@@ -101,6 +101,19 @@ COMMISSIONING_FILE = SPECTRA_STORAGE / "commissioning.json"
 #: unbounded one.
 CAPTURE_QUEUE_FILE = SPECTRA_STORAGE / "capture_queue.json"
 
+#: THE NIGHT QUEUE — the capture queue he DECLARES IN ADVANCE for the
+#: unattended overnight run (spectra/services/night_run.py). Exactly the
+#: shape `capture_queue.parse_items` already validates, because a night
+#: queue is the same list of button presses; declaring it is a human act
+#: with a human's own hours to fix a typo in, which is the whole point of
+#: it being declared rather than composed when the event arrives at 1am.
+NIGHT_QUEUE_FILE = SPECTRA_STORAGE / "night_queue.json"
+#: EVERY NIGHT, INCLUDING THE DECLINED ONES. A start event arriving while
+#: SPECTRA does not hold the room is DECLINED by name and recorded here —
+#: a normal outcome, not an error — so "did last night run?" is a read and
+#: never a silence indistinguishable from the seam being broken.
+NIGHT_RUNS_FILE = SPECTRA_STORAGE / "night_runs.json"
+
 # The TESTING IN PROGRESS record (spectra/services/test_session.py): the
 # DECLARED half of the room-visibility bar — {actor, reason, since_ms,
 # expires_ms}. Durable (not in-memory like preview_pause's own deadline)
@@ -136,6 +149,24 @@ def settings_agent_api_key() -> str:
 
 def settings_agent_model() -> str:
     return os.getenv("SPECTRA_SETTINGS_AGENT_MODEL", "claude-sonnet-5")
+
+
+def night_run_token() -> str:
+    """The shared secret Home Assistant presents on the night-run start and
+    abort pushes (spectra/api/night_run.py).
+
+    READ AT REQUEST TIME, never cached at import: rotating the secret is
+    then a systemd `Environment=` edit and a restart, with no code path that
+    could keep serving the old one from a module global. Same posture as
+    `settings_agent_api_key()` and `handover_armed()` — a credential belongs
+    in the environment, not in a file this app's own writes can touch, and
+    absolutely not in the repository.
+
+    UNSET MEANS THE SEAM IS SHUT, not open: `spectra/api/night_run.py`
+    answers 401 to every push when this is empty, so a deploy that forgot to
+    provision it fails closed and says so, rather than accepting anonymous
+    starts."""
+    return os.getenv("SPECTRA_NIGHT_RUN_TOKEN", "")
 
 
 def settings_agent_backend() -> str:

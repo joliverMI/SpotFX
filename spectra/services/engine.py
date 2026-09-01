@@ -370,7 +370,7 @@ async def stop() -> None:
 
 
 def status() -> dict:
-    from spectra.services import ambient_music_gate, param_watchdog
+    from spectra.services import ambient_music_gate, night_run, param_watchdog
     return {
         "increment": "S3",
         "dark": executor.mode == "recording",
@@ -385,4 +385,9 @@ def status() -> dict:
         # The param orphan watchdog (spectra/services/param_watchdog.py):
         # restores, suspicions, give-ups — loud by design, see its docstring.
         "param_watchdog": param_watchdog.status(),
+        # THE NIGHT RUN (spectra/services/night_run.py): run_id, state and
+        # timestamps, so his dashboards can show "measurement running" from
+        # the surface Home Assistant already reads. Small on purpose — the
+        # whole record is one route away at GET /api/night-run/fixtures.
+        "night_run": night_run.status_brief(),
     }

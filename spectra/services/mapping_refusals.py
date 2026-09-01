@@ -19,7 +19,9 @@ hold's own 3-minute ceiling, a fixture that stops answering mid-run, an
 empty emitter set, a phone that goes away, a camera that cannot resolve the
 composition it is being asked to read back, and — since the unattended
 capture client — a capture MACHINE with no usable camera, a session that
-never arrives or does not come back, and a queue somebody stopped. Plus one
+never arrives or does not come back, and a queue somebody stopped — and,
+since the night-run seam, a sleep-window start arriving while SPECTRA does
+not hold the room, or with no night queue declared. Plus one
 WARNING, which is a different thing from a refusal: a map that will come out as a single piece
 still runs and is still worth keeping, it just cannot show a wave. Each has a sentence below or is
 confirmed to have one at its own site — plus one FACT, `unseen_note`, which
@@ -194,10 +196,21 @@ def capture_refusal(emitter_label: str, exc: BaseException) -> str:
     """One emitter's own failure, named with what it was measuring. An
     ownership loss is NOT routed here — that ends the run (MID_RUN_LOSS);
     this is for the fixture that stopped answering while its neighbours are
-    still fine, which is why the run carries on past it."""
-    return (f"{emitter_label} could not be measured ({type(exc).__name__}: "
+    still fine, which is why the run carries on past it.
+
+    A SCONCE GETS THE MAINS CHECK FIRST (the Admiral's own order — see
+    `witness.SCONCE_MAINS_FIRST_CHECK`): `light.dimmer_kitchen_sconce` is
+    the kitchen sconces' mains supply and it is a switch, so at 0% both
+    sconces are simply dead — indistinguishable from a dead controller or a
+    lost network from anywhere inside this app, and an hour gone if it is
+    not the first thing checked. FIRST is the whole point: a line buried
+    under three paragraphs about networks is the hour this exists to save."""
+    from spectra.services import witness
+    said = (f"{emitter_label} could not be measured ({type(exc).__name__}: "
             f"{exc}). The rest of the run carried on — check that fixture is "
             f"powered and reachable, then map it again on its own.")
+    return witness.sconce_diagnostic(
+        said, sconce_involved=witness.mentions_sconce(emitter_label))
 
 
 def unseen_note(emitter_label: str, pose_id: str = "", *,
@@ -346,3 +359,139 @@ def pose_changed_note(previous: str, now: str) -> str:
             f"after it are each comparable among themselves, but not with "
             f"each other — re-map anything you want to compare across it in "
             f"one pass.")
+# ── THE NIGHT RUN ──────────────────────────────────────────────────────────
+#
+# Home Assistant pushes one event when his `Sleeping` helper has been on for
+# thirty continuous minutes, and one the moment it goes off or he touches a
+# light (spectra/services/night_run.py). Nobody is awake for any of it, so
+# the same rule as the queue above applies twice over: the record IS the
+# run, and a night that did not happen has to say why in a sentence a person
+# reads at breakfast.
+
+
+def night_not_owned(owner: str) -> str:
+    """THE BOUNDARY, and it is the whole reason this seam is safe to give a
+    key to: a start event arriving while SPECTRA does not hold the room is
+    DECLINED. It does not take the room, ask for it, or queue itself behind
+    a handover.
+
+    The Admiral's word, embedded on the order: the night trigger gets NO
+    room-take exception, ever — "it does not help itself to his room while
+    he sleeps. That boundary is worth more than an occasional missed
+    night." Taking the room back is a human act; a machine that could do it
+    at 1am on a schedule is a machine that can wake him up.
+
+    A DECLINE IS A NORMAL RECORDED OUTCOME, not an error, which is why this
+    reads as a statement of fact rather than an apology or an instruction to
+    go and fix something."""
+    where = {
+        "released": "released (his lights are Home Assistant's right now)",
+        "spot-effects": "held by the older SpotFX process",
+        "handing-over": "changing hands right now",
+    }.get(owner, f"held by {owner!r}")
+    return (f"The night run declined: SPECTRA does not hold the lights — "
+            f"they are {where}. Nothing was measured, nothing was turned on "
+            f"and nothing about the room was touched. This trigger never "
+            f"takes the room; take it back on the ownership bar when you "
+            f"want tonight's queue to run.")
+
+
+NO_DECLARED_NIGHT_QUEUE = (
+    "The night run declined: no night queue has been declared. Nothing was "
+    "measured and nothing about the room was touched. Declare the list of "
+    "runs you want the night to work through (PUT /api/night-run/queue, the "
+    "same items the capture queue takes), and the next sleep window will "
+    "run it.")
+
+
+def night_already_running(run_id: str) -> str:
+    """A second start event while a night is already in flight. Fire-and-
+    forget from HA means a duplicate is entirely possible and is not a
+    fault; it is also not a reason to start a second run over the top of the
+    first."""
+    return (f"The night run declined: night {run_id} is already running, so "
+            f"this start event was recorded and otherwise ignored. Nothing "
+            f"about the room was touched.")
+
+
+#: The event name Home Assistant sends when his ~05:50 morning routine runs.
+#: NOT a synonym for the others — see `night_ended_by_morning`.
+MORNING_ROUTINE = "morning-routine"
+
+
+def night_ended_by_morning() -> str:
+    """AN ORDINARY ENDING, and the one place in this file where saying so
+    plainly is the whole job.
+
+    His Home Assistant morning routine starts around 05:50 every day and
+    will end any overnight run whether or not this side had a dawn line of
+    its own — it is what stopped SPECTRA at 05:50 on 2026-09-01 with nobody
+    pressing anything. That is a PLANNED end, not an interruption and not a
+    fault: a night that ran until his morning ran exactly as long as it was
+    ever going to.
+
+    IT IS DELIBERATELY A DIFFERENT SENTENCE AND A DIFFERENT RECORDED STATE
+    from `night_aborted`. Waking up early and reaching for a light says
+    something about the run (it disturbed him, or he needed the room);
+    the morning arriving says nothing at all. Folding them together would
+    make every ordinary night read as an incident, which is how a record
+    stops being read."""
+    return ("The night run ended with his morning routine, which is where "
+            "every night ends: measuring stopped at the piece in flight, the "
+            "room was handed straight back, and everything measured is kept. "
+            "This is an ordinary ending, not an interruption.")
+
+
+def night_will_not_fit(estimate_s: float, window_s: float,
+                       planned_end: str) -> str:
+    """THE HARD PLANNED END, refused BEFORE the room goes dark.
+
+    His Home Assistant morning routine runs the flag at 05:30 house time and
+    the BLINDS OPEN around 05:40 — daylight into the frame, which is a
+    capture contaminant, not merely an interruption. So 05:30 is a bound, not
+    a preference: a run that cannot finish before it must not start, and an
+    item that cannot finish before it must not be started either.
+
+    THE SHAPE OF THE ANSWER, `too_long_refusal`'s own discipline: name the
+    cost, name the bound, hand the choice back. It never quietly drops items
+    to make the night fit — WHICH runs happen is his declaration, and a
+    surprising subset is a decision, not an error."""
+    return (f"The night run declined: the declared queue needs about "
+            f"{estimate_s / 60:.0f} minutes and there are only about "
+            f"{max(0.0, window_s) / 60:.0f} left before {planned_end}, when "
+            f"his morning routine runs and the blinds open — daylight in the "
+            f"frame is a contaminant, so nothing is scheduled past it. "
+            f"Nothing was measured and nothing about the room was touched. "
+            f"Declare a shorter queue, or start it earlier.")
+
+
+def night_item_will_not_fit(name: str, estimate_s: float, window_s: float,
+                            planned_end: str, remaining: int) -> str:
+    """One item that cannot finish before his morning. The queue stops here
+    rather than starting something that would run into daylight; everything
+    already measured is kept."""
+    return (f"'{name}' needs about {estimate_s / 60:.0f} minutes and only "
+            f"about {max(0.0, window_s) / 60:.0f} remain before "
+            f"{planned_end} (his morning routine, and the blinds open just "
+            f"after), so it was not started — nor were the "
+            f"{max(0, remaining - 1)} item(s) after it. Everything measured "
+            f"tonight is kept.")
+
+
+def night_aborted(source: str) -> str:
+    """A FACT, like `unseen_note` — not a refusal and not a failure.
+
+    A touched house is his house: `Sleeping` went off, or he reached for a
+    light. Everything measured so far is KEPT, which is what makes stopping
+    the moment he stirs cheap enough to do without hesitating.
+
+    The morning routine is NOT routed here — it has its own sentence and its
+    own recorded state (`night_ended_by_morning`), because an ordinary
+    ending and an interruption are different facts."""
+    why = {
+        "sleep-ended": "the sleep window ended",
+        "light-touched": "a light was touched in the house",
+    }.get(source, f"Home Assistant said so ({source})")
+    return (f"The night run stopped because {why}. Measuring stopped at the "
+            f"piece in flight, the room was handed straight back, and "
+            f"everything measured up to that point is kept.")

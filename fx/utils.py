@@ -471,12 +471,19 @@ class WLED:
         """
             Uses a JSON API call to determine the WLED device power state (on/off)
 
-        Args:
-            ip_address (string): The device IP to be queried
         Returns:
             boolean: True is "On", False is "Off"
+
+        SPOT-FX DEVIATION (fx/VENDOR.md #30). Upstream read
+        `await self.get_state()["on"]` — subscripting the COROUTINE before
+        awaiting it, which raises TypeError on the first call. Like
+        `set_brightness` before it (#26) this function had no caller
+        anywhere in the fork, so nothing ever ran it. The night-run seam
+        (spectra/services/night_power.py) needs to know whether a fixture
+        was off BEFORE it turns it on, because it has to put that back.
         """
-        return await self.get_state()["on"]
+        state = await self.get_state()
+        return bool(state.get("on"))
 
     async def get_segments(self):
         """
@@ -496,10 +503,18 @@ class WLED:
 
         Args:
             state (bool): on/off
+
+        SPOT-FX DEVIATION (fx/VENDOR.md #30). Upstream had the SAME two
+        transport bugs `set_brightness` did (#26), and for the same reason
+        — nothing in the fork ever called it: `data=power` form-encodes the
+        body (`on=True`) where WLED's JSON API needs a JSON one, and the
+        endpoint's leading slash makes the URL `http://ip//json/state`.
+        Fixed here rather than reimplemented in spectra/: this is the
+        device transport, which is fx/'s job.
         """
-        power = {"on": True if state else False}
+        power = {"on": bool(state)}
         await WLED._wled_request(
-            requests.post, self.ip_address, "/json/state", data=power
+            requests.post, self.ip_address, "json/state", json=power
         )
 
         _LOGGER.info(

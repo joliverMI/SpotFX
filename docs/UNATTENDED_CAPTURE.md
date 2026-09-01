@@ -30,6 +30,12 @@ already pointed at the room:
 | Knowing what happened | watch the page | one machine-readable outcome per item, written after **every** item |
 | Explaining a refusal | read a status word, guess | `mapping_refusals`' own sentence, on the page and in the record |
 | Releasing the room afterwards | (already automatic) | unchanged — the held-room sweep still owns it |
+| **Starting the night at all** | he set a session up before bed and pressed | his `Sleeping` helper, on for 30 minutes, pushes one event (`POST /api/night-run/start`) |
+| **Stopping when he stirs, or when his morning comes** | nobody was awake to | one `/abort` push — `sleep-ended`, `light-touched`, or his 05:30 `morning-routine` |
+| **Turning a fixture on that was switched off for the night** | it simply photographed an unlit strip | `night_power.owned` turns on only what reads off, confirms by reading back, and puts his switch back in a `finally` |
+| **Knowing the room is actually dark at the end** | a mode read, or nothing | `night_exit` reads every fixture back AT THE EMITTED LIGHT and names what still emits and why |
+| **Noticing the house changed light mid-capture** | nothing could see it | the contamination witness, asked per capture window and once more settled at the end; contaminated captures are re-taken |
+| **Telling the morning backstop what to turn off** | a hand-kept list that missed the shielded sets | `GET /api/night-run/fixtures` — what the run took AND what Dark mode leaves standing, both computed live |
 
 Also automatic, and unchanged by this work because it already was: the
 fixture firmware-brightness guard, the one-run-at-a-time lock, the hold
@@ -54,7 +60,16 @@ ends.
   loosen.
 - **Deciding the queue**: which rooms, which granularity, which
   commissioning targets. A queue file is a list of button presses; it is
-  not generated.
+  not generated. For the NIGHT run this is a stored DECLARATION
+  (`PUT /api/night-run/queue`, the same items) — declared while he is awake
+  and has hours to fix a typo in it, which is the whole point of it being
+  declared rather than composed when the event arrives at 1am.
+- **Provisioning the two secrets, in the environment only**:
+  `SPECTRA_NIGHT_RUN_TOKEN` (the bearer Home Assistant presents on the two
+  pushes) and `SPECTRA_WITNESS_URL` + `SPECTRA_WITNESS_TOKEN` (the
+  contamination witness). Unset means the night seam is SHUT (every push
+  401s) and the witness is absent (every capture recorded UNCLAIMED, never
+  clean) — both fail closed and say so.
 - Optionally, **making the client a systemd unit** so "start the client"
   stops being a step at all.
 
@@ -62,7 +77,15 @@ ends.
 
 - **Making sure SPECTRA owns the lights before the queue starts.** A
   released room refuses by name (one press on the ownership bar) — the
-  queue will not take the room back on its own, and should not.
+  queue will not take the room back on its own, and should not. **The night
+  trigger has no exception to this, ever**: a start arriving on a room
+  SPECTRA does not hold DECLINES by name, records the declined night, and
+  does nothing else.
+- **Checking `light.dimmer_kitchen_sconce` when a sconce will not answer.**
+  It is the kitchen sconces' MAINS SUPPLY and it is a switch (0% or 100%);
+  at 0% both are dead and it looks exactly like a dead controller or a lost
+  network. Nothing in SPECTRA can turn it on and nothing here ever turns it
+  off — the diagnostic names it FIRST so it is checked first.
 - **Moving the camera to a second pose** for any emitter the first pose
   could not see. The map already reports those (`unseen`); acting on it is
   walking across the room.
@@ -81,7 +104,15 @@ ends.
   whole point; automating the lock *confirmation* would forge the
   instrument's signature. Every lock this client reports is a read-back
   from the device, and a camera that will not lock refuses the run.
-- **Taking the room back from a release.** That is an ownership decision.
+- **Taking the room back from a release.** That is an ownership decision,
+  and the night trigger gets no scoped exception to it.
+- **Anything that drives a Home Assistant entity.** This side originates
+  exactly two HA requests and both are read-only witness GETs. The house's
+  own "Dark Music" envelope is fired and restored by the house side; the
+  emitted-light exit verification is NOT waived because of it.
+- **A dawn line of our own.** His 05:30 morning routine IS the hard end
+  bound and it arrives as an event; nothing here schedules against a clock,
+  and no capture work is ever scheduled past it.
 - **Aiming, and choosing a pose.**
 - **Anything about the frozen commissioning table**, its five tolerances,
   or the 320x180 wire-frame contract.
@@ -104,6 +135,23 @@ path (`scripts/check_capture_queue_e2e.py`, 42 checks, run from pytest).
   real `--list-ctrls-menus` transcript — that is not the same as a webcam.
   The first run on his laptop is the measurement.
 - **Nothing has run against his room.** By instruction.
+- **No night run has happened.** The seam, its refusals, the planned-end
+  bound, the abort, the power ownership, the exit report and the witness
+  re-take are each proven offline (see Proofs below) against fakes, an
+  isolated instance and a real headless render pipeline. The first real
+  night is the measurement.
+- **Whether a powered-off WLED displays a realtime stream, on HIS
+  fixtures, is NOT established** — see `spectra/services/night_power.py`'s
+  docstring for what the fleet has actually observed and why the run is
+  built to be correct under either answer rather than betting on one. The
+  first real night settles it as a by-product: the report says which
+  fixtures were found switched off.
+- **The witness has never been asked for real.** Its wire shape is built to
+  River's deployed, proven contract and exercised against
+  `httpx.MockTransport`; the entity subtraction is a slug match biased to
+  OVER-indict, which costs re-takes and never corrupts a footprint. If a
+  real night shows it over-indicting, the fix is to agree explicit entity
+  ids with River — not to loosen the match.
 
 The two ways the real backend can be wrong both fail SAFE, which is the
 point of the read-back rule:
@@ -185,6 +233,11 @@ start the client" work.
 | `spectra/services/capture_queue.py` | the runner: waits, walks, keeps partials, names pose changes, writes as it goes |
 | `spectra/api/capture_queue.py` | `POST`/`GET`/`stop` |
 | `spectra/services/mapping_refusals.py` | one wording per condition, including the three new ones |
+| `spectra/services/night_run.py` | **the night seam's binding statement** — the boundary, the planned end, the pricing, the abort |
+| `spectra/api/night_run.py` | `start` / `abort` (Bearer) + the open `fixtures` and `queue` reads |
+| `spectra/services/night_power.py` | lights on if necessary, and **what was established about that and what was not** |
+| `spectra/services/night_exit.py` | the honest exit — read back at the emitted light, never a mode |
+| `spectra/services/witness.py` | the contamination witness client, and **the sconce mains rule** |
 
 ## Proofs
 
@@ -193,6 +246,12 @@ start the client" work.
 | `scripts/check_capture_queue_e2e.py` | the whole path: real server, real WebSocket, the real client, a synthetic camera. A declared queue of five runs with no human action after start; a mid-queue refusal that the queue carries on past; a dropped socket whose partial is kept and whose retry completes; the pose held across the drop and NAMED across a reopen; the exposure gate refusing an automated client; a machine with no camera connecting anyway to say so. Run from pytest via `tests/test_light_field_checks.py`. |
 | `tests/test_capture_queue.py` | what the runner does with each outcome it is handed |
 | `tests/test_capture_client.py` | the lock is read back, never asserted — including a driver that ignores the write |
+| `tests/test_night_run.py` | the boundary declines and RECORDS; the planned-end bound at start and per item; the export's two lists, with the shield list following a config change; abort; his morning as an ordinary ending |
+| `tests/test_night_run_api.py` | auth (absent, wrong, unprovisioned, rotated), HA's own payloads, both open reads |
+| `tests/test_night_exit.py` | **RED WHEN LYING**: a fixture forced lit at its own firmware fails the dark claim, on a real headless render host through real `fx.utils.WLED` transport to a real HTTP endpoint |
+| `tests/test_night_power.py` | the two vendored WLED calls' wire shape, and the switch going back on the failure path |
+| `tests/test_witness.py` | the query shape, the window cap, the three verdicts, the mains rule, and no write verb anywhere in the module |
+| `tests/test_witness_retake.py` | the re-take on the REAL `run_mapping`: immediate per-window queries with **no added settle**, the settled sweep catching a late row, one re-take never a loop, and an unconfigured host byte-identical to before |
 
 **No live-room proof exists for any of this**, by instruction: it is
 proven against a synthetic camera and an isolated local instance. A run

@@ -3827,6 +3827,156 @@ sides against a box-integrating camera whose reported
 `tests/test_commissioning.py`, `tests/test_commissioning_per_fixture.py`,
 `tests/test_gray_code.py`.
 
+## THE NIGHT RUN — HA pushes, we answer; and it never takes his room
+
+His `Sleeping` helper is a better signal than a person: when it has been on
+for thirty continuous minutes Home Assistant PUSHES one event and the
+declared capture queue works through the night. `spectra/services/
+night_run.py`'s module docstring is the binding statement; the seam contract
+both captains agreed is `/home/javi/fleet-seam/river-dj-night-run-seam.md`.
+`POST /api/night-run/{start,abort}` (Bearer, `SPECTRA_NIGHT_RUN_TOKEN`, read
+at request time, absent-or-wrong is the same 401), `GET /api/night-run/
+fixtures` (open read), `GET/PUT /api/night-run/queue` (the declaration).
+**NO POLLING anywhere on our side, on any cadence** — he pushes, we answer
+reads. Seven things, and each one has cost something already:
+
+- **THE BOUNDARY, and it is not negotiable: a start arriving while SPECTRA
+  does not ALREADY hold the room DECLINES by name, records the declined
+  night, and does nothing else.** The Admiral's word — "it does not help
+  itself to his room while he sleeps. That boundary is worth more than an
+  occasional missed night." The ownership record is read FIRST, before
+  anything is resolved or driven, so a declined night cannot have had a side
+  effect. A DECLINE IS A NORMAL RECORDED OUTCOME (200, not 4xx): "did last
+  night run?" must be a read, never a silence indistinguishable from the
+  seam being broken.
+- **THE HARD PLANNED END IS 05:30 HOUSE TIME** (`HOUSE_TZ`,
+  America/New_York, via `zoneinfo` — never a fixed number of seconds added
+  to a timestamp). His HA morning routine runs the flag then and THE BLINDS
+  OPEN ~05:40: daylight in the frame is a capture CONTAMINANT, so this is a
+  bound, not a preference. The declared queue is PRICED at start
+  (`price_items`) and refused by name if it cannot fit; the bound is then
+  re-checked BEFORE EVERY ITEM through `capture_queue.run_queue`'s new
+  `guard` seam (default `None`, so every existing caller is unchanged) —
+  a queue that fitted at 01:00 has not necessarily got room for item six at
+  05:28. A commissioning item is priced at `commissioning.NOMINAL_PASS_S`,
+  a NAMED nominal used for this bound ONLY and never for the hold ceiling.
+- **`morning-routine` is an ORDINARY ENDING, not an abort.** All three stop
+  events (`sleep-ended`, `light-touched`, `morning-routine`) arrive at the
+  one `/abort` endpoint and do the same three things to the room; the
+  morning one records `ended_by_morning`. Folding it into `aborted` would
+  make every ordinary night read as an incident, which is how a record stops
+  being read.
+- **ABORT IS THREE PIECES OF EXISTING MACHINERY IN AN ORDER THAT IS THE
+  SEMANTICS**: `session.run_abort` (the run stops at its next capture
+  boundary WITH ITS PARTIALS KEPT), `capture_queue.stop()`, then
+  `flare_preview_hold.close_hold()` after a short bounded grace —
+  REGARDLESS, because his dark room back within seconds outranks a tidy run.
+  Nothing new was invented for it.
+- **LIGHTS ON IF NECESSARY** — `spectra/services/night_power.py`, the
+  `fixture_brightness.owned` pattern one axis down (power first, then
+  brightness: raising the brightness of a fixture that is off writes a value
+  nothing displays). Read its docstring for WHAT WAS ESTABLISHED about a
+  powered-off WLED under a realtime stream **and what was not**: the answer
+  for his fixtures could not be settled from here, so the run is correct
+  under either — it turns on only what reads off, CONFIRMS by reading back,
+  restores in a `finally`, and reports per fixture. `fx/VENDOR.md` #30 fixes
+  `WLED.get_power_state`/`set_power_state`, which were dead and broken in
+  three ways until this became their first caller.
+- **THE HONEST EXIT** (`spectra/services/night_exit.py`) — the new standard's
+  first application: at every run end, normal or aborted, every fixture is
+  read back AT THE EMITTED LIGHT (WLED `json/state`+`json/info`, Hue via
+  `release_fade.read_hue_light_states`) and named DARK / EMITTING / UNKNOWN.
+  **A mode or setting read is not verification, and neither is the house's
+  own envelope.** An unreadable fixture is UNKNOWN, never dark. An emitting
+  one is attributed: `by_design` (Dark-mode shielded — those were the lit
+  sets he woke to on 2026-09-01), `run_fixture` (ours, did not let go — the
+  only category this seam owes anybody an explanation for), or
+  `outside_run`.
+- **THE EXPORT IS TWO LISTS AND THE SECOND ONE IS THE LESSON.** `fixtures`
+  is what the night took; `standing_lit_under_dark` is computed LIVE from
+  `dark_light._shielded_set` at request time, never hardcoded, so his
+  pending shield decision reaches River's morning backstop with nothing to
+  remember. Turning off both lists is a complete morning scope; the first
+  alone is the gap he already fell into.
+
+**Run state on `GET /api/engine/status` is a TRIGGER, not a dashboard
+field** — the house restores its own "Dark Music" envelope off it, so
+`status_brief()` reads the live in-memory record (stamped before the network
+work) and exposes ONE `active` boolean derived from `ENDED_STATES`.
+
+**The house lights are Home Assistant's.** The "Dark Music" envelope is
+fired and restored by River's side; nothing here fires a house scene, and
+this app originates exactly two HA requests, both GETs (below). Nothing on
+this path assumes a host either — the capture client runs on a remote Pi
+near the camera.
+
+Spec: `tests/test_night_run.py` (the boundary, the planned end, the export
+tracking a shield change, abort, the morning ending),
+`tests/test_night_run_api.py` (auth, the payloads, both reads),
+`tests/test_night_exit.py` (RED-WHEN-LYING against the real headless
+pipeline and real `fx.utils.WLED` transport), `tests/test_night_power.py`.
+
+### The contamination witness, and THE SCONCE MAINS RULE
+
+`spectra/services/witness.py` is a READ-ONLY client for River's deployed
+house-state witness — `GET {SPECTRA_WITNESS_URL}/witness/{changes,scope}`,
+bearer from `SPECTRA_WITNESS_TOKEN`, both read at call time, the
+deploy-time secret living outside this repository and never entering code,
+a log or a record. SPECTRA CONFORMS to her contract, it does not
+renegotiate it (`transcription.py`'s own posture with the Whisper bridge).
+Its docstring is the binding statement; the short list:
+
+- **A house light coming on mid-capture is measured as the fixture's own
+  light** — the same class of failure the exposure lock and the
+  firmware-brightness guard each refuse, arriving by a door this instrument
+  could not see through before. Every capture window is asked about
+  IMMEDIATELY as it closes (`RunDeps.witness`, **no added settle — the dark
+  time stays flat**), plus ONE settled whole-run sweep at the end
+  (`RunDeps.witness_sweep`) so a late row still indicts the capture it
+  overlaps. Both feed ONE contamination re-take pass
+  (`room_mapping._retake_contaminated`), which reuses the unseen-retry
+  machinery and its ONE-retry-never-a-loop rule.
+- **THREE verdicts, and the third is the point.** `witness_unavailable`
+  MARKS, never discards and never kills a run: the capture is KEPT, stamped,
+  NO CLEAN CLAIM is made, and it is named in the exit report
+  (`night_run.witness_summary`). "We could not check" and "we checked and it
+  was fine" are different facts — the same distinction `night_exit` draws
+  between DARK and UNKNOWN. With no witness configured every capture is
+  `unclaimed`, never `clean`.
+- **A COMMISSIONING PASS IS ONE MEASUREMENT, so it gets ONE question over
+  its whole span and NO re-take** (`commissioning._judge_contamination`): a
+  gray-code stack is read against one dark and one full reference, so a
+  house light landing anywhere in it corrupts the decode rather than one row
+  of it, and re-taking one IS a whole new pass — which is what `repeat`
+  already is. It RECORDS and NAMES, and never touches `ok` or the five
+  pre-registered tolerances: contamination is a fact about the instrument's
+  conditions, like the exposure lock, not a table row.
+- **Our own fixtures are subtracted** from the rows, by slugified id/name
+  against the entity's object id (`own_entities`/`is_ours`) — exact, never a
+  substring. The match is BIASED TO OVER-INDICT on purpose: a fixture of
+  ours we fail to recognise costs a re-take; a house light we mistake for
+  ours silently corrupts a footprint.
+- **THE SCONCE MAINS RULE (Admiral-binding, both fleets):**
+  `light.dimmer_kitchen_sconce` is the kitchen sconces' MAINS SUPPLY. **No
+  run path may ever turn it off or lower it** — this side does not drive HA
+  entities at all, and `tests/test_witness.py` asserts the module body
+  contains no write verb. It is **BINARY, 0% or 100%, a switch with no scale
+  factor**: nothing records its level per measurement and nothing is
+  designed against it scaling (the Admiral's own correction, superseding an
+  earlier level-recording idea); the witness treats it as an ordinary scope
+  entity, so an accidental write to it indicts overlapped captures like any
+  other row. At 0% BOTH sconces are dead and it looks exactly like a dead
+  controller or a lost network, so `SCONCE_MAINS_FIRST_CHECK` is the NAMED
+  FIRST LINE of any sconce diagnostic (`capture_refusal`,
+  `activate_for_capture`'s failures, the not-rendering case) — FIRST is the
+  whole point; buried three paragraphs down it is the hour this exists to
+  save.
+
+Spec: `tests/test_witness.py` (wire shape, the window cap, the three
+verdicts, the mains rule), `tests/test_witness_retake.py` (the re-take on
+the REAL `run_mapping`, including the no-added-settle proof and the
+byte-identical unconfigured path).
+
 ## UNATTENDED CAPTURE — the client, the queue, and ONE seam for a run
 
 His bottleneck, not a feature request: a mapping or commissioning run

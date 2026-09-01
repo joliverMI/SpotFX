@@ -869,6 +869,33 @@ variables named `ledfx` (the core object handle) are untouched.
     the same pixel count: unfixed, exactly one virtual comes up dark and it
     is `tv-mapper`; fixed, all five declared-active virtuals drive.
 
+30. `utils.py`: `WLED.set_power_state` FIXED and `WLED.get_power_state`
+    FIXED — the same class of dead-and-broken as #27, found for the same
+    reason: the night-run seam became their first caller.
+
+    `grep` finds no caller of either in the fork, and both were broken:
+
+      * `get_power_state` did `await self.get_state()["on"]` — subscripting
+        the COROUTINE, so the first call raises TypeError. It now awaits,
+        then reads `on`.
+      * `set_power_state` carried BOTH of `set_brightness`'s transport bugs
+        (#27): `data=power` form-encodes the body where WLED's JSON API
+        needs a JSON one, and the endpoint's leading slash builds
+        `http://ip//json/state`.
+
+    Fixed here, not reimplemented in `spectra/`, for #27's own reason: this
+    is the device transport and a second copy of a WLED call living in
+    `spectra/` is exactly the drift `release_realtime` avoided.
+
+    WHY THEY MATTER NOW: `spectra/services/night_power.py` turns a fixture
+    on for an overnight capture and has to put HIS power state back — which
+    means reading it first. A `get_power_state` that raises would have made
+    every fixture read "unreadable" and a `set_power_state` that silently
+    did nothing would have left his room dark for a run that then measured
+    nothing, twice a night, with a plausible-looking record. Evidence:
+    `tests/test_night_power.py`, which drives both against a fake WLED
+    endpoint and asserts the request shape (JSON body, no double slash).
+
 Everything else is byte-identical to the fork at 149f4470 modulo the import
 rewrite and the deviations above. When updating vendored files, re-diff
 against that commit.

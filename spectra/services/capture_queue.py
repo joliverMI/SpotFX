@@ -344,14 +344,46 @@ async def run_queue(items: list[QueueItem], *, label: str = "",
                     sleep: Callable[[float], Any] = asyncio.sleep,
                     clock: Callable[[], float] = time.monotonic,
                     save: Optional[Callable[[QueueRun], Any]] = None,
-                    run: Optional[QueueRun] = None) -> QueueRun:
+                    run: Optional[QueueRun] = None,
+                    guard: Optional[Callable[[QueueItem], Optional[str]]] = None
+                    ) -> QueueRun:
     """Walk the declared list. Never raises for an expected condition — an
-    unattended caller gets a record, and the record says what happened."""
+    unattended caller gets a record, and the record says what happened.
+
+    `guard` is an optional per-item veto, asked BEFORE each item is started
+    and returning a sentence to refuse it (or None to allow it). Default
+    None, so every existing caller behaves exactly as before this parameter
+    existed. It is a REFUSAL SEAM, never a softening: nothing a guard
+    returns can let an item past a gate `capture_runs` would apply, and a
+    guard that refuses stops the queue the same way a lost session does —
+    the refused item and every item after it are recorded `not_run` with
+    the guard's own sentence, and everything already measured is kept.
+
+    Its one caller today is the night run, whose guard is the hard
+    planned-end bound: his morning routine (spectra/services/night_run.py).
+    A run that could not finish before his morning must not be started —
+    "never schedule capture work past it" — and a bound checked only once,
+    at the top of a queue, would still let item six start at 05:28."""
     if run is None:
         run = new_run(items, label)
     persist = save if save is not None else save_queue
 
     for index, item in enumerate(items):
+        refusal = guard(item) if guard is not None else None
+        if refusal:
+            remaining = len(items) - index
+            for j, later in enumerate(items[index:], start=index):
+                run.outcomes.append(ItemOutcome(
+                    index=j, name=later.name, kind=later.kind,
+                    room_id=later.room_id, status=STATUS_NOT_RUN,
+                    detail=refusal, refusal="guard"))
+            if refusal not in run.notes:
+                run.notes.append(refusal)
+            logger.warning("capture queue: item %d refused before it started "
+                           "(%d not run) — %s", index, remaining, refusal)
+            persist(run)
+            break
+
         if _stop:
             remaining = len(items) - index
             for j, later in enumerate(items[index:], start=index):

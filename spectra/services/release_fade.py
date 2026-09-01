@@ -270,6 +270,60 @@ async def fade_and_release_hue(host: Any) -> dict:
     return {"devices": faded, "failed": failed, "still_on": still_on}
 
 
+async def read_hue_light_states(host: Any) -> list[dict]:
+    """READ-ONLY: every Hue light SPECTRA streams to on `host`, and whether
+    the BULB itself currently reads on. Never writes anything.
+
+    Added for the night run's honest exit (`spectra/services/night_exit.py`),
+    which has to answer "is this fixture actually dark" at the emitted light
+    rather than from a mode or a setting. It lives HERE rather than in a
+    third copy of the bridge client because this module already owns the
+    entertainment-stream -> device -> light-resource walk, its per-bridge
+    cache, and the read-back that `_confirm_off` performs — and a second
+    implementation of that walk is exactly the drift this module's own
+    docstring warns about for `ambient.py`.
+
+    ONE INSTRUMENT CAVEAT, and it is load-bearing for how the exit report is
+    read: while an entertainment stream is live, `GET .../resource/light`
+    does NOT reflect the streamed colour (AGENTS.md, "Reading real Hue bulb
+    state"). It DOES honestly report on/off, which is the only question
+    asked here — but do not extend this to read a colour back and believe
+    it.
+
+    Best-effort per bridge: one unreachable bridge must not stop another
+    from being read, and a light that could not be read is reported as
+    `on: None` rather than as dark. An unreadable light is not a confirmed
+    dark one — `_read_still_on`'s own rule."""
+    out: list[dict] = []
+    for did, dev in sorted(_hue_devices(host).items()):
+        cfg = getattr(dev, "config", None) or {}
+        try:
+            async with _bridge_client(cfg) as client:
+                named = await _resolve_lights_named(client, cfg)
+                for rid, name in named:
+                    try:
+                        state = (await _hue_get(
+                            client,
+                            f"/clip/v2/resource/light/{rid}"))["data"][0]
+                        on = bool((state.get("on") or {}).get("on"))
+                        reason = ""
+                    except Exception as exc:           # noqa: BLE001
+                        logger.info("release fade: could not read %s (%s): %s",
+                                    name, rid, exc)
+                        on, reason = None, (f"the bridge did not answer for "
+                                            f"this bulb ({type(exc).__name__})")
+                    out.append({"device_id": did, "light_id": rid,
+                                "name": name, "on": on, "reason": reason})
+        except Exception as exc:                        # noqa: BLE001
+            logger.info("release fade: could not reach bridge for %s: %s",
+                        did, exc)
+            out.append({"device_id": did, "light_id": "", "name": did,
+                        "on": None,
+                        "reason": f"this bridge did not answer "
+                                  f"({type(exc).__name__})"})
+    return out
+
+
 async def _read_still_on(client: httpx.AsyncClient,
                          named: list[tuple[str, str]]) -> list[tuple[str, str]]:
     """Read each (rid, name) back and return the ones still reading on. A

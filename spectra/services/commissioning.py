@@ -135,6 +135,21 @@ WRITE_TRANSITION_MS = room_mapping.WRITE_TRANSITION_MS
 #: (the write has to actually land, through the same per-device delay every
 #: other write goes through) plus a window of frames to average.
 SETTLE_S = 0.6
+#: WHAT ONE PASS ROUGHLY COSTS, for the night run's planned-end bound and
+#: for nothing else (spectra/services/night_run.price_items).
+#:
+#: A pass is a dark reference, a full reference and 2xbits_needed(pixels)
+#: gray-code patterns over ONE hold — about 22 captures and ~35 seconds for
+#: his whole tv-mapper composition (this module's own docstring). The real
+#: number depends on a pixel count that cannot be resolved without the
+#: stored composition and a live virtual read, so the night run prices a
+#: commissioning item at this NOMINAL and SAYS SO in the record rather than
+#: presenting a precision it does not have. It is deliberately generous.
+#:
+#: IT IS NEVER USED FOR THE HOLD CEILING. Each run still derives its own
+#: ceiling from its own real plan; this is only ever compared against how
+#: much of the night is left.
+NOMINAL_PASS_S = 60.0
 CAPTURE_S = 0.9
 #: Frames a capture must actually have. Below this the run refuses rather
 #: than decoding a stack built from single frames.
@@ -703,6 +718,10 @@ class RunResult:
     agreement: dict = field(default_factory=dict)
     table: dict = field(default_factory=dict)
     captures: list[dict] = field(default_factory=list)
+    #: THE CONTAMINATION WITNESS's verdict over this pass's WHOLE span
+    #: (spectra/services/witness.py). Empty when no witness is wired, which
+    #: is NOT a clean claim — see the note where it is filled in.
+    witness: dict = field(default_factory=dict)
     #: The imaged extent of the composition, from the reference pair alone
     #: (`gray_code.resolution_report`) — carried whether the run went on or
     #: refused, because "how much margin did the pose have" is worth as
@@ -733,7 +752,8 @@ class RunResult:
                 "layout_note": self.layout_note,
                 "decodes": self.decodes, "agreement": self.agreement,
                 "table": self.table, "captures": self.captures,
-                "resolution": self.resolution, "targets": self.targets,
+                "resolution": self.resolution, "witness": self.witness,
+                "targets": self.targets,
                 "target_specs": self.target_specs,
                 "problems": self.problems, "notes": self.notes,
                 "at": self.at}
@@ -1059,6 +1079,51 @@ async def _run_target(deps: room_mapping.RunDeps, scope: list[str],
     return entry
 
 
+async def _judge_contamination(deps: room_mapping.RunDeps, result: RunResult,
+                               start_ts: float, end_ts: float) -> None:
+    """ASK THE HOUSE WHETHER IT MOVED WHILE THIS PASS WAS RUNNING.
+
+    WHY THIS IS ONE QUESTION OVER THE WHOLE SPAN, where a MAP asks per
+    capture: a gray-code pass is ONE measurement. Its ~22 captures are a
+    stack read against one dark and one full reference, and a house light
+    landing anywhere in it corrupts the decode rather than one row of it.
+    There is nothing smaller to indict, and nothing smaller to re-take.
+
+    AND WHY IT DOES NOT RE-TAKE: re-taking a commissioning pass IS a whole
+    new pass, which is exactly what `repeat` already is and what the
+    operator already decides. So this RECORDS and NAMES, and the naming is
+    the point: a judged ground-truth table that had silently absorbed a
+    house light would be a confident wrong answer, which is the one outcome
+    `gray_code.RESOLUTION_SAFETY_FACTOR` and the frozen table both exist to
+    refuse. It does not touch `ok` or any of the five pre-registered
+    tolerances — the contamination is a fact about the INSTRUMENT's
+    conditions, like the exposure lock, not a row of the table.
+
+    An unavailable witness MARKS and never claims: the pass is kept and no
+    clean claim is made for it (River's rule, and `night_exit`'s DARK vs
+    UNKNOWN distinction one subsystem over)."""
+    from spectra.services import witness as witness_mod
+
+    if deps.witness_sweep is None or end_ts <= start_ts:
+        return
+    try:
+        rows, tokens = await deps.witness_sweep(start_ts, end_ts)
+    except Exception:                                  # noqa: BLE001
+        logger.exception("commissioning: the contamination witness could not "
+                         "be asked — the pass is kept and unclaimed")
+        return
+    verdict = witness_mod.judge(rows, tokens, start_ts, end_ts)
+    result.witness = verdict.as_dict()
+    if verdict.contaminated:
+        result.problems.append(
+            "THE HOUSE CHANGED LIGHT DURING THIS PASS, so its decode cannot "
+            "be claimed clean: " + verdict.detail.replace(
+                "so it is discarded and taken again.",
+                "and a gray-code stack is one measurement, not a row that "
+                "can be retaken on its own. Run it again when the house is "
+                "settled."))
+
+
 async def run_commission(mapper_id: str, deps: room_mapping.RunDeps, *,
                          repeat: int = 1,
                          layout: Optional[dict] = None,
@@ -1102,6 +1167,7 @@ async def run_commission(mapper_id: str, deps: room_mapping.RunDeps, *,
     taken: the hold (the lights), any virtual this run brought up, and the
     session's full-frame ring."""
     started = deps.clock()
+    started_wall = deps.wall()
     sess = deps.session
     result = RunResult(mapper_id=mapper_id, ok=False,
                        pose_id=getattr(sess, "pose_id", ""),
@@ -1216,6 +1282,7 @@ async def run_commission(mapper_id: str, deps: room_mapping.RunDeps, *,
                 f"page, or run this again")
 
     result.seconds = deps.clock() - started
+    await _judge_contamination(deps, result, started_wall, deps.wall())
 
     if whole_only:
         # ONE TARGET, AND IT IS THE WHOLE COMPOSITION: the result keeps its
