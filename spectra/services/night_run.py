@@ -739,12 +739,17 @@ async def _work(run: NightRun, items) -> None:
     record, and the record says what happened."""
     global current
     run_ids = {str(f.get("id")) for f in run.fixtures}
+    # Held outside the try so the record carries what `owned()` did on EVERY
+    # path — including the failing one, where the restores that land in its
+    # own `finally` are exactly what a reader needs to know about.
+    held: list = []
     try:
         devices = await _live_devices()
         mine = [d for d in devices
                 if str(getattr(d, "id", "") or "") in run_ids]
         from spectra.services import night_power
         async with night_power.owned(mine) as power:
+            held.append(power)
             run.power = power.as_dict()
             save_night(run)
             queue_run = capture_queue.new_run(list(items), label=run.label)
@@ -756,9 +761,6 @@ async def _work(run: NightRun, items) -> None:
                 # has not necessarily got room for item six at 05:28.
                 guard=fits_guard(run.price))
             run.queue = queue_run.as_dict()
-        # Read AFTER the block so the record carries the restores, which
-        # only land in `owned()`'s own finally.
-        run.power = power.as_dict()
     except Exception as exc:                            # noqa: BLE001
         logger.exception("night run %s: failed", run.id)
         run.state = STATE_FAILED
@@ -766,6 +768,12 @@ async def _work(run: NightRun, items) -> None:
                       f"({type(exc).__name__}: {exc}). Anything measured "
                       f"before that is kept in its own store.")
     finally:
+        # Read AFTER the context has exited, on every path: the restores
+        # only land in `owned()`'s own finally, and a record that stopped at
+        # the pre-restore snapshot would understate what happened to his
+        # fixtures on exactly the night it mattered most.
+        if held:
+            run.power = held[0].as_dict()
         await _finish(run)
 
 

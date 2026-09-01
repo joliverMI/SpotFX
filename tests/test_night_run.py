@@ -414,6 +414,146 @@ def test_aborting_with_nothing_running_is_a_stated_no_op(monkeypatch):
     assert reverted["called"]
 
 
+# ── THE WHOLE NIGHT, END TO END ────────────────────────────────────────────
+
+class _Wled:
+    """A fixture that answers its own firmware, so `night_power` and
+    `night_exit` both read something real rather than a mock of the answer
+    they wanted."""
+
+    def __init__(self, on=False):
+        self.on = on
+        self.writes: list[bool] = []
+
+    async def get_power_state(self):
+        return self.on
+
+    async def set_power_state(self, state):
+        self.writes.append(bool(state))
+        self.on = bool(state)
+
+    async def get_state(self):
+        return {"on": self.on, "bri": 255 if self.on else 0}
+
+    async def get_info(self):
+        return {"live": False, "lip": ""}
+
+
+class _Device:
+    def __init__(self, device_id, wled):
+        self.id = device_id
+        self.type = "wled"
+        self.wled = wled
+
+
+def _whole_night(monkeypatch, *, blow_up=False, on=False):
+    from spectra.services import flare_preview_hold
+
+    _owner(lo.SPECTRA)
+    night_run.save_declaration("nightly", ITEMS)
+
+    helper = _Wled(on=on)
+    device = _Device("tv-backlight", helper)
+
+    async def listing():
+        return [{"id": "tv-backlight", "type": "wled",
+                 "config": {"name": "TV Backlight", "ip_address": "10.0.0.5"},
+                 "virtuals": ["tv-mapper"]}]
+
+    async def price(items, now=None):
+        return {"items": [{"name": i.name, "seconds": 30.0} for i in items],
+                "total_seconds": 30.0, "window_seconds": 9999.0,
+                "planned_end": time.time() + 9999,
+                "planned_end_label": night_run.PLANNED_END_LABEL}
+
+    async def run_queue(items, **kw):
+        if blow_up:
+            raise RuntimeError("the queue blew up")
+        return kw["run"]
+
+    async def close_hold():
+        return {"reverted": True}
+
+    async def live_devices():
+        return [device]
+
+    monkeypatch.setattr(night_run, "_device_listing", listing)
+    monkeypatch.setattr(night_run, "price_items", price)
+    monkeypatch.setattr(night_run, "_live_devices", live_devices)
+    monkeypatch.setattr(night_run, "run_fixture_rows",
+                        lambda items, entries: [
+                            {"id": "tv-backlight", "name": "TV Backlight",
+                             "address": "10.0.0.5"}])
+    monkeypatch.setattr(capture_queue, "run_queue", run_queue)
+    monkeypatch.setattr(flare_preview_hold, "close_hold", close_hold)
+
+    async def main():
+        run = await night_run.start(EVENT)
+        await night_run._task
+        return run
+
+    return _run(main()), helper
+
+
+def test_a_whole_night_turns_the_fixture_on_puts_it_back_and_reads_it_back(
+        monkeypatch):
+    """The three acts this seam owns, in order, on one fixture: switch it on
+    for the captures, put HIS switch back, then read the fixture back AT THE
+    EMITTED LIGHT and say what it is."""
+    run, helper = _whole_night(monkeypatch)
+
+    assert run.state == night_run.STATE_COMPLETE
+    assert helper.writes == [True, False], \
+        "the fixture was not turned on for the captures, or not put back"
+    assert helper.on is False
+    assert run.power["turned_on"] == ["tv-backlight"]
+    assert run.power["restored"] == ["tv-backlight"], \
+        "the record stopped at the pre-restore snapshot"
+
+    exit_report = run.exit_report
+    assert exit_report["verified_at_the_light"] is True
+    assert exit_report["dark"] == ["tv-backlight"]
+    assert exit_report["problems"] == []
+    # The witness said nothing, so nothing claims these captures were clean.
+    assert exit_report["witness"]["configured"] is False
+    assert "none of them claims to be clean" in exit_report["witness"]["summary"]
+
+    stored = night_run.load_nights()[-1]
+    assert stored["state"] == night_run.STATE_COMPLETE
+    assert stored["exit"]["dark"] == ["tv-backlight"]
+
+
+def test_a_night_that_blows_up_still_puts_his_switch_back_and_says_so(
+        monkeypatch):
+    """A failed night must not leave his lounge switched on at 3am, and the
+    record has to carry the restore rather than the moment before it."""
+    run, helper = _whole_night(monkeypatch, blow_up=True)
+
+    assert run.state == night_run.STATE_FAILED
+    assert "stopped on an unexpected error" in run.detail
+    assert helper.on is False, "a failed night left the fixture on"
+    assert run.power["restored"] == ["tv-backlight"]
+    # THE EXIT REPORT IS NOT OPTIONAL: it is produced on the failing path
+    # too, which is the path somebody actually needs it on.
+    assert run.exit_report["verified_at_the_light"] is True
+    assert run.exit_report["dark"] == ["tv-backlight"]
+
+
+def test_a_fixture_already_on_is_left_alone_and_named_as_still_emitting(
+        monkeypatch):
+    """It was his before the night and it is his after: nothing switched it,
+    and the exit report says plainly that it is still lit rather than
+    reporting the room dark."""
+    run, helper = _whole_night(monkeypatch, on=True)
+
+    assert helper.writes == [], "a fixture already on was written to anyway"
+    assert run.power["actions"]["tv-backlight"] == "already_on"
+    assert run.exit_report["emitting"] == ["tv-backlight"]
+    assert run.exit_report["dark"] == []
+    assert run.exit_report["problems"], \
+        "a run fixture still lit at exit was not named"
+
+
 # ── ENGINE STATUS: the house's restore trigger ─────────────────────────────
 
 def test_engine_status_carries_the_night_state_unambiguously():
