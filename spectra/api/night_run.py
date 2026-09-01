@@ -37,6 +37,11 @@ side had a dawn line) does exactly the same three things to the room and is
 recorded as `ended_by_morning`: an ORDINARY ending, not an incident. The
 response says which (`state`, `ended_by_morning`).
 
+THE ABORT RESPONSE CARRIES THE OUTCOME, so the house can restore its own
+envelope off this reply rather than waiting for its next status poll —
+`state` and `ended_by_morning` are the same words `GET /api/engine/status`
+will report a moment later.
+
 A DECLINED START IS HTTP 200. It is a normal recorded outcome, not an
 error — the run declined by name, the night is on the record, and Home
 Assistant's fire-and-forget push has nothing to retry. A 4xx here would

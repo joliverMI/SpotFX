@@ -915,6 +915,16 @@ async def abort(trigger: dict, *, grace_s: float = ABORT_GRACE_S,
     Then his power state goes back (the `night_power.owned` context exits on
     the run task's own way out) and the exit report is read at the light.
 
+    THE STATE IS STAMPED AFTER THE ROOM IS BACK, NOT BEFORE — deliberately.
+    The house restores its own "Dark Music" envelope off this run's state, so
+    flipping it the instant the push arrives would tell the house to restore
+    while we are still mid-capture in a dark room. It flips when the room is
+    genuinely his again, which is a few seconds later at most.
+
+    THE RESPONSE CARRIES THE STATE TOO, so the house never has to wait for
+    its next status poll to learn the outcome: `state` and
+    `ended_by_morning` are the same words `status_brief()` will report.
+
     Returns immediately-useful facts rather than the whole record: an
     unattended caller fired this and is not going to read a 40kB body."""
     from spectra.services import capture_runs as runs_mod
