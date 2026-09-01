@@ -16,7 +16,8 @@ next, in his words, never an exception class leaking through a 500.
 WHAT COUNTS AS EXPECTED HERE: an ownership state (released to Home
 Assistant, or a handover mid-flight), an ownership loss DURING a run, the
 hold's own 3-minute ceiling, a fixture that stops answering mid-run, an
-empty emitter set, a phone that goes away — and one WARNING, which is a
+empty emitter set, a phone that goes away, a camera that cannot resolve the
+composition it is being asked to read back — and one WARNING, which is a
 different thing from a refusal: a map that will come out as a single piece
 still runs and is still worth keeping, it just cannot show a wave. Each has a sentence below or is
 confirmed to have one at its own site — plus one FACT, `unseen_note`, which
@@ -100,6 +101,50 @@ def hold_refusal(reason: str) -> str:
                 "was rendering to take a snapshot of. Check that SPECTRA is "
                 "driving the lights, then press Start mapping again.")
     return f"The room could not be held for this measurement: {reason}"
+
+
+def unresolvable_composition(report: dict, width: int, height: int) -> str:
+    """THE CAMERA CANNOT SEE THIS COMPOSITION IN PIECES — refused two
+    captures in, before the room is held dark for the other twenty.
+
+    THE LIVE FAILURE THIS EXISTS FOR (2026-09-01, both runs of the
+    commissioning test on his tv-mapper): the whole 736-pixel composition
+    imaged into a few dozen camera pixels, so every pattern and its
+    inverse landed on the SAME camera pixels and cancelled. The run spent
+    ~42 seconds, decoded 0 of 736, and the frozen table read that as
+    "occlusion or blob-merge" — an attribution pointing at his room for
+    what was an instrument pointed at something it cannot resolve.
+    `gray_code.MIN_CAMERA_PX_PER_INDEX` carries the arithmetic.
+
+    THE SHAPE OF THE ANSWER, the same discipline `too_long_refusal` keeps:
+    name the measurement, name the bar, and hand back the choice. It never
+    proposes commissioning a coarser version of his composition — what is
+    being commissioned is his decision, and the frozen table judges 736
+    pixels because that is what the stored mapper says."""
+    lit = int(report.get("lit_pixels") or 0)
+    total = int(report.get("total") or 0)
+    needed = int(report.get("needed_camera_px") or 0)
+    per = float(report.get("camera_px_per_index") or 0.0)
+    if lit <= 0:
+        return (f"The camera saw no light from the composition at all: with "
+                f"every one of its {total} pixels turned on, not one camera "
+                f"pixel came out brighter than the dark reference. Nothing "
+                f"was measured and nothing was written. Check the phone is "
+                f"pointed at the television, that the fixtures actually lit, "
+                f"and that the frame is not so dark the difference rounds "
+                f"away — then press Commission again.")
+    return (f"From where the phone is standing, this camera cannot tell "
+            f"these pixels apart. With all {total} pixels on, the "
+            f"composition lights {lit} camera pixels — about {per:.2f} per "
+            f"pixel, where reading them back needs about "
+            f"{report.get('min_camera_px_per_index')} each "
+            f"({needed} in total, of the {width}x{height} frame the phone "
+            f"sends). Below that, a pattern and its opposite land on the "
+            f"same camera pixels and cancel, so nothing can be decoded "
+            f"however bright the room is. Nothing was written. Move the "
+            f"phone closer, or frame just the television, so the strip "
+            f"fills much more of the picture — then press Commission "
+            f"again.")
 
 
 def capture_refusal(emitter_label: str, exc: BaseException) -> str:

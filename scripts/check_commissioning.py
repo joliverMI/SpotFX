@@ -157,12 +157,21 @@ CHAIN = [{"id": d, "type": "wled"} for d in
 # ── the fake room: a camera looking at the writes the REAL program made ────
 
 class Room:
-    def __init__(self, *, dead=None, layout=None, delay_ms=None, fps=30.0):
-        self.virtuals = his_room()
+    def __init__(self, *, dead=None, layout=None, delay_ms=None, fps=30.0,
+                 virtuals=None, radius_px=2.0, noise=0.0, peak=None):
+        self.virtuals = virtuals or his_room()
         self.layout = layout or truth_layout()
         self.dead = set(dead or ())
         self.delay_ms = dict(delay_ms or {})
         self.fps = fps
+        #: the field regime's own camera: a tighter blob, read noise, and a
+        #: per-pixel level calibrated so ALL-ON reaches `peak` of 255 — see
+        #: section 3c. Left alone this is the same camera it always was.
+        self.radius_px = radius_px
+        self.noise = noise
+        self.peak = peak
+        self._rng = np.random.default_rng(3)
+        self._gain = None
         self.writes: list[dict] = []
         self.closed = 0
         self.activated: list[str] = []
@@ -195,17 +204,36 @@ class Room:
                     out.add(int(arr[pixel]))
         return out
 
+    def _render_raw(self, on) -> np.ndarray:
+        if self.peak is None:
+            return gray_code.render_frame(
+                self.layout, on, width=FW, height=FH,
+                radius_px=self.radius_px, dead=self.dead, blobs=self._blobs)
+        if self._gain is None:
+            unit = gray_code.render_frame(
+                self.layout, set(self.layout), width=FW, height=FH,
+                radius_px=self.radius_px, dark_level=2.0, lit_level=3.0,
+                blobs=self._blobs, window_sigmas=5.0)
+            self._gain = self.peak / max(1e-9, float((unit - 2.0).max()))
+        return gray_code.render_frame(
+            self.layout, on, width=FW, height=FH, radius_px=self.radius_px,
+            dark_level=2.0, lit_level=2.0 + self._gain, dead=self.dead,
+            blobs=self._blobs, window_sigmas=5.0)
+
     def render(self, elapsed_ms: float = 1e9) -> np.ndarray:
         arrived = tuple(sorted(d for d in self.composition.devices
                                if self.delay_ms.get(d, 0.0) <= elapsed_ms))
+        on = {i for i in self.lit() if self.device_of(i) in arrived}
+        if self.noise:
+            # fresh noise per frame: an averaging window that averages the
+            # SAME noise four times is not the camera this is modelling.
+            return np.clip(self._render_raw(on)
+                           + self._rng.normal(0.0, self.noise, (FH, FW)),
+                           0.0, 255.0)
         key = (self.seq, arrived)
         got = self._cache.get(key)
         if got is None:
-            got = gray_code.render_frame(
-                self.layout, {i for i in self.lit()
-                              if self.device_of(i) in arrived},
-                width=FW, height=FH, radius_px=2.0, dead=self.dead,
-                blobs=self._blobs)
+            got = self._render_raw(on)
             self._cache[key] = got
         return got
 
@@ -459,6 +487,241 @@ def section_three_b():
           "200 ms cadence cannot answer a 15 ms question")
 
 
+# ── THREE-C — THE FIELD REGIME: the failure his room actually produced ────
+#
+# HIS OWN NUMBERS, from the two runs of 2026-09-01 and the raw frame kept
+# from the same pose (data/commissioning-field-evidence/): 736 pixels, 22
+# captures, ~42 s, verdict FAIL, 0 of 736 decoded, ~3,165 "lit" camera
+# pixels ALL undecodable, 0 out of range — and, in the second run, 0 lit
+# pixels at all. The frame from that pose is 320x180 and all but 66 of its
+# 57,600 pixels are exactly zero: the whole composition arrives as THREE
+# compact glows, about 8x4 camera pixels each, peaking at 99 of 255.
+#
+# So this section builds that camera — his composition at his sizes, imaged
+# into those three glows, calibrated to that peak, with read noise and the
+# wire's own grey8 quantisation — and drives the REAL decoder and the REAL
+# run with it. Everything above this line runs at about 6 camera pixels per
+# composition index; his room ran at about 0.09. That gap, not the mechanics,
+# is what the synthetic proof was never asked about.
+
+FIELD_TV, FIELD_RIGHT, FIELD_LEFT = 560, (28, 60), (28, 60)
+FIELD_TOTAL = FIELD_TV + sum(FIELD_RIGHT) + sum(FIELD_LEFT)
+#: The brightest camera pixel in his own pose frame, of 255.
+FIELD_PEAK = 99.0
+#: The three glows, as measured off that frame: centre (x, y) in pixels and
+#: how much of the frame's width the fixture's whole strip covers.
+FIELD_GLOWS = {"tv-backlight": (140.0, 55.5, 8.0),
+               "sconce-kitchen-right": (73.0, 56.5, 6.0),
+               "sconce-kitchen-left": (207.5, 54.0, 6.0)}
+
+
+def field_room_virtuals() -> dict:
+    """His stored tv-mapper at ITS OWN size: 560 + 28 + 60 + 28 + 60."""
+    r0, r1 = FIELD_RIGHT
+    l0, l1 = FIELD_LEFT
+    return {
+        "tv-mapper": _virtual("tv-mapper", [
+            ("tv-backlight", 0, FIELD_TV - 1),
+            ("sconce-kitchen-right", 0, r0 - 1),
+            ("sconce-kitchen-right", r0, r0 + r1 - 1),
+            ("sconce-kitchen-left", 0, l0 - 1),
+            ("sconce-kitchen-left", l0, l0 + l1 - 1)], mapping="copy"),
+        "tv-backlight": _virtual("tv-backlight",
+                                 [("tv-backlight", 0, FIELD_TV - 1)],
+                                 active=False),
+        "sconce-kitchen-right": _virtual(
+            "sconce-kitchen-right",
+            [("sconce-kitchen-right", 0, r0 + r1 - 1)], active=False),
+        "sconce-kitchen-left": _virtual(
+            "sconce-kitchen-left",
+            [("sconce-kitchen-left", 0, l0 + l1 - 1)], active=False),
+    }
+
+
+def field_layout(span_scale: float = 1.0) -> dict[int, tuple[float, float]]:
+    """WHERE those 736 pixels land in his frame: each fixture's whole strip
+    inside its own glow. `span_scale` widens the glows — 1.0 is his pose,
+    and a large value is the close-up this test would need."""
+    counts = [("tv-backlight", FIELD_TV),
+              ("sconce-kitchen-right", FIELD_RIGHT[0]),
+              ("sconce-kitchen-right", FIELD_RIGHT[1]),
+              ("sconce-kitchen-left", FIELD_LEFT[0]),
+              ("sconce-kitchen-left", FIELD_LEFT[1])]
+    used: dict[str, int] = {}
+    layout, index = {}, 0
+    for device, n in counts:
+        cx, cy, span = FIELD_GLOWS[device]
+        span *= span_scale
+        total_on_device = sum(m for d, m in counts if d == device)
+        for k in range(n):
+            at = used.get(device, 0) + k
+            x = cx + (at / max(1, total_on_device - 1) - 0.5) * span
+            layout[index] = (x / FW, cy / FH)
+            index += 1
+        used[device] = used.get(device, 0) + n
+    return layout
+
+
+def field_stack(layout, *, noise=1.0, seed=11, radius_px=2.0, dark=2.0):
+    """The reference pair and every bit's pattern/inverse, as HIS camera
+    would deliver them: the per-pixel light calibrated so ALL-ON reaches the
+    99-of-255 his own frame peaks at, plus read noise, plus the wire's own
+    grey8 rounding — the quantisation is not a detail here, it is most of
+    why a half-lit pattern and its opposite come back identical."""
+    every = set(layout)
+    rng = np.random.default_rng(seed)
+    cache: dict = {}
+
+    def raw(on, gain):
+        return gray_code.render_frame(
+            layout, on, width=FW, height=FH, radius_px=radius_px,
+            dark_level=dark, lit_level=dark + gain, blobs=cache,
+            window_sigmas=5.0)
+
+    unit = float((raw(every, 1.0) - dark).max())
+    gain = FIELD_PEAK / max(1e-9, unit)
+
+    def shot(on):
+        # four frames averaged, exactly as a capture window does, each one
+        # quantised to the grey8 the phone actually sends.
+        frames = [np.clip(np.round(raw(on, gain)
+                                   + rng.normal(0.0, noise, (FH, FW))),
+                          0, 255).astype(np.uint8).astype(np.float64)
+                  for _ in range(4)]
+        return np.mean(frames, axis=0)
+
+    dark_frame, full_frame = shot(set()), shot(every)
+    pairs = []
+    for bit in range(gray_code.bits_needed(len(layout))):
+        on = {i for i in every if gray_code.pattern_bits(np.array([i]), bit)[0]}
+        pairs.append((shot(on), shot(every - on)))
+    return dark_frame, full_frame, pairs
+
+
+def _old_lit_count(dark, full):
+    """The gate as it was when his runs were judged: a 99th-percentile
+    peak and a 1e-9 floor. Kept here, and only here, so the reproduction can
+    show what those two field numbers actually were."""
+    bright = np.clip(np.asarray(full, float) - np.asarray(dark, float), 0, None)
+    peak = float(np.percentile(bright, 99.0))
+    return int((bright >= max(1e-9, peak * gray_code.LIT_FRACTION)).sum())
+
+
+def section_three_c():
+    print("\n== 3c. THE FIELD REGIME — his own failure, reproduced on "
+          "demand ==")
+    layout = field_layout()
+    dark, full, pairs = field_stack(layout)
+
+    # (a) the failure MODE, on the real decoder
+    decode = gray_code.decode_stack(dark, full, pairs, total=FIELD_TOTAL)
+    check(len(decode.seen) == 0,
+          f"0 of {FIELD_TOTAL} pixels decoded — his own result "
+          f"({len(decode.seen)} seen)")
+    check(decode.lit_pixels > 0 and
+          decode.undecodable_pixels == decode.lit_pixels,
+          f"with abundant light: every one of the {decode.lit_pixels} lit "
+          f"camera pixels is UNDECODABLE, his own signature")
+    check(decode.out_of_range_pixels == 0,
+          "and 0 out of range — nothing decoded to a wrong index, nothing "
+          "decoded at all")
+
+    # (b) WHERE it dies, which is the question the field response could not
+    #     answer and now can
+    contrast = decode.bit_contrast
+    low = [c["median_strength"] for c in contrast[:6]]
+    high = [c["median_strength"] for c in contrast[7:]]
+    check(all(v is not None and v < gray_code.BIT_CONFIDENCE for v in low),
+          f"the LOW bits are where it dies: median contrast {low} against a "
+          f"{gray_code.BIT_CONFIDENCE} bar — a pattern and its opposite "
+          f"alternate faster than this camera can see, and cancel")
+    check(all(v is not None and v > gray_code.BIT_CONFIDENCE for v in high),
+          f"while the HIGH bits are perfectly confident ({high}) — the "
+          f"stack is not noise, and it is not mistimed")
+
+    # (c) the discriminator: a TIMING error does not look like this
+    flat = [f for pair in pairs for f in pair]
+    lagged = [full] + flat[:-1]
+    late = gray_code.decode_stack(
+        dark, full, [(lagged[2 * b], lagged[2 * b + 1])
+                     for b in range(len(pairs))], total=FIELD_TOTAL)
+    mistimed = [c["median_strength"] for c in late.bit_contrast[:6]]
+    check(any(v is not None and v > gray_code.BIT_CONFIDENCE
+              for v in mistimed),
+          f"reading every capture one step late leaves the low bits with "
+          f"REAL contrast ({mistimed}) — two different patterns differ; "
+          f"they do not cancel. His runs showed the opposite, so the frames "
+          f"were not read at the wrong moments")
+
+    # (d) the lit gate itself, which reported two numbers that described
+    #     nothing
+    old_count = _old_lit_count(dark, full)
+    report = gray_code.resolution_report(dark, full, total=FIELD_TOTAL)
+    check(old_count > 10 * report["lit_pixels"],
+          f"the old 99th-percentile gate called {old_count} camera pixels "
+          f"lit (his run: 3,165) where the composition lights "
+          f"{report['lit_pixels']} — a composition covering 0.1% of the "
+          f"frame puts the 99th percentile in the noise")
+    check(report["lit_pixels"] > 0 and not report["resolvable"],
+          f"the shipped gate: {report['lit_pixels']} camera pixels, "
+          f"{report['camera_px_per_index']} per composition pixel, against "
+          f"{report['min_camera_px_per_index']} needed "
+          f"({report['needed_camera_px']} of the {FW}x{FH} frame)")
+
+    # (e) the run refuses BY NAME, two captures in, instead of spending the
+    #     room's dark time to reach a verdict about the wrong thing
+    room = Room(virtuals=field_room_virtuals(), layout=layout,
+                radius_px=2.0, noise=1.0, peak=FIELD_PEAK)
+    result = run(room, layout=layout, instrument={})
+    check(not result.ok and result.refusal == "resolution",
+          f"the run refuses ({result.refusal}): {result.reason[:110]}...")
+    check(len(result.captures) == 2,
+          f"after the dark and full reference captures ONLY — "
+          f"{len(result.captures)} of the {2 + 2 * gray_code.bits_needed(FIELD_TOTAL)} "
+          f"his runs spent")
+    check(result.table == {} and not result.decodes,
+          "nothing is judged and no decode is claimed — the frozen table is "
+          "never handed a stack this camera could not read")
+    check(result.resolution.get("camera_px_per_index", 9) < 1.0,
+          f"and the response carries the measurement itself: "
+          f"{result.resolution.get('camera_px_per_index')} camera pixels "
+          f"per composition pixel")
+    check(room.closed == 1 and
+          sorted(set(room.activated)) == sorted(set(room.deactivated)),
+          "the hold is released and the strips it brought up are put back, "
+          "refusal or not")
+
+    # (f) it is not the LIGHT: the same 99-of-255 room, the same read noise
+    #     and the same grey8 wire, decodes a composition small enough for
+    #     this frame
+    small = {i: (0.10 + 0.80 * i / 87.0, 0.5) for i in range(88)}
+    d2, f2, p2 = field_stack(small)
+    near = gray_code.decode_stack(d2, f2, p2, total=88)
+    ok = gray_code.resolution_report(d2, f2, total=88)
+    check(ok["resolvable"] and len(near.seen) > 0.8 * 88,
+          f"88 pixels across the same frame at the same 99-of-255: "
+          f"{ok['camera_px_per_index']} camera pixels each, "
+          f"{len(near.seen)} of 88 decoded — his run lacked resolution, not "
+          f"light")
+
+    # (g) AND IT IS NOT ONLY THE POSE. 736 pixels need about
+    #     736 x MIN_CAMERA_PX_PER_INDEX camera pixels of imaged strip; the
+    #     frame the phone sends is 320x180, whose entire border is ~1,000.
+    #     A television wrapped once by one strip cannot carry 1,472 of them
+    #     however the phone is held — which is the honest answer to "what
+    #     would a passing run need", and it is not a pose.
+    needed = int(FIELD_TOTAL * gray_code.MIN_CAMERA_PX_PER_INDEX)
+    border = 2 * (FW + FH)
+    check(needed > border,
+          f"{FIELD_TOTAL} pixels need ~{needed} camera pixels of imaged "
+          f"strip, and the whole border of the {FW}x{FH} frame is ~{border} "
+          f"— no pose fixes that; the wire's own frame size is the bound")
+    print(f"     a frame able to carry them, at his composition's own wrap, "
+          f"is about {int(round(needed / border * FW))}x"
+          f"{int(round(needed / border * FH))} — the phone captures at "
+          f"1280x720 and downsamples to {FW}x{FH} before sending")
+
+
 # ── FOUR — sabotage: each failure lands on ITS OWN row ────────────────────
 
 def section_four():
@@ -599,6 +862,7 @@ def main():
     section_two()
     room = section_three()
     section_three_b()
+    section_three_c()
     section_four()
     section_five()
     section_six()

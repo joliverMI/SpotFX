@@ -61,6 +61,23 @@ with the stored truth readable.
 
 NEVER A JUDGMENT CALL AT RUNTIME. This run either produces a decode and
 hands it to the frozen table, or it refuses BY NAME with nothing written.
+
+WHAT THE FIRST FIELD RUNS TAUGHT (2026-09-01, twice, identically): the
+mechanics were clean — 22 captures, ~42 s, the substitution right, the room
+restored — and it decoded 0 of 736 with abundant light in the frame,
+because his camera images the WHOLE composition into a few dozen pixels
+from where it stands. Every pattern and its inverse landed on the same
+camera pixels and cancelled. Nothing downstream could see that: the frozen
+table read "0 of 736" and attributed it to occlusion or blob-merge, which
+points at his room for what was a pose the instrument cannot read. Two
+things came of it and both are load-bearing here. The run now asks whether
+the camera can resolve the composition AT ALL from the reference pair alone
+— two captures, about four seconds — and refuses by name rather than
+spending the room's dark time to reach a verdict about the wrong thing
+(`gray_code.resolution_report`, `MIN_CAMERA_PX_PER_INDEX`). And every
+decode now carries its own per-bit contrast (`Decode.bit_contrast`), so a
+future failure says WHERE it died in its own response instead of needing
+frames nobody kept.
 """
 from __future__ import annotations
 
@@ -472,6 +489,11 @@ class RunResult:
     agreement: dict = field(default_factory=dict)
     table: dict = field(default_factory=dict)
     captures: list[dict] = field(default_factory=list)
+    #: The imaged extent of the composition, from the reference pair alone
+    #: (`gray_code.resolution_report`) — carried whether the run went on or
+    #: refused, because "how much margin did the pose have" is worth as
+    #: much on a green run as on a refused one.
+    resolution: dict = field(default_factory=dict)
     problems: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     at: float = field(default_factory=time.time)
@@ -489,6 +511,7 @@ class RunResult:
                 "layout_note": self.layout_note,
                 "decodes": self.decodes, "agreement": self.agreement,
                 "table": self.table, "captures": self.captures,
+                "resolution": self.resolution,
                 "problems": self.problems, "notes": self.notes,
                 "at": self.at}
 
@@ -556,6 +579,17 @@ async def _one_pass(deps: room_mapping.RunDeps, program: CommissionProgram,
             f"phone still connected?")
     latency = _latency_from_step(dark, full_timed, full_at)
 
+    # CAN THIS CAMERA RESOLVE THIS COMPOSITION AT ALL — asked here, two
+    # captures in, because the answer needs only the reference pair and
+    # because the alternative is spending the room's dark time to produce a
+    # verdict about his hardware that is really about the pose. See
+    # `gray_code.MIN_CAMERA_PX_PER_INDEX`.
+    report = gray_code.resolution_report(dark, full, total=total)
+    result.resolution = report
+    if not report["resolvable"]:
+        raise CameraCannotResolve(mapping_refusals.unresolvable_composition(
+            report, int(full.shape[1]), int(full.shape[0])))
+
     pairs = []
     for bit in range(bits):
         for invert in (False, True):
@@ -579,6 +613,11 @@ async def _one_pass(deps: room_mapping.RunDeps, program: CommissionProgram,
                 pairs.append((frame, None))
     decode = gray_code.decode_stack(dark, full, pairs, total=total)
     return decode, latency
+
+
+class CameraCannotResolve(Exception):
+    """The composition images into too few camera pixels to be read back —
+    already worded (`mapping_refusals.unresolvable_composition`)."""
 
 
 class RunAborted(Exception):
@@ -696,6 +735,11 @@ async def run_commission(mapper_id: str, deps: room_mapping.RunDeps, *,
     when the composition cannot be addressed as stored. Nothing is written
     and nothing is stored on any of those paths.
 
+    AND REFUSES TWO CAPTURES IN — the one refusal that cannot be made
+    beforehand, because it is a fact about the pose and only the camera
+    knows it — when the composition images into too few camera pixels to
+    be read back at all (see the module docstring).
+
     RESTORES IN A `finally`, three separate things, in the order they were
     taken: the hold (the lights), any virtual this run brought up, and the
     session's full-frame ring."""
@@ -798,10 +842,13 @@ async def run_commission(mapper_id: str, deps: room_mapping.RunDeps, *,
         if owned.note:
             result.notes.append(owned.note)
         result.problems.extend(owned.problems)
-    except (RunAborted, NotEnoughFrames, HoldRefused) as exc:
+    except (RunAborted, NotEnoughFrames, HoldRefused,
+            CameraCannotResolve) as exc:
         result.reason = str(exc)
         result.refusal = ("aborted" if isinstance(exc, RunAborted)
                           else "hold" if isinstance(exc, HoldRefused)
+                          else "resolution"
+                          if isinstance(exc, CameraCannotResolve)
                           else "frames")
     except Exception as exc:                           # noqa: BLE001
         named = mapping_refusals.ownership_refusal(exc)

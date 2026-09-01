@@ -53,6 +53,13 @@ def _run(name: str, timeout: int) -> str:
     # rendered device pixels rather than reasoned about
     ("check_copy_carrier_wave.py", 180,
      "COPY-CARRIER WAVE QUESTION ANSWERED: BEFORE THE COPY (no travel)"),
+    # COMMISSIONING: the pattern lamp on the real pipeline, a declared
+    # arrangement recovered end to end, the sabotage each failing its own
+    # frozen row — AND (section 3c) the field regime his own two runs hit,
+    # reproduced on demand. A reproduction nobody runs is not a standing
+    # proof, which is why this one is in the suite rather than only in a
+    # PR's own transcript.
+    ("check_commissioning.py", 300, "ALL COMMISSIONING CHECKS PASSED"),
 ])
 def test_check_script_passes(name, timeout, tail):
     stdout = _run(name, timeout)

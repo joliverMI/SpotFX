@@ -157,11 +157,16 @@ class Harness:
     through a fake camera, and records what the run did to it."""
 
     def __init__(self, *, tv=60, sconce=8, dead=None, corrupt=None,
-                 layout=None, fps=30.0, device_delay_ms=None):
+                 layout=None, fps=30.0, device_delay_ms=None,
+                 radius_px=2.0):
         self.virtuals = _his_room(tv, sconce)
         self.total = tv + 2 * sconce
         self.layout = layout or _truth_layout(self.total, tv, sconce)
         self.dead = set(dead or ())
+        #: how big a camera pixel each composition pixel is worth. The field
+        #: regime's whole problem is that this is far too small to tell them
+        #: apart — see `test_a_composition_the_camera_cannot_resolve...`.
+        self.radius_px = radius_px
         self.corrupt = corrupt          # callable(lit set) -> lit set
         self.writes: list[dict] = []
         self.closed = 0
@@ -219,7 +224,7 @@ class Harness:
                    if self._device_of(i) in arrived}
             got = gray_code.render_frame(
                 self.layout, lit, width=W, height=H,
-                radius_px=2.0, dead=self.dead, blobs=self._blobs)
+                radius_px=self.radius_px, dead=self.dead, blobs=self._blobs)
             self._frame_cache[key] = got
         return got
 
@@ -573,3 +578,62 @@ def test_results_are_stored_bounded_and_a_refusal_is_stored_too(tmp_path):
         commissioning.save_result(refused, path=path)
     assert len(commissioning.load_results(path)) == \
         commissioning.MAX_STORED_RESULTS
+
+
+# ── THE FIELD REGIME (2026-09-01) ─────────────────────────────────────────
+#
+# Both of his real runs held the room dark for ~42 s, decoded 0 of 736, and
+# handed the frozen table a "0 of 736" it could only attribute to occlusion
+# or blob-merge — pointing at his room for a camera that, from where it was
+# standing, images the whole composition into a few dozen pixels. The run
+# now asks that question from the reference pair alone.
+
+def _one_glow(total: int, span_px: float = 6.0):
+    """Every composition pixel inside one small glow — his pose, where the
+    whole thing arrives as three of these."""
+    return {i: ((160.0 + (i / max(1, total - 1) - 0.5) * span_px) / W,
+                90.0 / H) for i in range(total)}
+
+
+def test_a_composition_the_camera_cannot_resolve_is_refused_by_name():
+    h = Harness(layout=_one_glow(76), radius_px=1.0)
+    result = h.run(layout=h.layout, instrument={})
+    assert not result.ok
+    assert result.refusal == "resolution"
+    # the sentence names the measurement, the bar and what to do
+    assert "cannot tell these pixels apart" in result.reason
+    assert "camera pixels" in result.reason and "closer" in result.reason
+    # TWO captures, not twenty-two: the dark and full references answer it
+    assert len(result.captures) == 2
+    assert [c["label"] for c in result.captures] == ["run1/dark", "run1/full"]
+    # nothing judged, nothing claimed
+    assert result.table == {} and result.decodes == []
+    assert result.verdict == "refused"
+    # and the measurement itself travels with the refusal
+    assert 0 < result.resolution["camera_px_per_index"] < 2.0
+    assert result.resolution["needed_camera_px"] == 152
+
+
+def test_the_room_is_put_back_after_an_unresolvable_refusal():
+    h = Harness(layout=_one_glow(76), radius_px=1.0)
+    h.run(layout=h.layout, instrument={})
+    assert h.closed == 1
+    assert set(h.activated) == set(h.deactivated) == {
+        "sconce-kitchen-left", "sconce-kitchen-right", "tv-backlight"}
+    assert h.session.keep_full_frames is False
+
+
+def test_a_resolvable_run_carries_the_same_measurement(tmp_path):
+    """The number is worth as much on a green run — it says how much margin
+    the pose had — so it is reported, not only refused on."""
+    h = Harness()
+    result = h.run(layout=h.layout, instrument={})
+    assert result.ok
+    assert result.resolution["resolvable"] is True
+    assert result.resolution["camera_px_per_index"] >= 2.0
+    assert result.decodes[0]["resolution"]["total"] == h.total
+    # and every bit's own contrast, so a future failure says where it died
+    contrast = result.decodes[0]["bit_contrast"]
+    assert len(contrast) == gray_code.bits_needed(h.total)
+    assert all(c["median_strength"] > gray_code.BIT_CONFIDENCE
+               for c in contrast)
