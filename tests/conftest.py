@@ -314,6 +314,26 @@ def _isolated_room_light_field(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolated_capture_queue(tmp_path, monkeypatch):
+    """The unattended capture queue's store AND its module-global live run.
+
+    Same class as _isolated_fire_history: `capture_queue` has no DI seam —
+    `current`/`_stop` are process-global because there is one queue at a
+    time by design, and `save_queue` writes `config.CAPTURE_QUEUE_FILE`
+    directly. A queue left `current` by one test makes the next one's
+    `running()` true, which is exactly the kind of leak nobody can find."""
+    from spectra import config as scfg
+    from spectra.services import capture_queue
+    monkeypatch.setattr(scfg, "CAPTURE_QUEUE_FILE",
+                        tmp_path / "capture_queue.json")
+    capture_queue.current = None
+    capture_queue._stop = False                        # noqa: SLF001
+    yield
+    capture_queue.current = None
+    capture_queue._stop = False                        # noqa: SLF001
+
+
+@pytest.fixture(autouse=True)
 def _isolated_device_timing(tmp_path, monkeypatch):
     """Two no-DI-seam globals in one fixture, same class as
     _isolated_fire_history: the per-device settings STORE

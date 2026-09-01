@@ -3827,6 +3827,72 @@ sides against a box-integrating camera whose reported
 `tests/test_commissioning.py`, `tests/test_commissioning_per_fixture.py`,
 `tests/test_gray_code.py`.
 
+## UNATTENDED CAPTURE — the client, the queue, and ONE seam for a run
+
+His bottleneck, not a feature request: a mapping or commissioning run
+needed a person at every step (open the page on a device with a camera,
+grant it, wait for the lock, aim, keep the tab alive, press Start, press
+the next one), so every capture experiment queued behind his availability.
+**`docs/UNATTENDED_CAPTURE.md` carries the LEDGER** — what now runs with
+zero human involvement, what needs a human once (aiming and choosing the
+pose, camera permission, `ffmpeg`/`v4l2-ctl`, confirming that camera can
+lock at all, declaring the queue), and what still needs his hands per run
+(SPECTRA owning the lights, a second pose for unseen emitters, judging a
+`findings` verdict, deciding what to do with a `marginal` refusal). Keep
+those three categories separate whenever this area changes; blurring them
+is the one way this build can become a lie.
+
+- **`spectra/capture_client/camera.py` is the binding statement for the
+  lock's honesty, and the rule is one sentence: automating the lock
+  REQUEST is the point, automating the lock CONFIRMATION is forgery.**
+  `apply_lock()` asks the V4L2 control and then READS IT BACK;
+  `read_lock()` only ever returns what `v4l2-ctl --get-ctrl` printed; a
+  driver that accepts the write and keeps its old value reports auto, and
+  the run refuses by name. The `SyntheticCamera` every proof uses has NO
+  locked default, so a proof cannot pass without exercising the gate.
+  Nothing here may grow a flag that proceeds anyway.
+- **The POSE TOKEN is minted inside `camera.open()`, and that placement is
+  the whole design.** A footprint is `lit - dark` in one camera's byte
+  scale, so footprints are comparable within a pose and not across two. A
+  dropped WebSocket moves nothing and re-locks nothing, so the client
+  re-asserts its pose on reconnect (`hello`'s `pose_hint` →
+  `mapping_session._adopt_pose`) — labelling one measurement as two is the
+  dangerous direction. A camera REOPEN mints a new token, and
+  `capture_queue` names the change (`mapping_refusals.pose_changed_note`).
+  Don't move the token's creation, and don't let the client decide a pose
+  survived.
+- **`spectra/services/capture_runs.py` is now the ONE seam that executes a
+  capture run** — the run lock, the no-session gate and the two runs moved
+  out of `spectra/api/rooms.py`, which is now the human-pressed caller of
+  the same function `capture_queue` drives. A new gate goes there once.
+  `RunOutcome.escaped` distinguishes a refusal the run STATED (200 with
+  its record, which may hold kept footprints) from one that RAISED (409
+  with the sentence) — conflating them either loses a partial map or
+  claims a result that does not exist.
+- **`spectra/services/capture_queue.py`**: waits for a session that is
+  present AND LOCKED, walks the declared list, KEEPS partials, carries on
+  past a refusal, retries ONLY a `partial` and only when the item declared
+  it, and rewrites `storage/spectra/capture_queue.json` after EVERY item
+  (nobody is watching; a queue killed by a reboot has still explained
+  itself). It stores a SUMMARY per run — the full map is in
+  `room_maps.json`, the full judged table in `commissioning.json`; copying
+  either in would make the one file nobody watches the unbounded one.
+  A queue is validated AT DECLARATION, so a typo is refused before the
+  room goes dark.
+- Three new sentences in `mapping_refusals` (no camera / session lost /
+  queue stopped) plus one FACT (`pose_changed_note`), and `lock_refusal`
+  reworded ONCE to speak to both client kinds rather than growing a second
+  wording for the native one.
+- Proofs: `scripts/check_capture_queue_e2e.py` (real server, real
+  WebSocket, the REAL client, a synthetic camera — a five-item queue with
+  no human action after start, a mid-queue refusal it carries on past, a
+  dropped socket whose partial is kept and whose retry completes, the pose
+  held across the drop and named across a reopen, the gate refusing an
+  automated client, and a blind machine saying so), run from
+  `tests/test_light_field_checks.py`; `tests/test_capture_queue.py`;
+  `tests/test_capture_client.py`. **No live-room proof exists** — that is
+  a separate step the captain schedules.
+
 **A check script that renders through `fx.headless` must `os._exit()`.**
 `fx`'s `TemporalEffect` spawns non-daemon threads the frame-stepped harness
 never joins, and `FxHost.stop()` refuses ("refusing to stop the SpotFX

@@ -32,6 +32,12 @@
   GET    /api/rooms/{room_id}/footprint/{emitter_id}
                                           one footprint's full grid
 
+The UNATTENDED half of the same two runs — a declared queue executed by a
+capture client on a machine with a camera — lives in
+`spectra/api/capture_queue.py` (`/api/rooms/capture-queue`), and both it and
+the two run routes below execute through the ONE seam,
+`spectra/services/capture_runs.py`.
+
 THE RUN IS THE ONLY ROUTE HERE THAT TOUCHES A LIGHT, and it refuses before
 it does so when the phone's camera is not locked — the refusal names the
 phone and the capability rather than saying "mapping failed"
@@ -52,7 +58,6 @@ configuration and never a position in the room.
 """
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import Optional
 
@@ -63,16 +68,16 @@ from pydantic import BaseModel
 from spectra.models.room_map import AxisCalibration, RoomMap
 from spectra.services import emitters as emitters_mod
 from spectra.services import commission_compare
-from spectra.services import (commissioning, light_field, mapping_refusals,
-                              mapping_session, room_mapping)
+from spectra.services import (capture_runs, commissioning, light_field,
+                              mapping_refusals, mapping_session, room_mapping)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["spectra-rooms"])
 
-#: One mapping run at a time, process-wide — a second one would fight the
-#: first for the held room and for the same phone's frames.
-_run_lock = asyncio.Lock()
-_running: Optional[str] = None
+#: THE RUN LOCK, the session gate and the runs themselves live in
+#: `spectra/services/capture_runs.py` — one seam with two callers of equal
+#: standing, these routes and the unattended queue. See that module's
+#: docstring for why a second definition of "a capture run" was not made.
 
 
 class RoomBody(BaseModel):
@@ -138,19 +143,7 @@ class CommissionBody(BaseModel):
 
 def _run_granularity(room: RoomMap, granularity: Optional[str],
                      block_pixels: Optional[int]) -> tuple[str, int]:
-    g = (granularity or room.granularity or emitters_mod.DEFAULT_GRANULARITY)
-    g = g.strip().lower()
-    g = emitters_mod.GRANULARITY_ALIASES.get(g, g)
-    if g not in emitters_mod.GRANULARITIES:
-        g = emitters_mod.DEFAULT_GRANULARITY
-    try:
-        block = int(block_pixels if block_pixels is not None
-                    else (room.block_pixels or emitters_mod.DEFAULT_BLOCK_PIXELS))
-    except (TypeError, ValueError):
-        block = emitters_mod.DEFAULT_BLOCK_PIXELS
-    block = max(emitters_mod.MIN_BLOCK_PIXELS,
-                min(emitters_mod.MAX_BLOCK_PIXELS, block))
-    return g, block
+    return capture_runs.run_granularity(room, granularity, block_pixels)
 
 
 def _room_view(room: RoomMap) -> dict:
@@ -255,7 +248,7 @@ async def room_carriers():
 @router.get("/rooms/map/status")
 async def map_status():
     return {**mapping_session.status(),
-            "running_room": _running,
+            "running_room": capture_runs.running(),
             "granularities": list(emitters_mod.GRANULARITIES),
             "block_pixels_default": emitters_mod.DEFAULT_BLOCK_PIXELS,
             "max_emitters_per_run": emitters_mod.MAX_EMITTERS_PER_RUN,
@@ -340,53 +333,31 @@ async def run_map(room_id: str, body: Optional[MapBody] = None):
 
     One run at a time; a second request while one is live is refused by
     name rather than queued — two runs would fight over the same held room
-    and the same phone."""
-    global _running
-    room = light_field.get_room(room_id)
-    if room is None:
-        return JSONResponse(status_code=404, content={"detail": "no such room"})
-    sess = mapping_session.current
-    if sess is None or sess.closed:
+    and the same camera session. Both facts, and the run itself, belong to
+    `capture_runs`, which the unattended queue drives through the SAME
+    function: this route is the human-pressed half of one seam, not its own
+    implementation."""
+    outcome = await capture_runs.run_map(
+        room_id,
+        granularity=body.granularity if body else None,
+        block_pixels=body.block_pixels if body else None,
+        dark_settle_s=body.dark_settle_s if body else None,
+        lit_settle_s=body.lit_settle_s if body else None,
+        dark_capture_s=body.dark_capture_s if body else None,
+        lit_capture_s=body.lit_capture_s if body else None)
+    if outcome.status == capture_runs.STATUS_NOT_FOUND:
+        return JSONResponse(status_code=404, content={"detail": outcome.detail})
+    if outcome.refusal in ("no_session", "busy") or outcome.escaped:
+        # An ANTICIPATED condition, not a server fault: 409 with the
+        # sentence, exactly as this route has always answered them. A run
+        # that STATED its own refusal is a different thing and still returns
+        # its record with 200 — see RunOutcome.escaped.
         return JSONResponse(status_code=409, content={
-            "detail": "no phone connected — open this page on the phone that "
-                      "will do the capture and start its camera"})
-    if _run_lock.locked():
-        return JSONResponse(status_code=409, content={
-            "detail": f"a mapping run is already in progress ({_running})"})
-    g, block = _run_granularity(room, body.granularity if body else None,
-                                body.block_pixels if body else None)
-    async with _run_lock:
-        _running = room_id
-        try:
-            result = await room_mapping.run_mapping(
-                room, room_mapping.production_deps(sess),
-                granularity=g, block_pixels=block,
-                dark_settle_s=body.dark_settle_s if body else None,
-                lit_settle_s=body.lit_settle_s if body else None,
-                dark_capture_s=body.dark_capture_s if body else None,
-                lit_capture_s=body.lit_capture_s if body else None)
-        except Exception as exc:                       # noqa: BLE001
-            # The backstop for the thing that started this: an ownership
-            # refusal reached him as a bare 500 and a stack trace, for a
-            # condition one press of the ownership bar fixes. run_mapping
-            # states these itself now; this catches any that reach the route
-            # from a seam it does not wrap, so the SENTENCE is what he sees
-            # either way. A genuine bug still 500s — it should.
-            named = mapping_refusals.ownership_refusal(exc)
-            if named is None:
-                raise
-            return JSONResponse(status_code=409, content={
-                "detail": named, "refusal": "ownership"})
-        finally:
-            _running = None
-    # Remember the choice for the page's control only — a run always takes
-    # its own granularity as an argument, so this is never what one reads.
-    stored = light_field.get_room(room_id) or room
-    if (stored.granularity, stored.block_pixels) != (g, block):
-        stored.granularity, stored.block_pixels = g, block
-        light_field.put_room(stored)
-    out = result.as_dict()
-    out["room"] = _room_view(light_field.get_room(room_id) or stored)
+            "detail": outcome.detail, "refusal": outcome.refusal})
+    out = dict(outcome.result)
+    stored = light_field.get_room(room_id)
+    if stored is not None:
+        out["room"] = _room_view(stored)
     return out
 
 
@@ -417,7 +388,8 @@ async def run_commission(room_id: str, body: Optional[CommissionBody] = None):
     Either the frozen table is judged and returned (verdict pass / findings
     / incomplete / fail, each red row attributed to the side the table's own
     right-hand column names), or the run refuses BY NAME with nothing
-    written. Every result is stored either way.
+    written. Every result is stored either way. That property is what lets
+    `capture_queue` run one of these at three in the morning.
 
     PER TARGET, on the captain's ruling — see `CommissionBody.targets`. A
     per-fixture run is the SAME pre-registered comparison on a slice of the
@@ -427,49 +399,25 @@ async def run_commission(room_id: str, body: Optional[CommissionBody] = None):
     unmeasured rather than dropped from the denominator.
 
     One run at a time, sharing the mapping run's own lock — both hold the
-    room and both consume the same phone's frames, so a second one would
-    fight the first for both."""
-    global _running
-    room = light_field.get_room(room_id)
-    if room is None:
-        return JSONResponse(status_code=404, content={"detail": "no such room"})
-    mapper_id = (body.mapper_id if body else None) or _only_carrier(room)
-    if not mapper_id:
-        return JSONResponse(status_code=400, content={
-            "detail": f"name the composition to commission — this room has "
-                      f"{len(room.carrier_ids)} carriers "
-                      f"({', '.join(room.carrier_ids) or 'none'})"})
-    sess = mapping_session.current
-    if sess is None or sess.closed:
+    room and both consume the same camera session's frames."""
+    outcome = await capture_runs.run_commission(
+        room_id, mapper_id=(body.mapper_id if body else None),
+        repeat=(body.repeat if body else 1),
+        targets=_commission_targets(body))
+    if outcome.status == capture_runs.STATUS_NOT_FOUND:
+        return JSONResponse(status_code=404, content={"detail": outcome.detail})
+    if outcome.refusal == "no_mapper":
+        return JSONResponse(status_code=400, content={"detail": outcome.detail})
+    if outcome.refusal in ("no_session", "busy") or outcome.escaped:
         return JSONResponse(status_code=409, content={
-            "detail": "no phone connected — open this page on the phone that "
-                      "will do the capture and start its camera"})
-    if _run_lock.locked():
-        return JSONResponse(status_code=409, content={
-            "detail": f"a run is already in progress ({_running})"})
-    async with _run_lock:
-        _running = f"{room_id}/commission"
-        try:
-            result = await commissioning.run_commission(
-                mapper_id, room_mapping.production_deps(sess),
-                repeat=(body.repeat if body else 1),
-                targets=_commission_targets(body))
-        except Exception as exc:                       # noqa: BLE001
-            named = mapping_refusals.ownership_refusal(exc)
-            if named is None:
-                raise
-            return JSONResponse(status_code=409, content={
-                "detail": named, "refusal": "ownership"})
-        finally:
-            _running = None
-    stored = commissioning.save_result(result)
-    if not result.ok:
+            "detail": outcome.detail, "refusal": outcome.refusal})
+    if outcome.status != capture_runs.STATUS_OK:
         # A REFUSAL IS NOT A SERVER FAULT and is not a failed comparison
         # either: 409 with the sentence, and the stored record, so an
         # unattended caller can tell "we could not run" from "we ran and a
         # row is red" without parsing prose.
-        return JSONResponse(status_code=409, content=stored)
-    return stored
+        return JSONResponse(status_code=409, content=outcome.result)
+    return outcome.result
 
 
 def _commission_targets(body: Optional[CommissionBody]) -> Optional[list[str]]:
@@ -482,10 +430,6 @@ def _commission_targets(body: Optional[CommissionBody]) -> Optional[list[str]]:
     if body.per_fixture:
         return [commissioning.TARGET_FIXTURES]
     return None
-
-
-def _only_carrier(room: RoomMap) -> str:
-    return room.carrier_ids[0] if len(room.carrier_ids) == 1 else ""
 
 
 @router.get("/rooms/{room_id}/footprint/{emitter_id}")

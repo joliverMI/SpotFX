@@ -93,6 +93,13 @@ ROOM_EFFECTS_FILE = SPECTRA_STORAGE / "room_effects.json"
 #: The commissioning ground-truth test's judged results (the frozen table,
 #: bounded) — spectra/services/commissioning.py.
 COMMISSIONING_FILE = SPECTRA_STORAGE / "commissioning.json"
+#: The UNATTENDED CAPTURE QUEUE's per-item outcomes
+#: (spectra/services/capture_queue.py), bounded and rewritten after every
+#: item. It holds a SUMMARY per run, never a run's own record: the full map
+#: lives in room_maps.json and the full judged table in commissioning.json,
+#: and copying either in here would make the one file nobody watches the
+#: unbounded one.
+CAPTURE_QUEUE_FILE = SPECTRA_STORAGE / "capture_queue.json"
 
 # The TESTING IN PROGRESS record (spectra/services/test_session.py): the
 # DECLARED half of the room-visibility bar — {actor, reason, since_ms,

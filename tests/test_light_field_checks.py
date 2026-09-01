@@ -40,6 +40,12 @@ def _run(name: str, timeout: int) -> str:
     ("check_room_effect_wave.py", 300, "ALL ROOM-EFFECT WAVE CHECKS PASSED"),
     # the whole capture session over a real WebSocket and real HTTP routes
     ("check_mapping_capture_e2e.py", 300, "ALL END-TO-END CAPTURE CHECKS PASSED"),
+    # UNATTENDED CAPTURE: a declared queue of map + commissioning runs
+    # executed end to end against the REAL capture client and a synthetic
+    # camera, with no human action after start — plus the drop, the kept
+    # partial, the pose assertion and every refusal by name
+    ("check_capture_queue_e2e.py", 600,
+     "ALL UNATTENDED CAPTURE CHECKS PASSED"),
     # SUB-DEVICE granularity: the range lamp on the real render pipeline,
     # three distinct footprints from one strip, and the device-granularity
     # merge as the negative control
