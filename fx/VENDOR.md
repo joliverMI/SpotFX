@@ -758,6 +758,28 @@ variables named `ledfx` (the core object handle) are untouched.
     Evidence: `scripts/check_fixture_brightness.py`,
     `tests/test_fixture_brightness.py`.
 
+28. `effects/pixelPattern.py`: THE PATTERN LAMP (NEW EFFECT, SpotFX-authored)
+    — lights EXACTLY the effect pixels a bitmask names ('1' lit, '0' dark,
+    one character per pixel, index-aligned to the virtual's own buffer),
+    black everywhere else. It exists for ONE job: the commissioning
+    ground-truth test (`spectra/services/commissioning.py`) addresses a
+    whole composition in GRAY-CODE patterns, so ~22 captures identify every
+    pixel's camera position at once instead of 736 one-at-a-time captures —
+    and a gray-code pattern is not a contiguous run, so its sibling
+    instrument `pixelRange.py` cannot express one.
+    THE LAMP KNOWS NOTHING ABOUT THE CODE, deliberately: all the gray-code
+    arithmetic lives in `spectra/services/gray_code.py`, which is pure and
+    offline-provable, so the lamp and the decoder cannot drift apart into
+    two different ideas of which pixel is which. REGISTRY-EXEMPT, the same
+    discipline as `pixelRange` and the phase keys.
+    ONE THING WORTH COPYING: it renders in `on_activate` as well as in
+    `effect_loop`, so its FIRST assembled frame is already correct. A
+    temporal effect's loop runs on its own thread, and a capture that
+    photographs black while believing it photographed a pattern is exactly
+    the failure a measuring instrument must not have. Evidence:
+    `scripts/check_commissioning.py` section one, on the real render
+    pipeline. Not in the fork source at `/home/javi/ledfx-src`.
+
 Everything else is byte-identical to the fork at 149f4470 modulo the import
 rewrite and the deviations above. When updating vendored files, re-diff
 against that commit.
