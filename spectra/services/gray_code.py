@@ -32,6 +32,17 @@ came out relative to that pixel's own full-on brightness. A pixel whose two
 captures came out too close to call is reported UNDECODABLE rather than
 guessed — the whole point of an instrument that can fail honestly.
 
+WHAT THE INVERSE CANNOT CANCEL, learned in his room on 2026-09-01 and the
+reason `resolution_report` exists: comparing a pattern against its own
+inverse removes every unknown about brightness, but it assumes the camera
+can RESOLVE the pattern in the first place. Where one camera pixel
+integrates many LEDs, a pattern and its inverse deliver the same light to
+the same pixel and cancel each other instead of the unknowns — |p - q|
+goes to zero, no bit is confident, and a room full of light decodes to
+nothing at all. That is a fact about the pose and the frame size, not about
+his fixtures, and it is measurable from the reference pair alone. See
+MIN_CAMERA_PX_PER_INDEX and `docs/commissioning-field-decode-failure.md`.
+
 WHAT "SEEN" MEANS HERE, precisely, because a row of the frozen comparison
 is judged on it: an index is SEEN when at least `MIN_SUPPORT` camera pixels
 decoded to it with every bit confident. One camera pixel agreeing is not a
@@ -45,11 +56,33 @@ from typing import Optional
 import numpy as np
 
 #: A camera pixel must be at least this fraction of the frame's own
-#: bright-end level (the 99th percentile of full-minus-dark) before it is
-#: considered to be looking at the composition at all. Everything below it
-#: is wall, ceiling, spill and sensor noise — a region where `pattern` and
-#: `inverse` differ only by noise and every bit would be a coin toss.
+#: bright-end level (see PEAK_SAMPLE) before it is considered to be looking
+#: at the composition at all. Everything below it is wall, ceiling, spill
+#: and sensor noise — a region where `pattern` and `inverse` differ only by
+#: noise and every bit would be a coin toss.
 LIT_FRACTION = 0.15
+#: HOW THE FRAME'S BRIGHT END IS TAKEN: the mean of the this-many brightest
+#: camera pixels of `full - dark`, NOT a percentile.
+#:
+#: THE FIELD FAILURE THIS EXISTS FOR (2026-09-01, his tv-mapper, both runs):
+#: this was `np.percentile(bright, 99.0)`, which silently assumes the
+#: composition covers more than 1% of the frame. His does not — the whole
+#: 736-pixel composition images into about 66 camera pixels of 57,600
+#: (0.11%), so the 99th percentile of full-minus-dark was ZERO. The gate
+#: then collapsed to `bright >= 1e-9`, i.e. "anything at all above the dark
+#: reference", and reported 3,165 lit pixels in one run (averaging noise,
+#: not light) and 0 in the next. Neither number described the room. A mean
+#: over a handful of the brightest pixels is robust to a hot pixel and does
+#: not care what fraction of the frame the composition covers.
+PEAK_SAMPLE = 25
+#: An absolute floor, in grey levels, under which `full - dark` is not a
+#: measurement. This is NOT a scene-brightness assumption — the whole
+#: reason for capturing the inverse is that scene levels are unknowable —
+#: it is the SENSOR's own quantisation: a camera pixel whose full-on
+#: average sits less than one grey level above its dark average has been
+#: rounded, not measured. Without it, averaging noise reads as light (see
+#: PEAK_SAMPLE).
+MIN_BRIGHT_LEVELS = 1.0
 #: A bit is confident when |pattern - inverse| is at least this fraction of
 #: that camera pixel's own full-minus-dark brightness. Relative, never an
 #: absolute byte count: the whole reason for capturing the inverse is that
@@ -57,6 +90,24 @@ LIT_FRACTION = 0.15
 BIT_CONFIDENCE = 0.20
 #: Camera pixels that must agree on an index before it counts as SEEN.
 MIN_SUPPORT = 1
+#: CAMERA PIXELS PER COMPOSITION INDEX the decode needs along the imaged
+#: strip, and the reason a run can now refuse before spending the room's
+#: dark time.
+#:
+#: It is Nyquist, on the finest structure the stack contains: gray bit 0
+#: alternates in runs of TWO indices (0,1,1,0,0,1,1,0 ...), so a pattern
+#: and its inverse differ over a two-index period. A camera that puts fewer
+#: than about two pixels on each index cannot see that period at all — the
+#: pattern and its inverse land on the SAME camera pixels and average to
+#: the same brightness, |p - q| goes to zero, no bit is confident, and
+#: EVERY lit pixel comes back undecodable however much light is in the
+#: frame. That is exactly what his room produced: 736 pixels imaged into
+#: ~66 camera pixels (0.09 per index, ~22x short), 0 decoded, 0 out of
+#: range, and every lit pixel undecodable.
+#:
+#: A run at or above this bar can still fail for other reasons; a run below
+#: it cannot succeed for any.
+MIN_CAMERA_PX_PER_INDEX = 2.0
 
 
 def bits_needed(total: int) -> int:
@@ -129,6 +180,20 @@ class Decode:
     lit_pixels: int = 0
     undecodable_pixels: int = 0
     out_of_range_pixels: int = 0
+    #: WHERE A DECODE DIED, per bit, so a failed field run answers that
+    #: question in its own response instead of needing a desk investigation
+    #: against frames nobody kept. Each entry is
+    #: {bit, median_strength, confident_fraction} over the LIT pixels —
+    #: `median_strength` is |pattern - inverse| / that pixel's own
+    #: full-minus-dark brightness, the exact quantity BIT_CONFIDENCE gates
+    #: on. A bit whose median strength is ~0 is a bit the camera could not
+    #: see at all (its pattern and inverse cancelled); a bit hovering near
+    #: BIT_CONFIDENCE is a threshold question. They are not the same
+    #: finding and must not read the same.
+    bit_contrast: list[dict] = field(default_factory=list)
+    #: The imaged extent of the composition, from the reference pair alone
+    #: (see `resolution_report`).
+    resolution: dict = field(default_factory=dict)
 
     @property
     def seen(self) -> list[int]:
@@ -150,7 +215,67 @@ class Decode:
                 "missing_count": len(self.missing),
                 "lit_pixels": self.lit_pixels,
                 "undecodable_pixels": self.undecodable_pixels,
-                "out_of_range_pixels": self.out_of_range_pixels}
+                "out_of_range_pixels": self.out_of_range_pixels,
+                "bit_contrast": self.bit_contrast,
+                "resolution": self.resolution}
+
+
+def bright_and_lit(dark: np.ndarray, full: np.ndarray, *,
+                   lit_fraction: float = LIT_FRACTION
+                   ) -> tuple[np.ndarray, np.ndarray, float, float]:
+    """`full - dark`, and WHICH camera pixels are looking at the
+    composition — one definition, used by the decode and by the
+    resolution report, so the run cannot refuse on one count and decode
+    against another.
+
+    Returns (bright, lit, peak, floor). See PEAK_SAMPLE for why the bright
+    end is a mean over the brightest few pixels rather than a percentile,
+    and MIN_BRIGHT_LEVELS for why there is an absolute floor under it."""
+    dark = np.asarray(dark, dtype=np.float64)
+    full = np.asarray(full, dtype=np.float64)
+    if dark.shape != full.shape:
+        raise ValueError(f"dark {dark.shape} and full {full.shape} differ")
+    bright = np.clip(full - dark, 0.0, None)
+    if bright.size:
+        k = int(min(PEAK_SAMPLE, bright.size))
+        peak = float(np.mean(np.sort(bright, axis=None)[-k:]))
+    else:
+        peak = 0.0
+    floor = max(MIN_BRIGHT_LEVELS, peak * lit_fraction)
+    return bright, bright >= floor, peak, floor
+
+
+def resolution_report(dark: np.ndarray, full: np.ndarray, *, total: int,
+                      lit_fraction: float = LIT_FRACTION) -> dict:
+    """CAN THIS CAMERA, FROM WHERE IT IS STANDING, RESOLVE THIS
+    COMPOSITION AT ALL? — answered from the dark and full reference pair
+    alone, which is two captures and about four seconds into a run.
+
+    THE FIELD FAILURE THIS EXISTS FOR: a run that cannot possibly decode
+    still spent ~42 s holding his room dark, then reported 0 of 736 and
+    handed the frozen table an attribution ("occlusion or blob-merge")
+    that read as a fault in his room rather than as an instrument pointed
+    at something it cannot see. The arithmetic that settles it needs no
+    patterns: how many camera pixels does the whole composition light,
+    and how many does it need (MIN_CAMERA_PX_PER_INDEX per index)?
+
+    Reported on every run, refused on only the ones below the bar — the
+    number is worth carrying even when it passes, because it says how much
+    margin the pose had."""
+    bright, lit, peak, floor = bright_and_lit(dark, full,
+                                              lit_fraction=lit_fraction)
+    total = int(max(0, total))
+    lit_pixels = int(lit.sum())
+    per_index = (lit_pixels / total) if total else 0.0
+    needed = int(np.ceil(total * MIN_CAMERA_PX_PER_INDEX))
+    return {"total": total, "lit_pixels": lit_pixels,
+            "camera_px_per_index": round(per_index, 4),
+            "needed_camera_px": needed,
+            "min_camera_px_per_index": MIN_CAMERA_PX_PER_INDEX,
+            "frame_pixels": int(bright.size),
+            "peak": round(peak, 3), "floor": round(floor, 3),
+            "resolvable": bool(lit_pixels >= needed),
+            "any_light": bool(lit_pixels > 0)}
 
 
 def decode_stack(dark: np.ndarray, full: np.ndarray,
@@ -171,15 +296,13 @@ def decode_stack(dark: np.ndarray, full: np.ndarray,
     number the report carries rather than a silence."""
     dark = np.asarray(dark, dtype=np.float64)
     full = np.asarray(full, dtype=np.float64)
-    if dark.shape != full.shape:
-        raise ValueError(f"dark {dark.shape} and full {full.shape} differ")
     height, width = dark.shape
-    bright = np.clip(full - dark, 0.0, None)
-    peak = float(np.percentile(bright, 99.0)) if bright.size else 0.0
-    lit = bright >= max(1e-9, peak * lit_fraction)
+    bright, lit, _peak, _floor = bright_and_lit(dark, full,
+                                                lit_fraction=lit_fraction)
 
     value = np.zeros(bright.shape, dtype=np.int64)
     confident = lit.copy()
+    contrast: list[dict] = []
     for bit, (pat, inv) in enumerate(pairs):
         p = np.asarray(pat, dtype=np.float64)
         q = np.asarray(inv, dtype=np.float64)
@@ -192,8 +315,17 @@ def decode_stack(dark: np.ndarray, full: np.ndarray,
         # docstring for why an absolute threshold cannot be right here.
         with np.errstate(divide="ignore", invalid="ignore"):
             strength = np.abs(diff) / np.where(bright > 0, bright, np.nan)
-        confident &= np.nan_to_num(strength, nan=0.0) >= bit_confidence
+        strength = np.nan_to_num(strength, nan=0.0)
+        ok_bit = strength >= bit_confidence
+        confident &= ok_bit
         value |= (diff > 0).astype(np.int64) << bit
+        seen_here = strength[lit]
+        contrast.append({
+            "bit": bit,
+            "median_strength": (round(float(np.median(seen_here)), 4)
+                                if seen_here.size else None),
+            "confident_fraction": (round(float(ok_bit[lit].mean()), 4)
+                                   if seen_here.size else None)})
 
     index = from_gray(value)
     in_range = (index >= 0) & (index < total)
@@ -203,7 +335,10 @@ def decode_stack(dark: np.ndarray, full: np.ndarray,
                  index_map=np.where(ok, index, -1).reshape(-1),
                  lit_pixels=int(lit.sum()),
                  undecodable_pixels=int((lit & ~confident).sum()),
-                 out_of_range_pixels=int((lit & confident & ~in_range).sum()))
+                 out_of_range_pixels=int((lit & confident & ~in_range).sum()),
+                 bit_contrast=contrast,
+                 resolution=resolution_report(dark, full, total=total,
+                                              lit_fraction=lit_fraction))
 
     ys, xs = np.mgrid[0:height, 0:width]
     nx = (xs + 0.5) / width
@@ -260,29 +395,59 @@ def render_frame(layout: dict[int, tuple[float, float]], on, *,
                  dark_level: float = 8.0, lit_level: float = 220.0,
                  noise: float = 0.0, rng=None,
                  dead: Optional[set[int]] = None,
-                 blobs: Optional[dict] = None) -> np.ndarray:
+                 blobs: Optional[dict] = None,
+                 window_sigmas: Optional[float] = None) -> np.ndarray:
     """One camera frame of a KNOWN arrangement with `on` lit — the shared
     renderer behind every offline proof of this instrument.
 
     `layout` is the truth: composition index -> (x, y) in normalised frame
     coordinates. `dead` names indices that emit nothing however they are
     patterned — his hardware being wrong, which the frozen table calls out
-    as a real outcome to REPORT rather than a commissioning failure."""
+    as a real outcome to REPORT rather than a commissioning failure.
+
+    `window_sigmas` bounds each cached blob to that many radii around its
+    own centre instead of a whole frame's worth of array. It exists for the
+    FIELD REGIME proof — his real composition is 736 pixels, and a
+    full-frame cache for 736 blobs of a 320x180 frame is ~340 MB, where
+    5-sigma windows are ~3 MB. Left at None the renderer is byte-for-byte
+    what it always was, so nothing already proven against it moves."""
     dead = dead or set()
-    ys, xs = np.mgrid[0:height, 0:width]
     if blobs is None:
         blobs = {}
     frame = np.full((height, width), float(dark_level), dtype=np.float64)
-    for i in on:
-        if i in dead or i not in layout:
-            continue
-        blob = blobs.get(i)
-        if blob is None:
-            cx, cy = layout[i][0] * width, layout[i][1] * height
-            blob = np.exp(-(((xs - cx) ** 2 + (ys - cy) ** 2) /
-                            (2.0 * radius_px ** 2)))
-            blobs[i] = blob
-        frame += blob * (lit_level - dark_level)
+    gain = lit_level - dark_level
+    if window_sigmas is None:
+        ys, xs = np.mgrid[0:height, 0:width]
+        for i in on:
+            if i in dead or i not in layout:
+                continue
+            blob = blobs.get(i)
+            if blob is None:
+                cx, cy = layout[i][0] * width, layout[i][1] * height
+                blob = np.exp(-(((xs - cx) ** 2 + (ys - cy) ** 2) /
+                                (2.0 * radius_px ** 2)))
+                blobs[i] = blob
+            frame += blob * gain
+    else:
+        span = max(1, int(np.ceil(window_sigmas * radius_px)))
+        for i in on:
+            if i in dead or i not in layout:
+                continue
+            got = blobs.get(i)
+            if got is None:
+                cx, cy = layout[i][0] * width, layout[i][1] * height
+                x0, x1 = max(0, int(cx) - span), min(width, int(cx) + span + 1)
+                y0, y1 = max(0, int(cy) - span), min(height, int(cy) + span + 1)
+                if x1 <= x0 or y1 <= y0:      # centred off the frame
+                    blobs[i] = (0, 0, 0, 0, np.zeros((0, 0)))
+                    continue
+                wy, wx = np.mgrid[y0:y1, x0:x1]
+                patch = np.exp(-(((wx - cx) ** 2 + (wy - cy) ** 2) /
+                                 (2.0 * radius_px ** 2)))
+                got = (y0, y1, x0, x1, patch)
+                blobs[i] = got
+            y0, y1, x0, x1, patch = got
+            frame[y0:y1, x0:x1] += patch * gain
     if noise:
         gen = rng if rng is not None else np.random.default_rng(0)
         frame += gen.normal(0.0, noise, size=frame.shape)

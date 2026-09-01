@@ -3702,8 +3702,35 @@ and the id shape. Five things to know:
 The plan's §8 (`/home/javi/fleet-spotfx/.lavish/room-light-field-plan.html`),
 built 2026-08-31. Gray-code his stored `tv-mapper` composition, decode where
 every pixel is, and judge a comparison **frozen in the plan before any run**.
-Three things to know before touching any of it:
+Four things to know before touching any of it:
 
+- **ITS FIRST TWO FIELD RUNS FAILED TOTALLY, AND THE CAUSE IS RESOLUTION,
+  NOT TIMING AND NOT HIS ROOM (2026-09-01, PR fm/commissioning-decode-
+  failure, `docs/SPECTRA_SPEC.md` §98).** Both runs were mechanically clean
+  — 22 captures, ~42 s, substitution right, room restored — and decoded 0
+  of 736 with ~3,165 lit camera pixels ALL undecodable and 0 out of range.
+  The raw frame kept from that pose (`data/commissioning-field-evidence/`)
+  says why in one number: 66 of 57,600 camera pixels are non-zero, so his
+  whole composition arrives as THREE compact glows and every pattern lands
+  on the same camera pixels as its inverse and cancels. **The arithmetic
+  that governs this whole instrument, and it is not a tuning knob:** gray
+  bit 0 alternates in runs of TWO indices, so the camera needs about
+  `gray_code.MIN_CAMERA_PX_PER_INDEX` (2) pixels per composition index
+  along the imaged strip — 736 pixels need ~1,472, and the entire border
+  of the 320x180 frame the phone sends is ~1,000. **No pose fixes that at
+  the current frame size** (the phone captures at 1280x720 and the page
+  downsamples before sending; the "full-resolution ring" is full relative
+  to the 64x36 MAP GRID, not to the camera). Before proposing a cause for
+  any future decode failure here, read `Decode.bit_contrast` in the run's
+  own response: a mistimed stack compares two DIFFERENT patterns and keeps
+  real low-bit contrast while decoding CONFIDENTLY to wrong indices
+  (out-of-range > 0); an unresolvable one has zero confident bits with the
+  HIGH bits near 1.0. They are opposite signatures and the response now
+  carries both. The run refuses BY NAME two captures in
+  (`gray_code.resolution_report` →
+  `mapping_refusals.unresolvable_composition`) rather than spending the
+  room's dark time, and `scripts/check_commissioning.py` §3c reproduces the
+  whole field failure on demand.
 - **THE FIVE TOLERANCES ARE PRE-REGISTERED, NOT TUNING KNOBS.**
   `spectra/services/commission_compare.py` quotes the plan's table verbatim
   in its docstring and owns 0.98 / 2% / 5% / 5% / +/-15 ms. Moving one has
@@ -3726,6 +3753,17 @@ Three things to know before touching any of it:
   television" would be precisely the plausible-looking answer this test
   exists to refuse. Row 5 is unmeasured for a different stated reason: the
   mapping tap runs at 5 fps and a 15 ms tolerance needs ~67.
+- **A GATE ANCHORED ON A PERCENTILE ASSUMES HOW MUCH OF THE FRAME THE
+  THING COVERS.** The decode's lit gate took its bright end from
+  `percentile(full - dark, 99)` — fine for a synthetic room whose blobs
+  cover the frame, meaningless for a composition covering 0.11% of it: the
+  percentile landed in the read noise, the gate collapsed to "anything
+  above the dark reference", and it reported 3,165 lit pixels in one run
+  (averaging noise) and 0 in the next. It is now the mean of the brightest
+  `gray_code.PEAK_SAMPLE` pixels plus a one-grey-level floor — the sensor's
+  own quantisation, which is NOT the scene-brightness assumption the
+  inverse capture exists to avoid. Watch for the same shape anywhere else a
+  small bright thing is measured against a whole frame.
 - **ONE CONTINUOUS HOLD per pass, where the MAP's run is a chain of short
   ones** — different acts, not a change of mind: a map's emitters are
   independent measurements; a gray-code STACK is ONE measurement against

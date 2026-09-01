@@ -136,3 +136,133 @@ def _stack(layout, seed):
     dark, full, pairs = gc.synthetic_stack(layout, width=W, height=H,
                                            radius_px=2.0, noise=1.5, seed=seed)
     return dark, full, pairs
+
+
+# ── THE FIELD REGIME (2026-09-01) ─────────────────────────────────────────
+#
+# His first two real runs failed the same way: 0 of 736 decoded, ~3,165
+# "lit" camera pixels every one of them undecodable, 0 out of range, with
+# abundant light in the frame. The raw frame kept from that pose says why —
+# the whole composition arrives as three compact glows peaking at 99 of
+# 255, 66 non-zero camera pixels of 57,600. These tests hold the decoder to
+# what that regime does, so the failure cannot come back unnoticed.
+# `scripts/check_commissioning.py` section 3c is the fuller instrument.
+
+def _glow(total: int, span_px: float = 8.0, cx: float = 160.0,
+          cy: float = 90.0):
+    """A whole strip imaged into one small glow — his pose, in one fixture."""
+    return {i: ((cx + (i / max(1, total - 1) - 0.5) * span_px) / W, cy / H)
+            for i in range(total)}
+
+
+def _dim_stack(layout, *, peak=99.0, noise=1.0, seed=11, radius_px=2.0):
+    """His camera: per-pixel light calibrated so ALL-ON reaches `peak` of
+    255, read noise, four frames averaged, each quantised to the grey8 the
+    phone actually sends."""
+    every, cache, rng = set(layout), {}, np.random.default_rng(seed)
+
+    def raw(on, gain):
+        return gc.render_frame(layout, on, width=W, height=H,
+                               radius_px=radius_px, dark_level=2.0,
+                               lit_level=2.0 + gain, blobs=cache,
+                               window_sigmas=5.0)
+
+    gain = peak / max(1e-9, float((raw(every, 1.0) - 2.0).max()))
+
+    def shot(on):
+        return np.mean([np.clip(np.round(raw(on, gain)
+                                         + rng.normal(0.0, noise, (H, W))),
+                                0, 255).astype(np.uint8).astype(np.float64)
+                        for _ in range(4)], axis=0)
+
+    return shot(set()), shot(every), [
+        (shot({i for i in every if gc.pattern_bits(np.array([i]), b)[0]}),
+         shot(every - {i for i in every
+                       if gc.pattern_bits(np.array([i]), b)[0]}))
+        for b in range(gc.bits_needed(len(layout)))]
+
+
+def test_a_composition_imaged_into_a_glow_decodes_nothing_and_says_so():
+    layout = _glow(736)
+    out = gc.decode_stack(*_dim_stack(layout), total=736)
+    assert len(out.seen) == 0
+    # HIS SIGNATURE: light in the frame, and every lit pixel undecodable —
+    # never a confident answer to a question the camera could not read.
+    assert out.lit_pixels > 0
+    assert out.undecodable_pixels == out.lit_pixels
+    assert out.out_of_range_pixels == 0
+
+
+def test_the_decode_says_which_bits_it_lost():
+    """WHERE it dies, in the decode's own report: the low bits alternate
+    faster than the camera can see and cancel against their inverses; the
+    high bits are perfectly confident, so the stack is neither noise nor
+    mistimed."""
+    out = gc.decode_stack(*_dim_stack(_glow(736)), total=736)
+    low = [c["median_strength"] for c in out.bit_contrast[:6]]
+    high = [c["median_strength"] for c in out.bit_contrast[8:]]
+    assert all(v < gc.BIT_CONFIDENCE for v in low)
+    assert all(v > gc.BIT_CONFIDENCE for v in high)
+
+
+def test_a_mistimed_stack_looks_nothing_like_it():
+    """The discriminator that rules the hypothesis on file out: frames read
+    at the wrong moment compare two DIFFERENT patterns, which differ — the
+    low bits keep real contrast and pixels decode to wrong indices. His
+    runs showed neither."""
+    layout = _line(96)
+    dark, full, pairs = gc.synthetic_stack(layout, width=W, height=H,
+                                           radius_px=2.0)
+    flat = [f for pair in pairs for f in pair]
+    late = [full] + flat[:-1]
+    out = gc.decode_stack(dark, full,
+                          [(late[2 * b], late[2 * b + 1])
+                           for b in range(len(pairs))], total=96)
+    assert any(c["median_strength"] > gc.BIT_CONFIDENCE
+               for c in out.bit_contrast[:4])
+    # and it still produces CONFIDENT answers (wrong ones) — where his runs
+    # produced none at all: every lit pixel undecodable, both times.
+    assert out.undecodable_pixels < out.lit_pixels
+
+
+def test_the_lit_gate_does_not_degenerate_on_a_small_composition():
+    """THE GATE THAT REPORTED TWO NUMBERS DESCRIBING NOTHING: a 99th
+    percentile of `full - dark` is zero when the composition covers 0.1% of
+    the frame, and the gate then admitted every pixel of averaging noise
+    (3,165 in his first run) — or, when the dark average came out no lower,
+    none at all (his second)."""
+    dark, full, _pairs = _dim_stack(_glow(736))
+    bright = np.clip(full - dark, 0.0, None)
+    _b, lit, peak, floor = gc.bright_and_lit(dark, full)
+    old_peak = float(np.percentile(bright, 99.0))
+    # the old peak landed in the read noise, two orders below the light it
+    # was meant to measure...
+    assert old_peak < 0.05 * peak
+    old_lit = int((bright >= max(1e-9, old_peak * gc.LIT_FRACTION)).sum())
+    assert peak > 50.0 and floor >= gc.MIN_BRIGHT_LEVELS
+    # ...so the gate admitted the whole frame's worth of it.
+    assert 0 < int(lit.sum()) < old_lit / 10
+
+
+def test_the_resolution_report_answers_can_this_camera_read_it_at_all():
+    dark, full, _ = _dim_stack(_glow(736))
+    bad = gc.resolution_report(dark, full, total=736)
+    assert bad["any_light"] and not bad["resolvable"]
+    assert bad["camera_px_per_index"] < gc.MIN_CAMERA_PX_PER_INDEX
+    assert bad["needed_camera_px"] == 1472
+
+    # the same dim room, a composition small enough for this frame
+    small = _line(88)
+    d2, f2, p2 = _dim_stack(small)
+    good = gc.resolution_report(d2, f2, total=88)
+    assert good["resolvable"]
+    assert len(gc.decode_stack(d2, f2, p2, total=88).seen) > 70
+
+
+def test_a_frame_with_no_light_at_all_is_reported_as_such():
+    """His second run: not one camera pixel came out above the dark
+    reference. That is a fact about the room, not zero of 736 pixels."""
+    flat = np.full((H, W), 7.0)
+    report = gc.resolution_report(flat, flat.copy(), total=736)
+    assert report["lit_pixels"] == 0 and not report["any_light"]
+    assert not report["resolvable"]
