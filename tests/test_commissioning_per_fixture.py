@@ -90,6 +90,45 @@ def test_a_segment_target_is_finer_still():
     assert "segment 2" in seg.target_label
 
 
+def test_a_fixture_whose_segments_are_not_adjacent_slices_in_stored_order():
+    """A device may back segments the mapper does NOT store next to each
+    other. The slice concatenates them in the MAPPER's own order (never
+    sorted, never merged), so `global_indices` is discontinuous while the
+    local addressing stays 0..N-1 — which is exactly the shape that would
+    break silently if the slice assumed one contiguous run."""
+    def _v(vid, segs, mapping="span"):
+        return {"id": vid, "active": True,
+                "segments": [[d, lo, hi, False, 0] for d, lo, hi in segs],
+                "pixel_count": sum(h - l + 1 for _d, l, h in segs),
+                "config": {"mapping": mapping, "rows": 1, "grouping": 1},
+                "effect": {"type": "singleColor", "config": {}}}
+
+    virtuals = {"m": _v("m", [("A", 0, 9), ("B", 0, 4),
+                              ("A", 10, 19), ("B", 5, 9)], mapping="copy"),
+                "A": _v("A", [("A", 0, 19)]),
+                "B": _v("B", [("B", 0, 9)])}
+    whole = commissioning.resolve_composition("m", virtuals, [])
+    assert [(s.index, s.device_id, s.start, s.end) for s in whole.segments] == [
+        (0, "A", 0, 9), (1, "B", 10, 14), (2, "A", 15, 24), (3, "B", 25, 29)]
+
+    a = commissioning.slice_composition(whole, "device:A")
+    assert a.total == 20
+    assert [(s.index, s.start, s.end) for s in a.segments] == [(0, 0, 9),
+                                                               (2, 10, 19)]
+    assert a.global_indices == list(range(0, 10)) + list(range(15, 25))
+    # every local index addressed exactly once, through A's own pixels
+    assert a.pixel_map["A"].tolist() == list(range(20))
+    assert "B" not in a.pixel_map
+    # and the stored layout follows the discontinuity rather than assuming
+    # a run
+    layout = {i: (i / 30.0, 0.5) for i in range(whole.total)}
+    sliced = commissioning.slice_layout(layout, a)
+    assert sliced[0] == layout[0]
+    assert sliced[9] == layout[9]
+    assert sliced[10] == layout[15]        # the jump, honoured
+    assert sliced[19] == layout[24]
+
+
 def test_a_target_that_names_nothing_is_refused_by_name():
     whole = _whole()
     with pytest.raises(commissioning.CompositionRefused) as exc:
