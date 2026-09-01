@@ -82,15 +82,22 @@ class MapBody(BaseModel):
     room's own remembered choice (itself only a seed for the page's
     control), and an omitted settle means the shipped protocol exactly.
 
-    The settles are groundwork for quality levels — a slower run buys a
-    cleaner dark reference. They are BOUNDED server-side
-    (`room_mapping.clamp_settle`), so a stray number falls back to the
-    default rather than refusing a run or holding the room dark for a
-    minute."""
+    All FOUR protocol waits are exposed — the two settles and the two
+    CAPTURE windows — because the speed sweep varies one knob at a time and
+    cannot do that with only half of them. They are BOUNDED server-side
+    (`room_mapping.clamp_settle` / `clamp_capture`), so a stray number falls
+    back to the default rather than refusing a run or holding the room dark
+    for a minute.
+
+    ONE THING NOT TO MIS-READ IN A SWEEP: at the phone's fixed ~5 fps,
+    `lit_capture_s` IS the frame count — dwell and frames-averaged are one
+    knob, not two (room_mapping's own note above MIN_CAPTURE_S)."""
     granularity: Optional[str] = None
     block_pixels: Optional[int] = None
     dark_settle_s: Optional[float] = None
     lit_settle_s: Optional[float] = None
+    dark_capture_s: Optional[float] = None
+    lit_capture_s: Optional[float] = None
 
 
 def _run_granularity(room: RoomMap, granularity: Optional[str],
@@ -274,6 +281,13 @@ async def plan_map(room_id: str, granularity: Optional[str] = None,
         return JSONResponse(status_code=503, content={
             "detail": f"cannot read the live virtuals: {exc}"})
     body = plan.as_dict()
+    # BEFORE THE COST: the run is now ONE continuous dark room from the first
+    # emitter to the last, so how long it may hold that room belongs beside
+    # the emitter count — and a plan past the hard cap says so here rather
+    # than half-way through a dark room. It is a REFUSAL, not a correction:
+    # nothing here changes his granularity or block size to make it fit.
+    if body.get("too_long"):
+        body["problems"] = list(body.get("problems") or []) + [body["too_long"]]
     body["sub_device"] = any(not e.whole_carrier for e in plan.emitters)
     body["spectra_owns"] = room_mapping.spectra_owns_lights()
     if body["sub_device"] and not body["spectra_owns"]:
@@ -312,7 +326,9 @@ async def run_map(room_id: str, body: Optional[MapBody] = None):
                 room, room_mapping.production_deps(sess),
                 granularity=g, block_pixels=block,
                 dark_settle_s=body.dark_settle_s if body else None,
-                lit_settle_s=body.lit_settle_s if body else None)
+                lit_settle_s=body.lit_settle_s if body else None,
+                dark_capture_s=body.dark_capture_s if body else None,
+                lit_capture_s=body.lit_capture_s if body else None)
         except Exception as exc:                       # noqa: BLE001
             # The backstop for the thing that started this: an ownership
             # refusal reached him as a bare 500 and a stack trace, for a

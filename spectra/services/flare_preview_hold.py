@@ -166,6 +166,20 @@ watch several loops, nudge the intensity slider, watch again) while
 making a forgotten/minimised tab a brief, self-correcting nuisance instead
 of a lost show — nowhere near the 14 minutes that actually happened.
 
+THE CEILING IS PER SESSION, NOT PER MODULE (2026-08-31, fm/
+mapping-one-dark-hold). MAX_HOLD_DURATION_S is the default and the ONLY
+number any preview uses — unchanged. What changed is that a session may
+declare its own on its first open (`open_program_hold(max_duration_s=...)`,
+read once, never raisable by a later call), because three minutes is the
+right bound on a person judging one flare and the wrong bound on a mapping
+run: the room-mapping capture used to be A CHAIN OF SHORT PER-EMITTER HOLDS
+precisely to stay under it, and the owner watched that chain hand his show
+back to the fixtures twenty-two times in one run — which contaminated the
+very dark references the run exists to take. It is now ONE continuous hold
+with a ceiling derived at plan time from its own emitter list
+(spectra/services/room_mapping.run_ceiling_s), and `session_ceiling_at()`
+is the single place anything reads which number this session is held to.
+
 Reaching the ceiling runs the SAME revert the heartbeat-lapse path already
 does, but it ALSO locks the session (`_locked_until_reopen`) so a client
 that keeps calling /fire or /heartbeat afterward — exactly the reported
@@ -233,6 +247,16 @@ _deadline: float | None = None
 # _snapshot, on first_open) and cleared on every revert, whatever the
 # reason, so a genuinely new session always starts its own fresh ceiling.
 _session_started_at: float | None = None
+# THE CEILING THIS SESSION IS ACTUALLY HELD TO, in seconds from
+# _session_started_at. MAX_HOLD_DURATION_S unless the session's first open
+# asked for its own (open_program_hold's `max_duration_s`), which is how a
+# MAPPING RUN gets a RUN-SCOPED ceiling derived from its own plan estimate
+# instead of a preview's three minutes — see spectra/services/
+# room_mapping.py's `run_ceiling_s`. Set once, on first_open, alongside
+# _session_started_at; cleared with it on every revert, so a session never
+# inherits the previous one's ceiling. A preview passes nothing and is
+# byte-identical to before this existed.
+_session_max_duration_s: float | None = None
 # Sticky once the ceiling fires (_revert_locked(reason="max_duration"));
 # only clear_ceiling_lock() — called from a genuine POST /open, never a
 # heartbeat or a re-fire — clears it. See "MAXIMUM HOLD CEILING" above.
@@ -346,7 +370,7 @@ async def _revert_locked(reason: str = "explicit_close") -> None:
     abandoned/lapsed heartbeat leaves it free to start fresh on its own
     next open, exactly as before this ceiling existed."""
     global _snapshot, _deadline, _session_started_at, _locked_until_reopen
-    global _release_step
+    global _release_step, _session_max_duration_s
     for task in _release_tasks:
         task.cancel()
     _release_tasks.clear()
@@ -355,6 +379,8 @@ async def _revert_locked(reason: str = "explicit_close") -> None:
     _snapshot = None
     _deadline = None
     _session_started_at = None
+    ceiling_s = _session_max_duration_s or MAX_HOLD_DURATION_S
+    _session_max_duration_s = None
     _locked_until_reopen = (reason == "max_duration")
     _clear_snapshot_file()
     if not snap:
@@ -367,24 +393,37 @@ async def _revert_locked(reason: str = "explicit_close") -> None:
         logger.exception("flare_preview_hold: revert failed for %s", sorted(snap))
     if reason == "max_duration":
         logger.warning(
-            "flare_preview_hold: MAX_HOLD_DURATION_S (%.0fs) reached while "
+            "flare_preview_hold: the hold ceiling (%.0fs) reached while "
             "still heartbeating — releasing his room regardless (%d "
-            "virtual(s)); locked until a fresh /open", MAX_HOLD_DURATION_S,
+            "virtual(s)); locked until a fresh /open", ceiling_s,
             len(snap))
+
+
+def session_ceiling_at() -> float | None:
+    """The absolute monotonic moment THIS session must be released by, or
+    None when no session has begun. `MAX_HOLD_DURATION_S` for a preview;
+    a mapping run's own run-scoped ceiling when its first open asked for
+    one. Everything that enforces the ceiling reads it here rather than
+    recomputing it, so the deadline cap, the sweep's "was this the
+    ceiling?" verdict and `capped_pause_s` can never disagree about which
+    number this session is being held to."""
+    if _session_started_at is None:
+        return None
+    return _session_started_at + (_session_max_duration_s or MAX_HOLD_DURATION_S)
 
 
 def _rearm(duration_s: float) -> None:
     """(Re)arm the release deadline `duration_s` from now — capped so the
-    deadline can never cross the ABSOLUTE ceiling
-    (_session_started_at + MAX_HOLD_DURATION_S) once a real session has
-    begun. This is what makes the ceiling immune to heartbeats: a
-    heartbeat/re-fire arriving before the ceiling can still push the
-    deadline UP TO it, never past it — see the module docstring's
-    "MAXIMUM HOLD CEILING" section."""
+    deadline can never cross this session's ABSOLUTE ceiling
+    (`session_ceiling_at()`) once a real session has begun. This is what
+    makes the ceiling immune to heartbeats: a heartbeat/re-fire arriving
+    before the ceiling can still push the deadline UP TO it, never past it
+    — see the module docstring's "MAXIMUM HOLD CEILING" section."""
     global _deadline
     deadline = time.monotonic() + duration_s
-    if _session_started_at is not None:
-        deadline = min(deadline, _session_started_at + MAX_HOLD_DURATION_S)
+    ceiling = session_ceiling_at()
+    if ceiling is not None:
+        deadline = min(deadline, ceiling)
     _deadline = deadline
 
 
@@ -420,10 +459,10 @@ def capped_pause_s(requested_s: float) -> float:
     while locked (see locked_until_reopen())."""
     if _locked_until_reopen:
         return 0.0
-    if _session_started_at is None:
+    ceiling = session_ceiling_at()
+    if ceiling is None:
         return requested_s
-    remaining = (_session_started_at + MAX_HOLD_DURATION_S) - time.monotonic()
-    return max(0.0, min(requested_s, remaining))
+    return max(0.0, min(requested_s, ceiling - time.monotonic()))
 
 
 async def sweep_once() -> bool:
@@ -454,9 +493,9 @@ async def sweep_once() -> bool:
     async with _lock:
         if _snapshot is None or _deadline is None or time.monotonic() < _deadline:
             return False
-        reached_ceiling = (
-            _session_started_at is not None
-            and time.monotonic() >= _session_started_at + MAX_HOLD_DURATION_S - 1e-6)
+        ceiling = session_ceiling_at()
+        reached_ceiling = (ceiling is not None
+                           and time.monotonic() >= ceiling - 1e-6)
         reason = "max_duration" if reached_ceiling else "heartbeat_lapsed"
         await _revert_locked(reason)
         return True
@@ -605,7 +644,8 @@ class FlareKindProgram(PreviewProgram):
 
 async def open_program_hold(program: PreviewProgram, intensity: float, *,
                             step: str = "fire",
-                            heartbeat_timeout_s: float) -> dict:
+                            heartbeat_timeout_s: float,
+                            max_duration_s: float | None = None) -> dict:
     """Run one named STEP of `program` live, against a scratch pair seeded
     fresh every call from the program's own held scene — a later
     call in the SAME session (an intensity-slider change) re-runs the step at
@@ -634,8 +674,20 @@ async def open_program_hold(program: PreviewProgram, intensity: float, *,
     the ceiling above having fired and no fresh /open having cleared it
     yet. This is what stops a client that keeps calling /fire after the
     ceiling (the reported failure mode) from silently re-establishing a
-    new hold; see the module docstring's "MAXIMUM HOLD CEILING" section."""
+    new hold; see the module docstring's "MAXIMUM HOLD CEILING" section.
+
+    `max_duration_s` sets THIS SESSION's own absolute ceiling, read on the
+    FIRST open only (a later call in the same session cannot raise or lower
+    it — that would be exactly the heartbeat-pushes-the-ceiling hole the
+    ceiling exists to close). Omitted — every preview — means
+    MAX_HOLD_DURATION_S, unchanged. The one caller that passes it is the
+    MAPPING RUN, whose ceiling is derived at plan time from how long its own
+    emitter list will take (spectra/services/room_mapping.run_ceiling_s):
+    three minutes is the right bound on a person judging one flare and the
+    wrong bound on a twenty-two-emitter capture that must not release his
+    room in the middle."""
     global _snapshot, _session_started_at, _release_step
+    global _session_max_duration_s
     async with _lock:
         if _locked_until_reopen:
             return {"held": False, "expired": True, "reason": "max_duration"}
@@ -678,6 +730,9 @@ async def open_program_hold(program: PreviewProgram, intensity: float, *,
                                  "config": dict(effect.get("config") or {})}
             _snapshot = snapshot
             _session_started_at = time.monotonic()
+            _session_max_duration_s = (
+                float(max_duration_s) if max_duration_s and max_duration_s > 0
+                else None)
             _save_snapshot(snapshot)
         room = room_controls.load_room_controls()
         entry_ramp_ms = (scene.entry_ramp_ms or room.global_transition_ms

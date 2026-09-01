@@ -44,10 +44,29 @@ MID_RUN_LOSS = (
 #: Reachable by a long run, and previously surfaced as the bare word
 #: "max_duration" inside "the room could not be held: ...".
 HOLD_CEILING = (
-    "The room can only be held for three minutes at a time, and this run "
-    "reached that. Everything measured so far is kept — press Start mapping "
-    "again to carry on, or map fewer parts at once (the plan says how many "
-    "before you press).")
+    "The room ran out of its held time before this run finished. Everything "
+    "measured so far is kept — press Start mapping again to carry on, or map "
+    "fewer parts at once (the plan says how many, and how long, before you "
+    "press).")
+
+
+def too_long_refusal(estimate_s: float, hard_cap_s: float) -> str:
+    """A run whose own estimate is past the hard cap on ONE held room,
+    refused BEFORE the room goes dark and never silently truncated.
+
+    THE SHAPE OF THE ANSWER MATTERS: this names the cost and hands the
+    choice back. It must never propose (or perform) a coarser granularity
+    on his behalf — granularity and block size are HIS decisions, and a
+    surprising value is a decision, not an error. The plan line already
+    carries pieces, minutes and the ceiling; this sentence says which
+    bound was crossed and by how much."""
+    return (f"This run would hold the room dark for about "
+            f"{estimate_s / 60.0:.0f} minutes, and one continuous hold is "
+            f"capped at {hard_cap_s / 60.0:.0f}. Nothing was written. Map "
+            f"part of the room at a time — leave some carriers out of this "
+            f"run and map them in a second pass — or choose a setting that "
+            f"gives fewer pieces; the plan shows the cost of each before you "
+            f"press.")
 
 
 def ownership_refusal(exc: BaseException) -> Optional[str]:

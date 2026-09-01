@@ -75,6 +75,14 @@ type PlanEmitter = {
 type RunPlan = {
   granularity: string; block_pixels: number; count: number;
   estimated_seconds: number; truncated: boolean; problems: string[];
+  /** How long ONE continuous hold is allowed for this run. The capture is a
+   * single dark room from the first emitter to the last since
+   * fm/mapping-one-dark-hold, so the bound belongs beside the count — it is
+   * part of what he agrees to by pressing. `too_long` is the sentence when
+   * the run is past the hard cap on one hold: the run REFUSES, it is never
+   * truncated, and nothing here ever changes his granularity to make it
+   * fit. */
+  hold_ceiling_seconds?: number; too_long?: string;
   warnings?: string[]; notes?: string[];
   per_carrier: Record<string, string>; emitters: PlanEmitter[];
   brightness?: { device_id: string; state: string; value: number | null; percent: number | null; low: boolean; reason: string }[];
@@ -621,13 +629,19 @@ export default function RoomsPage() {
             * along it), so the whole panel goes to the warning state, colour
             * and sentence together, rather than reporting "1" quietly. */}
           {plan ? (
-            <div className={`plan-readout${plan.warnings?.length ? ' warn-state' : ''}`}>
+            <div className={`plan-readout${plan.too_long || plan.warnings?.length ? ' warn-state' : ''}`}>
               <span className="plan-readout-count">
                 {plan.count} piece{plan.count === 1 ? '' : 's'}
               </span>
               <span className="plan-readout-cost">
                 dark for about {Math.round(plan.estimated_seconds)}s
+                {plan.hold_ceiling_seconds
+                  ? ` · held up to ${Math.round(plan.hold_ceiling_seconds / 60)} min`
+                  : ''}
               </span>
+              {plan.too_long ? (
+                <span className="plan-readout-note warn">⛔ {plan.too_long}</span>
+              ) : null}
               {plan.warnings?.length ? (
                 plan.warnings.map((w) => (
                   <span key={w} className="plan-readout-note">⚠ {w}</span>
@@ -646,7 +660,8 @@ export default function RoomsPage() {
             </div>
           ) : (
             <p className="muted small">
-              The room goes dark for about {Math.max(1, (room?.carrier_ids.length ?? 1) * 4)} seconds.
+              The room goes dark for about {Math.max(1, (room?.carrier_ids.length ?? 1) * 4)} seconds,
+              and stays dark until the run finishes.
               Hold the phone still: every footprint in a map is only comparable to the others taken
               from the same position.
             </p>
@@ -654,7 +669,8 @@ export default function RoomsPage() {
 
           <button
             className="primary"
-            disabled={!room || !cameraOn || busy || !!refusal || !room.carrier_ids.length}
+            disabled={!room || !cameraOn || busy || !!refusal || !room.carrier_ids.length
+                      || !!plan?.too_long}
             onClick={() => void mapRoom()}
           >
             {busy ? 'Mapping…' : 'Map this room'}
