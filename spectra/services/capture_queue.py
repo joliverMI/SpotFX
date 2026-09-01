@@ -106,6 +106,16 @@ class QueueItem:
     lit_settle_s: Optional[float] = None
     dark_capture_s: Optional[float] = None
     lit_capture_s: Optional[float] = None
+    # THE CAMERA'S TWO MANUAL LEVERS, on BOTH kinds — a queue file is a list
+    # of button presses and both routes take these, so leaving them out here
+    # would make an unattended run the one place his camera cannot be told
+    # what to do. `exposure_time` is in 100-microsecond units (V4L2's own
+    # unit and the browser's, so nothing converts); `gain` is the device's
+    # own scale. Both default to None, which is converge-then-freeze — every
+    # queue declared before these existed runs exactly as it did.
+    # `spectra/services/capture_settings.py` is the binding statement.
+    exposure_time: Optional[int] = None
+    gain: Optional[int] = None
     # commissioning
     mapper_id: Optional[str] = None
     repeat: int = 1
@@ -314,6 +324,7 @@ async def _execute(item: QueueItem) -> capture_runs.RunOutcome:
             dark_settle_s=item.dark_settle_s, lit_settle_s=item.lit_settle_s,
             dark_capture_s=item.dark_capture_s,
             lit_capture_s=item.lit_capture_s,
+            exposure_time=item.exposure_time, gain=item.gain,
             # An overnight sweep must not redecorate his page's granularity
             # control with whichever item happened to run last.
             remember=False)
@@ -323,7 +334,7 @@ async def _execute(item: QueueItem) -> capture_runs.RunOutcome:
                      else None))
     return await capture_runs.run_commission(
         item.room_id, mapper_id=item.mapper_id, repeat=item.repeat,
-        targets=targets)
+        targets=targets, exposure_time=item.exposure_time, gain=item.gain)
 
 
 def new_run(items: list[QueueItem], label: str = "") -> QueueRun:

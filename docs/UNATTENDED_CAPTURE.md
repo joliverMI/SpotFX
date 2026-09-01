@@ -26,6 +26,9 @@ already pointed at the room:
 | Surviving a dropped connection | notice, reopen the page, start again | reconnect **keeping the same pose**, so the map either side is one measurement |
 | Starting each run | press Start mapping, wait, press the next one | `capture_queue` walks the declared list |
 | Choosing per-run parameters | re-set the controls between runs | each item carries its own granularity, block size and four protocol waits |
+| Getting the right FRAME SIZE for the run | (there was one size, and it could not read a composition) | the server asks (320x180 for a map, 1920x1080 for a commissioning read) and the client adopts the largest rung its camera can honestly fill |
+| Setting a manual integration time / gain | not possible at all | per-run request, applied by the driver and **read back**; a lever the camera did not take refuses by name |
+| Widening a capture window for a long exposure | (nothing knew the exposure) | `capture_windows` widens both so `MIN_FRAMES` is still averaged, and BOTH estimates — the run's own hold ceiling and the night's planned-end bound — price the widened run |
 | Keeping a run that was cut short | judge it, decide, re-run by hand | recorded `partial`, footprints kept, declared retry re-runs it |
 | Knowing what happened | watch the page | one machine-readable outcome per item, written after **every** item |
 | Explaining a refusal | read a status word, guess | `mapping_refusals`' own sentence, on the page and in the record |
@@ -53,6 +56,18 @@ ends.
 - **`ffmpeg` and `v4l2-ctl` installed** on the capture machine
   (`apt install ffmpeg v4l-utils`). Each is checked for by name and
   refused by name.
+- **Checking what resolution that camera actually produces.**
+  `--capture-size` defaults to `1920x1080`, which is what a commissioning
+  read wants; the client steps down to 1280x720 then 640x480 if the camera
+  will not open there, and SAYS which it got. It never sends a wire frame
+  bigger than what it captures, so a 720p webcam simply reads at 720p and
+  the run reports that rung — nothing to configure, but worth knowing
+  before wondering why a read refused as marginal.
+- **Checking whether that camera has manual exposure/gain at all**, if a
+  run is going to ask for them: `v4l2-ctl --list-ctrls-menus` should show
+  `exposure_time_absolute` and `gain` alongside `auto_exposure`. A camera
+  without them refuses those runs by name — honestly, and the run without
+  the levers still works.
 - **Confirming that camera can actually lock exposure.**
   `v4l2-ctl --list-ctrls-menus` should show `auto_exposure` with a
   `Manual Mode` entry. A camera without it will be refused on every run,
@@ -96,6 +111,11 @@ ends.
   `impossible`**: move the camera closer, or commission a smaller piece.
   The instrument refuses; it never commissions something smaller on his
   behalf.
+- **Choosing the integration time and gain a run asks for, and deciding
+  what the exposure comparison's answer means.** The comparison MEASURES
+  which regime put more light in the frame
+  (`POST /api/rooms/{id}/exposure-test`); picking the numbers to try, and
+  deciding whether a 3x gain is worth its noise, is his.
 - **Starting the client**, unless it is a systemd unit (see above).
 
 ### What was deliberately NOT automated
@@ -114,8 +134,17 @@ ends.
   bound and it arrives as an event; nothing here schedules against a clock,
   and no capture work is ever scheduled past it.
 - **Aiming, and choosing a pose.**
-- **Anything about the frozen commissioning table**, its five tolerances,
-  or the 320x180 wire-frame contract.
+- **Anything about the frozen commissioning table or its five
+  tolerances.** The wire's FRAME SIZE is no longer in that list — it was
+  raised on 2026-09-01 by the owner's own instruction, and only because
+  §98's arithmetic showed no pose could ever have read a composition
+  through the old one (`spectra/services/capture_settings.py`). The
+  tolerances did not move, and the resolution REFUSAL boundary moved only
+  because its input arithmetic did.
+- **Choosing a frame size bigger than the camera has.** The client
+  negotiates DOWN and never up: a bigger picture of a smaller image is not
+  more detail, and counting interpolated pixels as resolution is exactly
+  how a ground-truth test comes back confident and wrong.
 
 ---
 
@@ -152,6 +181,19 @@ path (`scripts/check_capture_queue_e2e.py`, 42 checks, run from pytest).
   OVER-indict, which costs re-takes and never corrupts a footprint. If a
   real night shows it over-indicting, the fix is to agree explicit entity
   ids with River — not to loosen the match.
+- **The manual exposure/gain levers have never met a real driver either.**
+  They are written against V4L2's documented control names and unit-tested
+  against read-backs, exactly like the lock — and they fail the same safe
+  way: a control this camera does not have, or one that answers with a
+  different number, refuses the run BY NAME rather than measuring under a
+  regime nobody asked for. A run that asks for neither is byte-for-byte the
+  protocol that has always shipped.
+- **No frame larger than 320x180 has crossed a real network.** The
+  negotiation, the downgrade and the never-upscale rule are proven over a
+  real uvicorn server and a real WebSocket with a synthetic camera
+  (`scripts/check_capture_queue_e2e.py` §5: asked 1920x1080, got 320x180
+  from a camera that has no more, said so) — the BYTES at 1080p, ~2 MB a
+  frame before base64, are an untested cost on his own LAN.
 
 The two ways the real backend can be wrong both fail SAFE, which is the
 point of the read-back rule:

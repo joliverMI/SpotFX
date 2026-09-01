@@ -3704,6 +3704,13 @@ built 2026-08-31. Gray-code his stored `tv-mapper` composition, decode where
 every pixel is, and judge a comparison **frozen in the plan before any run**.
 Six things to know before touching any of it:
 
+- **THE READ NOW HAPPENS AT 1920x1080, NOT 320x180 (2026-09-01,
+  owner-approved).** Everything in the next bullet about "no pose fixes
+  that at the current frame size" was TRUE OF THE OLD WIRE and is what the
+  raise addressed — see "THE WIRE FRAME AND THE TWO CAMERA LEVERS" above
+  for the arithmetic, the never-upscale rule and the levers. A refusal
+  after the raise is a REAL pose problem, no longer an arithmetic
+  impossibility.
 - **ITS FIRST TWO FIELD RUNS FAILED TOTALLY, AND THE CAUSE IS RESOLUTION,
   NOT TIMING AND NOT HIS ROOM (2026-09-01, PR fm/commissioning-decode-
   failure, `docs/SPECTRA_SPEC.md` §98).** Both runs were mechanically clean
@@ -3717,10 +3724,11 @@ Six things to know before touching any of it:
   bit 0 alternates in runs of TWO indices, so the camera needs about
   `gray_code.MIN_CAMERA_PX_PER_INDEX` (2) pixels per composition index
   along the imaged strip — 736 pixels need ~1,472, and the entire border
-  of the 320x180 frame the phone sends is ~1,000. **No pose fixes that at
-  the current frame size** (the phone captures at 1280x720 and the page
-  downsamples before sending; the "full-resolution ring" is full relative
-  to the 64x36 MAP GRID, not to the camera). Before proposing a cause for
+  of the 320x180 frame the phone sent BEFORE THE RAISE is ~1,000. **No
+  pose could fix that at THAT frame size** — which is exactly what the
+  2026-09-01 raise addressed (the read now asks for 1920x1080, ~6,000;
+  see the section above). The "full-resolution ring" is still full
+  relative to the 64x36 MAP GRID, not to the camera. Before proposing a cause for
   any future decode failure here, read `Decode.bit_contrast` in the run's
   own response: a mistimed stack compares two DIFFERENT patterns and keeps
   real low-bit contrast while decoding CONFIDENTLY to wrong indices
@@ -3826,6 +3834,105 @@ sides against a box-integrating camera whose reported
 `camera_px_per_index` IS the number under test),
 `tests/test_commissioning.py`, `tests/test_commissioning_per_fixture.py`,
 `tests/test_gray_code.py`.
+
+## THE WIRE FRAME AND THE TWO CAMERA LEVERS (`capture_settings.py`)
+
+**`spectra/services/capture_settings.py` is the binding statement** — the
+ladder of declared frame sizes, the arithmetic that chose them, the two
+manual levers, and the frame-rate coupling. Read it before touching
+anything that sends, sizes or exposes a capture frame. Six things:
+
+- **THE WIRE FRAME IS PER RUN, NOT ONE NUMBER (2026-09-01, owner-approved:
+  "raise video frame size and tweak whatever settings help").** A MAP still
+  sends 320x180 — a footprint is a 64x36 grid and more pixels buy nothing,
+  so night runs stay cheap. The COMMISSIONING read asks for **1920x1080**,
+  by arithmetic and not by picking the maximum: a decode needs ~2 camera px
+  per composition index, so his 736 need ~1,472 of imaged strip (~1,840
+  with the safety factor), and a strip wrapped round a screen images as a
+  PERIMETER — the whole perimeter of a 320x180 frame is 2x(320+180)=**1,000**,
+  so **no pose could ever have worked**. `commission_profile_for()` derives
+  the rung (smallest clearing 736 with 2x pose margin at a 77%-fill pose);
+  1920x1080 carries ~1,848. **THE STORED 64x36 MAP GRID IS UNCHANGED** —
+  every rung is 16:9 and an exact whole multiple of it (5x/10x/15x/20x/30x),
+  so `light_field.downsample` stays a box mean and a grid from a 1080p frame
+  is directly comparable with one from 320x180. **grey8, uncompressed, at
+  every rung** — a lossy stage's noise lands inside the measured difference.
+- **A CLIENT NEVER UPSCALES, and the server asserts it independently.**
+  `capture_settings.choose` picks the largest rung no bigger than BOTH the
+  request and the camera's own image; every frame carries `source_width`/
+  `source_height`; a frame bigger than its source is dropped and NAMED
+  (`mapping_refusals.upscaled_frame`). Interpolated pixels would inflate
+  `gray_code.resolution_report`'s camera-pixel count and let an unreadable
+  target report that it is readable — the MARGINAL confident-wrong-answer
+  through a side door. A camera that tops out at 720p **still runs**, at
+  720p, and the run says which rung it got (an honest downgrade is a
+  RESULT, never a refusal).
+- **THE TWO LEVERS ARE PER-RUN AND DEFAULT TO TODAY'S BEHAVIOUR.**
+  `exposure_time` is in **100-MICROSECOND UNITS on both paths** (V4L2
+  `exposure_time_absolute`, W3C `exposureTime`) so **nothing converts**;
+  `gain` is the device's own scale (V4L2 `gain` / the browser's `iso`),
+  passed through verbatim — converting it would be an invention. Asking for
+  neither is converge-then-freeze exactly as before. **Both are READ BACK
+  from the device**, and a lever the camera did not take refuses BY NAME
+  before any light (`manual_camera_unavailable`) — measuring under whatever
+  the camera chose while reporting the asked-for numbers is the one thing
+  this path must never do.
+- **A LONG INTEGRATION TIME IS NOT FREE, and it is not silent.** A sensor
+  integrating for E seconds gives at most 1/E fps, and a capture averages
+  whatever ARRIVED in its window — so `room_mapping.capture_windows` /
+  `commissioning.capture_window` widen the CAPTURE windows to still buy
+  `MIN_FRAMES`, `run_estimate_s` prices the widened run, and an exposure no
+  legal window can average refuses by name (`exposure_too_long`). **With no
+  manual exposure asked for both are an EXACT pass-through** — the shipped
+  protocol, byte for byte.
+- **`capture_settings.CameraNegotiation` IS THE ONE IMPLEMENTATION**, and
+  `MappingSession` plus **every test double** (`SessionCameraDouble`)
+  inherits it. Seven fake sessions live across `tests/` and `scripts/`; a
+  gate they MODEL is a gate no proof exercises — the founding defect of
+  this whole area was a hold that reported itself set while the show fired
+  underneath. Add a session capability there, not in seven places.
+- **THE EXPOSURE COMPARISON** (`spectra/services/exposure_test.py`,
+  `POST /api/rooms/{id}/exposure-test`, the Rooms page's own panel) answers
+  "is it the room, or the camera settings?": one emitter, one pose, two
+  regimes back to back, `better`/`ratio`/`summary`. It **stores nothing**
+  (throwaway room copy, no `save_room`) and puts the camera back in a
+  `finally`. The two weights are deliberately on different byte scales —
+  each is `lit - dark` WITHIN its own regime, so both are honest about how
+  much signal that regime produced and **neither is comparable with any
+  other footprint in the room**; the summary says so. A default regime that
+  saw NOTHING is a RESULT, not a failure.
+
+- **THE LEVERS TRAVEL THROUGH THE QUEUE, AND THE NIGHT PRICES THEM.**
+  `QueueItem` carries `exposure_time`/`gain` because its own contract is
+  "the SAME arguments the route takes" and both run routes take them — an
+  unattended run must not be the one place his camera cannot be told what to
+  do. And `night_run.price_items` prices a map item at the windows
+  `capture_windows` will WIDEN it to, not the ones it declared: a long
+  integration genuinely takes longer, and pricing the declared windows would
+  price short against the 05:30 planned-end bound, which is the one bound
+  that must not be over-run. Both were found composing #230 and #231 at the
+  same choke points; `tests/test_camera_levers_and_night.py` is the proof
+  that neither build swallowed the other.
+
+**KNOWN, OPEN, NOT FIXED BY THE RAISE:** `gray_code.resolution_report`
+counts lit **AREA**, so a strip thick enough for its LEDs' images to
+overlap sideways reports more camera pixels per index than it linearly
+resolves — measured at 5.7 where the perimeter supports ~1.4
+(`scripts/check_commissioning.py` §3d prints it). The gate can therefore
+pass a pose that decodes to NEIGHBOURS. His own field frames were thin
+glows so the gate was right about them. Measuring linear extent from the
+reference pair alone is separate work; inventing a boundary for it in
+passing is exactly what a pre-registered instrument must not do.
+
+Proofs: `scripts/check_commissioning.py` §3d (his own composition at a
+77%-fill pose — 320x180 decodes CONFIDENTLY WRONG at ~0.76 LED spacings,
+1920x1080 lands at 0.12, and accuracy rather than a count is what is
+asserted), `tests/test_capture_settings.py`, `tests/test_camera_levers_in_runs.py`
+(the runs actually negotiate and actually restore), `tests/test_exposure_test.py`,
+`scripts/check_capture_queue_e2e.py` §5 (the negotiation over the REAL
+client, WebSocket and server), `tests/test_camera_levers_and_night.py` (this
+build and the night run composing). Help: `camera-settings`,
+`exposure-comparison`.
 
 ## THE NIGHT RUN — HA pushes, we answer; and it never takes his room
 

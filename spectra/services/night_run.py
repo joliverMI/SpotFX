@@ -543,7 +543,13 @@ async def price_items(items, *, now: Optional[float] = None) -> dict:
     A MAP item is priced by the production estimator
     (`room_mapping.run_estimate_s`) against its room's real emitter count at
     this run's own settle/capture values — the same function the plan line
-    he reads before pressing uses, not a second arithmetic.
+    he reads before pressing uses, not a second arithmetic. Its capture
+    windows are the ones the RUN will use, which for an item declaring a
+    manual integration time are WIDER than the ones it declared
+    (`room_mapping.capture_windows`: a sensor integrating for E seconds
+    gives at most 1/E fps, so the windows grow to still average
+    MIN_FRAMES). Pricing the declared windows would price short against the
+    one bound that must not be over-run.
 
     A COMMISSION item is priced at a NAMED NOMINAL
     (`commissioning.NOMINAL_PASS_S` per target per repeat) because its real
@@ -589,17 +595,38 @@ async def price_items(items, *, now: Optional[float] = None) -> dict:
                         room, item.granularity, item.block_pixels)
                     plan = await room_mapping.resolve_plan(room, deps, scope,
                                                            g, block)
+                    # PRICED WITH THE WINDOWS THE RUN WILL ACTUALLY USE.
+                    # A declared manual integration time holds the camera to
+                    # 1/E frames a second, so `run_mapping` WIDENS both
+                    # capture windows to still average MIN_FRAMES — and an
+                    # item priced at its DECLARED windows would be priced
+                    # short against the one bound that must not be
+                    # over-run. Same function, so the two cannot drift.
+                    from spectra.services import mapping_session
+                    dark_c, lit_c, _refusal, _note = \
+                        room_mapping.capture_windows(
+                            room_mapping.clamp_capture(
+                                item.dark_capture_s,
+                                room_mapping.DARK_CAPTURE_S),
+                            room_mapping.clamp_capture(
+                                item.lit_capture_s,
+                                room_mapping.LIT_CAPTURE_S),
+                            item.exposure_time, mapping_session.FRAME_FPS)
                     row["seconds"] = room_mapping.run_estimate_s(
                         len(plan.emitters),
                         room_mapping.clamp_settle(item.dark_settle_s,
                                                   room_mapping.DARK_SETTLE_S),
-                        room_mapping.clamp_capture(item.dark_capture_s,
-                                                   room_mapping.DARK_CAPTURE_S),
+                        dark_c,
                         room_mapping.clamp_settle(item.lit_settle_s,
                                                   room_mapping.LIT_SETTLE_S),
-                        room_mapping.clamp_capture(item.lit_capture_s,
-                                                   room_mapping.LIT_CAPTURE_S))
+                        lit_c)
                     row["basis"] = f"{len(plan.emitters)} emitters"
+                    if item.exposure_time:
+                        row["note"] = (
+                            f"priced at the WIDENED capture windows "
+                            f"({dark_c:g}s dark / {lit_c:g}s lit) this "
+                            f"item's integration time forces, not its "
+                            f"declared ones")
         except Exception as exc:                        # noqa: BLE001
             logger.info("night run: could not price %s: %s", item.name, exc)
             row["note"] = (f"could not be priced ({type(exc).__name__}) — "

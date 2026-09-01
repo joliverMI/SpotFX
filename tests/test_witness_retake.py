@@ -18,6 +18,7 @@ import asyncio
 import numpy as np
 
 from spectra.models.room_map import AxisCalibration, Point, RoomMap
+from spectra.services import capture_settings
 from spectra.services import room_mapping, witness
 
 AXIS = AxisCalibration(kind="vertical", floor=Point(x=0.5, y=1.0),
@@ -31,7 +32,12 @@ def _virtual(device):
             "effect": {"type": "singleColor", "config": {}}}
 
 
-class _Session:
+class _Session(capture_settings.SessionCameraDouble):
+    """THE PER-RUN CAMERA NEGOTIATION IS INHERITED, not modelled — the rule
+    every double on this path follows (`capture_settings.CameraNegotiation`).
+    A run asks its session for a frame size before it touches a light, so a
+    double that did not answer would fail for a reason that has nothing to
+    do with the witness."""
     pose_id = "pose-1"
     run_abort = None
 

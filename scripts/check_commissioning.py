@@ -89,6 +89,7 @@ from fx import light_ownership                                 # noqa: E402
 light_ownership.OWNERSHIP_FILE = td / "ownership.json"
 light_ownership.OWNERSHIP_FILE.write_text(json.dumps({"owner": "spectra"}))
 
+from spectra.services import capture_settings
 from spectra.services import commission_compare as cc          # noqa: E402
 from spectra.services import (commissioning, gray_code,  # noqa: E402
                               mapping_refusals, room_mapping)
@@ -288,9 +289,14 @@ class Ctx:
         self.room.write_at = self.room.t
 
 
-class Phone:
+class Phone(capture_settings.SessionCameraDouble):
     """A connected, locked camera. Refuses nothing; the refusal paths are
-    exercised by overriding `refusal` in section six."""
+    exercised by overriding `refusal` in section six.
+
+    THE PER-RUN CAMERA NEGOTIATION IS INHERITED, not modelled: it runs the
+    real `capture_settings.CameraNegotiation`, so a gate this run passes is
+    a gate the shipped code passed and not a stub that agreed with it. See
+    that class's docstring for why every double on this path does this."""
 
     def __init__(self, room):
         self.room = room
@@ -539,7 +545,8 @@ def field_room_virtuals() -> dict:
     }
 
 
-def field_layout(span_scale: float = 1.0) -> dict[int, tuple[float, float]]:
+def field_layout(span_scale: float = 1.0, *, width: int = 0, height: int = 0
+                 ) -> dict[int, tuple[float, float]]:
     """WHERE those 736 pixels land in his frame: each fixture's whole strip
     inside its own glow. `span_scale` widens the glows — 1.0 is his pose,
     and a large value is the close-up this test would need."""
@@ -548,22 +555,30 @@ def field_layout(span_scale: float = 1.0) -> dict[int, tuple[float, float]]:
               ("sconce-kitchen-right", FIELD_RIGHT[1]),
               ("sconce-kitchen-left", FIELD_LEFT[0]),
               ("sconce-kitchen-left", FIELD_LEFT[1])]
+    # THE SAME ROOM AT A DIFFERENT FRAME SIZE. The glow centres and spans
+    # were measured off his own 320x180 frame, so they are scaled to
+    # whatever frame this layout is being built for — the fixtures did not
+    # move, the sensor got more pixels on them, which is the whole thing the
+    # raise changes.
+    w, h = (width or FW), (height or FH)
+    sx, sy = w / FW, h / FH
     used: dict[str, int] = {}
     layout, index = {}, 0
     for device, n in counts:
         cx, cy, span = FIELD_GLOWS[device]
-        span *= span_scale
+        cx, cy, span = cx * sx, cy * sy, span * sx * span_scale
         total_on_device = sum(m for d, m in counts if d == device)
         for k in range(n):
             at = used.get(device, 0) + k
             x = cx + (at / max(1, total_on_device - 1) - 0.5) * span
-            layout[index] = (x / FW, cy / FH)
+            layout[index] = (x / w, cy / h)
             index += 1
         used[device] = used.get(device, 0) + n
     return layout
 
 
-def field_stack(layout, *, noise=1.0, seed=11, radius_px=2.0, dark=2.0):
+def field_stack(layout, *, noise=1.0, seed=11, radius_px=2.0, dark=2.0,
+                width: int = 0, height: int = 0, frames: int = 4):
     """The reference pair and every bit's pattern/inverse, as HIS camera
     would deliver them: the per-pixel light calibrated so ALL-ON reaches the
     99-of-255 his own frame peaks at, plus read noise, plus the wire's own
@@ -572,10 +587,11 @@ def field_stack(layout, *, noise=1.0, seed=11, radius_px=2.0, dark=2.0):
     every = set(layout)
     rng = np.random.default_rng(seed)
     cache: dict = {}
+    w, h = (width or FW), (height or FH)
 
     def raw(on, gain):
         return gray_code.render_frame(
-            layout, on, width=FW, height=FH, radius_px=radius_px,
+            layout, on, width=w, height=h, radius_px=radius_px,
             dark_level=dark, lit_level=dark + gain, blobs=cache,
             window_sigmas=5.0)
 
@@ -583,13 +599,17 @@ def field_stack(layout, *, noise=1.0, seed=11, radius_px=2.0, dark=2.0):
     gain = FIELD_PEAK / max(1e-9, unit)
 
     def shot(on):
-        # four frames averaged, exactly as a capture window does, each one
-        # quantised to the grey8 the phone actually sends.
-        frames = [np.clip(np.round(raw(on, gain)
-                                   + rng.normal(0.0, noise, (FH, FW))),
-                          0, 255).astype(np.uint8).astype(np.float64)
-                  for _ in range(4)]
-        return np.mean(frames, axis=0)
+        # `frames` frames averaged, exactly as a capture window does, each
+        # one quantised to the grey8 the phone actually sends. Kept float32
+        # at the big frame sizes: a 22-capture 1080p stack is 365 MB in
+        # float64 and 183 in float32, and `decode_stack` casts per pair
+        # anyway.
+        stack = [np.clip(np.round(raw(on, gain)
+                                  + rng.normal(0.0, noise, (h, w))),
+                         0, 255).astype(np.uint8)
+                 for _ in range(frames)]
+        return np.mean(np.stack(stack).astype(np.float32), axis=0,
+                       dtype=np.float32)
 
     dark_frame, full_frame = shot(set()), shot(every)
     pairs = []
@@ -707,10 +727,10 @@ def section_three_c():
 
     # (g) AND IT IS NOT ONLY THE POSE. 736 pixels need about
     #     736 x MIN_CAMERA_PX_PER_INDEX camera pixels of imaged strip; the
-    #     frame the phone sends is 320x180, whose entire border is ~1,000.
-    #     A television wrapped once by one strip cannot carry 1,472 of them
-    #     however the phone is held — which is the honest answer to "what
-    #     would a passing run need", and it is not a pose.
+    #     frame the phone USED TO send is 320x180, whose entire border is
+    #     ~1,000. A television wrapped once by one strip cannot carry 1,472
+    #     of them however the phone is held — which is the honest answer to
+    #     "what would a passing run need", and it is not a pose.
     needed = int(FIELD_TOTAL * gray_code.MIN_CAMERA_PX_PER_INDEX)
     border = 2 * (FW + FH)
     check(needed > border,
@@ -719,8 +739,224 @@ def section_three_c():
           f"— no pose fixes that; the wire's own frame size is the bound")
     print(f"     a frame able to carry them, at his composition's own wrap, "
           f"is about {int(round(needed / border * FW))}x"
-          f"{int(round(needed / border * FH))} — the phone captures at "
-          f"1280x720 and downsamples to {FW}x{FH} before sending")
+          f"{int(round(needed / border * FH))}")
+
+
+# ── THREE-D — THE RAISE: the same room, read at the frame it needs ────────
+#
+# THREE-C ends at "the wire's own frame size is the bound". This section is
+# what happens when that bound is lifted (2026-09-01,
+# `spectra/services/capture_settings.py`): the SAME composition, the SAME
+# glows in the SAME places on the wall, the SAME 99-of-255 peak, the SAME
+# read noise and the SAME grey8 wire — read at 1920x1080 instead of
+# 320x180.
+#
+# Nothing about the room changes between 3c and 3d. That is the point: if
+# the raised-frame run decodes and the 320x180 one refuses, the difference
+# is the wire, which is exactly what the arithmetic said and exactly what
+# the raise was chosen to fix.
+
+def section_three_d():
+    print("\n== 3d. THE RAISE — the same room, at the frame the arithmetic "
+          "asked for ==")
+    cw, ch = capture_settings.COMMISSION_PROFILE
+
+    # (a) THE ARITHMETIC THAT CHOSE 1920x1080, checkable rather than
+    #     asserted. It is the SMALLEST rung carrying his composition with
+    #     the pose margin the model insists on — not the largest available.
+    check(capture_settings.commission_profile_for() == (cw, ch),
+          f"the read frame is DERIVED: {cw}x{ch} is the smallest rung "
+          f"carrying {capture_settings.REFERENCE_COMPOSITION} indices with "
+          f"{capture_settings.COMMISSION_POSE_MARGIN:g}x margin at a "
+          f"{capture_settings.REFERENCE_FILL:.0%}-of-frame-width pose")
+    small = capture_settings.frame_for_indices(FIELD_TOTAL)
+    check(small is not None and small != (FW, FH),
+          f"the BARE minimum is {small[0]}x{small[1]} "
+          f"({capture_settings.indices_supported(*small):.0f} indices) — "
+          f"{cw}x{ch} carries {capture_settings.indices_supported(cw, ch):.0f}, "
+          f"which is the margin, not maximum-picking")
+    check(capture_settings.indices_supported(FW, FH) < FIELD_TOTAL,
+          f"and the old {FW}x{FH} carries only "
+          f"{capture_settings.indices_supported(FW, FH):.0f} at that pose — "
+          f"under his {FIELD_TOTAL} however the phone is held")
+
+    # THE POSE THE ARITHMETIC NAMES, and it has to be this one. 3c above
+    # reproduces HIS pose — the television imaged into three glows about
+    # eight camera pixels wide — which is hopeless at any frame size and
+    # was never the case the raise is about. What the raise buys is that a
+    # REACHABLE pose now exists: stand where the television fills ~77% of
+    # the frame's width (`capture_settings.REFERENCE_FILL`), which is an
+    # ordinary hand-held shot, and the strip images as a PERIMETER around
+    # it. At 320x180 that perimeter is ~770 camera pixels against the
+    # ~1,840 his composition needs; at 1920x1080 it is ~4,620.
+    #
+    # So this is the same room, the same fixtures, the same 99-of-255 peak,
+    # the same read noise and the same grey8 wire, framed the way a person
+    # frames a television — read at each size in turn.
+
+    def wrap_layout(width: int, height: int) -> dict:
+        """His composition around a framed television: 560 backlight pixels
+        once around the screen's perimeter, then the four sconce segments
+        just outside it, in the mapper's own stored order."""
+        fill = capture_settings.REFERENCE_FILL
+        rw = width * fill
+        rh = rw * 9.0 / 16.0
+        x0, y0 = (width - rw) / 2.0, (height - rh) / 2.0
+        per = 2.0 * (rw + rh)
+        out, index = {}, 0
+        for k in range(FIELD_TV):                       # the ring
+            d = per * k / FIELD_TV
+            if d < rw:
+                x, y = x0 + d, y0
+            elif d < rw + rh:
+                x, y = x0 + rw, y0 + (d - rw)
+            elif d < 2 * rw + rh:
+                x, y = x0 + rw - (d - rw - rh), y0 + rh
+            else:
+                x, y = x0, y0 + rh - (d - 2 * rw - rh)
+            out[index] = (x / width, y / height)
+            index += 1
+        for side, segs in ((x0 - 0.06 * width, FIELD_RIGHT),
+                           (x0 + rw + 0.06 * width, FIELD_LEFT)):
+            at = 0
+            for n in segs:                              # a sconce's own runs
+                for k in range(n):
+                    y = y0 + rh * (at + k) / max(1, sum(segs) - 1)
+                    out[index] = (side / width, y / height)
+                    index += 1
+                at += n
+        return out
+
+    # A REAL LED SUBTENDS A FIXED ANGLE, so its imaged radius scales with
+    # the frame — a bigger sensor on the same scene resolves the same light
+    # into more pixels, it does not make each LED physically wider.
+    #
+    # WITH A FLOOR OF ONE CAMERA PIXEL, which is not a fudge: a lens has a
+    # point-spread function and a sensor pixel has an aperture, so nothing
+    # in a real image is ever narrower than about one pixel. Without the
+    # floor the small-frame render degenerates into sub-pixel spikes that
+    # decode beautifully and describe no camera that exists — the synthetic
+    # would be kinder than physics, in the one direction that matters.
+    def radius_for(width: int) -> float:
+        return max(1.0, 2.0 * width / cw)
+
+    def error_in_leds(decode, layout) -> tuple:
+        """HOW FAR EACH DECODED PIXEL LANDED FROM WHERE IT REALLY IS, in
+        units of the strip's own LED spacing — which is the unit that
+        matters. Half a spacing is a rounding; more than one is a decode
+        that named the wrong LED, confidently."""
+        if not decode.positions:
+            return (float("inf"), float("inf"))
+        errs = np.array([np.hypot(decode.positions[i][0] - layout[i][0],
+                                  decode.positions[i][1] - layout[i][1])
+                         for i in decode.positions])
+        rw = capture_settings.REFERENCE_FILL
+        pitch = 2.0 * rw * (1.0 + 9.0 / 16.0) / FIELD_TV
+        return (float(np.median(errs) / pitch),
+                float(np.percentile(errs, 95) / pitch))
+
+    # (b) THE OLD FRAME, KEPT RED — AND RED IN THE WAY THAT MATTERS.
+    #
+    # It does NOT come back empty, and that is the finding. At this pose a
+    # 320x180 frame puts about 1.4 camera pixels on each LED, which is
+    # under the Nyquist bar, and a decode under that bar does not fail
+    # visibly: gray code guarantees a flipped low bit lands on a NEIGHBOUR,
+    # so what comes back is a confident, plausible, WRONG arrangement. That
+    # is the MARGINAL disease (`gray_code.RESOLUTION_SAFETY_FACTOR`) and it
+    # is why the count of decoded pixels is the wrong thing to assert on.
+    # What is asserted is ACCURACY, against the arrangement that was lit.
+    old_layout = wrap_layout(FW, FH)
+    od, of, op = field_stack(old_layout, width=FW, height=FH,
+                             radius_px=radius_for(FW), frames=2)
+    old_report = gray_code.resolution_report(od, of, total=FIELD_TOTAL)
+    old_decode = gray_code.decode_stack(od, of, op, total=FIELD_TOTAL)
+    old_med, old_p95 = error_in_leds(old_decode, old_layout)
+    check(old_med > 0.5,
+          f"at {FW}x{FH}, from the pose the arithmetic names, the decode "
+          f"comes back CONFIDENT AND WRONG: {len(old_decode.seen)} of "
+          f"{FIELD_TOTAL} pixels 'found', each a median {old_med:.2f} LED "
+          f"spacings (p95 {old_p95:.2f}) from where it really is — the "
+          f"neighbour a flipped low bit decodes to, which is the one "
+          f"outcome a ground-truth test must never produce")
+    print(f"     and the wire, not the pose, is why: this frame's whole "
+          f"perimeter carries "
+          f"{capture_settings.indices_supported(FW, FH):.0f} indices at "
+          f"this fill and his composition is {FIELD_TOTAL}")
+
+    # A FINDING WORTH RECORDING RATHER THAN HIDING, since this section is
+    # where it shows: `resolution_report` counts lit AREA, so a strip thick
+    # enough for its LEDs' images to overlap sideways reports MORE camera
+    # pixels per index than it linearly resolves — here 5.7, against the
+    # ~1.4 the perimeter actually supports — and the gate passes a pose
+    # that decodes to neighbours. His own field frames were thin glows, so
+    # the gate was right about them; this is the shape that would fool it.
+    # NOT fixed here: measuring linear extent from the reference pair alone
+    # is a different piece of work from raising the wire, and inventing a
+    # boundary for it in passing is exactly what a pre-registered
+    # instrument must not do. See docs/SPECTRA_SPEC.md and AGENTS.md.
+    print(f"     NOTE (open, not fixed by the raise): the gate read this "
+          f"pose as '{old_report['verdict']}' at "
+          f"{old_report['camera_px_per_index']} camera pixels per index "
+          f"because it counts lit AREA, while the perimeter linearly "
+          f"supports about "
+          f"{capture_settings.wrap_capacity_px(FW, FH) / FIELD_TOTAL:.2f}. "
+          f"A thick strip can therefore pass a gate it should not.")
+
+    # (c) THE RAISED FRAME. Everything identical but the wire.
+    layout = wrap_layout(cw, ch)
+    dark, full, pairs = field_stack(layout, width=cw, height=ch,
+                                    radius_px=radius_for(cw), frames=2)
+    report = gray_code.resolution_report(dark, full, total=FIELD_TOTAL)
+    check(report["resolvable"],
+          f"at {cw}x{ch} the same pose RESOLVES: {report['lit_pixels']} "
+          f"camera pixels, {report['camera_px_per_index']} per composition "
+          f"pixel against the {report['safe_camera_px_per_index']} this "
+          f"instrument insists on")
+    decode = gray_code.decode_stack(dark, full, pairs, total=FIELD_TOTAL)
+    check(len(decode.seen) > 0.8 * FIELD_TOTAL,
+          f"and it DECODES: {len(decode.seen)} of {FIELD_TOTAL} pixels come "
+          f"back")
+    med, p95 = error_in_leds(decode, layout)
+    check(med < 0.25 and p95 < 0.5,
+          f"AND THEY ARE THE RIGHT PIXELS: a median {med:.2f} LED spacings "
+          f"from where each really is (p95 {p95:.2f}), against the "
+          f"{old_med:.2f} the same room gave at {FW}x{FH} — this is what "
+          f"the raise bought, and it is accuracy rather than a count")
+    check(med * 4.0 < old_med,
+          f"the arrangement is {old_med / max(1e-9, med):.0f}x more accurate "
+          f"at {cw}x{ch} than at {FW}x{FH} — nothing about the room, the "
+          f"fixtures, the pose, the peak, the noise or the wire's grey8 "
+          f"changed between the two; only the frame size")
+    low = [round(c["median_strength"], 3) for c in decode.bit_contrast[:4]]
+    old_low = [round(c["median_strength"], 3)
+               for c in old_decode.bit_contrast[:4]]
+    check(all(v > gray_code.BIT_CONFIDENCE for v in low) and low[0] > old_low[0],
+          f"and the LOW bits are unambiguous rather than merely confident: "
+          f"{low} against {old_low} at {FW}x{FH}. THIS IS THE SUBTLE PART — "
+          f"the small frame's low bits were never near zero here (they "
+          f"cancelled to nothing only in HIS distant three-glow pose, 3c "
+          f"above); at this pose they carried real contrast and were "
+          f"simply misregistered, which is precisely how a marginal read "
+          f"produces an answer that looks fine and is not")
+    check(decode.out_of_range_pixels == 0,
+          "and nothing decoded out of range — the arrangement that came "
+          "back is the one that was lit, not a plausible neighbour")
+
+    # (d) THE STORED MAP GRID IS UNCHANGED, which is the promise the raise
+    #     had to keep: every rung divides 64x36 exactly, so a footprint
+    #     taken through a 1080p frame is the same measurement as one taken
+    #     through a 320x180 frame of the same scene.
+    from spectra.services import light_field as lf
+    for w, h in capture_settings.PROFILES:
+        check(w % lf.GRID_W == 0 and h % lf.GRID_H == 0,
+              f"{w}x{h} divides the stored {lf.GRID_W}x{lf.GRID_H} grid "
+              f"exactly ({w // lf.GRID_W}x{h // lf.GRID_H} box mean, no "
+              f"interpolation to explain)")
+    flat = np.full((ch, cw), 40.0)
+    check(np.allclose(lf.downsample(flat), lf.downsample(np.full((FH, FW), 40.0))),
+          "and the same scene downsamples to the same grid at either size — "
+          "a box mean is scale-free, which is why night runs can stay at "
+          f"{FW}x{FH} while a commissioning read borrows {cw}x{ch}")
 
 
 # ── FOUR — sabotage: each failure lands on ITS OWN row ────────────────────
@@ -1106,6 +1342,7 @@ def main():
     room = section_three()
     section_three_b()
     section_three_c()
+    section_three_d()
     section_four()
     section_five()
     section_six()

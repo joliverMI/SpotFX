@@ -24,6 +24,31 @@ server then refuses BY NAME, exactly as it refuses a phone that will not
 lock. The unattended path is allowed to be more convenient. It is not
 allowed to be more trusting.
 
+THE SAME RULE NOW COVERS TWO MORE CONTROLS (2026-09-01): a run may ask for
+a MANUAL INTEGRATION TIME (`exposure_time_absolute`, in 100-microsecond
+units — the same unit the browser's own `exposureTime` uses, so nothing
+converts) and a MANUAL GAIN (`gain`, a device-specific scale passed through
+verbatim). `apply_lock` writes them and `read_lock` reads EVERY one of them
+back out of the device; a control this camera does not have, or one that
+came back a different number than it was asked for, is named in
+`manual_refusals` and the server refuses on it. Asking for neither is the
+shipped behaviour exactly — converge for SETTLE_BEFORE_LOCK_S, then freeze
+— so nothing about an ordinary night run changed.
+
+AND THE WIRE FRAME SIZE IS PER RUN. The commissioning read asks for
+1920x1080 (`spectra/services/capture_settings.py` carries the arithmetic);
+a map stays at 320x180. `set_frame_size` restarts only the SCALER, and it
+re-reads every control afterwards — a V4L2 device reopen can reset controls
+to their defaults, so the read-back is what decides whether the pose
+survived rather than an assumption that it did. See that method for why a
+CHANGED exposure mints a new pose and an unchanged one does not.
+
+THIS CLIENT NEVER UPSCALES. `open()` clamps the wire size to the largest
+declared rung the camera's own capture size can fill, and every frame
+carries `source_width`/`source_height` so the server can assert the same
+thing independently. A bigger picture of a smaller image is not more
+detail, and the decode counts camera pixels.
+
 WHY A NATIVE CLIENT AND NOT HEADLESS CHROME. Chrome's `exposureMode`
 capability is not reliably present for a plain UVC webcam on desktop Linux,
 so a headless-browser client would very often report "this camera will not
@@ -59,13 +84,33 @@ from typing import Callable, Optional
 
 logger = logging.getLogger(__name__)
 
-#: THE WIRE-FRAME CONTRACT. Not this module's to change: the server rejects
-#: any other size rather than resampling a surprise, and the commissioning
-#: instrument's whole resolution arithmetic is stated against it.
+#: THE WIRE-FRAME CONTRACT, and it is a LADDER, not a number — mirrored
+#: from `spectra/services/capture_settings.PROFILES` rather than imported,
+#: because this package is meant to run on a machine that has only the
+#: client. The server rejects any size off the ladder rather than resampling
+#: a surprise. These two remain the DEFAULT (the map's own size), which is
+#: what a client sends until a run asks otherwise.
 FRAME_W = 320
 FRAME_H = 180
+FRAME_SIZES: tuple[tuple[int, int], ...] = (
+    (320, 180), (640, 360), (960, 540), (1280, 720), (1920, 1080))
 FRAME_BYTES = FRAME_W * FRAME_H
 GREY_MIME = "image/grey8"
+
+
+def choose_frame_size(want: tuple[int, int], source_w: int,
+                      source_h: int) -> tuple[int, int]:
+    """The largest rung no bigger than what was asked for and no bigger than
+    what this camera actually produces — "never upscale", mirroring
+    `capture_settings.choose`."""
+    if want not in FRAME_SIZES:
+        want = (FRAME_W, FRAME_H)
+    if source_w <= 0 or source_h <= 0:
+        return want
+    for w, h in reversed(FRAME_SIZES):
+        if w <= want[0] and h <= want[1] and w <= source_w and h <= source_h:
+            return (w, h)
+    return FRAME_SIZES[0]
 
 #: Let auto-exposure converge on the scene BEFORE freezing it. A lock
 #: applied the instant the device opens freezes a half-converged exposure,
@@ -77,6 +122,12 @@ SETTLE_BEFORE_LOCK_S = 1.5
 #: tried and whichever the device actually has is the one reported.
 EXPOSURE_CONTROLS = ("auto_exposure", "exposure_auto")
 WB_CONTROLS = ("white_balance_automatic", "white_balance_temperature_auto")
+#: THE TWO MANUAL LEVERS' controls, modern spelling first. Integration time
+#: is in 100-microsecond units, which is V4L2's own unit for it AND the
+#: browser's, so nothing anywhere converts. Gain is a device-specific scale
+#: and is passed through verbatim; converting it would be an invention.
+EXPOSURE_TIME_CONTROLS = ("exposure_time_absolute", "exposure_absolute")
+GAIN_CONTROLS = ("gain",)
 #: V4L2's menu value for manual exposure (1 = Manual Mode, 3 = Aperture
 #: Priority Mode) and for white balance auto OFF.
 EXPOSURE_MANUAL = 1
@@ -100,6 +151,18 @@ class CameraLock:
     #: condition from "opened it and it will not lock", and the one an
     #: unattended machine hits first.
     camera_error: str = ""
+    #: THE TWO LEVERS, AS THE DEVICE REPORTED THEM BACK — never what was
+    #: asked for. `exposure_time` is in 100-microsecond units; `gain` is
+    #: this device's own scale. None means the control could not be read,
+    #: which is a different answer from zero.
+    exposure_time: Optional[float] = None
+    gain: Optional[float] = None
+    exposure_time_range: Optional[list] = None
+    gain_range: Optional[list] = None
+    #: A lever a run asked for that this camera does not have, or gave back
+    #: a different number for. The server refuses on these; this module
+    #: only ever reports what it read.
+    manual_refusals: list[str] = field(default_factory=list)
 
     @property
     def locked(self) -> bool:
@@ -113,7 +176,13 @@ class CameraLock:
                 "white_balance_mode": self.white_balance_mode,
                 "exposure_capabilities": list(self.exposure_capabilities),
                 "white_balance_capabilities": list(self.white_balance_capabilities),
-                "source": self.source, "camera_error": self.camera_error}
+                "source": self.source, "camera_error": self.camera_error,
+                "exposure_time": self.exposure_time, "gain": self.gain,
+                "exposure_time_range": (list(self.exposure_time_range)
+                                        if self.exposure_time_range else None),
+                "gain_range": (list(self.gain_range) if self.gain_range
+                               else None),
+                "manual_refusals": list(self.manual_refusals)}
 
 
 class CameraUnavailable(Exception):
@@ -130,6 +199,23 @@ class BaseCamera:
         self.pose_token = ""
         self.opened = False
         self.lock = CameraLock()
+        #: The wire size this camera sends, and the camera image it is
+        #: derived from. Both go on every frame so the server can assert
+        #: "never upscale" independently of the client that promised it.
+        self.frame_size: tuple[int, int] = (FRAME_W, FRAME_H)
+        self.capture_size: tuple[int, int] = (FRAME_W, FRAME_H)
+
+    @property
+    def frame_bytes(self) -> int:
+        return self.frame_size[0] * self.frame_size[1]
+
+    async def set_frame_size(self, size: tuple[int, int]) -> tuple[int, int]:
+        """Adopt this wire size, clamped to what this camera can fill.
+        Returns what was actually adopted — a camera that cannot reach the
+        request downgrades honestly and the server reads the frames it gets
+        rather than the ones it asked for."""
+        self.frame_size = choose_frame_size(tuple(size), *self.capture_size)
+        return self.frame_size
 
     def _mint_pose(self) -> None:
         # Inside open(), always: see the module docstring on why this
@@ -142,7 +228,8 @@ class BaseCamera:
     async def open(self) -> None:                      # pragma: no cover
         raise NotImplementedError
 
-    async def apply_lock(self) -> CameraLock:          # pragma: no cover
+    async def apply_lock(self, *, exposure_time: Optional[int] = None,
+                         gain: Optional[int] = None) -> CameraLock:  # pragma: no cover
         raise NotImplementedError
 
     async def read_lock(self) -> CameraLock:           # pragma: no cover
@@ -161,6 +248,15 @@ def _tool(name: str) -> Optional[str]:
     return shutil.which(name)
 
 
+def _as_float(value) -> Optional[float]:
+    """A read-back number, or None. None and 0 are different answers: "this
+    camera would not tell us" is not "it is zero"."""
+    try:
+        return None if value is None else float(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
 def _run(args: list[str], timeout: float = 5.0) -> tuple[int, str]:
     try:
         p = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
@@ -174,19 +270,44 @@ class V4L2Camera(BaseCamera):
     for the controls, and no image library anywhere in between."""
 
     def __init__(self, device: str = "/dev/video0", *, fps: float = 5.0,
-                 capture_size: tuple[int, int] = (1280, 720),
-                 input_format: str = "") -> None:
+                 capture_size: tuple[int, int] = (1920, 1080),
+                 input_format: str = "",
+                 fallback_sizes: tuple[tuple[int, int], ...] =
+                 ((1280, 720), (640, 480))) -> None:
         super().__init__()
         self.device = device
         self.fps = fps
         self.capture_size = capture_size
+        #: Sizes to try, in order, when the camera will not open at
+        #: `capture_size`. The default asks for 1080p — what the
+        #: commissioning read wants — and falls back rather than leaving an
+        #: unattended run dead at three in the morning over a camera that
+        #: tops out at 720p. Every fallback is SAID (`open_note`).
+        self.fallback_sizes = tuple(fallback_sizes)
+        self.open_note = ""
         self.input_format = input_format
+        #: The wire size this camera is currently sending, and the largest
+        #: rung it could ever send (clamped to what it actually captures).
+        self.frame_size: tuple[int, int] = (FRAME_W, FRAME_H)
         self._proc: Optional[subprocess.Popen] = None
         self._reader: Optional[asyncio.StreamReader] = None
+        #: Levers a run asked for that this device would not take, carried
+        #: from `apply_lock` into every subsequent `read_lock` so a paced
+        #: re-read does not silently drop the refusal.
+        self._manual_refusals: list[str] = []
+        self._wanted: dict = {"exposure_time": None, "gain": None}
+
+    @property
+    def frame_bytes(self) -> int:
+        return self.frame_size[0] * self.frame_size[1]
 
     def describe(self) -> dict:
         return {"kind": "v4l2", "device": self.device,
-                "capture_size": list(self.capture_size), "fps": self.fps}
+                "capture_size": list(self.capture_size), "fps": self.fps,
+                "frame_size": list(self.frame_size),
+                "max_frame_size": list(choose_frame_size(
+                    FRAME_SIZES[-1], *self.capture_size)),
+                "open_note": self.open_note}
 
     # ── controls ──────────────────────────────────────────────────────────
     def _controls(self) -> dict[str, dict]:
@@ -226,6 +347,22 @@ class V4L2Camera(BaseCamera):
             return None
         return out.split(":", 1)[1].strip().splitlines()[0].strip()
 
+    @staticmethod
+    def _range(raw: str) -> Optional[list]:
+        """min/max out of a `--list-ctrls-menus` line, when the driver
+        prints them. Reported so a refusal can quote what this camera
+        offers rather than only what it would not take."""
+        lo = hi = None
+        for token in (raw or "").split():
+            if token.startswith("min="):
+                lo = token[4:]
+            elif token.startswith("max="):
+                hi = token[4:]
+        try:
+            return None if lo is None or hi is None else [float(lo), float(hi)]
+        except ValueError:
+            return None
+
     def _set(self, control: str, value: int) -> bool:
         ctl = _tool("v4l2-ctl")
         if not ctl:
@@ -249,6 +386,10 @@ class V4L2Camera(BaseCamera):
         exp_val = self._get(exp_name) if exp_name else None
         wb_val = self._get(wb_name) if wb_name else None
         exp_menu = controls.get(exp_name, {}).get("menu", {})
+        # THE TWO LEVERS, READ THE SAME WAY: out of the device, never out of
+        # a memory of what was asked for.
+        time_name = next((c for c in EXPOSURE_TIME_CONTROLS if c in controls), "")
+        gain_name = next((c for c in GAIN_CONTROLS if c in controls), "")
         self.lock = CameraLock(
             exposure_locked=exp_val is not None and exp_val.strip() == str(EXPOSURE_MANUAL),
             white_balance_locked=wb_val is not None and wb_val.strip() == str(WB_AUTO_OFF),
@@ -259,15 +400,34 @@ class V4L2Camera(BaseCamera):
             exposure_capabilities=(sorted(exp_menu.values()) if exp_menu
                                    else ([exp_name] if exp_name else [])),
             white_balance_capabilities=([wb_name] if wb_name else []),
+            exposure_time=_as_float(self._get(time_name)) if time_name else None,
+            gain=_as_float(self._get(gain_name)) if gain_name else None,
+            exposure_time_range=self._range(
+                controls.get(time_name, {}).get("raw", "")) if time_name else None,
+            gain_range=self._range(
+                controls.get(gain_name, {}).get("raw", "")) if gain_name else None,
+            manual_refusals=list(self._manual_refusals),
             source=f"v4l2:{exp_name or 'no-exposure-control'}/"
                    f"{wb_name or 'no-white-balance-control'}")
         return self.lock
 
-    async def apply_lock(self) -> CameraLock:
-        """Ask for manual exposure and manual white balance, then read back.
-        A failed write is not reported as anything: the read-back that
-        follows is the only statement this makes."""
+    async def apply_lock(self, *, exposure_time: Optional[int] = None,
+                         gain: Optional[int] = None) -> CameraLock:
+        """Ask for manual exposure and manual white balance — and, when a
+        run asks for them, a specific integration time and gain — then READ
+        EVERY CONTROL BACK.
+
+        A failed write is not reported as anything on its own: the read-back
+        that follows is the only statement this makes. What IS reported is a
+        lever the run asked for that this device does not have, or that came
+        back a different number than it was asked for — both land in
+        `manual_refusals`, and the server refuses on them.
+
+        ORDER MATTERS: `exposure_time_absolute` is ignored by most UVC
+        drivers while auto exposure is still on, so manual mode is set
+        first, in the same call, before either lever is written."""
         controls = self._controls()
+        refusals: list[str] = []
         for name in EXPOSURE_CONTROLS:
             if name in controls:
                 self._set(name, EXPOSURE_MANUAL)
@@ -276,20 +436,59 @@ class V4L2Camera(BaseCamera):
             if name in controls:
                 self._set(name, WB_AUTO_OFF)
                 break
-        return await self.read_lock()
+        for want, names, what, unit in (
+                (exposure_time, EXPOSURE_TIME_CONTROLS,
+                 "a manual integration time", " (x100 us)"),
+                (gain, GAIN_CONTROLS, "a manual gain", "")):
+            if want is None:
+                continue
+            name = next((c for c in names if c in controls), "")
+            if not name:
+                refusals.append(
+                    f"this camera has no {' or '.join(names)} control, so "
+                    f"{what} cannot be set on it")
+                continue
+            if not self._set(name, int(want)):
+                refusals.append(f"the driver refused {name}={int(want)}{unit}")
+        self._manual_refusals = refusals
+        self._wanted = {"exposure_time": exposure_time, "gain": gain}
+        lock = await self.read_lock()
+        # THE READ-BACK IS WHAT DECIDES. A control that took a different
+        # value than it was asked for is refusing just as much as one that
+        # is absent — and more dangerously, because the frames still arrive
+        # and only the numbers are wrong.
+        extra: list[str] = []
+        if exposure_time is not None and lock.exposure_time is not None \
+                and abs(lock.exposure_time - exposure_time) > 1e-6:
+            extra.append(f"asked for an integration time of {exposure_time} "
+                         f"(x100 us) and the device reports "
+                         f"{lock.exposure_time:g}")
+        if gain is not None and lock.gain is not None \
+                and abs(lock.gain - gain) > 1e-6:
+            extra.append(f"asked for a gain of {gain} and the device reports "
+                         f"{lock.gain:g}")
+        if extra:
+            self._manual_refusals = refusals + extra
+            lock.manual_refusals = list(self._manual_refusals)
+        return lock
 
     # ── pixels ────────────────────────────────────────────────────────────
-    def _ffmpeg_args(self, ffmpeg: str) -> list[str]:
+    def _ffmpeg_args(self, ffmpeg: str,
+                     capture_size: Optional[tuple[int, int]] = None
+                     ) -> list[str]:
+        cap = capture_size or self.capture_size
         args = [ffmpeg, "-hide_banner", "-loglevel", "error",
                 "-f", "v4l2", "-framerate", str(self.fps)]
         if self.input_format:
             args += ["-input_format", self.input_format]
-        args += ["-video_size", f"{self.capture_size[0]}x{self.capture_size[1]}",
+        args += ["-video_size", f"{cap[0]}x{cap[1]}",
                  "-i", self.device,
-                 # scale to the wire's own size, then ONE luminance byte per
-                 # pixel — the exact bytes the protocol carries, with no
-                 # lossy stage anywhere in the path.
-                 "-vf", f"scale={FRAME_W}:{FRAME_H}",
+                 # scale to the wire's own CURRENT size, then ONE luminance
+                 # byte per pixel — the exact bytes the protocol carries,
+                 # with no lossy stage anywhere in the path. The size is
+                 # never larger than `capture_size` (see
+                 # `choose_frame_size`), so this only ever downsamples.
+                 "-vf", f"scale={self.frame_size[0]}:{self.frame_size[1]}",
                  "-pix_fmt", "gray", "-f", "rawvideo", "-"]
         return args
 
@@ -305,30 +504,104 @@ class V4L2Camera(BaseCamera):
             raise CameraUnavailable(
                 f"{self.device} is not readable by this user — add the user "
                 f"to the 'video' group and log in again")
+        # A CAMERA THAT WILL NOT OPEN AT 1080p IS NOT A DEAD NIGHT. The
+        # default asks for what the commissioning read wants and steps down
+        # rather than leaving an unattended run with no camera at all; every
+        # step is SAID (`open_note` -> the client's `hello`), never silent.
+        problems: list[str] = []
+        wanted = self.capture_size
+        ladder = [wanted] + [s for s in self.fallback_sizes if s != wanted]
+        for size in ladder:
+            problem = await self._open_at(ffmpeg, size)
+            if problem is None:
+                if size != wanted:
+                    self.open_note = (
+                        f"this camera would not open at "
+                        f"{wanted[0]}x{wanted[1]} "
+                        f"({problems[0]}); it is running at "
+                        f"{size[0]}x{size[1]}, so the largest frame it can "
+                        f"send is "
+                        f"{choose_frame_size(FRAME_SIZES[-1], *size)[0]}x"
+                        f"{choose_frame_size(FRAME_SIZES[-1], *size)[1]}")
+                    self.capture_size = size
+                break
+            problems.append(problem)
+        else:
+            raise CameraUnavailable("; ".join(problems))
+        self._mint_pose()
+        self.opened = True
+        # Settle, THEN lock, THEN read back — see SETTLE_BEFORE_LOCK_S.
+        await asyncio.sleep(SETTLE_BEFORE_LOCK_S)
+        await self.apply_lock()
+
+    async def _open_at(self, ffmpeg: str,
+                       capture_size: tuple[int, int]) -> Optional[str]:
+        """Start the pixel pipe at this capture size. Returns ffmpeg's own
+        complaint, or None when frames arrived.
+
+        The WIRE size is derived here, never asked for: the largest declared
+        rung this capture size can fill, capped at whatever was last
+        requested. That is "never upscale", enforced at the only place that
+        knows both numbers."""
+        self.frame_size = choose_frame_size(self.frame_size, *capture_size)
+        want = self.frame_bytes
         self._proc = subprocess.Popen(
-            self._ffmpeg_args(ffmpeg), stdout=subprocess.PIPE,
+            self._ffmpeg_args(ffmpeg, capture_size), stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, bufsize=0)
         loop = asyncio.get_running_loop()
-        reader = asyncio.StreamReader(limit=FRAME_BYTES * 8)
+        reader = asyncio.StreamReader(limit=want * 8)
         await loop.connect_read_pipe(
             lambda: asyncio.StreamReaderProtocol(reader), self._proc.stdout)
         self._reader = reader
         try:
-            await asyncio.wait_for(reader.readexactly(FRAME_BYTES), timeout=15.0)
+            await asyncio.wait_for(reader.readexactly(want), timeout=15.0)
         except (asyncio.TimeoutError, asyncio.IncompleteReadError) as exc:
             # STOP IT FIRST, then read its complaint: ffmpeg's stderr is a
             # blocking pipe, so reading it while the process is still alive
             # is a hang, not a diagnostic.
             err = self._drain_stderr()
             await self.close()
-            raise CameraUnavailable(
-                f"{self.device} produced no frames"
-                + (f" ({err})" if err else f" ({exc!r})")) from exc
-        self._mint_pose()
+            return (f"{self.device} produced no frames at "
+                    f"{capture_size[0]}x{capture_size[1]}"
+                    + (f" ({err})" if err else f" ({exc!r})"))
+        return None
+
+    async def set_frame_size(self, size: tuple[int, int]) -> tuple[int, int]:
+        """Send at this wire size from now on — clamped to what this camera
+        actually captures, so it can only ever go DOWN from the source.
+        Returns the size actually adopted.
+
+        IT RESTARTS THE SCALER, WHICH REOPENS THE DEVICE, AND THAT IS WHY
+        THE POSE IS RE-DECIDED HERE RATHER THAN ASSUMED. A pose is "this
+        camera, where it stands, at the exposure it locked", and a scaler
+        restart moves nothing and re-frames nothing — but a V4L2 reopen CAN
+        reset controls to their defaults, and a re-converged auto exposure
+        would be a genuinely different byte scale wearing the same pose id.
+        So every control is re-applied and RE-READ, and the read-back
+        decides: an exposure that came back where it was keeps the pose, one
+        that did not mints a new one and the queue names the change
+        (`mapping_refusals.pose_changed_note`). Measured, never assumed —
+        which is the same rule the lock itself lives by."""
+        want = choose_frame_size(tuple(size), *self.capture_size)
+        if want == self.frame_size:
+            return self.frame_size
+        before = (self.lock.exposure_mode, self.lock.exposure_time,
+                  self.lock.gain, self.lock.white_balance_mode)
+        ffmpeg = _tool("ffmpeg")
+        if not ffmpeg:
+            return self.frame_size
+        await self.close()
+        self.frame_size = want
+        problem = await self._open_at(ffmpeg, self.capture_size)
+        if problem is not None:
+            raise CameraUnavailable(problem)
         self.opened = True
-        # Settle, THEN lock, THEN read back — see SETTLE_BEFORE_LOCK_S.
-        await asyncio.sleep(SETTLE_BEFORE_LOCK_S)
-        await self.apply_lock()
+        await self.apply_lock(**self._wanted)
+        after = (self.lock.exposure_mode, self.lock.exposure_time,
+                 self.lock.gain, self.lock.white_balance_mode)
+        if after != before:
+            self._mint_pose()
+        return self.frame_size
 
     def _drain_stderr(self) -> str:
         """ffmpeg's own words about why it could not open the device — the
@@ -348,7 +621,7 @@ class V4L2Camera(BaseCamera):
             return None
         try:
             return await asyncio.wait_for(
-                self._reader.readexactly(FRAME_BYTES), timeout=10.0)
+                self._reader.readexactly(self.frame_bytes), timeout=10.0)
         except (asyncio.TimeoutError, asyncio.IncompleteReadError):
             return None
 
@@ -381,15 +654,26 @@ class SyntheticCamera(BaseCamera):
 
     def __init__(self, render: Callable[[], bytes], *,
                  lock: Optional[CameraLock] = None, fps: float = 20.0,
-                 fail: str = "") -> None:
+                 fail: str = "",
+                 capture_size: tuple[int, int] = (FRAME_W, FRAME_H)) -> None:
         super().__init__()
         self._render = render
         self._declared = lock or CameraLock(source="synthetic:declared")
         self.fps = fps
         self.fail = fail
+        # A SYNTHETIC CAMERA DECLARES WHAT IT CAN CAPTURE, like a real one,
+        # and the default is the wire's own smallest rung because that is
+        # what a fixed-size render function actually produces. Declaring
+        # more would make `set_frame_size` hand the run a size this camera
+        # cannot fill, and `frame()` would raise rather than the negotiation
+        # coming down honestly — the same lie about resolution the whole
+        # "never upscale" rule exists to stop, wearing a test double.
+        self.capture_size = capture_size
 
     def describe(self) -> dict:
-        return {"kind": "synthetic", "fps": self.fps}
+        return {"kind": "synthetic", "fps": self.fps,
+                "capture_size": list(self.capture_size),
+                "frame_size": list(self.frame_size)}
 
     async def open(self) -> None:
         if self.fail:
@@ -398,7 +682,11 @@ class SyntheticCamera(BaseCamera):
         self.opened = True
         self.lock = self._declared
 
-    async def apply_lock(self) -> CameraLock:
+    async def apply_lock(self, *, exposure_time: Optional[int] = None,
+                         gain: Optional[int] = None) -> CameraLock:
+        # It reports WHAT WAS DECLARED, never what was asked for — the same
+        # refusal to forge a read-back the real camera lives by. A spec that
+        # wants a lever to be taken declares a lock carrying it.
         self.lock = self._declared
         return self.lock
 
@@ -415,9 +703,9 @@ class SyntheticCamera(BaseCamera):
     async def frame(self) -> Optional[bytes]:
         await asyncio.sleep(1.0 / max(0.5, self.fps))
         data = self._render()
-        if len(data) != FRAME_BYTES:
+        if len(data) != self.frame_bytes:
             raise ValueError(f"synthetic camera produced {len(data)} bytes, "
-                             f"not {FRAME_BYTES}")
+                             f"not {self.frame_bytes}")
         return data
 
     async def close(self) -> None:

@@ -79,9 +79,13 @@ from typing import Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-# The stored grid. 64x36 is 16:9, matching the ~320x180 greyscale frames the
-# phone uploads: one grid cell is a 5x5 block of frame pixels, so the
-# downsample is an exact box mean with nothing left over.
+# The stored grid, and it is UNCHANGED by the 2026-09-01 wire-frame raise.
+# 64x36 is 16:9, and every frame size the wire declares
+# (`spectra/services/capture_settings.PROFILES`: 320x180 up to 1920x1080) is
+# a whole multiple of it — 5x for a map, 30x for the commissioning read — so
+# the downsample is an exact box mean with nothing left over at any of them,
+# and a grid derived from a 1080p frame is directly comparable with one
+# derived from a 320x180 frame of the same scene.
 GRID_W = 64
 GRID_H = 36
 #: Bins in the axis projection. Coarser than the grid on purpose — the axis

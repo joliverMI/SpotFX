@@ -30,6 +30,21 @@ laptop nobody is looking at is the failure mode this whole task exists to
 remove: it connects, reports `camera_error`, and the run refuses with that
 sentence on the page and in the queue's record instead of the generic "has
 not reported its lock state yet".
+
+THE SERVER ASKS FOR THE CAMERA'S PER-RUN SETTINGS (2026-09-01) and this
+client answers, in the same one-way shape as everything else here: a
+`config` message names a wire frame size (320x180 for a map, 1920x1080 for
+a commissioning read — `spectra/services/capture_settings.py` carries the
+arithmetic) and, optionally, a manual integration time and gain. The client
+applies what it can, RE-READS every control out of the device, and reports
+what came back. It never decides to proceed anyway and never reports a
+setting it did not read.
+
+AND IT NEVER UPSCALES. `camera.set_frame_size` clamps the wire size to what
+the camera actually captures, so a request bigger than the camera comes
+back as an honest downgrade; every frame carries `source_width`/
+`source_height` so the server asserts the same thing independently rather
+than trusting this promise.
 """
 from __future__ import annotations
 
@@ -45,8 +60,7 @@ from typing import Any, Callable, Optional
 import websockets
 
 from spectra.capture_client.camera import (BaseCamera, CameraLock,
-                                           CameraUnavailable, FRAME_H,
-                                           FRAME_W, GREY_MIME)
+                                           CameraUnavailable, GREY_MIME)
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +93,10 @@ class ClientState:
     last_refusal: str = ""
     camera_error: str = ""
     last_error: str = ""
+    #: The wire size this client is currently sending — the map's own
+    #: 320x180 until a run asks for something bigger, and never larger than
+    #: what the camera actually captures.
+    frame_size: list = field(default_factory=lambda: [320, 180])
     lock: dict = field(default_factory=dict)
 
     def as_dict(self) -> dict:
@@ -126,6 +144,7 @@ class CaptureClient:
             return self.state.camera_error
         self.state.camera_error = ""
         self.state.pose_token = self.camera.pose_token
+        self.state.frame_size = list(self.camera.frame_size)
         self.state.lock = self.camera.lock.as_wire()
         self._last_lock_read = self._clock()
         return None
@@ -183,6 +202,8 @@ class CaptureClient:
             "client": CLIENT_NAME, "host": self.host,
             "camera": self.camera.describe(),
             "secure_context": True,
+            "frame_size": {"width": self.camera.frame_size[0],
+                           "height": self.camera.frame_size[1]},
             # A RECONNECT keeps its pose: the camera never closed, so the
             # byte scale either side of the drop is the same one. See the
             # module docstring, and `mapping_session._adopt_pose` for the
@@ -210,8 +231,47 @@ class CaptureClient:
             elif kind == "welcome":
                 self.state.session_id = str(msg.get("session_id") or "")
                 self.state.pose_id = str(msg.get("pose_id") or "")
+            elif kind == "config":
+                await self._apply_config(ws, msg)
             elif kind == "error":
                 self.state.last_error = str(msg.get("message") or "")
+
+    async def _apply_config(self, ws, msg: dict) -> None:
+        """THE SERVER ASKED THE CAMERA FOR SOMETHING. Apply what this camera
+        can, re-read every control out of the device, and say what came
+        back — including when what came back is not what was asked for.
+
+        Never refuses and never raises past the connection: refusing is the
+        server's job and its refusal names the camera and the control. A
+        camera that cannot even reopen at the new size reports that as a
+        camera error, which is the condition the server already has a
+        sentence for."""
+        size = msg.get("frame_size") or {}
+        try:
+            if size.get("width") and size.get("height"):
+                got = await self.camera.set_frame_size(
+                    (int(size["width"]), int(size["height"])))
+                self.state.frame_size = list(got)
+                if self.camera.pose_token != self.state.pose_token:
+                    # The reopen re-locked the exposure, so this is a NEW
+                    # pose. Saying so is the whole point: footprints either
+                    # side of it are not comparable.
+                    self.state.pose_token = self.camera.pose_token
+                    self.state.camera_reopens += 1
+            await self.camera.apply_lock(
+                exposure_time=(int(msg["exposure_time"])
+                               if msg.get("exposure_time") is not None else None),
+                gain=(int(msg["gain"]) if msg.get("gain") is not None else None))
+        except CameraUnavailable as exc:
+            self.state.camera_error = str(exc)
+            self.camera.lock = CameraLock(camera_error=str(exc),
+                                          source="camera:unavailable")
+        except Exception as exc:                       # noqa: BLE001
+            logger.exception("capture client: applying the camera config failed")
+            self.state.last_error = f"{type(exc).__name__}: {exc}"
+        self.state.lock = self.camera.lock.as_wire()
+        self._last_lock_read = self._clock()
+        await ws.send(json.dumps({"type": "lock", **self.camera.lock.as_wire()}))
 
     async def _frames(self, ws) -> None:
         period = 1.0 / max(0.5, self.fps)
@@ -235,9 +295,16 @@ class CaptureClient:
                 await self.camera.read_lock()
                 self._last_lock_read = self._clock()
                 self.state.lock = self.camera.lock.as_wire()
+            fw, fh = self.camera.frame_size
+            cw, ch = self.camera.capture_size
             await ws.send(json.dumps({
                 "type": "frame", "mime": GREY_MIME,
-                "width": FRAME_W, "height": FRAME_H,
+                "width": fw, "height": fh,
+                # WHAT THE FRAME WAS DERIVED FROM. The server drops any
+                # frame bigger than its own source rather than counting
+                # interpolated pixels as resolution, so "never upscale" is
+                # asserted on both sides instead of promised on one.
+                "source_width": cw, "source_height": ch,
                 "captured_at_ms": self._clock() * 1000.0,
                 "data": base64.b64encode(data).decode("ascii"),
                 "lock": self.camera.lock.as_wire()}))

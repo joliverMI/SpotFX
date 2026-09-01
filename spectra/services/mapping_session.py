@@ -57,10 +57,39 @@ closed and its exposure was never re-locked (see `_adopt_pose`), and a
 out loud.
 
 PIXELS: `image/grey8` — raw single-byte luminance, width*height bytes, row
-major. Not JPEG: a lossy codec's own quantisation lands in the difference
-this instrument measures, and decoding one would put an image library in a
-path that currently needs none. At 320x180 and 5 fps that is ~58 KB/frame,
-~288 KB/s before base64 — the plan's own budget, on his LAN.
+major. Not JPEG, at ANY frame size: a lossy codec's own quantisation lands
+in the difference this instrument measures, and decoding one would put an
+image library in a path that currently needs none.
+
+THE FRAME SIZE IS PER RUN, NOT ONE NUMBER (2026-09-01). `spectra/services/
+capture_settings.py` is the binding statement — the ladder of declared
+sizes, the arithmetic that chose them, and why a client must never upscale.
+The short version:
+
+  * A MAP still sends 320x180, ~58 KB/frame, ~288 KB/s before base64 — a
+    footprint is a 64x36 grid and more pixels buy nothing. Night runs stay
+    cheap.
+  * A COMMISSIONING read asks for 1920x1080, because a gray-code decode
+    needs ~2 camera pixels per composition index and his 736-pixel
+    composition therefore needs ~1,472 of imaged strip, where the WHOLE
+    perimeter of a 320x180 frame is 1,000. No pose could ever have worked;
+    both field runs of 2026-09-01 decoded 0 of 736 for exactly that reason.
+  * Every rung is 16:9 and an exact whole multiple of the 64x36 grid, so
+    `light_field.downsample` stays a box mean at any of them and the STORED
+    MAP GRID IS UNCHANGED.
+  * A CLIENT NEVER UPSCALES. It sends the largest rung no bigger than both
+    the request and its own camera image, and reports its source size on
+    every frame; a frame that arrives larger than its source is NAMED
+    (`mapping_refusals.upscaled_frame`) and never counted, because
+    interpolated pixels would inflate `gray_code.resolution_report`'s count
+    and make an unreadable target report that it is readable.
+
+THE CAMERA'S OTHER TWO LEVERS ride the same `config` message: manual
+integration time and gain, both optional, both defaulting to today's
+converge-then-freeze behaviour, both READ BACK from the device and reported
+here like the lock is. `capture_settings.CameraRequest` is what a run asks
+for; `LockState` is what the camera said. They are never the same object,
+for the same reason `lock_refusal` reads a read-back and not a constraint.
 
 WHAT IS WRITTEN TO DISK BY THIS MODULE: nothing. Frames live in the bounded
 in-memory ring and the derived grids in another; both are dropped when the
@@ -80,10 +109,17 @@ from typing import Any, Awaitable, Callable, Optional
 
 import numpy as np
 
+from spectra.services import capture_settings
 from spectra.services.av_sync_session import ClockMap, Frame, FrameRing
 from spectra.services.light_field import FRAME_H, FRAME_W, downsample
 
 logger = logging.getLogger(__name__)
+
+#: THE MAP'S OWN FRAME, re-exported from `light_field` (where it is derived
+#: from the stored grid) and asserted here to be the ladder's own bottom
+#: rung. Two modules naming the same size is fine; two modules DISAGREEING
+#: about it silently would put the wire and the downsample out of step.
+assert (FRAME_W, FRAME_H) == capture_settings.MAP_PROFILE
 
 PING_INTERVAL_S = 2.0
 #: The tap's own rate. 5 fps over a 1.5 s capture is ~7 frames averaged —
@@ -107,18 +143,27 @@ GRID_RING = 120
 #: pixels. So it turns this ring on for the length of its run and off
 #: again. Nothing else in this codebase reads it.
 #:
-#: The cost is bounded and small: 320x180 bytes is ~58 KB, so the whole
-#: ring is ~11 MB, in memory only, dropped on disconnect exactly like every
-#: other ring here. Still never written to disk — the privacy statement
-#: above is unchanged, and remains true.
-FULL_RING = 200
+#: THE RING IS BOUNDED IN BYTES, NOT FRAMES, since the commissioning read
+#: moved to 1920x1080: 200 frames is ~11 MB at 320x180 and ~414 MB at
+#: 1080p, and only one of those is a ring. `capture_settings.full_ring_len`
+#: owns the budget, so the length follows the size that is actually
+#: arriving (48 frames at 1080p — a capture window is a handful). In memory
+#: only, dropped on disconnect exactly like every other ring here, still
+#: never written to disk: the privacy statement above is unchanged.
+#: The CEILING on that length. The ring is built at
+#: `capture_settings.full_ring_len(*frame_size)` and rebuilt whenever
+#: the size changes; this is the largest it can ever be.
+FULL_RING = capture_settings.FULL_RING_MAX
 
 GREY_MIME = "image/grey8"
 
 PRIVACY_SUMMARY = {
     "raw_media_leaves_phone": False,
-    "sent": "downsampled greyscale frames (320x180, ~5/s) while a mapping "
-            "run is active — no audio stream is opened by this page at all",
+    "sent": "downsampled greyscale frames while a run is active, ~5/s and "
+            "never compressed — 320x180 for a light-field map, and up to "
+            "1920x1080 for the commissioning read, which has to tell "
+            "individual LEDs apart. No audio stream is opened by this page "
+            "at all",
     "written_to_disk": "storage/spectra/room_maps.json — the derived map "
                        "(per-emitter footprint grids, axis profiles, "
                        "weights, capture context). Never a frame, never an "
@@ -155,6 +200,24 @@ class LockState:
     #: Reported, never trusted differently: the gate reads the two booleans,
     #: and this says whose read-back they came from.
     source: str = ""
+    #: THE TWO LEVERS, AS THE DEVICE REPORTED THEM BACK — never what was
+    #: asked for. `exposure_time` is in 100-microsecond units on BOTH paths
+    #: (V4L2 `exposure_time_absolute`, W3C `exposureTime`), so nothing
+    #: converts it; `gain` is a device-specific scale passed through
+    #: verbatim (V4L2 `gain`, the browser's `iso`). None means the client
+    #: could not read it, which is a different thing from zero.
+    #: See `spectra/services/capture_settings.py`.
+    exposure_time: Optional[float] = None
+    gain: Optional[float] = None
+    #: The device's own declared ranges, when it declares them — what a
+    #: refusal quotes so "gain 800 was refused" says what the camera offers.
+    exposure_time_range: Optional[list[float]] = None
+    gain_range: Optional[list[float]] = None
+    #: Controls a run ASKED FOR that this camera does not offer or did not
+    #: take, in the client's own words. A run that asked for a manual lever
+    #: and got this refuses BY NAME rather than measuring under whatever the
+    #: camera decided instead.
+    manual_refusals: list[str] = field(default_factory=list)
     changed_at: float = 0.0
 
     @property
@@ -170,7 +233,31 @@ class LockState:
                 "exposure_capabilities": list(self.exposure_capabilities),
                 "white_balance_capabilities": list(self.white_balance_capabilities),
                 "camera_error": self.camera_error, "source": self.source,
+                "exposure_time": self.exposure_time, "gain": self.gain,
+                "exposure_time_range": (list(self.exposure_time_range)
+                                        if self.exposure_time_range else None),
+                "gain_range": (list(self.gain_range) if self.gain_range
+                               else None),
+                "manual_refusals": list(self.manual_refusals),
                 "locked": self.locked}
+
+
+def _number(value) -> Optional[float]:
+    """A read-back number, or None. None and 0 are different answers here —
+    "this camera would not tell us its exposure" is not "its exposure is
+    zero" — so a junk value becomes None rather than a plausible float."""
+    try:
+        return None if value is None else float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _pair(value) -> Optional[list[float]]:
+    """A [min, max] the device declared, or None."""
+    if not isinstance(value, (list, tuple)) or len(value) != 2:
+        return None
+    lo, hi = _number(value[0]), _number(value[1])
+    return None if lo is None or hi is None else [lo, hi]
 
 
 def lock_refusal(lock: LockState, phone: dict | None = None) -> Optional[str]:
@@ -231,9 +318,16 @@ class TimedFrame:
     frame: np.ndarray           # uint8, height x width
 
 
-class MappingSession:
+class MappingSession(capture_settings.CameraNegotiation):
     """One phone connection for light-field capture. `send` is the coroutine
-    the API layer hands in (ws.send_json)."""
+    the API layer hands in (ws.send_json).
+
+    THE CAMERA'S PER-RUN SETTINGS — the wire frame size and the two manual
+    levers — live in `capture_settings.CameraNegotiation`, which this
+    inherits and every test double inherits too, so a gate is written once
+    and exercised by the proofs rather than modelled by them. This class
+    supplies the four things only a session knows: how to send, what time it
+    is, when frames arrived, and what the lock read back."""
 
     def __init__(self, send: Callable[[dict], Awaitable[None]], *,
                  clock: Callable[[], float] = time.monotonic) -> None:
@@ -253,7 +347,11 @@ class MappingSession:
         #: OFF by default: only the commissioning run needs full-resolution
         #: frames, and only for the length of its own run (see FULL_RING).
         self.keep_full_frames = False
-        self.full: deque[TimedFrame] = deque(maxlen=FULL_RING)
+        self.full: deque[TimedFrame] = deque(
+            maxlen=capture_settings.full_ring_len(*capture_settings.MAP_PROFILE))
+        # The wire frame size and the two manual levers: state and every
+        # decision on it come from CameraNegotiation, not from here.
+        self.init_camera(capture_settings.MAP_PROFILE)
         self.closed = False
         self.counts = {"frames": 0, "pongs": 0, "rejected": 0}
         self.last_error: Optional[str] = None
@@ -275,7 +373,13 @@ class MappingSession:
         await self.send({"type": "welcome", "session_id": self.id,
                          "pose_id": self.pose_id,
                          "frame_tap": self.frames.config(),
-                         "frame_size": {"width": FRAME_W, "height": FRAME_H},
+                         "frame_size": {"width": self.frame_size[0],
+                                        "height": self.frame_size[1]},
+                         # The whole ladder, so a client knows which sizes
+                         # it may be asked for and can pick its own rung
+                         # honestly rather than guessing or upscaling.
+                         "frame_sizes": [{"width": w, "height": h}
+                                         for w, h in capture_settings.PROFILES],
                          "mime": GREY_MIME,
                          "privacy": PRIVACY_SUMMARY})
         self._loop_task = asyncio.create_task(
@@ -309,6 +413,33 @@ class MappingSession:
             except Exception:
                 logger.exception("mapping session %s: loop iteration failed", self.id)
             await asyncio.sleep(0.2)
+
+    # ── the four hooks CameraNegotiation asks of a session ────────────────
+    async def _send_camera_config(self, payload: dict) -> None:
+        await self.send(payload)
+
+    def _camera_clock(self) -> float:
+        return self._clock()
+
+    def _camera_frame_times(self) -> list:
+        return [g.at_s for g in self.grids]
+
+    def _camera_lock_view(self) -> dict:
+        return self.lock.as_dict()
+
+    def _camera_lock_stamp(self) -> float:
+        # `_apply_lock` stamps this on every lock report the client sends —
+        # its own `lock` message, and the one riding every frame — so it is
+        # exactly "when did the camera last answer".
+        return self.lock.changed_at
+
+    def _on_frame_size_change(self, size: tuple) -> None:
+        """The full-resolution ring is bounded in BYTES, so its LENGTH
+        follows the frame size (see FULL_RING). Resizing DROPS what it held:
+        frames of two shapes cannot be averaged into one stack, and keeping
+        the old ones would only let a run pick up a straggler from before
+        the switch."""
+        self.full = deque(maxlen=capture_settings.full_ring_len(*size))
 
     async def _ping(self) -> None:
         self._ping_seq += 1
@@ -393,6 +524,12 @@ class MappingSession:
                 str(x) for x in (payload.get("white_balance_capabilities") or [])],
             camera_error=str(payload.get("camera_error") or ""),
             source=str(payload.get("source") or ""),
+            exposure_time=_number(payload.get("exposure_time")),
+            gain=_number(payload.get("gain")),
+            exposure_time_range=_pair(payload.get("exposure_time_range")),
+            gain_range=_pair(payload.get("gain_range")),
+            manual_refusals=[str(x) for x in
+                             (payload.get("manual_refusals") or [])],
             changed_at=self._clock())
         if prev and not self.lock.locked and self.run_abort is None:
             # A lock LOST mid-run is the failure this instrument exists to
@@ -415,6 +552,16 @@ class MappingSession:
             return
         if isinstance(msg.get("lock"), dict):
             self._apply_lock(msg["lock"])
+        # THE CAMERA'S OWN IMAGE SIZE, which is what an upscale is measured
+        # against. A client that does not send it leaves (0, 0) and the
+        # negotiation simply cannot narrow the rung for it — it is never
+        # read as "unlimited".
+        rejected = self.note_frame(w, h, int(msg.get("source_width") or 0),
+                                   int(msg.get("source_height") or 0))
+        if rejected:
+            self.last_error = rejected
+            self.counts["rejected"] += 1
+            return
         recv = self._clock()
         t_server = (self.clockmap.to_server(t_phone)
                     if self.clockmap.ready else recv)
@@ -427,6 +574,10 @@ class MappingSession:
         if grid is None:
             self.counts["rejected"] += 1
             return
+        # The GRID is scale-free — a box mean of the same scene at any rung
+        # of the ladder — so it is appended whatever size arrived, and the
+        # aim view and the map keep working across a switch. The FULL ring
+        # is not: frames of two shapes cannot be averaged into one stack.
         raw_max = int(np.frombuffer(data, dtype=np.uint8).max()) if data else 0
         self.grids.append(TimedGrid(at_s=t_server, grid=grid, raw_max=raw_max))
         if self.keep_full_frames:
@@ -436,12 +587,26 @@ class MappingSession:
 
     def _to_grid(self, data: bytes, w: int, h: int, mime: str) -> Optional[np.ndarray]:
         """grey8 bytes -> the stored 64x36 grid. Rejects anything that is
-        not the declared size rather than resampling a surprise: a frame of
-        the wrong shape means the page and the server disagree, and quietly
-        stretching it would hide that."""
+        not a DECLARED size rather than resampling a surprise: a frame of an
+        undeclared shape means the client and the server disagree, and
+        quietly stretching it would hide that.
+
+        "Declared" is now the ladder (`capture_settings.PROFILES`) rather
+        than one constant, since the commissioning read moved to 1080p.
+        Every rung is an exact whole multiple of the 64x36 grid, so this
+        stays a box mean with no interpolation to explain, and a grid taken
+        from a 1080p frame is directly comparable with one taken from a
+        320x180 frame of the same scene."""
         if mime != GREY_MIME:
             self.last_error = (f"frame mime {mime!r} is not {GREY_MIME!r} — "
                                "the mapping page sends raw greyscale bytes")
+            return None
+        if not capture_settings.is_profile(w, h):
+            self.last_error = (
+                f"frame is {w}x{h}, which is not one of the sizes this wire "
+                f"declares (" +
+                ", ".join(f"{a}x{b}" for a, b in capture_settings.PROFILES) +
+                ")")
             return None
         if w <= 0 or h <= 0 or len(data) != w * h:
             self.last_error = (f"frame is {len(data)} bytes for a declared "
@@ -496,6 +661,13 @@ class MappingSession:
         picked = [f for f in list(self.full) if start <= f.at_s <= end]
         if len(picked) < min_frames:
             picked = [f for f in list(self.full) if f.at_s >= start]
+        # ONE SHAPE ONLY. A frame-size switch can leave a straggler of the
+        # old size inside a window, and `np.stack` on two shapes raises
+        # somewhere far from here; the newest arrival is the size the run
+        # asked for, so that is the one kept.
+        if picked:
+            shape = picked[-1].frame.shape
+            picked = [f for f in picked if f.frame.shape == shape]
         return picked
 
     def refusal(self) -> Optional[str]:
@@ -515,6 +687,7 @@ class MappingSession:
                 "grids_held": len(self.grids),
                 "full_frames_held": len(self.full),
                 "keep_full_frames": self.keep_full_frames,
+                **self.camera_status(),
                 "latest_frame": latest.meta() if latest else None,
                 "last_error": self.last_error,
                 "phone": self.hello,

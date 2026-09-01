@@ -43,6 +43,20 @@ nothing at all. That is a fact about the pose and the frame size, not about
 his fixtures, and it is measurable from the reference pair alone. See
 MIN_CAMERA_PX_PER_INDEX and `docs/commissioning-field-decode-failure.md`.
 
+THE FRAME SIZE HALF OF THAT WAS FIXED ON 2026-09-01 AND THIS MODULE DID NOT
+MOVE, which is worth knowing before changing anything here. The wire used
+to carry 320x180 for everything, whose entire perimeter is 1,000 camera
+pixels against the ~1,472 his 736-pixel composition needs — so no pose
+could ever have worked, and the arithmetic below said so without knowing
+it. The commissioning read now asks for 1920x1080
+(`spectra/services/capture_settings.py` owns the ladder and the
+derivation), where the same wrap images ~4,600. Nothing in this file is
+stated against a frame size: `resolution_report` counts the camera pixels
+the composition ACTUALLY lit, whatever size the frame was, which is why a
+raise moves the verdict without moving a line of this arithmetic. Keep it
+that way — a constant here that assumed a frame size would be a second,
+silently stale copy of a contract that now varies per run.
+
 AND THE STATE BETWEEN THE TWO, which is the dangerous one: a target imaged
 just ABOVE that bar decodes, and decodes WRONG — gray code's own guarantee
 that a flipped low bit lands on a NEIGHBOUR means a marginal pose produces
@@ -114,6 +128,15 @@ MIN_SUPPORT = 1
 #:
 #: A run at or above this bar can still fail for other reasons; a run below
 #: it cannot succeed for any.
+#:
+#: WHAT IT COSTS IN FRAME SIZE, since that is the lever that actually moved:
+#: N indices need N x this many camera pixels of imaged strip (x
+#: RESOLUTION_SAFETY_FACTOR to be trusted), and a strip wrapped around a
+#: screen images as a PERIMETER — so 736 indices need ~1,472 (~1,840 safe)
+#: where a 320x180 frame's whole perimeter is 1,000 and a 1920x1080 one's
+#: is 6,000. `capture_settings.wrap_capacity_px` is that arithmetic in
+#: executable form, and `capture_settings.COMMISSION_PROFILE` is what it
+#: chose.
 MIN_CAMERA_PX_PER_INDEX = 2.0
 #: THE MARGIN, and it is the whole reason a per-target run does not erode
 #: the honesty the whole-composition run bought.
@@ -479,7 +502,11 @@ def render_frame(layout: dict[int, tuple[float, float]], on, *,
     own centre instead of a whole frame's worth of array. It exists for the
     FIELD REGIME proof — his real composition is 736 pixels, and a
     full-frame cache for 736 blobs of a 320x180 frame is ~340 MB, where
-    5-sigma windows are ~3 MB. Left at None the renderer is byte-for-byte
+    5-sigma windows are ~3 MB. At the commissioning read's own
+    1920x1080 the full-frame form is ~12 GB and the windowed one is
+    still ~3 MB, so there it is not an optimisation, it is the only
+    way the proof runs at all. Left at None the renderer is
+    byte-for-byte
     what it always was, so nothing already proven against it moves."""
     dead = dead or set()
     if blobs is None:

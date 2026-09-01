@@ -38,6 +38,7 @@ import asyncio
 import numpy as np
 
 from spectra.models.room_map import (AxisCalibration, Point, RoomMap)
+from spectra.services import capture_settings
 from spectra.services import (emitters as em, flare_preview_hold,
                               mapping_refusals, room_mapping)
 
@@ -52,7 +53,7 @@ def _virtual(device):
             "effect": {"type": "singleColor", "config": {}}}
 
 
-class _Session:
+class _Session(capture_settings.SessionCameraDouble):
     pose_id = "pose-1"
     run_abort = None
 

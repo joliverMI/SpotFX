@@ -42,6 +42,7 @@ import pytest
 
 from spectra.models.room_map import (AxisCalibration, EmitterFootprint, Point,
                                      RoomMap)
+from spectra.services import capture_settings
 from spectra.services import light_field, mapping_refusals, room_mapping
 
 AXIS = AxisCalibration(kind="vertical", floor=Point(x=0.5, y=1.0),
@@ -56,7 +57,7 @@ def _virtual(device):
             "effect": {"type": "singleColor", "config": {}}}
 
 
-class _Session:
+class _Session(capture_settings.SessionCameraDouble):
     """The phone. One carrier lights the frame; the other paints nothing —
     the far-side block whose light never reaches the camera."""
     pose_id = "pose-7"

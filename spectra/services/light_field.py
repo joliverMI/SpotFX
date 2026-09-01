@@ -65,9 +65,12 @@ from spectra.models.room_map import (AXIS_BINS, GRID_H, GRID_W, AxisCalibration,
 
 logger = logging.getLogger(__name__)
 
-#: The greyscale frame size the phone uploads. GRID_W x GRID_H divides it
-#: exactly (5x5 blocks), so downsampling is a box mean with no remainder and
-#: no interpolation to explain.
+#: THE MAP'S OWN greyscale frame size, and the bottom rung of the wire's
+#: ladder (`spectra/services/capture_settings.MAP_PROFILE`, which asserts the
+#: two agree). GRID_W x GRID_H divides it exactly (5x5 blocks), so
+#: downsampling is a box mean with no remainder and no interpolation to
+#: explain — as it is at every other rung. A COMMISSIONING read uses a
+#: bigger one; a footprint never needs to.
 FRAME_W = GRID_W * 5      # 320
 FRAME_H = GRID_H * 5      # 180
 #: Below this total relative luminance an emitter's capture holds no usable
@@ -110,7 +113,12 @@ def downsample(frame: np.ndarray) -> np.ndarray:
     """One greyscale frame -> the stored GRID_H x GRID_W grid, as an exact
     box mean. Accepts any frame whose dimensions are whole multiples of the
     grid; anything else is a programming error at the wire, not something to
-    silently resample."""
+    silently resample.
+
+    EVERY DECLARED WIRE FRAME SIZE IS SUCH A MULTIPLE
+    (`spectra/services/capture_settings.PROFILES`), which is what lets the
+    commissioning read borrow a 1920x1080 frame while a map stays at
+    320x180 and both land in the same comparable grid."""
     frame = np.asarray(frame, dtype=np.float64)
     if frame.ndim != 2:
         raise ValueError(f"expected a 2-D greyscale frame, got shape {frame.shape}")
@@ -118,7 +126,8 @@ def downsample(frame: np.ndarray) -> np.ndarray:
     if h % GRID_H or w % GRID_W:
         raise ValueError(
             f"frame {w}x{h} does not divide into the {GRID_W}x{GRID_H} grid — "
-            "the phone page sends exactly FRAME_W x FRAME_H")
+            f"the wire declares only whole multiples of it (see "
+            f"spectra/services/capture_settings.PROFILES)")
     return frame.reshape(GRID_H, h // GRID_H, GRID_W, w // GRID_W).mean(axis=(1, 3))
 
 

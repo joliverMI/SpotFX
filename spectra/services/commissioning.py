@@ -117,8 +117,9 @@ from spectra.models.scene import (SceneColorAssignment, SceneDeviceConfig,
                                   SceneV2)
 from spectra.services import commission_compare as compare
 from spectra.services import emitters as emitters_mod
-from spectra.services import (fixture_brightness, flare_preview_hold,
-                              gray_code, mapping_refusals, room_mapping)
+from spectra.services import (capture_settings, fixture_brightness,
+                              flare_preview_hold, gray_code, mapping_refusals,
+                              mapping_session, room_mapping)
 
 logger = logging.getLogger(__name__)
 
@@ -154,6 +155,46 @@ CAPTURE_S = 0.9
 #: Frames a capture must actually have. Below this the run refuses rather
 #: than decoding a stack built from single frames.
 MIN_FRAMES = 2
+#: THE FRAME SIZE THIS RUN READS AT, and the whole reason it is not the
+#: map's own 320x180: 736 pixels need ~1,472 camera pixels of imaged strip
+#: and that frame's entire perimeter is 1,000, so no pose could ever have
+#: worked. `spectra/services/capture_settings.py` carries the derivation;
+#: the session negotiates DOWN to whatever the camera actually has and the
+#: run reports the rung it got.
+READ_PROFILE = capture_settings.COMMISSION_PROFILE
+#: How long to wait for the client to start sending at that size before
+#: refusing by name. Two seconds is several frames at any tap rate, and a
+#: client that can only reach a smaller rung settles immediately rather
+#: than spending this.
+FRAME_SWITCH_WAIT_S = 4.0
+
+
+def capture_window(exposure_time: Optional[int], tap_fps: float
+                   ) -> tuple[float, Optional[str]]:
+    """This run's CAPTURE window, widened if the requested integration time
+    cannot deliver MIN_FRAMES inside the shipped one — and the refusal when
+    no window can.
+
+    THE COUPLING, which is easy to leave silent: a capture averages
+    whatever ARRIVED in its window, so at a fixed camera rate the window
+    length IS the frame count. A sensor integrating for 1/5 s produces at
+    most 5 frames a second and one integrating for 1/2 s at most 2, so
+    asking for a long exposure and leaving CAPTURE_S at 0.9 s would quietly
+    take the stack down to one frame a capture — no average, and every
+    capture's noise landing whole in the decode. See
+    `capture_settings.achievable_fps`.
+
+    WITH NO MANUAL EXPOSURE ASKED FOR THIS IS AN EXACT PASS-THROUGH: a run
+    that asks for nothing runs the shipped protocol, unchanged."""
+    if not exposure_time:
+        return CAPTURE_S, None
+    fps = capture_settings.achievable_fps(tap_fps, exposure_time)
+    need = capture_settings.min_capture_s(MIN_FRAMES, fps)
+    if need > room_mapping.MAX_CAPTURE_S:
+        return CAPTURE_S, mapping_refusals.exposure_too_long(
+            (exposure_time or 0) * capture_settings.EXPOSURE_UNIT_S, fps,
+            MIN_FRAMES, room_mapping.MAX_CAPTURE_S)
+    return max(CAPTURE_S, need), None
 #: The hold's heartbeat window. A run drives its own hold synchronously; if
 #: it dies mid-stack the sweep reverts within this + SWEEP_INTERVAL_S with
 #: nothing else needing to have run.
@@ -735,6 +776,13 @@ class RunResult:
     targets: list[dict] = field(default_factory=list)
     #: the target specs this run walked, in order, before any of them ran.
     target_specs: list[str] = field(default_factory=list)
+    #: WHAT THE CAMERA WAS ASKED FOR AND WHAT IT GAVE — the read frame size
+    #: requested, the rung that actually arrived (a client whose camera
+    #: cannot reach the request downgrades honestly), the source image size
+    #: it came from, the manual levers asked for and read back, and the
+    #: capture window this run used. A decode is only as good as the frame
+    #: it was read from, so the frame is part of the record.
+    camera: dict = field(default_factory=dict)
     problems: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     at: float = field(default_factory=time.time)
@@ -754,14 +802,15 @@ class RunResult:
                 "table": self.table, "captures": self.captures,
                 "resolution": self.resolution, "witness": self.witness,
                 "targets": self.targets,
-                "target_specs": self.target_specs,
+                "target_specs": self.target_specs, "camera": self.camera,
                 "problems": self.problems, "notes": self.notes,
                 "at": self.at}
 
 
 async def _capture(deps: room_mapping.RunDeps, program: CommissionProgram,
                    step: str, label: str, result: RunResult, *,
-                   watch_arrival: bool = False
+                   watch_arrival: bool = False,
+                   capture_s: float = CAPTURE_S
                    ) -> tuple[Optional[np.ndarray], list, float]:
     """One capture: land the step, let it settle, average a window of
     full-resolution frames. Returns (average, timed frames, write time).
@@ -779,15 +828,16 @@ async def _capture(deps: room_mapping.RunDeps, program: CommissionProgram,
             str((held or {}).get("reason") or "no writes")))
     write_at = deps.clock()
     if watch_arrival:
-        timed = await sess.gather_full(SETTLE_S + CAPTURE_S,
+        timed = await sess.gather_full(SETTLE_S + capture_s,
                                        min_frames=MIN_FRAMES)
         settled = [t for t in timed if t.at_s >= write_at + SETTLE_S]
     else:
         await deps.sleep(SETTLE_S)
-        timed = await sess.gather_full(CAPTURE_S, min_frames=MIN_FRAMES)
+        timed = await sess.gather_full(capture_s, min_frames=MIN_FRAMES)
         settled = timed
     result.captures.append({"label": label, "frames": len(settled),
                             "watched": len(timed),
+                            "capture_s": round(capture_s, 3),
                             "at_s": round(write_at, 3)})
     if len(settled) < MIN_FRAMES:
         return None, timed, write_at
@@ -799,9 +849,17 @@ class HoldRefused(Exception):
     """The room could not be held for a capture — already worded."""
 
 
+class CameraRefused(Exception):
+    """The camera would not read at the size, integration time or gain this
+    run needs — already worded (`mapping_refusals.upscaled_frame` /
+    `frame_size_not_adopted` / `manual_camera_unavailable`). Raised rather
+    than returned so it leaves through the run's own `finally`."""
+
+
 async def _one_pass(deps: room_mapping.RunDeps, program: CommissionProgram,
                     composition: Composition, result: RunResult,
-                    label: str) -> tuple[Optional[gray_code.Decode], dict]:
+                    label: str, capture_s: float = CAPTURE_S
+                    ) -> tuple[Optional[gray_code.Decode], dict]:
     """ONE full gray-code stack in ONE continuous hold: dark, full, then
     every bit and its inverse. The hold is closed by the caller's `finally`
     — never here, because a pass that raises must not leave the room dark
@@ -810,11 +868,13 @@ async def _one_pass(deps: room_mapping.RunDeps, program: CommissionProgram,
     total = composition.total
     bits = gray_code.bits_needed(total)
 
-    dark, _, _ = await _capture(deps, program, "dark", f"{label}/dark", result)
+    dark, _, _ = await _capture(deps, program, "dark", f"{label}/dark", result,
+                                capture_s=capture_s)
     if sess.run_abort:
         raise RunAborted(sess.run_abort)
     full, full_timed, full_at = await _capture(
-        deps, program, "full", f"{label}/full", result, watch_arrival=True)
+        deps, program, "full", f"{label}/full", result, watch_arrival=True,
+        capture_s=capture_s)
     if dark is None or full is None:
         raise NotEnoughFrames(
             f"not enough frames arrived for the {label} reference captures "
@@ -847,7 +907,8 @@ async def _one_pass(deps: room_mapping.RunDeps, program: CommissionProgram,
             program.set_patterns(patterns)
             frame, _, _ = await _capture(
                 deps, program, "pattern",
-                f"{label}/bit{bit}{'-inv' if invert else ''}", result)
+                f"{label}/bit{bit}{'-inv' if invert else ''}", result,
+                capture_s=capture_s)
             if sess.run_abort:
                 raise RunAborted(sess.run_abort)
             if frame is None:
@@ -972,7 +1033,8 @@ def instrument_latencies() -> dict[str, float]:
 async def _run_target(deps: room_mapping.RunDeps, scope: list[str],
                       full: Composition, spec: str, layout: Optional[dict],
                       layout_note: str, result: RunResult, repeats: int,
-                      instrument: dict[str, float]) -> dict:
+                      instrument: dict[str, float],
+                      capture_s: float = CAPTURE_S) -> dict:
     """ONE TARGET: its own composition slice, its own gray-code stack (or
     two), its own resolution report, and its own judged copy of the frozen
     table.
@@ -1015,7 +1077,7 @@ async def _run_target(deps: room_mapping.RunDeps, scope: list[str],
             sub.resolution = {}
             try:
                 decode, latency = await _one_pass(deps, program, comp, sub,
-                                                  pass_label)
+                                                  pass_label, capture_s)
             finally:
                 # ONE CONTINUOUS HOLD PER PASS, released before the next one
                 # opens — and released whatever happened inside it.
@@ -1128,7 +1190,8 @@ async def run_commission(mapper_id: str, deps: room_mapping.RunDeps, *,
                          repeat: int = 1,
                          layout: Optional[dict] = None,
                          instrument: Optional[dict[str, float]] = None,
-                         targets: Optional[list[str]] = None
+                         targets: Optional[list[str]] = None,
+                         camera: Optional["capture_settings.CameraRequest"] = None
                          ) -> RunResult:
     """The whole test: resolve the composition, gray-code it (once, or
     twice back to back), and judge the frozen table.
@@ -1162,6 +1225,31 @@ async def run_commission(mapper_id: str, deps: room_mapping.RunDeps, *,
     camera knows it — when that target images into too few camera pixels to
     be read back safely. On a per-target run that refusal ends the TARGET,
     not the run: the next fixture is a different question and gets asked.
+
+    THE CAMERA IS ASKED FOR THE READ FRAME SIZE, AND OPTIONALLY FOR MANUAL
+    LEVERS, before any of that (2026-09-01). `camera` is this run's request
+    — `capture_settings.CameraRequest`; None means "the frame size this
+    read needs, and nothing else", which is the shipped behaviour and keeps
+    the camera's own converge-then-freeze exposure. Three things follow, and
+    all three are stated rather than assumed:
+
+      * the frame size is NEGOTIATED, never imposed. The session asks for
+        READ_PROFILE and a client whose camera cannot reach it sends the
+        largest rung it can and says so; the run carries on at THAT size and
+        reports it, because a 1280x720 read of one fixture is a real
+        measurement. A client that never adopts any size refuses by name.
+      * a manual integration time or gain the camera did not TAKE refuses by
+        name, on the read-back, before the room goes dark — never measured
+        under whatever the camera chose instead while reporting the numbers
+        that were asked for.
+      * a long integration time WIDENS the capture windows so MIN_FRAMES is
+        still averaged (`capture_window`), and one so long that no legal
+        window can refuses by name.
+
+    Restored in the same `finally` as everything else this run borrows: the
+    session goes back to the map's own 320x180 with no manual levers, so a
+    night of ordinary footprint runs after a commissioning pass costs what
+    it always did.
 
     RESTORES IN A `finally`, three separate things, in the order they were
     taken: the hold (the lights), any virtual this run brought up, and the
@@ -1247,7 +1335,64 @@ async def run_commission(mapper_id: str, deps: room_mapping.RunDeps, *,
     entries: list[dict] = []
     sess.keep_full_frames = True
     sess.run_abort = None
+    req = camera or capture_settings.CameraRequest()
+    # THE FRAME SIZE IS THIS READ'S, not the caller's to lower: a
+    # commissioning decode at the map's own 320x180 is the failure of
+    # 2026-09-01. A caller may still name a SMALLER rung deliberately (the
+    # exposure comparison does not need 1080p), which is why the request's
+    # own value wins when it carries one.
+    req = capture_settings.CameraRequest(
+        frame_size=req.frame_size or READ_PROFILE,
+        exposure_time=req.exposure_time, gain=req.gain,
+        notes=list(req.notes))
+    capture_s, too_long = capture_window(
+        req.exposure_time, sess.observed_fps() or mapping_session.FRAME_FPS)
+    if too_long:
+        result.reason, result.refusal = too_long, "exposure"
+        sess.keep_full_frames = False
+        return result
     try:
+        await sess.apply_camera(req)
+        got = await sess.await_frame_size(req.frame_size, FRAME_SWITCH_WAIT_S)
+        # See `room_mapping`'s own call: a frame is not an answer about the
+        # LEVERS, and the gate below must not read the previous request's.
+        await sess.await_camera(FRAME_SWITCH_WAIT_S)
+        result.camera = {"requested": req.as_wire(),
+                         "frame_size": {"width": got[0], "height": got[1]},
+                         "source_size": {"width": sess.source_size[0],
+                                         "height": sess.source_size[1]},
+                         "lock": sess.camera_lock_view(),
+                         "capture_s": round(capture_s, 3),
+                         "observed_fps": sess.observed_fps()}
+        # BOTH GATES, BEFORE THE ROOM GOES DARK. A frame size the client
+        # never adopted, or a manual lever the camera did not take, would
+        # each produce a run whose numbers describe something other than
+        # what was asked for — which is worse than no run.
+        problem = sess.frame_refusal(req.frame_size) or sess.camera_refusal()
+        if problem:
+            # Raised rather than returned so it leaves through the SAME
+            # `finally` every other end of this run does — the camera goes
+            # back to the map's frame size, the strips this run brought up
+            # go back down, and the result is finished off below.
+            raise CameraRefused(problem)
+        if got != tuple(req.frame_size):
+            # AN HONEST DOWNGRADE IS A NOTE, NOT A REFUSAL: the camera has
+            # what it has, the read is real, and the resolution report will
+            # refuse on its own terms if this rung cannot carry the target.
+            result.notes.append(
+                f"This camera reads at {got[0]}x{got[1]}, not the "
+                f"{req.frame_size[0]}x{req.frame_size[1]} this test asks "
+                f"for — the run went ahead at that size, and a target it "
+                f"cannot resolve refuses on its own measurement rather than "
+                f"on this.")
+        if capture_s > CAPTURE_S:
+            result.notes.append(
+                f"The requested integration time lowers what this camera can "
+                f"deliver, so each capture window was widened from "
+                f"{CAPTURE_S:g}s to {capture_s:g}s to still average "
+                f"{MIN_FRAMES} frames — this run is about "
+                f"{(capture_s - CAPTURE_S) * len(result.target_specs) * (2 + 2 * gray_code.bits_needed(composition.total)):.0f}s "
+                f"longer than the shipped protocol.")
         fixtures = await _fixtures_for(composition, chains, deps)
         readings = await fixture_brightness.read_all(fixtures)
         warning = fixture_brightness.warning_for(readings)
@@ -1259,10 +1404,12 @@ async def run_commission(mapper_id: str, deps: room_mapping.RunDeps, *,
             for spec in specs:
                 entries.append(await _run_target(
                     deps, scope, composition, spec, layout, layout_note,
-                    result, result.repeats, resolved_instrument))
+                    result, result.repeats, resolved_instrument, capture_s))
         if owned.note:
             result.notes.append(owned.note)
         result.problems.extend(owned.problems)
+    except CameraRefused as exc:
+        result.reason, result.refusal = str(exc), "camera"
     except (RunAborted, HoldRefused) as exc:
         result.reason = str(exc)
         result.refusal = ("aborted" if isinstance(exc, RunAborted) else "hold")
@@ -1274,6 +1421,17 @@ async def run_commission(mapper_id: str, deps: room_mapping.RunDeps, *,
     finally:
         sess.keep_full_frames = False
         sess.full.clear()
+        # BACK TO THE MAP'S OWN FRAME AND NO MANUAL LEVERS. A commissioning
+        # read borrows a 1080p wire and possibly a long integration time;
+        # leaving either in place would make every ordinary footprint run
+        # after it cost thirty-six times the bandwidth and expose for a
+        # regime it never asked for.
+        try:
+            await sess.apply_camera(capture_settings.CameraRequest(
+                frame_size=capture_settings.MAP_PROFILE))
+        except Exception:                              # noqa: BLE001
+            logger.warning("commissioning: could not put the camera back to "
+                           "the map's own frame size", exc_info=True)
         left_on = await room_mapping.deactivate_after_capture(activated, deps)
         if left_on:
             result.problems.append(
