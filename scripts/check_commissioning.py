@@ -90,7 +90,8 @@ light_ownership.OWNERSHIP_FILE = td / "ownership.json"
 light_ownership.OWNERSHIP_FILE.write_text(json.dumps({"owner": "spectra"}))
 
 from spectra.services import commission_compare as cc          # noqa: E402
-from spectra.services import commissioning, gray_code, room_mapping  # noqa: E402
+from spectra.services import (commissioning, gray_code,  # noqa: E402
+                              mapping_refusals, room_mapping)
 
 FW, FH = 320, 180
 
@@ -847,6 +848,248 @@ def section_six():
           f"{note[:110]}...)")
 
 
+# ── SEVEN — PER TARGET, and the boundary that refuses a marginal one ──────
+#
+# THE CAPTAIN'S RULING (2026-09-01, after 3c above proved his whole
+# composition unreadable from ANY pose at the frame size the wire carries):
+# commission per fixture, or per segment, never the stitched whole — and
+# make the refusal boundary CONSERVATIVE, because "marginal is the state
+# that produces a confident wrong answer".
+#
+# The wire's 320x180 frame contract is deliberately NOT touched to make the
+# whole composition fit. That change goes back to him or it does not happen.
+
+def per_fixture_layout() -> dict[int, tuple[float, float]]:
+    """A PER-FIXTURE POSE, at his own composition's real sizes: each sconce
+    given a band of the frame it can actually be read in, and the 560-pixel
+    TV ring compact in the middle where it cannot. That is not a rigged
+    comparison — it is the situation, and it is why the ruling is per
+    fixture: one strip of 88 pixels fills a frame; three strips totalling
+    736 cannot."""
+    layout, index = {}, 0
+    per = FIELD_TV // 4
+    for k in range(FIELD_TV):
+        side, t = min(k // per, 3), (k % per) / per
+        layout[index] = [(0.25 + 0.50 * t, 0.42), (0.75, 0.42 + 0.16 * t),
+                         (0.75 - 0.50 * t, 0.58), (0.25, 0.58 - 0.16 * t)][side]
+        index += 1
+    for count, y in ((sum(FIELD_RIGHT), 0.15), (sum(FIELD_LEFT), 0.85)):
+        for k in range(count):
+            layout[index] = (0.05 + 0.90 * k / (count - 1), y)
+            index += 1
+    return layout
+
+
+def box_camera_stack(total: int, px_per_index: float, *, phase: float = 0.37,
+                     noise: float = 0.5, seed: int = 3, peak: float = 180.0,
+                     row: int = 90):
+    """A BOX-INTEGRATING camera looking at one strip, where the reported
+    `camera_px_per_index` IS `px_per_index` by construction — which is what
+    makes the boundary provable on both sides rather than approximately
+    bracketed.
+
+    Each composition index owns `px_per_index` camera columns starting at a
+    deliberately non-integer `phase`, and a camera column straddling two
+    indices sees the MEAN of what they are showing. That integration is not
+    a modelling flourish: it is the exact physical effect that makes a
+    marginal pose dangerous — the closer one camera pixel comes to spanning
+    a whole index, the more a pattern and its own inverse cancel."""
+    edges = phase + px_per_index * np.arange(total + 1)
+    cols = np.arange(FW) + 0.5
+    lo = np.maximum(edges[None, :-1], cols[:, None] - 0.5)
+    hi = np.minimum(edges[None, 1:], cols[:, None] + 0.5)
+    coverage = np.clip(hi - lo, 0.0, None)
+    rng = np.random.default_rng(seed)
+
+    def shot(on):
+        mask = np.zeros(total)
+        if on:
+            mask[list(on)] = 1.0
+        line = (coverage @ mask) * peak
+        frame = np.full((FH, FW), 2.0)
+        frame[row:row + 1, :] += line[None, :]
+        return np.clip(np.round(frame + rng.normal(0.0, noise, (FH, FW))),
+                       0, 255).astype(np.uint8).astype(np.float64)
+
+    def average(on):
+        return np.mean([shot(on) for _ in range(4)], axis=0)
+
+    every = set(range(total))
+    dark, full = average(set()), average(every)
+    pairs = []
+    for bit in range(gray_code.bits_needed(total)):
+        on = {i for i in every if gray_code.pattern_bits(np.array([i]), bit)[0]}
+        pairs.append((average(on), average(every - on)))
+    return dark, full, pairs
+
+
+def section_seven():
+    print("\n== 7. PER TARGET — a fixture at a time, and a MARGINAL one "
+          "refuses ==")
+
+    # (a) a slice is the STORED composition's own slice, re-addressed and
+    #     nothing else
+    whole = commissioning.resolve_composition(
+        "tv-mapper", field_room_virtuals(), CHAIN)
+    right = commissioning.slice_composition(
+        whole, "device:sconce-kitchen-right")
+    check(right.total == sum(FIELD_RIGHT) and whole.total == FIELD_TOTAL,
+          f"one sconce is {right.total} of the stored composition's "
+          f"{whole.total} pixels")
+    check([s.index for s in right.segments] == [1, 2] and
+          [(s.start, s.end) for s in right.segments] == [(0, 27), (28, 87)],
+          "its two stored segments keep their own numbers and their stored "
+          "order, re-addressed 0-87 for the gray code")
+    check(right.global_indices[0] == FIELD_TV and
+          right.global_indices[-1] == FIELD_TV + sum(FIELD_RIGHT) - 1,
+          f"and remember where they sit in the whole: local 0 is global "
+          f"{right.global_indices[0]}")
+    check(gray_code.bits_needed(right.total) == 7 and
+          gray_code.bits_needed(whole.total) == 10,
+          f"which is the point of re-addressing: {right.total} pixels are "
+          f"{gray_code.bits_needed(right.total)} patterns, not "
+          f"{gray_code.bits_needed(whole.total)}")
+    demand = int(right.total * gray_code.MIN_CAMERA_PX_PER_INDEX)
+    check(demand == 176 and
+          int(whole.total * gray_code.MIN_CAMERA_PX_PER_INDEX) == 1472,
+          f"and needs ~{demand} camera pixels of imaged strip where the "
+          f"stitched whole needs ~1472 of a frame whose entire border is "
+          f"~{2 * (FW + FH)}")
+    stored = truth_layout()
+    big = {i: (0.5, 0.5) for i in range(whole.total)}
+    sliced = commissioning.slice_layout(big, right)
+    check(sliced is not None and len(sliced) == right.total,
+          "the stored layout is sliced to the target, never re-derived at "
+          "the target's size")
+    check(commissioning.slice_layout(stored, right) is None,
+          "and a stored layout that does not carry one of the slice's own "
+          "pixels reports UNMEASURED rather than a guess")
+
+    # (b) each fixture, at a pose that frames it, decodes fully — and the
+    #     ring, from the same pose, refuses
+    layout = per_fixture_layout()
+    room = Room(virtuals=field_room_virtuals(), layout=layout,
+                radius_px=2.0, noise=1.0, peak=FIELD_PEAK)
+    result = run(room, layout=layout, instrument={}, targets=["fixtures"])
+    by_label = {e["label"]: e for e in result.targets}
+    check(result.target_specs == ["device:sconce-kitchen-left",
+                                  "device:sconce-kitchen-right",
+                                  "device:tv-backlight"],
+          f"one target per fixture, from the stored composition itself: "
+          f"{result.target_specs}")
+    for name in ("sconce-kitchen-left", "sconce-kitchen-right"):
+        entry = by_label[name]
+        seen = entry["decodes"][0]["seen"] if entry["decodes"] else 0
+        check(entry["ok"] and seen == sum(FIELD_RIGHT),
+              f"{name}: {seen} of {sum(FIELD_RIGHT)} pixels decoded at "
+              f"{entry['resolution']['camera_px_per_index']} camera pixels "
+              f"each — comfortably, at its own 88-pixel size")
+        check(entry["table"]["rows"][0]["verdict"] == cc.PASS,
+              f"{name}: row 1 of the SAME frozen table, judged against its "
+              f"own slice of the stored ground truth")
+    ring = by_label["tv-backlight"]
+    check(not ring["ok"] and ring["refusal"] == "resolution",
+          f"tv-backlight, the 560-pixel ring, refuses from the same pose "
+          f"({ring['resolution']['camera_px_per_index']} camera pixels per "
+          f"pixel, {ring['resolution']['verdict']})")
+    check(len([c for c in result.captures if c["label"].startswith("tv-")]) == 2,
+          "after its own two reference captures — a refused target costs "
+          "four seconds and does not end the run")
+
+    # (c) the set aggregates into the SAME judged shape, and the piece that
+    #     could not be read is LOUD, never dropped
+    table = result.table
+    check([r["field"] for r in table["rows"]] ==
+          [r["field"] for r in run(Room(), layout=truth_layout(),
+                                   instrument={}).table["rows"]],
+          "the aggregate is the same five rows in the same order")
+    check(table["tolerances"] == {
+              "seen_min_fraction": cc.SEEN_MIN_FRACTION,
+              "order_max_outlier_fraction": cc.ORDER_MAX_OUTLIER_FRACTION,
+              "arrangement_max_error": cc.ARRANGEMENT_MAX_ERROR,
+              "stitch_max_error": cc.STITCH_MAX_ERROR,
+              "latency_tolerance_ms": cc.LATENCY_TOLERANCE_MS},
+          "with the five frozen tolerances untouched")
+    check(table["verdict"] == "incomplete",
+          f"and the verdict is INCOMPLETE, not a pass: two fixtures green "
+          f"cannot outvote one nobody could measure")
+    row1 = table["rows"][0]
+    check(row1["verdict"] == cc.UNMEASURED and
+          row1["numbers"]["per_target"] == {
+              "sconce-kitchen-left": cc.PASS,
+              "sconce-kitchen-right": cc.PASS,
+              "tv-backlight": cc.UNMEASURED},
+          f"every row carries its own per-target verdicts: "
+          f"{row1['numbers']['per_target']}")
+    check(any(t["refusal"] == "resolution" for t in table["targets"]),
+          "and the target list carries the refusal and its sentence")
+
+    # (d) 226 IS STILL RED on the whole-composition attempt, from the same
+    #     per-fixture pose — splitting the run did not quietly widen it
+    whole_run = run(Room(virtuals=field_room_virtuals(), layout=layout,
+                         radius_px=2.0, noise=1.0, peak=FIELD_PEAK),
+                    layout=layout, instrument={})
+    check(not whole_run.ok and whole_run.refusal == "resolution" and
+          whole_run.table == {},
+          f"the stitched {FIELD_TOTAL}-pixel composition still refuses "
+          f"({whole_run.resolution['camera_px_per_index']} per pixel, "
+          f"{whole_run.resolution['verdict']}) — per-fixture is a different "
+          f"question, not a lower bar for the same one")
+
+    # (e) THE MARGINAL BOUNDARY, both sides, on a camera whose reported
+    #     camera_px_per_index IS the number under test
+    safe = (gray_code.MIN_CAMERA_PX_PER_INDEX
+            * gray_code.RESOLUTION_SAFETY_FACTOR)
+    above, below = safe + 0.1, safe - 0.1
+    n = 88
+    d_hi, f_hi, p_hi = box_camera_stack(n, above)
+    hi = gray_code.resolution_report(d_hi, f_hi, total=n)
+    dec_hi = gray_code.decode_stack(d_hi, f_hi, p_hi, total=n)
+    check(hi["verdict"] == gray_code.RESOLUTION_OK and len(dec_hi.seen) == n,
+          f"JUST ABOVE the bar ({hi['camera_px_per_index']} against "
+          f"{safe}): the gate passes and {len(dec_hi.seen)} of {n} decode")
+    d_lo, f_lo, p_lo = box_camera_stack(n, below)
+    lo = gray_code.resolution_report(d_lo, f_lo, total=n)
+    check(lo["verdict"] == gray_code.RESOLUTION_MARGINAL and
+          not lo["resolvable"] and lo["any_light"],
+          f"JUST BELOW it ({lo['camera_px_per_index']}): MARGINAL — above "
+          f"the {gray_code.MIN_CAMERA_PX_PER_INDEX} absolute minimum, "
+          f"inside the {gray_code.RESOLUTION_SAFETY_FACTOR}x margin, and "
+          f"REFUSED with light in the frame")
+    words = mapping_refusals.unresolvable_composition(
+        lo, FW, FH, target_label="sconce-kitchen-right")
+    check("MARGINAL" in words and "confident" in words and
+          "sconce-kitchen-right" in words,
+          f"and the refusal says WHICH it was, in his words: "
+          f"{words[:100]}...")
+    impossible = gray_code.resolution_report(
+        *box_camera_stack(n, 1.2)[:2], total=n)
+    words_i = mapping_refusals.unresolvable_composition(impossible, FW, FH)
+    check(impossible["verdict"] == gray_code.RESOLUTION_IMPOSSIBLE and
+          "MARGINAL" not in words_i and "cancel" in words_i,
+          f"while below the absolute minimum "
+          f"({impossible['camera_px_per_index']}) it is IMPOSSIBLE, and the "
+          f"sentence is the other one")
+    check(hi["safe_camera_px"] == int(np.ceil(
+              n * gray_code.MIN_CAMERA_PX_PER_INDEX
+              * gray_code.RESOLUTION_SAFETY_FACTOR)),
+          f"the margin is arithmetic, not a mood: {n} pixels need "
+          f"{hi['needed_camera_px']} camera pixels to be readable at all "
+          f"and {hi['safe_camera_px']} to be trusted")
+
+    # (f) HIS OWN RING, by 226's own arithmetic and the captain's own words
+    ring_needed = int(np.ceil(FIELD_TV * gray_code.MIN_CAMERA_PX_PER_INDEX))
+    ring_safe = int(np.ceil(FIELD_TV * gray_code.MIN_CAMERA_PX_PER_INDEX
+                            * gray_code.RESOLUTION_SAFETY_FACTOR))
+    border = 2 * (FW + FH)
+    check(ring_needed > border,
+          f"his ring alone: {FIELD_TV} pixels need ~{ring_needed} camera "
+          f"pixels to be readable at all and ~{ring_safe} to be trusted, "
+          f"against the ~{border} the whole border of a {FW}x{FH} frame "
+          f"holds — so the ring is out of reach at this frame size and the "
+          f"honest act is to say so, not to widen the wire")
+
+
 def print_table(result):
     print("\n== the frozen table, as this run judged it ==")
     for row in result.table["rows"]:
@@ -866,6 +1109,7 @@ def main():
     section_four()
     section_five()
     section_six()
+    section_seven()
     print_table(run(Room(), layout=truth_layout(), instrument={}))
     del room
     print()

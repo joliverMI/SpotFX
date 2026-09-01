@@ -723,3 +723,110 @@ def judge(decode, segments: list[Segment],
                 "arrangement_max_error": ARRANGEMENT_MAX_ERROR,
                 "stitch_max_error": STITCH_MAX_ERROR,
                 "latency_tolerance_ms": LATENCY_TOLERANCE_MS}}
+
+
+#: The order the aggregate resolves a field in when several targets
+#: disagree about it, worst first. It is `verdict_of`'s own precedence read
+#: one row at a time, and it is the reason a per-target run cannot come out
+#: greener than the whole-composition run it replaces: one target's FAIL is
+#: the whole table's FAIL, and one target that could not be MEASURED — a
+#: refusal included — makes the table INCOMPLETE rather than quietly
+#: shrinking the denominator to the targets that happened to work.
+_FIELD_PRECEDENCE = (FAIL, UNMEASURED, FINDING, PASS)
+
+#: The five fields, in the plan's own order, so an aggregate has a row for
+#: each even when every target refused and there is not one table to read
+#: the order off.
+FIELD_ORDER = ("Pixel count seen", "Pixel ordering", "2-D arrangement",
+               "Cross-device stitch", "Device latency")
+
+
+def aggregate(entries: list[dict]) -> dict:
+    """THE PER-TARGET RESULT SET, IN THE SAME JUDGED SHAPE — five rows, the
+    same five tolerances, one verdict.
+
+    A per-fixture run is the SAME pre-registered comparison applied to a
+    slice of the same stored ground truth, so it is judged by the same
+    table and it aggregates into the same shape rather than into a second,
+    friendlier one. Nothing here re-judges anything: every row of every
+    target was already decided by `judge` against tolerances frozen in the
+    plan, and this only resolves what the set of them means.
+
+    THE TWO RULES, and both exist to stop a split run reading greener than
+    the whole one it replaces:
+
+      * a field is as bad as its worst target (`_FIELD_PRECEDENCE`);
+      * a target that produced NO table — refused for resolution, for the
+        camera, for anything — contributes UNMEASURED to every field, with
+        its own sentence. It is never simply absent. A denominator that
+        silently drops the pieces that could not be read is exactly the
+        failure this whole instrument exists to refuse.
+
+    `entries` is [{target, label, table (dict or None), reason, refusal}].
+    """
+    entries = list(entries or [])
+    fields: list[str] = []
+    for entry in entries:
+        for row in ((entry.get("table") or {}).get("rows") or []):
+            if row.get("field") not in fields:
+                fields.append(str(row.get("field")))
+    if not fields:
+        fields = list(FIELD_ORDER)
+
+    rows: list[Row] = []
+    for name in fields:
+        per: list[tuple[str, dict]] = []
+        for entry in entries:
+            table = entry.get("table") or {}
+            label = str(entry.get("label") or entry.get("target") or "?")
+            found = next((r for r in (table.get("rows") or [])
+                          if r.get("field") == name), None)
+            if found is None:
+                found = {"field": name, "verdict": UNMEASURED,
+                         "ground_truth": "", "tolerance": "",
+                         "measured": "not measured",
+                         "indicts": "",
+                         "detail": str(entry.get("reason") or
+                                       "this target produced no decode"),
+                         "numbers": {}}
+            per.append((label, found))
+        verdict = next((v for v in _FIELD_PRECEDENCE
+                        if any(r.get("verdict") == v for _l, r in per)),
+                       UNMEASURED)
+        worst = [(l, r) for l, r in per if r.get("verdict") == verdict]
+        template = worst[0][1] if worst else {
+            "verdict": UNMEASURED, "ground_truth": "", "tolerance": "",
+            "measured": "not measured", "indicts": "",
+            "detail": "no target produced a decode"}
+        counts = {v: sum(1 for _l, r in per if r.get("verdict") == v)
+                  for v in _FIELD_PRECEDENCE}
+        rows.append(Row(
+            field=name,
+            ground_truth=str(template.get("ground_truth") or ""),
+            tolerance=str(template.get("tolerance") or ""),
+            verdict=verdict,
+            measured="; ".join(f"{l}: {r.get('measured') or r.get('verdict')}"
+                               for l, r in per),
+            indicts=str(template.get("indicts") or ""),
+            detail=(f"{len(worst)} of {len(per)} targets "
+                    f"{verdict}: {', '.join(l for l, _r in worst)}. "
+                    + str(template.get("detail") or "")).strip(),
+            numbers={"per_target": {l: r.get("verdict") for l, r in per},
+                     "counts": {k: v for k, v in counts.items() if v}}))
+
+    return {"verdict": verdict_of(rows),
+            "rows": [r.as_dict() for r in rows],
+            "findings": [r.as_dict() for r in rows if r.verdict == FINDING],
+            "targets": [{"target": e.get("target"), "label": e.get("label"),
+                         "verdict": ((e.get("table") or {}).get("verdict")
+                                     or ("refused" if not e.get("table")
+                                         else "")),
+                         "refusal": e.get("refusal") or "",
+                         "reason": e.get("reason") or ""}
+                        for e in entries],
+            "tolerances": {
+                "seen_min_fraction": SEEN_MIN_FRACTION,
+                "order_max_outlier_fraction": ORDER_MAX_OUTLIER_FRACTION,
+                "arrangement_max_error": ARRANGEMENT_MAX_ERROR,
+                "stitch_max_error": STITCH_MAX_ERROR,
+                "latency_tolerance_ms": LATENCY_TOLERANCE_MS}}

@@ -111,10 +111,29 @@ class CommissionBody(BaseModel):
     """What THIS commissioning run does. `mapper_id` names the stored
     composition to check (defaulting to the room's only carrier when it has
     exactly one, so the common case needs no body at all); `repeat` runs the
-    whole stack twice back to back, so two independent decodes bound the
-    instrument's own noise."""
+    stack twice back to back, so two independent decodes bound the
+    instrument's own noise.
+
+    `targets` NAMES WHAT TO COMMISSION, and per the captain's ruling
+    (2026-09-01) the useful answer is almost never the stitched whole:
+
+      omitted        the whole composition — the original behaviour, kept,
+                     and on his own tv-mapper it refuses as IMPOSSIBLE
+                     within four seconds with the arithmetic
+                     (`gray_code.MIN_CAMERA_PX_PER_INDEX`).
+      ["fixtures"]   one run per fixture. `per_fixture: true` is the same
+                     thing spelled as a switch.
+      ["segments"]   one run per stored segment, finer still.
+      explicit       "device:<id>" / "segment:<n>", any mixture.
+
+    Every target is judged by the SAME frozen table against the stored
+    composition's own slice of ground truth, and the set aggregates back
+    into one table of the same five rows
+    (`commission_compare.aggregate`)."""
     mapper_id: Optional[str] = None
     repeat: int = 1
+    targets: Optional[list[str]] = None
+    per_fixture: bool = False
 
 
 def _run_granularity(room: RoomMap, granularity: Optional[str],
@@ -400,6 +419,13 @@ async def run_commission(room_id: str, body: Optional[CommissionBody] = None):
     right-hand column names), or the run refuses BY NAME with nothing
     written. Every result is stored either way.
 
+    PER TARGET, on the captain's ruling — see `CommissionBody.targets`. A
+    per-fixture run is the SAME pre-registered comparison on a slice of the
+    same stored ground truth, aggregated back into the same five rows; a
+    target the camera cannot read SAFELY from this pose refuses by name and
+    the next fixture is still asked, with the unread one reported as
+    unmeasured rather than dropped from the denominator.
+
     One run at a time, sharing the mapping run's own lock — both hold the
     room and both consume the same phone's frames, so a second one would
     fight the first for both."""
@@ -426,7 +452,8 @@ async def run_commission(room_id: str, body: Optional[CommissionBody] = None):
         try:
             result = await commissioning.run_commission(
                 mapper_id, room_mapping.production_deps(sess),
-                repeat=(body.repeat if body else 1))
+                repeat=(body.repeat if body else 1),
+                targets=_commission_targets(body))
         except Exception as exc:                       # noqa: BLE001
             named = mapping_refusals.ownership_refusal(exc)
             if named is None:
@@ -443,6 +470,18 @@ async def run_commission(room_id: str, body: Optional[CommissionBody] = None):
         # row is red" without parsing prose.
         return JSONResponse(status_code=409, content=stored)
     return stored
+
+
+def _commission_targets(body: Optional[CommissionBody]) -> Optional[list[str]]:
+    """`targets` wins when it is given; `per_fixture` is the switch form of
+    `["fixtures"]`; neither means the whole composition, unchanged."""
+    if body is None:
+        return None
+    if body.targets:
+        return list(body.targets)
+    if body.per_fixture:
+        return [commissioning.TARGET_FIXTURES]
+    return None
 
 
 def _only_carrier(room: RoomMap) -> str:
