@@ -17,12 +17,15 @@ WHAT COUNTS AS EXPECTED HERE: an ownership state (released to Home
 Assistant, or a handover mid-flight), an ownership loss DURING a run, the
 hold's own 3-minute ceiling, a fixture that stops answering mid-run, an
 empty emitter set, a phone that goes away, a camera that cannot resolve the
-composition it is being asked to read back — and one WARNING, which is a
-different thing from a refusal: a map that will come out as a single piece
+composition it is being asked to read back, and — since the unattended
+capture client — a capture MACHINE with no usable camera, a session that
+never arrives or does not come back, and a queue somebody stopped. Plus one
+WARNING, which is a different thing from a refusal: a map that will come out as a single piece
 still runs and is still worth keeping, it just cannot show a wave. Each has a sentence below or is
 confirmed to have one at its own site — plus one FACT, `unseen_note`, which
 is neither: an emitter whose light this pose could not see ran perfectly
-well and is worth recording as such. What is NOT expected — a genuine bug
+well and is worth recording as such (`pose_changed_note` is the second
+one). What is NOT expected — a genuine bug
 — still raises, and should: a sentence invented for it would be a lie.
 
 ONE WORDING PER CONDITION, here, so the route, the run and the page cannot
@@ -259,3 +262,87 @@ def one_piece_warning(carrier_id: str, pixels: int, block_pixels: int, *,
             f"show a wave travelling along it — every pixel of it dims "
             f"together. Choose Blocks to measure it in {pieces} pieces "
             f"instead ({pixels} pixels at {block_pixels} a block).")
+
+
+# ── THE UNATTENDED PATH ────────────────────────────────────────────────────
+#
+# A capture run used to need a person at every step: open the page, grant
+# the camera, wait for the lock, aim, press. The unattended client
+# (spectra/capture_client/) and the queue runner
+# (spectra/services/capture_queue.py) remove the middle of that, and they
+# introduce conditions of their own. Each gets a sentence HERE, for the same
+# reason every other one on this path does: a queue that runs while nobody
+# is watching is read afterwards, from a log, by someone who was asleep —
+# so "item 3 failed" is useless and the sentence has to carry the whole
+# story on its own.
+
+#: What refuses a run when nothing is holding a camera on the room. It names
+#: BOTH ways in, because since the unattended client there are two, and a
+#: sentence that names only the phone would send him to the wrong machine.
+#: The words "no phone connected" are kept deliberately: they are what this
+#: condition has always said, and the proofs that read it still read it.
+NO_SESSION = (
+    "no capture session — no phone connected and no capture client running. "
+    "Open the Rooms page on a phone and start its camera, or start the "
+    "unattended capture client on a machine that has one "
+    "(python -m spectra.capture_client).")
+
+
+def no_camera(detail: str, host: str = "") -> str:
+    """The capture MACHINE has no usable camera — refused before a single
+    frame, and before the room is asked to go dark for it.
+
+    Reached from the client's own start-up and reported over the session, so
+    it lands on the same surface every other refusal here does: the client
+    connects and says what is wrong rather than dying silently on a laptop
+    nobody is looking at. A run then refuses with the camera's own reason
+    instead of the generic "not locked yet"."""
+    where = f" on {host}" if host else ""
+    return (f"the capture client{where} could not open a camera: {detail}. "
+            f"Nothing was measured and nothing was written. Check the camera "
+            f"is plugged in, that no other program is holding it, and that "
+            f"this machine's user may read it, then start the client again.")
+
+
+def session_lost(waited_s: float, *, ever_connected: bool) -> str:
+    """The queue asked for a capture session and did not get one — either it
+    never arrived, or it went away and did not come back inside the wait.
+
+    A queue that stops here KEEPS everything it already measured; the
+    sentence says so, because an unattended run that stopped half way is a
+    real result and a discarded one is not."""
+    if ever_connected:
+        return (f"the capture session went away and did not come back within "
+                f"{waited_s:.0f}s, so the rest of this queue was not run. "
+                f"Everything measured before that is kept. Start the capture "
+                f"client again and run the remaining items.")
+    return (f"no capture session arrived within {waited_s:.0f}s, so nothing "
+            f"in this queue was run and nothing was written. Start the "
+            f"capture client on the machine with the camera, then start the "
+            f"queue again.")
+
+
+def queue_stopped(remaining: int) -> str:
+    """Someone pressed Stop. Not a failure, and the count says exactly how
+    much of the declared list never ran."""
+    return (f"the capture queue was stopped, so {remaining} remaining "
+            f"item{'' if remaining == 1 else 's'} did not run. Everything "
+            f"measured before that is kept.")
+
+
+def pose_changed_note(previous: str, now: str) -> str:
+    """A FACT, like `unseen_note` — not a refusal and not a warning about
+    anything going wrong.
+
+    The camera was REOPENED part-way through a queue (the client reopens it
+    when the capture pipe dies, never for a plain WebSocket drop), so its
+    exposure was re-locked and its byte scale is its own again. Footprints
+    from either side of this line are each internally comparable and are NOT
+    comparable across it. The queue says so rather than leaving a map that
+    looks like one measurement and is two."""
+    return (f"the camera was reopened during this queue (pose {previous} -> "
+            f"{now}), so its exposure was locked again and its brightness "
+            f"scale starts over. Footprints measured before this point and "
+            f"after it are each comparable among themselves, but not with "
+            f"each other — re-map anything you want to compare across it in "
+            f"one pass.")

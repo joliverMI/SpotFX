@@ -1618,6 +1618,18 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        id: 'unattended-capture',
+        title: 'Capture runs that do not need you: the queue and the capture client',
+        keywords: 'unattended overnight queue automatic capture client headless laptop webcam v4l2 cron batch declared list runs no human remote start',
+        body: [
+          'A mapping or commissioning run used to need a person at every step: open this page on something with a camera, grant it, wait for the exposure lock, aim it, keep the tab alive, press Start, wait, press the next one. The capture CLIENT does all of that except aiming, which is a physical act and stays one. It runs on any machine with a webcam that can reach SPECTRA — `python -m spectra.capture_client --url http://spectra:8000/spectra --queue overnight.json` — opens the camera, asks the driver for manual exposure and manual white balance, reads back what the driver actually did, and holds the session, reconnecting on its own if the connection drops.',
+          'A QUEUE is a declared list of the same runs the buttons on this page start — map runs with their own granularity and settle times, commissioning passes with their own targets — executed one after another. It goes through exactly the same code the buttons do, so nothing about a run is more permissive because nobody is watching. A queue is validated when it is declared, so a typo is refused before the room ever goes dark, and the record is written after every item, so a queue interrupted by a reboot has still explained itself.',
+          'THE EXPOSURE LOCK IS NOT RELAXED FOR IT. The client reports what the camera driver said, the same way the phone page reports what the browser said, and the run refuses by name if either exposure or white balance is not actually locked. Automating the request is the point; nothing here can report a lock the camera did not confirm.',
+          'What you read afterwards is on this page: every item with what happened in a sentence — completed, stopped part-way (and what it kept), refused and why, or did not run. A run that is cut short keeps its measurements; if the item declared a retry, it is run again and both attempts are shown. If the camera had to be REOPENED part-way through a queue, its exposure was locked again and its brightness scale started over — the queue says so, because footprints from either side of that line are not comparable with each other.',
+          'Still yours to do: point the camera at the room and choose where it stands, make sure SPECTRA is driving the lights before the queue starts, and move the camera to a second pose for anything the first one could not see.',
+        ],
+      },
+      {
         id: 'room-mapping-granularity',
         title: 'Mapping in parts: whole fixtures, segments or blocks',
         keywords: 'granularity segment block pixels parts strip tv television wrap auto whole device split emitters resolution how many',

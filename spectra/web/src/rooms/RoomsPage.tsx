@@ -30,6 +30,7 @@ import HelpLink from '../help/HelpLink';
 import { apiDel, apiGet, apiPost } from '../api/client';
 import { useToast } from '../components/Toast';
 import HeatThumbnail from './HeatThumbnail';
+import UnattendedCard from './UnattendedCard';
 import { MappingCapture, MappingClient, type LockState, secureContextProblem } from './mappingCapture';
 
 type PixelRange = { virtual_id: string; start: number; end: number };
@@ -731,6 +732,12 @@ export default function RoomsPage() {
           )}
         </section>
       </div>
+
+      {/* THE UNATTENDED HALF, below the room he is looking at: the same runs,
+        * declared as a list and executed by a capture client on a machine
+        * with a camera. It is a REPORT here — every refusal on that path is
+        * a sentence, and this is the surface a human reads it on. */}
+      <UnattendedCard />
     </div>
   );
 }

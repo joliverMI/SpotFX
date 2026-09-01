@@ -34,13 +34,27 @@ This is the AV instrument's own refusal-honesty pattern
 (av_sync_session._refused / av_sync_correlate's MIN_PEAK_RATIO), applied to
 the one systematic that would make a whole map lie.
 
+TWO CLIENTS SPEAK THIS WIRE, and the gate cannot tell them apart on
+purpose. The Rooms page on a phone is one (`spectra/web/src/rooms/
+mappingCapture.ts`, confirming the lock out of `getSettings()`); the
+UNATTENDED CAPTURE CLIENT is the other (`spectra/capture_client/`, a
+process on a machine with a webcam, confirming the lock out of the V4L2
+control it just read back). Both report what the DEVICE said and neither
+gets to decide to proceed anyway — the gate reads two booleans and refuses,
+and `lock.source` records whose read-back they came from without changing
+how much they are trusted.
+
 THE WIRE, deliberately the same message shapes the av-sync phone page
 already speaks (spectra/api/rooms.py is the router):
-  phone -> server   hello / pong / frame / lock / stop
-  server -> phone   welcome / hello_ack / ping / config / status / error
+  client -> server  hello / pong / frame / lock / stop
+  server -> client  welcome / hello_ack / ping / config / status / error
 `frame` carries `data` (base64), `width`, `height`, `mime`,
 `captured_at_ms` and `lock` — the same envelope av_sync_session._ingest_frame
-reads, plus the lock state this stage requires.
+reads, plus the lock state this stage requires. `hello` may carry a
+`pose_hint`, which a RECONNECTING client uses to say its camera never
+closed and its exposure was never re-locked (see `_adopt_pose`), and a
+`camera_error`, which is how a client with no camera at all still says so
+out loud.
 
 PIXELS: `image/grey8` — raw single-byte luminance, width*height bytes, row
 major. Not JPEG: a lossy codec's own quantisation lands in the difference
@@ -129,6 +143,18 @@ class LockState:
     white_balance_mode: str = ""
     exposure_capabilities: list[str] = field(default_factory=list)
     white_balance_capabilities: list[str] = field(default_factory=list)
+    #: The client could not open a camera AT ALL — a different condition
+    #: from "opened it and it will not lock", and one only the capture
+    #: machine can know. Carried here so an unattended client that finds no
+    #: camera still CONNECTS and says so, instead of dying quietly on a
+    #: laptop nobody is looking at; the refusal then names the real reason
+    #: rather than the generic "has not reported its lock state yet".
+    camera_error: str = ""
+    #: WHAT confirmed this lock, in the client's own words — "getSettings"
+    #: for the browser page, "v4l2:auto_exposure" for the native client.
+    #: Reported, never trusted differently: the gate reads the two booleans,
+    #: and this says whose read-back they came from.
+    source: str = ""
     changed_at: float = 0.0
 
     @property
@@ -143,6 +169,7 @@ class LockState:
                 "white_balance_mode": self.white_balance_mode,
                 "exposure_capabilities": list(self.exposure_capabilities),
                 "white_balance_capabilities": list(self.white_balance_capabilities),
+                "camera_error": self.camera_error, "source": self.source,
                 "locked": self.locked}
 
 
@@ -150,12 +177,24 @@ def lock_refusal(lock: LockState, phone: dict | None = None) -> Optional[str]:
     """The refusal text, or None when the camera is genuinely locked. One
     function so the run gate, the mid-run abort and the status surface all
     say the SAME sentence — a refusal a user reads in two different wordings
-    reads as two different problems."""
+    reads as two different problems.
+
+    IT SPEAKS TO BOTH CLIENT KINDS. The phone's page and the unattended
+    capture client hit exactly the same condition for exactly the same
+    reason, so there is one sentence, and it names the remedy on each
+    (`hello`'s `user_agent`/`host` say which machine is being talked to)."""
+    ua = ((phone or {}).get("user_agent") or "").strip()
+    if lock.camera_error:
+        # A capture machine with NO camera is its own condition, and it is
+        # the one an unattended client hits first. `mapping_refusals` owns
+        # the wording, like every other expected condition on this path.
+        from spectra.services import mapping_refusals
+        return mapping_refusals.no_camera(
+            lock.camera_error, ((phone or {}).get("host") or ua or ""))
     if not lock.reported:
         return ("the phone has not reported its camera lock state yet — "
                 "start the camera on this page and wait for it to settle "
                 "before mapping")
-    ua = ((phone or {}).get("user_agent") or "").strip()
     who = f" ({ua})" if ua else ""
     missing = []
     if not lock.exposure_locked:
@@ -168,11 +207,13 @@ def lock_refusal(lock: LockState, phone: dict | None = None) -> Optional[str]:
                        f"this camera offers: {caps})")
     if not missing:
         return None
-    return (f"this browser{who} will not lock " + " and ".join(missing) +
+    return (f"this camera{who} will not lock " + " and ".join(missing) +
             ". A mapping run is refused: with auto-exposure live, every "
             "footprint is scaled by an unknown, silently changing factor and "
-            "the whole map would lie. Try Chrome on this phone, or a camera "
-            "app that exposes manual exposure.")
+            "the whole map would lie. On a phone, try Chrome, or a camera app "
+            "that exposes manual exposure; on a capture machine, check "
+            "`v4l2-ctl --list-ctrls` for an auto_exposure control this camera "
+            "actually has.")
 
 
 @dataclass
@@ -200,6 +241,10 @@ class MappingSession:
         self.send = send
         self._clock = clock
         self.pose_id = uuid.uuid4().hex[:8]
+        #: True when the CLIENT supplied this pose id on connect (a
+        #: reconnect that kept the same open, still-locked camera) rather
+        #: than the server minting a fresh one. See `_adopt_pose`.
+        self.pose_asserted = False
         self.clockmap = ClockMap()
         self.hello: dict = {}
         self.lock = LockState()
@@ -278,12 +323,15 @@ class MappingSession:
         kind = msg.get("type")
         if kind == "hello":
             self.hello = {k: msg.get(k) for k in
-                          ("user_agent", "video", "secure_context", "origin")
+                          ("user_agent", "video", "secure_context", "origin",
+                           "client", "host", "camera")
                           if k in msg}
+            self._adopt_pose(msg.get("pose_hint"))
             if isinstance(msg.get("lock"), dict):
                 self._apply_lock(msg["lock"])
             await self.send({"type": "hello_ack", "session_id": self.id,
                              "pose_id": self.pose_id,
+                             "pose_asserted": self.pose_asserted,
                              "lock": self.lock.as_dict(),
                              "refusal": lock_refusal(self.lock, self.hello)})
         elif kind == "pong":
@@ -305,6 +353,33 @@ class MappingSession:
             await self.send({"type": "error",
                              "message": f"unknown message type {kind!r}"})
 
+    def _adopt_pose(self, hint: Any) -> None:
+        """A RECONNECTING CLIENT MAY ASSERT ITS POSE, and this is the whole
+        reason the unattended client can survive a dropped WebSocket without
+        quietly splitting a map in two.
+
+        A pose is "this camera, where it is standing, at the exposure it
+        locked". A footprint is `lit - dark` in that camera's own byte
+        scale, so footprints are comparable within one pose and NOT across
+        two. A WebSocket drop moves nothing and re-locks nothing: the camera
+        stayed open and its scale is unchanged, so a new session id with a
+        NEW pose id would be a lie in the more dangerous direction — it
+        would label one measurement as two.
+
+        WHAT MAKES THE ASSERTION HONEST IS ON THE CLIENT SIDE, structurally:
+        the token is generated INSIDE the camera open (see
+        `spectra/capture_client/camera.py`), so it cannot survive a reopen,
+        and a reopen is exactly when the exposure is locked again. The
+        server records that the pose was asserted rather than minted here
+        (`pose_asserted`), so a reader can always tell which it was."""
+        if not isinstance(hint, str):
+            return
+        token = "".join(ch for ch in hint.strip() if ch.isalnum() or ch in "-_")[:32]
+        if not token:
+            return
+        self.pose_id = token
+        self.pose_asserted = True
+
     def _apply_lock(self, payload: dict) -> None:
         prev = self.lock.locked
         self.lock = LockState(
@@ -316,6 +391,8 @@ class MappingSession:
             exposure_capabilities=[str(x) for x in (payload.get("exposure_capabilities") or [])],
             white_balance_capabilities=[
                 str(x) for x in (payload.get("white_balance_capabilities") or [])],
+            camera_error=str(payload.get("camera_error") or ""),
+            source=str(payload.get("source") or ""),
             changed_at=self._clock())
         if prev and not self.lock.locked and self.run_abort is None:
             # A lock LOST mid-run is the failure this instrument exists to
@@ -427,6 +504,7 @@ class MappingSession:
     def status(self) -> dict:
         latest = self.frames.latest()
         return {"session_id": self.id, "pose_id": self.pose_id,
+                "pose_asserted": self.pose_asserted,
                 "closed": self.closed,
                 "clock": self.clockmap.as_dict(),
                 "counts": dict(self.counts),
