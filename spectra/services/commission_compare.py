@@ -798,12 +798,20 @@ def aggregate(entries: list[dict]) -> dict:
             "verdict": UNMEASURED, "ground_truth": "", "tolerance": "",
             "measured": "not measured", "indicts": "",
             "detail": "no target produced a decode"}
+        # GROUND TRUTH AND TOLERANCE ARE THE PRE-REGISTRATION, not a
+        # property of the worst target — a refused target's filler row has
+        # neither, and taking them from it would render three rows of a
+        # pre-registered table with no pre-registration in them. They are
+        # constant per field, so the first target that carries them is the
+        # right source; only `indicts` and `detail` come from the worst.
+        stated = next((r for _l, r in per if r.get("ground_truth")), template)
+        bound = next((r for _l, r in per if r.get("tolerance")), template)
         counts = {v: sum(1 for _l, r in per if r.get("verdict") == v)
                   for v in _FIELD_PRECEDENCE}
         rows.append(Row(
             field=name,
-            ground_truth=str(template.get("ground_truth") or ""),
-            tolerance=str(template.get("tolerance") or ""),
+            ground_truth=str(stated.get("ground_truth") or ""),
+            tolerance=str(bound.get("tolerance") or ""),
             verdict=verdict,
             measured="; ".join(f"{l}: {r.get('measured') or r.get('verdict')}"
                                for l, r in per),

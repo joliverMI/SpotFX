@@ -975,12 +975,13 @@ async def _run_target(deps: room_mapping.RunDeps, scope: list[str],
     entry = {"target": spec, "label": label, "ok": False, "reason": "",
              "refusal": "", "composition": comp.as_dict(),
              "resolution": {}, "decodes": [], "agreement": {}, "table": None,
-             "layout_note": layout_note}
+             "layout_note": layout_note, "notes": []}
 
     program = CommissionProgram(scope, comp,
                                 snapshot_virtuals=full.virtual_ids)
     sub = RunResult(mapper_id=full.mapper_id, ok=False)   # this target's own
     decodes: list[gray_code.Decode] = []
+    reports: list[dict] = []
     latency_by_device: dict[str, float] = {}
     resolution_ms = 1e9
     try:
@@ -991,6 +992,7 @@ async def _run_target(deps: room_mapping.RunDeps, scope: list[str],
             # multi-target capture list readable.
             prefix = f"{comp.target_label}/" if comp.target_label else ""
             pass_label = f"{prefix}run{pass_no + 1}"
+            sub.resolution = {}
             try:
                 decode, latency = await _one_pass(deps, program, comp, sub,
                                                   pass_label)
@@ -1003,6 +1005,14 @@ async def _run_target(deps: room_mapping.RunDeps, scope: list[str],
                     logger.warning("commissioning: releasing the hold after "
                                    "%s failed; the hold sweep owns it from "
                                    "here", pass_label, exc_info=True)
+                if sub.resolution:
+                    reports.append(sub.resolution)
+                    # THE POSE'S MARGIN TRAVELS EVEN WHEN THE RUN DIES ABOVE
+                    # US. `_run_target` does not return on an abort or a
+                    # refused hold, so publishing it here is the only way
+                    # "carried whether the run went on or refused" stays
+                    # true of `RunResult.resolution`.
+                    result.resolution = sub.resolution
             if decode is not None:
                 decodes.append(decode)
                 if not latency_by_device:
@@ -1016,13 +1026,27 @@ async def _run_target(deps: room_mapping.RunDeps, scope: list[str],
                             else "frames")
     finally:
         result.captures.extend(sub.captures)
-        entry["resolution"] = sub.resolution
+        # THE REPORT THAT BELONGS TO THE ACCEPTED DECODE is the FIRST pass's,
+        # never a later repeat's: publishing a second pass's margin beside a
+        # table judged from the first would describe the wrong pose.
+        entry["resolution"] = reports[0] if reports else {}
 
     if not decodes:
         if not entry["reason"]:
             entry["reason"] = ("no capture stack was decoded — see the "
                                "problems for why")
         return entry
+
+    if entry["refusal"]:
+        # AN EARLIER PASS DECODED AND A LATER REPEAT DID NOT. The judged
+        # table belongs to the pass that worked, so this is a NOTE about a
+        # missing repeat — never a refusal sitting next to an accepted
+        # answer, which is the exact shape the marginal boundary exists to
+        # keep out of the record.
+        entry["notes"].append(
+            f"a later repeat of this target did not complete: "
+            f"{entry['reason']}")
+        entry["reason"], entry["refusal"] = "", ""
 
     entry["decodes"] = [d.as_dict() for d in decodes]
     if len(decodes) > 1:
@@ -1199,7 +1223,7 @@ async def run_commission(mapper_id: str, deps: room_mapping.RunDeps, *,
         # every existing caller and every existing proof reads what it
         # always read.
         entry = entries[0] if entries else {}
-        result.resolution = entry.get("resolution") or {}
+        result.resolution = entry.get("resolution") or result.resolution
         result.decodes = entry.get("decodes") or []
         result.agreement = entry.get("agreement") or {}
         if entry.get("table"):
@@ -1214,15 +1238,34 @@ async def run_commission(mapper_id: str, deps: room_mapping.RunDeps, *,
                 result.refusal = str(entry.get("refusal") or "")
         return result
 
+    # A TARGET THE RUN NEVER REACHED IS STILL A TARGET. An abort, a refused
+    # hold or an ownership loss ends the whole run mid-set, so the targets
+    # after it were never appended — and an aggregate over only the ones
+    # that happened to finish is precisely the silently-shrinking
+    # denominator `compare.aggregate` exists to refuse. They are filled in
+    # here, in the order they were going to run, so the table reports the
+    # set that was ASKED FOR rather than the subset that answered.
+    done = {e.get("target") for e in entries}
+    entries = [next(e for e in entries if e.get("target") == spec)
+               if spec in done else
+               {"target": spec, "label": spec, "ok": False,
+                # "not_attempted" ALWAYS, whatever ended the run: at the
+                # target's own level the fact is that nobody looked, and
+                # the run's own sentence says why.
+                "reason": ("the run ended before this target was reached"
+                           + (f": {result.reason}" if result.reason else "")),
+                "refusal": "not_attempted",
+                "composition": {}, "resolution": {}, "decodes": [],
+                "agreement": {}, "table": None, "notes": []}
+               for spec in specs]
     result.targets = entries
     result.resolution = next((e.get("resolution") for e in entries
-                              if e.get("resolution")), {})
-    if not entries:
-        if not result.reason:
-            result.reason = "no target was commissioned"
-        return result
+                              if e.get("resolution")), result.resolution)
     result.table = compare.aggregate(entries)
-    result.ok = any(e.get("table") for e in entries)
+    # A RUN-LEVEL REFUSAL IS A REFUSAL even when some targets were judged
+    # before it: the judged tables are kept and stored, but the run did not
+    # complete, and `ok` is what the route turns into a 200.
+    result.ok = any(e.get("table") for e in entries) and not result.refusal
     if not result.ok and not result.reason:
         result.reason = "; ".join(
             f"{e.get('label')}: {e.get('reason')}" for e in entries

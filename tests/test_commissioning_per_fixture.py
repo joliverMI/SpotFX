@@ -428,3 +428,132 @@ def test_his_ring_alone_is_out_of_reach_at_the_wire_s_own_frame_size():
     # one sconce, the target the ruling actually asks for, is comfortable
     assert int(np.ceil(88 * gray_code.MIN_CAMERA_PX_PER_INDEX)) == 176
     assert 176 < 2 * (W + H)
+
+
+# ── the run ending mid-set, and the record it leaves ──────────────────────
+
+def test_a_target_the_run_never_reached_is_unmeasured_never_absent():
+    """A run aborted part-way through the set would otherwise aggregate over
+    only the targets that happened to finish — the silently-shrinking
+    denominator `aggregate` exists to refuse, arrived at from the other
+    direction. Every spec that was ASKED FOR appears in the table, in the
+    order it was going to run."""
+    h = Harness()
+    # end the session as soon as the second target starts its own stack
+    seen: list[str] = []
+    real = h.session.gather_full
+
+    def _abort_after(n_captures):
+        async def gather(seconds, *, min_frames=1):
+            seen.append("x")
+            if len(seen) > n_captures:
+                h.session.run_abort = "the phone stopped sending frames"
+            return await real(seconds, min_frames=min_frames)
+        return gather
+
+    # the first fixture (8 pixels -> 3 bits -> 8 captures) finishes; the
+    # second is cut off part-way through its own stack
+    h.session.gather_full = _abort_after(10)
+    result = h.run(layout=h.layout, instrument={}, targets=["fixtures"])
+
+    assert result.refusal == "aborted"
+    # THE WHOLE SET IS REPORTED, not the part that answered
+    assert [t["target"] for t in result.targets] == result.target_specs
+    assert len(result.targets) == 3
+    unreached = [t for t in result.targets if t["refusal"] == "not_attempted"]
+    assert unreached, "a target the run never reached must say so"
+    assert all("ended before this target was reached" in t["reason"]
+               for t in unreached)
+    row = result.table["rows"][0]
+    assert set(row["numbers"]["per_target"]) == set(
+        t["label"] for t in result.targets)
+    assert row["verdict"] == cc.UNMEASURED
+    assert result.table["verdict"] == "incomplete"
+    # a run that did not complete is not a 200, even with tables in hand
+    assert result.ok is False
+    # and the room is still put back
+    assert set(h.activated) == set(h.deactivated)
+
+
+def test_the_aggregate_keeps_the_pre_registration_on_an_unmeasured_row():
+    """`ground_truth` and `tolerance` are the pre-registration itself, not a
+    property of whichever target came out worst. A refused target's filler
+    row carries neither, and inheriting from it would render rows of a
+    pre-registered table with no pre-registration in them."""
+    h = Harness(tv=2000, sconce=8)
+    result = h.run(layout=h.layout, instrument={}, targets=["fixtures"])
+    rows = result.table["rows"]
+    # the ring is unmeasured, so every row it appears in is unmeasured
+    assert rows[0]["verdict"] == cc.UNMEASURED
+    for row in rows[:3]:
+        assert row["ground_truth"], f"{row['field']} lost its ground truth"
+        assert row["tolerance"], f"{row['field']} lost its tolerance"
+    assert "98" in rows[0]["tolerance"]
+
+
+def test_the_pose_s_margin_survives_a_refused_hold():
+    """`RunResult.resolution` says "carried whether the run went on or
+    refused". A hold refused after the reference captures must not take the
+    measurement down with it."""
+    h = Harness()
+    real_open = None
+
+    from spectra.services import room_mapping
+
+    deps = h.deps()
+    calls = {"n": 0}
+    inner = deps.open_hold
+
+    async def refusing_open(program, intensity, *, step, heartbeat_timeout_s):
+        calls["n"] += 1
+        if calls["n"] > 2:                     # dark and full land; then no
+            return {"held": False, "reason": "nothing was rendering"}
+        return await inner(program, intensity, step=step,
+                           heartbeat_timeout_s=heartbeat_timeout_s)
+
+    patched = room_mapping.RunDeps(
+        session=deps.session, get_virtuals=deps.get_virtuals,
+        open_hold=refusing_open, close_hold=deps.close_hold,
+        sleep=deps.sleep, clock=deps.clock,
+        carrier_devices=deps.carrier_devices, spectra_owns=deps.spectra_owns,
+        activate=deps.activate, deactivate=deps.deactivate,
+        fixture_devices=deps.fixture_devices)
+    h.composition = commissioning.resolve_composition(
+        "tv-mapper", h.virtuals,
+        [{"id": d, "type": "wled"} for d in
+         ("tv-backlight", "sconce-kitchen-left", "sconce-kitchen-right")])
+    import asyncio
+    result = asyncio.run(commissioning.run_commission(
+        "tv-mapper", patched, layout=h.layout, instrument={}))
+    assert not result.ok and result.refusal == "hold"
+    assert result.resolution, "the pose's own margin went down with the hold"
+    assert result.resolution["verdict"] == gray_code.RESOLUTION_OK
+    assert result.resolution["camera_px_per_index"] > 0
+
+
+def test_a_failed_repeat_never_sits_next_to_an_accepted_table():
+    """If pass 1 decodes and pass 2 does not, the judged table belongs to
+    pass 1 — so the record carries a NOTE, never a refusal beside an
+    accepted answer, and never pass 2's margin describing pass 1's decode."""
+    h = Harness()
+    real = h.session.gather_full
+    n = {"i": 0}
+    # a full pass is 2 + 2*bits_needed(76) captures; cut the SECOND one off
+    first_pass = 2 + 2 * gray_code.bits_needed(h.total)
+
+    async def gather(seconds, *, min_frames=1):
+        n["i"] += 1
+        if n["i"] > first_pass + 2:
+            return []                          # too few frames to average
+        return await real(seconds, min_frames=min_frames)
+
+    h.session.gather_full = gather
+    result = h.run(layout=h.layout, instrument={}, targets=["device:tv-backlight"],
+                   repeat=2)
+    entry = result.targets[0]
+    assert entry["ok"] and entry["table"] is not None
+    assert entry["refusal"] == "" and entry["reason"] == ""
+    assert entry["notes"] and "later repeat" in entry["notes"][0]
+    # the margin reported is the one the accepted decode came from
+    assert entry["resolution"]["verdict"] == gray_code.RESOLUTION_OK
+    assert len(entry["decodes"]) == 1
