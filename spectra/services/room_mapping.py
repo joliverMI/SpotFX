@@ -421,6 +421,17 @@ class EmitterResult:
     carrier_id: str = ""
     label: str = ""
     ranges: list[dict] = field(default_factory=list)
+    #: THE CAPTURE WINDOW in WALL time (not the monotonic run clock): what
+    #: the contamination witness is asked about. Recorded whether or not a
+    #: witness is configured, because a window nobody asked about is still
+    #: the window somebody may ask about later.
+    started_at: float = 0.0
+    ended_at: float = 0.0
+    #: The witness's verdict for that window — clean / contaminated /
+    #: witness_unavailable (spectra/services/witness.py). Empty when no
+    #: witness is wired, which is not the same as clean and never renders
+    #: as it.
+    witness: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -494,6 +505,28 @@ class MappingResult:
         return sum(1 for e in self.emitters if e.retried and e.mapped)
 
     @property
+    def witness_counts(self) -> dict:
+        """How the contamination witness judged this run's captures.
+
+        `unclaimed` is the honest count: captures kept with NO clean claim
+        made for them, whether because the witness could not be asked or
+        because no witness is wired at all. It is deliberately not folded
+        into `clean` — "we could not check" and "we checked and it was
+        fine" are different facts, and only one of them is evidence."""
+        from spectra.services import witness as witness_mod
+        clean = contaminated = unclaimed = 0
+        for e in self.emitters:
+            status = (e.witness or {}).get("status")
+            if status == witness_mod.VERDICT_CLEAN:
+                clean += 1
+            elif status == witness_mod.VERDICT_CONTAMINATED:
+                contaminated += 1
+            else:
+                unclaimed += 1
+        return {"clean": clean, "contaminated": contaminated,
+                "unclaimed": unclaimed}
+
+    @property
     def summary(self) -> str:
         parts = [f"{self.mapped_count} mapped"]
         if self.recovered_count:
@@ -504,6 +537,10 @@ class MappingResult:
         failed = sum(1 for e in self.emitters if not e.mapped and not e.unseen)
         if failed:
             parts.append(f"{failed} could not be measured")
+        counts = self.witness_counts
+        if counts["contaminated"]:
+            parts.append(f"{counts['contaminated']} still reading as taken "
+                         f"while the house changed light")
         return ", ".join(parts)
 
     def as_dict(self) -> dict:
@@ -523,6 +560,7 @@ class MappingResult:
                 "per_carrier": self.per_carrier, "problems": self.problems,
                 "warnings": self.warnings, "notes": self.notes,
                 "refusal": self.refusal, "partial": self.partial,
+                "witness": self.witness_counts,
                 "emitters": [e.__dict__ for e in self.emitters]}
 
 
@@ -574,6 +612,27 @@ class RunDeps:
     #: none, which makes the whole brightness guard a stated no-op rather
     #: than a crash on a rig that has no driver layer.
     fixture_devices: Callable[[], Any] = _no_fixture_devices
+    #: WALL time, for the capture windows the contamination witness is asked
+    #: about. Separate from `clock` (monotonic, for durations) on purpose:
+    #: an ISO instant on a wire and an elapsed measurement are different
+    #: quantities and one clock cannot honestly be both.
+    wall: Callable[[], float] = time.time
+    #: THE CONTAMINATION WITNESS (spectra/services/witness.py), asked
+    #: IMMEDIATELY after each capture window closes: did anything else in
+    #: the house change light while we were photographing? Returns one
+    #: verdict dict; never raises (an unreachable witness is a MARKED
+    #: verdict, never a failed run). None — the default — means no witness
+    #: is wired and every capture is recorded with an EMPTY verdict, which
+    #: is not a clean claim.
+    witness: Optional[Callable[[float, float], Any]] = None
+    #: The SETTLED whole-run sweep: the same question asked ONCE more over
+    #: the run's whole span at the end, so a row that arrived late still
+    #: indicts the capture it overlaps. Takes (start, end) and returns
+    #: `(rows, our_entity_tokens)` — the raw rows, judged per capture window
+    #: by the caller through `witness.judge`, which is the SAME pure
+    #: function the immediate per-window query uses. One fetch, N
+    #: judgements, and one definition of the rule.
+    witness_sweep: Optional[Callable[[float, float], Any]] = None
 
 
 def production_deps(session) -> RunDeps:
@@ -614,11 +673,79 @@ def production_deps(session) -> RunDeps:
             return []
         return list(host.devices.values())
 
+    # THE CONTAMINATION WITNESS, wired only when it is configured — an
+    # unconfigured host runs exactly as it did before this existed, with
+    # every capture recorded UNCLAIMED rather than falsely clean.
+    from spectra.services import witness as witness_mod
+
+    witness_fn = sweep_fn = None
+    if witness_mod.configured():
+        # The scope is read ONCE PER RUN and never cached across runs
+        # (River's instruction): a stale scope silently stops indicting
+        # whatever the house has gained since. It is not consulted for the
+        # subtraction — that is our own exported fixture list — but reading
+        # it is what makes "which entities are being watched" part of this
+        # run's own record rather than an assumption.
+        ours: set[str] = set()
+        resolved = {"done": False}
+
+        async def _own_tokens() -> set[str]:
+            """WHOSE CHANGES ARE NOT CONTAMINATION — resolved once per deps
+            object, which is once per run.
+
+            A RUNNING NIGHT'S OWN EXPORTED FIXTURES are the right answer and
+            the tightest one: they are exactly what this run drives, and
+            they are the SAME list River's morning backstop is built
+            against, so the two worlds cannot disagree about what "ours"
+            means.
+
+            Falling back to EVERY SPECTRA-driven fixture for a daytime run
+            is deliberate and is the safe direction: a fixture SPECTRA
+            drives is never a house light walking into the shot. It is
+            slightly loose — a SPECTRA fixture something else drove during a
+            capture would not be indicted — and that is a bounded, named
+            gap rather than the alternative, which is a daytime run
+            subtracting LAST night's fixture list and indicting the wrong
+            things."""
+            if resolved["done"]:
+                return ours
+            resolved["done"] = True
+            from spectra.services import night_run
+            night = night_run.last_night() or {}
+            if night.get("state") == night_run.STATE_RUNNING:
+                ours.update(witness_mod.own_entities(
+                    night.get("fixtures") or []))
+                return ours
+            chain = await carrier_devices()
+            ours.update(witness_mod.own_entities(
+                [entry for entries in chain.values() for entry in entries]))
+            return ours
+
+        async def witness_fn(start_ts: float, end_ts: float) -> dict:  # noqa: F811
+            verdict = await witness_mod.check_window(
+                start_ts, end_ts, await _own_tokens())
+            return verdict.as_dict()
+
+        async def sweep_fn(start_ts: float, end_ts: float):  # noqa: F811
+            """ONE settled query over the run's whole span. The caller
+            judges each capture window against these rows with the same
+            pure function the immediate query uses — nothing here re-asks
+            per window, which would be N more round trips for rows already
+            in hand."""
+            try:
+                rows = await witness_mod.fetch_changes(start_ts, end_ts)
+            except witness_mod.WitnessUnavailable as exc:
+                logger.info("room mapping: settled witness sweep "
+                            "unavailable: %s", exc)
+                return [], set()
+            return rows, await _own_tokens()
+
     return RunDeps(session=session,
                    get_virtuals=fx_seam.get_virtuals,
                    carrier_devices=carrier_devices,
                    activate=activate, deactivate=deactivate,
                    fixture_devices=fixture_devices,
+                   witness=witness_fn, witness_sweep=sweep_fn,
                    save_room=light_field.put_room)
 
 
@@ -762,8 +889,11 @@ async def activate_for_capture(plan, scope: list[str], deps: RunDeps
         except Exception as exc:                       # noqa: BLE001
             logger.exception("room mapping: could not activate %s for the "
                              "capture", vid)
-            failed.append(f"{vid}: could not be brought up for the capture "
-                          f"({type(exc).__name__}: {exc})")
+            from spectra.services import witness
+            failed.append(witness.sconce_diagnostic(
+                f"{vid}: could not be brought up for the capture "
+                f"({type(exc).__name__}: {exc})",
+                sconce_involved=witness.mentions_sconce(vid)))
             continue
         activated.append(vid)
     return sorted(set(scope) | set(activated)), activated, failed
@@ -998,6 +1128,11 @@ async def _capture_all(room: RoomMap, plan, scope: list[str], deps: RunDeps,
              if any(r.emitter_id == e.emitter_id and r.unseen
                     for r in result.emitters)]
     if not retry:
+        # No unseen emitters is not the end of the run: the contamination
+        # sweep is a separate question and still has to be asked.
+        await _retake_contaminated(room, program, plan, scope, deps, result,
+                                   dark_settle, lit_settle, dark_capture,
+                                   lit_capture)
         return
     logger.info("room mapping: %d emitter(s) measured ~zero; one retry with "
                 "a %.1fx dark settle", len(retry), RETRY_DARK_SETTLE_X)
@@ -1014,6 +1149,88 @@ async def _capture_all(room: RoomMap, plan, scope: list[str], deps: RunDeps,
     await _capture_pass(room, program, retry, scope, deps, result,
                         dark_settle * RETRY_DARK_SETTLE_X, lit_settle,
                         dark_capture, lit_capture, retry_pass=True)
+    await _retake_contaminated(room, program, plan, scope, deps, result,
+                               dark_settle, lit_settle, dark_capture,
+                               lit_capture)
+
+
+async def _retake_contaminated(room: RoomMap, program: "MappingProgram", plan,
+                               scope: list[str], deps: RunDeps,
+                               result: "MappingResult", dark_settle: float,
+                               lit_settle: float, dark_capture: float,
+                               lit_capture: float) -> None:
+    """THE CONTAMINATION RE-TAKE — the last pass of a run, over exactly the
+    captures the house walked into.
+
+    A footprint is `lit - dark` in one camera's scale. A house light coming
+    on between those two frames is measured as the fixture's own light, and
+    nothing downstream can tell the difference — the same class of failure
+    the exposure lock and the firmware-brightness guard each refuse, arriving
+    by a door this instrument could not see through until River's witness
+    existed.
+
+    TWO QUESTIONS, ONE PASS. Each capture was already asked about
+    IMMEDIATELY as it closed (`_capture_pass`), which catches everything the
+    witness had recorded by then; this adds ONE SETTLED SWEEP over the run's
+    whole span, so a row that arrived late still indicts the capture it
+    overlaps. Both verdicts feed the same single re-take, and a window is
+    contaminated if EITHER says so.
+
+    ONE RE-TAKE, NEVER A LOOP — the unseen retry's own rule, for the same
+    reason: a second contamination is an answer about the evening (somebody
+    is up, or an automation is running), not a reason to keep his room dark
+    until it stops. The re-take's own immediate verdict is recorded and
+    stands.
+
+    WITNESS-UNAVAILABLE NEVER TRIGGERS A RE-TAKE and never ends a run
+    (River's instruction): the capture is KEPT, stamped, and NO CLEAN CLAIM
+    is made for it. "We could not check" is a third thing, exactly as DARK /
+    EMITTING / UNKNOWN is in `night_exit` and `read` / `unreadable` is in
+    `fixture_brightness`."""
+    from spectra.services import witness as witness_mod
+
+    if deps.witness is None:
+        return
+
+    if deps.witness_sweep is not None:
+        windows = [r for r in result.emitters if r.ended_at > 0.0]
+        if windows:
+            span = (min(r.started_at for r in windows),
+                    max(r.ended_at for r in windows))
+            try:
+                rows, tokens = await deps.witness_sweep(*span)
+            except Exception:                          # noqa: BLE001
+                logger.exception("room mapping: the settled witness sweep "
+                                 "failed — per-capture verdicts stand")
+                rows, tokens = [], set()
+            for row in windows:
+                # A LATE ROW ONLY EVER ADDS. The immediate verdict already
+                # stands; this can turn a clean window contaminated, never
+                # the other way round — the sweep sees strictly more rows,
+                # so a window it calls clean is one it simply has no new
+                # evidence about.
+                verdict = witness_mod.judge(rows, tokens, row.started_at,
+                                            row.ended_at)
+                if verdict.contaminated:
+                    row.witness = verdict.as_dict()
+
+    dirty = {r.emitter_id for r in result.emitters
+             if (r.witness or {}).get("status")
+             == witness_mod.VERDICT_CONTAMINATED}
+    if not dirty:
+        return
+    retake = [e for e in plan.emitters if e.emitter_id in dirty]
+    logger.warning("room mapping: %d capture(s) were contaminated by the "
+                   "house; taking them again", len(retake))
+    result.notes.append(
+        f"{len(retake)} capture{'' if len(retake) == 1 else 's'} happened "
+        f"while something else in the house changed light, so "
+        f"{'it was' if len(retake) == 1 else 'they were'} discarded and "
+        f"taken again — a light coming on mid-capture is measured as the "
+        f"fixture's own.")
+    await _capture_pass(room, program, retake, scope, deps, result,
+                        dark_settle, lit_settle, dark_capture, lit_capture,
+                        retry_pass=True)
 
 
 async def _capture_pass(room: RoomMap, program: "MappingProgram", emitters,
@@ -1036,12 +1253,18 @@ async def _capture_pass(room: RoomMap, program: "MappingProgram", emitters,
             result.reason = sess.run_abort
             return True
         t0 = deps.clock()
+        w0 = deps.wall()
         in_scope = [v for v in emitter.virtual_ids if v in set(scope)]
         if not in_scope:
+            from spectra.services import witness
             _record(result, EmitterResult(
                 emitter.emitter_id, False,
-                "no virtual of this emitter is rendering right now — nothing "
-                "to light, so nothing to photograph",
+                witness.sconce_diagnostic(
+                    "no virtual of this emitter is rendering right now — "
+                    "nothing to light, so nothing to photograph",
+                    sconce_involved=witness.mentions_sconce(
+                        emitter.emitter_id, emitter.label,
+                        emitter.carrier_id)),
                 retried=retry_pass,
                 carrier_id=emitter.carrier_id, label=emitter.label))
             continue
@@ -1080,6 +1303,21 @@ async def _capture_pass(room: RoomMap, program: "MappingProgram", emitters,
         # the run. See the module docstring for what the old per-emitter
         # release was doing to the dark references.
         outcome.seconds = round(deps.clock() - t0, 2)
+        outcome.started_at, outcome.ended_at = w0, deps.wall()
+        if deps.witness is not None:
+            # IMMEDIATELY, and with NO ADDED SETTLE — River's binding
+            # instruction: the dark time stays flat. This round trip
+            # overlaps the next emitter's own dark settle rather than
+            # extending anything, and it can never fail the run: an
+            # unreachable witness comes back as a MARKED verdict.
+            try:
+                outcome.witness = await deps.witness(outcome.started_at,
+                                                     outcome.ended_at)
+            except Exception:                          # noqa: BLE001
+                logger.exception("room mapping: the witness query failed for "
+                                 "%s — the capture is kept and unclaimed",
+                                 emitter.emitter_id)
+                outcome.witness = {}
         _record(result, outcome)
         if lost:
             result.reason = lost
