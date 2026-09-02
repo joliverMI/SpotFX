@@ -24,7 +24,23 @@
  *
  * THE CAMERA STAYS ON THIS DEVICE. The page reduces each frame to a 320x180
  * greyscale image and sends only those bytes; nothing else leaves the
- * phone, and the server stores only the derived map (numbers). */
+ * phone, and the server stores only the derived map (numbers).
+ *
+ * THIS BROWSER IS A VIEWFINDER AND A REMOTE CONTROL, NOT AN INSTRUMENT
+ * (2026-09-02). The preview, Start camera and the two axis taps are exactly
+ * as first-class as they ever were — aiming is a live picture and a
+ * person's judgement, and neither cares whether the sensor obeys its own
+ * exposure control. The RUN BUTTONS stay here too, and they now execute
+ * against whatever the NATIVE capture client has established: he presses it
+ * here, that machine measures it. What a browser session may no longer do
+ * is BE the camera a calibration-grade run measures with — see
+ * spectra/services/capture_source.py for the evening that settled it.
+ *
+ * SO THE BUTTON IS NEVER DEAD FOR THAT REASON. It is enabled whenever SOME
+ * camera is holding the room, and a press with only a browser session
+ * present comes back with the server's own sentence naming the one next
+ * step. A disabled button explains nothing; the refusal explains everything,
+ * and it is the same wording the gate itself uses. */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import HelpLink from '../help/HelpLink';
 import { apiDel, apiGet, apiPost } from '../api/client';
@@ -53,6 +69,22 @@ type Footprint = {
   axis_profile: number[];
   thumbnail: number[][];
   capture: Record<string, unknown>;
+};
+/** The session's standing, from `capture_runs.session_view()`. Three answers
+ * that can disagree and must not be collapsed: `refusal` is why the CAMERA
+ * is not trusted yet (the exposure lock), `calibration_refusal` is why this
+ * CLIENT may not measure at all (the browser's demotion — not a fault in the
+ * session), and `measured_by` names whose camera a run would use. */
+type CaptureSource = {
+  present: boolean;
+  locked: boolean;
+  source: 'native' | 'browser' | 'none';
+  calibration_grade: boolean;
+  calibration_refusal: string;
+  measured_by: string;
+  aiming: boolean;
+  pose_id: string;
+  client: Record<string, unknown>;
 };
 type Room = {
   id: string;
@@ -156,6 +188,11 @@ export default function RoomsPage() {
   const [expBusy, setExpBusy] = useState(false);
 
   // capture
+  /** WHO IS HOLDING THE CAMERA AND WHAT THEY MAY DO — read from
+   * `/rooms/map/status`, which gets it from the SAME function the run gate
+   * calls, so this line can never promise something a press would refuse.
+   * `calibration_refusal` is empty exactly when a run may go. */
+  const [source, setSource] = useState<CaptureSource | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const captureRef = useRef<MappingCapture | null>(null);
   const clientRef = useRef<MappingClient | null>(null);
@@ -189,6 +226,26 @@ export default function RoomsPage() {
   useEffect(() => () => {
     captureRef.current?.stop();
     clientRef.current?.close();
+  }, []);
+
+  /** WHOSE CAMERA, polled. A capture client can arrive or go away without
+   * this page doing anything, and the answer decides both what the status
+   * line says and whether pressing a run is worth offering — so it is read
+   * on a slow timer rather than only at mount. Three seconds: a client
+   * connects in one and nothing here is time-critical. */
+  useEffect(() => {
+    let live = true;
+    const read = async () => {
+      try {
+        const body = await apiGet<{ capture_source: CaptureSource }>('/rooms/map/status');
+        if (live) setSource(body.capture_source ?? null);
+      } catch {
+        if (live) setSource(null);
+      }
+    };
+    void read();
+    const t = window.setInterval(() => void read(), 3000);
+    return () => { live = false; window.clearInterval(t); };
   }, []);
 
   const startCamera = useCallback(async () => {
@@ -660,6 +717,37 @@ export default function RoomsPage() {
 
           {refusal && <p className="warn refusal">{refusal}</p>}
 
+          {/* WHOSE CAMERA A RUN WOULD USE. Two devices can be in this room
+            * at once — a phone in his hand and a capture client on a shelf —
+            * and a page offering a Start button owes an answer to "which one
+            * is about to take the readings". Every sentence here is the
+            * SERVER'S, from the same function the run gate calls. */}
+          {source && (
+            <p className={`capture-source ${
+              source.calibration_grade ? 'ok' : source.present ? 'warn' : 'muted'} small`}>
+              {source.measured_by}
+              {source.pose_id && source.calibration_grade ? ` · pose ${source.pose_id}` : ''}
+              {' '}<HelpLink topic="browser-is-a-viewfinder" />
+            </p>
+          )}
+          {/* THE DEMOTION, said before he presses as well as after — but
+            * never as a disabled button. He can still press it; this is so
+            * he does not have to. */}
+          {source?.present && !source.calibration_grade && (
+            <p className="warn small">{source.calibration_refusal}</p>
+          )}
+          {/* ONE SESSION AT A TIME is how this protocol has always worked,
+            * so starting the camera here takes it from the capture client —
+            * which reconnects within a few seconds of Stop camera. Worth
+            * saying plainly now that the two devices have different jobs. */}
+          {cameraOn && source?.source === 'browser' && (
+            <p className="muted small">
+              While this camera is on, the page holds the session. Press Stop camera
+              when you have finished aiming and the capture client takes it back
+              within a few seconds.
+            </p>
+          )}
+
           <div className="map-granularity">
             <label>
               Map in
@@ -738,10 +826,17 @@ export default function RoomsPage() {
             </p>
           )}
 
+          {/* ENABLED WHENEVER SOME CAMERA IS HOLDING THE ROOM — this
+            * browser's, or a capture client's on another machine. It is
+            * deliberately NOT disabled for a browser session: the server's
+            * refusal names the reason and the one next step, and a greyed
+            * button names neither. `refusal` (the exposure lock) still
+            * disables only while THIS browser is the one holding it. */}
           <button
             className="primary"
-            disabled={!room || !cameraOn || busy || !!refusal || !room.carrier_ids.length
-                      || !!plan?.too_long}
+            disabled={!room || busy || !room.carrier_ids.length || !!plan?.too_long
+                      || !(source?.present || cameraOn)
+                      || (!!refusal && source?.source !== 'native')}
             onClick={() => void mapRoom()}
           >
             {busy ? 'Mapping…' : 'Map this room'}
@@ -837,8 +932,15 @@ export default function RoomsPage() {
               </label>
               <HelpLink topic="camera-settings" title="What these levers do, and what a long one costs" />
             </div>
+            {/* Same rule as Map: enabled whenever SOME camera holds the
+              * room, and the server's own sentence — never a grey button —
+              * explains a browser session. A browser cannot reach gain at
+              * all, which is half of what this compares, so the refusal is
+              * the more useful answer here than anywhere. */}
             <button
-              disabled={!room || !cameraOn || busy || expBusy || !!refusal
+              disabled={!room || busy || expBusy
+                        || !(source?.present || cameraOn)
+                        || (!!refusal && source?.source !== 'native')
                         || (!exposureTime.trim() && !gain.trim())}
               onClick={() => void runExposureTest()}
             >

@@ -58,6 +58,15 @@ type SessionView = {
   present: boolean; locked: boolean; session_id: string; pose_id: string;
   refusal: string | null; client: Record<string, unknown>;
   native?: boolean; lever?: Lever; host?: CameraHost;
+  /** WHAT THIS CLIENT MAY DO, since the browser's demotion. A browser
+   * session is present, locked and perfectly healthy AND cannot source a
+   * calibration — three facts that read as a contradiction unless the page
+   * says all three. `calibration_refusal` is the server's own sentence and
+   * is empty exactly when a run may go. */
+  source?: 'native' | 'browser' | 'none';
+  calibration_grade?: boolean;
+  calibration_refusal?: string;
+  measured_by?: string;
 };
 type Body = { running: boolean; current: Queue | null; session: SessionView; recent: Queue[] };
 
@@ -116,6 +125,7 @@ export default function UnattendedCard() {
         {session?.present
           ? `Camera session: ${session.locked ? 'locked and ready' : 'connected, NOT locked'}`
           : 'Camera session: none connected'}
+        {session?.present && session.source === 'browser' ? ' (a browser — aiming only)' : ''}
         {session?.present && (session.client?.host as string)
           ? ` · ${session.client.host as string}` : ''}
         {session?.present && (session.client?.pose_name as string)
@@ -136,6 +146,17 @@ export default function UnattendedCard() {
       )}
       {session && !session.locked && session.refusal && (
         <p className="warn small">{session.refusal}</p>
+      )}
+      {/* A BROWSER IS NOT A QUEUE'S CAMERA. A queue runs nothing but
+        * calibration-grade work, so a page left open on a phone is a
+        * connected, locked, healthy session that still cannot run one item —
+        * and without this line that reads as the queue being broken. The
+        * wording is the server's, from the same function the gate calls. */}
+      {session?.present && session.calibration_grade === false
+        && session.calibration_refusal && (
+        <p className="warn small">
+          {session.calibration_refusal} <HelpLink topic="browser-is-a-viewfinder" />
+        </p>
       )}
       {/* A DRIVER THAT HOLDS A SETTING IS NOT A SENSOR THAT OBEYS IT. The
         * line above says the camera reported itself locked; this one says

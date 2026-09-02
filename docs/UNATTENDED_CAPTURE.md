@@ -44,6 +44,7 @@ already pointed at the room:
 | **Knowing the room is actually dark at the end** | a mode read, or nothing | `night_exit` reads every fixture back AT THE EMITTED LIGHT and names what still emits and why |
 | **Noticing the house changed light mid-capture** | nothing could see it | the contamination witness, asked per capture window and once more settled at the end; contaminated captures are re-taken |
 | **Telling the morning backstop what to turn off** | a hand-kept list that missed the shielded sets | `GET /api/night-run/fixtures` — what the run took AND what Dark mode leaves standing, both computed live |
+| **Not measuring through a camera nothing can pin** | a browser session could run a whole calibration, and three of 2026-09-01's four failures are properties of the browser itself | a calibration-grade run REFUSES a browser session by name (`capture_source`), with the reason and the one next step; the page stays the viewfinder and the remote control, and a queue's own wait holds out for the client rather than reporting "no session" |
 
 Also automatic, and unchanged by this work because it already was: the
 fixture firmware-brightness guard, the one-run-at-a-time lock, the hold
@@ -141,7 +142,12 @@ ends.
   which regime put more light in the frame
   (`POST /api/rooms/{id}/exposure-test`); picking the numbers to try, and
   deciding whether a 3x gain is worth its noise, is his.
-- **Starting the client**, unless it is a boot service (see above).
+- **Starting the client**, unless it is a boot service (see above). **SINCE
+  2026-09-02 THIS IS NO LONGER OPTIONAL FOR A MEASUREMENT**: a
+  calibration-grade run refuses a browser-established session by name, so
+  the client (or its boot service) is what takes every reading. The page
+  itself is unchanged for AIMING and keeps all of its run buttons — pressing
+  one there runs it on the client's machine.
 - **Noticing the camera host is not there.** No longer his to notice:
   SPECTRA reads it. `GET /api/rooms/map/status` → `camera_host` (and the
   same read inside every session view) answers with three states, not two —
@@ -165,9 +171,14 @@ ends.
   checks are never substitutes: the read-back is instant and catches a
   control that was never taken; the self-test is the only thing that can
   catch one that was taken and does nothing.
-- **Demoting the browser.** This step leaves browser sessions exactly as
-  they were: no self-test, no verdict, no new refusal. He is owed that
-  sentence when it comes, not a refusal he discovers.
+- ~~**Demoting the browser.**~~ **DONE, 2026-09-02** — and the entry stays
+  rather than vanishing, because what it promised is exactly how it was
+  landed: he was owed the sentence, not a refusal he discovers. A
+  calibration-grade run now refuses a browser-established session BY NAME,
+  saying why in his own camera's terms and what to use instead; the page
+  keeps the live preview, Start camera, the axis taps, every read surface
+  AND every run button, which execute against the native session. See
+  `spectra/services/capture_source.py` and the table row below.
 - **Taking the room back from a release.** That is an ownership decision,
   and the night trigger gets no scoped exception to it.
 - **Anything that drives a Home Assistant entity.** This side originates

@@ -42,7 +42,12 @@ about a pose (`POSE_MATCH` / `POSE_CAMERA_MOVED` / `POSE_ROOM_CHANGED` /
 `POSE_CANNOT_TELL`) of which exactly ONE refuses a re-run — see
 `POSE_REFUSING` and `pose_verdict_sentence`, and
 `spectra/services/pose_fingerprint.py` for why a changed room and an
-inconclusive answer deliberately do not. What is NOT expected — a genuine bug
+inconclusive answer deliberately do not. And since the BROWSER'S DEMOTION,
+one that is about WHICH CLIENT is holding the camera rather than about the
+camera itself: a calibration-grade run asked for on a browser session
+(`browser_not_calibration_grade`, with `calibration_source_note` as its
+positive twin — a page that can refuse for the right reason should also be
+able to say whose camera it is about to use). What is NOT expected — a genuine bug
 — still raises, and should: a sentence invented for it would be a lie.
 
 ONE WORDING PER CONDITION, here, so the route, the run and the page cannot
@@ -955,6 +960,98 @@ def queue_stopped(remaining: int) -> str:
             f"measured before that is kept.")
 
 
+# ── THE BROWSER, DEMOTED BY NAME ───────────────────────────────────────────
+#
+# 2026-09-01 cost him an evening and settled this: a browser cannot hold a
+# camera to a known state. Not "not yet" and not "not well" — three of the
+# four failures are properties of the browser itself (his Brio exposes no
+# gain through one at all; `getSettings()` echoes the request back instead
+# of reporting the sensor, so commanded integration times a factor of twenty
+# apart all read as agreed and none of them moved the light; and an auto
+# mechanism the page cannot pin kept re-adapting underneath). Every one of
+# those makes a NUMBER wrong while every surface above it reads healthy,
+# which is the one failure mode this whole path is built to refuse.
+#
+# So a calibration-grade run refuses a browser session BY NAME, and the page
+# keeps the job a browser is genuinely the right tool for: aiming.
+# `spectra/services/capture_source.py` is the binding statement for what is
+# demoted (the browser's STANDING as a calibration source) and what is not
+# (the session transport, which the native client speaks too).
+
+#: THE ONE COMMAND that turns a machine with a camera into a calibration
+#: instrument. Named here, once, so the refusal, the no-session sentence and
+#: the page cannot quote three different lines at him.
+CLIENT_COMMAND = "python -m spectra.capture_client"
+
+#: What each calibration-grade run is called in his own words, for the
+#: sentence below. The machine words are `capture_runs.KIND_*`.
+_ACTION_WORDS = {
+    "map": "Mapping this room",
+    "commission": "A commissioning pass",
+    "exposure": "The exposure comparison",
+    "fingerprint": "A pose check",
+    "calibration": "Running a calibration",
+    "queue": "An unattended capture queue",
+}
+
+
+def browser_not_calibration_grade(source: dict, *, action: str = "") -> str:
+    """THE DEMOTION, said to him rather than implied by a dead button.
+
+    THREE THINGS IN ORDER, and the order is the point: WHAT stopped, WHY in
+    terms of his own camera rather than ours, and THE ONE NEXT STEP. A
+    refusal that names only the rule sends him to argue with the rule; one
+    that names the evening he already lived through sends him to the
+    machine by the camera.
+
+    IT IS NOT AN ERROR AND MUST NOT READ AS ONE. Nothing is broken, nothing
+    was written, and the browser is still doing its job — the sentence says
+    so, because a person who reads this as a fault goes looking for a fault.
+
+    `source` is `capture_source.describe`'s row; `action` is the run's own
+    kind word, or empty for the general case."""
+    what = _ACTION_WORDS.get(action or "", "This measurement")
+    ua = str(source.get("user_agent") or "").strip()
+    which = f" ({ua[:60]})" if ua else ""
+    # THE LAST CLAUSE IS ADDRESSED TO WHOEVER IS READING IT. A person at the
+    # page is being told to press again; a person reading a queue log at
+    # breakfast was never at a button, and telling them to press one would
+    # be an instruction they cannot follow.
+    again = ("then start it again"
+             if action in ("queue", "calibration") else
+             "then press this again from here: the page runs it, that "
+             "machine measures it")
+    return (
+        f"{what} needs a camera held to a known state, and this session is a "
+        f"browser{which}. A browser cannot hold one: it reaches no manual "
+        f"gain control at all (your Brio exposes none through one), its "
+        f"read-back repeats whatever was asked for rather than what the "
+        f"sensor did (10ms, 60ms and 200ms were all accepted and the light "
+        f"never changed), and its automatic exposure keeps re-adapting "
+        f"underneath — which is what made the picture bright and then very "
+        f"dark on its own. Every number a run took under that would be a "
+        f"statement about the camera's mood. "
+        f"Nothing was measured and nothing was written. "
+        f"The page is still exactly right for AIMING — keep the preview up, "
+        f"point the camera, calibrate the axis. To take the measurement, run "
+        f"the capture client on the machine beside the camera "
+        f"({CLIENT_COMMAND}, or leave its boot service running), {again}.")
+
+
+def calibration_source_note(source: dict) -> str:
+    """WHOSE CAMERA a run will use, when there IS one that can measure —
+    the other half of the same honesty. A page that offers a Start button
+    while two devices are in the room owes an answer to "which one is about
+    to take the readings", and it is one line."""
+    host = str(source.get("host") or "").strip() or "an unnamed machine"
+    pose = str(source.get("pose_name") or "").strip()
+    version = str(source.get("version") or "").strip()
+    where = f" ({pose})" if pose else ""
+    build = f", client {version}" if version else ""
+    return (f"Measured by the capture client on {host}{where}{build}. "
+            f"You press it here; that machine takes the readings.")
+
+
 def pose_changed_note(previous: str, now: str) -> str:
     """A FACT, like `unseen_note` — not a refusal and not a warning about
     anything going wrong.
@@ -1214,12 +1311,23 @@ def client_absent(host: str, *, pose_name: str = "", version: str = "",
             f"cannot reach this address.")
 
 
-def client_present(host: str, *, pose_name: str = "", version: str = "") -> str:
+def client_present(host: str, *, pose_name: str = "", version: str = "",
+                   browser: bool = False) -> str:
     """The plain positive, so a surface reads the same shape either way and
-    a reader never has to tell "connected" from "we did not check"."""
+    a reader never has to tell "connected" from "we did not check".
+
+    IT NAMES WHICH KIND OF CLIENT since the browser's demotion. Calling a
+    browser page "the capture client" was harmless while both could measure
+    and is not harmless now: the two words are exactly what a reader must
+    tell apart to know whether a run can go, and a status line that calls
+    one the other is the ambiguity this build exists to remove."""
     where = f" ({pose_name})" if pose_name else ""
     build = f" running {version}" if version else ""
-    return f"The capture client on {host or 'an unnamed machine'}{where}{build} is connected."
+    who = ("A browser session on" if browser else "The capture client on")
+    tail = (" — first-class for aiming, and not a calibration source"
+            if browser else "")
+    return (f"{who} {host or 'an unnamed machine'}{where}{build} is "
+            f"connected{tail}.")
 
 
 def _ago(seconds: float) -> str:

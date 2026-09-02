@@ -148,6 +148,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from spectra.models.room_map import GRID_H, GRID_W
+from spectra.services import capture_source
 
 # ── ONE: the wire-frame ladder ─────────────────────────────────────────────
 
@@ -800,7 +801,17 @@ class SessionCameraDouble(CameraNegotiation):
     size, one that upscales, a camera that will not take a manual lever —
     gets them by setting `camera_source`, calling `note_frame` itself, or
     declaring a lock with `manual_refusals`. None of them is reachable by
-    accident."""
+    accident.
+
+    IT DECLARES ITSELF THE NATIVE CAPTURE CLIENT, since the browser's
+    demotion, and that is the same "add a capability here, not in seven
+    places" rule this class already exists for: every spec that drives a
+    capture run is a spec about the RUN, and a double silently reading as a
+    browser would refuse every one of them for a reason none of them is
+    about. A spec that IS about the browser says so — one line,
+    `hello = {"user_agent": ...}` — which is how the demotion gets exercised
+    rather than modelled. `spectra/services/capture_source.py` is the
+    binding statement."""
 
     #: What this double's camera can deliver. The top rung by default (a
     #: spec is not usually about the camera's limits); lower it to make a
@@ -817,6 +828,11 @@ class SessionCameraDouble(CameraNegotiation):
     #: A double whose camera does not answer a request at all — how a spec
     #: makes `await_camera` time out without touching the gate.
     answers_camera_config: bool = True
+
+    #: WHAT THIS DOUBLE SAYS IT IS. The native capture client by default —
+    #: see the docstring. An instance that sets its own `hello` (a browser,
+    #: a named host, a pose label) overrides this entirely, as it always did.
+    hello: dict = {"client": capture_source.NATIVE_CLIENT}
 
     async def _send_camera_config(self, payload: dict) -> None:
         self.camera_configs = getattr(self, "camera_configs", [])

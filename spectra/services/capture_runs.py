@@ -38,8 +38,16 @@ run on a NATIVE session, the camera is made to prove that its exposure
 control reaches its sensor — driven, measured, and refused BY NAME if the
 light does not follow the command. It lives here for the same reason the
 lock does: one seam, so the button and the overnight queue inherit it
-together and neither can acquire what the other lacks. A BROWSER session is
-untouched by it — no self-test, no verdict, no new refusal.
+together and neither can acquire what the other lacks.
+
+AND, SINCE THE BROWSER'S DEMOTION, the gate that decides WHICH CLIENT may
+take a calibration-grade measurement at all. A browser session is refused
+BY NAME here (`_gate`) and is never self-tested, because there is nothing
+to test: a browser cannot pin the camera in the first place. It is the same
+one-seam argument one level up — the button, the queue and a calibration
+re-running itself all pass through this function, so none of them can be
+the one that forgot. `spectra/services/capture_source.py` is the binding
+statement; the page keeps aiming, which needs no held camera at all.
 
 THE OUTCOME IS MACHINE-READABLE AND SAYS BOTH THINGS. `status` is the word
 a program branches on; `detail` is the sentence a person reads, and it is
@@ -59,9 +67,9 @@ from typing import Any, Optional
 from spectra.models.room_map import RoomMap
 from spectra.services import capture_health
 from spectra.services import emitters as emitters_mod
-from spectra.services import (capture_settings, commissioning, exposure_test,
-                              lever_selftest, light_field, mapping_refusals,
-                              mapping_session, room_mapping)
+from spectra.services import (capture_settings, capture_source, commissioning,
+                              exposure_test, lever_selftest, light_field,
+                              mapping_refusals, mapping_session, room_mapping)
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +113,14 @@ KIND_FINGERPRINT = "fingerprint"
 CALIBRATION_GRADE = (KIND_MAP, KIND_COMMISSION, KIND_EXPOSURE,
                      KIND_FINGERPRINT)
 
+#: THE REFUSALS THAT HAPPEN BEFORE ANY LIGHT IS DRIVEN — nothing was
+#: measured, nothing was written, and the whole answer is the sentence. Every
+#: route on this path answers them the same way (409 with the wording), so
+#: the set is named ONCE here rather than retyped at each route: a gate added
+#: below that a route forgot to list would otherwise reach him as a 200 with
+#: an empty result, which is the shape of a silent failure.
+PREFLIGHT_REFUSALS = ("no_session", "browser_session", "busy")
+
 STATUS_OK = "ok"
 STATUS_PARTIAL = "partial"
 STATUS_REFUSED = "refused"
@@ -120,7 +136,7 @@ class RunOutcome:
     detail: str = ""
     #: the machine word for WHICH refusal, when there was one — the run's own
     #: (`ownership`, `too_long`, `aborted`, `camera_lock`, ...) or this
-    #: module's (`no_session`, `busy`, `not_found`)
+    #: module's (`no_session`, `browser_session`, `busy`, `not_found`)
     refusal: str = ""
     target: str = ""
     room_id: str = ""
@@ -271,12 +287,39 @@ def run_granularity(room: RoomMap, granularity: Optional[str],
 
 
 def _gate(kind: str, target: str, room_id: str) -> Optional[RunOutcome]:
-    """The two things that refuse before any run: nothing holding a camera
-    on the room, and another run already holding it."""
-    if live_session() is None:
+    """The three things that refuse before any run: nothing holding a camera
+    on the room, a camera nothing can hold to a known state, and another run
+    already holding it.
+
+    THE MIDDLE ONE IS THE BROWSER'S DEMOTION and it lands HERE, at the one
+    seam, for the reason this module exists: the button, the unattended
+    queue and a calibration re-running itself are callers of equal standing,
+    and a gate written at any one of them would be a gate the other two do
+    not have. `capture_source.py` is the binding statement for what is
+    demoted; `mapping_refusals` owns the sentence.
+
+    IT IS SCOPED TO CALIBRATION-GRADE KINDS, which today is all four — but
+    the check reads `CALIBRATION_GRADE` rather than assuming, so a future
+    kind that genuinely does not produce a comparable number is not silently
+    swept into a refusal it never earned.
+
+    NOTHING ABOUT THE SESSION TRANSPORT MOVES. A browser still connects,
+    still streams frames, still reports its lock, and is still the whole of
+    how a camera gets aimed — see this module's own `session_view`, which
+    reports the demotion as a fact about calibration rather than as a broken
+    session."""
+    sess = live_session()
+    if sess is None:
         return RunOutcome(kind=kind, status=STATUS_REFUSED,
                           detail=mapping_refusals.NO_SESSION,
                           refusal="no_session", target=target, room_id=room_id)
+    if kind in CALIBRATION_GRADE:
+        refusal = capture_source.calibration_refusal(sess, action=kind)
+        if refusal:
+            return RunOutcome(kind=kind, status=STATUS_REFUSED, detail=refusal,
+                              refusal="browser_session", target=target,
+                              room_id=room_id,
+                              session_id=getattr(sess, "id", ""))
     if _run_lock.locked():
         return RunOutcome(kind=kind, status=STATUS_BUSY, detail=busy_detail(),
                           refusal="busy", target=target, room_id=room_id)
@@ -301,9 +344,11 @@ async def _preflight(kind: str, room: RoomMap, sess,
     pays again — which is exactly "at establishment, and after any
     reconnect", made structural rather than remembered.
 
-    A BROWSER SESSION IS UNTOUCHED: no self-test, no verdict, no new
-    refusal. Demoting the browser is a later, separate build and he is owed
-    that sentence when it comes rather than discovering it as a refusal.
+    A BROWSER SESSION NEVER REACHES HERE for a calibration-grade kind —
+    `_gate` has already refused it by name (the browser's demotion), so this
+    is not a second opinion about the browser and must not become one. What
+    remains of the old "a browser is simply untouched" rule is still true
+    of every NON-calibration-grade use of a session, and of aiming.
 
     THE ROOM COMES BACK BETWEEN THE TWO, and that is deliberate: the
     self-test closes its own hold in a `finally` and the run opens its own
@@ -683,27 +728,65 @@ async def run_pose_fingerprint(room_id: str, *,
 
 def session_view() -> dict:
     """What a caller needs to know about the camera without reaching into
-    the session object: is one there, is it locked, whose is it, and which
-    pose. `refusal` is `mapping_session.lock_refusal`'s own sentence — this
-    never composes a second one."""
+    the session object: is one there, is it locked, WHOSE IS IT AND WHAT MAY
+    IT DO, and which pose. Every sentence in it is `mapping_refusals`' or
+    `mapping_session.lock_refusal`'s own — this composes none.
+
+    THE THREE ANSWERS ARE DELIBERATELY SEPARATE, because since the browser's
+    demotion they can disagree and a surface that collapsed them would lie:
+
+      `refusal`              — why the CAMERA cannot be trusted yet (the
+                               exposure lock). Unchanged.
+      `calibration_refusal`  — why this CLIENT may not source a measurement,
+                               even with a perfectly locked camera. This is
+                               the browser's demotion, and it is not a fault
+                               in the session: the session is fine, and it is
+                               still doing the job it is good at.
+      `measured_by`          — WHOSE CAMERA a run would use when one CAN.
+                               A page offering a Start button with two
+                               devices in the room owes this answer.
+
+    `aiming` is the positive statement the page needs most: a browser session
+    is fully, first-class usable for pointing a camera, and nothing here
+    should let that read as "unusable"."""
     sess = live_session()
     if sess is None:
         return {"present": False, "locked": False, "session_id": "",
                 "pose_id": "", "refusal": mapping_refusals.NO_SESSION,
                 "client": {}, "native": False, "lever": {},
+                "source": capture_source.KIND_NONE,
+                "calibration_grade": False, "calibration_refusal": "",
+                "measured_by": capture_source.measured_by(None),
+                "aiming": False,
                 # ABSENCE IS A READ. `refusal` above is why the RUN cannot
                 # go; this says which machine is missing, what it was
                 # running and when it was last here. It refuses nothing —
                 # see capture_health.py's own statement of that boundary.
                 "host": capture_health.health(None)}
     verdict = getattr(sess, "lever_verdict", None)
+    grade = capture_source.calibration_grade(sess)
     return {"host": capture_health.health(sess),
             "present": True, "locked": sess.lock.locked,
             "session_id": sess.id, "pose_id": sess.pose_id,
             "refusal": sess.refusal(), "client": dict(sess.hello or {}),
             # WHETHER THIS SESSION'S LEVERS ARE KNOWN TO BE REAL. `native`
             # says whether the question is even asked of it — a browser
-            # session is untouched by this step and reports no verdict, which
-            # is not the same as failing one.
-            "native": lever_selftest.is_native(sess),
+            # session is never self-tested (it is refused before that, and
+            # there is nothing to test), so no verdict here never reads as
+            # a failed one.
+            "native": grade,
+            "source": capture_source.kind(sess),
+            "calibration_grade": grade,
+            # EMPTY WHEN IT MAY MEASURE. A sentence sitting in this field is
+            # exactly the sentence a pressed run would refuse with, from the
+            # same function, so the page cannot promise something the gate
+            # will not honour.
+            "calibration_refusal": capture_source.calibration_refusal(sess) or "",
+            # ONE FUNCTION FOR ALL THREE STATES — it resolves the native
+            # sentence through `mapping_refusals` itself, so this composes
+            # nothing and there is no second copy to drift.
+            "measured_by": capture_source.measured_by(sess),
+            # A browser session is a VIEWFINDER, and that is a real capability
+            # rather than a consolation: aiming is what it is for.
+            "aiming": True,
             "lever": verdict.as_dict() if hasattr(verdict, "as_dict") else {}}

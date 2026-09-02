@@ -4035,10 +4035,14 @@ two checks both run and neither substitutes for the other. Six things:
   `mapping_session.open_session` builds a NEW session per WebSocket, so a
   reconnect cannot inherit one, and the fingerprint carries the pose id so
   a camera reopen inside one connection cannot either.
-- **BROWSER SESSIONS ARE UNTOUCHED** — no self-test, no verdict, no new
-  refusal. That is a later, separate build and he is owed the sentence when
-  it comes rather than discovering it as a refusal. `capture_runs.
-  session_view()['native']` is the tell.
+- **BROWSER SESSIONS ARE NEVER SELF-TESTED** — and since the demotion (see
+  "THE BROWSER IS A VIEWFINDER" below) that is because a calibration-grade
+  run on one is refused EARLIER and for the broader reason: a browser cannot
+  pin the camera at all, so there is nothing here to measure. The order
+  matters — a browser failing THIS test would say "your camera is not
+  obeying its exposure control", which is true of the browser and would send
+  him to look at the camera. `capture_runs.session_view()['native']` is
+  still the tell.
 
 **PERSISTENCE IS SOFTWARE, on the other half of this.** Whatever a session
 pins is re-asserted by `camera.open()` (a reboot, a re-plug, a dead capture
@@ -4057,6 +4061,64 @@ controls written, read back, and each one's stuck-driver refusal), and
 `scripts/check_lever_selftest.py` — both directions over a real server, a
 real WebSocket, the REAL capture client and the real map route, run from
 `tests/test_light_field_checks.py`.
+
+## THE BROWSER IS A VIEWFINDER — a calibration-grade run refuses it BY NAME
+
+**`spectra/services/capture_source.py` is the binding statement** for which
+client may source a measurement; `mapping_refusals.browser_not_calibration_
+grade` owns the sentence. Read both before touching anything that decides
+who is holding the camera. Six things:
+
+- **THE GATE IS ONE `if`, AT THE ONE SEAM.** `capture_runs._gate` refuses a
+  browser-established session for any `kind in CALIBRATION_GRADE` (map,
+  commissioning, exposure comparison, pose fingerprint), before the room is
+  asked for, `refusal="browser_session"`. The button, the unattended queue
+  and a calibration re-running itself are callers of equal standing through
+  that function, so all three inherit it and none can be the one that
+  forgot. **Do not add a second copy of this decision anywhere** — that is
+  what `capture_source.calibration_grade` exists to prevent, and it is the
+  one line that changes the day a second client kind can hold a camera
+  honestly.
+- **THE DEMOTED THING IS THE BROWSER'S STANDING, NOT THE TRANSPORT.** The
+  native client speaks the SAME `mapping_session` protocol, so none of that
+  machinery moved or forked. A browser still connects, streams frames,
+  reports its lock and serves the preview — and AIMING stays first-class,
+  because pointing a camera does not care whether the sensor obeys its
+  exposure control. `tests/test_browser_demotion.py` proves the aiming path
+  end to end on the real session and the real routes, and would go red if
+  "demote" had been built as "refuse".
+- **NEVER A DEAD BUTTON.** The Rooms page keeps every run control and
+  executes them against whatever NATIVE session is established (he presses
+  it here, that machine measures it), so the buttons are enabled whenever
+  ANY camera holds the room. A press with only a browser present comes back
+  with the sentence and the one next step. `session_view()` carries
+  `source`/`calibration_grade`/`calibration_refusal`/`measured_by`/`aiming`
+  — the refusal text arrives from the SAME function the gate calls, so the
+  page cannot promise what the gate will not honour.
+- **THREE ANSWERS THAT CAN DISAGREE, and collapsing them lies**: `refusal`
+  is why the CAMERA is not trusted (the exposure lock), `calibration_refusal`
+  is why this CLIENT may not measure (this), and `measured_by` names whose
+  camera a run would use. A browser session is present, locked, healthy AND
+  unable to run a single item — that is not a broken session.
+- **`PREFLIGHT_REFUSALS`** (`capture_runs`) is the set every route answers
+  409-with-the-sentence to. Add a pre-light gate at the seam and add its word
+  there, or it reaches him as a 200 with an empty result.
+- **`SessionCameraDouble` DECLARES ITSELF NATIVE** (`capture_settings`), one
+  place for the seven fakes — a spec about a RUN must not refuse for a
+  reason it is not about. A spec about the browser sets `hello =
+  {"user_agent": ...}` explicitly, which is how the gate gets exercised
+  rather than modelled. A session that says nothing is NEVER native.
+
+`capture_queue.wait_for_session` waits for present + locked + CALIBRATION-
+GRADE, and at the deadline reports the browser's own sentence rather than
+`NO_SESSION` — a queue log saying "no capture session" would send a reader
+to look for a machine that was plugged in the whole time.
+
+**This closes the fourth of his 2026-09-01 failures** (a cached tab silently
+running old capture code) with no machinery of its own: calibration cannot
+ride stale browser code because it cannot ride the browser at all. Help:
+`browser-is-a-viewfinder`, linked from the Rooms page and the unattended
+card. Spec: `tests/test_browser_demotion.py`.
 
 ## THE CALIBRATION RECORD, and the POSE FINGERPRINT that gates it
 

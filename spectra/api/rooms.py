@@ -334,6 +334,16 @@ async def room_carriers():
 async def map_status():
     return {**mapping_session.status(),
             "running_room": capture_runs.running(),
+            # WHICH CLIENT IS HOLDING THE CAMERA, AND WHAT IT MAY DO. The
+            # page reads this to answer two things it could not answer
+            # before the browser's demotion: whose camera a run would
+            # measure with, and — when only a browser is here — why a
+            # calibration-grade run will refuse and what the one next step
+            # is. The sentence is `mapping_refusals`' own, arriving from the
+            # SAME function the run gate itself calls, so the page can never
+            # promise what the gate will not honour, nor invent a second
+            # wording for it. It is a READ: it refuses nothing.
+            "capture_source": capture_runs.session_view(),
             "granularities": list(emitters_mod.GRANULARITIES),
             "block_pixels_default": emitters_mod.DEFAULT_BLOCK_PIXELS,
             "max_emitters_per_run": emitters_mod.MAX_EMITTERS_PER_RUN,
@@ -456,7 +466,7 @@ async def run_map(room_id: str, body: Optional[MapBody] = None):
         focus=body.focus if body else None)
     if outcome.status == capture_runs.STATUS_NOT_FOUND:
         return JSONResponse(status_code=404, content={"detail": outcome.detail})
-    if outcome.refusal in ("no_session", "busy") or outcome.escaped:
+    if outcome.refusal in capture_runs.PREFLIGHT_REFUSALS or outcome.escaped:
         # An ANTICIPATED condition, not a server fault: 409 with the
         # sentence, exactly as this route has always answered them. A run
         # that STATED its own refusal is a different thing and still returns
@@ -510,7 +520,7 @@ async def run_exposure_test(room_id: str, body: ExposureTestBody):
         dark_capture_s=body.dark_capture_s, lit_capture_s=body.lit_capture_s)
     if outcome.status == capture_runs.STATUS_NOT_FOUND:
         return JSONResponse(status_code=404, content={"detail": outcome.detail})
-    if outcome.refusal in ("no_session", "busy") or outcome.escaped:
+    if outcome.refusal in capture_runs.PREFLIGHT_REFUSALS or outcome.escaped:
         return JSONResponse(status_code=409, content={
             "detail": outcome.detail, "refusal": outcome.refusal})
     refused = _lever_refused(outcome)
@@ -575,7 +585,7 @@ async def run_commission(room_id: str, body: Optional[CommissionBody] = None):
         return JSONResponse(status_code=404, content={"detail": outcome.detail})
     if outcome.refusal == "no_mapper":
         return JSONResponse(status_code=400, content={"detail": outcome.detail})
-    if outcome.refusal in ("no_session", "busy") or outcome.escaped:
+    if outcome.refusal in capture_runs.PREFLIGHT_REFUSALS or outcome.escaped:
         return JSONResponse(status_code=409, content={
             "detail": outcome.detail, "refusal": outcome.refusal})
     refused = _lever_refused(outcome)

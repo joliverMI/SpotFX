@@ -379,18 +379,34 @@ def test_a_passing_self_test_lets_the_map_through_and_rides_on_it(monkeypatch):
     assert outcome.summary()["lever"]["verdict"] == mapping_refusals.LEVER_OK
 
 
-def test_a_browser_session_is_untouched_by_any_of_this(monkeypatch):
-    """No self-test, no verdict, no new refusal. Demoting the browser is a
-    later, separate build and he is owed that sentence when it comes rather
-    than discovering it as a refusal."""
+def test_a_browser_session_is_never_self_tested_and_is_refused_earlier(monkeypatch):
+    """THE SELF-TEST NEVER RUNS ON A BROWSER, and since the browser's
+    demotion that is because the run is refused BEFORE it, for the broader
+    reason: a browser cannot pin the camera at all, so there is nothing here
+    to measure.
+
+    THE ORDER MATTERS AND IS ASSERTED. A browser reaching the self-test and
+    failing it would say "your camera is not obeying its exposure control",
+    which is true of the browser and useless as an instruction — he would go
+    and look at the camera. The refusal he gets instead names the client and
+    the one next step, and no verdict is left on the session to be read
+    later as a finding about that camera."""
     sess = _Session(_Camera(honest), native=False)
     room = _room()
     _wire(monkeypatch, sess, room)
     outcome = asyncio.run(capture_runs.run_map(room.id, granularity="whole"))
-    assert outcome.status == capture_runs.STATUS_OK, outcome.detail
+    assert outcome.status == capture_runs.STATUS_REFUSED
+    assert outcome.refusal == "browser_session", outcome.detail
+    # NOT the lever's refusal: this camera was never measured, and the record
+    # must not imply it was.
     assert outcome.lever == {}
     assert sess.lever_verdict is None
-    assert capture_runs.session_view()["native"] is False
+    view = capture_runs.session_view()
+    assert view["native"] is False and view["calibration_grade"] is False
+    assert view["source"] == "browser"
+    # AND THE SESSION ITSELF IS FINE. Aiming is what it is for.
+    assert view["present"] and view["locked"] and view["aiming"] is True
+    assert view["refusal"] is None, "the CAMERA lock is not what refused"
 
 
 def test_the_verdict_is_earned_once_per_session_and_never_inherited(monkeypatch):

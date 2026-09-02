@@ -56,7 +56,7 @@ import time
 from typing import Any, Optional
 
 from spectra import config as scfg
-from spectra.services import mapping_refusals
+from spectra.services import capture_source, mapping_refusals
 
 logger = logging.getLogger(__name__)
 
@@ -201,7 +201,11 @@ def health(session: Any = None, *, path=None,
                 "absent_for_s": 0.0,
                 "sentence": mapping_refusals.client_present(
                     row["host"], pose_name=row["pose_name"],
-                    version=row["version"]),
+                    version=row["version"],
+                    # `describe` already files a browser session under
+                    # "browser"; the sentence says so rather than calling a
+                    # phone the capture client.
+                    browser=row["client"] != capture_source.NATIVE_CLIENT),
                 "known": rows}
     if not rows:
         return {"present": False, "state": "never", "client": None,

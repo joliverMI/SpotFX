@@ -16,6 +16,13 @@ fake camera device cannot lock exposure and would never get past the gate.
 The page's own half — that it negotiates, refuses honestly on a camera that
 will not lock, and renders — is smoke-tested separately against Chromium.
 
+Since the browser's demotion (2026-09-02) the wire client speaks as the
+NATIVE capture client, because that is what takes a measurement now — and
+§6 turns round and connects as a PAGE, to prove BOTH halves of that on the
+real socket: the calibration-grade run refused by name with nothing written,
+and the aiming stream (frames, the lock, the preview frame) working
+perfectly through the same connection.
+
 His fixtures are NOT granted, so the ONE thing faked is the two fx_seam
 primitives (patched in the server process before the app is built). Every
 other line of the path is production code.
@@ -73,7 +80,9 @@ import httpx                                                   # noqa: E402
 import uvicorn                                                 # noqa: E402
 import websockets                                              # noqa: E402
 
-from spectra.services import fx_seam, light_field, mapping_session, room_mapping  # noqa: E402
+from spectra.services import (capture_source, fx_seam,          # noqa: E402
+                              light_field, mapping_refusals,
+                              mapping_session, room_mapping)
 
 FW, FH = light_field.FRAME_W, light_field.FRAME_H
 DEVICE = "sconce-kitchen-left"
@@ -201,6 +210,18 @@ async def _no_lifespan(app):
 # ── the phone, over a real socket ─────────────────────────────────────────
 
 class WirePhone:
+    """A CLIENT ON THE REAL WIRE — every message a session speaks, over a
+    real WebSocket.
+
+    IT SPEAKS AS THE NATIVE CAPTURE CLIENT by default. This script is about
+    the WIRE and the run: the frames, the clock pairing, the exposure gate,
+    the footprint that comes out. Since the browser's demotion
+    (`spectra/services/capture_source.py`) a browser-established session
+    cannot source a calibration-grade run at all, so a double that said
+    "browser" here would refuse every one of those for a reason none of
+    these checks is about — the `SessionCameraDouble` rule, one wire down.
+    Pass `browser=True` to speak as a page, which §6 does deliberately."""
+
     def __init__(self, url: str) -> None:
         self.url = url
         self.ws = None
@@ -209,12 +230,16 @@ class WirePhone:
         self.pump = None
         self.streamer = None
 
-    async def connect(self, lock: dict | None = None):
+    async def connect(self, lock: dict | None = None, *, browser: bool = False):
         self.lock = dict(lock if lock is not None else LOCKED)
         self.ws = await websockets.connect(self.url)
         self.pump = asyncio.create_task(self._pump())
-        await self._send({"type": "hello", "user_agent": "WirePhone/1.0",
-                          "secure_context": True, "lock": self.lock})
+        hello = {"type": "hello", "user_agent": "WirePhone/1.0",
+                 "secure_context": True, "lock": self.lock}
+        if not browser:
+            hello.update({"client": capture_source.NATIVE_CLIENT,
+                          "host": "wire-check", "pose_name": "the bench"})
+        await self._send(hello)
         for _ in range(100):
             if any(m.get("type") == "hello_ack" for m in self.received):
                 break
@@ -373,6 +398,49 @@ async def main():
               "the session is gone once the socket closes")
         r = await http.post(f"/api/rooms/{room['id']}/map")
         check(r.status_code == 409, "and a run is refused again")
+
+        # ── 6. a BROWSER session: a viewfinder, on the real wire ──────────
+        #
+        # BOTH HALVES, because a page that could only be refused would be a
+        # page nobody keeps open: the aiming stream has to demonstrably
+        # still work through the same socket that just refused the run.
+        print("\n== 6. a browser session aims, and does not measure ==")
+        page = WirePhone(ws_url)
+        await page.connect(browser=True)
+        page.start_stream()
+        await asyncio.sleep(0.3)
+
+        status = (await http.get("/api/rooms/map/status")).json()
+        src_view = status["capture_source"]
+        check(src_view["present"] and src_view["locked"]
+              and src_view["source"] == "browser",
+              "the server knows a page is holding the camera")
+        check(src_view["calibration_grade"] is False
+              and mapping_refusals.CLIENT_COMMAND
+              in src_view["calibration_refusal"],
+              "and says so before he presses, naming the one next step")
+
+        r = await http.post(f"/api/rooms/{room['id']}/map")
+        check(r.status_code == 409
+              and r.json()["refusal"] == "browser_session",
+              f"its map is refused by name ({r.json().get('refusal')})")
+        before = len(WRITES)
+
+        # ...AND THE VIEWFINDER IS UNTOUCHED, through the same socket.
+        check(status["session"]["counts"]["frames"] > 3,
+              f"frames still arrive from the page "
+              f"({status['session']['counts']['frames']})")
+        check(status["session"]["refusal"] is None,
+              "its camera lock is accepted — the CAMERA is not what refused")
+        frame = await http.get("/api/rooms/map/frame/latest")
+        check(frame.status_code == 200 and frame.content.startswith(b"P5\n"),
+              "the aiming preview still serves the latest frame "
+              f"({len(frame.content)} bytes)")
+        check(src_view["aiming"] is True,
+              "and the page is reported as first-class for aiming")
+        check(len(WRITES) == before,
+              "nothing reached the lights for any of it")
+        await page.close()
 
     await server.stop()
     print()

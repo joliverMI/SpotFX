@@ -20,9 +20,14 @@ THE FOUR PASSES, and the second one is the whole point:
                REFUSES BY NAME, before any footprint is written.
   3. DRIFT     a camera whose sensitivity moves between two IDENTICAL
                commanded settings — the invisible re-clamping. Refused.
-  4. BROWSER   the same failing camera, connecting as the page rather than
-               the native client. UNTOUCHED: no self-test, no verdict, no
-               new refusal. Demoting the browser is a later, separate build.
+  4. BROWSER   an HONEST camera, connecting as the page rather than the
+               native client. REFUSED BEFORE THIS TEST, and for the broader
+               reason — a browser cannot pin the camera at all
+               (`spectra/services/capture_source.py`, 2026-09-02). The order
+               is the point: a browser reaching this test would be told its
+               camera is not obeying its exposure control, and sent to look
+               at a camera that is working. The session stays present,
+               locked and first-class for AIMING.
 
 WHAT IS FAKE, and it is exactly two things, both of them his hardware: the
 `fx_seam` write primitives (a check script never reaches for his fixtures)
@@ -458,19 +463,43 @@ async def main():
                   f"and the refusal quotes how far it moved "
                   f"({lever.get('repeat_ratio')})")
 
-        # ── 4. THE BROWSER IS UNTOUCHED ───────────────────────────────────
-        print("\n-- 4. a BROWSER session is untouched by any of this --")
+        # ── 4. THE BROWSER IS REFUSED EARLIER, AND FOR A BROADER REASON ───
+        #
+        # It used to run its map untouched by any of this, and the demotion
+        # (2026-09-02, `spectra/services/capture_source.py`) replaced that:
+        # a browser cannot pin the camera AT ALL, so a calibration-grade run
+        # is refused before the self-test rather than by it. THE ORDER IS
+        # WHAT IS CHECKED HERE. A browser reaching this test and failing it
+        # would say "your camera is not obeying its exposure control" —
+        # true of the browser, and an instruction that would send him to
+        # look at a camera that is standing there working perfectly.
+        print("\n-- 4. a BROWSER session is refused BEFORE this test --")
         async with Held(ws_url, RespondingCamera(honest), browser=True):
             view = (await http.get("/api/rooms/capture-queue")).json()
-            check((view.get("session") or {}).get("native") is False,
+            session = view.get("session") or {}
+            check(session.get("native") is False,
                   "the server knows this is not the native client")
-            body = (await http.post(f"/api/rooms/{room_id}/map",
-                                    json={"granularity": "whole"})).json()
-            check(body.get("ok"), "and its map runs, with no new refusal")
+            check(session.get("calibration_grade") is False
+                  and bool(session.get("calibration_refusal")),
+                  "and says so BEFORE he presses, in a sentence")
+            reply = await http.post(f"/api/rooms/{room_id}/map",
+                                    json={"granularity": "whole"})
+            body = reply.json()
+            check(reply.status_code == 409
+                  and body.get("refusal") == "browser_session",
+                  f"its map is refused by name ({body.get('refusal')})")
+            check(mapping_refusals.CLIENT_COMMAND in (body.get("detail") or ""),
+                  "naming the one next step, not just the rule")
             check(not body.get("lever"),
-                  "carrying no verdict — which is not the same as failing one")
+                  "carrying no verdict — this camera was never measured, and "
+                  "the record must not imply it was")
             check(mapping_session.current.lever_verdict is None,
                   "nothing was asked of a page that cannot answer it")
+            # AND THE SESSION ITSELF IS FINE: aiming is what it is for, and
+            # the demotion took nothing away from that.
+            check(session.get("present") and session.get("locked")
+                  and session.get("aiming") is True,
+                  "while the session stays present, locked and good for aiming")
 
     await server.stop()
     print("\n" + ("ALL CHECKS PASSED" if not FAILURES else

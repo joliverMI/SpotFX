@@ -131,7 +131,8 @@ async def establish_pose(cal: Calibration, *, placement: Optional[str] = None,
         return _refuse(cal, entry, mapping_refusals.calibration_no_room(
             cal.room_id), "no_room")
 
-    view, waited = await capture_queue.wait_for_session(SESSION_WAIT_S)
+    view, waited = await capture_queue.wait_for_session(
+        SESSION_WAIT_S, action="calibration")
     if view is None:
         return _refuse(cal, entry, waited, "session")
 
@@ -349,7 +350,8 @@ async def _run_declared(cal: Calibration, entry: CalibrationRun,
         return _refuse(cal, entry, mapping_refusals.calibration_already_running(
             (live.label or live.id) if live is not None else "one"), "busy")
 
-    view, waited = await capture_queue.wait_for_session(SESSION_WAIT_S)
+    view, waited = await capture_queue.wait_for_session(
+        SESSION_WAIT_S, action="calibration")
     if view is None:
         return _refuse(cal, entry, waited, "session")
     entry.session_id = view.get("session_id") or ""
