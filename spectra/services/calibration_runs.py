@@ -53,6 +53,21 @@ leave a carrier holding footprints from two different nights —
 about an amendment softens a gate a full run applies; it narrows what is
 measured, and it supersedes exactly what it measured.
 
+AN AMENDMENT THAT DOES NOT FINISH APPLIES NOTHING (`_land_unapplied`, the
+Admiral's ruling of 2026-09-01). Its measurements stay in the lineage and
+the room map is put back exactly as it was, because a half-measured carrier
+would leave his room holding neither the old calibration nor the new one but
+a mixture assembled by wherever the run stopped. A cut-short FULL RUN is
+unchanged and still keeps its partials — `spectra/services/amendment.py`
+carries both halves of that reasoning.
+
+THE NIGHT RUNS THIS FUNCTION, not a copy of it. `run_calibration` and
+`run_amendment` take `capture_queue.run_queue`'s own `guard` and `save`
+seams and pass them straight through, so an unattended night gets the hard
+05:30 planned-end bound per item and a record written after each one,
+without a night-only path that could drift from what a button press does.
+Both default to None; there is no night mode anywhere below this line.
+
 EDITING THE DECLARATION IS APPEND-ONLY TOO. `record_declaration_change`
 keeps the WHOLE PRIOR DECLARATION on its entry, so what run 3 asked for is
 recoverable after run 4 asked for something else — the declaration on the
@@ -235,26 +250,39 @@ async def check_pose(cal: Calibration) -> tuple[pose_fingerprint.Judgement,
 # ── the run ────────────────────────────────────────────────────────────────
 
 async def run_calibration(cal: Calibration, *, force: bool = False,
-                          label: str = "") -> tuple[Calibration, CalibrationRun]:
+                          label: str = "", guard=None, save=None
+                          ) -> tuple[Calibration, CalibrationRun]:
     """Check the pose, run the WHOLE declared queue, append one lineage
     entry.
 
     Returns the SAVED calibration and the entry, in every path including
     every refusal — a refused run is a fact about the evening and the
-    record is what a person reads afterwards."""
+    record is what a person reads afterwards.
+
+    `guard` and `save` are `capture_queue.run_queue`'s own two seams, passed
+    straight through and defaulting to None so a button press behaves
+    exactly as it did before they existed. THEY ARE NOT A CALIBRATION MODE
+    and cannot soften anything: `guard` is a per-item VETO (the night's hard
+    05:30 planned-end bound — spectra/services/night_run.py), and `save` is
+    where the queue's record is written after each item, which is how an
+    unattended night's own record stays in step with the queue's. Both are
+    the night seam's, and they exist here rather than in a night-only copy
+    of this function so that a calibration run at 2am is the same run as a
+    calibration run at 2pm."""
     entry = CalibrationRun(kind=KIND_RUN, label=label)
     if not cal.items:
         return _refuse(cal, entry,
                        mapping_refusals.calibration_nothing_declared(),
                        "nothing_declared")
     return await _run_declared(cal, entry, [dict(i) for i in cal.items],
-                               force=force, label=label)
+                               force=force, label=label, guard=guard,
+                               save=save)
 
 
 async def run_amendment(cal: Calibration, names: list[str], *,
                         overrides: Optional[dict] = None,
                         whole_carrier: bool = False, force: bool = False,
-                        label: str = ""
+                        label: str = "", guard=None, save=None
                         ) -> tuple[Calibration, CalibrationRun]:
     """AMEND IN PART: re-measure a NAMED SUBSET of the declaration, under
     this calibration's own pose check and its own pinned settings, and
@@ -290,12 +318,13 @@ async def run_amendment(cal: Calibration, names: list[str], *,
         return _refuse(cal, entry, subset.refusal, "amendment")
     entry.amended = list(subset.names)
     return await _run_declared(cal, entry, subset.items, force=force,
-                               label=label, mix_gate=True)
+                               label=label, mix_gate=True, guard=guard,
+                               save=save)
 
 
 async def _run_declared(cal: Calibration, entry: CalibrationRun,
                         declared: list[dict], *, force: bool, label: str,
-                        mix_gate: bool = False
+                        mix_gate: bool = False, guard=None, save=None
                         ) -> tuple[Calibration, CalibrationRun]:
     """THE ONE BODY a full run and an amendment share. The only difference
     between them is WHAT WAS DECLARED and, for an amendment, the one extra
@@ -380,11 +409,20 @@ async def _run_declared(cal: Calibration, entry: CalibrationRun,
             entry.mixed_carriers = mix.carriers
             entry.notes.append(mix.note)
 
+    # THE ROLLBACK, taken before the first light and used only when an
+    # AMENDMENT does not finish. `spectra/services/amendment.py` is the
+    # binding statement; the short of it is the Admiral's ruling, that a
+    # half-measured carrier would leave his room holding neither the old
+    # calibration nor the new one, assembled by wherever the run stopped.
+    # A FULL RUN TAKES NONE — it keeps its partials, as every run in this
+    # codebase has always promised to.
+    rollback = amendment.Rollback.take(room) if mix_gate else None
+
     started = time.time()
     queue_run = capture_queue.new_run(items, label=label or cal.name)
     entry.queue_run_id = queue_run.id
     await capture_queue.run_queue(items, label=label or cal.name,
-                                  run=queue_run)
+                                  run=queue_run, guard=guard, save=save)
     entry.seconds = time.time() - started
     entry.items = [_item_record(o) for o in queue_run.outcomes]
     entry.status = _run_status(queue_run)
@@ -411,12 +449,80 @@ async def _run_declared(cal: Calibration, entry: CalibrationRun,
     # entry measured — an amendment's three ranges, not its carrier's
     # twenty — so an emitter this run did not touch keeps the entry that
     # took it as its origin, and provenance keeps saying so.
+    #
+    # UNLESS IT LANDED UNAPPLIED, in which case it superseded NOTHING and
+    # says so — see `_land_unapplied`.
+    if rollback is not None and entry.status != capture_runs.STATUS_OK:
+        _land_unapplied(cal, entry, rollback, queue_run)
     origin = cal.emitter_origin()
-    entry.superseded = {e: origin[e] for e in entry.emitters if e in origin}
+    entry.superseded = ({} if not entry.applied
+                        else {e: origin[e] for e in entry.emitters
+                              if e in origin})
     entry.comparable, entry.comparable_note = _comparability(
         cal, entry, judgement)
     cal.append_run(entry)
     return calibration_store.save(cal), entry
+
+
+def _land_unapplied(cal: Calibration, entry: CalibrationRun,
+                    rollback: "amendment.Rollback", queue_run) -> None:
+    """AN AMENDMENT THAT DID NOT FINISH APPLIES NOTHING.
+
+    The Admiral's ruling, 2026-09-01, and `spectra/services/amendment.py`
+    carries the whole of it. In one sentence: a partial that applies itself
+    leaves his lighting neither the old calibration nor the new one but a
+    mixture assembled by where the clock fell, and he could not know which
+    parts of his room run on which measurement.
+
+    WHAT IS KEPT AND WHAT IS PUT BACK, and the split is the point. KEPT: the
+    lineage entry, its per-item outcomes, and every `EmitterMeasurement` row
+    the run took — so a diff can still read what it saw, and so a night that
+    was cut short can still say what it learned. PUT BACK: the room map,
+    footprint for footprint, exactly as it was before the first light.
+
+    A RUN THAT MEASURED NOTHING NEEDS NO ROLLBACK and does not get one — a
+    write for its own sake, on a store whose whole value is being the one
+    live map, is a risk with nothing on the other side of it.
+
+    IT IS NEVER SILENT. The entry carries `applied=False` and the sentence,
+    the note goes on the record, and provenance reports the emitters as
+    `unapplied` rather than as superseded or missing."""
+    if not entry.emitters:
+        return
+    # Re-read: the run has been writing through its own loaded copy of the
+    # room, so restoring into the stale object the snapshot came from would
+    # discard whatever else it legitimately recorded.
+    room = light_field.get_room(cal.room_id)
+    if room is None:
+        # The room went away mid-run. There is nothing to put back and
+        # nothing to claim — say so rather than reporting a rollback that
+        # did not happen.
+        entry.applied = False
+        entry.unapplied_reason = mapping_refusals.calibration_no_room(
+            cal.room_id)
+        entry.notes.append(entry.unapplied_reason)
+        return
+    result = rollback.apply_to(room)
+    light_field.put_room(room)
+    entry.applied = False
+    entry.unapplied_reason = mapping_refusals.amendment_landed_unapplied(
+        entry.amended, len(entry.emitters), _cut_short_reason(queue_run))
+    entry.notes.append(entry.unapplied_reason)
+    logger.warning(
+        "calibration %s: amendment %s was cut short and applied nothing — "
+        "%d footprint(s) restored, %d discarded",
+        cal.id, entry.id, result["restored"], len(result["discarded"]))
+
+
+def _cut_short_reason(queue_run) -> str:
+    """WHY it stopped, in the run's own words — his morning routine, a lost
+    camera, a stopped queue. Named rather than summarised, because "cut
+    short" without a reason is the log entry this whole record exists to
+    replace."""
+    for outcome in queue_run.outcomes:
+        if outcome.status != capture_runs.STATUS_OK and outcome.detail:
+            return outcome.detail
+    return "It stopped before it had finished."
 
 
 def _run_status(queue_run) -> str:
@@ -606,6 +712,14 @@ def view(cal: Calibration, *, room=None) -> dict:
     # guess an item's name out of the declaration's own shape.
     body["item_names"] = amendment.declared_names(cal)
     body["amendable"] = amendment.amendable(cal)
+    # WHAT WAS MEASURED AND NEVER APPLIED — a cut-short amendment waiting to
+    # be run again. Named on the read rather than left for someone to notice
+    # in the lineage, because "nothing changed until you say so" is only
+    # true if he is told.
+    body["unapplied"] = [
+        {"id": r.id, "at": r.at, "kind": r.kind, "amended": list(r.amended),
+         "emitters": r.emitters, "reason": r.unapplied_reason}
+        for r in cal.runs if r.kind in cal_model.RUN_KINDS and not r.applied]
     return body
 
 

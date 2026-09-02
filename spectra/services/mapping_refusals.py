@@ -1107,3 +1107,69 @@ def night_aborted(source: str) -> str:
     return (f"The night run stopped because {why}. Measuring stopped at the "
             f"piece in flight, the room was handed straight back, and "
             f"everything measured up to that point is kept.")
+
+
+def amendment_landed_unapplied(names: list, measured: int, why: str) -> str:
+    """A PARTIAL AMENDMENT LANDS UNAPPLIED — the Admiral's ruling, and the
+    one sentence that has to be right at breakfast.
+
+    An amendment that is cut short has measured SOME of what it named. Left
+    to apply itself per emitter, the carrier it touched would hold neither
+    the old calibration nor the new one but a mixture assembled by WHERE THE
+    CLOCK FELL — and he could not know which parts of his room run on which
+    measurement. So what it took is recorded and the live map is put back
+    exactly as it was: nothing changes until it runs to completion or he
+    says so.
+
+    NOT A FAILURE, and worded as the plain fact it is. The measurements are
+    real and they are in the lineage; what is withheld is applying a half
+    of a thing to his room."""
+    return (f"This amendment was cut short before it finished "
+            f"{and_list(names) if names else 'what it named'}, so nothing "
+            f"was applied to the room map — it is back exactly as it was. "
+            f"{why} It measured {measured} emitter"
+            f"{'' if measured == 1 else 's'} and those readings are kept in "
+            f"this calibration's lineage, where they can be compared. A "
+            f"half-measured fixture would leave that carrier holding neither "
+            f"the old calibration nor the new one, assembled by wherever the "
+            f"run happened to stop, so it applies when it finishes and not "
+            f"before. Run the amendment again when the room is free.")
+
+
+# ── A CALIBRATION AS THE NIGHT'S DECLARED QUEUE ────────────────────────────
+#
+# The night declaration may name a CALIBRATION instead of a bare item list
+# (spectra/services/night_calibration.py). Everything below is a fact the
+# morning read has to carry: nobody was awake, so a night that named a
+# calibration and did not measure it has to say why in a sentence a person
+# reads at breakfast.
+
+
+def night_calibration_missing(cal_id: str) -> str:
+    """The declaration names a calibration that is no longer stored. A
+    decline, exactly like a declaration that no longer parses: nothing about
+    the room is touched."""
+    return (f"The night run declined: it is declared to run calibration "
+            f"{cal_id}, and there is no such calibration stored any more. "
+            f"Nothing was measured and nothing about the room was touched. "
+            f"Declare a calibration that exists, or declare a plain item "
+            f"list instead.")
+
+
+def night_calibration_ambiguous() -> str:
+    return ("A night declaration names EITHER a calibration to run OR a "
+            "plain list of items, never both — two declarations in one file "
+            "is a question nobody would be awake to answer. Name one.")
+
+
+def night_calibration_refused(name: str, mode: str, detail: str) -> str:
+    """THE NIGHT RAN AND THE CALIBRATION REFUSED. Distinct from a decline
+    (which never started) and from a failure (an unexpected error): the seam
+    worked, the boundary held, and the calibration's own gate said no. Its
+    own sentence is carried verbatim — this only says whose it is."""
+    return (f"The night run held the room and {mode} '{name}' refused: "
+            f"{detail}")
+
+
+def night_calibration_ran(name: str, mode: str, summary: str) -> str:
+    return f"The night ran {mode} '{name}': {summary}"

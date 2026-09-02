@@ -74,6 +74,65 @@ regime this record knows, so "the camera had not moved since" is not
 something anybody can say about it; unknown provenance is `cannot_tell` one
 level up, and this module treats it the same way for the same reason.
 
+═══ A CUT-SHORT AMENDMENT LANDS UNAPPLIED ═══
+
+THE ADMIRAL'S RULING (2026-09-01), and it is binding: an amendment that does
+not finish applies NOTHING. What it measured is kept in the lineage; the
+room map is put back exactly as it was.
+
+HIS REASON, which is better than the one this module first reached for: a
+partial that applies itself leaves his lighting NEITHER THE OLD CALIBRATION
+NOR THE NEW ONE, assembled by where the clock fell — and he could not know
+which parts of his room run on which measurement. Unapplied means the
+morning read says plainly: cut short, here is what it measured, nothing
+changed until he or a completed run says so.
+
+THE ARGUMENT THIS MODULE HAD REACHED FOR, recorded because it was wrong in
+an instructive way: the gate above is answered BEFORE the run, from stored
+data, over the kept/taking split the amendment DECLARED. A run cut short
+takes fewer emitters than it declared, so the split that actually lands is
+not the one the gate judged — the extra emitters left behind were in
+`taking`, and their own origin regime was therefore never checked. That is
+a real hole and it argues for re-judging afterwards. It is not the whole
+problem, though: even a re-judge that PASSES leaves him a fixture whose
+halves were measured on two different nights for no reason anybody chose.
+The ruling closes both, and it needs no post-hoc verdict at all.
+
+HOW IT IS DONE, and it is a ROLLBACK on the ONE store rather than a second
+one. `room_mapping` writes each footprint to `room_maps.json` as it measures
+it — deliberately, so a run that stops half-way keeps what it took — so
+there is no moment at which a measurement is sitting unwritten and could
+simply be withheld. `Rollback.take(room)` snapshots the room's footprints
+before an amendment drives anything and `apply_to` puts them back; the
+measurements survive as `ItemOutcomeRecord.measurements` rows on the entry,
+which is where a diff reads them from anyway. No new store, no staging
+area, and `room_maps.json` remains the one live map.
+
+WHAT "AWAITING THE GATE" RESOLVES TO, said plainly rather than left to be
+discovered: the gate is THE AMENDMENT FINISHING. There is deliberately no
+"apply it later" action, and it is not an omission — a lineage entry keeps a
+one-row-per-emitter SUMMARY (`EmitterMeasurement`: a weight, seen or not),
+never the 2,304-cell grid, because copying grids into the file that must
+never be pruned is what would make it the unbounded one. So there is no
+stored footprint to apply later even in principle, and inventing a staging
+store for one would be the second record system this step is forbidden. What
+the readings ARE good for is exactly what the lineage is for: a diff, so he
+can see what the half it managed had to say before deciding to run it again.
+
+WHY EVERY PARTIAL AND NOT ONLY THE MORNING'S. The ruling names his morning
+cut, and the reason generalises exactly: a dropped camera at 2am and his
+05:50 routine leave the identical half-measured fixture. So ANY amendment
+whose run does not complete lands unapplied, and there is no night mode
+deciding which — one rule, applied at 2am and 2pm alike.
+
+WHY A CUT-SHORT FULL RUN IS UNCHANGED, and this scoping is deliberate:
+"everything measured up to that point is kept" is the shipped, stated
+promise of every partial run in this codebase, and a full run makes no
+kept/taking split claim — it replaces the whole of every carrier it
+declares, so what it leaves behind is what was always there, not a half of
+one fixture. The amendment is the only shape whose whole existence is
+mixing INSIDE one carrier under a gate, and it is the only one changed here.
+
 WHAT IS NOT HERE: any judgement about whether the amended numbers DIFFER
 from the ones they replaced. That is `spectra/services/calibration_diff.py`,
 computed from stored data and never narrated.
@@ -321,3 +380,62 @@ def amendable(cal: Calibration) -> bool:
     anything has no subset worth re-taking — run it first."""
     return bool(cal.items) and any(r.kind in RUN_KINDS for r in cal.runs)
 
+
+
+# ── the rollback that makes "unapplied" true ───────────────────────────────
+
+@dataclass
+class Rollback:
+    """THE ROOM MAP AS IT WAS BEFORE AN AMENDMENT DROVE ANYTHING.
+
+    Taken before the first light, put back when the amendment does not
+    finish. The module docstring is the binding statement for WHY; this is
+    only the mechanism, and it is deliberately a small one:
+
+      * THE WHOLE FOOTPRINT LIST, not a computed subset. What a run's plan
+        will actually touch is not fully knowable before the plan resolves
+        (a carrier-scoped item, `scope_plan`'s own carrier drop, a retry
+        that turns an unseen record into a mapped one), and a snapshot that
+        missed one emitter would restore a map that is ALMOST what it was —
+        which is exactly the "assembled by where the clock fell" state the
+        ruling refuses. It costs one room's footprints in memory, briefly,
+        for the length of one run: the same object `light_field.put_room`
+        serialises after every emitter anyway.
+
+      * RE-READ, NEVER RE-USED. `apply_to` is handed the room as it is NOW
+        (the run has been writing to it through its own loaded copy), and
+        replaces its footprint list wholesale. Restoring into the stale
+        object the snapshot came from would silently discard anything else
+        the run legitimately recorded on the room.
+
+    IT IS NOT A GENERAL TRANSACTION and must not become one. Nothing else in
+    this codebase rolls a capture back — a full run keeps its partials, by
+    the standing promise — and this exists for the one shape whose halves
+    cannot honestly be read together."""
+    room_id: str = ""
+    #: The stored footprints, dumped, exactly as they were.
+    footprints: list[dict] = field(default_factory=list)
+    taken: bool = False
+
+    @classmethod
+    def take(cls, room) -> "Rollback":
+        if room is None:
+            return cls()
+        return cls(room_id=room.id,
+                   footprints=[f.model_dump() for f in room.footprints],
+                   taken=True)
+
+    def apply_to(self, room) -> dict:
+        """Put the map back. Returns what changed, for the record — a
+        rollback that says nothing would be indistinguishable from one that
+        never happened."""
+        from spectra.models.room_map import EmitterFootprint
+        if not self.taken or room is None:
+            return {"restored": 0, "discarded": [], "rolled_back": False}
+        was = {f["emitter_id"]: f for f in self.footprints}
+        now = {f.emitter_id for f in room.footprints}
+        room.footprints = [EmitterFootprint(**dict(f))
+                           for f in self.footprints]
+        return {"restored": len(self.footprints),
+                "discarded": sorted(now - set(was)),
+                "rolled_back": True}

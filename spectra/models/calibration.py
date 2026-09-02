@@ -405,7 +405,29 @@ class CalibrationRun(BaseModel):
     #: leaves the rest of that carrier's footprints exactly where they were,
     #: still credited to the run that took them. No measurement ever
     #: disappears from the record without the record saying what replaced it.
+    #: EMPTY on an entry that landed UNAPPLIED — it superseded nothing.
     superseded: dict[str, str] = Field(default_factory=dict)
+    #: DID THIS ENTRY'S MEASUREMENTS REACH THE ROOM MAP? True for every run
+    #: and every amendment that finished, and for every entry written before
+    #: this field existed — which is correct, because those all applied.
+    #:
+    #: False for an AMENDMENT THAT WAS CUT SHORT (the Admiral's ruling,
+    #: 2026-09-01): what it measured is kept HERE, in the lineage, and the
+    #: live map is put back exactly as it was, because a half-measured
+    #: carrier would hold neither the old calibration nor the new one but a
+    #: mixture assembled by wherever the run happened to stop — and he could
+    #: not know which parts of his room ran on which measurement.
+    #: `spectra/services/amendment.py` is the binding statement, including
+    #: why a cut-short FULL RUN is unchanged by this and still keeps its
+    #: partials.
+    #:
+    #: EVERY READER THAT ASKS "WHICH RUN PRODUCED THIS FOOTPRINT" MUST HONOUR
+    #: IT — `emitter_origin` does, which is what stops an unapplied entry
+    #: from being credited with footprints that are not in the map.
+    applied: bool = True
+    #: Why it did not apply, in his nouns
+    #: (`mapping_refusals.amendment_landed_unapplied`). Empty when it did.
+    unapplied_reason: str = ""
     #: THE MIXING GATE'S OWN WORKING, for an amendment: which carriers it
     #: would have left holding footprints from more than one run, which
     #: emitters it was taking, and the claim (or the refusal) that decided
@@ -503,10 +525,16 @@ class Calibration(BaseModel):
     def emitter_origin(self) -> dict[str, str]:
         """emitter_id -> the id of the MOST RECENT run of this calibration
         that produced it. What a new run's `superseded` map is computed
-        against, and what a provenance read answers with."""
+        against, and what a provenance read answers with.
+
+        AN UNAPPLIED ENTRY IS SKIPPED. Its measurements are in the
+        lineage and NOT in the room map, so crediting it with a footprint
+        would tell the mixing gate that a reading it can never see was taken
+        under this calibration's own pose and regime — the exact confident
+        wrong answer that gate exists to refuse."""
         origin: dict[str, str] = {}
         for r in self.runs:
-            if r.kind not in RUN_KINDS:
+            if r.kind not in RUN_KINDS or not r.applied:
                 continue
             for e in r.emitters:
                 origin[e] = r.id

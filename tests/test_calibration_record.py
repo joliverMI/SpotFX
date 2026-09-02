@@ -127,7 +127,7 @@ def test_a_calibration_that_never_ran_says_so():
     assert "never run" in view["state"]
     # NOT an empty result set that looks like a run finding nothing.
     assert view["provenance"]["counts"] == {"present": 0, "superseded": 0,
-                                            "missing": 0}
+                                            "missing": 0, "unapplied": 0}
     assert "not produced a footprint yet" in view["provenance"]["note"]
 
 

@@ -178,3 +178,88 @@ def test_the_night_state_reaches_engine_status():
     assert "night_run" in body
     assert body["night_run"]["active"] is False
     assert "planned_end_label" in body["night_run"]
+
+
+# ── A CALIBRATION AS THE DECLARATION ───────────────────────────────────────
+
+def _calibration():
+    """A stored calibration with one declared item. The stores are repointed
+    by conftest's autouse fixtures, so nothing here touches his."""
+    from spectra.models.calibration import Calibration
+    from spectra.models.room_map import RoomMap
+    from spectra.services import calibration_store, light_field
+    room = light_field.put_room(RoomMap(name="Lounge", carrier_ids=["north"]))
+    return calibration_store.save(Calibration(
+        name="North shelf", room_id=room.id,
+        items=[{"kind": "map", "room_id": room.id, "label": "north",
+                "carrier_ids": ["north"]}]))
+
+
+def test_a_calibration_can_be_declared_as_the_nights_queue():
+    cal = _calibration()
+    with _client() as client:
+        resp = client.put("/api/night-run/queue",
+                          json={"label": "tonight", "calibration_id": cal.id})
+        assert resp.status_code == 200
+        stored = client.get("/api/night-run/queue").json()
+    assert stored["declared"] is True
+    assert stored["queue"]["calibration_id"] == cal.id
+    assert "items" not in stored["queue"]
+
+
+def test_an_amendment_can_be_declared_and_is_validated_now_not_at_1am():
+    """Refused while he is awake — `amendment`'s own sentence, through the
+    same function the /amend route calls."""
+    cal = _calibration()
+    with _client() as client:
+        good = client.put("/api/night-run/queue",
+                          json={"calibration_id": cal.id,
+                                "amend": {"items": ["north"]}})
+        assert good.status_code == 200
+        assert good.json()["queue"]["amend"]["items"] == ["north"]
+
+        bad = client.put("/api/night-run/queue",
+                         json={"calibration_id": cal.id,
+                               "amend": {"items": ["the sofa"]}})
+    assert bad.status_code == 400
+    assert "declares nothing called" in bad.json()["detail"]
+
+
+def test_a_declaration_naming_a_missing_calibration_is_refused_at_400():
+    with _client() as client:
+        resp = client.put("/api/night-run/queue",
+                          json={"calibration_id": "no-such-thing"})
+    assert resp.status_code == 400
+    assert "no such calibration" in resp.json()["detail"]
+
+
+def test_the_morning_read_is_an_open_read_and_says_when_nothing_ran():
+    """A READ CANNOT START ANYTHING, so it needs no token — and absence is a
+    read: "no night has ever run" must not look like "a night ran and
+    measured nothing"."""
+    with _client() as client:
+        resp = client.get("/api/night-run/morning")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["state"] == "idle"
+    assert "No night run has happened yet." in body["summary"]
+    assert body["waiting"] == []
+
+
+def test_a_declined_night_reaches_the_morning_read_with_its_reason():
+    """The boundary held (the room is released in this fixture), and the
+    morning read says so with the act that clears it."""
+    cal = _calibration()
+    with _client() as client:
+        client.put("/api/night-run/queue", json={"calibration_id": cal.id})
+        started = client.post("/api/night-run/start", json=START,
+                              headers=_auth())
+        assert started.json()["state"] == night_run.STATE_DECLINED
+        body = client.get("/api/night-run/morning").json()
+        fixtures = client.get("/api/night-run/fixtures").json()
+    assert "did not run" in body["ran"]
+    assert any("ownership bar" in w for w in body["waiting"])
+    # ONE READ: the morning backstop's own surface carries it too, so "what
+    # did last night do to my calibrations" and "what do I turn off" are not
+    # two different pages.
+    assert fixtures["morning_read"]["summary"] == body["summary"]

@@ -116,7 +116,8 @@ from zoneinfo import ZoneInfo
 from typing import Any, Optional
 
 from spectra import config as scfg
-from spectra.services import capture_queue, capture_runs, mapping_refusals
+from spectra.services import (capture_queue, capture_runs,
+                              mapping_refusals, night_calibration)
 
 logger = logging.getLogger(__name__)
 
@@ -159,6 +160,15 @@ STATE_ABORTED = "aborted"
 #: for why the two are different facts.
 STATE_ENDED_BY_MORNING = "ended_by_morning"
 STATE_DECLINED = "declined"
+#: THE NIGHT RAN AND WHAT IT WAS DECLARED TO RUN REFUSED BY NAME — today,
+#: a calibration whose pose check said the camera had moved, or an
+#: amendment whose mixing gate would not vouch for the result
+#: (spectra/services/night_calibration.py). DISTINCT FROM `declined`, which
+#: never started and never touched the room, and from `failed`, which is an
+#: unexpected error: here the seam worked, the boundary held, the room was
+#: held and handed back, and the calibration's own gate said no. Folding it
+#: into either would lose exactly the fact he needs at breakfast.
+STATE_REFUSED = "refused"
 STATE_FAILED = "failed"
 
 
@@ -206,7 +216,12 @@ def load_declaration(path=None) -> Optional[dict]:
     and has hours to fix a typo in it, rather than being assembled by
     something at 1am on the item nobody reads. `capture_queue.parse_items`
     is the one validator, so a night queue and a daytime queue cannot drift
-    into two dialects."""
+    into two dialects.
+
+    TWO SHAPES, ONE FILE. Either a plain `items` list, or a
+    `calibration_id` (with an optional `amend`) naming a CALIBRATION to run
+    — `spectra/services/night_calibration.py` is the binding statement for
+    the second. Never both: that is refused at declaration time."""
     p = _queue_path(path)
     try:
         if not os.path.exists(p):
@@ -216,18 +231,47 @@ def load_declaration(path=None) -> Optional[dict]:
     except Exception:                                   # noqa: BLE001
         logger.exception("night run: unreadable night queue %s", p)
         return None
-    if not (body or {}).get("items"):
+    body = body or {}
+    if not body.get("items") and not body.get("calibration_id"):
         return None
     return body
 
 
-def save_declaration(label: str, items: list[dict], path=None) -> dict:
+def save_declaration(label: str, items: Optional[list[dict]] = None,
+                     path=None, *, calibration_id: str = "",
+                     amend: Optional[dict] = None,
+                     force: bool = False) -> dict:
     """Store a declared night queue, VALIDATED FIRST. Raises ValueError with
-    `capture_queue`'s own sentence when the list will not parse — refusing a
-    typo at declaration is the entire reason this is declared ahead."""
-    capture_queue.parse_items(items)                    # refuses, or returns
-    body = {"label": str(label or ""), "items": list(items),
-            "declared_at": time.time()}
+    the offending layer's OWN sentence when it will not parse — refusing a
+    typo at declaration is the entire reason this is declared ahead, while
+    he is awake and has hours to fix it.
+
+    A CALIBRATION DECLARATION IS VALIDATED THE WHOLE WAY DOWN, not merely
+    stored: the calibration must exist, it must declare something, an
+    amendment's named items must be ones it declares, and what comes out
+    must satisfy `capture_queue.parse_items` — the one validator, reached
+    through `night_calibration.resolve`, which is the same path the run
+    itself takes. So "declared at 10pm, refuses at 1am for a reason he could
+    have seen" is closed by construction rather than by care."""
+    body: dict = {"label": str(label or ""), "declared_at": time.time()}
+    if calibration_id:
+        target = night_calibration.parse_target(
+            {"calibration_id": calibration_id, "amend": amend,
+             "force": force, "items": items or []})
+        if target.refusal:
+            raise ValueError(target.refusal)
+        resolved = night_calibration.resolve(target)
+        if resolved.refusal:
+            raise ValueError(resolved.refusal)
+        body.update({"calibration_id": target.calibration_id,
+                     "force": target.force})
+        if target.mode == night_calibration.MODE_AMEND:
+            body["amend"] = {"items": list(target.items),
+                             "overrides": dict(target.overrides),
+                             "whole_carrier": target.whole_carrier}
+    else:
+        capture_queue.parse_items(items)                # refuses, or returns
+        body["items"] = list(items or [])
     _atomic_write(_queue_path(path), body)
     return body
 
@@ -271,6 +315,12 @@ class NightRun:
     exit_report: dict = field(default_factory=dict)
     #: Aborted nights only: who touched what.
     abort: dict = field(default_factory=dict)
+    #: WHICH CALIBRATION THIS NIGHT RAN, and how its one lineage entry
+    #: landed — `night_calibration.record()`. Empty for a plain item-list
+    #: night. A LINK AND A VERDICT, never a copy of the lineage: the
+    #: measurements live in the calibration's own file, which is the one
+    #: that is never pruned, and this store is bounded.
+    calibration: dict = field(default_factory=dict)
 
     def as_dict(self) -> dict:
         return {"run_id": self.id, "state": self.state,
@@ -281,7 +331,8 @@ class NightRun:
                 "price": dict(self.price), "planned_end": self.planned_end,
                 "planned_end_label": PLANNED_END_LABEL,
                 "queue": dict(self.queue), "exit": dict(self.exit_report),
-                "abort": dict(self.abort)}
+                "abort": dict(self.abort),
+                "calibration": dict(self.calibration)}
 
 
 def load_nights(path=None) -> list[dict]:
@@ -443,6 +494,7 @@ async def fixtures_export() -> dict:
     hole, named, computed live. Turning off exactly these two lists is a
     complete morning scope; turning off only the first is the gap he already
     fell into."""
+    from spectra.services import morning_read
     entries = await _device_listing()
     night = last_night() or {}
     shielded = shielded_devices(entries)
@@ -457,13 +509,19 @@ async def fixtures_export() -> dict:
             {**_entry_row(by_id[did]), "shielded_via": vids}
             for did, vids in sorted(shielded.items()) if did in by_id],
         "exit": dict(night.get("exit") or {}),
+        # WHICH CALIBRATION THE NIGHT RAN AND WHAT CHANGED — carried here so
+        # "what did last night do to my calibrations" is the SAME read as
+        # "what does the morning backstop have to turn off", rather than two
+        # surfaces he has to know about (spectra/services/morning_read.py).
+        "calibration": dict(night.get("calibration") or {}),
+        "morning_read": morning_read.build(night),
     }
 
 
 #: The states in which a night is over. `active` is derived from this ONE
 #: set so nothing downstream has to enumerate them a second time.
 ENDED_STATES = (STATE_COMPLETE, STATE_ABORTED, STATE_ENDED_BY_MORNING,
-                STATE_DECLINED, STATE_FAILED)
+                STATE_DECLINED, STATE_REFUSED, STATE_FAILED)
 
 
 def status_brief() -> dict:
@@ -487,7 +545,7 @@ def status_brief() -> dict:
     if not night:
         return {"state": "idle", "active": False, "run_id": None,
                 "started": None, "ended": None, "ended_by_morning": False,
-                "declared": declared(),
+                "declared": declared(), "calibration": {},
                 "planned_end": planned_end_at(),
                 "planned_end_label": PLANNED_END_LABEL}
     state = night.get("state")
@@ -497,8 +555,34 @@ def status_brief() -> dict:
             "ended_by_morning": state == STATE_ENDED_BY_MORNING,
             "detail": night.get("detail") or "",
             "declared": declared(),
+            # WHICH CALIBRATION, ON THE POLLED SURFACE. Small and flat on
+            # purpose — the whole morning read is a route of its own
+            # (`GET /api/night-run/morning`), because it loads the
+            # calibration and computes a diff, which is not work for a
+            # surface answering every few seconds.
+            "calibration": _calibration_brief(night),
             "planned_end": night.get("planned_end") or planned_end_at(),
             "planned_end_label": PLANNED_END_LABEL}
+
+
+def _calibration_brief(night: dict) -> dict:
+    """The four facts a poll should carry about last night's calibration:
+    which one, which shape, how it landed, and WHETHER IT WAS APPLIED.
+
+    `applied` is on the cheap surface deliberately. A cut-short amendment
+    that measured a great deal and changed nothing looks, on every count in
+    this record, exactly like a successful one — and that is the single fact
+    the Admiral's ruling exists to keep visible."""
+    link = dict(night.get("calibration") or {})
+    if not link.get("calibration_id"):
+        return {}
+    return {"calibration_id": link.get("calibration_id"),
+            "name": link.get("name") or "",
+            "mode": link.get("mode") or "",
+            "entry_id": link.get("entry_id") or "",
+            "status": link.get("status") or "",
+            "applied": link.get("applied", True),
+            "comparable": link.get("comparable", False)}
 
 
 # ── the hard planned end, and pricing a queue against it ───────────────────
@@ -711,15 +795,31 @@ async def start(trigger: dict) -> NightRun:
     if declaration is None:
         return _decline(trigger, "no_declared_queue",
                         mapping_refusals.NO_DECLARED_NIGHT_QUEUE)
-    try:
-        items = capture_queue.parse_items(declaration["items"])
-    except ValueError as exc:
-        # A declaration that parsed when he wrote it and does not now (a
-        # hand-edited file, a renamed field) is still a decline with a
-        # sentence, never a 3am traceback.
-        return _decline(trigger, "no_declared_queue",
-                        f"{mapping_refusals.NO_DECLARED_NIGHT_QUEUE} "
-                        f"(the stored declaration no longer parses: {exc})")
+
+    # A CALIBRATION, OR A PLAIN LIST. Resolved through
+    # `night_calibration`, which reaches the calibration's own declaration
+    # and `amendment.resolve_subset` — the same functions the /run and
+    # /amend routes use — and then `capture_queue.parse_items`, the one
+    # validator. A calibration deleted between his declaring it and his
+    # falling asleep declines by name here, before anything is priced.
+    target = night_calibration.parse_target(declaration)
+    resolved = None
+    if target.declared or target.refusal:
+        resolved = night_calibration.resolve(target)
+        if resolved.refusal:
+            return _decline(trigger, resolved.refusal_kind, resolved.refusal)
+        items = capture_queue.parse_items(resolved.items)
+    else:
+        try:
+            items = capture_queue.parse_items(declaration["items"])
+        except ValueError as exc:
+            # A declaration that parsed when he wrote it and does not now (a
+            # hand-edited file, a renamed field) is still a decline with a
+            # sentence, never a 3am traceback.
+            return _decline(trigger, "no_declared_queue",
+                            f"{mapping_refusals.NO_DECLARED_NIGHT_QUEUE} "
+                            f"(the stored declaration no longer parses: "
+                            f"{exc})")
 
     # PRICED BEFORE ANYTHING IS HELD, against the hard planned end. A queue
     # that cannot finish before his morning routine (and the blinds opening
@@ -738,7 +838,9 @@ async def start(trigger: dict) -> NightRun:
                    trigger=dict(trigger), started=time.time(),
                    label=str(declaration.get("label") or ""),
                    fixtures=run_fixture_rows(items, entries),
-                   price=price, planned_end=price["planned_end"])
+                   price=price, planned_end=price["planned_end"],
+                   calibration=(night_calibration.record(target, resolved)
+                                if resolved is not None else {}))
     current = run
     save_night(run)
     logger.warning("night run %s: starting %d declared item(s) over %d "
@@ -746,7 +848,8 @@ async def start(trigger: dict) -> NightRun:
                    run.id, len(items), len(run.fixtures),
                    price["total_seconds"], price["window_seconds"],
                    PLANNED_END_LABEL)
-    _task = asyncio.create_task(_work(run, items), name="spectra-night-run")
+    _task = asyncio.create_task(_work(run, items, target, resolved),
+                                name="spectra-night-run")
     return run
 
 
@@ -761,9 +864,18 @@ async def _live_devices() -> list:
     return list(host.devices.values())
 
 
-async def _work(run: NightRun, items) -> None:
+async def _work(run: NightRun, items, target=None, resolved=None) -> None:
     """The night itself. Never raises past here: an unattended caller gets a
-    record, and the record says what happened."""
+    record, and the record says what happened.
+
+    ONE WALK, TWO CALLERS INTO IT. A plain declaration goes straight to
+    `capture_queue.run_queue`; a CALIBRATION declaration goes to
+    `calibration_runs` (through `night_calibration.execute`), which runs the
+    same `run_queue` with the same `guard` and the same `save` and then
+    appends one entry to that calibration's lineage. The power context, the
+    planned-end guard, the record-after-every-item and the honest exit are
+    outside the branch on purpose: nothing about a night changes because of
+    what it was declared to run."""
     global current
     run_ids = {str(f.get("id")) for f in run.fixtures}
     # Held outside the try so the record carries what `owned()` did on EVERY
@@ -779,15 +891,22 @@ async def _work(run: NightRun, items) -> None:
             held.append(power)
             run.power = power.as_dict()
             save_night(run)
-            queue_run = capture_queue.new_run(list(items), label=run.label)
-            await capture_queue.run_queue(
-                list(items), label=run.label, run=queue_run,
-                save=_queue_persist(run),
-                # NEVER SCHEDULE PAST HIS MORNING. Checked before EVERY
-                # item, not once at the top: a queue that fitted at 01:00
-                # has not necessarily got room for item six at 05:28.
-                guard=fits_guard(run.price))
-            run.queue = queue_run.as_dict()
+            # NEVER SCHEDULE PAST HIS MORNING. Checked before EVERY item,
+            # not once at the top: a queue that fitted at 01:00 has not
+            # necessarily got room for item six at 05:28. The SAME guard
+            # goes down either branch — a calibration's declared queue is
+            # priced and bounded exactly as a plain one is.
+            guard = fits_guard(run.price)
+            persist = _queue_persist(run)
+            if resolved is not None:
+                await _run_calibration(run, target, resolved, guard, persist)
+            else:
+                queue_run = capture_queue.new_run(list(items),
+                                                  label=run.label)
+                await capture_queue.run_queue(
+                    list(items), label=run.label, run=queue_run,
+                    save=persist, guard=guard)
+                run.queue = queue_run.as_dict()
     except Exception as exc:                            # noqa: BLE001
         logger.exception("night run %s: failed", run.id)
         run.state = STATE_FAILED
@@ -802,6 +921,49 @@ async def _work(run: NightRun, items) -> None:
         if held:
             run.power = held[0].as_dict()
         await _finish(run)
+
+
+async def _run_calibration(run: NightRun, target, resolved, guard,
+                           persist) -> None:
+    """RUN THE DECLARED CALIBRATION and land its verdict on this night.
+
+    THE RUN IS `calibration_runs`' OWN, unchanged: every gate a pressed run
+    applies applies here, because there is no second path to skip one on.
+    What this adds is the night's two seams — the planned-end `guard` and
+    the record-after-every-item `save` — and the translation of the entry's
+    outcome into the night's own state.
+
+    A REFUSAL IS `STATE_REFUSED`, NOT A FAILURE AND NOT A DECLINE. The seam
+    worked, the boundary held, the room was held and handed back, and the
+    calibration's own gate said no — most often an amendment whose mixing
+    gate would not vouch for the result. That is a read in the morning, and
+    it is never quietly widened into a full re-take he did not declare."""
+    cal, entry = await night_calibration.execute(
+        target, resolved, guard=guard, save=persist,
+        label=run.label or resolved.calibration.name)
+    run.calibration = night_calibration.record(target, resolved, entry)
+    if run.state != STATE_RUNNING:
+        # HIS MORNING (or a touched light) ALREADY ENDED THIS NIGHT while
+        # the run was in flight — `abort()` stamps the state and the
+        # sentence synchronously, ahead of its own network work, because the
+        # house restores its envelope off them. Overwriting either here
+        # would replace "this ended at his morning routine" with "this ran
+        # and came back partial", which is the same night described as an
+        # ordinary one. The calibration link above is still recorded: WHAT
+        # it measured is this function's to say, WHY it stopped is not.
+        save_night(run)
+        return
+    if entry.status == capture_runs.STATUS_REFUSED:
+        run.state = STATE_REFUSED
+        run.refusal = entry.refusal or "calibration"
+        run.detail = mapping_refusals.night_calibration_refused(
+            cal.name, target.word, entry.detail)
+        logger.warning("night run %s: %s '%s' refused — %s", run.id,
+                       target.word, cal.name, entry.detail)
+    else:
+        run.detail = mapping_refusals.night_calibration_ran(
+            cal.name, target.word, entry.detail)
+    save_night(run)
 
 
 def _queue_persist(run: NightRun):

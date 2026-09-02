@@ -4228,6 +4228,19 @@ things:
   pre-registered, not tuned. It never treats absence as a change and never
   claims a comparison the record does not support.
 
+- **A CUT-SHORT AMENDMENT APPLIES NOTHING** (Admiral's ruling, 2026-09-01,
+  §104). What it measured is KEPT in the lineage; the room map is PUT BACK
+  exactly as it was (`amendment.Rollback`, `calibration_runs.
+  _land_unapplied`, `CalibrationRun.applied=False`). His reason: a partial
+  that applies itself leaves his lighting neither the old calibration nor
+  the new one but a mixture **assembled by where the clock fell**. It is a
+  ROLLBACK on the ONE store (footprints are written per emitter as they are
+  measured, so there is no unwritten moment to withhold), it applies to
+  EVERY partial amendment day or night, and **a cut-short FULL RUN is
+  unchanged and still keeps its partials** — a full run makes no
+  kept/taking split claim. `emitter_origin` skips an unapplied entry and
+  provenance reports its emitters `unapplied`, never superseded/missing.
+
 **`RUN_KINDS` (`spectra/models/calibration.py`) is a constant for a
 reason**: an amendment produces footprints exactly as a run does, so every
 provenance/origin/comparability read uses it — a reader still testing
@@ -4310,6 +4323,28 @@ reads. Seven things, and each one has cost something already:
   remember. Turning off both lists is a complete morning scope; the first
   alone is the gap he already fell into.
 
+- **A CALIBRATION CAN BE WHAT THE NIGHT RUNS** (2026-09-01, §104) —
+  `spectra/services/night_calibration.py` is the binding statement.
+  `PUT /api/night-run/queue` takes EITHER the plain item list OR a
+  `calibration_id` (+ optional `amend`), never both, validated the whole way
+  down AT DECLARATION through the same `amendment.resolve_subset` /
+  `capture_queue.parse_items` the routes use. The night calls
+  `calibration_runs.run_calibration`/`run_amendment` — which simply gained
+  `run_queue`'s own `guard`/`save` seams (default None) so the 05:30 bound
+  and the per-item record reach a calibration's queue with **no night-only
+  copy of the walk**. What it measures lands in that calibration's own
+  lineage; the night record carries a LINK AND A VERDICT, never a copy. A
+  refusal (an amendment's mixing gate, a moved camera) is
+  `night_run.STATE_REFUSED` — distinct from `declined` (never started) and
+  `failed` (unexpected error).
+- **THE MORNING READ** — `spectra/services/morning_read.py`,
+  `GET /api/night-run/morning`, also folded into `/night-run/fixtures` so
+  "what did last night do to my calibrations" and "what do I turn off" are
+  ONE read. His bar: which calibration ran, what it measured (and whether
+  ANY of it was applied), what changed via `calibration_diff` (never a
+  second arithmetic), and what waits on him — his nouns, never a log. It
+  computes and judges nothing of its own.
+
 **Run state on `GET /api/engine/status` is a TRIGGER, not a dashboard
 field** — the house restores its own "Dark Music" envelope off it, so
 `status_brief()` reads the live in-memory record (stamped before the network
@@ -4323,6 +4358,9 @@ near the camera.
 
 Spec: `tests/test_night_run.py` (the boundary, the planned end, the export
 tracking a shield change, abort, the morning ending),
+`tests/test_night_calibration.py` (the calibration path: the boundary
+re-asserted, the lineage landing, the mixing gate at 2am, a morning-cut
+amendment applying nothing, the morning read),
 `tests/test_night_run_api.py` (auth, the payloads, both reads),
 `tests/test_night_exit.py` (RED-WHEN-LYING against the real headless
 pipeline and real `fx.utils.WLED` transport), `tests/test_night_power.py`.

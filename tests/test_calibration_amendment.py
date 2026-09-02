@@ -503,3 +503,103 @@ def test_amendable_says_no_before_anything_has_ever_been_measured():
     cal, _first = _run(cal)
     assert amendment.amendable(cal)
     assert calibration_runs.view(cal)["item_names"] == ["north", "east"]
+
+
+# ── 7. a cut-short amendment applies nothing ───────────────────────────────
+#
+# THE ADMIRAL'S RULING (2026-09-01), and it is NOT a night rule: it applies
+# at 2pm exactly as at 2am, because a dropped camera and a morning routine
+# leave the identical half-measured fixture. `spectra/services/amendment.py`
+# is the binding statement.
+
+def _cut_after_first_footprint(monkeypatch, session):
+    """Stop a run part-way. Tripped on the first footprint PERSISTED and
+    acted on at the next capture (an await), which is where `room_mapping`
+    itself reads `run_abort`."""
+    real_put = light_field.put_room
+    real_gather = session.gather
+    state = {"footprints": 0, "cut": False}
+
+    def put_room(room, path=None):
+        got = real_put(room, path)
+        state["footprints"] += 1
+        return got
+
+    async def gather(seconds, min_frames=1):
+        if state["footprints"] >= 1 and not state["cut"]:
+            state["cut"] = True
+            session.run_abort = "the run was stopped."
+        return await real_gather(seconds, min_frames=min_frames)
+
+    monkeypatch.setattr(light_field, "put_room", put_room)
+    session.gather = gather
+    return state
+
+
+def test_an_amendment_that_is_cut_short_applies_nothing(monkeypatch):
+    """It KEEPS what it measured, in the lineage, and PUTS THE MAP BACK.
+
+    A partial that applied itself would leave the carrier holding neither
+    the old calibration nor the new one, assembled by where the run happened
+    to stop — and nothing downstream could tell which half was which."""
+    room = _room()
+    cal = _cal(room)
+    cal, first = _run(cal)
+    before = {f.emitter_id: (f.weight, f.grid)
+              for f in light_field.get_room(room.id).footprints}
+
+    session = _wire(monkeypatch, _Session(SPREAD_ROOM))
+    _cut_after_first_footprint(monkeypatch, session)
+    cal, entry = _amend(cal, ["north"])
+
+    assert entry.status == capture_runs.STATUS_PARTIAL
+    assert entry.applied is False
+    assert entry.superseded == {}
+    assert entry.emitters, "it recorded nothing it had actually measured"
+    assert [m.emitter_id for i in entry.items for m in i.measurements], \
+        "the readings it took were not kept in the lineage"
+    assert {f.emitter_id: (f.weight, f.grid)
+            for f in light_field.get_room(room.id).footprints} == before
+    # NOTHING CREDITS IT with a footprint that is not in the map.
+    assert set(cal.emitter_origin().values()) == {first.id}
+    # And provenance says UNAPPLIED, which is neither superseded nor missing.
+    rows = calibration_store.provenance(cal)
+    unapplied = [r for r in rows["emitters"] if r["run_id"] == entry.id]
+    assert unapplied and all(r["state"] == calibration_store.UNAPPLIED
+                             for r in unapplied)
+    assert "never applied" in rows["note"]
+
+
+def test_a_cut_short_full_run_still_keeps_its_partials(monkeypatch):
+    """THE SCOPING IS DELIBERATE. "Everything measured up to that point is
+    kept" is the standing promise of every partial run in this codebase, and
+    a full run makes no kept/taking split claim — it replaces the whole of
+    every carrier it declares. Only the amendment changed."""
+    room = _room()
+    cal = _cal(room)
+    session = _wire(monkeypatch, _Session(SPREAD_ROOM))
+    _cut_after_first_footprint(monkeypatch, session)
+    cal, entry = _run(cal)
+
+    assert entry.status == capture_runs.STATUS_PARTIAL
+    assert entry.applied is True, "a cut-short FULL run was rolled back"
+    assert entry.emitters
+    assert {f.emitter_id
+            for f in light_field.get_room(room.id).footprints} == \
+        set(entry.emitters)
+
+
+def test_an_unapplied_amendment_is_named_on_the_read(monkeypatch):
+    """"Nothing changed until you say so" is only true if he is told."""
+    room = _room()
+    cal = _cal(room)
+    cal, _first = _run(cal)
+    session = _wire(monkeypatch, _Session(SPREAD_ROOM))
+    _cut_after_first_footprint(monkeypatch, session)
+    cal, entry = _amend(cal, ["north"])
+
+    view = calibration_runs.view(cal)
+    assert [u["id"] for u in view["unapplied"]] == [entry.id]
+    assert view["unapplied"][0]["amended"] == ["north"]
+    assert "nothing was applied to the room map" in entry.unapplied_reason
+    assert "Run the amendment again" in entry.unapplied_reason
