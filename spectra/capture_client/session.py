@@ -50,6 +50,17 @@ persistence is entirely software and a power cut costs nothing. Neither is
 allowed to CLAIM the regime: both end in a read-back, and the server
 refuses on that.
 
+IT SAYS WHO AND WHAT IT IS, and that is what makes its ABSENCE readable.
+`hello` carries the machine's name, the client's VERSION as its own field
+(not only inside a user-agent string a server would have to regex), the
+board it is running on, and `pose_name` — this camera's placement in his own
+words, e.g. "the north shelf". SPECTRA keeps the last of these per machine
+(`spectra/services/capture_health.py`), so a camera host that is switched
+off is named rather than producing the same silence as one that was never
+installed. **`pose_name` is a LABEL and never a measurement**: the pose id
+is minted in `camera.open()`, and only `pose_fingerprint` can tell a moved
+camera from a changed room.
+
 AND IT NEVER UPSCALES. `camera.set_frame_size` clamps the wire size to what
 the camera actually captures, so a request bigger than the camera comes
 back as an honest downgrade; every frame carries `source_width`/
@@ -122,11 +133,19 @@ class CaptureClient:
 
     def __init__(self, ws_url: str, camera: BaseCamera, *,
                  host: str = "", fps: float = 5.0,
+                 pose_name: str = "",
                  clock: Callable[[], float] = time.monotonic,
                  connect: Optional[Callable[[str], Any]] = None) -> None:
         self.ws_url = ws_url
         self.camera = camera
         self.host = host or platform.node()
+        #: THIS CAMERA'S PLACEMENT IN HIS OWN WORDS, and it is a LABEL — see
+        #: `spectra/capture_client/config.py` for why that word matters here.
+        #: It travels in `hello` so a status surface can name WHICH camera is
+        #: missing rather than saying "no session"; it is never evidence that
+        #: the camera is where it says it is, which is what the pose
+        #: fingerprint measures.
+        self.pose_name = pose_name
         self.fps = fps
         self._clock = clock
         self._connect = connect or (lambda url: websockets.connect(url))
@@ -242,6 +261,15 @@ class CaptureClient:
             "user_agent": f"{CLIENT_NAME}/{CLIENT_VERSION} "
                           f"({platform.system()} {platform.machine()})",
             "client": CLIENT_NAME, "host": self.host,
+            # THE VERSION AS A FIELD, not only inside the user-agent string.
+            # A server that has to regex a UA to answer "which build is on
+            # the camera machine" will one day answer wrongly; this is the
+            # same fact stated where a reader can take it.
+            "client_version": CLIENT_VERSION,
+            "pose_name": self.pose_name,
+            "platform": {"system": platform.system(),
+                         "machine": platform.machine(),
+                         "python": platform.python_version()},
             "camera": self.camera.describe(),
             "secure_context": True,
             "frame_size": {"width": self.camera.frame_size[0],

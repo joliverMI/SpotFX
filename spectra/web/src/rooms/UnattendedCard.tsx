@@ -42,10 +42,22 @@ type Lever = {
   verdict?: string; proven?: boolean; reason?: string;
   response_ratio?: number | null; commanded_factor?: number;
 };
+/** THE CAMERA HOST ITSELF — present, absent, or never seen. Three states
+ * and not two, because "that machine is off" and "no client has ever
+ * existed here" used to produce the identical silence and send a reader to
+ * look at a plug for no reason. `sentence` is `mapping_refusals`' own
+ * wording; this component composes none. It REPORTS: a run's own refusal is
+ * `SessionView.refusal`, unchanged, and is shown separately below.
+ * See `spectra/services/capture_health.py`. */
+type CameraHost = {
+  present: boolean; state: 'present' | 'absent' | 'never';
+  sentence: string; absent_for_s: number | null;
+  client: Record<string, unknown> | null;
+};
 type SessionView = {
   present: boolean; locked: boolean; session_id: string; pose_id: string;
   refusal: string | null; client: Record<string, unknown>;
-  native?: boolean; lever?: Lever;
+  native?: boolean; lever?: Lever; host?: CameraHost;
 };
 type Body = { running: boolean; current: Queue | null; session: SessionView; recent: Queue[] };
 
@@ -106,8 +118,22 @@ export default function UnattendedCard() {
           : 'Camera session: none connected'}
         {session?.present && (session.client?.host as string)
           ? ` · ${session.client.host as string}` : ''}
+        {session?.present && (session.client?.pose_name as string)
+          ? ` · ${session.client.pose_name as string}` : ''}
+        {session?.present && (session.client?.client_version as string)
+          ? ` · client ${session.client.client_version as string}` : ''}
         {session?.pose_id ? ` · pose ${session.pose_id}` : ''}
       </p>
+      {/* WHICH MACHINE, AND WHEN IT WAS LAST HERE. The line above says
+        * whether a session exists; without this one, a camera host that has
+        * been off since Tuesday and one that was never installed read the
+        * same. Only shown when there is no session — while one is connected
+        * the line above already names the machine. */}
+      {session && !session.present && session.host?.sentence && (
+        <p className="warn small">
+          {session.host.sentence} <HelpLink topic="camera-host" />
+        </p>
+      )}
       {session && !session.locked && session.refusal && (
         <p className="warn small">{session.refusal}</p>
       )}

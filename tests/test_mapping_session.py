@@ -8,6 +8,7 @@ holds the small claims that are cheapest to state directly.
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 from base64 import b64encode
 from pathlib import Path
@@ -169,13 +170,28 @@ def test_the_grid_ring_is_bounded():
 
 # ── 4. nothing is written to disk by this module ──────────────────────────
 
-def test_the_session_persists_nothing(tmp_path, monkeypatch):
+def test_the_session_persists_no_pixels(tmp_path, monkeypatch):
+    """NOTHING FROM THE CAMERA IS WRITTEN — not a frame, not a grid, not an
+    image. The one file this module now writes is the camera HOST's own row
+    (which machine is holding the camera, its build, its declared placement,
+    its lock state), so that a host being GONE is a read rather than the
+    same silence as one that never existed; `spectra/services/
+    capture_health.py` is the boundary statement, and the autouse
+    `_isolated_capture_health` fixture is why it lands in tmp_path."""
     before = set(tmp_path.iterdir())
     sess, _ = _session()
     sess.frames.configure(enabled=True)
     asyncio.run(sess.handle({"type": "hello", "lock": LOCKED}))
     sess._ingest_frame(_frame_msg(np.zeros((ms.FRAME_H, ms.FRAME_W))))
     asyncio.run(sess.close())
-    assert set(tmp_path.iterdir()) == before
+    written = set(tmp_path.iterdir()) - before
+    assert {p.name for p in written} == {"capture_health.json"}, written
+    body = json.loads((tmp_path / "capture_health.json").read_text())
+    row = body["clients"][0]
+    assert set(row) <= {
+        "host", "client", "version", "pose_name", "user_agent", "platform",
+        "camera", "session_id", "pose_id", "locked", "camera_error", "lever",
+        "first_seen_ms", "last_seen_ms", "last_event", "sessions",
+        "lever_seen_ms"}, "no pixels, no grids, no image — only who and what"
     assert not sess.grids and not sess.frames._frames, (
         "every ring is dropped on close")

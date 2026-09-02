@@ -8,6 +8,11 @@ it finishes.
     python -m spectra.capture_client --url http://spectra:8000/spectra \\
         --queue overnight.json --json-out /tmp/last-capture.json
 
+    # or with nothing on the command line at all, because a boot service
+    # has nobody to type it: SPECTRA_CAPTURE_URL and its siblings say the
+    # same things (`config.py`), and an explicit argument still wins.
+    python -m spectra.capture_client
+
 EXIT CODES, because the caller is a cron line or a systemd unit and not a
 person reading prose:
 
@@ -38,7 +43,9 @@ import httpx
 
 from spectra.capture_client.camera import (CameraLock, SyntheticCamera,
                                            V4L2Camera)
-from spectra.capture_client.session import CaptureClient
+from spectra.capture_client.config import (ConfigError, env_help,
+                                           from_environment)
+from spectra.capture_client.session import CLIENT_VERSION, CaptureClient
 
 #: How long to wait for the SERVER to report the session present and locked
 #: before giving up on a queue. Generous: a camera has to settle before it
@@ -106,18 +113,45 @@ async def _drive_queue(base: str, queue_path: str, label: str,
 
 
 def main(argv: Optional[list[str]] = None) -> int:
+    try:
+        env = from_environment()
+    except ConfigError as exc:
+        # AN UNREADABLE CONFIGURATION IS A REFUSAL, NOT A DEFAULT. A boot
+        # service that silently ran at 5 fps because its file said "fivve"
+        # would be a machine doing something other than what its own config
+        # says — exactly the silence this area exists to remove.
+        print(str(exc), file=sys.stderr)
+        return 2
+
     p = argparse.ArgumentParser(
         prog="python -m spectra.capture_client",
         description="Hold a SPECTRA capture session from a machine with a "
                     "camera, and optionally run a declared queue of capture "
-                    "runs to the end.")
-    p.add_argument("--url", required=True,
+                    "runs to the end.",
+        epilog=env_help(),
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    # EVERY DEFAULT COMES FROM THE ENVIRONMENT WHEN IT DECLARED ONE, so an
+    # explicit argument beats the file by construction rather than by a
+    # merge somebody has to keep correct. `--url` is required only when
+    # nothing declared it, which is what lets the boot service pass no
+    # arguments at all.
+    p.add_argument("--url", required="url" not in env, default=env.get("url"),
                    help="SPECTRA's address, e.g. http://spectra:8000/spectra")
-    p.add_argument("--device", default="/dev/video0")
-    p.add_argument("--fps", type=float, default=5.0,
+    p.add_argument("--device", default=env.get("device", "/dev/video0"))
+    p.add_argument("--pose-name", dest="pose_name",
+                   default=env.get("pose_name", ""),
+                   help="this camera's placement in his own words, e.g. "
+                        "'the north shelf'. A LABEL carried in hello so a "
+                        "status surface can name WHICH camera is missing — "
+                        "never evidence of where the camera actually is, "
+                        "which only the pose fingerprint measures")
+    p.add_argument("--version", action="version",
+                   version=f"spectra-capture-client {CLIENT_VERSION}")
+    p.add_argument("--fps", type=float, default=env.get("fps", 5.0),
                    help="frames per second on the wire (the server's own tap "
                         "rate is 5)")
-    p.add_argument("--capture-size", default="1920x1080",
+    p.add_argument("--capture-size",
+                   default=env.get("capture_size", "1920x1080"),
                    help="what to ask the camera for, before it is scaled to "
                         "whatever wire frame size a run asks for (320x180 "
                         "for a map, up to 1920x1080 for the commissioning "
@@ -126,19 +160,22 @@ def main(argv: Optional[list[str]] = None) -> int:
                         "so; the wire size is never larger than this, "
                         "because a bigger picture of a smaller image is not "
                         "more detail")
-    p.add_argument("--input-format", default="",
+    p.add_argument("--input-format", default=env.get("input_format", ""),
                    help="ffmpeg -input_format, e.g. mjpeg, when the camera "
                         "will not give raw at this size")
-    p.add_argument("--host", default=platform.node(),
+    p.add_argument("--host", default=env.get("host") or platform.node(),
                    help="what to call this machine in refusals")
-    p.add_argument("--queue", default="",
+    p.add_argument("--queue", default=env.get("queue", ""),
                    help="a declared queue file; without it the client just "
                         "holds the session")
-    p.add_argument("--label", default="", help="a name for this queue")
-    p.add_argument("--lock-wait", type=float, default=DEFAULT_LOCK_WAIT_S)
-    p.add_argument("--json-out", default="",
+    p.add_argument("--label", default=env.get("label", ""),
+                   help="a name for this queue")
+    p.add_argument("--lock-wait", type=float,
+                   default=env.get("lock_wait", DEFAULT_LOCK_WAIT_S))
+    p.add_argument("--json-out", default=env.get("json_out", ""),
                    help="write the machine-readable outcome here")
     p.add_argument("--synthetic", action="store_true",
+                   default=bool(env.get("synthetic", False)),
                    help="a black synthetic camera that reports NO lock — for "
                         "checking the wire reaches SPECTRA, never for a map")
     p.add_argument("-v", "--verbose", action="store_true")
@@ -171,7 +208,8 @@ def main(argv: Optional[list[str]] = None) -> int:
 
 
 async def _run(args, base: str, ws_url: str, camera) -> int:
-    client = CaptureClient(ws_url, camera, host=args.host, fps=args.fps)
+    client = CaptureClient(ws_url, camera, host=args.host, fps=args.fps,
+                           pose_name=args.pose_name)
     problem = await client.start_camera()
     if problem:
         logging.error("camera: %s", problem)

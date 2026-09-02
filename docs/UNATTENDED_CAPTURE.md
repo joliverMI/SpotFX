@@ -36,6 +36,8 @@ already pointed at the room:
 | Knowing what happened | watch the page | one machine-readable outcome per item, written after **every** item |
 | Explaining a refusal | read a status word, guess | `mapping_refusals`' own sentence, on the page and in the record |
 | Releasing the room afterwards | (already automatic) | unchanged — the held-room sweep still owns it |
+| **Having a camera session at all when the night starts** | a machine that was awake, unlocked and not asleep, set up before bed | a boot service on the camera host (`deploy/spectra-capture-client.service`) — started at boot, restarted after a crash, its configuration one file. **NOTE: proven on a dev host, never on a Pi, and the Pi does not exist yet** — see `docs/CAPTURE_CLIENT_HOST.md` |
+| **Knowing whether the camera machine is even there** | a silence identical to "never installed", answered by walking over to look at a plug | a READ: `camera_host` names the machine, its build, its placement and how long it has been gone |
 | **Starting the night at all** | he set a session up before bed and pressed | his `Sleeping` helper, on for 30 minutes, pushes one event (`POST /api/night-run/start`) |
 | **Stopping when he stirs, or when his morning comes** | nobody was awake to | one `/abort` push — `sleep-ended`, `light-touched`, or his 05:30 `morning-routine` |
 | **Turning a fixture on that was switched off for the night** | it simply photographed an unlit strip | `night_power.owned` turns on only what reads off, confirms by reading back, and puts his switch back in a `finally` |
@@ -100,8 +102,16 @@ ends.
   contamination witness). Unset means the night seam is SHUT (every push
   401s) and the witness is absent (every capture recorded UNCLAIMED, never
   clean) — both fail closed and say so.
-- Optionally, **making the client a systemd unit** so "start the client"
-  stops being a step at all.
+- **Making the client a boot service.** No longer optional-and-undescribed:
+  `scripts/install_capture_client.sh` takes a fresh Linux host from nothing
+  to a client that starts at boot, comes back after a crash or a power cut,
+  and reads its whole configuration from one file. **It turns every bullet
+  above it in this section into a named check** — ffmpeg, `v4l2-ctl`, the
+  video group, the configuration, and whether a user service will actually
+  start at boot — each refused by name with the command that fixes it, and
+  it is safe to run twice. `docs/CAPTURE_CLIENT_HOST.md` is the whole story,
+  **including its own honest ledger: no Raspberry Pi exists yet and nothing
+  in it has run on one.**
 
 ### (c) STILL needs his hands, per run
 
@@ -131,7 +141,15 @@ ends.
   which regime put more light in the frame
   (`POST /api/rooms/{id}/exposure-test`); picking the numbers to try, and
   deciding whether a 3x gain is worth its noise, is his.
-- **Starting the client**, unless it is a systemd unit (see above).
+- **Starting the client**, unless it is a boot service (see above).
+- **Noticing the camera host is not there.** No longer his to notice:
+  SPECTRA reads it. `GET /api/rooms/map/status` → `camera_host` (and the
+  same read inside every session view) answers with three states, not two —
+  `never` (nothing has ever connected, so this is an installation and not a
+  fault), `present` (the machine, its build, its declared placement, its
+  camera and its lever verdict), and `absent` with **the machine named** and
+  how long it has been gone. It reports; the run's own refusal is
+  unchanged.
 
 ### What was deliberately NOT automated
 
@@ -187,6 +205,16 @@ own measured shape and a re-clamping camera are each refused by name
 
 **Not proven, and stated rather than implied:**
 
+- **No Raspberry Pi exists.** The capture client's boot service, its
+  provisioning script and its dependency story are proven on an ordinary
+  x86 Linux host and nothing else; ARM execution, the Brio on a Pi's USB
+  controller, thermals and boot timing on his network are each named
+  individually in `docs/CAPTURE_CLIENT_HOST.md`'s ledger. **Nor has systemd
+  itself ever started that unit** — the build machine has no D-Bus session
+  bus, so the unit's TEXT is verified by `systemd-analyze` and its restart
+  policy is executed by a supervisor that reads the installed unit; the
+  first `systemctl --user enable --now` on a real machine is the
+  measurement.
 - **The V4L2 backend has never met real hardware.** The machine this was
   built on has no `/dev/video*` and no `v4l2-ctl`. The control names, the
   menu parsing and the ffmpeg pipeline are written against V4L2's

@@ -101,6 +101,15 @@ COMMISSIONING_FILE = SPECTRA_STORAGE / "commissioning.json"
 #: unbounded one.
 CAPTURE_QUEUE_FILE = SPECTRA_STORAGE / "capture_queue.json"
 
+#: THE CAMERA HOST'S OWN PRESENCE RECORD (spectra/services/capture_health.py)
+#: — one small row per capture machine, so a client that is NOT connected is
+#: a read that names the machine, its build, its declared placement and when
+#: it was last here, rather than the same silence as a client that never
+#: existed. Bounded by row count (MAX_CLIENTS), written only when something
+#: happens (a hello, a lever verdict, a close), and never consulted before a
+#: light is driven: it reports, it does not gate.
+CAPTURE_HEALTH_FILE = SPECTRA_STORAGE / "capture_health.json"
+
 #: THE CALIBRATION RECORD — one file per calibration, `<id>.json`
 #: (spectra/services/calibration_store.py). A DIRECTORY rather than one
 #: bounded file because a calibration is a named, long-lived artefact with an

@@ -80,6 +80,23 @@ def _run(name: str, timeout: int) -> str:
     # and wrong — which only a sweep can show.
     ("check_pose_fingerprint.py", 300,
      "ALL POSE FINGERPRINT CHECKS PASSED"),
+    # THE CAMERA HOST AS A BOOT SERVICE: the shipped systemd unit verified
+    # by systemd's own parser, the provisioning script's refusals and its
+    # idempotence on a throwaway HOME, and the unit's own ExecStart —
+    # configured ONLY by the unit's own EnvironmentFile, no arguments —
+    # establishing a real session on a real server, dying, being READ as
+    # absent by name, and coming back under the unit's own Restart policy.
+    # What it cannot do here is let systemd itself start the unit (this
+    # machine has no session bus); the script says so in its own output.
+    ("check_capture_client_service.py", 600,
+     "ALL CAPTURE CLIENT SERVICE CHECKS PASSED"),
+    # WHAT THE CLIENT IMPORTS, which is the only part of the ARM question
+    # an x86 machine can answer: it imports with every server-only package
+    # blocked at the meta path, its third-party closure is exactly the two
+    # declared, it never reaches into fx/, and nothing in it branches on an
+    # architecture. No board has run it, and the script says that too.
+    ("check_capture_client_deps.py", 180,
+     "ALL CAPTURE CLIENT DEPENDENCY CHECKS PASSED"),
 ])
 def test_check_script_passes(name, timeout, tail):
     stdout = _run(name, timeout)

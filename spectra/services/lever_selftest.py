@@ -575,4 +575,15 @@ async def ensure(room: RoomMap, deps: "room_mapping.RunDeps", *,
         except Exception:                              # noqa: BLE001
             logger.debug("lever self-test: this session will not hold a "
                          "verdict", exc_info=True)
+        # AND INTO THE CAMERA HOST'S OWN RECORD, so what this camera last
+        # proved about its own lever outlives the connection that proved it
+        # — the morning read of an overnight refusal is otherwise a session
+        # object that no longer exists. Reporting only; it gates nothing,
+        # and it never raises past here.
+        try:
+            from spectra.services import capture_health
+            capture_health.note_session(sess, event="lever")
+        except Exception:                              # noqa: BLE001
+            logger.debug("lever self-test: the camera-host record refused "
+                         "this verdict", exc_info=True)
     return verdict

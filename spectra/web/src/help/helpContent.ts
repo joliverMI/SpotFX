@@ -1694,6 +1694,18 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        id: 'camera-host',
+        title: 'The camera host: is that machine there, and which one is it?',
+        keywords: 'camera host capture client machine present absent never connected boot service systemd unit pi raspberry provisioning install offline dead missing pose name placement version build linger',
+        body: [
+          'A capture session is held by a MACHINE with a camera on it. Until now this page could only say whether a session existed — so a camera host that has been switched off since Tuesday, one whose service crashed four minutes ago, and one that was never installed all produced the same sentence, and the only way to tell them apart was to walk over and look at a plug.',
+          'SPECTRA now keeps one small row per camera machine and reports three states, deliberately not two. NEVER: no capture client has ever connected here, which is an installation rather than a fault. PRESENT: named, with the build it is running, the placement you gave it, the board it is on, its camera and whether that camera\'s exposure is locked. ABSENT: the machine NAMED, the build it was running, and how long it has been gone — nothing is wrong with SPECTRA, that host is off, its service is not running, or it cannot reach this address.',
+          'The placement — "the north shelf" — is a LABEL you type once when the client is installed, so a status line can say which camera is missing. It is not evidence that the camera is where it says it is: only the pose fingerprint measures that, and a calibration checks it before every re-run.',
+          'This REPORTS and never refuses. A run with no camera session refuses for exactly the reason it always did; this stands beside that refusal and says which machine to go and look at.',
+          'On the machine with the camera, `scripts/install_capture_client.sh` takes a fresh Linux host from nothing to a client that starts at boot and comes back after a crash or a power cut. It checks every prerequisite by name — ffmpeg, v4l2-ctl, the video group, the configuration, and whether a user service will actually start at boot — and refuses with the command that fixes each one rather than installing half of itself. It is safe to run twice. See docs/CAPTURE_CLIENT_HOST.md, which also states plainly what has NOT been proven: no Raspberry Pi exists yet, and nothing here has run on one.',
+        ],
+      },
+      {
         id: 'exposure-comparison',
         title: 'The exposure comparison: is it the room, or the camera settings?',
         keywords: 'exposure test comparison compare regime default manual integration gain which better ratio two minute question dark room cannot see faint camera settings',

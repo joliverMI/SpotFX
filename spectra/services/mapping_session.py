@@ -102,10 +102,19 @@ watches the measured light move. A native session runs it before any
 calibration-grade run and its verdict rides on the session
 (`lever_verdict`).
 
-WHAT IS WRITTEN TO DISK BY THIS MODULE: nothing. Frames live in the bounded
-in-memory ring and the derived grids in another; both are dropped when the
-connection closes. The only persisted artefact of a mapping run is the
-MAP (numbers), written by spectra/services/light_field.py.
+WHAT IS WRITTEN TO DISK BY THIS MODULE: one small row saying WHICH MACHINE
+IS HOLDING THE CAMERA, and nothing else — no frame, no grid, no image, no
+audio, ever. Frames live in the bounded in-memory ring and the derived grids
+in another; both are dropped when the connection closes, and the persisted
+artefact of a mapping run is still the MAP (numbers), written by
+spectra/services/light_field.py.
+
+The row (`capture_health.note_session`, written at hello and at close) is
+the machine's name, its build, its declared placement, its camera's
+description and its lock state — the same things `hello` already carries
+over the wire, kept so that a camera host being GONE is a read rather than
+the same silence as one that never existed. It gates nothing; see
+`spectra/services/capture_health.py` for that boundary stated properly.
 """
 from __future__ import annotations
 
@@ -120,7 +129,7 @@ from typing import Any, Awaitable, Callable, Optional
 
 import numpy as np
 
-from spectra.services import capture_settings
+from spectra.services import capture_health, capture_settings
 from spectra.services.av_sync_session import ClockMap, Frame, FrameRing
 from spectra.services.light_field import FRAME_H, FRAME_W, downsample
 
@@ -177,7 +186,11 @@ PRIVACY_SUMMARY = {
             "at all",
     "written_to_disk": "storage/spectra/room_maps.json — the derived map "
                        "(per-emitter footprint grids, axis profiles, "
-                       "weights, capture context). Never a frame, never an "
+                       "weights, capture context) — and "
+                       "storage/spectra/capture_health.json, one row per "
+                       "camera MACHINE (its name, build, declared placement "
+                       "and lock state, so a host that is gone can be named "
+                       "rather than merely absent). Never a frame, never an "
                        "image, never audio.",
     "retention": f"in-memory only while connected: <={FRAME_RING_MAX} raw "
                  f"frames and <={GRID_RING} derived grids, both dropped on "
@@ -425,6 +438,9 @@ class MappingSession(capture_settings.CameraNegotiation):
     async def close(self) -> None:
         if self.closed:
             return
+        # RECORD THE DEPARTURE BEFORE THE RINGS GO. What is written here is
+        # what makes a later absence answerable — see capture_health.py.
+        _note_health(self, "closed")
         self.closed = True
         task, self._loop_task = self._loop_task, None
         if task is not None:
@@ -490,13 +506,21 @@ class MappingSession(capture_settings.CameraNegotiation):
     async def handle(self, msg: dict) -> None:
         kind = msg.get("type")
         if kind == "hello":
+            # WHAT A CLIENT IS ALLOWED TO SAY ABOUT ITSELF. `client_version`,
+            # `pose_name` and `platform` arrive with the unattended client
+            # (spectra/capture_client/session.py) so a status surface can
+            # name WHICH camera host is missing and WHAT BUILD it was
+            # running — see capture_health.py. A key not on this list is
+            # dropped, which is why adding one is a deliberate edit.
             self.hello = {k: msg.get(k) for k in
                           ("user_agent", "video", "secure_context", "origin",
-                           "client", "host", "camera")
+                           "client", "client_version", "host", "pose_name",
+                           "platform", "camera")
                           if k in msg}
             self._adopt_pose(msg.get("pose_hint"))
             if isinstance(msg.get("lock"), dict):
                 self._apply_lock(msg["lock"])
+            _note_health(self, "hello")
             await self.send({"type": "hello_ack", "session_id": self.id,
                              "pose_id": self.pose_id,
                              "pose_asserted": self.pose_asserted,
@@ -766,5 +790,23 @@ async def close_session(sess: MappingSession) -> None:
 
 
 def status() -> dict:
-    return {"session": current.status() if current and not current.closed else None,
+    live = current if current and not current.closed else None
+    return {"session": live.status() if live else None,
+            # THE CAMERA HOST ITSELF, present or absent, on the same surface
+            # as the session — so "no session" is never the whole answer to
+            # "where is my camera". `capture_health.py` is the record; this
+            # only asks it. It gates nothing.
+            "camera_host": capture_health.health(live),
             "privacy": PRIVACY_SUMMARY}
+
+
+def _note_health(session: "MappingSession", event: str) -> None:
+    """Write this session into the camera-host record. NEVER raises past
+    here: a reporting surface that could take a session down would be worse
+    than no reporting surface. `capture_health.note_session` already
+    swallows a failed WRITE; this covers the rest."""
+    try:
+        capture_health.note_session(session, event=event)
+    except Exception:                                  # noqa: BLE001
+        logger.debug("mapping session: the camera-host record refused a "
+                     "%s write", event, exc_info=True)

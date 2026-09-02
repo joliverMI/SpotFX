@@ -1,0 +1,26 @@
+# THE CAPTURE CLIENT'S OWN DEPENDENCIES — the whole list, and the point is
+# how short it is.
+#
+# `requirements.txt` is the SERVER's, and installing it on a camera host
+# would be a mistake with a name: it carries compiled wheels
+# (aubio-ledfx, samplerate-ledfx, python-mbedtls, pyfastnoiselite, scipy,
+# librosa) that exist to render light and analyse audio, none of which a
+# camera process does. On x86 they are a slow install; on a Raspberry Pi
+# several of them have no prebuilt aarch64 wheel and would be COMPILED FROM
+# SOURCE on the board, or simply fail — for code the client never imports.
+#
+# So a camera host installs THIS file into its own virtualenv:
+#
+#     python3 -m venv ~/.local/share/spectra-capture/venv
+#     ~/.local/share/spectra-capture/venv/bin/pip install \
+#         -r requirements-capture-client.txt
+#
+# (scripts/install_capture_client.sh does exactly that, idempotently.)
+#
+# Both of these are pure-Python or ship aarch64 wheels, which is the whole
+# ARM story for this process — `scripts/check_capture_client_deps.py` proves
+# the import closure holds no more than this, by importing the client with
+# every server-only package BLOCKED at the meta path.
+httpx>=0.27.0             # the queue's HTTP half (its own deps are pure Python)
+websockets>=12.0          # the session's WebSocket half; a C speedup with a
+                          # pure-Python fallback, so no compiler is required

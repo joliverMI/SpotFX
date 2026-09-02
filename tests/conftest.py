@@ -191,6 +191,20 @@ def fresh_ledfx_client():
 
 
 @pytest.fixture(autouse=True)
+def _isolated_capture_health(tmp_path, monkeypatch):
+    """The camera-host presence record (spectra/services/capture_health.py)
+    is written from inside `mapping_session`'s own hello/close and from the
+    lever self-test's verdict cache — no DI seam, same class as
+    _isolated_fire_history below. Any test that opens a mapping session (and
+    every check that drives the real capture client does) would otherwise
+    write the repo's real `storage/spectra/capture_health.json`. Autouse so
+    no individual test needs to know this store exists."""
+    from spectra import config as scfg
+    monkeypatch.setattr(scfg, "CAPTURE_HEALTH_FILE",
+                        tmp_path / "capture_health.json")
+
+
+@pytest.fixture(autouse=True)
 def _isolated_fire_history(tmp_path, monkeypatch):
     """SPECTRA's fire-history counter/show-log (spectra/services/
     fire_history.py) is written from inside production choke points

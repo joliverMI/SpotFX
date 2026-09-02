@@ -4498,6 +4498,72 @@ is the one way this build can become a lie.
   wrong V4L2 detail costs a refused run, never a map that looks fine and
   is not.
 
+### THE CAMERA HOST AS A BOOT SERVICE — and the Pi that does not exist
+
+**`docs/CAPTURE_CLIENT_HOST.md` is the binding statement, and its LEDGER is
+the deliverable**: what is proven on a dev host, what only real hardware can
+settle, and what buying the board unlocks. **No Raspberry Pi exists.**
+Nothing here may be reported as a working Pi deployment, and when hardware
+arrives the correction is a DATED AMENDMENT, never a quiet rewrite of a
+sentence that was true when written. Six things:
+
+- **THE UNIT SHIPS VERBATIM** (`deploy/spectra-capture-client.service`) and
+  is checked by `systemd-analyze verify` — systemd's own parser, which
+  rejected two real mistakes here (`StartLimitIntervalSec` belongs in
+  `[Unit]`, not `[Service]`; a `Documentation=file:` relative path is
+  invalid). It carries NO host path: `%h` only, `ExecStart` takes NO
+  arguments, and everything that differs per machine lives in a launcher
+  `scripts/install_capture_client.sh` writes. Verifying the shipped bytes
+  is only meaningful because they ARE the installed bytes.
+- **`systemd` HAS NEVER STARTED IT.** This build machine has no D-Bus
+  session bus and a private `systemd --user` refuses without cgroup
+  delegation, so `systemctl --user start` cannot run here at all. The unit's
+  RESTART BEHAVIOUR is executed by a supervisor in
+  `scripts/check_capture_client_service.py` that reads `Restart=`/
+  `RestartSec=` out of the INSTALLED unit and obeys them. That proves what
+  the unit tells systemd to do; it is not a proof that systemd did it, and
+  it must never be reported as one. Do NOT install a probe unit into his
+  live user manager to work around this.
+- **ONE ENV FILE IS THE WHOLE CONFIGURATION**
+  (`spectra/capture_client/config.py`, `SPECTRA_CAPTURE_*`): an explicit
+  argument beats the environment beats the default, and a malformed number
+  REFUSES BY NAME at startup rather than silently defaulting.
+  `SPECTRA_CAPTURE_POSE` is a **LABEL** — his own words for where the camera
+  stands, so a status surface can name WHICH camera is missing. It is never
+  evidence of where the camera is; only `pose_fingerprint` measures that.
+- **ABSENCE IS A READ — three states, not two**
+  (`spectra/services/capture_health.py`, `storage/spectra/
+  capture_health.json`, autouse-isolated in `tests/conftest.py`).
+  `never` / `present` / `absent`, the last naming the machine, its build,
+  its declared placement and how long it has been gone. It is folded into
+  `capture_runs.session_view()` (so the queue and the calibration routes get
+  it for free) and `mapping_session.status()`. **IT GATES NOTHING** — the
+  run's refusal is still `lock_refusal`'s and `NO_SESSION`; a reporting
+  surface that could refuse a run would be a second exposure gate. This
+  makes `mapping_session` write ONE small row to disk (who is holding the
+  camera), which is why its "persists nothing" docstring and test now say
+  "no pixels" instead.
+- **THE CLIENT'S DEPENDENCIES ARE TWO, AND `requirements.txt` IS THE
+  SERVER'S.** `requirements-capture-client.txt` is httpx + websockets;
+  installing the server's list on a camera host would drag compiled wheels
+  (`aubio-ledfx`, `samplerate-ledfx`, `python-mbedtls`, `pyfastnoiselite`,
+  scipy, librosa, pillow) with no guaranteed aarch64 build onto the board.
+  `scripts/check_capture_client_deps.py` proves the closure by importing the
+  client with 28 server-only packages BLOCKED at the meta path, asserts it
+  never touches `fx/`, and audits for architecture literals
+  (`platform.machine()` is REPORTED in `hello`, never branched on).
+- **THE CLIENT ACQUIRES NO ROOM AUTHORITY, structurally.** Nothing under
+  `spectra/capture_client/` may mention `fx_seam`, `light_ownership`,
+  `handover`, a device driver or a compiler, and it imports nothing from
+  `spectra.services.*` — asserted in `tests/test_capture_client_service.py`.
+  Making it a boot service changed none of that.
+
+Provisioning: `scripts/install_capture_client.sh`, idempotent, `--check`
+writes nothing, every prerequisite refused BY NAME with its fix (ffmpeg,
+`v4l2-ctl`, python3/venv, the video group, the configuration, linger). **It
+is `pipefail`-strict** — a `grep` that legitimately finds nothing needs
+`|| true` or the script dies silently mid-check (a real bug found here).
+
 **A check script that renders through `fx.headless` must `os._exit()`.**
 `fx`'s `TemporalEffect` spawns non-daemon threads the frame-stepped harness
 never joins, and `FxHost.stop()` refuses ("refusing to stop the SpotFX
