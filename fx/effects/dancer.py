@@ -151,14 +151,14 @@ class Dancer2d(Twod, GradientEffect):
             ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1.0)),
             vol.Optional(
                 "burst_threshold",
-                description="Music level a beat needs to fire a flame burst; 0 = every beat",
+                description="Music level a beat needs to fire a flame burst; 0 = every beat, 1 = never (gates beat bursts and embers only - stunt and flourish flames ignore it; set Burst Size to 0 for those)",
                 default=0.63,
             ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1.0)),
             vol.Optional(
                 "burst_size",
-                description="Flame particles per burst (louder music adds more)",
+                description="Flame particles per burst (louder music adds more); 0 = no burst, stunt or flourish flames (embers still need Burst Threshold 1)",
                 default=30,
-            ): vol.All(vol.Coerce(int), vol.Range(min=3, max=60)),
+            ): vol.All(vol.Coerce(int), vol.Range(min=0, max=60)),
             vol.Optional(
                 "burst_audio",
                 description="How much loudness grows the flames",
@@ -1119,10 +1119,34 @@ class Dancer2d(Twod, GradientEffect):
         if kick:
             self._beat_no += 1
         thr = self.burst_threshold
+        # THE TOP OF THIS RANGE MEANS NEVER, and it has to be MADE to.
+        # `self.impulse` is an ExpFilter over a melbank power that audio.py
+        # already clips to exactly 1.0 (`get_freq_power` -> the
+        # `np.minimum(freq_power_raw, 1)` in `_update_freq_power`), so a
+        # sustained loud passage drives it to EXACTLY 1.0 within ~9 audio
+        # frames (~150 ms at 60 Hz). The old `self.impulse >= thr` therefore
+        # FIRED at thr == 1.0 — the one setting whose whole meaning is "no
+        # bursts, ever". Two guards, doing two different jobs:
+        #
+        #  * `sig` clamps the signal into [0, 1] the way every OTHER reader of
+        #    it in this file already does (`min(self.impulse, 1.0)`), so this
+        #    gate no longer depends on that upstream clip staying in place.
+        #    Today it is a no-op — impulse is already in [0, 1] — which is
+        #    exactly why the clamp ALONE would not have fixed anything.
+        #  * `thr < 1.0` is what actually makes the top of the range mean
+        #    never. It is deliberately NOT a switch to a strict `sig > thr`:
+        #    strict `>` would also change the exact-equality case at every
+        #    OTHER threshold, and a saturating signal reaches exact equality
+        #    routinely (that is this very defect's mechanism), so 0.7 could
+        #    not then be claimed bit-identical. Because clamping only lowers
+        #    values ABOVE 1.0 — which still clear any thr < 1.0 — this pair is
+        #    provably identical to the old line for every threshold below the
+        #    top of the range, for every signal value.
+        sig = float(min(max(self.impulse, 0.0), 1.0))
         mag = float(
-            np.clip((self.impulse - thr) / max(1.0 - thr, 0.05), 0.0, 1.0)
+            np.clip((sig - thr) / max(1.0 - thr, 0.05), 0.0, 1.0)
         )
-        over = self.impulse >= thr
+        over = thr < 1.0 and sig >= thr
         burst = False
         amplified = False
         if kick and over:
@@ -1211,6 +1235,21 @@ class Dancer2d(Twod, GradientEffect):
             sp["t"] -= dt
             if sp["t"] <= 0.0:
                 self._sprays.remove(sp)
+
+        # ZERO MEANS ZERO. `burst_size = 0` makes `count` 0, and every
+        # emitter below already draws nothing for a count of 0
+        # (FlameField.emit/emit_points both return on `k <= 0`) — EXCEPT the
+        # spray, which is seeded `"acc": 1.0` so its first driven frame puffs
+        # immediately: `acc += rate * dt` with rate == count / dur == 0 leaves
+        # acc at 1.0, `int(1.0)` is 1, and one particle is emitted per spray
+        # per burst. That is the appears-to-succeed shape — a zero that draws.
+        # Guarded here rather than inside the seeding branch so the OTHER
+        # zero-count paths (the outline burst, the ember emit) are covered by
+        # the same statement. Existing sprays are still driven above, so
+        # raising burst_size back mid-song resumes cleanly; for any count >= 1
+        # nothing below this line is reached differently than before.
+        if count <= 0:
+            return
 
         for i, (d, joints) in enumerate(worlds):
             if d["hidden"] or d["alpha"] < 0.3 or joints is None:

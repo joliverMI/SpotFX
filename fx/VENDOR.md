@@ -896,6 +896,60 @@ variables named `ledfx` (the core object handle) are untouched.
     `tests/test_night_power.py`, which drives both against a fake WLED
     endpoint and asserts the request shape (JSON body, no double slash).
 
+31. `effects/dancer.py`: THE FLAME GATE'S TOP OF RANGE NOW MEANS NEVER, and
+    `burst_size` REACHES ZERO — the owner asked to turn the dancers' flames
+    off, set both knobs to what reads as "off", and the room kept burning.
+
+      * `burst_threshold = 1.0` fired. The gate was
+        `over = self.impulse >= thr`, and `self.impulse` is an ExpFilter
+        over a melbank power `audio.py` already clips to EXACTLY 1.0
+        (`get_freq_power` -> the `np.minimum(freq_power_raw, 1)` in
+        `_update_freq_power`). So a sustained loud passage drives the filter
+        to exactly 1.0 within ~9 audio frames (~150 ms at 60 Hz) and the
+        `>=` opens. NOT an overshoot past 1.0 — a SATURATION meeting a `>=`,
+        which is why a clamp alone would have fixed nothing. The gate is now
+        a clamped signal (defence in depth, a no-op against today's upstream
+        clip, and the same `min(self.impulse, 1.0)` every other reader in
+        the file already applies) plus an explicit `thr < 1.0`. It is
+        deliberately NOT a switch to a strict `sig > thr`: `>` would also
+        change the exact-equality case at every OTHER threshold, and a
+        saturating signal reaches exact equality routinely, so his live 0.7
+        could not then be claimed bit-identical. As written it is provably
+        identical to the old line for every threshold below the top of the
+        range, for every signal value — asserted frame-by-frame, not
+        claimed.
+      * `burst_size` could not reach 0 (schema `Range(min=3)`, mirrored in
+        `config/effect_params.json`, the documented defined-twice trap), and
+        at 0 it would still have drawn: a burst seeds its spray
+        `"acc": 1.0` ("first puff now"), so `acc += rate * dt` with a rate
+        of `count / dur == 0` leaves acc at 1.0, `int(1.0)` is 1, and one
+        particle is emitted per spray per burst — the appears-to-succeed
+        family, a zero that draws. Both emitters (`dancer_flames.emit` /
+        `emit_points`) were already honest about a count of 0; only the
+        spray seeding was not. `_flame_emission` now returns on a count of
+        0, after driving any existing sprays so raising the size back
+        mid-song resumes cleanly.
+
+    WHY BOTH KNOBS. Four flame sources exist and the threshold gates only
+    two: beat BURSTS and the EMBER trickle. The FLOURISH payoff burst
+    (`_flourish_j`) and the six STUNT/impact moments (`_impact_flames`) are
+    ungated — so the threshold alone can never silence the flames, however
+    it is set. The ember trickle is the mirror: `embers` is a time
+    accumulator `burst_size` never scales, so only the threshold silences
+    it. Neither knob alone is "off"; together they are, and both proofs are
+    in the suite.
+
+    NO FLAME CODE WAS REMOVED OR STUBBED, and every value is restorable:
+    `burst_threshold` 1.0 -> 0.7 and `burst_size` 0 -> 30 restores the
+    flames exactly as they were.
+
+    Evidence: `tests/test_dancer_flames_off.py` and its measured twin
+    `scripts/check_dancer_flames_off.py` — the loudest possible signal
+    firing nothing at 1.0, proven RED against the PINNED pre-change module
+    loaded out of git beside the current one; 1,020 rendered frames
+    byte-identical to that baseline at 0.7; the zero path proven at the
+    emitter and RED against the baseline's spray leak.
+
 Everything else is byte-identical to the fork at 149f4470 modulo the import
 rewrite and the deviations above. When updating vendored files, re-diff
 against that commit.
