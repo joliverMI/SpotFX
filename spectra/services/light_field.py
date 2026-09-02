@@ -205,6 +205,35 @@ def axis_profile(grid: np.ndarray, axis: AxisCalibration,
     return [float(v) for v in out]
 
 
+def centroid(grid) -> tuple[float, float]:
+    """WHERE THIS EMITTER'S LIGHT LANDED IN THE PICTURE — the footprint's
+    weighted centre in normalized camera-frame coordinates (x 0..1
+    left->right, y 0..1 top->bottom, the same space
+    `spectra/models/room_map.Point` uses).
+
+    THIS IS NOT A FIXTURE POSITION, and the distinction is the model's own
+    fence rather than a caution: it is a one-number summary of the
+    measurement the grid ALREADY is — where the light landed in one camera's
+    frame — and it says nothing about where a strip physically is. A sconce
+    whose spill covers a ceiling has a centroid on that ceiling, not on the
+    sconce.
+
+    Its one consumer is `spectra/services/pose_fingerprint.py`, which
+    compares an anchor's centroid now against its centroid when the
+    fingerprint was taken. An empty or zero-weight grid returns (0, 0) and
+    the caller is expected to have checked `weight` first — a centroid of
+    nothing is not a position, which is why that check is the caller's and
+    not a fabricated default here.
+    """
+    arr = np.asarray(grid, dtype=np.float64).reshape(-1)
+    if arr.size != GRID_W * GRID_H:
+        return 0.0, 0.0
+    total = float(arr.sum())
+    if total <= 0.0:
+        return 0.0, 0.0
+    return float((_CX * arr).sum() / total), float((_CY * arr).sum() / total)
+
+
 def footprint_from_frames(*, emitter_id: str, virtual_ids: list[str],
                           dark_frames: list[np.ndarray],
                           lit_frames: list[np.ndarray],

@@ -337,6 +337,21 @@ def _isolated_room_light_field(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolated_calibrations(tmp_path, monkeypatch):
+    """The CALIBRATION RECORD's store (spectra/services/calibration_store.py).
+
+    A DIRECTORY rather than a file, and repointed for the same reason every
+    other store here is: `calibration_store.save` writes
+    `config.CALIBRATIONS_DIR` directly with no DI seam, and a calibration is
+    the one artefact whose whole point is that it is never pruned — a test
+    leaking one into the real `storage/spectra/calibrations/` would leave it
+    there for good."""
+    from spectra import config as scfg
+    monkeypatch.setattr(scfg, "CALIBRATIONS_DIR", tmp_path / "calibrations")
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _isolated_capture_queue(tmp_path, monkeypatch):
     """The unattended capture queue's store AND its module-global live run.
 

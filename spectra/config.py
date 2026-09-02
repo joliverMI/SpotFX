@@ -101,6 +101,22 @@ COMMISSIONING_FILE = SPECTRA_STORAGE / "commissioning.json"
 #: unbounded one.
 CAPTURE_QUEUE_FILE = SPECTRA_STORAGE / "capture_queue.json"
 
+#: THE CALIBRATION RECORD — one file per calibration, `<id>.json`
+#: (spectra/services/calibration_store.py). A DIRECTORY rather than one
+#: bounded file because a calibration is a named, long-lived artefact with an
+#: APPEND-ONLY lineage: they are created deliberately, one at a time, by a
+#: human naming a pose, and each one's history grows for as long as he keeps
+#: re-running it. A single-file store would either cap that history (losing
+#: the one thing a lineage is for) or grow without bound in a file every read
+#: has to parse whole.
+#:
+#: WHAT IS NOT IN HERE: footprints. A run records WHICH emitter ids it
+#: produced; the measurements themselves stay in `ROOM_MAPS_FILE`, which
+#: remains the live store, and provenance is resolved as a READ against it
+#: (spectra/services/calibration_store.provenance). Copying grids in would
+#: make two stores that disagree the moment a room is re-mapped.
+CALIBRATIONS_DIR = SPECTRA_STORAGE / "calibrations"
+
 #: THE NIGHT QUEUE — the capture queue he DECLARES IN ADVANCE for the
 #: unattended overnight run (spectra/services/night_run.py). Exactly the
 #: shape `capture_queue.parse_items` already validates, because a night

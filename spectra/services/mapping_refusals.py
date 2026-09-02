@@ -37,7 +37,12 @@ sensor (`lever_not_connected`, with `LEVER_REFUSING` naming the verdicts
 that stop a run and the two that deliberately do not). Plus one FACT,
 `unseen_note`, which is neither: an emitter whose light this pose could not
 see ran perfectly well and is worth recording as such (`pose_changed_note`
-is the second one). What is NOT expected — a genuine bug
+is the second one). And since the CALIBRATION RECORD, four verdict words
+about a pose (`POSE_MATCH` / `POSE_CAMERA_MOVED` / `POSE_ROOM_CHANGED` /
+`POSE_CANNOT_TELL`) of which exactly ONE refuses a re-run — see
+`POSE_REFUSING` and `pose_verdict_sentence`, and
+`spectra/services/pose_fingerprint.py` for why a changed room and an
+inconclusive answer deliberately do not. What is NOT expected — a genuine bug
 — still raises, and should: a sentence invented for it would be a lie.
 
 ONE WORDING PER CONDITION, here, so the route, the run and the page cannot
@@ -592,6 +597,178 @@ def one_piece_warning(carrier_id: str, pixels: int, block_pixels: int, *,
             f"show a wave travelling along it — every pixel of it dims "
             f"together. Choose Blocks to measure it in {pieces} pieces "
             f"instead ({pixels} pixels at {block_pixels} a block).")
+
+
+# ── THE POSE FINGERPRINT ───────────────────────────────────────────────────
+#
+# A calibration claims that two runs weeks apart may be compared. That claim
+# is only true while the camera has not moved, so before a re-run the
+# fingerprint drives a handful of known emitters and asks whether their
+# light still lands where it did (spectra/services/pose_fingerprint.py is
+# the binding statement for what it can and cannot tell apart).
+#
+# THE CAPTAIN'S REQUIREMENT IS WHY THERE ARE FOUR WORDS AND NOT TWO, and it
+# is worth stating in full because it is the whole design: "he rearranges
+# his own house; a calibration refusing because he moved a chair is a system
+# that expires for reasons he cannot see." So the answer must NAME which it
+# believes changed, and must prefer saying it cannot tell over guessing.
+#: The camera is where it was: every anchor's light landed where it did.
+POSE_MATCH = "match"
+#: Every anchor shifted, and they shifted TOGETHER — the signature only a
+#: camera can produce, since nothing in the room can move every fixture's
+#: image by the same vector at once.
+POSE_CAMERA_MOVED = "camera_moved"
+#: Some anchors moved and others stayed exactly put — the signature only the
+#: ROOM can produce, since a camera that moved would have moved all of them.
+POSE_ROOM_CHANGED = "room_changed"
+#: Something changed and the evidence does not separate the two. THE DEFAULT
+#: WHENEVER THE EVIDENCE IS THIN, by the captain's own ruling, and never a
+#: coin toss dressed as an answer.
+POSE_CANNOT_TELL = "cannot_tell"
+#: No fingerprint has ever been taken for this calibration. ABSENCE IS A
+#: READ: "we have never looked" is not "we looked and everything matched".
+POSE_UNESTABLISHED = "unestablished"
+
+#: THE ONE VERDICT THAT STOPS A RE-RUN, and only this one. The plan is
+#: explicit that "a moved camera is a NAMED REFUSAL rather than silently
+#: incomparable data"; the captain is equally explicit that a rearranged
+#: room must not refuse. `cannot_tell` deliberately does NOT refuse either:
+#: a fingerprint with thin anchors would otherwise refuse forever on any
+#: change at all, which is precisely the system-that-expires he named. What
+#: is withheld in those two cases is the COMPARABILITY CLAIM, not the
+#: measurement — the run happens, and the record says what it may be
+#: compared with. Same shape as `LEVER_REFUSING` above: refusing is reserved
+#: for a measurement that says something is wrong.
+POSE_REFUSING = (POSE_CAMERA_MOVED,)
+
+
+def pose_verdict_sentence(judgement: dict) -> str:
+    """ONE WORDING PER VERDICT, so the gate, the lineage entry and the page
+    cannot describe the same measurement three ways — the same reason
+    `lock_refusal` is a single string.
+
+    Every one of these says what it means FOR COMPARABILITY, because that is
+    the only thing a fingerprint is for. `judgement` is
+    `pose_fingerprint.Judgement.as_dict()`."""
+    verdict = str(judgement.get("verdict") or POSE_CANNOT_TELL)
+    checked = int(judgement.get("checked") or 0)
+    moved = int(judgement.get("moved") or 0)
+    shift = float(judgement.get("common_shift") or 0.0)
+    why = str(judgement.get("why") or "")
+    if verdict == POSE_MATCH:
+        return (f"The camera is where it was: all {checked} reference "
+                f"fixture{'' if checked == 1 else 's'} still land their "
+                f"light in the same place. This run may be compared with the "
+                f"earlier ones.")
+    if verdict == POSE_CAMERA_MOVED and judgement.get("identity_note"):
+        # A DIFFERENT CAMERA, decided before any light was driven. Same
+        # consequence and same remedy as a moved one, and a different
+        # sentence, because "they all shifted together" would be a
+        # description of a measurement this never took.
+        return (f"THIS IS A DIFFERENT CAMERA: "
+                f"{judgement['identity_note']}. A footprint is a difference "
+                f"in one camera's own brightness scale and one camera's own "
+                f"view, so nothing measured here would be comparable with "
+                f"what this calibration already holds. Re-anchor the pose to "
+                f"start a new comparable series with this camera.")
+    if verdict == POSE_CAMERA_MOVED:
+        return (f"THE CAMERA HAS MOVED. All {moved} reference fixtures "
+                f"shifted in the frame together, by about "
+                f"{shift * 100:.0f}% of the frame's width — nothing in the "
+                f"room can do that to every fixture at once, so this is the "
+                f"camera, not the room. Footprints taken from here would not "
+                f"be comparable with the ones this calibration already "
+                f"holds. Re-anchor the pose to start a new comparable "
+                f"series, or put the camera back and try again.")
+    if verdict == POSE_ROOM_CHANGED:
+        return (f"THE ROOM HAS CHANGED, not the camera: {moved} of "
+                f"{checked} reference fixtures read differently while the "
+                f"others landed exactly where they did before — a camera "
+                f"that had moved would have moved all of them. The run goes "
+                f"ahead and its numbers are good, but they are numbers about "
+                f"a changed room: compare them with the earlier ones knowing "
+                f"that.")
+    if verdict == POSE_UNESTABLISHED:
+        return ("No pose has been recorded for this calibration yet, so "
+                "there is nothing to compare against. This run establishes "
+                "it — from here on, a moved camera is something this "
+                "calibration can notice.")
+    return (f"SOMETHING CHANGED AND THIS CANNOT TELL WHICH. "
+            + (why + " " if why else "")
+            + "The run goes ahead — a rearranged room is not a reason to "
+              "refuse — but its numbers are not claimed to be comparable "
+              "with the earlier ones. Re-anchor the pose if the camera is "
+              "where you want it.")
+
+
+def pose_not_discriminating(count: int, spread: float, *, min_count: int,
+                            min_spread: float) -> str:
+    """SAID AT ESTABLISHMENT, NOT AT A REFUSAL. A fingerprint anchored on too
+    few fixtures, or on fixtures that all light one corner of the frame, can
+    still tell that something changed — it can never say whether it was the
+    camera or the room. He is told that when the pose is taken, so the
+    weaker answer months later is a known property of this pose rather than
+    a surprise."""
+    if count < min_count:
+        return (f"This pose is anchored on {count} reference "
+                f"fixture{'' if count == 1 else 's'}, and telling a moved "
+                f"camera from a changed room needs at least {min_count}: "
+                f"with fewer, a shift that they all share and a shift each "
+                f"made on its own look identical. It will still notice that "
+                f"something changed — it will say it cannot tell which.")
+    return (f"This pose's {count} reference fixtures all land their light "
+            f"within {spread * 100:.0f}% of the frame's width of each other, "
+            f"and telling a moved camera from a changed room needs at least "
+            f"{min_spread * 100:.0f}%: fixtures lighting one part of the "
+            f"frame move together whichever of the two happened. It will "
+            f"still notice that something changed — it will say it cannot "
+            f"tell which.")
+
+
+def pose_no_anchors(reason: str = "") -> str:
+    """A fingerprint that could not be taken at all — no carrier of this
+    room produced light. Not a refusal of anything: it is the same
+    `unseen_note` fact one level up, and the calibration simply has no pose
+    yet."""
+    return ("No pose could be recorded: nothing in this room lit up for the "
+            "camera" + (f" ({reason})" if reason else "") + ". Check the "
+            "room's carriers are rendering and that the camera can see at "
+            "least one of them, then take the pose again.")
+
+
+def pose_regime_changed(differences: list) -> str:
+    """The OTHER half of the comparability claim. A footprint is
+    `lit - dark` in a camera's own byte scale, so two pinned regimes are two
+    scales — the pose can match perfectly and the numbers still not be
+    comparable. Named separately from the pose verdict for exactly that
+    reason: they fail independently and a merged sentence would hide which
+    one did."""
+    return ("This run used different camera settings from the ones this "
+            "calibration records (" + "; ".join(differences) + "). Its "
+            "numbers are real, but a footprint is a difference in the "
+            "camera's own brightness scale, so a changed regime is a "
+            "changed scale: they are not claimed to be comparable with the "
+            "earlier runs.")
+
+
+def calibration_no_room(room_id: str) -> str:
+    return (f"This calibration was taken in a room that is no longer stored "
+            f"({room_id}). Nothing was run. Its record and its lineage are "
+            f"kept — a calibration is not deleted because its room was — but "
+            f"it cannot run again until the room is back.")
+
+
+def calibration_nothing_declared() -> str:
+    return ("This calibration declares nothing to run yet. Edit its "
+            "declaration to name the fixtures and the granularity it should "
+            "measure, then run it — the pose and the camera settings it "
+            "already holds are kept.")
+
+
+def calibration_already_running(name: str) -> str:
+    return (f"A capture queue is already running ({name}), and there is one "
+            f"camera and one room. Nothing was started — wait for it, or "
+            f"stop it, and run this calibration after.")
 
 
 # ── THE UNATTENDED PATH ────────────────────────────────────────────────────

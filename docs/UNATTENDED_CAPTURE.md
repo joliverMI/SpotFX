@@ -53,6 +53,17 @@ ends.
 - **Physically placing and aiming the camera at the room, and deciding
   where it stands.** This is the pose. Nothing here estimates it and
   nothing here should: a footprint is what a camera at one place saw.
+  **Since the CALIBRATION RECORD (`spectra/models/calibration.py`), a pose
+  is a thing the system HOLDS rather than a thing somebody remembers:
+  naming the placement and taking the pose is a human act, once, and after
+  that a re-run checks the pose itself and NAMES a moved camera rather than
+  quietly producing incomparable data. It cannot name what it cannot
+  measure — see `spectra/services/pose_fingerprint.py` for what falls to
+  "cannot tell", which is a stated limit and never a confident guess.**
+- **Declaring a calibration**: its name, its placement, its camera regime,
+  the darkness it needs, and the list it measures. That list is the capture
+  queue's own item shape validated by the same one validator, so a typo is
+  refused when he types it and never at 3 am.
 - **Camera permission on the capture machine**: the user must be able to
   read `/dev/video*` (usually one `usermod -aG video`, then log in again).
   The client refuses by name if it cannot.

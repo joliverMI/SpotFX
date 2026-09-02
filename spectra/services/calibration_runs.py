@@ -1,0 +1,504 @@
+"""RUNNING A CALIBRATION — the pose check, then the declared queue, then one
+append-only entry in the lineage.
+
+READ FIRST: `spectra/models/calibration.py` (what a calibration is) and
+`spectra/services/pose_fingerprint.py` (what the pose check can and cannot
+tell apart). This module is the ORCHESTRATION and holds no opinion of its
+own about either.
+
+IT ACQUIRES NOTHING. Every light this drives is driven through
+`spectra/services/capture_runs.py` — the one seam — so the exposure lock,
+the lever self-test, the ownership refusal, the hold ceiling and the
+one-run-at-a-time lock all apply exactly as they do to a button press, and
+a gate added there is added here for free. There is no calibration mode
+anywhere in this codebase that a run behaves differently under, and the
+declared items are validated by `capture_queue.parse_items` — the ONE
+validator — rather than by a second dialect that reads almost the same.
+
+THE NEVER-TAKES-HIS-ROOM BOUNDARY IS UNMOVED. Nothing here asks for the
+room, waits for a handover, or behaves differently when nobody is awake: a
+calibration run happens only when SPECTRA already holds the lights, exactly
+like every capture run today, and when it does not the run is REFUSED with
+`mapping_refusals`' own sentence and the refusal is recorded. No piece of
+this design needed an exception to that, which is worth saying explicitly
+because the brief asked to be told if one did.
+
+WHAT STOPS A RUN, and it is exactly one thing: a MEASURED CAMERA MOVE
+(`mapping_refusals.POSE_REFUSING`). The plan is explicit that a moved camera
+must be a named refusal rather than silently incomparable data. Everything
+else — a changed room, an inconclusive fingerprint, a pose with too few
+anchors to discriminate — RUNS, and what is withheld is the COMPARABILITY
+CLAIM, recorded on the entry as `comparable=False` with the reason. The
+captain's requirement is the reason for that split, verbatim: "a calibration
+refusing because he moved a chair is a system that expires for reasons he
+cannot see."
+
+AN EXPLICIT PRESS STILL WINS AND NAMES THE CONTRADICTION. `force=True` runs
+past a measured camera move and records `overrode_camera_moved` on the
+entry — the Force Scene precedent this codebase already uses everywhere a
+human deliberately overrides a gate. It never re-anchors the pose as a side
+effect: moving the pose is its own act (`establish_pose`), because a
+silently re-anchored pose would erase the very thing that noticed.
+
+THE LINEAGE IS APPEND-ONLY AND A REFUSED RUN IS AN ENTRY. `night_run`
+records a declined night and `commissioning` stores a refused pass for the
+same reason: "did it run?" must be a read, never a silence
+indistinguishable from the seam being broken.
+
+WHAT IS NOT HERE, deliberately: PER-EMITTER SUPERSESSION (amending a
+calibration by re-running a subset) is the next step. What this step
+guarantees is that no measurement ever leaves the record without the record
+saying which run replaced it — `CalibrationRun.superseded` is written on
+every run, and the mechanics that will act on it are built against a record
+that already exists rather than one invented alongside them.
+"""
+from __future__ import annotations
+
+import logging
+import time
+from typing import Optional
+
+from spectra.models.calibration import (Calibration, CalibrationRun,
+                                        ItemOutcomeRecord, PinnedCamera,
+                                        PoseFingerprint)
+from spectra.services import (calibration_store, capture_queue, capture_runs,
+                              light_field, mapping_refusals, pose_fingerprint)
+
+logger = logging.getLogger(__name__)
+
+KIND_RUN = "run"
+KIND_FINGERPRINT = "fingerprint"
+KIND_DECLARATION = "declaration"
+
+#: How long a calibration run waits for a present, LOCKED camera session
+#: before giving up — `capture_queue.wait_for_session`'s own wait, through
+#: that module's own function, because a calibration started from a cron
+#: line has the same "start the queue, then start the client" shape a plain
+#: queue does and must not be the one path with a different answer.
+SESSION_WAIT_S = capture_queue.DEFAULT_SESSION_WAIT_S
+
+
+# ── the pose ───────────────────────────────────────────────────────────────
+
+async def establish_pose(cal: Calibration, *, placement: Optional[str] = None,
+                         label: str = "") -> tuple[Calibration, CalibrationRun]:
+    """TAKE OR RE-ANCHOR THIS CALIBRATION'S POSE: drive the room's carriers,
+    measure where each one's light lands, keep the best-spread few as
+    anchors, and record whether this anchor set can tell a moved camera from
+    a changed room.
+
+    RE-ANCHORING IS A DELIBERATE ACT and never a side effect of a run: it
+    starts a NEW comparable series, so doing it automatically after a camera
+    move would erase the very thing that noticed. The previous pose is not
+    edited — the fingerprint is replaced and the lineage keeps the entry that
+    took the old one, which is what makes "when did this pose change" a
+    read."""
+    entry = CalibrationRun(kind=KIND_FINGERPRINT, label=label)
+    if placement is not None:
+        cal.pose.placement = placement
+
+    room = light_field.get_room(cal.room_id)
+    if room is None:
+        return _refuse(cal, entry, mapping_refusals.calibration_no_room(
+            cal.room_id), "no_room")
+
+    view, waited = await capture_queue.wait_for_session(SESSION_WAIT_S)
+    if view is None:
+        return _refuse(cal, entry, waited, "session")
+
+    outcome = await capture_runs.run_pose_fingerprint(
+        cal.room_id, exposure_time=cal.camera.exposure_time,
+        gain=cal.camera.gain, white_balance=cal.camera.white_balance,
+        focus=cal.camera.focus)
+    entry.session_id = outcome.session_id
+    entry.pose_id = outcome.pose_id
+    entry.seconds = outcome.seconds
+    entry.lever = outcome.lever
+    entry.camera = dict(outcome.result.get("camera") or {})
+    entry.notes.extend(outcome.result.get("problems") or [])
+    entry.notes.extend(outcome.result.get("notes") or [])
+    if outcome.status != capture_runs.STATUS_OK:
+        return _refuse(cal, entry, outcome.detail,
+                       outcome.refusal or "fingerprint")
+
+    measured = [pose_fingerprint.PoseReference(**r)
+                for r in outcome.result.get("references") or []]
+    anchors = pose_fingerprint.select_anchors(measured)
+    if not anchors:
+        return _refuse(cal, entry, mapping_refusals.pose_no_anchors(
+            "every carrier was driven and the camera saw none of them"),
+            "no_anchors")
+
+    ok, note = pose_fingerprint.discriminating(anchors)
+    cal.pose = PoseFingerprint(
+        camera=dict(outcome.result.get("identity") or {}),
+        placement=cal.pose.placement, pose_id=outcome.pose_id,
+        references=anchors, spread=round(pose_fingerprint.spread(anchors), 5),
+        discriminating=ok, note=note, taken_at=time.time(),
+        taken_by_run=entry.id)
+    # THE REGIME THAT PROVED ITSELF, kept on the artefact rather than only in
+    # one run's log: "these numbers were taken by a camera whose exposure
+    # control was MEASURED, not merely read back" is a property of the
+    # calibration.
+    if outcome.lever:
+        cal.lever = outcome.lever
+    entry.status = capture_runs.STATUS_OK
+    entry.fingerprint = {"verdict": mapping_refusals.POSE_MATCH,
+                         "established": True,
+                         "anchors": [a.emitter_id for a in anchors],
+                         "measured": len(measured),
+                         "anchor_spread": cal.pose.spread,
+                         "discriminating": ok, "note": note}
+    entry.detail = _established_sentence(cal.pose, len(measured))
+    if note:
+        entry.notes.append(note)
+    cal.append_run(entry)
+    return calibration_store.save(cal), entry
+
+
+def _established_sentence(pose: PoseFingerprint, measured: int) -> str:
+    where = f" at {pose.placement}" if pose.placement else ""
+    kept = len(pose.references)
+    return (f"Pose recorded{where}: {measured} fixture"
+            f"{'' if measured == 1 else 's'} driven, the "
+            f"{kept} best-spread kept as reference"
+            f"{'' if kept == 1 else 's'} "
+            f"({', '.join(r.label or r.emitter_id for r in pose.references)}). "
+            + ("From here on this calibration can tell a moved camera from a "
+               "changed room." if pose.discriminating
+               else "This pose can notice that something changed and cannot "
+                    "say which — see the note."))
+
+
+async def check_pose(cal: Calibration) -> tuple[pose_fingerprint.Judgement,
+                                                capture_runs.RunOutcome | None]:
+    """Is the camera where it was? Drives only this pose's recorded anchors.
+
+    A DIFFERENT CAMERA SHORT-CIRCUITS BEFORE ANY LIGHT: a different capture
+    machine or device is a different pose by definition and by arithmetic (a
+    footprint is `lit - dark` in one camera's own byte scale), so there is
+    nothing to learn from twenty seconds of his dark room."""
+    if not cal.pose.established:
+        judgement = pose_fingerprint.Judgement(
+            verdict=mapping_refusals.POSE_UNESTABLISHED)
+        judgement.reason = mapping_refusals.pose_verdict_sentence(
+            judgement.as_dict())
+        return judgement, None
+
+    view = capture_runs.session_view()
+    identity = pose_fingerprint.identity_from_hello(view.get("client") or {})
+    note = pose_fingerprint.identity_changed(cal.pose.camera, identity)
+    if note:
+        return pose_fingerprint.judge(cal.pose.references, [],
+                                      identity_note=note), None
+
+    outcome = await capture_runs.run_pose_fingerprint(
+        cal.room_id,
+        emitter_ids=[r.emitter_id for r in cal.pose.references],
+        exposure_time=cal.camera.exposure_time, gain=cal.camera.gain,
+        white_balance=cal.camera.white_balance, focus=cal.camera.focus)
+    if outcome.status != capture_runs.STATUS_OK:
+        # THE CHECK ITSELF COULD NOT BE MADE. That is not a finding about the
+        # camera or the room — the same distinction `lever_selftest` draws
+        # between `unproven` and a measurement — so it is `cannot_tell` and
+        # the run's own gate (ownership, the lock, the lever) refuses on its
+        # own better sentence if it is going to.
+        judgement = pose_fingerprint.Judgement(
+            verdict=mapping_refusals.POSE_CANNOT_TELL,
+            why=outcome.detail or "the pose check could not be taken",
+            problems=list(outcome.result.get("problems") or []))
+        judgement.reason = mapping_refusals.pose_verdict_sentence(
+            judgement.as_dict())
+        return judgement, outcome
+
+    observed = [pose_fingerprint.PoseReference(**r)
+                for r in outcome.result.get("references") or []]
+    return pose_fingerprint.judge(
+        cal.pose.references, observed,
+        problems=list(outcome.result.get("problems") or [])), outcome
+
+
+# ── the run ────────────────────────────────────────────────────────────────
+
+async def run_calibration(cal: Calibration, *, force: bool = False,
+                          label: str = "") -> tuple[Calibration, CalibrationRun]:
+    """Check the pose, run the declared queue, append one lineage entry.
+
+    Returns the SAVED calibration and the entry, in every path including
+    every refusal — a refused run is a fact about the evening and the
+    record is what a person reads afterwards."""
+    entry = CalibrationRun(kind=KIND_RUN, label=label)
+
+    room = light_field.get_room(cal.room_id)
+    if room is None:
+        return _refuse(cal, entry, mapping_refusals.calibration_no_room(
+            cal.room_id), "no_room")
+    if not cal.items:
+        return _refuse(cal, entry,
+                       mapping_refusals.calibration_nothing_declared(),
+                       "nothing_declared")
+    try:
+        items = capture_queue.parse_items(cal.items)
+    except ValueError as exc:
+        return _refuse(cal, entry, str(exc), "declaration")
+    if capture_queue.running():
+        live = capture_queue.current
+        return _refuse(cal, entry, mapping_refusals.calibration_already_running(
+            (live.label or live.id) if live is not None else "one"), "busy")
+
+    view, waited = await capture_queue.wait_for_session(SESSION_WAIT_S)
+    if view is None:
+        return _refuse(cal, entry, waited, "session")
+    entry.session_id = view.get("session_id") or ""
+    entry.pose_id = view.get("pose_id") or ""
+
+    # THE POSE COMES FIRST, always: a run appended to a lineage that claims
+    # one pose has to know whether it still is one before it spends the
+    # room's dark time on twelve items.
+    #
+    # A CALIBRATION WITH NO POSE YET TAKES ONE HERE, as its own lineage
+    # entry, and then runs. Doing it in the same press is what makes a
+    # calibration one act rather than two — and it is the honest cost of the
+    # first run only: from here on a re-run drives the anchors alone.
+    # Nothing is COMPARED on that first pass, because there is nothing to
+    # compare against, and the entry says exactly that rather than claiming
+    # a match it did not measure.
+    if not cal.pose.established:
+        cal, pose_entry = await establish_pose(cal, label=label)
+        entry.notes.append(pose_entry.detail)
+        if pose_entry.lever:
+            entry.lever = pose_entry.lever
+        judgement = pose_fingerprint.Judgement(
+            verdict=mapping_refusals.POSE_UNESTABLISHED)
+        judgement.reason = mapping_refusals.pose_verdict_sentence(
+            judgement.as_dict())
+        fp_outcome = None
+    else:
+        judgement, fp_outcome = await check_pose(cal)
+    entry.fingerprint = judgement.as_dict()
+    if fp_outcome is not None and fp_outcome.lever:
+        entry.lever = fp_outcome.lever
+    if judgement.refuses and not force:
+        return _refuse(cal, entry, judgement.reason, "pose")
+    if judgement.refuses:
+        # AN EXPLICIT PRESS WINS AND NAMES THE CONTRADICTION — Force Scene's
+        # own precedent. The pose is NOT re-anchored as a side effect.
+        entry.notes.append(
+            "overrode_camera_moved: this run was started deliberately after "
+            "the pose check said the camera had moved. Its footprints are "
+            "not comparable with the ones this calibration already holds — "
+            "re-anchor the pose to start a new comparable series.")
+
+    started = time.time()
+    queue_run = capture_queue.new_run(items, label=label or cal.name)
+    entry.queue_run_id = queue_run.id
+    await capture_queue.run_queue(items, label=label or cal.name,
+                                  run=queue_run)
+    entry.seconds = time.time() - started
+    entry.items = [_item_record(o) for o in queue_run.outcomes]
+    entry.status = _run_status(queue_run)
+    entry.detail = _run_detail(queue_run, entry.status)
+    entry.refusal = _run_refusal(queue_run, entry.status)
+    entry.notes.extend(queue_run.notes)
+    entry.notes.extend(_item_sentences(queue_run))
+    entry.camera = _camera_record(cal, queue_run)
+    # The lever verdict of whichever item earned one — every item of one run
+    # shares a session, so they share the verdict too (it is cached on the
+    # session by fingerprint). The pose check usually earns it first, which
+    # is why this only fills a gap.
+    if not entry.lever:
+        entry.lever = _first_lever(queue_run)
+
+    origin = cal.emitter_origin()
+    entry.superseded = {e: origin[e] for e in entry.emitters if e in origin}
+    entry.comparable, entry.comparable_note = _comparability(
+        cal, entry, judgement)
+    cal.append_run(entry)
+    return calibration_store.save(cal), entry
+
+
+def _run_status(queue_run) -> str:
+    counts = queue_run.counts
+    if counts.get(capture_runs.STATUS_OK) and not (
+            counts.get(capture_runs.STATUS_PARTIAL)
+            or counts.get(capture_runs.STATUS_REFUSED)
+            or counts.get(capture_queue.STATUS_NOT_RUN)
+            or counts.get(capture_queue.STATUS_STOPPED)):
+        return capture_runs.STATUS_OK
+    if counts.get(capture_runs.STATUS_OK) or counts.get(
+            capture_runs.STATUS_PARTIAL):
+        # SOME OF IT LANDED is a third thing, never folded into either of the
+        # other two — `capture_runs`' own rule, one level up.
+        return capture_runs.STATUS_PARTIAL
+    return capture_runs.STATUS_REFUSED
+
+
+def _item_sentences(queue_run) -> list[str]:
+    """The distinct sentences the items themselves produced, in order.
+
+    Kept on the entry because a run's own summary counts outcomes and a
+    person reading the lineage months later needs the REASON, not the
+    arithmetic — `mapping_refusals`' own wording, never a second one."""
+    out: list[str] = []
+    for o in queue_run.outcomes:
+        if o.detail and o.detail not in out:
+            out.append(o.detail)
+    return out
+
+
+def _run_detail(queue_run, status: str) -> str:
+    """The entry's own sentence. A run where NOTHING landed must carry the
+    reason, not just the count: "1 declared: 1 refused" tells a reader
+    nothing they can act on."""
+    summary = queue_run.summary
+    if status != capture_runs.STATUS_REFUSED:
+        return summary
+    sentences = _item_sentences(queue_run)
+    return f"{summary} — {' '.join(sentences)}" if sentences else summary
+
+
+def _run_refusal(queue_run, status: str) -> str:
+    """WHICH refusal, when every item refused for the same named reason.
+    Mixed reasons stay empty rather than picking one — the sentences are all
+    on the entry either way."""
+    if status != capture_runs.STATUS_REFUSED:
+        return ""
+    kinds = {o.refusal for o in queue_run.outcomes if o.refusal}
+    return kinds.pop() if len(kinds) == 1 else ""
+
+
+def _item_record(outcome) -> ItemOutcomeRecord:
+    run = outcome.run or {}
+    return ItemOutcomeRecord(
+        index=outcome.index, name=outcome.name, kind=outcome.kind,
+        room_id=outcome.room_id, status=outcome.status,
+        detail=outcome.detail, refusal=outcome.refusal,
+        attempts=outcome.attempts, pose_id=outcome.pose_id,
+        seconds=outcome.seconds,
+        emitters=[e for e in (run.get("emitter_ids") or []) if e],
+        witness=dict(run.get("witness") or {}))
+
+
+def _first_lever(queue_run) -> dict:
+    for o in queue_run.outcomes:
+        lever = (o.run or {}).get("lever") or {}
+        if lever.get("verdict"):
+            return lever
+    return {}
+
+
+def _camera_record(cal: Calibration, queue_run) -> dict:
+    """WHAT REGIME THIS RUN WAS MEASURED IN. The declared pinned levers are
+    the authority (every item of a calibration run is given them); the frame
+    size and the read-back live on each item's own run record, which is
+    where an honest downgrade to what the camera actually has belongs."""
+    return {"pinned": cal.camera.model_dump(),
+            "items": len(queue_run.outcomes)}
+
+
+def _comparability(cal: Calibration, entry: CalibrationRun,
+                   judgement: pose_fingerprint.Judgement) -> tuple[bool, str]:
+    """MAY THIS RUN'S NUMBERS BE COMPARED with the earlier runs of this same
+    calibration? Two independent gates, and they are reported separately
+    because they fail for different reasons:
+
+      1. THE POSE matched (one camera, one place).
+      2. THE PINNED REGIME is identical to the one the last run used — a
+         footprint is `lit - dark` in a camera's own byte scale, so two
+         regimes are two scales and the pose matching perfectly does not
+         save them.
+
+    THE FIRST RUN UNDER A POSE IS COMPARABLE by definition: it is the
+    baseline of the series, not a run that failed to match anything."""
+    previous = cal.last_run
+    if judgement.verdict == mapping_refusals.POSE_UNESTABLISHED:
+        # A POSE THAT WAS TAKEN is the baseline of a series. A pose that
+        # COULD NOT BE TAKEN is not — and claiming a baseline for it would
+        # be the quiet lie this whole record exists to prevent, since every
+        # later run would then compare itself against nothing.
+        if not cal.pose.established:
+            return False, ("No pose could be recorded for this run, so there "
+                           "is nothing for a later run to compare itself "
+                           "against. Take the pose, then run it again.")
+        return True, ("This run establishes the series: every later run that "
+                      "matches this pose and these camera settings will be "
+                      "comparable with it.")
+    if not judgement.matched:
+        return False, judgement.reason
+    if previous is None:
+        return True, ("The first run under this pose — the baseline every "
+                      "later one is compared against.")
+    was = PinnedCamera(**((previous.camera or {}).get("pinned") or {}))
+    if not cal.camera.same_as(was):
+        return False, mapping_refusals.pose_regime_changed(
+            was.differences(cal.camera))
+    return True, ("The camera is where it was and its settings are "
+                  "unchanged, so this run may be compared with the earlier "
+                  "ones.")
+
+
+def _refuse(cal: Calibration, entry: CalibrationRun, detail: str,
+            refusal: str) -> tuple[Calibration, CalibrationRun]:
+    """Record a refusal AS AN ENTRY and save. Nothing about a refused run is
+    silent, and nothing about it is an exception either: the caller gets the
+    record and the record says what happened."""
+    entry.status = capture_runs.STATUS_REFUSED
+    entry.detail = detail
+    entry.refusal = refusal
+    entry.comparable = False
+    entry.comparable_note = "this run did not happen"
+    cal.append_run(entry)
+    return calibration_store.save(cal), entry
+
+
+# ── editing the declaration ────────────────────────────────────────────────
+
+def record_declaration_change(cal: Calibration, changes: list[str], *,
+                              label: str = "") -> CalibrationRun:
+    """EDITING THE DECLARATION KEEPS LINEAGE (the plan's own words): the
+    edit is an entry, so a later reader can see that run 4 measured a
+    different list from run 3 and why the two do not line up.
+
+    It is not a `run` entry — nothing was driven — so it never counts
+    towards `Calibration.ran` and never appears as the last run."""
+    entry = CalibrationRun(kind=KIND_DECLARATION, label=label,
+                           status=capture_runs.STATUS_OK,
+                           detail="; ".join(changes) or "no change",
+                           notes=list(changes))
+    return cal.append_run(entry)
+
+
+def view(cal: Calibration, *, room=None) -> dict:
+    """The full read: the artefact, its lineage, and its provenance resolved
+    against the live room map right now.
+
+    ABSENCE IS A READ. A calibration that has never run says so in a
+    sentence rather than returning an empty result set that looks like a run
+    finding nothing, and a pose that was never taken says that too."""
+    body = cal.model_dump()
+    body["provenance"] = calibration_store.provenance(cal, room=room)
+    body["ran"] = cal.ran
+    body["state"] = _state_sentence(cal)
+    body["pose_established"] = cal.pose.established
+    return body
+
+
+def _state_sentence(cal: Calibration) -> str:
+    if not cal.pose.established and not cal.ran:
+        return ("This calibration has never run and has no pose recorded. "
+                "Running it will take the pose and then measure what it "
+                "declares.")
+    if not cal.pose.established:
+        return ("This calibration has run but has no pose recorded, so "
+                "nothing can tell whether the camera has moved since. Take "
+                "its pose to start a comparable series.")
+    if not cal.ran:
+        return (f"The pose is recorded"
+                + (f" at {cal.pose.placement}" if cal.pose.placement else "")
+                + ", and nothing has been measured under it yet.")
+    last = cal.last_run
+    runs = len([r for r in cal.runs if r.kind == KIND_RUN])
+    if last is None:
+        return f"{runs} run(s) recorded."
+    return (f"{runs} run{'' if runs == 1 else 's'} recorded; the last one "
+            f"{last.status} — {last.detail}")

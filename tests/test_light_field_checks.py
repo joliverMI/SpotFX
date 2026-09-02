@@ -72,6 +72,14 @@ def _run(name: str, timeout: int) -> str:
     # wall — an honest camera PASSES and its map runs; tonight's own
     # measured shape and a re-clamping camera are each refused by name.
     ("check_lever_selftest.py", 600, "ALL CHECKS PASSED"),
+    # THE POSE FINGERPRINT's boundaries, SWEPT rather than sampled: a camera
+    # move and a room change of growing size, parallax, the instrument's own
+    # repeat wander, and the two anchor sets that can never discriminate.
+    # The property that matters is not that each verdict is reachable but
+    # that there is NOWHERE in the range where it says something confident
+    # and wrong — which only a sweep can show.
+    ("check_pose_fingerprint.py", 300,
+     "ALL POSE FINGERPRINT CHECKS PASSED"),
 ])
 def test_check_script_passes(name, timeout, tail):
     stdout = _run(name, timeout)

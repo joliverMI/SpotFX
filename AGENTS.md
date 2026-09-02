@@ -4058,6 +4058,122 @@ controls written, read back, and each one's stuck-driver refusal), and
 real WebSocket, the REAL capture client and the real map route, run from
 `tests/test_light_field_checks.py`.
 
+## THE CALIBRATION RECORD, and the POSE FINGERPRINT that gates it
+
+A calibration stops being a ritual and becomes a durable, named,
+re-runnable artefact — step two of `/home/javi/fleet-spotfx/data/
+calibration-practice-plan/plan.md` §3. **`spectra/models/calibration.py` is
+the binding statement for what a calibration IS; `spectra/services/
+pose_fingerprint.py` is the binding statement for what the pose check can
+and cannot tell apart.** Read both before touching anything here. Five
+things:
+
+- **STORAGE IS A DIRECTORY, not a bounded file** — `storage/spectra/
+  calibrations/<id>.json`, one file per calibration (`calibration_store.py`,
+  atomic tmp+replace, `config.CALIBRATIONS_DIR`, repointed by
+  `tests/conftest.py`'s `_isolated_calibrations`). Every other store here
+  holds a HISTORY that ages out and a bound is right for it; a calibration's
+  LINEAGE is the one thing that must never be pruned, so a single-file store
+  would have to choose between capping it and growing unbounded in a file
+  every read parses whole.
+- **THE TAG REGISTRY IS STORAGE ONLY, and its one number is MEASURED.**
+  `Calibration.tags` (`TagRegistration`: ArUco `tag_id`, `measured_side_mm`,
+  `mount`) is empty by default, so its arrival changed nothing. **Nothing in
+  this build reads it and there is no tag-detection code anywhere here** —
+  it is carried from day one so the later vision step lands into a record
+  that already holds his measured truth instead of going back to ask for it
+  (`tests/test_calibration_record.py` asserts against the SOURCE that
+  `pose_fingerprint`/`calibration_runs` never name it, so the day it starts
+  being read is a deliberate edit rather than something that quietly became
+  true). **MEASURED, never nominal, and that is the whole point**: a printed
+  tag whose real side differs from its nominal one SILENTLY SCALES every
+  pose it anchors — a driver told "100 mm" when it is 97 reports a camera 3%
+  further away and every distance from it is wrong by that factor with
+  nothing to notice, the firmware-brightness failure arriving through
+  another door. So one physical tag has one size: a non-positive side is
+  refused at the model and a duplicate id is refused by name at the route.
+  **An ArUco id is only unique WITHIN a dictionary** and the dictionary is
+  deliberately NOT invented here — named in `TagRegistration`'s docstring as
+  an open question for whoever knows which one he printed, not left as an
+  oversight.
+- **RUNS GO THROUGH `capture_runs` — the one seam — and acquire nothing.**
+  `calibration_runs.run_calibration` checks the pose, then drives the
+  declared items through `capture_queue.run_queue`, so the exposure lock,
+  the lever self-test, the ambient gate, the witness, the hold ceiling and
+  the ownership boundary all apply exactly as they do to a button press.
+  `capture_runs.KIND_FINGERPRINT` is a FOURTH run kind and is
+  calibration-grade like the other three. **The declared items are validated
+  by `capture_queue.parse_items` — the ONE validator**; a second dialect
+  that read almost the same would be the drift this codebase keeps learning
+  about. **THE NEVER-TAKES-HIS-ROOM BOUNDARY IS UNMOVED** and no piece of
+  the design needed an exception to it.
+- **THE FINGERPRINT IS ANCHORED ON WHAT CAMERA GEOMETRY ALONE DETERMINES** —
+  where a handful of KNOWN FIXTURES land their own light in the frame,
+  measured by briefly driving them through `room_mapping._map_one` against a
+  throwaway room (the `lever_selftest`/`exposure_test` precedent: nothing
+  stored). **Deliberately NOT the ambient scene**, which is the room's to
+  change: a fingerprint made of a reference image fires on a moved chair,
+  which is the exact failure this exists to avoid. A camera move shifts
+  every fixture's image by one vector; a room change moves one and leaves
+  the rest put. That asymmetry is the whole discriminator.
+- **FOUR VERDICTS, AND EXACTLY ONE REFUSES.**
+  `mapping_refusals.POSE_REFUSING` is `(POSE_CAMERA_MOVED,)` — the plan
+  requires a moved camera be a named refusal rather than silently
+  incomparable data. **`POSE_ROOM_CHANGED` and `POSE_CANNOT_TELL` RUN**, on
+  the captain's binding requirement: "he rearranges his own house; a
+  calibration refusing because he moved a chair is a system that expires for
+  reasons he cannot see." What is withheld in those two cases is the
+  COMPARABILITY CLAIM (`CalibrationRun.comparable`), gated on the
+  fingerprint matching AND the pinned regime being identical — two
+  independent halves that fail for different reasons and are reported
+  separately. An explicit press still wins past a camera move and NAMES it
+  (`overrode_camera_moved`, the Force Scene precedent) and never re-anchors
+  the pose as a side effect.
+- **THE SIX TOLERANCES ARE PRE-REGISTERED** (`commission_compare.py`'s own
+  discipline): each is DERIVED from something the instrument already
+  measures — `CENTROID_TOLERANCE` is two of the 64-wide grid's cells and is
+  proven above the instrument's own repeat wobble (measured at ~11% of it)
+  rather than asserted. Moving one is a decision about what this instrument
+  claims, not a tweak. **`COHERENCE_FRACTION` is a FRACTION of the shared
+  shift and not a fixed band, and that was FOUND BY SWEEPING**
+  (`scripts/check_pose_fingerprint.py` §1, which is in the suite via
+  `tests/test_light_field_checks.py`): a big camera move pushes anchors near
+  the frame edge partly out of shot, so their centroids shift LESS than the
+  ones in the middle, and judged against a fixed band the most obvious
+  camera move there is fell to `cannot_tell` while a small one was named.
+  Sweep a boundary before trusting it here; sampling it once passes.
+
+**THE HONEST LIMITS, stated rather than hidden, and every one of them falls
+to "cannot tell" and never to a confident wrong answer:** a camera
+TRANSLATION produces parallax (near fixtures shift more than far ones), so
+it has no shared vector and reads `cannot_tell`; an anchor set that is too
+few (`MIN_DISCRIMINATING` = 3) or too clustered (`MIN_ANCHOR_SPREAD`) cannot
+discriminate at all and **SAYS SO AT ESTABLISHMENT**, so the weaker answer
+months later is a known property of the pose rather than a surprise; and a
+whole-frame brightness change (his firmware-brightness trap, one axis over)
+is deliberately not attributed to either. The fingerprint takes each fixture
+to full firmware brightness for the pass (`fixture_brightness.owned`,
+`run_mapping`'s own guard) precisely because that class of change would
+otherwise make every re-check unreadable.
+
+**PROVENANCE IS A READ, NEVER A COPY.** A run records the emitter ids it
+produced; the footprints stay in `room_maps.json`, which remains the live
+store. `calibration_store.provenance` resolves them against it AS IT IS NOW
+— `present` / `superseded` / `missing` — so a calibration pointing at
+footprints that no longer exist REPORTS that rather than implying they are
+there. **ABSENCE IS A READ** too: a calibration that never ran says so, and
+so does a pose that was never taken. The LINEAGE is append-only —
+`Calibration.append_run` is the only mutator and there is no counterpart,
+and `POST/GET/PUT` are the only routes (**there is deliberately no
+DELETE**). A REFUSED run is an entry, `night_run`'s declined-night precedent.
+
+**NOT BUILT HERE, by design:** per-emitter supersession (step three —
+`CalibrationRun.superseded` is the ledger it will be written against),
+night-seam integration (step four), and any UI, which is why there is no
+help topic: an unlinked topic is an orphan by this file's own rule. Spec:
+`docs/SPECTRA_SPEC.md` §102; tests `tests/test_pose_fingerprint.py`,
+`tests/test_calibration_record.py`, `tests/test_calibration_api.py`.
+
 ## THE NIGHT RUN — HA pushes, we answer; and it never takes his room
 
 His `Sleeping` helper is a better signal than a person: when it has been on

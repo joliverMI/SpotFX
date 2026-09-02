@@ -281,17 +281,25 @@ def parse_items(raw: Any) -> list[QueueItem]:
     return items
 
 
-async def _wait_for_session(item: QueueItem, sleep, clock
-                            ) -> tuple[Optional[dict], str]:
-    """Wait for a session that is present AND locked, up to this item's own
-    budget. Returns (session_view, refusal_sentence).
+async def wait_for_session(wait_s: float, *,
+                           sleep: Callable[[float], Any] = asyncio.sleep,
+                           clock: Callable[[], float] = time.monotonic
+                           ) -> tuple[Optional[dict], str]:
+    """Wait for a session that is present AND locked, up to `wait_s`.
+    Returns (session_view, refusal_sentence).
 
     IT WAITS FOR LOCKED, NOT MERELY PRESENT, on purpose: a client that has
     just reconnected has an exposure to settle and re-read, and a run
     started in that window would refuse for a reason that was about to stop
     being true. This is a wait, never a softening — the thing waited for is
-    the gate's own answer, unchanged."""
-    deadline = clock() + max(0.0, item.session_wait_s)
+    the gate's own answer, unchanged.
+
+    PUBLIC because there is a second legitimate waiter now: a CALIBRATION
+    run (spectra/services/calibration_runs.py) has to have a camera before
+    its pose fingerprint can drive a single anchor, and that wait must be
+    the same wait a queue item makes rather than a second one that drifts —
+    the whole discipline `capture_runs` exists for, one level up."""
+    deadline = clock() + max(0.0, wait_s)
     ever = False
     while True:
         view = capture_runs.session_view()
@@ -304,8 +312,14 @@ async def _wait_for_session(item: QueueItem, sleep, clock
                 # gate's own refusal, verbatim — not a session problem.
                 return None, view["refusal"] or mapping_refusals.NO_SESSION
             return None, mapping_refusals.session_lost(
-                item.session_wait_s, ever_connected=ever)
+                wait_s, ever_connected=ever)
         await sleep(SESSION_POLL_S)
+
+
+async def _wait_for_session(item: QueueItem, sleep, clock
+                            ) -> tuple[Optional[dict], str]:
+    return await wait_for_session(item.session_wait_s, sleep=sleep,
+                                  clock=clock)
 
 
 def _attempt_row(n: int, outcome: capture_runs.RunOutcome) -> dict:
