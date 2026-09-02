@@ -190,6 +190,22 @@ class RunOutcome:
                 "emitter_ids": [e.get("emitter_id")
                                 for e in (r.get("emitters") or [])
                                 if e.get("mapped")],
+                # WHAT EACH ONE MEASURED, one small row per emitter — never
+                # a grid. The room map keeps only the LATEST footprint, so a
+                # calibration's lineage has to carry the number itself or a
+                # diff between two of its own entries has nothing to read
+                # (`spectra/models/calibration.EmitterMeasurement`). Bounded
+                # by the run's own `emitters.MAX_EMITTERS_PER_RUN`.
+                "measurements": [
+                    {"emitter_id": e.get("emitter_id"),
+                     "carrier_id": e.get("carrier_id") or "",
+                     "label": e.get("label") or "",
+                     "weight": round(float(e.get("weight") or 0.0), 4),
+                     "mapped": bool(e.get("mapped")),
+                     "unseen": bool(e.get("unseen"))}
+                    for e in (r.get("emitters") or [])],
+                "scoped": bool(r.get("scoped")),
+                "mixed_carriers": list(r.get("mixed_carriers") or []),
                 # The contamination witness's own three counts for this run
                 # (clean / contaminated / unclaimed), verbatim.
                 "witness": dict(r.get("witness") or {}),
@@ -334,6 +350,8 @@ def _status_for(ok: bool, partial: bool) -> str:
 
 async def run_map(room_id: str, *, granularity: Optional[str] = None,
                   block_pixels: Optional[int] = None,
+                  carrier_ids: Optional[list[str]] = None,
+                  emitter_ids: Optional[list[str]] = None,
                   dark_settle_s: Optional[float] = None,
                   lit_settle_s: Optional[float] = None,
                   dark_capture_s: Optional[float] = None,
@@ -349,7 +367,13 @@ async def run_map(room_id: str, *, granularity: Optional[str] = None,
     page's control comes back where he left it. A queue item leaves it
     alone by default: an overnight sweep that varied the granularity per
     item must not silently redecorate his page's control with whichever
-    item happened to run last."""
+    item happened to run last.
+
+    `carrier_ids`/`emitter_ids` SCOPE the run to part of the room — a
+    calibration amendment re-measuring one fixture, or a few ranges of one.
+    Both default None, which is the whole room, so every caller that existed
+    before amendments did behaves exactly as it did. `run_mapping.scope_plan`
+    owns the narrowing and the one-granularity-per-carrier invariant."""
     room = light_field.get_room(room_id)
     if room is None:
         return RunOutcome(kind=KIND_MAP, status=STATUS_NOT_FOUND,
@@ -374,6 +398,8 @@ async def run_map(room_id: str, *, granularity: Optional[str] = None,
             result = await room_mapping.run_mapping(
                 room, room_mapping.production_deps(sess),
                 granularity=g, block_pixels=block,
+                carrier_ids=list(carrier_ids) if carrier_ids else None,
+                emitter_ids=list(emitter_ids) if emitter_ids else None,
                 dark_settle_s=dark_settle_s, lit_settle_s=lit_settle_s,
                 dark_capture_s=dark_capture_s, lit_capture_s=lit_capture_s,
                 camera=capture_settings.request(

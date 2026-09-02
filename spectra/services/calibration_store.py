@@ -26,9 +26,13 @@ third is the honesty rail this step exists for:
 
   present     the footprint is there and this run is still its most recent
               producer in this calibration.
-  superseded  the footprint is there and a LATER run of this calibration
-              produced it — the earlier reading is history, and the record
-              says which run replaced it.
+  superseded  the footprint is there and a LATER run or AMENDMENT of this
+              calibration produced it — the earlier reading is history, and
+              the record says which entry replaced it. Supersession is PER
+              EMITTER: an amendment that re-measured three ranges of a
+              wrapped TV supersedes exactly those three, and the rest of
+              that carrier stays `present`, still credited to the run that
+              took it.
   missing     the footprint is NOT in the room map any more (the room was
               re-mapped at a different granularity, a carrier was removed,
               the room was deleted). Reported by name. A calibration
@@ -48,7 +52,7 @@ import time
 from typing import Optional
 
 from spectra import config
-from spectra.models.calibration import Calibration
+from spectra.models.calibration import RUN_KINDS, Calibration
 from spectra.services import light_field
 
 logger = logging.getLogger(__name__)
@@ -169,7 +173,11 @@ def provenance(cal: Calibration, room=None, map_path=None) -> dict:
 
     rows = []
     for run in cal.runs:
-        if run.kind != "run":
+        # RUN_KINDS, never the literal "run": an AMENDMENT produces
+        # footprints exactly as a full run does, and a provenance read that
+        # skipped it would report his newest measurement as belonging to
+        # nobody while still listing the older one it superseded.
+        if run.kind not in RUN_KINDS:
             continue
         for emitter_id in run.emitters:
             fp = room.footprint(emitter_id)

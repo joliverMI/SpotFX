@@ -39,13 +39,36 @@ WHAT A CALIBRATION IS, then, and every field below is one of these:
                 witness said, which footprints it produced, and which
                 earlier run's footprints those replaced.
 
+FOUR KINDS OF ENTRY, and the second is the 2026-09-01 addition: `run` (the
+whole declaration), `amendment` (a NAMED SUBSET of it, re-measured on its
+own — `spectra/services/amendment.py` is the binding statement for when
+that is honest), `fingerprint` (a pose taken or re-anchored), and
+`declaration` (the declared items, the camera regime or the envelope were
+edited). `RUN_KINDS` is the pair that MEASURED something, and every reader
+asking "what has this calibration actually produced" uses that rather than
+testing for the word "run" — an amendment produces footprints exactly as a
+run does, and a reader that missed it would report his newest measurement
+as belonging to nobody.
+
 THE LINEAGE IS APPEND-ONLY, AND THAT IS THE HONESTY RAIL. Nothing in this
 model has a way to edit or drop a past run: `Calibration.append_run` is the
 only mutator of `runs`, and it appends. A re-run that replaces a footprint
 RECORDS the supersession (`CalibrationRun.superseded`) rather than erasing
-the run that measured it first. The per-emitter supersession MECHANICS —
-amending a calibration by re-running a subset — are the next step and are
-deliberately not here; what is here is the record they will be written into.
+the run that measured it first. Editing the DECLARATION is append-only too:
+the edit is its own entry and it carries the WHOLE PRIOR DECLARATION
+(`CalibrationRun.previous_declaration`), so what run 3 actually asked for is
+recoverable after run 4 asked for something else — never rewritten in place.
+
+WHAT EACH RUN MEASURED IS RECORDED AS A NUMBER, not only as a list of ids
+(`ItemOutcomeRecord.measurements`). The room map holds only the LATEST
+footprint per emitter, so a superseded grid is gone the moment it is
+replaced — and a diff between two of this calibration's own lineage entries
+would then have nothing to read. One small row per emitter, bounded by the
+run's own `emitters.MAX_EMITTERS_PER_RUN`, is what makes drift across a
+calibration's own selves DETECTABLE from stored data instead of narrated.
+An entry written before this field existed carries none, and
+`spectra/services/calibration_diff.py` reports that as UNMEASURED rather
+than as a change.
 
 RESULTS ARE A LINK, NOT A COPY. A run records the emitter ids it produced;
 the footprints themselves live in `storage/spectra/room_maps.json`, which
@@ -68,6 +91,21 @@ from pydantic import BaseModel, Field
 #: bound and not a formality — `spectra/services/pose_fingerprint.py` owns
 #: the reasoning and the selection.
 MAX_REFERENCES = 5
+
+#: THE ENTRY KINDS. `run` measures the whole declaration; `amendment`
+#: measures a NAMED SUBSET of it (spectra/services/amendment.py);
+#: `fingerprint` takes or re-anchors the pose; `declaration` records an edit
+#: to what this calibration declares.
+KIND_RUN = "run"
+KIND_AMENDMENT = "amendment"
+KIND_FINGERPRINT = "fingerprint"
+KIND_DECLARATION = "declaration"
+#: THE KINDS THAT MEASURED SOMETHING, and the reason this is a constant
+#: rather than a literal at each reader: an amendment produces footprints
+#: exactly as a run does, so a reader still testing `kind == "run"` would
+#: report his newest measurement as belonging to nobody. Every provenance,
+#: origin and comparability read uses this tuple.
+RUN_KINDS = (KIND_RUN, KIND_AMENDMENT)
 
 
 class TagRegistration(BaseModel):
@@ -240,6 +278,39 @@ class Envelope(BaseModel):
     note: str = ""
 
 
+class EmitterMeasurement(BaseModel):
+    """WHAT ONE EMITTER MEASURED, on the run that measured it — a small,
+    bounded row kept on the lineage entry itself.
+
+    WHY IT IS HERE AND NOT ONLY IN THE ROOM MAP: `room_maps.json` holds the
+    LATEST footprint per emitter, so the instant a re-run replaces one the
+    earlier grid is gone. A diff between two of a calibration's own lineage
+    entries would then have nothing to read, and "has this fixture drifted"
+    would be a thing somebody remembered rather than a thing anybody could
+    compute. One row per emitter, capped by `emitters.MAX_EMITTERS_PER_RUN`,
+    is the whole cost.
+
+    IT IS A SUMMARY AND NEVER THE GRID. Copying a 2,304-cell footprint into
+    every lineage entry would make the one file that must never be pruned
+    the unbounded one — `ItemOutcomeRecord`'s own discipline, one level
+    down."""
+    emitter_id: str
+    carrier_id: str = ""
+    label: str = ""
+    #: The footprint's total relative luminance — "how much light this
+    #: emitter landed in this room", in THIS run's camera scale. Comparable
+    #: only with a run whose pose matched and whose pinned regime was
+    #: identical; `calibration_diff` is the one place that judgement is
+    #: applied.
+    weight: float = 0.0
+    mapped: bool = False
+    #: RAN, and the camera saw nothing of it from this pose. A real reading,
+    #: kept, exactly as `EmitterFootprint.unseen` keeps it one level down —
+    #: which is what lets a diff say "it vanished from view" rather than
+    #: "it was not measured".
+    unseen: bool = False
+
+
 class ItemOutcomeRecord(BaseModel):
     """One declared item's landing, as the queue reported it. A SUMMARY, the
     same discipline `capture_queue.ItemOutcome` already keeps: the full map
@@ -262,6 +333,10 @@ class ItemOutcomeRecord(BaseModel):
     #: The witness's own counts for this item (clean / contaminated /
     #: unclaimed), verbatim from the run.
     witness: dict = Field(default_factory=dict)
+    #: WHAT EACH OF THOSE EMITTERS ACTUALLY MEASURED. Empty on an entry
+    #: written before this field existed, which `calibration_diff` reports
+    #: as UNMEASURED rather than as a change — absence is a read.
+    measurements: list[EmitterMeasurement] = Field(default_factory=list)
 
 
 class CalibrationRun(BaseModel):
@@ -273,10 +348,9 @@ class CalibrationRun(BaseModel):
     indistinguishable from the seam being broken."""
     id: str = Field(default_factory=lambda: uuid.uuid4().hex[:12])
     at: float = Field(default_factory=time.time)
-    #: "run" (the declared queue), "fingerprint" (a pose established or
-    #: re-anchored on its own), "declaration" (the declared queue or the
-    #: envelope was edited).
-    kind: str = "run"
+    #: One of `RUN_KINDS` (something was measured) or `KIND_FINGERPRINT` /
+    #: `KIND_DECLARATION`.
+    kind: str = KIND_RUN
     label: str = ""
     status: str = ""
     detail: str = ""
@@ -291,6 +365,26 @@ class CalibrationRun(BaseModel):
     #: declaration is edited later must still be readable against what each
     #: past run actually asked for.
     items: list[ItemOutcomeRecord] = Field(default_factory=list)
+    #: THE DECLARATION THIS ENTRY ACTUALLY RAN, verbatim, in the capture
+    #: queue's own item shape. A `run` carries the whole declaration as it
+    #: stood; an `amendment` carries only the named subset it re-measured,
+    #: WITH whatever this amendment overrode. Kept because the declaration
+    #: on the calibration is the CURRENT one and an edit moves it: without
+    #: this, "what did run 3 ask for" stops being answerable the moment
+    #: run 4 asks for something else.
+    declared: list[dict] = Field(default_factory=list)
+    #: THE NAMES THIS AMENDMENT ASKED FOR, as he wrote them. Empty on every
+    #: other kind. Kept separately from `declared` because an amendment that
+    #: names one item and overrides its granularity has two facts in it, and
+    #: a reader deserves both.
+    amended: list[str] = Field(default_factory=list)
+    #: FOR A `declaration` ENTRY: the WHOLE declaration as it stood BEFORE
+    #: the edit (items, camera regime, envelope, name, placement). This is
+    #: what makes "append-only, never rewritten" true of the declaration and
+    #: not only of the run list — the prior declaration is recoverable from
+    #: the lineage rather than overwritten in place. Empty on every other
+    #: kind.
+    previous_declaration: dict = Field(default_factory=dict)
     #: The pose fingerprint judgement this run was gated on
     #: (spectra/services/pose_fingerprint.Judgement.as_dict()).
     fingerprint: dict = Field(default_factory=dict)
@@ -306,10 +400,24 @@ class CalibrationRun(BaseModel):
     comparable: bool = False
     comparable_note: str = ""
     #: emitter_id -> the id of the run whose footprint this one replaced.
-    #: RECORDED, not performed: the per-emitter supersession mechanics are
-    #: the next step. What this guarantees today is that no measurement ever
+    #: PER EMITTER, which is the whole of amend-in-part: a run that
+    #: re-measured three ranges of a wrapped TV supersedes those three and
+    #: leaves the rest of that carrier's footprints exactly where they were,
+    #: still credited to the run that took them. No measurement ever
     #: disappears from the record without the record saying what replaced it.
     superseded: dict[str, str] = Field(default_factory=dict)
+    #: THE MIXING GATE'S OWN WORKING, for an amendment: which carriers it
+    #: would have left holding footprints from more than one run, which
+    #: emitters it was taking, and the claim (or the refusal) that decided
+    #: it. `spectra/services/amendment.MixVerdict.as_dict()`. Empty on every
+    #: full run, which mixes nothing by construction.
+    mix: dict = Field(default_factory=dict)
+    #: THE CARRIERS THIS ENTRY LEFT HOLDING FOOTPRINTS FROM MORE THAN ONE
+    #: RUN, and the claim that made mixing honest. Empty when nothing mixed.
+    #: `spectra/services/amendment.py` is the binding statement: mixing is
+    #: allowed ONLY when the pose fingerprint MATCHED and the pinned regime
+    #: is identical to the run that took the footprints being left in place.
+    mixed_carriers: list[str] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
 
     @property
@@ -352,15 +460,33 @@ class Calibration(BaseModel):
 
     @property
     def ran(self) -> bool:
-        """Has this calibration ever actually run? ABSENCE IS A READ: a
-        calibration that never ran says so, rather than reporting an empty
-        result set that looks like a run finding nothing."""
-        return any(r.kind == "run" for r in self.runs)
+        """Has this calibration ever actually measured anything? ABSENCE IS A
+        READ: a calibration that never ran says so, rather than reporting an
+        empty result set that looks like a run finding nothing.
+
+        AN AMENDMENT COUNTS. It drove lights and produced footprints; a
+        calibration whose only measurement came from one would otherwise
+        read as never having run."""
+        return any(r.kind in RUN_KINDS for r in self.runs)
 
     @property
     def last_run(self) -> Optional[CalibrationRun]:
+        """The most recent entry that MEASURED something, amendment or not —
+        which is what the regime half of the comparability claim is compared
+        against, and what a reader means by "the last run"."""
         for r in reversed(self.runs):
-            if r.kind == "run":
+            if r.kind in RUN_KINDS:
+                return r
+        return None
+
+    @property
+    def last_full_run(self) -> Optional[CalibrationRun]:
+        """The most recent entry that ran the WHOLE declaration. Distinct
+        from `last_run` on purpose: "when did this calibration last measure
+        everything it declares" and "when did it last measure anything" are
+        different questions and an amendment answers only the second."""
+        for r in reversed(self.runs):
+            if r.kind == KIND_RUN:
                 return r
         return None
 
@@ -380,7 +506,7 @@ class Calibration(BaseModel):
         against, and what a provenance read answers with."""
         origin: dict[str, str] = {}
         for r in self.runs:
-            if r.kind != "run":
+            if r.kind not in RUN_KINDS:
                 continue
             for e in r.emitters:
                 origin[e] = r.id
@@ -399,7 +525,9 @@ class Calibration(BaseModel):
                 "pose_established": self.pose.established,
                 "pose_discriminating": self.pose.discriminating,
                 "declared_items": len(self.items),
-                "runs": len([r for r in self.runs if r.kind == "run"]),
+                "runs": len([r for r in self.runs if r.kind == KIND_RUN]),
+                "amendments": len([r for r in self.runs
+                                   if r.kind == KIND_AMENDMENT]),
                 "ran": self.ran,
                 "camera": self.camera.model_dump(),
                 "envelope": self.envelope.model_dump(),
@@ -409,5 +537,20 @@ class Calibration(BaseModel):
                              if last is not None else None)}
 
 
-def new_run_entry(kind: str = "run", **kw: Any) -> CalibrationRun:
+def declaration_snapshot(cal: "Calibration") -> dict:
+    """THE WHOLE DECLARATION, as it stands right now — what a `declaration`
+    entry keeps as `previous_declaration` so the prior one survives an edit.
+
+    Everything a human declares and nothing a run measures: the pose
+    fingerprint, the lever verdict and the lineage are all excluded, because
+    an edit does not touch them and a snapshot that carried them would grow
+    the append-only file by the whole record on every rename."""
+    return {"name": cal.name, "placement": cal.pose.placement,
+            "camera": cal.camera.model_dump(),
+            "envelope": cal.envelope.model_dump(),
+            "items": [dict(i) for i in cal.items],
+            "tags": [t.model_dump() for t in cal.tags]}
+
+
+def new_run_entry(kind: str = KIND_RUN, **kw: Any) -> CalibrationRun:
     return CalibrationRun(kind=kind, **kw)

@@ -101,6 +101,15 @@ class QueueItem:
     label: str = ""
     # map
     granularity: Optional[str] = None
+    #: SCOPE this map to part of the room — the carriers, or the individual
+    #: emitters, to re-measure. Both None (the default, and every queue
+    #: declared before amendments existed) means the whole room. A
+    #: calibration amendment is the caller that uses them; see
+    #: `spectra/services/amendment.py` for when the RESULT may be mixed with
+    #: what the map already holds, and `room_mapping.scope_plan` for what is
+    #: enforced at run time.
+    carrier_ids: Optional[list[str]] = None
+    emitter_ids: Optional[list[str]] = None
     block_pixels: Optional[int] = None
     dark_settle_s: Optional[float] = None
     lit_settle_s: Optional[float] = None
@@ -277,6 +286,17 @@ def parse_items(raw: Any) -> list[QueueItem]:
                              f"'{capture_runs.KIND_COMMISSION}', not {kind!r}")
         if not str(entry.get("room_id") or "").strip():
             raise ValueError(f"item {i}: room_id is required")
+        if kind != capture_runs.KIND_MAP:
+            # SCOPING IS A MAP'S OWN ARGUMENT. A commissioning pass names
+            # what it reads with `targets`, and silently ignoring a
+            # carrier/emitter list here would let an amendment believe it
+            # narrowed a pass it did not.
+            for scoped in ("carrier_ids", "emitter_ids"):
+                if entry.get(scoped):
+                    raise ValueError(
+                        f"item {i}: {scoped} scopes a '{capture_runs.KIND_MAP}' "
+                        f"item; a '{kind}' item names what it reads with "
+                        f"'targets'")
         items.append(QueueItem(**{**entry, "kind": kind}))
     return items
 
@@ -340,6 +360,7 @@ async def _execute(item: QueueItem) -> capture_runs.RunOutcome:
         return await capture_runs.run_map(
             item.room_id, granularity=item.granularity,
             block_pixels=item.block_pixels,
+            carrier_ids=item.carrier_ids, emitter_ids=item.emitter_ids,
             dark_settle_s=item.dark_settle_s, lit_settle_s=item.lit_settle_s,
             dark_capture_s=item.dark_capture_s,
             lit_capture_s=item.lit_capture_s,
