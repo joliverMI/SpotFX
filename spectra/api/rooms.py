@@ -132,6 +132,14 @@ class MapBody(BaseModel):
     #: raises it.
     exposure_time: Optional[int] = None
     gain: Optional[int] = None
+    #: THE OTHER TWO PINNED LEVERS (2026-09-01), NATIVE CLIENT ONLY: white
+    #: balance TEMPERATURE in Kelvin and FOCUS on the device's own scale.
+    #: Same read-back discipline as the first two — a control the camera did
+    #: not take refuses BY NAME before any frame. The browser page has no
+    #: way to reach either, so a browser session simply reports them as not
+    #: read, which is what a run then refuses on if it asked for one.
+    white_balance: Optional[int] = None
+    focus: Optional[int] = None
 
 
 class ExposureTestBody(BaseModel):
@@ -193,6 +201,29 @@ class CommissionBody(BaseModel):
     #: a preference.
     exposure_time: Optional[int] = None
     gain: Optional[int] = None
+    #: THE OTHER TWO PINNED LEVERS (2026-09-01), NATIVE CLIENT ONLY: white
+    #: balance TEMPERATURE in Kelvin and FOCUS on the device's own scale.
+    #: Same read-back discipline as the first two — a control the camera did
+    #: not take refuses BY NAME before any frame. The browser page has no
+    #: way to reach either, so a browser session simply reports them as not
+    #: read, which is what a run then refuses on if it asked for one.
+    white_balance: Optional[int] = None
+    focus: Optional[int] = None
+
+
+def _lever_refused(outcome) -> Optional[JSONResponse]:
+    """A calibration-grade run stopped by the LEVER SELF-TEST — the camera
+    was measured and its exposure control does not reach its sensor.
+
+    409 with the sentence and the whole verdict, the same shape every other
+    anticipated refusal on this path answers with: nothing was written, and
+    the caller gets both registers (a word to branch on, a sentence to
+    read). See `spectra/services/lever_selftest.py`."""
+    if outcome.refusal != "lever":
+        return None
+    return JSONResponse(status_code=409, content={
+        "detail": outcome.detail, "refusal": outcome.refusal,
+        "lever": outcome.lever})
 
 
 def _run_granularity(room: RoomMap, granularity: Optional[str],
@@ -420,7 +451,9 @@ async def run_map(room_id: str, body: Optional[MapBody] = None):
         dark_capture_s=body.dark_capture_s if body else None,
         lit_capture_s=body.lit_capture_s if body else None,
         exposure_time=body.exposure_time if body else None,
-        gain=body.gain if body else None)
+        gain=body.gain if body else None,
+        white_balance=body.white_balance if body else None,
+        focus=body.focus if body else None)
     if outcome.status == capture_runs.STATUS_NOT_FOUND:
         return JSONResponse(status_code=404, content={"detail": outcome.detail})
     if outcome.refusal in ("no_session", "busy") or outcome.escaped:
@@ -430,7 +463,15 @@ async def run_map(room_id: str, body: Optional[MapBody] = None):
         # its record with 200 — see RunOutcome.escaped.
         return JSONResponse(status_code=409, content={
             "detail": outcome.detail, "refusal": outcome.refusal})
+    refused = _lever_refused(outcome)
+    if refused is not None:
+        return refused
     out = dict(outcome.result)
+    # THE VERDICT RIDES ON THE RUN, not only on a refusal: "this run's
+    # camera was proven to obey its own exposure control" is part of what
+    # the run measured, and a browser session carries {} rather than a
+    # verdict it was never asked for.
+    out["lever"] = outcome.lever
     stored = light_field.get_room(room_id)
     if stored is not None:
         out["room"] = _room_view(stored)
@@ -472,12 +513,15 @@ async def run_exposure_test(room_id: str, body: ExposureTestBody):
     if outcome.refusal in ("no_session", "busy") or outcome.escaped:
         return JSONResponse(status_code=409, content={
             "detail": outcome.detail, "refusal": outcome.refusal})
+    refused = _lever_refused(outcome)
+    if refused is not None:
+        return refused
     if outcome.status != capture_runs.STATUS_OK:
         # A REFUSAL IS NOT A SERVER FAULT: 409 with the record, so a caller
         # can tell "we could not run" from "we ran and the default regime
         # measured nothing" — which is a RESULT, and the interesting one.
         return JSONResponse(status_code=409, content=outcome.result)
-    return outcome.result
+    return {**outcome.result, "lever": outcome.lever}
 
 
 @router.get("/rooms/commission/results")
@@ -524,7 +568,9 @@ async def run_commission(room_id: str, body: Optional[CommissionBody] = None):
         repeat=(body.repeat if body else 1),
         targets=_commission_targets(body),
         exposure_time=body.exposure_time if body else None,
-        gain=body.gain if body else None)
+        gain=body.gain if body else None,
+        white_balance=body.white_balance if body else None,
+        focus=body.focus if body else None)
     if outcome.status == capture_runs.STATUS_NOT_FOUND:
         return JSONResponse(status_code=404, content={"detail": outcome.detail})
     if outcome.refusal == "no_mapper":
@@ -532,13 +578,16 @@ async def run_commission(room_id: str, body: Optional[CommissionBody] = None):
     if outcome.refusal in ("no_session", "busy") or outcome.escaped:
         return JSONResponse(status_code=409, content={
             "detail": outcome.detail, "refusal": outcome.refusal})
+    refused = _lever_refused(outcome)
+    if refused is not None:
+        return refused
     if outcome.status != capture_runs.STATUS_OK:
         # A REFUSAL IS NOT A SERVER FAULT and is not a failed comparison
         # either: 409 with the sentence, and the stored record, so an
         # unattended caller can tell "we could not run" from "we ran and a
         # row is red" without parsing prose.
         return JSONResponse(status_code=409, content=outcome.result)
-    return outcome.result
+    return {**outcome.result, "lever": outcome.lever}
 
 
 def _commission_targets(body: Optional[CommissionBody]) -> Optional[list[str]]:

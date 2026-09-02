@@ -24,16 +24,36 @@ server then refuses BY NAME, exactly as it refuses a phone that will not
 lock. The unattended path is allowed to be more convenient. It is not
 allowed to be more trusting.
 
-THE SAME RULE NOW COVERS TWO MORE CONTROLS (2026-09-01): a run may ask for
-a MANUAL INTEGRATION TIME (`exposure_time_absolute`, in 100-microsecond
-units — the same unit the browser's own `exposureTime` uses, so nothing
-converts) and a MANUAL GAIN (`gain`, a device-specific scale passed through
-verbatim). `apply_lock` writes them and `read_lock` reads EVERY one of them
-back out of the device; a control this camera does not have, or one that
-came back a different number than it was asked for, is named in
-`manual_refusals` and the server refuses on it. Asking for neither is the
-shipped behaviour exactly — converge for SETTLE_BEFORE_LOCK_S, then freeze
-— so nothing about an ordinary night run changed.
+THE SAME RULE NOW COVERS FOUR PINNED CONTROLS (`LEVERS`, 2026-09-01): a
+session may declare an exact INTEGRATION TIME (`exposure_time_absolute`, in
+100-microsecond units — the same unit the browser's own `exposureTime` uses,
+so nothing converts), an exact GAIN (`gain`, a device-specific scale passed
+through verbatim), an exact WHITE BALANCE temperature (Kelvin) and an exact
+FOCUS (`focus_absolute`). `apply_lock` writes them and `read_lock` reads
+EVERY one of them back out of the device; a control this camera does not
+have, or one that came back a different number than it was asked for, is
+named in `manual_refusals` and the server refuses on it BEFORE any frame is
+measured. Asking for none of them is the shipped behaviour exactly —
+converge for SETTLE_BEFORE_LOCK_S, then freeze — so nothing about an
+ordinary night run changed.
+
+PERSISTENCE IS SOFTWARE, and that is the point. Whatever a session pinned
+is remembered in `self._wanted` and RE-ASSERTED by `open()`, so a reboot, a
+camera re-plug, a dead capture pipe or a scaler restart costs nothing: the
+camera comes back up pinned the way the session pinned it and the read-back
+that follows is what says whether it took. Nothing is written to disk and
+nothing about the camera's own memory is relied on.
+
+AND A SETTING IS NOT THE LIGHT. Every read-back above proves what the
+DRIVER holds, which is not the same claim as the sensor obeying it —
+tonight's evidence is a camera that took 10 ms, 60 ms and 200 ms without
+complaint and measured flat noise at all three. That second claim needs a
+measurement, and it lives one layer up in
+`spectra/services/lever_selftest.py`, which drives a known emitter and
+watches the light move. Neither check is a substitute for the other: the
+read-back is instant and catches a control that was never taken; the
+self-test is the only thing that can catch one that was taken and does
+nothing.
 
 AND THE WIRE FRAME SIZE IS PER RUN. The commissioning read asks for
 1920x1080 (`spectra/services/capture_settings.py` carries the arithmetic);
@@ -128,10 +148,36 @@ WB_CONTROLS = ("white_balance_automatic", "white_balance_temperature_auto")
 #: and is passed through verbatim; converting it would be an invention.
 EXPOSURE_TIME_CONTROLS = ("exposure_time_absolute", "exposure_absolute")
 GAIN_CONTROLS = ("gain",)
+#: THE OTHER TWO PINNED CONTROLS (2026-09-01). White balance TEMPERATURE is
+#: a number in Kelvin the device holds once its own auto white balance is
+#: off; FOCUS is `focus_absolute`, a device-specific scale, and it needs the
+#: camera's continuous autofocus turned off first or the driver will take
+#: the write and then move the lens again.
+WB_TEMPERATURE_CONTROLS = ("white_balance_temperature",)
+FOCUS_CONTROLS = ("focus_absolute",)
+FOCUS_AUTO_CONTROLS = ("focus_automatic_continuous", "focus_auto")
 #: V4L2's menu value for manual exposure (1 = Manual Mode, 3 = Aperture
 #: Priority Mode) and for white balance auto OFF.
 EXPOSURE_MANUAL = 1
 WB_AUTO_OFF = 0
+#: Continuous autofocus OFF. Written ONLY when a run asks for a focus
+#: value — a camera that was left to focus itself keeps doing so, because
+#: silently disabling autofocus for every run would change what an ordinary
+#: night sees rather than pinning what a calibration asked for.
+FOCUS_AUTO_OFF = 0
+
+#: THE FOUR PINNED LEVERS, in the order they are written and read back.
+#: One tuple so the client, the read-back and the refusal cannot disagree
+#: about what "all four" means — adding a fifth control is one row here.
+#: (name, control candidates, words for a refusal, unit words)
+LEVERS: tuple[tuple[str, tuple[str, ...], str, str], ...] = (
+    ("exposure_time", EXPOSURE_TIME_CONTROLS,
+     "a manual integration time", " (x100 us)"),
+    ("gain", GAIN_CONTROLS, "a manual gain", ""),
+    ("white_balance", WB_TEMPERATURE_CONTROLS,
+     "a manual white balance temperature", " K"),
+    ("focus", FOCUS_CONTROLS, "a manual focus", ""),
+)
 
 
 @dataclass
@@ -157,8 +203,20 @@ class CameraLock:
     #: which is a different answer from zero.
     exposure_time: Optional[float] = None
     gain: Optional[float] = None
+    #: THE OTHER TWO PINNED LEVERS, same rule: white balance TEMPERATURE in
+    #: Kelvin and FOCUS on the device's own scale, both as the device
+    #: reported them back. Read whenever the control exists, whether or not
+    #: this run asked for one — reporting is free, and a refusal that can
+    #: quote where the lens actually is says more than one that cannot.
+    white_balance: Optional[float] = None
+    focus: Optional[float] = None
     exposure_time_range: Optional[list] = None
     gain_range: Optional[list] = None
+    white_balance_range: Optional[list] = None
+    focus_range: Optional[list] = None
+    #: Whether the camera's own continuous autofocus reads OFF right now.
+    #: None means this camera has no such control to read.
+    focus_auto: Optional[bool] = None
     #: A lever a run asked for that this camera does not have, or gave back
     #: a different number for. The server refuses on these; this module
     #: only ever reports what it read.
@@ -178,10 +236,16 @@ class CameraLock:
                 "white_balance_capabilities": list(self.white_balance_capabilities),
                 "source": self.source, "camera_error": self.camera_error,
                 "exposure_time": self.exposure_time, "gain": self.gain,
+                "white_balance": self.white_balance, "focus": self.focus,
+                "focus_auto": self.focus_auto,
                 "exposure_time_range": (list(self.exposure_time_range)
                                         if self.exposure_time_range else None),
                 "gain_range": (list(self.gain_range) if self.gain_range
                                else None),
+                "white_balance_range": (list(self.white_balance_range)
+                                        if self.white_balance_range else None),
+                "focus_range": (list(self.focus_range) if self.focus_range
+                                else None),
                 "manual_refusals": list(self.manual_refusals)}
 
 
@@ -228,8 +292,9 @@ class BaseCamera:
     async def open(self) -> None:                      # pragma: no cover
         raise NotImplementedError
 
-    async def apply_lock(self, *, exposure_time: Optional[int] = None,
-                         gain: Optional[int] = None) -> CameraLock:  # pragma: no cover
+    async def apply_lock(self, **levers) -> CameraLock:  # pragma: no cover
+        """Pin the camera. `levers` are the four of `LEVERS` by name; any
+        omitted one is left alone, which is converge-then-freeze exactly."""
         raise NotImplementedError
 
     async def read_lock(self) -> CameraLock:           # pragma: no cover
@@ -295,7 +360,13 @@ class V4L2Camera(BaseCamera):
         #: from `apply_lock` into every subsequent `read_lock` so a paced
         #: re-read does not silently drop the refusal.
         self._manual_refusals: list[str] = []
-        self._wanted: dict = {"exposure_time": None, "gain": None}
+        #: THE PINNED REGIME, and it is the whole of "persistence is
+        #: software". Every lever a session ever asked for is remembered
+        #: here and RE-ASSERTED by `open()` — so a reboot, a re-plug, a dead
+        #: capture pipe or a scaler restart costs nothing: the camera comes
+        #: back up pinned the way the session pinned it, and the read-back
+        #: that follows is what says whether it took.
+        self._wanted: dict = {name: None for name, *_ in LEVERS}
 
     @property
     def frame_bytes(self) -> int:
@@ -386,10 +457,19 @@ class V4L2Camera(BaseCamera):
         exp_val = self._get(exp_name) if exp_name else None
         wb_val = self._get(wb_name) if wb_name else None
         exp_menu = controls.get(exp_name, {}).get("menu", {})
-        # THE TWO LEVERS, READ THE SAME WAY: out of the device, never out of
-        # a memory of what was asked for.
-        time_name = next((c for c in EXPOSURE_TIME_CONTROLS if c in controls), "")
-        gain_name = next((c for c in GAIN_CONTROLS if c in controls), "")
+        # ALL FOUR PINNED LEVERS, READ THE SAME WAY: out of the device,
+        # never out of a memory of what was asked for. Read whether or not
+        # this run asked for one — reporting is free, and a refusal that can
+        # quote where the lens actually is says more than one that cannot.
+        found = {name: next((c for c in names if c in controls), "")
+                 for name, names, _w, _u in LEVERS}
+        read = {name: (_as_float(self._get(ctlname)) if ctlname else None)
+                for name, ctlname in found.items()}
+        ranges = {name: (self._range(controls.get(ctlname, {}).get("raw", ""))
+                         if ctlname else None)
+                  for name, ctlname in found.items()}
+        focus_auto_name = next((c for c in FOCUS_AUTO_CONTROLS if c in controls), "")
+        focus_auto_val = self._get(focus_auto_name) if focus_auto_name else None
         self.lock = CameraLock(
             exposure_locked=exp_val is not None and exp_val.strip() == str(EXPOSURE_MANUAL),
             white_balance_locked=wb_val is not None and wb_val.strip() == str(WB_AUTO_OFF),
@@ -400,32 +480,47 @@ class V4L2Camera(BaseCamera):
             exposure_capabilities=(sorted(exp_menu.values()) if exp_menu
                                    else ([exp_name] if exp_name else [])),
             white_balance_capabilities=([wb_name] if wb_name else []),
-            exposure_time=_as_float(self._get(time_name)) if time_name else None,
-            gain=_as_float(self._get(gain_name)) if gain_name else None,
-            exposure_time_range=self._range(
-                controls.get(time_name, {}).get("raw", "")) if time_name else None,
-            gain_range=self._range(
-                controls.get(gain_name, {}).get("raw", "")) if gain_name else None,
+            exposure_time=read["exposure_time"], gain=read["gain"],
+            white_balance=read["white_balance"], focus=read["focus"],
+            focus_auto=(None if focus_auto_val is None
+                        else focus_auto_val.strip() != str(FOCUS_AUTO_OFF)),
+            exposure_time_range=ranges["exposure_time"],
+            gain_range=ranges["gain"],
+            white_balance_range=ranges["white_balance"],
+            focus_range=ranges["focus"],
             manual_refusals=list(self._manual_refusals),
             source=f"v4l2:{exp_name or 'no-exposure-control'}/"
                    f"{wb_name or 'no-white-balance-control'}")
         return self.lock
 
-    async def apply_lock(self, *, exposure_time: Optional[int] = None,
-                         gain: Optional[int] = None) -> CameraLock:
-        """Ask for manual exposure and manual white balance — and, when a
-        run asks for them, a specific integration time and gain — then READ
-        EVERY CONTROL BACK.
+    async def apply_lock(self, **levers) -> CameraLock:
+        """Ask for manual exposure and manual white balance — and, for every
+        lever this run named, that exact value — then READ EVERY CONTROL
+        BACK OUT OF THE DEVICE.
 
-        A failed write is not reported as anything on its own: the read-back
-        that follows is the only statement this makes. What IS reported is a
-        lever the run asked for that this device does not have, or that came
-        back a different number than it was asked for — both land in
-        `manual_refusals`, and the server refuses on them.
+        THE FOUR LEVERS (`LEVERS`): integration time, gain, white balance
+        temperature, focus. Every one of them is written and every one of
+        them is read back; a control this camera does not have, or one that
+        came back a different number than it was asked for, lands in
+        `manual_refusals` and the server refuses on it BEFORE any frame is
+        measured. A failed write is not reported on its own — the read-back
+        that follows is the only statement this makes, because a returning
+        write call is never evidence.
 
-        ORDER MATTERS: `exposure_time_absolute` is ignored by most UVC
-        drivers while auto exposure is still on, so manual mode is set
-        first, in the same call, before either lever is written."""
+        WHAT IS ASKED FOR IS REMEMBERED (`self._wanted`), so `open()` can
+        re-assert it after a reopen: a camera that comes back from a re-plug
+        or a scaler restart at its factory defaults would otherwise measure
+        a different regime under the same session, silently.
+
+        ORDER MATTERS TWICE: `exposure_time_absolute` is ignored by most UVC
+        drivers while auto exposure is still on, and `focus_absolute` is
+        overridden moments later by a camera still focusing itself. So
+        manual exposure mode and manual white balance are set first, the
+        camera's continuous autofocus is turned off ONLY when a focus value
+        was asked for, and the values are written after that."""
+        wanted = dict(self._wanted)
+        wanted.update({k: v for k, v in levers.items() if k in wanted})
+        self._wanted = wanted
         controls = self._controls()
         refusals: list[str] = []
         for name in EXPOSURE_CONTROLS:
@@ -436,10 +531,16 @@ class V4L2Camera(BaseCamera):
             if name in controls:
                 self._set(name, WB_AUTO_OFF)
                 break
-        for want, names, what, unit in (
-                (exposure_time, EXPOSURE_TIME_CONTROLS,
-                 "a manual integration time", " (x100 us)"),
-                (gain, GAIN_CONTROLS, "a manual gain", "")):
+        if wanted.get("focus") is not None:
+            # ONLY when a focus was asked for: see FOCUS_AUTO_OFF. A camera
+            # with no autofocus control to turn off is not a refusal — the
+            # focus write's own read-back is what decides.
+            for name in FOCUS_AUTO_CONTROLS:
+                if name in controls:
+                    self._set(name, FOCUS_AUTO_OFF)
+                    break
+        for lever, names, what, unit in LEVERS:
+            want = wanted.get(lever)
             if want is None:
                 continue
             name = next((c for c in names if c in controls), "")
@@ -451,22 +552,20 @@ class V4L2Camera(BaseCamera):
             if not self._set(name, int(want)):
                 refusals.append(f"the driver refused {name}={int(want)}{unit}")
         self._manual_refusals = refusals
-        self._wanted = {"exposure_time": exposure_time, "gain": gain}
         lock = await self.read_lock()
         # THE READ-BACK IS WHAT DECIDES. A control that took a different
         # value than it was asked for is refusing just as much as one that
         # is absent — and more dangerously, because the frames still arrive
         # and only the numbers are wrong.
         extra: list[str] = []
-        if exposure_time is not None and lock.exposure_time is not None \
-                and abs(lock.exposure_time - exposure_time) > 1e-6:
-            extra.append(f"asked for an integration time of {exposure_time} "
-                         f"(x100 us) and the device reports "
-                         f"{lock.exposure_time:g}")
-        if gain is not None and lock.gain is not None \
-                and abs(lock.gain - gain) > 1e-6:
-            extra.append(f"asked for a gain of {gain} and the device reports "
-                         f"{lock.gain:g}")
+        for lever, _names, what, unit in LEVERS:
+            want = wanted.get(lever)
+            got = getattr(lock, lever)
+            if want is None or got is None:
+                continue
+            if abs(got - want) > 1e-6:
+                extra.append(f"asked for {what} of {want}{unit} and the "
+                             f"device reports {got:g}")
         if extra:
             self._manual_refusals = refusals + extra
             lock.manual_refusals = list(self._manual_refusals)
@@ -532,7 +631,11 @@ class V4L2Camera(BaseCamera):
         self.opened = True
         # Settle, THEN lock, THEN read back — see SETTLE_BEFORE_LOCK_S.
         await asyncio.sleep(SETTLE_BEFORE_LOCK_S)
-        await self.apply_lock()
+        # RE-ASSERT WHATEVER THIS CAMERA WAS PINNED TO. On a first open
+        # nothing is pinned and this is exactly converge-then-freeze; after
+        # a re-plug, a reboot or a dead capture pipe it is what makes the
+        # pinned regime survive with no stored state anywhere but here.
+        await self.apply_lock(**self._wanted)
 
     async def _open_at(self, ffmpeg: str,
                        capture_size: tuple[int, int]) -> Optional[str]:
@@ -586,7 +689,8 @@ class V4L2Camera(BaseCamera):
         if want == self.frame_size:
             return self.frame_size
         before = (self.lock.exposure_mode, self.lock.exposure_time,
-                  self.lock.gain, self.lock.white_balance_mode)
+                  self.lock.gain, self.lock.white_balance_mode,
+                  self.lock.white_balance, self.lock.focus)
         ffmpeg = _tool("ffmpeg")
         if not ffmpeg:
             return self.frame_size
@@ -598,7 +702,8 @@ class V4L2Camera(BaseCamera):
         self.opened = True
         await self.apply_lock(**self._wanted)
         after = (self.lock.exposure_mode, self.lock.exposure_time,
-                 self.lock.gain, self.lock.white_balance_mode)
+                 self.lock.gain, self.lock.white_balance_mode,
+                 self.lock.white_balance, self.lock.focus)
         if after != before:
             self._mint_pose()
         return self.frame_size
@@ -661,6 +766,11 @@ class SyntheticCamera(BaseCamera):
         self._declared = lock or CameraLock(source="synthetic:declared")
         self.fps = fps
         self.fail = fail
+        #: What the last `apply_lock` was asked for. Declared here rather
+        #: than grown lazily so a render function can read it on the very
+        #: first frame.
+        self.applied: dict = {}
+        self.applies = 0
         # A SYNTHETIC CAMERA DECLARES WHAT IT CAN CAPTURE, like a real one,
         # and the default is the wire's own smallest rung because that is
         # what a fixed-size render function actually produces. Declaring
@@ -682,11 +792,12 @@ class SyntheticCamera(BaseCamera):
         self.opened = True
         self.lock = self._declared
 
-    async def apply_lock(self, *, exposure_time: Optional[int] = None,
-                         gain: Optional[int] = None) -> CameraLock:
+    async def apply_lock(self, **levers) -> CameraLock:
         # It reports WHAT WAS DECLARED, never what was asked for — the same
         # refusal to forge a read-back the real camera lives by. A spec that
         # wants a lever to be taken declares a lock carrying it.
+        self.applied.update({k: v for k, v in levers.items() if v is not None})
+        self.applies += 1
         self.lock = self._declared
         return self.lock
 

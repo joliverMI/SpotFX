@@ -35,10 +35,20 @@ THE SERVER ASKS FOR THE CAMERA'S PER-RUN SETTINGS (2026-09-01) and this
 client answers, in the same one-way shape as everything else here: a
 `config` message names a wire frame size (320x180 for a map, 1920x1080 for
 a commissioning read — `spectra/services/capture_settings.py` carries the
-arithmetic) and, optionally, a manual integration time and gain. The client
-applies what it can, RE-READS every control out of the device, and reports
-what came back. It never decides to proceed anyway and never reports a
-setting it did not read.
+arithmetic) and, optionally, the four PINNED LEVERS: integration time,
+gain, white balance temperature and focus. The client applies what it can,
+RE-READS every control out of the device, and reports what came back. It
+never decides to proceed anyway and never reports a setting it did not
+read.
+
+AND IT RE-ASSERTS THEM ON EVERY RECONNECT. The pinned regime is held here
+(`_pinned`) and written to the driver again at each `hello`, so a dropped
+socket comes back to a camera pinned the way this session pinned it rather
+than to a memory of one. The camera's own `open()` covers the other half —
+a reopen after a re-plug or a dead capture pipe — so between them
+persistence is entirely software and a power cut costs nothing. Neither is
+allowed to CLAIM the regime: both end in a read-back, and the server
+refuses on that.
 
 AND IT NEVER UPSCALES. `camera.set_frame_size` clamps the wire size to what
 the camera actually captures, so a request bigger than the camera comes
@@ -59,7 +69,7 @@ from typing import Any, Callable, Optional
 
 import websockets
 
-from spectra.capture_client.camera import (BaseCamera, CameraLock,
+from spectra.capture_client.camera import (LEVERS, BaseCamera, CameraLock,
                                            CameraUnavailable, GREY_MIME)
 
 logger = logging.getLogger(__name__)
@@ -87,6 +97,10 @@ class ClientState:
     drops: int = 0
     frames_sent: int = 0
     camera_reopens: int = 0
+    #: How many times the pinned regime has been written to the driver
+    #: again — once per reconnect that had something to re-assert. Reported
+    #: so "it came back pinned" is a number a reader can see, not a promise.
+    reasserts: int = 0
     session_id: str = ""
     pose_id: str = ""
     pose_token: str = ""
@@ -120,6 +134,14 @@ class CaptureClient:
         self._stop = asyncio.Event()
         self._ws = None
         self._last_lock_read = 0.0
+        #: THE SESSION'S PINNED REGIME — the last thing the server asked
+        #: this camera for, kept so it can be RE-ASSERTED on every
+        #: reconnect. The camera keeps its own copy for a reopen
+        #: (`camera._wanted`); this one covers the other half of the same
+        #: rule, a socket that came back to a server that will not repeat
+        #: itself. Both are in memory only: nothing about a pinned camera
+        #: is written to disk, and re-asserting is what makes that free.
+        self._pinned: dict = {name: None for name, *_ in LEVERS}
 
     # ── lifecycle ─────────────────────────────────────────────────────────
     async def start_camera(self) -> Optional[str]:
@@ -186,8 +208,21 @@ class CaptureClient:
             frames = asyncio.create_task(self._frames(ws))
             stop = asyncio.create_task(self._stop.wait())
             try:
-                await asyncio.wait({pump, frames, stop},
-                                   return_when=asyncio.FIRST_COMPLETED)
+                done, _pending = await asyncio.wait(
+                    {pump, frames, stop}, return_when=asyncio.FIRST_COMPLETED)
+                # A REASON THAT NEVER REACHES A HUMAN IS A SILENT FAILURE.
+                # A frame pump that DIED takes the connection down with it,
+                # and without this the client simply reconnects for ever
+                # with an empty `last_error` — a loop nobody can explain.
+                for task in done:
+                    if task is stop or task.cancelled():
+                        continue
+                    exc = task.exception()
+                    if exc is not None:
+                        self.state.last_error = f"{type(exc).__name__}: {exc}"
+                        logger.warning("capture client: the connection ended "
+                                       "on %s", self.state.last_error,
+                                       exc_info=exc)
             finally:
                 for task in (pump, frames, stop):
                     task.cancel()
@@ -195,6 +230,13 @@ class CaptureClient:
                 self.state.connected = False
 
     async def _hello(self, ws) -> None:
+        # RE-ASSERT THE PINNED REGIME BEFORE SAYING HELLO, so the lock this
+        # connection opens with is a fresh read-back of the camera as this
+        # session pinned it rather than a memory from before the drop. A
+        # session that pinned nothing skips it entirely and an ordinary
+        # reconnect costs exactly what it always did.
+        if any(v is not None for v in self._pinned.values()):
+            await self._reassert()
         await ws.send(json.dumps({
             "type": "hello",
             "user_agent": f"{CLIENT_NAME}/{CLIENT_VERSION} "
@@ -210,6 +252,25 @@ class CaptureClient:
             # server's own account of why this is safe.
             "pose_hint": self.camera.pose_token or None,
             "lock": self.camera.lock.as_wire()}))
+
+    async def _reassert(self) -> None:
+        """Write the pinned levers to the driver again and read every
+        control back. Never raises past the caller: a camera that has gone
+        away is a `camera_error`, which is a condition the server already
+        has a sentence for."""
+        try:
+            await self.camera.apply_lock(**self._pinned)
+            self.state.reasserts += 1
+        except CameraUnavailable as exc:
+            self.state.camera_error = str(exc)
+            self.camera.lock = CameraLock(camera_error=str(exc),
+                                          source="camera:unavailable")
+        except Exception as exc:                       # noqa: BLE001
+            logger.exception("capture client: re-asserting the pinned "
+                             "camera settings failed")
+            self.state.last_error = f"{type(exc).__name__}: {exc}"
+        self.state.lock = self.camera.lock.as_wire()
+        self._last_lock_read = self._clock()
 
     async def _pump(self, ws) -> None:
         async for raw in ws:
@@ -258,10 +319,17 @@ class CaptureClient:
                     # side of it are not comparable.
                     self.state.pose_token = self.camera.pose_token
                     self.state.camera_reopens += 1
-            await self.camera.apply_lock(
-                exposure_time=(int(msg["exposure_time"])
-                               if msg.get("exposure_time") is not None else None),
-                gain=(int(msg["gain"]) if msg.get("gain") is not None else None))
+            # EVERY LEVER THIS SESSION HAS EVER BEEN ASKED FOR, not just
+            # the ones in this message: a config that names an integration
+            # time must not silently un-pin the focus a previous one set.
+            # A lever is un-pinned by naming it null, which is the only way
+            # to say "let this one go" without saying it about all of them.
+            for lever, *_ in LEVERS:
+                if lever in msg:
+                    value = msg.get(lever)
+                    self._pinned[lever] = (None if value is None
+                                           else int(value))
+            await self.camera.apply_lock(**self._pinned)
         except CameraUnavailable as exc:
             self.state.camera_error = str(exc)
             self.camera.lock = CameraLock(camera_error=str(exc),

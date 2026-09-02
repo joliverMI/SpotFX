@@ -66,6 +66,12 @@ def _run(name: str, timeout: int) -> str:
     # proof, which is why this one is in the suite rather than only in a
     # PR's own transcript.
     ("check_commissioning.py", 300, "ALL COMMISSIONING CHECKS PASSED"),
+    # THE LEVER-IS-REAL SELF-TEST, over the whole real path: the real
+    # client, a real WebSocket, the real capture-run seam and the real map
+    # route. Both directions, because a gate that refuses everything is a
+    # wall — an honest camera PASSES and its map runs; tonight's own
+    # measured shape and a re-clamping camera are each refused by name.
+    ("check_lever_selftest.py", 600, "ALL CHECKS PASSED"),
 ])
 def test_check_script_passes(name, timeout, tail):
     stdout = _run(name, timeout)
