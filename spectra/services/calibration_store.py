@@ -61,6 +61,12 @@ logger = logging.getLogger(__name__)
 PRESENT = "present"
 SUPERSEDED = "superseded"
 MISSING = "missing"
+#: THE ENTRY MEASURED IT AND NEVER APPLIED IT — a cut-short amendment, whose
+#: readings live in the lineage while the room map was put back exactly as it
+#: was (`spectra/services/amendment.py`). Deliberately NOT folded into
+#: `superseded`: nothing replaced these, and nothing about the map ever
+#: carried them.
+UNAPPLIED = "unapplied"
 
 
 def _dir(path=None):
@@ -181,7 +187,13 @@ def provenance(cal: Calibration, room=None, map_path=None) -> dict:
             continue
         for emitter_id in run.emitters:
             fp = room.footprint(emitter_id)
-            if fp is None:
+            if not run.applied:
+                # MEASURED, NEVER APPLIED. Whatever the map holds for this
+                # emitter today belongs to some other run; calling that
+                # `superseded` would say this entry's reading was replaced,
+                # when it was never in the map at all.
+                state = UNAPPLIED
+            elif fp is None:
                 state = MISSING
             elif origin.get(emitter_id) != run.id:
                 state = SUPERSEDED
@@ -203,7 +215,7 @@ def provenance(cal: Calibration, room=None, map_path=None) -> dict:
 
 
 def _counts(rows: list[dict]) -> dict:
-    out = {PRESENT: 0, SUPERSEDED: 0, MISSING: 0}
+    out = {PRESENT: 0, SUPERSEDED: 0, MISSING: 0, UNAPPLIED: 0}
     for r in rows:
         out[r["state"]] = out.get(r["state"], 0) + 1
     return out
@@ -221,6 +233,10 @@ def _provenance_note(rows: list[dict]) -> str:
     if counts[SUPERSEDED]:
         parts.append(f"{counts[SUPERSEDED]} replaced by a later run of this "
                      f"same calibration")
+    if counts[UNAPPLIED]:
+        parts.append(f"{counts[UNAPPLIED]} measured by an amendment that was "
+                     f"cut short and never applied — the readings are in the "
+                     f"lineage and the room map was left exactly as it was")
     if counts[MISSING]:
         parts.append(f"{counts[MISSING]} no longer in the room map at all "
                      f"(the room was re-mapped or the carrier removed) — "

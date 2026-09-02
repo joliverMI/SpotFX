@@ -6,6 +6,7 @@ morning backstop is built against.
   POST /api/night-run/abort      Bearer   {"event": "sleep-ended"
                                            | "light-touched"
                                            | "morning-routine", ...}
+  GET  /api/night-run/morning    open     what ran, and what changed
   GET  /api/night-run/fixtures   open     the two lists (below)
   GET  /api/night-run/queue      open     the declaration
   PUT  /api/night-run/queue      open     declare it
@@ -92,10 +93,29 @@ class EventBody(BaseModel):
 
 
 class QueueBody(BaseModel):
-    """The declared night queue — the SAME items the capture-queue route
-    takes (`capture_queue.QueueItem`), validated by the same function."""
+    """The declared night queue, in one of TWO shapes and never both.
+
+    `items` is the original: the SAME items the capture-queue route takes
+    (`capture_queue.QueueItem`), validated by the same function.
+
+    `calibration_id` names a CALIBRATION for the night to run instead — its
+    own declared queue, run through the same seam, landing in its own
+    lineage (`spectra/services/night_calibration.py`). With `amend` it runs
+    a NAMED SUBSET of that declaration: the same amend-in-part the `/amend`
+    route takes, resolved by the same function, gated by the same honesty
+    gate at 2am as at 2pm.
+
+    Both are validated the whole way down AT DECLARATION — the calibration
+    has to exist, an amendment's named items have to be ones it declares —
+    so a mistake is refused while he is awake."""
     label: str = ""
     items: list[dict[str, Any]] = []
+    calibration_id: str = ""
+    #: {"items": [...], "overrides": {...}, "whole_carrier": bool}
+    amend: Optional[dict[str, Any]] = None
+    #: Run past a MEASURED CAMERA MOVE, as a press may. It NEVER runs past
+    #: an amendment's mixing gate — `spectra/services/amendment.py`.
+    force: bool = False
 
 
 @router.post("/start")
@@ -113,6 +133,20 @@ async def abort(body: EventBody,
                 authorization: str | None = Header(default=None)):
     _authorise(authorization)
     return await night_run.abort(body.model_dump())
+
+
+@router.get("/morning")
+async def morning():
+    """WHAT RAN LAST NIGHT AND WHAT CHANGED — one read, in his nouns.
+
+    His own bar for this surface: he must be able to answer which
+    calibration ran, what it measured, what changed against the previous
+    one, and what waits on him, WITHOUT ASKING ANYONE and without reading a
+    log. `spectra/services/morning_read.py` is the binding statement.
+
+    Open, like every other read here: a read cannot start anything."""
+    from spectra.services import morning_read
+    return morning_read.build()
 
 
 @router.get("/fixtures")
@@ -134,7 +168,9 @@ async def get_queue():
 @router.put("/queue")
 async def put_queue(body: QueueBody):
     try:
-        stored = night_run.save_declaration(body.label, body.items)
+        stored = night_run.save_declaration(
+            body.label, body.items, calibration_id=body.calibration_id,
+            amend=body.amend, force=body.force)
     except ValueError as exc:
         # A DECLARATION error, refused now — while he is awake and can fix
         # it — rather than at 1am on the item nobody reads. `capture_queue`'s
