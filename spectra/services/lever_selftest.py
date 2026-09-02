@@ -118,16 +118,18 @@ from dataclasses import dataclass, field, replace
 from typing import Any, Optional
 
 from spectra.models.room_map import RoomMap
-from spectra.services import capture_settings, light_field, mapping_refusals
+from spectra.services import (capture_settings, capture_source, light_field,
+                              mapping_refusals)
 from spectra.services import emitters as emitters_mod
 from spectra.services import room_mapping
 
 logger = logging.getLogger(__name__)
 
-#: What the native capture client calls itself in `hello`. Mirrored rather
-#: than imported: this module runs in the SPECTRA process and the client
-#: package is meant to run on a machine that has only the client.
-NATIVE_CLIENT = "spectra-capture-client"
+#: What the native capture client calls itself in `hello`. Re-exported from
+#: `capture_source`, which owns the client-kind question outright since the
+#: browser's demotion — this name stays because the callers and the proofs
+#: that read it here read it here, not because there are two of them.
+NATIVE_CLIENT = capture_source.NATIVE_CLIENT
 
 #: HOW MUCH MORE TIME THE SECOND REGIME IS COMMANDED. Four is comfortably
 #: past anything noise can fake and comfortably short of driving an
@@ -150,15 +152,13 @@ SATURATION_EVIDENCE = 0.02
 DEFAULT_BRIGHT_EXPOSURE = 200
 
 
-def is_native(session: Any) -> bool:
-    """Is this the unattended capture client rather than the browser page?
-
-    Read off `hello`, which is the client's own word for itself — the same
-    field `lock_refusal` uses to name the machine it is talking to. A
-    session that has not said is NOT native, so nothing new is ever asked
-    of a page."""
-    hello = getattr(session, "hello", None) or {}
-    return str(hello.get("client") or "") == NATIVE_CLIENT
+#: Is this the unattended capture client rather than a browser page? THE
+#: ONE IMPLEMENTATION IS `capture_source.is_native` and this is that
+#: function, not a copy of it: since the browser's demotion the same answer
+#: decides whether this self-test is asked for at all AND whether a
+#: calibration-grade run may go, and two functions agreeing today is not the
+#: same as one function.
+is_native = capture_source.is_native
 
 
 def choose_regimes(lock: dict, requested: Optional[int] = None

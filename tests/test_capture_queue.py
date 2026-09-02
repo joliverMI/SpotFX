@@ -41,14 +41,34 @@ class _Session:
         return self.views[0] if len(self.views) == 1 else self.views.pop(0)
 
 
+#: A NATIVE, locked session — what every ordinary item in these specs runs
+#: against. `calibration_grade` is the browser's demotion: a queue runs
+#: nothing but calibration-grade work, so this is what the wait holds out
+#: for, and BROWSER below is the session that has everything else and still
+#: cannot run an item.
 LOCKED = {"present": True, "locked": True, "session_id": "sess-1",
-          "pose_id": "pose-1", "refusal": None, "client": {}}
+          "pose_id": "pose-1", "refusal": None, "client": {},
+          "calibration_grade": True, "calibration_refusal": ""}
 NO_SESSION = {"present": False, "locked": False, "session_id": "",
               "pose_id": "", "refusal": mapping_refusals.NO_SESSION,
-              "client": {}}
+              "client": {}, "calibration_grade": False,
+              "calibration_refusal": ""}
+#: The capture client, present, whose camera will not lock. It IS
+#: calibration-grade — that is a fact about WHICH CLIENT this is, never
+#: about the camera's state — so the sentence that comes back is the
+#: exposure gate's, which is the whole point of this spec.
 UNLOCKED = {"present": True, "locked": False, "session_id": "sess-1",
             "pose_id": "pose-1", "refusal": "this camera will not lock EXPOSURE",
-            "client": {}}
+            "client": {}, "calibration_grade": True,
+            "calibration_refusal": ""}
+#: PRESENT, LOCKED, HEALTHY — AND A BROWSER. The one shape that reads as
+#: fine everywhere except where it matters.
+BROWSER = {"present": True, "locked": True, "session_id": "sess-1",
+           "pose_id": "pose-1", "refusal": None,
+           "client": {"user_agent": "Pixel/Chrome"},
+           "calibration_grade": False,
+           "calibration_refusal": mapping_refusals.browser_not_calibration_grade(
+               {"user_agent": "Pixel/Chrome"}, action="queue")}
 
 
 def _run(items, monkeypatch, *, views=None, executes=None):

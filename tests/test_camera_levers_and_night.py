@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import asyncio
 
-from spectra.services import capture_queue, capture_runs, night_run
+from spectra.services import capture_queue, capture_runs, capture_source, night_run
 from spectra.services import capture_settings as cs
 from spectra.services import room_mapping
 
@@ -174,11 +174,14 @@ def test_the_guard_still_vetoes_while_the_levers_still_travel(monkeypatch):
     class _Session:
         """Only what `capture_runs.session_view` reads — the queue's own
         session gate is not what this test is about, and stubbing more of
-        it would be stubbing the thing under test's neighbours."""
+        it would be stubbing the thing under test's neighbours. It declares
+        itself the NATIVE client for the same reason: since the browser's
+        demotion a session that says nothing is refused every
+        calibration-grade run, and this test is about the guard."""
         lock = _Lock()
         id = "sess-1"
         pose_id = "pose-1"
-        hello: dict = {}
+        hello: dict = {"client": capture_source.NATIVE_CLIENT}
 
         @staticmethod
         def refusal():

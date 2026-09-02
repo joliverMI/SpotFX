@@ -1358,6 +1358,17 @@ kbd {
 .capture-status dd.warn, .warn { color: var(--warning); }
 .refusal { overflow-wrap: anywhere; }
 
+/* WHOSE CAMERA A RUN WILL MEASURE WITH — the line that removes the
+   ambiguity of two devices in one room. It is a plain statement of fact,
+   not an alert, so it takes the same three tones the rest of this panel
+   uses and nothing louder: green when a capture client is holding the
+   camera, amber when only a browser is (which is not a fault — it is
+   aiming, and it is what the page is for), grey when nothing is. `.ok` is
+   scoped rather than global here, matching the dd rules above. */
+.capture-source { margin: 6px 0; overflow-wrap: anywhere; }
+.capture-source.ok { color: var(--ok); }
+.capture-source.muted { color: var(--text-muted); }
+
 /* THE PLAN READOUT — what this press will cost, sized to be read by
    someone already reaching for the button. A check before the cost beats a
    message after it: the room is about to go dark for a minute, and the two

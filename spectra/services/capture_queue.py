@@ -65,7 +65,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
 from spectra import config as scfg
-from spectra.services import capture_runs, mapping_refusals
+from spectra.services import capture_runs, capture_source, mapping_refusals
 
 logger = logging.getLogger(__name__)
 
@@ -303,10 +303,11 @@ def parse_items(raw: Any) -> list[QueueItem]:
 
 async def wait_for_session(wait_s: float, *,
                            sleep: Callable[[float], Any] = asyncio.sleep,
-                           clock: Callable[[], float] = time.monotonic
+                           clock: Callable[[], float] = time.monotonic,
+                           action: str = "queue"
                            ) -> tuple[Optional[dict], str]:
-    """Wait for a session that is present AND locked, up to `wait_s`.
-    Returns (session_view, refusal_sentence).
+    """Wait for a session that is present, LOCKED and CALIBRATION-GRADE, up
+    to `wait_s`. Returns (session_view, refusal_sentence).
 
     IT WAITS FOR LOCKED, NOT MERELY PRESENT, on purpose: a client that has
     just reconnected has an exposure to settle and re-read, and a run
@@ -314,19 +315,42 @@ async def wait_for_session(wait_s: float, *,
     being true. This is a wait, never a softening — the thing waited for is
     the gate's own answer, unchanged.
 
+    IT ALSO WAITS THROUGH A BROWSER SESSION, since the browser's demotion,
+    and that is the same argument rather than a new one: everything either
+    caller runs is calibration-grade, so a page left open on a phone is a
+    session that cannot do the job — and one session is live at a time, so
+    the native client CONNECTING is exactly the thing worth waiting for. At
+    the deadline the browser's own refusal sentence is what comes back, so
+    the queue log says which camera was there rather than "no session",
+    which would have sent a reader to look for a machine that was plugged in
+    all along.
+
     PUBLIC because there is a second legitimate waiter now: a CALIBRATION
     run (spectra/services/calibration_runs.py) has to have a camera before
     its pose fingerprint can drive a single anchor, and that wait must be
     the same wait a queue item makes rather than a second one that drifts —
-    the whole discipline `capture_runs` exists for, one level up."""
+    the whole discipline `capture_runs` exists for, one level up.
+
+    `action` is only ever the WORD a refusal names this caller by (see
+    `mapping_refusals._ACTION_WORDS`) — it changes nothing about what is
+    waited for, because both callers wait for exactly the same thing."""
     deadline = clock() + max(0.0, wait_s)
     ever = False
     while True:
         view = capture_runs.session_view()
         ever = ever or view["present"]
-        if view["present"] and view["locked"]:
+        if view["present"] and view["locked"] and view["calibration_grade"]:
             return view, ""
         if clock() >= deadline:
+            if view["present"] and not view["calibration_grade"]:
+                # A BROWSER, all along. The SAME wording function the run
+                # gate refuses with — asked for this caller's own flavour,
+                # because whoever reads a queue log at breakfast was never
+                # standing at a button and "press this again" is an
+                # instruction they cannot follow.
+                return None, mapping_refusals.browser_not_calibration_grade(
+                    capture_source.describe_hello(view.get("client") or {}),
+                    action=action)
             if view["present"] and not view["locked"]:
                 # A camera that is THERE and will not lock is the exposure
                 # gate's own refusal, verbatim — not a session problem.
