@@ -1173,3 +1173,61 @@ def night_calibration_refused(name: str, mode: str, detail: str) -> str:
 
 def night_calibration_ran(name: str, mode: str, summary: str) -> str:
     return f"The night ran {mode} '{name}': {summary}"
+
+
+# ── the camera host's own presence, which is a READ and not a silence ──────
+#
+# ABSENCE IS A READ (the standing standard). "No capture session" already
+# refuses a run by name, but it says nothing about WHICH machine is missing
+# — and a camera host that has been off for three days and one that was
+# unplugged four minutes ago produce exactly the same silence. These say
+# what is known: the machine, its placement in his own words, the build it
+# was running, and when it was last there. `spectra/services/
+# capture_health.py` is where the record lives.
+
+def client_never_seen() -> str:
+    """No capture client has EVER connected to this SPECTRA. Different from
+    "one is missing": there is nothing to be missing yet, and the answer is
+    an installation, not a diagnosis."""
+    return ("No capture client has ever connected to this SPECTRA, so there "
+            "is no camera host to be missing. Install one on the machine "
+            "with the camera (scripts/install_capture_client.sh) or run it "
+            "by hand (python -m spectra.capture_client).")
+
+
+def client_absent(host: str, *, pose_name: str = "", version: str = "",
+                  absent_for_s: float = 0.0, last_seen: str = "") -> str:
+    """A capture client SPECTRA has seen before is not here now — said as a
+    fact with its own evidence, so "is the camera machine dead?" is a read
+    rather than an inference from a missing row.
+
+    It is never a refusal on its own: the run's refusal is `NO_SESSION`,
+    which this stands beside. This one names the machine so somebody knows
+    which plug to look at."""
+    where = f" ({pose_name})" if pose_name else ""
+    build = f" running {version}" if version else ""
+    when = f" at {last_seen}" if last_seen else ""
+    return (f"The capture client on {host or 'an unnamed machine'}{where}"
+            f"{build} is NOT connected. It was last here "
+            f"{_ago(absent_for_s)}{when}. Nothing is wrong with SPECTRA: "
+            f"either that machine is off, its service is not running, or it "
+            f"cannot reach this address.")
+
+
+def client_present(host: str, *, pose_name: str = "", version: str = "") -> str:
+    """The plain positive, so a surface reads the same shape either way and
+    a reader never has to tell "connected" from "we did not check"."""
+    where = f" ({pose_name})" if pose_name else ""
+    build = f" running {version}" if version else ""
+    return f"The capture client on {host or 'an unnamed machine'}{where}{build} is connected."
+
+
+def _ago(seconds: float) -> str:
+    seconds = max(0.0, float(seconds))
+    if seconds < 90:
+        return f"{seconds:.0f}s ago"
+    if seconds < 5400:
+        return f"{seconds / 60:.0f} minutes ago"
+    if seconds < 172800:
+        return f"{seconds / 3600:.1f} hours ago"
+    return f"{seconds / 86400:.1f} days ago"

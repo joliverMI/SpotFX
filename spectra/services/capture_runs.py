@@ -57,6 +57,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from spectra.models.room_map import RoomMap
+from spectra.services import capture_health
 from spectra.services import emitters as emitters_mod
 from spectra.services import (capture_settings, commissioning, exposure_test,
                               lever_selftest, light_field, mapping_refusals,
@@ -689,9 +690,15 @@ def session_view() -> dict:
     if sess is None:
         return {"present": False, "locked": False, "session_id": "",
                 "pose_id": "", "refusal": mapping_refusals.NO_SESSION,
-                "client": {}, "native": False, "lever": {}}
+                "client": {}, "native": False, "lever": {},
+                # ABSENCE IS A READ. `refusal` above is why the RUN cannot
+                # go; this says which machine is missing, what it was
+                # running and when it was last here. It refuses nothing —
+                # see capture_health.py's own statement of that boundary.
+                "host": capture_health.health(None)}
     verdict = getattr(sess, "lever_verdict", None)
-    return {"present": True, "locked": sess.lock.locked,
+    return {"host": capture_health.health(sess),
+            "present": True, "locked": sess.lock.locked,
             "session_id": sess.id, "pose_id": sess.pose_id,
             "refusal": sess.refusal(), "client": dict(sess.hello or {}),
             # WHETHER THIS SESSION'S LEVERS ARE KNOWN TO BE REAL. `native`

@@ -1,0 +1,91 @@
+# THE CAPTURE CLIENT AS A BOOT SERVICE — the camera host's own unit.
+#
+# It exists to remove the last human ritual in a calibration: a laptop that
+# must be awake, unlocked, and holding a session when the night starts. With
+# this installed on a machine whose camera is already aimed at the room, the
+# session is simply THERE — at boot, after a crash, after a power cut, and
+# after the network came back.
+#
+# INSTALL IT WITH THE SCRIPT, NOT BY HAND:
+#
+#     scripts/install_capture_client.sh --url http://spectra:8000/spectra \
+#         --pose-name "the north shelf"
+#
+# It refuses BY NAME at every missing prerequisite, is safe to run twice,
+# and writes the two things this unit points at:
+#
+#   %h/.local/bin/spectra-capture-client       the launcher (paths live HERE)
+#   %h/.config/spectra-capture/client.env      the configuration (one file)
+#
+# WHY A LAUNCHER RATHER THAN PATHS IN THIS FILE. systemd will not expand an
+# environment variable into the EXECUTABLE of ExecStart, so a unit that knew
+# where the checkout and the interpreter live would have to be rewritten per
+# machine — and a unit that is rewritten per machine is a unit nobody can
+# verify. This file ships verbatim to every host and `systemd-analyze
+# verify` checks the exact bytes that get installed; the launcher carries
+# the one thing that genuinely differs between machines.
+#
+# THIS UNIT ACQUIRES NO ROOM AUTHORITY, and that is a property of what it
+# starts rather than a promise made here: the capture client is a CAMERA
+# process. It opens a device, holds a WebSocket, and sends frames and lock
+# read-backs. It never takes the lights, never asks for them, and cannot —
+# `never-takes-his-room` is unchanged by this unit existing, and a queue
+# arriving on a room SPECTRA does not hold still refuses by name.
+#
+# THIS IS A USER UNIT, and boot-start therefore needs LINGER
+# (`loginctl enable-linger <user>`), or it starts only when that user logs
+# in. The installer checks for it by name and says so. It is a user unit
+# rather than a system one because the camera needs group `video` and a home
+# directory, and because a system unit for a camera would be the only piece
+# of this whole area that needs root.
+
+[Unit]
+Description=SPECTRA unattended capture client (camera host)
+Documentation=https://github.com/joliverMI/SpotFX/blob/master/docs/CAPTURE_CLIENT_HOST.md
+# The client's OWN reconnect loop is the real answer to a network that is
+# not up yet (backoff, and it holds an open camera while it waits), so this
+# is ordering only and nothing here Requires= it: a capture machine whose
+# network never comes up should still be a process that says why, not a
+# unit that never started.
+After=network-online.target
+Wants=network-online.target
+# Do NOT give up after a burst of restarts: a camera that is unplugged for
+# an hour must find the session again when it is plugged back in, and a
+# rate-limited unit would sit dead until a human ran systemctl. (This lives
+# in [Unit], not [Service] — systemd's own verifier says so, which is why
+# the shipped file is verified rather than believed.)
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+# NO `-` PREFIX, DELIBERATELY. A missing configuration file must stop the
+# unit and name itself in the journal, not start a client that then guesses
+# where SPECTRA lives. This is the same refuse-by-name rule the client's own
+# `ConfigError` follows one layer up.
+EnvironmentFile=%h/.config/spectra-capture/client.env
+ExecStart=%h/.local/bin/spectra-capture-client
+# A CAMERA HOST THAT DIES MUST COME BACK. `always` rather than `on-failure`
+# because the client exits 2 on a bad configuration and 1 on an incomplete
+# queue, and neither of those is a reason to leave the room with no camera
+# until somebody notices — the record says what happened
+# (`capture_health.py`), and coming back is what makes the night possible.
+Restart=always
+RestartSec=5
+# It talks to one server and reads one camera. Nothing here needs to write
+# outside its own home, and a capture process that could would be a
+# surprise nobody asked for.
+PrivateTmp=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+# ...except the machine-readable outcome, when the configuration asks for
+# one. SPECTRA_CAPTURE_JSON_OUT defaults into this directory
+# (%t = XDG_RUNTIME_DIR), which is the one path this service may write.
+RuntimeDirectory=spectra-capture
+ReadWritePaths=%t/spectra-capture
+# The camera itself, and nothing else under /dev.
+DeviceAllow=char-video4linux rw
+SupplementaryGroups=video
+
+[Install]
+WantedBy=default.target
