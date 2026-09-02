@@ -31,6 +31,7 @@ from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from spectra import config
+from spectra.api import calibrations as calibrations_api
 from spectra.api import capture_queue as capture_queue_api
 from spectra.api import engine as engine_api
 from spectra.api import night_run as night_run_api
@@ -102,6 +103,7 @@ def create_app() -> FastAPI:
     # BEFORE rooms: `/rooms/capture-queue` must never be eaten by a
     # `/rooms/{room_id}` pattern.
     app.include_router(capture_queue_api.router)
+    app.include_router(calibrations_api.router)
     app.include_router(night_run_api.router)
     app.include_router(rooms.router)
     app.include_router(room_effects_api.router)

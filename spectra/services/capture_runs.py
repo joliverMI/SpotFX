@@ -1,5 +1,6 @@
-"""ONE SEAM FOR EXECUTING ONE CAPTURE RUN — the map protocol or the
-commissioning pass — whoever asked for it.
+"""ONE SEAM FOR EXECUTING ONE CAPTURE RUN — the map protocol, the
+commissioning pass, the exposure comparison or the pose fingerprint —
+whoever asked for it.
 
 WHY THIS MODULE EXISTS. Until the unattended queue there was exactly one
 caller of `room_mapping.run_mapping` and one of `commissioning.
@@ -12,10 +13,18 @@ lesson (`scene_sequencer.fire_scene_by_id` is the one scene-fire choke
 point precisely so a new caller inherits every gate for free).
 
 So the lock, the session gate and the run itself live HERE, and there are
-two callers of equal standing: the routes (a human pressing a button) and
+callers of equal standing: the routes (a human pressing a button),
 `spectra/services/capture_queue.py` (a declared list running while nobody
-is awake). Neither can acquire a capability the other lacks, and a new gate
-added here is added to both at once.
+is awake), and `spectra/services/calibration_runs.py` (a named calibration
+re-running itself). None can acquire a capability the others lack, and a new
+gate added here is added to all of them at once.
+
+FOUR KINDS RUN THROUGH IT, and the fourth is the newest: the POSE
+FINGERPRINT (`run_pose_fingerprint`) drives a handful of known fixtures and
+reads back where their light lands, so a calibration can tell a moved camera
+from a changed room. It drives lights and reads the same camera session's
+frames, so it is a capture run in every sense the other three are — which is
+exactly why it lives here rather than growing its own path to a light.
 
 WHAT IT DOES NOT DO. It does not decide anything about the camera's
 honesty: `run_mapping`/`run_commission` each ask the session for its own
@@ -68,6 +77,12 @@ KIND_COMMISSION = "commission"
 #: these at once would fight over both scarce things exactly as a map and a
 #: commissioning pass would.
 KIND_EXPOSURE = "exposure"
+#: THE POSE FINGERPRINT (spectra/services/pose_fingerprint.py) — a handful
+#: of known fixtures driven and their light's landing place read back, so a
+#: calibration can tell a moved camera from a changed room. It drives lights
+#: and consumes the same camera session's frames, so it takes the SAME lock
+#: as the other three for the same two reasons.
+KIND_FINGERPRINT = "fingerprint"
 
 #: WHICH KINDS ARE CALIBRATION-GRADE, i.e. run the lever self-test first
 #: on a NATIVE session. All three are: each of them produces a number
@@ -80,7 +95,14 @@ KIND_EXPOSURE = "exposure"
 #: settings", and a refusing self-test IS that answer — measured, named, and
 #: arriving in fifteen seconds instead of two minutes. It is not a
 #: capability being taken away; it is the same finding, sooner.
-CALIBRATION_GRADE = (KIND_MAP, KIND_COMMISSION, KIND_EXPOSURE)
+#:
+#: THE POSE FINGERPRINT IS ONE TOO, and it is the clearest case of the
+#: sentence above: its whole purpose is to compare a number taken now with
+#: the same number taken weeks ago, so a camera not obeying its own exposure
+#: control would make that comparison a statement about the camera's mood
+#: with a calibration's comparability claim resting on it.
+CALIBRATION_GRADE = (KIND_MAP, KIND_COMMISSION, KIND_EXPOSURE,
+                     KIND_FINGERPRINT)
 
 STATUS_OK = "ok"
 STATUS_PARTIAL = "partial"
@@ -159,11 +181,30 @@ class RunOutcome:
             base.update({
                 "mapped_count": r.get("mapped_count"),
                 "unseen_count": r.get("unseen_count"),
+                # WHICH EMITTERS THIS RUN ACTUALLY PRODUCED, by id — the
+                # provenance link a calibration's lineage records, and
+                # useful to any reader of a queue log asking "which pieces
+                # did item 3 land?". Bounded by construction: a run is
+                # capped at `emitters.MAX_EMITTERS_PER_RUN` short ids, so
+                # this is a handful of strings and never a grid.
+                "emitter_ids": [e.get("emitter_id")
+                                for e in (r.get("emitters") or [])
+                                if e.get("mapped")],
+                # The contamination witness's own three counts for this run
+                # (clean / contaminated / unclaimed), verbatim.
+                "witness": dict(r.get("witness") or {}),
                 "granularity": r.get("granularity"),
                 "block_pixels": r.get("block_pixels"),
                 "run_summary": r.get("summary"),
                 "problems": list(r.get("problems") or []),
                 "warnings": list(r.get("warnings") or []),
+                "notes": list(r.get("notes") or [])})
+        elif self.kind == KIND_FINGERPRINT:
+            refs = list(r.get("references") or [])
+            base.update({
+                "anchors": len(refs),
+                "anchors_seen": sum(1 for x in refs if x.get("seen")),
+                "problems": list(r.get("problems") or []),
                 "notes": list(r.get("notes") or [])})
         else:
             base.update({
@@ -507,6 +548,110 @@ async def run_exposure_test(room_id: str, *,
                       pose_id=result.pose_id, seconds=result.seconds,
                       lever=lever.as_dict() if lever else {},
                       result=result.as_dict())
+
+
+async def run_pose_fingerprint(room_id: str, *,
+                               emitter_ids: Optional[list[str]] = None,
+                               exposure_time: Optional[int] = None,
+                               gain: Optional[int] = None,
+                               white_balance: Optional[int] = None,
+                               focus: Optional[int] = None):
+    """THE POSE FINGERPRINT PASS, through the same seam as the other three.
+
+    It drives lights and reads the same camera session's frames, so it takes
+    the same lock, passes the same session gate, runs the same lever
+    self-test preflight and gets its ownership refusals worded by the same
+    module. That is the entire reason this function lives here rather than
+    in `pose_fingerprint` or in the calibration runner: a fingerprint that
+    reached a light through its own path would be a second definition of
+    "a capture run", and the gates would drift.
+
+    It stores NOTHING (`pose_fingerprint.measure` runs against a throwaway
+    room). What the caller does with the readings — establish a pose,
+    check one, discard both — is the calibration's business, not this
+    seam's.
+
+    `RunOutcome.result` carries the measurement; `RunOutcome.status` is
+    `ok` when readings were taken (even if some anchors were dark, which is
+    a reading), `refused` otherwise."""
+    from spectra.services import pose_fingerprint
+
+    room = light_field.get_room(room_id)
+    if room is None:
+        return RunOutcome(kind=KIND_FINGERPRINT, status=STATUS_NOT_FOUND,
+                          detail="no such room", refusal="not_found",
+                          target=room_id, room_id=room_id)
+    gate = _gate(KIND_FINGERPRINT, room.name or room_id, room_id)
+    if gate is not None:
+        return gate
+    sess = live_session()
+
+    global _running
+    lever = None
+    async with _run_lock:
+        _running = f"{room_id}/fingerprint"
+        try:
+            lever = await _preflight(KIND_FINGERPRINT, room, sess,
+                                     exposure_time)
+            refused = _lever_refusal(KIND_FINGERPRINT, lever, room_id,
+                                     room.name or room_id)
+            if refused is not None:
+                return refused
+            # ASK THE CAMERA, THEN READ IT BACK, BEFORE THE ROOM GOES DARK —
+            # `run_mapping`'s own shape verbatim, because a fingerprint's
+            # readings are compared with readings taken weeks apart and are
+            # therefore the LAST thing that may be measured under whatever
+            # the camera happened to choose.
+            request = capture_settings.request(
+                frame_size=capture_settings.MAP_PROFILE,
+                exposure_time=exposure_time, gain=gain,
+                white_balance=white_balance, focus=focus)
+            await sess.apply_camera(request)
+            got = await sess.await_frame_size(request.frame_size,
+                                              room_mapping.FRAME_SWITCH_WAIT_S)
+            await sess.await_camera(room_mapping.FRAME_SWITCH_WAIT_S)
+            camera = {"requested": request.as_wire(),
+                      "frame_size": {"width": got[0], "height": got[1]},
+                      "lock": sess.camera_lock_view(),
+                      "observed_fps": sess.observed_fps()}
+            problem = (sess.frame_refusal(request.frame_size)
+                       or sess.camera_refusal())
+            if problem:
+                return RunOutcome(kind=KIND_FINGERPRINT,
+                                  status=STATUS_REFUSED, detail=problem,
+                                  refusal="camera", target=room.name or room_id,
+                                  room_id=room_id,
+                                  session_id=getattr(sess, "id", ""),
+                                  lever=lever.as_dict() if lever else {},
+                                  result={"camera": camera})
+            measured = await pose_fingerprint.measure(
+                room, room_mapping.production_deps(sess),
+                emitter_ids=emitter_ids)
+        except Exception as exc:                       # noqa: BLE001
+            named = mapping_refusals.ownership_refusal(exc)
+            if named is None:
+                raise
+            return RunOutcome(kind=KIND_FINGERPRINT, status=STATUS_REFUSED,
+                              detail=named, refusal="ownership", escaped=True,
+                              target=room.name or room_id, room_id=room_id)
+        finally:
+            _running = None
+
+    body = {"references": [r.model_dump() for r in measured.references],
+            "problems": list(measured.problems),
+            "notes": list(measured.notes),
+            "pose_id": measured.pose_id,
+            "seconds": round(measured.seconds, 2),
+            "camera": camera,
+            "identity": pose_fingerprint.camera_identity(sess)}
+    return RunOutcome(
+        kind=KIND_FINGERPRINT,
+        status=STATUS_REFUSED if measured.refusal else STATUS_OK,
+        detail=measured.refusal, refusal="pose" if measured.refusal else "",
+        target=room.name or room_id, room_id=room_id,
+        session_id=getattr(sess, "id", ""), pose_id=measured.pose_id,
+        seconds=measured.seconds,
+        lever=lever.as_dict() if lever else {}, result=body)
 
 
 def session_view() -> dict:
