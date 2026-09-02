@@ -5313,6 +5313,42 @@ with the mechanism detail; this is the short list of traps.
    `scripts/check_blackhole_charge_lull.py` for the instrument and
    `.claude/skills/crystal-hex-grid/SKILL.md` for why.
 
+## A SATURATING SIGNAL MEETING `>=` MAKES A "never" THRESHOLD FIRE
+
+Found 2026-09-02 turning the Dancer's flames off (`fx/VENDOR.md` #31,
+PR fm/dancer-flames-off). Every audio power in this pipeline is CLIPPED
+to exactly 1.0 upstream (`fx/effects/audio.py::_update_freq_power`'s
+`np.minimum(freq_power_raw, 1)`), and an `ExpFilter` over it converges to
+EXACTLY 1.0 in float within ~9 audio frames (~150 ms at 60 Hz). So a
+user threshold whose Range max is 1.0 — the setting whose whole meaning
+is "never" — FIRES on any loud passage the moment the comparison is
+`>=`. It is not an overshoot past 1.0, so **clamping the signal fixes
+nothing**; the comparison is what has to exclude the top of the range.
+Prefer `thr < 1.0 and sig >= thr` over switching to a strict `>`: `>`
+also changes the exact-equality case at every OTHER threshold, and a
+saturating signal reaches exact equality routinely, so an existing
+setting can no longer be claimed bit-identical.
+
+Known instances of this shape, checked not assumed (only the first is
+fixed; the rest are reported, and the captain decides):
+`fx/effects/dancer.py:1149` `burst_threshold` (FIXED),
+`fx/effects/eye.py:574` `snap_threshold` (same defect, unfixed),
+`fx/effects/dancer.py:393` + `fx/effects/keybeat2d.py:479`
+`min_volume` compared `>=` against a [0,1]-clamped volume — while
+`fx/effects/audio.py:1173` and `fx/effects/melbank.py:540` compare the
+SAME setting with strict `>`, where 1.0 genuinely does mean never. When
+adding any audio gate, check which side of that split you are on.
+
+**And a gate is rarely the only source.** The Dancer has FOUR flame
+sources and `burst_threshold` gates only two (beat bursts, the ember
+trickle); the flourish payoff burst and the six `_impact_flames` stunt
+moments are ungated, so no threshold value can silence them —
+`burst_size = 0` is the other half of "off". Before promising a knob
+turns something off, enumerate every caller of the emitter, not just the
+one the knob's name suggests. Proofs (harness + pinned pre-change
+baseline, offline on `fx.headless`):
+`tests/test_dancer_flames_off.py`, `scripts/check_dancer_flames_off.py`.
+
 ## Fish (`fx/effects/fish.py`) — Orbits' twin, different kinematics
 
 A new Matrix effect + a Fish scene that is a WHOLESALE COPY of his Orbits V2

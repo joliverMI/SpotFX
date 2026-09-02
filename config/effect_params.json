@@ -3343,17 +3343,17 @@
           "min": 0,
           "max": 1,
           "aspect": "reactivity",
-          "note": "Music level a beat needs to fire a flame burst; 0 = every beat",
+          "note": "Music level a beat needs to fire a flame burst; 0 = every beat, 1 = never (beat bursts and embers only \u2014 stunt and flourish flames ignore this gate, use Burst Size 0 for silence)",
           "default": 0.63
         },
         "burst_size": {
           "label": "Burst Size",
           "type": "integer",
           "smooth": false,
-          "min": 3,
+          "min": 0,
           "max": 60,
           "aspect": "shape",
-          "note": "Flame particles per burst; the shared Edge / particle count shape sub-field lands here on dancer",
+          "note": "Flame particles per burst; 0 silences the bursts AND the ungated stunt/flourish flames (the ember trickle needs Burst Threshold 1); the shared Edge / particle count shape sub-field lands here on dancer",
           "default": 30
         },
         "burst_audio": {
