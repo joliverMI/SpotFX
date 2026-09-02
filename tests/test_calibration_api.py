@@ -3,8 +3,9 @@
 The calibration RECORD and the pose fingerprint are proven where they live
 (tests/test_calibration_record.py, tests/test_pose_fingerprint.py). This
 file is about the wire: what a caller can declare, what is refused at
-declaration rather than at 3 am, what an edit does to the lineage, and the
-one route that deliberately does not exist.
+declaration rather than at 3 am, what an edit does to the lineage, what an
+AMENDMENT may name and override, and the one route that deliberately does
+not exist.
 """
 from __future__ import annotations
 
@@ -265,7 +266,91 @@ def test_taking_a_pose_with_no_camera_is_a_409_carrying_the_record(monkeypatch):
         assert body["pose"]["placement"] == "the shelf by the window"
 
 
-# ── 5. the route that deliberately does not exist ──────────────────────────
+# ── 5. amending in part, on the wire ───────────────────────────────────────
+
+def test_the_overridable_list_and_the_diff_band_are_published():
+    """A page never hard-codes either. The overridable list is what an
+    amendment may change for one run; the noise band is what the diff calls
+    drift rather than the instrument repeating itself."""
+    from spectra.services import amendment, calibration_diff
+    with _client() as client:
+        _room(client)
+        listing = client.get("/api/calibrations").json()
+        assert listing["amendment"]["overridable"] == list(amendment.OVERRIDABLE)
+        assert listing["diff"]["noise_fraction"] == \
+            calibration_diff.NOISE_FRACTION
+
+
+def test_a_calibration_publishes_the_names_an_amendment_can_use():
+    """An amendment names DECLARED items by the labels he gave them, so the
+    names have to be readable off the record rather than guessed at out of
+    the declaration's own shape."""
+    with _client() as client:
+        room = _room(client)
+        cal = _create(client, room, items=[
+            {"kind": "map", "room_id": room["id"], "label": "the tv"},
+            {"kind": "map", "room_id": room["id"]}]).json()
+        assert cal["item_names"] == ["the tv", "item 2"]
+        # ABSENCE IS A READ: nothing has been measured, so there is nothing
+        # worth re-taking part of.
+        assert cal["amendable"] is False
+
+
+def test_amending_a_name_this_calibration_does_not_declare_is_a_409(
+        monkeypatch):
+    """Refused BY NAME, and recorded — an amendment that quietly measured
+    three of the four things he named would report success while leaving the
+    fourth at last month's reading."""
+    from spectra.services import calibration_runs
+    monkeypatch.setattr(calibration_runs, "SESSION_WAIT_S", 0.0)
+    with _client() as client:
+        room = _room(client)
+        cal = _create(client, room).json()
+        r = client.post(f"/api/calibrations/{cal['id']}/amend",
+                        json={"items": ["the shelf lamp"]})
+        assert r.status_code == 409
+        body = r.json()
+        assert body["entry"]["refusal"] == "amendment"
+        assert "the shelf lamp" in body["entry"]["detail"]
+        assert body["runs"][-1]["kind"] == "amendment"
+
+
+def test_an_amendment_may_not_override_what_the_calibration_declares(
+        monkeypatch):
+    from spectra.services import calibration_runs
+    monkeypatch.setattr(calibration_runs, "SESSION_WAIT_S", 0.0)
+    with _client() as client:
+        room = _room(client)
+        cal = _create(client, room).json()
+        r = client.post(f"/api/calibrations/{cal['id']}/amend",
+                        json={"items": ["item 1"],
+                              "overrides": {"room_id": "elsewhere"}})
+        assert r.status_code == 409
+        assert "room_id" in r.json()["entry"]["detail"]
+
+
+def test_a_diff_needs_two_runs_and_says_so_when_there_are_none():
+    """ABSENCE IS A READ, one level up: "we have never measured twice" is
+    not "nothing changed"."""
+    with _client() as client:
+        room = _room(client)
+        cal = _create(client, room).json()
+        r = client.get(f"/api/calibrations/{cal['id']}/diff")
+        assert r.status_code == 409
+        assert "0 that measured anything" in r.json()["detail"]
+
+
+def test_a_diff_between_unknown_entries_names_the_ones_there_are():
+    with _client() as client:
+        room = _room(client)
+        cal = _create(client, room).json()
+        r = client.get(f"/api/calibrations/{cal['id']}/diff",
+                       params={"a": "nope", "b": "also-nope"})
+        assert r.status_code == 404
+        assert "no lineage entry" in r.json()["detail"]
+
+
+# ── 6. the route that deliberately does not exist ──────────────────────────
 
 def test_there_is_no_delete_route():
     """The lineage is append-only. A route that could drop a calibration

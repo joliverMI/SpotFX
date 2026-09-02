@@ -771,6 +771,124 @@ def calibration_already_running(name: str) -> str:
             f"stop it, and run this calibration after.")
 
 
+# ── AMENDING A CALIBRATION IN PART ─────────────────────────────────────────
+#
+# The plan's own §4: "amending a calibration = declaring a SUBSET (one
+# fixture, one changed parameter) and re-running just it under the same pose
+# fingerprint and pinned settings". The point of it is cheapness — he can
+# change one fixture without spending an evening re-taking everything — and
+# the price of cheapness is that a carrier can end up holding footprints
+# from two different nights. `spectra/services/amendment.py` is the binding
+# statement for when that is honest. Every sentence below names the two ways
+# out, because a refusal that only says no turns a five-minute amendment
+# back into the whole evening it was built to avoid.
+
+
+def amendment_unknown_item(names: list, declared: list) -> str:
+    """He named something this calibration does not declare. Refused rather
+    than skipped: an amendment that quietly measured three of the four
+    things he named would report success while leaving the fourth at last
+    month's reading."""
+    return (f"This calibration declares nothing called "
+            f"{and_list(names)}. It declares "
+            f"{and_list(declared) if declared else 'nothing at all'}. "
+            f"Nothing was run — name one of those, or edit the declaration "
+            f"first and then amend it.")
+
+
+def amendment_nothing_named() -> str:
+    return ("An amendment re-measures a NAMED part of a calibration, and "
+            "this one named nothing. Name the item to re-run, or run the "
+            "whole calibration.")
+
+
+def amendment_scope_empty() -> str:
+    return ("Nothing in this room matched what the amendment asked to "
+            "re-measure, so there was nothing to photograph. Nothing was "
+            "run and nothing was changed.")
+
+
+def amendment_carrier_unresolved(missing: list, available: list) -> str:
+    return (f"{and_list(missing)} is not something this run can light: the "
+            f"carriers rendering in this room right now are "
+            f"{and_list(available) if available else 'none'}. Nothing was "
+            f"run — check the fixture is switched on and driving, then "
+            f"amend again.")
+
+
+def amendment_granularity_conflict(carrier_id: str, stray: list,
+                                   granularity: str) -> str:
+    """THE INVARIANT THAT MAKES MIXING SAFE AT ALL, one level below the
+    comparability gate: a carrier carries footprints from exactly ONE
+    granularity, or a room effect drives the same pixels twice and dims that
+    fixture twice (`RoomMap.drop_carrier_footprints`). This fires when the
+    footprints an amendment would LEAVE BEHIND are not ones this run's own
+    plan would produce."""
+    return (f"This amendment would leave {carrier_id} holding footprints "
+            f"from two different granularities — it re-measures at "
+            f"'{granularity}', and {and_list(stray)} was measured at "
+            f"something else. Driving both would dim that fixture twice, so "
+            f"nothing was run. Re-take the whole of {carrier_id} instead "
+            f"(amend it with 'whole carrier'), or amend at the granularity "
+            f"it already holds.")
+
+
+def amendment_emitter_unresolved(missing: list, granularity: str,
+                                 block_pixels: int) -> str:
+    return (f"{and_list(missing)} is not something this run would produce "
+            f"at '{granularity}' granularity"
+            + (f" in blocks of {block_pixels} pixels"
+               if granularity == 'block' else "")
+            + ". A part's name comes from the granularity that produced it, "
+              "so asking for a part of one shape at another shape's settings "
+              "cannot resolve. Nothing was run — amend at the granularity "
+              "the room already holds, or re-take the whole carrier.")
+
+
+def amendment_would_mix(carrier_id: str, reason: str, kept: int) -> str:
+    """THE CORE HONESTY OF AMEND-IN-PART. Footprints of one carrier taken on
+    two different nights sit side by side and are read together — by a room
+    effect, by a diff, by his eye — so they are only comparable when the
+    camera had not moved and the pinned regime was identical. When either
+    half fails, mixing them would be a quiet lie, and the two honest answers
+    are to re-take the whole carrier or not to run."""
+    return (f"This amendment would leave {kept} footprint"
+            f"{'' if kept == 1 else 's'} of {carrier_id} in place beside the "
+            f"ones it re-measures, and those two readings are not comparable "
+            f"with each other: {reason} A footprint is a difference in one "
+            f"camera's own view and one camera's own brightness scale, so "
+            f"mixing them would put two different scales on one fixture "
+            f"where nothing downstream could tell. Nothing was run. Re-take "
+            f"the whole of {carrier_id} (amend it with 'whole carrier'), or "
+            f"put the camera back and re-anchor the pose first.")
+
+
+def amendment_mixed_note(carriers: list) -> str:
+    """SAID WHEN MIXING WAS ALLOWED, so it is never silent. The gate passed
+    on a measurement (the pose matched, the regime was identical); a reader
+    still deserves to know which carriers now hold work from more than one
+    night."""
+    return (f"{and_list(carriers)} now holds footprints from more than one "
+            f"run of this calibration: the parts named here were re-measured "
+            f"and the rest were kept. The camera had not moved and its "
+            f"settings were identical, so the two readings are in the same "
+            f"scale and may be read together.")
+
+
+def and_list(items) -> str:
+    """A human list. `mapping_refusals` composes sentences a person reads at
+    breakfast, and "['a', 'b']" is not one. PUBLIC because a caller composing
+    the variable half of one of these sentences (the carriers an amendment
+    would mix) must render a list the same way the sentence around it
+    does."""
+    got = [str(i) for i in items if str(i)]
+    if not got:
+        return ""
+    if len(got) == 1:
+        return got[0]
+    return ", ".join(got[:-1]) + f" and {got[-1]}"
+
+
 # ── THE UNATTENDED PATH ────────────────────────────────────────────────────
 #
 # A capture run used to need a person at every step: open the page, grant

@@ -45,12 +45,19 @@ records a declined night and `commissioning` stores a refused pass for the
 same reason: "did it run?" must be a read, never a silence
 indistinguishable from the seam being broken.
 
-WHAT IS NOT HERE, deliberately: PER-EMITTER SUPERSESSION (amending a
-calibration by re-running a subset) is the next step. What this step
-guarantees is that no measurement ever leaves the record without the record
-saying which run replaced it — `CalibrationRun.superseded` is written on
-every run, and the mechanics that will act on it are built against a record
-that already exists rather than one invented alongside them.
+AMENDING IN PART is `run_amendment`, and it is the SAME function body with
+a smaller declaration: the same pose check, the same queue machinery, the
+same one lineage entry. What it adds is ONE gate, and only when it would
+leave a carrier holding footprints from two different nights —
+`spectra/services/amendment.py` is the binding statement for it. Nothing
+about an amendment softens a gate a full run applies; it narrows what is
+measured, and it supersedes exactly what it measured.
+
+EDITING THE DECLARATION IS APPEND-ONLY TOO. `record_declaration_change`
+keeps the WHOLE PRIOR DECLARATION on its entry, so what run 3 asked for is
+recoverable after run 4 asked for something else — the declaration on the
+calibration is the CURRENT one, and the lineage is where the previous ones
+live.
 """
 from __future__ import annotations
 
@@ -59,16 +66,23 @@ import time
 from typing import Optional
 
 from spectra.models.calibration import (Calibration, CalibrationRun,
-                                        ItemOutcomeRecord, PinnedCamera,
-                                        PoseFingerprint)
-from spectra.services import (calibration_store, capture_queue, capture_runs,
-                              light_field, mapping_refusals, pose_fingerprint)
+                                        EmitterMeasurement, ItemOutcomeRecord,
+                                        PinnedCamera, PoseFingerprint,
+                                        declaration_snapshot)
+from spectra.models import calibration as cal_model
+from spectra.services import (amendment, calibration_store, capture_queue,
+                              capture_runs, light_field, mapping_refusals,
+                              pose_fingerprint)
 
 logger = logging.getLogger(__name__)
 
-KIND_RUN = "run"
-KIND_FINGERPRINT = "fingerprint"
-KIND_DECLARATION = "declaration"
+#: THE ENTRY KINDS live on the model, which is what every reader outside
+#: this module imports. Re-exported here because this module's own callers
+#: have always read them from it.
+KIND_RUN = cal_model.KIND_RUN
+KIND_AMENDMENT = cal_model.KIND_AMENDMENT
+KIND_FINGERPRINT = cal_model.KIND_FINGERPRINT
+KIND_DECLARATION = cal_model.KIND_DECLARATION
 
 #: How long a calibration run waits for a present, LOCKED camera session
 #: before giving up — `capture_queue.wait_for_session`'s own wait, through
@@ -222,23 +236,83 @@ async def check_pose(cal: Calibration) -> tuple[pose_fingerprint.Judgement,
 
 async def run_calibration(cal: Calibration, *, force: bool = False,
                           label: str = "") -> tuple[Calibration, CalibrationRun]:
-    """Check the pose, run the declared queue, append one lineage entry.
+    """Check the pose, run the WHOLE declared queue, append one lineage
+    entry.
 
     Returns the SAVED calibration and the entry, in every path including
     every refusal — a refused run is a fact about the evening and the
     record is what a person reads afterwards."""
     entry = CalibrationRun(kind=KIND_RUN, label=label)
+    if not cal.items:
+        return _refuse(cal, entry,
+                       mapping_refusals.calibration_nothing_declared(),
+                       "nothing_declared")
+    return await _run_declared(cal, entry, [dict(i) for i in cal.items],
+                               force=force, label=label)
+
+
+async def run_amendment(cal: Calibration, names: list[str], *,
+                        overrides: Optional[dict] = None,
+                        whole_carrier: bool = False, force: bool = False,
+                        label: str = ""
+                        ) -> tuple[Calibration, CalibrationRun]:
+    """AMEND IN PART: re-measure a NAMED SUBSET of the declaration, under
+    this calibration's own pose check and its own pinned settings, and
+    append one entry that supersedes exactly what it measured.
+
+    `spectra/services/amendment.py` is the binding statement for the one
+    gate this adds — whether the amended footprints may sit beside the ones
+    it leaves in place. Everything else is `run_calibration`'s own body,
+    deliberately: an amendment must not be able to acquire, soften or skip
+    anything a full run applies.
+
+    `overrides` changes CAPTURE PARAMETERS for this run only (a granularity,
+    a settle time, a scope) and never what the calibration declares —
+    changing that is an edit, which is its own lineage entry. `whole_carrier`
+    drops the named emitter scoping so the amendment re-takes each carrier
+    whole; it is the named way past the mixing gate, and it is a wider
+    measurement rather than a weaker check.
+
+    `force` runs past a MEASURED CAMERA MOVE exactly as it does for a full
+    run, and NEVER past the mixing gate — a forced full run costs a
+    comparability claim the record then names, where a forced mix would
+    leave one carrier's own footprints disagreeing with each other with
+    nothing downstream able to tell."""
+    entry = CalibrationRun(kind=KIND_AMENDMENT, label=label,
+                           amended=[str(n) for n in (names or [])])
+    if not cal.items:
+        return _refuse(cal, entry,
+                       mapping_refusals.calibration_nothing_declared(),
+                       "nothing_declared")
+    subset = amendment.resolve_subset(cal, list(names or []), overrides,
+                                      whole_carrier=whole_carrier)
+    if subset.refusal:
+        return _refuse(cal, entry, subset.refusal, "amendment")
+    entry.amended = list(subset.names)
+    return await _run_declared(cal, entry, subset.items, force=force,
+                               label=label, mix_gate=True)
+
+
+async def _run_declared(cal: Calibration, entry: CalibrationRun,
+                        declared: list[dict], *, force: bool, label: str,
+                        mix_gate: bool = False
+                        ) -> tuple[Calibration, CalibrationRun]:
+    """THE ONE BODY a full run and an amendment share. The only difference
+    between them is WHAT WAS DECLARED and, for an amendment, the one extra
+    gate — so a gate added here is added to both, which is the same
+    discipline `capture_runs` keeps one level down."""
+    entry.declared = [dict(i) for i in declared]
 
     room = light_field.get_room(cal.room_id)
     if room is None:
         return _refuse(cal, entry, mapping_refusals.calibration_no_room(
             cal.room_id), "no_room")
-    if not cal.items:
+    if not declared:
         return _refuse(cal, entry,
                        mapping_refusals.calibration_nothing_declared(),
                        "nothing_declared")
     try:
-        items = capture_queue.parse_items(cal.items)
+        items = capture_queue.parse_items(declared)
     except ValueError as exc:
         return _refuse(cal, entry, str(exc), "declaration")
     if capture_queue.running():
@@ -289,6 +363,23 @@ async def run_calibration(cal: Calibration, *, force: bool = False,
             "not comparable with the ones this calibration already holds — "
             "re-anchor the pose to start a new comparable series.")
 
+    # THE MIXING GATE, and it is asked AFTER the pose check and BEFORE the
+    # room goes dark: it needs the pose verdict, and an amendment that was
+    # always going to refuse must cost nothing but the pose check itself.
+    # `force` never reaches it — see `run_amendment`'s docstring.
+    if mix_gate:
+        # Read the room back: `establish_pose` above may have run since the
+        # copy at the top was taken, and the gate reasons about what is
+        # stored right now.
+        room = light_field.get_room(cal.room_id) or room
+        mix = amendment.judge_mix(cal, room, declared, judgement.verdict)
+        entry.mix = mix.as_dict()
+        if mix.refusal:
+            return _refuse(cal, entry, mix.refusal, "would_mix")
+        if mix.mixes:
+            entry.mixed_carriers = mix.carriers
+            entry.notes.append(mix.note)
+
     started = time.time()
     queue_run = capture_queue.new_run(items, label=label or cal.name)
     entry.queue_run_id = queue_run.id
@@ -302,6 +393,13 @@ async def run_calibration(cal: Calibration, *, force: bool = False,
     entry.notes.extend(queue_run.notes)
     entry.notes.extend(_item_sentences(queue_run))
     entry.camera = _camera_record(cal, queue_run)
+    # WHAT THE RUN ITSELF REPORTED ABOUT MIXING, which is the authority: the
+    # gate predicts from stored data, `room_mapping.scope_plan` knows what
+    # the plan actually produced.
+    for outcome in queue_run.outcomes:
+        for carrier_id in ((outcome.run or {}).get("mixed_carriers") or []):
+            if carrier_id not in entry.mixed_carriers:
+                entry.mixed_carriers.append(carrier_id)
     # The lever verdict of whichever item earned one — every item of one run
     # shares a session, so they share the verdict too (it is cached on the
     # session by fingerprint). The pose check usually earns it first, which
@@ -309,6 +407,10 @@ async def run_calibration(cal: Calibration, *, force: bool = False,
     if not entry.lever:
         entry.lever = _first_lever(queue_run)
 
+    # SUPERSESSION IS PER EMITTER. `entry.emitters` is exactly what this
+    # entry measured — an amendment's three ranges, not its carrier's
+    # twenty — so an emitter this run did not touch keeps the entry that
+    # took it as its origin, and provenance keeps saying so.
     origin = cal.emitter_origin()
     entry.superseded = {e: origin[e] for e in entry.emitters if e in origin}
     entry.comparable, entry.comparable_note = _comparability(
@@ -376,7 +478,14 @@ def _item_record(outcome) -> ItemOutcomeRecord:
         attempts=outcome.attempts, pose_id=outcome.pose_id,
         seconds=outcome.seconds,
         emitters=[e for e in (run.get("emitter_ids") or []) if e],
-        witness=dict(run.get("witness") or {}))
+        witness=dict(run.get("witness") or {}),
+        # WHAT EACH EMITTER ACTUALLY MEASURED, kept on the entry itself: the
+        # room map holds only the LATEST footprint, so without this a diff
+        # between two of this calibration's own entries would have nothing
+        # to read (`spectra/services/calibration_diff.py`).
+        measurements=[EmitterMeasurement(**m)
+                      for m in (run.get("measurements") or [])
+                      if m.get("emitter_id")])
 
 
 def _first_lever(queue_run) -> dict:
@@ -454,16 +563,29 @@ def _refuse(cal: Calibration, entry: CalibrationRun, detail: str,
 # ── editing the declaration ────────────────────────────────────────────────
 
 def record_declaration_change(cal: Calibration, changes: list[str], *,
+                              previous: Optional[dict] = None,
                               label: str = "") -> CalibrationRun:
     """EDITING THE DECLARATION KEEPS LINEAGE (the plan's own words): the
     edit is an entry, so a later reader can see that run 4 measured a
     different list from run 3 and why the two do not line up.
 
-    It is not a `run` entry — nothing was driven — so it never counts
-    towards `Calibration.ran` and never appears as the last run."""
+    `previous` IS THE WHOLE PRIOR DECLARATION, not just a list of change
+    sentences, and that is what makes "append-only, never rewritten" true of
+    the declaration itself. The calibration carries the CURRENT declaration
+    and an edit moves it; without the snapshot, "what did run 3 ask for"
+    stops being answerable the moment run 4 asks for something else — the
+    sentences say what changed and cannot rebuild what was there.
+    `declaration_snapshot(cal)` taken BEFORE the edit is what to pass.
+
+    A DECLARATION EDIT NEVER TOUCHES A MEASUREMENT. It is not a `run` entry
+    — nothing was driven — so it never counts towards `Calibration.ran`,
+    never appears as the last run, and supersedes nothing: the footprints
+    the old declaration produced stay exactly where they are, still credited
+    to the runs that took them."""
     entry = CalibrationRun(kind=KIND_DECLARATION, label=label,
                            status=capture_runs.STATUS_OK,
                            detail="; ".join(changes) or "no change",
+                           previous_declaration=dict(previous or {}),
                            notes=list(changes))
     return cal.append_run(entry)
 
@@ -480,6 +602,10 @@ def view(cal: Calibration, *, room=None) -> dict:
     body["ran"] = cal.ran
     body["state"] = _state_sentence(cal)
     body["pose_established"] = cal.pose.established
+    # WHAT HE CAN AMEND, by the names he wrote — so a caller never has to
+    # guess an item's name out of the declaration's own shape.
+    body["item_names"] = amendment.declared_names(cal)
+    body["amendable"] = amendment.amendable(cal)
     return body
 
 
@@ -498,7 +624,14 @@ def _state_sentence(cal: Calibration) -> str:
                 + ", and nothing has been measured under it yet.")
     last = cal.last_run
     runs = len([r for r in cal.runs if r.kind == KIND_RUN])
+    amended = len([r for r in cal.runs if r.kind == KIND_AMENDMENT])
+    # AMENDMENTS ARE COUNTED SEPARATELY, because they answer a different
+    # question: "when did this last measure EVERYTHING it declares" is not
+    # "when did it last measure anything", and one number for both would
+    # answer neither.
+    what = (f"{runs} run{'' if runs == 1 else 's'}"
+            + (f" and {amended} amendment{'' if amended == 1 else 's'}"
+               if amended else "") + " recorded")
     if last is None:
-        return f"{runs} run(s) recorded."
-    return (f"{runs} run{'' if runs == 1 else 's'} recorded; the last one "
-            f"{last.status} — {last.detail}")
+        return f"{what}."
+    return f"{what}; the last one {last.status} — {last.detail}"

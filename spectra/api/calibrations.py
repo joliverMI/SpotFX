@@ -17,6 +17,14 @@
                                         lights
   POST   /api/calibrations/{id}/run     run it — pose check, then the
                                         declared queue
+  POST   /api/calibrations/{id}/amend   AMEND IN PART — re-run a NAMED
+                                        SUBSET of the declaration under the
+                                        same pose and the same pinned
+                                        settings, superseding only the
+                                        footprints it measures
+  GET    /api/calibrations/{id}/diff    what changed between two of this
+                                        calibration's own lineage entries,
+                                        computed from stored data
 
 THERE IS NO DELETE, and that is the point of the artefact: the lineage is
 append-only, and a route that could drop a calibration would be a route that
@@ -24,7 +32,8 @@ erases work that cost dark rooms to produce. `calibration_store.delete`
 exists for a test to clean up after itself and is deliberately not wired
 here.
 
-TWO OF THESE ROUTES TOUCH A LIGHT, and both do it through
+THREE OF THESE ROUTES TOUCH A LIGHT (pose, run, amend), and all three do it
+through
 `spectra/services/capture_runs.py` — the ONE seam — so the exposure lock,
 the lever self-test, the ownership boundary, the hold ceiling and the
 one-run-at-a-time lock apply exactly as they do to the map button. This
@@ -52,10 +61,11 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from spectra.models.calibration import (Calibration, Envelope, PinnedCamera,
-                                        TagRegistration)
-from spectra.services import (calibration_runs, calibration_store,
-                              capture_queue, capture_runs, light_field,
-                              pose_fingerprint)
+                                        TagRegistration,
+                                        declaration_snapshot)
+from spectra.services import (amendment, calibration_diff, calibration_runs,
+                              calibration_store, capture_queue, capture_runs,
+                              light_field, pose_fingerprint)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["spectra-calibrations"])
@@ -96,6 +106,33 @@ class RunBody(BaseModel):
     force: bool = False
 
 
+class AmendBody(BaseModel):
+    """AMEND IN PART — the plan's own §4, and the capability that makes the
+    practice cheap enough to use: change one fixture without spending an
+    evening re-taking everything.
+
+    `items` names DECLARED items, by the labels he gave them (or "item 3"
+    when he gave none — `GET /api/calibrations/{id}` publishes the names as
+    `item_names`, so nothing has to guess). A name this calibration does not
+    declare is refused BY NAME rather than skipped."""
+    items: list[str] = []
+    #: CAPTURE PARAMETERS for this run only — a granularity, a settle time,
+    #: a scope (`carrier_ids`/`emitter_ids`). Never `kind` or `room_id`:
+    #: changing either makes it a different declaration, which is an edit
+    #: (`PUT`) and is recorded as its own lineage entry.
+    #: `amendment.OVERRIDABLE` is the list, and anything else is refused.
+    overrides: Optional[dict[str, Any]] = None
+    #: RE-TAKE EACH NAMED CARRIER WHOLE rather than the parts of it named by
+    #: `emitter_ids`. This is the named way past the mixing gate — a wider
+    #: measurement, never a weaker check — and the thing the refusal points
+    #: at when a partial re-take would not be honest.
+    whole_carrier: bool = False
+    label: str = ""
+    #: Run past a MEASURED CAMERA MOVE, as a full run may. It NEVER runs past
+    #: the mixing gate: see `spectra/services/amendment.py`.
+    force: bool = False
+
+
 class PoseBody(BaseModel):
     placement: Optional[str] = None
     label: str = ""
@@ -110,6 +147,11 @@ def _not_found(cal_id: str) -> JSONResponse:
 async def list_calibrations():
     return {"calibrations": [c.as_summary() for c in calibration_store.load_all()],
             "session": capture_runs.session_view(),
+            # What an amendment may override for one run, and the diff's own
+            # pre-registered noise band — published so a page never
+            # hard-codes either.
+            "amendment": {"overridable": list(amendment.OVERRIDABLE)},
+            "diff": {"noise_fraction": calibration_diff.NOISE_FRACTION},
             # The pose fingerprint's own pre-registered tolerances, published
             # so a page never hard-codes one and a reader can check the
             # judgement's arithmetic rather than believe it.
@@ -173,6 +215,11 @@ async def update_declaration(cal_id: str, body: CalibrationBody):
     cal = calibration_store.load(cal_id)
     if cal is None:
         return _not_found(cal_id)
+    # THE PRIOR DECLARATION, snapshotted BEFORE anything is changed. This is
+    # what makes "append-only, never rewritten" true of the declaration and
+    # not only of the run list — the sentences below say what changed and
+    # could never rebuild what was there.
+    previous = declaration_snapshot(cal)
     if body.items is not None:
         problem = _validate_items(body.items)
         if problem is not None:
@@ -207,9 +254,64 @@ async def update_declaration(cal_id: str, body: CalibrationBody):
         cal.tags = list(body.tags)
 
     if changes:
-        calibration_runs.record_declaration_change(cal, changes)
+        calibration_runs.record_declaration_change(cal, changes,
+                                                   previous=previous)
         calibration_store.save(cal)
     return {**calibration_runs.view(cal), "changed": changes}
+
+
+@router.post("/calibrations/{cal_id}/amend")
+async def amend_calibration(cal_id: str, body: AmendBody):
+    """RE-MEASURE A NAMED SUBSET, under this calibration's own pose check and
+    its own pinned settings, appending one entry that supersedes exactly
+    what it measured.
+
+    409 for a refusal with the whole record, exactly as `/run` does — the
+    refusal IS an entry, including the one that matters most here: an
+    amendment that would have left one carrier holding two nights' work
+    taken under conditions that are not comparable
+    (`spectra/services/amendment.py` is the binding statement)."""
+    cal = calibration_store.load(cal_id)
+    if cal is None:
+        return _not_found(cal_id)
+    cal, entry = await calibration_runs.run_amendment(
+        cal, list(body.items), overrides=dict(body.overrides or {}),
+        whole_carrier=body.whole_carrier, force=body.force, label=body.label)
+    body_out = {**calibration_runs.view(cal), "entry": entry.model_dump(),
+                "queue": capture_queue.status()["current"]}
+    if entry.status == capture_runs.STATUS_REFUSED:
+        return JSONResponse(status_code=409, content=body_out)
+    return body_out
+
+
+@router.get("/calibrations/{cal_id}/diff")
+async def diff_calibration(cal_id: str, a: str = "", b: str = ""):
+    """WHAT CHANGED between two of this calibration's own lineage entries.
+
+    Omit both and it compares the two most recent entries that MEASURED
+    something, in lineage order — which is the question a person asks after
+    an amendment. Computed from stored data (`calibration_diff`), never
+    narrated, and it names when the two sets of numbers are not claimed to
+    be comparable rather than withholding them."""
+    cal = calibration_store.load(cal_id)
+    if cal is None:
+        return _not_found(cal_id)
+    runs = calibration_diff.measurable_runs(cal)
+    if not a or not b:
+        if len(runs) < 2:
+            return JSONResponse(status_code=409, content={
+                "detail": (f"a diff compares two of this calibration's runs, "
+                           f"and it has {len(runs)} that measured anything. "
+                           f"Run it, then amend or re-run it, and the two "
+                           f"can be compared."),
+                "runs": [r.id for r in runs]})
+        a, b = a or runs[-2].id, b or runs[-1].id
+    got = calibration_diff.diff(cal, a, b)
+    if got.refusal:
+        return JSONResponse(status_code=404,
+                            content={"detail": got.refusal,
+                                     "runs": [r.id for r in runs]})
+    return got.as_dict()
 
 
 @router.post("/calibrations/{cal_id}/pose")

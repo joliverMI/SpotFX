@@ -501,6 +501,16 @@ class MappingResult:
     reason: str = ""
     pose_id: str = ""
     emitters: list[EmitterResult] = field(default_factory=list)
+    #: This run measured PART of the room — a calibration amendment naming
+    #: one fixture, or a few ranges of one (`scope_plan`). False on every
+    #: ordinary run, which is every run declared before amendments existed.
+    scoped: bool = False
+    #: The carriers this run left holding footprints from more than one run:
+    #: it re-measured some of their emitters and deliberately kept the rest.
+    #: Empty on an unscoped run by construction, since one drops each
+    #: carrier whole. `spectra/services/amendment.py` owns whether mixing is
+    #: honest; this records that it happened.
+    mixed_carriers: list[str] = field(default_factory=list)
     seconds: float = 0.0
     granularity: str = emitters_mod.DEFAULT_GRANULARITY
     block_pixels: int = emitters_mod.DEFAULT_BLOCK_PIXELS
@@ -624,6 +634,7 @@ class MappingResult:
                 "granularity": self.granularity,
                 "block_pixels": self.block_pixels,
                 "per_carrier": self.per_carrier, "problems": self.problems,
+                "scoped": self.scoped, "mixed_carriers": self.mixed_carriers,
                 "warnings": self.warnings, "notes": self.notes,
                 "refusal": self.refusal, "partial": self.partial,
                 "witness": self.witness_counts,
@@ -987,9 +998,92 @@ async def deactivate_after_capture(activated: list[str],
     return left_on
 
 
+def scope_plan(room: RoomMap, plan, carrier_ids: Optional[list[str]],
+               emitter_ids: Optional[list[str]]) -> tuple[str, list[str]]:
+    """NARROW A RESOLVED PLAN to the named carriers or emitters, and answer
+    the one question that needs the plan in hand: would leaving the
+    unmeasured footprints in place put TWO GRANULARITIES on one carrier?
+
+    Returns `(refusal_sentence, mixed_carrier_ids)` and MUTATES `plan.emitters`
+    to the chosen subset. `("", [])` for an unscoped run — every caller
+    before amendments existed passes None for both and this is a no-op.
+
+    THE INVARIANT IT DEFENDS is `RoomMap.drop_carrier_footprints`' own: a
+    carrier carries footprints from exactly ONE granularity, or the room
+    effect drives the same pixels twice and dims that fixture twice. An
+    amendment that re-measures three ranges of a wrapped TV is safe because
+    the ranges it leaves behind are ranges THIS SAME PLAN would produce; one
+    that re-measures a range of a carrier whose stored footprint is the
+    WHOLE carrier is not, and it refuses BY NAME with the two ways out
+    rather than mixing.
+
+    A NAMED THING THAT DOES NOT RESOLVE IS A REFUSAL, never a silent
+    narrowing: an amendment that asked for four emitters and measured three
+    would report success while leaving the fourth at last month's reading,
+    which is exactly the quiet lie the calibration record exists to end.
+    `pose_fingerprint.measure` takes the other choice for its own anchors
+    (a missing anchor is carried as an unreadable reference) and is right
+    to — a fingerprint is a comparison whose whole job is to survive a
+    changed room, where an amendment is a MEASUREMENT he asked for by
+    name."""
+    wanted_carriers = [c for c in (carrier_ids or []) if c]
+    wanted_emitters = [e for e in (emitter_ids or []) if e]
+    if not wanted_carriers and not wanted_emitters:
+        return "", []
+
+    producible: dict[str, set] = {}
+    for e in plan.emitters:
+        producible.setdefault(e.carrier_id, set()).add(e.emitter_id)
+
+    chosen = list(plan.emitters)
+    if wanted_carriers:
+        missing = [c for c in wanted_carriers if c not in producible]
+        if missing:
+            return mapping_refusals.amendment_carrier_unresolved(
+                missing, sorted(producible)), []
+        chosen = [e for e in chosen if e.carrier_id in set(wanted_carriers)]
+    if wanted_emitters:
+        have = {e.emitter_id for e in chosen}
+        missing = [w for w in wanted_emitters if w not in have]
+        if missing:
+            return mapping_refusals.amendment_emitter_unresolved(
+                missing, plan.granularity, plan.block_pixels), []
+        chosen = [e for e in chosen if e.emitter_id in set(wanted_emitters)]
+    if not chosen:
+        return mapping_refusals.amendment_scope_empty(), []
+    if not wanted_emitters:
+        # A CARRIER-SCOPED RUN RE-TAKES EACH CARRIER IT TOUCHES WHOLE, so
+        # nothing of theirs is left behind and nothing mixes — the caller
+        # drops them wholesale exactly as an unscoped run does. That is what
+        # makes "amend one fixture" the common, ungated case, and it is also
+        # what lets an amendment CHANGE a carrier's granularity: the stored
+        # footprints of the old shape go with the drop rather than being
+        # stranded beside the new ones.
+        plan.emitters = chosen
+        return "", []
+
+    taking = {e.emitter_id for e in chosen}
+    mixed: list[str] = []
+    for carrier_id in sorted({e.carrier_id for e in chosen}):
+        kept = [f for f in room.emitters_for_carrier(carrier_id)
+                if f.emitter_id not in taking]
+        if not kept:
+            continue
+        stray = sorted(f.emitter_id for f in kept
+                       if f.emitter_id not in producible.get(carrier_id, set()))
+        if stray:
+            return mapping_refusals.amendment_granularity_conflict(
+                carrier_id, stray, plan.granularity), []
+        mixed.append(carrier_id)
+    plan.emitters = chosen
+    return "", mixed
+
+
 async def run_mapping(room: RoomMap, deps: RunDeps, *,
                       granularity: str = emitters_mod.DEFAULT_GRANULARITY,
                       block_pixels: int = emitters_mod.DEFAULT_BLOCK_PIXELS,
+                      carrier_ids: Optional[list[str]] = None,
+                      emitter_ids: Optional[list[str]] = None,
                       dark_settle_s: Optional[float] = None,
                       lit_settle_s: Optional[float] = None,
                       dark_capture_s: Optional[float] = None,
@@ -1015,6 +1109,15 @@ async def run_mapping(room: RoomMap, deps: RunDeps, *,
     the COMMISSIONING read's alone and night runs cost exactly what they
     always did — this run ASSERTS that size rather than assuming it, since
     a commissioning pass earlier in the same session borrowed 1080p.
+
+    `carrier_ids` / `emitter_ids` SCOPE THE RUN to part of the room — how a
+    calibration amendment re-measures one fixture, or a few ranges of one,
+    without spending the room's dark time on everything else. Both default
+    None, which is every carrier of the room: a run declared before these
+    existed does exactly what it always did. `spectra/services/amendment.py`
+    is the binding statement for when the RESULT of a scoped run may be
+    mixed with what the map already holds; what is enforced HERE is the one
+    invariant that needs the plan in hand — see `scope_plan`.
 
     `camera` is this run's optional levers (`capture_settings.CameraRequest`
     — manual integration time and gain). None means the shipped behaviour
@@ -1121,6 +1224,12 @@ async def run_mapping(room: RoomMap, deps: RunDeps, *,
     # an assignment would silently drop the one thing that explains why
     # this run is longer than the plan quoted.
     result.notes.extend(plan.notes)
+    scope_refusal, mixed = scope_plan(room, plan, carrier_ids, emitter_ids)
+    if scope_refusal:
+        result.reason, result.refusal = scope_refusal, "scope"
+        return result
+    result.scoped = bool(carrier_ids or emitter_ids)
+    result.mixed_carriers = mixed
     if not plan.emitters:
         result.reason = ("nothing to map: " + "; ".join(plan.problems)
                          if plan.problems else
@@ -1155,7 +1264,16 @@ async def run_mapping(room: RoomMap, deps: RunDeps, *,
     # a TV per segment must not leave last week's whole-carrier footprint
     # beside the new ranges, where the room effect would drive both and dim
     # the fixture twice.
+    #
+    # A CARRIER THIS RUN ONLY PARTLY RE-MEASURES IS NOT DROPPED — that is
+    # amend-in-part, and it is safe here only because `scope_plan` has
+    # already proven every footprint being LEFT BEHIND is one this same plan
+    # would produce, i.e. the same granularity. `put_footprint` replaces the
+    # re-measured ones by id as it goes, so exactly the amended emitters
+    # change and the rest keep the run that took them.
     for carrier_id in {e.carrier_id for e in plan.emitters}:
+        if carrier_id in mixed:
+            continue
         room.drop_carrier_footprints(carrier_id)
 
     scope, activated, not_brought_up = await activate_for_capture(

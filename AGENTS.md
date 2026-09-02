@@ -4167,12 +4167,76 @@ so does a pose that was never taken. The LINEAGE is append-only —
 and `POST/GET/PUT` are the only routes (**there is deliberately no
 DELETE**). A REFUSED run is an entry, `night_run`'s declined-night precedent.
 
-**NOT BUILT HERE, by design:** per-emitter supersession (step three —
-`CalibrationRun.superseded` is the ledger it will be written against),
-night-seam integration (step four), and any UI, which is why there is no
-help topic: an unlinked topic is an orphan by this file's own rule. Spec:
+**NOT BUILT HERE, by design:** night-seam integration (step four), the
+browser demotion (step six), and any UI, which is why there is no help
+topic: an unlinked topic is an orphan by this file's own rule. Spec:
 `docs/SPECTRA_SPEC.md` §102; tests `tests/test_pose_fingerprint.py`,
 `tests/test_calibration_record.py`, `tests/test_calibration_api.py`.
+
+### AMENDING ONE FIXTURE without spending the evening
+
+Step three (`plan.md` §4, `docs/SPECTRA_SPEC.md` §103).
+**`spectra/services/amendment.py`'s module docstring is the binding
+statement for when a partly re-measured carrier is honest** — read it before
+touching anything that scopes a capture run or replaces a footprint. Six
+things:
+
+- **AN AMENDMENT IS AN ORDINARY RUN OF A SMALLER DECLARATION.**
+  `calibration_runs.run_amendment` / `POST /api/calibrations/{id}/amend`
+  names DECLARED items by his own labels (`GET` publishes them as
+  `item_names`) and shares ONE body — `_run_declared` — with
+  `run_calibration`, so a gate added there is added to both. Overrides
+  (`amendment.OVERRIDABLE`) change CAPTURE parameters for that run only;
+  changing `kind` or `room_id` is an EDIT, refused here. A name this
+  calibration does not declare is refused BY NAME, never skipped.
+- **SUPERSESSION IS PER EMITTER.** `room_mapping.scope_plan` narrows a
+  resolved plan (`carrier_ids` / `emitter_ids`, both threaded through
+  `capture_runs.run_map` and `capture_queue.QueueItem`, both defaulting to
+  None = the whole room and byte-identical to before). A carrier only PARTLY
+  re-measured is no longer dropped wholesale; `put_footprint` replaces
+  exactly the amended ids and the siblings keep the run that took them.
+  A CARRIER-SCOPED item still re-takes its carrier WHOLE, which is what lets
+  an amendment change a carrier's granularity without stranding the old
+  shape beside the new one.
+- **THE GATE, and it is the whole point:** two readings of one carrier may
+  sit side by side only when the pose fingerprint **MATCHED** and the pinned
+  regime is **IDENTICAL** to the run that took the kept ones. Stricter than
+  what stops a full run, deliberately — a full run replaces the whole
+  carrier so only its claim against earlier runs is withheld, where a mixed
+  carrier's inconsistency is INSIDE its own footprints and nothing
+  downstream could notice. Either half failing refuses by name with nothing
+  driven, naming the two ways out (`whole_carrier`, or re-anchor the pose).
+  **There is deliberately no force flag for it** — `force` runs past a
+  measured camera move exactly as for a full run and never past this.
+  UNKNOWN PROVENANCE fails it too (a carrier mapped from the Rooms page
+  button carries no pose or regime this record knows). When it passes,
+  mixing is still never silent (`mixed_carriers` + `amendment_mixed_note`).
+- **TWO GRANULARITIES ON ONE CARRIER ARE REFUSED** one level down
+  (`amendment_granularity_conflict`) — `RoomMap.drop_carrier_footprints`'
+  own invariant: driving both would dim that fixture twice.
+- **THE DECLARATION IS APPEND-ONLY TOO.** A `declaration` entry carries the
+  WHOLE PRIOR DECLARATION (`CalibrationRun.previous_declaration`, built by
+  `calibration.declaration_snapshot` BEFORE the edit): the change sentences
+  say what moved and could never rebuild what was there. An edit still
+  touches no measurement.
+- **THE DIFF** (`spectra/services/calibration_diff.py`,
+  `GET /api/calibrations/{id}/diff`) reads THE LINEAGE, not the room map —
+  which is why `ItemOutcomeRecord.measurements` exists: the map holds only
+  the LATEST footprint, so a diff against it could compare the newest
+  reading only with itself. `NOISE_FRACTION` **IS** `exposure_test.
+  TIE_FRACTION` (one instrument, one idea of its own noise) and is
+  pre-registered, not tuned. It never treats absence as a change and never
+  claims a comparison the record does not support.
+
+**`RUN_KINDS` (`spectra/models/calibration.py`) is a constant for a
+reason**: an amendment produces footprints exactly as a run does, so every
+provenance/origin/comparability read uses it — a reader still testing
+`kind == "run"` reports his newest measurement as belonging to nobody.
+
+Spec: `docs/SPECTRA_SPEC.md` §103; tests
+`tests/test_calibration_amendment.py` (both directions, plus a test that
+goes RED on the defect it was written for) and
+`tests/test_calibration_diff.py`.
 
 ## THE NIGHT RUN — HA pushes, we answer; and it never takes his room
 
