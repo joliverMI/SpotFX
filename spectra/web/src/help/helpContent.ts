@@ -1682,6 +1682,18 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        id: 'lever-self-test',
+        title: 'The lever self-test: is the camera actually obeying its exposure control?',
+        keywords: 'lever self test exposure control obey sensor driver read back measured light refuse capture client native pinned settings focus white balance drift re-clamping calibration',
+        body: [
+          'Asking a camera for an exposure and reading it back only proves the DRIVER is holding that number. It does not prove the SENSOR is doing anything with it — and on 1 September 2026 that difference cost a whole evening: three integration times were commanded, a factor of twenty apart, every one was accepted, every read-back agreed, and the measured light did not move at all. Everything downstream looked like a dark room.',
+          'So before a calibration-grade run on the capture client, the camera has to prove it. One emitter is lit three times: once at a short integration time, once at four times that, and once more at the same long one. The light must RISE with the commanded time, and the two identical commands must measure the same thing. If it does not, the run refuses in seconds and the refusal names both commands, both measurements and what it means — calibrating through that camera would be measuring the camera\'s mood, not the room.',
+          'A refusal is always a MEASUREMENT. If the test simply could not be made — a camera whose exposure range is too narrow to span the factor, a capture that produced no frames, a room that was handed back part-way — it says so and the run goes ahead: "we could not check" is not "we checked and it is broken", and refusing on a check that was never made would invent a fault.',
+          'IT ONLY APPLIES TO THE CAPTURE CLIENT. A session opened from this page in a browser is untouched — no self-test, no verdict, no new refusal — because a browser cannot pin the camera in the first place. That is a known limit, not a silent one.',
+          'The capture client can also PIN four controls exactly, and holds them through anything: integration time, gain, white balance temperature and focus. Every one is written to the driver and read back, and a control that answered a different number refuses the run by name. They survive a reboot, a camera being unplugged and a dropped connection, because they are re-asserted every time the camera opens and every time the client reconnects — nothing is stored in the camera and nothing is stored on disk.',
+        ],
+      },
+      {
         id: 'exposure-comparison',
         title: 'The exposure comparison: is it the room, or the camera settings?',
         keywords: 'exposure test comparison compare regime default manual integration gain which better ratio two minute question dark room cannot see faint camera settings',

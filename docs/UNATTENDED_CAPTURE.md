@@ -28,6 +28,9 @@ already pointed at the room:
 | Choosing per-run parameters | re-set the controls between runs | each item carries its own granularity, block size and four protocol waits |
 | Getting the right FRAME SIZE for the run | (there was one size, and it could not read a composition) | the server asks (320x180 for a map, 1920x1080 for a commissioning read) and the client adopts the largest rung its camera can honestly fill |
 | Setting a manual integration time / gain | not possible at all | per-run request, applied by the driver and **read back**; a lever the camera did not take refuses by name |
+| Pinning WHITE BALANCE and FOCUS | not possible at all — the browser cannot reach either | declared per session, written via `v4l2-ctl` and **read back**, all four levers on one rule |
+| Keeping the pinned regime across a reboot, a re-plug or a dropped socket | (there was no regime to keep) | **persistence is software**: `camera.open()` re-asserts it on every reopen and the client re-asserts it on every reconnect, then reads it back |
+| Knowing the camera actually OBEYS its exposure control | nothing could tell — the read-back only proves the driver holds the value | **the lever self-test**: before a calibration-grade run on a native session, a known emitter is driven at two integration times a known factor apart and the MEASURED LIGHT must follow, or the run refuses by name in seconds |
 | Widening a capture window for a long exposure | (nothing knew the exposure) | `capture_windows` widens both so `MIN_FRAMES` is still averaged, and BOTH estimates — the run's own hold ceiling and the night's planned-end bound — price the widened run |
 | Keeping a run that was cut short | judge it, decide, re-run by hand | recorded `partial`, footprints kept, declared retry re-runs it |
 | Knowing what happened | watch the page | one machine-readable outcome per item, written after **every** item |
@@ -63,11 +66,12 @@ ends.
   bigger than what it captures, so a 720p webcam simply reads at 720p and
   the run reports that rung — nothing to configure, but worth knowing
   before wondering why a read refused as marginal.
-- **Checking whether that camera has manual exposure/gain at all**, if a
+- **Checking whether that camera has the manual controls at all**, if a
   run is going to ask for them: `v4l2-ctl --list-ctrls-menus` should show
-  `exposure_time_absolute` and `gain` alongside `auto_exposure`. A camera
-  without them refuses those runs by name — honestly, and the run without
-  the levers still works.
+  `exposure_time_absolute`, `gain`, `white_balance_temperature` and
+  `focus_absolute` alongside `auto_exposure`. A camera without one refuses
+  the runs that ask for it BY NAME — honestly, and the run without the
+  levers still works.
 - **Confirming that camera can actually lock exposure.**
   `v4l2-ctl --list-ctrls-menus` should show `auto_exposure` with a
   `Manual Mode` entry. A camera without it will be refused on every run,
@@ -124,6 +128,17 @@ ends.
   whole point; automating the lock *confirmation* would forge the
   instrument's signature. Every lock this client reports is a read-back
   from the device, and a camera that will not lock refuses the run.
+- **Believing a read-back.** A driver that holds a value is not a sensor
+  that obeys it — 2026-09-01 proved that with three commanded integration
+  times, three clean read-backs and flat noise-level light at all three.
+  So a calibration-grade run on the native client MEASURES the lever
+  before it trusts it (`spectra/services/lever_selftest.py`), and the two
+  checks are never substitutes: the read-back is instant and catches a
+  control that was never taken; the self-test is the only thing that can
+  catch one that was taken and does nothing.
+- **Demoting the browser.** This step leaves browser sessions exactly as
+  they were: no self-test, no verdict, no new refusal. He is owed that
+  sentence when it comes, not a refusal he discovers.
 - **Taking the room back from a release.** That is an ownership decision,
   and the night trigger gets no scoped exception to it.
 - **Anything that drives a Home Assistant entity.** This side originates
@@ -153,7 +168,11 @@ ends.
 Proven offline, against a synthetic camera and an isolated local SPECTRA
 instance: the whole wire, the queue, the seam, the reconnect, the pose
 assertion, the kept partial, the declared retry, and every refusal on this
-path (`scripts/check_capture_queue_e2e.py`, 42 checks, run from pytest).
+path (`scripts/check_capture_queue_e2e.py`, 42 checks, run from pytest) —
+and, since the lever self-test, the same wire proving BOTH DIRECTIONS of
+the camera-truth gate: an honest camera passes and its map runs; tonight's
+own measured shape and a re-clamping camera are each refused by name
+(`scripts/check_lever_selftest.py`, also run from pytest).
 
 **Not proven, and stated rather than implied:**
 
@@ -181,13 +200,25 @@ path (`scripts/check_capture_queue_e2e.py`, 42 checks, run from pytest).
   OVER-indict, which costs re-takes and never corrupts a footprint. If a
   real night shows it over-indicting, the fix is to agree explicit entity
   ids with River — not to loosen the match.
-- **The manual exposure/gain levers have never met a real driver either.**
-  They are written against V4L2's documented control names and unit-tested
-  against read-backs, exactly like the lock — and they fail the same safe
-  way: a control this camera does not have, or one that answers with a
-  different number, refuses the run BY NAME rather than measuring under a
-  regime nobody asked for. A run that asks for neither is byte-for-byte the
+- **The four pinned levers have never met a real driver either.**
+  Integration time, gain, white balance temperature and focus are written
+  against V4L2's documented control names and unit-tested against
+  read-backs, exactly like the lock — and they fail the same safe way: a
+  control this camera does not have, or one that answers with a different
+  number, refuses the run BY NAME rather than measuring under a regime
+  nobody asked for. A run that asks for none of them is byte-for-byte the
   protocol that has always shipped.
+- **The lever self-test has never watched a real sensor.** Its judgement,
+  its tolerances and its three refusals are proven against a camera made of
+  a response curve — including tonight's own measured shape, which it
+  refuses — over the real client, a real WebSocket and the real map route
+  (`scripts/check_lever_selftest.py`). What it has never done is watch a
+  real lamp through a real lens. Its failure direction is the safe one: a
+  refusal costs a run and names the measurement; it cannot produce a map.
+  Its own honest bound is stated in the module — a camera whose declared
+  exposure range cannot span the factor reports `unprovable` and the run
+  goes ahead, because "we could not check" is not "we checked and it is
+  broken".
 - **No frame larger than 320x180 has crossed a real network.** The
   negotiation, the downgrade and the never-upscale rule are proven over a
   real uvicorn server and a real WebSocket with a synthetic camera
@@ -203,6 +234,8 @@ point of the read-back rule:
 | `ffmpeg` missing, device missing, device busy, device unreadable | the client still CONNECTS, reports `camera_error`, and every run refuses with that sentence naming the machine |
 | `v4l2-ctl` missing, or a control this camera does not have | the camera opens and reports **NOT LOCKED**, with "v4l2-ctl is not installed" (or the missing control) in its capabilities — the run refuses by name |
 | the control exists, the write is accepted, and the camera ignores it | the read-back says auto, so it reports **NOT LOCKED** — the run refuses by name |
+| a pinned lever is accepted and the camera keeps its own value | the read-back is a different number, so it is named in `manual_refusals` — the run refuses by name |
+| every read-back is perfect and the SENSOR ignores the exposure anyway (2026-09-01, twice) | the lever self-test drives a known emitter at two commanded times and measures — the run refuses by name in seconds, naming both commands and both measurements |
 
 None of those produce a map. A wrong V4L2 detail costs a refused run and a
 sentence saying which control was missing; it cannot produce a map that
@@ -274,6 +307,7 @@ start the client" work.
 | `spectra/services/capture_runs.py` | the ONE seam that executes one run — the page's button and the queue both go through it |
 | `spectra/services/capture_queue.py` | the runner: waits, walks, keeps partials, names pose changes, writes as it goes |
 | `spectra/api/capture_queue.py` | `POST`/`GET`/`stop` |
+| `spectra/services/lever_selftest.py` | **"the setting is not the light"** — the boot check that measures whether the exposure lever reaches the sensor, and the binding statement for its tolerances |
 | `spectra/services/mapping_refusals.py` | one wording per condition, including the three new ones |
 | `spectra/services/night_run.py` | **the night seam's binding statement** — the boundary, the planned end, the pricing, the abort |
 | `spectra/api/night_run.py` | `start` / `abort` (Bearer) + the open `fixtures` and `queue` reads |

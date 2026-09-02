@@ -1036,6 +1036,8 @@ async def run_mapping(room: RoomMap, deps: RunDeps, *,
                     else capture_settings.MAP_PROFILE),
         exposure_time=camera.exposure_time if camera else None,
         gain=camera.gain if camera else None,
+        white_balance=camera.white_balance if camera else None,
+        focus=camera.focus if camera else None,
         notes=list(camera.notes) if camera else [])
     dark_capture, lit_capture, exposure_refusal, window_note = capture_windows(
         dark_capture, lit_capture, req.exposure_time,

@@ -28,12 +28,16 @@ still runs and is still worth keeping, it just cannot show a wave. Each has a se
 confirmed to have one at its own site. Since the wire-frame raise of
 2026-09-01 that list also carries the camera's own PER-RUN SETTINGS: a
 client that sends a frame bigger than its camera, a client that never
-adopts the frame size a run needs, a manual integration time or gain the
-camera would not take, and an integration time so long the protocol cannot
-average its frames. Plus one FACT, `unseen_note`, which
-is neither: an emitter whose light this pose could not see ran perfectly
-well and is worth recording as such (`pose_changed_note` is the second
-one). What is NOT expected — a genuine bug
+adopts the frame size a run needs, one of the four PINNED LEVERS
+(integration time, gain, white balance temperature, focus) the camera would
+not take, and an integration time so long the protocol cannot average its
+frames. And since the LEVER SELF-TEST, one more that is a MEASUREMENT
+rather than a read-back: a camera whose exposure control does not reach its
+sensor (`lever_not_connected`, with `LEVER_REFUSING` naming the verdicts
+that stop a run and the two that deliberately do not). Plus one FACT,
+`unseen_note`, which is neither: an emitter whose light this pose could not
+see ran perfectly well and is worth recording as such (`pose_changed_note`
+is the second one). What is NOT expected — a genuine bug
 — still raises, and should: a sentence invented for it would be a lie.
 
 ONE WORDING PER CONDITION, here, so the route, the run and the page cannot
@@ -309,6 +313,107 @@ def manual_camera_unavailable(refused: list, request: dict,
               "Ask for a value inside this camera's own range, or run without "
               "the manual levers (the default is still: let the exposure "
               "settle on the scene, then freeze it).")
+
+
+#: THE LEVER SELF-TEST'S OWN VERDICT WORDS. Named here, beside every other
+#: expected condition, so the self-test, the run that refuses on it and the
+#: page that shows it cannot describe the same measurement three ways.
+LEVER_OK = "ok"
+LEVER_NO_SIGNAL = "no_signal"
+LEVER_NO_RESPONSE = "no_response"
+LEVER_DRIFT = "drift"
+LEVER_UNPROVABLE = "unprovable"
+LEVER_UNPROVEN = "unproven"
+#: The verdicts that stop a calibration-grade run, and every one of them is
+#: a MEASUREMENT. The two that do NOT are deliberate: "we could not check"
+#: is not "we checked and it is broken" — the same distinction `night_exit`
+#: draws between DARK and UNKNOWN, and `witness` between contaminated and
+#: witness_unavailable. Refusing on a check we could not make would invent
+#: a fault.
+#:
+#: A CAMERA THAT WOULD NOT TAKE THE TEST'S OWN COMMANDS is `unprovable`,
+#: not a refusal, and deliberately so: the run may not have asked for that
+#: lever at all, and its own `camera_refusal` gate still stops it by name
+#: if it did.
+LEVER_REFUSING = (LEVER_NO_SIGNAL, LEVER_NO_RESPONSE, LEVER_DRIFT)
+
+
+def lever_not_connected(verdict: dict) -> str:
+    """THE SETTING IS NOT THE LIGHT — the sentence for a camera that took
+    its exposure control and did nothing with it.
+
+    THE LIVE FAILURE THIS EXISTS FOR (2026-09-01, the browser path): three
+    integration times were commanded — 10 ms, 60 ms and 200 ms, a factor of
+    twenty end to end — and the driver echoed every one of them back
+    without complaint while the measured light stayed flat at the noise
+    floor (footprint weights 0.0, 0.0014 and 0.0051, against the
+    `light_field.UNSEEN_WEIGHT` of 1.0 an emitter must clear to count as
+    seen at all). Every read-back said yes. Nothing about the light did. An
+    evening of calibration went into a camera that was measuring its own
+    mood.
+
+    So the refusal quotes BOTH measurements and both commands, and says
+    what it means in plain words: a run through this camera would not be
+    measuring the room."""
+    a, b = _lever_pair(verdict)
+    kind = verdict.get("verdict")
+    head = (f"the camera's exposure control is not reaching the sensor. "
+            if kind == LEVER_NO_RESPONSE else
+            f"the camera measured no usable light at either commanded "
+            f"exposure. " if kind == LEVER_NO_SIGNAL else
+            f"the camera's sensitivity moved between two IDENTICAL "
+            f"commanded settings. ")
+    return (
+        head
+        + f"Commanded {a} and measured {_lever_weight(verdict, 0)}; "
+          f"commanded {b} and measured {_lever_weight(verdict, 1)}"
+        + (f"; commanded {b} again and measured "
+           f"{_lever_weight(verdict, 2)}" if len(verdict.get('readings') or []) > 2
+           else "")
+        + ". "
+        + ("A sensor that obeys its own integration time puts more light in "
+           "the frame when it is given more time; this one did not, so what "
+           "a calibration through it measured would be the camera's mood, "
+           "not the room. Nothing was written."
+           if kind in (LEVER_NO_RESPONSE, LEVER_DRIFT) else
+           "Either this pose sees none of that emitter's light, or the "
+           "exposure control is doing nothing — and either way a "
+           "calibration taken through it would measure nothing. Check the "
+           "aim first, then the camera. Nothing was written."
+           if kind == LEVER_NO_SIGNAL else
+           "The driver refused the commanded controls, so there is no "
+           "regime to measure in. Nothing was written.")
+        + " (spectra/services/lever_selftest.py; the driver's own read-back "
+          "passed — this is the measurement it cannot make.)")
+
+
+def _lever_pair(verdict: dict) -> tuple[str, str]:
+    readings = verdict.get("readings") or []
+    words = []
+    for i in (0, 1):
+        if i < len(readings):
+            e = readings[i].get("exposure_time")
+            words.append(f"an integration time of {e} (x100 us, "
+                         f"{(e or 0) * 1e-4:.4g}s)" if e is not None
+                         else "the camera's own converged exposure")
+        else:
+            words.append("nothing")
+    return words[0], words[1]
+
+
+def _lever_weight(verdict: dict, index: int) -> str:
+    readings = verdict.get("readings") or []
+    if index >= len(readings):
+        return "nothing"
+    r = readings[index]
+    if not r.get("ok"):
+        return f"no reading ({r.get('reason') or 'unknown'})"
+    # The floor rides on the verdict rather than being imported, so the
+    # sentence quotes the number the test actually judged against.
+    floor = float(verdict.get("signal_floor") or 0.0)
+    w = float(r.get("weight") or 0.0)
+    return (f"{w:.3f} ({'above' if w >= floor else 'below'} the {floor:g} an "
+            f"emitter must clear to count as seen)")
 
 
 def exposure_too_long(exposure_s: float, fps: float, min_frames: int,

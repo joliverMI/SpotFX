@@ -1,5 +1,6 @@
-"""WHAT THE CAMERA IS ASKED TO DO FOR ONE RUN — the wire frame size, the
-manual integration time and the gain, and what each of them COSTS.
+"""WHAT THE CAMERA IS ASKED TO DO FOR ONE RUN — the wire frame size and the
+FOUR PINNED LEVERS (integration time, gain, white balance temperature,
+focus), and what each of them COSTS.
 
 PURE. No camera, no session, no store, no clock: sizes in, arithmetic out.
 Both clients (`spectra/web/src/rooms/mappingCapture.ts` on a phone and
@@ -78,14 +79,25 @@ is a 4x improvement on 320x180 and enough for a per-fixture target — and
 the run says which rung it got.
 
 ────────────────────────────────────────────────────────────────────────────
-THREE. THE LEVERS: MANUAL INTEGRATION TIME AND GAIN
+THREE. THE FOUR PINNED LEVERS (`LEVER_BOUNDS`)
 ────────────────────────────────────────────────────────────────────────────
 
-Both are PER-RUN requests, both default to "ask for nothing", and asking
-for nothing preserves today's behaviour exactly: converge-then-freeze (let
+INTEGRATION TIME, GAIN, WHITE BALANCE TEMPERATURE and FOCUS. All four are
+PER-RUN requests, all four default to "ask for nothing", and asking for
+nothing preserves today's behaviour exactly: converge-then-freeze (let
 auto-exposure settle on the scene, then lock it), which is what both
 clients already do and what every map taken so far was taken under. Nothing
 about his room changes unless a run asks.
+
+THE LAST TWO ARE NATIVE-CLIENT ONLY, and that is a fact about the browser
+rather than a policy: a page cannot reach `white_balance_temperature` or
+`focus_absolute` at all, so a browser session reports both as not read —
+which is what a run asking for one then refuses on. `spectra/capture_client/
+camera.py` is where all four are written and read back.
+
+AND A READ-BACK IS STILL NOT THE LIGHT. Every claim below is about what the
+DRIVER holds. Whether the SENSOR obeys it needs a measurement, and that
+lives in `spectra/services/lever_selftest.py`.
 
 EXPOSURE TIME IS IN 100-MICROSECOND UNITS, on purpose and on both paths:
 V4L2's `exposure_time_absolute` is in 100 us units and the W3C image-capture
@@ -94,14 +106,19 @@ both sides already speak and NOTHING converts it — a unit conversion is a
 place for a factor of ten to hide, and a factor of ten in integration time
 is the difference between a readable frame and a white one.
 
-GAIN IS PASSED THROUGH VERBATIM AND NEVER CONVERTED. V4L2 `gain` and the
-browser's `iso` are device-specific scales with no shared meaning; the only
-honest thing to do with the number is hand it to the driver and report what
-the driver said it became. A conversion here would be an invention.
+GAIN AND FOCUS ARE PASSED THROUGH VERBATIM AND NEVER CONVERTED. V4L2
+`gain`/`focus_absolute` and the browser's `iso` are device-specific scales
+with no shared meaning; the only honest thing to do with the number is hand
+it to the driver and report what the driver said it became. A conversion
+here would be an invention. WHITE BALANCE is a temperature in Kelvin, which
+IS a shared unit — and is still not converted, for the same reason: the
+driver's own range is what finally applies.
 
-BOTH ARE READ BACK, ALWAYS. The rule the exposure lock already lives by:
-automating the REQUEST is the point; automating the CONFIRMATION is forging
-the instrument's signature. A returning write call is never evidence.
+ALL FOUR ARE READ BACK, ALWAYS, and `camera_refusal` checks every one of
+them off ONE declaration (`LEVER_BOUNDS`) so a fifth cannot be added on one
+side only. The rule the exposure lock already lives by: automating the
+REQUEST is the point; automating the CONFIRMATION is forging the
+instrument's signature. A returning write call is never evidence.
 
 ────────────────────────────────────────────────────────────────────────────
 FOUR. FRAME-RATE HONESTY — a long integration is not free
@@ -327,6 +344,29 @@ MAX_EXPOSURE_TIME = 100_000
 #: non-negative and not absurd. The read-back is the statement.
 MIN_GAIN = 0
 MAX_GAIN = 100_000
+#: WHITE BALANCE TEMPERATURE, in Kelvin — V4L2's `white_balance_temperature`
+#: once the device's own auto white balance is off. A sanity bound only,
+#: wide on purpose for the same reason the exposure one is: the device's own
+#: declared range is narrower and is what finally applies, and the read-back
+#: is the statement.
+MIN_WHITE_BALANCE = 1_000
+MAX_WHITE_BALANCE = 20_000
+#: FOCUS, on the device's own scale (V4L2 `focus_absolute`) with no shared
+#: meaning across drivers — so, like gain, the only bound is non-negative
+#: and not absurd.
+MIN_FOCUS = 0
+MAX_FOCUS = 100_000
+
+#: THE FOUR PINNED LEVERS, in one place so a fifth is one row rather than
+#: eight edits: (field, min, max, unit words, words for a refusal).
+LEVER_BOUNDS: tuple[tuple[str, int, int, str, str], ...] = (
+    ("exposure_time", MIN_EXPOSURE_TIME, MAX_EXPOSURE_TIME, "100 us units",
+     "an integration time"),
+    ("gain", MIN_GAIN, MAX_GAIN, "", "a gain"),
+    ("white_balance", MIN_WHITE_BALANCE, MAX_WHITE_BALANCE, "K",
+     "a white balance temperature"),
+    ("focus", MIN_FOCUS, MAX_FOCUS, "", "a focus"),
+)
 
 
 @dataclass
@@ -340,16 +380,27 @@ class CameraRequest:
     frame_size: Optional[tuple[int, int]] = None
     exposure_time: Optional[int] = None
     gain: Optional[int] = None
+    #: THE OTHER TWO PINNED LEVERS (2026-09-01): white balance TEMPERATURE
+    #: in Kelvin and FOCUS on the device's own scale. Same discipline as the
+    #: first two — a request, never a claim, and the read-back decides.
+    white_balance: Optional[int] = None
+    focus: Optional[int] = None
     #: what was clamped on the way in, in his words, so a bounded value is
     #: never silently different from the one he typed
     notes: list[str] = field(default_factory=list)
 
     @property
+    def levers(self) -> dict:
+        """The pinned levers this request actually names, by field."""
+        return {name: getattr(self, name)
+                for name, *_ in LEVER_BOUNDS
+                if getattr(self, name) is not None}
+
+    @property
     def manual(self) -> bool:
-        """Does this ask for manual integration time or gain at all? A
-        request that asks for neither must not make a camera that offers
-        neither refuse."""
-        return self.exposure_time is not None or self.gain is not None
+        """Does this ask for ANY of the four pinned levers? A request that
+        asks for none must not make a camera that offers none refuse."""
+        return bool(self.levers)
 
     @property
     def exposure_seconds(self) -> Optional[float]:
@@ -362,12 +413,14 @@ class CameraRequest:
                                 "height": self.frame_size[1]}
                                if self.frame_size else None),
                 "exposure_time": self.exposure_time, "gain": self.gain,
+                "white_balance": self.white_balance, "focus": self.focus,
                 "exposure_seconds": self.exposure_seconds,
                 "notes": list(self.notes)}
 
 
 def request(*, frame_size: Optional[tuple[int, int]] = None,
-            exposure_time=None, gain=None) -> CameraRequest:
+            exposure_time=None, gain=None, white_balance=None,
+            focus=None) -> CameraRequest:
     """A bounded request from whatever a caller sent. Out-of-range values
     are CLAMPED AND SAID — unlike the protocol waits, which fall silently
     back to their default, because these are deliberate levers and a
@@ -381,10 +434,11 @@ def request(*, frame_size: Optional[tuple[int, int]] = None,
             f"{frame_size[0]}x{frame_size[1]} is not one of the declared "
             f"frame sizes ({_ladder_words()}) — the session's own size is "
             f"used instead")
-    req.exposure_time = _clamp_int(exposure_time, MIN_EXPOSURE_TIME,
-                                   MAX_EXPOSURE_TIME, "exposure_time",
-                                   "100 us units", req.notes)
-    req.gain = _clamp_int(gain, MIN_GAIN, MAX_GAIN, "gain", "", req.notes)
+    asked = {"exposure_time": exposure_time, "gain": gain,
+             "white_balance": white_balance, "focus": focus}
+    for name, lo, hi, unit, _words in LEVER_BOUNDS:
+        setattr(req, name, _clamp_int(asked[name], lo, hi, name, unit,
+                                      req.notes))
     return req
 
 
@@ -696,17 +750,16 @@ class CameraNegotiation:
             return None
         lock = self._camera_lock_view()
         refused = [str(x) for x in (lock.get("manual_refusals") or [])]
-        # A camera that would not say what its integration time or gain
-        # became is refusing just as much as one that named a control it
-        # does not have — and more dangerously, because the frames still
-        # arrive and only the numbers are wrong.
-        if req.exposure_time is not None and lock.get("exposure_time") is None:
-            refused.append("the camera never reported an integration time "
-                           "back, so there is nothing to check the request "
-                           "against")
-        if req.gain is not None and lock.get("gain") is None:
-            refused.append("the camera never reported a gain back, so there "
-                           "is nothing to check the request against")
+        # A camera that would not say what a pinned control became is
+        # refusing just as much as one that named a control it does not
+        # have — and more dangerously, because the frames still arrive and
+        # only the numbers are wrong. Checked for ALL FOUR levers off one
+        # declaration, so a fifth cannot be added on one side only.
+        for name, _lo, _hi, _unit, words in LEVER_BOUNDS:
+            if getattr(req, name) is not None and lock.get(name) is None:
+                refused.append(f"the camera never reported {words} back, so "
+                               f"there is nothing to check the request "
+                               f"against")
         if not refused:
             return None
         from spectra.services import mapping_refusals

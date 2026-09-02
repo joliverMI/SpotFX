@@ -33,9 +33,19 @@ type Queue = {
   counts: Record<string, number>; summary: string; notes: string[];
   first_pose: string; items: Item[];
 };
+/** THE LEVER SELF-TEST'S VERDICT for a NATIVE session — whether this
+ * camera's exposure control was measured to reach its sensor. Empty on a
+ * browser session, which is untouched by that check; `native` says whether
+ * the question is even asked, so "no verdict" never reads as "failed one".
+ * See `spectra/services/lever_selftest.py`. */
+type Lever = {
+  verdict?: string; proven?: boolean; reason?: string;
+  response_ratio?: number | null; commanded_factor?: number;
+};
 type SessionView = {
   present: boolean; locked: boolean; session_id: string; pose_id: string;
   refusal: string | null; client: Record<string, unknown>;
+  native?: boolean; lever?: Lever;
 };
 type Body = { running: boolean; current: Queue | null; session: SessionView; recent: Queue[] };
 
@@ -100,6 +110,21 @@ export default function UnattendedCard() {
       </p>
       {session && !session.locked && session.refusal && (
         <p className="warn small">{session.refusal}</p>
+      )}
+      {/* A DRIVER THAT HOLDS A SETTING IS NOT A SENSOR THAT OBEYS IT. The
+        * line above says the camera reported itself locked; this one says
+        * whether that was ever MEASURED. A browser session shows nothing
+        * here, because nothing is asked of it. */}
+      {session?.native && session.lever?.verdict && (
+        <p className={session.lever.proven ? 'ok small' : 'warn small'}>
+          {session.lever.proven
+            ? `Exposure lever: measured real${
+                session.lever.response_ratio
+                  ? ` (${session.lever.response_ratio}× light for a commanded ${
+                      session.lever.commanded_factor}×)` : ''}`
+            : session.lever.reason || 'Exposure lever: not proven'}{' '}
+          <HelpLink topic="lever-self-test" />
+        </p>
       )}
 
       {queue && (

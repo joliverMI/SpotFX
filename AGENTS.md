@@ -3888,12 +3888,15 @@ sides against a box-integrating camera whose reported
 `tests/test_commissioning.py`, `tests/test_commissioning_per_fixture.py`,
 `tests/test_gray_code.py`.
 
-## THE WIRE FRAME AND THE TWO CAMERA LEVERS (`capture_settings.py`)
+## THE WIRE FRAME AND THE FOUR PINNED CAMERA LEVERS (`capture_settings.py`)
 
 **`spectra/services/capture_settings.py` is the binding statement** — the
-ladder of declared frame sizes, the arithmetic that chose them, the two
-manual levers, and the frame-rate coupling. Read it before touching
-anything that sends, sizes or exposes a capture frame. Six things:
+ladder of declared frame sizes, the arithmetic that chose them, the four
+pinned levers (`LEVER_BOUNDS`: integration time, gain, white balance
+temperature, focus — the last two added 2026-09-01, NATIVE CLIENT ONLY,
+since the browser can reach neither), and the frame-rate coupling. Read it
+before touching anything that sends, sizes or exposes a capture frame. Six
+things:
 
 - **THE WIRE FRAME IS PER RUN, NOT ONE NUMBER (2026-09-01, owner-approved:
   "raise video frame size and tweak whatever settings help").** A MAP still
@@ -3986,6 +3989,74 @@ asserted), `tests/test_capture_settings.py`, `tests/test_camera_levers_in_runs.p
 client, WebSocket and server), `tests/test_camera_levers_and_night.py` (this
 build and the night run composing). Help: `camera-settings`,
 `exposure-comparison`.
+
+## "THE SETTING IS NOT THE LIGHT" — the lever self-test (`lever_selftest.py`)
+
+**`spectra/services/lever_selftest.py` is the binding statement.** Read it
+before touching anything that decides whether a camera can be trusted.
+
+THE EVENING IT EXISTS FOR (2026-09-01): the browser path commanded three
+integration times — 10 ms, 60 ms, 200 ms, a factor of twenty end to end —
+every one was accepted, every read-back agreed, and the measured light did
+not move (footprint weights 0.0, 0.0014, 0.0051 against
+`light_field.UNSEEN_WEIGHT` = 1.0), while the camera's own converged regime
+wandered 0.23 -> 0.01 between two runs of the same thing. **A read-back
+proves the DRIVER holds a value. It cannot prove the SENSOR obeys it.** The
+two checks both run and neither substitutes for the other. Six things:
+
+- **THREE CAPTURES, and the order is the design**: A (dim), B (= A x
+  `COMMANDED_FACTOR`), B' (the SAME command again). A->B answers "does more
+  commanded time put more light in the frame"; B->B' answers "does this
+  camera hold still when nothing was asked to change". The repeat is at the
+  BRIGHT regime because a ratio between two near-noise readings measures
+  nothing.
+- **SIGNAL IS CHECKED BEFORE RESPONSE, and that ordering IS the fix.**
+  His three real weights are proportional to two significant figures and
+  every one of them is noise — a response check run first would have
+  PASSED them. So the bright regime must clear `UNSEEN_WEIGHT` before any
+  ratio is quoted, and the no-signal wording names the honest ambiguity (a
+  pose that sees nothing and a dead lever look identical, and neither can
+  be calibrated through).
+- **The measurement is the MAP'S OWN** — `room_mapping._map_one` against a
+  throwaway room with no `save_room`, `exposure_test.py`'s own precedent.
+  Never a second idea of "how much light".
+- **`unprovable`/`unproven` NEVER REFUSE** (`mapping_refusals.
+  LEVER_REFUSING` is the list of the four that do, and every one of them is
+  a MEASUREMENT). "We could not check" is not "we checked and it is
+  broken" — the same distinction `night_exit` draws between DARK and
+  UNKNOWN and `witness` between contaminated and witness_unavailable.
+  Refusing on a check that could not be made would invent a fault.
+- **WIRED AT `capture_runs`, the one seam**, before a map / commissioning
+  pass / exposure comparison whose session is the NATIVE client, inside
+  the run lock (it drives a light, so it takes the same held room and the
+  same camera every capture takes — it acquires nothing new). **The verdict
+  is cached ON THE SESSION OBJECT**, which is what makes "at establishment,
+  and after any reconnect" structural rather than remembered:
+  `mapping_session.open_session` builds a NEW session per WebSocket, so a
+  reconnect cannot inherit one, and the fingerprint carries the pose id so
+  a camera reopen inside one connection cannot either.
+- **BROWSER SESSIONS ARE UNTOUCHED** — no self-test, no verdict, no new
+  refusal. That is a later, separate build and he is owed the sentence when
+  it comes rather than discovering it as a refusal. `capture_runs.
+  session_view()['native']` is the tell.
+
+**PERSISTENCE IS SOFTWARE, on the other half of this.** Whatever a session
+pins is re-asserted by `camera.open()` (a reboot, a re-plug, a dead capture
+pipe, a scaler restart) and by the client at every reconnect
+(`session._reassert`, counted in `state.reasserts`), then READ BACK.
+Nothing is written to disk and nothing about the camera's own memory is
+relied on. A `config` message naming one lever does not un-pin the others;
+un-pinning is saying so explicitly (`null`).
+
+Proofs: `tests/test_lever_selftest.py` (the pure judgement red/green/drift,
+the whole run, and a test that goes RED on the defect it was written for —
+with the preflight removed, tonight's camera runs a whole map and reports a
+ROOM-shaped failure, sending him to move a camera that was standing in
+exactly the right place), `tests/test_camera_pinned_settings.py` (four
+controls written, read back, and each one's stuck-driver refusal), and
+`scripts/check_lever_selftest.py` — both directions over a real server, a
+real WebSocket, the REAL capture client and the real map route, run from
+`tests/test_light_field_checks.py`.
 
 ## THE NIGHT RUN — HA pushes, we answer; and it never takes his room
 

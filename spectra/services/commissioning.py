@@ -1472,6 +1472,7 @@ async def run_commission(mapper_id: str, deps: room_mapping.RunDeps, *,
     req = capture_settings.CameraRequest(
         frame_size=req.frame_size or READ_PROFILE,
         exposure_time=req.exposure_time, gain=req.gain,
+        white_balance=req.white_balance, focus=req.focus,
         notes=list(req.notes))
     capture_s, too_long = capture_window(
         req.exposure_time, sess.observed_fps() or mapping_session.FRAME_FPS)

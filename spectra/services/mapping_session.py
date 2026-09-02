@@ -84,12 +84,23 @@ The short version:
     interpolated pixels would inflate `gray_code.resolution_report`'s count
     and make an unreadable target report that it is readable.
 
-THE CAMERA'S OTHER TWO LEVERS ride the same `config` message: manual
-integration time and gain, both optional, both defaulting to today's
-converge-then-freeze behaviour, both READ BACK from the device and reported
-here like the lock is. `capture_settings.CameraRequest` is what a run asks
-for; `LockState` is what the camera said. They are never the same object,
-for the same reason `lock_refusal` reads a read-back and not a constraint.
+THE CAMERA'S FOUR PINNED LEVERS ride the same `config` message: integration
+time, gain, white balance temperature and focus — all optional, all
+defaulting to today's converge-then-freeze behaviour, all READ BACK from the
+device and reported here like the lock is.
+`capture_settings.CameraRequest` is what a run asks for; `LockState` is what
+the camera said. They are never the same object, for the same reason
+`lock_refusal` reads a read-back and not a constraint. Only the NATIVE
+client can reach the last two; a browser session reports them as None, which
+is what "not reported" has always meant here.
+
+AND A DRIVER'S ANSWER IS STILL NOT THE LIGHT. Every read-back on this page
+proves what the driver holds. Whether the SENSOR obeys it is a different
+claim and needs a measurement — `spectra/services/lever_selftest.py` drives
+a known emitter, commands two integration times a known factor apart, and
+watches the measured light move. A native session runs it before any
+calibration-grade run and its verdict rides on the session
+(`lever_verdict`).
 
 WHAT IS WRITTEN TO DISK BY THIS MODULE: nothing. Frames live in the bounded
 in-memory ring and the derived grids in another; both are dropped when the
@@ -209,10 +220,22 @@ class LockState:
     #: See `spectra/services/capture_settings.py`.
     exposure_time: Optional[float] = None
     gain: Optional[float] = None
+    #: THE OTHER TWO PINNED LEVERS (2026-09-01), same rule and same source:
+    #: white balance TEMPERATURE in Kelvin and FOCUS on the device's own
+    #: scale. Only the native client can pin these — the browser page has no
+    #: way to reach them — so they are None on every browser session, which
+    #: is exactly what "not reported" has always meant here.
+    white_balance: Optional[float] = None
+    focus: Optional[float] = None
+    #: Whether this camera's own continuous autofocus reads OFF. None when
+    #: it has no such control.
+    focus_auto: Optional[bool] = None
     #: The device's own declared ranges, when it declares them — what a
     #: refusal quotes so "gain 800 was refused" says what the camera offers.
     exposure_time_range: Optional[list[float]] = None
     gain_range: Optional[list[float]] = None
+    white_balance_range: Optional[list[float]] = None
+    focus_range: Optional[list[float]] = None
     #: Controls a run ASKED FOR that this camera does not offer or did not
     #: take, in the client's own words. A run that asked for a manual lever
     #: and got this refuses BY NAME rather than measuring under whatever the
@@ -234,10 +257,16 @@ class LockState:
                 "white_balance_capabilities": list(self.white_balance_capabilities),
                 "camera_error": self.camera_error, "source": self.source,
                 "exposure_time": self.exposure_time, "gain": self.gain,
+                "white_balance": self.white_balance, "focus": self.focus,
+                "focus_auto": self.focus_auto,
                 "exposure_time_range": (list(self.exposure_time_range)
                                         if self.exposure_time_range else None),
                 "gain_range": (list(self.gain_range) if self.gain_range
                                else None),
+                "white_balance_range": (list(self.white_balance_range)
+                                        if self.white_balance_range else None),
+                "focus_range": (list(self.focus_range) if self.focus_range
+                                else None),
                 "manual_refusals": list(self.manual_refusals),
                 "locked": self.locked}
 
@@ -362,6 +391,14 @@ class MappingSession(capture_settings.CameraNegotiation):
         #: the instant a lock is lost rather than at the next capture.
         self.run_abort: Optional[str] = None
         self.run_label: Optional[str] = None
+        #: THE LEVER SELF-TEST'S VERDICT for this connection
+        #: (`spectra/services/lever_selftest.py`), or None until one has been
+        #: earned. It lives on the SESSION and nowhere else, which is what
+        #: makes it un-inheritable: a reconnect builds a new session
+        #: (`open_session`) and starts with nothing, and the verdict's own
+        #: fingerprint carries the pose id so a camera reopen inside one
+        #: connection cannot reuse it either.
+        self.lever_verdict: Any = None
 
     # ── lifecycle ─────────────────────────────────────────────────────────
     async def open(self) -> None:
@@ -526,8 +563,14 @@ class MappingSession(capture_settings.CameraNegotiation):
             source=str(payload.get("source") or ""),
             exposure_time=_number(payload.get("exposure_time")),
             gain=_number(payload.get("gain")),
+            white_balance=_number(payload.get("white_balance")),
+            focus=_number(payload.get("focus")),
+            focus_auto=(None if payload.get("focus_auto") is None
+                        else bool(payload.get("focus_auto"))),
             exposure_time_range=_pair(payload.get("exposure_time_range")),
             gain_range=_pair(payload.get("gain_range")),
+            white_balance_range=_pair(payload.get("white_balance_range")),
+            focus_range=_pair(payload.get("focus_range")),
             manual_refusals=[str(x) for x in
                              (payload.get("manual_refusals") or [])],
             changed_at=self._clock())
@@ -687,6 +730,9 @@ class MappingSession(capture_settings.CameraNegotiation):
                 "grids_held": len(self.grids),
                 "full_frames_held": len(self.full),
                 "keep_full_frames": self.keep_full_frames,
+                "lever_verdict": (self.lever_verdict.as_dict()
+                                  if hasattr(self.lever_verdict, "as_dict")
+                                  else None),
                 **self.camera_status(),
                 "latest_frame": latest.meta() if latest else None,
                 "last_error": self.last_error,
