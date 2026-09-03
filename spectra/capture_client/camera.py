@@ -139,6 +139,83 @@ def choose_frame_size(want: tuple[int, int], source_w: int,
 #: for the same reason and roughly as long.
 SETTLE_BEFORE_LOCK_S = 1.5
 
+
+# ── FRESH FRAMES: the stream must not hand back what it saw a second ago ───
+#
+# THE FAILURE THIS EXISTS FOR (2026-09-02, his laptop, the first time the
+# lever self-test met a real camera): three commanded regimes measured
+# 0.000, 444.282 and 0.043 — two IDENTICAL commands ten-thousand-fold
+# apart — while every driver read-back held Manual throughout. Nothing was
+# wrong with the lever. The frames were old.
+#
+# WHY THEY WERE OLD, measured rather than reasoned
+# (`scripts/check_stream_freshness.py` reproduces it with no camera): this
+# client reads pixels out of an ffmpeg pipe, and the path between the two
+# holds whole frames — the OS pipe plus the `StreamReader` limit set in
+# `_open_at`. At the map rung that is up to NINETEEN 320x180 frames, and it
+# SATURATES there: 3.8 seconds of backlog at 5 fps, established the first
+# time the client stops reading for a moment and never given back, because
+# the frame loop paces itself at exactly the camera's own rate and can
+# therefore never catch up. It stops reading for a moment constantly:
+# `open()` sleeps SETTLE_BEFORE_LOCK_S and then runs `apply_lock`, and
+# both `apply_lock` and the paced `read_lock` are BLOCKING `v4l2-ctl`
+# subprocesses on the event loop.
+#
+# 3.8 s is longer than a whole capture phase (a settle of 0.7 plus a window
+# of 1.5), so a lit window can land entirely on frames whose photons predate
+# the lamp — measuring nothing — while a slightly shallower backlog catches
+# it in full. That is not noise between the two readings; it is the two
+# sides of one boundary, which is exactly the shape he saw.
+#
+# THE RULE, and it is one rule with two ready-tests (`newest_of`): a frame
+# is only ever returned when nothing NEWER is already waiting. Draining the
+# measured 19-frame saturation costs 23 ms, so freshness is free.
+#
+#: How long a probe waits before deciding no further frame is ALREADY
+#: buffered. An already-buffered frame comes back in about a millisecond
+#: (measured: 19 of them in 23 ms); the next frame from the camera is one
+#: frame period away — 200 ms at the wire's own 5 fps and still 33 ms at 30.
+#: 20 ms sits an order of magnitude above the first and below the second.
+DRAIN_PROBE_S = 0.02
+#: A bound so a camera streaming far faster than this client reads can
+#: never spin here. More than three times the measured saturation depth,
+#: and still under a tenth of a second of draining.
+DRAIN_MAX_FRAMES = 64
+
+#: HOW MANY FRAMES A CONTROL CHANGE COSTS BEFORE THE SENSOR SHOWS IT.
+#: Draining above removes everything already in the PIPE; this is the
+#: SENSOR's own lag, which no drain can reach. A UVC control lands at a
+#: frame boundary, so the frame in flight and the frame already integrating
+#: when the write lands were both exposed under the OLD regime — two is the
+#: arithmetic minimum and the third is one frame of margin for a driver
+#: that queues the write to the next boundary rather than this one.
+#: Discarded frames are counted (`regime_discards`), never silently
+#: swallowed, and they cost 600 ms once per regime at 5 fps.
+SENSOR_APPLY_FRAMES = 3
+
+
+async def newest_of(try_read, *, max_frames: int = DRAIN_MAX_FRAMES
+                    ) -> tuple[Optional[bytes], int]:
+    """THE ONE DRAIN RULE, written once so the real camera and every rig
+    that models a lagging stream cannot hold two ideas of it.
+
+    `try_read(blocking)` returns the next whole frame — waiting for one when
+    `blocking` is true, and returning None rather than waiting when it is
+    not. Returns (newest frame, how many older ones were dropped).
+
+    A CANCELLED PROBE MUST NOT EAT A PARTIAL FRAME, and for the real camera
+    it does not: `asyncio.StreamReader.readexactly` only takes bytes out of
+    its buffer once the whole frame is there, so a probe that times out
+    mid-frame leaves every byte where it was and the next call resumes."""
+    data = await try_read(True)
+    dropped = 0
+    while data is not None and dropped < max_frames:
+        nxt = await try_read(False)
+        if nxt is None:
+            break
+        data, dropped = nxt, dropped + 1
+    return data, dropped
+
 #: The control names, modern first then the legacy UVC spelling. Both are
 #: tried and whichever the device actually has is the one reported.
 EXPOSURE_CONTROLS = ("auto_exposure", "exposure_auto")
@@ -260,10 +337,28 @@ class BaseCamera:
     """Everything a camera must be, and the pose token every one of them
     mints at open."""
 
+    #: DOES THIS CAMERA GUARANTEE THAT `frame()` RETURNS THE NEWEST FRAME
+    #: IT HAS, and that the frames a control change was still reaching are
+    #: gone? Declared per backend rather than assumed, and put on the wire
+    #: in `hello`, so a server measuring light through this client can say
+    #: which claim it is measuring under instead of discovering it in a
+    #: reading that disagrees with its own repeat. False here on purpose:
+    #: a new backend claims freshness by implementing it.
+    fresh_frames = False
+
     def __init__(self) -> None:
         self.pose_token = ""
         self.opened = False
         self.lock = CameraLock()
+        #: How many older frames have been dropped to keep the stream
+        #: fresh, and how many were discarded because a control had just
+        #: moved. Counters, not promises: a depth nobody can see is a depth
+        #: nobody can argue with.
+        self.stale_dropped = 0
+        self.regime_discards = 0
+        #: Frames still owed to the sensor after a control moved — see
+        #: SENSOR_APPLY_FRAMES.
+        self._apply_owed = 0
         #: The wire size this camera sends, and the camera image it is
         #: derived from. Both go on every frame so the server can assert
         #: "never upscale" independently of the client that promised it.
@@ -375,6 +470,10 @@ class V4L2Camera(BaseCamera):
     """A UVC webcam on the capture machine: `ffmpeg` for pixels, `v4l2-ctl`
     for the controls, and no image library anywhere in between."""
 
+    #: This backend drains its own transport and pays off a control change
+    #: in frames before returning one — see `frame()` and `apply_lock`.
+    fresh_frames = True
+
     def __init__(self, device: str = "/dev/video0", *, fps: float = 5.0,
                  capture_size: tuple[int, int] = (1920, 1080),
                  input_format: str = "",
@@ -415,6 +514,7 @@ class V4L2Camera(BaseCamera):
 
     def describe(self) -> dict:
         return {"kind": "v4l2", "device": self.device,
+                "fresh_frames": self.fresh_frames,
                 "capture_size": list(self.capture_size), "fps": self.fps,
                 "frame_size": list(self.frame_size),
                 "max_frame_size": list(choose_frame_size(
@@ -565,7 +665,17 @@ class V4L2Camera(BaseCamera):
         was asked for, and the values are written after that."""
         wanted = dict(self._wanted)
         wanted.update({k: v for k, v in levers.items() if k in wanted})
+        # A CONTROL THAT ACTUALLY MOVED COSTS THE SENSOR FRAMES. Compared
+        # against what was last ASKED FOR, not against the read-back: the
+        # read-back is taken after this write, so comparing with it would
+        # always say "no change" and the discard would never arm. Re-asking
+        # for the value already held is free, which is what keeps an
+        # ordinary reconnect's re-assert from paying for nothing.
+        moved = any(wanted.get(name) != self._wanted.get(name)
+                    for name, *_ in LEVERS)
         self._wanted = wanted
+        if moved:
+            self._apply_owed = SENSOR_APPLY_FRAMES
         controls = self._controls()
         refusals: list[str] = []
         for name in EXPOSURE_CONTROLS:
@@ -766,14 +876,39 @@ class V4L2Camera(BaseCamera):
             return ""
         return (err or b"").decode(errors="replace").strip()[-400:]
 
-    async def frame(self) -> Optional[bytes]:
+    async def _read(self, blocking: bool) -> Optional[bytes]:
+        """One whole frame off the pipe. `blocking` waits for the camera to
+        produce one; otherwise this returns None the moment it is clear
+        nothing is ALREADY waiting — see DRAIN_PROBE_S for why 20 ms
+        answers that question and cannot answer any other."""
         if self._reader is None:
             return None
+        timeout = 10.0 if blocking else min(
+            DRAIN_PROBE_S, 0.5 / max(0.5, float(self.fps)))
         try:
             return await asyncio.wait_for(
-                self._reader.readexactly(self.frame_bytes), timeout=10.0)
+                self._reader.readexactly(self.frame_bytes), timeout=timeout)
         except (asyncio.TimeoutError, asyncio.IncompleteReadError):
             return None
+
+    async def frame(self) -> Optional[bytes]:
+        """THE NEWEST FRAME THIS CAMERA HAS, and never one the sensor was
+        still catching up to.
+
+        Two things happen here and they answer two different lags. The
+        DISCARD pays off a control change the sensor has not shown yet
+        (SENSOR_APPLY_FRAMES); the DRAIN throws away everything the
+        transport has queued behind the newest (DRAIN_PROBE_S). Neither is
+        an optimisation: a frame from before the lamp went on measures the
+        dark room and says nothing about it."""
+        while self._apply_owed > 0:
+            if await self._read(True) is None:
+                return None
+            self._apply_owed -= 1
+            self.regime_discards += 1
+        data, dropped = await newest_of(self._read)
+        self.stale_dropped += dropped
+        return data
 
     async def close(self) -> None:
         self.opened = False
@@ -802,6 +937,15 @@ class SyntheticCamera(BaseCamera):
     run refuse. What this class must never grow is a default that reports
     locked when the caller said nothing."""
 
+    #: A function has no transport and no queue: the frame it returns is the
+    #: scene as of this instant, and a control change is visible in the very
+    #: next one. So this camera is fresh BY CONSTRUCTION — which is also
+    #: exactly why it could never have caught the stale-stream defect of
+    #: 2026-09-02, and why the rig that models a lagging stream overrides
+    #: this to False and implements the queue it is modelling
+    #: (`scripts/check_stream_freshness.py`).
+    fresh_frames = True
+
     def __init__(self, render: Callable[[], bytes], *,
                  lock: Optional[CameraLock] = None, fps: float = 20.0,
                  fail: str = "",
@@ -827,6 +971,7 @@ class SyntheticCamera(BaseCamera):
 
     def describe(self) -> dict:
         return {"kind": "synthetic", "fps": self.fps,
+                "fresh_frames": self.fresh_frames,
                 "capture_size": list(self.capture_size),
                 "frame_size": list(self.frame_size)}
 

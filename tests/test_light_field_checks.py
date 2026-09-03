@@ -72,6 +72,14 @@ def _run(name: str, timeout: int) -> str:
     # wall — an honest camera PASSES and its map runs; tonight's own
     # measured shape and a re-clamping camera are each refused by name.
     ("check_lever_selftest.py", 600, "ALL CHECKS PASSED"),
+    # A STAMP IS NOT A PHOTON. The self-test above proves the JUDGEMENT
+    # against a camera that is a function; this measures the TRANSPORT that
+    # a function does not have — how many whole frames really sit between
+    # ffmpeg and the client (19, 3.8 s at 5 fps, and it saturates there),
+    # that the read this replaced handed back frames seconds old, and that
+    # a capture window over the real wire now averages only frames stamped
+    # within a frame period of being taken.
+    ("check_stream_freshness.py", 300, "STREAM FRESHNESS CHECKS PASSED"),
     # THE POSE FINGERPRINT's boundaries, SWEPT rather than sampled: a camera
     # move and a room change of growing size, parallax, the instrument's own
     # repeat wander, and the two anchor sets that can never discriminate.

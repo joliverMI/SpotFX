@@ -348,6 +348,43 @@ LEVER_UNPROVEN = "unproven"
 LEVER_REFUSING = (LEVER_NO_SIGNAL, LEVER_NO_RESPONSE, LEVER_DRIFT)
 
 
+#: THE NAMED FIRST CHECK for a lever verdict whose readings disagree, when
+#: the client holding the camera has not said its frames are fresh. FIRST
+#: is the whole point — the same discipline `SCONCE_MAINS_FIRST_CHECK`
+#: exists for. Two identical commands ten-thousand-fold apart is not a
+#: sensor's behaviour; it is what a queued transport looks like, and
+#: sending somebody to look at a working camera instead is the hour this
+#: sentence exists to save.
+STALE_STREAM_FIRST_CHECK = (
+    "FIRST, THE CAMERA HOST'S OWN BUILD: this client did not say its "
+    "frames are fresh, which means it predates the transport drain in "
+    "spectra/capture_client/camera.py. A client that queues whole frames "
+    "hands back a frame stamped after the lamp write that was taken "
+    "BEFORE it — measured on 2026-09-02 at up to 19 frames, 3.8 seconds "
+    "at 5 fps, which is longer than a whole capture phase — so two "
+    "identical commands land on opposite sides of that boundary and "
+    "disagree by any factor at all. Update the capture client on this "
+    "machine and run this again before looking at the camera.")
+
+
+def stale_frame_pipeline(host: str = "") -> str:
+    """A FACT, never a refusal: this client has not promised that a frame
+    it sent is the newest one it had.
+
+    Not a refusal because it is not a measurement — it is a build's
+    silence, and a browser (which cannot answer at all) is already refused
+    earlier and for a broader reason. It is carried so a reading that
+    cannot be accounted for is EXPLAINED rather than mysterious, which is
+    the same reason `unseen_note` and `witness_unavailable` exist."""
+    who = f"the capture client on {host}" if host else "this capture client"
+    return (f"{who} did not report whether its frames are fresh, so a "
+            f"reading taken through it cannot be shown to be of the moment "
+            f"it was taken in. Frames may have been queued in its "
+            f"transport and captured before the light write they are "
+            f"credited to. Nothing is refused on this — it is a build's "
+            f"silence, not a measurement.")
+
+
 def lever_not_connected(verdict: dict) -> str:
     """THE SETTING IS NOT THE LIGHT — the sentence for a camera that took
     its exposure control and did nothing with it.
@@ -393,6 +430,8 @@ def lever_not_connected(verdict: dict) -> str:
            if kind == LEVER_NO_SIGNAL else
            "The driver refused the commanded controls, so there is no "
            "regime to measure in. Nothing was written.")
+        + (" " + STALE_STREAM_FIRST_CHECK
+           if verdict.get("fresh_frames") is False else "")
         + " (spectra/services/lever_selftest.py; the driver's own read-back "
           "passed — this is the measurement it cannot make.)")
 
