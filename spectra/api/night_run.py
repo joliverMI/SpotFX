@@ -6,6 +6,8 @@ morning backstop is built against.
   POST /api/night-run/abort      Bearer   {"event": "sleep-ended"
                                            | "light-touched"
                                            | "morning-routine", ...}
+  GET  /api/night-run/would-start open    the preflight: would a start,
+                                          arriving now, run? (a pure read)
   GET  /api/night-run/morning    open     what ran, and what changed
   GET  /api/night-run/fixtures   open     the two lists (below)
   GET  /api/night-run/queue      open     the declaration
@@ -133,6 +135,37 @@ async def abort(body: EventBody,
                 authorization: str | None = Header(default=None)):
     _authorise(authorization)
     return await night_run.abort(body.model_dump())
+
+
+@router.get("/would-start")
+async def would_start():
+    """THE PREFLIGHT — would a start event arriving right now run?
+
+    His house PREPARES before it starts a night: River's side fires the
+    "Dark Music" envelope, then pushes start. On 2026-09-01 that order lit
+    his house up while he slept — the envelope fired, the start declined by
+    name (no declared queue, the designed outcome), and a restore then ran
+    against a night that never began. The agreed fix (the seam's addenda
+    7-9) reverses it: ASK FIRST, PREPARE ONLY ON YES. On a no, nothing was
+    ever touched, so his house is byte-identical by not-touching.
+
+    OPEN, like every other read here, and River asked for it that way: a
+    read cannot start anything. It writes nothing, holds nothing, drives no
+    light and mutates no state — call it a hundred times and every store is
+    byte-identical.
+
+    THE ANSWER IS THE START'S OWN. `night_run.evaluate_start` is the one
+    gate chain; `night_run.start` calls it too, so `reason` here is the
+    literal sentence that start would have recorded, not a preflight
+    rewording of it. A second implementation would be worse than no
+    preflight — a confident wrong answer at 1am with nobody awake.
+
+    A YES CAN GO STALE, and the design says so rather than pretending
+    otherwise: closing that window would mean reserving something, which is
+    preparation-before-confirmation in disguise. The house's safety does
+    not rest on the yes — it snapshots before it prepares and restores on
+    any answer from start that is not `running`."""
+    return await night_run.would_start()
 
 
 @router.get("/morning")
