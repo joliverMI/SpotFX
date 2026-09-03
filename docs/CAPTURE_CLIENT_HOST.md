@@ -144,6 +144,12 @@ scripts/install_capture_client.sh \
 scripts/install_capture_client.sh --check
 ```
 
+On Debian-family systems (Debian, Ubuntu, Raspberry Pi OS) the standard
+library's `venv` imports fine while the part that seeds pip into a new
+environment ships separately, so a venv built without it comes out with no
+pip. The script checks for that and refuses by name with the fix:
+`sudo apt install -y python3-venv python3-pip`.
+
 Then, on a headless host, so the unit starts at boot rather than at login:
 
 ```bash
