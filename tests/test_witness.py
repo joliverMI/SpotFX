@@ -207,3 +207,71 @@ def test_a_non_sconce_diagnostic_is_left_exactly_as_it_was():
     assert witness.sconce_diagnostic("boom", sconce_involved=False) == "boom"
     assert witness.mentions_sconce("crystal-mapper blk3") is False
     assert witness.mentions_sconce("sconce-kitchen-left") is True
+
+
+# ── a 200-shaped error body is UNVERIFIED, never clean ─────────────────────
+#
+# River's live report: her over-cap answer is an ERROR OBJECT with a 200, and
+# a payload with no `changes` key parsed naively reads as zero rows — a
+# genuine CLEAN claim, invented by this side. The two guarded paths (the
+# client-side window cap, and HTTP >= 400) never fire on it.
+
+def test_a_200_with_an_error_object_is_witness_unavailable_not_clean():
+    """RED against the old parse, which returned [] here and let `judge`
+    hand back a clean verdict for a window the witness never answered."""
+    def handler(request):
+        return httpx.Response(200, json={
+            "error": "window too large",
+            "max_window_s": 7200})
+
+    async def main():
+        async with _client(handler) as client:
+            return await witness.check_window(1_700_000_000.0,
+                                              1_700_000_060.0,
+                                              ["light.ours"], client=client)
+
+    verdict = _run(main())
+    assert verdict.status == witness.VERDICT_UNAVAILABLE
+    assert verdict.clean is False
+    assert verdict.contaminated is False
+
+
+def test_the_absent_key_sentence_names_what_was_received():
+    """So a future change to River's service is a READ, not a mystery: the
+    sentence carries the keys that arrived and the error marker itself."""
+    with pytest.raises(witness.WitnessUnavailable) as caught:
+        witness.parse_rows({"error": "window too large", "max_window_s": 7200})
+    said = str(caught.value)
+    assert "'changes'" in said
+    assert "error, max_window_s" in said
+    assert "window too large" in said
+
+
+def test_an_error_marker_beside_real_rows_is_also_unverified():
+    with pytest.raises(witness.WitnessUnavailable):
+        witness.parse_rows({"changes": [{"entity_id": "light.hall"}],
+                            "error": "partial scan"})
+    with pytest.raises(witness.WitnessUnavailable):
+        witness.parse_rows({"changes": [], "witness": "degraded"})
+
+
+def test_a_payload_that_is_neither_object_nor_list_is_unverified():
+    for payload in (None, "", "ok", 0):
+        with pytest.raises(witness.WitnessUnavailable):
+            witness.parse_rows(payload)
+
+
+def test_an_explicit_empty_changes_list_is_a_genuine_clean():
+    """The other half, and it must stay: an answered window with nothing in
+    it is the ordinary healthy case."""
+    assert witness.parse_rows({"changes": []}) == []
+    assert witness.parse_rows({"changes": [], "witness": "ok"}) == []
+    assert witness.parse_rows([]) == []
+    verdict = witness.judge([], ["light.ours"], 1.0, 2.0)
+    assert verdict.status == witness.VERDICT_CLEAN
+    assert verdict.clean is True
+
+
+def test_a_bare_list_of_rows_still_parses_as_before():
+    rows = witness.parse_rows([{"entity_id": "light.hallway"}])
+    assert [r.entity_id for r in rows] == ["light.hallway"]
