@@ -4322,9 +4322,38 @@ night_run.py`'s module docstring is the binding statement; the seam contract
 both captains agreed is `/home/javi/fleet-seam/river-dj-night-run-seam.md`.
 `POST /api/night-run/{start,abort}` (Bearer, `SPECTRA_NIGHT_RUN_TOKEN`, read
 at request time, absent-or-wrong is the same 401), `GET /api/night-run/
-fixtures` (open read), `GET/PUT /api/night-run/queue` (the declaration).
-**NO POLLING anywhere on our side, on any cadence** — he pushes, we answer
-reads. Seven things, and each one has cost something already:
+{would-start,fixtures,morning}` (open reads), `GET/PUT /api/night-run/queue`
+(the declaration). **NO POLLING anywhere on our side, on any cadence** — he
+pushes, we answer reads. Eight things, and each one has cost something
+already:
+
+- **ASK FIRST, PREPARE ONLY ON YES — `GET /api/night-run/would-start`,
+  and THE ONE-PREDICATE GUARANTEE IS THE POINT OF IT** (2026-09-02, the
+  seam's addenda 7-9). His house PREPARES before it starts a night (River
+  fires the "Dark Music" envelope, then pushes start), so on 2026-09-01 the
+  envelope fired, the start declined by name — no declared queue, the
+  DESIGNED outcome — and his house sat lit while he slept. The preflight is
+  a PURE READ (open, like every other read here; no writes, no state, no
+  room touched) answering the exact three gates a start applies: owned?
+  declared-and-parses? prices inside the 05:30 bound? — plus the two
+  already-running gates. `{"would_start": true, ...}` or `{"would_start":
+  false, "reason": <the start's OWN sentence>, "code": <not_owned |
+  no_declared_queue | already_running | will_not_fit, or a calibration
+  declaration's own refusal kind>}`, and the planned end / priced seconds /
+  window ride along because the pricing already computed them.
+  **`night_run.evaluate_start` IS THE ONE GATE CHAIN — `start()` calls it
+  too, and neither caller keeps a gate of its own.** A preflight with its
+  own copy would be worse than none: a confident wrong answer at 1am with
+  nobody awake. `tests/test_night_would_start.py` holds that structurally
+  (a sentinel proving both callers route through the one function, a
+  yes-under-a-hostile-world proving neither kept a private veto, and a
+  callgraph check that no gate NAME appears in either caller's body) and
+  BOTH halves were verified RED against a re-introduced second
+  implementation. The staleness window is NAMED, not closed: a yes can go
+  stale, and closing that would mean reserving something — preparation
+  before confirmation in disguise. Safety does not rest on the yes; River
+  snapshots before preparing and restores on any start answer that is not
+  `state == "running"`.
 
 - **THE BOUNDARY, and it is not negotiable: a start arriving while SPECTRA
   does not ALREADY hold the room DECLINES by name, records the declined
@@ -4424,6 +4453,10 @@ tracking a shield change, abort, the morning ending),
 re-asserted, the lineage landing, the mixing gate at 2am, a morning-cut
 amendment applying nothing, the morning read),
 `tests/test_night_run_api.py` (auth, the payloads, both reads),
+`tests/test_night_would_start.py` (the preflight: the one-predicate drift
+proof both ways, every decline's sentence asserted against the START's own
+record rather than a copy, the honest yes, and byte-identical stores across
+ten calls),
 `tests/test_night_exit.py` (RED-WHEN-LYING against the real headless
 pipeline and real `fx.utils.WLED` transport), `tests/test_night_power.py`.
 

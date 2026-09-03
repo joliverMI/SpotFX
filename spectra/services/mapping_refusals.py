@@ -1128,6 +1128,19 @@ def night_already_running(run_id: str) -> str:
 MORNING_ROUTINE = "morning-routine"
 
 
+#: A capture queue started OUTSIDE this seam — from the page or the command
+#: line — is already holding the same room and the same camera. A night
+#: started over the top of it would be two runs fighting; and stopping HIS
+#: queue to run ours would be helping ourselves to more than the room. So
+#: the night declines and leaves it alone. Recorded under the same machine
+#: word as a duplicate start (`already_running`), because from the outside
+#: they are the same fact: something is already using the room.
+NIGHT_FOREIGN_QUEUE_RUNNING = (
+    "The night run declined: a capture queue is already running (started "
+    "outside this seam), so it was left alone. Nothing about the room was "
+    "touched.")
+
+
 def night_ended_by_morning() -> str:
     """AN ORDINARY ENDING, and the one place in this file where saying so
     plainly is the whole job.

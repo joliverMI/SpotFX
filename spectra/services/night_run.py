@@ -11,8 +11,18 @@ better signal than a person, and Home Assistant already has it.
     POST /api/night-run/start   {"event": "sleep-window-start", "ts": ...,
                                  "source": "home-assistant"}
     POST /api/night-run/abort   {"event": "sleep-ended" | ..., "ts": ...}
+    GET  /api/night-run/would-start the PREFLIGHT (below)
     GET  /api/night-run/fixtures    the two lists the morning backstop needs
     GET/PUT /api/night-run/queue    the declaration
+
+ASK FIRST, PREPARE ONLY ON YES. His house prepares before it starts a night
+— River's side fires the "Dark Music" envelope, then pushes start — so on
+2026-09-01 the envelope fired, the start declined by name (no declared
+queue: the DESIGNED outcome), and his house sat lit while he slept.
+`would_start` is the fix's half on this side: a pure read answering the
+exact gates a start applies, computed BY THE SAME FUNCTION the start calls
+(`evaluate_start`). See that function's own section for why one
+implementation is structural here rather than tidiness.
 
 HE PUSHES; WE NEVER POLL. Nothing in this module or its route reaches out to
 Home Assistant, on any cadence, for any reason. The events arrive and the
@@ -752,6 +762,173 @@ def fits_guard(price: dict, *, clock=time.time):
     return guard
 
 
+# ── THE GATE CHAIN — ONE IMPLEMENTATION, TWO CALLERS ───────────────────────
+#
+# `start()` and the `would-start` PREFLIGHT ask the same three questions:
+# do we hold the room, is a queue declared and does it parse, and does it
+# price inside the hard planned end. THEY ASK THEM THROUGH THIS ONE
+# FUNCTION, on purpose and structurally.
+#
+# The preflight exists because his house PREPARES before it starts a night
+# (River's side fires the "Dark Music" envelope), and preparing for a night
+# that then declines is what lit his house up while he slept on
+# 2026-09-01. So the sequencing became: ask first, prepare only on yes.
+# A preflight that answered with its own copy of the gates would be worse
+# than no preflight at all — it would be a confident wrong answer, the
+# failure this codebase refuses everywhere else it measures anything.
+#
+# SO THERE IS NO SECOND IMPLEMENTATION TO DRIFT. `evaluate_start` is the
+# whole chain; `start()` calls it and then acts on the answer; `would_start`
+# calls it and then reports the answer. `tests/test_night_would_start.py`
+# goes RED the moment either grows a gate of its own.
+#
+# IT IS A PURE READ. Nothing here writes a file, holds a room, drives a
+# light or mutates a module global — the RECORD of a decline is written by
+# `_decline`, which only `start()` calls. The one cost is the pricing read
+# (a room's plan, the live virtual list), which `start()` already paid at
+# exactly this point and which is the only honest way to answer the third
+# question.
+#
+# THE STALENESS WINDOW IS NAMED, NOT CLOSED (the seam's own addendum 9): a
+# yes can go stale between the preflight and the start, and closing that
+# would mean reserving something, which is preparation before confirmation
+# wearing a different hat. The house's safety does not depend on the yes —
+# it snapshots before it prepares and restores on any non-running answer.
+
+
+@dataclass
+class StartGate:
+    """The answer to "would a start event arriving RIGHT NOW run?", plus
+    everything a real start needs so it does not resolve any of it twice."""
+    ok: bool
+    #: The machine word `NightRun.refusal` carries — "not_owned",
+    #: "no_declared_queue", "already_running", "will_not_fit", or a
+    #: calibration declaration's own kind (`night_calibration`).
+    refusal: str = ""
+    #: `mapping_refusals`' own sentence for that condition, verbatim.
+    detail: str = ""
+    #: Parsed, validated items — only on a yes.
+    items: list = field(default_factory=list)
+    #: What the queue was priced at. Present on a yes AND on a
+    #: `will_not_fit` no, because the numbers are the reason.
+    price: dict = field(default_factory=dict)
+    declaration: dict = field(default_factory=dict)
+    #: `night_calibration.Target` / `Resolved` when the declaration named a
+    #: calibration; None when it was a plain item list.
+    target: Any = None
+    resolved: Any = None
+
+
+async def evaluate_start(*, now: Optional[float] = None) -> StartGate:
+    """THE THREE GATES, in the order a start applies them. A pure read.
+
+    The order is load-bearing and unchanged from when `start()` carried it
+    inline: THE BOUNDARY IS READ FIRST, before anything else is resolved or
+    priced, so a declined night cannot have had a side effect — and so the
+    preflight's cheapest answer is also its most important one."""
+    owner = _owner()
+    if not spectra_owns():
+        # THE BOUNDARY. See `mapping_refusals.night_not_owned` — the night
+        # trigger gets no room-take exception, ever.
+        return StartGate(False, "not_owned",
+                         mapping_refusals.night_not_owned(owner))
+    if running():
+        return StartGate(False, "already_running",
+                         mapping_refusals.night_already_running(
+                             current.id if current else "?"))
+    if capture_queue.running():
+        # Not this seam's queue — somebody started one from the page or the
+        # command line. It holds the same room and the same camera, so a
+        # night started over the top of it would be two runs fighting; and
+        # stopping HIS queue to run ours would be helping ourselves to more
+        # than the room.
+        return StartGate(False, "already_running",
+                         mapping_refusals.NIGHT_FOREIGN_QUEUE_RUNNING)
+    declaration = load_declaration()
+    if declaration is None:
+        return StartGate(False, "no_declared_queue",
+                         mapping_refusals.NO_DECLARED_NIGHT_QUEUE)
+
+    # A CALIBRATION, OR A PLAIN LIST. Resolved through
+    # `night_calibration`, which reaches the calibration's own declaration
+    # and `amendment.resolve_subset` — the same functions the /run and
+    # /amend routes use — and then `capture_queue.parse_items`, the one
+    # validator. A calibration deleted between his declaring it and his
+    # falling asleep declines by name here, before anything is priced.
+    target = night_calibration.parse_target(declaration)
+    resolved = None
+    if target.declared or target.refusal:
+        resolved = night_calibration.resolve(target)
+        if resolved.refusal:
+            return StartGate(False, resolved.refusal_kind, resolved.refusal,
+                             declaration=dict(declaration))
+        items = capture_queue.parse_items(resolved.items)
+    else:
+        try:
+            items = capture_queue.parse_items(declaration["items"])
+        except ValueError as exc:
+            # A declaration that parsed when he wrote it and does not now (a
+            # hand-edited file, a renamed field) is still a decline with a
+            # sentence, never a 3am traceback.
+            return StartGate(False, "no_declared_queue",
+                             f"{mapping_refusals.NO_DECLARED_NIGHT_QUEUE} "
+                             f"(the stored declaration no longer parses: "
+                             f"{exc})",
+                             declaration=dict(declaration))
+
+    # PRICED BEFORE ANYTHING IS HELD, against the hard planned end. A queue
+    # that cannot finish before his morning routine (and the blinds opening
+    # just after it) does not start: daylight in the frame is a contaminant,
+    # so this is a bound, not a preference.
+    price = await price_items(items, now=now)
+    if price["total_seconds"] > price["window_seconds"]:
+        return StartGate(False, "will_not_fit",
+                         mapping_refusals.night_will_not_fit(
+                             price["total_seconds"], price["window_seconds"],
+                             PLANNED_END_LABEL),
+                         price=price, declaration=dict(declaration))
+    return StartGate(True, items=items, price=price,
+                     declaration=dict(declaration), target=target,
+                     resolved=resolved)
+
+
+async def would_start() -> dict:
+    """THE PREFLIGHT — would a start event arriving right now run?
+
+    A PURE READ answering the exact gates the real start applies, computed
+    by the exact function the real start calls. No auth (a read cannot start
+    anything), no writes, no state: calling it a hundred times leaves every
+    store byte-identical.
+
+    It also carries the planned end and, when a queue is declared, what that
+    queue priced at — both already computed by the gate chain, and both
+    things River's side may want to show."""
+    gate = await evaluate_start()
+    # `declared` is a REPORT FIELD, not a gate — it is the same cheap signal
+    # `status_brief()` already publishes (is there a declaration on disk at
+    # all), so the two reads River's side may poll cannot say different
+    # things about the same file. Whether that declaration would actually
+    # RUN is `would_start`, which is the gate chain's answer and nothing
+    # else's.
+    out: dict = {"would_start": gate.ok,
+                 "planned_end": planned_end_at(),
+                 "planned_end_label": PLANNED_END_LABEL,
+                 "declared": declared()}
+    if gate.price:
+        out["priced_seconds"] = gate.price.get("total_seconds")
+        out["window_seconds"] = gate.price.get("window_seconds")
+    if gate.ok:
+        out["label"] = str(gate.declaration.get("label") or "")
+        out["items"] = len(gate.items)
+        return out
+    # THE SENTENCE THE START ITSELF WOULD GIVE, not a preflight rewording of
+    # it — it comes back from the one gate chain, so there is nothing here
+    # that could describe his night differently from the record.
+    out["reason"] = gate.detail
+    out["code"] = gate.refusal
+    return out
+
+
 # ── starting ───────────────────────────────────────────────────────────────
 
 def _decline(trigger: dict, refusal: str, detail: str,
@@ -768,70 +945,23 @@ def _decline(trigger: dict, refusal: str, detail: str,
 async def start(trigger: dict) -> NightRun:
     """A sleep-window start event. Returns the night's record either way —
     a decline is a record, not an exception, because that is what makes the
-    boundary safe to leave armed."""
+    boundary safe to leave armed.
+
+    EVERY GATE IT APPLIES IS `evaluate_start`'s, and there is no second copy
+    of one here: the `would-start` preflight the house asks BEFORE it
+    prepares its envelope calls the same function, so the two can never
+    disagree except by time passing between them. See that function's own
+    section comment for why that is structural rather than a convention."""
     global current, _task
 
-    owner = _owner()
-    if not spectra_owns():
-        # THE BOUNDARY. Read first, before anything else is resolved or
-        # touched, so a declined night cannot have had a side effect.
-        return _decline(trigger, "not_owned",
-                        mapping_refusals.night_not_owned(owner))
-    if running():
-        return _decline(trigger, "already_running",
-                        mapping_refusals.night_already_running(
-                            current.id if current else "?"))
-    if capture_queue.running():
-        # Not this seam's queue — somebody started one from the page or the
-        # command line. It holds the same room and the same camera, so a
-        # night started over the top of it would be two runs fighting; and
-        # stopping HIS queue to run ours would be helping ourselves to more
-        # than the room.
-        return _decline(trigger, "already_running",
-                        "The night run declined: a capture queue is already "
-                        "running (started outside this seam), so it was left "
-                        "alone. Nothing about the room was touched.")
-    declaration = load_declaration()
-    if declaration is None:
-        return _decline(trigger, "no_declared_queue",
-                        mapping_refusals.NO_DECLARED_NIGHT_QUEUE)
-
-    # A CALIBRATION, OR A PLAIN LIST. Resolved through
-    # `night_calibration`, which reaches the calibration's own declaration
-    # and `amendment.resolve_subset` — the same functions the /run and
-    # /amend routes use — and then `capture_queue.parse_items`, the one
-    # validator. A calibration deleted between his declaring it and his
-    # falling asleep declines by name here, before anything is priced.
-    target = night_calibration.parse_target(declaration)
-    resolved = None
-    if target.declared or target.refusal:
-        resolved = night_calibration.resolve(target)
-        if resolved.refusal:
-            return _decline(trigger, resolved.refusal_kind, resolved.refusal)
-        items = capture_queue.parse_items(resolved.items)
-    else:
-        try:
-            items = capture_queue.parse_items(declaration["items"])
-        except ValueError as exc:
-            # A declaration that parsed when he wrote it and does not now (a
-            # hand-edited file, a renamed field) is still a decline with a
-            # sentence, never a 3am traceback.
-            return _decline(trigger, "no_declared_queue",
-                            f"{mapping_refusals.NO_DECLARED_NIGHT_QUEUE} "
-                            f"(the stored declaration no longer parses: "
-                            f"{exc})")
-
-    # PRICED BEFORE ANYTHING IS HELD, against the hard planned end. A queue
-    # that cannot finish before his morning routine (and the blinds opening
-    # just after it) does not start: daylight in the frame is a contaminant,
-    # so this is a bound, not a preference.
-    price = await price_items(items)
-    if price["total_seconds"] > price["window_seconds"]:
-        return _decline(trigger, "will_not_fit",
-                        mapping_refusals.night_will_not_fit(
-                            price["total_seconds"], price["window_seconds"],
-                            PLANNED_END_LABEL),
-                        price=price)
+    gate = await evaluate_start()
+    if not gate.ok:
+        # A DECLINE IS A RECORD. `_decline` is the only thing on this path
+        # that writes anything, which is exactly what keeps the preflight a
+        # pure read while sharing every gate with this one.
+        return _decline(trigger, gate.refusal, gate.detail, price=gate.price)
+    declaration, items = gate.declaration, gate.items
+    price, target, resolved = gate.price, gate.target, gate.resolved
 
     entries = await _device_listing()
     run = NightRun(id=uuid.uuid4().hex[:12], state=STATE_RUNNING,
