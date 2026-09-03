@@ -22,7 +22,6 @@ autouse `_isolated_night_run`, and no queue is ever actually run.
 from __future__ import annotations
 
 import asyncio
-import inspect
 import time
 
 import pytest
@@ -153,12 +152,25 @@ def test_neither_caller_keeps_a_private_veto(monkeypatch):
         "the start vetoed a yes the shared gate gave — it kept a gate"
 
 
-@pytest.mark.parametrize("fn", [night_run.start, night_run.would_start])
-def test_neither_caller_carries_a_gate_of_its_own(fn):
+@pytest.mark.parametrize("name", ["start", "would_start"])
+def test_neither_caller_carries_a_gate_of_its_own(name):
     """The callgraph half of the same guarantee: no gate NAME appears in
     either caller's own body. A new gate added to one and not the other is
-    exactly the drift the preflight cannot survive."""
-    body = inspect.getsource(fn)
+    exactly the drift the preflight cannot survive.
+
+    Read out of the SOURCE FILE BY NAME (`ast`), not by
+    `inspect.getsource` — that resolves a live function object's recorded
+    line numbers against whatever the file says now, so an edit to the
+    module while a long test run is in flight makes it quote a DIFFERENT
+    function entirely. Caught doing exactly that here; a proof that can
+    accuse the wrong function is not a proof."""
+    import ast
+    tree = ast.parse(
+        open(night_run.__file__, "r", encoding="utf-8").read())
+    fn = next(n for n in tree.body
+              if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+              and n.name == name)
+    body = ast.unparse(fn)
     assert "evaluate_start(" in body
     for gate in ("spectra_owns(", "capture_queue.running(",
                  "load_declaration(", "price_items(",
@@ -166,8 +178,8 @@ def test_neither_caller_carries_a_gate_of_its_own(fn):
                  "night_already_running(", "night_will_not_fit(",
                  "NO_DECLARED_NIGHT_QUEUE"):
         assert gate not in body, \
-            (f"{fn.__name__} applies '{gate}' itself — the preflight and the "
-             f"start must share ONE gate chain, or they will disagree")
+            (f"{name} applies '{gate}' itself — the preflight and the start "
+             f"must share ONE gate chain, or they will disagree")
 
 
 # ── EVERY NO IS THE START'S OWN SENTENCE ───────────────────────────────────
