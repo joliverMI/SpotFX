@@ -221,12 +221,56 @@ def _parse_ts(value: Any) -> float:
         return 0.0
 
 
+def _describe_payload(payload: Any) -> str:
+    """What arrived, in one short clause, so a future change to River's
+    service is a READ rather than a mystery. Never the whole body (it can
+    carry anything) and never a token: keys for an object, a type name
+    otherwise, plus an explicit error/status marker when one is present."""
+    if isinstance(payload, dict):
+        keys = ", ".join(sorted(str(k) for k in payload)) or "no keys"
+        marker = ""
+        for name in ("error", "detail", "message", "witness", "status"):
+            if name in payload:
+                marker += f'; {name}={str(payload[name])[:160]!r}'
+        return f"a JSON object carrying [{keys}]{marker}"
+    return f"a JSON {type(payload).__name__}"
+
+
 def parse_rows(payload: Any) -> list[ChangeRow]:
     """The wire's rows -> `ChangeRow`s, tolerantly. A row shape this side
     does not recognise is still KEPT (with whatever entity id it carries),
     because the safe direction for a contamination check is to notice a
-    change it cannot fully describe, never to drop it."""
-    rows = payload.get("changes") if isinstance(payload, dict) else payload
+    change it cannot fully describe, never to drop it.
+
+    AN ABSENT `changes` LIST IS UNVERIFIED, NEVER AN EMPTY ONE. River's
+    over-cap answer is a 200-shaped ERROR OBJECT, and a payload with no
+    `changes` key parsed naively reads as zero rows — i.e. as a genuine
+    CLEAN claim, which is the one thing this instrument must never invent.
+    So anything that is not an explicit list of rows raises
+    `WitnessUnavailable` and lands on the `witness_unavailable` verdict
+    (marks, never discards, no clean claim). `{"changes": []}` is a real
+    clean and stays one."""
+    if isinstance(payload, dict):
+        if not isinstance(payload.get("changes"), list):
+            raise WitnessUnavailable(
+                "the witness answered without a 'changes' list, so nothing "
+                "here can say whether the house changed light during this "
+                f"capture — it sent {_describe_payload(payload)}")
+        marker = payload.get("witness")
+        if payload.get("error") is not None or (
+                marker is not None and str(marker).lower() != "ok"):
+            raise WitnessUnavailable(
+                "the witness answered with an error marker beside its rows, "
+                "so nothing here claims this capture was clean — it sent "
+                f"{_describe_payload(payload)}")
+        rows: Any = payload["changes"]
+    elif isinstance(payload, list):
+        rows = payload
+    else:
+        raise WitnessUnavailable(
+            "the witness answered with no change rows at all, so nothing "
+            "here can say whether the house changed light during this "
+            f"capture — it sent {_describe_payload(payload)}")
     out: list[ChangeRow] = []
     for row in rows or []:
         if not isinstance(row, dict):
