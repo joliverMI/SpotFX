@@ -107,6 +107,30 @@ def calibration_grade(session: Any) -> bool:
     return is_native(session)
 
 
+def serves_fresh_frames(session: Any) -> Optional[bool]:
+    """DOES THIS CLIENT PROMISE THAT A FRAME IT SENT IS THE NEWEST ONE IT
+    HAD? True, False, or None for a client that did not say.
+
+    THE THREE ANSWERS ARE NOT TWO. A build that predates
+    `spectra/capture_client/camera.py`'s drain sends no such field, and it
+    is exactly the build whose readings cannot be accounted for — but so is
+    a browser, which has no way to answer and is refused earlier and for a
+    broader reason. Collapsing None onto False would tell a page holding a
+    camera for AIMING that its transport is stale, which is neither true
+    nor useful; collapsing it onto True would let tonight's shape happen
+    again with nothing named.
+
+    WHY THE SERVER ASKS AT ALL. A footprint is `lit - dark` and the whole
+    instrument assumes a frame stamped after the lamp write carries light
+    from after it. A transport that queues whole frames breaks that
+    silently — see `spectra/services/lever_selftest.py` for the evening it
+    cost. This is a CLAIM, not a read-back, so it is only ever used to NAME
+    a condition; nothing refuses on it."""
+    hello = getattr(session, "hello", None) or {}
+    got = hello.get("fresh_frames")
+    return None if got is None else bool(got)
+
+
 def measured_by(session: Any) -> str:
     """WHOSE CAMERA a run would measure with, in his words — so a page
     showing a Start button is never ambiguous about which device is about to

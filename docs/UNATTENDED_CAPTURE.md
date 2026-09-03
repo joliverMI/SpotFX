@@ -241,7 +241,17 @@ own measured shape and a re-clamping camera are each refused by name
   menu parsing and the ffmpeg pipeline are written against V4L2's
   documented shapes and unit-tested against a fake `v4l2-ctl` speaking a
   real `--list-ctrls-menus` transcript — that is not the same as a webcam.
-  The first run on his laptop is the measurement.
+  The first run on his laptop is the measurement. **It happened on
+  2026-09-02 and it found one**: the lever self-test refused his camera
+  with two identical commands ten-thousand-fold apart, and the cause was
+  the transport, not the lever. Every proof of this path had used the
+  synthetic camera, which is a function with no queue in front of it; a
+  real ffmpeg pipe holds up to 19 whole frames, 3.8 s at 5 fps, and hands
+  back the oldest. The client now drains to the newest frame and pays off a
+  control change in frames, and the transport is MEASURED rather than
+  modelled (`scripts/check_stream_freshness.py`). See AGENTS.md,
+  "A STAMP IS NOT A PHOTON". **The PIXEL path has now been proven against
+  a real OS pipe; the CONTROL path still has not met a webcam.**
 - **Nothing has run against his room.** By instruction.
 - **No night run has happened.** The seam, its refusals, the planned-end
   bound, the abort, the power ownership, the exit report and the witness

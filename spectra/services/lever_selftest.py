@@ -217,6 +217,11 @@ class Reading:
     saturated_fraction: float = 0.0
     dark_frames: int = 0
     lit_frames: int = 0
+    #: How long this reading waited after commanding its integration time
+    #: before it measured anything — `capture_settings.regime_settle_s`.
+    #: Recorded because a reading taken too soon is indistinguishable from
+    #: a broken lever, and the number is the difference.
+    regime_settle_s: float = 0.0
     lock: dict = field(default_factory=dict)
 
     def as_dict(self) -> dict:
@@ -225,6 +230,7 @@ class Reading:
                 "weight": round(self.weight, 4),
                 "saturated_fraction": self.saturated_fraction,
                 "dark_frames": self.dark_frames, "lit_frames": self.lit_frames,
+                "regime_settle_s": self.regime_settle_s,
                 "lock": self.lock}
 
 
@@ -248,6 +254,12 @@ class Verdict:
     response_ratio: Optional[float] = None
     repeat_ratio: Optional[float] = None
     signal_floor: float = light_field.UNSEEN_WEIGHT
+    #: Did the client holding this camera promise that a frame it sent is
+    #: the newest one it had? True / False / None — `capture_source.
+    #: serves_fresh_frames` owns the three answers. Carried onto the
+    #: refusal sentence, which names a stale transport as the FIRST thing
+    #: to check when the readings disagree and this is False.
+    fresh_frames: Optional[bool] = None
     readings: list = field(default_factory=list)
     problems: list = field(default_factory=list)
     notes: list = field(default_factory=list)
@@ -277,6 +289,7 @@ class Verdict:
                 "response_ratio": self.response_ratio,
                 "repeat_ratio": self.repeat_ratio,
                 "signal_floor": self.signal_floor,
+                "fresh_frames": self.fresh_frames,
                 "min_response_ratio": min_response_ratio(),
                 "repeat_band": REPEAT_BAND,
                 "readings": [r.as_dict() for r in self.readings],
@@ -384,7 +397,14 @@ async def run_selftest(room: RoomMap, deps: "room_mapping.RunDeps", *,
     sess = deps.session
     out = Verdict(session_id=getattr(sess, "id", ""),
                   pose_id=getattr(sess, "pose_id", ""),
+                  fresh_frames=capture_source.serves_fresh_frames(sess),
                   commanded_factor=COMMANDED_FACTOR)
+    if out.fresh_frames is False:
+        # A FACT, carried, never a refusal — see `stale_frame_pipeline`.
+        # It is on the verdict BEFORE any capture so it is recorded even
+        # when the run refuses on ownership two lines below.
+        out.problems.append(mapping_refusals.stale_frame_pipeline(
+            str((getattr(sess, "hello", None) or {}).get("host") or "")))
 
     refusal = sess.refusal()
     if refusal:
@@ -517,9 +537,20 @@ async def _one_regime(label: str, exposure: int, scratch: RoomMap, program,
     if problem:
         reading.reason = problem
         return reading
+    # AND THEN WAIT FOR THE SENSOR, not just the driver. `await_camera`
+    # returns when the DRIVER has answered; the frames a sensor was still
+    # integrating when the control landed are exposed under the OLD regime,
+    # and averaging them is how two identical commands came back
+    # ten-thousand-fold apart on 2026-09-02. See
+    # `capture_settings.regime_settle_s` for the arithmetic — it is paid
+    # once per commanded regime, so an ordinary map, whose exposure never
+    # moves mid-run, pays nothing.
+    fps = sess.observed_fps() or 5.0
+    reading.regime_settle_s = capture_settings.regime_settle_s(exposure, fps)
+    await deps.sleep(reading.regime_settle_s)
     dark_c, lit_c, too_long, note = room_mapping.capture_windows(
         room_mapping.DARK_CAPTURE_S, room_mapping.LIT_CAPTURE_S, exposure,
-        sess.observed_fps() or 5.0)
+        fps)
     if too_long:
         reading.reason = too_long
         return reading

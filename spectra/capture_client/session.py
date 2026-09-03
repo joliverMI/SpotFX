@@ -86,7 +86,13 @@ from spectra.capture_client.camera import (LEVERS, BaseCamera, CameraLock,
 logger = logging.getLogger(__name__)
 
 CLIENT_NAME = "spectra-capture-client"
-CLIENT_VERSION = "1.0"
+#: 1.1 (2026-09-02): the wire gained `fresh_frames`, and this client's
+#: transport gained the drain behind it. The number moves when what a
+#: SERVER can rely on this client for moves — `capture_health` keeps the
+#: last one per machine, so "which build is on the camera host" stays a
+#: read rather than a guess. `fresh_frames` itself is still the signal
+#: anything branches on; a version is for a human reading the record.
+CLIENT_VERSION = "1.1"
 
 #: Reconnect backoff. Short at first (a service restart is seconds) and
 #: capped low: this client's whole job is to BE there when the queue looks,
@@ -108,6 +114,12 @@ class ClientState:
     drops: int = 0
     frames_sent: int = 0
     camera_reopens: int = 0
+    #: Older frames thrown away to keep the stream fresh, and frames
+    #: discarded because a control had just moved. Read off the camera each
+    #: cycle so the transport's real depth is a number a reader can see
+    #: rather than a promise this client makes about itself.
+    stale_dropped: int = 0
+    regime_discards: int = 0
     #: How many times the pinned regime has been written to the driver
     #: again — once per reconnect that had something to re-assert. Reported
     #: so "it came back pinned" is a number a reader can see, not a promise.
@@ -271,6 +283,14 @@ class CaptureClient:
                          "machine": platform.machine(),
                          "python": platform.python_version()},
             "camera": self.camera.describe(),
+            # WHETHER THIS CLIENT'S FRAMES ARE FRESH — see
+            # `camera.BaseCamera.fresh_frames`. A server measuring light
+            # through this connection needs to know whether a frame stamped
+            # after a light write can carry photons from before it; a build
+            # that does not drain its transport simply does not send this,
+            # and the server names that rather than producing a reading it
+            # cannot account for.
+            "fresh_frames": bool(getattr(self.camera, "fresh_frames", False)),
             "secure_context": True,
             "frame_size": {"width": self.camera.frame_size[0],
                            "height": self.camera.frame_size[1]},
@@ -405,6 +425,9 @@ class CaptureClient:
                 "data": base64.b64encode(data).decode("ascii"),
                 "lock": self.camera.lock.as_wire()}))
             self.state.frames_sent += 1
+            self.state.stale_dropped = getattr(self.camera, "stale_dropped", 0)
+            self.state.regime_discards = getattr(
+                self.camera, "regime_discards", 0)
             spent = self._clock() - started
             if spent < period:
                 await asyncio.sleep(period - spent)

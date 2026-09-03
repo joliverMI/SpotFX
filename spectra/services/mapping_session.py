@@ -129,7 +129,8 @@ from typing import Any, Awaitable, Callable, Optional
 
 import numpy as np
 
-from spectra.services import capture_health, capture_settings
+from spectra.services import (capture_health, capture_settings,
+                              capture_source)
 from spectra.services.av_sync_session import ClockMap, Frame, FrameRing
 from spectra.services.light_field import FRAME_H, FRAME_W, downsample
 
@@ -510,12 +511,17 @@ class MappingSession(capture_settings.CameraNegotiation):
             # `pose_name` and `platform` arrive with the unattended client
             # (spectra/capture_client/session.py) so a status surface can
             # name WHICH camera host is missing and WHAT BUILD it was
-            # running — see capture_health.py. A key not on this list is
-            # dropped, which is why adding one is a deliberate edit.
+            # running — see capture_health.py. `fresh_frames` arrives with
+            # it too: whether this client promises that a frame it sent is
+            # the newest one it had, which a build predating the transport
+            # drain simply does not send (`capture_source.
+            # serves_fresh_frames` owns all three answers). A key not on
+            # this list is dropped, which is why adding one is a deliberate
+            # edit.
             self.hello = {k: msg.get(k) for k in
                           ("user_agent", "video", "secure_context", "origin",
                            "client", "client_version", "host", "pose_name",
-                           "platform", "camera")
+                           "platform", "camera", "fresh_frames")
                           if k in msg}
             self._adopt_pose(msg.get("pose_hint"))
             if isinstance(msg.get("lock"), dict):
@@ -693,11 +699,33 @@ class MappingSession(capture_settings.CameraNegotiation):
         (grids, raw_maxima) — the raw maxima ride along so the caller can
         report saturation without keeping frames.
 
-        Windowed by arrival, not by a frame's own capture stamp: the window
-        boundaries here are settle/capture phases of a light write, which
-        are hundreds of ms wide, so RTT-scale timing precision buys nothing
-        and depending on a paired clock would make a capture fail for a
-        reason unrelated to light."""
+        WINDOWED BY THE FRAME'S OWN CAPTURE STAMP, mapped onto this
+        server's clock by the pairing (`ClockMap`), NOT by when it happened
+        to arrive here — `_ingest_frame` stores `at_s` and that is what
+        this compares. RTT-scale precision still buys nothing (these
+        boundaries are settle/capture phases hundreds of ms wide), but the
+        floor has to be a stamp or a slow arrival of an OLD frame would be
+        counted as a new one.
+
+        THE FLOOR IS ALREADY THE WRITE, and a second one would be
+        decoration — recorded here so it is not re-added. `start` is taken
+        when this is CALLED, which every caller does after the phase's own
+        light write AND after its settle, so a frame stamped before the
+        write is already excluded by both branches, the fall-back included.
+        Passing the write's own timestamp in would be a strictly earlier
+        floor: weaker, not stronger.
+
+        WHAT NO FLOOR HERE CAN DO, stated because it is the thing that cost
+        an evening (2026-09-02): a stamp is when the CLIENT read the frame
+        out of its transport, not when the photons landed. A client that
+        queues whole frames hands back a stamp that is honest about itself
+        and wrong about the world — its lit window is stamped after the
+        lamp and full of the dark room — and nothing on this side can
+        detect that from stamps alone. The fix is the client's own drain
+        (`spectra/capture_client/camera.py`, `newest_of`); whether a client
+        makes that promise is `capture_source.serves_fresh_frames`, and the
+        sensor's own share of the lag is `capture_settings.
+        regime_settle_s`."""
         start = self._clock()
         await asyncio.sleep(max(0.0, seconds))
         end = self._clock()
@@ -715,7 +743,7 @@ class MappingSession(capture_settings.CameraNegotiation):
         their server-clock times — the commissioning run's own consumer
         (`gather` above is the map's, and is unchanged).
 
-        Same arrival-windowed rule and same fall-back as `gather`: a caller
+        Same capture-stamp rule and same fall-back as `gather`: a caller
         that asked for more than arrived gets fewer and decides for itself,
         rather than this function silently pretending."""
         if not self.keep_full_frames:
@@ -754,6 +782,10 @@ class MappingSession(capture_settings.CameraNegotiation):
                 "grids_held": len(self.grids),
                 "full_frames_held": len(self.full),
                 "keep_full_frames": self.keep_full_frames,
+                # True / False / None — see `capture_source.
+                # serves_fresh_frames`. None is "this client did not say",
+                # which is a third answer and not a no.
+                "fresh_frames": capture_source.serves_fresh_frames(self),
                 "lever_verdict": (self.lever_verdict.as_dict()
                                   if hasattr(self.lever_verdict, "as_dict")
                                   else None),

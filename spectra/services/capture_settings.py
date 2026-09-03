@@ -492,6 +492,45 @@ def min_capture_s(frames: int, fps: float) -> float:
                  / max(1e-6, float(fps)), 3)
 
 
+#: HOW MANY FRAMES A REAL SENSOR TAKES TO SHOW A CONTROL CHANGE. The
+#: client's own `camera.SENSOR_APPLY_FRAMES` discards this many after a
+#: control moves; this is the SERVER's independent statement of the same
+#: bound, because a server that measures light through a client it did not
+#: write must not depend on that client having done it. A UVC control lands
+#: at a frame boundary, so the frame in flight and the frame already
+#: integrating were both exposed under the old regime — two is the
+#: arithmetic minimum and the third is a driver's margin.
+SENSOR_APPLY_FRAMES = 3
+#: One further frame for the transport: even a client that drains its own
+#: pipe returns a frame whose photons ended up to one frame period ago.
+TRANSPORT_LAG_FRAMES = 1
+
+
+def regime_settle_s(exposure_time: Optional[int], fps: float) -> float:
+    """HOW LONG AFTER COMMANDING A NEW INTEGRATION TIME BEFORE A FRAME CAN
+    BE TRUSTED TO HAVE BEEN TAKEN IN IT.
+
+    THE FAILURE THIS EXISTS FOR (2026-09-02): the lever self-test commanded
+    three integration times and measured 0.000, 444.282 and 0.043 — two
+    IDENTICAL commands ten-thousand-fold apart — because the frames it
+    averaged had been captured before the command, and in one case before
+    the lamp. The transport half of that is the client's to fix and it has
+    (`spectra/capture_client/camera.py`, `newest_of`). This is the half no
+    drain can reach: a sensor shows a new integration time some frames
+    later, and those frames are already in flight.
+
+    The bound is arithmetic, not tuned: `SENSOR_APPLY_FRAMES` +
+    `TRANSPORT_LAG_FRAMES` frame periods at the rate the camera can
+    actually deliver, PLUS the integration itself, because the last of
+    those frames spends that long collecting light. It is a wait a run
+    pays ONCE per commanded regime — never per emitter of an ordinary map,
+    whose exposure does not move — so it costs a night nothing."""
+    rate = achievable_fps(fps, exposure_time)
+    frames = SENSOR_APPLY_FRAMES + TRANSPORT_LAG_FRAMES
+    integration = (exposure_time or 0) * EXPOSURE_UNIT_S
+    return round(frames / max(1e-6, rate) + integration, 3)
+
+
 def frames_in(capture_s: float, fps: float) -> int:
     """How many frames a window of this length buys at this rate — the
     other direction, for pricing and for saying what a run is about to

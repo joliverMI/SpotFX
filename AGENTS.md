@@ -4062,6 +4062,80 @@ controls written, read back, and each one's stuck-driver refusal), and
 real WebSocket, the REAL capture client and the real map route, run from
 `tests/test_light_field_checks.py`.
 
+### A STAMP IS NOT A PHOTON — the stale-stream defect (2026-09-02)
+
+The self-test above met a REAL camera for the first time and refused his
+laptop with readings that made no sense: commanded 500 x100 us measured
+0.000; commanded 2000 measured 444.282; commanded 2000 AGAIN measured
+0.043 — two IDENTICAL commands ten-thousand-fold apart, with every driver
+read-back holding Manual throughout. **Nothing was wrong with the lever and
+nothing was wrong with the judgement. The frames were OLD.**
+`spectra/capture_client/camera.py`'s "FRESH FRAMES" block is the binding
+statement. Five things, and the first three generalize well past cameras:
+
+- **A TRANSPORT THAT QUEUES WHOLE FRAMES BREAKS A `lit - dark` INSTRUMENT
+  SILENTLY, and no server-side window can see it.** The client reads pixels
+  out of an ffmpeg pipe; MEASURED in the exact construction `_open_at`
+  builds (OS pipe + `StreamReader(limit=frame*8)`), that path holds up to
+  **19 whole 320x180 frames — 3.8 s at 5 fps — and it SATURATES there**. It
+  fills the first time the client stops reading for a moment (`open()`
+  sleeps `SETTLE_BEFORE_LOCK_S` then runs `apply_lock`; `apply_lock` and
+  the paced `read_lock` are BLOCKING `v4l2-ctl` subprocesses on the event
+  loop) and is never given back, because the frame loop paces itself at
+  exactly the camera's own rate. 3.8 s is longer than a whole capture phase
+  (settle 0.7 + window 1.5), so a LIT window lands entirely on frames whose
+  photons predate the lamp — and a slightly shallower queue catches it in
+  full. That is not noise between two readings; it is the two sides of one
+  boundary.
+- **A CAPTURE STAMP IS HONEST ABOUT ITSELF AND SAYS NOTHING ABOUT THE
+  WORLD.** `captured_at_ms` is stamped when the client READ the frame out
+  of its transport. `MappingSession.gather` windows correctly against that
+  stamp through the paired clock, and its floor is already the phase's own
+  write plus settle — **a second `not_before` floor was considered and is
+  decoration; the docstring says so, so it is not re-added.** The whole
+  defect lives in the gap between the stamp and the photons, which only the
+  client can close.
+- **TWO LAGS, TWO FIXES, and each is proven with the other turned off.**
+  TRANSPORT: `camera.newest_of` — a frame is returned only when nothing
+  newer is already waiting (`DRAIN_PROBE_S` 20 ms, an order of magnitude
+  above the ~1 ms an already-buffered frame costs and below a 30 fps frame
+  period). Draining the measured 19-frame saturation costs **23 ms**, so
+  freshness is free. SENSOR: `camera.SENSOR_APPLY_FRAMES` (3) discarded
+  after a control actually MOVES — the frame in flight and the frame
+  already integrating were exposed under the old regime, and no drain can
+  reach those; the server states the same bound independently as
+  `capture_settings.regime_settle_s`, paid ONCE per commanded regime, so an
+  ordinary map (whose exposure never moves mid-run) pays nothing. Without
+  it a reading's DARK REFERENCE straddles the change and is subtracted from
+  a lit capture taken in a different regime.
+- **THE SYNTHETIC CAMERA IS FRESH BY CONSTRUCTION, WHICH IS WHY NOTHING
+  CAUGHT THIS.** `SyntheticCamera` is a function: no transport, no queue, a
+  control change visible in the very next frame. Every proof of this path
+  used it. **Any rig that must speak about timing has to model the queue**
+  — `tests/test_stream_freshness.py` does, and drives the REAL
+  `run_selftest`/`_map_one`/`light_field`/`judge` through it, swept across
+  the whole measured band rather than sampled at one depth.
+- **A CLIENT DECLARES FRESHNESS AND THE THREE ANSWERS ARE NOT TWO.**
+  `hello.fresh_frames` -> `capture_source.serves_fresh_frames`: True,
+  False, or **None for a build that did not say** (and a browser, which
+  cannot). Nothing REFUSES on it — it is a build's silence, not a
+  measurement — but a lever verdict whose readings disagree carries
+  `mapping_refusals.STALE_STREAM_FIRST_CHECK` as the NAMED FIRST CHECK, the
+  `SCONCE_MAINS_FIRST_CHECK` discipline: two identical commands orders
+  apart is what a queued transport looks like, and sending someone to look
+  at a working camera instead is the hour that sentence exists to save.
+
+**THE FIX IS CLIENT-SIDE AND SERVER-SIDE, so `spectra.service` must be
+deployed for `regime_settle_s`/the freshness note, and the camera host must
+pull for the drain.** Until it pulls, its readings are refused-or-noted,
+never silently trusted. Proofs: `tests/test_stream_freshness.py` (the
+judgement, modelled transport, red and green, swept) and
+`scripts/check_stream_freshness.py` (the transport MEASURED against a real
+subprocess pipe, the real `V4L2Camera.frame()` beside the read it replaced,
+and the whole thing over a real server, WebSocket and capture client —
+0.15 s from capture to stamp where the shipped read served 2.2 s of queued
+frames).
+
 ## THE BROWSER IS A VIEWFINDER — a calibration-grade run refuses it BY NAME
 
 **`spectra/services/capture_source.py` is the binding statement** for which
