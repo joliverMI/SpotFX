@@ -4678,19 +4678,72 @@ past this subsystem:
 - **ASK THE PREDICATE, NOT THE NEIGHBOURING QUESTION.** `[ -r /dev/video0 ]`
   is not `id -nG | grep -qx video`: a desktop seat's ACL grants read access
   with no group at all, so the old installer check passed on a machine whose
-  unit could never start (`SupplementaryGroups=video` → `216/GROUP`). This
-  is the SAME shape as the `import venv` vs `ensurepip` bug (PR #241) one
-  section over, and both cost an evening. When adding a precondition check,
-  write down the thing that actually has to be true and check THAT.
+  service could never open the camera. This is the SAME shape as the
+  `import venv` vs `ensurepip` bug (PR #241) one section over, and both cost
+  an evening. When adding a precondition check, write down the thing that
+  actually has to be true and check THAT.
 - **A GROUP IS NOT APPLIED UNTIL THE USER MANAGER RESTARTS.** `usermod -aG`
   changes the database, not any running process; `systemd --user` takes its
   supplementary groups once at manager start and, being unprivileged, cannot
-  gain one after. So `id -nG` in a fresh shell can say `video` while the
-  unit still dies `216/GROUP`. The doctor reads the manager's own
-  `/proc/<pid>/status` `Groups:` line — a pure read with the same answer as
-  running a test unit, without writing a transient unit into his manager
-  every time. **Say REBOOT, not "log out and back in"**, especially with
-  linger enabled.
+  gain one after. A user service INHERITS the manager's groups, so `id -nG`
+  in a fresh shell can say `video` while the service holding the camera has
+  none. The doctor reads the manager's own `/proc/<pid>/status` `Groups:`
+  line — a pure read with the same answer as running a test unit, without
+  writing a transient unit into his manager every time. **Say REBOOT, not
+  "log out and back in"**, especially with linger enabled.
+- **`SupplementaryGroups=` IN A USER UNIT CAN NEVER WORK, AND MEMBERSHIP IS
+  IRRELEVANT TO THAT** (2026-09-03, PR fm/unit-group-directive-fix). An
+  unprivileged manager is refused `setgroups(2)` outright — `216/GROUP`,
+  "Changing group credentials failed: **Operation not permitted**" — so a
+  user who IS in the group fails identically. The shipped user unit carried
+  it; the owner was told to `usermod` and REBOOT, did both, twice, and it
+  still died. **The boundary: the directive is legitimate ONLY under a ROOT
+  manager that drops privileges — a SYSTEM unit may carry it, a USER unit
+  must not.** They are two files (`deploy/spectra-capture-client.service`
+  and `...-system.service.in`, the installer's `--system` mode) rather than
+  one template with a conditional line, and the user unit's header NAMES the
+  directive it excludes so nobody re-adds it beside `DeviceAllow=`.
+- **`216/GROUP` HAS TWO CAUSES AND THE STATUS CODE CANNOT TELL THEM APART**
+  — only the journal's own reason line can: "Operation not permitted" is the
+  privilege cause above (fix: remove the directive, `daemon-reload`,
+  restart, NO reboot); anything else is the membership-shaped one. The
+  doctor's `read_216_cause()` reads it and gives them separate verdicts.
+  **The general rule: an exit status is a CLASS, not a diagnosis.** Before
+  translating one into advice, check whether the class has more than one
+  cause — collapsing two into the more common one produces a confident wrong
+  answer that sends someone to fix a thing that is not broken.
+- **A CONTROL YOU DID NOT RUN IS A CONFOUND YOU DID NOT RULE OUT.** Rig A's
+  original red case (`SupplementaryGroups=video` on a user NOT in the group)
+  went red, proved 216, and PASSED FOR THE WRONG REASON: it never ran the
+  IN-GROUP control, where the same 216 arrives for the same reason. When a
+  proof attributes a failure to a variable, run the case where that variable
+  has the OTHER value — `check_capture_client_fresh_host.py` rig A now runs
+  A1 (in-group), A2 (out-of-group), A3 (no directive → STARTS) and A4 (the
+  stale-ghost case) on real systemd, cross-checking the doctor's translation
+  against each REAL journal line rather than a typed constant.
+- **A LAST-ERROR VERDICT WITHOUT A CLOCK IS A GHOST** (same PR). After the
+  owner's fix the doctor still headlined `last error` as a problem, quoting
+  a failure from before it, while the service was up and connected. A
+  journal read with no clock cannot tell a scar from a wound. It now
+  compares against the unit's own `ActiveEnterTimestampMonotonic` and
+  reports `IS FAILING` vs `FAILED EARLIER` as different verdicts — the
+  second is UNKNOWN, visible and never counted. **Use the MONOTONIC clock,
+  not `journalctl --since`**: `ActiveEnterTimestamp` is a wall-clock string
+  with SECOND granularity and a `Restart=` loop fits inside a second, so the
+  old failure lands in the window and reads as current;
+  `ActiveEnterTimestampMonotonic` and `journalctl -b -o short-monotonic` are
+  the same boot-relative clock at microsecond precision, with nothing to
+  parse but a number systemd printed.
+- **A MENU CONTROL HAS NO SINGLE OUTPUT FORMAT** (same PR).
+  `v4l2-ctl --get-ctrl` prints `auto_exposure: 1` on some drivers and
+  `auto_exposure: 1 (Manual Mode)` on others — including his. The read-back
+  compared the whole string to `"1"`, so a camera GENUINELY AT MANUAL
+  reported `exposure_locked=False` and every calibration-grade run refused
+  by name while quoting a mode that said Manual. `camera._menu_value` parses
+  the LEADING INTEGER and every menu comparison in that file goes through
+  it (exposure, white balance, continuous autofocus); `_as_float` does the
+  same for the four levers, which were silently reading None on the same
+  drivers. Never compare a driver's printed value by string equality.
 - **A REACHABLE-BUT-BROKEN CLIENT MUST NOT LOOK LIKE A HEALTHY ONE.**
   `capture_health` has a FOURTH state, `impaired` — connected and saying why
   it cannot work, in the client's own words. `present` stays a boolean about
@@ -4711,10 +4764,11 @@ manager answers. Without them it fails "Failed to connect to bus", which
 reads exactly like "no such service" — so anything reporting on a unit must
 fill those in and, when the bus is genuinely absent, say so as a property of
 the shell. **This unlocks a real proof**: `systemd-run --user
---property=SupplementaryGroups=video /bin/true` on a user not in that group
-reproduces a genuine `216/GROUP` in about two seconds, and `reset-failed`
-leaves nothing behind. Do NOT install, enable or start the real unit in his
-manager to test something.
+--property=SupplementaryGroups=<any group> /bin/true` reproduces a genuine
+`216/GROUP` in about two seconds — for ANY group, member or not — and the
+same transient unit with no directive starts clean; `reset-failed` leaves
+nothing behind. Do NOT install, enable or start the real unit in his manager
+to test something.
 
 **Proving a provisioner needs a host that never saw the repo.**
 `scripts/check_capture_client_fresh_host.py` is the pattern: rig A drives

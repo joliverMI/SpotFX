@@ -41,7 +41,10 @@ Every row is exercised by a check that runs in the suite
 | **ONE DOCTOR COMMAND answers every branch** | *(2026-09-02)* `spectra-capture-client --doctor` checks, in dependency order: python / venv+**ensurepip** / the installed virtualenv's pip; ffmpeg + `v4l2-ctl`; the device; **group MEMBERSHIP and whether the running user manager has it** (the reboot-pending case, read out of `/proc`); the address in **three readings** (resolves / connects / answers); the unit's state, its exit status translated, and its own last journal line; and whether SPECTRA can see this machine. It fixes nothing and starts nothing. `tests/test_capture_doctor.py` (27 tests). |
 | **The doctor works when the virtualenv is the broken thing** | It is **stdlib-only** and runs as a plain file (`python3 spectra/capture_client/doctor.py`) with no package import — proven by importing it with `httpx` and `websockets` blocked at the meta path, and by running it inside a fresh Debian container with nothing installed at all. |
 | **The installer verifies through to a REAL hello, and claims nothing else** | *(2026-09-02)* It probes the address BEFORE writing anything, and after starting the service it WAITS (bounded) for this machine to appear on `camera_host`, then reports what actually happened: connected (with the lever verdict), present-but-unable, the unit's own failure words, or never-arrived. The old unconditional "SPECTRA can now SEE this machine" is gone — it used to print that while installing a service that could not start. §8 of the service check, RED-verified against the old ending. |
-| **The 216/GROUP case, on REAL systemd** | *(2026-09-02)* `scripts/check_capture_client_fresh_host.py` rig A: a transient `systemd-run --user` unit with `SupplementaryGroups=video`, on a user not in that group, produces the real `ExecMainStatus=216` / "Changing group credentials failed" — and the doctor's `/proc` predicate is cross-checked against that live outcome rather than against a typed-in constant. |
+| **BOTH shapes of `216/GROUP`, on REAL systemd** | *(2026-09-03)* `scripts/check_capture_client_fresh_host.py` rig A drives the host's own user manager to four live outcomes: **A1** a group the user IS in and **A2** one it is NOT — same `ExecMainStatus=216`, same "Changing group credentials failed: **Operation not permitted**", because an unprivileged manager is refused `setgroups(2)` outright and membership was never the variable; **A3** the same unit with NO directive, which STARTS; **A4** a healthy unit whose journal still holds A2's failure. The doctor's translation is cross-checked against **each real journal line**, never a typed-in constant, and its `/proc` predicate against the live outcome. Rig A ran only A2 before this, and passed for the wrong reason — see §"the confound" below. |
+| **A user unit carries no group directive, and says why** | *(2026-09-03)* `deploy/spectra-capture-client.service` has no `SupplementaryGroups=` line and its header states the boundary. Asserted on the shipped bytes (`check_capture_client_service.py` §1b, `tests/test_capture_client_service.py`) and on the INSTALLED bytes by the installer itself, which regenerates the unit whole rather than patching — so a reinstall over a hand-edited unit converges instead of resurrecting the directive (§3 of the service check, with the broken line hand-added back first). |
+| **A menu value is read the same however the driver prints it** | *(2026-09-03)* `v4l2-ctl --get-ctrl` has no single output format: some drivers print `auto_exposure: 1`, the owner's own laptop prints `1 (Manual Mode)`. The read-back compared the whole string by equality, so a camera GENUINELY AT MANUAL reported `exposure_locked=False` and every calibration-grade run refused by name while quoting a mode that said Manual. `camera._menu_value` parses the leading integer; both formats are test cases and the annotated one is RED against the pre-fix code (`tests/test_capture_client.py`). |
+| **A last-error verdict carries WHEN** | *(2026-09-03)* After the owner's fix the doctor still headlined `last error` as a problem, quoting a failure from before it, while the service was up and connected. It now compares the journal against the unit's own `ActiveEnterTimestampMonotonic` (one clock, microsecond precision — a wall-clock `--since` is second-granularity and a `Restart=` loop fits inside a second) and reports **IS FAILING** or **FAILED EARLIER** as different verdicts. A healthy service with old failures reports **zero problems**; a failure since the last start still fails; an unreadable clock keeps the failure rather than excusing it. Proven live (rig A4) and in `tests/test_capture_doctor.py`, both RED-verified. |
 | **And on a host that never saw this repo** | Rig B: a stock `debian:stable-slim`, a user created seconds ago (not in `video`), the repo mounted read-only. The installer refuses on BOTH the group and the genuinely-missing `ensurepip`, in one pass, writing nothing; the doctor runs there standalone. |
 | **The client acquires no room authority** | Structural: nothing in `spectra/capture_client/` mentions `fx_seam`, `light_ownership`, `handover`, a device driver or a compiler, and it imports nothing from `spectra.services.*`. Making it a boot service changed none of that — a queue arriving on a room SPECTRA does not hold still refuses by name. |
 | **Its dependency closure is two pure-Python packages** | It imports with 28 server-only packages **blocked at the meta path**, never reaches into `fx/`, and every third-party import it makes is declared in `requirements-capture-client.txt`. |
@@ -93,16 +96,30 @@ Every row is exercised by a check that runs in the suite
   usually has neither, and `systemctl --user` then fails with "Failed to
   connect to bus", which reads exactly like a missing service). So
   `check_capture_client_fresh_host.py` rig A now drives real systemd for the
-  one thing that matters most — a genuine `216/GROUP` — and both the doctor
+  things that matter most — both shapes of a genuine `216/GROUP`, the
+  directive-free unit that starts, the stale last-error ghost — and both the doctor
   and that script fill the two variables in rather than reporting the
   shell's condition as the machine's. What is still unproven is systemd
   starting **this unit, with its sandboxing directives, on his hardware**.
 - **Linger.** A user unit starts at boot only with
   `loginctl enable-linger`. The installer checks for it and says so; that
   it survives a real reboot on his hardware is unmeasured.
+- **A SYSTEM unit under a REAL ROOT MANAGER.** *(2026-09-03)* The installer
+  has a `--system` mode for a host with no login session — the kiosk Pi —
+  and it generates `deploy/spectra-capture-client-system.service.in` with
+  the account and its paths filled in. There the `SupplementaryGroups=video`
+  directive is legitimate and IS the mechanism: root applies it before
+  dropping to `User=`. **What is proven is the TEXT, both ways**: the
+  generated bytes pass `systemd-analyze verify`, the system unit carries the
+  directive and `WantedBy=multi-user.target`, the user unit carries neither,
+  and the hardening is no weaker (`check_capture_client_service.py` §1b,
+  `tests/test_capture_client_service.py`). **What is NOT proven is a root
+  manager actually starting it** — that needs a machine we may write into
+  `/etc` on and reboot, which is out of offline reach here. It is named
+  unproven rather than simulated.
 - **The unit's sandboxing directives.** `ProtectSystem=strict`,
-  `ProtectHome=read-only`, `PrivateTmp`, `DeviceAllow=char-video4linux` and
-  `SupplementaryGroups=video` are all things only a running systemd applies;
+  `ProtectHome=read-only`, `PrivateTmp` and `DeviceAllow=char-video4linux`
+  are all things only a running systemd applies;
   `systemd-analyze verify` accepts them without exercising them. They are
   right (a camera process should not be able to write his home) and they are
   a real footgun: a `SPECTRA_CAPTURE_JSON_OUT` pointing anywhere but the
@@ -179,11 +196,24 @@ sudo reboot                          # if the group was just added
 **The reboot is not superstition.** `usermod -aG` changes the group
 database; it changes no running process. `systemd --user` takes its
 supplementary groups once, when the manager starts, and — being unprivileged
-— cannot gain one afterwards. So a fresh terminal can print `video` while
-the manager that has to launch the unit still cannot, and the unit keeps
-failing `216/GROUP` with everything you can see saying it is fine. The
-doctor reads the *running manager's* own groups and says which of the two is
-missing.
+— cannot gain one afterwards. A user service INHERITS the manager's groups
+and cannot ask for its own, so a fresh terminal can print `video` while the
+service that actually holds the camera has none, and everything you can see
+says it is fine. The doctor reads the *running manager's* own groups and
+says which of the two is missing.
+
+**And `216/GROUP` is NOT that problem — that was the confound.** Until
+2026-09-03 both the doctor and this document said a missing membership meant
+the unit would die `216/GROUP`. It does not. That status means the manager
+could not apply the unit's group DIRECTIVES, and under `systemd --user` it
+is refused the call outright — `Operation not permitted` — **whether or not
+the user is a member**. The shipped user unit was carrying
+`SupplementaryGroups=video`, so it could never start on any machine, and the
+advice it produced (`usermod`, then reboot) cost the owner two reboots for a
+fault neither could touch. The unit no longer carries it; the doctor reads
+the journal's own reason and names the two causes separately; and rig A now
+runs the IN-GROUP control that would have caught this, because the
+out-of-group case alone proved 216 and proved nothing about why.
 
 After the reboot, one command confirms the whole chain end to end:
 
@@ -227,18 +257,23 @@ machine that is working.
    `import venv`); and the installed virtualenv's own pip and dependencies.
 2. `ffmpeg` and `v4l2-ctl`, each by name and package.
 3. the camera device exists.
-4. **group membership** — the predicate the unit's `SupplementaryGroups=`
-   actually needs — and separately whether the **running user manager** has
+4. **group membership** — the predicate a user service's INHERITED groups
+   actually need — and separately whether the **running user manager** has
    it yet (the reboot-pending case above). Deliberately *not* whether the
    device is readable: a desktop seat grants that through an ACL with no
-   group in sight, which is how a machine whose unit could never start used
-   to pass.
+   group in sight, which is how a machine whose service could never open the
+   camera used to pass. Under `--system` the answer differs and the doctor
+   says so: root applies the group at every start, so membership is enough
+   and a restart is enough.
 5. the address, in **three readings**: does the name resolve here, does
    anything accept a connection there, and is what answers actually SPECTRA
    (a missing `/spectra` prefix is the common one).
 6. the unit: installed, enabled, running or crash-looping; its exit status
-   translated (`216/GROUP` is a group problem, not a mystery); and its own
-   last real journal line.
+   translated **from the journal's own reason** (`216/GROUP` has two causes
+   — a group directive an unprivileged manager cannot apply, or the group
+   itself — and only the reason line tells them apart); and its own last
+   real journal line, **dated**: `IS FAILING` and `FAILED EARLIER` are
+   different verdicts, and only the first counts as a problem.
 7. whether SPECTRA can see this machine — which is a different question from
    "is my service running", and they came apart on the evening this was
    written.
@@ -292,7 +327,7 @@ refusal is unchanged.
 | | |
 |---|---|
 | `scripts/check_capture_client_service.py` | the unit verified by systemd's own parser (with a broken-unit negative control), the provisioner's refusals and idempotence on a throwaway HOME, the unit's `ExecStart` configured only by its `EnvironmentFile` against a real server, the death-is-a-read sentence, and the restart |
-| `scripts/check_capture_client_fresh_host.py` | *(2026-09-02)* the same failures on machines that never saw this repo: **rig A** drives the host's own systemd user manager to a real `216/GROUP` and cross-checks the doctor's `/proc` predicate against that live outcome; **rig B** is a stock `debian:stable-slim` with a user created seconds ago (not in `video`, no `ensurepip`) where the installer refuses both by name and the doctor runs standalone. A rig it cannot run is SKIPPED with the reason named — never a pass |
+| `scripts/check_capture_client_fresh_host.py` | *(2026-09-03)* the same failures on machines that never saw this repo: **rig A** drives the host's own systemd user manager to BOTH shapes of a real `216/GROUP` (in-group and out-of-group — the same EPERM either way), to the directive-free unit that STARTS, and to the stale-last-error ghost, cross-checking the doctor's translation against each real journal line; **rig B** is a stock `debian:stable-slim` with a user created seconds ago (not in `video`, no `ensurepip`) where the installer refuses both by name and the doctor runs standalone. A rig it cannot run is SKIPPED with the reason named — never a pass |
 | `tests/test_capture_doctor.py` | *(2026-09-02)* every doctor verdict, the reboot-pending case, the three readings of an address, the exit-status translation, the bounded wait's four outcomes, and that an UNKNOWN never counts as a failure |
 | `scripts/check_capture_client_deps.py` | the import closure, the meta-path blocker, the fx/ boundary, the architecture audit |
 | `tests/test_capture_client_service.py` | the configuration's rules, the presence record, and the two structural properties (no room authority, no server imports) |

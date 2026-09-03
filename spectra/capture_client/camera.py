@@ -96,6 +96,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import shutil
 import subprocess
 import uuid
@@ -313,13 +314,53 @@ def _tool(name: str) -> Optional[str]:
     return shutil.which(name)
 
 
+#: The number at the FRONT of a v4l2-ctl read-back, with anything the
+#: driver appended after it left alone.
+_LEADING_NUMBER = re.compile(r"^[+-]?\d+(?:\.\d+)?")
+
+
 def _as_float(value) -> Optional[float]:
     """A read-back number, or None. None and 0 are different answers: "this
-    camera would not tell us" is not "it is zero"."""
+    camera would not tell us" is not "it is zero".
+
+    IT PARSES THE LEADING NUMBER, NOT THE WHOLE STRING, and that is the
+    whole point — see `_menu_value` immediately below for the evening it
+    cost."""
+    if value is None:
+        return None
+    m = _LEADING_NUMBER.match(str(value).strip())
     try:
-        return None if value is None else float(str(value).strip())
+        return float(m.group(0)) if m else None
     except (TypeError, ValueError):
         return None
+
+
+def _menu_value(value) -> Optional[int]:
+    """THE MENU NUMBER A DRIVER REPORTED, however it chose to print it.
+
+    `v4l2-ctl --get-ctrl=auto_exposure` does not have one output format. On
+    some drivers it prints:
+
+        auto_exposure: 1
+
+    and on others — including the owner's own laptop, 2026-09-03 — it
+    ANNOTATES the menu entry:
+
+        auto_exposure: 1 (Manual Mode)
+
+    Until this function existed the read-back compared the whole string to
+    `"1"` by equality, so a camera GENUINELY AT MANUAL reported
+    `exposure_locked=False`. The client then told SPECTRA it could not lock,
+    the server refused every calibration-grade run by name, and the reason
+    it quoted said the mode was `1 (Manual Mode)` while insisting it would
+    not lock — a machine contradicting itself in one sentence, which is
+    exactly the confident wrong answer this whole package exists to end.
+
+    A menu value is an INTEGER with an optional human label after it. Read
+    the integer; ignore the label. Anything that cannot start with one is
+    None — an UNKNOWN, never a default."""
+    f = _as_float(value)
+    return None if f is None else int(f)
 
 
 def _run(args: list[str], timeout: float = 5.0) -> tuple[int, str]:
@@ -471,19 +512,23 @@ class V4L2Camera(BaseCamera):
         focus_auto_name = next((c for c in FOCUS_AUTO_CONTROLS if c in controls), "")
         focus_auto_val = self._get(focus_auto_name) if focus_auto_name else None
         self.lock = CameraLock(
-            exposure_locked=exp_val is not None and exp_val.strip() == str(EXPOSURE_MANUAL),
-            white_balance_locked=wb_val is not None and wb_val.strip() == str(WB_AUTO_OFF),
-            exposure_mode=(exp_menu.get(str(exp_val), str(exp_val))
+            exposure_locked=_menu_value(exp_val) == EXPOSURE_MANUAL,
+            white_balance_locked=_menu_value(wb_val) == WB_AUTO_OFF,
+            # The driver's own label when it gave one ("1 (Manual Mode)"),
+            # else this control's menu table, else the raw string. Never a
+            # guess, and never "unknown" for a value we actually read.
+            exposure_mode=(exp_menu.get(str(_menu_value(exp_val)),
+                                        str(exp_val).strip())
                            if exp_val is not None else "unknown"),
-            white_balance_mode=("manual" if (wb_val or "").strip() == str(WB_AUTO_OFF)
+            white_balance_mode=("manual" if _menu_value(wb_val) == WB_AUTO_OFF
                                 else ("auto" if wb_val is not None else "unknown")),
             exposure_capabilities=(sorted(exp_menu.values()) if exp_menu
                                    else ([exp_name] if exp_name else [])),
             white_balance_capabilities=([wb_name] if wb_name else []),
             exposure_time=read["exposure_time"], gain=read["gain"],
             white_balance=read["white_balance"], focus=read["focus"],
-            focus_auto=(None if focus_auto_val is None
-                        else focus_auto_val.strip() != str(FOCUS_AUTO_OFF)),
+            focus_auto=(None if _menu_value(focus_auto_val) is None
+                        else _menu_value(focus_auto_val) != FOCUS_AUTO_OFF),
             exposure_time_range=ranges["exposure_time"],
             gain_range=ranges["gain"],
             white_balance_range=ranges["white_balance"],

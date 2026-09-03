@@ -47,27 +47,51 @@ INSTALLER was getting wrong by asking a neighbouring question instead:
     desktop through the seat's ACL — `logind` grants the *logged-in* user
     read access to the seat's devices with no group anywhere in it — so the
     old check said yes on a machine whose user was not in `video`, and the
-    unit then died `216/GROUP` because `SupplementaryGroups=video` demands
-    actual membership. Two different questions that agree on most machines
-    and disagree on his. Exactly the shape of the `venv`/`ensurepip` bug
-    fixed in PR #241, one subsystem over.
+    service could not open the camera. Two different questions that agree on
+    most machines and disagree on his. Exactly the shape of the
+    `venv`/`ensurepip` bug fixed in PR #241, one subsystem over.
   * **AND WHETHER THE USER MANAGER HAS IT YET.** `usermod -aG video` changes
     the group DATABASE. It does not change the supplementary groups of any
     process already running — including `systemd --user`, which inherits
     them once, at manager start, and cannot gain a group afterwards because
-    it is unprivileged. So `id -nG` in a fresh terminal can say `video`
-    while the manager still cannot start the unit, and the unit keeps dying
-    `216/GROUP` with a shell that swears everything is fine. That is the
-    "reboot, not a logout" requirement, and this reads it as a FACT out of
-    `/proc/<manager>/status` rather than telling him to reboot on principle.
+    it is unprivileged. A user service INHERITS the manager's groups, so
+    `id -nG` in a fresh terminal can say `video` while the service that
+    actually holds the camera has none. That is the "reboot, not a logout"
+    requirement, and this reads it as a FACT out of `/proc/<manager>/status`
+    rather than telling him to reboot on principle.
+
+THE THIRD PREDICATE, AND IT COST A SECOND REBOOT (2026-09-03). `216/GROUP`
+HAS TWO CAUSES AND THE STATUS CODE CANNOT TELL THEM APART — only the
+journal's own reason line can:
+
+  * `Changing group credentials failed: **Operation not permitted**` — the
+    unit is carrying a `SupplementaryGroups=` line and an UNPRIVILEGED
+    manager cannot apply one AT ALL. `setgroups(2)` is refused outright, so
+    MEMBERSHIP IS IRRELEVANT: a user who IS in the group fails identically.
+    The fix is to remove the directive, `daemon-reload`, restart — no
+    reboot, no `usermod`.
+  * anything else — the membership-shaped failure, which is the reading this
+    module always gave.
+
+Until this was written the doctor collapsed both into the second, which is
+how the owner was sent to `usermod` and a REBOOT for a fault neither could
+touch: he was already a member, he had already rebooted, and the shipped
+USER unit was carrying `SupplementaryGroups=video`. `read_216_cause()` now
+reads the journal and names which one it is. The shipped user unit no longer
+carries the directive at all — see `deploy/spectra-capture-client.service`'s
+own header for the boundary, and note the SYSTEM unit (the installer's
+`--system` mode, for a root-manager host) legitimately does.
 
 WHY /proc AND NOT A TEST UNIT. Asking systemd to actually try
 (`systemd-run --user --property=SupplementaryGroups=video`) is the most
-direct possible answer and it is what proved this failure in the first
-place — but it is a WRITE: a transient unit in his live user manager, every
-time he runs the doctor. The manager's own supplementary group set is the
-same predicate as a pure read, because an unprivileged user manager cannot
-grant a unit a group it does not itself hold.
+direct possible answer — but it is a WRITE: a transient unit in his live
+user manager, every time he runs the doctor. The manager's own supplementary
+group set is the same predicate as a pure read, because a user service
+inherits exactly the groups its manager holds and can never ask for more.
+(That transient-unit probe is still how the CLAIM is proven, once, offline:
+`scripts/check_capture_client_fresh_host.py` rig A drives real systemd to
+both shapes of `216/GROUP` and cross-checks this module's translation
+against each real journal line.)
 
 THE SEVENTH CHECK IS THE ONE THAT CLOSES THE LOOP. When everything local
 passes, it asks THE SERVER whether it can see this machine — the same
@@ -120,6 +144,46 @@ VIDEO_GROUP = "video"
 
 #: The unit the installer writes. Same reason.
 UNIT_NAME = "spectra-capture-client"
+
+#: WHICH SERVICE MANAGER OWNS THE UNIT — and this is not cosmetic. The two
+#: scopes have DIFFERENT correct answers to the same questions:
+#:
+#:   USER   an unprivileged `systemd --user`. It cannot change group
+#:          credentials at all, so a `SupplementaryGroups=` line can never
+#:          work there; group access is INHERITED from the login session,
+#:          which is why the running manager's own `/proc` group set is the
+#:          predicate and why applying a new membership needs a REBOOT.
+#:          Boot-start needs LINGER.
+#:   SYSTEM a root manager that drops privileges into `User=`. There
+#:          `SupplementaryGroups=` is legitimate and is the mechanism, the
+#:          group DATABASE is the predicate (root applies it at each start,
+#:          so a plain restart is enough), and boot-start needs no login and
+#:          no linger.
+#:
+#: Getting this wrong is how a correct machine gets diagnosed as broken.
+SCOPE_USER = "user"
+SCOPE_SYSTEM = "system"
+
+
+def _scope_args(scope: str) -> list:
+    """The one place `--user` is decided, so no call site can quietly ask
+    the wrong manager and report on a unit that is not the one running."""
+    return ["--user"] if scope == SCOPE_USER else []
+
+
+def detect_scope(unit: str = UNIT_NAME) -> str:
+    """WHICH MANAGER ACTUALLY HAS THIS UNIT, read rather than assumed.
+
+    A SYSTEM unit file present on disk wins, because the installer's
+    `--system` mode is a deliberate choice for a host with no login session
+    (the kiosk Pi), and on such a host the user manager may not exist at
+    all. Otherwise the user scope, which is the default install."""
+    for path in (f"/etc/systemd/system/{unit}.service",
+                 f"/usr/lib/systemd/system/{unit}.service",
+                 f"/lib/systemd/system/{unit}.service"):
+        if os.path.exists(path):
+            return SCOPE_SYSTEM
+    return SCOPE_USER
 
 #: How long any single external probe may take. A doctor that hangs is a
 #: doctor nobody runs twice.
@@ -403,21 +467,36 @@ def check_device(report: Report, device: str) -> None:
 
 # ── 4. THE GROUP, AND THE MANAGER THAT HAS TO HAVE IT ──────────────────────
 
-def check_video_group(report: Report, *, user: Optional[str] = None) -> None:
-    """MEMBERSHIP, then WHETHER THE USER MANAGER HAS IT — two findings,
-    because they fail separately and the fix is different for each.
+def check_video_group(report: Report, *, user: Optional[str] = None,
+                      scope: str = SCOPE_USER) -> None:
+    """MEMBERSHIP, then WHETHER THE THING THAT LAUNCHES THE UNIT HAS IT —
+    two findings, because they fail separately and the fix is different for
+    each, and different again per scope.
 
-    Membership is read from `id -nG`, which is the real predicate the unit's
-    `SupplementaryGroups=video` needs. Readability of the device is NOT
-    asked anywhere here: a desktop seat's ACL grants it without membership,
-    the unit still dies `216/GROUP`, and a check that passed on a machine
-    whose unit cannot start is worse than no check at all.
+    Membership is read from `id -nG`, which is the real predicate. Device
+    READABILITY is NOT asked anywhere here: a desktop seat's ACL grants it
+    without membership, so a check that passed on a machine whose service
+    cannot open the camera is worse than no check at all.
 
-    The second finding is the one that makes "reboot, not logout" a measured
-    fact: `systemd --user` takes its supplementary groups once, at manager
-    start, and — being unprivileged — cannot acquire one afterwards. So a
-    fresh shell saying `video` proves nothing about the manager that has to
-    launch the unit."""
+    WHAT MEMBERSHIP BUYS, and it is scope-dependent:
+
+      USER scope — the service INHERITS the supplementary groups of
+      `systemd --user`, which takes them once, at manager start, and (being
+      unprivileged) cannot acquire one afterwards. So a fresh shell saying
+      `video` proves nothing about the manager that has to launch the unit,
+      and applying a new membership takes a REBOOT. That second finding is
+      what makes "reboot, not logout" a MEASURED fact rather than advice.
+
+      SYSTEM scope — the root manager reads the group DATABASE at each
+      start and applies `SupplementaryGroups=` itself before dropping to
+      `User=`. Membership is enough, a restart is enough, and the running
+      user manager is not part of the mechanism at all.
+
+    NOTE WHAT THIS NO LONGER CLAIMS. Until 2026-09-03 both findings said a
+    missing group meant the unit would die `216/GROUP`. That was true of a
+    USER unit carrying `SupplementaryGroups=` — and that unit could never
+    have started anyway, member or not. The honest consequence in user
+    scope is a service that starts fine and cannot open the camera."""
     user = user or _current_user()
     code, out = _run(["id", "-nG"] + ([user] if user else []))
     if code != 0:
@@ -426,23 +505,47 @@ def check_video_group(report: Report, *, user: Optional[str] = None) -> None:
         return
     groups = out.split()
     member = VIDEO_GROUP in groups
-    fix = (f"sudo usermod -aG {VIDEO_GROUP} {user} — then REBOOT. A logout "
-           f"is not enough: the user manager keeps the groups it started "
-           f"with, and the unit fails 216/GROUP until it is restarted from "
-           f"scratch.")
+    if scope == SCOPE_SYSTEM:
+        fix = (f"sudo usermod -aG {VIDEO_GROUP} {user}, then: sudo "
+               f"systemctl restart {UNIT_NAME}. (No reboot: a system unit's "
+               f"groups are applied by root at every start.)")
+        consequence = (f"The system unit declares "
+                       f"SupplementaryGroups={VIDEO_GROUP} — which is "
+                       f"legitimate there, root applies it before dropping "
+                       f"to User= — so systemd refuses to start it at all "
+                       f"until the group resolves for that user.")
+    else:
+        fix = (f"sudo usermod -aG {VIDEO_GROUP} {user} — then REBOOT. A "
+               f"logout is not enough: the user manager keeps the groups it "
+               f"started with, and the service inherits ITS groups, not "
+               f"this shell's.")
+        consequence = (f"A user service inherits its groups from "
+                       f"`systemd --user`; it cannot ask for them (a "
+                       f"`SupplementaryGroups=` line in a user unit is "
+                       f"refused outright — see the unit's own header). So "
+                       f"without membership the service STARTS NORMALLY and "
+                       f"then cannot open the camera, and SPECTRA sees a "
+                       f"host that is present and impaired.")
     if not member:
         report.add("video group", FAILED,
-                   f"{user} is NOT in group '{VIDEO_GROUP}'. The unit "
-                   f"declares SupplementaryGroups={VIDEO_GROUP}, so systemd "
-                   f"refuses to start it at all: status=216/GROUP, "
-                   f"'Changing group credentials failed'. Note that the "
-                   f"camera can still be READABLE without this — a desktop "
-                   f"seat grants that through an ACL — so a readable "
-                   f"/dev/video0 is not evidence the unit can start.",
+                   f"{user} is NOT in group '{VIDEO_GROUP}'. {consequence} "
+                   f"Note the camera can still be READABLE without this — a "
+                   f"desktop seat grants that through an ACL — so a "
+                   f"readable /dev/video0 is not evidence this is fine.",
                    fix)
         return
     report.add("video group", OK,
                f"{user} is in group '{VIDEO_GROUP}'")
+
+    if scope == SCOPE_SYSTEM:
+        # THE RUNNING USER MANAGER IS NOT THE MECHANISM HERE, and saying so
+        # is better than silently skipping a check somebody expects to see.
+        report.add("group applied", OK,
+                   f"and this is a SYSTEM unit, so the root manager applies "
+                   f"SupplementaryGroups={VIDEO_GROUP} from the group "
+                   f"database at every start — the login session's own "
+                   f"groups are not involved and no reboot is needed")
+        return
 
     gid = _group_gid(VIDEO_GROUP)
     pid = _user_manager_pid()
@@ -468,14 +571,16 @@ def check_video_group(report: Report, *, user: Optional[str] = None) -> None:
     if gid in held:
         report.add("group applied", OK,
                    f"and the running user manager (pid {pid}) holds it too, "
-                   f"so the unit can start")
+                   f"so a service it starts inherits the camera")
         return
     report.add("group applied", FAILED,
                f"but the RUNNING user manager (pid {pid}) does not hold "
                f"group '{VIDEO_GROUP}' yet — it keeps the groups it started "
                f"with. The membership is real and this shell can see it; the "
                f"manager that has to launch the unit cannot, so the service "
-               f"will keep failing 216/GROUP until this machine is REBOOTED.",
+               f"it starts inherits no camera access and the client will "
+               f"report a device it cannot open until this machine is "
+               f"REBOOTED.",
                "sudo reboot   (a logout does not reliably restart the user "
                "manager, especially with linger enabled)")
 
@@ -587,7 +692,8 @@ def check_url(report: Report, url: str) -> None:
 
 # ── 6. the unit ────────────────────────────────────────────────────────────
 
-def check_service(report: Report, unit: str = UNIT_NAME) -> None:
+def check_service(report: Report, unit: str = UNIT_NAME,
+                  scope: str = SCOPE_USER) -> None:
     """THE UNIT AND ITS LAST REAL ERROR LINE. Every state it can be in gets
     its own sentence, because "not running" covers a unit that was never
     installed, one that is disabled, one that is crash-looping five times a
@@ -597,14 +703,21 @@ def check_service(report: Report, unit: str = UNIT_NAME) -> None:
     `systemctl --user` in a shell with no session bus fails with "Failed to
     connect to bus", which reads exactly like "no such service"; saying so
     plainly is the difference between looking at the right machine and the
-    wrong one."""
+    wrong one.
+
+    `scope` says WHICH manager to ask (see SCOPE_USER/SCOPE_SYSTEM). Asking
+    the user manager about a unit the system manager owns reports "there is
+    no unit installed for this user" about a service that is running fine,
+    which is the same class of confident wrong answer as everything else
+    this module exists to end."""
     if not shutil.which("systemctl"):
         report.add("service", UNKNOWN,
                    "systemctl is not installed, so there is no unit to ask "
                    "about (the client can still be run by hand)")
         return
-    env = _user_bus_env()
-    code, out = _run(["systemctl", "--user", "is-system-running"], env=env)
+    env = _user_bus_env() if scope == SCOPE_USER else None
+    sc = _scope_args(scope)
+    code, out = _run(["systemctl"] + sc + ["is-system-running"], env=env)
     if "Failed to connect to bus" in out or "No medium found" in out:
         report.add("service", UNKNOWN,
                    f"this shell cannot reach the user service manager "
@@ -616,17 +729,25 @@ def check_service(report: Report, unit: str = UNIT_NAME) -> None:
                    "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus")
         return
 
-    load = _run(["systemctl", "--user", "show", unit, "-p", "LoadState",
+    load = _run(["systemctl"] + sc + ["show", unit, "-p", "LoadState",
                  "--value"], env=env)[1].strip()
     if load in ("not-found", ""):
+        where = ("for this user" if scope == SCOPE_USER
+                 else "on this machine (system scope)")
         report.add("service", FAILED,
-                   f"there is no {unit} unit installed for this user",
-                   "scripts/install_capture_client.sh --url <SPECTRA's address>")
+                   f"there is no {unit} unit installed {where}",
+                   "scripts/install_capture_client.sh --url <SPECTRA's address>"
+                   + ("" if scope == SCOPE_USER else " --system"))
         return
     props = {}
     for name in ("ActiveState", "SubState", "UnitFileState", "Result",
-                 "ExecMainStatus", "NRestarts"):
-        props[name] = _run(["systemctl", "--user", "show", unit, "-p", name,
+                 "ExecMainStatus", "NRestarts",
+                 # WHEN THE SERVICE LAST CAME UP. Without this the journal's
+                 # oldest failure and its newest success are the same to a
+                 # reader, which is how a FIXED machine kept being told it
+                 # was broken — see `_add_last_error`.
+                 "ActiveEnterTimestamp", "ActiveEnterTimestampMonotonic"):
+        props[name] = _run(["systemctl"] + sc + ["show", unit, "-p", name,
                             "--value"], env=env)[1].strip()
 
     if props["UnitFileState"] not in ("enabled", "enabled-runtime",
@@ -634,7 +755,7 @@ def check_service(report: Report, unit: str = UNIT_NAME) -> None:
         report.add("service enabled", FAILED,
                    f"{unit} is installed but {props['UnitFileState'] or 'not enabled'}, "
                    f"so it will not start on its own",
-                   f"systemctl --user enable --now {unit}")
+                   _systemctl_hint(scope, "enable", "--now", unit))
     else:
         report.add("service enabled", OK,
                    f"{unit} is {props['UnitFileState']}")
@@ -657,26 +778,28 @@ def check_service(report: Report, unit: str = UNIT_NAME) -> None:
                    f"{unit} is {active}/{sub} after {restarts} restarts — it "
                    f"is failing and being restarted in a loop, so it never "
                    f"stays up long enough to hold a session",
-                   f"journalctl --user -u {unit} -n 50 --no-pager")
+                   _journal_hint(unit, scope))
     else:
         report.add("service running", FAILED,
                    f"{unit} is {active or 'unknown'}/{sub or 'unknown'} "
                    f"(result={props['Result'] or 'none'}, "
                    f"exit={props['ExecMainStatus'] or 'none'})",
-                   f"systemctl --user start {unit} && journalctl --user -u "
-                   f"{unit} -n 50 --no-pager")
+                   _systemctl_hint(scope, "start", unit) + " && "
+                   + _journal_hint(unit, scope))
 
-    _add_216_reading(report, props)
-    _add_last_error(report, unit, env)
+    journal = _read_journal(unit, env, scope)
+    _add_216_reading(report, props, unit=unit, env=env,
+                     scope=scope, journal_text=journal)
+    _add_last_error(report, unit, env, journal_text=journal,
+                    scope=scope, props=props)
 
 
-#: systemd's own exit statuses for the two failures that are otherwise
-#: unreadable in a log — and 216/GROUP is the one that cost the evening.
+#: systemd's own exit statuses for the failures that are otherwise
+#: unreadable in a log. `216` is NOT here: it has two causes with two
+#: different fixes, only one of which is a group membership problem, and the
+#: journal is the only thing that can tell them apart — see
+#: `read_216_cause` and `_add_216_reading`.
 _EXIT_READINGS = {
-    "216": ("216/GROUP — systemd could not give the service its "
-            "SupplementaryGroups. This is the group check above: the unit "
-            "asks for group 'video' and the user manager does not hold it.",
-            f"sudo usermod -aG {VIDEO_GROUP} $(id -un), then REBOOT"),
     "217": ("217/USER — systemd could not switch to the configured user.",
             "check the unit's User= directive"),
     "203": ("203/EXEC — systemd could not execute the program at all: the "
@@ -687,46 +810,315 @@ _EXIT_READINGS = {
             "re-run the installer to rewrite the launcher"),
 }
 
+#: THE TWO CAUSES OF ONE STATUS. Named, because a single "216 = you are not
+#: in the group" reading is what sent the owner to `usermod` and a REBOOT
+#: for a fault that neither of those could ever fix.
+CAUSE_PRIVILEGE = "privilege"     # the manager could not make the call
+CAUSE_MEMBERSHIP = "membership"   # systemd could not resolve/apply the group
 
-def _add_216_reading(report: Report, props: dict) -> None:
-    """THE EXIT STATUS, TRANSLATED. `status=216/GROUP` in a journal is not a
-    sentence anybody can act on, and it is precisely the line that sat in
-    his journal all evening saying nothing to anyone."""
+#: The kernel's own word, carried verbatim into systemd's journal line. This
+#: is EPERM on `setgroups(2)` itself, which an unprivileged manager gets
+#: whether or not the user is a member of anything.
+_EPERM_WORDS = "operation not permitted"
+
+#: systemd's line for the whole family, whichever cause produced it.
+_GROUP_CRED_WORDS = "changing group credentials failed"
+
+
+def read_216_cause(journal_text: str) -> Optional[str]:
+    """WHICH 216 THIS IS, read out of the unit's OWN journal text.
+
+    A status code cannot answer this and never could. `216/GROUP` means only
+    "systemd could not apply the group directives", and there are two very
+    different ways to get there:
+
+      * `Operation not permitted` — the *manager* was refused the
+        `setgroups(2)` call outright. Under `systemd --user` that is
+        UNCONDITIONAL: an unprivileged manager cannot change group
+        credentials at all, and MEMBERSHIP IS IRRELEVANT — a user who is in
+        the group fails identically. The unit is simply carrying a directive
+        that cannot work where it is. No amount of `usermod` or rebooting
+        touches it.
+
+      * anything else — the membership-shaped failure: systemd could resolve
+        the call but not the group (it does not exist, or the manager may
+        not grant it). That is the reading this doctor has always given.
+
+    Returns None when the journal could not be read or says nothing about
+    group credentials — an UNKNOWN, never a guess. Inventing the privilege
+    reading from a bare status code would be the same class of confident
+    wrong answer this whole module exists to end."""
+    text = (journal_text or "").lower()
+    if _GROUP_CRED_WORDS not in text and "216" not in text:
+        return None
+    # Only judge the line that actually names the failure, so an unrelated
+    # "operation not permitted" elsewhere in 60 lines of journal cannot
+    # promote a membership fault into a privilege one.
+    for line in text.splitlines():
+        if _GROUP_CRED_WORDS in line:
+            return (CAUSE_PRIVILEGE if _EPERM_WORDS in line
+                    else CAUSE_MEMBERSHIP)
+    return None
+
+
+def _add_216_reading(report: Report, props: dict, *,
+                     unit: str = UNIT_NAME,
+                     env: Optional[dict] = None,
+                     scope: str = SCOPE_USER,
+                     journal_text: Optional[str] = None) -> None:
+    """THE EXIT STATUS, TRANSLATED — and translated from the JOURNAL'S OWN
+    REASON, not from the number alone.
+
+    `status=216/GROUP` in a journal is not a sentence anybody can act on,
+    and it is precisely the line that sat in his journal all evening saying
+    nothing to anyone. Worse, the reading it used to get here ("you are not
+    in group video, run usermod and REBOOT") was RIGHT about the class and
+    WRONG about his machine: he was already a member, he had already
+    rebooted, and the unit still died — because a user unit carrying
+    `SupplementaryGroups=` can never start, member or not.
+
+    `journal_text` may be supplied by a caller that already has the unit's
+    real journal in hand (the fresh-host rig does exactly this, so the
+    translation is cross-checked against a live journal line rather than a
+    constant somebody typed into a test)."""
     status = (props.get("ExecMainStatus") or "").strip()
-    reading = _EXIT_READINGS.get(status)
-    if reading is None:
+    if status != "216":
+        reading = _EXIT_READINGS.get(status)
+        if reading is not None:
+            report.add("exit status", FAILED, reading[0], reading[1])
         return
-    detail, fix = reading
-    report.add("exit status", FAILED, detail, fix)
+
+    if journal_text is None:
+        journal_text = _read_journal(unit, env, scope)
+    cause = read_216_cause(journal_text or "")
+
+    if cause == CAUSE_PRIVILEGE:
+        report.add(
+            "exit status", FAILED,
+            f"216/GROUP, and the journal says why: 'Changing group "
+            f"credentials failed: Operation not permitted'. THE UNIT IS "
+            f"CARRYING A GROUP DIRECTIVE AN UNPRIVILEGED MANAGER CANNOT "
+            f"APPLY. `systemd --user` is not root, so `setgroups(2)` is "
+            f"refused outright — this is NOT about membership and a user "
+            f"who IS in '{VIDEO_GROUP}' fails exactly the same way. "
+            f"`usermod` will not fix it and neither will a reboot. The "
+            f"shipped user unit has no SupplementaryGroups= line for this "
+            f"reason; a hand-edited or pre-2026-09-03 one does. (Under a "
+            f"SYSTEM unit — the installer's --system mode — the same "
+            f"directive is legitimate, because root applies it before "
+            f"dropping to User=.)",
+            f"remove the SupplementaryGroups= line from "
+            f"~/.config/systemd/user/{unit}.service — or just re-run "
+            f"scripts/install_capture_client.sh, which regenerates the unit "
+            f"without it — then: systemctl --user daemon-reload && "
+            f"systemctl --user restart {unit}   (NO REBOOT NEEDED)")
+        return
+
+    if cause == CAUSE_MEMBERSHIP:
+        report.add(
+            "exit status", FAILED,
+            f"216/GROUP — systemd could not give the service its "
+            f"supplementary groups, and the journal does NOT say "
+            f"'Operation not permitted', so this is the group itself, not "
+            f"the manager's privilege: see the group check above.",
+            f"sudo usermod -aG {VIDEO_GROUP} $(id -un), then "
+            + ("REBOOT" if scope == SCOPE_USER else
+               f"systemctl restart {unit}"))
+        return
+
+    report.add(
+        "exit status", FAILED,
+        f"216/GROUP — systemd could not apply the unit's group directives. "
+        f"The journal's own reason line could not be read from here, so "
+        f"WHICH of the two causes this is was not determined: a "
+        f"SupplementaryGroups= line in a USER unit (which can never work, "
+        f"whatever the membership), or the group itself. Read the reason "
+        f"and the answer is in it — 'Operation not permitted' means the "
+        f"first.",
+        f"grep -n SupplementaryGroups "
+        f"~/.config/systemd/user/{unit}.service ; journalctl --user -u "
+        f"{unit} -n 50 --no-pager")
 
 
-def _add_last_error(report: Report, unit: str, env: dict) -> None:
+def _read_journal(unit: str, env: Optional[dict],
+                  scope: str = SCOPE_USER) -> Optional[str]:
+    """The unit's recent journal. None means it COULD NOT BE READ (no
+    journalctl, or the read failed); "" means it was read and was empty —
+    a distinction that matters, because "we could not check" and "there was
+    nothing" get different verdicts. Shared by the 216 reading and the
+    last-error line so there is one idea of what "the unit's own words"
+    means, and so the doctor reads the journal once."""
+    if not shutil.which("journalctl"):
+        return None
+    code, out = _run(["journalctl"] + _scope_args(scope) + ["-u", unit, "-n",
+                      "60", "--no-pager", "-o", "cat"],
+                     timeout=PROBE_TIMEOUT_S, env=env)
+    return out if code == 0 else None
+
+
+def _systemctl_hint(scope: str, *words) -> str:
+    """A systemctl command HE can actually run in this scope. A system unit
+    needs root, and printing a line that comes back "Access denied" is one
+    more thing for him to be the messenger about."""
+    prefix = ["systemctl"] if scope == SCOPE_USER else ["sudo", "systemctl"]
+    return " ".join(prefix + _scope_args(scope) + list(words))
+
+
+def _journal_hint(unit: str, scope: str = SCOPE_USER) -> str:
+    """The command HE should run, in the scope his unit actually lives in.
+    Handing someone `journalctl --user` for a system unit is handing them a
+    command that answers about nothing."""
+    prefix = ["journalctl"] if scope == SCOPE_USER else ["sudo", "journalctl"]
+    return " ".join(prefix + _scope_args(scope)
+                    + ["-u", unit, "-n", "50", "--no-pager"])
+
+
+def _add_last_error(report: Report, unit: str, env: Optional[dict],
+                    journal_text: Optional[str] = None,
+                    scope: str = SCOPE_USER,
+                    props: Optional[dict] = None) -> None:
     """THE LAST REAL ERROR LINE from the journal — the thing a person would
     scroll for. Not a summary and not our paraphrase: the unit's own words,
-    which is what makes it worth pasting."""
-    if not shutil.which("journalctl"):
+    which is what makes it worth pasting.
+
+    AND WHEN IT HAPPENED, WHICH IS THE HALF THIS SHIPPED WITHOUT (fixed
+    2026-09-03). The owner fixed his host, the service came up, SPECTRA saw
+    it — and the doctor still headlined `last error` as a PROBLEM, quoting a
+    failure from BEFORE the fix, because a journal read with no clock cannot
+    tell a scar from a wound. A tool whose whole purpose is to stop him
+    being the messenger had him pasting a message about a machine that was
+    working.
+
+    So a last-error finding now carries WHEN, measured against the unit's
+    own `ActiveEnterTimestamp` — the moment it last came up — and the two
+    cases get DIFFERENT VERDICTS:
+
+      IS FAILING      the newest error line is at or after the last
+                      successful start, or the service is not running at
+                      all. FAILED, and it counts as a problem.
+      FAILED EARLIER  every error line predates the start that is still
+                      running. That is HISTORY on a healthy service, so it
+                      is reported as UNKNOWN — visible, never counted, and
+                      explicitly labelled as such.
+
+    An unreadable or absent timestamp is NOT resolved by guessing: with no
+    clock the line is reported as-is and said to be undated."""
+    out = (journal_text if journal_text is not None
+           else _read_journal(unit, env, scope))
+    if out is None:
         report.add("last error", UNKNOWN,
-                   "journalctl is not installed, so the unit's own words "
-                   "could not be read")
+                   "the unit's own words could not be read (journalctl is "
+                   "not installed, or the journal refused this read)")
         return
-    code, out = _run(["journalctl", "--user", "-u", unit, "-n", "60",
-                      "--no-pager", "-o", "cat"], timeout=PROBE_TIMEOUT_S,
-                     env=env)
-    if code != 0 or not out.strip():
+    if not out.strip():
         report.add("last error", UNKNOWN,
                    "the journal had nothing for this unit (it may never "
                    "have been started on this machine)")
         return
     lines = [ln.strip() for ln in out.splitlines() if ln.strip()]
-    interesting = [ln for ln in lines
-                   if re.search(r"error|fail|refus|traceback|cannot|could not"
-                                r"|no such|permission|denied|216|Exception",
-                                ln, re.I)]
+    interesting = [ln for ln in lines if _INTERESTING.search(ln)]
     chosen = (interesting or lines)[-1]
-    report.add("last error", UNKNOWN if not interesting else FAILED,
-               f"the unit's own last line: {chosen[:300]}",
-               f"journalctl --user -u {unit} -n 50 --no-pager"
-               if interesting else "")
+    if not interesting:
+        report.add("last error", UNKNOWN,
+                   f"the unit's own last line: {chosen[:300]}")
+        return
+
+    healthy, started_at, started_mono = _running_since(props)
+    stale = (_errors_predate_start(unit, env, scope, started_mono)
+             if healthy else False)
+    if healthy and stale:
+        # FAILED EARLIER — history, not a fault. UNKNOWN so it appears in
+        # the paste and is never counted as a problem, which is the whole
+        # difference between "your machine is broken" and "here is what it
+        # went through before it came up".
+        report.add("last error", UNKNOWN,
+                   f"FAILED EARLIER, not now: the service has been up since "
+                   f"{started_at or 'its last start'} and every error in its "
+                   f"journal predates that. Kept because it says what this "
+                   f"machine went through, not because anything is wrong "
+                   f"now. Newest of them: {chosen[:250]}")
+        return
+    when = (f" (the service has been up since {started_at}, so this is at or "
+            f"after that start)" if healthy and started_at else "")
+    report.add("last error", FAILED,
+               f"IS FAILING — the unit's own last line: {chosen[:300]}{when}",
+               _journal_hint(unit, scope))
+
+
+def _running_since(props: Optional[dict]) -> tuple:
+    """(is the service up right now, when it came up in words, when it came
+    up on the monotonic clock). All three out of systemd's own properties —
+    never inferred from the journal we are about to judge against them."""
+    if not props:
+        return False, "", None
+    healthy = (props.get("ActiveState") == "active"
+               and props.get("SubState") == "running")
+    mono = (props.get("ActiveEnterTimestampMonotonic") or "").strip()
+    try:
+        mono_s = float(mono) / 1e6 if mono and mono != "0" else None
+    except ValueError:
+        mono_s = None
+    return healthy, (props.get("ActiveEnterTimestamp") or "").strip(), mono_s
+
+
+#: `journalctl -o short-monotonic` puts seconds-since-boot in brackets at
+#: the head of every line: `[830866.798367] host systemd[1]: ...`
+_MONOTONIC_LINE = re.compile(r"^\[\s*(\d+(?:\.\d+)?)\]\s*(.*)$")
+
+
+def _errors_predate_start(unit: str, env: Optional[dict], scope: str,
+                          started_monotonic_s: Optional[float]) -> bool:
+    """DID EVERY ERROR LINE HAPPEN BEFORE THE START THAT IS STILL RUNNING?
+
+    WHY THE MONOTONIC CLOCK AND NOT `--since`. `ActiveEnterTimestamp` is a
+    wall-clock string with SECOND granularity, so a unit that failed and
+    came back inside the same second — which is exactly what a `Restart=`
+    loop does, and what the rig reproduces — lands its old failure inside
+    the window and reads as current. `ActiveEnterTimestampMonotonic` and
+    `journalctl -o short-monotonic` are THE SAME CLOCK, boot-relative, at
+    microsecond precision: one origin, no timezone, no locale, and nothing
+    to parse but a number systemd printed.
+
+    `-b` bounds it to the CURRENT BOOT, which the monotonic clock requires:
+    across a reboot those seconds start again, and without it a failure from
+    a previous boot could carry a larger number than this boot's start and
+    read as newer than it.
+
+    Anything that cannot be read gives False — history, if we cannot prove
+    it, is treated as a live problem. A doctor that downgraded a REAL,
+    CURRENT failure to a scar because its own clock query failed would be
+    worse than one that never had a clock at all."""
+    if started_monotonic_s is None or not shutil.which("journalctl"):
+        return False
+    code, out = _run(["journalctl"] + _scope_args(scope) + ["-u", unit, "-b",
+                      "--no-pager", "-o", "short-monotonic"],
+                     timeout=PROBE_TIMEOUT_S, env=env)
+    if code != 0 or not out.strip():
+        return False
+    saw_boundary = False
+    for line in out.splitlines():
+        m = _MONOTONIC_LINE.match(line.strip())
+        if not m:
+            # A LINE WE CANNOT DATE IS NOT A LINE WE MAY DISMISS.
+            return False
+        when, text = float(m.group(1)), m.group(2)
+        if when < started_monotonic_s:
+            continue
+        saw_boundary = True
+        if _INTERESTING.search(text):
+            return False
+    # Nothing at or after the start at all means the journal and systemd
+    # disagree about when this unit came up; say so by refusing the claim
+    # rather than declaring every failure historical.
+    return saw_boundary
+
+
+#: What counts as an error line. One definition, used to pick the line worth
+#: quoting AND to decide whether anything since the start is a problem — two
+#: different answers from one regex is a bug this file cannot afford.
+_INTERESTING = re.compile(
+    r"error|fail|refus|traceback|cannot|could not|no such|permission"
+    r"|denied|216|Exception", re.I)
 
 
 # ── 7. DOES THE SERVER SEE THIS MACHINE ────────────────────────────────────
@@ -792,17 +1184,18 @@ def check_server_sees_us(report: Report, url: str, host: str) -> None:
 
 def run(*, url: str = "", device: str = "/dev/video0", host: str = "",
         venv: str = "", unit: str = UNIT_NAME,
-        skip_server: bool = False) -> Report:
+        skip_server: bool = False, scope: str = "") -> Report:
     """Every branch, in the order a person would work through them: this
     machine's own tools first, then the thing between it and SPECTRA, then
     SPECTRA's own answer. Nothing here writes, fixes or starts anything."""
     report = Report(host=host or platform.node())
+    scope = scope or detect_scope(unit)
     check_python(report, venv)
     check_tools(report)
     check_device(report, device)
-    check_video_group(report)
+    check_video_group(report, scope=scope)
     check_url(report, url)
-    check_service(report, unit)
+    check_service(report, unit, scope)
     if not skip_server:
         check_server_sees_us(report, url, report.host)
     return report
@@ -852,12 +1245,12 @@ def render(report: Report, *, venv: str = "", url: str = "",
 
 def main(*, url: str = "", device: str = "/dev/video0", host: str = "",
          venv: str = "", unit: str = UNIT_NAME, as_json: bool = False,
-         skip_server: bool = False) -> int:
+         skip_server: bool = False, scope: str = "") -> int:
     """Exit 0 when nothing FAILED. An UNKNOWN never fails the run: a doctor
     that reported a blind spot as a fault would send him to fix a machine
     that is working."""
     report = run(url=url, device=device, host=host, venv=venv, unit=unit,
-                 skip_server=skip_server)
+                 skip_server=skip_server, scope=scope)
     if as_json:
         print(json.dumps(report.as_dict(), indent=2))
     else:
@@ -958,7 +1351,7 @@ def _hello_never_arrived(unit: str, last_err: str, timeout_s: float,
     make anybody go and find it."""
     out = [f"  SPECTRA never saw this machine within {timeout_s:.0f}s."]
     report = Report()
-    check_service(report, unit)
+    check_service(report, unit, detect_scope(unit))
     failed = [f for f in report.findings if f.failed]
     if failed:
         out.append("")
@@ -979,7 +1372,7 @@ def _hello_never_arrived(unit: str, last_err: str, timeout_s: float,
                "client has still")
     out.append("  not appeared there. That is the one case neither side can "
                "explain alone:")
-    out.append(f"    journalctl --user -u {unit} -n 50 --no-pager")
+    out.append(f"    {_journal_hint(unit, detect_scope(unit))}")
     return "\n".join(out)
 
 
@@ -1019,6 +1412,13 @@ if __name__ == "__main__":                             # pragma: no cover
     _p.add_argument("--host", default=os.environ.get("SPECTRA_CAPTURE_HOST", ""))
     _p.add_argument("--venv", default=os.environ.get("SPECTRA_CAPTURE_VENV", ""))
     _p.add_argument("--json", action="store_true")
+    # WHICH MANAGER OWNS THE UNIT. Detected from disk by default (a system
+    # unit file present wins), overridable because a half-migrated host can
+    # have both and only a person knows which one is meant to be running.
+    _p.add_argument("--scope", choices=(SCOPE_USER, SCOPE_SYSTEM),
+                    default="",
+                    help="ask the user or the system service manager "
+                         "(default: whichever has the unit installed)")
     _p.add_argument("--offline", action="store_true",
                     help="do not ask the server anything")
     _p.add_argument("--address-only", action="store_true",
@@ -1040,4 +1440,4 @@ if __name__ == "__main__":                             # pragma: no cover
         raise SystemExit(_code)
     raise SystemExit(main(url=_a.url, device=_a.device, host=_a.host,
                           venv=_a.venv, as_json=_a.json,
-                          skip_server=_a.offline))
+                          skip_server=_a.offline, scope=_a.scope))

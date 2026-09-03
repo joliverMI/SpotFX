@@ -1,0 +1,86 @@
+# THE CAPTURE CLIENT AS A SYSTEM SERVICE — the kiosk host's unit.
+#
+# THIS IS THE OTHER HALF OF A DELIBERATE SPLIT. Read
+# `deploy/spectra-capture-client.service` (the USER unit) alongside it; the
+# two exist as separate files rather than one template with a conditional
+# line, because the directive that separates them is legal in exactly one of
+# them and a conditional is how it gets copied into the wrong half.
+#
+#   USER unit    a laptop or desktop somebody logs into. Boot-start needs
+#                LINGER. Group access is INHERITED from the login session's
+#                own `systemd --user`, and `SupplementaryGroups=` MUST NOT
+#                appear: an unprivileged manager is refused `setgroups(2)`
+#                outright (`216/GROUP`, "Operation not permitted") whether
+#                or not the user is a member.
+#   SYSTEM unit  THIS FILE. A headless box — the kiosk Pi — with no login
+#                session to inherit anything from and nobody to log in.
+#                systemd runs as root, applies `SupplementaryGroups=` and
+#                THEN drops to `User=`, so the directive is not merely legal
+#                here, it is the mechanism. Boot-start needs no linger and
+#                no login.
+#
+# WHY THIS ONE IS A TEMPLATE (`.service.in`) AND THE USER UNIT IS NOT. The
+# user unit ships VERBATIM because `%h` resolves per user at load time, so
+# one set of bytes is correct on every host and `systemd-analyze verify` can
+# check the exact bytes that get installed. Under a root manager `%h` is
+# ROOT's home, which is not where the client lives, so a system unit has to
+# name the account and its paths. `scripts/install_capture_client.sh
+# --system` substitutes the four placeholders below and then runs
+# `systemd-analyze verify` ON THE GENERATED FILE — the verification property
+# is kept, it just moves from "the shipped bytes" to "the installed bytes".
+#
+#   @USER@       the account the client runs as
+#   @GROUP@      that account's primary group
+#   @HOME@       its home directory (where the configuration and venv live)
+#   @LAUNCHER@   the generated launcher, which carries the checkout path
+#
+# THIS UNIT ACQUIRES NO ROOM AUTHORITY. Same as the user unit, and for the
+# same reason: it starts a CAMERA process. It opens a device, holds a
+# WebSocket, sends frames and lock read-backs. It never takes the lights and
+# cannot. Running under the system manager does NOT widen that — every
+# hardening directive below is at least as strict as the user unit's, and
+# `User=`/`Group=` mean the process itself is unprivileged exactly as
+# before.
+
+[Unit]
+Description=SPECTRA unattended capture client (camera host, system scope)
+Documentation=https://github.com/joliverMI/SpotFX/blob/master/docs/CAPTURE_CLIENT_HOST.md
+After=network-online.target
+Wants=network-online.target
+# Do NOT give up after a burst of restarts — an unplugged camera must find
+# the session again when it is plugged back in. ([Unit], not [Service];
+# systemd's own verifier says so.)
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+# THE ACCOUNT. Under a root manager nothing is inherited, so it is named.
+User=@USER@
+Group=@GROUP@
+# AND THIS IS WHERE THE DIRECTIVE IS LEGITIMATE: root applies it BEFORE
+# dropping to User=, which is the whole difference from the user unit. It is
+# also the only way this host gets the camera — there is no login session
+# here to inherit a group from.
+SupplementaryGroups=video
+# NO `-` PREFIX: a missing configuration must stop the unit and name itself
+# in the journal, not start a client that guesses where SPECTRA lives.
+EnvironmentFile=@HOME@/.config/spectra-capture/client.env
+ExecStart=@LAUNCHER@
+Restart=always
+RestartSec=5
+PrivateTmp=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+# The user unit uses ProtectHome=read-only; here the account's own home is
+# where the venv and the configuration live and it is still only ever READ.
+ProtectHome=read-only
+ReadOnlyPaths=@HOME@
+RuntimeDirectory=spectra-capture
+ReadWritePaths=/run/spectra-capture
+# The camera itself, and nothing else under /dev.
+DeviceAllow=char-video4linux rw
+
+[Install]
+# NOT default.target: there is no user session here. This is what makes a
+# kiosk host start its camera with nobody logged in and no linger.
+WantedBy=multi-user.target
