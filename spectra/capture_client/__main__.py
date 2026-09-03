@@ -41,6 +41,7 @@ from typing import Optional
 
 import httpx
 
+from spectra.capture_client import doctor
 from spectra.capture_client.camera import (CameraLock, SyntheticCamera,
                                            V4L2Camera)
 from spectra.capture_client.config import (ConfigError, env_help,
@@ -52,6 +53,18 @@ from spectra.capture_client.session import CLIENT_VERSION, CaptureClient
 #: can honestly report anything.
 DEFAULT_LOCK_WAIT_S = 90.0
 POLL_S = 1.0
+
+
+def _venv_path() -> str:
+    """The virtualenv this process is running FROM, when it is running from
+    one — read off `sys.prefix` rather than guessed from a path the
+    installer happens to use today. The launcher execs the venv's own
+    python, so `--doctor` through the installed launcher inspects the
+    environment it is actually in; run from a checkout's `.venv` it inspects
+    that, which is equally honest."""
+    if sys.prefix != getattr(sys, "base_prefix", sys.prefix):
+        return sys.prefix
+    return ""
 
 
 def _urls(base: str) -> tuple[str, str]:
@@ -135,7 +148,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     # merge somebody has to keep correct. `--url` is required only when
     # nothing declared it, which is what lets the boot service pass no
     # arguments at all.
-    p.add_argument("--url", required="url" not in env, default=env.get("url"),
+    # NOT `required=`, EVEN THOUGH RUNNING NEEDS IT. `--doctor` exists for
+    # the machine whose configuration is the broken thing, so an argparse
+    # error about a missing --url would refuse the one command that could
+    # have explained it. A run without an address refuses below, by name.
+    p.add_argument("--url", default=env.get("url"),
                    help="SPECTRA's address, e.g. http://spectra:8000/spectra")
     p.add_argument("--device", default=env.get("device", "/dev/video0"))
     p.add_argument("--pose-name", dest="pose_name",
@@ -178,8 +195,39 @@ def main(argv: Optional[list[str]] = None) -> int:
                    default=bool(env.get("synthetic", False)),
                    help="a black synthetic camera that reports NO lock — for "
                         "checking the wire reaches SPECTRA, never for a map")
+    # THE ONE COMMAND HE RUNS WHEN NOTHING IS WORKING. It checks every
+    # branch of the chain — interpreter, venv+pip, the two tools, the
+    # device, GROUP MEMBERSHIP and whether the user manager has it, the URL
+    # (resolves/connects/answers), the unit and its own last error line, and
+    # finally whether SPECTRA can see this machine — and it fixes, starts
+    # and gates nothing. See `doctor.py`, which is the binding statement.
+    p.add_argument("--doctor", action="store_true",
+                   help="check every link in the chain from this machine to "
+                        "SPECTRA, name each verdict, and stop. Writes "
+                        "nothing, starts nothing, opens no camera")
+    p.add_argument("--doctor-json", action="store_true",
+                   help="the same checks as machine-readable JSON")
+    p.add_argument("--doctor-offline", action="store_true",
+                   help="--doctor without asking the server anything (for a "
+                        "machine with no network)")
     p.add_argument("-v", "--verbose", action="store_true")
     args = p.parse_args(argv)
+
+    if args.doctor or args.doctor_json or args.doctor_offline:
+        # IT RUNS WITHOUT A --url, DELIBERATELY. The doctor's whole job is
+        # the case where the configuration is the thing that is wrong, so it
+        # must never be the one command that refuses to start because of it
+        # — a missing address is a FINDING here, not a usage error.
+        return doctor.main(url=args.url or "", device=args.device,
+                           host=args.host, venv=_venv_path(),
+                           as_json=args.doctor_json,
+                           skip_server=args.doctor_offline)
+
+    if not args.url:
+        print("no SPECTRA address: pass --url, or set SPECTRA_CAPTURE_URL in "
+              "the client's environment file. Run --doctor to check every "
+              "other link in the chain at the same time.", file=sys.stderr)
+        return 2
 
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,

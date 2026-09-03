@@ -46,6 +46,15 @@ VENV="${SPECTRA_CAPTURE_VENV:-$HOME/.local/share/spectra-capture/venv}"
 
 URL=""; POSE=""; DEVICE=""; HOSTNAME_ARG=""; SIZE=""; INPUT_FORMAT=""
 CHECK_ONLY=0; ADD_GROUP=0; NO_START=0; PYTHON="${SPECTRA_CAPTURE_PYTHON:-python3}"
+# Set only when THIS RUN added the user to 'video'. The membership is real
+# from that moment but the running user manager does not have it, so the
+# service is installed and deliberately NOT started — see section 4.
+ADDED_GROUP=0
+# How long to wait, after starting the service, for the client to actually
+# appear on SPECTRA's own camera_host surface. Generous: a camera settles
+# before it can honestly report anything (the client's own
+# SETTLE_BEFORE_LOCK_S), and a slow answer is still an answer.
+HELLO_WAIT_S="${SPECTRA_CAPTURE_HELLO_WAIT_S:-45}"
 
 usage() {
     sed -n '2,40p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
@@ -177,31 +186,60 @@ read this camera's exposure lock back out of the driver" \
            "sudo apt install v4l-utils"
 fi
 
-# ── 4. the camera, and the video group ─────────────────────────────────────
+# ── 4. the camera, and GROUP MEMBERSHIP (not readability) ──────────────────
 # `|| true` because `pipefail` is on and grep exits 1 on no match — which
 # is the ordinary case (no configuration yet), not a failure.
 DEV_FROM_ENV="$( { grep -E '^SPECTRA_CAPTURE_DEVICE=' "$ENV_FILE" 2>/dev/null || true; } | tail -1 | cut -d= -f2- )"
 DEV="${DEVICE:-$DEV_FROM_ENV}"
 DEV="${DEV:-/dev/video0}"
+#
+# THE PREDICATE IS MEMBERSHIP, AND ASKING THE NEIGHBOURING QUESTION COST AN
+# EVENING (2026-09-02). This used to test `[ -r $DEV ]` and call that the
+# video-group check. On a desktop those are not the same question: logind
+# grants the LOGGED-IN user read access to the seat's devices through an
+# ACL, with no group anywhere in it, so `-r` said yes on a machine whose
+# user was not in `video` — and then the unit, which declares
+# `SupplementaryGroups=video`, could not start AT ALL: `status=216/GROUP`,
+# "Changing group credentials failed". The install reported success while
+# installing a service that could never run. This is the same shape as the
+# `venv` vs `ensurepip` bug one section up: a check that passes on most
+# machines and is not the thing that has to be true.
+#
+# AND MEMBERSHIP ALONE IS NOT ENOUGH EITHER, so the refusal says REBOOT
+# rather than "log out and back in": `systemd --user` takes its
+# supplementary groups once, when the manager starts, and being
+# unprivileged it cannot gain one afterwards. With linger enabled the
+# manager may not even stop at logout. `--doctor` reads the running
+# manager's own groups out of /proc and says which of the two is missing.
+VIDEO_FIX="sudo usermod -aG video $(id -un)  — then REBOOT (a logout does \
+not reliably restart the user manager, and the unit fails 216/GROUP until \
+it does)"
+if id -nG | tr ' ' '\n' | grep -qx video; then
+    ok "$(id -un) is in group 'video' (which is what the unit's \
+SupplementaryGroups=video actually requires)"
+elif [ "$ADD_GROUP" = "1" ]; then
+    say "running: sudo usermod -aG video $(id -un)"
+    if sudo usermod -aG video "$(id -un)"; then
+        ADDED_GROUP=1
+        note "added $(id -un) to group 'video'. NEITHER THIS SHELL NOR THE \
+RUNNING USER MANAGER HAS IT YET. Everything below is installed, and the \
+service is NOT started, because it would only fail 216/GROUP. REBOOT and it \
+starts by itself."
+    else
+        refuse "could not add $(id -un) to group 'video'" \
+               "run it as a user with sudo: $VIDEO_FIX"
+    fi
+else
+    refuse "$(id -un) is NOT in group 'video'. The unit declares \
+SupplementaryGroups=video, so systemd would refuse to start it at all \
+(status=216/GROUP). Note this is NOT the same as whether the camera is \
+readable: a desktop seat grants that through an ACL without any group, \
+which is exactly why the old check here passed on a machine whose service \
+could never start." \
+           "$VIDEO_FIX — or re-run this script with --add-video-group"
+fi
 if [ -e "$DEV" ]; then
     ok "$DEV exists"
-    if [ -r "$DEV" ]; then
-        ok "$DEV is readable by $(id -un)"
-    elif [ "$ADD_GROUP" = "1" ]; then
-        say "running: sudo usermod -aG video $(id -un)"
-        if sudo usermod -aG video "$(id -un)"; then
-            note "added to group 'video' — THIS SHELL still is not in it. \
-Log out and back in (or reboot) before the service can read the camera."
-        else
-            refuse "could not add $(id -un) to group 'video'" \
-                   "run it as a user with sudo: sudo usermod -aG video $(id -un)"
-        fi
-    else
-        refuse "$DEV is not readable by $(id -un) — the user must be in \
-group 'video'" \
-               "sudo usermod -aG video $(id -un) (then log out and back in), \
-or re-run this script with --add-video-group"
-    fi
 else
     # NOT A REFUSAL. A camera host is often provisioned before the camera is
     # plugged in, and the client itself connects and REPORTS a missing camera
@@ -222,6 +260,43 @@ else
     refuse "there is no configuration at $ENV_FILE and no --url was given, \
 so this client would not know where SPECTRA is" \
            "re-run with --url http://spectra:8000/spectra"
+fi
+
+# ── 5b. AND WHETHER THAT ADDRESS ANSWERS FROM THIS MACHINE ─────────────────
+# NEVER CHECKED UNTIL 2026-09-02, so the whole URL branch of an install was
+# untested: a name that does not resolve here, a port nothing is listening
+# on, and a server that answers but is not SPECTRA (usually the `/spectra`
+# path prefix, which is easy to lose) all produced the same silent outcome —
+# an installed service quietly failing to connect to nothing.
+#
+# THREE READINGS, and they have three different fixes, which is the whole
+# reason not to collapse them into "cannot reach SPECTRA". The logic is the
+# DOCTOR'S OWN (`spectra/capture_client/doctor.py --address-only`), run
+# straight from the checkout with the system interpreter because there is no
+# virtualenv yet — that file is stdlib-only precisely so this can happen
+# before anything is built. There is no second copy of it here.
+URL_TO_CHECK="$URL"
+if [ -z "$URL_TO_CHECK" ] && [ -f "$ENV_FILE" ]; then
+    URL_TO_CHECK="$( { grep -E '^SPECTRA_CAPTURE_URL=' "$ENV_FILE" 2>/dev/null || true; } | tail -1 | cut -d= -f2- )"
+fi
+DOCTOR="$SELF/spectra/capture_client/doctor.py"
+if [ -z "$URL_TO_CHECK" ]; then
+    :   # already refused above; no address to probe
+elif [ ! -f "$DOCTOR" ]; then
+    note "the doctor is missing from this checkout ($DOCTOR), so SPECTRA's \
+address could not be probed from here"
+elif ! command -v "$PYTHON" >/dev/null 2>&1; then
+    :   # already refused above; nothing to run it with
+else
+    ADDR_OUT="$("$PYTHON" "$DOCTOR" --address-only --url "$URL_TO_CHECK" 2>&1)" \
+        && ADDR_RC=0 || ADDR_RC=$?
+    printf '%s\n' "$ADDR_OUT" | sed 's/^/  /'
+    if [ "${ADDR_RC:-0}" != "0" ]; then
+        refuse "SPECTRA does not answer at $URL_TO_CHECK from this machine \
+(the three readings above say which of resolve / connect / answer failed)" \
+               "fix the address or the server, then run this again. \
+Everything else on this host is fine and nothing has been written."
+    fi
 fi
 
 # ── 6. boot-start actually starting at boot ────────────────────────────────
@@ -333,27 +408,87 @@ else
 fi
 
 systemctl --user daemon-reload
-if [ "$NO_START" = "1" ]; then
-    note "--no-start given: enabled nothing. Start it with: \
-systemctl --user enable --now spectra-capture-client"
-else
-    systemctl --user enable --now spectra-capture-client
-    ok "spectra-capture-client is enabled and started"
-fi
 
-cat <<DONE_MSG
+cat <<INSTALLED_MSG
 
 == installed ==
   configuration   $ENV_FILE
   launcher        $LAUNCHER
   unit            $UNIT_DST
   virtualenv      $VENV
+INSTALLED_MSG
 
-  systemctl --user status spectra-capture-client
-  journalctl --user -u spectra-capture-client -f
+# ── THE PART THAT USED TO BE A CLAIM ───────────────────────────────────────
+#
+# This script used to end by announcing that "SPECTRA can now SEE this
+# machine". It printed that sentence unconditionally — including, on
+# 2026-09-02, while installing a service that could not start at all
+# (216/GROUP). A closing message that asserts something nobody checked is
+# worse than no closing message: it sends the reader to look somewhere else.
+#
+# So nothing is claimed now. The install STARTS the service and then WAITS,
+# bounded, for the client to actually appear on SPECTRA's own camera_host
+# surface, and prints what really happened — one of:
+#
+#   connected            with the machine SPECTRA named and its self-test
+#                        verdict, because that is the thing being claimed
+#   present but unable   the client is there and says why it cannot work
+#   the unit's own words when the service failed or is crash-looping
+#   never arrived        the service is up and SPECTRA never heard from it,
+#                        which is the cannot-reach-the-server case and the
+#                        one the address probe above and `--doctor` exist for
+#
+# `--doctor` is named in every outcome, because the next question after any
+# of them is the same one.
+if [ "$ADDED_GROUP" = "1" ]; then
+    cat <<GROUP_MSG
 
-SPECTRA can now SEE this machine: GET /spectra/api/rooms/map/status carries
-'camera_host', which names this host, its build, its declared placement and
-its camera's self-test verdict — and, when this client is not connected,
-says so with the machine named rather than a bare "no session".
-DONE_MSG
+== NOT STARTED, AND THAT IS THE HONEST ANSWER ==
+  $(id -un) was added to group 'video' by this run. The membership is real,
+  but the RUNNING user manager still has the groups it started with, so
+  starting the service now would only fail 216/GROUP.
+
+  REBOOT. The unit is enabled, so it starts by itself when the machine comes
+  back, and it will have the group.
+
+    sudo reboot
+    # then, on that machine:
+    $LAUNCHER --doctor
+GROUP_MSG
+    systemctl --user enable spectra-capture-client >/dev/null 2>&1 || true
+    ok "unit enabled (it will start at boot)"
+    exit 0
+fi
+
+if [ "$NO_START" = "1" ]; then
+    cat <<NOSTART_MSG
+
+  --no-start given: nothing was started and nothing is claimed about what
+  SPECTRA can see. Start it, then check:
+
+    systemctl --user enable --now spectra-capture-client
+    $LAUNCHER --doctor
+NOSTART_MSG
+    exit 0
+fi
+
+systemctl --user enable --now spectra-capture-client
+ok "spectra-capture-client is enabled and started"
+
+echo
+echo "== waiting up to ${HELLO_WAIT_S}s for SPECTRA to actually see this machine =="
+VERIFY_HOST="${HOSTNAME_ARG:-$(uname -n)}"
+if "$VENV/bin/python" "$DOCTOR" --await-hello "$HELLO_WAIT_S" \
+        --url "$URL_TO_CHECK" --host "$VERIFY_HOST" \
+        --device "$DEV" --venv "$VENV"; then
+    echo
+    echo "  Run this any time that changes: $LAUNCHER --doctor"
+    exit 0
+fi
+echo
+echo "  The install itself is complete — the configuration, launcher, unit"
+echo "  and virtualenv above are all in place. What is NOT working is above,"
+echo "  in its own words. Full detail, every branch at once:"
+echo
+echo "    $LAUNCHER --doctor"
+exit 1

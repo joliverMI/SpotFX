@@ -90,6 +90,14 @@ def _run(name: str, timeout: int) -> str:
     # machine has no session bus); the script says so in its own output.
     ("check_capture_client_service.py", 600,
      "ALL CAPTURE CLIENT SERVICE CHECKS PASSED"),
+    # AND THE SAME FAILURES ON MACHINES THAT NEVER SAW THIS REPO: a REAL
+    # 216/GROUP from the host's own systemd user manager, and a stock Debian
+    # container with a user created seconds ago (not in `video`, and with no
+    # ensurepip) refusing by name and writing nothing. The script SKIPS a
+    # rig it cannot run — no docker, no session bus — with the reason named,
+    # so an unavailable facility is a hole in the ledger rather than a pass.
+    ("check_capture_client_fresh_host.py", 1200,
+     "FRESH-HOST CHECKS PASSED"),
     # WHAT THE CLIENT IMPORTS, which is the only part of the ARM question
     # an x86 machine can answer: it imports with every server-only package
     # blocked at the meta path, its third-party closure is exactly the two

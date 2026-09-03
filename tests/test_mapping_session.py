@@ -192,6 +192,13 @@ def test_the_session_persists_no_pixels(tmp_path, monkeypatch):
         "host", "client", "version", "pose_name", "user_agent", "platform",
         "camera", "session_id", "pose_id", "locked", "camera_error", "lever",
         "first_seen_ms", "last_seen_ms", "last_event", "sessions",
-        "lever_seen_ms"}, "no pixels, no grids, no image — only who and what"
+        "lever_seen_ms",
+        # PRESENT-BUT-UNABLE's own two, and both are still "who and what":
+        # whether the camera has spoken at all yet (the settling-vs-faulty
+        # discriminator) and the session's own refusal SENTENCE. Kept in the
+        # record rather than recomputed so that an ABSENT host still says
+        # what it was complaining about when it was last here.
+        "lock_reported", "refusal",
+    }, "no pixels, no grids, no image — only who and what"
     assert not sess.grids and not sess.frames._frames, (
         "every ring is dropped on close")

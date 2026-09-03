@@ -757,7 +757,7 @@ def session_view() -> dict:
                 "source": capture_source.KIND_NONE,
                 "calibration_grade": False, "calibration_refusal": "",
                 "measured_by": capture_source.measured_by(None),
-                "aiming": False,
+                "aiming": False, "unable": "",
                 # ABSENCE IS A READ. `refusal` above is why the RUN cannot
                 # go; this says which machine is missing, what it was
                 # running and when it was last here. It refuses nothing —
@@ -765,7 +765,16 @@ def session_view() -> dict:
                 "host": capture_health.health(None)}
     verdict = getattr(sess, "lever_verdict", None)
     grade = capture_source.calibration_grade(sess)
-    return {"host": capture_health.health(sess),
+    host = capture_health.health(sess)
+    return {"host": host,
+            # PRESENT AND UNABLE IS NOT PRESENT AND FINE. `host.state` is
+            # `impaired` when this connected client has said it cannot do
+            # the job (no camera, a lock it reported and did not get, a
+            # measured lever failure) and `unable` carries its own reason.
+            # It refuses nothing — `refusal` below is still the gate — but a
+            # surface reading this can no longer show a broken camera host
+            # and a working one with the same word.
+            "unable": host.get("unable", ""),
             "present": True, "locked": sess.lock.locked,
             "session_id": sess.id, "pose_id": sess.pose_id,
             "refusal": sess.refusal(), "client": dict(sess.hello or {}),
