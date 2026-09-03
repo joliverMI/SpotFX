@@ -1343,6 +1343,30 @@ def client_present(host: str, *, pose_name: str = "", version: str = "",
             f"connected{tail}.")
 
 
+def client_impaired(host: str, reason: str, *, pose_name: str = "",
+                    version: str = "", browser: bool = False) -> str:
+    """CONNECTED, AND SAYING IT CANNOT DO THE JOB — the sentence that stops
+    a reachable-but-broken client from reading exactly like a healthy one.
+
+    The client already connects when it has no camera, cannot lock, or
+    failed its lever self-test, precisely so its reason lands on a surface
+    instead of dying on a laptop nobody is watching. Until this existed,
+    `camera_host` then said the same word — "connected" — that it says for a
+    machine doing its job perfectly, and a reader went looking elsewhere.
+
+    IT CARRIES THE CLIENT'S OWN REASON VERBATIM and composes none of its
+    own: whichever of the three conditions it is, the sentence a person
+    needs was already written by whoever detected it. This one only says
+    WHICH MACHINE it came from, and that the machine is present."""
+    where = f" ({pose_name})" if pose_name else ""
+    build = f" running {version}" if version else ""
+    who = ("A browser session on" if browser else "The capture client on")
+    return (f"{who} {host or 'an unnamed machine'}{where}{build} IS "
+            f"connected but cannot do the job: {reason} Nothing is wrong "
+            f"with the connection — this machine is reachable and reporting, "
+            f"so fix what it names and it clears on its own.")
+
+
 def _ago(seconds: float) -> str:
     seconds = max(0.0, float(seconds))
     if seconds < 90:

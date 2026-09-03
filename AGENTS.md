@@ -4659,6 +4659,74 @@ writes nothing, every prerequisite refused BY NAME with its fix (ffmpeg,
 is `pipefail`-strict** — a `grep` that legitimately finds nothing needs
 `|| true` or the script dies silently mid-check (a real bug found here).
 
+### A MACHINE MUST BE ABLE TO SAY WHAT IS WRONG WITH IT
+
+2026-09-02, PR fm/instrument-visibility, after eight successive failures on
+his laptop in one evening — every one ours, every one INVISIBLE here until
+he pasted something. **The defect was not any of the eight; it was that we
+had no way to know.** `spectra/capture_client/doctor.py`'s module docstring
+is the binding statement. Five things, and the middle three generalize well
+past this subsystem:
+
+- **`spectra-capture-client --doctor` is the one command**, and it is
+  **STDLIB-ONLY and runnable as a plain file**
+  (`python3 spectra/capture_client/doctor.py`, no package import — the
+  package `__init__` pulls in `websockets`). That is a requirement, not a
+  preference: it is the tool you reach for when the VIRTUALENV is the broken
+  thing, which two of the eight were. The installer runs it before it writes
+  anything, which is how the address branch became a pre-install check.
+- **ASK THE PREDICATE, NOT THE NEIGHBOURING QUESTION.** `[ -r /dev/video0 ]`
+  is not `id -nG | grep -qx video`: a desktop seat's ACL grants read access
+  with no group at all, so the old installer check passed on a machine whose
+  unit could never start (`SupplementaryGroups=video` → `216/GROUP`). This
+  is the SAME shape as the `import venv` vs `ensurepip` bug (PR #241) one
+  section over, and both cost an evening. When adding a precondition check,
+  write down the thing that actually has to be true and check THAT.
+- **A GROUP IS NOT APPLIED UNTIL THE USER MANAGER RESTARTS.** `usermod -aG`
+  changes the database, not any running process; `systemd --user` takes its
+  supplementary groups once at manager start and, being unprivileged, cannot
+  gain one after. So `id -nG` in a fresh shell can say `video` while the
+  unit still dies `216/GROUP`. The doctor reads the manager's own
+  `/proc/<pid>/status` `Groups:` line — a pure read with the same answer as
+  running a test unit, without writing a transient unit into his manager
+  every time. **Say REBOOT, not "log out and back in"**, especially with
+  linger enabled.
+- **A REACHABLE-BUT-BROKEN CLIENT MUST NOT LOOK LIKE A HEALTHY ONE.**
+  `capture_health` has a FOURTH state, `impaired` — connected and saying why
+  it cannot work, in the client's own words. `present` stays a boolean about
+  the socket so every earlier reader is unchanged, and NOT-YET is not
+  CANNOT: only a lock that was REPORTED and did not lock counts, or every
+  healthy startup would flap through it. It still gates nothing.
+- **AN INSTALLER MAY NOT CLAIM WHAT IT DID NOT CHECK.** The old script ended
+  by announcing "SPECTRA can now SEE this machine" — unconditionally, while
+  installing a service that could not start. It now WAITS (bounded) for a
+  real hello on `camera_host` and reports one of four outcomes, non-zero for
+  three of them.
+
+**`systemctl --user` DOES work from an agent shell here** — the memory that
+it cannot is about the SHELL, not the machine. Export
+`XDG_RUNTIME_DIR=/run/user/$(id -u)` and
+`DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus` and his live user
+manager answers. Without them it fails "Failed to connect to bus", which
+reads exactly like "no such service" — so anything reporting on a unit must
+fill those in and, when the bus is genuinely absent, say so as a property of
+the shell. **This unlocks a real proof**: `systemd-run --user
+--property=SupplementaryGroups=video /bin/true` on a user not in that group
+reproduces a genuine `216/GROUP` in about two seconds, and `reset-failed`
+leaves nothing behind. Do NOT install, enable or start the real unit in his
+manager to test something.
+
+**Proving a provisioner needs a host that never saw the repo.**
+`scripts/check_capture_client_fresh_host.py` is the pattern: rig A drives
+real systemd as above; rig B is `docker run --rm -v $REPO:/repo:ro
+debian:stable-slim` with a user created seconds ago — not in `video` because
+nobody put it there, and with no `ensurepip` because that is what a bare
+Debian is. Shims in `check_capture_client_service.py` force both answers to
+a question so a refusal is exercised deterministically; they cannot prove
+the QUESTION is right, which is exactly what the fresh host is for. Either
+rig SKIPS with its reason named when the facility is missing — a named hole
+beats a false clean row.
+
 **A check script that renders through `fx.headless` must `os._exit()`.**
 `fx`'s `TemporalEffect` spawns non-daemon threads the frame-stepped harness
 never joins, and `FxHost.stop()` refuses ("refusing to stop the SpotFX

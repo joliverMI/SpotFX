@@ -131,6 +131,36 @@ SYSTEMCTL_LOG = td / "systemctl-calls.log"
 for name in ("systemctl", "v4l2-ctl"):
     os.chmod(SHIMS / name, 0o755)
 
+# ── THE GROUP, BOTH WAYS, AND WHY IT IS A SHIM AT ALL ──────────────────────
+#
+# The installer's real predicate is now `id -nG | grep -qx video` — actual
+# membership, because the unit's `SupplementaryGroups=video` demands it and
+# a readable /dev/video0 does NOT imply it (a desktop seat's ACL grants read
+# access with no group in sight, which is how a machine whose unit could
+# never start passed the old check).
+#
+# Both answers therefore have to be forced here rather than inherited from
+# whoever happens to run this: a machine whose user IS in video would make
+# the refusal proof pass vacuously, and one whose user is NOT (this build
+# host, as it happens) could not provision at all. So there are two PATHs,
+# each with an `id` that answers one way and delegates everything else to
+# the real binary. What is NOT shimmed is the refusal's own logic, which is
+# the thing under test.
+_REAL_ID = shutil.which("id") or "/usr/bin/id"
+for _dirname, _extra in (("id-in-video", "video"), ("id-not-in-video", "")):
+    _d = td / _dirname
+    _d.mkdir(exist_ok=True)
+    (_d / "id").write_text(
+        "#!/bin/sh\n"
+        'if [ "$1" = "-nG" ] && [ $# -eq 1 ]; then\n'
+        f'  printf "%s\\n" "$({_REAL_ID} -nG) {_extra}"\n'
+        "  exit 0\n"
+        "fi\n"
+        f'exec {_REAL_ID} "$@"\n')
+    os.chmod(_d / "id", 0o755)
+ID_IN_VIDEO = td / "id-in-video"
+ID_NOT_IN_VIDEO = td / "id-not-in-video"
+
 #: A PATH holding every tool the installer genuinely uses EXCEPT the one
 #: under test — built by symlink so the refusal is exercised against a host
 #: that really is missing that binary, rather than against a crippled PATH
@@ -154,7 +184,9 @@ def path_without(missing: str) -> str:
         link = d / tool
         if not link.exists():
             link.symlink_to(target)
-    return str(d)
+    # Every "missing tool" refusal must fail for THAT tool, not for the
+    # group — so these hosts are always in video.
+    return f"{ID_IN_VIDEO}:{d}"
 
 BASE_ENV = dict(os.environ)
 BASE_ENV.pop("SPECTRA_STORAGE_DIR", None)
@@ -162,7 +194,9 @@ BASE_ENV.update({
     "HOME": str(HOME),
     "XDG_CONFIG_HOME": str(HOME / ".config"),
     "XDG_RUNTIME_DIR": str(HOME / "run"),
-    "PATH": f"{SHIMS}:{BASE_ENV.get('PATH', '')}",
+    # Provisioning runs as a host whose user IS in video; the refusal
+    # section below explicitly runs with the other one.
+    "PATH": f"{ID_IN_VIDEO}:{SHIMS}:{BASE_ENV.get('PATH', '')}",
 })
 (HOME / "run").mkdir(parents=True, exist_ok=True)
 
@@ -180,6 +214,18 @@ def run_installer(*args, env_extra=None, path=None):
         env["PATH"] = path
     return subprocess.run([str(INSTALLER), *args], capture_output=True,
                           text=True, env=env, timeout=600)
+
+
+async def run_installer_async(*args, **kw):
+    """The same call, off the event loop — LOAD-BEARING once the installer
+    talks to SPECTRA.
+
+    The test server runs inside THIS process's loop, and the installer now
+    probes the address before writing and waits for a real hello after
+    starting. A blocking `subprocess.run` here would stall the very server
+    it is trying to reach, and every one of those checks would fail for a
+    reason that has nothing to do with what it is testing."""
+    return await asyncio.to_thread(run_installer, *args, **kw)
 
 
 # ── the unit, read the way systemd reads it ────────────────────────────────
@@ -400,15 +446,70 @@ async def main():
     check(not ENV_FILE.exists() and not UNIT_DST.exists(),
           "after three refusals the throwaway host is still untouched")
 
-    r = run_installer("--check", "--url", "http://x/y", "--device", "/dev/null")
-    check(r.returncode == 0 and "nothing was written" in r.stdout,
-          "--check with every prerequisite met passes and still writes nothing")
-    check(not ENV_FILE.exists(), "and really wrote nothing")
+    # ── 2b. THE 216/GROUP RED CASE — the one that cost the evening ────────
+    # A host whose user is NOT in group 'video'. The unit declares
+    # SupplementaryGroups=video, so systemd refuses to start it AT ALL
+    # (`status=216/GROUP`, "Changing group credentials failed") — and the
+    # old check here asked whether /dev/video0 was READABLE, which a desktop
+    # seat's ACL grants without any group. It said yes, the install said
+    # success, and the service could never run.
+    #
+    # Note the device passed here is /dev/null, which IS readable: that is
+    # the point. A check that conflated the two would pass this test.
+    print("\n== 2b. NOT in group 'video' — the 216/GROUP case, refused ==")
+    r = run_installer("--check", "--url", "http://x/y", "--device", "/dev/null",
+                      path=f"{ID_NOT_IN_VIDEO}:{SHIMS}:{os.environ.get('PATH','')}")
+    check(r.returncode == 1 and "NOT in group 'video'" in r.stdout,
+          "a user who is not in 'video' is REFUSED, by name")
+    check("216/GROUP" in r.stdout,
+          "and the refusal says what systemd would actually do about it")
+    check("usermod -aG video" in r.stdout and "REBOOT" in r.stdout,
+          "naming the command AND the reboot — a logout does not restart "
+          "the user manager, which is what has to gain the group")
+    check("readable" in r.stdout.lower() and "ACL" in r.stdout,
+          "and it says WHY a readable /dev/video0 was never evidence of "
+          "this, so nobody re-introduces the old check")
+    check(not ENV_FILE.exists() and not UNIT_DST.exists(),
+          "nothing was written for it")
+
+    # ── 2c. AN ADDRESS THAT DOES NOT ANSWER, also refused before writing ──
+    # The URL branch had never been checked at install time at all, so a
+    # name that does not resolve here, a port nothing listens on, and a
+    # server that is not SPECTRA were all the same silent non-event.
+    print("\n== 2c. an address that does not answer, refused before "
+          "anything is written ==")
+    dead = free_port()
+    r = run_installer("--check", "--url", f"http://127.0.0.1:{dead}/spectra",
+                      "--device", "/dev/null")
+    check(r.returncode == 1 and "does not answer" in r.stdout,
+          "an address nothing is listening on is refused before installing")
+    check("will not accept a connection" in r.stdout,
+          "naming WHICH of resolve/connect/answer failed")
+    r = run_installer("--check", "--url", "http://no-such-host.invalid/spectra",
+                      "--device", "/dev/null")
+    check("cannot resolve" in r.stdout and r.returncode == 1,
+          "and a name this machine cannot resolve is its own reading, not "
+          "the same one")
+    check(not ENV_FILE.exists(), "still nothing written")
 
     # ── 3. provisioning, and then provisioning again ──────────────────────
     print("\n== 3. a fresh host, provisioned — then provisioned again ==")
     port = free_port()
     url = f"http://127.0.0.1:{port}"
+    # THE SERVER COMES UP FIRST NOW, because the installer verifies the
+    # address before it writes anything and then waits for a real hello
+    # after it starts the service. Provisioning against a server that is not
+    # there is itself one of the cases under test — section 2c above.
+    server = Server(port)
+    await server.start()
+    print(f"   (the real SPECTRA app is up on 127.0.0.1:{port})")
+
+    r = await run_installer_async("--check", "--url", url, "--device", "/dev/null")
+    check(r.returncode == 0 and "nothing was written" in r.stdout,
+          "--check with every prerequisite met passes and still writes nothing")
+    check("SPECTRA answered at" in r.stdout,
+          "and it got a real answer from SPECTRA before saying so")
+    check(not ENV_FILE.exists(), "and really wrote nothing")
     # THE ONE THING HERE THAT NEEDS THE OUTSIDE WORLD is pip building the
     # client's virtualenv. On a machine with no index reachable, pre-build
     # it with system site packages and SAY SO, rather than failing a proof
@@ -421,7 +522,7 @@ async def main():
               "step is then the same no-op a second run makes")
         subprocess.run([sys.executable, "-m", "venv", "--system-site-packages",
                         str(VENV)], check=True, timeout=300)
-    r = run_installer("--url", url, "--pose-name", "the north shelf",
+    r = await run_installer_async("--url", url, "--pose-name", "the north shelf",
                       "--device", "/dev/null", "--host", "camera-probe",
                       "--venv", str(VENV), "--no-start")
     check(r.returncode == 0, f"the installer succeeded: {r.stdout[-300:]}"
@@ -455,7 +556,7 @@ async def main():
     with open(ENV_FILE, "a") as fh:
         fh.write("\nSPECTRA_CAPTURE_FPS=3\n")
     before_unit = UNIT_DST.read_text()
-    r = run_installer("--url", url, "--device", "/dev/null",
+    r = await run_installer_async("--url", url, "--device", "/dev/null",
                       "--venv", str(VENV), "--no-start")
     check(r.returncode == 0, "running it a second time succeeds")
     again = env_file_vars(ENV_FILE)
@@ -474,9 +575,6 @@ async def main():
         # here can produce a map and nothing tries to.
         fh.write("SPECTRA_CAPTURE_SYNTHETIC=1\n")
 
-    server = Server(port)
-    await server.start()
-    print(f"   (the real SPECTRA app is up on 127.0.0.1:{port})")
     sup = UnitSupervisor(UNIT_DST)
     check(sup.exec_start == str(LAUNCHER),
           "ExecStart resolves to the launcher provisioning wrote")
@@ -502,8 +600,22 @@ async def main():
         print("\n== 5. SPECTRA can SEE that host ==")
         view = await host_view()
         client = view.get("client") or {}
-        check(view.get("present") is True and view.get("state") == "present",
-              "the camera host reads present")
+        # PRESENT AND UNABLE, AND THIS RIG IS THE PROOF OF IT. The client
+        # here runs the SYNTHETIC camera, which by construction reports NOT
+        # LOCKED — so it is a real reachable-but-broken client, and until
+        # `impaired` existed this surface called it "present", the same word
+        # it uses for a camera doing its job perfectly. The socket is still
+        # a fact (`present` stays True); what changed is that the answer no
+        # longer stops there.
+        check(view.get("present") is True and view.get("state") == "impaired",
+              f"the camera host reads present-but-UNABLE, not simply "
+              f"present: state={view.get('state')!r}")
+        check(bool(view.get("unable")),
+              f"carrying the client's OWN reason: "
+              f"{str(view.get('unable'))[:90]}")
+        check("connected but cannot do the job" in (view.get("sentence") or ""),
+              "and the sentence says connected AND unable in one line, so "
+              "neither half can be read without the other")
         check(client.get("host") == "camera-probe",
               f"named: {client.get('host')!r}")
         check(client.get("client") == "spectra-capture-client" and
@@ -571,6 +683,53 @@ async def main():
               "and the record still holds ONE row for this machine, not one "
               "per connection")
 
+        # ── 8. THE INSTALLER NO LONGER CLAIMS WHAT IT DID NOT CHECK ──────
+        # It used to END by announcing "SPECTRA can now SEE this machine",
+        # unconditionally — including while installing a service that could
+        # not start at all. It now STARTS the service and WAITS, bounded,
+        # for this machine to appear on SPECTRA's own camera_host surface,
+        # and prints what really happened.
+        print("\n== 8. the installer verifies the whole chain, and says "
+              "what it found ==")
+        text = INSTALLER.read_text()
+        check("SPECTRA can now SEE this machine" not in text,
+              "the old unconditional claim is GONE from the script")
+
+        # (a) NOTHING RUNNING. The systemctl shim logs `enable --now` and
+        #     starts nothing, so this is a service that did not come up —
+        #     the exact evening-shaped case.
+        await sup.stop()
+        await wait_for(lambda: _absent(http), timeout=30.0)
+        r = await run_installer_async(
+            "--url", url, "--device", "/dev/null", "--host", "camera-probe",
+            "--venv", str(VENV), env_extra={"SPECTRA_CAPTURE_HELLO_WAIT_S": "4"})
+        check(r.returncode != 0,
+              "when the client never arrives, the install EXITS NON-ZERO "
+              "rather than reporting success")
+        check("never saw this machine" in r.stdout,
+              f"and says so plainly: "
+              f"{[ln for ln in r.stdout.splitlines() if 'never saw' in ln][:1]}")
+        check("== installed ==" in r.stdout,
+              "while still reporting that the FILES were installed — those "
+              "two facts are separate and both are true")
+        check("--doctor" in r.stdout,
+              "and it names the one command that answers every branch")
+
+        # (b) RUNNING, AND UNABLE. The client comes back with its synthetic
+        #     camera, which reports NO lock — present, and saying why it
+        #     cannot work. An install that called that "connected" would be
+        #     the same lie in a new place.
+        await sup.start()
+        await wait_for(lambda: _present(http), timeout=60.0)
+        r = await run_installer_async(
+            "--url", url, "--device", "/dev/null", "--host", "camera-probe",
+            "--venv", str(VENV), env_extra={"SPECTRA_CAPTURE_HELLO_WAIT_S": "20"})
+        check("SPECTRA SEES camera-probe" in r.stdout,
+              "with the client actually there, the install SEES it — by "
+              "asking the server, not by asserting it")
+        check("CANNOT" in r.stdout and r.returncode != 0,
+              "and reports that it cannot do its job, non-zero, rather "
+              "than calling a broken camera a finished install")
         await sup.stop()
     await server.stop()
 

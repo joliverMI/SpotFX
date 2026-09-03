@@ -45,6 +45,34 @@ word for itself, exactly as `lock_refusal` already uses it to name the
 machine it is talking to. A browser session declares no host and is
 recorded under its user agent — a phone is a camera host too, and the point
 of the record is to say WHICH one is missing.
+
+A REACHABLE-BUT-BROKEN CLIENT MUST NEVER LOOK LIKE A HEALTHY ONE (2026-09-02).
+The record began with three states — `never`, `absent`, `present` — and
+`present` was the whole of "a client is connected", which is a claim that
+was doing more work than it could carry. The client already CONNECTS when it
+cannot do its job (`session.py`: a machine with no camera says so rather
+than dying quietly on a laptop nobody is watching), so a host whose camera
+does not exist, whose exposure will not lock, or whose lever self-test
+failed reported EXACTLY what a working one reports. Someone reading
+`camera_host` saw "connected" and went looking somewhere else.
+
+So there are FOUR states now, and the fourth is `impaired`: connected, and
+saying it cannot do the job. Three things about it:
+
+  * **`present` stays a boolean fact about the SOCKET**, true for
+    `impaired` as well, because the client IS there — every existing reader
+    of that field keeps the answer it already had. Only `state` and
+    `sentence` change, and `unable` carries the client's OWN reason.
+  * **NOT-YET IS NOT CANNOT.** A camera that has not reported its lock state
+    is settling, which is the ordinary first seconds of every session; only
+    a lock that was REPORTED and did not lock counts (`lock.reported`, the
+    same discriminator `mapping_session.lock_refusal` already draws). A
+    state that flapped through `impaired` on every healthy startup would be
+    ignored inside a week.
+  * **IT STILL GATES NOTHING.** A run's refusal is `lock_refusal`'s and
+    `NO_SESSION`'s, unchanged and computed elsewhere; this only means the
+    same fact is now READABLE from the status surface instead of having to
+    be inferred from a missing map at 3am.
 """
 from __future__ import annotations
 
@@ -68,6 +96,13 @@ MAX_CLIENTS = 12
 
 #: The word a browser session is filed under when it declares no host.
 UNNAMED = "an unnamed machine"
+
+#: The four states. `IMPAIRED` is present-but-unable — see the module
+#: docstring for why it is separate from PRESENT and why it is not a gate.
+STATE_NEVER = "never"
+STATE_ABSENT = "absent"
+STATE_PRESENT = "present"
+STATE_IMPAIRED = "impaired"
 
 
 def _path(path=None):
@@ -128,9 +163,57 @@ def describe(session: Any) -> dict:
         # camera still connects and says so, and that is the single most
         # useful thing this record can carry into the morning.
         "camera_error": str(getattr(lock, "camera_error", "") or ""),
+        # WHETHER THE CAMERA HAS SPOKEN AT ALL YET. The discriminator
+        # between a session settling (ordinary, every startup) and one that
+        # reported and will not lock (a fault) — `unable()` below is the
+        # only reader, and without this it could not tell them apart.
+        "lock_reported": bool(getattr(lock, "reported", False)),
         "lever": (verdict.as_dict() if hasattr(verdict, "as_dict") else {}),
     }
+    # THE SESSION'S OWN REFUSAL SENTENCE, asked of the session rather than
+    # composed here — `mapping_session.lock_refusal` is its author and this
+    # module has never had a second copy of it. Duck-typed like everything
+    # else here, so every test double stays a valid argument.
+    refusal = getattr(session, "refusal", None)
+    if callable(refusal):
+        try:
+            row["refusal"] = str(refusal() or "")
+        except Exception:                              # noqa: BLE001
+            logger.debug("capture health: a session would not state its "
+                         "refusal", exc_info=True)
+            row["refusal"] = ""
+    else:
+        row["refusal"] = ""
     return row
+
+
+def unable(row: dict) -> str:
+    """WHY THIS CONNECTED CLIENT CANNOT DO THE JOB, or "" when it can.
+
+    Its answer is always the CLIENT'S OWN reason, never one composed here,
+    and the three conditions are checked in the order a reader would want
+    them: no camera at all beats a camera that will not lock, which beats a
+    camera whose lever was measured not to work.
+
+    A LOCK THAT HAS NOT BEEN REPORTED YET IS NOT A FAULT. That is a session
+    in its first seconds, and treating it as one would put every healthy
+    startup through `impaired` — see the module docstring."""
+    if row.get("camera_error"):
+        return str(row["camera_error"])
+    if row.get("lock_reported") and not row.get("locked"):
+        return (str(row.get("refusal") or "")
+                or "this camera reported its state and it is not locked")
+    verdict = dict(row.get("lever") or {})
+    # ONLY A MEASUREMENT REFUSES. `refuses` is the Verdict's own property
+    # and it is False for `unprovable`/`unproven` on purpose — "we could not
+    # check" is not "we checked and it is broken", and reading the raw
+    # verdict word here would quietly overrule that rule.
+    if verdict.get("refuses") or (verdict.get("verdict")
+                                  in mapping_refusals.LEVER_REFUSING):
+        return (str(verdict.get("reason") or "")
+                or f"the camera's lever self-test came back "
+                   f"{verdict.get('verdict')}")
+    return ""
 
 
 def _fallback_host(hello: dict) -> str:
@@ -197,25 +280,38 @@ def health(session: Any = None, *, path=None,
         if not row["lever"] and stored.get("lever"):
             row["lever"] = dict(stored["lever"])
             row["lever_seen_ms"] = stored.get("lever_seen_ms")
-        return {"present": True, "state": "present", "client": row,
-                "absent_for_s": 0.0,
+        browser = row["client"] != capture_source.NATIVE_CLIENT
+        # PRESENT-BUT-UNABLE IS ITS OWN ANSWER. `present` stays True either
+        # way — the socket is a fact — so nothing that already read that
+        # field changes; what changes is that "connected" no longer implies
+        # "working", which it never actually did.
+        reason = unable(row)
+        if reason:
+            return {"present": True, "state": STATE_IMPAIRED, "client": row,
+                    "absent_for_s": 0.0, "unable": reason,
+                    "sentence": mapping_refusals.client_impaired(
+                        row["host"], reason, pose_name=row["pose_name"],
+                        version=row["version"], browser=browser),
+                    "known": rows}
+        return {"present": True, "state": STATE_PRESENT, "client": row,
+                "absent_for_s": 0.0, "unable": "",
                 "sentence": mapping_refusals.client_present(
                     row["host"], pose_name=row["pose_name"],
                     version=row["version"],
                     # `describe` already files a browser session under
                     # "browser"; the sentence says so rather than calling a
                     # phone the capture client.
-                    browser=row["client"] != capture_source.NATIVE_CLIENT),
+                    browser=browser),
                 "known": rows}
     if not rows:
-        return {"present": False, "state": "never", "client": None,
-                "absent_for_s": None,
+        return {"present": False, "state": STATE_NEVER, "client": None,
+                "absent_for_s": None, "unable": "",
                 "sentence": mapping_refusals.client_never_seen(),
                 "known": []}
     last = rows[0]
     gap = max(0.0, (stamp - float(last.get("last_seen_ms") or stamp)) / 1000.0)
-    return {"present": False, "state": "absent", "client": last,
-            "absent_for_s": round(gap, 1),
+    return {"present": False, "state": STATE_ABSENT, "client": last,
+            "absent_for_s": round(gap, 1), "unable": "",
             "sentence": mapping_refusals.client_absent(
                 str(last.get("host") or ""),
                 pose_name=str(last.get("pose_name") or ""),

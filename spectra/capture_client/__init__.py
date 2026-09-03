@@ -15,6 +15,9 @@ automating the lock CONFIRMATION is forgery.
   camera.py    what a camera is, and the read-back rule
   session.py   the WebSocket half: hello, frames, pong, reconnect, pose
   __main__.py  the command line, and the machine-readable outcome
+  doctor.py    `--doctor`: every link in the chain from this machine to
+               SPECTRA, named. STDLIB-ONLY and runnable as a plain file, so
+               it still works when the virtualenv is the broken thing
 
 `docs/UNATTENDED_CAPTURE.md` carries the ledger: what now runs with no human
 at all, what needs one once, and what still needs his hands per run.

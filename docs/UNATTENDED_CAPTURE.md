@@ -38,6 +38,9 @@ already pointed at the room:
 | Releasing the room afterwards | (already automatic) | unchanged — the held-room sweep still owns it |
 | **Having a camera session at all when the night starts** | a machine that was awake, unlocked and not asleep, set up before bed | a boot service on the camera host (`deploy/spectra-capture-client.service`) — started at boot, restarted after a crash, its configuration one file. **NOTE: proven on a dev host, never on a Pi, and the Pi does not exist yet** — see `docs/CAPTURE_CLIENT_HOST.md` |
 | **Knowing whether the camera machine is even there** | a silence identical to "never installed", answered by walking over to look at a plug | a READ: `camera_host` names the machine, its build, its placement and how long it has been gone |
+| **Knowing whether a camera machine that IS there can actually work** | identical to a healthy one: the client connects when it has no camera, and `camera_host` said "present" either way | a fourth state, `impaired` — connected AND saying why it cannot do the job, in the client's own words *(2026-09-02)* |
+| **Finding out WHY a camera host never appeared** | he pasted things into a chat window until somebody guessed — eight failures in one evening, every one of them ours and every one invisible from here | **one command**: `spectra-capture-client --doctor` answers every branch at once — interpreter, venv+pip, the two tools, the device, group membership AND whether the user manager has it, the address in three readings, the unit and its own last error line, and whether SPECTRA sees this machine *(2026-09-02)* |
+| **Knowing whether an install actually worked** | the installer said "SPECTRA can now SEE this machine" — unconditionally, including while installing a service that could not start | it probes the address before writing and WAITS for a real hello after starting, then reports what happened: connected, present-but-unable, the unit's own failure words, or never-arrived *(2026-09-02)* |
 | **Starting the night at all** | he set a session up before bed and pressed | his `Sleeping` helper, on for 30 minutes, pushes one event (`POST /api/night-run/start`) |
 | **Stopping when he stirs, or when his morning comes** | nobody was awake to | one `/abort` push — `sleep-ended`, `light-touched`, or his 05:30 `morning-routine` |
 | **Turning a fixture on that was switched off for the night** | it simply photographed an unlit strip | `night_power.owned` turns on only what reads off, confirms by reading back, and puts his switch back in a `finally` |
@@ -150,12 +153,19 @@ ends.
   one there runs it on the client's machine.
 - **Noticing the camera host is not there.** No longer his to notice:
   SPECTRA reads it. `GET /api/rooms/map/status` → `camera_host` (and the
-  same read inside every session view) answers with three states, not two —
-  `never` (nothing has ever connected, so this is an installation and not a
-  fault), `present` (the machine, its build, its declared placement, its
-  camera and its lever verdict), and `absent` with **the machine named** and
-  how long it has been gone. It reports; the run's own refusal is
-  unchanged.
+  same read inside every session view) answers with **four** states, not
+  two — `never` (nothing has ever connected, so this is an installation and
+  not a fault), `present` (the machine, its build, its declared placement,
+  its camera and its lever verdict), `impaired` (connected, and saying in
+  its own words why it cannot do the job), and `absent` with **the machine
+  named** and how long it has been gone. It reports; the run's own refusal
+  is unchanged.
+- **Diagnosing a machine that never appeared.** No longer his to piece
+  together either: `spectra-capture-client --doctor` on that machine
+  answers every branch in one paste. The one case that is structurally
+  invisible from SPECTRA's side — a client that cannot reach the server —
+  is exactly what the doctor and the installer's own pre-install address
+  probe cover, since neither of them runs here.
 
 ### What was deliberately NOT automated
 
