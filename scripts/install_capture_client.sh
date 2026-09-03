@@ -130,9 +130,34 @@ if command -v "$PYTHON" >/dev/null 2>&1; then
 else
     refuse "$PYTHON is not on PATH" "apt install python3 python3-venv"
 fi
+# THE PREDICATE IS "will a venv built by this python CONTAIN PIP", not "does
+# `import venv` work". On Debian-family systems `venv` is in the standard
+# library and imports fine while `ensurepip` — the part that seeds pip into a
+# new environment — ships separately in python3-venv. Checking the wrong one
+# passed here and then failed as a raw `No module named pip` traceback INSIDE
+# the freshly built venv, which is precisely the shape this script exists to
+# replace with a named refusal, before anything is written.
 if ! "$PYTHON" -c 'import venv' >/dev/null 2>&1; then
     refuse "this python cannot make a virtualenv (no venv module)" \
-           "apt install python3-venv"
+           "sudo apt install -y python3-venv python3-pip"
+elif ! "$PYTHON" -m ensurepip --version >/dev/null 2>&1; then
+    refuse "this python can make a virtualenv but cannot put pip in it (no \
+ensurepip), so the install would fail with 'No module named pip' inside the \
+new venv" \
+           "sudo apt install -y python3-venv python3-pip"
+fi
+
+# A HALF-MADE VENV FROM A FAILED RUN IS NOT A VENV TO REUSE. The run that
+# died inside pip leaves $VENV/bin/python behind, and the reuse branch below
+# would take it as finished and fail in exactly the same place again. This
+# NAMES it and leaves it alone — removing somebody's directory uncommanded is
+# not this script's to do.
+if [ -x "$VENV/bin/python" ] && ! "$VENV/bin/python" -m pip --version >/dev/null 2>&1; then
+    refuse "the virtualenv at $VENV has no pip in it — a previous run built \
+it with a python that could not seed pip, and reusing it would fail the same \
+way" \
+           "sudo apt install -y python3-venv python3-pip, then remove the \
+half-made environment: rm -rf $VENV"
 fi
 
 # ── 3. THE TWO EXTERNAL TOOLS, each by name ────────────────────────────────

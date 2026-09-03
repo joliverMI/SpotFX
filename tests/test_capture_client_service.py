@@ -326,3 +326,67 @@ def test_absence_wording_distinguishes_never_from_gone():
     assert never != gone
     assert "has ever connected" in never and "camera-pi" in gone
     assert "45s ago" in gone
+
+
+# ── the pip predicate: a Debian-shaped refusal, before any write ───────────
+# The failure this is written for: `import venv` succeeds on Debian while
+# `ensurepip` (python3-venv) is absent, so the old check passed and the run
+# died with a raw `No module named pip` INSIDE the freshly built venv.
+
+import os
+import subprocess
+import sys
+
+APT_FIX = "sudo apt install -y python3-venv python3-pip"
+
+
+def _shim(path: Path, refuse_arg: str) -> Path:
+    """A python that behaves exactly like this one except for one module."""
+    path.write_text(
+        "#!/bin/sh\n"
+        f'for a in "$@"; do [ "$a" = "{refuse_arg}" ] && exit 1; done\n'
+        f'exec {sys.executable} "$@"\n'
+    )
+    path.chmod(0o755)
+    return path
+
+
+def _run_installer(tmp_path: Path, *args: str):
+    home = tmp_path / "home"
+    home.mkdir(exist_ok=True)
+    env = dict(os.environ, HOME=str(home), XDG_CONFIG_HOME=str(home / ".config"))
+    env.pop("SPECTRA_CAPTURE_VENV", None)
+    env.pop("SPECTRA_CAPTURE_PYTHON", None)
+    proc = subprocess.run(["bash", str(INSTALLER), "--check", *args],
+                          capture_output=True, text=True, env=env)
+    return proc, home
+
+
+def test_a_python_that_cannot_seed_pip_refuses_by_name_before_any_write(tmp_path):
+    py = _shim(tmp_path / "python-no-ensurepip", "ensurepip")
+    proc, home = _run_installer(tmp_path, "--python", str(py),
+                                "--url", "http://spectra:8000/spectra")
+    assert proc.returncode == 1
+    assert "ensurepip" in proc.stdout and APT_FIX in proc.stdout
+    # NOTHING WAS WRITTEN: the refusal is collected before the install half.
+    assert not list(home.rglob("*"))
+
+
+def test_a_pipless_venv_is_refused_by_name_and_never_reused(tmp_path):
+    venv = tmp_path / "half-made-venv"
+    (venv / "bin").mkdir(parents=True)
+    _shim(venv / "bin" / "python", "pip")
+    proc, home = _run_installer(tmp_path, "--venv", str(venv),
+                                "--url", "http://spectra:8000/spectra")
+    assert proc.returncode == 1
+    assert "has no pip in it" in proc.stdout
+    # It NAMES the two-step fix and removes nothing itself.
+    assert APT_FIX in proc.stdout and f"rm -rf {venv}" in proc.stdout
+    assert (venv / "bin" / "python").exists()
+
+
+def test_a_whole_python_passes_the_pip_checks(tmp_path):
+    proc, _ = _run_installer(tmp_path, "--python", sys.executable,
+                             "--url", "http://spectra:8000/spectra")
+    assert "ensurepip" not in proc.stdout
+    assert "has no pip in it" not in proc.stdout
