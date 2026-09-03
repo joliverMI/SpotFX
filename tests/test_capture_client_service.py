@@ -22,6 +22,7 @@ from spectra.services import capture_health, mapping_refusals
 
 REPO = Path(__file__).resolve().parent.parent
 UNIT = REPO / "deploy" / "spectra-capture-client.service"
+SYSTEM_UNIT = REPO / "deploy" / "spectra-capture-client-system.service.in"
 INSTALLER = REPO / "scripts" / "install_capture_client.sh"
 CLIENT_PKG = REPO / "spectra" / "capture_client"
 
@@ -235,14 +236,18 @@ def test_the_client_imports_nothing_from_the_server_side_of_spectra():
 
 # ── the shipped unit still says what it has to say ─────────────────────────
 
-def _unit_directives() -> dict:
+def _directives(text: str) -> dict:
     out = {}
-    for line in UNIT.read_text().splitlines():
+    for line in text.splitlines():
         line = line.strip()
         if line and not line.startswith("#") and "=" in line:
             key, _, value = line.partition("=")
             out[key.strip()] = value.strip()
     return out
+
+
+def _unit_directives() -> dict:
+    return _directives(UNIT.read_text())
 
 
 def test_the_unit_restarts_always_and_never_gives_up():
@@ -272,10 +277,80 @@ def test_the_unit_takes_no_arguments():
 
 def test_the_unit_reaches_the_camera_and_nothing_else():
     d = _unit_directives()
-    assert d["SupplementaryGroups"] == "video"
     assert d["DeviceAllow"] == "char-video4linux rw"
     assert d["ProtectSystem"] == "strict"
     assert d["NoNewPrivileges"] == "yes"
+
+
+# ── THE BOUNDARY: one directive, legal in exactly one of the two units ─────
+#
+# `SupplementaryGroups=` is legitimate ONLY under a ROOT manager that drops
+# privileges. An unprivileged `systemd --user` is refused `setgroups(2)`
+# outright (`216/GROUP`, "Operation not permitted") and MEMBERSHIP IS
+# IRRELEVANT to that — proven live on the owner's own laptop, 2026-09-02→03,
+# AFTER correct membership and a reboot, and reproduced on real systemd by
+# `scripts/check_capture_client_fresh_host.py` rig A.
+#
+# Both directions are asserted, because "the user unit lost a line" and "the
+# system unit still has it" are two different regressions and only one of
+# them is caught by removing a string.
+
+def test_the_USER_unit_carries_no_group_directive():
+    """THE ONE LINE THAT MUST NOT BE THERE. It cost the owner a reboot for
+    nothing, twice, and the installer regenerates the whole file every run
+    specifically so a hand-edit cannot bring it back."""
+    d = _unit_directives()
+    assert "SupplementaryGroups" not in d, \
+        "a USER unit carrying SupplementaryGroups= can never start, member " \
+        "or not — see this unit's own header"
+
+
+def test_the_USER_unit_says_WHY_so_nobody_re_adds_it_helpfully():
+    """A removed line leaves no trace; a stated rule does. The header has to
+    carry the boundary, or the next person adding `DeviceAllow=` puts the
+    group back beside it as an obvious omission."""
+    text = UNIT.read_text()
+    assert "SupplementaryGroups" in text, \
+        "the header must still NAME the directive it excludes"
+    assert "Operation not permitted" in text, "with the kernel's own reason"
+    assert "MEMBERSHIP IS IRRELEVANT" in text
+    assert "SYSTEM unit" in text and "USER unit must not" in text, \
+        "and the boundary, so a system unit's copy is not read as a bug"
+
+
+def test_the_SYSTEM_unit_carries_it_legitimately():
+    """THE OTHER SIDE. The kiosk host has no login session to inherit a
+    group from, so under a root manager this directive is not merely allowed
+    — it is the mechanism, and it is applied before the drop to User=."""
+    text = SYSTEM_UNIT.read_text()
+    d = _directives(text)
+    assert d["SupplementaryGroups"] == "video"
+    assert d["User"] == "@USER@" and d["Group"] == "@GROUP@", \
+        "root has to be told which account to drop into; there is no %h here"
+    assert d["WantedBy"] == "multi-user.target", \
+        "not default.target: there is no user session on this host, which " \
+        "is the whole reason it needs no linger"
+    # HARDENING IS NOT RELAXED BY RUNNING UNDER ROOT.
+    assert d["NoNewPrivileges"] == "yes"
+    assert d["ProtectSystem"] == "strict"
+    assert d["DeviceAllow"] == "char-video4linux rw"
+
+
+def test_the_SYSTEM_template_names_every_placeholder_it_uses():
+    """A placeholder the installer does not fill lands in /etc as literal
+    `@HOME@`. The installer refuses on any leftover `@X@`; this asserts the
+    header documents the same set the file actually contains, so the two
+    cannot drift."""
+    text = SYSTEM_UNIT.read_text()
+    used = set(re.findall(r"@[A-Z_]+@", text))
+    body = "\n".join(l for l in text.splitlines()
+                      if not l.lstrip().startswith("#"))
+    in_body = set(re.findall(r"@[A-Z_]+@", body))
+    assert in_body, "the template must actually have placeholders"
+    assert in_body <= used
+    for name in in_body:
+        assert f"#   {name}" in text or f"{name} " in text, \
+            f"{name} is substituted but never explained in the header"
 
 
 def test_the_unit_names_no_host_specific_path():

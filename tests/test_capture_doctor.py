@@ -71,21 +71,58 @@ def _fake_group_env(monkeypatch, *, groups: str, manager_pid, manager_groups,
     monkeypatch.setattr(doctor, "_process_groups", lambda pid: manager_groups)
 
 
-def test_not_a_member_is_the_216_group_case(monkeypatch):
-    """THE EVENING'S FAILURE. The unit declares SupplementaryGroups=video;
-    without membership systemd will not start it at all. The refusal must
-    name the exit status, the usermod line AND the reboot, and it must say
-    why a READABLE device was never evidence of this — or the neighbouring
-    question gets asked again."""
+def test_not_a_member_names_the_real_user_scope_consequence(monkeypatch):
+    """THE EVENING'S FAILURE, AND THE HALF OF IT WE GOT WRONG.
+
+    Membership is still the predicate — a readable device was never evidence
+    of it, and that has to keep being said or the neighbouring question gets
+    asked again. But the CONSEQUENCE in user scope is not `216/GROUP`: a
+    user service INHERITS its groups and cannot ask for them, so without
+    membership it starts normally and then cannot open the camera. Claiming
+    216 here described a unit carrying a directive that must not be in it,
+    and sent the owner to fix the wrong thing."""
     _fake_group_env(monkeypatch, groups="javi sudo docker",
                     manager_pid=1292, manager_groups=[1000])
     r = doctor.Report()
     doctor.check_video_group(r, user="javi")
     f = r.findings[0]
     assert f.verdict == doctor.FAILED
-    assert "216/GROUP" in f.detail
+    assert "inherits" in f.detail.lower()
+    assert "cannot open the camera" in f.detail
+    assert "216/GROUP" not in f.detail, \
+        "a user unit does not die 216 for want of a membership"
     assert "READABLE" in f.detail and "ACL" in f.detail
     assert "usermod -aG video javi" in f.fix and "REBOOT" in f.fix
+
+
+def test_system_scope_says_membership_is_enough_and_a_restart_is_enough(
+        monkeypatch):
+    """THE OTHER SIDE OF THE BOUNDARY. Under a ROOT manager the directive is
+    legitimate and IS the mechanism: root reads the group database at every
+    start and applies it before dropping to User=. So membership is enough,
+    a RESTART is enough, and the running user manager is not involved — the
+    doctor must not send a kiosk host owner to reboot for nothing."""
+    _fake_group_env(monkeypatch, groups="camerauser sudo",
+                    manager_pid=1292, manager_groups=[1000])
+    r = doctor.Report()
+    doctor.check_video_group(r, user="camerauser", scope=doctor.SCOPE_SYSTEM)
+    f = r.findings[0]
+    assert f.verdict == doctor.FAILED
+    assert "SupplementaryGroups=video" in f.detail
+    assert "legitimate" in f.detail
+    assert "systemctl restart" in f.fix and "No reboot" in f.fix
+
+    # And with the membership present it does NOT go on to read /proc: that
+    # predicate belongs to the user scope and answering it here would be
+    # reporting on a mechanism this unit does not use.
+    _fake_group_env(monkeypatch, groups="camerauser video",
+                    manager_pid=1292, manager_groups=[1000])   # manager: no 44
+    r = doctor.Report()
+    doctor.check_video_group(r, user="camerauser", scope=doctor.SCOPE_SYSTEM)
+    member, applied = r.findings
+    assert member.verdict == doctor.OK
+    assert applied.check == "group applied" and applied.verdict == doctor.OK
+    assert "root manager applies" in applied.detail
 
 
 def test_a_member_whose_user_manager_has_not_caught_up_is_its_own_finding(
@@ -119,7 +156,7 @@ def test_a_member_whose_manager_has_it_passes_both(monkeypatch):
     r = doctor.Report()
     doctor.check_video_group(r, user="javi")
     assert [f.verdict for f in r.findings] == [doctor.OK, doctor.OK]
-    assert "can start" in r.findings[1].detail
+    assert "inherits the camera" in r.findings[1].detail
 
 
 def test_an_unreadable_manager_is_unknown_not_broken(monkeypatch):
@@ -246,6 +283,11 @@ def _systemctl(monkeypatch, answers: dict, *, have=True):
 
     def fake(args, **kw):
         if args[:1] == ["journalctl"]:
+            # THE TWO JOURNAL READS ARE DIFFERENT QUESTIONS and the fake has
+            # to keep them apart: the plain read is "the unit's own words",
+            # the monotonic one is "what happened since it last came up".
+            if "short-monotonic" in args:
+                return 0, answers.get("journal_monotonic", "")
             return 0, answers.get("journal", "")
         if "is-system-running" in args:
             return 0, answers.get("is-system-running", "running")
@@ -282,19 +324,255 @@ def test_a_crash_looping_unit_is_not_uptime(monkeypatch):
     assert "37 restarts" in running.detail and "loop" in running.detail
 
 
-def test_exit_216_is_translated_into_the_group(monkeypatch):
-    """`status=216/GROUP` in a journal is not a sentence anybody can act on,
-    and it is exactly the line that sat in his journal all evening saying
-    nothing to anyone."""
+#: The journal a user manager actually writes when a unit asks for a group
+#: it cannot be given. Captured verbatim from `systemd-run --user
+#: --property=SupplementaryGroups=...` on 2026-09-03, both in-group and
+#: out-of-group — they are IDENTICAL, which is the whole point.
+EPERM_JOURNAL = (
+    "Started spectra-capture-client.service - SPECTRA capture client.\n"
+    "(python3)[3154419]: spectra-capture-client.service: Changing group "
+    "credentials failed: Operation not permitted\n"
+    "spectra-capture-client.service: Main process exited, code=exited, "
+    "status=216/GROUP\n"
+    "spectra-capture-client.service: Failed with result 'exit-code'.\n")
+
+#: A 216 that is NOT the privilege case: systemd could make the call and
+#: could not resolve the group.
+MEMBERSHIP_JOURNAL = (
+    "spectra-capture-client.service: Changing group credentials failed: "
+    "No such process\n"
+    "spectra-capture-client.service: Main process exited, code=exited, "
+    "status=216/GROUP\n")
+
+
+def _failed_216(monkeypatch, journal):
     _systemctl(monkeypatch, {"LoadState": "loaded", "UnitFileState": "enabled",
                              "ActiveState": "failed", "SubState": "failed",
-                             "Result": "exit-code", "ExecMainStatus": "216"})
+                             "Result": "exit-code", "ExecMainStatus": "216",
+                             "journal": journal})
     r = doctor.Report()
     doctor.check_service(r)
-    status = [f for f in r.findings if f.check == "exit status"][0]
-    assert "216/GROUP" in status.detail
-    assert "SupplementaryGroups" in status.detail or "group 'video'" in status.detail
-    assert "usermod -aG video" in status.fix and "REBOOT" in status.fix
+    return [f for f in r.findings if f.check == "exit status"][0]
+
+
+def test_216_eperm_is_the_privilege_cause_not_the_membership_one(monkeypatch):
+    """THE SECOND EVENING (2026-09-03). `216/GROUP` has TWO causes and the
+    status code cannot tell them apart. When the journal says 'Operation not
+    permitted' the MANAGER was refused the call outright — an unprivileged
+    `systemd --user` cannot change group credentials at all, so MEMBERSHIP
+    IS IRRELEVANT and a member fails identically.
+
+    The old reading collapsed this into "you are not in the group", which is
+    how the owner was sent to `usermod` and a REBOOT, twice, for a fault
+    neither could touch: he was already a member and had already rebooted."""
+    f = _failed_216(monkeypatch, EPERM_JOURNAL)
+    assert f.verdict == doctor.FAILED
+    assert "Operation not permitted" in f.detail
+    assert "NOT about membership" in f.detail
+    assert "SupplementaryGroups" in f.fix and "daemon-reload" in f.fix
+    assert "NO REBOOT" in f.fix.upper()
+    assert "usermod" not in f.fix, \
+        "the advice that cost two reboots must not be reachable from here"
+
+
+def test_216_without_eperm_is_still_the_membership_reading(monkeypatch):
+    """The other cause keeps the verdict it always had. Naming one of them
+    is only worth anything if the other stays distinguishable."""
+    f = _failed_216(monkeypatch, MEMBERSHIP_JOURNAL)
+    assert f.verdict == doctor.FAILED
+    assert "216/GROUP" in f.detail
+    assert "not the manager's privilege" in f.detail
+    assert "usermod -aG video" in f.fix and "REBOOT" in f.fix
+
+
+def test_216_with_no_readable_journal_names_neither_cause(monkeypatch):
+    """"We could not check" is never "we checked". With no reason line the
+    doctor says WHICH question is unanswered and how to answer it, rather
+    than picking the cause that happens to be more common."""
+    f = _failed_216(monkeypatch, "")
+    assert f.verdict == doctor.FAILED
+    assert "could not be read" in f.detail
+    assert "WHICH of the two causes" in f.detail
+    assert "grep -n SupplementaryGroups" in f.fix
+
+
+def test_the_216_translation_reads_the_journal_and_not_the_number(monkeypatch):
+    """THE PROPERTY, PINNED. Same status, opposite journals, different
+    verdicts — so nothing here can go back to deciding from the code alone.
+
+    This is also the RED PROOF for the fix: the pre-2026-09-03 translation
+    was a dict lookup on `ExecMainStatus` with no journal argument at all,
+    and would answer these two identically."""
+    eperm = _failed_216(monkeypatch, EPERM_JOURNAL)
+    member = _failed_216(monkeypatch, MEMBERSHIP_JOURNAL)
+    assert eperm.detail != member.detail and eperm.fix != member.fix
+    assert doctor.read_216_cause(EPERM_JOURNAL) == doctor.CAUSE_PRIVILEGE
+    assert doctor.read_216_cause(MEMBERSHIP_JOURNAL) == doctor.CAUSE_MEMBERSHIP
+    assert doctor.read_216_cause("") is None
+
+
+def test_an_unrelated_eperm_elsewhere_does_not_promote_the_cause():
+    """ONLY THE LINE THAT NAMES THE FAILURE IS JUDGED. Sixty lines of
+    journal will contain "permission denied" for all sorts of reasons, and
+    letting any of them decide would turn a real membership fault into
+    advice to delete a directive that is not there."""
+    noisy = ("some-helper: open /dev/thing: Operation not permitted\n"
+             + MEMBERSHIP_JOURNAL)
+    assert doctor.read_216_cause(noisy) == doctor.CAUSE_MEMBERSHIP
+
+
+# ── THE STALE LAST-ERROR GHOST ─────────────────────────────────────────────
+#
+# Found live 2026-09-03: after the owner fixed his host and the service came
+# up and SPECTRA could see it, the doctor STILL headlined `last error` as a
+# problem, quoting a failure from BEFORE the fix. A journal read with no
+# clock cannot tell a scar from a wound, and the one tool whose whole point
+# is that he stops being the messenger had him pasting a message about a
+# machine that was working.
+
+_HEALTHY = {"LoadState": "loaded", "UnitFileState": "enabled",
+            "ActiveState": "active", "SubState": "running", "NRestarts": "0",
+            "ActiveEnterTimestamp": "Thu 2026-09-03 09:00:00 EDT",
+            "ActiveEnterTimestampMonotonic": "900000000"}     # 900.0 s
+
+
+def _last_error(monkeypatch, answers):
+    merged = dict(_HEALTHY)
+    merged.update(answers)
+    _systemctl(monkeypatch, merged)
+    r = doctor.Report()
+    doctor.check_service(r)
+    return r, [f for f in r.findings if f.check == "last error"][0]
+
+
+def test_a_healthy_service_with_only_OLD_failures_reports_zero_problems(
+        monkeypatch):
+    """THE RED CASE, AND THE BAR. A unit that is up right now, whose journal
+    still carries everything it went through on the way there, must report
+    NO problems at all. It reported one, for hours, on a machine that was
+    working."""
+    r, last = _last_error(monkeypatch, {
+        "journal": EPERM_JOURNAL,
+        # `-o short-monotonic`: everything at 800s, the start at 900s.
+        "journal_monotonic":
+            "[  800.100000] host systemd[1]: Changing group credentials "
+            "failed: Operation not permitted\n"
+            "[  800.200000] host systemd[1]: Main process exited, "
+            "status=216/GROUP\n"
+            "[  900.000100] host systemd[1]: Started SPECTRA capture "
+            "client.\n"})
+    assert last.verdict == doctor.UNKNOWN
+    assert "FAILED EARLIER" in last.detail
+    # STILL QUOTED. History is kept, never hidden — it says what this
+    # machine went through, it just is not a fault now.
+    assert "216/GROUP" in last.detail or "exit-code" in last.detail
+    assert r.failures == [], \
+        f"a healthy service must report zero problems, got {r.failures}"
+
+
+def test_a_failure_since_the_last_start_is_still_IS_FAILING(monkeypatch):
+    """THE OTHER DIRECTION, AND IT MATTERS MORE. Downgrading a live failure
+    to history would be a doctor that tells him everything is fine while his
+    camera is not working — strictly worse than the ghost it replaced."""
+    r, last = _last_error(monkeypatch, {
+        "journal": "the client cannot open /dev/video0\n",
+        "journal_monotonic":
+            "[  900.000100] host systemd[1]: Started SPECTRA capture "
+            "client.\n"
+            "[  905.000000] host python3[9]: the client cannot open "
+            "/dev/video0\n"})
+    assert last.verdict == doctor.FAILED
+    assert "IS FAILING" in last.detail
+    assert last in r.failures
+
+
+def test_a_stopped_service_never_gets_the_historical_reading(monkeypatch):
+    """FAILED EARLIER is a claim about a service that is UP. A unit that is
+    down has no "since it came up" to measure against, so its journal is
+    read exactly as it always was."""
+    r, last = _last_error(monkeypatch, {
+        "ActiveState": "failed", "SubState": "failed",
+        "journal": EPERM_JOURNAL,
+        "journal_monotonic": "[  800.100000] host systemd[1]: boom failed\n"})
+    assert last.verdict == doctor.FAILED
+    assert "IS FAILING" in last.detail
+
+
+def test_an_unreadable_clock_keeps_the_failure_rather_than_excusing_it(
+        monkeypatch):
+    """A DOCTOR MAY NOT EXCUSE A FAILURE WITH A CHECK IT COULD NOT MAKE. If
+    the monotonic window comes back empty or unparseable, the error stands —
+    the safe direction is over-reporting, and it is the only direction that
+    cannot leave him with a dark room and a clean bill of health."""
+    for mono in ("", "no timestamps here at all\n"):
+        r, last = _last_error(monkeypatch, {"journal": EPERM_JOURNAL,
+                                            "journal_monotonic": mono})
+        assert last.verdict == doctor.FAILED, mono
+        assert "IS FAILING" in last.detail
+
+
+def test_the_boundary_is_microseconds_not_seconds(monkeypatch):
+    """WHY THE MONOTONIC CLOCK AND NOT `--since`. `ActiveEnterTimestamp` is
+    a wall-clock string with SECOND granularity, so a unit that failed and
+    restarted inside the same second — which is what `Restart=` does — puts
+    its old failure inside the window and reads as current. Here the failure
+    is 200us before the start, and it is still history."""
+    r, last = _last_error(monkeypatch, {
+        "journal": EPERM_JOURNAL,
+        "journal_monotonic":
+            "[  899.999800] host systemd[1]: Failed with result "
+            "'exit-code'.\n"
+            "[  900.000000] host systemd[1]: Started SPECTRA capture "
+            "client.\n"})
+    assert last.verdict == doctor.UNKNOWN
+    assert "FAILED EARLIER" in last.detail
+    assert r.failures == []
+
+
+def test_the_ghost_harness_goes_RED_on_the_defect_it_was_written_for(
+        monkeypatch):
+    """A PROOF BAR THAT CANNOT FAIL ON ITS OWN DEFECT IS DECORATION.
+
+    The pre-fix `_add_last_error` had no clock at all: any error line
+    anywhere in the journal was a current failure. That is exactly
+    `_errors_predate_start` never returning True, so pinning it there
+    reproduces the shipped behaviour — and the bar above must go red."""
+    monkeypatch.setattr(doctor, "_errors_predate_start",
+                        lambda *a, **kw: False)
+    r, last = _last_error(monkeypatch, {
+        "journal": EPERM_JOURNAL,
+        "journal_monotonic":
+            "[  800.100000] host systemd[1]: Changing group credentials "
+            "failed: Operation not permitted\n"
+            "[  900.000100] host systemd[1]: Started SPECTRA capture "
+            "client.\n"})
+    assert last.verdict == doctor.FAILED
+    assert r.failures != [], \
+        "with the pre-fix behaviour restored, a healthy machine reports a " \
+        "problem — which is the defect, and which the bar above catches"
+
+
+def test_the_216_harness_goes_RED_on_the_defect_it_was_written_for():
+    """THE SAME BAR FOR THE OTHER FIX. The pre-2026-09-03 translation was a
+    dict lookup on the exit status with no journal in it at all. Reproduced
+    here, it answers the two opposite journals IDENTICALLY — which is what
+    made a directive fault indistinguishable from a membership one, and what
+    sent the owner to `usermod` and a reboot for neither."""
+    old_reading = ("216/GROUP — the unit asks for group 'video' and the user "
+                   "manager does not hold it.",
+                   "sudo usermod -aG video $(id -un), then REBOOT")
+
+    def old_translate(_journal_text):
+        return old_reading          # the number was the whole input
+
+    assert old_translate(EPERM_JOURNAL) == old_translate(MEMBERSHIP_JOURNAL)
+    assert "usermod" in old_translate(EPERM_JOURNAL)[1] and \
+        "REBOOT" in old_translate(EPERM_JOURNAL)[1], \
+        "and its advice for the privilege case was the reboot that could " \
+        "never work"
+    # The shipped one does not.
+    assert doctor.read_216_cause(EPERM_JOURNAL) != \
+        doctor.read_216_cause(MEMBERSHIP_JOURNAL)
 
 
 def test_the_units_own_last_error_line_is_carried(monkeypatch):
@@ -382,7 +660,8 @@ def test_await_hello_never_claims_a_connection_it_did_not_see(monkeypatch):
     _server(monkeypatch, {"state": "never", "client": None, "sentence": "none"})
     _systemctl(monkeypatch, {"LoadState": "loaded", "UnitFileState": "enabled",
                              "ActiveState": "failed", "SubState": "failed",
-                             "Result": "exit-code", "ExecMainStatus": "216"})
+                             "Result": "exit-code", "ExecMainStatus": "216",
+                             "journal": EPERM_JOURNAL})
     code, text = doctor.await_hello("http://s/spectra", "camera-pi",
                                     timeout_s=0, sleep=lambda s: None)
     assert code == 1

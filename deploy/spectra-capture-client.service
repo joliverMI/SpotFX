@@ -35,9 +35,38 @@
 # THIS IS A USER UNIT, and boot-start therefore needs LINGER
 # (`loginctl enable-linger <user>`), or it starts only when that user logs
 # in. The installer checks for it by name and says so. It is a user unit
-# rather than a system one because the camera needs group `video` and a home
-# directory, and because a system unit for a camera would be the only piece
-# of this whole area that needs root.
+# rather than a system one because the client needs a home directory and the
+# login session's own group membership (`video`, inherited — see below), and
+# because a system unit for a camera would be the only piece of this whole
+# area that needs root.
+#
+# ── NO `SupplementaryGroups=` HERE. EVER. THIS IS A USER UNIT. ─────────────
+#
+# DO NOT ADD IT BACK, however helpful it looks next to `DeviceAllow=`. An
+# UNPRIVILEGED service manager cannot change group credentials AT ALL: the
+# `setgroups(2)` call itself returns EPERM, and MEMBERSHIP IS IRRELEVANT to
+# that. A user who IS in `video` fails exactly as hard as one who is not.
+#
+# Proven live on the owner's laptop, 2026-09-02→03, AFTER correct membership
+# and a reboot:
+#
+#     (true)[...]: spectra-capture-client.service: Changing group
+#                  credentials failed: Operation not permitted
+#     systemd[...]: ... Main process exited, code=exited, status=216/GROUP
+#
+# It is also UNNECESSARY here. A user service INHERITS every supplementary
+# group the login session's `systemd --user` manager holds, so membership in
+# `video` — checked by name in `scripts/install_capture_client.sh`, and read
+# out of the running manager's own `/proc/<pid>/status` by `--doctor` — is
+# the whole mechanism. The directive added nothing and cost a reboot.
+#
+# THE BOUNDARY, so this is a rule and not a scar: `SupplementaryGroups=` is
+# legitimate ONLY under a ROOT manager that drops privileges — a SYSTEM unit
+# may carry it, a USER unit must not. There is no system unit for the
+# capture client today. If one is ever added, it gets its OWN file rather
+# than a shared template with a conditional line, because a directive whose
+# legality depends on which manager loads it is exactly the kind of thing
+# that gets copied into the wrong half.
 
 [Unit]
 Description=SPECTRA unattended capture client (camera host)
@@ -83,9 +112,11 @@ ProtectHome=read-only
 # (%t = XDG_RUNTIME_DIR), which is the one path this service may write.
 RuntimeDirectory=spectra-capture
 ReadWritePaths=%t/spectra-capture
-# The camera itself, and nothing else under /dev.
+# The camera itself, and nothing else under /dev. Note that this NARROWS
+# what the service may touch; it grants nothing. Reaching the camera is
+# group membership, inherited from the manager — see the header for why no
+# `SupplementaryGroups=` line belongs in a user unit.
 DeviceAllow=char-video4linux rw
-SupplementaryGroups=video
 
 [Install]
 WantedBy=default.target

@@ -45,6 +45,7 @@ Camera Controls
 				1: Manual Mode
 				3: Aperture Priority Mode
           exposure_time_absolute 0x009a0902 (int)   : min=3 max=2047 value=166
+    focus_automatic_continuous 0x009a090c (bool)   : default=1 value=1
 """
 
 
@@ -94,6 +95,89 @@ def test_a_camera_reporting_auto_is_reported_as_not_locked(ctl):
     assert lock.exposure_mode == "Aperture Priority Mode"
     assert lock.exposure_capabilities == ["Aperture Priority Mode", "Manual Mode"]
     assert lock.source.startswith("v4l2:auto_exposure")
+
+
+# ── THE ANNOTATED MENU VALUE — the owner's own laptop, 2026-09-03 ──────────
+#
+# `v4l2-ctl --get-ctrl` HAS NO SINGLE OUTPUT FORMAT. Some drivers print
+#
+#     auto_exposure: 1
+#
+# and others — including his — annotate the menu entry:
+#
+#     auto_exposure: 1 (Manual Mode)
+#
+# The read-back compared that whole string to `"1"` by equality, so a camera
+# GENUINELY AT MANUAL reported `exposure_locked=False`. The client told
+# SPECTRA it could not lock, every calibration-grade run refused by name,
+# and the reason it quoted said the mode was `1 (Manual Mode)` while
+# insisting it would not lock: a machine contradicting itself in one
+# sentence.
+#
+# BOTH FORMATS ARE TEST CASES, and the annotated one is RED against the
+# pre-fix code. Every menu control is covered, not just exposure — the same
+# equality comparison was on white balance and continuous autofocus.
+
+ANNOTATED = {"auto_exposure": "1 (Manual Mode)",
+             "white_balance_automatic": "0 (Auto Mode off)",
+             "focus_automatic_continuous": "0 (off)"}
+PLAIN = {"auto_exposure": "1", "white_balance_automatic": "0",
+         "focus_automatic_continuous": "0"}
+
+
+@pytest.mark.parametrize("values,shape", [(PLAIN, "plain"),
+                                          (ANNOTATED, "annotated")])
+def test_a_menu_value_is_read_the_same_however_the_driver_prints_it(
+        monkeypatch, values, shape):
+    fake = FakeCtl(values)
+    monkeypatch.setattr(cam, "_tool", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(cam, "_run", fake)
+    lock = asyncio.run(V4L2Camera().read_lock())
+    assert lock.exposure_locked is True, \
+        f"a camera at Manual must read as locked ({shape} output)"
+    assert lock.white_balance_locked is True, shape
+    assert lock.focus_auto is False, \
+        f"continuous autofocus off must read as off ({shape} output)"
+    assert lock.locked is True, shape
+
+
+def test_the_annotated_label_is_kept_rather_than_thrown_away(monkeypatch):
+    """The label is the driver's own words about its own state, so it is
+    reported. What it may not do is decide the boolean."""
+    fake = FakeCtl(dict(ANNOTATED))
+    monkeypatch.setattr(cam, "_tool", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(cam, "_run", fake)
+    lock = asyncio.run(V4L2Camera().read_lock())
+    assert "Manual" in lock.exposure_mode
+    assert lock.white_balance_mode == "manual"
+
+
+def test_an_annotated_auto_reading_is_still_NOT_locked(monkeypatch):
+    """THE FIX MAY NOT OVER-CORRECT. Parsing the leading integer must not
+    turn every annotated reading into a lock — an annotated AUTO is auto."""
+    fake = FakeCtl({"auto_exposure": "3 (Aperture Priority Mode)",
+                    "white_balance_automatic": "1 (Auto Mode)"})
+    monkeypatch.setattr(cam, "_tool", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(cam, "_run", fake)
+    lock = asyncio.run(V4L2Camera().read_lock())
+    assert lock.exposure_locked is False
+    assert lock.white_balance_locked is False
+    assert lock.locked is False
+
+
+def test_the_leading_number_parser_takes_the_number_and_nothing_else():
+    """Directly, because every read-back in this file goes through it — and
+    a value with no leading number is None (an UNKNOWN), never a default."""
+    assert cam._menu_value("1") == 1
+    assert cam._menu_value("1 (Manual Mode)") == 1
+    assert cam._menu_value("  3 (Aperture Priority Mode)  ") == 3
+    assert cam._menu_value("0 (Auto Mode)") == 0
+    for junk in ("", None, "Manual Mode", "(1)"):
+        assert cam._menu_value(junk) is None, junk
+    # The LEVERS are read with the same parser, so an annotating driver must
+    # not silently report every one of them as unreadable.
+    assert cam._as_float("250 (whatever)") == 250.0
+    assert cam._as_float("-3 (below zero)") == -3.0
 
 
 def test_apply_lock_asks_the_driver_then_reports_what_it_read_back(ctl):
