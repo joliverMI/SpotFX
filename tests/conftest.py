@@ -175,6 +175,40 @@ class FakeLedFX:
                 pass
 
 
+# ── THE INSTRUMENT GATE'S ONE STUB ─────────────────────────────────────────
+#
+# `night_run.evaluate_start` asks `capture_runs.session_view()` whether
+# anything can measure tonight (the seam's addendum 10, item 1: a room must
+# never be TAKEN for a night that cannot measure, and by the same argument
+# never HELD DARK for one). Every night spec that wants a night to actually
+# run has to say that a camera is there.
+#
+# ONE DEFINITION, imported by every night spec, on purpose. Four copies of
+# "what a measuring session looks like" is four things to update the day
+# that view grows a field, and three of them would be updated late.
+
+MEASURING_SESSION = {
+    "present": True, "locked": True, "session_id": "sess-test",
+    "pose_id": "pose-test", "refusal": "", "unable": "",
+    "native": True, "source": "native", "calibration_grade": True,
+    "calibration_refusal": "", "aiming": True,
+    "measured_by": "the capture client", "client": {}, "lever": {},
+    "host": {"state": "present"},
+}
+
+
+def measuring_session(monkeypatch, **overrides):
+    """Point `capture_runs.session_view` at a camera that can measure.
+
+    Patched at `night_run`'s own import of `capture_runs`, which is the
+    module attribute the gate actually reads — patch the object, never a
+    second copy of the answer."""
+    from spectra.services import capture_runs
+    view = {**MEASURING_SESSION, **overrides}
+    monkeypatch.setattr(capture_runs, "session_view", lambda: dict(view))
+    return view
+
+
 @pytest.fixture()
 def fresh_ledfx_client():
     """Reload api.ledfx_client so each test gets pristine module globals
@@ -235,12 +269,22 @@ def _isolated_night_run(tmp_path, monkeypatch):
     from spectra.services import night_run
     monkeypatch.setattr(scfg, "NIGHT_QUEUE_FILE", tmp_path / "night_queue.json")
     monkeypatch.setattr(scfg, "NIGHT_RUNS_FILE", tmp_path / "night_runs.json")
+    # THE SELF-TAKING NIGHT's pre-take snapshot (spectra/services/
+    # night_take.py) is the same class of store and is reached from the same
+    # production surfaces: `status_brief()` asks whether a room is being held
+    # RIGHT NOW on every `engine.status()` poll, and any test driving a take
+    # or a give-back would otherwise write his real storage/spectra/.
+    monkeypatch.setattr(scfg, "NIGHT_TAKE_FILE", tmp_path / "night_take.json")
     night_run.current = None
     night_run._task = None
+    night_run._stop_mark = 0.0
+    night_run._stop_source = ""
     night_run._disk_cache.update({"key": None, "night": None})
     yield
     night_run.current = None
     night_run._task = None
+    night_run._stop_mark = 0.0
+    night_run._stop_source = ""
     night_run._disk_cache.update({"key": None, "night": None})
 
 

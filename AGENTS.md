@@ -4387,7 +4387,7 @@ Spec: `docs/SPECTRA_SPEC.md` §103; tests
 goes RED on the defect it was written for) and
 `tests/test_calibration_diff.py`.
 
-## THE NIGHT RUN — HA pushes, we answer; and it never takes his room
+## THE NIGHT RUN — HA pushes, we answer (and, ARMED, it takes the room)
 
 His `Sleeping` helper is a better signal than a person: when it has been on
 for thirty continuous minutes Home Assistant PUSHES one event and the
@@ -4429,11 +4429,14 @@ already:
   snapshots before preparing and restores on any start answer that is not
   `state == "running"`.
 
-- **THE BOUNDARY, and it is not negotiable: a start arriving while SPECTRA
-  does not ALREADY hold the room DECLINES by name, records the declined
-  night, and does nothing else.** The Admiral's word — "it does not help
-  itself to his room while he sleeps. That boundary is worth more than an
-  occasional missed night." The ownership record is read FIRST, before
+- **THE BOUNDARY: a start arriving while SPECTRA does not ALREADY hold the
+  room DECLINES by name, records the declined night, and does nothing
+  else.** The Admiral's word at the time — "it does not help itself to his
+  room while he sleeps. That boundary is worth more than an occasional
+  missed night." **HE HAS SINCE OVERRULED IT** for a RELEASED room behind
+  one absent-by-default lever — see THE SELF-TAKING NIGHT below; everything
+  in this bullet is still exactly what an UNARMED deploy does, and that is
+  every deploy until he words the arm. The ownership record is read FIRST, before
   anything is resolved or driven, so a declined night cannot have had a side
   effect. A DECLINE IS A NORMAL RECORDED OUTCOME (200, not 4xx): "did last
   night run?" must be a read, never a silence indistinguishable from the
@@ -4533,6 +4536,103 @@ record rather than a copy, the honest yes, and byte-identical stores across
 ten calls),
 `tests/test_night_exit.py` (RED-WHEN-LYING against the real headless
 pipeline and real `fx.utils.WLED` transport), `tests/test_night_power.py`.
+
+### THE SELF-TAKING NIGHT — armed, it takes a RELEASED room and comes up DARK
+
+The Admiral overruled the never-takes-the-room boundary above (2026-09-04,
+of having to leave his room in a special state before bed: "no!!! i dont
+want to have to turn it on. why can't you"). **`spectra/services/
+night_take.py`'s module docstring is the binding statement**; the design is
+the seam's addenda 10-11 and nothing departs from it. Read it before
+touching anything on this path. Eight things:
+
+- **ONE ARMING LEVER, ABSENT BY DEFAULT.** `SPECTRA_NIGHT_SELF_TAKE=1`
+  (`config.night_self_take()`, read at call time). Unarmed — the shipped
+  state — a start on a released room declines with
+  `mapping_refusals.night_not_owned`'s own sentence BYTE FOR BYTE, asserted
+  against that function's output rather than a copy of its text. It is
+  deliberately NOT `SPECTRA_HANDOVER_ARMED`: that latch guards the
+  interactive route, and two levers for one act is how a night silently
+  fails to run for a reason nobody looks at.
+- **IT ONLY EVER TAKES A `released` ROOM.** Held by the older SpotFX
+  process, or mid-handover, still declines: displacing a live writer while
+  he sleeps is not what he asked for. Checked twice — in the gate chain and
+  again inside `take_room`, which closes the window between the preflight
+  and the start.
+- **THE QUIET TAKE CLOSES BOTH SOURCES OF LIGHT, and there were two.** The
+  stack comes up BLACK (`fx/VENDOR.md` deviation #32: a LOAD-TIME
+  substitution — `virtual_cfg` untouched, so nothing persists and every
+  ordinary take-back afterwards restores his show), and `engine.go_live` is
+  NEVER called, so the conductor/response/trigger engines write to the
+  RecordingExecutor. `fx_seam` routes on the OWNERSHIP RECORD plus
+  `facade.set_host` and never on the engine's executor — which is exactly
+  why the night's own capture writes land while the show does not. A third
+  thing is a SKIP, not a mode: `run_handover(quiet=True)` does not run the
+  post-commit ambient reconcile, because a hold is Hue bulbs lit.
+  **Do not "fix" this with `pause_all`** — pausing suppresses the flush, so
+  the fixture holds its last frame instead of being driven black AND the
+  VIRTUAL_UPDATE freshness the activation gate verifies goes silent.
+- **NO DARK MUSIC — his sleeping house IS the envelope** (settled with
+  River 2026-09-03, his-routine-outranks-our-envelope). The self-taking
+  flow fires NO house scene; the quiet take darkens only SPECTRA's own
+  fixtures; a stray house light is the contamination witness's business,
+  per capture. `tests/test_night_self_take.py` asserts the module body
+  contains no house-scene call so nobody adds it back helpfully.
+- **GIVE-BACK ON EVERY EXIT, AND THE ORDER IS THE SEMANTICS**: stop,
+  RELEASE, terminal state, announce — River's re-dark rides the night's
+  state, so the room is his again before he is told it is. Gated on
+  `night_take`'s durable snapshot and NEVER on the armed flag or the
+  current owner, so **a night that ran on a room SPECTRA already held
+  releases nothing**. The honest exit still reads at the light: releasing
+  tears the live stack down, so `night_run.Instruments` captures the driver
+  handles BEFORE the release and the report then answers the better
+  question — is it dark now that we have let go.
+- **A STOP ARRIVING DURING THE TAKE IS HONOURED, and it is a window only
+  this build created.** `capture_queue.stop()` is a no-op with nothing
+  running, and the take now spends real seconds holding the room BEFORE
+  there is any night for an abort to stop — so a `sleep-ended` landing
+  mid-handover used to be swallowed while the room stayed held. `night_run.
+  _stop_mark`/`_stop_source` (bumped by EVERY `abort()`, including the ones
+  with nothing to stop) are read either side of the take; a stop that
+  landed in between hands the room straight back and declines the night by
+  name, naming WHICH stop it was (his morning routine is an ordinary
+  ending; a touched light is not). A touched house is his house even when
+  the house was touched between two of our own statements.
+- **CRASH RECOVERY RUNS BEFORE `resume_own_room()`, and that ordering is
+  the whole point.** `night_run.recover_orphaned_night()` is called from
+  `spectra/app.py`'s lifespan first: without it the resume would
+  re-activate the stack and resume his SHOW at 2am, through a door the
+  quiet take never opens. The orphan is stamped `failed` with
+  `refusal="crashed"` — an ending River's `active` boolean already covers;
+  inventing a state word for a frozen contract is how a seam breaks
+  quietly — the room goes back, the terminal state is re-posted and the
+  give-back announced. A night already stamped by a proper ending is never
+  restamped.
+- **THE ANNOUNCEMENT IS BOTH ENDS, TIMESTAMPED AND SILENT** (Order 22 for
+  a sleeping house): durable records plus `take`/`self_take` on
+  `status_brief()` and `fixtures_export()`, never a sound and never a push.
+  `night_take.merge_announcement` is the ONE merge — folding a give-back's
+  `as_dict()` in naively REPLACES the take's own entry, which was got wrong
+  twice before it was factored out.
+
+**The instrument gate joins the preflight for EVERY night**, self-taking or
+not (`night_run._can_measure` over `capture_runs.session_view()`, the one
+thing asked about the camera): a room must never be TAKEN for — nor held
+dark all night by — a night that cannot measure. It sits after the
+declaration (the cheaper answer when both are true) and before pricing.
+Any night spec that wants a night to RUN must now say a camera is there —
+`conftest.measuring_session(monkeypatch)` is the one definition.
+
+**NOT BUILT, and it is the named follow-up**: the durable per-declaration
+`may_take_room: true` consent field (addendum 10, item 2). His spoken word
+covered the first night; the second gate belongs on the declaration.
+
+Specs: `tests/test_night_self_take.py` (the unarmed byte-identity, the
+gates, the give-back ordering, idempotence, the silence),
+`tests/test_quiet_take_dark.py` (the emitted-light proof through
+`fx.headless`, with the ordinary path as its own red-first control),
+`tests/test_night_take_crash_recovery.py` (the REAL lifespan, a control
+proving the resume would have re-lit the room, and a fresh interpreter).
 
 ### The contamination witness, and THE SCONCE MAINS RULE
 

@@ -138,6 +138,14 @@ NIGHT_QUEUE_FILE = SPECTRA_STORAGE / "night_queue.json"
 #: a normal outcome, not an error — so "did last night run?" is a read and
 #: never a silence indistinguishable from the seam being broken.
 NIGHT_RUNS_FILE = SPECTRA_STORAGE / "night_runs.json"
+#: THE PRE-TAKE SNAPSHOT of the SELF-TAKING NIGHT (spectra/services/
+#: night_take.py): the owner state a night found before it took the room,
+#: and when. Written BEFORE the take and dropped on the way out, so its mere
+#: PRESENCE at a cold start is proof a night was holding his room when this
+#: process died — the one thing an in-memory record could never survive to
+#: say. Same restart-survival shape (and the same reason) as
+#: FLARE_PREVIEW_HOLD_FILE above.
+NIGHT_TAKE_FILE = SPECTRA_STORAGE / "night_take.json"
 
 # The TESTING IN PROGRESS record (spectra/services/test_session.py): the
 # DECLARED half of the room-visibility bar — {actor, reason, since_ms,
@@ -192,6 +200,29 @@ def night_run_token() -> str:
     provision it fails closed and says so, rather than accepting anonymous
     starts."""
     return os.getenv("SPECTRA_NIGHT_RUN_TOKEN", "")
+
+
+def night_self_take() -> bool:
+    """THE ARMING LEVER on the SELF-TAKING NIGHT (spectra/services/
+    night_take.py) — the Admiral's overrule of the no-room-take boundary,
+    behind one env var that is ABSENT by default.
+
+    Absent (the shipped state) means the night trigger behaves exactly as it
+    always has: a start arriving while SPECTRA does not hold the room
+    declines by name, records the decline, and touches nothing. The whole
+    self-taking build lands green and takes NOTHING until this is worded.
+
+    READ AT CALL TIME, never cached at import — `handover_armed()`'s and
+    `night_run_token()`'s own posture, and for the same reason: arming is a
+    systemd `Environment=` edit and a restart, with no module global that
+    could keep serving a stale answer.
+
+    DELIBERATELY NOT `SPECTRA_HANDOVER_ARMED`. That latch guards the
+    interactive route, a hand change he presses between two worlds that may
+    both be running; this is a different act with its own consent behind it.
+    Two levers for one act is how a night silently fails to run for a reason
+    nobody thinks to look at."""
+    return os.getenv("SPECTRA_NIGHT_SELF_TAKE", "") == "1"
 
 
 def settings_agent_backend() -> str:

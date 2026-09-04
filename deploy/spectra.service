@@ -23,6 +23,17 @@
 # so the latch goes here — systemctl --user edit spectra, add
 # Environment=SPECTRA_HANDOVER_ARMED=1, restart spectra. Disarm afterwards.
 #
+# THE SELF-TAKING NIGHT is a SEPARATE lever and is absent here on purpose:
+# Environment=SPECTRA_NIGHT_SELF_TAKE=1 lets the night trigger take a
+# RELEASED room by itself, quietly (up dark, show off), and give it back on
+# every exit including a crash — spectra/services/night_take.py is the
+# binding statement. Without it the night declines on a room SPECTRA does
+# not already hold, exactly as it always has. It is deliberately not the
+# handover latch above: that one guards the room changing hands on a press,
+# this one is his standing consent to a sleep-triggered take, and two levers
+# for one act is how a night silently fails to run for a reason nobody looks
+# at. Arming it is the Admiral's word, not a deploy default.
+#
 # Restart while SPECTRA owns the room: the process auto-resumes the live
 # stack at start (guarded activation + readiness gate — handover.
 # resume_own_room), so Restart=always genuinely restores the room, not just

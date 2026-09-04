@@ -950,6 +950,44 @@ variables named `ledfx` (the core object handle) are untouched.
     byte-identical to that baseline at 0.7; the zero path proven at the
     emitter and RED against the baseline's spray leak.
 
+32. `virtuals.py` + `host.py`: A BLACKOUT LOAD — every virtual comes up
+    driving BLACK instead of restoring its stored effect.
+    `Virtuals.create_from_config(..., blackout=True)`, reached through
+    `FxHost.start(blackout=True)`, and it has exactly ONE caller: the
+    SELF-TAKING NIGHT's quiet take (`spectra/services/night_take.py`).
+
+    WHY IT IS NOT A CONFIG EDIT. The stored `virtual_cfg` is left exactly as
+    it was read and only the EFFECT INSTANCE is substituted, so nothing
+    persists: a `save_config()` firing later during the night (a capture
+    run's own effects PUT does exactly that) still writes his stored effect
+    for every virtual this load blacked out and never touched. Blacking the
+    config out instead would come up dark tonight AND on every ordinary
+    take-back afterwards.
+
+    WHY NOT THE EXISTING `pause_all`. Pausing suppresses the FLUSH, so no
+    frame is written at all — the fixture holds whatever it was last sent
+    rather than being driven to black, and the per-virtual VIRTUAL_UPDATE
+    freshness the S3 activation gate verifies against goes silent. "Held
+    black" and "never written to" are different states and only one of them
+    is provable at the light.
+
+    Everything else about the load is unchanged, deliberately: the same
+    segments, the same `activate=stored_active` semantics (deviation #29's
+    ordering fix is untouched), the same render thread, the same restore
+    audit. The substitution is reported on `Virtuals.blacked_out` — a load
+    that silently blacked nothing out is worth being able to read.
+
+    The write is the SAME shape `spectra/services/room_mapping.py` uses for
+    its own dark step (`singleColor` #000000 at brightness 0), so "the room
+    is dark" means one thing in this codebase rather than two.
+
+    Evidence: `tests/test_quiet_take_dark.py` — every frame reaching a
+    device's transport recorded across a real `fx.headless` load of a config
+    whose stored effects are white at full brightness. The quiet load emits
+    ZERO non-black frames; the ORDINARY load of the same config emits 94 at
+    full value, which is the control that proves the rig can see the defect
+    at all. Verified RED against a build with the substitution removed.
+
 Everything else is byte-identical to the fork at 149f4470 modulo the import
 rewrite and the deviations above. When updating vendored files, re-diff
 against that commit.

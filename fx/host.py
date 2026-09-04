@@ -95,14 +95,19 @@ class FxHost:
         )
         self._started = False
 
-    async def start(self) -> None:
+    async def start(self, *, blackout: bool = False) -> None:
         """Instantiate devices and virtuals from the fx config file.
 
         Light ownership gate (SPECTRA S3), enforced in the construction path:
         a config with any non-dummy device is the live room, and starting it
         requires an ActivationGrant that is valid against the ownership
         record RIGHT NOW (fx/light_ownership.py). Headless/dummy configs are
-        untouched — no grant, no record read."""
+        untouched — no grant, no record read.
+
+        `blackout` (SpotFX deviation #32) brings every virtual up driving
+        BLACK instead of its stored effect — the SELF-TAKING NIGHT's quiet
+        take, and nothing else. See Virtuals.create_from_config for what it
+        does and, just as importantly, what it deliberately does not touch."""
         live_types = sorted(
             {d.get("type") for d in self.config["devices"]} - SAFE_DEVICE_TYPES
         )
@@ -114,7 +119,8 @@ class FxHost:
             )
         self.devices.create_from_config(self.config["devices"])
         await self.devices.async_initialize_devices()
-        self.virtuals.create_from_config(self.config["virtuals"])
+        self.virtuals.create_from_config(self.config["virtuals"],
+                                         blackout=blackout)
         self._started = True
         logger.info(
             "FxHost started: %d devices, %d virtuals (config_dir=%s)",

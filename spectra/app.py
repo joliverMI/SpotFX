@@ -165,10 +165,24 @@ async def _standalone_lifespan(app):
     logger = logging.getLogger("spectra")
     from spectra.services import (activation_report, ambient_music_gate,
                                    device_preview, engine, flare_preview_hold,
-                                   frame_watchdog, handover,
+                                   frame_watchdog, handover, night_run,
                                    ownership_reconciler, param_watchdog)
     await engine.start()
     await device_preview.start()
+    # A SELF-TAKEN NIGHT ORPHANED BY A CRASH, and this MUST run before the
+    # resume below. The self-taking night (spectra/services/night_take.py)
+    # takes a released room itself and gives it back on every way out — but
+    # a crash skips every exit path, leaving the ownership record saying
+    # SPECTRA owns a room nobody asked for and the night's disk record
+    # stuck at "running" with no terminal state for the house's own re-dark
+    # to catch. Left to run first, `resume_own_room()` would re-activate
+    # the stack and resume his SHOW: his house coming on at 2am, through a
+    # door the quiet take itself never opens. So the orphan is found, the
+    # night is stamped failed-by-crash and re-posted, and the room goes
+    # back to `released` — after which the resume sees a released room and
+    # takes its own unchanged early return. A no-op on every ordinary
+    # start (nothing on disk, nothing to do).
+    await night_run.recover_orphaned_night()
     # Restart mid-reign: if the ownership record says spectra owns, the
     # live stack reactivates itself through the guarded activation path
     # (grant + readiness gate). Failure stays dark-but-owned and keeps

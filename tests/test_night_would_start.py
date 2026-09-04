@@ -26,6 +26,7 @@ import time
 
 import pytest
 
+from conftest import measuring_session
 from fx import light_ownership as lo
 from spectra.services import (capture_queue, mapping_refusals, night_run)
 
@@ -52,10 +53,18 @@ EVENT = {"event": "sleep-window-start", "ts": "2026-09-02T01:00:00Z",
          "source": "home-assistant"}
 
 
-def _fits(monkeypatch, *, total=30.0, window=9999.0):
+def _fits(monkeypatch, *, total=30.0, window=9999.0, instrument=True):
     """Price a queue as comfortably fitting, without resolving a real room.
     `price_items` is the module-level function BOTH callers reach through
-    the one gate chain, so patching it here patches exactly one thing."""
+    the one gate chain, so patching it here patches exactly one thing.
+
+    It also puts a MEASURING CAMERA in the room by default: the instrument
+    gate sits between the declaration and the pricing, so a spec about
+    pricing that left it out would be a spec about the instrument gate
+    wearing the wrong name."""
+    if instrument:
+        measuring_session(monkeypatch)
+
     async def price(items, now=None):
         return {"items": [{"name": i.name, "seconds": total} for i in items],
                 "total_seconds": total, "window_seconds": window,
@@ -176,7 +185,17 @@ def test_neither_caller_carries_a_gate_of_its_own(name):
                  "load_declaration(", "price_items(",
                  "parse_items(", "night_not_owned(",
                  "night_already_running(", "night_will_not_fit(",
-                 "NO_DECLARED_NIGHT_QUEUE"):
+                 "NO_DECLARED_NIGHT_QUEUE",
+                 # THE INSTRUMENT GATE and the SELF-TAKING NIGHT's arming
+                 # lever join the same guarantee. `start()` may ACT on the
+                 # answer (it is the only one of the two that takes a room),
+                 # but neither caller may decide it: a preflight that said
+                 # yes while the start's own copy of the camera check said
+                 # no would prepare his house for a night that then
+                 # declined, which is the exact failure this file exists
+                 # for.
+                 "session_view(", "_can_measure(",
+                 "night_no_instrument(", "night_take.armed("):
         assert gate not in body, \
             (f"{name} applies '{gate}' itself — the preflight and the start "
              f"must share ONE gate chain, or they will disagree")

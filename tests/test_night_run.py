@@ -20,6 +20,7 @@ import time
 
 import pytest
 
+from conftest import measuring_session
 from fx import light_ownership as lo
 from spectra.services import (capture_queue, capture_settings,
                               mapping_refusals, night_run)
@@ -150,6 +151,7 @@ def test_a_queue_that_cannot_fit_before_his_morning_declines_by_name(
     frame is a CONTAMINANT, so this is a bound and not a preference."""
     _owner(lo.SPECTRA)
     night_run.save_declaration("nightly", ITEMS)
+    measuring_session(monkeypatch)
 
     async def price(items, now=None):
         return {"items": [{"name": "lounge blocks", "seconds": 7200.0}],
@@ -456,6 +458,10 @@ def _whole_night(monkeypatch, *, blow_up=False, on=False):
 
     _owner(lo.SPECTRA)
     night_run.save_declaration("nightly", ITEMS)
+    # THE INSTRUMENT GATE (spectra/services/night_run._can_measure): a night
+    # with nothing to look through declines before it holds his room. Every
+    # spec that wants a night to RUN has to say a camera is there.
+    measuring_session(monkeypatch)
 
     helper = _Wled(on=on)
     device = _Device("tv-backlight", helper)
