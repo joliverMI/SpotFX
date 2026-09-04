@@ -127,7 +127,13 @@ async def start(body: EventBody,
     run = await night_run.start(body.model_dump())
     return {"run_id": run.id, "state": run.state, "detail": run.detail,
             "refusal": run.refusal, "started": run.started,
-            "fixtures": run.fixtures, "power": run.power}
+            "fixtures": run.fixtures, "power": run.power,
+            # WHETHER THIS START TOOK THE ROOM ITSELF, in the reply rather
+            # than only on the next status poll — the self-taking night
+            # (spectra/services/night_take.py). Empty on every night that
+            # ran on a room SPECTRA already held, and on every night at all
+            # while the arming lever is absent.
+            "take": run.take}
 
 
 @router.post("/abort")

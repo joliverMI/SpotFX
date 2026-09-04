@@ -187,6 +187,7 @@ async def run_handover(
     sides: dict[str, WriterSide],
     *,
     grace_s: float = HUE_RELEASE_GRACE_S,
+    quiet: bool = False,
 ) -> light_ownership.OwnershipRecord:
     """The two-step switch. Raises HandoverRefused when the to-side's go-day
     preparation is missing — BEFORE the record moves and before any quiesce,
@@ -315,7 +316,16 @@ async def run_handover(
     record = light_ownership.commit(handover.token, detail=commit_detail)
     logger.warning("handover: %s owns the lights%s", to_side.name,
                    " (PARTIAL — see activation report)" if partial else "")
-    if to_world == light_ownership.SPECTRA:
+    if to_world == light_ownership.SPECTRA and quiet:
+        # A QUIET TAKE APPLIES NO STORED AMBIENT INTENT. `reconcile_now`
+        # exists to land a hold he pressed for while the room was released —
+        # and a hold is Hue bulbs lit at ambient colour, which is the one
+        # thing a take that must come up dark cannot do. Skipped, not
+        # forgotten: the intent stays durable in RoomControlState exactly as
+        # it was, and the next ORDINARY take-back or restart applies it.
+        logger.warning("handover: QUIET take — the stored ambient intent is "
+                       "not applied (a hold is light); it stays stored")
+    elif to_world == light_ownership.SPECTRA:
         # THE STORED AMBIENT INTENT (spectra/services/ambient_music_gate.py's
         # "THE RELEASED ROOM"): a press while the room was released reports
         # phase "unavailable" and saves the intent — this is where it is
@@ -417,10 +427,22 @@ class SpectraSide:
     name = light_ownership.SPECTRA
 
     def __init__(self, config_dir: Optional[str] = None,
-                 open_audio: bool = True, audio_source_factory=None):
+                 open_audio: bool = True, audio_source_factory=None,
+                 quiet: bool = False):
         self.config_dir = config_dir or str(config.FX_LIVE_CONFIG_DIR)
         self.open_audio = open_audio
         self.audio_source_factory = audio_source_factory
+        #: THE QUIET TAKE (spectra/services/night_take.py). Two things, and
+        #: they are the two things that put light in the room on an ordinary
+        #: take-back: the stack comes up driving BLACK instead of each
+        #: virtual's stored effect (live_host.activate(quiet=True)), and the
+        #: ENGINE IS NOT SWITCHED LIVE — the drift conductor, the response
+        #: engine and the trigger engine keep writing to the recording
+        #: executor, so the show runs on paper and not on his fixtures.
+        #: Everything a capture run needs still works: `fx_seam` routes on
+        #: the OWNERSHIP RECORD plus `facade.set_host`, never on the engine's
+        #: executor, so the room is fully writable and completely dark.
+        self.quiet = bool(quiet)
         self._last_failure_detail: Optional[str] = None
         self._last_outcome: Optional[ActivationOutcome] = None
 
@@ -466,9 +488,21 @@ class SpectraSide:
         grant = light_ownership.mint_activation_grant(light_ownership.SPECTRA)
         await live.activate(grant, self.config_dir,
                             open_audio=self.open_audio,
-                            audio_source_factory=self.audio_source_factory)
+                            audio_source_factory=self.audio_source_factory,
+                            quiet=self.quiet)
         facade.set_host(live.host)
-        engine.go_live(FacadeExecutor(), grant)
+        if self.quiet:
+            # THE SHOW STAYS ON PAPER. `engine.go_live` is what points the
+            # drift conductor and the response engine at real lights; a
+            # quiet take deliberately never calls it, so the engine keeps
+            # its RecordingExecutor and nothing it decides reaches a
+            # fixture. `fx_seam` is unaffected (it routes on the ownership
+            # record + facade host), which is why the night's own capture
+            # writes still land.
+            logger.warning("handover: QUIET activation — the stack is up and "
+                           "black; the engine stays dark (executor unchanged)")
+        else:
+            engine.go_live(FacadeExecutor(), grant)
         # The crystal lazy-activation class (report gate e3, folded in as
         # first-class alongside the reconciler, 2026-08-13): give EVERY
         # config-declared virtual its best chance to come up (a Hue DTLS
@@ -572,10 +606,13 @@ class SpectraSide:
         return not live.active
 
 
-def production_sides() -> dict[str, WriterSide]:
+def production_sides(*, quiet: bool = False) -> dict[str, WriterSide]:
+    """The two real writer sides. `quiet` builds the SPECTRA side in its
+    quiet mode — the self-taking night's take, and nothing else; every other
+    caller gets exactly what it always got."""
     return {
         light_ownership.SPOT_EFFECTS: SpotEffectsSide(),
-        light_ownership.SPECTRA: SpectraSide(),
+        light_ownership.SPECTRA: SpectraSide(quiet=quiet),
     }
 
 

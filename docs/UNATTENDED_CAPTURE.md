@@ -121,10 +121,19 @@ ends.
 
 - **Making sure SPECTRA owns the lights before the queue starts.** A
   released room refuses by name (one press on the ownership bar) — the
-  queue will not take the room back on its own, and should not. **The night
-  trigger has no exception to this, ever**: a start arriving on a room
-  SPECTRA does not hold DECLINES by name, records the declined night, and
-  does nothing else.
+  daytime queue will not take the room back on its own, and should not.
+  **The NIGHT trigger had no exception to this either, and now has exactly
+  one, behind an absent-by-default lever** (`SPECTRA_NIGHT_SELF_TAKE`, the
+  Admiral's overrule 2026-09-04; `spectra/services/night_take.py` is the
+  binding statement). UNARMED — every deploy until he words the arm — a
+  start arriving on a room SPECTRA does not hold DECLINES by name, records
+  the declined night, and does nothing else: this line is unchanged and
+  byte-identical. ARMED, a start on a **released** room takes it itself,
+  QUIETLY (every fixture held black from the first frame, the show never
+  switched live, no house scene fired) and gives it back on every way out
+  including a crash — so on an armed deploy this row moves up to (a). A
+  room held by the older SpotFX process, or mid-handover, still declines:
+  the exception is `released` and nothing else.
 - **Checking `light.dimmer_kitchen_sconce` when a sconce will not answer.**
   It is the kitchen sconces' MAINS SUPPLY and it is a switch (0% or 100%);
   at 0% both are dead and it looks exactly like a dead controller or a lost

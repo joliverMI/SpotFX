@@ -1846,12 +1846,51 @@ class Virtuals:
                 cleanup_effects, Event.LEDFX_SHUTDOWN
             )
 
-    def create_from_config(self, config, pause_all=False):
+    #: SpotFX deviation #32 — the write a BLACKOUT load installs instead of
+    #: the stored effect.  Deliberately the SAME shape
+    #: `spectra/services/room_mapping.py` writes for its own dark step
+    #: (MAP_EFFECT_TYPE + BLACK, brightness 0), so "the room is dark" means
+    #: one thing in this codebase rather than two.
+    BLACKOUT_EFFECT_TYPE = "singleColor"
+    BLACKOUT_EFFECT_CONFIG = {"color": "#000000", "brightness": 0.0,
+                              "background_brightness": 0.0}
+
+    def create_from_config(self, config, pause_all=False, blackout=False):
+        """Realize the stored virtuals.
+
+        `blackout` is SpotFX deviation #32 and it exists for ONE caller:
+        the SELF-TAKING NIGHT's quiet take (spectra/services/night_take.py).
+        A take-back normally restores each virtual's STORED effect, which is
+        whatever last painted his room — so the room comes up LIT, which at
+        1am is the whole failure the quiet take exists to avoid.  Under
+        `blackout` every virtual that would have restored an effect gets a
+        BLACK one instead: same virtual, same segments, same
+        `activate=stored_active` semantics (deviation #29's ordering fix is
+        untouched), same render thread, same VIRTUAL_UPDATE freshness the
+        activation gate verifies against — but the first frame it ever
+        flushes, and every frame after it, is zeros.
+
+        IT IS A LOAD-TIME SUBSTITUTION, NOT A CONFIG EDIT.  `virtual_cfg` is
+        left exactly as it was read, so nothing persists: a `save_config()`
+        firing later (a capture run's own effects PUT does) still writes his
+        stored effect for every virtual this load blacked out and never
+        touched.  Blacking the config out instead would come up dark tonight
+        and dark on every ordinary take-back afterwards.
+
+        WHY NOT `pause_all`: pausing suppresses the flush, so no frame is
+        written at all — the fixture holds whatever it was last sent rather
+        than being driven to black, and the freshness signal the activation
+        gate reads goes silent.  "Held black" and "never written to" are
+        different states and only one of them is provable at the light.
+        """
         # Named record of every virtual whose stored effect did not end up
         # driving it, keyed by virtual id.  Read by the liveness surface
         # (spectra/services/live_host.py) so "not active" can say WHY
         # instead of guessing.  Reset per load, like the registry itself.
         self.restore_failures = {}
+        #: The virtuals this load blacked out, for the caller to report.
+        #: Empty on every ordinary load.
+        self.blacked_out = []
 
         for virtual_cfg in config:
             _LOGGER.debug("Loading virtual from config: %s", virtual_cfg)
@@ -1910,11 +1949,23 @@ class Virtuals:
                 )
             elif "effect" in virtual_cfg:
                 try:
-                    effect = self._ledfx.effects.create(
-                        ledfx=self._ledfx,
-                        type=virtual_cfg["effect"]["type"],
-                        config=virtual_cfg["effect"]["config"],
-                    )
+                    # SpotFX deviation #32: under blackout the STORED effect
+                    # is not instantiated at all — a black one takes its
+                    # place.  `virtual_cfg` is untouched either way, so the
+                    # substitution lives only in this process's memory.
+                    if blackout:
+                        effect = self._ledfx.effects.create(
+                            ledfx=self._ledfx,
+                            type=self.BLACKOUT_EFFECT_TYPE,
+                            config=dict(self.BLACKOUT_EFFECT_CONFIG),
+                        )
+                        self.blacked_out.append(virtual_cfg["id"])
+                    else:
+                        effect = self._ledfx.effects.create(
+                            ledfx=self._ledfx,
+                            type=virtual_cfg["effect"]["type"],
+                            config=virtual_cfg["effect"]["config"],
+                        )
                     new_virtual.set_effect(effect, activate=stored_active)
                 except vol.MultipleInvalid as e:
                     self._record_restore_failure(

@@ -144,6 +144,10 @@ class LiveLights:
         self._pump_task: Optional[asyncio.Task] = None
         self._prev_audio_cls = None
         self.expected_active_ids: set[str] = set()
+        #: Virtual ids the LAST activation brought up black instead of
+        #: restoring their stored effect — empty on every ordinary
+        #: activation, populated only by a quiet take.
+        self.blacked_out: list[str] = []
 
     @property
     def active(self) -> bool:
@@ -156,11 +160,20 @@ class LiveLights:
         *,
         open_audio: bool = True,
         audio_source_factory: Optional[Callable[[AudioIngestHub], object]] = None,
+        quiet: bool = False,
     ) -> None:
         """Bring the stack up under `grant`. Raises OwnershipError before
         touching anything if the grant is stale; on any later failure the
         caller (the orchestrator) runs deactivate() — every step here is
-        reversible and deactivate() tolerates partial assembly."""
+        reversible and deactivate() tolerates partial assembly.
+
+        `quiet` is THE QUIET TAKE (spectra/services/night_take.py): every
+        virtual comes up driving BLACK rather than its stored effect, so the
+        stack is fully alive — rendering, flushing, freshness-stamped, ready
+        for a capture run's own writes through `fx_seam` — while emitting
+        nothing. Everything else about the assembly is identical, which is
+        why the activation gate that verifies a take-back can verify this
+        one unchanged."""
         light_ownership.require_grant(grant, light_ownership.SPECTRA,
                                       detail="live stack activate")
         if self.active:
@@ -170,7 +183,11 @@ class LiveLights:
         self.host = host          # set before start() so a failed start still
         self.expected_active_ids = _restrict_to_genuinely_driven(
             _config_expected_active_ids(host.config))
-        await host.start()        # deactivates through us
+        await host.start(blackout=quiet)   # deactivates through us
+        #: WHICH VIRTUALS CAME UP BLACK — for the take's own record. A quiet
+        #: take that silently blacked nothing out (a config with no stored
+        #: effects at all) is a fact worth being able to read afterwards.
+        self.blacked_out = list(getattr(host.virtuals, "blacked_out", []))
         self.freshness.attach(host)
         # His per-device timing equalization: install the stored offsets
         # against the ids this host actually holds, so the anchoring

@@ -127,7 +127,8 @@ from typing import Any, Optional
 
 from spectra import config as scfg
 from spectra.services import (capture_queue, capture_runs,
-                              mapping_refusals, night_calibration)
+                              mapping_refusals, night_calibration,
+                              night_take)
 
 logger = logging.getLogger(__name__)
 
@@ -331,6 +332,21 @@ class NightRun:
     #: measurements live in the calibration's own file, which is the one
     #: that is never pruned, and this store is bounded.
     calibration: dict = field(default_factory=dict)
+    #: WHETHER THIS NIGHT TOOK THE ROOM ITSELF, AND WHEN IT GAVE IT BACK —
+    #: the Admiral's Order 22 read for a sleeping house, both ends,
+    #: timestamped, silent. Empty on every night that ran on a room SPECTRA
+    #: already held (and on every night at all while the self-take lever is
+    #: absent). `spectra/services/night_take.py` is the binding statement;
+    #: `status_brief()` publishes the small version of this for River's HA
+    #: sensors to render into a morning he can read.
+    take: dict = field(default_factory=dict)
+    #: THE LIVE INSTRUMENTS, captured before the room is given back.
+    #: Deliberately NOT in `as_dict` — these are driver objects, not a
+    #: record. Releasing tears the live stack down, so the honest exit
+    #: report's only chance to read fixtures at the light is through handles
+    #: taken while the stack was still up. None on every non-self-taken
+    #: night, where `build_exit` reads the live stack as it always did.
+    instruments: Any = None
 
     def as_dict(self) -> dict:
         return {"run_id": self.id, "state": self.state,
@@ -342,7 +358,8 @@ class NightRun:
                 "planned_end_label": PLANNED_END_LABEL,
                 "queue": dict(self.queue), "exit": dict(self.exit_report),
                 "abort": dict(self.abort),
-                "calibration": dict(self.calibration)}
+                "calibration": dict(self.calibration),
+                "take": dict(self.take)}
 
 
 def load_nights(path=None) -> list[dict]:
@@ -376,6 +393,23 @@ def save_night(run: NightRun, path=None) -> dict:
 
 current: Optional[NightRun] = None
 _task: Optional[asyncio.Task] = None
+
+#: WHEN A STOP LAST ARRIVED, whether or not there was a night to stop.
+#: Bumped by every `abort()`, monotonic, never reset.
+#:
+#: A TOUCHED HOUSE IS HIS HOUSE, and the self-taking night widened the one
+#: window where that could be missed: `start()` now spends real seconds
+#: TAKING the room before there is any night for an abort to stop, and
+#: `capture_queue.stop()` is a no-op with nothing running. Without this, a
+#: `sleep-ended` arriving while the handover was in flight would be
+#: swallowed and the night would go on holding a room he had just got up
+#: in. `start()` marks this before the take and re-reads it after, and a
+#: stop that landed in between gives the room straight back.
+_stop_mark: float = 0.0
+#: …and WHICH stop it was, so the sentence for one arriving mid-take can
+#: name his morning routine as an ordinary ending rather than calling it a
+#: touched house. Meaningless without `_stop_mark`; read only beside it.
+_stop_source: str = ""
 
 
 def running() -> bool:
@@ -524,6 +558,12 @@ async def fixtures_export() -> dict:
         # "what does the morning backstop have to turn off", rather than two
         # surfaces he has to know about (spectra/services/morning_read.py).
         "calibration": dict(night.get("calibration") or {}),
+        # DID SPECTRA TAKE THIS ROOM, AND HAS IT GIVEN IT BACK. On the SAME
+        # read as "what do I turn off", because they are the same question
+        # in the morning: a fixture still lit means something different when
+        # the room was taken and handed back than when it was never taken.
+        "take": _take_brief(night),
+        "self_take": self_take_brief(),
         "morning_read": morning_read.build(night),
     }
 
@@ -556,6 +596,8 @@ def status_brief() -> dict:
         return {"state": "idle", "active": False, "run_id": None,
                 "started": None, "ended": None, "ended_by_morning": False,
                 "declared": declared(), "calibration": {},
+                "take": _take_brief({}),
+                "self_take": self_take_brief(),
                 "planned_end": planned_end_at(),
                 "planned_end_label": PLANNED_END_LABEL}
     state = night.get("state")
@@ -571,8 +613,38 @@ def status_brief() -> dict:
             # calibration and computes a diff, which is not work for a
             # surface answering every few seconds.
             "calibration": _calibration_brief(night),
+            # THE TAKE AND THE GIVE-BACK, BOTH ENDS, TIMESTAMPED, SILENT —
+            # the Admiral's Order 22 read for a sleeping house (the seam's
+            # River addendum 8, refinement 1). These are the fields River's
+            # HA sensors render into a morning he can look at; there is no
+            # sound and no push anywhere on this path, because an announce
+            # at 01:12 would wake him and defeat the night.
+            "take": _take_brief(night),
+            "self_take": self_take_brief(),
             "planned_end": night.get("planned_end") or planned_end_at(),
             "planned_end_label": PLANNED_END_LABEL}
+
+
+def _take_brief(night: dict) -> dict:
+    """THE ANNOUNCEMENT, on the polled surface — flat, small, and both ends.
+
+    `holding` is deliberately the DURABLE snapshot rather than this record's
+    own belief: a process that crashed mid-night and has just come back has
+    no in-memory record at all, and "is SPECTRA holding his room right now"
+    must be answerable then above all. `taken_at`/`given_back_at` are unix
+    timestamps, so the morning line River renders — "took the room 01:12,
+    gave it back 02:30, released clean" — is arithmetic on his side rather
+    than prose on ours."""
+    take = dict(night.get("take") or {})
+    return {"self_taken": bool(take.get("self_taken")),
+            "taken_at": take.get("taken_at") or None,
+            "given_back": bool(take.get("given_back")),
+            "given_back_at": take.get("given_back_at") or None,
+            "given_back_to": take.get("given_back_to") or "",
+            "why": take.get("why") or "",
+            "verified": bool(take.get("verified")),
+            "holding": night_take.holding(),
+            "detail": take.get("detail") or ""}
 
 
 def _calibration_brief(night: dict) -> dict:
@@ -796,6 +868,35 @@ def fits_guard(price: dict, *, clock=time.time):
 # it snapshots before it prepares and restores on any non-running answer.
 
 
+def _can_measure(view: dict) -> bool:
+    """CAN ANYTHING MEASURE TONIGHT? — the instrument gate's predicate,
+    asked of `capture_runs.session_view()` and of nothing else.
+
+    THREE THINGS, and they are three because they can disagree (that view's
+    own docstring says so, and collapsing them is how a surface starts
+    lying): something is CONNECTED, its camera is HELD to a known exposure,
+    and this client is allowed to SOURCE A MEASUREMENT at all — the browser's
+    demotion, which is a perfectly healthy session that may aim and may not
+    measure. A night declared entirely of calibration-grade items (which is
+    every item kind there is today) would refuse every one of them on a
+    browser, having held his room dark until his morning to do it.
+
+    It reads the view's own fields rather than reaching into the session,
+    and it asks no fourth question of its own: `capture_health`'s `impaired`
+    state arrives as `unable` and is already carried by the sentence."""
+    if not view.get("present") or not view.get("locked"):
+        return False
+    if view.get("calibration_refusal"):
+        return False
+    if view.get("unable"):
+        # PRESENT AND UNABLE IS NOT PRESENT AND FINE (capture_health.py): a
+        # connected client that has said it cannot do the job — no camera, a
+        # lock it reported and did not get, a measured lever failure — is a
+        # night that cannot measure, whatever its lock flag currently reads.
+        return False
+    return True
+
+
 @dataclass
 class StartGate:
     """The answer to "would a start event arriving RIGHT NOW run?", plus
@@ -817,6 +918,13 @@ class StartGate:
     #: calibration; None when it was a plain item list.
     target: Any = None
     resolved: Any = None
+    #: THE ROOM IS RELEASED AND THIS NIGHT WOULD TAKE IT (the self-taking
+    #: night, `spectra/services/night_take.py`). False on every gate answer
+    #: while `SPECTRA_NIGHT_SELF_TAKE` is absent — where a released room is
+    #: still a plain `not_owned` decline — and false on a night that runs on
+    #: a room SPECTRA already holds, which takes nothing and gives nothing
+    #: back. Reported on the preflight so the house knows what a yes means.
+    take_required: bool = False
 
 
 async def evaluate_start(*, now: Optional[float] = None) -> StartGate:
@@ -827,11 +935,30 @@ async def evaluate_start(*, now: Optional[float] = None) -> StartGate:
     priced, so a declined night cannot have had a side effect — and so the
     preflight's cheapest answer is also its most important one."""
     owner = _owner()
+    from fx import light_ownership
+    take_required = False
     if not spectra_owns():
-        # THE BOUNDARY. See `mapping_refusals.night_not_owned` — the night
-        # trigger gets no room-take exception, ever.
-        return StartGate(False, "not_owned",
-                         mapping_refusals.night_not_owned(owner))
+        # THE BOUNDARY, AND THE ONE PLACE THE ADMIRAL OVERRULED IT.
+        #
+        # UNARMED (the shipped state, and the state this build lands in):
+        # unchanged, word for word — `mapping_refusals.night_not_owned`'s
+        # own sentence, the night declined and recorded, nothing touched.
+        #
+        # ARMED (`SPECTRA_NIGHT_SELF_TAKE=1`, his spoken word): a RELEASED
+        # room — and only a released room — may be taken by the night
+        # itself, quietly, and is given back on every way out. A room held
+        # by the older SpotFX process or mid-handover still declines here:
+        # displacing a live writer while he sleeps is not what he asked
+        # for, and `released` is the one owner state that means nobody is
+        # writing — which is also the state the exit restores.
+        #
+        # THE TAKE ITSELF HAPPENS IN `start()`, NEVER HERE. This function
+        # is a pure read that both callers share, and a preflight that
+        # took a room would be the worst thing in this file.
+        if not (night_take.armed() and owner == light_ownership.RELEASED):
+            return StartGate(False, "not_owned",
+                             mapping_refusals.night_not_owned(owner))
+        take_required = True
     if running():
         return StartGate(False, "already_running",
                          mapping_refusals.night_already_running(
@@ -876,6 +1003,40 @@ async def evaluate_start(*, now: Optional[float] = None) -> StartGate:
                              f"{exc})",
                              declaration=dict(declaration))
 
+    # THE INSTRUMENT GATE — a room must never be TAKEN for a night that
+    # cannot measure (the seam's addendum 10, item 1), and by the same
+    # argument a room must never be HELD DARK all night for one either.
+    # So it applies to every night, self-taking or not.
+    #
+    # WHERE IT SITS IS DELIBERATE. After the ownership boundary, so an
+    # unarmed released room still answers `not_owned` with its own sentence
+    # and this gate can never change what that night says. After the
+    # declaration, because "no queue declared" is the cheaper and more
+    # actionable answer when both are true. Before pricing, because pricing
+    # resolves rooms and plans and there is no reason to spend that on a
+    # night that has nothing to look through.
+    #
+    # `capture_runs.session_view()` is the ONE thing asked about the camera
+    # (this module's own docstring: nothing here knows where the camera is),
+    # and the sentence is the session's own — see `night_no_instrument`.
+    try:
+        view = capture_runs.session_view()
+    except Exception as exc:                            # noqa: BLE001
+        # A REPORTING SURFACE MUST NEVER 500 A 1AM PUSH. Home Assistant
+        # fires and forgets, so a traceback out of this gate is a night
+        # nobody can explain in the morning. An unreadable view is treated
+        # as "we cannot say anything can measure", which is the same answer
+        # as no camera and lands as an ordinary recorded decline.
+        logger.exception("night run: could not read the capture session")
+        view = {"present": False,
+                "refusal": f"the camera session could not be read "
+                           f"({type(exc).__name__}: {exc})."}
+    if not _can_measure(view):
+        return StartGate(False, "no_instrument",
+                         mapping_refusals.night_no_instrument(view),
+                         declaration=dict(declaration),
+                         take_required=take_required)
+
     # PRICED BEFORE ANYTHING IS HELD, against the hard planned end. A queue
     # that cannot finish before his morning routine (and the blinds opening
     # just after it) does not start: daylight in the frame is a contaminant,
@@ -886,10 +1047,11 @@ async def evaluate_start(*, now: Optional[float] = None) -> StartGate:
                          mapping_refusals.night_will_not_fit(
                              price["total_seconds"], price["window_seconds"],
                              PLANNED_END_LABEL),
-                         price=price, declaration=dict(declaration))
+                         price=price, declaration=dict(declaration),
+                         take_required=take_required)
     return StartGate(True, items=items, price=price,
                      declaration=dict(declaration), target=target,
-                     resolved=resolved)
+                     resolved=resolved, take_required=take_required)
 
 
 async def would_start() -> dict:
@@ -913,13 +1075,21 @@ async def would_start() -> dict:
     out: dict = {"would_start": gate.ok,
                  "planned_end": planned_end_at(),
                  "planned_end_label": PLANNED_END_LABEL,
-                 "declared": declared()}
+                 "declared": declared(),
+                 "self_take": self_take_brief()}
     if gate.price:
         out["priced_seconds"] = gate.price.get("total_seconds")
         out["window_seconds"] = gate.price.get("window_seconds")
     if gate.ok:
         out["label"] = str(gate.declaration.get("label") or "")
         out["items"] = len(gate.items)
+        # WHAT A YES MEANS FOR HIS ROOM. `true` says this start would TAKE a
+        # released room itself and give it back on every way out (the
+        # self-taking night); `false` is the original meaning — SPECTRA
+        # already holds the lights and the night changes nothing about
+        # whose they are. River's side shows it; nothing branches on it,
+        # because `would_start` is still the whole answer.
+        out["will_take_room"] = gate.take_required
         return out
     # THE SENTENCE THE START ITSELF WOULD GIVE, not a preflight rewording of
     # it — it comes back from the one gate chain, so there is nothing here
@@ -929,14 +1099,28 @@ async def would_start() -> dict:
     return out
 
 
+def self_take_brief() -> dict:
+    """WHETHER THE SELF-TAKING NIGHT IS ARMED ON THIS DEPLOY, published so a
+    `not_owned` decline is legible without anyone reading an env var over
+    his shoulder: unarmed, that decline is the DESIGNED outcome; armed, it
+    means the room was held by something other than nobody."""
+    return {"armed": night_take.armed(), "holding": night_take.holding()}
+
+
 # ── starting ───────────────────────────────────────────────────────────────
 
 def _decline(trigger: dict, refusal: str, detail: str,
-             price: Optional[dict] = None) -> NightRun:
+             price: Optional[dict] = None,
+             take: Optional[dict] = None) -> NightRun:
     run = NightRun(id=uuid.uuid4().hex[:12], state=STATE_DECLINED,
                    trigger=dict(trigger), started=time.time(),
                    ended=time.time(), detail=detail, refusal=refusal,
-                   price=dict(price or {}), planned_end=planned_end_at())
+                   price=dict(price or {}), planned_end=planned_end_at(),
+                   # A TAKE THAT REFUSED IS ON THE RECORD TOO — a night that
+                   # tried to take the room and could not is a different
+                   # fact from one that never tried, and at breakfast it is
+                   # the more interesting of the two.
+                   take=dict(take or {}))
     save_night(run)
     logger.warning("night run: DECLINED (%s) — %s", refusal, detail)
     return run
@@ -963,14 +1147,56 @@ async def start(trigger: dict) -> NightRun:
     declaration, items = gate.declaration, gate.items
     price, target, resolved = gate.price, gate.target, gate.resolved
 
+    # THE QUIET TAKE, and it is the LAST thing before the run — every gate
+    # above has already passed, including the instrument gate, so a room is
+    # never taken for a night that could not have run anyway.
+    #
+    # A TAKE THAT REFUSES IS A DECLINED NIGHT, not a half-held room:
+    # `take_room` never raises and `run_handover` lands single-owner on
+    # every failure path, so the worst case here is exactly the status quo
+    # — the room released, nothing lit, the night on the record with a
+    # sentence. `spectra/services/night_take.py` is the binding statement.
+    #
+    # THE RUN ID IS MINTED FIRST AND USED FOR BOTH — the pre-take snapshot
+    # names the night it took the room for, and the cold start's own
+    # recovery looks the night up BY THAT ID. Two ids here would leave a
+    # crashed night's record stuck at "running" forever with a snapshot
+    # pointing at a night nobody recorded.
+    run_id = uuid.uuid4().hex[:12]
+    take = night_take.TakeResult()
+    if gate.take_required:
+        stop_mark = _stop_mark
+        take = await night_take.take_room(run_id)
+        if not take.took:
+            return _decline(trigger, take.refusal, take.detail,
+                            price=gate.price, take=take.as_dict())
+        if _stop_mark > stop_mark:
+            # HE GOT UP WHILE WE WERE TAKING IT. The stop arrived with no
+            # night to stop and `capture_queue.stop()` had nothing to say
+            # no to, so this is the only place it can be honoured — and it
+            # must be, because a touched house is his house and the room is
+            # now held. Straight back, and recorded as the stopped night it
+            # is rather than as a night that never happened.
+            back = await night_take.give_back(why=night_take.WHY_ABORTED,
+                                              run_id=run_id)
+            detail = mapping_refusals.night_stopped_during_the_take(
+                _stop_source)
+            logger.warning("night run: STOPPED DURING THE TAKE — the room "
+                           "went straight back")
+            return _decline(trigger, "stopped_during_take", detail,
+                            price=gate.price,
+                            take=night_take.merge_announcement(
+                                take.as_dict(), back.as_dict()))
+
     entries = await _device_listing()
-    run = NightRun(id=uuid.uuid4().hex[:12], state=STATE_RUNNING,
+    run = NightRun(id=run_id, state=STATE_RUNNING,
                    trigger=dict(trigger), started=time.time(),
                    label=str(declaration.get("label") or ""),
                    fixtures=run_fixture_rows(items, entries),
                    price=price, planned_end=price["planned_end"],
                    calibration=(night_calibration.record(target, resolved)
-                                if resolved is not None else {}))
+                                if resolved is not None else {}),
+                   take=take.as_dict() if take.took else {})
     current = run
     save_night(run)
     logger.warning("night run %s: starting %d declared item(s) over %d "
@@ -1108,20 +1334,105 @@ def _queue_persist(run: NightRun):
     return persist
 
 
+@dataclass
+class Instruments:
+    """The live handles the honest exit needs, captured BEFORE the room is
+    given back.
+
+    Releasing tears the live stack down (`release.py`: `live.host` goes to
+    None, every driver is deactivated), so a self-taken night that released
+    first and read the fixtures afterwards would report UNKNOWN for every
+    one of them — an exit report that says nothing, on exactly the night
+    nobody was awake for. The DRIVER OBJECTS themselves keep working after a
+    teardown: a WLED read is plain HTTP to the fixture and a Hue read is
+    plain REST to the bridge, neither of which cares whether a render thread
+    is running. So the handles are taken while the stack is up and the reads
+    happen after the give-back — which also makes the report answer a
+    strictly better question than it used to: not "was the room dark while
+    we held it" but "is it dark now that we have let go"."""
+    entries: list = field(default_factory=list)
+    devices_by_id: dict = field(default_factory=dict)
+    host: Any = None
+
+
+async def capture_instruments(run: NightRun) -> "Instruments":
+    """Take the live handles now, for a read that happens later. Never
+    raises: an exit report with nothing to read is still better than a night
+    that failed to hand the room back because a device listing timed out."""
+    try:
+        entries = await _device_listing()
+    except Exception:                                   # noqa: BLE001
+        logger.exception("night run %s: could not list devices before the "
+                         "give-back", run.id)
+        entries = []
+    try:
+        devices = {str(getattr(d, "id", "") or ""): d
+                   for d in await _live_devices()}
+    except Exception:                                   # noqa: BLE001
+        logger.exception("night run %s: could not read the live devices "
+                         "before the give-back", run.id)
+        devices = {}
+    from spectra.services.live_host import live
+    return Instruments(entries=entries, devices_by_id=devices,
+                       host=getattr(live, "host", None))
+
+
+async def give_room_back(run: NightRun, why: str) -> dict:
+    """GIVE THE ROOM BACK IF THIS NIGHT TOOK IT — the one call every exit
+    path makes, idempotent, gated on `night_take`'s own durable snapshot and
+    never on this record.
+
+    IT COSTS A NIGHT THAT TOOK NOTHING EXACTLY NOTHING — the holding check
+    is a file stat, and every step after it (including capturing the
+    instruments, which is a real device read) happens only on the far side
+    of it. A night on a room SPECTRA already held is byte-identical to
+    before this seam existed, right down to `build_exit` reading the live
+    stack itself.
+
+    On the far side it captures the instruments first (see `Instruments`
+    for why) and lands the give-back on the record, so the announcement is
+    durable before anything else about the exit is written."""
+    if not night_take.holding():
+        return {}
+    if run.instruments is None:
+        run.instruments = await capture_instruments(run)
+    result = await night_take.give_back(why=why, run_id=run.id)
+    if result.given_back or result.announce:
+        # ONE MERGE, and it is `night_take`'s — see `merge_announcement` for
+        # why folding a give-back in naively drops the take's own end of the
+        # announcement.
+        run.take = night_take.merge_announcement(run.take, result.as_dict())
+    return result.as_dict()
+
+
 async def _finish(run: NightRun) -> None:
     """Close the night out: hand the room back, read every fixture BACK AT
     THE LIGHT, and write the record. Runs on the normal path and the abort
     path alike — an exit report only produced when things went well would be
-    exactly the report nobody needs."""
+    exactly the report nobody needs.
+
+    THE ORDER IS THE SEMANTICS, and it is the same order `abort` keeps: the
+    hold is closed, the instruments are captured, THE ROOM IS GIVEN BACK,
+    the terminal state is stamped and SAVED (River's own re-dark trigger
+    rides that state, so it must land before the paperwork), the give-back
+    is announced, and only then are the fixtures read back at the light. The
+    room is his again before he is told it is."""
     from spectra.services import flare_preview_hold
     try:
         await flare_preview_hold.close_hold()
     except Exception:                                   # noqa: BLE001
         logger.exception("night run %s: the final hold close failed", run.id)
+    # THE ROOM FIRST. A no-op — and a free one — on every night that did
+    # not take it.
+    await give_room_back(run, night_take.WHY_FINISHED)
     if run.state == STATE_RUNNING:
         run.state = STATE_COMPLETE
         run.detail = run.detail or "The night's declared queue finished."
     run.ended = run.ended or time.time()
+    # STAMPED AND SAVED BEFORE THE EXIT REPORT, which takes a real network
+    # read of every fixture: the house restores its own envelope off this
+    # state, and it must not queue behind our paperwork.
+    save_night(run)
     try:
         report = (await build_exit(run)).as_dict()
         report["witness"] = witness_summary(run)
@@ -1182,17 +1493,99 @@ def witness_summary(run: NightRun) -> dict:
 async def build_exit(run: NightRun):
     """THE HONEST EXIT for this night — `night_exit.build` wired to the live
     room. Kept as its own function so a test can drive it against a headless
-    pipeline without starting a night."""
+    pipeline without starting a night.
+
+    It reads through `run.instruments` when the exit captured them — a
+    self-taken night has already given the room back by this point and the
+    live stack is down, so the handles taken before the release are the only
+    thing left that can ask a fixture what it is emitting. Falls back to the
+    live stack, which is exactly what every night did before this."""
     from spectra.services import night_exit
     from spectra.services.live_host import live
-    entries = await _device_listing()
-    devices = {str(getattr(d, "id", "") or ""): d
-               for d in await _live_devices()}
+    inst = run.instruments
+    if inst is None:
+        inst = await capture_instruments(run)
+    entries = inst.entries or await _device_listing()
     return await night_exit.build(
-        device_entries=entries, devices_by_id=devices,
+        device_entries=entries, devices_by_id=inst.devices_by_id,
         run_device_ids={str(f.get("id")) for f in run.fixtures},
         shielded_devices=shielded_devices(entries),
-        host=getattr(live, "host", None))
+        host=inst.host if inst.host is not None else getattr(live, "host", None))
+
+
+# ── the crash ──────────────────────────────────────────────────────────────
+
+def stamp_crashed_night(run_id: str, detail: str, give_back=None) -> dict:
+    """RE-POST A TERMINAL STATE FOR A NIGHT NOBODY CLOSED — the paperwork
+    half of `night_take.recover_orphaned_take`, kept here because this
+    module owns the record's shape and its store.
+
+    THE STORED STATE IS `failed`, NOT A NEW WORD. River's side branches on
+    `active`, one boolean derived from `ENDED_STATES`, and `failed` is
+    already in it — so a crashed night reads as over the instant this lands
+    and her re-dark fires normally. WHAT it was is carried by `refusal`
+    ("crashed") and by the sentence, which is exactly the split the seam's
+    addendum 10 uses for every other decline: branch on the boolean, treat
+    the machine word as a label for the log. Inventing a state word for a
+    frozen contract is how a seam breaks quietly.
+
+    IT ONLY EVER STAMPS A RECORD STILL READING `running`. A night that was
+    ended properly and then crashed something else has already said what it
+    was; overwriting that with "crashed" would replace a true ending with a
+    guess."""
+    nights = load_nights()
+    target = None
+    for row in reversed(nights):
+        if run_id and row.get("run_id") == run_id:
+            target = row
+            break
+    if target is None:
+        # The snapshot names a run this store has never heard of, or names
+        # nothing at all — a crash between the snapshot write and the
+        # night's own first save. There is no record to stamp and inventing
+        # one would be inventing a night; the room has still been given
+        # back, which was the load-bearing half.
+        logger.warning("night run: no stored record for orphaned night %r — "
+                       "nothing to stamp (the room has been given back)",
+                       run_id)
+        return {}
+    if target.get("state") != STATE_RUNNING:
+        logger.warning("night run: orphaned night %s already reads %r — "
+                       "left alone", run_id, target.get("state"))
+        return dict(target)
+    take = dict(target.get("take") or {})
+    if give_back is not None:
+        result = give_back.as_dict() if hasattr(give_back, "as_dict") \
+            else dict(give_back)
+        take = night_take.merge_announcement(take, result)
+    target["state"] = STATE_FAILED
+    target["refusal"] = "crashed"
+    target["detail"] = detail
+    target["ended"] = time.time()
+    target["take"] = take
+    kept = [n for n in nights if n.get("run_id") != run_id] + [target]
+    _atomic_write(_runs_path(), {"nights": kept[-MAX_STORED_NIGHTS:]})
+    _disk_cache.update({"key": None, "night": None})
+    logger.critical("night run %s: stamped FAILED (crashed) and re-posted — "
+                    "%s", run_id, detail)
+    return dict(target)
+
+
+async def recover_orphaned_night() -> dict:
+    """THE COLD-START ENTRY POINT, called from `spectra/app.py`'s lifespan
+    BEFORE `handover.resume_own_room()`.
+
+    THE ORDER IS LOAD-BEARING AND IT IS THE WHOLE POINT. A crash mid
+    self-taken night leaves the ownership record saying SPECTRA owns; the
+    resume would then re-activate the stack and resume his show, which is
+    his house coming on at 2am — the exact failure the quiet take exists to
+    avoid, arriving through a door the take itself never opens. Recovery
+    releases the room first, so the resume sees a released room and takes
+    its own unchanged early return.
+
+    A no-op with nothing on disk, which is every ordinary start."""
+    result = await night_take.recover_orphaned_take()
+    return result.as_dict()
 
 
 # ── aborting ───────────────────────────────────────────────────────────────
@@ -1249,7 +1642,13 @@ async def abort(trigger: dict, *, grace_s: float = ABORT_GRACE_S,
     from spectra.services import capture_runs as runs_mod
     from spectra.services import flare_preview_hold, mapping_session
 
+    global _stop_mark, _stop_source
     source = str(trigger.get("event") or trigger.get("source") or "")
+    # MARKED FIRST AND UNCONDITIONALLY, before anything else this function
+    # does — including the cases where there is no night to stop. See
+    # `_stop_mark`: a take in flight is the one window where a stop has
+    # nothing to act on yet, and `start()` reads this to close it.
+    _stop_mark, _stop_source = time.monotonic(), source
     by_morning = source == mapping_refusals.MORNING_ROUTINE
     detail = (mapping_refusals.night_ended_by_morning() if by_morning
               else mapping_refusals.night_aborted(source))
@@ -1272,6 +1671,20 @@ async def abort(trigger: dict, *, grace_s: float = ABORT_GRACE_S,
     reverted = await flare_preview_hold.close_hold()
 
     run = current
+    # THE ROOM, THEN THE PAPERWORK — and in a self-taken night the room is
+    # not his again until it is RELEASED, not merely until the hold reverts.
+    # So the give-back goes here, between the stop and the stamp, and it
+    # runs before the state that wakes River's own re-dark.
+    #
+    # It is a no-op on every night that did not take the room (gated on
+    # `night_take`'s snapshot), and idempotent against the run task's own
+    # `_finish`, which reaches the same call moments later.
+    give_back: dict = {}
+    if run is not None:
+        give_back = await give_room_back(
+            run, night_take.WHY_MORNING if by_morning
+            else night_take.WHY_ABORTED)
+
     if run is not None and run.state == STATE_RUNNING:
         run.state = end_state
         run.detail = detail
@@ -1279,10 +1692,17 @@ async def abort(trigger: dict, *, grace_s: float = ABORT_GRACE_S,
         run.abort = {"trigger": dict(trigger), "told_run": told_run,
                      "stopped_queue": stopped_queue,
                      "run_landed_itself": landed,
-                     "hold_reverted_here": bool(reverted.get("reverted"))}
+                     "hold_reverted_here": bool(reverted.get("reverted")),
+                     "gave_room_back": bool(give_back.get("given_back"))}
         save_night(run)
 
     return {"aborted": was_running, "state": end_state,
+            # WHETHER THE ROOM WENT BACK, IN THE REPLY. The house restores
+            # its own envelope off this response rather than waiting for its
+            # next poll, and on a self-taken night "is it mine again" is the
+            # question that reply has to answer.
+            "gave_room_back": bool(give_back.get("given_back")),
+            "room_owner": give_back.get("given_back_to", ""),
             "ended_by_morning": by_morning, "detail": detail,
             "run_id": run.id if run is not None else None,
             "told_run": told_run, "stopped_queue": stopped_queue,

@@ -1258,6 +1258,171 @@ def night_aborted(source: str) -> str:
             f"everything measured up to that point is kept.")
 
 
+# ── THE SELF-TAKING NIGHT ──────────────────────────────────────────────────
+#
+# The Admiral's overrule of the no-room-take boundary: sleep-triggered work
+# must not require his room left in a special state. Everything below is
+# behind `SPECTRA_NIGHT_SELF_TAKE` and unreachable in an unarmed deploy —
+# where `night_not_owned` above is still the whole story, word for word.
+# `spectra/services/night_take.py` is the binding statement.
+
+
+def night_no_instrument(view: dict) -> str:
+    """A ROOM MUST NEVER BE TAKEN FOR A NIGHT THAT CANNOT MEASURE — the seam's
+    addendum 10, item 1, and it is a gate on every night rather than only a
+    self-taking one: a night with no camera holds his room dark until his
+    morning and refuses every item it was declared to run.
+
+    IT CARRIES THE SESSION'S OWN SENTENCE rather than describing the camera
+    a second time. `capture_runs.session_view()` already resolves which of
+    the several things is wrong — nothing connected, connected but not
+    locked, connected and saying it cannot work, or a browser that may aim
+    but may not measure — through `mapping_refusals` and `capture_source`'s
+    own functions. Composing a rival description here is how two surfaces
+    start telling him different stories about one camera."""
+    own = (view.get("calibration_refusal") or view.get("unable")
+           or view.get("refusal") or "")
+    if not own:
+        if not view.get("present"):
+            own = NO_SESSION
+        elif not view.get("locked"):
+            own = ("the camera is connected but not held to a known "
+                   "exposure, so nothing it measures is comparable")
+        else:
+            own = "the camera cannot be used for a measurement right now"
+    return (f"The night run declined: nothing can measure tonight — {own} "
+            f"Nothing was measured, nothing was turned on, and the room was "
+            f"neither taken nor touched. Bring the capture client up and the "
+            f"next sleep window will run the declared queue.")
+
+
+def night_take_not_released(owner: str) -> str:
+    """The take is only ever attempted on a RELEASED room, and this is the
+    sentence for the window between the preflight and the start closing on
+    it — he took the room back himself, or something else moved the record.
+    Displacing a live writer while he sleeps is not what he asked for."""
+    return (f"The night run declined: the room stopped being free between "
+            f"the preflight and the start — it now reads {owner!r}, and this "
+            f"seam only ever takes a released room. Nothing was taken and "
+            f"nothing about the room was touched.")
+
+
+def night_stopped_during_the_take(source: str = "") -> str:
+    """HE GOT UP WHILE WE WERE TAKING IT. The stop arrived after the gates
+    passed and before there was a night to stop, in the seconds the
+    handover itself takes — a window that only exists because the night now
+    takes the room. A touched house is his house, so the room goes straight
+    back and the night never starts.
+
+    It NAMES which stop it was, on `night_aborted`'s own reasoning: his
+    morning routine arriving is an ordinary ending and says nothing about
+    the run, where a touched light says he needed the room. Calling both a
+    touched house would be a small lie in the one record he reads at
+    breakfast."""
+    why = {
+        MORNING_ROUTINE: "his morning routine ran",
+        "sleep-ended": "the sleep window ended",
+        "light-touched": "a light was touched in the house",
+    }.get(source, f"Home Assistant said stop ({source or 'no reason given'})")
+    return (f"The night run stopped before it started: {why} while SPECTRA "
+            f"was still taking the room, so the room went straight back and "
+            f"nothing was measured. It is released again — the state it was "
+            f"found in.")
+
+
+def night_take_failed(exc: BaseException) -> str:
+    """The quiet take itself did not land. `handover.run_handover` lands
+    single-owner on every failure path, so the room is back at `released`
+    already — which is exactly the state he left it in, and exactly the
+    status quo of a night that simply did not run."""
+    return (f"The night run declined: SPECTRA could not take the room "
+            f"({type(exc).__name__}: {exc}). The take is all-or-nothing, so "
+            f"the room is exactly as it was — released, with nothing "
+            f"holding it and nothing lit by this attempt.")
+
+
+def night_took_the_room(*, partial: bool = False) -> str:
+    """THE TAKE, ANNOUNCED — half of the Admiral's Order 22 read for a
+    sleeping house (River's refinement 1): he is told when the room is taken
+    AND when it is given back, both, and neither may wake him. So this is a
+    durable record and a status field, never a sound and never a push."""
+    line = ("SPECTRA took the room for tonight's declared run. It came up "
+            "DARK — every fixture held black from its first frame, the show "
+            "left switched off — and it goes back to released the moment "
+            "the night ends, however it ends.")
+    if partial:
+        line += (" Some lights could not be brought up and are named in the "
+                 "activation report; every other one is held.")
+    return line
+
+
+def night_gave_back_the_room(why: str, *, verified: bool,
+                             problems: list) -> str:
+    """THE OTHER HALF OF ORDER 22, and it is written for a person reading it
+    at breakfast rather than for a log."""
+    because = {
+        "finished": "the declared queue finished",
+        "aborted": "the night was stopped",
+        "morning-routine": "his morning routine ended it",
+        "crash-recovery": ("SPECTRA restarted while it was still holding "
+                           "the room"),
+    }.get(why, why)
+    line = (f"SPECTRA gave the room back because {because}. It is released "
+            f"again — the state it was found in — so nothing here is "
+            f"writing to it.")
+    if not verified:
+        line += (" THE GIVE-BACK COULD NOT BE CONFIRMED: "
+                 + "; ".join(str(p) for p in problems or []) +
+                 ". The record says released regardless, but something may "
+                 "still be lit — check it.")
+    return line
+
+
+def night_gave_back_already(owner: str) -> str:
+    """Nothing of ours is holding his room any more. Said plainly rather
+    than releasing over the top of whatever has it now."""
+    return (f"The room did not need giving back: the ownership record "
+            f"already reads {owner!r}, so nothing this night took is still "
+            f"holding it. Nothing was released and nothing was touched.")
+
+
+def _duration(seconds: float) -> str:
+    """A plain span, where `_ago` below is a span with a direction. Both are
+    small on purpose: a sentence a person reads at breakfast should not carry
+    a float."""
+    seconds = max(0.0, float(seconds))
+    if seconds < 90:
+        return f"{seconds:.0f} seconds"
+    if seconds < 5400:
+        return f"{seconds / 60:.0f} minutes"
+    return f"{seconds / 3600:.1f} hours"
+
+
+NIGHT_NOTHING_TO_GIVE_BACK = (
+    "This night never took the room, so there is nothing to give back — "
+    "SPECTRA already held the lights when the start arrived and whose they "
+    "are afterwards is not this seam's to change.")
+
+
+def night_crashed_mid_run(run_id: str, held_for_s: float) -> str:
+    """FAILED BY CRASH — the named item DJ addendum 11 owed River.
+
+    A crash skips every state transition, so the disk record sits at
+    `running` forever, no terminal state is re-posted for the house's own
+    re-dark to catch, and (since the self-taking build) the ownership record
+    still says SPECTRA holds a room nobody asked it to. The cold start finds
+    it, says this, gives the room back and re-posts — and the recorded STATE
+    stays `failed`, an ending the house's `active` boolean already covers,
+    because inventing a new state word for a frozen contract is how a seam
+    breaks quietly."""
+    return (f"The night run stopped because SPECTRA restarted while it was "
+            f"still running — a crash, a kill or a deploy; from here they "
+            f"look the same. Night {run_id or '?'} had been holding the room "
+            f"for {_duration(held_for_s)} and the room has been given "
+            f"straight back. Anything it measured before the "
+            f"restart is kept in its own store.")
+
+
 def amendment_landed_unapplied(names: list, measured: int, why: str) -> str:
     """A PARTIAL AMENDMENT LANDS UNAPPLIED — the Admiral's ruling, and the
     one sentence that has to be right at breakfast.
