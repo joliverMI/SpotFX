@@ -396,12 +396,26 @@ class Scope:
     LIGHT it drives is his room, and a run must not drive fixtures it was not
     asked to touch.
 
-    TWO KINDS OF FIELD, and both matter for the same reason.
-    `granularity`/`block_pixels` decide the SHAPE the plan is enumerated at,
-    and an emitter's id comes from the granularity that produced it
-    (`emitters.py`) — so a block-granularity run's emitter id simply does not
-    exist in a whole-granularity plan, and scoping without the shape could
-    only ever fail to resolve.
+    TWO KINDS OF FIELD. `emitter_ids`/`carrier_ids` are WHAT is in scope;
+    `granularity`/`block_pixels` are the SHAPE the run will enumerate at,
+    carried verbatim from the run so this record says what the run chose.
+
+    THE SHAPE FOLLOWS THE RUN ONLY WHEN THE SCOPE NAMES EMITTER IDS
+    (`plan_granularity`/`plan_block_pixels`, the ONE place that decides).
+    An emitter's id comes from the granularity that produced it
+    (`emitters.py`), so a block-scoped id simply does not exist in a
+    whole-granularity plan, and an emitter-scoped self-test has to enumerate
+    at the run's own shape or it could never resolve. Nothing else needs the
+    shape, and following it anywhere else is a defect: a CARRIER-ONLY scope
+    at whole granularity is exactly one emitter per carrier — that emitter IS
+    in scope, `within` still narrows to it, and it puts strictly MORE light in
+    frame than any one of its blocks; an UNSCOPED run at whole granularity
+    takes `plan.emitters[0]`, byte-identical to before this class existed.
+    The alternative, found on his own Living Room, is an ordinary map at the
+    room's default granularity ("auto", which is BLOCK on a single-segment
+    strip such as his TV wrap) earning its verdict on one 30-px block at the
+    far end of the wrap: out of shot while the strip as a whole is not, a
+    NO-SIGNAL verdict that is then cached and refuses every later item.
 
     `within` IS THE WHOLE FAIL-CLOSED GUARANTEE, and it is structural rather
     than a check somebody remembered to write: it returns the plan's own list
@@ -433,6 +447,18 @@ class Scope:
     def scoped(self) -> bool:
         return bool(self.emitter_ids or self.carrier_ids)
 
+    @property
+    def plan_granularity(self) -> str:
+        """The granularity the self-test enumerates its plan at: the run's
+        own when the scope names emitter ids (the only case an id's shape is
+        load-bearing), whole otherwise."""
+        return self.granularity if self.emitter_ids else "whole"
+
+    @property
+    def plan_block_pixels(self) -> int:
+        return (self.block_pixels if self.emitter_ids
+                else emitters_mod.DEFAULT_BLOCK_PIXELS)
+
     def within(self, plan_emitters: list) -> list:
         """The emitters of `plan_emitters` this self-test may drive, in the
         PLAN'S OWN ORDER — so "the first one" is deterministic and is always
@@ -458,10 +484,13 @@ async def run_selftest(room: RoomMap, deps: "room_mapping.RunDeps", *,
     """Drive one emitter three times and say whether this camera's exposure
     lever reaches its sensor.
 
-    `scope` is the RUN'S OWN SCOPE (`Scope`), and it decides both the shape
-    the plan is enumerated at and which of its emitters this test may drive.
-    Omitted — the default — is the whole room at whole granularity, which is
-    what every run that scopes nothing has always got.
+    `scope` is the RUN'S OWN SCOPE (`Scope`), and it decides which of the
+    plan's emitters this test may drive — and, ONLY when it names emitter
+    ids, the shape the plan is enumerated at (`Scope.plan_granularity`, the
+    one definition). A carrier-only scope and an unscoped run both enumerate
+    at whole granularity, whatever shape the run itself maps at: the whole
+    room at whole granularity is what every run that scopes nothing has
+    always got, and a carrier-only scope drives the whole carrier.
 
     Everything it touches, it puts back: a throwaway room (nothing stored),
     the previous camera request (restored in a `finally`), the hold (closed
@@ -499,8 +528,8 @@ async def run_selftest(room: RoomMap, deps: "room_mapping.RunDeps", *,
     try:
         live = await room_mapping.live_virtual_ids(deps.get_virtuals)
         plan = await room_mapping.resolve_plan(room, deps, live,
-                                               scope.granularity,
-                                               scope.block_pixels)
+                                               scope.plan_granularity,
+                                               scope.plan_block_pixels)
     except Exception as exc:                           # noqa: BLE001
         named = mapping_refusals.ownership_refusal(exc)
         if named is None:
@@ -521,7 +550,7 @@ async def run_selftest(room: RoomMap, deps: "room_mapping.RunDeps", *,
             mapping_refusals.lever_scope_unresolved(
                 list(scope.emitter_ids or scope.carrier_ids),
                 [e.emitter_id for e in plan.emitters],
-                scope.granularity, scope.block_pixels)
+                scope.plan_granularity, scope.plan_block_pixels)
             if scope.scoped else
             "nothing to light for the self-test — no carrier of "
             "this room is rendering right now")

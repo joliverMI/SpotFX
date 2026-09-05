@@ -510,10 +510,26 @@ def test_a_scoped_run_drives_the_FIRST_scoped_emitter_in_plan_order():
 
 
 def test_a_carrier_scoped_run_stays_inside_that_carrier():
+    """A CARRIER-ONLY scope needs no shape: at whole granularity each carrier
+    is exactly one emitter, that emitter IS in scope, and it puts more light
+    in frame than any one of its blocks. So the run's own block granularity
+    is deliberately NOT followed here — the whole carrier is driven."""
     _sess, verdict = _scoped(_Camera(honest), carrier_ids=["strip"],
                              granularity="block", block_pixels=5)
     assert verdict.proven, verdict.reason
-    assert verdict.emitter_id in BLOCKS
+    assert verdict.emitter_id == "strip", "the whole carrier, not a block"
+    assert verdict.emitter_id not in BLOCKS
+
+
+def test_a_carrier_scoped_run_still_narrows_to_that_carrier():
+    """...and it is still a NARROWING: a carrier the room does not hold
+    resolves nothing and fails closed, never the room's first carrier."""
+    sess, verdict = _scoped(_Camera(honest), carrier_ids=["other-strip"],
+                            granularity="block", block_pixels=5)
+    assert verdict.verdict == mapping_refusals.LEVER_UNPROVEN
+    assert verdict.emitter_id == ""
+    assert "other-strip" in verdict.reason
+    assert sess.camera_configs == []
 
 
 def test_an_unresolvable_scope_FAILS_CLOSED_and_never_widens():
@@ -562,8 +578,12 @@ def test_an_unscoped_run_is_byte_identical_to_before_the_scope_existed():
     _s3, explicit_none = _scoped(_Camera(honest), emitter_ids=None,
                                  carrier_ids=None, granularity=None,
                                  block_pixels=None)
+    # AND AN UNSCOPED RUN THAT MAPS AT BLOCK GRANULARITY: the shape it will
+    # map at is not a scope, so the self-test still drives the whole carrier.
+    _s4, unscoped_blocks = _scoped(_Camera(honest), granularity="block",
+                                   block_pixels=5)
     assert plain.emitter_id == "strip", "the whole carrier, as always"
-    for other in (empty_scope, explicit_none):
+    for other in (empty_scope, explicit_none, unscoped_blocks):
         assert other.emitter_id == plain.emitter_id
         assert other.verdict == plain.verdict
         assert [r.exposure_time for r in other.readings] == \
@@ -579,6 +599,27 @@ def test_an_empty_scope_is_exactly_the_default_scope():
     assert not lever_selftest.Scope().scoped
     assert lever_selftest.Scope.of(emitter_ids=[], carrier_ids=None) == \
         lever_selftest.Scope()
+
+
+def test_the_plan_shape_follows_the_run_only_when_emitter_ids_are_named():
+    """THE SHAPE IS LOAD-BEARING ONLY FOR SUB-CARRIER IDS. An emitter's id
+    comes from the granularity that produced it, so a block-scoped run must
+    enumerate at block granularity or its ids cannot resolve. Nothing else
+    needs the shape, and every other scope enumerates at whole — where each
+    carrier is one emitter and puts the most light in frame."""
+    scoped = lever_selftest.Scope.of(emitter_ids=[BLOCKS[0]],
+                                     granularity="block", block_pixels=5)
+    assert (scoped.plan_granularity, scoped.plan_block_pixels) == ("block", 5)
+    for shapeless in (
+            lever_selftest.Scope.of(granularity="block", block_pixels=5),
+            lever_selftest.Scope.of(carrier_ids=["strip"],
+                                    granularity="block", block_pixels=5),
+            lever_selftest.Scope.of(granularity="segment")):
+        assert shapeless.plan_granularity == "whole"
+        assert shapeless.plan_block_pixels == \
+            lever_selftest.emitters_mod.DEFAULT_BLOCK_PIXELS
+        # The run's own choice is still carried, untouched, for the record.
+        assert shapeless.granularity != "whole"
 
 
 def test_within_hands_back_the_plans_own_list_when_nothing_is_scoped():
@@ -633,6 +674,45 @@ def test_run_map_unscoped_hands_over_the_default_scope(monkeypatch):
                                      remember=False))
     assert not seen["scope"].scoped
     assert seen["scope"].granularity == "whole"
+
+
+def test_an_unscoped_map_at_block_granularity_self_tests_the_WHOLE_carrier(
+        monkeypatch):
+    """THE CASE THE FIRST PROOF MISSED. An ordinary map — the Rooms button,
+    a night-queue item with no scope — runs at the room's own granularity,
+    which "auto" resolves to BLOCK for a single-segment strip such as his
+    TV wrap. Its self-test must still drive the whole carrier, exactly as
+    before the scope existed: one 30-px block at the far end of the wrap can
+    be out of shot while the strip as a whole is not, and a no-signal verdict
+    earned on that block would be cached and refuse every later item."""
+    sess = _Session(_Camera(honest))
+    room = _room()
+    _wire(monkeypatch, sess, room)
+    outcome = asyncio.run(capture_runs.run_map(
+        room.id, granularity="block", block_pixels=5, remember=False))
+    assert outcome.lever["proven"] is True, outcome.detail
+    assert outcome.lever["emitter_id"] == "strip", \
+        "the whole carrier, never its first block"
+    assert outcome.lever["emitter_id"] not in BLOCKS
+    # AND THE MAP ITSELF STILL RAN AT THE BLOCK GRANULARITY HE ASKED FOR.
+    assert outcome.status == capture_runs.STATUS_OK, outcome.detail
+    mapped = [e["emitter_id"] for e in outcome.result["emitters"]]
+    assert set(mapped) == set(BLOCKS), mapped
+
+
+def test_an_unscoped_map_at_auto_granularity_self_tests_the_whole_carrier(
+        monkeypatch):
+    """The same, through the room's remembered default rather than an
+    explicit choice: `auto` on this single-segment strip is `block`."""
+    sess = _Session(_Camera(honest))
+    room = _room()
+    room.granularity, room.block_pixels = "auto", 5
+    _wire(monkeypatch, sess, room)
+    outcome = asyncio.run(capture_runs.run_map(room.id, remember=False))
+    assert outcome.lever["emitter_id"] == "strip"
+    assert outcome.status == capture_runs.STATUS_OK, outcome.detail
+    assert set(e["emitter_id"] for e in outcome.result["emitters"]) == \
+        set(BLOCKS)
 
 
 def test_a_map_scoped_to_one_block_lights_only_that_block_end_to_end(monkeypatch):

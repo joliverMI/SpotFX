@@ -4095,9 +4095,21 @@ two checks both run and neither substitutes for the other. Six things:
   was scoped: on his Living Room that is one carrier (`tv-mapper`, a 560-px
   strip spanning the TV backlight AND both kitchen sconces as pixel ranges
   of one run), so a run scoped to the backlight's blocks earned its verdict
-  by lighting the kitchen. **The granularity is half the fix, not a detail**
-  — an emitter's id comes from the shape that produced it, so a block-scoped
-  id cannot resolve in a whole-granularity plan. `Scope.within` is the
+  by lighting the kitchen. **The granularity is half the fix, not a detail,
+  AND IT FOLLOWS THE RUN ONLY WHEN THE SCOPE NAMES EMITTER IDS**
+  (`Scope.plan_granularity`/`plan_block_pixels`, the one definition): an
+  emitter's id comes from the shape that produced it, so a block-scoped id
+  cannot resolve in a whole-granularity plan — but nothing else needs the
+  shape, and a carrier-only scope or an unscoped run enumerates at WHOLE
+  whatever the map itself runs at. The first cut followed the run's shape
+  unconditionally, and on his Living Room an ORDINARY map (the Rooms button,
+  a night-queue item with no scope) runs at "auto" = BLOCK on the
+  single-segment TV wrap, so its self-test would have driven one 30-px block
+  at the far end of the wrap instead of the whole 560-px carrier: out of
+  shot while the strip is not, a NO-SIGNAL verdict cached for the session
+  and every later item refused. A carrier-only scope at whole is exactly one
+  emitter per carrier, still in scope, still narrowed to, and more light in
+  frame than any of its blocks. `Scope.within` is the
   fail-closed guarantee and it is STRUCTURAL: it returns the plan's own list
   verbatim when nothing is scoped and a subset of it otherwise, so there is
   no `plan.emitters[0]` fallback left to widen to — a scoped run resolving
