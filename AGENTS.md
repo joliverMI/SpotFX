@@ -66,6 +66,24 @@ of the URL).
 Prefer adding a `HelpLink` next to a complex control over embedding
 instructional prose in the UI; short tooltips (`title=`) are fine.
 
+**A "?" click JUMPS and FLASHES, every time** (2026-09-04, PR
+fm/spectra-help-icon-jump-highlight). `spectra/web/src/help/helpTarget.ts`
+is the binding statement. Three things it exists to keep true, each of
+which was a measured defect: the scroll waits until the expanded subtree is
+actually in the laid-out DOM (a single rAF is not guaranteed to be after
+React commits the expansion — a cold `?topic=` load left the page at
+scrollY 0 with the target 6603px down); every "?" click carries a fresh
+NONCE (`hl=`) because a repeat click produces an identical URL, so
+`?topic=` alone can never re-fire the effect; and `.help-target-flash`
+(tokens.css, 1.8s self-fading, separate from `.help-highlight`'s
+search-match styling) is applied imperatively after a forced reflow so a
+re-click RESTARTS the animation instead of re-adding a class that is
+already there. **`HelpLink` binds a NATIVE click listener and deliberately
+leaves it attached on unmount**: the second click of a double-click lands
+on an anchor React has already detached, React's delegated root listener
+never sees it, and the browser follows the `href` — a full page reload of
+the SPA. Any in-app link that navigates away on click has this shape.
+
 ## SPECTRA capability & decision spec (live — check here first)
 
 Before touching anything under `spectra/`, read `docs/SPECTRA_SPEC.md`. It is
