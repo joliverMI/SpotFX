@@ -4683,7 +4683,42 @@ gates, the give-back ordering, idempotence, the silence),
 `tests/test_quiet_take_dark.py` (the emitted-light proof through
 `fx.headless`, with the ordinary path as its own red-first control),
 `tests/test_night_take_crash_recovery.py` (the REAL lifespan, a control
-proving the resume would have re-lit the room, and a fresh interpreter).
+proving the resume would have re-lit the room, and a fresh interpreter),
+and — the COMPOSITION of all of them —
+`tests/test_selftake_dark_e2e.py` + `tests/selftake_dark_e2e_driver.py`.
+
+**THE COMPOSITION PROOF, and what its numbers are (2026-09-05, PR
+fm/spectra-selftake-dark-e2e-proof).** The two halves above each prove
+their own half with the other one faked; this one runs the WHOLE armed
+flow — `night_run.start` → the real `take_room` → the real `run_handover`
+→ a real `SpectraSide(quiet=True)` over a real `fx.headless` host — and
+records every frame that reaches a device transport. MEASURED, quiet:
+232 frames, 21 non-black, ALL of them the run's own capture lamp on the
+one emitter it named; zero in the take, the dark step, the show being
+driven, the give-back and after it; owner back to `released`, snapshot
+dropped, zero frames once it let go. The ORDINARY path through the same
+driver: 154 non-black, first lit in the TAKE. Three things it settles
+that neither half did — the engine's executor is still the
+RecordingExecutor DURING the queue (a write pushed through
+`engine.conductor.executor` reaches nothing), the run's own hold reverts
+to the snapshot it took and under a quiet take that snapshot is BLACK,
+and a restart on a RELEASED room drives ZERO frames while the same
+restart on an OWNED room drives 102. Read the test's own docstring for
+the four named substitutions (no camera, so the queue item is
+representative; `engine.start()`'s bridge WS is not opened; dummies, not
+his fixtures; pricing).
+
+**A PHASE LABEL IS NOT A CLOCK — bound a drain by measurement.** Building
+it, one lamp frame landed on the far side of a phase label that was
+flipped before the revert was awaited, and read as a stray light in his
+room. A render pipeline has latency: a frame already assembled reaches a
+transport after the write that supersedes it returns, so asserting the
+room is black the instant a write is ISSUED asserts something physically
+false. The fix is not a looser assertion — it is `REVERT_DRAIN_S` plus
+`lit_after_revert_ms`/`lit_after_drain`, which say how far past the
+revert the last lit frame actually landed. Any future instrument
+labelling frames by phase around an in-flight write needs the same
+treatment, or it will report a race as a defect.
 
 ### The contamination witness, and THE SCONCE MAINS RULE
 
