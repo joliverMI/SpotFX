@@ -1167,10 +1167,20 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         id: 'timing-lock-history',
         title: 'Lock history',
-        keywords: 'last 10 songs grade time to lock offset delta search recent plays',
+        keywords: 'last 10 songs grade time to lock offset delta search recent plays first play repeat 1st',
         body: [
           'The panel at the top of the Timing page lists the last 10 distinct songs\' lock outcomes: how long into the song the hard lock landed ("time to lock"), the final offset, how far it had to move from the previous baseline (Δ needed), the lock quality Q, and a letter grade. Click any row to load that song\'s full timing dump below; type in the search box to switch to a full-history search (every stored play matching title, artist, or uri).',
           'Grades: the base comes from the play\'s best Q (A ≥ 0.9, B ≥ 0.8, C ≥ 0.7, D ≥ 0.6, F below). A play that finished its windows without a hard lock drops one notch, and so does a hard lock that landed more than 30 s into the song (the song ran that long on the cold-start baseline).',
+          'First plays are graded separately: a "1st" chip marks a song\'s first-ever recorded play, and the summary line above the table splits the grade counts into repeats vs first plays. A first play starts cold — no offset history — so its grade says how hard the song was to lock from nothing, not how well the room is doing; an album of brand-new songs will grade low without anything being wrong.',
+        ],
+      },
+      {
+        id: 'timing-pipeline-drift',
+        title: 'Pipeline drift line & alarm',
+        keywords: 'drift alarm audio chain latency session offset moved snapclient common shift',
+        body: [
+          'The drift line above the lock table watches for the whole audio pipeline moving — an audio-chain latency change (a snapclient fault, an audio-routing shuffle) shifts EVERY song\'s timing by a similar amount, and the per-song offsets quietly re-learn it one play at a time, so nothing else makes it visible. It takes each repeat play\'s winning offset, subtracts that same song\'s own older baseline (its plays from 1.5–21 days before), and shows the median over the current listening session: per-song quirks cancel, and what survives is the common shift only a pipeline change produces. First plays have no baseline and never move this number.',
+          'It alarms when the session median passes ±1.5 s — deliberately before the ±3 s stale-offset error where the lock search starts failing outright, so there is real headroom to fix the audio chain while locks still land. The small trail on the right shows recent sessions oldest → newest: a steady climb means a drift (something ratcheting), a sudden jump means a step (something restarted or was reconfigured). A session needs at least 3 repeat plays with baselines before it can drive the alarm.',
         ],
       },
       {
