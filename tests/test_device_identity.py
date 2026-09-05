@@ -476,3 +476,26 @@ def test_peer_discovery_asks_only_devices_that_have_a_destination(monkeypatch):
         [Sibling("a"), Sibling("b"), Sibling(None)]))
     assert found == ["10.0.0.7"]
     assert sorted(seen) == ["a", "b"]
+
+
+def test_activation_uses_the_cheap_rungs_only(monkeypatch):
+    """Activation contacts EVERY device. A whole network that is down must
+    not cost a full /24 sweep per device before the room comes up — mDNS is
+    one lookup, and the sweep belongs on the rate-limited 30 s recheck."""
+    import fx.devices as devices_module
+    monkeypatch.setattr(devices_module, "resolve_destination",
+                        _passthrough_resolver())
+    _patch_network(monkeypatch, {})
+    monkeypatch.setattr(wled_module.WLED, "get_config", _fake_get_config({}))
+    device = _device(hardware_id=LEFT_SCONCE_MAC)
+    asked: list[bool] = []
+    real = WLEDDevice.reconcile_address
+
+    async def record(self, peer_addresses=(), sweep=True):
+        asked.append(sweep)
+        return await real(self, peer_addresses=peer_addresses, sweep=sweep)
+
+    monkeypatch.setattr(WLEDDevice, "reconcile_address", record)
+    with pytest.raises(ValueError):
+        asyncio.run(device.async_initialize())
+    assert asked == [False], "activation must not sweep a /24 per device"

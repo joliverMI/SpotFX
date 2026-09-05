@@ -371,7 +371,13 @@ class WLEDDevice(NetworkedDevice):
             _LOGGER.info(
                 "WLED %s: %s at %s — looking for it by hardware id",
                 self.name, first, self._config.get("ip_address"))
-            location = await self.reconcile_address()
+            # CHEAP RUNGS ONLY HERE. Activation contacts every device, and a
+            # whole network that is down would otherwise cost a full /24
+            # sweep PER DEVICE before the room comes up at all. mDNS is one
+            # lookup; the sweep belongs on the 30 s recheck, where
+            # spectra/services/device_relocation.py rate-limits it and
+            # adopts the address BEFORE calling back into here.
+            location = await self.reconcile_address(sweep=False)
             if location is None or not location.moved:
                 raise first
             self.wled = WLED(self._destination)
