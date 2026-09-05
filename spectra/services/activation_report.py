@@ -346,6 +346,7 @@ async def recheck(probe_timeout_s: float = RECHECK_PROBE_TIMEOUT_S,
     `retry_init`) retry the driver's own initialization for a device that
     never resolved. Serialized (one recheck at a time). Returns the
     (possibly updated) report, or None when there is nothing to recheck."""
+    from spectra.services import device_relocation
     from spectra.services.live_host import live
     async with _recheck_lock:
         report = current()
@@ -359,10 +360,30 @@ async def recheck(probe_timeout_s: float = RECHECK_PROBE_TIMEOUT_S,
                 device = live.host.devices.get(device_id)
                 if device is None:
                     continue
+                # A RELOCATED DEVICE HAS A DESTINATION AND IS STILL DARK.
+                # A literal pinned IP "resolves" verbatim (fx/utils.py::
+                # resolve_destination never contacts anything), so a fixture
+                # that took a new DHCP lease keeps a destination that means
+                # nothing, is never re-inited by the rule below, and stays
+                # dark forever — the 2026-09-04 sconce, exactly. Ask its
+                # hardware identity where it actually is FIRST; a device
+                # with no stored identity, or one whose pin is still right,
+                # costs one json/info and changes nothing (spectra/services/
+                # device_relocation.py).
+                moved = False
+                try:
+                    location = await device_relocation.reconcile(
+                        device, host=live.host)
+                    moved = location is not None and location.moved
+                except Exception:
+                    logger.debug("activation report: %s relocation check "
+                                 "failed", device_id, exc_info=True)
                 # Only a driver with no destination needs a re-init; a
                 # resolved-but-silent device is already being sent frames
-                # and only needs to be asked again.
-                if getattr(device, "_destination", None) is None:
+                # and only needs to be asked again. A device that just MOVED
+                # needs one too — its sender was built against the old
+                # address.
+                if moved or getattr(device, "_destination", None) is None:
                     entry.retries += 1
                     await _retry_driver_init(device)
         confirmed = await live.probe_devices(dark_ids, probe_timeout_s)

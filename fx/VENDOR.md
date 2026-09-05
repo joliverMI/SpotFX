@@ -33,6 +33,11 @@ switched on (`settings.fx_in_process`, default off).
 - Support pulled by `utils.py`/`assets.py`: `libraries/cache.py`,
   `utilities/{gradient_extraction,image_utils,security_utils}.py`
 
+SpotFX-authored modules living in `fx/` (NOT fork code, no upstream to
+re-diff against): `headless.py`, `facade.py`, `host.py`, `light_ownership.py`,
+`audio_ingest.py`, `device_model.py`, `device_schema.py`, `device_timing.py`,
+`virtual_gain_mask.py`, `device_identity.py`.
+
 Dropped entirely (per report Option C): `core.py`, the aiohttp server and
 `ledfx/api/*`, the LedFX frontend, zeroconf/mDNS, integrations, sentry, tray
 icon, sendspin, nowplaying, presets library, playlists.
@@ -987,6 +992,55 @@ variables named `ledfx` (the core object handle) are untouched.
     ZERO non-black frames; the ORDINARY load of the same config emits 94 at
     full value, which is the control that proves the rig can see the defect
     at all. Verified RED against a build with the substitution removed.
+
+33. `devices/wled.py` + `device_identity.py` (NEW MODULE, SpotFX-authored):
+    A WLED IS FOUND BY WHAT IT IS, NOT BY WHERE IT WAS.
+
+    THE DEFECT, twice in one evening on 2026-09-04: every WLED is pinned by
+    `ip_address` and nothing else, so when his kitchen sconce took a new
+    DHCP lease the room could not tell a RELOCATED device from a DEAD one —
+    the probe reported it dark, the take-back reported "Failed to connect",
+    and both were true statements about an address that no longer meant
+    anything. `utils.py::resolve_destination` cannot catch it: handed a
+    literal IP it returns that IP verbatim, contacting nothing, so a stale
+    pin still "resolves" perfectly and fails one layer later.
+
+    `fx/device_identity.py` is the whole mechanism and the binding
+    statement — the identity is the MAC (reported on every `json/info`,
+    survives a lease/reboot/rename, and WLED's own default mDNS name is
+    DERIVED from it, so one identity rather than two that can disagree),
+    and the ladder is pinned -> mDNS -> a reachable sibling's `json/nodes`
+    -> a bounded /24 sweep, with EVERY rung confirmed by reading the MAC
+    back. A name that resolves is never trusted on its own: avahi caches,
+    and a cached answer pointing at the wrong host is exactly the
+    confident-wrong-answer this exists to end. It holds no sockets — I/O is
+    injected — so every path is proven against loopback HTTP.
+
+    `wled.py` gains: an optional `hardware_id` on `CONFIG_SCHEMA`;
+    `learn_identity()` (stamped off the `json/info` that
+    `async_initialize` already reads, the same way `name`/`pixel_count`/
+    `rgbw_led` already are — LAZY, nothing rewrites his config);
+    `reconcile_address()`/`adopt_address()` (the device config, the resolved
+    destination, the JSON client AND the streaming subdevice all move, or
+    frames keep going to the old address forever); and `_contact()`, which
+    retries `get_config` at the reconciled address.
+    `discover_peer_addresses()` and the two blocking probes (`read_info`,
+    `read_node_addresses`) are the transport, run in an executor because
+    `WLED._wled_request` is an `async def` calling `requests` directly and
+    would park the render loop for its whole timeout.
+
+    BACKWARD COMPATIBLE BY CONSTRUCTION: no `hardware_id` means no lookup,
+    and the original error is re-raised verbatim rather than replaced — a
+    genuinely-off fixture must not start reporting something different. A
+    device whose pin is still right is confirmed as `via="pinned"` and
+    changed in no way.
+
+    SPECTRA's half is `spectra/services/device_relocation.py` (persistence,
+    the sweep cooldown, and the recovery placement) and the seeder is
+    `scripts/seed_wled_hardware_ids.py`. Evidence:
+    `tests/test_device_identity.py`, `tests/test_device_relocation.py`,
+    `scripts/check_device_relocation.py` (his own failure reproduced
+    against real HTTP servers, then fixed with one field added).
 
 Everything else is byte-identical to the fork at 149f4470 modulo the import
 rewrite and the deviations above. When updating vendored files, re-diff

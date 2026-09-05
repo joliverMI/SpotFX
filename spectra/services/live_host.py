@@ -200,6 +200,18 @@ class LiveLights:
         except Exception:
             logger.exception("live stack: per-device timing offsets not applied")
 
+        # A device that answered ONCE is re-findable forever after: stamp
+        # every hardware id the drivers just learned into the config, so the
+        # restart where its address has already changed still has an
+        # identity to look it up by (spectra/services/device_relocation.py).
+        # Never fatal — a stack that came up must not be refused over a
+        # config write.
+        try:
+            from spectra.services import device_relocation
+            device_relocation.learn_from_live(host)
+        except Exception:
+            logger.exception("live stack: device identities not persisted")
+
         if open_audio:
             self.hub = AudioIngestHub()
             self._install_hub_melbank(host)

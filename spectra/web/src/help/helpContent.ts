@@ -1571,6 +1571,17 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        id: 'device-hardware-id',
+        title: 'Hardware ID — finding a light after its address changes',
+        keywords: 'hardware id mac address identity dhcp lease moved relocated ip changed mdns wled local hostname failed to connect device dead offline',
+        body: [
+          'A WLED is normally reached at the IP address in its config. That address belongs to the network, not to the light: a router hands out a new lease and the light is somewhere else, with nothing about it changed. When that happens the room cannot tell the difference between a light that MOVED and a light that DIED — both simply stop answering at the address we have. That has cost a whole evening.',
+          'The hardware ID is the light\'s MAC — the one thing about it that a new lease, a reboot, a rename and a firmware update all leave alone. With one stored, a fixture that stops answering is looked for instead of written off: first at its own mDNS name (WLED publishes wled-xxxxxx.local, derived from the same MAC), then among the addresses a WLED that IS answering knows about, and finally across the neighbourhood of its old address. Whatever is found is only believed once its MAC has been read back and matched, so a stale name lookup can never quietly point the room at the wrong fixture.',
+          'YOU DO NOT HAVE TO FILL THIS IN. It is learned by itself the first time a device is reached, and remembered from then on. Leaving it blank means the device is pinned by address alone — exactly how everything behaved before this field existed.',
+          'A light that had already moved before it was ever reached is the one case that cannot learn its own identity — there is nothing to ask. Paste the MAC here, in any spelling, or run scripts/seed_wled_hardware_ids.py.',
+        ],
+      },
+      {
         id: 'devices-create',
         title: 'Creating a device',
         keywords: 'create new add device wled hue ddp e131 udp dummy required fields virtual segment',

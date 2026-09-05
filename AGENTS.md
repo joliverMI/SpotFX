@@ -4962,6 +4962,73 @@ process"), so a plain return leaves the interpreter alive forever — which
 reads as a hang, not a failure, and cost a real debugging cycle here. Wrap
 `asyncio.run(main())` in try/except and `os._exit(status)`.
 
+## A DEVICE IS FOUND BY WHAT IT IS, NOT BY WHERE IT WAS
+
+**`fx/device_identity.py`'s module docstring is the binding statement** for
+how a WLED is located, and `spectra/services/device_relocation.py`'s is for
+what SPECTRA does with the answer. Read both before touching anything that
+pins, probes or gives up on a networked device. Five things:
+
+- **A RELOCATED DEVICE IS INDISTINGUISHABLE FROM A DEAD ONE WHEN IT IS
+  PINNED BY LOCATION** — twice in one evening, 2026-09-04. His kitchen
+  sconce took a new DHCP lease (`192.168.40.110` -> `.112`), the probe
+  reported it dark, the take-back reported "Failed to connect", and both
+  were true statements about an address that no longer meant anything.
+  `fx/utils.py::resolve_destination` cannot catch this: handed a literal IP
+  it returns that IP **verbatim, contacting nothing**, so a stale pin still
+  "resolves" perfectly and fails one layer later. Do not read a successful
+  `resolve_address()` as evidence a device is where the config says.
+- **THE IDENTITY IS THE MAC, and the mDNS name is DERIVED from it.** WLED
+  reports `mac` on every `json/info`; its own default mDNS name is
+  `wled-<last six>.local`. Storing the MAC therefore gives the hostname for
+  free rather than a second field that can disagree. The ladder is pinned
+  -> mDNS -> a reachable sibling's `json/nodes` -> a bounded /24 sweep of
+  the old pin (nearest-first), and **every rung is confirmed by reading the
+  MAC back** — a name that resolves is a CANDIDATE, never an answer, because
+  avahi caches and a stale cache pointing at a neighbour is precisely the
+  confident-wrong-answer this exists to end. Measured on his host: nsswitch
+  carries `mdns4_minimal`, avahi is active, and two of his own devices are
+  ALREADY pinned by `.local` names and work — which is why mDNS is primary.
+- **BACKWARD COMPATIBLE BY CONSTRUCTION, and that is load-bearing.** No
+  `hardware_id` on a device means no lookup and the original error re-raised
+  **verbatim** (a genuinely-off fixture must not start reporting something
+  different); a device whose pin is still right is confirmed `via="pinned"`
+  and changed in no way. His config was never mass-rewritten: the field is
+  learned on first contact (`WLEDDevice.learn_identity`, the same lazy
+  stamping `name`/`pixel_count` already get) and persisted only for a device
+  that actually learned or actually moved.
+- **PERSISTENCE IS THE HALF THAT MATTERS MOST, and it is not obvious.**
+  Learning a MAC on the live object drives the fixture tonight and is
+  useless after a restart — a process coming up against a stale pin has
+  nothing to contact and therefore **nothing to learn an identity from**.
+  `device_relocation.learn_from_live` (wired into `live_host.activate`) is
+  what closes that, through the vendored `save_config` — one write path, not
+  a second racing it. `scripts/seed_wled_hardware_ids.py` (dry-run default,
+  `--apply`, `--mac id=MAC`) is the bootstrap for a device that has ALREADY
+  moved and so can never learn on its own; its peer/name-match pass is a
+  proposal for a human to confirm, which is why the dry run is the default.
+- **THE RECOVERY PLACEMENT WAS THE OTHER HALF.** `activation_report.recheck`
+  only re-inited a driver with NO destination — and a relocated device HAS
+  one, so it was never re-inited and stayed dark forever. It now asks the
+  identity FIRST and re-inits a device that moved (its sender was built
+  against the old address). The /24 sweep is rate-limited per device
+  (`SWEEP_COOLDOWN_S`) because that recheck runs every 30 s; the cheap rungs
+  are not.
+
+**Camera-by-`/dev/videoN` is the SAME SHAPE ONE LAYER DOWN and is NOT fixed
+by this** — his camera also came back at a different node after a re-plug.
+The principle transfers (a camera has a stable USB identity; Linux already
+publishes it as `/dev/v4l/by-id/usb-<vendor>_<product>_<serial>-video-index0`)
+but nothing here does: no HTTP, no MAC, no mDNS, a different process on a
+different machine, a stdlib-only client that must be pulled separately, and
+no way to prove it without hardware. Carded separately; do not report the
+WLED fix as covering it.
+
+Spec: `tests/test_device_identity.py`, `tests/test_device_relocation.py`,
+`tests/test_seed_wled_hardware_ids.py`, `scripts/check_device_relocation.py`
+(his own failure reproduced against real loopback HTTP, then fixed with one
+field added). `fx/VENDOR.md` deviation #33.
+
 ## Per-device timing equalization + the device page (`/devices`)
 
 His ask (2026-08-28): "Different devices seem to have different network and
