@@ -4116,7 +4116,13 @@ two checks both run and neither substitutes for the other. Six things:
   nothing reports `LEVER_UNPROVEN` with
   `mapping_refusals.lever_scope_unresolved` and drives no light at all. A
   verdict earned on a different emitter than the run maps is a confident
-  answer about the wrong target. The cache key deliberately does NOT carry
+  answer about the wrong target. **The narrowing covers ACTIVATION too**: a
+  substitute strip is typically inactive, and `activate_for_capture` over
+  the whole plan would bring up (and `save_config` a stored effect onto)
+  every carrier's substitute — so the self-test hands it a plan of the ONE
+  driven emitter. That cannot shrink the dark reference, because
+  `activate_for_capture` only ever adds to the live list the hold is built
+  over. The cache key deliberately does NOT carry
   the scope (the verdict is about the CAMERA), so a differently-scoped queue
   still pays for it once. `run_commission`/`run_exposure_test`/
   `run_pose_fingerprint` pass no scope and are byte-identical to before.

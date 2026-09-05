@@ -494,7 +494,9 @@ async def run_selftest(room: RoomMap, deps: "room_mapping.RunDeps", *,
 
     Everything it touches, it puts back: a throwaway room (nothing stored),
     the previous camera request (restored in a `finally`), the hold (closed
-    in the same `finally`), and any virtual it had to bring up."""
+    in the same `finally`), and any virtual it had to bring up — and it
+    brings up only the substitute the ONE driven emitter needs, never every
+    carrier's, so a scoped run touches no fixture it was not scoped to."""
     scope = scope or Scope()
     started = deps.clock()
     sess = deps.session
@@ -565,8 +567,14 @@ async def run_selftest(room: RoomMap, deps: "room_mapping.RunDeps", *,
     scratch = RoomMap(name=room.name, carrier_ids=list(room.carrier_ids),
                       axis=room.axis)
     quiet = replace(deps, save_room=None)
+    # BRING UP ONLY WHAT THE DRIVEN EMITTER NEEDS. Computed over the whole
+    # plan this would activate — and persist a stored effect onto — the
+    # substitute strip of every carrier in the room, fixtures the run never
+    # asked for. Narrowing it cannot shrink the dark reference:
+    # `activate_for_capture` only ever ADDS to `live`, and the hold below is
+    # built over all of `live`, so every live virtual is still darkened.
     live, activated, not_up = await room_mapping.activate_for_capture(
-        plan, live, quiet)
+        replace(plan, emitters=[emitter]), live, quiet)
     out.problems.extend(not_up)
     program = room_mapping.MappingProgram(live)
     sess.run_abort = None

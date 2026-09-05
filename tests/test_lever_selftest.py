@@ -726,3 +726,127 @@ def test_a_map_scoped_to_one_block_lights_only_that_block_end_to_end(monkeypatch
         emitter_ids=[BLOCKS[1]], remember=False))
     assert outcome.lever["proven"] is True, outcome.detail
     assert outcome.lever["emitter_id"] == BLOCKS[1]
+
+
+# ── 7. AND IT BRINGS UP ONLY WHAT THE DRIVEN EMITTER NEEDS ─────────────────
+#
+# Narrowing the SELECTION is not enough. A substitute strip is typically
+# inactive — that is why the carrier stands in front of it — so the self-test
+# brings it up for the capture and puts it back. Computed over the whole
+# room's plan, that brings up (and persists a stored effect onto) the
+# substitute of every carrier in the room, not the one the run is about.
+
+def _two_carrier_deps(session, brought_up: list, put_back: list):
+    """Two copy-mapped carriers, each standing in front of its own
+    fixture's INACTIVE direct strip — his tv-mapper's shape, twice."""
+    active_now: list[str] = []
+
+    def copy_carrier(device):
+        return {"active": True, "pixel_count": 20,
+                "config": {"grouping": 1, "mapping": "copy"},
+                "segments": [[device, 0, 19, False]],
+                "effect": {"type": "singleColor", "config": {}}}
+
+    def direct(device, vid):
+        up = vid in active_now
+        return {"active": up, "pixel_count": 20,
+                "config": {"grouping": 1, "mapping": "span"},
+                "segments": [[device, 0, 19, False]],
+                "effect": {"type": "singleColor", "config": {}} if up else {}}
+
+    async def get_virtuals():
+        return {"mapper-a": copy_carrier("fixture-a"),
+                "strip-a": direct("fixture-a", "strip-a"),
+                "mapper-b": copy_carrier("fixture-b"),
+                "strip-b": direct("fixture-b", "strip-b")}
+
+    async def chains():
+        return {"mapper-a": [{"id": "fixture-a", "type": "wled"}],
+                "mapper-b": [{"id": "fixture-b", "type": "wled"}]}
+
+    async def activate(vid):
+        active_now.append(vid)
+        brought_up.append(vid)
+
+    async def deactivate(vid):
+        active_now.remove(vid)
+        put_back.append(vid)
+
+    async def open_hold(*a, **k):
+        return {"held": True}
+
+    async def close_hold():
+        return None
+
+    async def sleep(_s):
+        return None
+
+    return room_mapping.RunDeps(
+        session=session, get_virtuals=get_virtuals, carrier_devices=chains,
+        activate=activate, deactivate=deactivate, open_hold=open_hold,
+        close_hold=close_hold, sleep=sleep, clock=lambda: 0.0,
+        spectra_owns=lambda: True), active_now
+
+
+def _two_carrier_room():
+    return RoomMap(name="Two strips", carrier_ids=["mapper-a", "mapper-b"],
+                   axis=AXIS)
+
+
+def test_a_scoped_self_test_brings_up_only_the_substitute_it_drives():
+    """A run scoped to one of the FIRST carrier's blocks must bring up that
+    carrier's strip and no other — the second carrier's strip is a fixture
+    the run never asked to touch, and bringing it up writes a stored effect
+    onto it. What was brought up is put back, exactly."""
+    sess = _Session(_Camera(honest))
+    brought_up, put_back = [], []
+    deps, active_now = _two_carrier_deps(sess, brought_up, put_back)
+    verdict = asyncio.run(lever_selftest.run_selftest(
+        _two_carrier_room(), deps,
+        scope=lever_selftest.Scope.of(emitter_ids=["strip-a:blk1[5-9]"],
+                                      granularity="block", block_pixels=5)))
+    assert verdict.proven, verdict.reason
+    assert verdict.emitter_id == "strip-a:blk1[5-9]"
+    assert brought_up == ["strip-a"], \
+        "the other carrier's substitute was never brought up"
+    assert "strip-b" not in brought_up
+    assert put_back == brought_up, "exactly what came up went back"
+    assert active_now == [], "nothing was left rendering"
+
+
+def test_a_scoped_self_test_still_darkens_every_live_virtual():
+    """Narrowing what it ACTIVATES must not narrow what it DARKENS: the
+    dark reference is the whole room, so the hold's scene still covers
+    every live virtual plus the one strip brought up for the capture."""
+    sess = _Session(_Camera(honest))
+    brought_up, put_back = [], []
+    deps, _active = _two_carrier_deps(sess, brought_up, put_back)
+    programs = []
+
+    async def open_hold(program, *a, **k):
+        programs.append(program)
+        return {"held": True}
+
+    deps = room_mapping.RunDeps(**{**deps.__dict__, "open_hold": open_hold})
+    verdict = asyncio.run(lever_selftest.run_selftest(
+        _two_carrier_room(), deps,
+        scope=lever_selftest.Scope.of(emitter_ids=["strip-a:blk1[5-9]"],
+                                      granularity="block", block_pixels=5)))
+    assert verdict.proven, verdict.reason
+    assert programs, "the hold was opened"
+    assert set(programs[0].virtual_ids) == {"mapper-a", "mapper-b", "strip-a"}
+    assert "strip-b" not in programs[0].virtual_ids
+
+
+def test_an_unscoped_self_test_on_two_carriers_brings_up_nothing():
+    """Byte-identical to before the scope existed: unscoped enumerates at
+    whole, where no carrier is substituted and nothing is brought up."""
+    sess = _Session(_Camera(honest))
+    brought_up, put_back = [], []
+    deps, _active = _two_carrier_deps(sess, brought_up, put_back)
+    verdict = asyncio.run(lever_selftest.run_selftest(
+        _two_carrier_room(), deps,
+        scope=lever_selftest.Scope.of(granularity="block", block_pixels=5)))
+    assert verdict.proven, verdict.reason
+    assert verdict.emitter_id == "mapper-a"
+    assert brought_up == [] and put_back == []
