@@ -310,29 +310,47 @@ export const musicMarks: CanvasLayer = {
   },
 };
 
-// ── 2: Override Blend spans — tinted background between a blend trigger and
-//      the next enabled trigger (or song end), in the blending event's color ──
+// ── 2: Blend spans — tinted background between a blending trigger and the
+//      next enabled trigger, in the blending event's color. Two sources:
+//      the legacy override_blend flag, and CHARGE/LULL, which SPECTRA
+//      blends unconditionally with no flag to tick (see ../phaseBlend.ts).
+//      A phase span draws its ~90% ramp at full tint and its ~10% hang
+//      lighter, so the pause before the drop reads as the pause it is. ────
+const blendEventType = (f: CanvasFrame) => (eventId: string) =>
+  f.data.events.find((ev) => ev.id === eventId)?.event_type;
+
 export const blendSpans: CanvasLayer = {
   id: 'blendSpans',
   z: 2,
-  visible: (f) => f.data.triggers.some((t) => t.override_blend && t.enabled !== false),
+  visible: (f) => computeBlendSpans(
+    f.data.triggers, f.data.meta?.duration_ms ?? f.win.endMs, blendEventType(f)).length > 0,
   draw(f) {
     const { ctx } = f;
     const durationMs = f.data.meta?.duration_ms ?? f.win.endMs;
     ctx.save();
-    for (const span of computeBlendSpans(f.data.triggers, durationMs)) {
+    for (const span of computeBlendSpans(f.data.triggers, durationMs, blendEventType(f))) {
       const s = span.startMs + f.view.triggerOffsetMs;
       const e = span.endMs + f.view.triggerOffsetMs;
       if (e < f.win.startMs || s > f.win.endMs) continue;
+      const r = span.rampEndMs + f.view.triggerOffsetMs;
       const x0 = f.timeToX(Math.max(s, f.win.startMs));
       const x1 = f.timeToX(Math.min(e, f.win.endMs));
+      const xr = f.timeToX(Math.min(Math.max(r, f.win.startMs), f.win.endMs));
       const color = f.data.events.find((ev) => ev.id === span.eventId)?.color || '#888';
       ctx.fillStyle = color;
       ctx.globalAlpha = 0.09;
-      ctx.fillRect(x0, 0, Math.max(1, x1 - x0), f.mainH);
+      ctx.fillRect(x0, 0, Math.max(1, xr - x0), f.mainH);
+      if (x1 > xr) {
+        ctx.globalAlpha = 0.04;
+        ctx.fillRect(xr, 0, x1 - xr, f.mainH);
+      }
       // Baseline strip keeps the span readable over busy waveforms.
       ctx.globalAlpha = 0.4;
-      ctx.fillRect(x0, f.mainH - 3, Math.max(1, x1 - x0), 3);
+      ctx.fillRect(x0, f.mainH - 3, Math.max(1, xr - x0), 3);
+      if (x1 > xr) {
+        ctx.globalAlpha = 0.18;
+        ctx.fillRect(xr, f.mainH - 3, x1 - xr, 3);
+      }
     }
     ctx.restore();
   },

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { onMessage } from '../../api/ws';
 import { fmtMsTenths } from '../../lib/time';
 import { useSticky } from '../../lib/useSticky';
+import { isPhaseStretchClass } from '../phaseBlend';
 import { useBuilderStore } from '../store';
 import type { EventOption, MusicTrigger } from '../types';
 
@@ -89,8 +90,13 @@ export default function TriggerList({
               <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {ev?.name ?? t.event_id}
               </span>
-              {t.override_blend && (
-                <span title="Override Blend — ramps until the next trigger"
+              {/* Charge/lull always blend (no flag to read — phaseBlend.ts),
+                * so the badge is class-driven for them and flag-driven for
+                * everything else. */}
+              {(isPhaseStretchClass(ev?.event_type) || t.override_blend) && (
+                <span title={isPhaseStretchClass(ev?.event_type)
+                  ? 'Charge/lull always ramps until the next trigger — no setting to turn it off'
+                  : 'Override Blend — ramps until the next trigger'}
                   style={{ color: 'var(--accent)', flex: 'none' }}>⤳</span>
               )}
               {t.labels.map((l) => <span key={l} className="chip">{l}</span>)}

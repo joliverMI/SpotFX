@@ -1,28 +1,65 @@
 /** Pure data helpers ported from frontend/js/shape_canvas.js. */
 import type { AudioShapeData, LibrosaAnalysis, MarkType, MusicTrigger } from '../types';
+import { isPhaseStretchClass, phaseBlendSpan } from '../phaseBlend';
 
-/** One Override Blend region: from a blend trigger to the next enabled
- * trigger (or song end). Mirrors trigger_engine._blend_factor_for. */
+/** One blend region: from a blending trigger to the next enabled trigger.
+ *
+ * TWO SOURCES, and the second is why this file no longer diffs
+ * byte-identical against spot-effects' own web/src/builder/canvas/data.ts:
+ *   'override' — the legacy per-trigger override_blend flag, unchanged:
+ *                span runs to the next enabled trigger or the song's end,
+ *                mirroring trigger_engine._blend_factor_for.
+ *   'phase'    — a CHARGE or LULL event, which SPECTRA blends
+ *                UNCONDITIONALLY (scene_response._phase_ramp_ms) with no
+ *                flag to consult, so it is keyed on the event's TYPE. See
+ *                ../phaseBlend.ts for the full statement; a charge/lull
+ *                that happens to carry override_blend too is drawn once,
+ *                as 'phase', because that is what actually runs.
+ * The ramp completes at rampEndMs and then HANGS at full until endMs — a
+ * real distinction for 'phase' (~90/10), inert for 'override'.
+ */
 export interface BlendSpan {
   startMs: number;
+  rampEndMs: number;
   endMs: number;
   triggerId: string;
   eventId: string;
+  source: 'override' | 'phase';
+  /** false only when a phase blend had no next trigger to stretch toward
+   * and fell back to its flat class default. */
+  stretched: boolean;
 }
 
-export function computeBlendSpans(triggers: MusicTrigger[], durationMs: number): BlendSpan[] {
+/** eventType resolves a trigger's event_id to its event_type ('charge' /
+ * 'lull' / …). Omitted, only override_blend spans are produced — the
+ * pre-phase-blend behaviour. */
+export function computeBlendSpans(
+  triggers: MusicTrigger[],
+  durationMs: number,
+  eventType?: (eventId: string) => string | undefined,
+): BlendSpan[] {
   const enabled = triggers
     .filter((t) => t.enabled !== false)
     .sort((a, b) => a.timestamp_ms - b.timestamp_ms);
   const spans: BlendSpan[] = [];
   for (const t of enabled) {
-    if (!t.override_blend) continue;
+    const cls = eventType?.(t.event_id);
     const next = enabled.find((n) => n.timestamp_ms > t.timestamp_ms);
+    if (isPhaseStretchClass(cls)) {
+      const b = phaseBlendSpan(cls!, t.timestamp_ms, next ? next.timestamp_ms : null);
+      spans.push({ ...b, triggerId: t.id, eventId: t.event_id, source: 'phase' });
+      continue;
+    }
+    if (!t.override_blend) continue;
+    const endMs = next ? next.timestamp_ms : durationMs;
     spans.push({
       startMs: t.timestamp_ms,
-      endMs: next ? next.timestamp_ms : durationMs,
+      rampEndMs: endMs,
+      endMs,
       triggerId: t.id,
       eventId: t.event_id,
+      source: 'override',
+      stretched: true,
     });
   }
   return spans;

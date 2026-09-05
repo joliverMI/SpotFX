@@ -1541,6 +1541,39 @@ Reconcilers still receive `(previous, merged)`. Spec:
   `scripts/check_triggers.py` (gap computation, incl. a disabled/mode-
   gated trigger never counting as "next") + `scripts/check_spectra.py` +
   `tests/test_spectra_engine.py` (frame-level, his real Dopamine pair).
+
+  **THE UI CAUGHT UP 2026-09-04 (PR fm/spectra-charge-lull-blend-graph, his
+  ruling: "i want the tick box enabled, or i don't want it visible on them.
+  but i do want to show the blend on the graph like other triggers with
+  'override blend' enabled").** Because the stretch above is UNCONDITIONAL,
+  the ported timeline's Override Blend checkbox was a control implying a
+  choice that does not exist — and it was worse than cosmetic: 64 of his 338
+  real charge/lull triggers carry `override_blend: false`, so the canvas drew
+  19% of his charge/lull as blending nothing while the room blended them
+  anyway. Both halves fixed, UI only — no engine change, no data migration,
+  no trigger flag read or written on the charge/lull branch:
+  - The checkbox is HIDDEN for a charge/lull event (a box he cannot untick
+    still implies agency), replaced by a sentence pointing at the graph.
+    `web/src/builder/`'s frozen spot-effects twin is deliberately UNTOUCHED —
+    the retired legacy engine really is flag-gated there
+    (`services/trigger_engine.py:1877`), so hiding it on that surface would
+    remove real agency, unlike here. The `[`/`]` blend BRUSH is also
+    untouched (a bulk tool over every event type).
+  - `spectra/web/src/timeline/phaseBlend.ts` is the binding statement for the
+    drawn span, and MIRRORS `scene_response`'s own constants (nothing serves
+    them over the wire) — ramp to ~90% of the real gap to the next ENABLED
+    trigger, then a lighter HANG band for the last ~10%; a charge/lull with
+    NO next trigger draws its flat class default (4000/2500 ms) with no hang,
+    never a span to the song's end (that is `override_blend`'s rule, not
+    this one); a disabled one draws nothing; drop never draws a span.
+    Rendered on BOTH surfaces: `SpectraTriggerBar.tsx` (his 338 native
+    charge/lull live here) and the legacy canvas's `blendSpans` layer, which
+    grew an `eventType` resolver — so `canvas/data.ts` no longer diffs
+    byte-identical against `web/src/builder/canvas/data.ts`, deliberately.
+  Spec: `node scripts/check_charge_lull_blend_spans.mjs` — transpiles the
+  REAL frontend module with esbuild and asserts it against `_phase_ramp_ms`'s
+  constants READ OUT OF the Python source, so a constant drifting on either
+  side goes red. Help: `charge-lull-blend`.
 - **Energy gates/tilt** — PROVEN EQUIVALENT, nothing built: sequencer
   likelihood curves already express floor/ceiling/scale gating exactly
   (`scripts/seed_sequencer_from_legacy.gate_points`, zero=veto in
