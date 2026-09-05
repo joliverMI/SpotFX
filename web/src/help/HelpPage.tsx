@@ -6,6 +6,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { HELP_SECTIONS, type HelpEntry, type HelpSection } from './helpContent';
+import { HELP_NONCE_PARAM } from './helpTarget';
 import { fuzzyScore } from './fuzzy';
 
 /* ── Search index ─────────────────────────────────────────────── */
@@ -196,6 +197,30 @@ function countEntries(s: HelpSection): number {
   return (s.entries?.length ?? 0) + (s.subsections ?? []).reduce((n, sub) => n + countEntries(sub), 0);
 }
 
+/* ── Deep-link target flash ───────────────────────────────────── */
+
+/** Briefly flash the jumped-to section so it is obvious where you landed.
+ * The class is applied imperatively (and re-applied after a forced reflow) so
+ * a rapid double-click RESTARTS the animation instead of leaving it stuck —
+ * re-adding a class React never removes would otherwise be a no-op. */
+const FLASH_MS = 1800;
+let flashed: HTMLElement | null = null;
+let flashTimer: ReturnType<typeof setTimeout> | null = null;
+
+function clearFlash() {
+  if (flashTimer) { clearTimeout(flashTimer); flashTimer = null; }
+  if (flashed) { flashed.classList.remove('help-target-flash'); flashed = null; }
+}
+
+function flashTarget(el: HTMLElement) {
+  clearFlash();
+  // Force a reflow between remove and add so the animation restarts.
+  void el.offsetWidth;
+  el.classList.add('help-target-flash');
+  flashed = el;
+  flashTimer = setTimeout(clearFlash, FLASH_MS + 200);
+}
+
 /* ── Page ─────────────────────────────────────────────────────── */
 
 export default function HelpPage() {
@@ -216,23 +241,55 @@ export default function HelpPage() {
 
   const setOpen = (id: string, v: boolean) => setOpenState((o) => ({ ...o, [id]: v }));
 
-  // ?topic=<id> deep link: expand the ancestor chain and scroll to it.
+  // ?topic=<id> deep link: expand the ancestor chain, scroll to it, flash it.
+  //
+  // `hl=` is a per-click nonce (helpTarget.ts) so re-clicking the SAME "?" —
+  // which leaves ?topic= unchanged — still re-runs this. Search typing rewrites
+  // only `q`, so it carries the same nonce and never re-flashes.
   const topic = params.get('topic');
+  const nonce = params.get(HELP_NONCE_PARAM);
   useEffect(() => {
-    if (!topic || scrolledFor.current === topic) return;
+    if (!topic) return;
+    const runKey = `${topic}|${nonce ?? ''}`;
+    if (scrolledFor.current === runKey) return;
+    // A query-string edit made HERE (typing in the search box rewrites `q`)
+    // must never re-jump: if this topic was already handled and the incoming
+    // navigation carries no fresh click nonce, there is nothing new to do.
+    if (!nonce && scrolledFor.current?.startsWith(`${topic}|`)) return;
     const path = findPath(HELP_SECTIONS, topic);
     if (!path) return;
-    scrolledFor.current = topic;
+    scrolledFor.current = runKey;
     setOpenState((o) => {
       const next = { ...o };
       for (const id of path) next[id] = true;
       return next;
     });
-    // Scroll after the expanded tree renders.
-    requestAnimationFrame(() => {
-      document.getElementById(`help-${topic}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    });
-  }, [topic]);
+
+    // Wait for the expanded subtree to actually be in the laid-out DOM before
+    // scrolling — a single rAF is not guaranteed to be after React has
+    // committed the expansion, which is why the jump used to land short.
+    let raf = 0;
+    let frames = 0;
+    let settled = false;
+    const step = () => {
+      const el = document.getElementById(`help-${topic}`);
+      if (el && el.getBoundingClientRect().height > 0) {
+        if (!settled) {
+          // One more frame so any sibling expansion above it has laid out too,
+          // otherwise the target's offset is still moving as we scroll.
+          settled = true;
+          raf = requestAnimationFrame(step);
+          return;
+        }
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        flashTarget(el);
+        return;
+      }
+      if (frames++ < 60) raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [topic, nonce]);
 
   const expandAll = (v: boolean) => {
     const next: Record<string, boolean> = {};

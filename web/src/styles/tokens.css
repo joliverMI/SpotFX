@@ -359,6 +359,16 @@ kbd {
 
 .help-highlight { background: rgba(255, 215, 0, 0.25); color: var(--text); border-radius: 2px; }
 
+/* Deep-link target flash: the "?" jumped you HERE. Fades on its own so it
+ * never lingers; separate from .help-highlight (search-match text marks).
+ * Duration must stay in step with FLASH_MS in HelpPage.tsx. */
+.help-target-flash { animation: help-target-flash 1.8s ease-out both; }
+@keyframes help-target-flash {
+  0%   { background: rgba(255, 215, 0, 0.28); box-shadow: 0 0 0 2px rgba(255, 215, 0, 0.70); }
+  25%  { background: rgba(255, 215, 0, 0.24); box-shadow: 0 0 0 2px rgba(255, 215, 0, 0.60); }
+  100% { background: rgba(255, 215, 0, 0);    box-shadow: 0 0 0 2px rgba(255, 215, 0, 0); }
+}
+
 .help-search {
   width: 100%;
   margin-bottom: 12px;
