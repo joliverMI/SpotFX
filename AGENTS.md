@@ -4053,7 +4053,7 @@ not move (footprint weights 0.0, 0.0014, 0.0051 against
 `light_field.UNSEEN_WEIGHT` = 1.0), while the camera's own converged regime
 wandered 0.23 -> 0.01 between two runs of the same thing. **A read-back
 proves the DRIVER holds a value. It cannot prove the SENSOR obeys it.** The
-two checks both run and neither substitutes for the other. Six things:
+two checks both run and neither substitutes for the other. Seven things:
 
 - **THREE CAPTURES, and the order is the design**: A (dim), B (= A x
   `COMMANDED_FACTOR`), B' (the SAME command again). A->B answers "does more
@@ -4072,7 +4072,7 @@ two checks both run and neither substitutes for the other. Six things:
   throwaway room with no `save_room`, `exposure_test.py`'s own precedent.
   Never a second idea of "how much light".
 - **`unprovable`/`unproven` NEVER REFUSE** (`mapping_refusals.
-  LEVER_REFUSING` is the list of the four that do, and every one of them is
+  LEVER_REFUSING` is the list of the three that do, and every one of them is
   a MEASUREMENT). "We could not check" is not "we checked and it is
   broken" — the same distinction `night_exit` draws between DARK and
   UNKNOWN and `witness` between contaminated and witness_unavailable.
@@ -4086,6 +4086,35 @@ two checks both run and neither substitutes for the other. Six things:
   `mapping_session.open_session` builds a NEW session per WebSocket, so a
   reconnect cannot inherit one, and the fingerprint carries the pose id so
   a camera reopen inside one connection cannot either.
+- **IT DRIVES WHAT THE RUN DRIVES, and FAILS CLOSED when it cannot**
+  (2026-09-05). `lever_selftest.Scope` — its docstring is the binding
+  statement for this rule — is the run's own scope (`emitter_ids`/
+  `carrier_ids` PLUS the `granularity`/`block_pixels` the run will use),
+  handed down by `capture_runs.run_map` through `_preflight`. Before it the
+  self-test drove `plan.emitters[0]` over the whole room however narrowly
+  the run was scoped, which on his one-carrier Living Room (`tv-mapper`, a
+  560-px strip spanning the TV backlight AND both kitchen sconces) lit the
+  kitchen for a run scoped to the backlight's blocks. Four invariants:
+  (1) the self-test enumerates at the run's OWN shape ONLY when the scope
+  names emitter ids (`Scope.plan_granularity`/`plan_block_pixels`, the one
+  definition) — an emitter's id comes from the granularity that produced
+  it, so a block-scoped id cannot resolve in a whole-granularity plan; a
+  carrier-only scope or an unscoped run enumerates at WHOLE whatever the
+  map itself runs at, because following the run's shape unconditionally
+  makes an ordinary "auto"=BLOCK map on his single-segment TV wrap earn its
+  verdict on one 30-px block at the far end, out of shot, and cache that
+  NO-SIGNAL verdict for the session. (2) `Scope.within` is the fail-closed
+  guarantee and it is STRUCTURAL — the plan's own list verbatim when
+  unscoped, a subset otherwise — so a scoped run resolving nothing reports
+  `LEVER_UNPROVEN` with `mapping_refusals.lever_scope_unresolved` and drives
+  no light at all; there is no fallback emitter left to widen to. (3)
+  ACTIVATION is narrowed too: `activate_for_capture` is handed a plan of the
+  ONE driven emitter, never every carrier's substitute (it only ever adds to
+  the live list the hold is built over, so the dark reference cannot
+  shrink). (4) The cache key deliberately does NOT carry the scope — the
+  verdict is about the CAMERA, so a differently-scoped queue pays once.
+  `run_commission`/`run_exposure_test`/`run_pose_fingerprint` pass no scope
+  and are byte-identical to before.
 - **BROWSER SESSIONS ARE NEVER SELF-TESTED** — and since the demotion (see
   "THE BROWSER IS A VIEWFINDER" below) that is because a calibration-grade
   run on one is refused EARLIER and for the broader reason: a browser cannot
@@ -4104,7 +4133,10 @@ relied on. A `config` message naming one lever does not un-pin the others;
 un-pinning is saying so explicitly (`null`).
 
 Proofs: `tests/test_lever_selftest.py` (the pure judgement red/green/drift,
-the whole run, and a test that goes RED on the defect it was written for —
+the whole run, sections 5-7 for the scope, its fail-closed rule and the
+narrowed activation — both halves verified RED against the widening they
+replace — and a test that goes
+RED on the defect it was written for —
 with the preflight removed, tonight's camera runs a whole map and reports a
 ROOM-shaped failure, sending him to move a camera that was standing in
 exactly the right place), `tests/test_camera_pinned_settings.py` (four

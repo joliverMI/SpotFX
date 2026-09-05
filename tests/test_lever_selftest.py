@@ -466,3 +466,387 @@ async def _none():
 
 def test_the_signal_floor_is_the_one_a_real_emitter_must_clear():
     assert lever_selftest.Verdict().signal_floor == light_field.UNSEEN_WEIGHT
+
+
+# ── 5. THE SELF-TEST DRIVES WHAT THE RUN DRIVES ────────────────────────────
+#
+# THE DEFECT: the self-test resolved its OWN plan over the whole room at
+# whole granularity and drove `plan.emitters[0]`, however narrowly the run
+# itself was scoped. On his Living Room that is one carrier — `tv-mapper`,
+# a 560-px strip spanning the TV backlight AND both kitchen sconces as pixel
+# ranges of one run — so a run scoped to the backlight's blocks earned its
+# verdict by lighting the kitchen. The run's scope never reached the test.
+#
+# The `strip` here is that shape in miniature: ONE carrier, 20 pixels,
+# four blocks of five, standing in for four regions of one physical strip.
+
+BLOCKS = ["strip:blk0[0-4]", "strip:blk1[5-9]",
+          "strip:blk2[10-14]", "strip:blk3[15-19]"]
+
+
+def _scoped(camera, **scope_kw):
+    sess = _Session(camera)
+    return sess, asyncio.run(lever_selftest.run_selftest(
+        _room(), _deps(sess), scope=lever_selftest.Scope.of(**scope_kw)))
+
+
+def test_a_scoped_run_drives_the_scoped_emitter_not_the_first_one():
+    """A run scoped to the THIRD block must light the third block. Before
+    this, it lit `plan.emitters[0]` — a different part of his room."""
+    _sess, verdict = _scoped(_Camera(honest), emitter_ids=[BLOCKS[2]],
+                             granularity="block", block_pixels=5)
+    assert verdict.proven, verdict.reason
+    assert verdict.emitter_id == BLOCKS[2]
+    assert verdict.emitter_id != BLOCKS[0], \
+        "the whole point: never the whole-room first emitter"
+
+
+def test_a_scoped_run_drives_the_FIRST_scoped_emitter_in_plan_order():
+    """Deterministic, and always one the run itself is about to map."""
+    _sess, verdict = _scoped(_Camera(honest),
+                             emitter_ids=[BLOCKS[3], BLOCKS[1]],
+                             granularity="block", block_pixels=5)
+    assert verdict.emitter_id == BLOCKS[1], "plan order, not argument order"
+
+
+def test_a_carrier_scoped_run_stays_inside_that_carrier():
+    """A CARRIER-ONLY scope needs no shape: at whole granularity each carrier
+    is exactly one emitter, that emitter IS in scope, and it puts more light
+    in frame than any one of its blocks. So the run's own block granularity
+    is deliberately NOT followed here — the whole carrier is driven."""
+    _sess, verdict = _scoped(_Camera(honest), carrier_ids=["strip"],
+                             granularity="block", block_pixels=5)
+    assert verdict.proven, verdict.reason
+    assert verdict.emitter_id == "strip", "the whole carrier, not a block"
+    assert verdict.emitter_id not in BLOCKS
+
+
+def test_a_carrier_scoped_run_still_narrows_to_that_carrier():
+    """...and it is still a NARROWING: a carrier the room does not hold
+    resolves nothing and fails closed, never the room's first carrier."""
+    sess, verdict = _scoped(_Camera(honest), carrier_ids=["other-strip"],
+                            granularity="block", block_pixels=5)
+    assert verdict.verdict == mapping_refusals.LEVER_UNPROVEN
+    assert verdict.emitter_id == ""
+    assert "other-strip" in verdict.reason
+    assert sess.camera_configs == []
+
+
+def test_an_unresolvable_scope_FAILS_CLOSED_and_never_widens():
+    """THE WHOLE POINT OF THE SCOPE. A verdict earned on a different emitter
+    than the run maps is a confident answer about the wrong target, which is
+    exactly the class this instrument exists to refuse. It reports that it
+    could not check — never a check made on something else."""
+    sess, verdict = _scoped(_Camera(honest), emitter_ids=["strip:blk9[45-49]"],
+                            granularity="block", block_pixels=5)
+    assert verdict.verdict == mapping_refusals.LEVER_UNPROVEN
+    assert verdict.emitter_id == "", "no emitter was driven at all"
+    assert verdict.emitter_id != BLOCKS[0]
+    assert not verdict.refuses, \
+        "'we could not check' is not 'we checked and it is broken'"
+    assert verdict.readings == [], "and nothing was lit finding that out"
+    assert "strip:blk9[45-49]" in verdict.reason
+    assert "was NOT checked" in verdict.reason
+    assert sess.camera_configs == [], "the camera was never even commanded"
+
+
+def test_a_scope_at_the_wrong_granularity_fails_closed_too():
+    """An emitter's id comes from the granularity that produced it, so a
+    block id asked for at whole granularity cannot resolve — and must not
+    quietly become the whole carrier."""
+    _sess, verdict = _scoped(_Camera(honest), emitter_ids=[BLOCKS[0]],
+                             granularity="whole")
+    assert verdict.verdict == mapping_refusals.LEVER_UNPROVEN
+    assert verdict.emitter_id == ""
+
+
+def test_the_fail_closed_verdict_is_never_cached_so_it_cannot_stick():
+    sess = _Session(_Camera(honest))
+    deps = _deps(sess)
+    scope = lever_selftest.Scope.of(emitter_ids=["nope"], granularity="block",
+                                    block_pixels=5)
+    verdict = asyncio.run(lever_selftest.ensure(_room(), deps, scope=scope))
+    assert verdict.verdict == mapping_refusals.LEVER_UNPROVEN
+    assert sess.lever_verdict is None
+
+
+def test_an_unscoped_run_is_byte_identical_to_before_the_scope_existed():
+    """EVERY caller that does not scope must behave exactly as it did: the
+    whole room, whole granularity, `plan.emitters[0]`."""
+    _s1, plain = _run(_Camera(honest))
+    _s2, empty_scope = _scoped(_Camera(honest))
+    _s3, explicit_none = _scoped(_Camera(honest), emitter_ids=None,
+                                 carrier_ids=None, granularity=None,
+                                 block_pixels=None)
+    # AND AN UNSCOPED RUN THAT MAPS AT BLOCK GRANULARITY: the shape it will
+    # map at is not a scope, so the self-test still drives the whole carrier.
+    _s4, unscoped_blocks = _scoped(_Camera(honest), granularity="block",
+                                   block_pixels=5)
+    assert plain.emitter_id == "strip", "the whole carrier, as always"
+    for other in (empty_scope, explicit_none, unscoped_blocks):
+        assert other.emitter_id == plain.emitter_id
+        assert other.verdict == plain.verdict
+        assert [r.exposure_time for r in other.readings] == \
+            [r.exposure_time for r in plain.readings]
+        assert [r.weight for r in other.readings] == \
+            [r.weight for r in plain.readings]
+
+
+def test_an_empty_scope_is_exactly_the_default_scope():
+    """Structural, not asserted by sampling: an unscoped run builds the same
+    object the omitted argument defaults to."""
+    assert lever_selftest.Scope.of() == lever_selftest.Scope()
+    assert not lever_selftest.Scope().scoped
+    assert lever_selftest.Scope.of(emitter_ids=[], carrier_ids=None) == \
+        lever_selftest.Scope()
+
+
+def test_the_plan_shape_follows_the_run_only_when_emitter_ids_are_named():
+    """THE SHAPE IS LOAD-BEARING ONLY FOR SUB-CARRIER IDS. An emitter's id
+    comes from the granularity that produced it, so a block-scoped run must
+    enumerate at block granularity or its ids cannot resolve. Nothing else
+    needs the shape, and every other scope enumerates at whole — where each
+    carrier is one emitter and puts the most light in frame."""
+    scoped = lever_selftest.Scope.of(emitter_ids=[BLOCKS[0]],
+                                     granularity="block", block_pixels=5)
+    assert (scoped.plan_granularity, scoped.plan_block_pixels) == ("block", 5)
+    for shapeless in (
+            lever_selftest.Scope.of(granularity="block", block_pixels=5),
+            lever_selftest.Scope.of(carrier_ids=["strip"],
+                                    granularity="block", block_pixels=5),
+            lever_selftest.Scope.of(granularity="segment")):
+        assert shapeless.plan_granularity == "whole"
+        assert shapeless.plan_block_pixels == \
+            lever_selftest.emitters_mod.DEFAULT_BLOCK_PIXELS
+        # The run's own choice is still carried, untouched, for the record.
+        assert shapeless.granularity != "whole"
+
+
+def test_within_hands_back_the_plans_own_list_when_nothing_is_scoped():
+    """THE FAIL-CLOSED GUARANTEE IS A PROPERTY OF THE LIST, which is what
+    makes it structural: there is no third answer for a scoped run to widen
+    to, so there is no fallback branch to forget."""
+    class _E:
+        def __init__(self, eid, cid):
+            self.emitter_id, self.carrier_id = eid, cid
+
+    plan = [_E("a", "c1"), _E("b", "c1"), _E("c", "c2")]
+    assert lever_selftest.Scope().within(plan) is plan
+    assert [e.emitter_id for e in
+            lever_selftest.Scope.of(carrier_ids=["c2"]).within(plan)] == ["c"]
+    assert lever_selftest.Scope.of(emitter_ids=["zz"]).within(plan) == []
+
+
+# ── 6. AND THE RUN ITSELF HANDS ITS OWN SCOPE OVER ─────────────────────────
+
+def test_run_map_gives_the_self_test_its_own_scope(monkeypatch):
+    sess = _Session(_Camera(honest))
+    room = _room()
+    _wire(monkeypatch, sess, room)
+    seen = {}
+
+    async def spy(_room, _deps, *, requested_exposure=None, scope=None):
+        seen["scope"] = scope
+        return lever_selftest.Verdict(verdict=mapping_refusals.LEVER_OK)
+
+    monkeypatch.setattr(lever_selftest, "ensure", spy)
+    asyncio.run(capture_runs.run_map(room.id, granularity="block",
+                                     block_pixels=5,
+                                     emitter_ids=[BLOCKS[2]],
+                                     carrier_ids=["strip"], remember=False))
+    assert seen["scope"] == lever_selftest.Scope(
+        emitter_ids=(BLOCKS[2],), carrier_ids=("strip",),
+        granularity="block", block_pixels=5)
+
+
+def test_run_map_unscoped_hands_over_the_default_scope(monkeypatch):
+    sess = _Session(_Camera(honest))
+    room = _room()
+    _wire(monkeypatch, sess, room)
+    seen = {}
+
+    async def spy(_room, _deps, *, requested_exposure=None, scope=None):
+        seen["scope"] = scope
+        return lever_selftest.Verdict(verdict=mapping_refusals.LEVER_OK)
+
+    monkeypatch.setattr(lever_selftest, "ensure", spy)
+    asyncio.run(capture_runs.run_map(room.id, granularity="whole",
+                                     remember=False))
+    assert not seen["scope"].scoped
+    assert seen["scope"].granularity == "whole"
+
+
+def test_an_unscoped_map_at_block_granularity_self_tests_the_WHOLE_carrier(
+        monkeypatch):
+    """THE CASE THE FIRST PROOF MISSED. An ordinary map — the Rooms button,
+    a night-queue item with no scope — runs at the room's own granularity,
+    which "auto" resolves to BLOCK for a single-segment strip such as his
+    TV wrap. Its self-test must still drive the whole carrier, exactly as
+    before the scope existed: one 30-px block at the far end of the wrap can
+    be out of shot while the strip as a whole is not, and a no-signal verdict
+    earned on that block would be cached and refuse every later item."""
+    sess = _Session(_Camera(honest))
+    room = _room()
+    _wire(monkeypatch, sess, room)
+    outcome = asyncio.run(capture_runs.run_map(
+        room.id, granularity="block", block_pixels=5, remember=False))
+    assert outcome.lever["proven"] is True, outcome.detail
+    assert outcome.lever["emitter_id"] == "strip", \
+        "the whole carrier, never its first block"
+    assert outcome.lever["emitter_id"] not in BLOCKS
+    # AND THE MAP ITSELF STILL RAN AT THE BLOCK GRANULARITY HE ASKED FOR.
+    assert outcome.status == capture_runs.STATUS_OK, outcome.detail
+    mapped = [e["emitter_id"] for e in outcome.result["emitters"]]
+    assert set(mapped) == set(BLOCKS), mapped
+
+
+def test_an_unscoped_map_at_auto_granularity_self_tests_the_whole_carrier(
+        monkeypatch):
+    """The same, through the room's remembered default rather than an
+    explicit choice: `auto` on this single-segment strip is `block`."""
+    sess = _Session(_Camera(honest))
+    room = _room()
+    room.granularity, room.block_pixels = "auto", 5
+    _wire(monkeypatch, sess, room)
+    outcome = asyncio.run(capture_runs.run_map(room.id, remember=False))
+    assert outcome.lever["emitter_id"] == "strip"
+    assert outcome.status == capture_runs.STATUS_OK, outcome.detail
+    assert set(e["emitter_id"] for e in outcome.result["emitters"]) == \
+        set(BLOCKS)
+
+
+def test_a_map_scoped_to_one_block_lights_only_that_block_end_to_end(monkeypatch):
+    """THE ACCEPTANCE, on the real seam: the self-test's own measurement
+    names the scoped block, and the map that follows it runs."""
+    sess = _Session(_Camera(honest))
+    room = _room()
+    _wire(monkeypatch, sess, room)
+    outcome = asyncio.run(capture_runs.run_map(
+        room.id, granularity="block", block_pixels=5,
+        emitter_ids=[BLOCKS[1]], remember=False))
+    assert outcome.lever["proven"] is True, outcome.detail
+    assert outcome.lever["emitter_id"] == BLOCKS[1]
+
+
+# ── 7. AND IT BRINGS UP ONLY WHAT THE DRIVEN EMITTER NEEDS ─────────────────
+#
+# Narrowing the SELECTION is not enough. A substitute strip is typically
+# inactive — that is why the carrier stands in front of it — so the self-test
+# brings it up for the capture and puts it back. Computed over the whole
+# room's plan, that brings up (and persists a stored effect onto) the
+# substitute of every carrier in the room, not the one the run is about.
+
+def _two_carrier_deps(session, brought_up: list, put_back: list):
+    """Two copy-mapped carriers, each standing in front of its own
+    fixture's INACTIVE direct strip — his tv-mapper's shape, twice."""
+    active_now: list[str] = []
+
+    def copy_carrier(device):
+        return {"active": True, "pixel_count": 20,
+                "config": {"grouping": 1, "mapping": "copy"},
+                "segments": [[device, 0, 19, False]],
+                "effect": {"type": "singleColor", "config": {}}}
+
+    def direct(device, vid):
+        up = vid in active_now
+        return {"active": up, "pixel_count": 20,
+                "config": {"grouping": 1, "mapping": "span"},
+                "segments": [[device, 0, 19, False]],
+                "effect": {"type": "singleColor", "config": {}} if up else {}}
+
+    async def get_virtuals():
+        return {"mapper-a": copy_carrier("fixture-a"),
+                "strip-a": direct("fixture-a", "strip-a"),
+                "mapper-b": copy_carrier("fixture-b"),
+                "strip-b": direct("fixture-b", "strip-b")}
+
+    async def chains():
+        return {"mapper-a": [{"id": "fixture-a", "type": "wled"}],
+                "mapper-b": [{"id": "fixture-b", "type": "wled"}]}
+
+    async def activate(vid):
+        active_now.append(vid)
+        brought_up.append(vid)
+
+    async def deactivate(vid):
+        active_now.remove(vid)
+        put_back.append(vid)
+
+    async def open_hold(*a, **k):
+        return {"held": True}
+
+    async def close_hold():
+        return None
+
+    async def sleep(_s):
+        return None
+
+    return room_mapping.RunDeps(
+        session=session, get_virtuals=get_virtuals, carrier_devices=chains,
+        activate=activate, deactivate=deactivate, open_hold=open_hold,
+        close_hold=close_hold, sleep=sleep, clock=lambda: 0.0,
+        spectra_owns=lambda: True), active_now
+
+
+def _two_carrier_room():
+    return RoomMap(name="Two strips", carrier_ids=["mapper-a", "mapper-b"],
+                   axis=AXIS)
+
+
+def test_a_scoped_self_test_brings_up_only_the_substitute_it_drives():
+    """A run scoped to one of the FIRST carrier's blocks must bring up that
+    carrier's strip and no other — the second carrier's strip is a fixture
+    the run never asked to touch, and bringing it up writes a stored effect
+    onto it. What was brought up is put back, exactly."""
+    sess = _Session(_Camera(honest))
+    brought_up, put_back = [], []
+    deps, active_now = _two_carrier_deps(sess, brought_up, put_back)
+    verdict = asyncio.run(lever_selftest.run_selftest(
+        _two_carrier_room(), deps,
+        scope=lever_selftest.Scope.of(emitter_ids=["strip-a:blk1[5-9]"],
+                                      granularity="block", block_pixels=5)))
+    assert verdict.proven, verdict.reason
+    assert verdict.emitter_id == "strip-a:blk1[5-9]"
+    assert brought_up == ["strip-a"], \
+        "the other carrier's substitute was never brought up"
+    assert "strip-b" not in brought_up
+    assert put_back == brought_up, "exactly what came up went back"
+    assert active_now == [], "nothing was left rendering"
+
+
+def test_a_scoped_self_test_still_darkens_every_live_virtual():
+    """Narrowing what it ACTIVATES must not narrow what it DARKENS: the
+    dark reference is the whole room, so the hold's scene still covers
+    every live virtual plus the one strip brought up for the capture."""
+    sess = _Session(_Camera(honest))
+    brought_up, put_back = [], []
+    deps, _active = _two_carrier_deps(sess, brought_up, put_back)
+    programs = []
+
+    async def open_hold(program, *a, **k):
+        programs.append(program)
+        return {"held": True}
+
+    deps = room_mapping.RunDeps(**{**deps.__dict__, "open_hold": open_hold})
+    verdict = asyncio.run(lever_selftest.run_selftest(
+        _two_carrier_room(), deps,
+        scope=lever_selftest.Scope.of(emitter_ids=["strip-a:blk1[5-9]"],
+                                      granularity="block", block_pixels=5)))
+    assert verdict.proven, verdict.reason
+    assert programs, "the hold was opened"
+    assert set(programs[0].virtual_ids) == {"mapper-a", "mapper-b", "strip-a"}
+    assert "strip-b" not in programs[0].virtual_ids
+
+
+def test_an_unscoped_self_test_on_two_carriers_brings_up_nothing():
+    """Byte-identical to before the scope existed: unscoped enumerates at
+    whole, where no carrier is substituted and nothing is brought up."""
+    sess = _Session(_Camera(honest))
+    brought_up, put_back = [], []
+    deps, _active = _two_carrier_deps(sess, brought_up, put_back)
+    verdict = asyncio.run(lever_selftest.run_selftest(
+        _two_carrier_room(), deps,
+        scope=lever_selftest.Scope.of(granularity="block", block_pixels=5)))
+    assert verdict.proven, verdict.reason
+    assert verdict.emitter_id == "mapper-a"
+    assert brought_up == [] and put_back == []
