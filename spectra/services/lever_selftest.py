@@ -85,7 +85,7 @@ ownership state — is CARRIED and never refuses: "we could not check" is not
 "we checked and it is broken", the same distinction `night_exit` draws
 between DARK and UNKNOWN and `witness` between contaminated and
 witness_unavailable. Refusing on a check that could not be made would
-invent a fault. The four verdicts in `mapping_refusals.LEVER_REFUSING` are
+invent a fault. The three verdicts in `mapping_refusals.LEVER_REFUSING` are
 the ones that stop a run, and each of them is a MEASUREMENT.
 
 WHERE IT RUNS. `spectra/services/capture_runs.py` — the one seam every
@@ -96,6 +96,16 @@ establishment, and after any reconnect" structural rather than remembered:
 `mapping_session.open_session` builds a NEW session per WebSocket, so a
 reconnect cannot inherit a verdict, and the cache key carries the pose id
 as well, so a camera reopen inside one connection cannot either.
+
+WHICH EMITTER IT DRIVES: one inside the run's own scope — the whole room
+when the run names none. `Scope`, below, is that scope, handed down by
+`capture_runs.run_map` (every other run kind passes none); it
+decides which of the plan's emitters this test may light, the shape the
+plan is enumerated at, and the fail-closed rule — a scoped run whose scope
+resolves to nothing reports `unproven` and drives no light at all, never
+some other fixture. Its docstring is the binding statement for that rule.
+The scope is not part of the cache key above: the verdict is a fact about
+the CAMERA, so a queue of differently-scoped items pays for it once.
 
 BROWSER SESSIONS ARE UNTOUCHED by all of this — no demotion, no new
 refusal, nothing asked of a page that has no way to answer it. That
