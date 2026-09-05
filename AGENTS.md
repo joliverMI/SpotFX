@@ -4086,6 +4086,28 @@ two checks both run and neither substitutes for the other. Six things:
   `mapping_session.open_session` builds a NEW session per WebSocket, so a
   reconnect cannot inherit one, and the fingerprint carries the pose id so
   a camera reopen inside one connection cannot either.
+- **IT DRIVES WHAT THE RUN DRIVES, and FAILS CLOSED when it cannot**
+  (2026-09-05). `lever_selftest.Scope` is the run's own scope —
+  `emitter_ids`/`carrier_ids` PLUS the `granularity`/`block_pixels` the run
+  will use — handed down by `capture_runs.run_map` through `_preflight`.
+  Before it, the self-test resolved its OWN plan over the whole room at
+  whole granularity and drove `plan.emitters[0]`, however narrowly the run
+  was scoped: on his Living Room that is one carrier (`tv-mapper`, a 560-px
+  strip spanning the TV backlight AND both kitchen sconces as pixel ranges
+  of one run), so a run scoped to the backlight's blocks earned its verdict
+  by lighting the kitchen. **The granularity is half the fix, not a detail**
+  — an emitter's id comes from the shape that produced it, so a block-scoped
+  id cannot resolve in a whole-granularity plan. `Scope.within` is the
+  fail-closed guarantee and it is STRUCTURAL: it returns the plan's own list
+  verbatim when nothing is scoped and a subset of it otherwise, so there is
+  no `plan.emitters[0]` fallback left to widen to — a scoped run resolving
+  nothing reports `LEVER_UNPROVEN` with
+  `mapping_refusals.lever_scope_unresolved` and drives no light at all. A
+  verdict earned on a different emitter than the run maps is a confident
+  answer about the wrong target. The cache key deliberately does NOT carry
+  the scope (the verdict is about the CAMERA), so a differently-scoped queue
+  still pays for it once. `run_commission`/`run_exposure_test`/
+  `run_pose_fingerprint` pass no scope and are byte-identical to before.
 - **BROWSER SESSIONS ARE NEVER SELF-TESTED** — and since the demotion (see
   "THE BROWSER IS A VIEWFINDER" below) that is because a calibration-grade
   run on one is refused EARLIER and for the broader reason: a browser cannot
@@ -4104,7 +4126,9 @@ relied on. A `config` message naming one lever does not un-pin the others;
 un-pinning is saying so explicitly (`null`).
 
 Proofs: `tests/test_lever_selftest.py` (the pure judgement red/green/drift,
-the whole run, and a test that goes RED on the defect it was written for —
+the whole run, sections 5-6 for the scope and its fail-closed rule — both
+halves verified RED against the widening they replace — and a test that goes
+RED on the defect it was written for —
 with the preflight removed, tonight's camera runs a whole map and reports a
 ROOM-shaped failure, sending him to move a camera that was standing in
 exactly the right place), `tests/test_camera_pinned_settings.py` (four

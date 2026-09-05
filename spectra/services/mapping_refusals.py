@@ -889,6 +889,29 @@ def amendment_emitter_unresolved(missing: list, granularity: str,
               "the room already holds, or re-take the whole carrier.")
 
 
+def lever_scope_unresolved(wanted: list, available: list, granularity: str,
+                           block_pixels: int) -> str:
+    """THE SELF-TEST FAILING CLOSED, and the whole reason it has a sentence
+    of its own rather than reusing the unscoped "nothing to light" one.
+
+    A scoped run's self-test must drive an emitter the run itself is about
+    to map. When none of the run's scope resolves in the plan the self-test
+    could light, the honest answer is that this check could not be made —
+    NOT a verdict earned on some other emitter. Widening to the whole room's
+    first emitter would drive fixtures the run never asked for AND make a
+    confident claim about the wrong target, which is exactly the class of
+    answer this instrument exists to refuse."""
+    return (f"the self-test could not light anything this run is scoped to "
+            f"— {and_list(wanted)} did not resolve at '{granularity}' "
+            f"granularity"
+            + (f" in blocks of {block_pixels} pixels"
+               if granularity == 'block' else "")
+            + (f" (this room can light {and_list(available)} right now)"
+               if available else " (nothing of this room is rendering)")
+            + ". The lever was NOT checked; it was not checked on something "
+              "else either.")
+
+
 def amendment_would_mix(carrier_id: str, reason: str, kept: int) -> str:
     """THE CORE HONESTY OF AMEND-IN-PART. Footprints of one carrier taken on
     two different nights sit side by side and are read together — by a room

@@ -327,7 +327,8 @@ def _gate(kind: str, target: str, room_id: str) -> Optional[RunOutcome]:
 
 
 async def _preflight(kind: str, room: RoomMap, sess,
-                     requested_exposure: Optional[int] = None
+                     requested_exposure: Optional[int] = None,
+                     scope: "lever_selftest.Scope | None" = None
                      ) -> "lever_selftest.Verdict | None":
     """THE LEVER SELF-TEST, run before a calibration-grade run on a NATIVE
     session — and nothing at all on a browser one.
@@ -350,6 +351,15 @@ async def _preflight(kind: str, room: RoomMap, sess,
     remains of the old "a browser is simply untouched" rule is still true
     of every NON-calibration-grade use of a session, and of aiming.
 
+    IT DRIVES WHAT THE RUN DRIVES. `scope` is the run's own scope, and it
+    is what stops a run scoped to three ranges of a wrapped television from
+    earning its verdict by lighting the kitchen sconces on the same strip.
+    Omitted — every non-map caller today — is the whole room at whole
+    granularity, exactly as before this argument existed.
+    `lever_selftest.Scope` owns the narrowing AND the fail-closed rule: a
+    scoped run whose scope resolves to nothing reports `unproven`, and there
+    is no wider emitter left for it to fall back to.
+
     THE ROOM COMES BACK BETWEEN THE TWO, and that is deliberate: the
     self-test closes its own hold in a `finally` and the run opens its own
     afterwards, so the show is visible for a moment in between. A hold that
@@ -363,7 +373,7 @@ async def _preflight(kind: str, room: RoomMap, sess,
     try:
         return await lever_selftest.ensure(
             room, room_mapping.production_deps(sess),
-            requested_exposure=requested_exposure)
+            requested_exposure=requested_exposure, scope=scope)
     except Exception as exc:                           # noqa: BLE001
         named = mapping_refusals.ownership_refusal(exc)
         if named is None:
@@ -419,7 +429,12 @@ async def run_map(room_id: str, *, granularity: Optional[str] = None,
     calibration amendment re-measuring one fixture, or a few ranges of one.
     Both default None, which is the whole room, so every caller that existed
     before amendments did behaves exactly as it did. `run_mapping.scope_plan`
-    owns the narrowing and the one-granularity-per-carrier invariant."""
+    owns the narrowing and the one-granularity-per-carrier invariant.
+
+    THE SAME SCOPE REACHES THE LEVER SELF-TEST (`lever_selftest.Scope`,
+    below), at this run's own granularity — an emitter's id comes from the
+    shape that produced it, so a block-scoped run's self-test has to
+    enumerate at that shape or it could not resolve his scope at all."""
     room = light_field.get_room(room_id)
     if room is None:
         return RunOutcome(kind=KIND_MAP, status=STATUS_NOT_FOUND,
@@ -436,7 +451,11 @@ async def run_map(room_id: str, *, granularity: Optional[str] = None,
     async with _run_lock:
         _running = room_id
         try:
-            lever = await _preflight(KIND_MAP, room, sess, exposure_time)
+            lever = await _preflight(
+                KIND_MAP, room, sess, exposure_time,
+                scope=lever_selftest.Scope.of(
+                    emitter_ids=emitter_ids, carrier_ids=carrier_ids,
+                    granularity=g, block_pixels=block))
             refused = _lever_refusal(KIND_MAP, lever, room_id,
                                      room.name or room_id)
             if refused is not None:

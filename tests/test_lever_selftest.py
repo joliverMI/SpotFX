@@ -466,3 +466,183 @@ async def _none():
 
 def test_the_signal_floor_is_the_one_a_real_emitter_must_clear():
     assert lever_selftest.Verdict().signal_floor == light_field.UNSEEN_WEIGHT
+
+
+# ── 5. THE SELF-TEST DRIVES WHAT THE RUN DRIVES ────────────────────────────
+#
+# THE DEFECT: the self-test resolved its OWN plan over the whole room at
+# whole granularity and drove `plan.emitters[0]`, however narrowly the run
+# itself was scoped. On his Living Room that is one carrier — `tv-mapper`,
+# a 560-px strip spanning the TV backlight AND both kitchen sconces as pixel
+# ranges of one run — so a run scoped to the backlight's blocks earned its
+# verdict by lighting the kitchen. The run's scope never reached the test.
+#
+# The `strip` here is that shape in miniature: ONE carrier, 20 pixels,
+# four blocks of five, standing in for four regions of one physical strip.
+
+BLOCKS = ["strip:blk0[0-4]", "strip:blk1[5-9]",
+          "strip:blk2[10-14]", "strip:blk3[15-19]"]
+
+
+def _scoped(camera, **scope_kw):
+    sess = _Session(camera)
+    return sess, asyncio.run(lever_selftest.run_selftest(
+        _room(), _deps(sess), scope=lever_selftest.Scope.of(**scope_kw)))
+
+
+def test_a_scoped_run_drives_the_scoped_emitter_not_the_first_one():
+    """A run scoped to the THIRD block must light the third block. Before
+    this, it lit `plan.emitters[0]` — a different part of his room."""
+    _sess, verdict = _scoped(_Camera(honest), emitter_ids=[BLOCKS[2]],
+                             granularity="block", block_pixels=5)
+    assert verdict.proven, verdict.reason
+    assert verdict.emitter_id == BLOCKS[2]
+    assert verdict.emitter_id != BLOCKS[0], \
+        "the whole point: never the whole-room first emitter"
+
+
+def test_a_scoped_run_drives_the_FIRST_scoped_emitter_in_plan_order():
+    """Deterministic, and always one the run itself is about to map."""
+    _sess, verdict = _scoped(_Camera(honest),
+                             emitter_ids=[BLOCKS[3], BLOCKS[1]],
+                             granularity="block", block_pixels=5)
+    assert verdict.emitter_id == BLOCKS[1], "plan order, not argument order"
+
+
+def test_a_carrier_scoped_run_stays_inside_that_carrier():
+    _sess, verdict = _scoped(_Camera(honest), carrier_ids=["strip"],
+                             granularity="block", block_pixels=5)
+    assert verdict.proven, verdict.reason
+    assert verdict.emitter_id in BLOCKS
+
+
+def test_an_unresolvable_scope_FAILS_CLOSED_and_never_widens():
+    """THE WHOLE POINT OF THE SCOPE. A verdict earned on a different emitter
+    than the run maps is a confident answer about the wrong target, which is
+    exactly the class this instrument exists to refuse. It reports that it
+    could not check — never a check made on something else."""
+    sess, verdict = _scoped(_Camera(honest), emitter_ids=["strip:blk9[45-49]"],
+                            granularity="block", block_pixels=5)
+    assert verdict.verdict == mapping_refusals.LEVER_UNPROVEN
+    assert verdict.emitter_id == "", "no emitter was driven at all"
+    assert verdict.emitter_id != BLOCKS[0]
+    assert not verdict.refuses, \
+        "'we could not check' is not 'we checked and it is broken'"
+    assert verdict.readings == [], "and nothing was lit finding that out"
+    assert "strip:blk9[45-49]" in verdict.reason
+    assert "was NOT checked" in verdict.reason
+    assert sess.camera_configs == [], "the camera was never even commanded"
+
+
+def test_a_scope_at_the_wrong_granularity_fails_closed_too():
+    """An emitter's id comes from the granularity that produced it, so a
+    block id asked for at whole granularity cannot resolve — and must not
+    quietly become the whole carrier."""
+    _sess, verdict = _scoped(_Camera(honest), emitter_ids=[BLOCKS[0]],
+                             granularity="whole")
+    assert verdict.verdict == mapping_refusals.LEVER_UNPROVEN
+    assert verdict.emitter_id == ""
+
+
+def test_the_fail_closed_verdict_is_never_cached_so_it_cannot_stick():
+    sess = _Session(_Camera(honest))
+    deps = _deps(sess)
+    scope = lever_selftest.Scope.of(emitter_ids=["nope"], granularity="block",
+                                    block_pixels=5)
+    verdict = asyncio.run(lever_selftest.ensure(_room(), deps, scope=scope))
+    assert verdict.verdict == mapping_refusals.LEVER_UNPROVEN
+    assert sess.lever_verdict is None
+
+
+def test_an_unscoped_run_is_byte_identical_to_before_the_scope_existed():
+    """EVERY caller that does not scope must behave exactly as it did: the
+    whole room, whole granularity, `plan.emitters[0]`."""
+    _s1, plain = _run(_Camera(honest))
+    _s2, empty_scope = _scoped(_Camera(honest))
+    _s3, explicit_none = _scoped(_Camera(honest), emitter_ids=None,
+                                 carrier_ids=None, granularity=None,
+                                 block_pixels=None)
+    assert plain.emitter_id == "strip", "the whole carrier, as always"
+    for other in (empty_scope, explicit_none):
+        assert other.emitter_id == plain.emitter_id
+        assert other.verdict == plain.verdict
+        assert [r.exposure_time for r in other.readings] == \
+            [r.exposure_time for r in plain.readings]
+        assert [r.weight for r in other.readings] == \
+            [r.weight for r in plain.readings]
+
+
+def test_an_empty_scope_is_exactly_the_default_scope():
+    """Structural, not asserted by sampling: an unscoped run builds the same
+    object the omitted argument defaults to."""
+    assert lever_selftest.Scope.of() == lever_selftest.Scope()
+    assert not lever_selftest.Scope().scoped
+    assert lever_selftest.Scope.of(emitter_ids=[], carrier_ids=None) == \
+        lever_selftest.Scope()
+
+
+def test_within_hands_back_the_plans_own_list_when_nothing_is_scoped():
+    """THE FAIL-CLOSED GUARANTEE IS A PROPERTY OF THE LIST, which is what
+    makes it structural: there is no third answer for a scoped run to widen
+    to, so there is no fallback branch to forget."""
+    class _E:
+        def __init__(self, eid, cid):
+            self.emitter_id, self.carrier_id = eid, cid
+
+    plan = [_E("a", "c1"), _E("b", "c1"), _E("c", "c2")]
+    assert lever_selftest.Scope().within(plan) is plan
+    assert [e.emitter_id for e in
+            lever_selftest.Scope.of(carrier_ids=["c2"]).within(plan)] == ["c"]
+    assert lever_selftest.Scope.of(emitter_ids=["zz"]).within(plan) == []
+
+
+# ── 6. AND THE RUN ITSELF HANDS ITS OWN SCOPE OVER ─────────────────────────
+
+def test_run_map_gives_the_self_test_its_own_scope(monkeypatch):
+    sess = _Session(_Camera(honest))
+    room = _room()
+    _wire(monkeypatch, sess, room)
+    seen = {}
+
+    async def spy(_room, _deps, *, requested_exposure=None, scope=None):
+        seen["scope"] = scope
+        return lever_selftest.Verdict(verdict=mapping_refusals.LEVER_OK)
+
+    monkeypatch.setattr(lever_selftest, "ensure", spy)
+    asyncio.run(capture_runs.run_map(room.id, granularity="block",
+                                     block_pixels=5,
+                                     emitter_ids=[BLOCKS[2]],
+                                     carrier_ids=["strip"], remember=False))
+    assert seen["scope"] == lever_selftest.Scope(
+        emitter_ids=(BLOCKS[2],), carrier_ids=("strip",),
+        granularity="block", block_pixels=5)
+
+
+def test_run_map_unscoped_hands_over_the_default_scope(monkeypatch):
+    sess = _Session(_Camera(honest))
+    room = _room()
+    _wire(monkeypatch, sess, room)
+    seen = {}
+
+    async def spy(_room, _deps, *, requested_exposure=None, scope=None):
+        seen["scope"] = scope
+        return lever_selftest.Verdict(verdict=mapping_refusals.LEVER_OK)
+
+    monkeypatch.setattr(lever_selftest, "ensure", spy)
+    asyncio.run(capture_runs.run_map(room.id, granularity="whole",
+                                     remember=False))
+    assert not seen["scope"].scoped
+    assert seen["scope"].granularity == "whole"
+
+
+def test_a_map_scoped_to_one_block_lights_only_that_block_end_to_end(monkeypatch):
+    """THE ACCEPTANCE, on the real seam: the self-test's own measurement
+    names the scoped block, and the map that follows it runs."""
+    sess = _Session(_Camera(honest))
+    room = _room()
+    _wire(monkeypatch, sess, room)
+    outcome = asyncio.run(capture_runs.run_map(
+        room.id, granularity="block", block_pixels=5,
+        emitter_ids=[BLOCKS[1]], remember=False))
+    assert outcome.lever["proven"] is True, outcome.detail
+    assert outcome.lever["emitter_id"] == BLOCKS[1]

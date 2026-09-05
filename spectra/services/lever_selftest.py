@@ -379,20 +379,94 @@ def judge(readings: list, floor: float = light_field.UNSEEN_WEIGHT
     return mapping_refusals.LEVER_OK, response, ratio, notes
 
 
+# ── the run's scope ────────────────────────────────────────────────────────
+
+@dataclass(frozen=True)
+class Scope:
+    """WHAT THE RUN IS ABOUT TO MEASURE, handed to the self-test so the
+    self-test measures the same thing.
+
+    THE DEFECT THIS EXISTS TO CLOSE: the self-test used to resolve its own
+    plan over the WHOLE room at whole granularity and drive `plan.emitters[0]`
+    — the first carrier's whole emitter — however narrowly the run itself was
+    scoped. On his Living Room that is one carrier, `tv-mapper`, whose 560-px
+    strip spans the TV backlight AND both kitchen sconces as pixel ranges of
+    one run: a run scoped to the TV backlight's blocks had its verdict earned
+    by lighting the kitchen. The verdict is a claim about the CAMERA, but the
+    LIGHT it drives is his room, and a run must not drive fixtures it was not
+    asked to touch.
+
+    TWO KINDS OF FIELD, and both matter for the same reason.
+    `granularity`/`block_pixels` decide the SHAPE the plan is enumerated at,
+    and an emitter's id comes from the granularity that produced it
+    (`emitters.py`) — so a block-granularity run's emitter id simply does not
+    exist in a whole-granularity plan, and scoping without the shape could
+    only ever fail to resolve.
+
+    `within` IS THE WHOLE FAIL-CLOSED GUARANTEE, and it is structural rather
+    than a check somebody remembered to write: it returns the plan's own list
+    verbatim when nothing is scoped, and a subset of it otherwise. There is
+    no third answer, so there is nothing for a scoped run to widen to."""
+
+    #: Emitter ids this run will map. Empty is "not scoped by emitter".
+    emitter_ids: tuple = ()
+    #: Carrier ids this run will map. Empty is "not scoped by carrier".
+    carrier_ids: tuple = ()
+    granularity: str = "whole"
+    block_pixels: int = emitters_mod.DEFAULT_BLOCK_PIXELS
+
+    @classmethod
+    def of(cls, *, emitter_ids=None, carrier_ids=None,
+           granularity: Optional[str] = None,
+           block_pixels: Optional[int] = None) -> "Scope":
+        """Build one from a run's own arguments, which are `None`-or-list
+        where this is a tuple. An UNSCOPED run building this lands on exactly
+        the default, so it costs nothing and changes nothing."""
+        return cls(
+            emitter_ids=tuple(e for e in (emitter_ids or []) if e),
+            carrier_ids=tuple(c for c in (carrier_ids or []) if c),
+            granularity=granularity or "whole",
+            block_pixels=(block_pixels if block_pixels
+                          else emitters_mod.DEFAULT_BLOCK_PIXELS))
+
+    @property
+    def scoped(self) -> bool:
+        return bool(self.emitter_ids or self.carrier_ids)
+
+    def within(self, plan_emitters: list) -> list:
+        """The emitters of `plan_emitters` this self-test may drive, in the
+        PLAN'S OWN ORDER — so "the first one" is deterministic and is always
+        one the run itself is about to map."""
+        if not self.scoped:
+            return plan_emitters
+        chosen = plan_emitters
+        if self.carrier_ids:
+            want = set(self.carrier_ids)
+            chosen = [e for e in chosen if e.carrier_id in want]
+        if self.emitter_ids:
+            want = set(self.emitter_ids)
+            chosen = [e for e in chosen if e.emitter_id in want]
+        return chosen
+
+
 # ── the run ────────────────────────────────────────────────────────────────
 
 async def run_selftest(room: RoomMap, deps: "room_mapping.RunDeps", *,
-                       emitter_id: Optional[str] = None,
+                       scope: Optional[Scope] = None,
                        requested_exposure: Optional[int] = None,
-                       granularity: str = "whole",
-                       block_pixels: int = emitters_mod.DEFAULT_BLOCK_PIXELS,
                        ) -> Verdict:
     """Drive one emitter three times and say whether this camera's exposure
     lever reaches its sensor.
 
+    `scope` is the RUN'S OWN SCOPE (`Scope`), and it decides both the shape
+    the plan is enumerated at and which of its emitters this test may drive.
+    Omitted — the default — is the whole room at whole granularity, which is
+    what every run that scopes nothing has always got.
+
     Everything it touches, it puts back: a throwaway room (nothing stored),
     the previous camera request (restored in a `finally`), the hold (closed
     in the same `finally`), and any virtual it had to bring up."""
+    scope = scope or Scope()
     started = deps.clock()
     sess = deps.session
     out = Verdict(session_id=getattr(sess, "id", ""),
@@ -423,9 +497,10 @@ async def run_selftest(room: RoomMap, deps: "room_mapping.RunDeps", *,
         return out
 
     try:
-        scope = await room_mapping.live_virtual_ids(deps.get_virtuals)
-        plan = await room_mapping.resolve_plan(room, deps, scope, granularity,
-                                               block_pixels)
+        live = await room_mapping.live_virtual_ids(deps.get_virtuals)
+        plan = await room_mapping.resolve_plan(room, deps, live,
+                                               scope.granularity,
+                                               scope.block_pixels)
     except Exception as exc:                           # noqa: BLE001
         named = mapping_refusals.ownership_refusal(exc)
         if named is None:
@@ -433,15 +508,25 @@ async def run_selftest(room: RoomMap, deps: "room_mapping.RunDeps", *,
         out.verdict, out.reason = mapping_refusals.LEVER_UNPROVEN, named
         return out
     out.problems.extend(plan.problems)
-    if not plan.emitters:
+    # THE ONE SELECTION, and there is deliberately no second one. `within`
+    # hands back the plan's own list verbatim for an unscoped run and a
+    # subset of it for a scoped one, so "drive something the run is about to
+    # map" is a property of the LIST rather than a check somebody remembered
+    # to write — and there is no `plan.emitters[0]` left for a scoped run
+    # that resolves nothing to widen to.
+    candidates = scope.within(plan.emitters)
+    if not candidates:
         out.verdict = mapping_refusals.LEVER_UNPROVEN
-        out.reason = ("nothing to light for the self-test — no carrier of "
-                      "this room is rendering right now")
+        out.reason = (
+            mapping_refusals.lever_scope_unresolved(
+                list(scope.emitter_ids or scope.carrier_ids),
+                [e.emitter_id for e in plan.emitters],
+                scope.granularity, scope.block_pixels)
+            if scope.scoped else
+            "nothing to light for the self-test — no carrier of "
+            "this room is rendering right now")
         return out
-    emitter = next((e for e in plan.emitters if e.emitter_id == emitter_id),
-                   None) if emitter_id else plan.emitters[0]
-    if emitter is None:
-        emitter = plan.emitters[0]
+    emitter = candidates[0]
     out.emitter_id = emitter.emitter_id
     out.emitter_label = emitter.label or emitter.emitter_id
 
@@ -451,17 +536,17 @@ async def run_selftest(room: RoomMap, deps: "room_mapping.RunDeps", *,
     scratch = RoomMap(name=room.name, carrier_ids=list(room.carrier_ids),
                       axis=room.axis)
     quiet = replace(deps, save_room=None)
-    scope, activated, not_up = await room_mapping.activate_for_capture(
-        plan, scope, quiet)
+    live, activated, not_up = await room_mapping.activate_for_capture(
+        plan, live, quiet)
     out.problems.extend(not_up)
-    program = room_mapping.MappingProgram(scope)
+    program = room_mapping.MappingProgram(live)
     sess.run_abort = None
     before = sess.camera_request
     try:
         for label, exposure in (("dim", dim), ("bright", bright),
                                 ("repeat", bright)):
             out.readings.append(await _one_regime(
-                label, exposure, scratch, program, emitter, scope, quiet, out))
+                label, exposure, scratch, program, emitter, live, quiet, out))
             if not out.readings[-1].ok and label != "repeat":
                 break
     finally:
@@ -519,7 +604,7 @@ async def run_selftest(room: RoomMap, deps: "room_mapping.RunDeps", *,
 
 
 async def _one_regime(label: str, exposure: int, scratch: RoomMap, program,
-                      emitter, scope: list, deps: "room_mapping.RunDeps",
+                      emitter, live: list, deps: "room_mapping.RunDeps",
                       out: Verdict) -> Reading:
     """Command this integration time, GATE ON THE READ-BACK, then take the
     map's own single-emitter measurement in it."""
@@ -558,7 +643,7 @@ async def _one_regime(label: str, exposure: int, scratch: RoomMap, program,
         out.notes.append(f"{label}: {note}")
     outcome = await room_mapping._map_one(                     # noqa: SLF001
         scratch, program, emitter,
-        [v for v in emitter.virtual_ids if v in set(scope)], deps,
+        [v for v in emitter.virtual_ids if v in set(live)], deps,
         room_mapping.DARK_SETTLE_S, room_mapping.LIT_SETTLE_S, dark_c, lit_c,
         room_mapping.RUN_CEILING_FLOOR_S)
     reading.dark_frames, reading.lit_frames = outcome.dark_frames, outcome.lit_frames
@@ -577,7 +662,7 @@ async def _one_regime(label: str, exposure: int, scratch: RoomMap, program,
 
 async def ensure(room: RoomMap, deps: "room_mapping.RunDeps", *,
                  requested_exposure: Optional[int] = None,
-                 emitter_id: Optional[str] = None) -> Verdict:
+                 scope: Optional[Scope] = None) -> Verdict:
     """Run the self-test unless this session already earned the same verdict
     under the same fingerprint, and remember it on the session.
 
@@ -589,13 +674,20 @@ async def ensure(room: RoomMap, deps: "room_mapping.RunDeps", *,
 
     A verdict that REFUSES is cached like any other — re-driving the room
     three more times per queue item to re-learn the same fact would cost
-    dark minutes and change nothing."""
+    dark minutes and change nothing.
+
+    THE CACHE KEY DELIBERATELY DOES NOT CARRY THE SCOPE. What this test
+    proves is a fact about the CAMERA, not about the emitter it happened to
+    light, so a queue of differently-scoped items pays for it once — which
+    is the whole of "it is free after the first one". The scope decides
+    which of his fixtures a self-test that actually RUNS may drive; it is
+    not a second thing the verdict is about."""
     sess = deps.session
     want = fingerprint(sess, requested_exposure)
     held = getattr(sess, "lever_verdict", None)
     if isinstance(held, Verdict) and held.fingerprint == want and held.fingerprint:
         return held
-    verdict = await run_selftest(room, deps, emitter_id=emitter_id,
+    verdict = await run_selftest(room, deps, scope=scope,
                                  requested_exposure=requested_exposure)
     # An UNPROVEN verdict is never cached: it says nothing about the camera,
     # and the reason it could not run (ownership, no emitters, a lost
