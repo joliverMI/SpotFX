@@ -34,3 +34,13 @@ async def search(q: str = "", limit: int = 100) -> dict:
 async def song(uri: str, limit: int = 50) -> dict:
     """Every recorded play of one song, newest first."""
     return {"entries": lock_history.entries_for_uri(uri, limit=max(1, min(limit, 500)))}
+
+
+@router.get("/drift")
+async def drift() -> dict:
+    """Pipeline-drift instrument: per listening session, the median of each
+    play's winning offset vs that song's own older baseline — the common
+    component a pipeline-level latency change leaves across a whole session,
+    which per-song saves otherwise quietly absorb. Drives the Timing page's
+    drift line and its alarm."""
+    return lock_history.pipeline_drift()

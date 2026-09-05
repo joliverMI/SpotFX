@@ -29,8 +29,9 @@ from __future__ import annotations
 
 import json
 import logging
+import statistics
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from config import BASE_DIR
@@ -40,6 +41,27 @@ logger = logging.getLogger(__name__)
 _STORE_PATH = BASE_DIR / "storage" / "lock_history.json"
 _CAP = 500          # entries kept on disk (~10s of KB)
 _SLOW_LOCK_MS = 30_000   # hard lock landing after this long costs one grade notch
+
+# ── Pipeline drift (the drift alarm) ──────────────────────────────────────────
+# A pipeline-level latency change (a snapclient/monitor-chain fault, an audio
+# routing shuffle) moves EVERY song's winning offset in the same direction.
+# Per-song saves quietly re-learn it one play at a time, so the only place it
+# is visible is the common component across a listening session: each play's
+# winning offset minus that same song's own OLDER baseline, median'd per
+# session. Calibrated against the real Aug 25 → Sep 2 2026 ratchet
+# (~350 ms/day, reaching −3.2 s): with a 36 h minimum baseline age the median
+# crossed 1.5 s on Aug 28 — four days before locks started failing — while
+# every healthy session before the ratchet stayed well under 1 s. A younger
+# baseline chases the drift and mutes the signal; a much older one starves
+# sessions of baselined plays.
+_DRIFT_SESSION_GAP_S = 2 * 3600   # a >2h silence starts a new listening session
+_DRIFT_BASELINE_MIN_AGE_H = 36    # baseline plays must be at least this old …
+_DRIFT_BASELINE_MAX_AGE_D = 21    # … and no older than this
+DRIFT_ALARM_MS = 1500             # |session median| past this alarms — the lock
+                                  # search tips over near 3 s stale-offset error,
+                                  # so this fires with real headroom left
+_DRIFT_MIN_BASELINED = 3          # sessions with fewer baselined plays are
+                                  # reported but never drive the alarm
 
 _lock = threading.Lock()
 _entries: Optional[list[dict]] = None   # lazily loaded cache
@@ -188,3 +210,98 @@ def entries_for_uri(uri: str, limit: int = 50) -> list[dict]:
     with _lock:
         entries = list(_load())
     return [e for e in entries if e.get("uri") == uri][:limit]
+
+
+def _parse_at(ts: str) -> Optional[datetime]:
+    try:
+        at = datetime.fromisoformat(ts)
+    except (TypeError, ValueError):
+        return None
+    if at.tzinfo is None:      # defensive — record() always stamps UTC-aware
+        at = at.replace(tzinfo=timezone.utc)
+    return at
+
+
+def pipeline_drift(max_sessions: int = 10) -> dict:
+    """The pipeline-drift instrument behind the Timing page's drift line.
+
+    For each recorded play whose song has an OLDER baseline (plays of the
+    same uri between _DRIFT_BASELINE_MIN_AGE_H and _DRIFT_BASELINE_MAX_AGE_D
+    before it), the residual is `winning offset − median(baseline offsets)`.
+    Plays are grouped into listening sessions (a >2h silence starts a new
+    one) and each session reports the median residual over its baselined
+    plays. Per-song capture quirks cancel in that median; what survives is
+    the common component — exactly what a pipeline-level latency change
+    (audio-chain fault, routing shuffle) produces and what per-song saves
+    quietly absorb before anyone notices.
+
+    First-ever plays have no baseline and are excluded by construction, so
+    an album of new songs cannot move this number.
+
+    `current` is the most recent session with at least _DRIFT_MIN_BASELINED
+    baselined plays; `alarm` is true when its |median| ≥ DRIFT_ALARM_MS.
+    Sessions come back newest first, capped at `max_sessions`.
+    """
+    with _lock:
+        entries = list(_load())
+
+    plays: list[tuple[datetime, str, int]] = []
+    for e in entries:
+        at = _parse_at(e.get("at", ""))
+        if at is None:
+            continue
+        try:
+            off = int(e.get("offset_ms", 0))
+        except (TypeError, ValueError):
+            continue
+        plays.append((at, str(e.get("uri", "")), off))
+    plays.sort(key=lambda p: p[0])
+
+    by_uri: dict[str, list[tuple[datetime, int]]] = {}
+    for at, uri, off in plays:
+        by_uri.setdefault(uri, []).append((at, off))
+
+    min_age = timedelta(hours=_DRIFT_BASELINE_MIN_AGE_H)
+    max_age = timedelta(days=_DRIFT_BASELINE_MAX_AGE_D)
+
+    sessions: list[dict] = []
+    cur: Optional[dict] = None
+    last_at: Optional[datetime] = None
+    for at, uri, off in plays:
+        if (last_at is None
+                or (at - last_at).total_seconds() > _DRIFT_SESSION_GAP_S):
+            cur = {"start": at, "end": at, "plays": 0, "residuals": []}
+            sessions.append(cur)
+        assert cur is not None
+        cur["plays"] += 1
+        cur["end"] = at
+        last_at = at
+        baseline = [o for (t, o) in by_uri.get(uri, ())
+                    if at - max_age <= t <= at - min_age]
+        if baseline:
+            cur["residuals"].append(off - statistics.median(baseline))
+
+    out: list[dict] = []
+    for s in reversed(sessions):                     # newest first
+        rs = s["residuals"]
+        out.append({
+            "start_at": s["start"].isoformat(),
+            "end_at": s["end"].isoformat(),
+            "plays": s["plays"],
+            "baselined": len(rs),
+            "median_residual_ms": int(round(statistics.median(rs))) if rs else None,
+        })
+        if len(out) >= max_sessions:
+            break
+
+    current = next((s for s in out
+                    if s["baselined"] >= _DRIFT_MIN_BASELINED), None)
+    alarm = bool(current
+                 and abs(current["median_residual_ms"]) >= DRIFT_ALARM_MS)
+    return {
+        "sessions": out,
+        "current": current,
+        "alarm": alarm,
+        "alarm_threshold_ms": DRIFT_ALARM_MS,
+        "min_baselined": _DRIFT_MIN_BASELINED,
+    }
