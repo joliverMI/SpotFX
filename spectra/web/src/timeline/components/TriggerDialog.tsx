@@ -7,6 +7,7 @@ import SearchSelect from '../../components/forms/SearchSelect';
 import { fmtMsTenths, parseMsTenths } from '../../lib/time';
 import { readSticky, writeSticky } from '../../lib/useSticky';
 import { uuid } from '../../lib/uid';
+import { isPhaseStretchClass } from '../phaseBlend';
 import { useBuilderStore } from '../store';
 import { useColorSets } from '../../api/queries';
 import type { EventOption, MusicTrigger } from '../types';
@@ -217,16 +218,35 @@ export default function TriggerDialog({ events }: { events: EventOption[] }) {
           <HelpLink topic="display-modes" title="Dark / Light mode" />
         </label>
 
-        <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, fontSize: 13 }}
-          title="Stretch or compress this event's ramps and delays so it completes exactly at the next enabled trigger (or song end). Beat-timed spacing stays on the beat — only its ramps scale.">
-          <span style={{ width: 90, color: 'var(--text-muted)' }}>Blend ⤳</span>
-          <input type="checkbox" checked={overrideBlend}
-            onChange={(e) => setOverrideBlend(e.target.checked)} />
-          <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>
-            Override blend — ramp until the next trigger
-          </span>
-          <HelpLink topic="override-blend" title="Override Blend" />
-        </label>
+        {/* CHARGE/LULL HAVE NO CHOICE HERE, so they are shown none. SPECTRA
+          * stretches a charge or lull ramp to the real gap to the next
+          * trigger unconditionally (scene_response._phase_ramp_ms) — the
+          * per-scene knob that once gated it was retired 2026-08-20. A box
+          * he cannot untick still implies agency he does not have, so the
+          * control is hidden and the truth is carried on the graph instead:
+          * the timeline draws every charge/lull's ramp-and-hang span (see
+          * ../phaseBlend.ts). The stored flag is never read or written on
+          * this branch — no trigger data changes either way. */}
+        {isPhaseStretchClass(events.find((e) => e.id === eventId)?.event_type) ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, fontSize: 13 }}>
+            <span style={{ width: 90, color: 'var(--text-muted)' }}>Blend ⤳</span>
+            <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>
+              Always ramps to the next trigger — shown on the timeline
+            </span>
+            <HelpLink topic="charge-lull-blend" title="Charge / lull always blend" />
+          </div>
+        ) : (
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, fontSize: 13 }}
+            title="Stretch or compress this event's ramps and delays so it completes exactly at the next enabled trigger (or song end). Beat-timed spacing stays on the beat — only its ramps scale.">
+            <span style={{ width: 90, color: 'var(--text-muted)' }}>Blend ⤳</span>
+            <input type="checkbox" checked={overrideBlend}
+              onChange={(e) => setOverrideBlend(e.target.checked)} />
+            <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>
+              Override blend — ramp until the next trigger
+            </span>
+            <HelpLink topic="override-blend" title="Override Blend" />
+          </label>
+        )}
 
         <div style={{ display: 'flex', gap: 8 }}>
           <button className="primary" onClick={() => save()} disabled={!eventId || parseMsTenths(tsText) === null}>

@@ -1003,13 +1003,25 @@ export const HELP_SECTIONS: HelpSection[] = [
             keywords: 'blend ramp stretch scale slow fast transition next trigger no action paint brush bracket',
             body: [
               'A trigger with Override Blend on rescales its event\'s ramps and delays — proportionally — so the last ramp completes exactly at the next enabled trigger (or at song end when none follows). Beat-timed steps stay on their beats — only their ramps scale. On both timelines the blended span is tinted in the event\'s color from the blend trigger to the trigger that ends it.',
-              'On Charge and Lull triggers this stretches the phase build to exactly the gap to the NEXT trigger — the charge peaks the instant the lull fires, the lull finishes coiling the instant the drop hits. Drop never blends: it stays a snap.',
+              'CHARGE AND LULL ARE NOT GOVERNED BY THIS TICK BOX and no longer show one — see "Charge / lull always blend". Drop never blends either way: it stays a snap.',
             ],
             table: [
               ['[', 'Arm the blend brush — right-click triggers to turn Override Blend ON. Re-press or Esc disarms.'],
               [']', 'Arm the eraser — right-click triggers to turn Override Blend OFF.'],
             ],
             kbd: true,
+          },
+          {
+            id: 'charge-lull-blend',
+            title: 'Charge / lull always blend',
+            keywords: 'charge lull blend ramp hang stretch next trigger span graph timeline tick box checkbox hidden unconditional phase build drop',
+            body: [
+              'A charge or lull ramp ALWAYS stretches to the real gap to the next trigger that will actually fire. There is no per-trigger or per-scene setting that turns it off — the knob that once did was retired in 2026, because his own two lull gaps on one song (6.0 s and 0.9 s) proved no single fixed length fits both. So the Override Blend tick box is hidden on charge and lull triggers rather than shown ticked-and-greyed: a box you cannot untick still implies a choice you do not have.',
+              'What replaces it is a picture. Both timelines now draw every charge and lull as a tinted span in its own colour, running from the trigger to the next one: a stronger band for the RAMP (the first ~90% of the gap, where the build actually rises) and a lighter band for the HANG (the last ~10%, where it sits at full waiting for the next moment — his own spec, "reach the center just and hang for just a moment, before the explosion"). Hovering a marker on the SPECTRA trigger bar spells the same thing out in seconds.',
+              'A charge or lull with NO later enabled trigger has nothing to stretch toward, so it falls back to its flat tuned default — 4.0 s for a charge, 2.5 s for a lull — and is drawn at exactly that width, with no hang. That is the honest picture: it is not a blend running to the end of the song. A disabled trigger never fires, so it draws no span at all.',
+              'Drop is never stretched: it is always the fixed 400 ms snap, and draws no blend span.',
+            ],
+            kbd: false,
           },
           {
             id: 'trigger-color-override',

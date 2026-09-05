@@ -77,6 +77,7 @@ export default function SpectraTriggersCard({
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', fontSize: 11, color: 'var(--text-muted)', marginBottom: 2 }}>
         <span>Marker colours <HelpLink topic="spectra-trigger-colours" title="Marker colours" /></span>
         <span>Fires on the xcorr-synced clock <HelpLink topic="spectra-trigger-sync" title="When a trigger actually fires" /></span>
+        <span>Charge/lull blend spans <HelpLink topic="charge-lull-blend" title="Charge / lull always blend" /></span>
       </div>
       <SpectraTriggerBar
         durationMs={durationMs}
