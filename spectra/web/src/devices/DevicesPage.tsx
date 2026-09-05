@@ -176,7 +176,10 @@ function EditDevice({ device, fields, categoryNames, appliedDelayMs, offsetLimit
                   onChange={(v) => setDraft({ ...draft, [f.name]: v })} />
       ))}
 
-      <div className="card-subtitle" style={{ marginTop: 12 }}>{device.type} settings</div>
+      <div className="card-subtitle" style={{ marginTop: 12 }}>
+        {device.type} settings
+        {device.type === 'wled' && <> <HelpLink topic="device-hardware-id" /></>}
+      </div>
       {group('type').length === 0
         ? <div className="empty-note">This device type adds no settings of its own.</div>
         : group('type').map((f) => (

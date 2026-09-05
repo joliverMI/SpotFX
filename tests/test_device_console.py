@@ -86,7 +86,7 @@ def test_fields_are_grouped_base_then_type_for_the_one_tab():
     assert base == {"name", "icon_name", "center_offset", "refresh_rate",
                     "ip_address"}
     assert {f["name"] for f in fields if f["group"] == "type"} == {
-        "sync_mode", "timeout", "create_segments"}
+        "sync_mode", "timeout", "create_segments", "hardware_id"}
 
 
 def test_a_fields_bounds_and_choices_are_read_not_retyped():
