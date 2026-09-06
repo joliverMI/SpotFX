@@ -100,6 +100,31 @@ while he sleeps — a larger act than taking the lights, and one nobody has
 asked for.
 
 ────────────────────────────────────────────────────────────────────────────
+THE PRE-TAKE PING — announce the take, then wait, THEN take
+────────────────────────────────────────────────────────────────────────────
+
+`take_room`'s FIRST act, ahead of the snapshot file and ahead of the quiet
+take: `pretake_ping.before_take()` POSTs one small `pre_take` event to
+RIVER'S OWN SERVICE and waits `SPECTRA_PRETAKE_SETTLE_MS`, so her snapshot
+watch can read his fixtures in the state SPECTRA found them. Her existing
+trigger watches "is ambient running", which tracks the NIGHT and not the
+TAKE, so an attended take moved his lights with nothing photographed behind
+them; this is the owner's chosen fix, at every take rather than every night.
+
+IT DOES NOT WEAKEN THE SECTION ABOVE. Nothing here fires a house scene,
+names a house entity or reaches Home Assistant — the POST goes to River,
+and what she does with it is hers. `spectra/services/pretake_ping.py` is
+the binding statement and states that boundary as a prohibition.
+
+IT CAN DELAY THIS TAKE; IT CAN NEVER REFUSE ONE. `before_take` does not
+raise, an unreachable endpoint is a VISIBLE `failed` on `TakeResult.pretake`
+(and so on the night's own record), and an unset `SPECTRA_PRETAKE_URL` — the
+shipped state — sends nothing, waits nothing, and leaves the take
+byte-identical to the one before this existed. `run_handover` is told
+`pretake=False` from here precisely so the announcement happens ONCE, at
+this start, and never a second time inside the handover.
+
+────────────────────────────────────────────────────────────────────────────
 SNAPSHOT AND RESTORE ON EVERY EXIT — arming gate two
 ────────────────────────────────────────────────────────────────────────────
 
@@ -164,7 +189,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from spectra import config as scfg
-from spectra.services import mapping_refusals
+from spectra.services import mapping_refusals, pretake_ping
 
 logger = logging.getLogger(__name__)
 
@@ -275,6 +300,11 @@ class TakeResult:
     blacked_out: list = field(default_factory=list)
     #: PARTIAL take-backs commit (the owner's 2026-08-21 ruling) and say so.
     partial: bool = False
+    #: THE PRE-TAKE PING'S OUTCOME (`pretake_ping.PingResult.as_dict`) —
+    #: `sent` / `failed` / `unconfigured`. Carried on the night's own record
+    #: so a snapshot River was never told about is a READ afterwards, never
+    #: a silence: the whole reason a fail-soft call still reports.
+    pretake: dict = field(default_factory=dict)
     announce: list = field(default_factory=list)
 
     def as_dict(self) -> dict:
@@ -283,6 +313,7 @@ class TakeResult:
                 "refusal": self.refusal, "quiet": self.quiet,
                 "blacked_out": list(self.blacked_out),
                 "partial": self.partial,
+                "pretake": dict(self.pretake),
                 "announce": list(self.announce)}
 
 
@@ -314,17 +345,34 @@ async def take_room(run_id: str, *, sides=None,
         # argument is not a gate. It also closes the window between the
         # preflight and the start, where he may have taken the room back
         # himself.
+        #
+        # NO PING ON THIS PATH, deliberately: nothing is taken, so there is
+        # no take to announce and nothing for River to photograph.
         return TakeResult(refusal="not_released",
                           owner_before=owner_before,
                           detail=mapping_refusals.night_take_not_released(
                               owner_before))
+    # ── THE PRE-TAKE PING, AT THE VERY START ───────────────────────────────
+    # BEFORE the snapshot file, before the quiet take darkens anything.
+    # River's snapshot watch tracks "is ambient running", which is the
+    # NIGHT and not the TAKE, so this is the announcement that lets her
+    # read his fixtures in the state SPECTRA found them. It sits here — not
+    # inside `run_handover`, which is told `pretake=False` below — so the
+    # announcement precedes every act of this take including its own
+    # bookkeeping, and so a fake handover in a spec cannot hide it.
+    #
+    # NEVER FATAL, and never a reason to decline a night: `before_take`
+    # does not raise, and a failure is carried on `TakeResult.pretake` and
+    # said out loud in the log rather than stopping the take.
+    pretake = await pretake_ping.before_take()
     # THE SNAPSHOT IS WRITTEN FIRST. Nothing has moved yet, so a crash here
     # costs one stale file the cold start clears with a stated reason —
     # where a crash AFTER the commit with no snapshot on disk would leave a
     # taken room nothing knows how to give back.
     save_snapshot(run_id=run_id, owner_before=owner_before)
     try:
-        await run_handover(light_ownership.SPECTRA, sides, quiet=True)
+        await run_handover(light_ownership.SPECTRA, sides, quiet=True,
+                           pretake=False)
     except Exception as exc:                            # noqa: BLE001
         logger.exception("night take: the quiet take failed")
         # run_handover lands single-owner on every failure path, so the room
@@ -332,7 +380,8 @@ async def take_room(run_id: str, *, sides=None,
         # a cold start believing a room is held.
         clear_snapshot()
         return TakeResult(refusal="take_failed", owner_before=owner_before,
-                          detail=mapping_refusals.night_take_failed(exc))
+                          detail=mapping_refusals.night_take_failed(exc),
+                          pretake=pretake.as_dict())
 
     from spectra.services import activation_report
     from spectra.services.live_host import live
@@ -342,7 +391,8 @@ async def take_room(run_id: str, *, sides=None,
     detail = mapping_refusals.night_took_the_room(partial=partial)
     result = TakeResult(took=True, owner_before=owner_before,
                         taken_at=taken_at, detail=detail, partial=partial,
-                        blacked_out=list(getattr(live, "blacked_out", [])))
+                        blacked_out=list(getattr(live, "blacked_out", [])),
+                        pretake=pretake.as_dict())
     result.announce.append({"event": EVENT_TAKEN, "at": taken_at,
                             "owner_before": owner_before, "quiet": True,
                             "partial": partial, "detail": detail})

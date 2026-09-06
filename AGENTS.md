@@ -4752,6 +4752,61 @@ revert the last lit frame actually landed. Any future instrument
 labelling frames by phase around an in-flight write needs the same
 treatment, or it will report a race as a defect.
 
+### THE PRE-TAKE PING — River is told BEFORE a fixture moves, at EVERY take
+
+`spectra/services/pretake_ping.py`'s module docstring is the binding
+statement, and its one correctness property is PLACEMENT: the announcement
+must precede the first act that could change a fixture, or the snapshot it
+exists to trigger is a snapshot of a room SPECTRA has already begun to move.
+River's snapshot watch fired on "is ambient running" — the NIGHT, not the
+TAKE — so an ATTENDED take moved his lights with nothing photographed behind
+them. The owner's chosen fix (option b): announce, wait a settle, then take.
+Five things:
+
+- **THE WIRE IS HERS AND CONFIRMED LIVE (2026-09-06)**: `POST
+  {SPECTRA_PRETAKE_URL}` (the FULL endpoint URL — this side never appends a
+  path), bearer `SPECTRA_PRETAKE_TOKEN` read by `os.getenv` at CALL TIME
+  exactly as `witness.witness_token()` is, body `{event: "pre_take",
+  room_id, at_ms}`, and **SUCCESS IS HTTP 200, her word, never "any 2xx"** —
+  answering `{captured, elapsed_s, result}`. Her `captured`/`elapsed_s` are
+  SURFACED on the take's own record rather than reduced to a boolean: a 200
+  saying `captured: false` is still `sent` (inventing a verdict she has not
+  defined would be renegotiating her contract) and is still LOUD, in the
+  detail sentence and at ERROR. `None` means SHE DID NOT SAY and is never
+  rendered as "she said no" — `witness_unavailable`'s own discipline.
+- **THE ADDRESS IS NEVER IN THE REPOSITORY.** `config.pretake_url()` has NO
+  default (unlike `whisper_bridge_url()`); her endpoint sits at a
+  DHCP-reachable house address and a baked-in default is the
+  pinned-by-location defect `fx/device_identity.py` exists to end one layer
+  down. The deploy address is recorded in that function's docstring as prose.
+- **BOTH TAKE PATHS, ONCE EACH.** `handover.run_handover` fires it for
+  `to_world == SPECTRA` only (a give-back is not a take — River's own
+  restore owns that end), AFTER the refusal gates (a handover that refuses
+  touches nothing, so there is nothing to announce and no settle to spend)
+  and BEFORE `begin_handover`/quiesce — quiesce STOPS the current writer,
+  which the room can already see. `night_take.take_room` fires it as its own
+  first act, ahead of its snapshot file, and passes `pretake=False` down so
+  a double ping is structurally impossible. That flag exists for that reason
+  alone; nothing calls it to skip the announcement.
+- **IT CAN DELAY A TAKE; IT CAN NEVER REFUSE ONE.** `before_take()` never
+  raises — unconfigured, unreachable, refused, timed out and malformed all
+  come back as a `PingResult` the caller REPORTS (`TakeResult.pretake` on
+  the night's record, `pretake_ping.last()` folded into the armed handover
+  route's response) and the take proceeds. A failed ping STILL SETTLES: a
+  refused or timed-out POST may have arrived, and racing the one snapshot
+  this protects to save 1.5 s is the wrong trade. Only `unconfigured` skips.
+- **UNSET `SPECTRA_PRETAKE_URL` IS INERT AND IS THE SHIPPED STATE** — no
+  request, no sleep, no httpx import, and a take whose side-call sequence is
+  proven byte-identical to the same take with the call absent.
+
+**IT CROSSES NO NEW BOUNDARY.** This is a POST to a RIVER SERVICE, the
+witness/Whisper-bridge posture with the direction reversed; SPECTRA still
+has no Home Assistant write access, no second path into his house, and THE
+SCONCE MAINS RULE below is untouchable from here (asserted against the
+module's own source). Spec: `tests/test_pretake_ping.py` — the ordering
+proven on both paths, with `_first_write`'s own control and a recorded
+source-level RED run behind it.
+
 ### The contamination witness, and THE SCONCE MAINS RULE
 
 `spectra/services/witness.py` is a READ-ONLY client for River's deployed

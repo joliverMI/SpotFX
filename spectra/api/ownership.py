@@ -98,6 +98,7 @@
 from __future__ import annotations
 
 import time
+from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
@@ -105,7 +106,7 @@ from pydantic import BaseModel
 
 from fx import light_ownership
 from spectra import config
-from spectra.services import activation_report
+from spectra.services import activation_report, pretake_ping
 from spectra.services import dark_fixture_watch
 from spectra.services import fx_seam
 from spectra.services import handover as handover_svc
@@ -158,6 +159,25 @@ async def get_ownership():
     return _record_json()
 
 
+def _pretake_json(to_world: str) -> Optional[dict]:
+    """THE PRE-TAKE PING'S OUTCOME, for the take this route just performed.
+
+    `run_handover` returns an `OwnershipRecord` and has nowhere to hand this
+    back, so it is read from the module's remembered result the way a
+    partial activation is read from `activation_report.current()` — with the
+    same care that makes that pattern safe: `last()` describes the LAST
+    announcement, so it is reported ONLY for a take in the direction that
+    actually announces one. A give-back never pings, and must never wear a
+    previous take's status.
+
+    A `failed` ping is a committed handover with a VISIBLE note attached —
+    never a refusal. Nothing about the room changes on it."""
+    if to_world != light_ownership.SPECTRA:
+        return None
+    result = pretake_ping.last()
+    return None if result is None else result.as_dict()
+
+
 @router.post("/ownership/handover")
 async def post_handover(body: HandoverRequest):
     if body.to not in light_ownership.WORLDS:
@@ -177,18 +197,30 @@ async def post_handover(body: HandoverRequest):
             {"result": "refused-preparation-missing", "error": str(exc),
              "record": _record_json()}, status_code=412)
     except handover_svc.HandoverFailed as exc:
-        return JSONResponse(
-            {"result": "failed-landed-single-owner", "error": str(exc),
-             "record": _record_json()}, status_code=502)
+        # A FAILED TAKE STILL ANNOUNCED ITSELF. The ping fires ahead of
+        # quiesce, so River was told and may be holding a snapshot of a room
+        # that never changed hands — she restores it either way, and saying
+        # so here is what stops that from being a silent loose end. The two
+        # refusal paths above are BEFORE the ping and carry nothing.
+        failed = {"result": "failed-landed-single-owner", "error": str(exc),
+                  "record": _record_json()}
+        ping = _pretake_json(body.to)
+        if ping is not None:
+            failed["pretake"] = ping
+        return JSONResponse(failed, status_code=502)
     report = activation_report.current()
+    out = {"result": "committed", "owner": record.owner,
+           "record": _record_json()}
     if report is not None and report.partial \
             and report.source == activation_report.SOURCE_TAKE_BACK:
         # Committed, but not over every light — say so in the response
         # itself (the bar's toast), not only in the record/log.
-        return {"result": "committed-partial", "owner": record.owner,
-                "activation": report.to_json(), "record": _record_json()}
-    return {"result": "committed", "owner": record.owner,
-            "record": _record_json()}
+        out["result"] = "committed-partial"
+        out["activation"] = report.to_json()
+    ping = _pretake_json(body.to)
+    if ping is not None:
+        out["pretake"] = ping
+    return out
 
 
 @router.post("/ownership/release")
