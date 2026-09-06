@@ -63,7 +63,7 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Optional
 
 from spectra.models.room_map import RoomMap
 from spectra.services import capture_health

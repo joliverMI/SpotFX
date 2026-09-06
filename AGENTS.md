@@ -5100,15 +5100,15 @@ binding statement:
 3. **KIND_AUTO** — `preview_pause`/`flare_preview_hold`/`room_preview`,
    which say only that SOMETHING holds the room.
 
-**Why the order, and the defect that set it (2026-09-05, his report
-watching a real proof run: "the ownership banner shows an OUTDATED test
-reason").** Tier 1 did not exist, so a second run starting inside an
-earlier run's still-live declaration wore the EARLIER run's reason — and
-the auto tier could not correct it, because a mapping run holds the room
-through `flare_preview_hold.open_program_hold` and therefore trips the
-label "a flare preview is driving your lights". `since_ms` follows
-whatever the headline names, off the SAME source dict, so this run's words
-can never sit beside an earlier declaration's clock.
+**Why the order matters**: a declaration outlives the run it was made
+for, and a mapping run holds the room through
+`flare_preview_hold.open_program_hold`, so the auto tier can only say "a
+flare preview is driving your lights" about it — without tier 1 a second
+run inside an earlier declaration's ttl wears the EARLIER run's reason
+(the 2026-09-05 report is recorded on `capture_runs.CurrentRun`'s
+docstring). `since_ms` follows whatever the headline names, off the SAME
+source dict, so this run's words can never sit beside an earlier
+declaration's clock.
 
 Three things to know before touching any of it:
 

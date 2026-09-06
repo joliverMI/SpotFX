@@ -9,9 +9,10 @@
  *
  *   IS SOMEONE TESTING?   GET /test-session (spectra/services/
  *     test_session.py) — a server-side fold of the app's own test paths
- *     (a preview holding the room, a flare preview driving lights, a
- *     colour-set preview painting it) PLUS any declared take. The fold
- *     needs zero agent discipline: if a path holds his room, this lights.
+ *     (a named capture run executing, a preview holding the room, a flare
+ *     preview driving lights, a colour-set preview painting it) PLUS any
+ *     declared take. The fold needs zero agent discipline: if a path holds
+ *     his room, this lights.
  *
  *   WHO, AND SINCE WHEN?  MEASURED BEFORE CLAIMED (see whoLine): a live
  *     capture run names itself and carries its own start; otherwise the
