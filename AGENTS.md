@@ -5466,9 +5466,12 @@ things:
   a light back on while it certainly would darken the ones that work (the
   owner's own 2026-08-21 partial-activation trade). Threshold
   `FAULT_AFTER_S`=60 s over ≥3 reads at a 30 s sweep, so ≤90 s to name and
-  no accusation on one noisy read. Stands down entirely (dropping every
-  suspicion) while the stack is down, SPECTRA does not own, a preview/
-  capture hold has the room, or the engine is dark.
+  no accusation on one noisy read. **An UNKNOWN reading never clears a
+  named fault** — a lost `json/state` reply (json/info still answering) is
+  listed as `unchecked` and leaves the suspicion and its clock untouched;
+  only a read that positively says lit clears one. Stands down entirely
+  (dropping every suspicion) while the stack is down, SPECTRA does not
+  own, a preview/capture hold has the room, or the engine is dark.
 
 **ROOT CAUSE, as far as an offline investigation can honestly go: nothing in
 the SPECTRA write path distinguishes .236 from the WLEDs that survive.**

@@ -118,7 +118,12 @@ class EmissionRead:
     so a caller can quote them rather than paraphrase.
 
     `on`/`brightness` are None when `read_state` was False or the state
-    read did not land — again, unknown, never assumed good."""
+    read did not land — again, unknown, never assumed good.
+
+    This is a FACT, not a verdict: it carries no opinion of its own about
+    whether the fixture is dark. The two judgements over it live with their
+    callers (probe_device_live below, dark_fixture_watch.judge), so there
+    is exactly one rule per question and no third that could drift."""
     device_id: str
     checkable: bool
     reachable: bool = False
@@ -128,20 +133,6 @@ class EmissionRead:
     brightness: Optional[int] = None
     state_read: bool = False
     error: Optional[str] = None
-
-    @property
-    def dark(self) -> Optional[bool]:
-        """True when the fixture ANSWERED and is emitting nothing — off at
-        its own firmware, or master brightness zero. None when we could not
-        tell (unreachable, or no state read), which is deliberately not
-        False: "we did not look" and "it is lit" are different facts."""
-        if not self.reachable or self.on is None:
-            return None
-        if not self.on:
-            return True
-        if self.brightness is not None and self.brightness <= 0:
-            return True
-        return False
 
 
 def _read_wled_blocking(wled, read_state: bool):

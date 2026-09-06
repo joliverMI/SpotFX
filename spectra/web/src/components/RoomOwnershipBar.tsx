@@ -17,7 +17,7 @@
  * disappears on its own the moment the light confirms). The take-back's
  * toast says the same thing once, immediately. */
 import HelpLink from '../help/HelpLink';
-import { fmtAgo } from '../lib/time';
+import { fmtAgo, fmtDuration } from '../lib/time';
 import {
   useOwnership,
   useReleaseRoom,
@@ -90,7 +90,7 @@ export function DarkFixtureStrip({ dark }: { dark: DarkFixtureStatus | null | un
             <strong>{d.name}</strong> <span className="activation-strip-why">— {d.why}</span>
             {' '}
             <span className="activation-strip-age">
-              · dark {fmtAgo(d.dark_for_s)}, last read {fmtAgo(d.last_checked_age_s)}
+              · dark for {fmtDuration(d.dark_for_s)}, last read {fmtAgo(d.last_checked_age_s)}
             </span>
           </li>
         ))}

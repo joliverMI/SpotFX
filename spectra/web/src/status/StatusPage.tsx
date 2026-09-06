@@ -2,7 +2,7 @@
  * frame-flush freshness, the named contract) arrives with S3 ownership;
  * this page states what exists now rather than pretending. */
 import HelpLink from '../help/HelpLink';
-import { fmtAgo } from '../lib/time';
+import { fmtAgo, fmtDuration } from '../lib/time';
 import { useAppStatus, useEngineStatus, useOwnership, useSequencerStatus } from '../queries';
 
 export default function StatusPage() {
@@ -74,7 +74,7 @@ export default function StatusPage() {
                     {dark.faults.map((d) => (
                       <li key={d.device_id} title={`${d.device_id}: ${d.reason}`}>
                         ⚠ <strong>{d.name}</strong> — {d.why}
-                        <span style={{ opacity: 0.7 }}> · dark {fmtAgo(d.dark_for_s)}</span>
+                        <span style={{ opacity: 0.7 }}> · dark for {fmtDuration(d.dark_for_s)}</span>
                       </li>
                     ))}
                   </ul>

@@ -94,6 +94,20 @@ does NOT restart the clock: the claim being made is "this fixture has been
 dark continuously for X", which stays true across a change in HOW it is
 dark; the currently-reported kind is simply the latest read's.
 
+AN UNKNOWN READING NEVER CLEARS A NAMED FAULT. Only a read that positively
+says lit does. A fixture that answers `json/info` but loses its `json/state`
+reply — a single dropped request, ordinary for a controller under a write
+burst, which is the very condition this watch exists for — is neither
+evidence of light nor of darkness: it is listed as unchecked for that
+sweep and the suspicion (or fault) stands untouched, clock and all. A lost
+`json/info` in the same sweep is judged unreachable and CONTINUES the
+clock; a lost `json/state` must therefore not reset it either, or the
+switched-off kind could never ripen on a fixture that drops one request
+in three. Two cases DO drop the claim, because in them we are no longer
+making it: a fixture that has genuinely stopped being checkable (not a
+WLED, or a driver with no client) and a fixture SPECTRA has stopped
+streaming to.
+
 WHEN IT STANDS DOWN ENTIRELY, and every suspicion is dropped:
   * the live stack is down, or the ownership record does not say SPECTRA
     owns — we are not streaming to anything and have no standing to
@@ -337,12 +351,13 @@ async def sweep(deps: Deps) -> dict:
             continue
         kind = judge(read)
         if kind is None:
-            checkable = getattr(read, "checkable", False) and read.state_read
-            if not checkable:
+            if not getattr(read, "checkable", False):
                 unchecked.append(device_id)
-            _clear(device_id, now,
-                   "it reads lit again" if checkable
-                   else "it can no longer be checked")
+                _clear(device_id, now, "it can no longer be checked")
+            elif not read.state_read:
+                unchecked.append(device_id)
+            else:
+                _clear(device_id, now, "it reads lit again")
             continue
         dark.append(device_id)
         _mark(device_id, kind, read, now, deps)

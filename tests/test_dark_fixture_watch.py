@@ -43,6 +43,8 @@ from spectra.services.live_host import LiveLights
 #: His real TV backlight: a 560-pixel strip, the Living Room's only capture
 #: carrier and the fixture both reports are about.
 TV_BACKLIGHT_PIXELS = 560
+#: The shipped threshold, read off the module rather than typed here.
+MIN_READS_TO_RIPEN = dfw.MIN_BAD_READS
 
 
 # ── the fixture that can go bad ────────────────────────────────────────────
@@ -65,6 +67,7 @@ class StubWled:
                      "fps": 54}
         self.reachable = True
         self.hang_s = 0.0
+        self.drop_state = 0
         self.requests: list[tuple[str, str]] = []
         outer = self
 
@@ -93,6 +96,10 @@ class StubWled:
                     self.close_connection = True
                     return
                 if self.path.endswith("/json/state"):
+                    if outer.drop_state > 0:
+                        outer.drop_state -= 1
+                        self.close_connection = True
+                        return
                     return self._send(outer.state)
                 if self.path.endswith("/json/info"):
                     return self._send(outer.info)
@@ -115,6 +122,12 @@ class StubWled:
         answering, and keeps reporting that our realtime stream is
         arriving; it simply shows nothing."""
         self.state["on"] = False
+
+    def lose_state_replies(self, count: int) -> None:
+        """Drop the next `count` json/state replies while json/info keeps
+        answering — one lost request at a time, which is what a controller
+        under a write burst actually does."""
+        self.drop_state = count
 
     def leave_the_network(self) -> None:
         """His 2026-09-06 state: gone, while we keep streaming at it."""
@@ -237,16 +250,18 @@ def test_the_four_kinds_of_dark_are_told_apart():
 def test_what_could_not_be_checked_is_never_counted_as_lit():
     """"We did not look" and "it is lit" are different facts — the same
     distinction night_exit draws between DARK and UNKNOWN. A fixture we
-    cannot ask must never be convicted, and must never be absolved."""
+    cannot ask must never be convicted, and must never be absolved.
+    judge() is the ONE rule for what a read means, so "no opinion" is
+    proven there and nowhere else."""
     from spectra.services.live_host import EmissionRead
     unknown = EmissionRead(device_id="hue-1", checkable=False)
     assert dfw.judge(unknown) is None
-    assert unknown.dark is None
     # Reachable, but the state read did not land: on/bri unknown, so no
-    # accusation — and `dark` says so rather than saying False.
+    # accusation — and no absolution either, see the sweep test below.
     partial = _read(on=None, brightness=None, state_read=False)
     assert dfw.judge(partial) is None
-    assert partial.dark is None
+    assert dfw.judge(_read()) is None
+    assert dfw.judge(_read(on=False)) == dfw.KIND_SWITCHED_OFF
 
 
 # ── 2. HIS ROOM: the state every other signal called healthy ───────────────
@@ -280,7 +295,8 @@ def test_his_2026_08_15_state_every_old_signal_says_fine_and_the_watch_names_it(
                 # ── the fixture's own account of itself ──
                 read = await lights.read_emission("tv-backlight")
                 assert read.reachable and read.live is True
-                assert read.on is False and read.dark is True
+                assert read.on is False
+                assert dfw.judge(read) == dfw.KIND_SWITCHED_OFF
 
                 # ── the watch, at the shipped cadence and threshold ──
                 clock = Clock()
@@ -385,6 +401,81 @@ def test_a_fixture_that_comes_back_clears_its_own_fault(tmp_path):
                 cleared = [e for e in dfw.status()["recent"]
                            if e["event"] == "cleared"]
                 assert cleared and cleared[-1]["device_id"] == "tv-backlight"
+
+        _run(scenario())
+
+
+def test_a_lost_state_reply_neither_clears_nor_resets_a_dark_fixture(tmp_path):
+    """AN UNKNOWN READING NEVER CLEARS A NAMED FAULT. His fixtures routinely
+    lose a single request under a write burst — the very condition this
+    watch exists for — so a switched-off fixture whose json/state reply is
+    dropped on some sweeps (json/info still answering) must still ripen on
+    the SHIPPED 60 s / 3-read threshold, and once named must survive a lost
+    reply rather than flap. Only a read that positively says lit clears
+    it."""
+    with StubWled() as stub:
+        async def scenario():
+            async with streaming_room(tmp_path, stub) as (host, lights):
+                clock = Clock()
+                deps = deps_for(lights, clock)
+                stub.go_dark()
+
+                # Every other json/state reply is lost on the way to
+                # ripening: reads 1 and 3 land, reads 2 and 4 do not.
+                await dfw.sweep(deps)                       # dark, read 1
+                clock.tick()
+                stub.lose_state_replies(1)
+                seen = await dfw.sweep(deps)                # lost: no opinion
+                assert seen["unchecked"] == ["tv-backlight"]
+                assert "tv-backlight" in dfw.liveness_summary()["watching"]
+                suspect = dfw._suspects["tv-backlight"]
+                assert suspect.reads == 1, "an unknown read advanced the clock"
+                clock.tick()
+                await dfw.sweep(deps)                       # dark, read 2
+                clock.tick()
+                stub.lose_state_replies(1)
+                await dfw.sweep(deps)                       # lost: no opinion
+                assert dfw._suspects["tv-backlight"] is suspect, \
+                    "an unknown read reset the suspicion"
+                clock.tick()
+                await dfw.sweep(deps)                       # dark, read 3
+                named = dfw.faults()
+                assert len(named) == 1, (
+                    "a fixture dropping one request in two never ripened: "
+                    + dfw.summary())
+                assert named[0].kind == dfw.KIND_SWITCHED_OFF
+                assert named[0].reads == MIN_READS_TO_RIPEN
+                assert named[0].dark_for_s >= dfw.FAULT_AFTER_S
+
+                # Named, and the next reply is lost: the fault STANDS.
+                clock.tick()
+                stub.lose_state_replies(1)
+                seen = await dfw.sweep(deps)
+                assert seen["unchecked"] == ["tv-backlight"]
+                assert len(dfw.faults()) == 1, "a lost reply cleared a named fault"
+                assert dfw.faults()[0] is named[0]
+                assert dfw.liveness_summary()["fault_count"] == 1
+                assert not [e for e in dfw.status()["recent"]
+                            if e["event"] == "cleared"]
+
+                # A lost json/info in the same sweep is a different reading:
+                # unreachable, and it CONTINUES the same clock.
+                clock.tick()
+                stub.leave_the_network()
+                await dfw.sweep(deps)
+                assert dfw.faults()[0] is named[0]
+                assert dfw.faults()[0].kind == dfw.KIND_UNREACHABLE
+                stub.reachable = True
+
+                # Only a read that positively says lit clears it.
+                clock.tick()
+                stub.state["on"] = True
+                await dfw.sweep(deps)
+                assert dfw.faults() == []
+                cleared = [e for e in dfw.status()["recent"]
+                           if e["event"] == "cleared"]
+                assert cleared and cleared[-1]["how"] == "it reads lit again"
+                assert stub.writes() == []
 
         _run(scenario())
 
