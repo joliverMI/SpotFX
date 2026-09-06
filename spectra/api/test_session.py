@@ -8,6 +8,16 @@ and the three rules it exists to enforce).
                                      guesses: an unreadable store or a
                                      failing auto-source probe reports
                                      "unknown", which the bar SHOWS.
+                                     Each source carries `kind`: "run" (a
+                                     NAMED capture run executing right now,
+                                     stamped by spectra/services/
+                                     capture_runs.py), "auto" (one of the
+                                     app's own paths, saying only that
+                                     something holds the room) or
+                                     "declared". The bar's headline prefers
+                                     them in that order — measured before
+                                     claimed — and `since_ms` is whichever
+                                     one it named.
   POST /api/test-session/declare  — {actor, reason, ttl_s}. ttl_s is
                                      MANDATORY (422 without it) and capped
                                      at MAX_TTL_S; re-declaring renews.

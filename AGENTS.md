@@ -5080,6 +5080,61 @@ process"), so a plain return leaves the interpreter alive forever — which
 reads as a hang, not a failure, and cost a real debugging cycle here. Wrap
 `asyncio.run(main())` in try/except and `os._exit(status)`.
 
+## "TESTING IN PROGRESS" NAMES THE RUN — measured before claimed
+
+The loud full-width top bar (`spectra/web/src/components/TestingBar.tsx`,
+served by `spectra/services/test_session.py`) is what he reads to answer
+"are my lights being tested on?". Its headline has THREE source tiers and
+the order is the point — `test_session.py`'s own module docstring is the
+binding statement:
+
+1. **KIND_RUN** — the app executing a NAMED capture run right now. Stamped
+   at the ONE seam, `capture_runs._begin`/`_clear`, in lockstep with the
+   `_running` that already existed, and read through
+   `capture_runs.current_run()`. It cannot go stale: it exists for exactly
+   as long as the run holds the lock, on the success path and the raising
+   one.
+2. **KIND_DECLARED** — `POST /api/test-session/declare`, a human's claim
+   with a ttl up to an hour. It is the one source that deliberately
+   OUTLIVES the work it describes.
+3. **KIND_AUTO** — `preview_pause`/`flare_preview_hold`/`room_preview`,
+   which say only that SOMETHING holds the room.
+
+**Why the order, and the defect that set it (2026-09-05, his report
+watching a real proof run: "the ownership banner shows an OUTDATED test
+reason").** Tier 1 did not exist, so a second run starting inside an
+earlier run's still-live declaration wore the EARLIER run's reason — and
+the auto tier could not correct it, because a mapping run holds the room
+through `flare_preview_hold.open_program_hold` and therefore trips the
+label "a flare preview is driving your lights". `since_ms` follows
+whatever the headline names, off the SAME source dict, so this run's words
+can never sit beside an earlier declaration's clock.
+
+Three things to know before touching any of it:
+
+- **A FIFTH RUN KIND NEEDS A `RUN_PURPOSES` ENTRY** (`capture_runs.py`,
+  declared beside the `KIND_*` constants). Without one it falls back to
+  naming itself ("a `<kind>` run on X") rather than borrowing another
+  kind's phrase — honest, but not his words.
+- **ASK `current_run()` ONCE PER ANSWER.** `_auto_sources()` snapshots it
+  and derives the label, the probe and the start from that one
+  observation; two reads can straddle a run ending, and a headline whose
+  words and whose clock came from different observations is the same class
+  of lie as the stale reason.
+- **THE DECLARED ACTOR IS NOT BORROWED** for a run's headline. It names
+  whoever declared last, which is not provably whoever started this run.
+  The declaration is not discarded — it stays in `sources` and on the
+  payload — it just stops speaking for a run it was not about.
+
+The ROOM-OWNERSHIP bar (`RoomOwnershipBar.tsx`) is a different surface and
+carries no reason at all: the release button, the released banner, and the
+amber `ActivationStrip`. `light_ownership.commit(detail=)` writes the
+record's HISTORY, which nothing renders as a live reason. Spec:
+`tests/test_testing_bar_run_purpose.py` (both halves proven RED against
+the unfixed code) + `node scripts/check_testing_bar_display.mjs` (the real
+`whoLine` formula, DOM-free, with the pre-fix rule driven alongside it).
+Help: `testing-bar`.
+
 ## A DEVICE IS FOUND BY WHAT IT IS, NOT BY WHERE IT WAS
 
 **`fx/device_identity.py`'s module docstring is the binding statement** for

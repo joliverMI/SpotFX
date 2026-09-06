@@ -1295,14 +1295,20 @@ export interface SonicUsageSummary {
 /* ── TESTING IN PROGRESS — the room-visibility surface (his ask 2026-08-24,
  * spectra/services/test_session.py) ── */
 
-/** One reason the bar is up. `kind` "auto" is one of the app's own test
- * paths, folded live server-side with zero agent discipline; "declared" is
- * a human/agent's declared take. */
+/** One reason the bar is up. `kind` "run" is the app executing a NAMED
+ * capture run right now (spectra/services/capture_runs.py) — the only kind
+ * that can say WHICH run, and true for exactly as long as it holds the
+ * room; "auto" is one of the app's own test paths, folded live server-side
+ * with zero agent discipline, saying only that something holds the room;
+ * "declared" is a human/agent's ttl-bounded declared take. The headline
+ * prefers them in that order — see whoLine in TestingBar.tsx.
+ * `since_ms` is that source's own start, where it has one. */
 export interface TestSessionSource {
   key: string;
   label: string;
   detail: string | null;
-  kind: 'auto' | 'declared';
+  kind: 'run' | 'auto' | 'declared';
+  since_ms?: number | null;
 }
 
 export interface TestSessionDeclaration {

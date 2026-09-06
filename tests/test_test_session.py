@@ -67,11 +67,19 @@ def test_each_auto_source_alone_lights_the_bar(monkeypatch):
         assert st["sources"][0]["kind"] == "auto"
 
 
-def test_the_real_auto_sources_are_the_three_paths_that_have_held_his_room():
+def test_the_real_auto_sources_are_the_paths_that_have_held_his_room():
     """The fold must actually reach the real modules — a test that only
-    ever runs against fakes would pass while the wiring is wrong."""
-    keys = [s.key for s in _REAL_AUTO_SOURCES()]
-    assert keys == ["preview_pause", "flare_preview_hold", "room_preview"]
+    ever runs against fakes would pass while the wiring is wrong.
+
+    THE LIVE CAPTURE RUN IS FIRST, and it is the only KIND_RUN one: it is
+    the only source that can name WHICH run holds the room, which is what
+    the headline prefers (see tests/test_testing_bar_run_purpose.py)."""
+    sources = _REAL_AUTO_SOURCES()
+    assert [s.key for s in sources] == [
+        "capture_run", "preview_pause", "flare_preview_hold", "room_preview"]
+    assert [s.kind for s in sources] == [
+        test_session.KIND_RUN, test_session.KIND_AUTO,
+        test_session.KIND_AUTO, test_session.KIND_AUTO]
 
 
 def test_real_preview_pause_lights_the_bar_end_to_end(monkeypatch):

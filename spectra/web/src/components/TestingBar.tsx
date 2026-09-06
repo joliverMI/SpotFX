@@ -13,8 +13,11 @@
  *     colour-set preview painting it) PLUS any declared take. The fold
  *     needs zero agent discipline: if a path holds his room, this lights.
  *
- *   WHO, AND SINCE WHEN?  The declared record's actor/reason/since_ms,
- *     rendered as his own local wall clock plus an elapsed duration.
+ *   WHO, AND SINCE WHEN?  MEASURED BEFORE CLAIMED (see whoLine): a live
+ *     capture run names itself and carries its own start; otherwise the
+ *     declared record's actor/reason/since_ms. Either way `since_ms` comes
+ *     from whichever one the headline names, because this run's words
+ *     beside an earlier declaration's clock is the same lie in a hat.
  *
  *   IS IT ACTUALLY PAINTING?  GET /liveness. THE WHOLE REASON THIS
  *     MATTERS: an owner indicator showed green right through an outage he
@@ -85,9 +88,27 @@ export function paintingLine(live: Liveness | null | undefined): string {
   return `driving your lights (${active.length} painting, frames flowing)`;
 }
 
-/** The one-line "who" — a declared take names itself; an auto-detected
- * source says what is holding the room instead of inventing a name. */
+/** The one-line "who" — MEASURED BEFORE CLAIMED, in three tiers.
+ *
+ * A LIVE RUN WINS. A `run` source is the app executing a named capture run
+ * right now (spectra/services/capture_runs.py stamps it, test_session folds
+ * it), and it exists for exactly as long as that run holds his room. A
+ * DECLARED take is a ttl-bounded human claim that outlives the run it was
+ * made for, so before the run tier existed a second run starting inside an
+ * earlier declaration showed the EARLIER run's reason — the Admiral's own
+ * report, 2026-09-05, watching this bar during a real proof run.
+ *
+ * The declaration's actor is deliberately NOT borrowed for the run's
+ * headline: it names whoever declared last, which is not provably whoever
+ * started this run, and attributing a run to the wrong person is the same
+ * kind of confident wrong answer. It stays on the payload and in `sources`,
+ * so nothing is lost — only the stale sentence stops being the headline.
+ *
+ * An auto source (any tier-3 path) says only that SOMETHING holds the room,
+ * which is still better than inventing a name. */
 export function whoLine(st: TestSessionStatus): string {
+  const run = st.sources.find((s) => s.kind === 'run');
+  if (run) return `${run.label}${run.detail ? ` (${run.detail})` : ''}`;
   if (st.declared) return `${st.declared.actor} — ${st.declared.reason}`;
   const auto = st.sources.filter((s) => s.kind === 'auto');
   if (auto.length === 0) return 'someone (undeclared)';

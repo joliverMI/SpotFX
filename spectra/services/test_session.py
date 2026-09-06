@@ -6,7 +6,19 @@ tested on?" and "weve been thru this befkre").
 The question this answers is NOT "who owns the lights" — an owner
 indicator showed green right through an outage he sat in. It answers "is
 somebody messing with my room RIGHT NOW, and is it actually painting?"
-Two halves, deliberately separate:
+Three sources, deliberately separate, and the headline prefers them in
+this order — MEASURED BEFORE CLAIMED:
+
+  THE LIVE RUN (what is executing right now, in its own words).  Every
+  capture/test run — a map, a commissioning pass, an exposure comparison,
+  a pose fingerprint — goes through the one seam `spectra/services/
+  capture_runs.py`, which publishes what it is doing for exactly as long
+  as it does it (`capture_runs.CurrentRun`). This is the only source that
+  can name WHICH run holds the room, and it cannot go stale: it exists
+  only while the run does. Added 2026-09-05, on the Admiral's report
+  watching the app during a real proof run — "the ownership banner shows
+  an OUTDATED test reason" — because the two sources below cannot answer
+  "which run is this?", and the declared one confidently answers it wrong.
 
   THE AUTO FOLD (zero agent discipline required).  The app's own test
   paths already hold his room, and each one has silently outlived its
@@ -21,7 +33,9 @@ Two halves, deliberately separate:
   that trips an auto source. POST /declare records {actor, reason,
   since_ms, expires_ms}. It is a RECORD HE CAN READ, not reporting
   discipline: nothing enforces it, and its absence never makes the bar
-  claim the room is idle when an auto source says otherwise.
+  claim the room is idle when an auto source says otherwise. It is also
+  the one source that OUTLIVES the work it describes — that is what its
+  ttl is for — so it never owns the headline while a live run does.
 
 THREE RULES THIS MODULE EXISTS TO ENFORCE, all of them scar tissue:
 
@@ -76,6 +90,15 @@ YES = "yes"
 NO = "no"
 UNKNOWN = "unknown"
 
+#: THE THREE KINDS OF SOURCE, in the order the headline prefers them.
+#: KIND_RUN is the app executing a NAMED run right now (`capture_runs.
+#: current_run`) — measured, and true for exactly as long as the run holds
+#: his room. KIND_DECLARED is a human's TTL-bounded claim. KIND_AUTO is one
+#: of the app's own paths saying only that SOMETHING holds the room.
+KIND_RUN = "run"
+KIND_DECLARED = "declared"
+KIND_AUTO = "auto"
+
 
 @dataclass
 class AutoSource:
@@ -84,17 +107,27 @@ class AutoSource:
     `key` is stable and machine-readable; `label` is the phrase that goes
     in front of him on the bar. `probe` returns True while that path is
     holding/driving his room. A probe that RAISES makes the whole fold
-    "unknown" — see fold_sources()."""
+    "unknown" — see fold_sources().
+
+    `kind` is AUTO for every path that only says "something holds the
+    room"; the live capture run declares KIND_RUN instead, because it says
+    which run, and that is what the headline is entitled to prefer.
+    `since_ms` is that run's own start — carried on the source rather than
+    read a second time, so the words and the clock come from ONE
+    observation."""
     key: str
     label: str
     probe: Callable[[], bool]
     detail: Callable[[], Optional[str]] = field(default=lambda: None)
+    kind: str = KIND_AUTO
+    since_ms: Optional[float] = None
 
 
 def _auto_sources() -> list[AutoSource]:
     """The app's own test paths. Imported HERE, not at module scope —
     lazy-import discipline (AGENTS.md's light-mode cold-start crash)."""
-    from spectra.services import flare_preview_hold, preview_pause, room_preview
+    from spectra.services import (capture_runs, flare_preview_hold,
+                                  preview_pause, room_preview)
 
     def _room_preview_detail() -> Optional[str]:
         st = room_preview.status()
@@ -103,7 +136,28 @@ def _auto_sources() -> list[AutoSource]:
             return None
         return f"{len(virtuals)} virtual(s)"
 
+    # THE RUN THAT IS HOLDING HIS ROOM, ASKED ONCE. Snapshotted here rather
+    # than probed live like the others, deliberately: the label, the probe
+    # and the start time then all come from ONE observation, so they cannot
+    # describe two different runs. The snapshot is microseconds old — this
+    # function is called fresh on every fold — and a run that ended in that
+    # window reports the source as not live, which is the safe direction.
+    run = capture_runs.current_run()
+
     return [
+        AutoSource(
+            key="capture_run",
+            # ITS OWN PURPOSE, not a leftover. Until this source existed the
+            # bar's headline could only fall back to a DECLARED take, which
+            # outlives the run it was made for — so a second run inside an
+            # earlier run's ttl showed the earlier run's reason (the
+            # Admiral's report, 2026-09-05). See `capture_runs.CurrentRun`.
+            label=(run.purpose if run is not None
+                   else "a capture run is driving your lights"),
+            probe=lambda: run is not None,
+            kind=KIND_RUN,
+            since_ms=(run.started_ms if run is not None else None),
+        ),
         AutoSource(
             key="preview_pause",
             label="a preview is holding your room (automatic changes paused)",
@@ -270,7 +324,7 @@ def fold_sources() -> tuple[list[dict], bool]:
             # never hide the fact that the source IS live.
             detail = None
         out.append({"key": src.key, "label": src.label, "detail": detail,
-                    "kind": "auto"})
+                    "kind": src.kind, "since_ms": src.since_ms})
     return out, all_readable
 
 
@@ -295,7 +349,10 @@ def status(now_ms: Optional[float] = None) -> dict[str, Any]:
             "key": "declared",
             "label": f"{record.get('actor')}: {record.get('reason')}",
             "detail": None,
-            "kind": "declared",
+            "kind": KIND_DECLARED,
+            "since_ms": (float(record["since_ms"])
+                         if isinstance(record.get("since_ms"), (int, float))
+                         else None),
         }]
 
     if sources:
@@ -305,8 +362,17 @@ def status(now_ms: Optional[float] = None) -> dict[str, Any]:
     else:
         testing = NO
 
+    # SINCE MUST BELONG TO WHATEVER THE HEADLINE NAMES. A live run's own
+    # start wins for the same reason its purpose does: pairing this run's
+    # words with an earlier declaration's clock is the stale reason wearing
+    # a different hat, and it reads as "this has been running for 47
+    # minutes" about something that started a moment ago. Both come off the
+    # SAME source dict, so they cannot disagree.
     since_ms: Optional[float] = None
-    if record is not None and isinstance(record.get("since_ms"), (int, float)):
+    run_src = next((s for s in sources if s.get("kind") == KIND_RUN), None)
+    if run_src is not None and isinstance(run_src.get("since_ms"), (int, float)):
+        since_ms = float(run_src["since_ms"])
+    elif record is not None and isinstance(record.get("since_ms"), (int, float)):
         since_ms = float(record["since_ms"])
 
     return {
