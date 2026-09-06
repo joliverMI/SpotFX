@@ -125,7 +125,16 @@ the vendored default so the activation gate's timing is byte-identical.
 THE SUMMARY LINE COUNTS ONLY READS THAT POSITIVELY SAID LIT as "confirmed
 lit". A fixture reading dark inside the ripening window is accounted for
 as "reading dark or not answering, not yet named" from its first bad read
-— never folded into the lit count while its clock runs.
+— never folded into the lit count while its clock runs — and that clause
+is built from the STANDING suspicions, not from this sweep's reads, so a
+watched fixture stays in the sentence across a lost reply exactly as it
+stays in `watching`. Two different absences get two different words:
+"not checkable" is said only of a device that genuinely cannot be asked
+(not a WLED, or a driver with no client — a property of the device, and
+the claim is dropped because we can no longer make it), while a lost
+reply or a reader crash on a fixture we CAN ask is "unchecked this sweep"
+— a transient miss on a light we are actively watching, which touches
+nothing.
 
 WHEN IT STANDS DOWN ENTIRELY, and every suspicion is dropped:
   * the live stack is down, or the ownership record does not say SPECTRA
@@ -351,7 +360,8 @@ async def sweep(deps: Deps) -> dict:
             _clear(device_id, now, f"the watch stood down — {blocked}")
         _suspects.clear()
         _last_sweep = {"gate": blocked, "streaming": 0, "checked": 0,
-                       "lit": 0, "unchecked": [], "dark": []}
+                       "lit": 0, "unchecked": [], "uncheckable": [],
+                       "dark": []}
         _last_sweep_wall = now
         return _last_sweep
 
@@ -363,6 +373,7 @@ async def sweep(deps: Deps) -> dict:
         return_exceptions=True)
 
     unchecked: list[str] = []
+    uncheckable: list[str] = []
     dark: list[str] = []
     for device_id, read in zip(streaming, reads):
         if isinstance(read, BaseException):
@@ -375,7 +386,7 @@ async def sweep(deps: Deps) -> dict:
         kind = judge(read)
         if kind is None:
             if not getattr(read, "checkable", False):
-                unchecked.append(device_id)
+                uncheckable.append(device_id)
                 _clear(device_id, now, "it can no longer be checked")
             elif not read.state_read:
                 unchecked.append(device_id)
@@ -389,12 +400,14 @@ async def sweep(deps: Deps) -> dict:
     for device_id in [d for d in _suspects if d not in streaming]:
         _clear(device_id, now, "SPECTRA is no longer streaming to it")
 
+    checked = len(streaming) - len(unchecked) - len(uncheckable)
     _last_sweep = {
         "gate": None,
         "streaming": len(streaming),
-        "checked": len(streaming) - len(unchecked),
-        "lit": len(streaming) - len(unchecked) - len(dark),
+        "checked": checked,
+        "lit": checked - len(dark),
         "unchecked": unchecked,
+        "uncheckable": uncheckable,
         "dark": dark,
     }
     _last_sweep_wall = now
@@ -521,28 +534,29 @@ def status() -> dict:
 def summary() -> str:
     ripe = sorted(faults(), key=lambda s: s.name)
     sweep = _last_sweep or {}
-    named_ids = {s.device_id for s in ripe}
-    pending = sorted(d for d in (sweep.get("dark") or [])
-                     if d not in named_ids)
+    pending = sorted(s.device_id for s in _suspects.values() if not s.faulted)
+    unchecked = sorted(sweep.get("unchecked") or [])
+    uncheckable = sorted(sweep.get("uncheckable") or [])
+    clauses = []
+    if pending:
+        clauses.append(f"{len(pending)} reading dark or not answering, not "
+                       f"yet named ({', '.join(pending)})")
+    if unchecked:
+        clauses.append(f"{len(unchecked)} unchecked this sweep "
+                       f"({', '.join(unchecked)})")
+    if uncheckable:
+        clauses.append(f"{len(uncheckable)} not checkable "
+                       f"({', '.join(uncheckable)})")
     if ripe:
-        out = (f"{len(ripe)} fixture(s) dark or not answering while streamed: "
-               + "; ".join(f"{s.name} ({s.why})" for s in ripe))
-        if pending:
-            out += (f"; {len(pending)} more reading dark or not answering, "
-                    f"not yet named ({', '.join(pending)})")
-        return out
+        named = (f"{len(ripe)} fixture(s) dark or not answering while streamed: "
+                 + "; ".join(f"{s.name} ({s.why})" for s in ripe))
+        return "; ".join([named, *clauses])
     if _last_sweep is None:
         return "not swept yet"
     if sweep.get("gate"):
         return f"standing down — {sweep['gate']}"
-    unchecked = sweep.get("unchecked") or []
-    out = f"{sweep.get('lit', 0)} streamed fixture(s) confirmed lit"
-    if pending:
-        out += (f", {len(pending)} reading dark or not answering, not yet "
-                f"named ({', '.join(pending)})")
-    if unchecked:
-        out += f", {len(unchecked)} not checkable ({', '.join(sorted(unchecked))})"
-    return out
+    return ", ".join(
+        [f"{sweep.get('lit', 0)} streamed fixture(s) confirmed lit", *clauses])
 
 
 def liveness_summary() -> dict:
@@ -559,6 +573,7 @@ def liveness_summary() -> dict:
             for s in ripe],
         "watching": [s.device_id for s in _suspects.values() if not s.faulted],
         "unchecked": list((_last_sweep or {}).get("unchecked") or []),
+        "uncheckable": list((_last_sweep or {}).get("uncheckable") or []),
         "last_sweep_age_s": (round(now - _last_sweep_wall, 1)
                              if _last_sweep_wall is not None else None),
         "gate": (_last_sweep or {}).get("gate"),

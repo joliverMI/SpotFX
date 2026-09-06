@@ -5480,9 +5480,12 @@ things:
   listed as `unchecked` and leaves the suspicion and its clock untouched,
   and so is the reader itself raising; only a read that positively says
   lit clears one. The summary line counts only reads that positively said
-  lit as "confirmed lit" — a fixture reading dark inside the ripening
-  window is "reading dark or not answering, not yet named", never folded
-  into the lit count. Stands down entirely
+  lit as "confirmed lit"; its "reading dark or not answering, not yet
+  named" clause is built from the STANDING suspicions, not this sweep's
+  reads, so a watched fixture stays in the sentence across a lost reply;
+  and "not checkable" is said only of a device that cannot be asked at
+  all (`uncheckable`), never of a lost reply or reader crash on a fixture
+  we can ask (`unchecked this sweep`). Stands down entirely
   (dropping every suspicion) while the stack is down, SPECTRA does not
   own, a preview/capture hold has the room, or the engine is dark.
 

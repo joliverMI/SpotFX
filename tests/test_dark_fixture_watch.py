@@ -431,9 +431,19 @@ def test_a_lost_state_reply_neither_clears_nor_resets_a_dark_fixture(tmp_path):
                 stub.lose_state_replies(1)
                 seen = await dfw.sweep(deps)                # lost: no opinion
                 assert seen["unchecked"] == ["tv-backlight"]
+                assert seen["uncheckable"] == []
                 assert "tv-backlight" in dfw.liveness_summary()["watching"]
                 suspect = dfw._suspects["tv-backlight"]
                 assert suspect.reads == 1, "an unknown read advanced the clock"
+                # The SENTENCE, not just the fields: the standing suspicion
+                # stays in it across the lost reply, and a fixture we CAN
+                # ask is never described as one we cannot.
+                line = dfw.summary()
+                assert line.startswith("0 streamed fixture(s) confirmed lit"), line
+                assert "not yet named (tv-backlight)" in line, line
+                assert "unchecked this sweep (tv-backlight)" in line, line
+                assert "not checkable" not in line, line
+                assert dfw.liveness_summary()["summary"] == line
                 clock.tick()
                 await dfw.sweep(deps)                       # dark, read 2
                 clock.tick()
@@ -461,6 +471,11 @@ def test_a_lost_state_reply_neither_clears_nor_resets_a_dark_fixture(tmp_path):
                 assert dfw.liveness_summary()["fault_count"] == 1
                 assert not [e for e in dfw.status()["recent"]
                             if e["event"] == "cleared"]
+                line = dfw.summary()
+                assert line.startswith(
+                    "1 fixture(s) dark or not answering while streamed"), line
+                assert "unchecked this sweep (tv-backlight)" in line, line
+                assert "not checkable" not in line, line
 
                 # A lost json/info in the same sweep is a different reading:
                 # unreachable, and it CONTINUES the same clock.
@@ -586,17 +601,56 @@ def test_a_reader_crash_is_an_unknown_reading_and_leaves_a_named_fault_standing(
 
                 seen = await dfw.sweep(replace(deps, read_emission=broken))
                 assert seen["unchecked"] == ["tv-backlight"]
+                assert seen["uncheckable"] == []
                 assert seen["dark"] == [] and seen["lit"] == 0
                 assert dfw.faults() and dfw.faults()[0] is named[0], \
                     "a reader crash cleared a named fault"
                 assert not [e for e in dfw.status()["recent"]
                             if e["event"] == "cleared"]
                 assert dfw.liveness_summary()["fault_count"] == 1
+                line = dfw.summary()
+                assert "unchecked this sweep (tv-backlight)" in line, line
+                assert "not checkable" not in line, line
 
                 clock.tick()
                 stub.state["on"] = True
                 await dfw.sweep(deps)
                 assert dfw.faults() == []
+                assert stub.writes() == []
+
+        _run(scenario())
+
+
+def test_only_a_device_that_cannot_be_asked_is_called_not_checkable(tmp_path):
+    """"Not checkable" is a property of the DEVICE — not a WLED, or a driver
+    with no client — never a transient miss on a fixture we can ask (the
+    lost-reply and reader-crash proofs above say "unchecked this sweep" for
+    those). When a fixture we were watching stops being askable at all, the
+    claim is dropped, because we can no longer make it, and the sentence
+    says so in exactly those words."""
+    with StubWled() as stub:
+        async def scenario():
+            async with streaming_room(tmp_path, stub) as (host, lights):
+                clock = Clock()
+                deps = deps_for(lights, clock)
+                stub.go_dark()
+                await sweep_until_ripe(deps, clock)
+                assert len(dfw.faults()) == 1
+
+                host.devices.get("tv-backlight").wled = None
+                seen = await dfw.sweep(deps)
+                assert seen["uncheckable"] == ["tv-backlight"]
+                assert seen["unchecked"] == [] and seen["lit"] == 0
+                assert dfw.faults() == [] and dfw._suspects == {}
+                cleared = [e for e in dfw.status()["recent"]
+                           if e["event"] == "cleared"]
+                assert cleared and cleared[-1]["how"] == \
+                    "it can no longer be checked"
+                line = dfw.summary()
+                assert line == ("0 streamed fixture(s) confirmed lit, "
+                                "1 not checkable (tv-backlight)"), line
+                assert dfw.liveness_summary()["uncheckable"] == ["tv-backlight"]
+                assert dfw.liveness_summary()["unchecked"] == []
                 assert stub.writes() == []
 
         _run(scenario())
