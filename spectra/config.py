@@ -227,6 +227,81 @@ def night_self_take() -> bool:
     return os.getenv("SPECTRA_NIGHT_SELF_TAKE", "") == "1"
 
 
+# ── THE PRE-TAKE PING (spectra/services/pretake_ping.py) ───────────────────
+#
+# River's snapshot watch needs to read his fixtures' state BEFORE SPECTRA
+# changes any of them, at EVERY take of the room. All three knobs are read
+# AT CALL TIME — `night_run_token()`'s own posture: repointing River's
+# endpoint or retuning the settle is a systemd `Environment=` edit and a
+# restart, never a module global that could keep serving a stale answer.
+
+#: The settle SPECTRA waits after the ping so River's watch can read the
+#: room, when `SPECTRA_PRETAKE_SETTLE_MS` is unset. 1.5s: long enough for a
+#: local HA automation to fire and read a scene, short enough to be lost in
+#: `handover.HUE_RELEASE_GRACE_S` (5s), which every take already spends.
+PRETAKE_SETTLE_MS_DEFAULT = 1500
+
+#: A malformed or absurd `SPECTRA_PRETAKE_SETTLE_MS` must not be able to
+#: park a take. Zero is legal and means "ping, do not wait".
+PRETAKE_SETTLE_MS_MAX = 30_000
+
+
+def pretake_url() -> str:
+    """The FULL URL of River's pre-take endpoint — SPECTRA POSTs to exactly
+    this address and never appends a path of its own, so the route stays
+    hers to name (`whisper_bridge_url()`'s posture with the STT bridge, one
+    step further: there is not even a path convention to conform to).
+
+    UNSET IS THE SHIPPED STATE AND MEANS INERT: `pretake_ping.before_take()`
+    sends nothing, waits nothing, and every take is byte-identical to the
+    one before this feature existed. It fails SILENT rather than closed on
+    purpose — unlike `night_run_token()`, whose absence must refuse a push,
+    a missing snapshot watch is River's business and may never be a reason
+    SPECTRA cannot take the room.
+
+    DELIBERATELY NO DEFAULT, unlike `whisper_bridge_url()`. Her endpoint is
+    on the house network at a DHCP-reachable address (it was confirmed live
+    at `http://192.168.40.145:8098/pretake` on 2026-09-06 — recorded here as
+    a fact about a deploy, never as a value this code falls back to). Baking
+    a host address into this repository is the pinned-by-location defect
+    `fx/device_identity.py` exists to end one layer down: the day it moves,
+    a default would keep announcing takes into an address that no longer
+    means anything, and every ping would report `failed` for a reason nobody
+    would look for in the code."""
+    return os.getenv("SPECTRA_PRETAKE_URL", "").strip().rstrip("/")
+
+
+def pretake_token() -> str:
+    """The bearer SPECTRA presents on the pre-take POST, from the
+    environment ONLY — never logged, never recorded, never read from a file
+    this app's own writes could touch (`night_run_token()`'s rule).
+
+    An empty token does NOT make the ping inert (that is `pretake_url()`'s
+    job alone): the POST goes out without an `Authorization` header, River
+    answers 401, and the take records a VISIBLE `failed` status and carries
+    on. A missed snapshot said out loud beats a take that quietly skipped
+    the ping because a secret was not provisioned."""
+    return os.getenv("SPECTRA_PRETAKE_TOKEN", "")
+
+
+def pretake_settle_ms() -> int:
+    """How long a take waits between the ping and touching a fixture, so
+    River's watch has a window to read the pre-take state.
+
+    CLAMPED to [0, PRETAKE_SETTLE_MS_MAX] and falling back to the default on
+    anything unparseable: this value sits on the critical path of every take
+    of his room, so a typo in a systemd unit must cost at most 30 seconds
+    and never an hour of held-dark room."""
+    raw = os.getenv("SPECTRA_PRETAKE_SETTLE_MS", "").strip()
+    if not raw:
+        return PRETAKE_SETTLE_MS_DEFAULT
+    try:
+        value = int(float(raw))
+    except ValueError:
+        return PRETAKE_SETTLE_MS_DEFAULT
+    return max(0, min(PRETAKE_SETTLE_MS_MAX, value))
+
+
 def settings_agent_backend() -> str:
     """"api" (default) or "cli" -- which settings_agent* module
     spectra/api/settings_console.py's POST /message dispatches to. MUST

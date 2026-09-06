@@ -84,6 +84,22 @@ load-bearing for another — the vendored render loop skips an inactive
 (unresolved) device's segments per flush and a non-answering DDP target
 simply drops packets, so one dark fixture can only dim the room, never
 corrupt it (proven on the real pipeline in tests/test_take_back_partial.py).
+
+THE PRE-TAKE PING is the FIRST light-affecting act of a take in this
+direction (to_world == spectra), ahead of quiesce and ahead of the record
+moving: `pretake_ping.before_take()` announces the take to River's own
+service and waits a short settle so her snapshot watch can read his fixtures
+in the state SPECTRA found them. Placement IS the correctness property —
+quiesce stops the current writer, which already changes the room — so this
+call must precede it and not merely precede the new writer's first frame.
+It sits AFTER the refusal gates (a handover that refuses touches nothing, so
+there is no take to announce) and only in the take direction (handing the
+room BACK is a give-back; River's own restore owns that end). It NEVER
+raises and never refuses a take; the outcome is reported through
+`pretake_ping.last()`, which the armed API route folds into its response.
+`spectra/services/pretake_ping.py` is the binding statement, including the
+boundary it does not cross: no Home Assistant write access, no second path
+into his house, and the sconce mains rule untouched.
 """
 from __future__ import annotations
 
@@ -100,7 +116,7 @@ import httpx
 from fx import light_ownership
 from fx.host import VENDORED_DEVICE_TYPES
 from spectra import config
-from spectra.services import activation_report
+from spectra.services import activation_report, pretake_ping
 
 logger = logging.getLogger(__name__)
 
@@ -188,6 +204,7 @@ async def run_handover(
     *,
     grace_s: float = HUE_RELEASE_GRACE_S,
     quiet: bool = False,
+    pretake: bool = True,
 ) -> light_ownership.OwnershipRecord:
     """The two-step switch. Raises HandoverRefused when the to-side's go-day
     preparation is missing — BEFORE the record moves and before any quiesce,
@@ -195,7 +212,13 @@ async def run_handover(
     OwnershipError if the record refuses to begin (already owner / already in
     flight) and HandoverFailed when a step fails — in which case the record
     has landed back at the from-world and the from-side was restored
-    best-effort. Returns the committed record."""
+    best-effort. Returns the committed record.
+
+    `pretake=False` says THE CALLER ALREADY ANNOUNCED THIS TAKE — the one
+    caller that does is `night_take.take_room`, which pings at its own start
+    so the announcement precedes its snapshot file too. It exists to make a
+    double ping structurally impossible, never to skip the announcement:
+    nothing in this app calls it with the default flipped."""
     light_ownership.check_can_begin(to_world)
     problems = await sides[to_world].readiness_problems()
     if problems:
@@ -203,6 +226,27 @@ async def run_handover(
             f"handover to {to_world} refused before quiesce — the room is "
             f"untouched and the current owner keeps writing. Missing "
             f"preparation: " + "; ".join(problems))
+    # ── THE PRE-TAKE PING (spectra/services/pretake_ping.py) ───────────────
+    # THE FIRST LIGHT-AFFECTING ACT OF EVERY TAKE, and its placement IS the
+    # correctness property: River's snapshot watch has to be able to read
+    # his fixtures in the state SPECTRA found them, so this must precede
+    # quiesce (which stops the current writer — a change to the room) and
+    # activation, not merely precede the new writer's first frame.
+    #
+    # AFTER the refusal gates above, deliberately: a handover that refuses
+    # touches nothing, so announcing a take that will not happen would ask
+    # River to snapshot and restore for no reason and spend the settle on
+    # a no-op. It is BEFORE `begin_handover` for the same reason it is
+    # before quiesce — nothing has moved yet when River reads.
+    #
+    # ONLY IN THE TAKE DIRECTION. Handing the room BACK to spot-effects is
+    # a give-back, not a take; there is no pre-take state of ours to
+    # photograph and River's own restore owns that end.
+    #
+    # NEVER FATAL: `before_take` does not raise, and its outcome is reported
+    # (the armed API route reads `pretake_ping.last()`), never enforced.
+    if pretake and to_world == light_ownership.SPECTRA:
+        await pretake_ping.before_take()
     handover = light_ownership.begin_handover(to_world)
     # The way back from the panic release: from_world is "released", not one
     # of the two worlds — there is no side to look up, nothing was writing,
