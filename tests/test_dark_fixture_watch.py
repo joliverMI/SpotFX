@@ -341,7 +341,11 @@ def test_his_2026_09_06_state_the_fixture_leaves_the_network_under_stream(
                 named = dfw.faults()
                 assert len(named) == 1, dfw.summary()
                 assert named[0].kind == dfw.KIND_UNREACHABLE
-                assert "stopped answering" in named[0].why
+                assert "not answering" in named[0].why
+                assert f"within {dfw.HTTP_TIMEOUT_S:g}s" in named[0].why
+                assert "dark" not in named[0].why, (
+                    "no reply proves no reply; darkness is an inference the "
+                    "read does not support")
                 assert "no answer" in named[0].reason
 
         _run(scenario())
@@ -378,7 +382,7 @@ def test_a_lit_fixture_is_never_accused_however_long_the_show_runs(tmp_path):
                     clock.tick()
                 assert dfw.faults() == []
                 assert dfw.status()["faults_total"] == 0
-                assert "confirmed lit" in dfw.summary()
+                assert dfw.summary() == "1 streamed fixture(s) confirmed lit"
 
         _run(scenario())
 
@@ -475,6 +479,124 @@ def test_a_lost_state_reply_neither_clears_nor_resets_a_dark_fixture(tmp_path):
                 cleared = [e for e in dfw.status()["recent"]
                            if e["event"] == "cleared"]
                 assert cleared and cleared[-1]["how"] == "it reads lit again"
+                assert stub.writes() == []
+
+        _run(scenario())
+
+
+def test_the_summary_never_calls_a_dark_reading_fixture_confirmed_lit(
+        tmp_path):
+    """The ripening window — a fixture reading dark before FAULT_AFTER_S has
+    elapsed — is exactly when the first shipped summary said "1 streamed
+    fixture(s) confirmed lit" over a read that had just said on=false. A
+    dark read is accounted for from its first sweep and never folded into
+    the lit count; "confirmed lit" means a read that positively said so."""
+    with StubWled() as stub:
+        async def scenario():
+            async with streaming_room(tmp_path, stub) as (host, lights):
+                clock = Clock()
+                deps = deps_for(lights, clock)
+                await dfw.sweep(deps)
+                assert dfw.summary() == "1 streamed fixture(s) confirmed lit"
+
+                clock.tick()
+                stub.go_dark()
+                seen = await dfw.sweep(deps)
+                assert dfw.faults() == [] and seen["dark"] == ["tv-backlight"]
+                assert seen["lit"] == 0 and seen["checked"] == 1
+                pending = dfw.summary()
+                assert "0 streamed fixture(s) confirmed lit" in pending
+                assert "1 streamed fixture(s) confirmed lit" not in pending
+                assert "reading dark" in pending and "not yet named" in pending
+                assert "tv-backlight" in pending
+                assert dfw.liveness_summary()["summary"] == pending
+                assert dfw.liveness_summary()["watching"] == ["tv-backlight"]
+
+                clock.tick()
+                await sweep_until_ripe(deps, clock, sweeps=3)
+                assert len(dfw.faults()) == 1
+                assert "not yet named" not in dfw.summary()
+                assert "confirmed lit" not in dfw.summary()
+
+                stub.state["on"] = True
+                await dfw.sweep(deps)
+                assert dfw.summary() == "1 streamed fixture(s) confirmed lit"
+
+        _run(scenario())
+
+
+def test_the_declared_http_budget_is_the_one_that_decides_unreachable(
+        tmp_path):
+    """A fixture answering slower than the vendored transport's own 0.5 s
+    default but inside HTTP_TIMEOUT_S is REACHABLE and reads lit — the
+    budget this module declares is the one handed to the transport, not a
+    number that only bounded the outer wait and never bound. The vendored
+    default driven on the same fixture is the control: it is what used to
+    decide, and it says unreachable, which is what a busy controller taking
+    the stream looked like to the first shipped version."""
+    with StubWled() as stub:
+        async def scenario():
+            async with streaming_room(tmp_path, stub) as (host, lights):
+                stub.hang_s = 0.8
+                assert 0.5 < stub.hang_s < dfw.HTTP_TIMEOUT_S
+
+                read = await lights.read_emission(
+                    "tv-backlight", dfw.READ_TIMEOUT_S,
+                    http_timeout_s=dfw.HTTP_TIMEOUT_S)
+                assert read.reachable and read.live is True and read.on is True
+                assert dfw.judge(read) is None
+
+                control = await lights.read_emission(
+                    "tv-backlight", dfw.READ_TIMEOUT_S, read_state=False)
+                assert control.reachable is False, (
+                    "the vendored default did not time out on this fixture — "
+                    "the control proves nothing")
+                assert control.state_read is False and control.on is None
+
+                clock = Clock()
+                deps = deps_for(lights, clock)
+                seen = await dfw.sweep(deps)
+                assert seen["dark"] == [] and seen["lit"] == 1
+                assert dfw._suspects == {} and dfw.faults() == []
+                assert dfw.summary() == "1 streamed fixture(s) confirmed lit"
+
+        _run(scenario())
+
+
+def test_a_reader_crash_is_an_unknown_reading_and_leaves_a_named_fault_standing(
+        tmp_path):
+    """The reader itself raising is the most unknown reading there is: it
+    must neither convict a light on our own error nor absolve one. A named
+    fault survives it untouched, and only a read that positively says lit
+    clears it afterwards."""
+    from dataclasses import replace
+
+    with StubWled() as stub:
+        async def scenario():
+            async with streaming_room(tmp_path, stub) as (host, lights):
+                clock = Clock()
+                deps = deps_for(lights, clock)
+                stub.go_dark()
+                await sweep_until_ripe(deps, clock)
+                named = dfw.faults()
+                assert len(named) == 1
+
+                async def broken(device_id, timeout_s, **kw):
+                    raise RuntimeError("reader bug")
+
+                seen = await dfw.sweep(replace(deps, read_emission=broken))
+                assert seen["unchecked"] == ["tv-backlight"]
+                assert seen["dark"] == [] and seen["lit"] == 0
+                assert dfw.faults() and dfw.faults()[0] is named[0], \
+                    "a reader crash cleared a named fault"
+                assert not [e for e in dfw.status()["recent"]
+                            if e["event"] == "cleared"]
+                assert dfw.liveness_summary()["fault_count"] == 1
+
+                clock.tick()
+                stub.state["on"] = True
+                await dfw.sweep(deps)
+                assert dfw.faults() == []
                 assert stub.writes() == []
 
         _run(scenario())

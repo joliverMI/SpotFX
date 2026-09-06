@@ -39,6 +39,8 @@ import time
 from dataclasses import dataclass
 from typing import Callable, Optional
 
+import requests
+
 from fx import light_ownership
 from fx.audio_ingest import AudioIngestHub, HubMelbankSource, LiveDeviceSource
 from fx.events import Event
@@ -135,7 +137,8 @@ class EmissionRead:
     error: Optional[str] = None
 
 
-def _read_wled_blocking(wled, read_state: bool):
+def _read_wled_blocking(wled, read_state: bool,
+                        http_timeout_s: Optional[float] = None):
     """(info, state, error) for one fixture, on a WORKER THREAD — see
     LiveLights.read_emission for why this is off the event loop.
 
@@ -145,11 +148,26 @@ def _read_wled_blocking(wled, read_state: bool):
     transport — not a second, parallel WLED client that could drift from
     the one the driver actually uses.
 
+    `http_timeout_s` is the budget EACH request gets, handed to that same
+    transport explicitly (`WLED._wled_request(timeout=)`); None keeps the
+    transport's own default (0.5 s), which is what the activation gate has
+    always run at. A caller that declares a budget must hand it down here
+    — an outer bound around this call never decides reachability, because
+    the transport's default fires first.
+
     A `json/state` read that fails after `json/info` answered is NOT
     "unreachable": the fixture demonstrably answered. It comes back as an
     absent state, which every consumer reports as unknown."""
+    def fetch(endpoint: str):
+        if http_timeout_s is None:
+            return asyncio.run(wled.get_info() if endpoint == "json/info"
+                               else wled.get_state())
+        response = asyncio.run(wled._wled_request(
+            requests.get, wled.ip_address, endpoint, timeout=http_timeout_s))
+        return response.json()
+
     try:
-        info = asyncio.run(wled.get_info())
+        info = fetch("json/info")
     except Exception as exc:
         return None, None, repr(exc)
     if not isinstance(info, dict):
@@ -158,7 +176,7 @@ def _read_wled_blocking(wled, read_state: bool):
     if not read_state:
         return info, None, None
     try:
-        state = asyncio.run(wled.get_state())
+        state = fetch("json/state")
     except Exception:
         state = None
     return info, (state if isinstance(state, dict) else None), None
@@ -489,7 +507,9 @@ class LiveLights:
 
     async def read_emission(self, device_id: str,
                             timeout_s: float = DEVICE_VERIFY_TIMEOUT_S,
-                            *, read_state: bool = True) -> "EmissionRead":
+                            *, read_state: bool = True,
+                            http_timeout_s: Optional[float] = None,
+                            ) -> "EmissionRead":
         """ONE read of what one fixture is ACTUALLY DOING — the single
         definition of that fact for every caller in this codebase. Two
         different questions are asked of it and they are deliberately
@@ -514,6 +534,12 @@ class LiveLights:
         poll-until-live loop on a device class whose failure mode is being
         overwhelmed.
 
+        `http_timeout_s` is the per-REQUEST budget handed to the transport
+        (see _read_wled_blocking); `timeout_s` only bounds the whole read
+        from outside and never decides reachability by itself. The default
+        None keeps the transport's own 0.5 s, so probe_device_live's timing
+        is byte-identical to before this read was shared.
+
         OFF THE EVENT LOOP, on purpose. `fx.utils.WLED`'s methods are
         `async def` wrappers around BLOCKING `requests` calls — they never
         await, so awaiting one parks the whole SPECTRA event loop for the
@@ -534,7 +560,8 @@ class LiveLights:
         try:
             info, state, error = await asyncio.wait_for(
                 loop.run_in_executor(
-                    None, _read_wled_blocking, device.wled, read_state),
+                    None, _read_wled_blocking, device.wled, read_state,
+                    http_timeout_s),
                 timeout_s)
         except Exception as exc:                      # incl. TimeoutError
             return EmissionRead(device_id=device_id, checkable=True,
@@ -551,7 +578,7 @@ class LiveLights:
             on=state.get("on") if "on" in state else None,
             brightness=int(brightness) if isinstance(brightness, (int, float))
             else None,
-            state_read=bool(state) or not read_state,
+            state_read=bool(state),
         )
 
     async def probe_device_live(self, device_id: str,

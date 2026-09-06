@@ -62,14 +62,14 @@ export default function StatusPage() {
                 </span>
               )}
             </div>
-            <div><div className="k">Lights dark while streamed <HelpLink topic="dark-fixture-watch" title="A light that is dark while being streamed to" /></div>
+            <div><div className="k">Streamed lights dark or not answering <HelpLink topic="dark-fixture-watch" title="A light that is dark or not answering while being streamed to" /></div>
               {!dark || dark.last_sweep_age_s === null ? (
                 <span style={{ opacity: 0.7 }}>— (not watching — SPECTRA is not driving the lights)</span>
               ) : dark.fault_count === 0 ? (
                 <span title={dark.summary}>none · {dark.summary}</span>
               ) : (
                 <span>
-                  {dark.fault_count} dark · last read {fmtAgo(dark.last_sweep_age_s)}
+                  {dark.fault_count} named · last read {fmtAgo(dark.last_sweep_age_s)}
                   <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
                     {dark.faults.map((d) => (
                       <li key={d.device_id} title={`${d.device_id}: ${d.reason}`}>

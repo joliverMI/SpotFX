@@ -5446,7 +5446,16 @@ things:
   = an activation gap) and asks with `read_state=False`, deliberately: the
   activation gate is a poll-until-live loop and must not add HTTP load to a
   fixture during its own come-up ramp. The watch's judgement adds
-  `on=false` / `bri=0`. **The read is OFF THE EVENT LOOP** — `fx.utils.
+  `on=false` / `bri=0`. **The `unreachable` kind claims only what the read
+  established** — no reply within `HTTP_TIMEOUT_S` (3 s), which is handed
+  to the vendored transport explicitly (`WLED._wled_request(timeout=)`):
+  its own default is 0.5 s, and a budget that only bounds the outer
+  `wait_for` never binds (the first shipped version declared 3 s and
+  decided at 0.5 s). Its sentence says "not answering", never "dark" — a
+  controller too busy taking the stream to answer HTTP reads the same as
+  one off the network. `probe_device_live` keeps the vendored default
+  (`http_timeout_s=None`), so the activation gate's timing is
+  byte-identical. **The read is OFF THE EVENT LOOP** — `fx.utils.
   WLED`'s methods are `async def` wrappers around blocking `requests`, so
   awaiting one parks the loop that drives the bridge poll, the trigger tick
   and every WS broadcast; a sweep over dead fixtures would stall all three.
@@ -5468,8 +5477,12 @@ things:
   `FAULT_AFTER_S`=60 s over ≥3 reads at a 30 s sweep, so ≤90 s to name and
   no accusation on one noisy read. **An UNKNOWN reading never clears a
   named fault** — a lost `json/state` reply (json/info still answering) is
-  listed as `unchecked` and leaves the suspicion and its clock untouched;
-  only a read that positively says lit clears one. Stands down entirely
+  listed as `unchecked` and leaves the suspicion and its clock untouched,
+  and so is the reader itself raising; only a read that positively says
+  lit clears one. The summary line counts only reads that positively said
+  lit as "confirmed lit" — a fixture reading dark inside the ripening
+  window is "reading dark or not answering, not yet named", never folded
+  into the lit count. Stands down entirely
   (dropping every suspicion) while the stack is down, SPECTRA does not
   own, a preview/capture hold has the room, or the engine is dark.
 

@@ -81,8 +81,8 @@ export function DarkFixtureStrip({ dark }: { dark: DarkFixtureStatus | null | un
   return (
     <div className="activation-strip" role="status">
       <span className="activation-strip-lead">
-        ⚠ {dark.fault_count} light{dark.fault_count === 1 ? ' is' : 's are'} dark while SPECTRA
-        {' '}streams to {dark.fault_count === 1 ? 'it' : 'them'}
+        ⚠ {dark.fault_count} light{dark.fault_count === 1 ? ' is' : 's are'} dark or not answering
+        {' '}while SPECTRA streams to {dark.fault_count === 1 ? 'it' : 'them'}
       </span>
       <ul>
         {dark.faults.map((d) => (
@@ -95,7 +95,7 @@ export function DarkFixtureStrip({ dark }: { dark: DarkFixtureStatus | null | un
           </li>
         ))}
       </ul>
-      <HelpLink topic="dark-fixture-watch" title="A light that is dark while being streamed to" />
+      <HelpLink topic="dark-fixture-watch" title="A light that is dark or not answering while being streamed to" />
     </div>
   );
 }

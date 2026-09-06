@@ -44,10 +44,14 @@ off, and a virtual that stopped flushing is `activation_gaps`' business,
 already named there. The two detections therefore cannot both claim the
 same silence.
 
-FOUR NAMED KINDS, all of them "dark while streamed", told apart because the
-next step differs for each:
-  unreachable    it stopped answering at all — the show is writing into the
-                 dark (his 2026-09-06 shape)
+FOUR NAMED KINDS, each claiming only what its read established, told apart
+because the next step differs for each:
+  unreachable    it did not reply to our HTTP read within `HTTP_TIMEOUT_S`
+                 (his 2026-09-06 shape). That is ALL this kind claims: a
+                 controller too busy taking the stream to answer looks the
+                 same from here as one off the network, and whether the
+                 light is lit cannot be read until it answers — so its
+                 sentence says "not answering", never "dark".
   not-receiving  it answers, and says our stream is not arriving
   switched-off   it takes our stream and is OFF at its own firmware (his
                  2026-08-15 shape)
@@ -106,7 +110,22 @@ switched-off kind could never ripen on a fixture that drops one request
 in three. Two cases DO drop the claim, because in them we are no longer
 making it: a fixture that has genuinely stopped being checkable (not a
 WLED, or a driver with no client) and a fixture SPECTRA has stopped
-streaming to.
+streaming to. The reader itself raising is the most unknown reading there
+is and is treated the same way: listed as unchecked, nothing touched.
+
+THE BUDGET THAT DECIDES `unreachable` IS `HTTP_TIMEOUT_S`, and it binds
+because it is handed to the vendored transport explicitly
+(`WLED._wled_request(timeout=)`, still the unmodified production
+transport). That transport's own default is 0.5 s, and a budget that only
+bounded the outer wait would never bind — the first shipped version
+declared 3 s and decided at 0.5 s. `READ_TIMEOUT_S` is the whole
+two-request read's outer bound, nothing more. `probe_device_live` keeps
+the vendored default so the activation gate's timing is byte-identical.
+
+THE SUMMARY LINE COUNTS ONLY READS THAT POSITIVELY SAID LIT as "confirmed
+lit". A fixture reading dark inside the ripening window is accounted for
+as "reading dark or not answering, not yet named" from its first bad read
+— never folded into the lit count while its clock runs.
 
 WHEN IT STANDS DOWN ENTIRELY, and every suspicion is dropped:
   * the live stack is down, or the ownership record does not say SPECTRA
@@ -170,7 +189,8 @@ logger = logging.getLogger(__name__)
 SWEEP_INTERVAL_S = 30.0
 FAULT_AFTER_S = 60.0
 MIN_BAD_READS = 3
-READ_TIMEOUT_S = 3.0
+HTTP_TIMEOUT_S = 3.0
+READ_TIMEOUT_S = 2 * HTTP_TIMEOUT_S + 1.0
 RECENT_EVENTS = 50
 
 KIND_UNREACHABLE = "unreachable"
@@ -181,8 +201,10 @@ KIND_BLACKED_OUT = "blacked-out"
 #: The clause each kind contributes to the sentence he reads. The fixture's
 #: own name and address are filled in around it by `_describe`.
 _KIND_CLAUSE = {
-    KIND_UNREACHABLE: ("has stopped answering at {where} while SPECTRA is "
-                       "streaming to it — the show is writing into the dark"),
+    KIND_UNREACHABLE: ("is not answering at {where} — no reply to SPECTRA "
+                       "within {budget:g}s — while SPECTRA is streaming to "
+                       "it; whether it is lit cannot be read until it "
+                       "answers"),
     KIND_NOT_RECEIVING: ("answers at {where} but reports it is NOT receiving "
                          "SPECTRA's stream, while SPECTRA is streaming to it"),
     KIND_SWITCHED_OFF: ("is taking SPECTRA's stream at {where} but is "
@@ -249,7 +271,7 @@ class Deps:
     #: The devices SPECTRA is pushing frames at right now.
     streaming_device_ids: Callable[[], set]
     #: One fixture's own account of itself — live_host.LiveLights.read_emission.
-    read_emission: Callable[[str, float], Any]
+    read_emission: Callable[..., Any]
     #: (name, address) for a device id, for the sentence he reads.
     describe_device: Callable[[str], tuple]
     #: Why the sweep must not run right now, or None.
@@ -301,12 +323,13 @@ def judge(read) -> Optional[str]:
 
 def _describe(kind: str, name: str, address: Optional[str]) -> str:
     where = address or "its address"
-    return f"{name} " + _KIND_CLAUSE[kind].format(where=where)
+    return f"{name} " + _KIND_CLAUSE[kind].format(where=where,
+                                                  budget=HTTP_TIMEOUT_S)
 
 
 def _reason(read, kind: str) -> str:
     if kind == KIND_UNREACHABLE:
-        return f"no answer: {read.error}"
+        return f"no answer within {HTTP_TIMEOUT_S:g}s: {read.error}"
     return (f"live={read.live} on={read.on} bri={read.brightness}"
             + (f" lip={read.source_ip}" if read.source_ip else ""))
 
@@ -315,8 +338,8 @@ def _reason(read, kind: str) -> str:
 
 async def sweep(deps: Deps) -> dict:
     """One pass. Returns what it saw, and records/clears faults. Never
-    raises for a fixture's sake — a read that blew up is an unreachable
-    fixture, which is the fault this exists to name."""
+    raises for a fixture's sake: the reader itself failing is the most
+    unknown reading there is, listed as unchecked and touching nothing."""
     global _last_sweep, _last_sweep_wall
 
     now = deps.clock()
@@ -328,13 +351,14 @@ async def sweep(deps: Deps) -> dict:
             _clear(device_id, now, f"the watch stood down — {blocked}")
         _suspects.clear()
         _last_sweep = {"gate": blocked, "streaming": 0, "checked": 0,
-                       "unchecked": [], "dark": []}
+                       "lit": 0, "unchecked": [], "dark": []}
         _last_sweep_wall = now
         return _last_sweep
 
     streaming = sorted(deps.streaming_device_ids())
     reads = await asyncio.gather(
-        *(deps.read_emission(device_id, READ_TIMEOUT_S)
+        *(deps.read_emission(device_id, READ_TIMEOUT_S,
+                             http_timeout_s=HTTP_TIMEOUT_S)
           for device_id in streaming),
         return_exceptions=True)
 
@@ -343,11 +367,10 @@ async def sweep(deps: Deps) -> dict:
     for device_id, read in zip(streaming, reads):
         if isinstance(read, BaseException):
             # The reader itself failed us, not the fixture. Say so; do not
-            # convict a light on our own error.
+            # convict a light on our own error, and do not absolve one.
             logger.warning("dark fixture watch: read of %s failed: %r",
                            device_id, read)
             unchecked.append(device_id)
-            _clear(device_id, now, "its read could not be made")
             continue
         kind = judge(read)
         if kind is None:
@@ -370,6 +393,7 @@ async def sweep(deps: Deps) -> dict:
         "gate": None,
         "streaming": len(streaming),
         "checked": len(streaming) - len(unchecked),
+        "lit": len(streaming) - len(unchecked) - len(dark),
         "unchecked": unchecked,
         "dark": dark,
     }
@@ -404,7 +428,7 @@ def _mark(device_id: str, kind: str, read, now: float, deps: Deps) -> None:
                     "dark_for_s": round(suspect.dark_for_s, 1)})
     logger.critical(
         "DARK FIXTURE: %s — %s (%s; %s). SPECTRA has been streaming to it "
-        "for %.0fs with nothing to show for it. Nothing is being written to "
+        "and reading this back for %.0fs. Nothing is being written to "
         "fix this: see GET /spectra/api/liveness → dark_fixtures.",
         device_id, why, kind, reason, suspect.dark_for_s)
 
@@ -496,16 +520,26 @@ def status() -> dict:
 
 def summary() -> str:
     ripe = sorted(faults(), key=lambda s: s.name)
+    sweep = _last_sweep or {}
+    named_ids = {s.device_id for s in ripe}
+    pending = sorted(d for d in (sweep.get("dark") or [])
+                     if d not in named_ids)
     if ripe:
-        return (f"{len(ripe)} fixture(s) dark while streamed: "
-                + "; ".join(f"{s.name} ({s.why})" for s in ripe))
+        out = (f"{len(ripe)} fixture(s) dark or not answering while streamed: "
+               + "; ".join(f"{s.name} ({s.why})" for s in ripe))
+        if pending:
+            out += (f"; {len(pending)} more reading dark or not answering, "
+                    f"not yet named ({', '.join(pending)})")
+        return out
     if _last_sweep is None:
         return "not swept yet"
-    if _last_sweep.get("gate"):
-        return f"standing down — {_last_sweep['gate']}"
-    checked = _last_sweep.get("checked", 0)
-    unchecked = _last_sweep.get("unchecked") or []
-    out = f"{checked} streamed fixture(s) confirmed lit"
+    if sweep.get("gate"):
+        return f"standing down — {sweep['gate']}"
+    unchecked = sweep.get("unchecked") or []
+    out = f"{sweep.get('lit', 0)} streamed fixture(s) confirmed lit"
+    if pending:
+        out += (f", {len(pending)} reading dark or not answering, not yet "
+                f"named ({', '.join(pending)})")
     if unchecked:
         out += f", {len(unchecked)} not checkable ({', '.join(sorted(unchecked))})"
     return out
