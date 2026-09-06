@@ -370,7 +370,8 @@ async def stop() -> None:
 
 
 def status() -> dict:
-    from spectra.services import ambient_music_gate, night_run, param_watchdog
+    from spectra.services import (ambient_music_gate, dark_fixture_watch,
+                                   night_run, param_watchdog)
     return {
         "increment": "S3",
         "dark": executor.mode == "recording",
@@ -385,6 +386,12 @@ def status() -> dict:
         # The param orphan watchdog (spectra/services/param_watchdog.py):
         # restores, suspicions, give-ups — loud by design, see its docstring.
         "param_watchdog": param_watchdog.status(),
+        # THE DARK FIXTURE WATCH (spectra/services/dark_fixture_watch.py):
+        # every fixture this engine is streaming to that reads back dark or
+        # unreachable. `executor.recent_writes` above proves a write LEFT
+        # SPECTRA; this is the only thing here that says whether a light
+        # came on at the other end.
+        "dark_fixtures": dark_fixture_watch.status(),
         # THE NIGHT RUN (spectra/services/night_run.py): run_id, state and
         # timestamps, so his dashboards can show "measurement running" from
         # the surface Home Assistant already reads. Small on purpose — the

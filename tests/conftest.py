@@ -338,6 +338,21 @@ def _isolated_param_watchdog():
 
 
 @pytest.fixture(autouse=True)
+def _isolated_dark_fixture_watch():
+    """spectra/services/dark_fixture_watch.py (the dark fixture watch,
+    2026-09-06) is module-global state with no DI seam — same shape as
+    param_watchdog / activation_report above. A suspicion started by one
+    test's sweep would otherwise ripen into a NAMED FAULT inside an
+    unrelated later test that happens to sweep the same device id, and a
+    fault count leaks straight onto the liveness payload every API test
+    reads. Autouse so no individual test needs to know."""
+    from spectra.services import dark_fixture_watch
+    dark_fixture_watch.reset()
+    yield
+    dark_fixture_watch.reset()
+
+
+@pytest.fixture(autouse=True)
 def _isolated_activation_report():
     """spectra/services/activation_report.py (the take-back/resume
     activation report, 2026-08-21) is module-global state with no DI seam

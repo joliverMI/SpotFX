@@ -164,9 +164,10 @@ async def _standalone_lifespan(app):
 
     logger = logging.getLogger("spectra")
     from spectra.services import (activation_report, ambient_music_gate,
-                                   device_preview, engine, flare_preview_hold,
-                                   frame_watchdog, handover, night_run,
-                                   ownership_reconciler, param_watchdog)
+                                   dark_fixture_watch, device_preview, engine,
+                                   flare_preview_hold, frame_watchdog,
+                                   handover, night_run, ownership_reconciler,
+                                   param_watchdog)
     await engine.start()
     await device_preview.start()
     # A SELF-TAKEN NIGHT ORPHANED BY A CRASH, and this MUST run before the
@@ -261,11 +262,23 @@ async def _standalone_lifespan(app):
     # running show on its own. Idle-cheap when nothing was skipped.
     activation_recheck_task = asyncio.create_task(
         activation_report.run_supervised(), name="spectra-activation-recheck")
+    # THE DARK FIXTURE WATCH (his tv-backlight reports, 2026-08-15 and
+    # 2026-09-06 — spectra/services/dark_fixture_watch.py): every
+    # SWEEP_INTERVAL_S, each fixture SPECTRA is actually pushing frames at
+    # is asked what it is doing, and one that has read back dark or gone
+    # for FAULT_AFTER_S is NAMED — CRITICAL log, and on every status
+    # surface that reported healthy over exactly that state. The activation
+    # recheck above only ever re-asks lights that were already dark at
+    # activation, so a fixture that goes mid-show was invisible without
+    # this. Read-only: it never writes to a fixture and never restarts
+    # anything. Stands down by itself while SPECTRA is not driving the room.
+    dark_fixture_task = asyncio.create_task(
+        dark_fixture_watch.run_supervised(), name="spectra-dark-fixture-watch")
     logger.info("SPECTRA started — own process, pid %d", os.getpid())
     yield
     all_tasks = (watchdog_task, reconciler_task, ambient_verify_task,
                 flare_preview_sweep_task, param_watchdog_task,
-                activation_recheck_task)
+                activation_recheck_task, dark_fixture_task)
     for task in all_tasks:
         task.cancel()
     for task in all_tasks:

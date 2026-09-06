@@ -106,6 +106,7 @@ from pydantic import BaseModel
 from fx import light_ownership
 from spectra import config
 from spectra.services import activation_report
+from spectra.services import dark_fixture_watch
 from spectra.services import fx_seam
 from spectra.services import handover as handover_svc
 from spectra.services import param_watchdog
@@ -136,6 +137,15 @@ def _record_json() -> dict:
         # `partial` + `skipped[]` name every light the last take-back/
         # resume could not bring up, and whether it has since recovered.
         "activation": activation_report.status(),
+        # THE DARK FIXTURE WATCH (spectra/services/dark_fixture_watch.py):
+        # a light SPECTRA is streaming to RIGHT NOW that is not lit — off
+        # at its own firmware, at zero brightness, refusing our stream, or
+        # gone from the network. The activation report above is a snapshot
+        # of one activation and by construction can never notice a fixture
+        # that was fine and then went (his 2026-08-15 and 2026-09-06
+        # tv-backlight reports); this is the continuous half, on its own
+        # cadence, and the room bar renders both.
+        "dark_fixtures": dark_fixture_watch.status(),
     }
     if record.handover:
         out["handover"]["age_s"] = round(
@@ -215,7 +225,16 @@ async def get_liveness():
     virtuals = live.liveness()
     devices = {}
     if live.host is not None:
-        devices = {d.id: {"type": d.type, "online": bool(d.is_online)}
+        # `is_online` is a METHOD on fx.devices.Device, not a property —
+        # `bool(d.is_online)` was `bool(<bound method>)`, i.e. hardcoded
+        # True for every device on every response, forever. Called now, so
+        # the field at least reports the flag it claims to. THE HONEST
+        # LIMIT, and it is why dark_fixtures below had to exist: even
+        # called, `_online` is set True when the driver is built and is
+        # only ever cleared by an OSError out of `sendto`, which a UDP
+        # unicast to a dead host does not raise on Linux — so this is not
+        # a reachability signal for a WLED and must never be read as one.
+        devices = {d.id: {"type": d.type, "online": bool(d.is_online())}
                    for d in live.host.devices.values()}
 
     activation_gaps = live.activation_gaps() if live.active else {}
@@ -266,6 +285,18 @@ async def get_liveness():
             # take-back/resume had to skip, why, and whether they have come
             # back since. Informational only; never affects `healthy`.
             "activation": activation_report.liveness_summary(),
+            # Additive (2026-09-06, the dark fixture watch — spectra/
+            # services/dark_fixture_watch.py): a fixture SPECTRA is
+            # STREAMING TO right now that is reading back dark or gone.
+            # Every other signal on this payload said healthy over exactly
+            # that state — `virtuals` proves OUR render loop pushed a
+            # frame, `devices[].online` is a flag a dead UDP fixture never
+            # clears, and `activation_gaps`/`activation` only ever speak
+            # about the last activation. Informational only; NEVER part of
+            # `healthy`, because the systemd dead-man and the fleet checker
+            # read that and a restart cannot fix a switched-off light while
+            # it certainly would darken the ones that work.
+            "dark_fixtures": dark_fixture_watch.liveness_summary(),
         },
         status_code=200 if healthy else 503,
     )

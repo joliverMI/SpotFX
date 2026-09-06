@@ -766,6 +766,37 @@ export interface ActivationReport {
   recheck_interval_s: number;
 }
 
+/** GET /spectra/api/ownership → `dark_fixtures` (the server's own
+ * `dark_fixture_watch.status()`): a fixture SPECTRA is STREAMING TO right
+ * now that reads back dark or gone. Distinct from ActivationReport above,
+ * which is a snapshot of one activation and by construction can never
+ * notice a light that was fine and then went (his tv-backlight, twice). */
+export interface DarkFixture {
+  device_id: string;
+  name: string;
+  address: string | null;
+  kind: 'unreachable' | 'not-receiving' | 'switched-off' | 'blacked-out' | string;
+  why: string;
+  reason: string;
+  reads: number;
+  dark_for_s: number;
+  first_seen_age_s: number;
+  last_checked_age_s: number;
+  faulted: boolean;
+  faulted_age_s: number | null;
+}
+
+export interface DarkFixtureStatus {
+  faults: DarkFixture[];
+  fault_count: number;
+  watching: DarkFixture[];
+  faults_total: number;
+  last_sweep_age_s: number | null;
+  sweep_interval_s: number;
+  fault_after_s: number;
+  summary: string;
+}
+
 export interface OwnershipRecord {
   owner: string;
   handover: {
@@ -777,6 +808,7 @@ export interface OwnershipRecord {
   live_stack_active: boolean;
   history: { at: number; event: string; detail: string }[];
   activation: ActivationReport | null;
+  dark_fixtures: DarkFixtureStatus;
 }
 
 /** Polls fast enough that the banner/button reflect a press from another
