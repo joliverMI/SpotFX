@@ -36,7 +36,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from dataclasses import dataclass
 from typing import Callable, Optional
+
+import requests
 
 from fx import light_ownership
 from fx.audio_ingest import AudioIngestHub, HubMelbankSource, LiveDeviceSource
@@ -102,6 +105,81 @@ def _restrict_to_genuinely_driven(declared: set[str]) -> set[str]:
     if not driven:
         return declared
     return declared & driven
+
+
+@dataclass(frozen=True)
+class EmissionRead:
+    """What one fixture said it was doing, one read ago — the shared fact
+    behind BOTH the activation gate and the dark-fixture watch.
+
+    `checkable` False is the honest "no opinion" case (not a WLED, or a
+    driver with no client yet) and MUST NOT be read as a clean bill of
+    health: every consumer reports it as unchecked rather than folding it
+    into a healthy count. `reachable` False means the fixture did not
+    answer at all, and `error` carries the transport's own words verbatim
+    so a caller can quote them rather than paraphrase.
+
+    `on`/`brightness` are None when `read_state` was False or the state
+    read did not land — again, unknown, never assumed good.
+
+    This is a FACT, not a verdict: it carries no opinion of its own about
+    whether the fixture is dark. The two judgements over it live with their
+    callers (probe_device_live below, dark_fixture_watch.judge), so there
+    is exactly one rule per question and no third that could drift."""
+    device_id: str
+    checkable: bool
+    reachable: bool = False
+    live: Optional[bool] = None
+    source_ip: Optional[str] = None
+    on: Optional[bool] = None
+    brightness: Optional[int] = None
+    state_read: bool = False
+    error: Optional[str] = None
+
+
+def _read_wled_blocking(wled, read_state: bool,
+                        http_timeout_s: Optional[float] = None):
+    """(info, state, error) for one fixture, on a WORKER THREAD — see
+    LiveLights.read_emission for why this is off the event loop.
+
+    `fx.utils.WLED`'s reads are `async def` wrappers that never await, so
+    driving them with `asyncio.run` here is exactly one (or two) blocking
+    HTTP GETs on a throwaway loop, through the UNMODIFIED production
+    transport — not a second, parallel WLED client that could drift from
+    the one the driver actually uses.
+
+    `http_timeout_s` is the budget EACH request gets, handed to that same
+    transport explicitly (`WLED._wled_request(timeout=)`); None keeps the
+    transport's own default (0.5 s), which is what the activation gate has
+    always run at. A caller that declares a budget must hand it down here
+    — an outer bound around this call never decides reachability, because
+    the transport's default fires first.
+
+    A `json/state` read that fails after `json/info` answered is NOT
+    "unreachable": the fixture demonstrably answered. It comes back as an
+    absent state, which every consumer reports as unknown."""
+    def fetch(endpoint: str):
+        if http_timeout_s is None:
+            return asyncio.run(wled.get_info() if endpoint == "json/info"
+                               else wled.get_state())
+        response = asyncio.run(wled._wled_request(
+            requests.get, wled.ip_address, endpoint, timeout=http_timeout_s))
+        return response.json()
+
+    try:
+        info = fetch("json/info")
+    except Exception as exc:
+        return None, None, repr(exc)
+    if not isinstance(info, dict):
+        return None, None, repr(TypeError(
+            f"WLED json/info returned {type(info).__name__}, not an object"))
+    if not read_state:
+        return info, None, None
+    try:
+        state = fetch("json/state")
+    except Exception:
+        state = None
+    return info, (state if isinstance(state, dict) else None), None
 
 
 class FrameFreshness:
@@ -373,6 +451,42 @@ class LiveLights:
                 return gaps
             await asyncio.sleep(0.05)
 
+    def streaming_device_ids(self,
+                             stale_after_s: float = STALE_AFTER_S) -> set[str]:
+        """Every real (non-gap) device SPECTRA is PUSHING FRAMES AT RIGHT
+        NOW — the devices backing a virtual that is `active` and whose last
+        displayed frame is fresher than `stale_after_s`.
+
+        Deliberately NOT expected_device_ids(): that set answers "what the
+        config declared", and a device behind a virtual that never came up
+        is activation_gaps()' business, already named there. This one is
+        the precise precondition for the claim "we are writing light into
+        this fixture" — which is the only claim that makes a dark fixture a
+        FAULT rather than merely an off light. A virtual whose device layer
+        went quiet stops appearing here on its own, so the two detections
+        can never both name the same silence."""
+        if self.host is None:
+            return set()
+        ages = self.freshness.ages()
+        device_ids: set[str] = set()
+        for virtual in self.host.virtuals.values():
+            if not virtual.active:
+                continue
+            age = ages.get(virtual.id)
+            if age is None or age > stale_after_s:
+                continue
+            for seg in getattr(virtual, "_segments", None) or []:
+                device_id = seg[0]
+                if device_id.startswith("gap-"):
+                    continue
+                device = self.host.devices.get(device_id)
+                if device is None or not device.is_active():
+                    # An inactive device is not being written to at all —
+                    # update_pixels() refuses and says so.
+                    continue
+                device_ids.add(device_id)
+        return device_ids
+
     def expected_device_ids(self) -> set[str]:
         """Every real (non-gap) device id backing an expected-active virtual
         — the set device_gaps() verifies and the activation report counts
@@ -391,15 +505,97 @@ class LiveLights:
                     device_ids.add(device_id)
         return device_ids
 
+    async def read_emission(self, device_id: str,
+                            timeout_s: float = DEVICE_VERIFY_TIMEOUT_S,
+                            *, read_state: bool = True,
+                            http_timeout_s: Optional[float] = None,
+                            ) -> "EmissionRead":
+        """ONE read of what one fixture is ACTUALLY DOING — the single
+        definition of that fact for every caller in this codebase. Two
+        different questions are asked of it and they are deliberately
+        different judgements over the SAME read, never two reads:
+
+          * probe_device_live() below — the ACTIVATION gate's question, "is
+            our stream reaching it": unreachable, or live=false, is a gap.
+          * spectra/services/dark_fixture_watch.py — the running room's
+            question, "is the fixture we are streaming to actually emitting
+            light": unreachable, live=false, on=false, or bri=0 is a fault.
+            A fixture answering `live: true` while `on: false` is dark and
+            was invisible to every surface until that module existed (his
+            2026-08-15 report: tv-backlight `on=false` while SPECTRA
+            streamed to it at ~54 fps, and nothing said so).
+
+        WLED splits the two facts across two endpoints — `live` (and `lip`)
+        live under `json/info` only, `on`/`bri` under `json/state` only
+        (fx/VENDOR.md #8, verified against real devices) — so a fixture that
+        answers is asked both. `read_state=False` asks only `json/info`:
+        the activation gate does not need the second fact and must not add
+        HTTP load to a fixture during its own come-up ramp, which is a
+        poll-until-live loop on a device class whose failure mode is being
+        overwhelmed.
+
+        `http_timeout_s` is the per-REQUEST budget handed to the transport
+        (see _read_wled_blocking); `timeout_s` only bounds the whole read
+        from outside and never decides reachability by itself. The default
+        None keeps the transport's own 0.5 s, so probe_device_live's timing
+        is byte-identical to before this read was shared.
+
+        OFF THE EVENT LOOP, on purpose. `fx.utils.WLED`'s methods are
+        `async def` wrappers around BLOCKING `requests` calls — they never
+        await, so awaiting one parks the whole SPECTRA event loop for the
+        request's own timeout, and a dead fixture costs that timeout on
+        every read. This process's loop drives the bridge poll, the trigger
+        tick and every WS broadcast; a sweep over a room of unreachable
+        fixtures would stall all three (the same lesson AGENTS.md records
+        for trigger_store's ~126 ms writes, one layer down). See
+        fx/devices/wled.py::read_info's own docstring for the same
+        reasoning about the identity probe."""
+        device = self.host.devices.get(device_id) if self.host else None
+        if device is None or getattr(device, "wled", None) is None:
+            # Nothing to ask: no host, no such device, or a driver that
+            # never got far enough to hold a client. No opinion is not the
+            # same as a clean bill of health — see EmissionRead.checkable.
+            return EmissionRead(device_id=device_id, checkable=False)
+        loop = asyncio.get_running_loop()
+        try:
+            info, state, error = await asyncio.wait_for(
+                loop.run_in_executor(
+                    None, _read_wled_blocking, device.wled, read_state,
+                    http_timeout_s),
+                timeout_s)
+        except Exception as exc:                      # incl. TimeoutError
+            return EmissionRead(device_id=device_id, checkable=True,
+                                reachable=False, error=repr(exc))
+        if error is not None:
+            return EmissionRead(device_id=device_id, checkable=True,
+                                reachable=False, error=error)
+        state = state or {}
+        brightness = state.get("bri")
+        return EmissionRead(
+            device_id=device_id, checkable=True, reachable=True,
+            live=bool(info.get("live")),
+            source_ip=info.get("lip") or None,
+            on=state.get("on") if "on" in state else None,
+            brightness=int(brightness) if isinstance(brightness, (int, float))
+            else None,
+            state_read=bool(state),
+        )
+
     async def probe_device_live(self, device_id: str,
                                 timeout_s: float = DEVICE_VERIFY_TIMEOUT_S,
                                 ) -> Optional[str]:
-        """ONE read of one device's own live state — the reason it cannot be
-        confirmed driving, or None when it can (or when there is nothing to
-        confirm: a non-WLED device, or a WLED whose driver never got far
-        enough to have a client). The single definition of "confirmed live"
-        device_gaps() polls and the activation report's recheck re-asks
-        later — never two."""
+        """The reason this device cannot be confirmed RECEIVING our stream,
+        or None when it can (or when there is nothing to confirm: a non-WLED
+        device, or a WLED whose driver never got far enough to have a
+        client). The single definition of "confirmed live" device_gaps()
+        polls and the activation report's recheck re-asks later — never two.
+
+        Judgement UNCHANGED since it was written: unreachable, or
+        `live=false`. A fixture that takes our stream and shows nothing (off
+        at its own firmware, brightness zero) is NOT an activation gap — it
+        came up exactly as asked — it is a running-room fault, and naming it
+        is spectra/services/dark_fixture_watch.py's job on its own cadence.
+        Only the READ is now shared (read_emission above)."""
         if self.host is None:
             return None
         device = self.host.devices.get(device_id)
@@ -408,12 +604,13 @@ class LiveLights:
         if getattr(device, "type", None) != "wled" \
                 or getattr(device, "wled", None) is None:
             return None  # not a WLED device, or not yet initialized
-        try:
-            wled_info = await asyncio.wait_for(
-                device.wled.get_info(), timeout_s)
-        except Exception as exc:
-            return f"could not confirm live state: {exc!r}"
-        if not wled_info.get("live"):
+        read = await self.read_emission(device_id, timeout_s,
+                                        read_state=False)
+        if not read.checkable:
+            return None
+        if not read.reachable:
+            return f"could not confirm live state: {read.error}"
+        if not read.live:
             return ("device reports live=false — not "
                     "receiving realtime data")
         return None

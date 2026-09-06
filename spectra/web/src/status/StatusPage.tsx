@@ -2,7 +2,7 @@
  * frame-flush freshness, the named contract) arrives with S3 ownership;
  * this page states what exists now rather than pretending. */
 import HelpLink from '../help/HelpLink';
-import { fmtAgo } from '../lib/time';
+import { fmtAgo, fmtDuration } from '../lib/time';
 import { useAppStatus, useEngineStatus, useOwnership, useSequencerStatus } from '../queries';
 
 export default function StatusPage() {
@@ -11,6 +11,7 @@ export default function StatusPage() {
   const { data: eng } = useEngineStatus();
   const { data: own } = useOwnership();
   const act = own?.activation ?? null;
+  const dark = own?.dark_fixtures ?? null;
 
   return (
     <div>
@@ -58,6 +59,25 @@ export default function StatusPage() {
                       ))}
                     </ul>
                   )}
+                </span>
+              )}
+            </div>
+            <div><div className="k">Streamed lights dark or not answering <HelpLink topic="dark-fixture-watch" title="A light that is dark or not answering while being streamed to" /></div>
+              {!dark || dark.last_sweep_age_s === null ? (
+                <span style={{ opacity: 0.7 }}>— (not watching — SPECTRA is not driving the lights)</span>
+              ) : dark.fault_count === 0 ? (
+                <span title={dark.summary}>none · {dark.summary}</span>
+              ) : (
+                <span>
+                  {dark.fault_count} named · watch swept {fmtAgo(dark.last_sweep_age_s)}
+                  <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
+                    {dark.faults.map((d) => (
+                      <li key={d.device_id} title={`${d.device_id}: ${d.reason}`}>
+                        ⚠ <strong>{d.name}</strong> — {d.why}
+                        <span style={{ opacity: 0.7 }}> · dark for {fmtDuration(d.dark_for_s)}, last confirmed dark {fmtAgo(d.last_checked_age_s)}</span>
+                      </li>
+                    ))}
+                  </ul>
                 </span>
               )}
             </div>

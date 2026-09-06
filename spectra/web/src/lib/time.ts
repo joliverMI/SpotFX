@@ -43,3 +43,13 @@ export function fmtAgo(seconds: number | null | undefined): string {
   if (seconds < 3600) return `${Math.round(seconds / 60)}m ago`;
   return `${Math.round(seconds / 3600)}h ago`;
 }
+
+/** "4s" / "20m" / "3h" — a DURATION ("dark for 4m"), as opposed to fmtAgo's
+ * point in time ("4m ago"). Same rounding as fmtAgo so the two read as one
+ * scale when they sit side by side. */
+export function fmtDuration(seconds: number | null | undefined): string {
+  if (seconds == null || Number.isNaN(seconds)) return '';
+  if (seconds < 60) return `${Math.max(0, Math.round(seconds))}s`;
+  if (seconds < 3600) return `${Math.round(seconds / 60)}m`;
+  return `${Math.round(seconds / 3600)}h`;
+}

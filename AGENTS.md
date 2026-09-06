@@ -5410,6 +5410,136 @@ different jobs). The short list:
   clock shift is removed. Any future change to how this setting reaches
   the show must clear that bar, not a round-tripped JSON value.
 
+## A LIGHT WE ARE STREAMING TO THAT IS NOT LIT (`dark_fixture_watch.py`)
+
+**`spectra/services/dark_fixture_watch.py`'s module docstring is the binding
+statement.** Read it before touching anything that claims a fixture is
+healthy. His `tv-backlight` (WLED, 560 px, the Living Room's only capture
+carrier) went dark under SPECTRA's stream twice — `on=false` while streaming
+at ~54 fps (2026-08-15) and off the network entirely under the same take
+(2026-09-06) — and **every** reading we serve said FINE both times. Five
+things:
+
+- **THREE SIGNALS THAT LOOK LIKE HEALTH AND ARE NOT.** (1) `live_host.
+  probe_device_live` asks WLED's `json/info` for `live`, which means
+  "realtime data is arriving" and is TRUE of a switched-off fixture — his
+  2026-08-15 state passes it. (2) `activation_report.recheck()` re-asks only
+  devices already named dark AT ACTIVATION (`report.still_dark`), so by
+  construction NOTHING in this codebase re-probed a confirmed device; a
+  light that was fine and then went was invisible forever. (3) liveness's
+  `devices[].online` is `Device._online`, set True when the driver is built
+  and cleared only by an `OSError` out of `sendto`, which a UDP unicast to a
+  dead host does not raise — and the payload read `bool(d.is_online)` on the
+  **METHOD OBJECT**, i.e. hardcoded `true` for every device on every
+  response (fixed here; the honest limit above still stands, so never read
+  it as reachability).
+- **BEING STREAMED IS THE PRECONDITION, and it is what keeps the two
+  detections from claiming the same silence.** `live_host.LiveLights.
+  streaming_device_ids()` is devices behind a virtual that is active AND
+  flushing fresh frames, onto an active device — "we are writing light into
+  this fixture right now". A fixture nobody writes to may be off; a virtual
+  that stopped flushing is `activation_gaps`' business, already named there.
+- **ONE READ, TWO JUDGEMENTS.** `LiveLights.read_emission` is the single
+  definition of what a fixture is doing (`json/info` for `live`/`lip`,
+  `json/state` for `on`/`bri` — WLED splits them, `fx/VENDOR.md` #8).
+  `probe_device_live`'s judgement is UNCHANGED (unreachable or `live=false`
+  = an activation gap) and asks with `read_state=False`, deliberately: the
+  activation gate is a poll-until-live loop and must not add HTTP load to a
+  fixture during its own come-up ramp. The watch's judgement adds
+  `on=false` / `bri=0`. **The `unreachable` kind claims only what the read
+  established** — no reply within `HTTP_TIMEOUT_S` (3 s), which is handed
+  to the vendored transport explicitly (`WLED._wled_request(timeout=)`):
+  its own default is 0.5 s, and a budget that only bounds the outer
+  `wait_for` never binds (the first shipped version declared 3 s and
+  decided at 0.5 s). Its sentence says "not answering", never "dark" — a
+  controller too busy taking the stream to answer HTTP reads the same as
+  one off the network. `probe_device_live` keeps the vendored default
+  (`http_timeout_s=None`), so the activation gate's timing is
+  byte-identical. **The read is OFF THE EVENT LOOP** — `fx.utils.
+  WLED`'s methods are `async def` wrappers around blocking `requests`, so
+  awaiting one parks the loop that drives the bridge poll, the trigger tick
+  and every WS broadcast; a sweep over dead fixtures would stall all three.
+  Proven, not argued: `test_a_dead_fixture_does_not_stall_the_event_loop`.
+- **IT NEVER WRITES, and that is structural** (the backlog's own ruling,
+  "BUILD THE DETECTION, NOT THE CURE"): no power-on, no refresh-rate change,
+  no driver re-init, no release. Repair already has owners
+  (`activation_report.recheck`, `device_relocation`); a second, differently-
+  motivated writer is how two mechanisms start fighting over one light.
+  `test_it_writes_nothing_to_the_fixture_ever` asserts the stub fixture saw
+  GETs and nothing else across a whole raised fault.
+- **NAMED, NEVER `healthy`.** It lands on `GET /api/liveness` →
+  `dark_fixtures`, `GET /api/ownership` → `dark_fixtures` (the room bar's
+  `DarkFixtureStrip`, beside the activation strip), `GET /api/engine/status`,
+  and a CRITICAL log. It is additive and informational ONLY — the systemd
+  dead-man and the fleet checker read `healthy`, and a restart cannot switch
+  a light back on while it certainly would darken the ones that work (the
+  owner's own 2026-08-21 partial-activation trade). Threshold
+  `FAULT_AFTER_S`=60 s over ≥3 reads at a 30 s sweep, so ≤90 s to name and
+  no accusation on one noisy read. **An UNKNOWN reading never clears a
+  named fault** — a lost `json/state` reply (json/info still answering) is
+  listed as `unchecked` and leaves the suspicion and its clock untouched,
+  and so is the reader itself raising; only a read that positively says
+  lit clears one. The summary line counts only reads that positively said
+  lit as "confirmed lit"; its "reading dark or not answering, not yet
+  named" clause is built from the STANDING suspicions, not this sweep's
+  reads, so a watched fixture stays in the sentence across a lost reply;
+  and "not checkable" is said only of a device that cannot be asked at
+  all (`uncheckable`), never of a lost reply or reader crash on a fixture
+  we can ask (`unchecked this sweep`). The per-fault ages on the strip
+  and the Status page are TWO clocks with two labels: "last confirmed
+  dark" (`last_checked_age_s` = the last read that positively said dark
+  or did not answer — an unknown read does not move it) beside "watch
+  swept" (`last_sweep_age_s`), so a light dropping replies is visibly
+  different from a stalled watch; never label both "last read". The four
+  timing constants have their row in `docs/SPECTRA_TIMING_CONVENTIONS.md`'s
+  master table, per that document's own rule. Stands down entirely
+  (dropping every suspicion) while the stack is down, SPECTRA does not
+  own, a preview/capture hold has the room, or the engine is dark.
+
+**ROOT CAUSE, as far as an offline investigation can honestly go: nothing in
+the SPECTRA write path distinguishes .236 from the WLEDs that survive.**
+`WLEDDevice.flush` → `DDPDevice.flush` → `send_out` is one code path with no
+per-device branch; packet shape is a pure function of `pixel_count`
+(560 px = 2 DDP datagrams/frame, ~120/s and ~100 KB/s at the default 60 fps)
+and his heavier fixtures send strictly MORE through the same code without
+dropping. The fault tracks the STREAM (appears on activation, clears on
+release), which is the signature of a controller saturating, not of a wrong
+address or a malformed packet. **What DID change on SPECTRA's side is the
+rate, and it changed for a good reason**: before the S3 process split her
+render threads were frozen by spot-effects' 90 ms–5 s GIL bursts, and the
+split plus `sys.setswitchinterval(0.001)` measurably restored them to ~57 fps
+(see the S3 section above). A fixture that used to receive a stuttering,
+starved stream now receives a steady one at its configured rate — his
+observed ~54 fps. That is the fix working, not a defect; but it is the best
+available answer to "why SPECTRA, why now", and it is what makes the
+per-device rate the right correction rather than a workaround.
+**The SPECTRA-side lever therefore already exists and needed no code**: `refresh_rate` is a per-device config field
+(base `Device.CONFIG_SCHEMA`, default 60) editable on `/devices`, and
+`Virtual.refresh_rate = min(device.max_refresh_rate ...)` — lowering it on
+that one device halves its datagram rate. **Its trade, named**: that `min`
+means the whole virtual slows, so on his copy-mapped `tv-mapper` it would
+also slow both kitchen sconces (the sibling-capping problem open PR #58 is
+about). No throttle was invented next to a knob that already works.
+
+**FLAGGED, NOT BUILT: the unified detection.** This watch generalises
+cleanly to the other carded blind-spot defects (`spectra-dark-fixture-
+detection-unified`) — the read, the streamed-to precondition, the
+persistence threshold and the surfacing are all defect-agnostic. That is a
+shape decision for firstmate/the captain, not one to take in passing.
+
+**ADJACENT FINDING, REPORTED AND NOT FIXED**: `ownership_reconciler.
+_foreign_wled_sources` reads `wled.get_state()` and tests
+`wled_state.get("live")`, but WLED reports `live` under `json/info` ONLY
+(`fx/VENDOR.md` #8). That foreign-writer check is dead and can never fire.
+Same family, but it is ownership logic and deserves its own card.
+
+Spec: `tests/test_dark_fixture_watch.py` (real `fx.headless` render host,
+real production `fx.utils.WLED` transport, a real HTTP fixture that can be
+taken dark or off the network out of band; the founding test asserts every
+OLD signal still reads healthy over his exact 2026-08-15 state before
+asserting the watch names it, and a test proves the pre-fix rule names
+nothing). Help: `dark-fixture-watch`.
+
 ## SPECTRA param orphan watchdog (the safety net under momentary releases)
 
 `spectra/services/param_watchdog.py` (own supervised task in `spectra/app.py`'s

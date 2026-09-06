@@ -17,8 +17,14 @@
  * disappears on its own the moment the light confirms). The take-back's
  * toast says the same thing once, immediately. */
 import HelpLink from '../help/HelpLink';
-import { fmtAgo } from '../lib/time';
-import { useOwnership, useReleaseRoom, useTakeBackToSpectra, type ActivationReport } from '../queries';
+import { fmtAgo, fmtDuration } from '../lib/time';
+import {
+  useOwnership,
+  useReleaseRoom,
+  useTakeBackToSpectra,
+  type ActivationReport,
+  type DarkFixtureStatus,
+} from '../queries';
 import { useToast } from './Toast';
 
 function partialToast(act: ActivationReport): string {
@@ -56,6 +62,41 @@ export function ActivationStrip({ act }: { act: ActivationReport | null | undefi
         ))}
       </ul>
       <HelpLink topic="take-back-skipped-light" title="A light the take-back had to skip" />
+    </div>
+  );
+}
+
+/** THE DARK FIXTURE STRIP — a light SPECTRA is streaming to RIGHT NOW that
+ * is not lit (spectra/services/dark_fixture_watch.py). Deliberately the
+ * SAME amber strip as the activation one above, because to him it is the
+ * same question — "which of my lights isn't working, and why" — and the
+ * two answers arrive from different mechanisms only by accident of when
+ * the light went. This one is the continuous half: the activation strip
+ * can only ever speak about lights that were already dark when SPECTRA
+ * took the room, which is exactly why his tv-backlight going dark
+ * mid-show was invisible. Nothing is being written to fix it — this is a
+ * report, and it says so. */
+export function DarkFixtureStrip({ dark }: { dark: DarkFixtureStatus | null | undefined }) {
+  if (!dark || dark.fault_count === 0) return null;
+  return (
+    <div className="activation-strip" role="status">
+      <span className="activation-strip-lead">
+        ⚠ {dark.fault_count} light{dark.fault_count === 1 ? ' is' : 's are'} dark or not answering
+        {' '}while SPECTRA streams to {dark.fault_count === 1 ? 'it' : 'them'}
+      </span>
+      <ul>
+        {dark.faults.map((d) => (
+          <li key={d.device_id} title={`${d.device_id}: ${d.reason}`}>
+            <strong>{d.name}</strong> <span className="activation-strip-why">— {d.why}</span>
+            {' '}
+            <span className="activation-strip-age">
+              · dark for {fmtDuration(d.dark_for_s)}, last confirmed dark {fmtAgo(d.last_checked_age_s)}
+              {dark.last_sweep_age_s !== null && <>, watch swept {fmtAgo(dark.last_sweep_age_s)}</>}
+            </span>
+          </li>
+        ))}
+      </ul>
+      <HelpLink topic="dark-fixture-watch" title="A light that is dark or not answering while being streamed to" />
     </div>
   );
 }
@@ -119,6 +160,7 @@ export default function RoomOwnershipBar() {
   return (
     <>
       <ActivationStrip act={data.activation} />
+      <DarkFixtureStrip dark={data.dark_fixtures} />
       <button
         className="panic-release-btn"
         onClick={doRelease}
