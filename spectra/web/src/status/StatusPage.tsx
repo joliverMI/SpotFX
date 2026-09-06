@@ -69,12 +69,12 @@ export default function StatusPage() {
                 <span title={dark.summary}>none · {dark.summary}</span>
               ) : (
                 <span>
-                  {dark.fault_count} named · last read {fmtAgo(dark.last_sweep_age_s)}
+                  {dark.fault_count} named · watch swept {fmtAgo(dark.last_sweep_age_s)}
                   <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
                     {dark.faults.map((d) => (
                       <li key={d.device_id} title={`${d.device_id}: ${d.reason}`}>
                         ⚠ <strong>{d.name}</strong> — {d.why}
-                        <span style={{ opacity: 0.7 }}> · dark for {fmtDuration(d.dark_for_s)}</span>
+                        <span style={{ opacity: 0.7 }}> · dark for {fmtDuration(d.dark_for_s)}, last confirmed dark {fmtAgo(d.last_checked_age_s)}</span>
                       </li>
                     ))}
                   </ul>

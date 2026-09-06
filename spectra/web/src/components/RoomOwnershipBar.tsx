@@ -90,7 +90,8 @@ export function DarkFixtureStrip({ dark }: { dark: DarkFixtureStatus | null | un
             <strong>{d.name}</strong> <span className="activation-strip-why">— {d.why}</span>
             {' '}
             <span className="activation-strip-age">
-              · dark for {fmtDuration(d.dark_for_s)}, last read {fmtAgo(d.last_checked_age_s)}
+              · dark for {fmtDuration(d.dark_for_s)}, last confirmed dark {fmtAgo(d.last_checked_age_s)}
+              {dark.last_sweep_age_s !== null && <>, watch swept {fmtAgo(dark.last_sweep_age_s)}</>}
             </span>
           </li>
         ))}

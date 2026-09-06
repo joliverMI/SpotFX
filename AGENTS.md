@@ -5485,7 +5485,14 @@ things:
   reads, so a watched fixture stays in the sentence across a lost reply;
   and "not checkable" is said only of a device that cannot be asked at
   all (`uncheckable`), never of a lost reply or reader crash on a fixture
-  we can ask (`unchecked this sweep`). Stands down entirely
+  we can ask (`unchecked this sweep`). The per-fault ages on the strip
+  and the Status page are TWO clocks with two labels: "last confirmed
+  dark" (`last_checked_age_s` = the last read that positively said dark
+  or did not answer — an unknown read does not move it) beside "watch
+  swept" (`last_sweep_age_s`), so a light dropping replies is visibly
+  different from a stalled watch; never label both "last read". The four
+  timing constants have their row in `docs/SPECTRA_TIMING_CONVENTIONS.md`'s
+  master table, per that document's own rule. Stands down entirely
   (dropping every suspicion) while the stack is down, SPECTRA does not
   own, a preview/capture hold has the room, or the engine is dark.
 
