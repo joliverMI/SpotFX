@@ -883,3 +883,48 @@ def test_the_production_gate_stands_down_while_spectra_is_not_driving(
     assert dfw._production_gate() == "live stack down"
     assert _run(dfw.sweep(dfw.production_deps()))["gate"] == "live stack down"
     assert dfw.faults() == []
+
+
+def test_the_liveness_devices_online_flag_reports_the_flag_not_the_method(
+        tmp_path, monkeypatch):
+    """`fx.devices.Device.is_online` is a METHOD, and the liveness payload
+    used to serialize `bool(d.is_online)` — the truthiness of a bound
+    method, i.e. `true` for every device on every response regardless of
+    the flag. The one-character fix calls it. Proven by the only reading the
+    old payload could never produce: a device whose `_online` flag is
+    genuinely False now reads `online: false`, while its lit neighbour on
+    the same payload still reads true. (The honest limit stands: `_online`
+    is not a reachability signal for a WLED — see ownership.py's own note —
+    which is why `dark_fixtures` exists beside it.)"""
+    from fx import light_ownership as lo
+    from spectra.api import ownership as ownership_api
+    from spectra.services.live_host import live as live_singleton
+
+    with StubWled() as stub:
+        async def scenario():
+            async with streaming_room(tmp_path, stub) as (host, lights):
+                device = host.devices.get("tv-backlight")
+                monkeypatch.setattr(
+                    lo, "load",
+                    lambda: lo.OwnershipRecord(owner=lo.SPECTRA))
+                monkeypatch.setattr(live_singleton, "host", host)
+                monkeypatch.setattr(live_singleton, "freshness",
+                                    lights.freshness)
+                monkeypatch.setattr(live_singleton, "expected_active_ids",
+                                    {"tv-backlight"})
+
+                assert device.is_online() is True
+                body = json.loads(bytes((await ownership_api.get_liveness()).body))
+                assert body["devices"]["tv-backlight"]["online"] is True
+
+                # The flag the driver actually keeps — cleared only by an
+                # OSError out of sendto in production; forced here so the
+                # payload's honesty about it is observable at all.
+                device._online = False
+                assert device.is_online() is False
+                body = json.loads(bytes((await ownership_api.get_liveness()).body))
+                assert body["devices"]["tv-backlight"]["online"] is False, (
+                    "the liveness payload reported the truthiness of a bound "
+                    "method, not the device's own flag")
+
+        _run(scenario())

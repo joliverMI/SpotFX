@@ -629,7 +629,7 @@ export const HELP_SECTIONS: HelpSection[] = [
     title: 'Status page',
     keywords: 'health ownership bridge liveness engine lights skipped take-back',
     intro:
-      'App status (scene count, light ownership from the durable record, which lights the last take-back/restart brought up and which it had to skip — see "A light the take-back had to skip", bridge state, sequencer state, room journey) plus the evolution-engine card: journey custody, active scene and legs, bridge health, recorded writes, the parameter watchdog\'s count.',
+      'App status (scene count, light ownership from the durable record, which lights the last take-back/restart brought up and which it had to skip — see "A light the take-back had to skip", which streamed lights are reading back dark or not answering — see "A light that is dark or not answering while SPECTRA streams to it", bridge state, sequencer state, room journey) plus the evolution-engine card: journey custody, active scene and legs, bridge health, recorded writes, the parameter watchdog\'s count.',
   },
   {
     id: 'ownership',
@@ -665,7 +665,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         keywords: 'health checker frame flush freshness 503 contract',
         body: [
           'GET /spectra/api/liveness is the binding fleet contract: per-virtual frame-flush freshness straight from the render loop, HTTP 200 healthy / 503 not. While SPECTRA is dark it answers healthy only if provably dark (a live stack without ownership is the split-brain tripwire). Never remove or repoint it without the owner\'s word.',
-          'Additive, informational keys ride alongside (never part of `healthy`): `activation_gaps` (a config-declared virtual that never came up — this one DOES make it unhealthy), `write_seam`, `param_watchdog`, and since 2026-08-21 `activation` — the activation report: which lights the last take-back/restart had to skip, why, whether each has come back since, and how long ago it was last rechecked. A skipped light is deliberately NOT an unhealthy 503: the systemd dead-man watches this same health and a dark fixture must never restart-loop the whole service.',
+          'Additive, informational keys ride alongside (never part of `healthy`): `activation_gaps` (a config-declared virtual that never came up — this one DOES make it unhealthy), `write_seam`, `param_watchdog`, and since 2026-08-21 `activation` — the activation report: which lights the last take-back/restart had to skip, why, whether each has come back since, and how long ago it was last rechecked. A skipped light is deliberately NOT an unhealthy 503: the systemd dead-man watches this same health and a dark fixture must never restart-loop the whole service. Since 2026-09-06 `dark_fixtures` rides alongside on the same terms — a light SPECTRA is streaming to right now that reads back dark or not answering (see "A light that is dark or not answering while SPECTRA streams to it"); informational only, never part of `healthy`.',
         ],
       },
       {
