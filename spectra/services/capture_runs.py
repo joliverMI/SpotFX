@@ -61,8 +61,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Optional
 
 from spectra.models.room_map import RoomMap
 from spectra.services import capture_health
@@ -78,6 +79,9 @@ logger = logging.getLogger(__name__)
 #: the one camera session's frames.
 _run_lock = asyncio.Lock()
 _running: Optional[str] = None
+#: WHAT IS RUNNING RIGHT NOW, in its own words — see `CurrentRun` and
+#: `_begin`/`_clear` below. Set and cleared in lockstep with `_running`.
+_current: Optional["CurrentRun"] = None
 
 KIND_MAP = "map"
 KIND_COMMISSION = "commission"
@@ -126,6 +130,81 @@ STATUS_PARTIAL = "partial"
 STATUS_REFUSED = "refused"
 STATUS_BUSY = "busy"
 STATUS_NOT_FOUND = "not_found"
+
+#: WHAT EACH KIND IS DOING, in the words he reads on the TESTING IN PROGRESS
+#: bar. One phrase per kind, declared beside the kinds themselves so a fifth
+#: kind added above cannot ship with no way to say what it is: the fallback
+#: below names the kind rather than inventing a purpose for it.
+RUN_PURPOSES = {
+    KIND_MAP: "mapping the light field",
+    KIND_COMMISSION: "a commissioning pass",
+    KIND_EXPOSURE: "an exposure comparison",
+    KIND_FINGERPRINT: "a pose fingerprint",
+}
+
+
+@dataclass(frozen=True)
+class CurrentRun:
+    """THE RUN THAT IS HOLDING HIS ROOM RIGHT NOW, in its own words.
+
+    WHY THIS EXISTS (2026-09-05, reported live by the Admiral watching the
+    app during a real proof run: "the ownership banner shows an OUTDATED
+    test reason"). The TESTING IN PROGRESS bar's headline had exactly two
+    sources for what is being tested, and NEITHER of them was the run: the
+    app's own auto fold, which says only that *some* path holds the room
+    ("a flare preview is driving your lights" — the label a mapping run
+    tripped), and a DECLARED take, which is a TTL-bounded human claim that
+    outlives the run it was made for. So a second run starting inside an
+    earlier run's declaration showed the earlier run's purpose, for up to
+    `test_session.MAX_TTL_S`, while a different run held the room.
+
+    A run now says what it is FOR ITSELF, for exactly as long as it runs
+    (`_begin`/`_clear`, in lockstep with `_running`), and `spectra/services/
+    test_session.py` folds it. Measured beats claimed — the same rule
+    `ambient_music_gate`'s status honesty and `night_exit`'s read-at-the-
+    light already stand on: the app's own live knowledge of what is
+    executing outranks anybody's note about what they meant to run.
+
+    IT IS STAMPED AT THIS SEAM AND NOWHERE ELSE, which is the whole reason
+    all four kinds are covered at once — the button, the unattended queue
+    and a calibration re-running itself are callers of equal standing here
+    (this module's own docstring), so none of them can be the one that
+    forgot to say what it was doing."""
+    kind: str
+    #: What is being measured, in his nouns — a room's name, a mapper id.
+    target: str
+    room_id: str
+    #: Wall clock (time.time()), not monotonic: it is rendered as his own
+    #: local "since HH:MM", the same reason `test_session`'s own record is
+    #: wall-clock.
+    started_at: float
+
+    @property
+    def purpose(self) -> str:
+        """The one phrase the bar puts in front of him."""
+        what = RUN_PURPOSES.get(self.kind, f"a {self.kind} run")
+        return f"{what} on {self.target}" if self.target else what
+
+    @property
+    def started_ms(self) -> float:
+        return self.started_at * 1000.0
+
+
+def _begin(kind: str, target: str, room_id: str, running: str) -> None:
+    """Say what is running, at the moment it starts. Paired with `_clear`
+    in the SAME `try`/`finally` that already owned `_running`, so a stamp
+    cannot outlive the run that set it — a purpose surviving its own run is
+    precisely the defect this record exists to close."""
+    global _running, _current
+    _running = running
+    _current = CurrentRun(kind=kind, target=target, room_id=room_id,
+                          started_at=time.time())
+
+
+def _clear() -> None:
+    global _running, _current
+    _running = None
+    _current = None
 
 
 @dataclass
@@ -253,6 +332,16 @@ class RunOutcome:
 def running() -> Optional[str]:
     """What is holding the run lock right now, or None."""
     return _running if _run_lock.locked() else None
+
+
+def current_run() -> Optional[CurrentRun]:
+    """The run holding his room right now, or None — the ONE live answer to
+    "what is being tested?". Read it ONCE per answer and derive both the
+    purpose and its start from that single observation: two reads can
+    straddle a run ending, and a headline whose words and whose clock came
+    from different observations is the same class of lie as the stale
+    reason this record was built to close."""
+    return _current if _run_lock.locked() else None
 
 
 def busy_detail() -> str:
@@ -452,10 +541,9 @@ async def run_map(room_id: str, *, granularity: Optional[str] = None,
     sess = live_session()
     g, block = run_granularity(room, granularity, block_pixels)
 
-    global _running
     lever = None
     async with _run_lock:
-        _running = room_id
+        _begin(KIND_MAP, room.name or room_id, room_id, room_id)
         try:
             lever = await _preflight(
                 KIND_MAP, room, sess, exposure_time,
@@ -490,7 +578,7 @@ async def run_map(room_id: str, *, granularity: Optional[str] = None,
                               detail=named, refusal="ownership", escaped=True,
                               target=room.name or room_id, room_id=room_id)
         finally:
-            _running = None
+            _clear()
 
     if remember:
         stored = light_field.get_room(room_id) or room
@@ -540,10 +628,9 @@ async def run_commission(room_id: str, *, mapper_id: Optional[str] = None,
         return gate
     sess = live_session()
 
-    global _running
     lever = None
     async with _run_lock:
-        _running = f"{room_id}/commission"
+        _begin(KIND_COMMISSION, target_id, room_id, f"{room_id}/commission")
         try:
             lever = await _preflight(KIND_COMMISSION, room, sess,
                                      exposure_time)
@@ -565,7 +652,7 @@ async def run_commission(room_id: str, *, mapper_id: Optional[str] = None,
                               detail=named, refusal="ownership", escaped=True,
                               target=target_id, room_id=room_id)
         finally:
-            _running = None
+            _clear()
 
     stored = commissioning.save_result(result)
     return RunOutcome(kind=KIND_COMMISSION,
@@ -611,10 +698,10 @@ async def run_exposure_test(room_id: str, *,
     sess = live_session()
     _, block = run_granularity(room, None, block_pixels)
 
-    global _running
     lever = None
     async with _run_lock:
-        _running = f"{room_id}/exposure"
+        _begin(KIND_EXPOSURE, room.name or room_id, room_id,
+               f"{room_id}/exposure")
         try:
             lever = await _preflight(KIND_EXPOSURE, room, sess, exposure_time)
             refused = _lever_refusal(KIND_EXPOSURE, lever, room_id,
@@ -635,7 +722,7 @@ async def run_exposure_test(room_id: str, *,
                               detail=named, refusal="ownership", escaped=True,
                               target=room.name or room_id, room_id=room_id)
         finally:
-            _running = None
+            _clear()
 
     return RunOutcome(kind=KIND_EXPOSURE,
                       status=STATUS_OK if result.ok else STATUS_REFUSED,
@@ -683,10 +770,10 @@ async def run_pose_fingerprint(room_id: str, *,
         return gate
     sess = live_session()
 
-    global _running
     lever = None
     async with _run_lock:
-        _running = f"{room_id}/fingerprint"
+        _begin(KIND_FINGERPRINT, room.name or room_id, room_id,
+               f"{room_id}/fingerprint")
         try:
             lever = await _preflight(KIND_FINGERPRINT, room, sess,
                                      exposure_time)
@@ -732,7 +819,7 @@ async def run_pose_fingerprint(room_id: str, *,
                               detail=named, refusal="ownership", escaped=True,
                               target=room.name or room_id, room_id=room_id)
         finally:
-            _running = None
+            _clear()
 
     body = {"references": [r.model_dump() for r in measured.references],
             "problems": list(measured.problems),

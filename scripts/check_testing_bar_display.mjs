@@ -23,6 +23,13 @@
 //   FIVE  — who/since formatting: a declared take names itself, an
 //           undeclared auto hold names the path, elapsed appears only
 //           past a minute.
+//   SIX   — MEASURED BEFORE CLAIMED: a live capture run's own purpose
+//           outranks a declared take, which is ttl-bounded and outlives
+//           the run it was made for. The Admiral's own report, 2026-09-05:
+//           "the ownership banner shows an OUTDATED test reason" — a
+//           second run inside an earlier run's declaration wore the
+//           earlier run's reason. The pre-fix rule is driven against the
+//           same state to prove it produced exactly that.
 
 function check(cond, label) {
   if (!cond) { console.error(`FAIL: ${label}`); process.exit(1); }
@@ -76,6 +83,19 @@ function paintingLine(live) {
 }
 
 function whoLine(st) {
+  const run = st.sources.find((s) => s.kind === 'run');
+  if (run) return `${run.label}${run.detail ? ` (${run.detail})` : ''}`;
+  if (st.declared) return `${st.declared.actor} — ${st.declared.reason}`;
+  const auto = st.sources.filter((s) => s.kind === 'auto');
+  if (auto.length === 0) return 'someone (undeclared)';
+  const first = auto[0];
+  const extra = auto.length > 1 ? ` +${auto.length - 1} more` : '';
+  return `${first.label}${first.detail ? ` (${first.detail})` : ''}${extra}`;
+}
+
+/** The rule as it shipped BEFORE the run tier — kept so SIX can prove the
+ * stale headline it produced, rather than merely asserting it existed. */
+function whoLineBeforeTheFix(st) {
   if (st.declared) return `${st.declared.actor} — ${st.declared.reason}`;
   const auto = st.sources.filter((s) => s.kind === 'auto');
   if (auto.length === 0) return 'someone (undeclared)';
@@ -206,5 +226,40 @@ check(formatSince(base) === '23:05', 'FIVE: since is his own local HH:MM, zero-p
 check(formatElapsed(base, base + 30_000) === null, 'FIVE: under a minute shows no duration');
 check(formatElapsed(base, base + 61_000) === '1m', 'FIVE: past a minute shows minutes');
 check(formatElapsed(base, base + 3_600_000 + 120_000) === '1h 2m', 'FIVE: past an hour shows h + m');
+
+/* ── SIX: a live run outranks a stale declaration ─────────────────────── */
+
+// His evening: firstmate declared run A's purpose, run A ended, run B is
+// what holds the room now — and the declaration has not expired.
+const RUN_B = {
+  testing: 'yes',
+  sources: [
+    { key: 'capture_run', label: 'mapping the light field on Living Room',
+      detail: null, kind: 'run', since_ms: 2_000 },
+    { key: 'flare_preview_hold', label: 'a flare preview is driving your lights',
+      detail: null, kind: 'auto', since_ms: null },
+    { key: 'declared', label: 'firstmate: commissioning proof of the TV mapper',
+      detail: null, kind: 'declared', since_ms: 1_000 },
+  ],
+  declared: { actor: 'firstmate', reason: 'commissioning proof of the TV mapper',
+              since_ms: 1_000, expires_ms: 9e15, ttl_s: 3600 },
+  since_ms: 2_000, readable: true, now_ms: 0,
+};
+
+check(whoLine(RUN_B) === 'mapping the light field on Living Room',
+      'SIX: a live run names ITSELF, not the earlier run a declaration was made for');
+check(whoLineBeforeTheFix(RUN_B) === 'firstmate — commissioning proof of the TV mapper',
+      'SIX: the PRE-FIX rule really did show the stale reason on this same state');
+check(whoLine(RUN_B) !== whoLineBeforeTheFix(RUN_B),
+      'SIX: the two rules disagree here — this check can fail on the defect');
+check(whoLine({ ...RUN_B, sources: RUN_B.sources.filter((s) => s.kind !== 'run') })
+        === 'firstmate — commissioning proof of the TV mapper',
+      'SIX: with no run live a declaration still owns the headline — unchanged');
+check(whoLine({ ...RUN_B,
+                sources: [{ ...RUN_B.sources[0], detail: '3 of 22 emitters' }] })
+        === 'mapping the light field on Living Room (3 of 22 emitters)',
+      'SIX: a run\'s own detail rides with its purpose');
+check(RUN_B.since_ms === RUN_B.sources[0].since_ms,
+      'SIX: the headline\'s clock is the RUN\'s start, never the older declaration\'s');
 
 console.log('\nALL CHECKS PASSED — spectra/web/src/components/TestingBar.tsx');
