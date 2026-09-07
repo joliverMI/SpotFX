@@ -492,8 +492,18 @@ class Session:
     async def handle(self, msg: dict) -> None:
         kind = msg.get("type")
         if kind == "hello":
+            # WHO IS MEASURING, kept on the record. The browser page sends
+            # the first five; a fixed camera client (spectra/capture_client/
+            # avsync_session.py) additionally names itself, its build, its
+            # machine and its pose LABEL — so a stored measurement says
+            # which camera stood where instead of being indistinguishable
+            # from a phone run months later. Nothing here BRANCHES on them:
+            # the arithmetic, the systematics and the refusals are identical
+            # whichever client filled the streams, which is the whole reason
+            # a second client was possible without touching this module.
             self.hello = {k: msg.get(k) for k in ("user_agent", "audio", "video", "secure_context",
-                                                  "origin") if k in msg}
+                                                  "origin", "source", "client", "client_version",
+                                                  "host", "pose_name") if k in msg}
             await self.send({"type": "hello_ack", "session_id": self.id})
         elif kind == "pong":
             seq = msg.get("seq")

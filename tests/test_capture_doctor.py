@@ -738,13 +738,158 @@ def test_the_doctor_fixes_nothing_and_starts_nothing():
         for line in body.splitlines():
             if verb in line and "_run(" in line:
                 raise AssertionError(f"the doctor would run {verb!r}: {line}")
-    # The only subprocesses it may spawn are READS.
+    # The only subprocesses it may spawn are READS. `arecord` is on this
+    # list for its LISTING only (`arecord -l`) — asserted below, because
+    # `arecord` without that flag OPENS the microphone, which would take
+    # the capture away from a run using it.
     calls = re.findall(r"_run\(\[([^\]]*)\]", body)
     allowed = {'"id"', '"systemctl"', '"journalctl"', 'sys.executable',
-               'python', '"-m"', '"-c"'}
+               'python', '"-m"', '"-c"', '"arecord"'}
     for call in calls:
         head = call.split(",")[0].strip()
         assert head in allowed, f"the doctor spawns {head}"
+        if head == '"arecord"':
+            assert call.replace(" ", "") == '"arecord","-l"', call
+
+
+# ── the microphone check, and the three ways it can answer ────────────────
+
+def test_the_microphone_check_is_skipped_when_no_device_was_named():
+    """A MAPPING-ONLY CAMERA HOST HAS NO MICROPHONE AND NEVER NEEDED ONE.
+    Reporting that as a fault would send somebody to fix a machine doing
+    its whole job — the same conflation `check_device` refuses one check
+    up."""
+    report = doctor.Report(host="t")
+    doctor.check_audio(report, "")
+    assert report.findings == []
+
+
+def test_the_microphone_check_names_what_the_machine_actually_has(monkeypatch):
+    listing = ("card 1: reSpeaker [ReSpeaker 4 Mic Array], device 0: "
+               "USB Audio [USB Audio]\n")
+    monkeypatch.setattr(doctor.shutil, "which", lambda _n: "/usr/bin/arecord")
+    monkeypatch.setattr(doctor, "_run", lambda *a, **k: (0, listing))
+    report = doctor.Report(host="t")
+    doctor.check_audio(report, "BRIO")
+    verdicts = {f.check: f for f in report.findings}
+    assert verdicts["capture devices"].verdict == doctor.OK
+    assert "reSpeaker" in verdicts["capture devices"].detail
+    assert verdicts["microphone"].verdict == doctor.FAILED
+    assert "BRIO" in verdicts["microphone"].detail
+    assert verdicts["microphone"].fix
+    # and it PASSES for a name that is there (the node finding is this
+    # machine's own business — see the access tests below)
+    ok = doctor.Report(host="t")
+    doctor.check_audio(ok, "reSpeaker")
+    assert [f.verdict for f in ok.findings
+            if f.check in ("capture devices", "microphone")] == [doctor.OK,
+                                                                 doctor.OK]
+    assert not ok.failures
+
+
+def test_a_readable_node_without_the_group_is_a_WARN_not_a_pass(monkeypatch):
+    """THE SAME TRAP AS `video`, ONE DEVICE CLASS OVER. A desktop seat's ACL
+    makes the node readable in a terminal with no group anywhere in it; a
+    user SERVICE inherits `systemd --user`'s groups and gets neither. Saying
+    "ok" here is how someone runs the measurement by hand, sees it work, and
+    then cannot work out why the unit cannot capture."""
+    listing = "card 2: BRIO [Logitech BRIO], device 0: USB Audio [USB Audio]\n"
+    monkeypatch.setattr(doctor.shutil, "which", lambda _n: "/usr/bin/arecord")
+
+    def fake_run(args, *a, **k):
+        if args[:2] == ["id", "-nG"]:
+            return 0, "javi adm cdrom sudo dip plugdev"   # no 'audio'
+        return 0, listing
+    monkeypatch.setattr(doctor, "_run", fake_run)
+    monkeypatch.setattr(doctor.os.path, "exists", lambda _p: True)
+    monkeypatch.setattr(doctor.os, "access", lambda _p, _m: True)
+    report = doctor.Report(host="t")
+    doctor.check_audio(report, "BRIO")
+    node = [f for f in report.findings if f.check == "microphone node"][0]
+    assert node.verdict == doctor.WARN
+    assert "/dev/snd/pcmC2D0c" in node.detail
+    assert "seat ACL" in node.detail and "REBOOT" in node.fix
+    assert not report.failures        # a warn never fails the run
+
+    # ...and with the group, it is a plain ok
+    monkeypatch.setattr(
+        doctor, "_run",
+        lambda args, *a, **k: (0, "javi audio") if args[:2] == ["id", "-nG"]
+        else (0, listing))
+    ok = doctor.Report(host="t")
+    doctor.check_audio(ok, "BRIO")
+    assert [f.verdict for f in ok.findings
+            if f.check == "microphone node"] == [doctor.OK]
+
+
+def test_an_unreadable_node_is_a_failure_that_names_the_group(monkeypatch):
+    listing = "card 2: BRIO [Logitech BRIO], device 0: USB Audio [USB Audio]\n"
+    monkeypatch.setattr(doctor.shutil, "which", lambda _n: "/usr/bin/arecord")
+    monkeypatch.setattr(
+        doctor, "_run",
+        lambda args, *a, **k: (0, "javi") if args[:2] == ["id", "-nG"]
+        else (0, listing))
+    monkeypatch.setattr(doctor.os.path, "exists", lambda _p: True)
+    monkeypatch.setattr(doctor.os, "access", lambda _p, _m: False)
+    report = doctor.Report(host="t")
+    doctor.check_audio(report, "BRIO")
+    node = [f for f in report.findings if f.check == "microphone node"][0]
+    assert node.verdict == doctor.FAILED and doctor.AUDIO_GROUP in node.fix
+    # a card ALSA lists whose node is gone is a different failure
+    monkeypatch.setattr(doctor.os.path, "exists", lambda _p: False)
+    gone = doctor.Report(host="t")
+    doctor.check_audio(gone, "BRIO")
+    missing = [f for f in gone.findings if f.check == "microphone node"][0]
+    assert missing.verdict == doctor.FAILED
+    assert "does not exist" in missing.detail
+
+
+def test_an_explicit_alsa_device_gets_no_node_finding(monkeypatch):
+    """`hw:1,0` or `default` names no single node — inventing one to have
+    something to check would be a guess."""
+    monkeypatch.setattr(doctor.shutil, "which", lambda _n: "/usr/bin/arecord")
+    monkeypatch.setattr(
+        doctor, "_run", lambda *a, **k: (0, "card 2: BRIO [Logitech BRIO], "
+                                            "device 0: USB Audio [USB Audio]"))
+    report = doctor.Report(host="t")
+    doctor.check_audio(report, "default")
+    assert [f.check for f in report.findings] == ["capture devices",
+                                                  "microphone"]
+    assert not report.failures
+
+
+def test_a_missing_arecord_is_named_with_its_package(monkeypatch):
+    monkeypatch.setattr(doctor.shutil, "which", lambda _n: None)
+    report = doctor.Report(host="t")
+    doctor.check_audio(report, "BRIO")
+    assert report.findings[0].verdict == doctor.FAILED
+    assert "alsa-utils" in report.findings[0].fix
+
+
+def test_without_its_package_the_match_is_UNKNOWN_never_a_second_rule(monkeypatch):
+    """The plain-file run — the "the virtualenv is the broken thing" case.
+    The LISTING still reaches a human; whether the named device is in it is
+    a blind spot, and a doctor that answered it with its own matching rule
+    would be the confident wrong answer this module exists to end."""
+    listing = "card 2: BRIO [Logitech BRIO], device 0: USB Audio [USB Audio]\n"
+    monkeypatch.setattr(doctor.shutil, "which", lambda _n: "/usr/bin/arecord")
+    monkeypatch.setattr(doctor, "_run", lambda *a, **k: (0, listing))
+    import builtins
+    real_import = builtins.__import__
+
+    def no_avsync(name, *a, **k):
+        if "avsync_audio" in name:
+            raise ModuleNotFoundError("No module named 'spectra.capture_client'")
+        return real_import(name, *a, **k)
+    monkeypatch.setattr(builtins, "__import__", no_avsync)
+    report = doctor.Report(host="t")
+    doctor.check_audio(report, "BRIO")
+    monkeypatch.undo()
+    mic = [f for f in report.findings if f.check == "microphone"][0]
+    assert mic.verdict == doctor.UNKNOWN
+    assert not report.failures          # a blind spot is never a fault
+    assert "BRIO" in [f for f in report.findings
+                      if f.check == "capture devices"][0].detail
 
 
 def test_the_doctor_takes_no_room_authority():
