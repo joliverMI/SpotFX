@@ -160,11 +160,34 @@ def test_an_honest_downgrade_is_a_result_and_never_a_refusal():
 
 
 def test_a_client_that_never_adopts_the_size_refuses_by_name():
+    """AND IT WAITS THE WHOLE ACT OUT FIRST (2026-09-06). The wait is a bound
+    on REFUSING, so the number that matters is the one the client's own
+    frame-size switch costs — not the caller's, which is one fixed constant
+    covering a size that never changes and a full pipe restart alike. Proven
+    on a modelled clock rather than by spending sixteen real seconds; see
+    `tests/test_frame_size_switch_wait.py` for the run this closes."""
     d = _double(camera_source=(1920, 1080), adopts_frame_size=False)
+    ticks = _ticking_clock(d)
     got = asyncio.run(_apply_and_wait(d, cs.COMMISSION_PROFILE, timeout=0.05))
     assert got == cs.MAP_PROFILE
     said = d.frame_refusal(cs.COMMISSION_PROFILE)
     assert said and "1920x1080" in said and "320x180" in said
+    assert ticks() >= cs.CLIENT_RESIZE_BUDGET_S, \
+        "it gave the client the whole budget for the act before refusing"
+
+
+def _ticking_clock(d, step=2.0):
+    """A modelled clock on the double: seconds pass as the wait polls, which
+    is exactly what the wait measures against. Returns a reader for how much
+    modelled time went by."""
+    box = [0.0]
+
+    def clock():
+        box[0] += step
+        return box[0]
+
+    d._clock = clock
+    return lambda: box[0]
 
 
 async def _apply_and_wait(d, size, timeout=0.2):

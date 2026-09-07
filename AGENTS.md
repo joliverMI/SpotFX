@@ -3946,7 +3946,7 @@ ladder of declared frame sizes, the arithmetic that chose them, the four
 pinned levers (`LEVER_BOUNDS`: integration time, gain, white balance
 temperature, focus — the last two added 2026-09-01, NATIVE CLIENT ONLY,
 since the browser can reach neither), and the frame-rate coupling. Read it
-before touching anything that sends, sizes or exposes a capture frame. Six
+before touching anything that sends, sizes or exposes a capture frame. Seven
 things:
 
 - **THE WIRE FRAME IS PER RUN, NOT ONE NUMBER (2026-09-01, owner-approved:
@@ -3964,6 +3964,32 @@ things:
   so `light_field.downsample` stays a box mean and a grid from a 1080p frame
   is directly comparable with one from 320x180. **grey8, uncompressed, at
   every rung** — a lossy stage's noise lands inside the measured difference.
+- **ASKING FOR A NEW WIRE FRAME COMMANDS THREE ACTS, AND THEY ARE ADDED, NOT
+  SHARED (2026-09-06, PR fm/spectra-fix-framesize-race).** His sconce
+  commissioning negotiated 1920x1080 at 22:09, REFUSED at 22:44 ("the camera
+  is still sending 320x180 ... 2 frames arrived at the old size while this
+  run waited") and worked again at 22:46, with nothing about the camera, the
+  pose or the room different — and it was worse whenever an integration time
+  rode in the same `config` message. Neither the camera nor the refusal's
+  wording was wrong: the client had been told to restart its pixel pipe at
+  the new size (for which `capture_client/camera.py::_open_at` allows ITSELF
+  15 s), re-read every control, and pay the sensor settle any moved lever
+  owes (`regime_settle_s`) — and all three had to fit inside ONE fixed 4.0 s
+  window (`room_mapping.FRAME_SWITCH_WAIT_S`) that the run picked without
+  knowing which of them it had commanded. `frame_switch_wait_s` derives that
+  window instead — the three costs ADDED, from the client's own numbers —
+  and `await_frame_size` takes `max(caller, derived)`, so **the caller's
+  constant is a FLOOR and never a ceiling**; the negotiation is the only
+  place that knows both the request and the client's cost, which is why the
+  bound is raised there rather than at four call sites. **It can afford to
+  be generous because of what it bounds**: `await_frame_size` returns on the
+  FRAME, not on the clock, so this is the longest a run waits before
+  REFUSING and never a delay before succeeding — a working camera pays none
+  of it. A client that genuinely never switches is still refused by name,
+  which is half the proof (`tests/test_frame_size_switch_wait.py` drives the
+  real commissioning run over a modelled slow client and carries the
+  never-switches control beside it). Before shortening any wait on this
+  path, check what the far side was told to DO first.
 - **A CLIENT NEVER UPSCALES, and the server asserts it independently.**
   `capture_settings.choose` picks the largest rung no bigger than BOTH the
   request and the camera's own image; every frame carries `source_width`/
