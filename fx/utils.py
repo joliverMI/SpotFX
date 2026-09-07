@@ -316,6 +316,28 @@ def async_callback(loop, callback, *args):
     return future
 
 
+#: THE BUDGET A BRIGHTNESS CALL RUNS AT, and it is deliberately not
+#: `_wled_request`'s blanket 0.5s (SPOT-FX DEVIATION, fx/VENDOR.md #34).
+#:
+#: LIVE FINDING, 2026-09-06: a commissioning run took `tv-backlight` (.236)
+#: to full for the capture and could not put the operator's 84% back — the
+#: restore's single HTTP POST timed out and surfaced as
+#: `ValueError: Failed to connect`, leaving the fixture at 255 until it was
+#: set by hand. .236 is the fixture `spectra/services/dark_fixture_watch.py`
+#: exists for: a controller that saturates under its own realtime stream.
+#: The restore lands at the END of a run that has just spent ~35s pouring a
+#: capture stream into it, which is why the RAISE succeeded and the restore
+#: did not.
+#:
+#: 0.5s is a discovery-shaped budget. A brightness call is a CONTROL write
+#: that has to land on a busy controller, and there is no caller in this
+#: fork that wants it to fail fast — so the two brightness methods declare
+#: their own, matching `dark_fixture_watch.HTTP_TIMEOUT_S`. It is a
+#: DEFAULT, not a forced value: a caller may still name its own, and every
+#: other WLED call keeps the transport's 0.5s exactly as before.
+WLED_BRIGHTNESS_TIMEOUT_S = 3.0
+
+
 class WLED:
     """
     A collection of WLED helper functions
@@ -521,7 +543,7 @@ class WLED:
             "WLED %s: Turned %s.", self.ip_address, "on" if state else "off"
         )
 
-    async def set_brightness(self, brightness):
+    async def set_brightness(self, brightness, timeout=WLED_BRIGHTNESS_TIMEOUT_S):
         """
             Uses a JSON API post call to adjust a WLED compatible device's
             MASTER (firmware) brightness — the `bri` field of json/state,
@@ -530,6 +552,12 @@ class WLED:
 
         Args:
             brightness (int): The brightness value between 0-255
+            timeout (float): per-request budget, defaulting to
+                WLED_BRIGHTNESS_TIMEOUT_S above rather than the transport's
+                blanket 0.5s (fx/VENDOR.md #34) — a control write that has
+                to land on a controller busy taking its own realtime stream
+                needs a budget that binds, and 0.5s is what stranded a
+                fixture at full on 2026-09-06.
 
         SPOT-FX DEVIATION (fx/VENDOR.md #26). Upstream this function had
         never been called by anything — `grep` finds no caller in the fork —
@@ -554,21 +582,31 @@ class WLED:
 
         await WLED._wled_request(
             requests.post, self.ip_address, "json/state",
-            json={"bri": brightness}
+            timeout=timeout, json={"bri": brightness}
         )
 
         _LOGGER.info(
             "WLED %s: Set brightness to %s.", self.ip_address, brightness
         )
 
-    async def get_brightness(self):
+    async def get_brightness(self, timeout=WLED_BRIGHTNESS_TIMEOUT_S):
         """The fixture's current MASTER (firmware) brightness, 0-255, off
         json/state's `bri`. SPOT-FX addition (fx/VENDOR.md #26): a run that
         turns this up for a capture has to know what to put back, and a plan
         that warns about a dim fixture has to read it before the room ever
-        goes dark."""
-        state = await self.get_state()
-        return int(state.get("bri", 0))
+        goes dark.
+
+        It runs at WLED_BRIGHTNESS_TIMEOUT_S for the same reason the write
+        does (fx/VENDOR.md #34), and it matters twice over: this read is
+        also the READ-BACK that confirms a restore landed, taken over the
+        same busy controller that just refused the write. At the shipped
+        0.5s a saturated fixture also read as `unreadable` at PLAN time,
+        which `fixture_brightness.owned` correctly leaves completely
+        alone — so the run would then measure his dim level with nothing
+        but a "we could not ask" note to show for it."""
+        response = await WLED._wled_request(
+            requests.get, self.ip_address, "json/state", timeout=timeout)
+        return int(response.json().get("bri", 0))
 
     def enable_realtime_gamma(self):
         """

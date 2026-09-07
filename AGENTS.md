@@ -3531,6 +3531,41 @@ and the id shape. Five things to know:
   no caller anywhere in the fork and forced every input to 255 via a double
   `max`, so a RESTORE would have silently set full. Spec:
   `tests/test_fixture_brightness.py`.
+- **A CONTROL WRITE THAT MUST LAND NEEDS A BUDGET THAT BINDS, AND A
+  READ-BACK** (2026-09-06, PR fm/spectra-fix-brightness-restore; the sconce
+  commissioning). The restore above shipped as ONE HTTP write at
+  `fx.utils.WLED._wled_request`'s blanket **0.5 s**, and `tv-backlight`
+  (.236) was taken to full and LEFT there — "could NOT be put back to 84%
+  (ValueError) — set it on the fixture itself" — until it was set by hand.
+  Nothing else does it for him: **the release path hands back the STREAM,
+  not `bri`**, so a failed restore strands a fixture bright indefinitely.
+  Three things to know, and the first two generalize past this module:
+  - **0.5 s is a DISCOVERY budget, not a control-write one.** .236 is the
+    fixture `dark_fixture_watch` exists for — a controller that saturates
+    under its own realtime stream — and the restore lands at the END of a
+    run that has spent ~35 s pouring a capture stream into it (which is why
+    the RAISE succeeded and the restore did not). `fx/VENDOR.md` #34 gives
+    the brightness pair its own `WLED_BRIGHTNESS_TIMEOUT_S` (3.0, matching
+    `dark_fixture_watch.HTTP_TIMEOUT_S`) as the DEFAULT `timeout` handed to
+    the transport explicitly — every other WLED call keeps 0.5 s. At 0.5 s
+    a saturated fixture also read `unreadable` at PLAN time, which `owned()`
+    correctly leaves completely alone, so the run measured his dim level
+    with only a "we could not ask" note.
+  - **A 2xx IS NOT PROOF, one fixture type over from §64.** Every write is
+    now confirmed by reading `bri` back, retried bounded and spaced inside
+    a declared wall budget (`RESTORE_BUDGET_S`, checked BETWEEN attempts —
+    an in-flight request cannot be abandoned, so the stated ceiling is the
+    budget plus one attempt). **Policy lives in `fixture_brightness.py`,
+    transport in `fx/`** — do not put retries in the driver.
+  - **THREE outcomes, not two, and `OwnResult.note` obeys them.** `landed` /
+    `unconfirmed` (accepted, never confirmed — a SOFTER sentence, because
+    sending him to a fixture that probably already carries his level is
+    noise) / `failed` (the loud original sentence, unchanged). The note is
+    read after the block exits, so it never claims a restore its own
+    `problems` deny. Spec: `tests/test_fixture_brightness_restore.py` (his
+    sentence reproduced byte for byte against the REAL transport and a real
+    saturating HTTP server, then fixed) + `scripts/check_fixture_brightness.py`
+    §4.
 - **A NORMALISED THUMBNAIL IS BLIND TO THE MAGNITUDE IT NORMALISED AWAY.**
   `light_field.thumbnail` scales each footprint to its OWN peak, so one
   holding a hundredth of its neighbour's light draws an equally convincing

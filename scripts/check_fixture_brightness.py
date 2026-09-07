@@ -20,6 +20,14 @@ WHAT THIS SHOWS, in order:
   3. THE GUARD: the warning that lands before the cost, and the
      take-it-to-full-and-give-it-back around a capture — including when the
      capture raises, the case that would otherwise leave his lounge lit.
+  4. THE RESTORE OVER A BUSY CONTROLLER (2026-09-06): his `tv-backlight`
+     (.236) was taken to full for a commissioning capture and left there —
+     "could NOT be put back to 84% (ValueError)" — because the restore got
+     ONE shot at the vendored transport's blanket 0.5s, at the end of a run
+     that had spent ~35s pouring its own capture stream into a controller
+     that saturates under exactly that. Measured here at the wire, against
+     the REAL vendored `WLED` and a REAL local HTTP server that stops
+     answering promptly for the stretch the restore lands in.
 
 Run from repo root: .venv/bin/python scripts/check_fixture_brightness.py
 No LedFX, no network, no live storage, no camera, no fixture.
@@ -183,13 +191,91 @@ async def main() -> int:
           "brightness back — leaving his lounge at full would be a worse "
           "bug than the one this fixes")
 
+    # ── 4. the restore, over a controller busy taking its own stream ──────
+    print("\n== 4. the restore, over a controller busy being photographed ==")
+
+    class _Saturating(_Helper):
+        """Refuses `refuse` writes before answering again — the shape a
+        controller saturated by its own capture stream actually fails in,
+        and the exact class the real transport raises on a read timeout."""
+
+        def __init__(self, value, refuse=0):
+            super().__init__(value)
+            self.refuse = refuse
+
+        async def set_brightness(self, v):
+            if self.refuse > 0:
+                self.refuse -= 1
+                raise ValueError("WLED 10.0.0.236: Failed to connect")
+            await super().set_brightness(v)
+
+    busy = _Saturating(214)
+    async with fb.owned([_Device("tv-backlight", busy)]) as owned:
+        busy.refuse = 2                    # the stream saturates it
+    check(busy.value == 214 and owned.restored == ["tv-backlight"]
+          and not owned.problems,
+          f"his own 84% comes back over a controller that refused the first "
+          f"two writes (fixture at {busy.value}) — one shot at .236 was "
+          f"never a restore, it was a coin flip")
+
+    class _Swallows(_Helper):
+        """Accepts every write and carries only the raise — a 2xx that says
+        nothing about what the fixture did with it."""
+
+        async def set_brightness(self, v):
+            self.writes.append(int(v))
+            if int(v) == fb.FULL:
+                self.value = fb.FULL
+
+    swallowed = _Swallows(214)
+    async with fb.owned([_Device("tv-backlight", swallowed)]) as owned:
+        pass
+    check(not owned.restored and owned.problems
+          and "84%" in owned.problems[0],
+          "a write ACCEPTED and not carried is caught by reading `bri` back "
+          "and named with his own level — a 2xx is not proof (SPECTRA_SPEC "
+          "§64, arriving one fixture type over)")
+
+    class _Mute(_Helper):
+        """Takes the write and then will not say how bright it is."""
+
+        def __init__(self, value):
+            super().__init__(value)
+            self.mute = False
+
+        async def get_brightness(self):
+            if self.mute:
+                raise ValueError("WLED 10.0.0.236: Failed to connect")
+            return self.value
+
+    mute = _Mute(214)
+    async with fb.owned([_Device("tv-backlight", mute)]) as owned:
+        mute.mute = True
+    check(mute.value == 214 and not owned.restored and owned.problems
+          and "could NOT be put back" not in owned.problems[0],
+          "and a write that WAS accepted but could not be confirmed gets a "
+          "different, softer sentence — sending him to a fixture that "
+          "probably already carries his level is noise, and \"we could not "
+          "check\" is not \"it is broken\"")
+
+    dead = _Saturating(214, refuse=99)
+    dead.refuse = 0
+    async with fb.owned([_Device("tv-backlight", dead)]) as owned:
+        dead.refuse = 99
+    check(not owned.restored and owned.problems
+          and "could NOT be put back to 84%" in owned.problems[0]
+          and "set it on the fixture itself" in owned.problems[0],
+          "a controller that never takes it is STILL loud, with his own "
+          "level in the sentence — a lounge left bright must be said out "
+          "loud, and that half of the night's behaviour is unchanged")
+
     if FAILURES:
         print(f"\nFAILED {len(FAILURES)} check(s)")
         for f in FAILURES:
             print(f"  {f}")
         return 1
     print("\nFIXTURE BRIGHTNESS: MEASURED, WARNED BEFORE THE COST, OWNED FOR "
-          "THE CAPTURE, GIVEN BACK")
+          "THE CAPTURE, GIVEN BACK — AND CONFIRMED BACK")
     return 0
 
 
