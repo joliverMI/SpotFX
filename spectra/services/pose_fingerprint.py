@@ -334,9 +334,9 @@ async def measure(room: RoomMap, deps: "room_mapping.RunDeps", *,
     scratch = RoomMap(name=room.name, carrier_ids=list(room.carrier_ids),
                       axis=room.axis)
     quiet = replace(deps, save_room=None)
-    scope, activated, not_up = await room_mapping.activate_for_capture(
-        plan, scope, quiet)
-    out.problems.extend(not_up)
+    activation = await room_mapping.activate_for_capture(plan, scope, quiet)
+    scope = activation.scope
+    out.problems.extend(activation.failed)
     program = room_mapping.MappingProgram(scope)
     ceiling = (hold_ceiling_s if hold_ceiling_s is not None
                else room_mapping.run_ceiling_s(
@@ -379,10 +379,14 @@ async def measure(room: RoomMap, deps: "room_mapping.RunDeps", *,
         except Exception:                              # noqa: BLE001
             logger.warning("pose fingerprint: releasing the hold failed; the "
                            "hold sweep owns it from here", exc_info=True)
-        left_on = await room_mapping.deactivate_after_capture(activated, quiet)
-        if left_on:
+        restore = await room_mapping.deactivate_after_capture(activation, quiet)
+        if restore.left_on:
             out.problems.append(
-                f"left rendering after the pose check: {', '.join(left_on)}")
+                f"left rendering after the pose check: "
+                f"{', '.join(restore.left_on)}")
+        if restore.not_restored:
+            out.problems.append(
+                mapping_refusals.carrier_not_restored(restore.not_restored))
 
     out.seconds = deps.clock() - started
     return out

@@ -683,6 +683,13 @@ class RunDeps:
     #: run that has to light a fixture's own idle strip uses these.
     activate: Callable[[str], Any] = None              # type: ignore[assignment]
     deactivate: Callable[[str], Any] = None            # type: ignore[assignment]
+    #: RAISE A VIRTUAL'S ACTIVE FLAG AND NOTHING ELSE — the restore for a
+    #: carrier this run's own activation DISPLACED (DISPLACEMENT, below).
+    #: Deliberately not `activate`: that one writes the run's black lamp
+    #: onto the virtual first, which is right for an idle strip with no
+    #: effect at all and WRONG here, where the hold's revert has already
+    #: put his own effect back and only the render thread is missing.
+    reactivate: Callable[[str], Any] = None            # type: ignore[assignment]
     #: The LIVE driver objects for this room's fixtures, which is the only
     #: thing that can be asked its firmware brightness (a config entry
     #: cannot — see spectra/services/fixture_brightness.py). Defaults to
@@ -739,6 +746,11 @@ def production_deps(session) -> RunDeps:
 
     async def deactivate(virtual_id: str) -> None:
         await fx_seam.set_virtual_active(virtual_id, False)
+
+    async def reactivate(virtual_id: str) -> None:
+        # The flag ALONE. The virtual already holds the effect the hold's
+        # revert put back; all that is missing is the render thread.
+        await fx_seam.set_virtual_active(virtual_id, True)
 
     async def fixture_devices() -> list:
         # The live driver objects, not the config: only a driver that has
@@ -821,6 +833,7 @@ def production_deps(session) -> RunDeps:
                    get_virtuals=fx_seam.get_virtuals,
                    carrier_devices=carrier_devices,
                    activate=activate, deactivate=deactivate,
+                   reactivate=reactivate,
                    fixture_devices=fixture_devices,
                    witness=witness_fn, witness_sweep=sweep_fn,
                    save_room=light_field.put_room)
@@ -930,10 +943,63 @@ async def fixture_readings(plan, chains: dict, deps: RunDeps):
     return await fixture_brightness.read_all(devices), devices
 
 
+@dataclass
+class CaptureActivation:
+    """What this run did to the room's `active` flags, and what it therefore
+    owes back — the record `deactivate_after_capture` needs to undo BOTH
+    halves.
+
+    Deliberately NOT a tuple, and deliberately not unpackable: the historic
+    three-value return let a call site keep `activated` alone and hand that
+    to the restore, which is exactly how the displaced carrier's half went
+    missing for every path at once. A caller now either carries the whole
+    record or fails loudly at the seam."""
+    #: What this run may write to from here: the live scope with the
+    #: newly-activated ids folded in and the DISPLACED ones taken out (they
+    #: cannot render, and writing to one fights the substitute for the
+    #: device — see `activate_for_capture`).
+    scope: list[str] = field(default_factory=list)
+    #: Brought up by this run — to be put back to sleep afterwards.
+    activated: list[str] = field(default_factory=list)
+    #: Could NOT be brought up, each with its reason.
+    failed: list[str] = field(default_factory=list)
+    #: Was rendering before this run's activation and is not any more —
+    #: DISPLACEMENT (below). To be put back to RENDERING afterwards.
+    displaced: list[str] = field(default_factory=list)
+
+
+@dataclass
+class CaptureRestore:
+    """What the restore could not put back, split by which direction it
+    failed in. A fixture left rendering and a carrier left dark are two
+    different changes to his room and read as two different sentences."""
+    #: Brought up for the capture, still rendering — his room is lit.
+    left_on: list[str] = field(default_factory=list)
+    #: Displaced by the capture, still NOT rendering — writes to it land on
+    #: nothing, which is the whole defect this record exists for.
+    not_restored: list[str] = field(default_factory=list)
+
+
+async def _rendering_now(deps: RunDeps) -> Optional[set[str]]:
+    """The set of virtuals rendering right now, by the SAME predicate
+    `live_virtual_ids` uses — or None when it could not be read.
+
+    None, never an empty set: "nothing is rendering" and "I could not
+    look" are different facts, and the caller must not treat the second as
+    evidence that everything was displaced."""
+    try:
+        return set(await live_virtual_ids(deps.get_virtuals))
+    except Exception:                                  # noqa: BLE001
+        logger.warning("room mapping: could not read which virtuals are "
+                       "rendering; this run cannot tell whether its own "
+                       "activation displaced anything", exc_info=True)
+        return None
+
+
 async def activate_for_capture(plan, scope: list[str], deps: RunDeps
-                               ) -> tuple[list[str], list[str]]:
+                               ) -> "CaptureActivation":
     """Bring up any virtual this run must light that is not rendering, and
-    say which ones were brought up so the run can put them back.
+    say what the run now owes the room back.
 
     ACTIVATION, and why the run owns it: a substitute strip
     (`resolve_plan`) is typically INACTIVE — that is why the carrier was
@@ -947,14 +1013,52 @@ async def activate_for_capture(plan, scope: list[str], deps: RunDeps
     tests/test_capture_activation.py drives a real headless host and reads
     the flag after the run.
 
-    Returns (scope with the activated ids added, ids to put back, and the
-    ones that could NOT be brought up — named, because a fixture that never
-    came up is about to be reported as "not rendering" and the reason it is
-    not rendering would otherwise die in the journal)."""
+    DISPLACEMENT — the other half of the same act, and the half that was
+    missing until 2026-09-06. Activating a virtual is not a private thing:
+    `fx/devices/__init__.py::Device.add_segments_batch` deactivates every
+    EXTERNAL virtual streaming to a device whose own device-virtual comes
+    up. So bringing up his `tv-backlight` to light one block of it takes
+    the copy-mapped `tv-mapper` standing in front of it OFF THE AIR, and
+    putting the substitute back to sleep does not bring the carrier back:
+    it is left holding its effect with no render thread, so every write to
+    it lands on nothing (liveness `activation_gaps`, a fixture stuck on a
+    static frame, and a lever self-test that finds no carrier rendering).
+
+    It is MEASURED, never inferred from the device layer's rules: what was
+    rendering is read before the activation and again after it, and the
+    difference — minus what this run deliberately brought up — is what it
+    displaced. A read that fails claims nothing rather than guessing, since
+    the corrective act is itself a write to his room.
+
+    A DISPLACED VIRTUAL LEAVES THE CAPTURE SCOPE for the rest of the run,
+    and that is not tidiness — it is MEASURED
+    (`tests/test_capture_carrier_restore.py`, and do not re-reason it from
+    the source). It cannot render while its substitute holds the device, so
+    it emits nothing and the dark step has nothing to darken on it. But it
+    still HOLDS an effect, so a write to it takes `fx/facade.py`'s own
+    repair branch (`_verify_effect_took`, deviation #29), which activates
+    it to make the write real — and THAT knocks the substitute back off the
+    air. The two then trade the device on every write, and with the
+    carrier's black write last in the payload the LAMP IS INACTIVE at the
+    moment the camera looks: the device measures 0.0 on every pass, every
+    emitter, which is a run that maps nothing and cannot say why. Keeping
+    it out of scope is what makes the substitute's own lamp the only thing
+    driving that device for the whole run.
+
+    Returns a `CaptureActivation`; the run's own `finally` hands the WHOLE
+    record to `deactivate_after_capture`."""
     needed = {v for e in plan.emitters for v in e.virtual_ids}
     missing = sorted(needed - set(scope))
     if not missing:
-        return list(scope), [], []
+        return CaptureActivation(scope=list(scope))
+    # What was rendering before this run touched anything. READ, so that a
+    # virtual that stopped between the plan and here is not mistaken for
+    # one this activation displaced; `scope` — which IS the caller's own
+    # `live_virtual_ids` reading — is the fallback when the read fails, so
+    # a momentary read failure costs accuracy, never the restore itself.
+    before = await _rendering_now(deps)
+    if before is None:
+        before = set(scope)
     activated: list[str] = []
     failed: list[str] = []
     for vid in missing:
@@ -973,20 +1077,42 @@ async def activate_for_capture(plan, scope: list[str], deps: RunDeps
                 sconce_involved=witness.mentions_sconce(vid)))
             continue
         activated.append(vid)
-    return sorted(set(scope) | set(activated)), activated, failed
+    displaced: list[str] = []
+    if activated:
+        after = await _rendering_now(deps)
+        # A read that FAILED claims nothing: the corrective act is itself a
+        # write to his room, and "I could not look" is not evidence that
+        # everything stopped rendering.
+        if after is not None:
+            displaced = sorted(before - after - set(activated))
+            if displaced:
+                logger.info("room mapping: bringing up %s took %s off the "
+                            "air; it will be put back after the capture",
+                            ", ".join(activated), ", ".join(displaced))
+    return CaptureActivation(
+        scope=sorted((set(scope) | set(activated)) - set(displaced)),
+        activated=activated, failed=failed, displaced=displaced)
 
 
-async def deactivate_after_capture(activated: list[str],
-                                   deps: RunDeps) -> list[str]:
-    """Put back exactly what `activate_for_capture` brought up. Never
-    raises: this runs in a `finally`, and a room already handed back must
-    not turn a finished map into a 500. Returns what could not be put back
-    — a fixture left rendering is a REAL change to his room, and the one
-    thing that must never be only a log line."""
-    left_on: list[str] = []
-    for vid in activated:
+async def deactivate_after_capture(activation: "CaptureActivation",
+                                   deps: RunDeps) -> "CaptureRestore":
+    """Put the room's `active` flags back exactly as they were: what
+    `activate_for_capture` brought up goes back to sleep, and what it
+    DISPLACED goes back on the air. Never raises: this runs in a `finally`,
+    and a room already handed back must not turn a finished map into a 500.
+
+    THE ORDER IS THE SEMANTICS. The substitute is put to sleep FIRST, so
+    that re-activating the carrier is not immediately undone by the device
+    layer's own exclusion rule in the other direction, and so the carrier
+    never briefly fights the strip for the same pixels.
+
+    Returns what could not be put back, split by direction — a fixture left
+    rendering and a carrier left dark are both REAL changes to his room and
+    are the one thing that must never be only a log line."""
+    out = CaptureRestore()
+    for vid in activation.activated:
         if deps.deactivate is None:
-            left_on.append(vid)
+            out.left_on.append(vid)
             continue
         try:
             await deps.deactivate(vid)
@@ -994,8 +1120,32 @@ async def deactivate_after_capture(activated: list[str],
             logger.warning("room mapping: could not deactivate %s after the "
                            "capture — it is left rendering", vid,
                            exc_info=True)
-            left_on.append(f"{vid} ({type(exc).__name__}: {exc})")
-    return left_on
+            out.left_on.append(f"{vid} ({type(exc).__name__}: {exc})")
+    if not activation.displaced:
+        return out
+    # Only what is STILL down: the hold's own revert can already have
+    # repaired one on its way out (fx/facade.py's `_verify_effect_took`),
+    # and re-activating a virtual that is rendering would join and respawn
+    # its render thread for nothing.
+    still = await _rendering_now(deps)
+    for vid in activation.displaced:
+        if still is not None and vid in still:
+            continue
+        if deps.reactivate is None:
+            out.not_restored.append(
+                f"{vid}: this run has no way to put a virtual back on the air")
+            continue
+        try:
+            await deps.reactivate(vid)
+        except Exception as exc:                       # noqa: BLE001
+            logger.warning("room mapping: could not put %s back on the air "
+                           "after the capture — writes to it will land on "
+                           "nothing", vid, exc_info=True)
+            out.not_restored.append(f"{vid} ({type(exc).__name__}: {exc})")
+            continue
+        logger.info("room mapping: put %s back on the air after the capture",
+                    vid)
+    return out
 
 
 def scope_plan(room: RoomMap, plan, carrier_ids: Optional[list[str]],
@@ -1276,14 +1426,20 @@ async def run_mapping(room: RoomMap, deps: RunDeps, *,
             continue
         room.drop_carrier_footprints(carrier_id)
 
-    scope, activated, not_brought_up = await activate_for_capture(
-        plan, scope, deps)
-    for problem in not_brought_up:
+    activation = await activate_for_capture(plan, scope, deps)
+    scope = activation.scope
+    for problem in activation.failed:
         result.problems.append(problem)
-    if activated:
+    if activation.activated:
         result.notes.append(
-            f"Brought up {', '.join(activated)} for the capture and put "
-            f"{'it' if len(activated) == 1 else 'them'} back afterwards.")
+            f"Brought up {', '.join(activation.activated)} for the capture "
+            f"and put {'it' if len(activation.activated) == 1 else 'them'} "
+            f"back afterwards.")
+    if activation.displaced:
+        result.notes.append(
+            f"{', '.join(activation.displaced)} was off the air for the "
+            f"capture (the fixture's own strip held the device) and was put "
+            f"back on it afterwards.")
     try:
         # OWN THE FIXTURE'S OWN BRIGHTNESS for the capture and give his level
         # back — including if the chain below raises. The plan already read
@@ -1313,12 +1469,15 @@ async def run_mapping(room: RoomMap, deps: RunDeps, *,
             logger.warning("room mapping: releasing the hold at the end of "
                            "the run failed; the hold sweep owns it from here",
                            exc_info=True)
-        left_on = await deactivate_after_capture(activated, deps)
-        if left_on:
+        restore = await deactivate_after_capture(activation, deps)
+        if restore.left_on:
             result.problems.append(
                 f"left rendering after the capture (they were idle before "
-                f"it): {', '.join(left_on)} — turn them off on the devices "
-                f"page, or run the map again")
+                f"it): {', '.join(restore.left_on)} — turn them off on the "
+                f"devices page, or run the map again")
+        if restore.not_restored:
+            result.problems.append(
+                mapping_refusals.carrier_not_restored(restore.not_restored))
 
     result.seconds = deps.clock() - started
     mapped = [e for e in result.emitters if e.mapped]

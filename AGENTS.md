@@ -3486,6 +3486,64 @@ and the id shape. Five things to know:
   did not observe, so the flag is the run's own to restore
   (`tests/test_capture_activation.py` reads it back). `room_effects.start`
   does the same and `stop()` puts it back AFTER the hold's revert.
+- **BRINGING A SUBSTITUTE UP TAKES THE CARRIER OFF THE AIR, and the capture
+  owes BOTH halves back** (2026-09-06, PR fm/spectra-fix-carrier-activation,
+  from his first real sconce commission). `fx/devices/__init__.py::
+  Device.add_segments_batch` deactivates every EXTERNAL virtual streaming to
+  a device whose own device-virtual activates — so lighting `tv-backlight`
+  for one block took the copy-mapped `tv-mapper` off the air, and putting
+  the substitute back to sleep did not bring the carrier back. It was left
+  HOLDING ITS EFFECT WITH NO RENDER THREAD: liveness `healthy=False` with
+  `activation_gaps {tv-mapper}`, .236 stuck on a static frame, and a lever
+  self-test reporting "no carrier of this room is rendering", while every
+  write to it landed on nothing. **The activation reconciler cannot cover
+  this** — it re-inits dark DEVICES, not an inactive VIRTUAL — so the
+  restore belongs to the capture path that displaced it.
+  `activate_for_capture` now returns a `CaptureActivation` (scope /
+  activated / failed / **displaced**) and `deactivate_after_capture` takes
+  that WHOLE RECORD and returns a `CaptureRestore` (`left_on` /
+  `not_restored`, two different changes to his room, two sentences —
+  `mapping_refusals.carrier_not_restored`). Four things not to undo: the
+  record is deliberately NOT tuple-unpackable, because the old three-value
+  return is exactly how a call site kept `activated` alone and lost the
+  other half on every path at once; displacement is **MEASURED** (what was
+  rendering, read before and after the activation, minus what this run
+  deliberately brought up) and never inferred from the device layer's
+  rules, with a failed read claiming NOTHING; the substitute is put to
+  sleep BEFORE the carrier goes back on, or the same exclusion rule fires
+  in the other direction; and the restore is `deps.reactivate` — the FLAG
+  ALONE (`fx_seam.set_virtual_active(vid, True)`), never `deps.activate`,
+  which writes the run's black lamp first and would destroy the effect the
+  hold's revert just put back. All five capture paths (map, commissioning,
+  exposure comparison, pose fingerprint, lever self-test) inherit it from
+  the one seam.
+- **AND THE HALF THAT WAS FOUND BY BUILDING THAT PROOF: A DISPLACED
+  VIRTUAL LEAVES THE WRITE SCOPE FOR THE REST OF THE RUN** (same PR), and
+  it is MEASURED, not tidiness. A displaced carrier still HOLDS an effect,
+  so the capture's own black write to it takes `fx/facade.py`'s repair
+  branch (`_verify_effect_took`, deviation #29), which ACTIVATES it to make
+  that write real — and that hands the device straight back, knocking the
+  substitute off the air. The two then trade the device on every write, and
+  with the carrier's black write last in the payload THE LAMP IS INACTIVE
+  WHEN THE CAMERA LOOKS: measured on the real pipeline, the device reads
+  `max=0.0` / 0 lit pixels on every step of every pass — a run that maps
+  nothing and cannot say why. `CaptureActivation.scope` is therefore
+  `(live | activated) - displaced`, which is what makes the substitute's
+  own lamp the only thing driving that device for the whole run. It also
+  makes the restore self-contained rather than depending on that repair
+  firing. Keep it out of scope; do not "complete" the dark step by putting
+  it back in.
+  Proof for both halves, on a real `fx.headless` host with real render
+  threads: `tests/test_capture_carrier_restore.py` — active, a live thread
+  AND fresh `VIRTUAL_UPDATE` frames after the restore, plus the real
+  `MappingProgram` payloads driven through the real write seam over two
+  emitter passes with the DEVICE's own buffer measured. Both verified RED
+  against the pre-fix code (`active=False`, effect held, 0 frames; and the
+  lamp's virtual off the air during the dark step). That file's own header
+  says why its teardown is explicit: it is the only headless test in the
+  suite that spawns real render threads (`headless.attach_effect`
+  deliberately skips them), and a virtual left rendering is a non-daemon
+  thread that hangs the interpreter at exit.
 - **AN EMITTER THE CAMERA NEVER SAW IS A RECORD, NOT AN ABSENCE** (2026-08-31,
   PR fm/mapping-unseen-emitter-note). His first real map ran 22 emitters and
   stored 14; the missing 8 (far-side TV blocks, sconce spill outside the

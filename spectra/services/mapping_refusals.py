@@ -1022,6 +1022,24 @@ def queue_stopped(remaining: int) -> str:
             f"measured before that is kept.")
 
 
+def carrier_not_restored(ids: list) -> str:
+    """A virtual this run's own capture activation took OFF THE AIR and
+    could not put back — the 2026-09-06 defect's own sentence.
+
+    It reads as its consequence, not as its mechanism: a virtual holding an
+    effect with no render thread looks configured and correct everywhere,
+    while every write to it lands on nothing and its fixture sits on
+    whatever frame it stopped on. Naming the one-press way out matters here
+    because a take-back re-activates the whole room cleanly, and nothing
+    else he can reach does."""
+    return (f"left OFF THE AIR after the capture (this run's own activation "
+            f"displaced {'it' if len(ids) == 1 else 'them'}): "
+            f"{and_list(ids)} — {'it holds' if len(ids) == 1 else 'they hold'} "
+            f"an effect but {'runs' if len(ids) == 1 else 'run'} no render "
+            f"thread, so writes land on nothing. Release the room and take "
+            f"it back to bring everything up again.")
+
+
 # ── THE BROWSER, DEMOTED BY NAME ───────────────────────────────────────────
 #
 # 2026-09-01 cost him an evening and settled this: a browser cannot hold a
