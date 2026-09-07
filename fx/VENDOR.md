@@ -1042,6 +1042,47 @@ variables named `ledfx` (the core object handle) are untouched.
     `scripts/check_device_relocation.py` (his own failure reproduced
     against real HTTP servers, then fixed with one field added).
 
+34. `utils.py`: THE BRIGHTNESS PAIR RUNS AT A BUDGET THAT BINDS, not the
+    transport's blanket 0.5s.
+
+    THE DEFECT, live 2026-09-06 on the sconce commissioning: a run took
+    `tv-backlight` (.236) to full for the capture and could NOT put the
+    operator's 84% back — "could NOT be put back to 84% (ValueError) — set
+    it on the fixture itself" — leaving it at 255 until it was restored by
+    hand. The `(ValueError)` is `_wled_request`'s own wording for a
+    `requests` timeout, and the restore had exactly ONE shot at it: at the
+    END of a run that had just spent ~35s pouring its capture stream into a
+    controller that saturates under precisely that (.236 is the fixture
+    `spectra/services/dark_fixture_watch.py` was built for). The RAISE
+    succeeded because it lands before the stream has been hammering.
+
+    `WLED_BRIGHTNESS_TIMEOUT_S` (3.0, matching `dark_fixture_watch.
+    HTTP_TIMEOUT_S`) is now the DEFAULT `timeout` of `set_brightness` and
+    `get_brightness`, handed to `_wled_request` explicitly — the
+    live_host lesson that an outer bound never decides reachability because
+    the transport's default fires first. 0.5s is a discovery-shaped budget;
+    a brightness call is a CONTROL write that has to land on a busy
+    controller, and no caller in this fork wants it to fail fast. It is a
+    default, not a forced value, and every OTHER WLED call keeps 0.5s
+    exactly as before, so no existing behaviour moved.
+
+    `get_brightness` also stops going through `get_state()` (which cannot
+    carry a budget) and reads `json/state` directly. That matters twice:
+    it is the READ-BACK that confirms a restore landed, over the same busy
+    controller that just refused the write — and at 0.5s a saturated
+    fixture ALSO read as `unreadable` at plan time, which
+    `fixture_brightness.owned` correctly leaves completely alone, so the
+    run would then measure his dim level with nothing but a "we could not
+    ask" note.
+
+    The retry/confirm POLICY is deliberately NOT here: fx/ owns the
+    transport, spectra/ owns what to do when a fixture will not take a
+    write (`spectra/services/fixture_brightness.py`, whose docstring is the
+    binding statement). Evidence:
+    `tests/test_fixture_brightness_restore.py` (his sentence reproduced
+    byte for byte against the real transport and a real saturating HTTP
+    server, then fixed), `scripts/check_fixture_brightness.py` §4.
+
 Everything else is byte-identical to the fork at 149f4470 modulo the import
 rewrite and the deviations above. When updating vendored files, re-diff
 against that commit.
