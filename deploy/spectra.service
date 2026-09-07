@@ -21,7 +21,10 @@
 #
 # Handover arming (go day only): the handover API now runs in THIS process,
 # so the latch goes here — systemctl --user edit spectra, add
-# Environment=SPECTRA_HANDOVER_ARMED=1, restart spectra. Disarm afterwards.
+# Environment=SPECTRA_HANDOVER_ARMED=1, restart spectra. STANDING DESIGN
+# (Admiral, 2026-09-07): that latch is now KEPT ARMED PERMANENTLY — River's
+# take-back button is a first-class control — so there is no disarm step;
+# see docs/SPECTRA_HANDOVER.md's own STANDING DESIGN section.
 #
 # THE SELF-TAKING NIGHT is a SEPARATE lever and is absent here on purpose:
 # Environment=SPECTRA_NIGHT_SELF_TAKE=1 lets the night trigger take a

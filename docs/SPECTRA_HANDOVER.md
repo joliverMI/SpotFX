@@ -11,6 +11,43 @@ in-process fx/ pipeline) — never both. The durable record is
 `storage/spectra/ownership.json`; a missing record means the shipped
 default: **spot-effects owns**.
 
+## STANDING DESIGN (Admiral, 2026-09-07): the latch stays ARMED
+
+`SPECTRA_HANDOVER_ARMED=1` is kept set **permanently** on `spectra.service`.
+It is already set in the deployed unit; nothing below re-arms anything and no
+default in the code changed. This section records the INTENT, so the latch is
+never read as a temporary go-day arm that somebody should tidy away
+afterwards.
+
+Why: River's take-back button — the interactive handover **to** SPECTRA
+(`POST /spectra/api/ownership/handover` with `{"to": "spectra"}`, the way back
+from `released`) — is a **first-class control he presses whenever he wants the
+room back**, not a one-off switchover ceremony. A latch that has to be worded
+and restarted first would make that button fail at exactly the moment it is
+wanted. This is the operator's deliberate standing posture; disarming is now a
+decision he takes, not a step the procedure owes.
+
+What this does NOT change:
+
+- **The panic RELEASE stays un-gated, exactly as before.**
+  `POST /spectra/api/ownership/release` was never behind this latch (see
+  "Panic release" above and `spectra/services/release.py`) — going to
+  no-writer is always safe.
+- **The readiness gate, the staged switch and the rollback are untouched.**
+  Armed only means the route is reachable; every refusal below (412 readiness,
+  409 in-flight, 502 failed-and-landed-single-owner) is unchanged.
+- **The self-taking night is a SEPARATE, INDEPENDENT latch and is UNCHANGED.**
+  `SPECTRA_NIGHT_SELF_TAKE` (`spectra/config.py::night_self_take`,
+  `spectra/services/night_take.py`) is a different env var read by a different
+  function and is **absent by default**; this decision says nothing about it
+  and does not arm it. Do not conflate the two — an unattended night taking a
+  released room by itself is a different act from a human pressing a button,
+  and each keeps its own consent.
+
+The go-day procedure below is kept verbatim as the record of what arming does
+and how the switch runs; its "disarm afterwards" line is superseded by this
+section.
+
 ## Addresses
 
 Since the S3 process split, SPECTRA runs as her own process
@@ -129,7 +166,8 @@ switch or stated here as why it stays an operator note:
 
 1. **Arm** (the owner's word, expressed as an env latch on the process —
    since the process split the handover API runs in the SPECTRA process,
-   so the latch goes on HER unit):
+   so the latch goes on HER unit). **Already done and kept that way** as of
+   2026-09-07 — see the standing-design section above:
 
        systemctl --user edit spectra    # add:
        # [Service]
@@ -185,8 +223,10 @@ devices deactivated — Hue session released, DDP stopped, audio closed) →
 verify → `systemctl --user start ledfx` + wait for `/api/info` → commit.
 spot-effects' own reassert machinery then pushes cached effect state.
 
-**Disarm afterwards** (remove the Environment line, restart spectra) unless
-more switches are planned.
+**Disarming is no longer part of the procedure** — see "STANDING DESIGN
+(Admiral, 2026-09-07): the latch stays ARMED" above. The latch is kept set
+permanently so River's take-back button works at any time; removing the
+Environment line is a deliberate decision, not a tidy-up step.
 
 **Restart while SPECTRA owns**: a spectra.service restart (deploy, crash,
 watchdog) auto-resumes — at process start, a record that says `spectra`
