@@ -66,15 +66,32 @@ ENV_VARS: tuple[tuple[str, str, str], ...] = (
     ("SPECTRA_CAPTURE_SYNTHETIC", "synthetic",
      "1 to use the black synthetic camera, which reports NO lock — for "
      "proving the wire and the unit reach SPECTRA, never for a map"),
+    # ── the A/V-sync mode (spectra/capture_client/avsync_session.py) ──
+    # A DIFFERENT INSTRUMENT ON THE SAME MACHINE, so it gets its own
+    # variables rather than reinterpreting the mapping ones: a host set up
+    # to map at 5 fps must keep mapping at 5 fps.
+    ("SPECTRA_CAPTURE_AVSYNC", "avsync",
+     "1 to run the A/V-sync instrument (camera + microphone) instead of "
+     "the mapping session"),
+    ("SPECTRA_CAPTURE_AUDIO_DEVICE", "audio_device",
+     "the microphone for the A/V-sync measurement, BY NAME as ALSA "
+     "publishes it (e.g. BRIO) or as an explicit ALSA device "
+     "(plughw:CARD=BRIO,DEV=0) — never a card index, which is only USB "
+     "enumeration order"),
+    ("SPECTRA_CAPTURE_AVSYNC_FPS", "avsync_fps",
+     "camera frames per second for the A/V-sync measurement (its own "
+     "number: the light edge is timed to half a frame, so this wants to "
+     "be fast where a map wants to be cheap)"),
 )
 
 #: Which of those are numbers, and what to call them when they are not.
-NUMERIC: dict[str, type] = {"fps": float, "lock_wait": float}
+NUMERIC: dict[str, type] = {"fps": float, "lock_wait": float,
+                            "avsync_fps": float}
 #: And which are switches. `SPECTRA_CAPTURE_SYNTHETIC` is safe to have in
 #: the environment because the synthetic camera is INCAPABLE of claiming a
 #: lock — every run it touches refuses by name. A switch that could make a
 #: run happen anyway would not belong here.
-BOOLEAN: frozenset = frozenset({"synthetic"})
+BOOLEAN: frozenset = frozenset({"synthetic", "avsync"})
 TRUE_WORDS = ("1", "true", "yes", "on")
 
 

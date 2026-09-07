@@ -447,6 +447,126 @@ def check_tools(report: Report) -> None:
                        f"sudo apt install {package}")
 
 
+# ── 2b. THE MICROPHONE, only when this machine is the A/V-sync one ─────────
+
+def check_audio(report: Report, audio_device: str) -> None:
+    """Is the microphone the A/V-sync measurement needs there, and is it the
+    one that was asked for?
+
+    RUN ONLY WHEN A DEVICE WAS NAMED. A mapping-only camera host has no
+    microphone and never needed one — reporting that as a fault would send
+    somebody to fix a machine doing its whole job, which is the same mistake
+    `check_device` refuses one check up.
+
+    IT OPENS NOTHING. `arecord -l` is a listing; opening the device would
+    take the capture away from a run that is using it, and a doctor that
+    could break the thing it is diagnosing is not one.
+
+    THE MATCH IS THE CLIENT'S OWN. The resolver here is imported from
+    `avsync_audio`, never re-implemented: a doctor that said "BRIO is there"
+    by a different rule than the one the client opens with would be a
+    confident wrong answer of exactly the kind this module exists to end. In
+    the one case that import cannot work — this file run as a plain script
+    from outside a checkout, which is the "the virtualenv is the broken
+    thing" case — the LISTING is still reported and the match is UNKNOWN,
+    which is a blind spot and is never a failure."""
+    if not audio_device:
+        return
+    if shutil.which("arecord") is None:
+        report.add("microphone", FAILED,
+                   "arecord is not installed, and the A/V-sync client reads "
+                   "the microphone through it",
+                   "sudo apt install alsa-utils")
+        return
+    code, out = _run(["arecord", "-l"])
+    listed = [ln.strip() for ln in out.splitlines()
+              if ln.strip().startswith("card ")]
+    if listed:
+        report.add("capture devices", OK,
+                   f"{len(listed)} listed by ALSA: " + "; ".join(listed))
+    else:
+        report.add("capture devices", FAILED,
+                   f"arecord -l lists no capture device on this machine "
+                   f"(exit {code}): {out.strip()[:200] or 'no output'}",
+                   "plug the camera/microphone in, then: arecord -l")
+        return
+    try:
+        from spectra.capture_client.avsync_audio import probe_device
+    except Exception as exc:                            # noqa: BLE001
+        report.add("microphone", UNKNOWN,
+                   f"the capture devices above are what this machine has, "
+                   f"but whether {audio_device!r} resolves to one could not "
+                   f"be checked from here ({type(exc).__name__}: {exc}) — "
+                   f"this file was run without its package importable")
+        return
+    # ONE RUNNER for both reads on this path, so the listing a human is
+    # shown and the listing the match is made against cannot be two
+    # different answers from two calls.
+    probe = probe_device(audio_device, run=_run)
+    if not probe.get("ok"):
+        report.add("microphone", FAILED, probe["detail"],
+                   "arecord -l, then pass --audio-device with a name from "
+                   "it (or set SPECTRA_CAPTURE_AUDIO_DEVICE)")
+        return
+    report.add("microphone", OK, probe["detail"])
+    _check_audio_access(report, probe)
+
+
+#: The group an ALSA device node belongs to on a Debian-class machine. The
+#: same story as `VIDEO_GROUP` one device class over — and the same trap.
+AUDIO_GROUP = "audio"
+
+
+def _check_audio_access(report: Report, probe: dict) -> None:
+    """CAN THIS BE OPENED, and — separately — can the thing that will
+    actually open it?
+
+    Two findings for the same reason `check_video_group` gives two: a
+    desktop seat grants the logged-in user access to its own sound devices
+    through an ACL with no group anywhere in it, so `os.access` passing in
+    THIS shell is not evidence that a user SERVICE can capture. The service
+    inherits `systemd --user`'s supplementary groups, which that manager
+    took once at start and cannot gain afterwards.
+
+    Nothing here opens the device: a doctor that took the capture away from
+    a run in progress would be breaking the thing it is diagnosing."""
+    node = probe.get("pcm_node")
+    if not node:
+        # An explicit ALSA device string (`hw:1,0`, `default`) — there is no
+        # single node to point at, and inventing one would be a guess.
+        return
+    if not os.path.exists(node):
+        report.add("microphone node", FAILED,
+                   f"{node} does not exist, so ALSA lists this card but its "
+                   f"capture device is not there",
+                   "unplug and replug the microphone, then: arecord -l")
+        return
+    readable = os.access(node, os.R_OK)
+    user = _current_user()
+    code, out = _run(["id", "-nG"] + ([user] if user else []))
+    member = code == 0 and AUDIO_GROUP in out.split()
+    if readable and member:
+        report.add("microphone node", OK,
+                   f"{node} is readable by {user}, who is in group "
+                   f"'{AUDIO_GROUP}'")
+        return
+    if readable and not member:
+        report.add("microphone node", WARN,
+                   f"{node} is readable in THIS shell but {user} is not in "
+                   f"group '{AUDIO_GROUP}' — on a desktop that is a seat "
+                   f"ACL, which a user SERVICE does not get. Running the "
+                   f"measurement from a terminal will work; running it "
+                   f"under systemd may not.",
+                   f"sudo usermod -aG {AUDIO_GROUP} {user} — then REBOOT "
+                   f"(the user manager keeps the groups it started with)")
+        return
+    report.add("microphone node", FAILED,
+               f"{node} is NOT readable by {user}"
+               + ("" if member else f", who is also not in group "
+                                    f"'{AUDIO_GROUP}'"),
+               f"sudo usermod -aG {AUDIO_GROUP} {user} — then REBOOT")
+
+
 # ── 3. the camera device ───────────────────────────────────────────────────
 
 def check_device(report: Report, device: str) -> None:
@@ -1184,7 +1304,8 @@ def check_server_sees_us(report: Report, url: str, host: str) -> None:
 
 def run(*, url: str = "", device: str = "/dev/video0", host: str = "",
         venv: str = "", unit: str = UNIT_NAME,
-        skip_server: bool = False, scope: str = "") -> Report:
+        skip_server: bool = False, scope: str = "",
+        audio_device: str = "") -> Report:
     """Every branch, in the order a person would work through them: this
     machine's own tools first, then the thing between it and SPECTRA, then
     SPECTRA's own answer. Nothing here writes, fixes or starts anything."""
@@ -1192,6 +1313,7 @@ def run(*, url: str = "", device: str = "/dev/video0", host: str = "",
     scope = scope or detect_scope(unit)
     check_python(report, venv)
     check_tools(report)
+    check_audio(report, audio_device)
     check_device(report, device)
     check_video_group(report, scope=scope)
     check_url(report, url)
@@ -1245,12 +1367,14 @@ def render(report: Report, *, venv: str = "", url: str = "",
 
 def main(*, url: str = "", device: str = "/dev/video0", host: str = "",
          venv: str = "", unit: str = UNIT_NAME, as_json: bool = False,
-         skip_server: bool = False, scope: str = "") -> int:
+         skip_server: bool = False, scope: str = "",
+         audio_device: str = "") -> int:
     """Exit 0 when nothing FAILED. An UNKNOWN never fails the run: a doctor
     that reported a blind spot as a fault would send him to fix a machine
     that is working."""
     report = run(url=url, device=device, host=host, venv=venv, unit=unit,
-                 skip_server=skip_server, scope=scope)
+                 skip_server=skip_server, scope=scope,
+                 audio_device=audio_device)
     if as_json:
         print(json.dumps(report.as_dict(), indent=2))
     else:

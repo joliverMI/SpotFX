@@ -5602,6 +5602,57 @@ reason). The vision/ArUco stage is deliberately NOT built — only its seam
 `scripts/check_av_sync.py` (simulated rooms through the real code);
 `tests/test_av_sync_*.py`.
 
+**THE CAMERA NEED NOT BE A PHONE (2026-09-07, PR fm/spectra-avsync-on-
+kiosk-brio-mic).** `spectra/capture_client/avsync_session.py` is a SECOND
+client speaking the identical wire from a fixed kiosk camera with the
+Brio's own built-in microphone beside it — `--avsync` on the existing
+capture client, whose mapping path is untouched (a different mode, taken
+before the mapping camera is even constructed). **The server correlation,
+references, clock map, statement and refusals are unchanged**; the only
+server edit is five `hello` keys the record now KEEPS (`source`/`client`/
+`client_version`/`host`/`pose_name`) so a stored measurement says which
+camera took it instead of reading like a phone run. Three things before
+touching any of it:
+
+- **The reductions are the whole payload and they are pure stdlib**
+  (`avsync_reduce.py` is the binding statement): one log-energy dB per
+  ~11 ms hop, and per frame one mean + a 4x4 grid of region means. The
+  browser's 32x24 canvas is deliberately NOT reproduced — a box-mean
+  downscale followed by a proportional partition gives the same region
+  means as the partition alone, so the grey8 frame is partitioned
+  directly with the browser's own index arithmetic (asserted against a
+  line-for-line port of `luminanceOf`, not argued). Measured cost 0.72 ms
+  a frame + 30 us a hop, which is why there is no numpy and why
+  `check_capture_client_deps.py` still holds at httpx + websockets — that
+  script now names EVERY client module, because these three are imported
+  lazily and a package-level import would never have asked the blocker
+  about them.
+- **THE AUDIO CLOCK IS THE FRAGILE PART, and it is where a silent wrong
+  answer comes from.** `avsync_reduce.SampleClock` maps sample INDEX ->
+  monotonic seconds through one anchor, taken as the MINIMUM over the
+  warm-up reads (`ClockMap`'s own min-RTT discipline) and then FROZEN —
+  an anchor that keeps improving puts a step in the middle of the window
+  being correlated. Stamping a batch when the read returned instead moves
+  the answer ~88 ms with nothing downstream able to notice; that is one
+  of the two RED CONTROLS in `scripts/check_avsync_kiosk.py`, and the
+  other is a flipped sign. Do not "simplify" either away.
+- **It reports `capture_time_available: false` and `latency_s: null` on
+  purpose.** A v4l2 pipe cannot say when a frame's photons landed, so the
+  server names the camera-pipeline term (80 ms, lights_look_later) and the
+  microphone term (40 ms, lights_look_earlier) rather than a correction
+  nobody measured; they push OPPOSITE ways and are constant for one camera
+  in one place. Claiming a capture time here would silently delete the
+  larger of the two. **`arecord` has never met a real ALSA device on any
+  build machine** (recorded in `docs/CAPTURE_CLIENT_HOST.md`'s ledger);
+  every way that can be wrong is a named refusal and a non-zero exit,
+  never a silent envelope of zeros. The microphone is bound BY NAME
+  (`plughw:CARD=BRIO,DEV=0`), never a card index — that is USB
+  enumeration order, not a fact.
+
+Launching it, and the preconditions: `docs/UNATTENDED_CAPTURE.md`'s "THE
+OTHER INSTRUMENT" section (SPECTRA must own the lights and music must be
+playing, or the client refuses BEFORE flashing his room).
+
 ### Applying it: `RoomControlState.av_sync_lead_ms` — the ONLY authored term in SPECTRA's fire clock
 
 Built 2026-08-28 (PR fm/avsync-apply-button, his ask: "when I run avsync

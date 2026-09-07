@@ -72,6 +72,16 @@ Every row is exercised by a check that runs in the suite
   hardware, on any machine. **This dev host does not even have
   `v4l-utils` installed** — the provisioning script refuses on it here,
   correctly, which is how that refusal came to be exercised for real.
+- **`arecord` against a real ALSA capture device, on any machine.** The
+  A/V-sync mode (`docs/UNATTENDED_CAPTURE.md`, "THE OTHER INSTRUMENT")
+  opens the camera's own microphone through `arecord`; the device string,
+  the format flags and the period sizes are written against ALSA's
+  documented behaviour and exercised against a fake process feeding a real
+  stream. Nothing here has opened a real microphone. Every way that can be
+  wrong fails LOUD — a missing tool, an unmatched or ambiguous name, a
+  capture producing no bytes, a stream that dies mid-run — so the cost of a
+  wrong detail is a refused run, never a measurement that looks fine and is
+  not.
 - **1080p frames over his LAN from that board.** ~2 MB a frame before
   base64, at 5 fps, is an untested cost — untested on x86 too, and a Pi
   adds its own encode-free-but-copy-heavy path to the question.

@@ -57,6 +57,21 @@ def check(cond, label):
     return True
 
 
+#: EVERY module of the client, named rather than reached transitively — the
+#: A/V-sync ones are imported LAZILY at their call site (a mapping host must
+#: not pay for them), so a package-level import alone would never ask the
+#: blocker about them and this proof would pass without proving anything
+#: about the half most likely to want numpy.
+CLIENT_MODULES = (
+    "spectra.capture_client",
+    "spectra.capture_client.__main__",
+    "spectra.capture_client.config",
+    "spectra.capture_client.doctor",
+    "spectra.capture_client.avsync_reduce",
+    "spectra.capture_client.avsync_audio",
+    "spectra.capture_client.avsync_session",
+)
+
 #: Every top-level module the SERVER needs and the CLIENT must not. Blocked
 #: at the meta path so the proof is "it imported without them", not "we did
 #: not notice it importing them".
@@ -106,10 +121,9 @@ def main() -> int:
     blocker = _Blocker(SERVER_ONLY)
     sys.meta_path.insert(0, blocker)
     try:
-        importlib.import_module("spectra.capture_client")
-        importlib.import_module("spectra.capture_client.__main__")
-        importlib.import_module("spectra.capture_client.config")
-        check(True, "spectra.capture_client (and its __main__) import with "
+        for name in CLIENT_MODULES:
+            importlib.import_module(name)
+        check(True, f"{len(CLIENT_MODULES)} client modules import with "
                     f"{len(SERVER_ONLY)} server-only packages unavailable")
     except ImportError as exc:
         check(False, f"the client needs a server-only package: {exc}")

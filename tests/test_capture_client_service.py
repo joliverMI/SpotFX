@@ -70,6 +70,17 @@ def test_help_names_every_variable_so_the_program_is_the_reference():
         assert var in text
 
 
+def test_the_shipped_env_example_names_every_variable_too():
+    """The installer COPIES this file as the machine's whole configuration,
+    so a variable missing from it is one a person provisioning a host has no
+    way to find. Same discipline as the help text: one table, and nothing
+    that reads it may disagree with it."""
+    text = (REPO / "deploy" / "spectra-capture-client.env.example").read_text()
+    missing = [var for var, _d, _h in client_config.ENV_VARS
+               if var not in text]
+    assert missing == [], missing
+
+
 # ── the camera host's presence record ──────────────────────────────────────
 
 class _FakeLock:

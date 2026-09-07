@@ -367,6 +367,104 @@ The queue can also be started without the client (`POST
 for a camera session to arrive, which is what makes "start the queue, then
 start the client" work.
 
+## THE OTHER INSTRUMENT: A/V-sync from the kiosk
+
+The same machine, the same client, a different measurement. `/avsync`
+measures how far the lights are behind (or ahead of) the sound, and until
+now it needed a person holding a phone still for twelve seconds. The kiosk
+mode speaks the SAME WebSocket protocol the phone page speaks
+(`spectra/api/av_sync.py`), producing the same two number streams from the
+camera and the microphone beside it — **the Brio's own built-in mic**, so
+the thing that hears and the thing that sees stand in one place.
+
+Nothing about the server changed to make this work: the correlation, the
+two references, the clock map, the confidence statement and the refusals
+are the code that was already there. What the server gained is five extra
+`hello` keys it KEEPS on the record (`source`, `client`, `client_version`,
+`host`, `pose_name`) so a stored measurement says which camera took it.
+
+```bash
+# ONE measurement, then exit — the flash pattern, 12 s, printed as JSON
+python -m spectra.capture_client \
+    --url http://spectra:8000/spectra \
+    --avsync --audio-device BRIO --measure \
+    --json-out /tmp/avsync.json
+
+# two runs back to back: the DIFFERENCE between them is far tighter than
+# either absolute number, and the Apply dialogue wants that comparison
+python -m spectra.capture_client --url http://spectra:8000/spectra \
+    --avsync --measure --measure-runs 2
+
+# stream both signals and take no measurement, to watch them arrive at
+# GET /spectra/api/av-sync/status before committing the room to a flash
+python -m spectra.capture_client --url http://spectra:8000/spectra --avsync
+
+# is the microphone even there, and can the SERVICE open it?
+# (opens nothing, writes nothing — the group answer is the one that bites:
+#  a desktop seat's ACL makes the node readable in a terminal while a user
+#  service, which inherits `systemd --user`'s groups, still cannot capture)
+python -m spectra.capture_client --avsync --doctor
+```
+
+**Deploying it costs nothing new.** The reductions are pure stdlib, so the
+client's dependency closure is still exactly httpx + websockets — a camera
+host that already runs the mapping client only needs its checkout updated
+(the installed launcher `cd`s into that checkout and runs
+`python -m spectra.capture_client`). The one extra system package is
+`alsa-utils` for `arecord`, which the mapping-only path does not need and
+`--avsync --doctor` names by hand if it is missing. `spectra.service` wants
+the same deploy, but only for the RECORD: the five kept `hello` keys are the
+one server-side change, and an un-updated SPECTRA drops them and measures
+exactly the same number — the stored row then just does not say which camera
+took it. Deploy order does not matter.
+
+Exit codes: `0` a number for every run; `1` it ran and the instrument
+REFUSED (weak / ambiguous / unstable / no audio reference — the server's
+own reason and statement are in the JSON); `2` nothing ran (no camera, no
+microphone, SPECTRA unreachable). **A refusal is a result, not a crash.**
+
+**STOP THE MAPPING SERVICE FIRST if this machine runs one.** Both modes
+open the same `/dev/video0`, and a camera is not shareable: an A/V-sync run
+started while `spectra-capture-client.service` is holding a mapping session
+refuses with ffmpeg's own "device or resource busy" rather than measuring
+anything. `systemctl --user stop spectra-capture-client`, measure, start it
+again. (The installed launcher is `~/.local/bin/spectra-capture-client`, so
+every command above can be typed with that name instead of `python -m`.)
+
+Preconditions, and the run says which one is missing rather than guessing:
+SPECTRA must OWN the lights and be playing music (the audio reference is
+its own live hub tap — with no reference the client refuses BEFORE
+flashing his room), and the camera has to be aimed at lights that fill a
+useful part of the frame.
+
+The measurement is never applied by this: it is presented, and the Apply
+press on `/avsync` is his (`docs/SPECTRA_TIMING_CONVENTIONS.md`'s
+`av_sync_lead_ms` row is the sign law).
+
+**What is proven, and what is not.** The whole data path is proven
+offline: raw 16-bit PCM and raw grey8 frames, reduced by this client's own
+code and timestamped by its own sample clock, drive the REAL server
+correlation to a KNOWN offset within a millisecond, with the correct sign
+in both directions, and the harness goes RED on a flipped sign and on the
+naive "stamp the envelope when the read returned" implementation
+(`scripts/check_avsync_kiosk.py`). **`arecord` has never met a real ALSA
+device on any machine this was built on**, and neither has the V4L2
+backend (above): the device string, the format flags and the period sizes
+are written against ALSA's documented behaviour and exercised against a
+fake process feeding a real stream. Every way that can be wrong fails
+LOUD — a missing tool, a name that matches no card, an ambiguous name, a
+capture that produces no bytes and a stream that dies mid-run are each a
+named refusal and a non-zero exit, never a silent envelope of zeros.
+
+**The one bound worth reading before trusting a kiosk number**: a browser
+can sometimes hand SPECTRA the frame's real capture time; a v4l2 pipe
+cannot, so this client reports `capture_time_available: false` and the
+server names the camera-pipeline term (bound 80 ms, direction "lights look
+later") rather than a correction. It declines to guess a microphone
+latency for the same reason, and that term points the other way. They
+partly cancel, they are constant for one camera in one place, and that is
+why two runs from the SAME camera are worth more than one absolute figure.
+
 ## Where to read the result
 
 - The **Rooms page**, "Unattended capture": the live queue, every item's
@@ -382,6 +480,9 @@ start the client" work.
 |---|---|
 | `spectra/capture_client/camera.py` | what a camera is, and the read-back rule (**binding statement** for the lock's honesty) |
 | `spectra/capture_client/session.py` | hello, frames, pong, reconnect, pose |
+| `spectra/capture_client/avsync_reduce.py` | the two A/V-sync reductions (**binding statement** for their units and for why the browser's 32×24 canvas is not reproduced), and the sample clock |
+| `spectra/capture_client/avsync_audio.py` | the microphone: bound BY NAME, never by card index, and a stream it cannot vouch for is a refusal |
+| `spectra/capture_client/avsync_session.py` | the A/V-sync WebSocket client (**binding statement** for its clocks and their honest limits) |
 | `spectra/capture_client/__main__.py` | the command line and the exit codes |
 | `spectra/services/capture_runs.py` | the ONE seam that executes one run — the page's button and the queue both go through it |
 | `spectra/services/capture_queue.py` | the runner: waits, walks, keeps partials, names pose changes, writes as it goes |
@@ -401,6 +502,10 @@ start the client" work.
 | `scripts/check_capture_queue_e2e.py` | the whole path: real server, real WebSocket, the real client, a synthetic camera. A declared queue of five runs with no human action after start; a mid-queue refusal that the queue carries on past; a dropped socket whose partial is kept and whose retry completes; the pose held across the drop and NAMED across a reopen; the exposure gate refusing an automated client; a machine with no camera connecting anyway to say so. Run from pytest via `tests/test_light_field_checks.py`. |
 | `tests/test_capture_queue.py` | what the runner does with each outcome it is handed |
 | `tests/test_capture_client.py` | the lock is read back, never asserted — including a driver that ignores the write |
+| `scripts/check_avsync_kiosk.py` | **the load-bearing A/V-sync proof**: raw PCM + raw grey8 frames through this client's own reductions and sample clock into the REAL server correlation, recovering a known offset to within a millisecond, both signs, four rooms — and TWO RED CONTROLS (a flipped sign, and the envelope stamped at the read) that the harness must fail on |
+| `tests/test_avsync_kiosk_e2e.py` | the same, from pytest, plus the privacy property re-proven for a client that has raw media in its hands |
+| `tests/test_avsync_reduce.py` | the reductions against known signals AND against a line-for-line port of the browser's own `luminanceOf` |
+| `tests/test_avsync_capture_client.py` | the microphone bound by name, every refusal it raises, and the session refusing to flash his room when the server has already said it cannot measure |
 | `tests/test_night_run.py` | the boundary declines and RECORDS; the planned-end bound at start and per item; the export's two lists, with the shield list following a config change; abort; his morning as an ordinary ending |
 | `tests/test_night_run_api.py` | auth (absent, wrong, unprovisioned, rotated), HA's own payloads, both open reads |
 | `tests/test_night_exit.py` | **RED WHEN LYING**: a fixture forced lit at its own firmware fails the dark claim, on a real headless render host through real `fx.utils.WLED` transport to a real HTTP endpoint |
