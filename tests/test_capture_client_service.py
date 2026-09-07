@@ -409,8 +409,10 @@ def test_absence_wording_distinguishes_never_from_gone():
 # died with a raw `No module named pip` INSIDE the freshly built venv.
 
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 
 APT_FIX = "sudo apt install -y python3-venv python3-pip"
 
@@ -465,3 +467,94 @@ def test_a_whole_python_passes_the_pip_checks(tmp_path):
                              "--url", "http://spectra:8000/spectra")
     assert "ensurepip" not in proc.stdout
     assert "has no pip in it" not in proc.stdout
+
+
+# ── THE VERIFIED PATH'S OWN NAME ───────────────────────────────────────────
+#
+# `systemd-analyze verify` takes a UNIT FILE, and it decides what kind of
+# unit that is from the BASENAME's suffix — so it refuses an unsuffixed
+# name before it reads a byte of the contents: "Failed to prepare filename
+# /tmp/tmp.XXXXXXXXXX: Invalid argument". The installer generated its
+# system unit into a bare `mktemp` file and verified THAT, so a perfectly
+# valid unit was refused and a kiosk host would not provision (River,
+# kiosk-0, systemd 257, 2026-09-07 — and reproduced below on whatever
+# systemd is here, so it was never a version regression).
+#
+# The refusal is INDISTINGUISHABLE AT THE EXIT STATUS from a genuinely bad
+# unit, which is why the fix is the name and not a looser check: a verify
+# step that can fail for a reason having nothing to do with the unit is not
+# a check on the unit.
+
+SYSTEM_UNIT_DST_BASENAME = "spectra-capture-client.service"
+
+
+def _generated_system_unit(launcher: str) -> str:
+    """The bytes the installer's --system path writes, filled the way it
+    fills them."""
+    return (SYSTEM_UNIT.read_text()
+            .replace("@USER@", "camerauser")
+            .replace("@GROUP@", "camerauser")
+            .replace("@HOME@", "/home/camerauser")
+            .replace("@LAUNCHER@", launcher))
+
+
+def test_the_installer_verifies_a_service_suffixed_path_not_a_bare_mktemp():
+    """STRUCTURAL, and it runs everywhere: whatever `systemd-analyze verify`
+    is handed in the --system path must carry the unit's own name."""
+    text = INSTALLER.read_text()
+    body = "\n".join(l for l in text.splitlines() if not l.lstrip().startswith("#"))
+    assert 'UNIT_TMP_DIR="$(mktemp -d)"' in body, \
+        "the temp unit needs a DIRECTORY it can be given a real name inside"
+    assert 'UNIT_TMP="$UNIT_TMP_DIR/spectra-capture-client.service"' in body, \
+        "and that name must carry a valid unit suffix or verify refuses it"
+    assert 'UNIT_TMP="$(mktemp)"' not in body, \
+        "a bare mktemp name is rejected by systemd-analyze before it reads " \
+        "the file — this is the defect, not a style point"
+    # The verified path and the installed path are the same basename, which
+    # is what makes the verify a check on the bytes that land in /etc.
+    assert 'systemd-analyze verify "$UNIT_TMP"' in body
+    assert '$SUDO install -m 0644 "$UNIT_TMP" "$SYSTEM_UNIT_DST"' in body
+    assert SYSTEM_UNIT_DST_BASENAME in body
+
+
+@pytest.mark.skipif(not shutil.which("systemd-analyze"),
+                    reason="systemd-analyze is not on this machine")
+def test_the_suffix_boundary_is_real_measured_on_the_generated_bytes(tmp_path):
+    """MEASURED, not taken from the bug report: the SAME generated unit is
+    refused at a bare-mktemp name and accepted at a `.service` one.
+
+    This is the red-first half. The only difference between the two runs is
+    the filename, so the failure cannot be attributed to the unit."""
+    analyze = shutil.which("systemd-analyze")
+    launcher = tmp_path / "stub-launcher"
+    launcher.write_text("#!/bin/sh\nexit 0\n")
+    launcher.chmod(0o755)
+    unit = _generated_system_unit(str(launcher))
+
+    # THE OLD NAME — what `mktemp` produces, byte-identical contents.
+    with tempfile.NamedTemporaryFile("w", delete=False) as fh:
+        fh.write(unit)
+        unsuffixed = Path(fh.name)
+    try:
+        r = subprocess.run([analyze, "verify", str(unsuffixed)],
+                           capture_output=True, text=True, timeout=60)
+        assert r.returncode != 0, \
+            "expected the unsuffixed name to be refused — if this passes, " \
+            "this systemd no longer has the boundary and the fix is merely " \
+            "harmless, not needed"
+        assert "Failed to prepare filename" in (r.stdout + r.stderr), \
+            f"refused for the wrong reason: {(r.stdout + r.stderr)[:200]!r}"
+    finally:
+        unsuffixed.unlink(missing_ok=True)
+
+    # THE NEW NAME — same bytes, inside a `mktemp -d`, under the unit's own
+    # real name. Clean: no output at all, which is what the installer's
+    # `if systemd-analyze verify` branch requires.
+    suffixed = tmp_path / SYSTEM_UNIT_DST_BASENAME
+    suffixed.write_text(unit)
+    r = subprocess.run([analyze, "verify", str(suffixed)],
+                       capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, \
+        f"the generated unit must verify clean at a .service name: " \
+        f"rc={r.returncode} {(r.stdout + r.stderr)[:300]!r}"
+    assert not (r.stdout + r.stderr).strip()
