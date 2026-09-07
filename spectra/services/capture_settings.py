@@ -141,6 +141,31 @@ before he presses are the minutes the room is actually dark. An exposure so
 long that even the maximum window cannot buy MIN_FRAMES REFUSES by name
 (`mapping_refusals.exposure_too_long`) rather than producing a run of
 unmapped emitters.
+
+────────────────────────────────────────────────────────────────────────────
+FIVE. A BOUND ON REFUSING IS NOT A BUDGET FOR SUCCEEDING
+────────────────────────────────────────────────────────────────────────────
+
+Asking a camera for a new frame size is not free either, and the run that
+asks is not the thing that knows what it costs. His sconce commissioning of
+2026-09-06 negotiated 1920x1080 at 22:09, REFUSED at 22:44 — "the camera is
+still sending 320x180 ... 2 frames arrived at the old size while this run
+waited" — and worked again at 22:46, with nothing about the camera, the pose
+or the room different between them. It was worse whenever an integration
+time rode in the same message.
+
+Nothing was wrong with the camera and nothing was wrong with the refusal's
+wording. The client had been told to do THREE things — restart its pixel
+pipe at the new size, re-read every control, and pay the sensor for a lever
+that moved — and all three had to fit inside ONE fixed 4.0 s window that the
+run picked without knowing which of them it had commanded.
+
+`frame_switch_wait_s` is that window, derived instead of picked: the three
+costs ADDED, from the client's own numbers, with the caller's constant kept
+as a FLOOR rather than a ceiling. It can afford to be generous because of
+what it actually bounds — `await_frame_size` returns on the FRAME, not on
+the clock, so this is the longest a run will wait before REFUSING and never
+a delay before succeeding. A working camera pays none of it.
 """
 from __future__ import annotations
 
@@ -531,6 +556,63 @@ def regime_settle_s(exposure_time: Optional[int], fps: float) -> float:
     return round(frames / max(1e-6, rate) + integration, 3)
 
 
+#: HOW LONG A CLIENT THAT IS DOING WHAT IT WAS TOLD CAN BE SILENT WHILE IT
+#: CHANGES FRAME SIZE — the SERVER's own statement of the client's cost, the
+#: same discipline `SENSOR_APPLY_FRAMES` follows two constants up, and for
+#: the same reason: a server that measures light through a client it did not
+#: write must not depend on that client having done it.
+#:
+#: WHAT THE ACT ACTUALLY IS (`spectra/capture_client/camera.py::
+#: set_frame_size`): the pixel pipe is CLOSED, the decoder is re-spawned at
+#: the new capture size, and the first frame there is waited for — for which
+#: the client allows ITSELF 15 s (`_open_at`'s own `asyncio.wait_for`) —
+#: and then every control is written and re-read out of the device before a
+#: single frame can be sent at the new size.
+#:
+#: SO THE NUMBER IS NOT TUNED, IT IS THE CLIENT'S OWN: a server bound
+#: SHORTER than the client's budget for the act the server just commanded
+#: refuses a camera that is working, and it does so on a threshold nobody
+#: can see. That is the 2026-09-06 defect verbatim — the same camera, the
+#: same pose, refused at 22:44 between two runs that worked.
+#:
+#: IT COSTS A WORKING RUN NOTHING. `await_frame_size` returns the instant
+#: the frames arrive, so this is a bound on REFUSING, never a delay before
+#: succeeding — which is the trade that lets it be generous.
+CLIENT_RESIZE_BUDGET_S = 15.0
+
+
+def frame_switch_wait_s(exposure_time: Optional[int], fps: float, *,
+                        lever_moved: bool) -> float:
+    """THE LONGEST A CLIENT THAT IS WORKING CAN TAKE TO START SENDING AT A
+    NEW FRAME SIZE — and therefore the shortest bound that can refuse one
+    honestly.
+
+    THREE COSTS, ADDED RATHER THAN SHARED, AND THAT IS THE FIX:
+
+      * the pipe restart (`CLIENT_RESIZE_BUDGET_S`);
+      * the SENSOR SETTLE a lever in the SAME message owes
+        (`regime_settle_s`) — `spectra/capture_client/session.py::
+        _apply_config` applies the size and then the levers, and a lever
+        that moved arms `SENSOR_APPLY_FRAMES`, so the frames that follow
+        the restart are DISCARDED before one is sent at all;
+      * one frame period for the first frame at the new size to actually
+        arrive and be noted.
+
+    Until 2026-09-06 all three shared ONE fixed 4.0 s window
+    (`room_mapping.FRAME_SWITCH_WAIT_S`), so an integration time arriving
+    in the same message spent the frame size's own wait — which is why the
+    field failure was flaky at all (a bare resize fits in 4 s; a resize
+    plus a settle does not) and why it was WORSE with a lever.
+
+    A SESSION THAT CANNOT YET SAY HOW FAST FRAMES ARRIVE (`observed_fps`
+    is 0.0 until there are two to time) is treated as SLOW by
+    `achievable_fps`, which is the safe direction for a bound whose only
+    cost is paid when refusing."""
+    rate = achievable_fps(fps, exposure_time)
+    settle = regime_settle_s(exposure_time, fps) if lever_moved else 0.0
+    return round(CLIENT_RESIZE_BUDGET_S + settle + 1.0 / rate, 3)
+
+
 def frames_in(capture_s: float, fps: float) -> int:
     """How many frames a window of this length buys at this rate — the
     other direction, for pricing and for saying what a run is about to
@@ -688,6 +770,20 @@ class CameraNegotiation:
                 return False
             await asyncio.sleep(poll)
 
+    def switch_wait_s(self) -> float:
+        """This session's own bound for the switch it has just asked for —
+        `frame_switch_wait_s` applied to THIS request and THIS observed
+        rate. Public because a run that wants to say how long it is prepared
+        to wait can ask rather than re-derive.
+
+        DELIBERATELY NOT NAMED AFTER THE FUNCTION IT CALLS: one identifier
+        meaning two things inside one class is exactly how the cold-start
+        crash of 2026-08-24 happened (AGENTS.md carries it), and a method
+        shadowing a module-level name it also has to call is that shape."""
+        req = self.camera_request
+        return frame_switch_wait_s(req.exposure_time, self.observed_fps(),
+                                   lever_moved=req.manual)
+
     async def await_frame_size(self, size: tuple, timeout: float, *,
                                poll: float = 0.05) -> tuple:
         """Wait until frames are arriving at `size` — or at the client's own
@@ -697,10 +793,24 @@ class CameraNegotiation:
         says so on every frame, so "smaller than asked for" is a RESULT, not
         a failure: this returns it and the caller decides. A client that
         never switches at all times out, and the caller refuses by name
-        rather than stacking frames of two shapes."""
+        rather than stacking frames of two shapes.
+
+        THE CALLER'S `timeout` IS A FLOOR, NOT A CEILING (2026-09-06). Every
+        caller passes one fixed number — `room_mapping.FRAME_SWITCH_WAIT_S`,
+        4.0 s — and a fixed number cannot know what it is waiting for: the
+        same constant covers a map re-asking for the size it is already on
+        (instant) and a commissioning read commanding a full pipe restart
+        plus a sensor settle (seconds). So the bound the ACT costs is raised
+        here, where the request and the client's own cost are both known,
+        and the caller's number is only ever raised, never lowered — a
+        caller that wants to wait longer still does.
+
+        IT COSTS A WORKING CLIENT NOTHING: this returns on the frame, not on
+        the clock."""
         import asyncio
         want = tuple(size)
-        deadline = self._camera_clock() + max(0.0, timeout)
+        deadline = (self._camera_clock()
+                    + max(0.0, timeout, self.switch_wait_s()))
         while True:
             got = self.active_frame_size
             if got == want:

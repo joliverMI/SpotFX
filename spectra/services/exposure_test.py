@@ -257,9 +257,9 @@ async def compare_regimes(room: RoomMap, deps: room_mapping.RunDeps, *,
                       axis=room.axis)
     quiet = replace(deps, save_room=None)
 
-    scope, activated, not_up = await room_mapping.activate_for_capture(
-        plan, scope, quiet)
-    result.problems.extend(not_up)
+    activation = await room_mapping.activate_for_capture(plan, scope, quiet)
+    scope = activation.scope
+    result.problems.extend(activation.failed)
     program = room_mapping.MappingProgram(scope)
     sess.run_abort = None
     before = sess.camera_request
@@ -290,10 +290,14 @@ async def compare_regimes(room: RoomMap, deps: room_mapping.RunDeps, *,
         except Exception:                              # noqa: BLE001
             logger.warning("exposure test: releasing the hold failed; the "
                            "hold sweep owns it from here", exc_info=True)
-        left_on = await room_mapping.deactivate_after_capture(activated, quiet)
-        if left_on:
+        restore = await room_mapping.deactivate_after_capture(activation, quiet)
+        if restore.left_on:
             result.problems.append(
-                f"left rendering after the comparison: {', '.join(left_on)}")
+                f"left rendering after the comparison: "
+                f"{', '.join(restore.left_on)}")
+        if restore.not_restored:
+            result.problems.append(
+                mapping_refusals.carrier_not_restored(restore.not_restored))
 
     result.seconds = deps.clock() - started
     got = {r.label: r for r in result.regimes}

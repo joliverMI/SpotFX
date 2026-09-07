@@ -3486,6 +3486,64 @@ and the id shape. Five things to know:
   did not observe, so the flag is the run's own to restore
   (`tests/test_capture_activation.py` reads it back). `room_effects.start`
   does the same and `stop()` puts it back AFTER the hold's revert.
+- **BRINGING A SUBSTITUTE UP TAKES THE CARRIER OFF THE AIR, and the capture
+  owes BOTH halves back** (2026-09-06, PR fm/spectra-fix-carrier-activation,
+  from his first real sconce commission). `fx/devices/__init__.py::
+  Device.add_segments_batch` deactivates every EXTERNAL virtual streaming to
+  a device whose own device-virtual activates — so lighting `tv-backlight`
+  for one block took the copy-mapped `tv-mapper` off the air, and putting
+  the substitute back to sleep did not bring the carrier back. It was left
+  HOLDING ITS EFFECT WITH NO RENDER THREAD: liveness `healthy=False` with
+  `activation_gaps {tv-mapper}`, .236 stuck on a static frame, and a lever
+  self-test reporting "no carrier of this room is rendering", while every
+  write to it landed on nothing. **The activation reconciler cannot cover
+  this** — it re-inits dark DEVICES, not an inactive VIRTUAL — so the
+  restore belongs to the capture path that displaced it.
+  `activate_for_capture` now returns a `CaptureActivation` (scope /
+  activated / failed / **displaced**) and `deactivate_after_capture` takes
+  that WHOLE RECORD and returns a `CaptureRestore` (`left_on` /
+  `not_restored`, two different changes to his room, two sentences —
+  `mapping_refusals.carrier_not_restored`). Four things not to undo: the
+  record is deliberately NOT tuple-unpackable, because the old three-value
+  return is exactly how a call site kept `activated` alone and lost the
+  other half on every path at once; displacement is **MEASURED** (what was
+  rendering, read before and after the activation, minus what this run
+  deliberately brought up) and never inferred from the device layer's
+  rules, with a failed read claiming NOTHING; the substitute is put to
+  sleep BEFORE the carrier goes back on, or the same exclusion rule fires
+  in the other direction; and the restore is `deps.reactivate` — the FLAG
+  ALONE (`fx_seam.set_virtual_active(vid, True)`), never `deps.activate`,
+  which writes the run's black lamp first and would destroy the effect the
+  hold's revert just put back. All five capture paths (map, commissioning,
+  exposure comparison, pose fingerprint, lever self-test) inherit it from
+  the one seam.
+- **AND THE HALF THAT WAS FOUND BY BUILDING THAT PROOF: A DISPLACED
+  VIRTUAL LEAVES THE WRITE SCOPE FOR THE REST OF THE RUN** (same PR), and
+  it is MEASURED, not tidiness. A displaced carrier still HOLDS an effect,
+  so the capture's own black write to it takes `fx/facade.py`'s repair
+  branch (`_verify_effect_took`, deviation #29), which ACTIVATES it to make
+  that write real — and that hands the device straight back, knocking the
+  substitute off the air. The two then trade the device on every write, and
+  with the carrier's black write last in the payload THE LAMP IS INACTIVE
+  WHEN THE CAMERA LOOKS: measured on the real pipeline, the device reads
+  `max=0.0` / 0 lit pixels on every step of every pass — a run that maps
+  nothing and cannot say why. `CaptureActivation.scope` is therefore
+  `(live | activated) - displaced`, which is what makes the substitute's
+  own lamp the only thing driving that device for the whole run. It also
+  makes the restore self-contained rather than depending on that repair
+  firing. Keep it out of scope; do not "complete" the dark step by putting
+  it back in.
+  Proof for both halves, on a real `fx.headless` host with real render
+  threads: `tests/test_capture_carrier_restore.py` — active, a live thread
+  AND fresh `VIRTUAL_UPDATE` frames after the restore, plus the real
+  `MappingProgram` payloads driven through the real write seam over two
+  emitter passes with the DEVICE's own buffer measured. Both verified RED
+  against the pre-fix code (`active=False`, effect held, 0 frames; and the
+  lamp's virtual off the air during the dark step). That file's own header
+  says why its teardown is explicit: it is the only headless test in the
+  suite that spawns real render threads (`headless.attach_effect`
+  deliberately skips them), and a virtual left rendering is a non-daemon
+  thread that hangs the interpreter at exit.
 - **AN EMITTER THE CAMERA NEVER SAW IS A RECORD, NOT AN ABSENCE** (2026-08-31,
   PR fm/mapping-unseen-emitter-note). His first real map ran 22 emitters and
   stored 14; the missing 8 (far-side TV blocks, sconce spill outside the
@@ -3981,7 +4039,7 @@ ladder of declared frame sizes, the arithmetic that chose them, the four
 pinned levers (`LEVER_BOUNDS`: integration time, gain, white balance
 temperature, focus — the last two added 2026-09-01, NATIVE CLIENT ONLY,
 since the browser can reach neither), and the frame-rate coupling. Read it
-before touching anything that sends, sizes or exposes a capture frame. Six
+before touching anything that sends, sizes or exposes a capture frame. Seven
 things:
 
 - **THE WIRE FRAME IS PER RUN, NOT ONE NUMBER (2026-09-01, owner-approved:
@@ -3999,6 +4057,32 @@ things:
   so `light_field.downsample` stays a box mean and a grid from a 1080p frame
   is directly comparable with one from 320x180. **grey8, uncompressed, at
   every rung** — a lossy stage's noise lands inside the measured difference.
+- **ASKING FOR A NEW WIRE FRAME COMMANDS THREE ACTS, AND THEY ARE ADDED, NOT
+  SHARED (2026-09-06, PR fm/spectra-fix-framesize-race).** His sconce
+  commissioning negotiated 1920x1080 at 22:09, REFUSED at 22:44 ("the camera
+  is still sending 320x180 ... 2 frames arrived at the old size while this
+  run waited") and worked again at 22:46, with nothing about the camera, the
+  pose or the room different — and it was worse whenever an integration time
+  rode in the same `config` message. Neither the camera nor the refusal's
+  wording was wrong: the client had been told to restart its pixel pipe at
+  the new size (for which `capture_client/camera.py::_open_at` allows ITSELF
+  15 s), re-read every control, and pay the sensor settle any moved lever
+  owes (`regime_settle_s`) — and all three had to fit inside ONE fixed 4.0 s
+  window (`room_mapping.FRAME_SWITCH_WAIT_S`) that the run picked without
+  knowing which of them it had commanded. `frame_switch_wait_s` derives that
+  window instead — the three costs ADDED, from the client's own numbers —
+  and `await_frame_size` takes `max(caller, derived)`, so **the caller's
+  constant is a FLOOR and never a ceiling**; the negotiation is the only
+  place that knows both the request and the client's cost, which is why the
+  bound is raised there rather than at four call sites. **It can afford to
+  be generous because of what it bounds**: `await_frame_size` returns on the
+  FRAME, not on the clock, so this is the longest a run waits before
+  REFUSING and never a delay before succeeding — a working camera pays none
+  of it. A client that genuinely never switches is still refused by name,
+  which is half the proof (`tests/test_frame_size_switch_wait.py` drives the
+  real commissioning run over a modelled slow client and carries the
+  never-switches control beside it). Before shortening any wait on this
+  path, check what the far side was told to DO first.
 - **A CLIENT NEVER UPSCALES, and the server asserts it independently.**
   `capture_settings.choose` picks the largest rung no bigger than BOTH the
   request and the camera's own image; every frame carries `source_width`/
