@@ -1452,13 +1452,19 @@ async def run_commission(mapper_id: str, deps: room_mapping.RunDeps, *,
             f"slice of the same stored ground truth.")
 
     plan = _ActivationPlan(composition)
-    scope, activated, not_up = await room_mapping.activate_for_capture(
-        plan, scope, deps)
-    result.problems.extend(not_up)
-    if activated:
+    activation = await room_mapping.activate_for_capture(plan, scope, deps)
+    scope = activation.scope
+    result.problems.extend(activation.failed)
+    if activation.activated:
         result.notes.append(
-            f"Brought up {', '.join(activated)} for the capture and put "
-            f"{'it' if len(activated) == 1 else 'them'} back afterwards.")
+            f"Brought up {', '.join(activation.activated)} for the capture "
+            f"and put {'it' if len(activation.activated) == 1 else 'them'} "
+            f"back afterwards.")
+    if activation.displaced:
+        result.notes.append(
+            f"{', '.join(activation.displaced)} was off the air for the "
+            f"capture (the fixture's own strip held the device) and was put "
+            f"back on it afterwards.")
 
     entries: list[dict] = []
     sess.keep_full_frames = True
@@ -1561,12 +1567,15 @@ async def run_commission(mapper_id: str, deps: room_mapping.RunDeps, *,
         except Exception:                              # noqa: BLE001
             logger.warning("commissioning: could not put the camera back to "
                            "the map's own frame size", exc_info=True)
-        left_on = await room_mapping.deactivate_after_capture(activated, deps)
-        if left_on:
+        restore = await room_mapping.deactivate_after_capture(activation, deps)
+        if restore.left_on:
             result.problems.append(
                 f"left rendering after the capture (they were idle before "
-                f"it): {', '.join(left_on)} — turn them off on the devices "
-                f"page, or run this again")
+                f"it): {', '.join(restore.left_on)} — turn them off on the "
+                f"devices page, or run this again")
+        if restore.not_restored:
+            result.problems.append(
+                mapping_refusals.carrier_not_restored(restore.not_restored))
 
     result.seconds = deps.clock() - started
     await _judge_contamination(deps, result, started_wall, deps.wall())

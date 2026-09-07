@@ -580,12 +580,15 @@ async def run_selftest(room: RoomMap, deps: "room_mapping.RunDeps", *,
     # BRING UP ONLY WHAT THE DRIVEN EMITTER NEEDS. Computed over the whole
     # plan this would activate — and persist a stored effect onto — the
     # substitute strip of every carrier in the room, fixtures the run never
-    # asked for. Narrowing it cannot shrink the dark reference:
-    # `activate_for_capture` only ever ADDS to `live`, and the hold below is
-    # built over all of `live`, so every live virtual is still darkened.
-    live, activated, not_up = await room_mapping.activate_for_capture(
+    # asked for. Narrowing it cannot shrink the dark reference: the hold
+    # below is built over all of `live`, so every virtual that can still
+    # emit is darkened. `activate_for_capture` ADDS what it brought up and
+    # REMOVES what bringing that up displaced — and a displaced virtual has
+    # no render thread, so it emits nothing there is a reference to take.
+    activation = await room_mapping.activate_for_capture(
         replace(plan, emitters=[emitter]), live, quiet)
-    out.problems.extend(not_up)
+    live = activation.scope
+    out.problems.extend(activation.failed)
     program = room_mapping.MappingProgram(live)
     sess.run_abort = None
     before = sess.camera_request
@@ -609,10 +612,14 @@ async def run_selftest(room: RoomMap, deps: "room_mapping.RunDeps", *,
         except Exception:                              # noqa: BLE001
             logger.warning("lever self-test: releasing the hold failed; the "
                            "hold sweep owns it from here", exc_info=True)
-        left_on = await room_mapping.deactivate_after_capture(activated, quiet)
-        if left_on:
+        restore = await room_mapping.deactivate_after_capture(activation, quiet)
+        if restore.left_on:
             out.problems.append(
-                f"left rendering after the self-test: {', '.join(left_on)}")
+                f"left rendering after the self-test: "
+                f"{', '.join(restore.left_on)}")
+        if restore.not_restored:
+            out.problems.append(
+                mapping_refusals.carrier_not_restored(restore.not_restored))
 
     out.seconds = deps.clock() - started
     # A CAMERA THAT WOULD NOT TAKE THE TEST'S OWN COMMANDS proves nothing
