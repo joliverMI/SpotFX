@@ -72,6 +72,27 @@ the full per-class writeup):
            to freeze/fade — deactivating its virtuals is the same best-
            effort this file already did before this fix.
 
+RIVER IS TOLD, AND SHE IS TOLD AT THE FIRST MOMENT IT IS TRUE. The Hue
+fade above is the step that actually lets his bulbs go, so the release
+announces itself to River immediately after it —
+`pretake_ping.after_release()`, the exact mirror of the pre-take
+announcement `handover.run_handover` and `night_take.take_room` already
+make, on the SAME endpoint and the SAME bearer with one field different
+(`{"event": "released", ...}`). Her restore
+of the byte-exact bulb capture then fires off a STATEMENT that SPECTRA has
+let go rather than off an ambient-mode sensor she has to infer it from. It
+runs whether the fade succeeded or not — she must restore either way, and a
+fade that failed is the case where his room needs her most — and it is
+FAIL-SOFT in the strongest sense available here: the release has already
+happened, so a ping that does not land can change nothing about it. Its
+outcome is carried on `ReleaseResult.release_ping` and reported by the API,
+and DELIBERATELY NOT folded into `verified`/`problems`: whether the room let
+go is a question about his fixtures, and whether River heard about it is a
+question about her watch. Collapsing the two would make a genuinely dark
+room read as an unverified release. Unconfigured (`SPECTRA_PRETAKE_URL`
+unset) it sends nothing and every other step is byte-identical — the
+shipped state on a host that has never heard of River.
+
 Verification (spec gap closed 2026-08-13): a command is not proof. After
 cleanup, _verify_released() reads real state back — the SPECTRA live stack
 via live.active, the external LedFX service via the same
@@ -115,7 +136,16 @@ from fx import light_ownership
 logger = logging.getLogger(__name__)
 
 
-async def _best_effort(step, label: str):
+#: What a failed cleanup step COSTS, in the sentence a person reads at 2am.
+#: The default is the device-class steps' own consequence, byte-identical to
+#: what this module has always logged; a step that is not a device gets its
+#: own, because "this device may still be lit" is a LIE about a POST to
+#: River and would send whoever read it to look at a fixture that is fine.
+DEVICE_CONSEQUENCE = "this device may still be lit until its own timeout"
+
+
+async def _best_effort(step, label: str,
+                       consequence: str = DEVICE_CONSEQUENCE):
     """Runs `step`, swallowing any exception (logged) so a cleanup failure
     never re-opens the write gate. Returns the step's result, or None on
     failure."""
@@ -123,8 +153,7 @@ async def _best_effort(step, label: str):
         return await step()
     except Exception:
         logger.exception("release: best-effort %s failed — released stands, "
-                         "this device may still be lit until its own "
-                         "timeout", label)
+                         "%s", label, consequence)
         return None
 
 
@@ -143,6 +172,31 @@ async def _fade_hue_before_release() -> dict:
     if not live.active or live.host is None:
         return {"devices": [], "failed": []}
     return await release_fade.fade_and_release_hue(live.host)
+
+
+#: The announcement's own consequence — nothing about his room, everything
+#: about whether River knows to restore it.
+PING_CONSEQUENCE = ("the room IS released and River's restore watch may not "
+                    "have been told")
+
+
+async def _announce_release():
+    """TELL RIVER THE ROOM IS HERS AGAIN — one POST, fail-soft, never a
+    reason a release is anything other than a release.
+
+    Called once from release_room(), immediately after the Hue fade, which
+    is the first instant the statement is true (see this module's docstring
+    and `pretake_ping.after_release`'s own). The logging lives in that
+    function, beside the pre-take's own, so both edges of the room narrate
+    themselves in one voice; this wrapper exists only to keep the call at
+    the same `_best_effort` altitude as every other cleanup step here.
+
+    Returns a `pretake_ping.PingResult`. The import is local for this file's
+    own established reason (every step here imports what it needs inside
+    itself), not because `pretake_ping` is heavy — it reaches only
+    `spectra.config` and the standard library."""
+    from spectra.services import pretake_ping
+    return await pretake_ping.after_release()
 
 
 async def _release_spectra_devices() -> None:
@@ -220,6 +274,12 @@ class ReleaseResult:
     from_world: str
     verified: bool
     problems: list[str] = field(default_factory=list)
+    #: The River announcement's own outcome (`pretake_ping.PingResult.
+    #: as_dict()`), ADDITIVE AND INFORMATIONAL — never in `problems`, never
+    #: able to move `verified`. EMPTY means no announcement was made at all,
+    #: which today is exactly the already-released no-op press: nothing was
+    #: let go, so there was nothing to announce.
+    release_ping: dict = field(default_factory=dict)
 
 
 async def release_room(reason: str = "owner panic release") -> ReleaseResult:
@@ -232,11 +292,20 @@ async def release_room(reason: str = "owner panic release") -> ReleaseResult:
     record = light_ownership.release(reason)
 
     hue_still_on: list[str] = []
+    release_ping: dict = {}
     if from_world != light_ownership.RELEASED:
         fade_result = await _best_effort(
             _fade_hue_before_release, "spectra hue release fade")
         if fade_result:
             hue_still_on = fade_result.get("still_on", [])
+        # RIGHT HERE, and unconditionally: the fade is what actually lets
+        # his bulbs go, so this is the first moment "released" is a true
+        # statement — and a fade that FAILED is the case where River's
+        # restore matters most, so its outcome must not gate the telling.
+        ping = await _best_effort(_announce_release, "river release ping",
+                                  PING_CONSEQUENCE)
+        if ping is not None:
+            release_ping = ping.as_dict()
         await _best_effort(_release_spectra_devices, "spectra live stack")
         await _best_effort(_release_ledfx_virtuals, "external LedFX virtuals")
 
@@ -259,4 +328,5 @@ async def release_room(reason: str = "owner panic release") -> ReleaseResult:
             "record says released but reality may not match: %s",
             from_world, reason, "; ".join(problems))
     return ReleaseResult(record=record, from_world=from_world,
-                         verified=verified, problems=problems)
+                         verified=verified, problems=problems,
+                         release_ping=release_ping)

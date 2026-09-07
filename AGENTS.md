@@ -4871,22 +4871,28 @@ revert the last lit frame actually landed. Any future instrument
 labelling frames by phase around an in-flight write needs the same
 treatment, or it will report a race as a defect.
 
-### THE PRE-TAKE PING — River is told BEFORE a fixture moves, at EVERY take
+### THE TWO BOUNDARY PINGS — River is told at each edge of SPECTRA holding the room
 
 `spectra/services/pretake_ping.py`'s module docstring is the binding
-statement, and its one correctness property is PLACEMENT: the announcement
-must precede the first act that could change a fixture, or the snapshot it
-exists to trigger is a snapshot of a room SPECTRA has already begun to move.
+statement for BOTH (the module is named for the first one that existed),
+and their one correctness property is PLACEMENT: each announcement must sit
+at the exact instant its own statement becomes true — the PRE-TAKE before
+the first act that could change a fixture, or the snapshot it exists to
+trigger is a snapshot of a room SPECTRA has already begun to move; the
+RELEASE after the Hue fade, or it announces a release that has not
+happened.
 River's snapshot watch fired on "is ambient running" — the NIGHT, not the
 TAKE — so an ATTENDED take moved his lights with nothing photographed behind
 them. The owner's chosen fix (option b): announce, wait a settle, then take.
-Five things:
+Six things:
 
 - **THE WIRE IS HERS AND CONFIRMED LIVE (2026-09-06)**: `POST
   {SPECTRA_PRETAKE_URL}` (the FULL endpoint URL — this side never appends a
   path), bearer `SPECTRA_PRETAKE_TOKEN` read by `os.getenv` at CALL TIME
-  exactly as `witness.witness_token()` is, body `{event: "pre_take",
-  room_id, at_ms}`, and **SUCCESS IS HTTP 200, her word, never "any 2xx"** —
+  exactly as `witness.witness_token()` is, body `{event: "pre_take" |
+  "released", room_id, at_ms}` — ONE endpoint, ONE bearer, ONE wire shape,
+  the `event` word the only field that differs, which is why this is one
+  module and not two — and **SUCCESS IS HTTP 200, her word, never "any 2xx"** —
   answering `{captured, elapsed_s, result}`. Her `captured`/`elapsed_s` are
   SURFACED on the take's own record rather than reduced to a boolean: a 200
   saying `captured: false` is still `sent` (inventing a verdict she has not
@@ -4907,24 +4913,68 @@ Five things:
   first act, ahead of its snapshot file, and passes `pretake=False` down so
   a double ping is structurally impossible. That flag exists for that reason
   alone; nothing calls it to skip the announcement.
-- **IT CAN DELAY A TAKE; IT CAN NEVER REFUSE ONE.** `before_take()` never
-  raises — unconfigured, unreachable, refused, timed out and malformed all
+- **AND THE RELEASE PING, 2026-09-07, THE OTHER EDGE.** River's
+  bridge-direct byte-exact restore of all 17 Hue bulbs needs to fire when
+  SPECTRA has actually LET GO, and her only trigger for that was the same
+  ambient-mode sensor — an inference about the NIGHT, not a statement about
+  the RELEASE. `pretake_ping.after_release()` posts `{"event": "released",
+  ...}` from `release.release_room()`, **immediately after the Hue fade**
+  (the step that actually takes his bulbs down, so the first instant the
+  statement is true) and **before the live stack tears down**, so her
+  restore has an uncontested room while SPECTRA finishes letting go behind
+  it. Four things not to undo: it fires whether the fade SUCCEEDED OR NOT
+  (a failed fade is the case where his room needs her most); it does **NOT
+  settle** (the pre-take waits because River must read a room about to
+  change — here the change is done, so there is no race left to lose and
+  `after_release` has no `sleep` seam at all); its outcome rides
+  `ReleaseResult.release_ping` and the route's response BESIDE `verified`
+  and NEVER inside `problems` (whether the room let go is a question about
+  his fixtures, whether River heard is a question about her watch —
+  collapsing them makes a genuinely dark room read as a failed release);
+  and an already-released no-op press announces NOTHING, with an EMPTY
+  `release_ping` rather than a fabricated status. It rides the same env,
+  so a night give-back gets it for free (`night_take.give_back` releases
+  through the same function). `last()` still means "the last TAKE" —
+  releases land in their own `last_release()` slot, because one shared slot
+  would put a release's words on the armed handover route's own response.
+- **IT CAN DELAY A TAKE; IT CAN NEVER REFUSE ONE, AND IT CAN NEVER UNDO A
+  RELEASE.** `before_take()`/`after_release()` never
+  raise — unconfigured, unreachable, refused, timed out and malformed all
   come back as a `PingResult` the caller REPORTS (`TakeResult.pretake` on
   the night's record, `pretake_ping.last()` folded into the armed handover
-  route's response) and the take proceeds. A failed ping STILL SETTLES: a
+  route's response, `release_ping` on the release route's) and the take (or
+  the release) proceeds. A failed PRE-TAKE ping STILL SETTLES: a
   refused or timed-out POST may have arrived, and racing the one snapshot
   this protects to save 1.5 s is the wrong trade. Only `unconfigured` skips.
 - **UNSET `SPECTRA_PRETAKE_URL` IS INERT AND IS THE SHIPPED STATE** — no
-  request, no sleep, no httpx import, and a take whose side-call sequence is
-  proven byte-identical to the same take with the call absent.
+  request, no sleep, no httpx import, and a take (or a release) whose
+  side-call sequence is proven byte-identical to the same one with the call
+  absent. **There is ONE env pair for both pings** — do not add a second.
+- **A FAILED STEP SAYS WHAT ITS OWN FAILURE COSTS.** `release._best_effort`
+  took a fixed sentence ("this device may still be lit until its own
+  timeout"), true of a fade or a device teardown and a LIE about a POST to
+  River that would send whoever read it at 2am to look at a fixture that is
+  fine. It now takes the consequence as an argument, defaulting to that same
+  device sentence byte-for-byte; a new non-device step there needs its own.
 
 **IT CROSSES NO NEW BOUNDARY.** This is a POST to a RIVER SERVICE, the
 witness/Whisper-bridge posture with the direction reversed; SPECTRA still
 has no Home Assistant write access, no second path into his house, and THE
 SCONCE MAINS RULE below is untouchable from here (asserted against the
-module's own source). Spec: `tests/test_pretake_ping.py` — the ordering
-proven on both paths, with `_first_write`'s own control and a recorded
-source-level RED run behind it.
+module's own source, both modules). Specs: `tests/test_pretake_ping.py` —
+the take ordering proven on both take paths, with `_first_write`'s own
+control and a recorded source-level RED run behind it — and
+`tests/test_release_ping.py`, the same discipline for the release: the
+fade→ping→teardown ordering with its own discriminating control, and TWO
+recorded source-level RED runs (the announcement removed entirely: 15 red;
+the announcement moved ahead of the fade: 5 red).
+
+**A `.pyc` CAN OUTLIVE A SOURCE EDIT THAT ONLY MOVES A BLOCK.** Running
+those RED controls, restoring the file left the OLD bytecode live and the
+restored code kept failing: CPython validates a cache on source mtime AND
+SIZE, and moving a block changes neither. Any hand-run RED control that
+edits by relocation — not just here — must clear `__pycache__` (or `touch`
+the file) on the way back, or the restore silently does not happen.
 
 ### The contamination witness, and THE SCONCE MAINS RULE
 

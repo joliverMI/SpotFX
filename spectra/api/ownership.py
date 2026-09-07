@@ -29,7 +29,9 @@
       genuinely mid-flight (settle it, or wait for the stale-handover
       recovery, then press again). The record always lands `released`;
       cleanup runs against BOTH worlds regardless of which the record said
-      owned, and a post-release verification read-back decides the result:
+      owned, announces itself to River the moment the Hue fade has let his
+      bulbs go (`release_ping`, additive — see the handler), and a
+      post-release verification read-back decides the result:
       200 result="released" when confirmed, 207
       result="released-unverified" with `problems` when a device could not
       be confirmed dark (the caller should treat this as still-lit until
@@ -231,7 +233,14 @@ async def post_release():
     can't confirm reality matches (a device still lit), this reports
     result="released-unverified" with the specific `problems` instead of a
     clean "released", at HTTP 207 — loud, not silent, per the merge-scout
-    two-writers report (2026-08-13)."""
+    two-writers report (2026-08-13).
+
+    `release_ping` carries whether River was told the room is hers again
+    (`pretake_ping.after_release`, fired right after the Hue fade). It is
+    ADDITIVE: a ping that did not land never makes a genuinely dark room
+    report `released-unverified`, because whether the room let go and
+    whether her restore watch heard about it are two different facts. Empty
+    means nothing was announced — the already-released no-op press."""
     try:
         result = await release_svc.release_room("owner panic release (API)")
     except light_ownership.OwnershipError as exc:
@@ -239,10 +248,11 @@ async def post_release():
     if not result.verified:
         return JSONResponse(
             {"result": "released-unverified", "owner": result.record.owner,
-             "problems": result.problems, "record": _record_json()},
+             "problems": result.problems, "record": _record_json(),
+             "release_ping": result.release_ping},
             status_code=207)
     return {"result": "released", "owner": result.record.owner,
-            "record": _record_json()}
+            "record": _record_json(), "release_ping": result.release_ping}
 
 
 @router.post("/ownership/recover")
