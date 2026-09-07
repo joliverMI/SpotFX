@@ -5975,7 +5975,15 @@ CONTRACT: `GET /spectra/api/liveness` (`spectra/api/ownership.py`) — never
 delete or repoint without the Admiral's word. The handover API is inert until
 `SPECTRA_HANDOVER_ARMED=1`; arming and running it is the owner's word —
 procedure in `docs/SPECTRA_HANDOVER.md` (go-day seeder
-`scripts/seed_spectra_fx_live.py`). Spec:
+`scripts/seed_spectra_fx_live.py`). **STANDING DESIGN, Admiral 2026-09-07:
+that latch is kept ARMED PERMANENTLY** (already set on the deployed
+`spectra.service`; no default changed) because River's take-back button —
+the interactive handover TO spectra — is a first-class control, not a
+one-off ceremony; there is no "disarm afterwards" step any more. The panic
+RELEASE stays un-gated as before, and the self-taking night's
+`SPECTRA_NIGHT_SELF_TAKE` is a SEPARATE, still-absent-by-default latch that
+this decision does not touch — don't conflate the two. Full note:
+`docs/SPECTRA_HANDOVER.md` § "STANDING DESIGN". Spec:
 `.venv/bin/python scripts/check_ownership.py` + `tests/test_handover.py`.
 
 A third owner state, `released` (`fx/light_ownership.RELEASED`), is the
