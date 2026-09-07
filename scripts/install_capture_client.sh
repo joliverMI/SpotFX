@@ -492,14 +492,30 @@ set_key SPECTRA_CAPTURE_INPUT_FORMAT "$INPUT_FORMAT"
 # after the next install, silently and correctly, rather than surviving
 # because the script only touched the lines it recognised.
 if [ "$SYSTEM_MODE" = "1" ]; then
-    UNIT_TMP="$(mktemp)"
+    # THE TEMP UNIT IS NAMED, NOT ANONYMOUS, AND THAT IS LOAD-BEARING.
+    # `systemd-analyze verify` takes a UNIT FILE, and it resolves what kind
+    # of unit it is from the BASENAME's suffix — so a bare `mktemp` name
+    # (`/tmp/tmp.OOWvets9qt`) is refused before the contents are read at
+    # all: "Failed to prepare filename /tmp/tmp.XXXXXXXXXX: Invalid
+    # argument". That refusal says nothing about the unit, and it is
+    # indistinguishable, at the exit status, from a genuinely bad one — so
+    # the installer REFUSED to provision a kiosk host over a perfectly valid
+    # file (River, kiosk-0, systemd 257, 2026-09-07; reproduced here on 255,
+    # so this is not a version regression — the old name never worked).
+    # `mktemp -d` plus the unit's own real name is the whole fix: the
+    # verified path is `<tmpdir>/spectra-capture-client.service`, which is
+    # also the basename it lands under in /etc.
+    UNIT_TMP_DIR="$(mktemp -d)"
+    UNIT_TMP="$UNIT_TMP_DIR/spectra-capture-client.service"
+    # One cleanup, on every exit path — the refusals below leave through
+    # `exit`, and `set -e` can leave through the `sed` too.
+    trap 'rm -rf "$UNIT_TMP_DIR"' EXIT
     sed -e "s|@USER@|$(id -un)|g" \
         -e "s|@GROUP@|$(id -gn)|g" \
         -e "s|@HOME@|$HOME|g" \
         -e "s|@LAUNCHER@|$LAUNCHER|g" \
         "$UNIT_SRC_SYSTEM" > "$UNIT_TMP"
     if grep -q '@[A-Z]*@' "$UNIT_TMP"; then
-        rm -f "$UNIT_TMP"
         echo "  REFUSED  the generated system unit still has an unfilled \
 placeholder — refusing to install it." >&2
         exit 1
@@ -510,7 +526,6 @@ placeholder — refusing to install it." >&2
         if systemd-analyze verify "$UNIT_TMP"; then
             ok "systemd-analyze verify: the generated system unit is valid"
         else
-            rm -f "$UNIT_TMP"
             echo "  REFUSED  systemd will not accept the generated unit (above)." >&2
             exit 1
         fi
@@ -518,7 +533,8 @@ placeholder — refusing to install it." >&2
         note "systemd-analyze is not installed, so the unit could not be verified here"
     fi
     $SUDO install -m 0644 "$UNIT_TMP" "$SYSTEM_UNIT_DST"
-    rm -f "$UNIT_TMP"
+    rm -rf "$UNIT_TMP_DIR"
+    trap - EXIT
     ok "unit at $SYSTEM_UNIT_DST (User=$(id -un), and its \
 SupplementaryGroups=video is applied by root before it drops there)"
 else

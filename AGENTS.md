@@ -5066,7 +5066,7 @@ the deliverable**: what is proven on a dev host, what only real hardware can
 settle, and what buying the board unlocks. **No Raspberry Pi exists.**
 Nothing here may be reported as a working Pi deployment, and when hardware
 arrives the correction is a DATED AMENDMENT, never a quiet rewrite of a
-sentence that was true when written. Six things:
+sentence that was true when written. Eight things:
 
 - **THE UNIT SHIPS VERBATIM** (`deploy/spectra-capture-client.service`) and
   is checked by `systemd-analyze verify` — systemd's own parser, which
@@ -5076,6 +5076,27 @@ sentence that was true when written. Six things:
   arguments, and everything that differs per machine lives in a launcher
   `scripts/install_capture_client.sh` writes. Verifying the shipped bytes
   is only meaningful because they ARE the installed bytes.
+- **`systemd-analyze verify` RESOLVES A UNIT'S TYPE FROM ITS BASENAME, so
+  never hand it an unsuffixed `mktemp` name.** It refuses one outright —
+  "Failed to prepare filename /tmp/tmp.XXXXXXXXXX: Invalid argument" —
+  BEFORE reading a byte of the contents, and at the exit status that is
+  indistinguishable from a genuinely bad unit. The installer's `--system`
+  path generated its unit into a bare `mktemp` file and verified THAT, so a
+  perfectly valid unit refused every kiosk install (River, kiosk-0, systemd
+  257, 2026-09-07; reproduced on 255 — the name never worked). A temp unit
+  gets `mktemp -d` plus its own real name
+  (`<tmpdir>/spectra-capture-client.service`), which is also the basename it
+  lands under in /etc. The USER path never had this: it verifies
+  `$UNIT_DST`, already a `.service`.
+- **AND THE REASON NO PROOF SAW IT: §1b GENERATED THE BYTES ITSELF.** It
+  verified a unit built the way the installer builds one, at a path IT
+  chose — the same "a gate you MODEL is a gate no proof exercises" shape
+  this file states about `SessionCameraDouble`. `check_capture_client_
+  service.py` §3b now DRIVES the installer's own `--system` run (throwaway
+  `HOME`, `sudo` shimmed to a recorder so nothing reaches `/etc`, and the
+  recorded `install` line carries the exact path the installer verified).
+  When a proof models a step the shipped code owns, the step it models is
+  the one that will be wrong.
 - **`systemd` HAS NEVER STARTED IT.** This build machine has no D-Bus
   session bus and a private `systemd --user` refuses without cgroup
   delegation, so `systemctl --user start` cannot run here at all. The unit's
