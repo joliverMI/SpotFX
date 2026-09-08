@@ -128,7 +128,7 @@ from typing import Any, Optional
 from spectra import config as scfg
 from spectra.services import (capture_queue, capture_runs,
                               mapping_refusals, night_calibration,
-                              night_take)
+                              night_take, take_scope)
 
 logger = logging.getLogger(__name__)
 
@@ -487,15 +487,24 @@ def run_fixture_rows(items, device_entries: list[dict]) -> list[dict]:
     his rooms are keyed by and four of his seven fan out to several fixtures
     at once (spectra/services/carriers.py). A run that SUBSTITUTES a direct
     virtual for a copy-mapped carrier still lights the same physical
-    fixtures, so the list is unchanged by that substitution."""
-    from spectra.services import carriers, light_field
+    fixtures, so the list is unchanged by that substitution.
+
+    WHICH CARRIERS an item drives is `take_scope.carriers_for_item` — the
+    SAME function the take's own scope is computed from, so this list and
+    the fixtures actually brought up cannot disagree. They used to: this
+    read the room's whole carrier list while an item naming its own
+    carriers drives fewer, which would attribute a lit out-of-scope fixture
+    to the run in the morning report."""
+    from spectra.services import carriers, light_field, take_scope
     by_carrier = carriers.devices_by_carrier(device_entries)
     seen: dict[str, dict] = {}
     for item in items or []:
         room = light_field.get_room(getattr(item, "room_id", "") or "")
         if room is None:
             continue
-        for carrier_id in room.carrier_ids:
+        for carrier_id in take_scope.carriers_for_item(
+                room, getattr(item, "carrier_ids", None),
+                getattr(item, "emitter_ids", None)):
             for entry in by_carrier.get(carrier_id) or []:
                 did = str(entry.get("id") or "")
                 if did and did not in seen:
@@ -1166,7 +1175,17 @@ async def start(trigger: dict) -> NightRun:
     take = night_take.TakeResult()
     if gate.take_required:
         stop_mark = _stop_mark
-        take = await night_take.take_room(run_id)
+        # ── HOW MUCH OF HIS HOUSE THIS NIGHT MAY TOUCH ────────────────────
+        # The declared items name rooms, and a room names carriers, and a
+        # carrier names fixtures — so a night that maps the living room has
+        # no business bringing up the Hue entertainment groups that span
+        # the hallway, the bedroom and the bathroom. Resolved from the
+        # DECLARATION, before anything is taken; unresolvable widens back
+        # to the whole room WITH A REASON rather than guessing narrow
+        # (`spectra/services/take_scope.py` is the binding statement).
+        scope = take_scope.resolve_for_items(items)
+        logger.warning("night run: take scope — %s", scope.reason)
+        take = await night_take.take_room(run_id, scope=scope)
         if not take.took:
             return _decline(trigger, take.refusal, take.detail,
                             price=gate.price, take=take.as_dict())

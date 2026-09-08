@@ -107,6 +107,30 @@ def _restrict_to_genuinely_driven(declared: set[str]) -> set[str]:
     return declared & driven
 
 
+def scoped_expected_active(expected: set[str],
+                           scope: Optional[set[str]]) -> set[str]:
+    """The expected-active set a SCOPED take verifies against
+    (spectra/services/take_scope.py) — the config's genuinely driven set
+    narrowed to what this take is allowed to bring up. `None` is the whole
+    room, unchanged.
+
+    AN EMPTY INTERSECTION RAISES rather than narrowing to nothing. An
+    activation with no virtual to bring up sails through the freshness gate
+    vacuously and hands back a dark room reported as a good take — the exact
+    class `_restrict_to_genuinely_driven` above already refuses to fall
+    into, arriving here through a different door."""
+    if scope is None:
+        return set(expected)
+    scoped = set(expected) & set(scope)
+    if not scoped:
+        raise RuntimeError(
+            "live stack: the requested take scope brings up nothing — "
+            f"{sorted(scope)} intersects none of this config's "
+            f"{len(expected)} genuinely driven virtual(s). Refusing rather "
+            "than activating an empty room that would verify vacuously.")
+    return scoped
+
+
 @dataclass(frozen=True)
 class EmissionRead:
     """What one fixture said it was doing, one read ago — the shared fact
@@ -226,6 +250,14 @@ class LiveLights:
         #: restoring their stored effect — empty on every ordinary
         #: activation, populated only by a quiet take.
         self.blacked_out: list[str] = []
+        #: THE SCOPE THIS STACK CAME UP UNDER (spectra/services/take_scope.py)
+        #: — None on every ordinary activation, meaning the whole config.
+        #: Read for reporting only; the enforcement is that out-of-scope
+        #: virtuals were never activated in the first place.
+        self.scope: Optional[set[str]] = None
+        #: Virtual ids a SCOPED activation deliberately held back — the
+        #: config wanted them active and this take did not.
+        self.held_back: list[str] = []
 
     @property
     def active(self) -> bool:
@@ -239,6 +271,7 @@ class LiveLights:
         open_audio: bool = True,
         audio_source_factory: Optional[Callable[[AudioIngestHub], object]] = None,
         quiet: bool = False,
+        scope: Optional[set[str]] = None,
     ) -> None:
         """Bring the stack up under `grant`. Raises OwnershipError before
         touching anything if the grant is stale; on any later failure the
@@ -251,7 +284,23 @@ class LiveLights:
         for a capture run's own writes through `fx_seam` — while emitting
         nothing. Everything else about the assembly is identical, which is
         why the activation gate that verifies a take-back can verify this
-        one unchanged."""
+        one unchanged.
+
+        `scope` is THE SCOPED TAKE (spectra/services/take_scope.py): the
+        virtual ids this activation may bring up. Everything else loads
+        exactly as a stored-inactive virtual does, so ITS BACKING DEVICES
+        ARE NEVER ACTIVATED — which is what makes "this take touched only
+        these fixtures" a structural fact rather than an intention. The
+        expected-active set the activation gate verifies against is
+        narrowed to match, or the gate would refuse forever over virtuals
+        this take deliberately held back.
+
+        A scope that intersects to NOTHING raises before the host starts:
+        an activation with no virtual to bring up would sail through the
+        freshness gate vacuously and hand back a dark room reported as a
+        good take — the exact class `_restrict_to_genuinely_driven` already
+        refuses to fall into. `None` (every ordinary caller) is
+        byte-identical to before this parameter existed."""
         light_ownership.require_grant(grant, light_ownership.SPECTRA,
                                       detail="live stack activate")
         if self.active:
@@ -259,13 +308,22 @@ class LiveLights:
 
         host = FxHost(config_dir, live_grant=grant)
         self.host = host          # set before start() so a failed start still
-        self.expected_active_ids = _restrict_to_genuinely_driven(
-            _config_expected_active_ids(host.config))
-        await host.start(blackout=quiet)   # deactivates through us
+        expected = scoped_expected_active(
+            _restrict_to_genuinely_driven(
+                _config_expected_active_ids(host.config)),
+            scope)
+        self.scope = set(scope) if scope is not None else None
+        self.expected_active_ids = expected
+        await host.start(blackout=quiet,   # deactivates through us
+                         only_active=(set(scope) if scope is not None
+                                      else None))
         #: WHICH VIRTUALS CAME UP BLACK — for the take's own record. A quiet
         #: take that silently blacked nothing out (a config with no stored
         #: effects at all) is a fact worth being able to read afterwards.
         self.blacked_out = list(getattr(host.virtuals, "blacked_out", []))
+        #: WHICH VIRTUALS A SCOPED TAKE HELD BACK — empty unless `scope` was
+        #: given. Reported, never inferred from an absence.
+        self.held_back = list(getattr(host.virtuals, "held_back", []))
         self.freshness.attach(host)
         # His per-device timing equalization: install the stored offsets
         # against the ids this host actually holds, so the anchoring
@@ -330,6 +388,8 @@ class LiveLights:
             host, self.host = self.host, None
             await host.shutdown()
         self.expected_active_ids = set()
+        self.scope = None
+        self.held_back = []
         # Nothing is rendering any more; a stale delay map must not survive
         # into whatever comes up next (a re-activation re-pushes above).
         from fx import device_timing

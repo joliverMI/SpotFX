@@ -6178,6 +6178,68 @@ empty `expected_active_ids` — pre-existing, fails identically on pristine
 master here; `test_take_back_partial.py` stubs `room_topology.
 genuinely_driven_virtual_ids` for exactly that reason.
 
+### A TAKE AND A RELEASE ARE SCOPED TO THE FIXTURES THEY ACTUALLY DRIVE
+
+2026-09-07, the Admiral verbatim: "you turned off the bathroom light... be
+more selective about which lights you turn off." A kitchen capture run took
+the whole room — which on his config means ONE virtual, `hues`, spanning
+BOTH Hue bridges and the two entertainment configurations behind them,
+seventeen bulbs from the hallway to the bathroom — drove every one of them,
+and switched every one of them off on the way out. **Neither half was a bug
+in the release: the release let go of exactly what the take had taken. The
+TAKE was the wrong size.** Two halves, and each is a fact rather than a
+policy:
+
+- **`spectra/services/take_scope.py` is the binding statement for how much
+  of his house a take may bring up.** A device is activated by ONE thing —
+  a virtual with segments on it activating (`Virtual.activate_segments`) —
+  so the scope is computed as a set of DEVICES (a room → its carriers →
+  the devices those carrier virtuals touch) and the virtual scope handed to
+  the take is then *every config virtual whose segments touch only in-scope
+  devices*. That makes "no out-of-scope fixture can be activated by this
+  take" STRUCTURAL: there is no virtual left able to reach one. It reads
+  the STORED `fx-live/config.json` plus the room map, because the scope has
+  to be known before there is any host to ask. **Unresolvable widens to the
+  whole room WITH A STATED REASON** (unknown room, no carriers, a carrier
+  that is not a virtual): a wrongly-narrow take wastes a night, a
+  wrongly-wide one is only today's behaviour. An EMPTY intersection is a
+  hard refusal in `live_host.activate` — a take with nothing to bring up
+  would pass the freshness gate vacuously.
+  Threaded as `live_host.activate(scope=)` → `FxHost.start(only_active=)` →
+  `Virtuals.create_from_config(only_active=)` (`fx/VENDOR.md` #36), and
+  `handover.SpectraSide(scope=)`/`production_sides(scope=)` →
+  `night_take.take_room(scope=)`, computed in `night_run.start` from the
+  DECLARED queue. `None` everywhere else is byte-identical to before.
+- **`release_fade.fade_and_release_hue` fades only Hue devices this stack
+  ACTUALLY STREAMED TO** (`Device.ever_activated`, `fx/VENDOR.md` #35 —
+  sticky, not "active right now", so a substitute stood down mid-run is
+  still owed its let-go). The whole argument for the fade is that a Hue
+  bulb holds SPECTRA's last streamed frame; a device never activated holds
+  nothing of ours. **The panic release is UNCHANGED** — on a whole-room
+  take-back every Hue device comes up, so every one is in scope. A Hue
+  device left alone is REPORTED (`untouched`), never silently skipped.
+
+**THE HONEST UNIT IS THE ENTERTAINMENT GROUP, NOT THE BULB, and it is
+measured rather than argued** (`tests/test_scoped_take_release.py::
+test_a_hue_group_is_indivisible_at_the_wire`): `HueDevice.flush` sends the
+WHOLE channel set in one DTLS datagram, and `Device.update_pixels` scatters
+every virtual's segments into one shared buffer, so streaming any part of a
+group drives every bulb in it (the unwritten ones to black). Every bulb in
+a streamed group is therefore holding a frame of ours and is owed the fade.
+Splitting finer is a bridge-side grouping decision this code cannot invent.
+
+`night_exit`'s own `release_fade.read_hue_light_states` is deliberately NOT
+scoped: it is READ-ONLY and its attribution (`outside_run`) is what makes
+an out-of-scope lit bulb legible rather than blamed.
+
+Proofs: `tests/test_scoped_take_release.py` (the whole night through the
+real `night_run.start` → `take_room` → `run_handover` → a real
+`fx.headless` host with the REAL `HueDevice` class, transport stubbed —
+every frame that reaches a device and every REST call that reaches a
+bridge, with an `unscoped` run of the identical night as the red control,
+reproducing "his bathroom was switched off" by name) and
+`tests/test_take_scope.py` (the rule, and every case it refuses to narrow).
+
 ### Two-writers prevention build (2026-08-13 incident: `Wants=ledfx.service`
 in the unit resurrected a deliberately-quiesced LedFX on a routine
 `systemctl restart spotfx` while SPECTRA owned — see

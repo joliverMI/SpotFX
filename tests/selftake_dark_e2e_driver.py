@@ -120,11 +120,11 @@ def _sides_factory():
     `engine.go_live` points the conductor at the facade)."""
     real = handover.production_sides
 
-    def sides(*, quiet=False):
-        built = real(quiet=quiet)
+    def sides(*, quiet=False, scope=None):
+        built = real(quiet=quiet, scope=scope)
         built[lo.SPECTRA] = handover.SpectraSide(
             config_dir=str(scfg.FX_LIVE_CONFIG_DIR), open_audio=False,
-            quiet=quiet and QUIET)
+            quiet=quiet and QUIET, scope=scope)
         return built
     return sides
 

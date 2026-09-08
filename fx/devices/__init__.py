@@ -77,6 +77,12 @@ class Device(BaseRegistry):
         )
 
     _active = False
+    # SpotFX deviation #35: STICKY, per-object, never reset — "did anything
+    # ever try to stream to this fixture during THIS stack's life". Device
+    # objects are built fresh by every FxHost, so it is session-scoped by
+    # construction and needs no clearing. See the read-only `ever_activated`
+    # property below for the one question it answers.
+    _ever_activated = False
 
     def __init__(self, ledfx, config):
         self._ledfx = ledfx
@@ -86,6 +92,7 @@ class Device(BaseRegistry):
         self._silence_start = None
         self._device_type = ""
         self._online = True
+        self._ever_activated = False
         self.lock = threading.Lock()
 
     def __del__(self):
@@ -139,6 +146,23 @@ class Device(BaseRegistry):
 
     def is_active(self):
         return self._active
+
+    @property
+    def ever_activated(self) -> bool:
+        """Whether this device was EVER activated during this host's life
+        (SpotFX deviation #35, SpotFX-authored accessor — not a fork API).
+
+        `is_active()` is a question about right now; this is a question
+        about the whole session, and they answer different things. A
+        fixture activated and later stood down (a capture run's substitute
+        put back to sleep, a virtual deactivated mid-run) is no longer
+        active but HAS been streamed to, so it may be holding a frame of
+        ours — which is exactly what the release fade has to know before
+        deciding whether it owes that fixture a "let go".
+
+        Sticky and never cleared: `deactivate()` deliberately leaves it
+        True."""
+        return self._ever_activated
 
     def is_online(self):
         return self._online
@@ -284,6 +308,14 @@ class Device(BaseRegistry):
     def activate(self):
         self._pixels = np.zeros((self.pixel_count, 3))
         self._active = True
+        # SpotFX deviation #35. Set HERE, at the base, so every driver
+        # inherits it from its own super().activate() — and set BEFORE any
+        # driver's transport work, deliberately: the question is "may this
+        # fixture be holding a frame of ours", and an activation that
+        # started and then failed its handshake is still a yes. Erring
+        # toward "we touched it" is the fail-safe direction for the one
+        # caller (spectra/services/release_fade.py) that reads it.
+        self._ever_activated = True
         self._teardown_dispatched = False
 
     def deactivate(self):

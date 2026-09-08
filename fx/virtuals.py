@@ -1855,8 +1855,27 @@ class Virtuals:
     BLACKOUT_EFFECT_CONFIG = {"color": "#000000", "brightness": 0.0,
                               "background_brightness": 0.0}
 
-    def create_from_config(self, config, pause_all=False, blackout=False):
+    def create_from_config(self, config, pause_all=False, blackout=False,
+                           only_active=None):
         """Realize the stored virtuals.
+
+        `only_active` is SpotFX deviation #36 and it exists for ONE caller:
+        a SCOPED TAKE (spectra/services/take_scope.py).  Given a set of
+        virtual ids, every virtual NOT in it is loaded exactly as a virtual
+        whose stored `active` is false already loads — segments restored,
+        stored effect instantiated, `set_effect(activate=False)`, no render
+        thread — so it never activates, never registers segments, and
+        therefore NEVER ACTIVATES ITS BACKING DEVICES.  That last clause is
+        the whole point: a device is only ever activated by a virtual
+        activating on it (`Virtual.activate_segments`), so holding a virtual
+        back is how a take reaches one fixture and provably not another.
+
+        IT IS A LOAD-TIME DECISION, NOT A CONFIG EDIT — the same discipline
+        as `blackout` above.  `virtual_cfg` is untouched, nothing persists,
+        and a held-back virtual is resumed at any time by the ordinary
+        `set_virtual_active(vid, True)` the capture path already uses for
+        its substitutes.  `None` (every other caller) is byte-identical to
+        before this parameter existed.
 
         `blackout` is SpotFX deviation #32 and it exists for ONE caller:
         the SELF-TAKING NIGHT's quiet take (spectra/services/night_take.py).
@@ -1891,6 +1910,11 @@ class Virtuals:
         #: The virtuals this load blacked out, for the caller to report.
         #: Empty on every ordinary load.
         self.blacked_out = []
+        #: SpotFX deviation #36: the virtuals a SCOPED load deliberately did
+        #: not activate.  Empty unless `only_active` was given.  Named so a
+        #: caller can report what a scoped take held back rather than
+        #: leaving it to be inferred from an absence.
+        self.held_back = []
 
         for virtual_cfg in config:
             _LOGGER.debug("Loading virtual from config: %s", virtual_cfg)
@@ -1939,6 +1963,15 @@ class Virtuals:
             # historical behaviour (activate), which is what every
             # pre-`active`-key config relied on.
             stored_active = bool(virtual_cfg.get("active", True))
+            # SpotFX deviation #36: a scoped take holds every out-of-scope
+            # virtual back at exactly the point a stored `active: false`
+            # already holds one back, so there is one code path and not two.
+            held_back = (only_active is not None
+                         and virtual_cfg["id"] not in only_active)
+            if held_back:
+                if stored_active:
+                    self.held_back.append(virtual_cfg["id"])
+                stored_active = False
 
             if "effect" in virtual_cfg and not new_virtual._devices:
                 self._record_restore_failure(
@@ -1959,7 +1992,11 @@ class Virtuals:
                             type=self.BLACKOUT_EFFECT_TYPE,
                             config=dict(self.BLACKOUT_EFFECT_CONFIG),
                         )
-                        self.blacked_out.append(virtual_cfg["id"])
+                        # A HELD-BACK virtual is not "came up black" — it
+                        # did not come up at all. Two different facts, and
+                        # `held_back` above is the one that describes it.
+                        if not held_back:
+                            self.blacked_out.append(virtual_cfg["id"])
                     else:
                         effect = self._ledfx.effects.create(
                             ledfx=self._ledfx,
@@ -2004,7 +2041,7 @@ class Virtuals:
                 )
             )
 
-        self._audit_restored_effects(config)
+        self._audit_restored_effects(config, only_active=only_active)
 
     # ── SpotFX deviation #29: a config load must never fail quietly ────────
     #
@@ -2026,7 +2063,7 @@ class Virtuals:
             reason,
         )
 
-    def _audit_restored_effects(self, config):
+    def _audit_restored_effects(self, config, only_active=None):
         """After the whole config is loaded, VERIFY every virtual that the
         stored config says should be driving actually is.
 
@@ -2044,6 +2081,14 @@ class Virtuals:
             if not virtual_cfg.get("active"):
                 continue
             virtual_id = virtual_cfg["id"]
+            if only_active is not None and virtual_id not in only_active:
+                # SpotFX deviation #36: held back ON PURPOSE by a scoped
+                # take.  Not driving is the INTENDED outcome here, so
+                # shouting about it would turn every scoped take into a
+                # page of ERRORs and bury a real restore failure among
+                # them.  What was held back is reported by the caller, off
+                # `self.held_back`.
+                continue
             if virtual_id in getattr(self, "restore_failures", {}):
                 continue  # already named, loudly, above
             effect_type = (virtual_cfg.get("effect") or {}).get("type")

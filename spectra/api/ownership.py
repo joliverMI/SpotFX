@@ -124,6 +124,17 @@ LIVENESS_ADDRESS = "/spectra/api/liveness"
 
 class HandoverRequest(BaseModel):
     to: str
+    #: A SCOPED TAKE — bring up only the fixtures behind these carriers, or
+    #: behind the carriers of this room. Omitted (the default, and the
+    #: room-ownership bar's own press) is the whole room, byte-identical to
+    #: before this field existed: "give SPECTRA the room" is a whole-room
+    #: act and stays one. It exists for the OTHER kind of take — a capture
+    #: run driven by hand, which has no business bringing up the Hue
+    #: entertainment groups spanning the rest of his house. See
+    #: spectra/services/take_scope.py, and note it is IGNORED for a handover
+    #: to spot-effects, which has no scope concept.
+    room_id: Optional[str] = None
+    carrier_ids: Optional[list[str]] = None
 
 
 def _record_json() -> dict:
@@ -180,6 +191,37 @@ def _pretake_json(to_world: str) -> Optional[dict]:
     return None if result is None else result.as_dict()
 
 
+def _requested_scope(body: HandoverRequest):
+    """`take_scope.ScopeOutcome` when this request asked to be narrowed, or
+    None when it did not (the whole room, unchanged).
+
+    Only ever consulted for a take TO SPECTRA: spot-effects runs its own
+    world and there is nothing here that could narrow it."""
+    if body.to != light_ownership.SPECTRA:
+        return None
+    if not body.room_id and not body.carrier_ids:
+        return None
+    from spectra.services import take_scope
+    if body.carrier_ids and not body.room_id:
+        virtuals = take_scope.load_config_virtuals()
+        narrowed = take_scope.scope_for_carriers(body.carrier_ids, virtuals)
+        if narrowed is None:
+            return take_scope.ScopeOutcome(
+                None, f"the carriers {list(body.carrier_ids)} could not be "
+                      f"placed in the fx-live config")
+        return take_scope.ScopeOutcome(
+            narrowed,
+            f"scoped to {len(narrowed.device_ids)} device(s) behind "
+            f"{len(narrowed.carriers)} carrier(s)")
+
+    class _Item:
+        room_id = body.room_id
+        carrier_ids = body.carrier_ids
+        emitter_ids = None
+
+    return take_scope.resolve_for_items([_Item()])
+
+
 @router.post("/ownership/handover")
 async def post_handover(body: HandoverRequest):
     if body.to not in light_ownership.WORLDS:
@@ -189,9 +231,26 @@ async def post_handover(body: HandoverRequest):
             403, "handover not armed — the room changes hands only on the "
             "owner's word (export SPECTRA_HANDOVER_ARMED=1; see "
             "docs/SPECTRA_HANDOVER.md)")
+    scope = _requested_scope(body)
+    if scope is not None and scope.scope is None:
+        # A SCOPE THAT COULD NOT BE PLACED IS A REFUSAL, NOT A WIDENING.
+        # An unattended night widens (a missed narrowing costs a wasted
+        # night, and the alternative is a room that comes up missing the
+        # fixture the run needed) — but somebody who ASKED for a narrow take
+        # and silently got the whole house is the incident this whole change
+        # is about. Nothing has moved: this is before the record does.
+        return JSONResponse(
+            {"result": "refused-scope-unresolved", "error": scope.reason,
+             "record": _record_json()}, status_code=422)
     try:
-        record = await handover_svc.run_handover(
-            body.to, handover_svc.production_sides())
+        # UNSCOPED CALLS THE SAME WAY IT ALWAYS DID — no keyword at all —
+        # so the default press, and every test double built for it, is
+        # byte-identical to before this parameter existed.
+        sides = (handover_svc.production_sides()
+                 if scope is None else
+                 handover_svc.production_sides(
+                     scope=scope.scope.virtual_ids))
+        record = await handover_svc.run_handover(body.to, sides)
     except light_ownership.OwnershipError as exc:
         raise HTTPException(409, str(exc))
     except handover_svc.HandoverRefused as exc:
@@ -222,6 +281,11 @@ async def post_handover(body: HandoverRequest):
     ping = _pretake_json(body.to)
     if ping is not None:
         out["pretake"] = ping
+    if scope is not None:
+        # WHICH OF HIS FIXTURES THIS TAKE ACTUALLY BROUGHT UP, in the
+        # response that performed it — a narrowed take must never be
+        # something he has to infer from what his house looks like.
+        out["scope"] = scope.as_dict()
     return out
 
 
