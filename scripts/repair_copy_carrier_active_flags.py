@@ -13,40 +13,55 @@ copy-carrier in front of it can never BOTH render.
 
 A capture/commission run that was interrupted in its own crash window (a
 process kill, a restart, a hard abort between `activate_for_capture` and
-`deactivate_after_capture`) leaves those device-virtuals PERSISTED
-`active: true`. On the next config load, tv-mapper is restored active, then
-each device-virtual activates and evicts it — so tv-mapper holds its effect
-with no render thread, the Living Room has zero active carriers, and the
-take rolls back to `released`. The cold-load fix (fm/tvmapper-cold-load-fix)
-respects the stored `active` flag, so it cannot override a residue that
-stores the WRONG flag.
+`deactivate_after_capture`) leaves those device-virtuals stored in a shape
+the config loader BRINGS UP: either persisted `active: true`, or — for a
+device-virtual that never carried an `active` key at all, which is every
+one the device layer creates — a persisted black lamp beside NO `active`
+key, which `fx/virtuals.py create_from_config` reads as active (a stored
+effect activates unless `active` is explicitly false). On the next config
+load, tv-mapper is restored active, then each such device-virtual activates
+and evicts it — so tv-mapper holds its effect with no render thread, the
+Living Room has zero active carriers, and the take rolls back to
+`released`. The cold-load fix (fm/tvmapper-cold-load-fix) respects the
+stored `active` flag, so it cannot override a residue that stores the WRONG
+one, or none.
 
-THE REPAIR, and why it is always safe. For every device-virtual that is
-stored `active: true` while a copy-mapped external carrier that is itself
-stored `active: true` streams to that same device, set the device-virtual
-`active: false`. This makes the carrier deterministically win on load —
-which is the only outcome the device layer would ever allow anyway, since
-the two can never both render. Nothing else is touched: not the carrier,
-not the device-virtual's stored effect, not any other key.
+THE RULE IS THE LOADER'S OWN. `would_activate_on_load` is the one predicate
+here — a virtual comes up at load iff it has a stored `effect` and its
+`active` key is not explicitly false — applied to BOTH sides: the carrier
+counts only if it would itself come up, and a device-virtual behind it is
+residue only if it would too.
+
+THE REPAIR, and why it is always safe. For every device-virtual that would
+activate on load while a copy-mapped external carrier that would itself
+activate on load streams to that same device, set the device-virtual
+`active: false` (an explicit false, added if the key was absent). This
+makes the carrier deterministically win on load — which is the only
+outcome the device layer would ever allow anyway, since the two can never
+both render. Nothing else is touched: not the carrier, not the
+device-virtual's stored effect, not any other key.
 
 Deliberately NARROW: only a device-virtual behind an active COPY-mapped
 carrier is flipped. A span virtual, a blender/mask/foreground/background
 layer, a gap dummy — none are considered, because none is the copy-carrier
 eviction this bug is about.
 
-The recurrence itself is fixed in code (a capture run no longer PERSISTS a
-transient `active: true` for a substitute — spectra/services/room_mapping.py
-production_deps + fx/facade.py `_virtual_put_active`'s `persist` flag,
-fx/VENDOR.md #37). This script is the one-time catch-up for a config that
-already carries the residue, the same relationship
-scripts/check_spectra_expected_active.py has to live_host's own runtime
-intersection.
+The recurrence itself is fixed in code (a transient activation of a
+substitute now STORES it `active: false` regardless — spectra/services/
+room_mapping.py + room_effects.py production_deps, fx/facade.py
+`_virtual_put_active`'s `persist` flag, fx/VENDOR.md #37). This script is
+the one-time catch-up for a config that already carries the residue, the
+same relationship scripts/check_spectra_expected_active.py has to
+live_host's own runtime intersection.
 
 Dry-run by default; --apply writes (atomic tmp+replace) AFTER copying the
-config to a timestamped backup, and ASSERTS the written file differs from
-the original in EXACTLY the planned `active` flips and nothing else before
-declaring success. Idempotent: a config with no residue reports nothing to
-do and writes nothing.
+config to a timestamped backup, and ASSERTS the written file is
+SEMANTICALLY identical to the original except for EXACTLY the planned
+`active` flips before declaring success — parsed JSON compared key by key,
+not bytes: the write re-serializes in save_config's own canonical form
+(sort_keys, indent=4), so a config not already in that layout shows a
+larger textual diff than the flips while meaning the same thing. Idempotent:
+a config with no residue reports nothing to do and writes nothing.
 
 Run from repo root:
     .venv/bin/python scripts/repair_copy_carrier_active_flags.py [--config PATH] [--apply]
@@ -79,19 +94,31 @@ def _segment_devices(virtual: dict) -> set[str]:
     return out
 
 
+def would_activate_on_load(virtual: dict) -> bool:
+    """The config loader's own rule (`fx/virtuals.py create_from_config`):
+    a stored effect is restored with `activate=bool(active-with-True-
+    default)`, and a virtual with no stored effect is never activated by
+    the load at all. So an ABSENT `active` key beside a stored effect brings
+    the virtual up, exactly as `active: true` does; only an explicit false
+    holds it back."""
+    return "effect" in virtual and bool(virtual.get("active", True))
+
+
 def carrier_owned_devices(virtuals: list[dict]) -> dict[str, list[str]]:
-    """device id -> the active copy-mapped external carriers streaming to it.
+    """device id -> the copy-mapped external carriers streaming to it that
+    would themselves come up on load.
 
     An EXTERNAL virtual has a falsy `is_device`; a copy-mapped one has
-    `config.mapping == "copy"`; only carriers that are themselves stored
-    `active: true` count — an inactive carrier is not "the one that should
-    win", so a device-virtual sharing its device is left alone."""
+    `config.mapping == "copy"`; only carriers the loader would activate
+    count (`would_activate_on_load`) — a carrier that stays down is not
+    "the one that should win", so a device-virtual sharing its device is
+    left alone."""
     owned: dict[str, list[str]] = {}
     for v in virtuals:
         if v.get("is_device"):
             continue                                  # a device-virtual
-        if not v.get("active"):
-            continue                                  # inactive carrier
+        if not would_activate_on_load(v):
+            continue                                  # carrier stays down
         if _mapping(v) != COPY_MAPPING:
             continue                                  # span/blender/etc.
         for device_id in _segment_devices(v):
@@ -101,8 +128,11 @@ def carrier_owned_devices(virtuals: list[dict]) -> dict[str, list[str]]:
 
 def find_residue(virtuals: list[dict]) -> list[dict]:
     """The device-virtuals to flip, each with the carrier(s) that own its
-    device. A device-virtual is `is_device: "<device>"` (truthy) and its
-    device is carrier-owned and it is stored `active: true`."""
+    device. A device-virtual is `is_device: "<device>"` (truthy); it is
+    residue when its device is carrier-owned and the loader would bring it
+    up (`would_activate_on_load`: a stored effect with `active: true` OR
+    with no `active` key at all). `stored_active` is what the key held —
+    True, or None for absent — so the report can say which shape it was."""
     owned = carrier_owned_devices(virtuals)
     residue: list[dict] = []
     for v in virtuals:
@@ -111,11 +141,12 @@ def find_residue(virtuals: list[dict]) -> list[dict]:
             continue                                  # not a device-virtual
         if str(device_id) not in owned:
             continue                                  # no copy-carrier on it
-        if not v.get("active"):
-            continue                                  # already correct
+        if not would_activate_on_load(v):
+            continue                                  # already held back
         residue.append({"id": str(v.get("id")),
                         "device": str(device_id),
-                        "carriers": owned[str(device_id)]})
+                        "carriers": owned[str(device_id)],
+                        "stored_active": v.get("active")})
     return residue
 
 
@@ -139,10 +170,12 @@ def diff_active(before: dict, after: dict) -> list[tuple[str, object, object]]:
 
 def assert_only_planned_active_flips(before: dict, after: dict,
                                      planned_ids: set[str]) -> None:
-    """The 'written diff equals the planned diff' guarantee. The whole config
-    must be byte-identical to the original EXCEPT that exactly the planned
-    device-virtuals flip `active` True -> False; every other key of every
-    virtual, and every top-level key, is untouched."""
+    """The 'written diff equals the planned diff' guarantee, on PARSED
+    JSON: the whole config must be semantically identical to the original
+    EXCEPT that exactly the planned device-virtuals end up `active: false`
+    from `true` or from no key at all; every other key of every virtual,
+    and every top-level key, is untouched. (Bytes may differ — the write is
+    save_config's canonical layout.)"""
     b_virtuals = {v.get("id"): v for v in before.get("virtuals") or []}
     a_virtuals = {v.get("id"): v for v in after.get("virtuals") or []}
     if set(b_virtuals) != set(a_virtuals):
@@ -157,11 +190,12 @@ def assert_only_planned_active_flips(before: dict, after: dict,
     for vid, bv in b_virtuals.items():
         av = a_virtuals[vid]
         if vid in planned_ids:
-            if not (bv.get("active") is True and av.get("active") is False):
+            if not (bv.get("active") in (True, None)
+                    and av.get("active") is False):
                 raise AssertionError(
                     f"{vid}: planned flip did not land (before="
                     f"{bv.get('active')!r}, after={av.get('active')!r})")
-            # everything except `active` byte-identical
+            # everything except `active` identical
             b_rest = {k: val for k, val in bv.items() if k != "active"}
             a_rest = {k: val for k, val in av.items() if k != "active"}
             if b_rest != a_rest:
@@ -215,21 +249,26 @@ def main() -> int:
     residue = find_residue(virtuals)
     if not residue:
         print("nothing to correct — no device-virtual behind an active "
-              "copy-mapped carrier is stored active:true")
+              "copy-mapped carrier would come up on load (each is stored "
+              "active:false, or has no stored effect)")
         return 0
 
-    print(f"\n  residue: {len(residue)} device-virtual(s) stored active:true "
-          f"while a copy-carrier owns their device (they evict it on load):")
+    print(f"\n  residue: {len(residue)} device-virtual(s) the loader would "
+          f"bring up while a copy-carrier owns their device (they evict it "
+          f"on load):")
     for r in residue:
+        shape = ("active:true" if r["stored_active"] is True
+                 else "no `active` key beside a stored effect")
         print(f"    {r['id']:<24} (device {r['device']}, behind "
-              f"{', '.join(r['carriers'])})  ->  active:false")
+              f"{', '.join(r['carriers'])}; {shape})  ->  active:false")
 
     planned_ids = {r["id"] for r in residue}
 
     if not args.apply:
         print(f"\ndry-run: would set {len(planned_ids)} device-virtual(s) "
               f"active:false in {path} (pass --apply). Only the `active` key "
-              f"changes; every other field on disk is left identical.")
+              f"changes; every other field keeps its value (the file is "
+              f"re-written in save_config's canonical layout).")
         return 0
 
     # Build the patched config on a fresh copy of the raw dict.
@@ -248,8 +287,9 @@ def main() -> int:
     shutil.copy2(path, backup_path)
     print(f"\nbacked up {path} -> {backup_path}")
 
-    # Match save_config's own on-disk serialization so the only real change
-    # is the flipped flags and the app's next save does not churn the file.
+    # Match save_config's own on-disk serialization so the only semantic
+    # change is the flipped flags and the app's next save does not churn
+    # the file.
     tmp = path.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(patched, ensure_ascii=False, sort_keys=True,
                               indent=4), encoding="utf-8")

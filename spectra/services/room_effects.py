@@ -379,11 +379,17 @@ def production_deps() -> RunnerDeps:
     from spectra.services import room_mapping
 
     async def activate(virtual_id: str) -> None:
+        # The same transient activation the capture makes, under the same
+        # rule (fx/VENDOR.md #37): the strip is raised LIVE for the wave's
+        # own duration, and the stored config is written `active: false`
+        # regardless — a Dim Wave interrupted mid-run (a crash, a restart)
+        # must not leave a copy-target device-virtual able to come up on the
+        # next load and evict the copy-mapped carrier (`tv-mapper`).
         await fx_seam.set_virtual_effect(
             virtual_id, room_mapping.MAP_EFFECT_TYPE,
             {"color": room_mapping.BLACK, "brightness": 0.0,
              "background_brightness": 0.0})
-        await fx_seam.set_virtual_active(virtual_id, True)
+        await fx_seam.set_virtual_active(virtual_id, True, persist=False)
 
     async def deactivate(virtual_id: str) -> None:
         await fx_seam.set_virtual_active(virtual_id, False)

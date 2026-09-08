@@ -394,14 +394,18 @@ async def _virtual_put_active(host, virtual_id: str, body: dict) -> FacadeRespon
     if active is None:
         return _invalid('Required attribute "active" was not provided')
 
-    # SpotFX deviation #37: a TRANSIENT activation must not reach disk.
-    # `persist` defaults True (every SpotFX/LedFX caller's behaviour is
-    # unchanged); persist=False activates the virtual LIVE but leaves the
-    # stored `active` flag and the config file untouched. A capture run
-    # brings a copy-target device-virtual up only for the capture — its
-    # `active: true` persisted, then a crash/restart before the run's own
-    # deactivate, is exactly what strands the copy-mapped carrier on the
-    # next config load (fx/VENDOR.md #37, spectra/services/room_mapping.py).
+    # SpotFX deviation #37: a TRANSIENT activation must never be the stored
+    # truth. `persist` defaults True (every SpotFX/LedFX caller's behaviour
+    # is unchanged: the live flag is what gets stored); persist=False
+    # activates/deactivates the virtual LIVE but STORES it inactive
+    # (`active: false`) regardless — an explicit false, not a skipped write,
+    # because the config loader treats an ABSENT `active` beside a stored
+    # effect as "activate" (fx/virtuals.py create_from_config). A capture
+    # run or a room effect brings a copy-target device-virtual up only for
+    # its own duration; a stored config able to bring that virtual up on the
+    # next load is exactly what evicts the copy-mapped carrier and strands
+    # the take (fx/VENDOR.md #37, spectra/services/room_mapping.py,
+    # spectra/services/room_effects.py).
     persist = bool(body.get("persist", True))
 
     if active:
@@ -422,11 +426,10 @@ async def _virtual_put_active(host, virtual_id: str, body: dict) -> FacadeRespon
     except (ValueError, RuntimeError) as msg:
         return _internal(f"Unable to set virtual {virtual.id} status: {msg}")
 
-    if persist:
-        virtual.virtual_cfg["active"] = virtual.active
-        save_config(config=host.config, config_dir=host.config_dir)
+    virtual.virtual_cfg["active"] = virtual.active if persist else False
+    save_config(config=host.config, config_dir=host.config_dir)
     return _ok({"status": "success", "active": virtual.active,
-                "persisted": persist})
+                "stored_active": virtual.virtual_cfg["active"]})
 
 
 # ── SpotFX deviation #29: a write that did not take must never report success ─

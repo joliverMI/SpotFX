@@ -1145,39 +1145,56 @@ against that commit.
     (the whole night measured at the emitted light and at the bridge, with
     the unscoped night as its red control), `tests/test_take_scope.py`.
 
-37. `facade.py`: A TRANSIENT ACTIVATION NEED NOT REACH DISK — the `persist`
+37. `facade.py`: A TRANSIENT ACTIVATION IS STORED INACTIVE — the `persist`
     flag on `PUT /api/virtuals/{id}` (`_virtual_put_active`, SpotFX-authored).
     The body may carry `"persist": false` alongside `"active"`; it defaults
-    True, so every SpotFX/LedFX caller is byte-identical to before. When
-    False the virtual's `active` flag is raised/lowered LIVE but
-    `virtual.virtual_cfg["active"]` and `save_config` are BOTH skipped — the
-    stored config never learns of the flag change.
+    True, so every SpotFX/LedFX caller is byte-identical to before.
+    `persist=True` stores the LIVE active state (`virtual_cfg["active"] =
+    virtual.active`, then `save_config`). `persist=False` raises/lowers the
+    virtual's `active` flag LIVE exactly the same way but STORES it inactive
+    — `virtual_cfg["active"] = False` and `save_config` — regardless of what
+    the live flag became. The response carries both truths: `active` (live)
+    and `stored_active` (what the config file now holds).
 
-    WHY IT EXISTS, and why persisting was the whole bug. A capture run brings
-    a copy-target device-virtual up only for the capture
-    (`spectra/services/room_mapping.py` production_deps `activate`) and puts
-    it back afterwards. Persisting that transient `active: true` meant a run
-    interrupted in its own window — a process kill, a restart, a hard abort
-    between `activate_for_capture` and `deactivate_after_capture` — left the
-    device-virtual stored active. On the NEXT config load it activates and
-    evicts the copy-mapped carrier standing in front of it (deviation #29's
-    eviction), so the room comes up with the carrier dark and a Living Room
-    take rolls back to `released` (2026-09-08, his failing offset test). With
-    `persist=False` the crash-window state on disk is safe: the substitute is
-    stored `active: false` throughout, and the carrier survives every load.
+    WHY IT IS AN EXPLICIT FALSE AND NOT A SKIPPED WRITE. The config loader
+    (`fx/virtuals.py create_from_config`) restores a stored effect with
+    `activate=bool(virtual_cfg.get("active", True))` — an ABSENT `active`
+    key beside a stored effect brings the virtual up. Every device-virtual
+    the device layer creates omits the key. So a first-ever transient
+    activation that merely withheld the flag write would leave the
+    substitute's persisted black lamp beside no key, and the next load would
+    activate it anyway.
+
+    WHY IT EXISTS, and why the stored flag was the whole bug. A capture run
+    (`spectra/services/room_mapping.py` production_deps `activate`) and a
+    room effect (`spectra/services/room_effects.py` production_deps
+    `activate`) each bring a copy-target device-virtual up only for their own
+    duration and put it back afterwards. Persisting that transient
+    `active: true` meant a run interrupted in its own window — a process
+    kill, a restart, a hard abort between activate and its own deactivate —
+    left the device-virtual stored active. On the NEXT config load it
+    activates and evicts the copy-mapped carrier standing in front of it
+    (deviation #29's eviction), so the room comes up with the carrier dark
+    and a Living Room take rolls back to `released` (2026-09-08, his failing
+    offset test). With `persist=False` the crash-window state on disk is
+    safe: the substitute is stored `active: false` throughout, whatever its
+    history, and the carrier survives every load.
 
     The substitute's stored EFFECT is still persisted (the black lamp — a
-    prior, harmless deviation: a device-virtual with a stored effect but
-    `active: false` is attached, not activated, at load, so it evicts
-    nothing). Only the transient `active: true` is withheld. `persist=False`
-    is meaningful only on the facade path; the external-LedFX HTTP PUT takes
-    just `active` (`spectra/services/fx_seam.set_virtual_active`), which is
-    the only transport a sub-device capture ever uses. Its one caller is the
-    capture-run activation; `deactivate` (substitute back to sleep) and the
-    displaced-carrier `reactivate` both keep the default persist=True, since
-    those ARE the settled end-state. Evidence:
-    `tests/test_capture_active_flag_not_persisted.py` (the crash-window
-    persisted state and the take after both a clean and an interrupted run,
-    with the pre-fix persisting activation as its red control),
+    prior, harmless deviation: a device-virtual with a stored effect and an
+    explicit `active: false` is attached, not activated, at load, so it
+    evicts nothing). `persist=False` is meaningful only on the facade path;
+    the external-LedFX HTTP PUT takes just `active`
+    (`spectra/services/fx_seam.set_virtual_active`), which is the only
+    transport a sub-device capture or a masked room effect ever uses. Its
+    callers are the two transient activations above; each `deactivate`
+    (substitute back to sleep) and the displaced-carrier `reactivate` keep
+    the default persist=True, since those ARE the settled end-state.
+    Evidence: `tests/test_capture_active_flag_not_persisted.py` (the
+    crash-window persisted state, with and without a pre-existing `active`
+    key, for both the capture and the room-effect door; the take after both
+    a clean and an interrupted run; the pre-fix persisting activation and
+    the effect-beside-no-key residue as its red controls),
+    `tests/test_repair_copy_carrier_active_flags.py` +
     `scripts/repair_copy_carrier_active_flags.py` (the one-time catch-up for
-    a config that already carries the residue).
+    a config that already carries either residue shape).

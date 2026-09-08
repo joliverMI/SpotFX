@@ -157,13 +157,17 @@ async def set_virtual_active(virtual_id: str, active: bool,
     believes it activated something it did not would photograph a dark
     fixture and store the result.
 
-    `persist=False` activates/deactivates the virtual LIVE but does NOT
-    write the `active` flag to the stored config — for a TRANSIENT capture
-    activation of a copy-target device-virtual, whose `active: true` must
-    never reach disk or it evicts the copy-mapped carrier on the next load
-    (fx/facade.py `_virtual_put_active`, fx/VENDOR.md #37). Only meaningful
-    on the facade (spectra-owns) path, which is the only one a sub-device
-    capture ever uses."""
+    `persist=True` (the default) stores the LIVE active state — the settled
+    end-state every ordinary caller means. `persist=False` activates/
+    deactivates the virtual LIVE but STORES it inactive (`active: false`)
+    regardless: the TRANSIENT activation a capture run or a room effect
+    gives a copy-target device-virtual, whose stored config must never be
+    able to bring it up on the next load (an absent `active` beside a stored
+    effect loads as active, so it is an explicit false, never a skipped
+    write) or it evicts the copy-mapped carrier (fx/facade.py
+    `_virtual_put_active`, fx/VENDOR.md #37). Only meaningful on the facade
+    (spectra-owns) path, which is the only one a sub-device capture ever
+    uses."""
     owner = _require_owner()
     if owner == light_ownership.SPECTRA:
         from fx import facade

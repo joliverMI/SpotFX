@@ -13,19 +13,33 @@ restart, a hard abort before the run's own deactivate — left that residue in
 evict the copy-mapped carrier, so the Living Room has zero active carriers
 and the take rolls back to `released`.
 
-THE FIX (fx/VENDOR.md #37): the transient activation is LIVE-only —
+THE FIX (fx/VENDOR.md #37): the transient activation is STORED INACTIVE —
 `fx_seam.set_virtual_active(..., persist=False)` -> the facade's
-`_virtual_put_active` raises the flag on the live virtual but never writes
-`active` to the stored config. So even a crash mid-capture leaves the
-substitutes stored `active: false`, and the carrier survives the next load.
+`_virtual_put_active` raises the flag on the live virtual but writes an
+EXPLICIT `active: false` to the stored config regardless. Explicit, not
+skipped: the loader reads an ABSENT `active` key beside a stored effect as
+"activate" (fx/virtuals.py create_from_config), and every device-virtual
+the device layer creates omits the key — so a strip on its first-ever
+capture, whose black lamp the effects POST persists, would still come up
+and evict the carrier if the flag write were merely withheld. So even a
+crash mid-capture leaves the substitutes stored `active: false`, whatever
+their history, and the carrier survives the next load.
+
+THE SAME DOOR EXISTS TWICE: a room effect (Dim Wave) brings an idle strip
+up through `room_effects.production_deps().activate` exactly as the
+capture does, and a wave interrupted mid-run is the identical residue.
+Both doors are driven here.
 
 THE BAR: this drives a REAL headless host with his copy-mapped shape and
 reads the SAVED config.json — the durable state a cold load / take reads —
 not just the live flags. It proves the persisted state is safe DURING the
-capture window (the crash point), and that a cold load after both a full
-cycle AND an interrupted one leaves tv-mapper ACTIVE and rendering. Each
-persisted-state assertion goes RED against the pre-fix code, which is
-exercised directly by `_run_activation(persist=True)` as a control.
+capture window (the crash point), for a strip WITH and WITHOUT a
+pre-existing `active` key, and that a cold load after both a full cycle
+AND an interrupted one leaves tv-mapper ACTIVE and rendering. Each
+persisted-state assertion goes RED against a control that reproduces the
+defect through the same loader: the pre-fix persisting activation
+(`_deps(persist_activation=True)`), and the effect-beside-no-key residue a
+withheld flag write leaves behind (`_deps(lamp_only=True)`).
 """
 from __future__ import annotations
 
@@ -69,10 +83,13 @@ def _config_dir(tmp_path) -> str:
     return str(tmp_path / "fx")
 
 
-def _write_config(config_dir: str) -> None:
+def _write_config(config_dir: str, *, active_key: bool = True) -> None:
     """His shape: a copy-mapped carrier rendering across three fixtures, each
     fixture's own span virtual ASLEEP with NO stored effect (the clean
-    original state, before any capture run touched it).
+    original state, before any capture run touched it). `active_key=False`
+    is the shape the device layer CREATES a device-virtual in — no `active`
+    key at all — i.e. a strip that has never been through a capture; the
+    loader reads that absence as "activate" once an effect is stored.
 
     ORDER MATTERS, and it mirrors his real config: the carrier is written
     BEFORE the device-virtuals, so a device-virtual stored active:true loads
@@ -90,10 +107,12 @@ def _write_config(config_dir: str) -> None:
                    "config": {"color": "#ff0000", "brightness": 1.0,
                               "background_brightness": 0.0}}}]
     for d, pix in DEVS.items():
-        virtuals.append({"id": d, "is_device": d, "auto_generated": False,
-                         "config": {"name": d, "mapping": "span", "rows": 1},
-                         "segments": [[d, 0, pix - 1, False]],
-                         "active": False})
+        entry = {"id": d, "is_device": d, "auto_generated": False,
+                 "config": {"name": d, "mapping": "span", "rows": 1},
+                 "segments": [[d, 0, pix - 1, False]]}
+        if active_key:
+            entry["active"] = False
+        virtuals.append(entry)
     with open(os.path.join(config_dir, "config.json"), "w") as fh:
         json.dump({"configuration_version": CONFIGURATION_VERSION,
                    "devices": [{"id": d, "type": "dummy",
@@ -142,19 +161,24 @@ def _plan():
         granularity="whole", block_pixels=30)
 
 
-async def _deps(persist_activation: bool):
-    """Production deps, optionally with the PRE-FIX activation (persist=True)
-    to drive the control that proves the harness goes red on the defect."""
+async def _deps(persist_activation: bool = False, lamp_only: bool = False):
+    """Production deps, optionally with one of two CONTROL activations that
+    drive the harness red on the defect: the PRE-FIX activation
+    (`persist_activation=True`, stores the transient flag), or the lamp
+    POST alone (`lamp_only=True`) — which is exactly the on-disk residue a
+    withheld flag write leaves on a strip with no `active` key: the black
+    lamp persisted (the effects POST also activates the strip LIVE), and no
+    key beside it."""
     from spectra.services import fx_seam, room_mapping
     deps = room_mapping.production_deps(session=None)
-    if persist_activation:
+    if persist_activation or lamp_only:
         async def activate(vid: str) -> None:
             await fx_seam.set_virtual_effect(
                 vid, room_mapping.MAP_EFFECT_TYPE,
                 {"color": room_mapping.BLACK, "brightness": 0.0,
                  "background_brightness": 0.0})
-            # the pre-fix behaviour: persist the transient flag
-            await fx_seam.set_virtual_active(vid, True, persist=True)
+            if persist_activation:
+                await fx_seam.set_virtual_active(vid, True, persist=True)
         deps.activate = activate
     return deps
 
@@ -321,3 +345,155 @@ def test_the_carrier_actually_shows_its_own_colour_after_the_take(tmp_path,
             assert pixels[:, 0].mean() > 200.0, (
                 "the carrier's own red is not reaching the fixture after the take")
     asyncio.run(take())
+
+
+@pytest.mark.parametrize("active_key", [True, False],
+                         ids=["stored-active-false", "no-active-key"])
+def test_a_strip_is_stored_inactive_during_the_capture_whatever_its_history(
+        tmp_path, monkeypatch, active_key):
+    """The crash-window state for BOTH shapes a substitute can start in —
+    an explicit `active: false` (a strip that has been through a clean run)
+    and NO key at all (a strip the device layer created and nothing has
+    touched). After the transient activation the strip is LIVE-active and
+    the saved config holds an EXPLICIT false; the run is then interrupted
+    (no deactivate) and the take still brings tv-mapper up. The no-key half
+    is RED with a withheld write instead of an explicit false — see the
+    lamp-only control below."""
+    _own(monkeypatch, tmp_path)
+    from spectra.services import room_mapping
+    config_dir = _config_dir(tmp_path)
+    _write_config(config_dir, active_key=active_key)
+    assert all((_stored_active(config_dir)[d] is False) is active_key
+               for d in DEVS)
+
+    async def go():
+        async with _started(config_dir) as host:
+            deps = await _deps()
+            scope = await room_mapping.live_virtual_ids(deps.get_virtuals)
+            activation = await room_mapping.activate_for_capture(
+                _plan(), scope, deps)
+            assert sorted(activation.activated) == sorted(DEVS)
+            for d in DEVS:
+                assert host.virtuals.get(d).active
+            stored = _stored_active(config_dir)
+            for d in DEVS:
+                assert stored[d] is False, (
+                    f"{d} stored active={stored[d]!r} during the capture "
+                    f"(started {'with' if active_key else 'without'} a key)")
+            assert stored[CARRIER] is True
+
+    asyncio.run(go())                                # interrupted: no deactivate
+    assert _cold_reload_renders(config_dir), (
+        "an interrupted first capture on a strip with no stored `active` key "
+        "must not strand tv-mapper on the next take")
+
+
+def test_a_persisted_lamp_beside_no_active_key_strands_the_carrier(
+        tmp_path, monkeypatch):
+    """The RED control for the no-key half: the effects POST alone (the
+    black lamp persisted, the strip activated live by `set_effect`, and NO
+    `active` written) is the residue a merely-withheld flag write leaves on
+    a first-ever capture. The loader reads the absent key as "activate", the
+    strip evicts tv-mapper, and the take fails — proving the explicit false
+    is load-bearing, not tidiness."""
+    _own(monkeypatch, tmp_path)
+    from spectra.services import room_mapping
+    config_dir = _config_dir(tmp_path)
+    _write_config(config_dir, active_key=False)
+
+    async def go():
+        async with _started(config_dir) as host:
+            deps = await _deps(lamp_only=True)
+            scope = await room_mapping.live_virtual_ids(deps.get_virtuals)
+            activation = await room_mapping.activate_for_capture(
+                _plan(), scope, deps)
+            assert sorted(activation.activated) == sorted(DEVS)
+            for d in DEVS:
+                assert host.virtuals.get(d).active
+
+    asyncio.run(go())
+
+    stored = _stored_active(config_dir)
+    for d in DEVS:
+        assert stored[d] is None, "the control must leave the key absent"
+    assert not _cold_reload_renders(config_dir), (
+        "a stored lamp beside no `active` key loads as active and evicts "
+        "tv-mapper — the residue an explicit false exists to prevent")
+
+
+@pytest.mark.parametrize("active_key", [True, False],
+                         ids=["stored-active-false", "no-active-key"])
+def test_a_room_effect_interrupted_mid_run_leaves_the_carrier_driving(
+        tmp_path, monkeypatch, active_key):
+    """THE OTHER DOOR. A Dim Wave brings an idle strip up through
+    `room_effects.production_deps().activate` — the same lamp POST and flag
+    raise the capture makes — and `stop()` is what puts it back. A wave
+    interrupted mid-run (a crash, a restart) must leave the same safe
+    stored state: the strip LIVE-active with an explicit `active: false` on
+    disk, so the take after it still brings tv-mapper up."""
+    _own(monkeypatch, tmp_path)
+    from spectra.services import room_effects
+    config_dir = _config_dir(tmp_path)
+    _write_config(config_dir, active_key=active_key)
+
+    async def go():
+        async with _started(config_dir) as host:
+            deps = room_effects.production_deps()
+            for d in DEVS:
+                await deps.activate(d)
+                assert host.virtuals.get(d).active
+            assert not _renders(host, CARRIER)      # evicted live, as measured
+            stored = _stored_active(config_dir)
+            for d in DEVS:
+                assert stored[d] is False, (
+                    f"{d} stored active={stored[d]!r} while the wave ran")
+            assert stored[CARRIER] is True
+
+    asyncio.run(go())                                # interrupted: no stop()
+    assert _cold_reload_renders(config_dir), (
+        "a room effect interrupted mid-run must not strand tv-mapper on the "
+        "next take")
+
+
+def test_the_facade_reports_the_live_and_the_stored_flag_separately(
+        tmp_path, monkeypatch):
+    """The wire truth of `persist=False`: the PUT answers `active: true`
+    (live) beside `stored_active: false` (what the file now holds), and the
+    file agrees; the default persist stores the live flag and says so."""
+    _own(monkeypatch, tmp_path)
+    from spectra.services import fx_seam, room_mapping
+    config_dir = _config_dir(tmp_path)
+    _write_config(config_dir, active_key=False)
+    strip = next(iter(DEVS))
+
+    async def go():
+        async with _started(config_dir) as host:
+            await fx_seam.set_virtual_effect(
+                strip, room_mapping.MAP_EFFECT_TYPE,
+                {"color": room_mapping.BLACK, "brightness": 0.0,
+                 "background_brightness": 0.0})
+            resp = await facade.handle(
+                "PUT", f"/api/virtuals/{strip}",
+                json={"active": True, "persist": False})
+            body = resp.json()
+            assert body["active"] is True
+            assert body["stored_active"] is False
+            assert host.virtuals.get(strip).active
+            assert _stored_active(config_dir)[strip] is False
+
+            resp = await facade.handle(
+                "PUT", f"/api/virtuals/{strip}", json={"active": False})
+            body = resp.json()
+            assert body["active"] is False
+            assert body["stored_active"] is False
+            assert _stored_active(config_dir)[strip] is False
+
+            resp = await facade.handle(
+                "PUT", f"/api/virtuals/{strip}", json={"active": True})
+            body = resp.json()
+            assert body["active"] is True
+            assert body["stored_active"] is True
+            assert _stored_active(config_dir)[strip] is True
+            await fx_seam.set_virtual_active(strip, False)
+
+    asyncio.run(go())
