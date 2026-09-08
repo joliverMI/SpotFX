@@ -3546,70 +3546,38 @@ and the id shape. Five things to know:
   thread that hangs the interpreter at exit.
 - **A TRANSIENT ACTIVATION IS STORED INACTIVE, or an INTERRUPTED run
   strands the carrier on the next load** (2026-09-08, PR
-  fm/spectra-commission-leaves-carrier-inactive, `fx/VENDOR.md` #37, from
-  his failing Living Room take/offset test). The LIVE restore above (#257)
-  is correct and proven; the gap was on DISK. `activate_for_capture` brought
-  the substitutes up via `set_virtual_active(vid, True)`, whose facade
-  handler (`_virtual_put_active`) writes `virtual_cfg["active"]=True` +
-  `save_config` — so the transient `active: true` was PERSISTED. A clean run
-  undoes it (`deactivate_after_capture` persists `active: false`, verified),
-  but a run interrupted in that window — a process kill, a restart, a hard
-  abort between activate and deactivate — leaves the copy-target
-  device-virtuals (`tv-backlight` + kitchen sconces) stored `active: true`.
-  On the next config load they evict the copy-mapped carrier (`tv-mapper`,
-  the deviation-#29 eviction), the Living Room has zero active carriers, and
-  the take rolls back to `released`. The cold-load fix
-  (fm/tvmapper-cold-load-fix) RESPECTS the stored flag, so it cannot override
-  a residue that stores the WRONG one. Fix: `fx_seam.set_virtual_active(vid,
-  True, persist=False)` → `_virtual_put_active` raises the flag on the live
-  virtual but STORES `active: false` regardless — an EXPLICIT false, never a
-  skipped write, because the loader (`fx/virtuals.py create_from_config`)
-  reads an ABSENT `active` key beside a stored effect as "activate", and
-  every device-virtual the device layer creates omits the key; a first-ever
-  capture on such a strip persists its black lamp, so withholding the flag
-  alone would still strand the carrier. And the ORDER inside one
-  activation is part of it: the lamp POST persists with its own
-  `save_config` before the flag PUT runs, so the transient activation
-  writes an explicit `active: false` FIRST (`set_virtual_active(vid,
-  False)`, a live no-op on an idle strip), THEN sets the lamp, THEN raises
-  the flag with `persist=False` — no snapshot written during an activation
-  can bring the strip up on load, so a hard kill anywhere inside it is
-  safe. That ordering lives in ONE place, `room_mapping.transient_activate`,
-  and BOTH doors that make a transient activation delegate to it: the
-  capture run (`room_mapping.production_deps.activate`) and a room effect
-  (`room_effects.production_deps.activate` — a Dim Wave interrupted mid-run
-  is the identical residue). Each `deactivate` (substitute → sleep) and the
-  displaced-carrier `reactivate` keep the default `persist=True` — those ARE
-  the settled end-state. The substitute's stored EFFECT (black lamp) still
-  persists, harmlessly (a stored effect with an explicit `active: false` is
-  attached, not activated, at load — it evicts nothing). One-time catch-up
-  for a config that already carries the residue:
-  `scripts/repair_copy_carrier_active_flags.py` (dry-run default, `--apply`,
-  backs up + asserts the written config is SEMANTICALLY identical except
-  the planned active flips — parsed JSON, not bytes, since it re-writes in
-  save_config's canonical layout — idempotent). Its rule is the LOADER'S
-  OWN (`would_activate_on_load`: stored effect AND `active` not explicitly
-  false), applied to both sides: every device-virtual the loader would bring
-  up — stored `active: true` OR a stored effect beside NO key — whose device
-  a copy-mapped carrier that would itself come up streams to is set
-  `active: false`. Proofs: `tests/test_capture_active_flag_not_persisted.py`
-  (crash-window persisted state for a strip with and without a pre-existing
-  key, at both doors; EVERY `save_config` snapshot inside one activation
-  held against the loader's rule, with the pre-reorder sequence as its red
-  control; the take after both a clean and an interrupted run; the pre-fix
-  persisting activation and the effect-beside-no-key residue as RED
-  controls), `tests/test_repair_copy_carrier_active_flags.py` (both
-  residue shapes cold-loaded through the real host before and after the
-  repair, dry-run writes nothing, idempotent, the narrow rule's refusals)
-  and `scripts/check_cold_load_effect_restore.py` (his real config,
-  read-only: FAIL before repair / PASS after). Config load ORDER decides
-  which side wins — his sconces load AFTER tv-mapper and so evict it; a
-  repro/test with the carrier last hides the residue by letting it win on
-  order. A test double for `fx_seam.set_virtual_active` must accept the
-  `persist` keyword (`scripts/check_capture_queue_e2e.py`,
+  fm/spectra-commission-leaves-carrier-inactive; `fx/VENDOR.md` #37 is the
+  binding statement). The LIVE restore above (#257) was already right; the
+  gap was ON DISK: a capture or a Dim Wave brings the copy-target
+  device-virtuals (`tv-backlight`, the kitchen sconces) up for its own
+  duration, and a run interrupted before its own deactivate left them
+  stored ACTIVATABLE — `active: true`, or a black lamp beside NO `active`
+  key, which the loader reads as active. On the next config load they
+  evict the copy-mapped `tv-mapper` (deviation #29's eviction; his sconces
+  load AFTER it, so order decides), the Living Room has zero active
+  carriers, and the take rolls back to `released`. The fix lives in TWO
+  places: `fx/facade.py::_virtual_put_active`'s `persist` flag
+  (`fx_seam.set_virtual_active(vid, True, persist=False)` raises the flag
+  live and STORES an explicit `active: false`) and
+  `room_mapping.transient_activate`, the ONE helper both doors —
+  `room_mapping.production_deps().activate` (capture) and
+  `room_effects.production_deps().activate` (room effects) — delegate to.
+  Its docstring owns the three-write ORDER; VENDOR.md #37 owns why the
+  false is explicit rather than a skipped write. One-time catch-up for a
+  config already carrying either residue shape:
+  `scripts/repair_copy_carrier_active_flags.py` (dry-run default,
+  `--apply`). Two traps: a test double for `fx_seam.set_virtual_active`
+  must accept the `persist` keyword (`scripts/check_capture_queue_e2e.py`,
   `scripts/check_lever_selftest.py`) — `activate_for_capture` swallows a
-  `TypeError` from the double into `failed`, which silently hollows out the
-  substitute-activation path of a proof that still reads green.
+  `TypeError` from the double into `failed`, hollowing out the substitute
+  path of a proof that still reads green; and a repro that loads the
+  carrier LAST hides the residue by letting it win on order. DEFERRED,
+  filed as `spectra-stale-hold-recovery-reevicts-carrier`:
+  `flare_preview_hold`'s restart recovery replays a mid-run hold snapshot
+  and re-evicts the carrier LIVE for that process life — pre-existing,
+  live-only, exposed by this fix rather than caused by it. Spec:
+  `tests/test_capture_active_flag_not_persisted.py`,
+  `tests/test_repair_copy_carrier_active_flags.py`.
 - **AN EMITTER THE CAMERA NEVER SAW IS A RECORD, NOT AN ABSENCE** (2026-08-31,
   PR fm/mapping-unseen-emitter-note). His first real map ran 22 emitters and
   stored 14; the missing 8 (far-side TV blocks, sconce spill outside the
