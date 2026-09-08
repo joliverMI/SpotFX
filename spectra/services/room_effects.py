@@ -379,11 +379,13 @@ def production_deps() -> RunnerDeps:
     from spectra.services import room_mapping
 
     async def activate(virtual_id: str) -> None:
-        await fx_seam.set_virtual_effect(
-            virtual_id, room_mapping.MAP_EFFECT_TYPE,
-            {"color": room_mapping.BLACK, "brightness": 0.0,
-             "background_brightness": 0.0})
-        await fx_seam.set_virtual_active(virtual_id, True)
+        # The same transient activation the capture makes, through the same
+        # helper — `room_mapping.transient_activate` is the binding
+        # statement for the write ordering that keeps a copy-target
+        # device-virtual stored non-activating if a Dim Wave is interrupted
+        # mid-run (fx/VENDOR.md #37). `stop()`'s deactivate is the unchanged
+        # end-state.
+        await room_mapping.transient_activate(virtual_id)
 
     async def deactivate(virtual_id: str) -> None:
         await fx_seam.set_virtual_active(virtual_id, False)

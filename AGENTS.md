@@ -3544,6 +3544,40 @@ and the id shape. Five things to know:
   suite that spawns real render threads (`headless.attach_effect`
   deliberately skips them), and a virtual left rendering is a non-daemon
   thread that hangs the interpreter at exit.
+- **A TRANSIENT ACTIVATION IS STORED INACTIVE, or an INTERRUPTED run
+  strands the carrier on the next load** (2026-09-08, PR
+  fm/spectra-commission-leaves-carrier-inactive; `fx/VENDOR.md` #37 is the
+  binding statement). The LIVE restore above (#257) was already right; the
+  gap was ON DISK: a capture or a Dim Wave brings the copy-target
+  device-virtuals (`tv-backlight`, the kitchen sconces) up for its own
+  duration, and a run interrupted before its own deactivate left them
+  stored ACTIVATABLE — `active: true`, or a black lamp beside NO `active`
+  key, which the loader reads as active. On the next config load they
+  evict the copy-mapped `tv-mapper` (deviation #29's eviction; his sconces
+  load AFTER it, so order decides), the Living Room has zero active
+  carriers, and the take rolls back to `released`. The fix lives in TWO
+  places: `fx/facade.py::_virtual_put_active`'s `persist` flag
+  (`fx_seam.set_virtual_active(vid, True, persist=False)` raises the flag
+  live and STORES an explicit `active: false`) and
+  `room_mapping.transient_activate`, the ONE helper both doors —
+  `room_mapping.production_deps().activate` (capture) and
+  `room_effects.production_deps().activate` (room effects) — delegate to.
+  Its docstring owns the three-write ORDER; VENDOR.md #37 owns why the
+  false is explicit rather than a skipped write. One-time catch-up for a
+  config already carrying either residue shape:
+  `scripts/repair_copy_carrier_active_flags.py` (dry-run default,
+  `--apply`). Two traps: a test double for `fx_seam.set_virtual_active`
+  must accept the `persist` keyword (`scripts/check_capture_queue_e2e.py`,
+  `scripts/check_lever_selftest.py`) — `activate_for_capture` swallows a
+  `TypeError` from the double into `failed`, hollowing out the substitute
+  path of a proof that still reads green; and a repro that loads the
+  carrier LAST hides the residue by letting it win on order. DEFERRED,
+  filed as `spectra-stale-hold-recovery-reevicts-carrier`:
+  `flare_preview_hold`'s restart recovery replays a mid-run hold snapshot
+  and re-evicts the carrier LIVE for that process life — pre-existing,
+  live-only, exposed by this fix rather than caused by it. Spec:
+  `tests/test_capture_active_flag_not_persisted.py`,
+  `tests/test_repair_copy_carrier_active_flags.py`.
 - **AN EMITTER THE CAMERA NEVER SAW IS A RECORD, NOT AN ABSENCE** (2026-08-31,
   PR fm/mapping-unseen-emitter-note). His first real map ran 22 emitters and
   stored 14; the missing 8 (far-side TV blocks, sconce spill outside the
@@ -6468,12 +6502,17 @@ branch, so it never activated and never evicted anything. His three
 `BLACK` verbatim — with `pixelRange`/`pixelPattern` in their stored `effects`
 history, lamps that exist nowhere else. `activate_for_capture` writes an
 effect and raises the active flag through `fx_seam`, i.e. the facade's
-`_effects_put` + `_virtual_put_active`, and BOTH call `save_config()`: a
+`_effects_post` + `_virtual_put_active`, and BOTH call `save_config()`: a
 capture run PERSISTS a stored effect onto a device virtual that had none.
 Those values are his own runs' genuine residue, not corruption — the load
 path was what was wrong to act on them — so nothing in his config was
-rewritten. **Anything that borrows a virtual and puts it back should know it
-is writing his stored config, not just the live host.**
+rewritten. The ACTIVE-flag half of that residue (an interrupted run leaving
+a device-virtual stored activatable), and the one-time repair for a config
+already carrying it, is deviation #37 — see the Rooms section's own bullet
+above (`room_mapping.transient_activate`,
+`scripts/repair_copy_carrier_active_flags.py`). **Anything that borrows a
+virtual and puts it back should know it is writing his stored config, not
+just the live host.**
 
 Proofs: `tests/test_cold_load_effect_restore.py` (cold start in a FRESH
 INTERPRETER per the light-mode cold-start precedent — a warm pytest process

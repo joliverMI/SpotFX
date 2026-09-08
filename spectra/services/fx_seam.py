@@ -143,7 +143,8 @@ async def set_virtual_config(virtual_id: str, patch: dict) -> None:
             resp.raise_for_status()
 
 
-async def set_virtual_active(virtual_id: str, active: bool) -> None:
+async def set_virtual_active(virtual_id: str, active: bool,
+                             *, persist: bool = True) -> None:
     """PUT a virtual's ACTIVE flag over the transport the ownership record
     grants — the flag itself, distinct from `apply_writes`' effect PUT and
     from `set_virtual_config`'s device-config merge.
@@ -154,20 +155,34 @@ async def set_virtual_active(virtual_id: str, active: bool) -> None:
     binding statement, including that the run restores what it found).
     Raises on failure, same contract as apply_writes: a capture that
     believes it activated something it did not would photograph a dark
-    fixture and store the result."""
+    fixture and store the result.
+
+    `persist=True` (the default) stores the LIVE active state — the settled
+    end-state every ordinary caller means. `persist=False` activates/
+    deactivates the virtual LIVE but STORES it inactive (`active: false`)
+    regardless: the TRANSIENT activation a capture run or a room effect
+    gives a copy-target device-virtual, whose stored config must never be
+    able to bring it up on the next load (an absent `active` beside a stored
+    effect loads as active, so it is an explicit false, never a skipped
+    write) or it evicts the copy-mapped carrier (fx/facade.py
+    `_virtual_put_active`, fx/VENDOR.md #37). Only meaningful on the facade
+    (spectra-owns) path, which is the only one a sub-device capture ever
+    uses."""
     owner = _require_owner()
-    payload = {"active": bool(active)}
     if owner == light_ownership.SPECTRA:
         from fx import facade
-        resp = await facade.handle("PUT", f"/api/virtuals/{virtual_id}",
-                                   json=payload)
+        # `persist` is understood only by the facade handler; the external
+        # LedFX PUT takes just `active`.
+        resp = await facade.handle(
+            "PUT", f"/api/virtuals/{virtual_id}",
+            json={"active": bool(active), "persist": bool(persist)})
         resp.raise_for_status()
     else:
         async with httpx.AsyncClient(base_url=config.ledfx_url(),
                                      timeout=REQUEST_DEADLINE_S) as client:
             async with _slots:
                 resp = await client.put(f"/api/virtuals/{virtual_id}",
-                                        json=payload)
+                                        json={"active": bool(active)})
             resp.raise_for_status()
 
 

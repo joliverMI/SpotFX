@@ -719,6 +719,45 @@ class RunDeps:
     witness_sweep: Optional[Callable[[float, float], Any]] = None
 
 
+async def transient_activate(virtual_id: str) -> None:
+    """Bring an idle strip up for a run's own duration — the ONE transient
+    activation, shared by the capture (`production_deps().activate`) and a
+    room effect (`room_effects.production_deps().activate`), each of which
+    puts the strip back through its own deactivate.
+
+    A copy-target device-virtual (`tv-backlight`, the kitchen sconces) whose
+    stored config could bring it up on the next load — an `active: true`
+    persisted here, or a stored effect beside NO `active` key, which the
+    loader reads as active — then a crash or restart before the run's own
+    deactivate, is exactly what evicts the copy-mapped carrier (`tv-mapper`)
+    on the next config load and strands the Living Room take
+    (fx/VENDOR.md #37). THE ORDER IS THE GUARANTEE:
+
+    1. An explicit `active: false` is written to disk FIRST. The strip is
+       idle (only a strip the run found asleep reaches here), so the live
+       deactivate is a no-op; what lands is the stored flag, on a strip
+       that may never have carried one.
+    2. The run's own black singleColor (the same lamp the dark step writes)
+       is set — an idle virtual may have no effect at all, and the effects
+       PUT refuses that. This activates the strip live and persists the
+       lamp BESIDE the false already on disk, so no snapshot ever holds an
+       effect the loader would bring up.
+    3. The flag is raised live with persist=False, which keeps the stored
+       `active: false` whatever the live flag became.
+
+    So a kill anywhere inside this call leaves the strip stored
+    non-activating, and the lamp itself persists harmlessly (a stored
+    effect with an explicit active:false is attached, not activated, at
+    load — it evicts nothing). Proven snapshot by snapshot in
+    tests/test_capture_active_flag_not_persisted.py."""
+    from spectra.services import fx_seam
+    await fx_seam.set_virtual_active(virtual_id, False, persist=True)
+    await fx_seam.set_virtual_effect(
+        virtual_id, MAP_EFFECT_TYPE,
+        {"color": BLACK, "brightness": 0.0, "background_brightness": 0.0})
+    await fx_seam.set_virtual_active(virtual_id, True, persist=False)
+
+
 def production_deps(session) -> RunDeps:
     from spectra.services import fx_seam
 
@@ -736,15 +775,16 @@ def production_deps(session) -> RunDeps:
         return cache
 
     async def activate(virtual_id: str) -> None:
-        # An idle virtual may have no effect at all, and the effects PUT
-        # refuses that — so give it the run's own black singleColor first
-        # (the same lamp the dark step writes), THEN raise the flag.
-        await fx_seam.set_virtual_effect(
-            virtual_id, MAP_EFFECT_TYPE,
-            {"color": BLACK, "brightness": 0.0, "background_brightness": 0.0})
-        await fx_seam.set_virtual_active(virtual_id, True)
+        # Up only for the capture (`activate_for_capture` reaches here for
+        # `needed - scope`) and put back by `deactivate_after_capture`. The
+        # ordering that keeps the stored config safe lives in ONE place.
+        await transient_activate(virtual_id)
 
     async def deactivate(virtual_id: str) -> None:
+        # persist=True (the default): putting the substitute back to sleep
+        # is the settled end-state and stores the live flag — which also
+        # clears any stored `active: true` a run from before #37 may have
+        # left on this device-virtual.
         await fx_seam.set_virtual_active(virtual_id, False)
 
     async def reactivate(virtual_id: str) -> None:

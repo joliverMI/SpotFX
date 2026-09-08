@@ -53,7 +53,6 @@ import os
 import socket
 import sys
 import tempfile
-import time
 from pathlib import Path
 
 import numpy as np
@@ -280,7 +279,7 @@ async def fake_set_virtual_effect(virtual_id, effect_type, config):
                               "effect_type": effect_type, "config": config}])
 
 
-async def fake_set_virtual_active(virtual_id, active):
+async def fake_set_virtual_active(virtual_id, active, *, persist=True):
     VIRTUALS.setdefault(virtual_id, _virtual(virtual_id, []))["active"] = bool(active)
     if not active:
         LIT[virtual_id] = 0.0
