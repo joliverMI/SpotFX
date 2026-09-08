@@ -379,23 +379,13 @@ def production_deps() -> RunnerDeps:
     from spectra.services import room_mapping
 
     async def activate(virtual_id: str) -> None:
-        # The same transient activation the capture makes, in the same
-        # order, under the same rule (fx/VENDOR.md #37; room_mapping's own
-        # `activate` is the binding statement): an explicit `active: false`
-        # is written to disk FIRST (a live no-op on an idle strip), THEN the
-        # black lamp is set — which activates the strip live and persists
-        # the lamp beside the false already on disk — THEN the flag is
-        # raised live with persist=False, keeping the stored false. A Dim
-        # Wave interrupted anywhere in here (a crash, a restart) leaves a
-        # copy-target device-virtual stored non-activating, so it cannot
-        # come up on the next load and evict the copy-mapped carrier
-        # (`tv-mapper`). `stop()`'s deactivate is the unchanged end-state.
-        await fx_seam.set_virtual_active(virtual_id, False, persist=True)
-        await fx_seam.set_virtual_effect(
-            virtual_id, room_mapping.MAP_EFFECT_TYPE,
-            {"color": room_mapping.BLACK, "brightness": 0.0,
-             "background_brightness": 0.0})
-        await fx_seam.set_virtual_active(virtual_id, True, persist=False)
+        # The same transient activation the capture makes, through the same
+        # helper — `room_mapping.transient_activate` is the binding
+        # statement for the write ordering that keeps a copy-target
+        # device-virtual stored non-activating if a Dim Wave is interrupted
+        # mid-run (fx/VENDOR.md #37). `stop()`'s deactivate is the unchanged
+        # end-state.
+        await room_mapping.transient_activate(virtual_id)
 
     async def deactivate(virtual_id: str) -> None:
         await fx_seam.set_virtual_active(virtual_id, False)

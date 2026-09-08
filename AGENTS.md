@@ -3569,16 +3569,16 @@ and the id shape. Five things to know:
   capture on such a strip persists its black lamp, so withholding the flag
   alone would still strand the carrier. And the ORDER inside one
   activation is part of it: the lamp POST persists with its own
-  `save_config` before the flag PUT runs, so both transient activations
-  write an explicit `active: false` FIRST (`set_virtual_active(vid,
-  False)`, a live no-op on an idle strip), THEN set the lamp, THEN raise
+  `save_config` before the flag PUT runs, so the transient activation
+  writes an explicit `active: false` FIRST (`set_virtual_active(vid,
+  False)`, a live no-op on an idle strip), THEN sets the lamp, THEN raises
   the flag with `persist=False` — no snapshot written during an activation
   can bring the strip up on load, so a hard kill anywhere inside it is
-  safe. The same rule at BOTH doors that
-  make a transient activation: the capture run (`room_mapping.
-  production_deps.activate`) and a room effect (`room_effects.
-  production_deps.activate` — a Dim Wave interrupted mid-run is the
-  identical residue). Each `deactivate` (substitute → sleep) and the
+  safe. That ordering lives in ONE place, `room_mapping.transient_activate`,
+  and BOTH doors that make a transient activation delegate to it: the
+  capture run (`room_mapping.production_deps.activate`) and a room effect
+  (`room_effects.production_deps.activate` — a Dim Wave interrupted mid-run
+  is the identical residue). Each `deactivate` (substitute → sleep) and the
   displaced-carrier `reactivate` keep the default `persist=True` — those ARE
   the settled end-state. The substitute's stored EFFECT (black lamp) still
   persists, harmlessly (a stored effect with an explicit `active: false` is

@@ -1184,11 +1184,12 @@ against that commit.
     effects POST (`_effects_post`) persists the lamp with its own
     `save_config` before the flag PUT ever runs, so on a strip with no
     stored key a kill between the two would still leave effect-beside-no-key
-    on disk. Both transient activations therefore write an explicit
-    `active: false` FIRST (`set_virtual_active(vid, False)`, default
-    persist — a live no-op on an idle strip), THEN set the lamp, THEN raise
-    the flag with `persist=False`: no snapshot the facade writes during an
-    activation holds an effect the loader would bring up. Proven by
+    on disk. Both transient activations therefore run through ONE helper,
+    `spectra/services/room_mapping.py::transient_activate`, which writes an
+    explicit `active: false` FIRST (`set_virtual_active(vid, False)`,
+    default persist — a live no-op on an idle strip), THEN sets the lamp,
+    THEN raises the flag with `persist=False`: no snapshot the facade
+    writes during an activation holds an effect the loader would bring up. Proven by
     capturing every `save_config` snapshot inside one `activate()` and
     holding the loader's own rule against each, with the pre-reorder
     sequence as the red control.
