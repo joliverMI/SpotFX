@@ -30,6 +30,15 @@ up through `room_effects.production_deps().activate` exactly as the
 capture does, and a wave interrupted mid-run is the identical residue.
 Both doors are driven here.
 
+AND THE ORDER INSIDE ONE ACTIVATION IS PART OF THE GUARANTEE. The lamp
+POST persists with its own `save_config` before the flag PUT ever runs, so
+a strip with no stored key would sit effect-beside-no-key on disk between
+the two — a hard kill there strands the carrier exactly as above. Both
+doors therefore write an explicit `active: false` FIRST, then the lamp,
+then the live flag. `_capture_saves` records EVERY config snapshot the
+facade writes during one `activate()`, and the loader's own rule is held
+against each; the pre-reorder sequence is the red control.
+
 THE BAR: this drives a REAL headless host with his copy-mapped shape and
 reads the SAVED config.json — the durable state a cold load / take reads —
 not just the live flags. It proves the persisted state is safe DURING the
@@ -149,6 +158,36 @@ def _renders(host, virtual_id: str) -> bool:
     thread = getattr(virtual, "_thread", None)
     return bool(virtual and virtual.active
                 and thread is not None and thread.is_alive())
+
+
+def _would_activate_on_load(entry: dict) -> bool:
+    """The loader's own rule (fx/virtuals.py create_from_config): a stored
+    effect is restored with `activate=bool(active-with-True-default)`, so an
+    absent key beside an effect brings the virtual up and only an explicit
+    false holds it back."""
+    return "effect" in entry and bool(entry.get("active", True))
+
+
+def _capture_saves(monkeypatch, config_dir: str) -> list[dict]:
+    """Record every on-disk config snapshot written while the patch is in
+    place — each `save_config` call, from every module that binds the name,
+    is followed by a fresh read of the file the loader reads."""
+    import importlib
+    from fx import config as fx_config
+    snapshots: list[dict] = []
+    real = fx_config.save_config
+
+    def recording(*args, **kwargs):
+        real(*args, **kwargs)
+        with open(os.path.join(config_dir, "config.json")) as fh:
+            snapshots.append(json.load(fh))
+
+    for name in ("fx.config", "fx.facade", "fx.virtuals", "fx.devices",
+                 "fx.utils", "fx.scenes", "fx.effects.audio"):
+        module = importlib.import_module(name)
+        if getattr(module, "save_config", None) is real:
+            monkeypatch.setattr(module, "save_config", recording)
+    return snapshots
 
 
 def _plan():
@@ -497,3 +536,84 @@ def test_the_facade_reports_the_live_and_the_stored_flag_separately(
             await fx_seam.set_virtual_active(strip, False)
 
     asyncio.run(go())
+
+
+def _room_effect_activate():
+    from spectra.services import room_effects
+    return room_effects.production_deps().activate
+
+
+def _capture_activate():
+    from spectra.services import room_mapping
+    return room_mapping.production_deps(session=None).activate
+
+
+@pytest.mark.parametrize("door", [_capture_activate, _room_effect_activate],
+                         ids=["capture", "room-effect"])
+def test_no_snapshot_written_during_an_activation_can_bring_the_strip_up(
+        tmp_path, monkeypatch, door):
+    """THE CRASH WINDOW INSIDE ONE ACTIVATE. For a strip that starts with NO
+    `active` key and NO stored effect (the shape the device layer creates),
+    every config snapshot the facade writes during a single `activate()` is
+    captured, and not one may hold the strip in a state the loader would
+    bring up — an effect present while the stored active is absent or true.
+    The strip must still end up LIVE-active, or the capture would
+    photograph a dark fixture."""
+    _own(monkeypatch, tmp_path)
+    config_dir = _config_dir(tmp_path)
+    _write_config(config_dir, active_key=False)
+    strip = next(iter(DEVS))
+
+    async def go():
+        async with _started(config_dir) as host:
+            activate = door()
+            snapshots = _capture_saves(monkeypatch, config_dir)
+            await activate(strip)
+            assert host.virtuals.get(strip).active
+            return snapshots
+
+    snapshots = asyncio.run(go())
+    assert len(snapshots) >= 2, "the activation must have written to disk"
+    for i, snap in enumerate(snapshots):
+        entry = next(v for v in snap["virtuals"] if v["id"] == strip)
+        assert not _would_activate_on_load(entry), (
+            f"snapshot {i} of {len(snapshots)} holds {strip} in a state the "
+            f"loader brings up: active={entry.get('active')!r}, "
+            f"effect={'present' if 'effect' in entry else 'absent'} — a hard "
+            f"kill there strands tv-mapper on the next take")
+    final = next(v for v in snapshots[-1]["virtuals"] if v["id"] == strip)
+    assert final.get("active") is False and "effect" in final
+
+
+def test_the_pre_reorder_sequence_writes_a_snapshot_the_loader_brings_up(
+        tmp_path, monkeypatch):
+    """The RED control for the snapshot harness: the lamp POST first, then
+    the persist=False flag raise — the sequence before the explicit false
+    was pinned ahead of the lamp — writes one snapshot holding the lamp
+    beside no key, which is exactly the residue the loader activates."""
+    _own(monkeypatch, tmp_path)
+    from spectra.services import fx_seam, room_mapping
+    config_dir = _config_dir(tmp_path)
+    _write_config(config_dir, active_key=False)
+    strip = next(iter(DEVS))
+
+    async def go():
+        async with _started(config_dir):
+            snapshots = _capture_saves(monkeypatch, config_dir)
+            await fx_seam.set_virtual_effect(
+                strip, room_mapping.MAP_EFFECT_TYPE,
+                {"color": room_mapping.BLACK, "brightness": 0.0,
+                 "background_brightness": 0.0})
+            await fx_seam.set_virtual_active(strip, True, persist=False)
+            return snapshots
+
+    snapshots = asyncio.run(go())
+    exposed = [
+        i for i, snap in enumerate(snapshots)
+        if _would_activate_on_load(
+            next(v for v in snap["virtuals"] if v["id"] == strip))]
+    assert exposed == [0], (
+        "the pre-reorder sequence must expose exactly its first snapshot "
+        "(the lamp beside no key), or the harness above cannot see the window")
+    final = next(v for v in snapshots[-1]["virtuals"] if v["id"] == strip)
+    assert final.get("active") is False

@@ -3567,7 +3567,14 @@ and the id shape. Five things to know:
   reads an ABSENT `active` key beside a stored effect as "activate", and
   every device-virtual the device layer creates omits the key; a first-ever
   capture on such a strip persists its black lamp, so withholding the flag
-  alone would still strand the carrier. The same rule at BOTH doors that
+  alone would still strand the carrier. And the ORDER inside one
+  activation is part of it: the lamp POST persists with its own
+  `save_config` before the flag PUT runs, so both transient activations
+  write an explicit `active: false` FIRST (`set_virtual_active(vid,
+  False)`, a live no-op on an idle strip), THEN set the lamp, THEN raise
+  the flag with `persist=False` — no snapshot written during an activation
+  can bring the strip up on load, so a hard kill anywhere inside it is
+  safe. The same rule at BOTH doors that
   make a transient activation: the capture run (`room_mapping.
   production_deps.activate`) and a room effect (`room_effects.
   production_deps.activate` — a Dim Wave interrupted mid-run is the
@@ -3587,9 +3594,11 @@ and the id shape. Five things to know:
   a copy-mapped carrier that would itself come up streams to is set
   `active: false`. Proofs: `tests/test_capture_active_flag_not_persisted.py`
   (crash-window persisted state for a strip with and without a pre-existing
-  key, at both doors; the take after both a clean and an interrupted run;
-  the pre-fix persisting activation and the effect-beside-no-key residue as
-  RED controls), `tests/test_repair_copy_carrier_active_flags.py` (both
+  key, at both doors; EVERY `save_config` snapshot inside one activation
+  held against the loader's rule, with the pre-reorder sequence as its red
+  control; the take after both a clean and an interrupted run; the pre-fix
+  persisting activation and the effect-beside-no-key residue as RED
+  controls), `tests/test_repair_copy_carrier_active_flags.py` (both
   residue shapes cold-loaded through the real host before and after the
   repair, dry-run writes nothing, idempotent, the narrow rule's refusals)
   and `scripts/check_cold_load_effect_restore.py` (his real config,

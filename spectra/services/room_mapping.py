@@ -736,23 +736,33 @@ def production_deps(session) -> RunDeps:
         return cache
 
     async def activate(virtual_id: str) -> None:
-        # An idle virtual may have no effect at all, and the effects PUT
-        # refuses that — so give it the run's own black singleColor first
-        # (the same lamp the dark step writes), THEN raise the flag.
+        # A TRANSIENT activation, up only for the capture and put back by
+        # `deactivate_after_capture`. A copy-target device-virtual
+        # (`tv-backlight`, the kitchen sconces) whose stored config could
+        # bring it up on the next load — an `active: true` persisted here,
+        # or a stored effect beside NO `active` key, which the loader reads
+        # as active — then a crash or restart before the run's own
+        # deactivate, is exactly what evicts the copy-mapped carrier
+        # (`tv-mapper`) on the next config load and strands the Living Room
+        # take (fx/VENDOR.md #37). THE ORDER IS THE GUARANTEE:
         #
-        # persist=False: this is a TRANSIENT activation, up only for the
-        # capture and put back by `deactivate_after_capture`. A copy-target
-        # device-virtual (`tv-backlight`, the kitchen sconces) whose stored
-        # config could bring it up on the next load — an `active: true`
-        # persisted here, or a stored effect beside NO `active` key, which
-        # the loader reads as active — then a crash or restart before the
-        # run's own deactivate, is exactly what evicts the copy-mapped
-        # carrier (`tv-mapper`) on the next config load and strands the
-        # Living Room take. So the flag is raised LIVE while the stored
-        # config is written `active: false` regardless (fx/VENDOR.md #37).
-        # The black lamp itself still persists (harmless: a stored effect
-        # with an explicit active:false is attached but not activated at
-        # load, so it evicts nothing).
+        # 1. An explicit `active: false` is written to disk FIRST. The strip
+        #    is idle (only `needed - scope` reaches here), so the live
+        #    deactivate is a no-op; what lands is the stored flag, on a
+        #    strip that may never have carried one.
+        # 2. The run's own black singleColor (the same lamp the dark step
+        #    writes) is set — an idle virtual may have no effect at all, and
+        #    the effects PUT refuses that. This activates the strip live and
+        #    persists the lamp BESIDE the false already on disk, so no
+        #    snapshot ever holds an effect the loader would bring up.
+        # 3. The flag is raised live with persist=False, which keeps the
+        #    stored `active: false` whatever the live flag became.
+        #
+        # So a kill anywhere inside this call leaves the strip stored
+        # non-activating, and the lamp itself persists harmlessly (a stored
+        # effect with an explicit active:false is attached, not activated,
+        # at load — it evicts nothing).
+        await fx_seam.set_virtual_active(virtual_id, False, persist=True)
         await fx_seam.set_virtual_effect(
             virtual_id, MAP_EFFECT_TYPE,
             {"color": BLACK, "brightness": 0.0, "background_brightness": 0.0})
