@@ -53,7 +53,6 @@ import os
 import socket
 import sys
 import tempfile
-import time
 from pathlib import Path
 
 import numpy as np

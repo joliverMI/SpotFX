@@ -6534,12 +6534,17 @@ branch, so it never activated and never evicted anything. His three
 `BLACK` verbatim — with `pixelRange`/`pixelPattern` in their stored `effects`
 history, lamps that exist nowhere else. `activate_for_capture` writes an
 effect and raises the active flag through `fx_seam`, i.e. the facade's
-`_effects_put` + `_virtual_put_active`, and BOTH call `save_config()`: a
+`_effects_post` + `_virtual_put_active`, and BOTH call `save_config()`: a
 capture run PERSISTS a stored effect onto a device virtual that had none.
 Those values are his own runs' genuine residue, not corruption — the load
 path was what was wrong to act on them — so nothing in his config was
-rewritten. **Anything that borrows a virtual and puts it back should know it
-is writing his stored config, not just the live host.**
+rewritten. The ACTIVE-flag half of that residue (an interrupted run leaving
+a device-virtual stored activatable), and the one-time repair for a config
+already carrying it, is deviation #37 — see the Rooms section's own bullet
+above (`room_mapping.transient_activate`,
+`scripts/repair_copy_carrier_active_flags.py`). **Anything that borrows a
+virtual and puts it back should know it is writing his stored config, not
+just the live host.**
 
 Proofs: `tests/test_cold_load_effect_restore.py` (cold start in a FRESH
 INTERPRETER per the light-mode cold-start precedent — a warm pytest process

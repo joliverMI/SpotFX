@@ -819,14 +819,20 @@ variables named `ledfx` (the core object handle) are untouched.
     `pixelRange`/`pixelPattern`, the map and commissioning lamps that exist
     nowhere else. `room_mapping`'s `activate_for_capture` writes an effect
     and raises the active flag through `fx_seam`, i.e. the facade's
-    `_effects_put` + `_virtual_put_active`, and BOTH `save_config()` — so a
+    `_effects_post` + `_virtual_put_active`, and BOTH `save_config()` — so a
     capture run persists a stored effect onto a device virtual that had
     none, arming the eviction on every cold start after it. Those values
     are genuine residue of his own runs, not corruption; the load path was
     what was wrong to act on them this way, so NOTHING in his config was
     rewritten. (Deleting the `effect` key from those three entries would
     also stop the eviction, and is strictly weaker: the next mapping run
-    re-arms it.)
+    re-armed it.) The persisted ACTIVE flag was the half this fix could
+    not reach — a run interrupted before its own deactivate left a
+    device-virtual stored activatable, and this restore honours whatever is
+    stored — and is closed by deviation #37 (the transient activation
+    stores an explicit `active: false` first; `scripts/
+    repair_copy_carrier_active_flags.py` is the one-time catch-up for a
+    config already carrying that residue).
 
     THE FIX IS THE `activate=` KEYWORD on `set_effect` — the restore honours
     the stored `active` flag instead of round-tripping through activation.
@@ -1128,8 +1134,9 @@ against that commit.
     IT IS A LOAD-TIME DECISION, NOT A CONFIG EDIT — the same discipline as
     deviation #32's blackout. `virtual_cfg` is untouched, nothing persists,
     and a held-back virtual is resumed at any time by the ordinary
-    `set_virtual_active(vid, True)` the capture path already uses for its
-    substitutes.
+    `set_virtual_active(vid, True)` the capture path already uses to put a
+    displaced carrier back (`reactivate`; its SUBSTITUTES go up with
+    `persist=False`, deviation #37).
 
     Two bookkeeping details ride with it, both so that a scoped take is a
     READ rather than an inference: `Virtuals.held_back` names the virtuals
