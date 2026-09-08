@@ -4871,10 +4871,11 @@ revert the last lit frame actually landed. Any future instrument
 labelling frames by phase around an in-flight write needs the same
 treatment, or it will report a race as a defect.
 
-### THE TWO BOUNDARY PINGS — River is told at each edge of SPECTRA holding the room
+### THE FOUR BOUNDARY PINGS — River is told at each edge of SPECTRA holding
+the room, and at each edge of THE WINDOW it runs inside
 
 `spectra/services/pretake_ping.py`'s module docstring is the binding
-statement for BOTH (the module is named for the first one that existed),
+statement for ALL FOUR (the module is named for the first one that existed),
 and their one correctness property is PLACEMENT: each announcement must sit
 at the exact instant its own statement becomes true — the PRE-TAKE before
 the first act that could change a fixture, or the snapshot it exists to
@@ -4890,9 +4891,9 @@ Six things:
   {SPECTRA_PRETAKE_URL}` (the FULL endpoint URL — this side never appends a
   path), bearer `SPECTRA_PRETAKE_TOKEN` read by `os.getenv` at CALL TIME
   exactly as `witness.witness_token()` is, body `{event: "pre_take" |
-  "released", room_id, at_ms}` — ONE endpoint, ONE bearer, ONE wire shape,
-  the `event` word the only field that differs, which is why this is one
-  module and not two — and **SUCCESS IS HTTP 200, her word, never "any 2xx"** —
+  "released" | "window_open" | "window_close", room_id, at_ms}` — ONE
+  endpoint, ONE bearer, ONE wire shape, the `event` word the only field
+  that differs, which is why this is one module and not four — and **SUCCESS IS HTTP 200, her word, never "any 2xx"** —
   answering `{captured, elapsed_s, result}`. Her `captured`/`elapsed_s` are
   SURFACED on the take's own record rather than reduced to a boolean: a 200
   saying `captured: false` is still `sent` (inventing a verdict she has not
@@ -4975,6 +4976,80 @@ restored code kept failing: CPython validates a cache on source mtime AND
 SIZE, and moving a block changes neither. Any hand-run RED control that
 edits by relocation — not just here — must clear `__pycache__` (or `touch`
 the file) on the way back, or the restore silently does not happen.
+
+### THE WINDOW — River powers the mains, SPECTRA waits for the fixtures
+
+2026-09-08, after a night stalled because the mains-on step depended on a
+human relaying the request. River added two events to the SAME endpoint,
+bearer and body shape above; **`spectra/services/night_window.py` is the
+binding statement** for when a night sends them and
+**`spectra/services/sconce_wait.py`** for what "the fixtures came up" means.
+Six things:
+
+- **THE GATE IS THE MEASUREMENT, NEVER HER 200.** `window_open` asks her to
+  power the sconce mains and hold his away automations; her answering 200
+  says SHE ACTED and nothing about whether a sconce is powered. So the open
+  is two acts and the night is gated on the SECOND — `sconce_wait` reads the
+  run's own WLED fixtures back until they answer. `docs/SPECTRA_SPEC.md`
+  §64's rule one service further out. A failed POST over sconces that are
+  already lit is a night that RUNS (the wait happens on a failed POST too,
+  `before_take`'s own "it may still have arrived"); a cheerful 200 over a
+  sconce that never comes up is a night that REFUSES, because a room taken
+  with a dark sconce measures the dark for four hours and calls it a map.
+- **A FIXTURE IS FOUND BY IDENTITY, NEVER BY ITS OLD ADDRESS. A MAINS CYCLE
+  IS EXACTLY WHEN A WLED TAKES A NEW DHCP LEASE**, so `sconce_wait` locates
+  every fixture through `fx/device_identity.locate()` (pin → mDNS → peers →
+  a bounded sweep, every rung confirmed by reading the MAC back) — polling
+  the stored `ip_address` alone would abort a night whose sconces are lit
+  and fine, which is that module's own founding defect arriving through this
+  door. THE SWEEP RUNS ON THE LAST ROUND ONLY (254 probes), so the stated
+  ceiling is the budget plus one sweep —
+  `fixture_brightness.RESTORE_BUDGET_S`'s own shape. A fixture with no
+  stored identity is asked at its pin and its MAC is LEARNED there; a
+  relocation is written back to the fx-live config **only while the live
+  stack is down**, because `fx.facade`'s own writes own that file whenever a
+  host is up.
+- **THREE ANSWERS AND ONLY ONE STOPS A NIGHT**: `True` (all answered, or
+  there were none to watch — a run with no WLED has no mains dependency),
+  `False` (the only refusal), `None` (NOTHING WAS WAITED FOR).
+  `SPECTRA_WINDOW_WAIT_MS` (`config.window_wait_ms()`, default 45 s,
+  clamped) **set to 0 is the documented OFF SWITCH**: the window still opens
+  and closes, nothing is measured and nothing is gated, and a night behaves
+  exactly as it did before this existed.
+- **UNCONFIGURED IS INERT AND THAT IS CORRECTNESS, not tidiness.** With
+  `SPECTRA_PRETAKE_URL` unset there is no POST, no probe, no marker and no
+  gate: nobody asked for the mains to be powered on such a host, so the
+  fixtures may legitimately be dark and refusing the night would turn "no
+  River configured" into "your sconces are broken".
+- **WHOEVER OPENED IT CLOSES IT, and the close comes AFTER the release** —
+  she restores his bedtime baseline into a room SPECTRA has already let go
+  of. `night_run._finish` (every ordinary exit, after `give_room_back`),
+  `abort` (straight after the room, on the same within-seconds promise),
+  the two decline paths that had already opened one, and
+  `recover_orphaned_window()` at the cold start. That last one needs the
+  DURABLE MARKER (`config.NIGHT_WINDOW_FILE`, `night_take.py`'s own
+  restart-survival shape): a crash otherwise leaves River holding his away
+  automations with nothing visibly wrong for anyone to notice. It is written
+  ONLY when a `window_open` was actually SENT. A close that does not land
+  still drops the marker and says so loudly — `give_back`'s own rule.
+- **THE SCONCE MAINS RULE IS UNTOUCHED.** Neither module names or drives a
+  Home Assistant entity; `sconce_wait` makes only `GET /json/info` and
+  `GET /json/nodes`. Asserted against both modules' own code (comments and
+  docstrings stripped, since their prose necessarily discusses what they do
+  not do). The refusal sentence
+  (`mapping_refusals.night_sconces_did_not_come_up`) leads with
+  `witness.SCONCE_MAINS_FIRST_CHECK` when a sconce is among the missing, and
+  deliberately does not when it is only the TV backlight.
+
+Spec: `tests/test_window_ping.py` — the wire, the wait (incl. the relocated
+case and a STRANGER answering at the old pin, which must not read as ours),
+the run-flow order proven at the wire (`window_open → pre_take → released →
+window_close`), the abort-on-dark-sconces path, and the inertness proof
+comparing a whole unconfigured night's step sequence against a configured
+one. Three source-level RED controls were run by hand: the gate removed (the
+night takes the room and runs with a dark sconce), the close moved ahead of
+the release, and the identity lookup replaced with a pinned-address poll (a
+relocated sconce reads as dead AND a stranger reads as ours).
 
 ### The contamination witness, and THE SCONCE MAINS RULE
 

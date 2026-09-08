@@ -275,6 +275,14 @@ def _isolated_night_run(tmp_path, monkeypatch):
     # RIGHT NOW on every `engine.status()` poll, and any test driving a take
     # or a give-back would otherwise write his real storage/spectra/.
     monkeypatch.setattr(scfg, "NIGHT_TAKE_FILE", tmp_path / "night_take.json")
+    # THE WINDOW MARKER (spectra/services/night_window.py) is the same class
+    # of store and is reached from the same production surfaces: every
+    # night's start writes it and every exit path stats it, and the cold
+    # start's own recovery reads it — so a test driving a night would
+    # otherwise write his real storage/spectra/ and, worse, leave a marker
+    # that makes the NEXT test's start believe a window is already open.
+    monkeypatch.setattr(scfg, "NIGHT_WINDOW_FILE",
+                        tmp_path / "night_window.json")
     night_run.current = None
     night_run._task = None
     night_run._stop_mark = 0.0

@@ -1371,6 +1371,43 @@ def night_stopped_during_the_take(source: str = "") -> str:
             f"found in.")
 
 
+def night_sconces_did_not_come_up(fixtures: dict,
+                                  ping_detail: str = "") -> str:
+    """THE FIXTURES NEVER ANSWERED after River was asked to open the window,
+    so the night declines rather than measuring a dark room for four hours.
+
+    THE MAINS CHECK GOES FIRST, by the Admiral's own order — at 0% both
+    sconces are simply dead and it looks exactly like a dead controller or a
+    lost network, and a line buried under three paragraphs about DHCP is the
+    hour that rule exists to save. What follows it is what SPECTRA actually
+    did and actually measured: River was ASKED (with her own answer quoted,
+    because "she never answered" and "she answered 200 and nothing came up"
+    send somebody to two different places), and each fixture was then looked
+    for BY IDENTITY, not merely at the address it used to live at, so a new
+    DHCP lease has already been ruled out before this sentence is written."""
+    from spectra.services import witness
+    missing = fixtures.get("missing") or []
+    names = and_list([str(m.get("name") or m.get("id") or "?")
+                      for m in missing]) or "the run's fixtures"
+    watched = len(fixtures.get("watched") or [])
+    budget = float(fixtures.get("budget_s") or 0.0)
+    said = (f"The night run declined: {names} never answered after the "
+            f"window was opened ({len(missing)} of {watched} fixture(s), "
+            f"{budget:.0f}s). Nothing was taken and nothing about the room "
+            f"was touched — a room taken with a dark sconce measures the "
+            f"dark and calls it a map, so this refuses instead. Each one "
+            f"was looked for by its own hardware identity as well as its "
+            f"stored address, so a new DHCP lease is already ruled out.")
+    if ping_detail:
+        said += f" River's own answer to the window: {ping_detail}"
+    # THE HONEST RULE, not a blanket prefix: at 0% both sconces are dead, so
+    # a mains failure always puts a sconce in this list. Leading with the
+    # mains check when the only missing fixture is the TV backlight would
+    # point the reader at a switch that has nothing to do with it.
+    return witness.sconce_diagnostic(
+        said, sconce_involved=witness.mentions_sconce(names))
+
+
 def night_take_failed(exc: BaseException) -> str:
     """The quiet take itself did not land. `handover.run_handover` lands
     single-owner on every failure path, so the room is back at `released`

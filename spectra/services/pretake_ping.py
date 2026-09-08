@@ -1,11 +1,23 @@
-"""THE TWO BOUNDARY PINGS — one POST to River at each edge of SPECTRA
-holding his room. PRE-TAKE, at the start of every take, so his house can
-photograph itself BEFORE SPECTRA changes a fixture. RELEASED, the moment the
-panic release has finished letting the fixtures go, so her restore fires off
-a STATEMENT that it happened rather than off a sensor she has to infer it
-from. ONE endpoint, ONE bearer, ONE wire shape, one transport, one reading
-of her answer — the `event` word is the only field that differs, which is
-exactly why this is one module and not two.
+"""THE BOUNDARY PINGS — one POST to River at each edge of two different
+things, on ONE endpoint with ONE bearer, ONE wire shape, one transport and
+one reading of her answer. The `event` word is the only field that differs,
+which is exactly why this is one module and not four.
+
+    THE ROOM      pre_take       the start of every take, so his house can
+                                 photograph itself BEFORE SPECTRA changes a
+                                 fixture
+                  released       the moment the panic release has finished
+                                 letting the fixtures go, so her restore
+                                 fires off a STATEMENT rather than off a
+                                 sensor she has to infer it from
+
+    THE WINDOW    window_open    power the sconce mains, hold his away
+                                 automations — sent at the START of a night
+                                 (`spectra/services/night_window.py`), and
+                                 the only one of the four that then WAITS
+                                 for something it can measure
+                  window_close   restore his bedtime baseline, drop that
+                                 hold — sent AFTER the release
 
 WHAT THE PRE-TAKE IS FOR. River holds a Home-Assistant snapshot watch:
 before a night prepares his house she `scene.create`s the pre-preparation
@@ -36,6 +48,25 @@ AND IT DOES NOT SETTLE. The pre-take waits because River has to read a room
 that is about to change; a release has already happened, there is nothing
 left to protect from a race, and River restores on her own schedule. A wait
 here would buy nothing and hold the panic handle open for it.
+
+WHAT THE WINDOW PINGS ARE FOR, and why only one of them waits. The kitchen
+sconces run off a MAINS SWITCH that is Home Assistant's and River's alone to
+drive; until 2026-09-08 powering it before a night depended on a human
+relaying the request, and a night stalled for exactly that reason. River
+removed the dependency by adding these two events to this same endpoint.
+
+    {"event": "window_open",  "room_id": "<id>", "at_ms": <epoch ms>}
+    {"event": "window_close", "room_id": "<id>", "at_ms": <epoch ms>}
+
+`open_window()` POSTs and then READS THE FIXTURES BACK
+(`spectra/services/sconce_wait.py`), because HER 200 SAYS SHE ACTED AND NOT
+THAT A SCONCE IS POWERED — `docs/SPECTRA_SPEC.md` §64's own rule, one
+service further out. That measurement, and never her answer, is what a night
+is gated on: a failed POST over sconces that are already lit is a night that
+runs, and a cheerful 200 over a sconce that never comes up is a night that
+REFUSES rather than measuring the dark for four hours. `close_window()`
+waits for nothing, for `after_release`'s reason: by then there is nothing
+left to protect.
 
 WHAT ANNOUNCES A RELEASE IS `release.release_room()`, AND ONLY THAT — which
 is every way SPECTRA actually lets go of the room: his panic press, the
@@ -161,6 +192,16 @@ logger = logging.getLogger(__name__)
 EVENT_PRE_TAKE = "pre_take"
 EVENT_RELEASED = "released"
 
+#: THE WINDOW, the other pair — see `open_window`/`close_window` below and
+#: `spectra/services/night_window.py`, which is the binding statement for
+#: when they are sent. A window_open asks River to POWER THE SCONCE MAINS
+#: and hold his away automations; a window_close, after the release, asks
+#: her to restore his bedtime baseline and drop that hold. Same endpoint,
+#: same bearer, same body shape, same reading of her answer — one more word
+#: each on the wire and not one more transport.
+EVENT_WINDOW_OPEN = "window_open"
+EVENT_WINDOW_CLOSE = "window_close"
+
 #: What both take paths pass as `room_id` — see the docstring's own section.
 #: A take is of the whole room; this says so instead of inventing an id.
 ROOM_ALL = "all"
@@ -238,6 +279,12 @@ _last: Optional[PingResult] = None
 #: what it always was.
 _last_release: Optional[PingResult] = None
 
+#: The most recent WINDOW announcement of each kind, kept in their own slots
+#: for `_last_release`'s own reason: one shared slot would let a close
+#: overwrite the open a caller is still reporting, and the two say different
+#: things about his house.
+_last_window: dict = {}
+
 
 def last() -> Optional[PingResult]:
     """The last PRE-TAKE announcement. Unchanged: a release never lands
@@ -252,13 +299,22 @@ def last_release() -> Optional[PingResult]:
     return _last_release
 
 
+def last_window(event: str = EVENT_WINDOW_OPEN) -> Optional["WindowResult"]:
+    """The last window announcement of one kind. `last()`'s contract, one
+    pair over: it describes the LAST one, so a caller must only report it
+    for a window it just opened or closed."""
+    return _last_window.get(event)
+
+
 def reset() -> None:
-    """Drop the remembered results, BOTH of them. For tests and for a cold
+    """Drop the remembered results, ALL of them. For tests and for a cold
     start; nothing in production needs it, since every `before_take()` /
-    `after_release()` replaces its own."""
+    `after_release()` / `open_window()` / `close_window()` replaces its
+    own."""
     global _last, _last_release
     _last = None
     _last_release = None
+    _last_window.clear()
 
 
 #: RIVER'S OWN SUCCESS CODE, her word: 200 exactly, never "any 2xx". A
@@ -329,6 +385,36 @@ WORDS = {
                      "(SPECTRA_PRETAKE_URL), so River's restore watch was "
                      "not told this release completed",
         log="release ping"),
+    EVENT_WINDOW_OPEN: _Words(
+        endpoint="River's ping endpoint",
+        not_told="she was not asked to power the sconce mains or to hold "
+                 "his away automations",
+        acted="River opened the window",
+        did_nothing="River answered 200 and reported that she did NOTHING "
+                    "— the sconce mains may not have been powered and his "
+                    "away automations may not be held",
+        unconfirmed="River's ping endpoint answered 200 without saying "
+                    "whether it acted — the ping landed, the mains and the "
+                    "automation hold are unconfirmed",
+        unconfigured="the River ping is not configured on this host "
+                     "(SPECTRA_PRETAKE_URL), so nothing was asked to power "
+                     "the sconce mains and no fixture was waited for",
+        log="window-open ping"),
+    EVENT_WINDOW_CLOSE: _Words(
+        endpoint="River's ping endpoint",
+        not_told="his bedtime baseline may not have been restored and his "
+                 "away automations may still be held",
+        acted="River closed the window",
+        did_nothing="River answered 200 and reported that she did NOTHING "
+                    "— his bedtime baseline may not be restored and the "
+                    "automation hold may still be in place",
+        unconfirmed="River's ping endpoint answered 200 without saying "
+                    "whether it acted — the ping landed, the baseline "
+                    "restore and the hold release are unconfirmed",
+        unconfigured="the River ping is not configured on this host "
+                     "(SPECTRA_PRETAKE_URL), so nothing was asked to "
+                     "restore his bedtime baseline",
+        log="window-close ping"),
 }
 
 
@@ -488,6 +574,153 @@ async def after_release(*, room_id: str = ROOM_ALL,
                      "restore watch may NOT have been told: %s",
                      answer.detail)
     _last_release = result
+    return result
+
+
+# ── THE WINDOW — the mains, the hold, and what actually came up ────────────
+
+@dataclass
+class WindowResult:
+    """ONE EDGE OF THE WINDOW: what River was told, and — on the open —
+    what the room's own fixtures then said back.
+
+    THE TWO HALVES ARE KEPT APART ON PURPOSE. `ping` is whether River HEARD
+    us; `resolved` is whether the fixtures actually CAME UP. A 200 is not a
+    lit sconce (`docs/SPECTRA_SPEC.md` §64's rule, one service further out),
+    so the gate a night is held to is the MEASUREMENT and never the answer.
+    Collapsing them would let a cheerful 200 from a River whose mains switch
+    did nothing send a night into a dark room."""
+
+    event: str = EVENT_WINDOW_OPEN
+    ping: PingResult = field(default_factory=PingResult)
+    #: True  — every fixture this run needs answered.
+    #: False — at least one never did, inside the whole budget. THE ONLY
+    #:         value that stops a night.
+    #: None  — NOTHING WAS WAITED FOR, which is not the same as "nothing
+    #:         came up": an unconfigured host (no window was opened at all),
+    #:         a zero budget, or a close (which waits for nothing by
+    #:         design). `witness_unavailable`'s own three-state discipline.
+    resolved: Optional[bool] = None
+    #: `sconce_wait.WaitResult.as_dict()` — which fixtures were watched,
+    #: which answered, which moved, and how long it took.
+    fixtures: dict = field(default_factory=dict)
+    detail: str = ""
+
+    @property
+    def ok(self) -> bool:
+        """WHETHER A NIGHT MAY PROCEED. `None` proceeds: "we did not check"
+        must never read as "we checked and it failed", or a host with no
+        River at all would stop running nights."""
+        return self.resolved is not False
+
+    @property
+    def sent(self) -> bool:
+        return self.ping.sent
+
+    def as_dict(self) -> dict:
+        return {"event": self.event, "ping": self.ping.as_dict(),
+                "resolved": self.resolved, "ok": self.ok,
+                "fixtures": dict(self.fixtures), "detail": self.detail}
+
+
+async def _window_ping(event: str, room_id: str,
+                       client: Optional[Any]) -> PingResult:
+    """One window edge's POST, through the SAME transport and the SAME
+    reading of her answer both other events use. Never raises."""
+    at_ms = int(time.time() * 1000)
+    url = pretake_url()
+    if not url:
+        return PingResult(status=STATUS_UNCONFIGURED, at_ms=at_ms,
+                          room_id=room_id, detail=words(event).unconfigured)
+    answer = await _post(url, room_id, at_ms, client=client, event=event)
+    result = PingResult(status=answer.status, detail=answer.detail,
+                        at_ms=at_ms, room_id=room_id, settled_ms=0,
+                        http_status=answer.http_status,
+                        captured=answer.captured, elapsed_s=answer.elapsed_s,
+                        river_result=answer.river_result)
+    result.announce.append({"event": event, "at_ms": at_ms,
+                            "room_id": room_id, "status": answer.status,
+                            "captured": answer.captured})
+    w = words(event)
+    if answer.status == STATUS_SENT and answer.captured is not False:
+        logger.warning("%s: River told (room=%s, acted=%s, elapsed=%ss)",
+                       w.log, room_id, answer.captured, answer.elapsed_s)
+    else:
+        # LOUD, NEVER FATAL — the same shape both other events keep. On the
+        # OPEN this is only half the story: the fixtures are asked directly
+        # a moment later, and THAT is what a night is gated on.
+        logger.error("%s — %s", w.log, answer.detail)
+    return result
+
+
+async def open_window(*, room_id: str = ROOM_ALL,
+                      device_ids: Optional[Any] = None,
+                      client: Optional[Any] = None,
+                      wait: Optional[Any] = None) -> WindowResult:
+    """ASK RIVER TO OPEN THE WINDOW, THEN WAIT FOR THE FIXTURES. Never
+    raises.
+
+    She powers the sconce mains and holds his away automations off this one
+    event; SPECTRA then reads the room's own WLED fixtures back until they
+    answer, because HER 200 SAYS SHE ACTED AND NOT THAT A SCONCE IS
+    POWERED. `spectra/services/sconce_wait.py` is the binding statement for
+    what "answered" means and for why a fixture is found by its IDENTITY
+    rather than at the address it used to live at — a mains cycle is
+    exactly when a WLED takes a new DHCP lease, and a device pinned by
+    location is indistinguishable from a dead one the moment it moves.
+
+    THE WAIT IS SKIPPED ONLY WHEN NOTHING WAS SENT. Unconfigured
+    (`SPECTRA_PRETAKE_URL` unset, the state every host that has never heard
+    of River is in) there is no window, nobody was asked to power anything,
+    and waiting for fixtures that were never going to be switched on would
+    turn "no River here" into "your sconces are broken". Every other
+    outcome waits — INCLUDING a failed POST, for `before_take`'s own reason:
+    a refused or timed-out request may still have arrived, and the fixtures
+    themselves are the only honest answer either way.
+
+    `wait` is the injection seam (specs drive it with a fake clock and fake
+    fixtures); production resolves the real one lazily, INSIDE the
+    configured branch, so an unconfigured night imports no device code and
+    opens no socket at all."""
+    ping = await _window_ping(EVENT_WINDOW_OPEN, room_id, client)
+    if ping.status == STATUS_UNCONFIGURED:
+        return WindowResult(event=EVENT_WINDOW_OPEN, ping=ping,
+                            resolved=None, detail=ping.detail)
+    if wait is None:
+        from spectra.services import sconce_wait
+
+        async def wait():
+            return await sconce_wait.wait_for_fixtures(device_ids=device_ids)
+    outcome = await wait()
+    result = WindowResult(
+        event=EVENT_WINDOW_OPEN, ping=ping,
+        resolved=getattr(outcome, "resolved", None),
+        fixtures=(outcome.as_dict() if hasattr(outcome, "as_dict")
+                  else dict(outcome or {})),
+        detail=getattr(outcome, "detail", "") or ping.detail)
+    _last_window[EVENT_WINDOW_OPEN] = result
+    return result
+
+
+async def close_window(*, room_id: str = ROOM_ALL,
+                       client: Optional[Any] = None) -> WindowResult:
+    """TELL RIVER THE WINDOW IS SHUT — call it AFTER the release, so she
+    restores his bedtime baseline into a room SPECTRA has already let go of
+    and drops the automation hold. Never raises.
+
+    IT WAITS FOR NOTHING, and that is the design rather than an omission:
+    the open waits because a night about to measure his room must not take
+    it dark, and here there is nothing left to protect. `resolved` is
+    therefore always `None` — "nothing was checked" — which is exactly what
+    `ok` treats as fine.
+
+    LIKE THE RELEASE PING, IT CANNOT UNDO ANYTHING. The room has already
+    gone back by the time this goes out, so a ping that does not land is a
+    fact about River's watch and never about his lights."""
+    ping = await _window_ping(EVENT_WINDOW_CLOSE, room_id, client)
+    result = WindowResult(event=EVENT_WINDOW_CLOSE, ping=ping, resolved=None,
+                          detail=ping.detail)
+    _last_window[EVENT_WINDOW_CLOSE] = result
     return result
 
 
