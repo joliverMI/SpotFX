@@ -1144,3 +1144,40 @@ against that commit.
     the scope is chosen. Evidence: `tests/test_scoped_take_release.py`
     (the whole night measured at the emitted light and at the bridge, with
     the unscoped night as its red control), `tests/test_take_scope.py`.
+
+37. `facade.py`: A TRANSIENT ACTIVATION NEED NOT REACH DISK — the `persist`
+    flag on `PUT /api/virtuals/{id}` (`_virtual_put_active`, SpotFX-authored).
+    The body may carry `"persist": false` alongside `"active"`; it defaults
+    True, so every SpotFX/LedFX caller is byte-identical to before. When
+    False the virtual's `active` flag is raised/lowered LIVE but
+    `virtual.virtual_cfg["active"]` and `save_config` are BOTH skipped — the
+    stored config never learns of the flag change.
+
+    WHY IT EXISTS, and why persisting was the whole bug. A capture run brings
+    a copy-target device-virtual up only for the capture
+    (`spectra/services/room_mapping.py` production_deps `activate`) and puts
+    it back afterwards. Persisting that transient `active: true` meant a run
+    interrupted in its own window — a process kill, a restart, a hard abort
+    between `activate_for_capture` and `deactivate_after_capture` — left the
+    device-virtual stored active. On the NEXT config load it activates and
+    evicts the copy-mapped carrier standing in front of it (deviation #29's
+    eviction), so the room comes up with the carrier dark and a Living Room
+    take rolls back to `released` (2026-09-08, his failing offset test). With
+    `persist=False` the crash-window state on disk is safe: the substitute is
+    stored `active: false` throughout, and the carrier survives every load.
+
+    The substitute's stored EFFECT is still persisted (the black lamp — a
+    prior, harmless deviation: a device-virtual with a stored effect but
+    `active: false` is attached, not activated, at load, so it evicts
+    nothing). Only the transient `active: true` is withheld. `persist=False`
+    is meaningful only on the facade path; the external-LedFX HTTP PUT takes
+    just `active` (`spectra/services/fx_seam.set_virtual_active`), which is
+    the only transport a sub-device capture ever uses. Its one caller is the
+    capture-run activation; `deactivate` (substitute back to sleep) and the
+    displaced-carrier `reactivate` both keep the default persist=True, since
+    those ARE the settled end-state. Evidence:
+    `tests/test_capture_active_flag_not_persisted.py` (the crash-window
+    persisted state and the take after both a clean and an interrupted run,
+    with the pre-fix persisting activation as its red control),
+    `scripts/repair_copy_carrier_active_flags.py` (the one-time catch-up for
+    a config that already carries the residue).

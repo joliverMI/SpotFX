@@ -739,12 +739,27 @@ def production_deps(session) -> RunDeps:
         # An idle virtual may have no effect at all, and the effects PUT
         # refuses that — so give it the run's own black singleColor first
         # (the same lamp the dark step writes), THEN raise the flag.
+        #
+        # persist=False: this is a TRANSIENT activation, up only for the
+        # capture and put back by `deactivate_after_capture`. A copy-target
+        # device-virtual (`tv-backlight`, the kitchen sconces) whose
+        # `active: true` reached disk — persisted here, then a crash or
+        # restart before the run's own deactivate — is exactly what evicts
+        # the copy-mapped carrier (`tv-mapper`) on the next config load and
+        # strands the Living Room take. So the flag is raised LIVE and never
+        # written to the stored config (fx/VENDOR.md #37). The black lamp
+        # itself still persists (harmless: a stored effect with active:false
+        # is attached but not activated at load, so it evicts nothing).
         await fx_seam.set_virtual_effect(
             virtual_id, MAP_EFFECT_TYPE,
             {"color": BLACK, "brightness": 0.0, "background_brightness": 0.0})
-        await fx_seam.set_virtual_active(virtual_id, True)
+        await fx_seam.set_virtual_active(virtual_id, True, persist=False)
 
     async def deactivate(virtual_id: str) -> None:
+        # persist=True (the default): putting the substitute back to sleep
+        # is the settled end-state and SHOULD be written — it also clears
+        # any stored `active: true` a prior interrupted run may have left on
+        # this device-virtual.
         await fx_seam.set_virtual_active(virtual_id, False)
 
     async def reactivate(virtual_id: str) -> None:

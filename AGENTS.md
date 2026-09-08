@@ -3544,6 +3544,44 @@ and the id shape. Five things to know:
   suite that spawns real render threads (`headless.attach_effect`
   deliberately skips them), and a virtual left rendering is a non-daemon
   thread that hangs the interpreter at exit.
+- **A TRANSIENT CAPTURE ACTIVATION MUST NOT REACH DISK, or an INTERRUPTED
+  run strands the carrier on the next load** (2026-09-08, PR
+  fm/spectra-commission-leaves-carrier-inactive, `fx/VENDOR.md` #37, from
+  his failing Living Room take/offset test). The LIVE restore above (#257)
+  is correct and proven; the gap was on DISK. `activate_for_capture` brought
+  the substitutes up via `set_virtual_active(vid, True)`, whose facade
+  handler (`_virtual_put_active`) writes `virtual_cfg["active"]=True` +
+  `save_config` — so the transient `active: true` was PERSISTED. A clean run
+  undoes it (`deactivate_after_capture` persists `active: false`, verified),
+  but a run interrupted in that window — a process kill, a restart, a hard
+  abort between activate and deactivate — leaves the copy-target
+  device-virtuals (`tv-backlight` + kitchen sconces) stored `active: true`.
+  On the next config load they evict the copy-mapped carrier (`tv-mapper`,
+  the deviation-#29 eviction), the Living Room has zero active carriers, and
+  the take rolls back to `released`. The cold-load fix
+  (fm/tvmapper-cold-load-fix) RESPECTS the stored flag, so it cannot override
+  a residue that stores the WRONG one. Fix: the transient activation is
+  LIVE-only — `fx_seam.set_virtual_active(vid, True, persist=False)` →
+  `_virtual_put_active` raises the flag on the live virtual but skips both
+  `virtual_cfg["active"]` and `save_config`, so the crash-window state on
+  disk is always `active: false`. Only the capture-run `activate` uses
+  `persist=False`; `deactivate` (substitute → sleep) and the displaced-carrier
+  `reactivate` keep the default `persist=True` — those ARE the settled
+  end-state. The substitute's stored EFFECT (black lamp) still persists,
+  harmlessly (a stored effect with `active: false` is attached, not
+  activated, at load — it evicts nothing). One-time catch-up for a config
+  that already carries the residue:
+  `scripts/repair_copy_carrier_active_flags.py` (dry-run default, `--apply`,
+  backs up + asserts written-diff == planned active flips, idempotent) — sets
+  every device-virtual `active: false` whose device an active copy-mapped
+  carrier streams to. Proofs:
+  `tests/test_capture_active_flag_not_persisted.py` (crash-window persisted
+  state + the take after both a clean and an interrupted run, pre-fix
+  persisting activation as its RED control) and
+  `scripts/check_cold_load_effect_restore.py` (his real config, read-only:
+  FAIL before repair / PASS after). Config load ORDER decides which side
+  wins — his sconces load AFTER tv-mapper and so evict it; a repro/test with
+  the carrier last hides the residue by letting it win on order.
 - **AN EMITTER THE CAMERA NEVER SAW IS A RECORD, NOT AN ABSENCE** (2026-08-31,
   PR fm/mapping-unseen-emitter-note). His first real map ran 22 emitters and
   stored 14; the missing 8 (far-side TV blocks, sconce spill outside the

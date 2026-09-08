@@ -394,6 +394,16 @@ async def _virtual_put_active(host, virtual_id: str, body: dict) -> FacadeRespon
     if active is None:
         return _invalid('Required attribute "active" was not provided')
 
+    # SpotFX deviation #37: a TRANSIENT activation must not reach disk.
+    # `persist` defaults True (every SpotFX/LedFX caller's behaviour is
+    # unchanged); persist=False activates the virtual LIVE but leaves the
+    # stored `active` flag and the config file untouched. A capture run
+    # brings a copy-target device-virtual up only for the capture — its
+    # `active: true` persisted, then a crash/restart before the run's own
+    # deactivate, is exactly what strands the copy-mapped carrier on the
+    # next config load (fx/VENDOR.md #37, spectra/services/room_mapping.py).
+    persist = bool(body.get("persist", True))
+
     if active:
         if not virtual._active_effect or isinstance(
             virtual.active_effect, DummyEffect
@@ -412,9 +422,11 @@ async def _virtual_put_active(host, virtual_id: str, body: dict) -> FacadeRespon
     except (ValueError, RuntimeError) as msg:
         return _internal(f"Unable to set virtual {virtual.id} status: {msg}")
 
-    virtual.virtual_cfg["active"] = virtual.active
-    save_config(config=host.config, config_dir=host.config_dir)
-    return _ok({"status": "success", "active": virtual.active})
+    if persist:
+        virtual.virtual_cfg["active"] = virtual.active
+        save_config(config=host.config, config_dir=host.config_dir)
+    return _ok({"status": "success", "active": virtual.active,
+                "persisted": persist})
 
 
 # ── SpotFX deviation #29: a write that did not take must never report success ─
