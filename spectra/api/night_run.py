@@ -133,7 +133,16 @@ async def start(body: EventBody,
             # (spectra/services/night_take.py). Empty on every night that
             # ran on a room SPECTRA already held, and on every night at all
             # while the arming lever is absent.
-            "take": run.take}
+            "take": run.take,
+            # AND THE WINDOW (spectra/services/night_window.py): whether
+            # River was asked for the sconce mains, and whether the fixtures
+            # then actually came up. NOTE THAT THIS ROUTE NOW WAITS FOR
+            # THAT — up to `SPECTRA_WINDOW_WAIT_MS` (45s by default) on a
+            # night whose fixtures never answer, and only their real boot
+            # time on one that runs. A night must not be taken into a dark
+            # room, so the measurement has to happen before the take and
+            # therefore before this reply.
+            "window": run.window}
 
 
 @router.post("/abort")

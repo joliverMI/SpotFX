@@ -307,10 +307,18 @@ def test_an_ordinary_start_with_nothing_on_disk_is_a_no_op(monkeypatch):
     be silent."""
     from spectra.services import night_run, night_take
 
+    from spectra.services import night_window
+
     assert night_take.load_snapshot() is None
+    assert night_window.holding() is False
     result = _run(night_run.recover_orphaned_night())
+    # THE WINDOW IS RECOVERED HERE TOO (spectra/services/night_window.py) —
+    # a crashed night can leave River holding his away automations with no
+    # take behind it at all, so it is gated on its own marker and reports
+    # an empty answer when there is nothing on disk.
     assert result == {"recovered": False, "run_id": "", "held_for_s": 0.0,
-                      "detail": "", "give_back": {}, "night": {}}
+                      "detail": "", "give_back": {}, "night": {},
+                      "window": {}}
 
 
 def test_a_night_that_ended_properly_is_never_restamped_as_crashed(

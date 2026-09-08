@@ -128,7 +128,7 @@ from typing import Any, Optional
 from spectra import config as scfg
 from spectra.services import (capture_queue, capture_runs,
                               mapping_refusals, night_calibration,
-                              night_take, take_scope)
+                              night_take, night_window, take_scope)
 
 logger = logging.getLogger(__name__)
 
@@ -340,6 +340,13 @@ class NightRun:
     #: `status_brief()` publishes the small version of this for River's HA
     #: sensors to render into a morning he can read.
     take: dict = field(default_factory=dict)
+    #: THE WINDOW River was asked to open for this night, and how it closed
+    #: — `pretake_ping.WindowResult.as_dict()` plus the close's own record.
+    #: Empty on every host with no River configured, which is the whole
+    #: inertness property. `spectra/services/night_window.py` is the binding
+    #: statement; the FIXTURES block inside it is what a reader wants at
+    #: breakfast, because it says which of his lights actually came up.
+    window: dict = field(default_factory=dict)
     #: THE LIVE INSTRUMENTS, captured before the room is given back.
     #: Deliberately NOT in `as_dict` — these are driver objects, not a
     #: record. Releasing tears the live stack down, so the honest exit
@@ -359,7 +366,7 @@ class NightRun:
                 "queue": dict(self.queue), "exit": dict(self.exit_report),
                 "abort": dict(self.abort),
                 "calibration": dict(self.calibration),
-                "take": dict(self.take)}
+                "take": dict(self.take), "window": dict(self.window)}
 
 
 def load_nights(path=None) -> list[dict]:
@@ -1118,9 +1125,23 @@ def self_take_brief() -> dict:
 
 # ── starting ───────────────────────────────────────────────────────────────
 
+def _window_record(window, closed: Optional[dict] = None) -> dict:
+    """The window's two ends on ONE record, without either overwriting the
+    other — `night_take.merge_announcement`'s own lesson, which was learned
+    by writing that merge wrong twice. The open says what came up; the close
+    says whether River was told to put his house back, and at breakfast both
+    are worth reading."""
+    record = window.as_dict() if hasattr(window, "as_dict") \
+        else dict(window or {})
+    if closed:
+        record["close"] = dict(closed)
+    return record
+
+
 def _decline(trigger: dict, refusal: str, detail: str,
              price: Optional[dict] = None,
-             take: Optional[dict] = None) -> NightRun:
+             take: Optional[dict] = None,
+             window: Optional[dict] = None) -> NightRun:
     run = NightRun(id=uuid.uuid4().hex[:12], state=STATE_DECLINED,
                    trigger=dict(trigger), started=time.time(),
                    ended=time.time(), detail=detail, refusal=refusal,
@@ -1129,7 +1150,12 @@ def _decline(trigger: dict, refusal: str, detail: str,
                    # tried to take the room and could not is a different
                    # fact from one that never tried, and at breakfast it is
                    # the more interesting of the two.
-                   take=dict(take or {}))
+                   take=dict(take or {}),
+                   # AND THE WINDOW, on the same reasoning: a night that
+                   # asked River for the mains and then declined because
+                   # they never came up is a completely different morning
+                   # from one that declined before asking her anything.
+                   window=dict(window or {}))
     save_night(run)
     logger.warning("night run: DECLINED (%s) — %s", refusal, detail)
     return run
@@ -1173,22 +1199,78 @@ async def start(trigger: dict) -> NightRun:
     # pointing at a night nobody recorded.
     run_id = uuid.uuid4().hex[:12]
     take = night_take.TakeResult()
+    # READ BEFORE THE WINDOW, not just before the take. The fixture wait
+    # below can spend real seconds, and a stop arriving inside it has no
+    # night to stop yet — so the mark has to be taken ahead of the FIRST
+    # thing that can take time, or the wait would silently swallow it.
+    stop_mark = _stop_mark
+    # ── HOW MUCH OF HIS HOUSE THIS NIGHT MAY TOUCH ────────────────────────
+    # The declared items name rooms, and a room names carriers, and a
+    # carrier names fixtures — so a night that maps the living room has no
+    # business bringing up the Hue entertainment groups that span the
+    # hallway, the bedroom and the bathroom. Resolved from the DECLARATION,
+    # before anything is taken; unresolvable widens back to the whole room
+    # WITH A REASON rather than guessing narrow (`spectra/services/
+    # take_scope.py` is the binding statement).
+    #
+    # RESOLVED HERE RATHER THAN INSIDE THE TAKE, because the WINDOW below
+    # needs the same answer: the fixtures waited for must be exactly the
+    # fixtures brought up, and a night that does not need a take still
+    # needs its sconces powered. One resolution, two consumers.
+    scope = take_scope.resolve_for_items(items)
+    logger.warning("night run: take scope — %s", scope.reason)
+
+    # ── THE WINDOW, BEFORE ANYTHING ELSE ──────────────────────────────────
+    # River powers the sconce mains and holds his away automations off this
+    # one event, and SPECTRA then WAITS for the run's own fixtures to
+    # answer. A 200 from her is not a lit sconce, so the gate is the
+    # measurement: a room taken with a dark sconce measures the dark for
+    # four hours and calls the result a map.
+    #
+    # IT RUNS WHETHER OR NOT A TAKE IS NEEDED. The mains is about POWER,
+    # not about ownership — a night on a room SPECTRA already holds needs
+    # its sconces lit exactly as much as one that takes it.
+    #
+    # INERT with no River configured: nothing sent, nothing waited for,
+    # nothing gated, no marker written. `spectra/services/night_window.py`
+    # is the binding statement.
+    window = await night_window.open_for_run(run_id, scope=scope)
+    if not window.ok:
+        # DO NOT TAKE, AND DO NOT LEAVE ANYTHING HELD. The window we just
+        # opened is closed again immediately, so his away automations are
+        # not held for a night that is not going to happen.
+        closed = await night_window.close_for_run(
+            why=night_window.WHY_SCONCES_DARK, run_id=run_id)
+        return _decline(trigger, night_window.REFUSAL_SCONCES_DARK,
+                        mapping_refusals.night_sconces_did_not_come_up(
+                            window.fixtures, window.ping.detail),
+                        price=gate.price,
+                        window=_window_record(window, closed))
+    if _stop_mark > stop_mark:
+        # HE GOT UP WHILE WE WERE WAITING FOR HIS SCONCES. Nothing has been
+        # taken, so this costs him nothing but the window — which goes
+        # straight back, because a stop is a stop whichever second of the
+        # start it lands in.
+        closed = await night_window.close_for_run(
+            why=night_window.WHY_ABORTED, run_id=run_id)
+        detail = mapping_refusals.night_stopped_during_the_take(_stop_source)
+        logger.warning("night run: STOPPED WHILE THE WINDOW WAS OPENING — "
+                       "nothing was taken")
+        return _decline(trigger, "stopped_during_take", detail,
+                        price=gate.price,
+                        window=_window_record(window, closed))
+
     if gate.take_required:
-        stop_mark = _stop_mark
-        # ── HOW MUCH OF HIS HOUSE THIS NIGHT MAY TOUCH ────────────────────
-        # The declared items name rooms, and a room names carriers, and a
-        # carrier names fixtures — so a night that maps the living room has
-        # no business bringing up the Hue entertainment groups that span
-        # the hallway, the bedroom and the bathroom. Resolved from the
-        # DECLARATION, before anything is taken; unresolvable widens back
-        # to the whole room WITH A REASON rather than guessing narrow
-        # (`spectra/services/take_scope.py` is the binding statement).
-        scope = take_scope.resolve_for_items(items)
-        logger.warning("night run: take scope — %s", scope.reason)
         take = await night_take.take_room(run_id, scope=scope)
         if not take.took:
+            # THE WINDOW IS OURS TO CLOSE ON EVERY WAY OUT, including the
+            # ones the take itself refuses on: a night that never happened
+            # must not leave his away automations held.
+            closed = await night_window.close_for_run(
+                why=night_window.WHY_ABORTED, run_id=run_id)
             return _decline(trigger, take.refusal, take.detail,
-                            price=gate.price, take=take.as_dict())
+                            price=gate.price, take=take.as_dict(),
+                            window=_window_record(window, closed))
         if _stop_mark > stop_mark:
             # HE GOT UP WHILE WE WERE TAKING IT. The stop arrived with no
             # night to stop and `capture_queue.stop()` had nothing to say
@@ -1198,6 +1280,10 @@ async def start(trigger: dict) -> NightRun:
             # is rather than as a night that never happened.
             back = await night_take.give_back(why=night_take.WHY_ABORTED,
                                               run_id=run_id)
+            # AFTER THE ROOM HAS GONE BACK, never before — she restores his
+            # baseline into a room SPECTRA has already let go of.
+            closed = await night_window.close_for_run(
+                why=night_window.WHY_ABORTED, run_id=run_id)
             detail = mapping_refusals.night_stopped_during_the_take(
                 _stop_source)
             logger.warning("night run: STOPPED DURING THE TAKE — the room "
@@ -1205,7 +1291,8 @@ async def start(trigger: dict) -> NightRun:
             return _decline(trigger, "stopped_during_take", detail,
                             price=gate.price,
                             take=night_take.merge_announcement(
-                                take.as_dict(), back.as_dict()))
+                                take.as_dict(), back.as_dict()),
+                            window=_window_record(window, closed))
 
     entries = await _device_listing()
     run = NightRun(id=run_id, state=STATE_RUNNING,
@@ -1215,7 +1302,8 @@ async def start(trigger: dict) -> NightRun:
                    price=price, planned_end=price["planned_end"],
                    calibration=(night_calibration.record(target, resolved)
                                 if resolved is not None else {}),
-                   take=take.as_dict() if take.took else {})
+                   take=take.as_dict() if take.took else {},
+                   window=window.as_dict())
     current = run
     save_night(run)
     logger.warning("night run %s: starting %d declared item(s) over %d "
@@ -1424,6 +1512,22 @@ async def give_room_back(run: NightRun, why: str) -> dict:
     return result.as_dict()
 
 
+async def close_night_window(run: NightRun, why: str) -> dict:
+    """CLOSE THE WINDOW IF THIS NIGHT OPENED ONE — the one call every exit
+    path makes, idempotent, gated on `night_window`'s own durable marker and
+    never on this record.
+
+    It lands on the record so "was his house put back" is a read at
+    breakfast rather than an inference, and it merges rather than replaces
+    for `night_take.merge_announcement`'s own reason: the open says which
+    fixtures came up, and losing that to record the close would throw away
+    the more interesting half."""
+    closed = await night_window.close_for_run(why=why, run_id=run.id)
+    if closed:
+        run.window = _window_record(run.window, closed)
+    return closed
+
+
 async def _finish(run: NightRun) -> None:
     """Close the night out: hand the room back, read every fixture BACK AT
     THE LIGHT, and write the record. Runs on the normal path and the abort
@@ -1432,9 +1536,11 @@ async def _finish(run: NightRun) -> None:
 
     THE ORDER IS THE SEMANTICS, and it is the same order `abort` keeps: the
     hold is closed, the instruments are captured, THE ROOM IS GIVEN BACK,
-    the terminal state is stamped and SAVED (River's own re-dark trigger
-    rides that state, so it must land before the paperwork), the give-back
-    is announced, and only then are the fixtures read back at the light. The
+    THE WINDOW IS CLOSED (so River restores his bedtime baseline into a room
+    SPECTRA has already let go of, never one it is still holding), the
+    terminal state is stamped and SAVED (River's own re-dark trigger rides
+    that state, so it must land before the paperwork), the give-back is
+    announced, and only then are the fixtures read back at the light. The
     room is his again before he is told it is."""
     from spectra.services import flare_preview_hold
     try:
@@ -1444,6 +1550,12 @@ async def _finish(run: NightRun) -> None:
     # THE ROOM FIRST. A no-op — and a free one — on every night that did
     # not take it.
     await give_room_back(run, night_take.WHY_FINISHED)
+    # THEN THE WINDOW, and the order is the semantics exactly as it is
+    # above: River restores his bedtime baseline into a room SPECTRA has
+    # already let go of, and drops the hold on his away automations. A
+    # no-op (one file stat) on every night that opened no window — which is
+    # every night on a host with no River configured.
+    await close_night_window(run, night_window.WHY_FINISHED)
     if run.state == STATE_RUNNING:
         run.state = STATE_COMPLETE
         run.detail = run.detail or "The night's declared queue finished."
@@ -1604,7 +1716,13 @@ async def recover_orphaned_night() -> dict:
 
     A no-op with nothing on disk, which is every ordinary start."""
     result = await night_take.recover_orphaned_take()
-    return result.as_dict()
+    out = result.as_dict()
+    # AND THE WINDOW, INDEPENDENTLY OF THE TAKE. A window can be open with
+    # no take behind it at all — a night on a room SPECTRA already held
+    # still asks River for the mains — so this is gated on its own marker
+    # and never on the take's snapshot.
+    out["window"] = await night_window.recover_orphaned_window()
+    return out
 
 
 # ── aborting ───────────────────────────────────────────────────────────────
@@ -1699,10 +1817,19 @@ async def abort(trigger: dict, *, grace_s: float = ABORT_GRACE_S,
     # `night_take`'s snapshot), and idempotent against the run task's own
     # `_finish`, which reaches the same call moments later.
     give_back: dict = {}
+    window_closed: dict = {}
     if run is not None:
         give_back = await give_room_back(
             run, night_take.WHY_MORNING if by_morning
             else night_take.WHY_ABORTED)
+        # AND THE WINDOW, straight after the room — his away automations
+        # come off hold on the same "within seconds" promise the dark room
+        # is on, rather than waiting for the run task to finish closing
+        # out. Idempotent and marker-gated, so `_finish` reaching the same
+        # call moments later is a no-op that says so.
+        window_closed = await close_night_window(
+            run, night_window.WHY_MORNING if by_morning
+            else night_window.WHY_ABORTED)
 
     if run is not None and run.state == STATE_RUNNING:
         run.state = end_state
@@ -1712,7 +1839,8 @@ async def abort(trigger: dict, *, grace_s: float = ABORT_GRACE_S,
                      "stopped_queue": stopped_queue,
                      "run_landed_itself": landed,
                      "hold_reverted_here": bool(reverted.get("reverted")),
-                     "gave_room_back": bool(give_back.get("given_back"))}
+                     "gave_room_back": bool(give_back.get("given_back")),
+                     "closed_window": bool(window_closed)}
         save_night(run)
 
     return {"aborted": was_running, "state": end_state,
@@ -1722,6 +1850,10 @@ async def abort(trigger: dict, *, grace_s: float = ABORT_GRACE_S,
             # question that reply has to answer.
             "gave_room_back": bool(give_back.get("given_back")),
             "room_owner": give_back.get("given_back_to", ""),
+            # WHETHER HIS AWAY AUTOMATIONS CAME OFF HOLD, in the reply, for
+            # the same reason the room owner is: the house acts on this
+            # response rather than waiting for its next poll.
+            "closed_window": bool(window_closed),
             "ended_by_morning": by_morning, "detail": detail,
             "run_id": run.id if run is not None else None,
             "told_run": told_run, "stopped_queue": stopped_queue,

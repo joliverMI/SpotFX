@@ -146,6 +146,14 @@ NIGHT_RUNS_FILE = SPECTRA_STORAGE / "night_runs.json"
 #: say. Same restart-survival shape (and the same reason) as
 #: FLARE_PREVIEW_HOLD_FILE above.
 NIGHT_TAKE_FILE = SPECTRA_STORAGE / "night_take.json"
+#: THE WINDOW MARKER (spectra/services/night_window.py): River was asked to
+#: power the sconce mains and hold his away automations, and has not yet
+#: been told to put them back. Written only when a `window_open` was
+#: actually SENT, so an unconfigured host writes nothing at all — and its
+#: presence at a cold start is the one thing that can say a crashed night
+#: left her holding. Same restart-survival shape, and the same reason, as
+#: NIGHT_TAKE_FILE immediately above.
+NIGHT_WINDOW_FILE = SPECTRA_STORAGE / "night_window.json"
 
 # The TESTING IN PROGRESS record (spectra/services/test_session.py): the
 # DECLARED source of the room-visibility bar — {actor, reason, since_ms,
@@ -300,6 +308,44 @@ def pretake_settle_ms() -> int:
     except ValueError:
         return PRETAKE_SETTLE_MS_DEFAULT
     return max(0, min(PRETAKE_SETTLE_MS_MAX, value))
+
+
+# ── THE WINDOW (spectra/services/night_window.py + sconce_wait.py) ────────
+#
+# River powers the sconce mains off the `window_open` event; SPECTRA then
+# WAITS for those fixtures to answer before it takes a room it would
+# otherwise take dark. Read AT CALL TIME, `pretake_settle_ms()`'s own
+# posture — retuning it is a systemd `Environment=` edit and a restart.
+
+#: How long the run waits for its WLED fixtures to come up after the
+#: window is opened, when `SPECTRA_WINDOW_WAIT_MS` is unset. 45s: a WLED
+#: that has just had its mains restored has to boot, associate and take a
+#: DHCP lease, which is seconds rather than tens of seconds on his network,
+#: and the cost of waiting slightly too long is a later start where the
+#: cost of waiting too little is a night measured in the dark.
+WINDOW_WAIT_MS_DEFAULT = 45_000
+
+#: A malformed or absurd value must not be able to park a night against the
+#: 05:30 planned end. Zero is legal and is the documented OFF SWITCH: the
+#: window is still opened and closed, and nothing is waited for or gated on
+#: — a night then behaves exactly as it did before this feature existed.
+WINDOW_WAIT_MS_MAX = 300_000
+
+
+def window_wait_ms() -> int:
+    """How long to wait for the run's own WLED fixtures to answer after the
+    window is opened. Clamped to [0, WINDOW_WAIT_MS_MAX], falling back to
+    the default on anything unparseable — this number sits on the critical
+    path of every night, so a typo in a unit file must cost at most five
+    minutes and never the whole window."""
+    raw = os.getenv("SPECTRA_WINDOW_WAIT_MS", "").strip()
+    if not raw:
+        return WINDOW_WAIT_MS_DEFAULT
+    try:
+        value = int(float(raw))
+    except ValueError:
+        return WINDOW_WAIT_MS_DEFAULT
+    return max(0, min(WINDOW_WAIT_MS_MAX, value))
 
 
 def settings_agent_backend() -> str:

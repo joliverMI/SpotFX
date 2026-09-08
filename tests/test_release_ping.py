@@ -630,9 +630,20 @@ def test_an_unknown_event_falls_back_rather_than_raising():
 
 def test_the_event_vocabulary_is_closed_and_small():
     """`night_take.EVENT_TAKEN`'s discipline: River renders these words, and
-    a vocabulary that grows quietly is a contract that breaks quietly."""
-    assert set(pretake_ping.WORDS) == {"pre_take", "released"}
+    a vocabulary that grows quietly is a contract that breaks quietly.
+
+    FOUR SINCE 2026-09-08, one per edge of two different things: the two
+    edges of SPECTRA holding his ROOM (`pre_take` / `released`) and the two
+    edges of the WINDOW it runs inside (`window_open` / `window_close`, the
+    sconce mains and the automation hold — see
+    `spectra/services/night_window.py`). Every one of them has to be a word
+    River renders, which is why this list is asserted rather than described.
+    """
+    assert set(pretake_ping.WORDS) == {"pre_take", "released",
+                                       "window_open", "window_close"}
     assert pretake_ping.EVENT_RELEASED == "released"
+    assert pretake_ping.EVENT_WINDOW_OPEN == "window_open"
+    assert pretake_ping.EVENT_WINDOW_CLOSE == "window_close"
 
 
 # ── the failure sentence, and the API surface ──────────────────────────────
