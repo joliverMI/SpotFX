@@ -97,6 +97,24 @@ morning routine, which is the outer net for this seam as it is for every
 other part of it.
 
 ────────────────────────────────────────────────────────────────────────────
+WHERE IT IS WIRED, AND WHERE IT DELIBERATELY IS NOT
+────────────────────────────────────────────────────────────────────────────
+
+THE UNATTENDED NIGHT, and only that. `night_run.start` opens it and every
+exit path closes it — which covers a COMMISSIONING pass too, because a
+commissioning item runs unattended inside a night's own declared queue
+(`capture_queue.run_queue` → `capture_runs.run_commission`) and inherits
+this the way it inherits the take, the hold and the 05:30 bound.
+
+NOT the daytime button (`POST /api/rooms/{id}/commission`,
+`/map`, `/exposure-test`) and NOT the armed take-back
+(`POST /api/ownership/handover`). Both are acts a PERSON is present for,
+and the window is two things at once: it powers the mains, which he can do
+himself while standing there, and it HOLDS HIS AWAY AUTOMATIONS, which is
+the wrong thing to do to a house he is in. The human relay this feature
+removes was only ever in the way of the unattended path.
+
+────────────────────────────────────────────────────────────────────────────
 WHAT THIS SIDE STILL CANNOT DO
 ────────────────────────────────────────────────────────────────────────────
 

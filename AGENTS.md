@@ -5021,6 +5021,15 @@ Six things:
   gate: nobody asked for the mains to be powered on such a host, so the
   fixtures may legitimately be dark and refusing the night would turn "no
   River configured" into "your sconces are broken".
+- **THE UNATTENDED NIGHT ONLY.** `night_run.start` opens it and every exit
+  path closes it — which covers a COMMISSIONING pass, because a
+  commissioning item runs unattended inside a night's own declared queue and
+  inherits this the way it inherits the take and the 05:30 bound. NOT the
+  daytime buttons (`/rooms/{id}/commission`, `/map`, `/exposure-test`) and
+  NOT the armed take-back: both are acts a PERSON is present for, and a
+  window HOLDS HIS AWAY AUTOMATIONS, which is the wrong thing to do to a
+  house he is standing in. The human relay this removes was only ever in
+  the way of the unattended path.
 - **WHOEVER OPENED IT CLOSES IT, and the close comes AFTER the release** —
   she restores his bedtime baseline into a room SPECTRA has already let go
   of. `night_run._finish` (every ordinary exit, after `give_room_back`),
