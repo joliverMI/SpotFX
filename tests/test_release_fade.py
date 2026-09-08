@@ -210,7 +210,8 @@ def test_fade_freezes_before_writing_rest(monkeypatch, bridge):
 
     result = _run(release_fade.fade_and_release_hue(host))
 
-    assert result == {"devices": ["hue-lights"], "failed": [], "still_on": []}
+    assert result == {"devices": ["hue-lights"], "failed": [],
+                      "untouched": [], "still_on": []}
     assert dev.frozen is True
     freeze_at = _first_index(bridge, lambda c: c == ("set_frozen", True))
     put_at = _first_index(bridge, lambda c: c[:2] == ("REST", "PUT"))
@@ -233,7 +234,8 @@ def test_fade_dims_then_powers_off_with_one_shared_sleep(monkeypatch, bridge):
 
     result = _run(release_fade.fade_and_release_hue(host))
 
-    assert result == {"devices": ["a", "b"], "failed": [], "still_on": []}
+    assert result == {"devices": ["a", "b"], "failed": [],
+                      "untouched": [], "still_on": []}
     assert sleeps == [1.5], ("one shared sleep for the whole batch, not one per "
                              "device — the off-confirm pacing is zeroed by the "
                              "autouse _fast_off_confirm_pacing fixture, so it "
@@ -286,7 +288,7 @@ def test_fade_no_hue_devices_is_a_clean_noop(bridge):
 
     result = _run(release_fade.fade_and_release_hue(host))
 
-    assert result == {"devices": [], "failed": []}
+    assert result == {"devices": [], "failed": [], "untouched": []}
     assert bridge == []  # no REST calls at all
 
 

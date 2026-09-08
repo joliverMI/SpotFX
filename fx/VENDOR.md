@@ -1086,3 +1086,61 @@ variables named `ledfx` (the core object handle) are untouched.
 Everything else is byte-identical to the fork at 149f4470 modulo the import
 rewrite and the deviations above. When updating vendored files, re-diff
 against that commit.
+
+35. `devices/__init__.py`: A DEVICE REMEMBERS WHETHER ANYTHING EVER STREAMED
+    TO IT (NEW STATE, SpotFX-authored) — `Device._ever_activated`, set in
+    `Device.activate()`, read through the new `ever_activated` property.
+    Sticky, never cleared, and per object: device objects are built fresh by
+    every `FxHost`, so it is session-scoped by construction.
+
+    THE QUESTION IT ANSWERS, and `is_active()` cannot: "may this fixture be
+    holding a frame of ours right now?" `is_active()` is about the present
+    instant, and a fixture activated and later stood down — a capture run's
+    substitute put back to sleep, a virtual deactivated mid-run — is no
+    longer active and IS still holding whatever we last streamed at it.
+
+    ITS ONE CALLER is `spectra/services/release_fade.py`, whose whole
+    argument for powering a Hue bulb off is that the bulb holds SPECTRA's
+    last streamed frame. A device that was never activated was never
+    streamed to, holds nothing of ours, and switching it off is this app
+    changing a light it never drove — the 2026-09-07 incident ("you turned
+    off the bathroom light... be more selective about which lights you turn
+    off").
+
+    It is set BEFORE any driver's transport work, deliberately: an
+    activation that started and then failed its handshake still counts as
+    "we touched it", which is the fail-safe direction for that caller.
+    Nothing else in the fork reads it and no behaviour changed.
+
+36. `virtuals.py` + `host.py`: A SCOPED LOAD — a take may bring up only some
+    of the config's virtuals (NEW PARAMETER, SpotFX-authored).
+    `Virtuals.create_from_config(..., only_active=<set of virtual ids>)` and
+    `FxHost.start(..., only_active=...)`. `None` — every caller but one — is
+    byte-identical to before.
+
+    Given a set, every virtual NOT in it is loaded exactly as a virtual
+    whose stored `active` is false already loads: segments restored, stored
+    effect instantiated, `set_effect(activate=False)`, no render thread. The
+    consequence is the point: a device is activated ONLY by a virtual with
+    segments on it activating (`Virtual.activate_segments`), so holding a
+    virtual back is how a take reaches one fixture and PROVABLY not another.
+
+    IT IS A LOAD-TIME DECISION, NOT A CONFIG EDIT — the same discipline as
+    deviation #32's blackout. `virtual_cfg` is untouched, nothing persists,
+    and a held-back virtual is resumed at any time by the ordinary
+    `set_virtual_active(vid, True)` the capture path already uses for its
+    substitutes.
+
+    Two bookkeeping details ride with it, both so that a scoped take is a
+    READ rather than an inference: `Virtuals.held_back` names the virtuals
+    the scope declined to activate (`blacked_out` deliberately does NOT
+    include them — "came up black" and "did not come up" are different
+    facts), and `_audit_restored_effects` skips them, since deviation #29's
+    whole point is to SHOUT about a stored effect that is not driving and a
+    scoped take's held-back virtuals are not driving on purpose.
+
+    Its one caller is `spectra/services/take_scope.py` via
+    `live_host.activate(scope=...)`, which is the binding statement for how
+    the scope is chosen. Evidence: `tests/test_scoped_take_release.py`
+    (the whole night measured at the emitted light and at the bridge, with
+    the unscoped night as its red control), `tests/test_take_scope.py`.

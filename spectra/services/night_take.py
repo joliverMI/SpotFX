@@ -298,6 +298,15 @@ class TakeResult:
     quiet: bool = True
     #: Which virtuals came up black rather than restoring a stored effect.
     blacked_out: list = field(default_factory=list)
+    #: THE FIXTURES THIS TAKE WAS ALLOWED TO REACH
+    #: (`take_scope.ScopeOutcome.as_dict()`), and an empty dict means the
+    #: whole room. Carried on the night's own record so "which of his
+    #: lights did last night touch" is a read, never an inference from what
+    #: the room looks like in the morning.
+    scope: dict = field(default_factory=dict)
+    #: Virtuals the scope deliberately held back — the config wanted them
+    #: driving and this take did not.
+    held_back: list = field(default_factory=list)
     #: PARTIAL take-backs commit (the owner's 2026-08-21 ruling) and say so.
     partial: bool = False
     #: THE PRE-TAKE PING'S OUTCOME (`pretake_ping.PingResult.as_dict`) —
@@ -312,13 +321,15 @@ class TakeResult:
                 "taken_at": self.taken_at, "detail": self.detail,
                 "refusal": self.refusal, "quiet": self.quiet,
                 "blacked_out": list(self.blacked_out),
+                "scope": dict(self.scope),
+                "held_back": list(self.held_back),
                 "partial": self.partial,
                 "pretake": dict(self.pretake),
                 "announce": list(self.announce)}
 
 
 async def take_room(run_id: str, *, sides=None,
-                    run_handover=None) -> TakeResult:
+                    run_handover=None, scope=None) -> TakeResult:
     """THE QUIET TAKE. Snapshot first, then the guarded handover in its quiet
     mode. Never raises: a take that cannot happen comes back as a refusal
     with a sentence, and the caller declines the night — which is the status
@@ -330,12 +341,30 @@ async def take_room(run_id: str, *, sides=None,
     the activation verification, the partial-take-back tolerance coming from
     `released`, and the single-owner landing on any failure. There is no
     capability here a person pressing the ownership bar does not have —
-    except that this one comes up dark."""
+    except that this one comes up dark.
+
+    `scope` is a `take_scope.ScopeOutcome` (or None, the whole room): the
+    fixtures this night is allowed to bring up at all. It is the SECOND
+    thing that keeps a sleeping house's lights alone, and it is a different
+    thing from `quiet`: quiet means the fixtures we take come up black,
+    scope means we do not take the others AT ALL — never activated, never
+    streamed to, and therefore never faded off on the way out
+    (`release_fade`'s own scope reads the same fact off the device). See
+    `spectra/services/take_scope.py`, which is the binding statement.
+
+    A SCOPED TAKE STILL GIVES BACK EXACTLY WHAT IT TOOK: `give_back`
+    releases the room, and the release's Hue fade now only reaches devices
+    this stack actually streamed to — so a scoped take is narrower at both
+    ends by the same fact, not by two rules that could drift."""
     from fx import light_ownership
     from spectra.services import handover as handover_mod
 
+    narrowed = getattr(scope, "scope", None)
     sides = sides if sides is not None else \
-        handover_mod.production_sides(quiet=True)
+        handover_mod.production_sides(
+            quiet=True,
+            scope=(narrowed.virtual_ids if narrowed is not None else None))
+    scope_record = scope.as_dict() if scope is not None else {}
     run_handover = run_handover or handover_mod.run_handover
 
     owner_before = light_ownership.load().owner
@@ -381,7 +410,7 @@ async def take_room(run_id: str, *, sides=None,
         clear_snapshot()
         return TakeResult(refusal="take_failed", owner_before=owner_before,
                           detail=mapping_refusals.night_take_failed(exc),
-                          pretake=pretake.as_dict())
+                          scope=scope_record, pretake=pretake.as_dict())
 
     from spectra.services import activation_report
     from spectra.services.live_host import live
@@ -392,6 +421,8 @@ async def take_room(run_id: str, *, sides=None,
     result = TakeResult(took=True, owner_before=owner_before,
                         taken_at=taken_at, detail=detail, partial=partial,
                         blacked_out=list(getattr(live, "blacked_out", [])),
+                        scope=scope_record,
+                        held_back=list(getattr(live, "held_back", [])),
                         pretake=pretake.as_dict())
     result.announce.append({"event": EVENT_TAKEN, "at": taken_at,
                             "owner_before": owner_before, "quiet": True,

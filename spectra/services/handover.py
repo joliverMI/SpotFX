@@ -472,7 +472,7 @@ class SpectraSide:
 
     def __init__(self, config_dir: Optional[str] = None,
                  open_audio: bool = True, audio_source_factory=None,
-                 quiet: bool = False):
+                 quiet: bool = False, scope: Optional[set] = None):
         self.config_dir = config_dir or str(config.FX_LIVE_CONFIG_DIR)
         self.open_audio = open_audio
         self.audio_source_factory = audio_source_factory
@@ -487,6 +487,13 @@ class SpectraSide:
         #: the OWNERSHIP RECORD plus `facade.set_host`, never on the engine's
         #: executor, so the room is fully writable and completely dark.
         self.quiet = bool(quiet)
+        #: A SCOPED TAKE (spectra/services/take_scope.py): the virtual ids
+        #: this activation may bring up. Everything outside it is loaded
+        #: but never activated, so ITS DEVICES ARE NEVER STREAMED TO — the
+        #: fixture-level half of "a capture run touches only what it
+        #: measures". None (every ordinary take-back, and every restart
+        #: resume) is the whole room, exactly as before.
+        self.scope = set(scope) if scope is not None else None
         self._last_failure_detail: Optional[str] = None
         self._last_outcome: Optional[ActivationOutcome] = None
 
@@ -533,7 +540,7 @@ class SpectraSide:
         await live.activate(grant, self.config_dir,
                             open_audio=self.open_audio,
                             audio_source_factory=self.audio_source_factory,
-                            quiet=self.quiet)
+                            quiet=self.quiet, scope=self.scope)
         facade.set_host(live.host)
         if self.quiet:
             # THE SHOW STAYS ON PAPER. `engine.go_live` is what points the
@@ -650,13 +657,18 @@ class SpectraSide:
         return not live.active
 
 
-def production_sides(*, quiet: bool = False) -> dict[str, WriterSide]:
+def production_sides(*, quiet: bool = False,
+                     scope: Optional[set] = None) -> dict[str, WriterSide]:
     """The two real writer sides. `quiet` builds the SPECTRA side in its
     quiet mode — the self-taking night's take, and nothing else; every other
-    caller gets exactly what it always got."""
+    caller gets exactly what it always got.
+
+    `scope` narrows WHICH FIXTURES that take brings up at all
+    (spectra/services/take_scope.py). None — every other caller — is the
+    whole room."""
     return {
         light_ownership.SPOT_EFFECTS: SpotEffectsSide(),
-        light_ownership.SPECTRA: SpectraSide(quiet=quiet),
+        light_ownership.SPECTRA: SpectraSide(quiet=quiet, scope=scope),
     }
 
 

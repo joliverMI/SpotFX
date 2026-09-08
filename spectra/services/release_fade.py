@@ -31,13 +31,43 @@ light off — off is the only bulb state that does not itself read as "a
 colour SPECTRA chose". That is this module's reading of "let go": dark,
 handed back clean, not a prettier hold.
 
-SCOPE: every live Hue device on live_host.live.host — every bridge, every
-entertainment group SPECTRA streams to (his room spans two bridges,
-hue-lights and dining-hues) — not just whichever one gets reported, and
-not WLED (see spectra/services/release.py's module docstring / the PR body
-for why WLED's own realtime-exit already reverts to its on-device show,
-genuinely different in kind from a Hue bulb that has no "own show" to fall
-back to).
+SCOPE — AND IT IS NOT "EVERY HUE WE CAN REACH" ANY MORE (2026-09-07).
+
+THE INCIDENT, the Admiral verbatim: "you turned off the bathroom light...
+be more selective about which lights you turn off." His Hue spans two
+bridges and the two entertainment configurations SPECTRA streams to reach
+17 bulbs across the house — hallway, bedroom, office, living room, dining,
+and a bathroom. A kitchen/living-room CAPTURE RUN needs the WLED sconces
+and the TV backlight and no Hue entertainment group at all, and it still
+ended by powering all seventeen off, because this function's scope was
+"every Hue device on the host" and the take had brought every one of them
+up.
+
+The scope is now: **every Hue device THIS LIVE STACK ACTUALLY STREAMED
+TO** (`fx.devices.Device.ever_activated`, SpotFX deviation #35), which is
+the only set this step has ever had a reason to touch. The whole argument
+for the fade is that a Hue bulb holds the last frame SPECTRA streamed at
+it; a device that was never activated was never streamed to, holds nothing
+of ours, and powering it off is this app changing a light it never drove.
+
+It is STICKY, not "active right now", deliberately: a fixture activated
+and later stood down (a capture run's substitute put back to sleep) IS
+holding a frame of ours and still needs letting go.
+
+NOTHING CHANGES FOR THE PANIC RELEASE. On an ordinary whole-room take-back
+every Hue device comes up, so every Hue device is in scope and the owner's
+red button behaves exactly as it did. What changed is that a take which
+never brought a fixture up can no longer end by switching it off — see
+`spectra/services/take_scope.py` for the other half, which is what makes a
+capture run's take narrow in the first place.
+
+`device_ids` overrides the default with an explicit set, for a caller that
+knows better than the flag.
+
+Still not WLED (see spectra/services/release.py's module docstring / the PR
+body for why WLED's own realtime-exit already reverts to its on-device
+show, genuinely different in kind from a Hue bulb that has no "own show" to
+fall back to).
 
 Best-effort per device, same discipline as spectra/services/release.py:
 one unreachable bridge must not stop another from being released, and a
@@ -86,7 +116,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any
+from typing import Any, Iterable, Optional
 
 import httpx
 
@@ -218,20 +248,62 @@ def _hue_devices(host: Any) -> dict[str, Any]:
             if getattr(host.devices.get(did), "type", None) == "hue"}
 
 
-async def fade_and_release_hue(host: Any) -> dict:
-    """Freeze + bridge-fade every live Hue device on `host` to off. Called
-    once from release_room(), BEFORE the live stack itself tears down (the
-    stream must still be reachable to freeze). Best-effort per device — one
-    bridge failing to fade must not stop another, and must not raise past
-    this call (release_room() already wraps its caller in _best_effort, but
-    a partial run here still needs every OTHER device to get its own
-    attempt). Returns {"devices": [...faded ids...], "failed": [...ids that
-    raised before the dim landed...], "still_on": [...bridge light names
-    that did not confirm off after the read-back + one retry — module
-    docstring, "Off-write read-back confirmation"...]} for logging/tests."""
-    hue_devices = _hue_devices(host)
+def streamed_hue_devices(host: Any) -> dict[str, Any]:
+    """The Hue devices this stack ever activated — the fade's own scope
+    (module docstring, "SCOPE"). `ever_activated` is fx deviation #35 and is
+    sticky for the host's whole life.
+
+    A device object that does not carry the flag at all counts as STREAMED.
+    That is the fail-safe direction and it is chosen on purpose: erring
+    toward "we may be holding this bulb" costs one redundant off-write to a
+    fixture nobody is driving, where erring the other way abandons a bulb
+    lit on SPECTRA's last frame — the defect this whole module exists to
+    fix."""
+    return {did: dev for did, dev in _hue_devices(host).items()
+            if getattr(dev, "ever_activated", True)}
+
+
+async def fade_and_release_hue(
+        host: Any, *,
+        device_ids: Optional[Iterable[str]] = None) -> dict:
+    """Freeze + bridge-fade to off every Hue device on `host` THIS STACK
+    STREAMED TO. Called once from release_room(), BEFORE the live stack
+    itself tears down (the stream must still be reachable to freeze).
+    Best-effort per device — one bridge failing to fade must not stop
+    another, and must not raise past this call (release_room() already wraps
+    its caller in _best_effort, but a partial run here still needs every
+    OTHER device to get its own attempt).
+
+    `device_ids` names the scope explicitly; omitted, it is every Hue device
+    this stack ever activated (module docstring, "SCOPE"). Either way a Hue
+    device left alone is REPORTED in `untouched` rather than silently
+    skipped: "we did not fade this bulb" is a fact about his house and must
+    be readable, the same rule this module already applies to `still_on`.
+
+    Returns {"devices": [...faded ids...], "failed": [...ids that raised
+    before the dim landed...], "untouched": [...Hue device ids deliberately
+    not faded...], "still_on": [...bridge light names that did not confirm
+    off after the read-back + one retry — module docstring, "Off-write
+    read-back confirmation"...]} for logging/tests."""
+    all_hue = _hue_devices(host)
+    if device_ids is None:
+        hue_devices = streamed_hue_devices(host)
+    else:
+        wanted = {str(d) for d in device_ids}
+        hue_devices = {did: dev for did, dev in all_hue.items()
+                       if did in wanted}
+    untouched = sorted(set(all_hue) - set(hue_devices))
+    if untouched:
+        logger.warning(
+            "release fade: %d Hue device(s) left completely alone — this "
+            "stack never streamed to them, so they hold nothing of ours: %s",
+            len(untouched), untouched)
     if not hue_devices:
-        return {"devices": [], "failed": []}
+        # `still_on` is deliberately ABSENT here, exactly as it always has
+        # been: nothing was written, so there is nothing to have confirmed,
+        # and tests/test_release_fade.py pins that so a field arriving in
+        # this shape is a decision rather than a drift.
+        return {"devices": [], "failed": [], "untouched": untouched}
 
     faded: list[str] = []
     failed: list[str] = []
@@ -267,7 +339,8 @@ async def fade_and_release_hue(host: Any) -> dict:
             "still reading on: %s", len(still_on), still_on)
     logger.warning("release fade: %s faded to off before release (failed: %s)",
                    faded, failed)
-    return {"devices": faded, "failed": failed, "still_on": still_on}
+    return {"devices": faded, "failed": failed, "untouched": untouched,
+            "still_on": still_on}
 
 
 async def read_hue_light_states(host: Any) -> list[dict]:
