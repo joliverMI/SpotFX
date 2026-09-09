@@ -7194,7 +7194,14 @@ stored song with no captured audio. The song list also carries each song's
 `title`/`artist` from the same one-pass profile scan its provenance comes
 from, so the page never fans out one `/api/profiles/by-uri` per song. A pin
 (a full WAV copy + decode) runs under `asyncio.to_thread` too, which is why
-`testbed_audio` locks its registry read-modify-write.
+`testbed_audio` locks its registry read-modify-write — and because that
+worker thread rebuilds `analysis_reader`'s uri→stem index while the loop
+thread reads it every tick, `_build_index` REBINDS a fresh dict and never
+clears in place (`tests/test_analysis_reader_index.py`). The page's
+per-lane fetch is `GET /api/testbed/engine-marks` (one engine's marks,
+nothing else — the slider matches locally); `/compare` is the
+server-computed number at a fixed tolerance and reads the fired copy only,
+never the profile directory.
 
 **Test-bed audio retention is its OWN policy** (`testbed_audio.py`,
 Admiral-approved test-bed pinning), deliberately independent of

@@ -7,6 +7,8 @@ reviewed push-to-real button.
   GET    /api/testbed/marks?uri=                      his real marks (split)
   GET    /api/testbed/waveform?uri=                    waveform/energy lane
   GET    /api/testbed/engines?uri=                    per-engine availability
+  GET    /api/testbed/engine-marks?uri=&engine=&mark_kind=
+                                                       one engine's marks, nothing else
   GET    /api/testbed/compare?uri=&engine=&mark_kind=&reference=&tolerance_ms=
                                                        one engine's marks + P/R/F1
   GET    /api/testbed/audio/status?uri=                pin/WAV status
@@ -70,15 +72,19 @@ async def list_songs():
 
 @router.get("/marks")
 async def get_marks(uri: str = Query(...)):
-    marks = testbed_marks.marks_for_song(uri)
-    return {
-        "uri": uri,
-        "title": marks.title,
-        "artist": marks.artist,
-        "transitions": [m.__dict__ for m in marks.transitions],
-        "flares": [m.__dict__ for m in marks.flares],
-        "provenance": marks.provenance.__dict__,
-    }
+    """One song's marks + provenance: a full triggers.json parse plus the
+    profile-directory scan its caveat needs, so it runs off the loop."""
+    def _read() -> dict:
+        marks = testbed_marks.marks_for_song(uri)
+        return {
+            "uri": uri,
+            "title": marks.title,
+            "artist": marks.artist,
+            "transitions": [m.__dict__ for m in marks.transitions],
+            "flares": [m.__dict__ for m in marks.flares],
+            "provenance": marks.provenance.__dict__,
+        }
+    return await asyncio.to_thread(_read)
 
 
 @router.get("/waveform")
@@ -98,6 +104,42 @@ async def get_engines(uri: str = Query(...)):
     return {"uri": uri, "engines": testbed_engines.availability_for(uri)}
 
 
+def _estimate_for(engine: str, uri: str, mark_kind: str):
+    """One engine's marks of one kind, or None when the engine has nothing
+    for this song — the ONLY read the page's per-lane fetch needs. Never
+    touches triggers.json or the profile directory."""
+    engine_marks = testbed_engines.marks_for(engine, uri)
+    if engine_marks is None:
+        return None
+    return [m for m in engine_marks if m.kind == mark_kind]
+
+
+def _estimate_payload(estimate) -> list[dict]:
+    return [{"time_ms": m.time_ms, "label": m.label, "score": m.score}
+            for m in estimate]
+
+
+@router.get("/engine-marks")
+async def engine_marks(
+    uri: str = Query(...),
+    engine: str = Query(...),
+    mark_kind: str = Query(...),
+):
+    """The page's per-lane fetch: it recomputes P/R/F1 locally against the
+    marks it already holds (spectra/web/src/testbed/metrics.ts), so the
+    server-side match and the reference marks /compare carries would be
+    computed and discarded — and the trigger-store parse + profile scan
+    they cost is what this route exists to skip."""
+    if engine not in testbed_engines.ENGINES:
+        raise HTTPException(404, f"unknown engine '{engine}'")
+    estimate = await asyncio.to_thread(_estimate_for, engine, uri, mark_kind)
+    return {
+        "uri": uri, "engine": engine, "mark_kind": mark_kind,
+        "available": estimate is not None,
+        "estimate": _estimate_payload(estimate or []),
+    }
+
+
 @router.get("/compare")
 async def compare(
     uri: str = Query(...),
@@ -106,35 +148,39 @@ async def compare(
     reference: str = Query("transitions", pattern="^(transitions|flares)$"),
     tolerance_ms: float = Query(500.0, gt=0),
 ):
+    """Server-computed P/R/F1 at a fixed tolerance — for any caller that
+    wants the number from the reference matcher itself rather than the
+    page's local port. Reads the fired copy for the reference marks (one
+    triggers.json parse, off the loop) and never the profile directory:
+    provenance is /marks' business."""
     if engine not in testbed_engines.ENGINES:
         raise HTTPException(404, f"unknown engine '{engine}'")
-    engine_marks = testbed_engines.marks_for(engine, uri)
-    if engine_marks is None:
-        return {"uri": uri, "engine": engine, "mark_kind": mark_kind,
-                "reference": reference, "tolerance_ms": tolerance_ms,
-                "available": False, "estimate": [], "reference_marks": [],
-                "metrics": None}
 
-    estimate = [m for m in engine_marks if m.kind == mark_kind]
-    song_marks = testbed_marks.marks_for_song(uri)
-    ref_marks = (song_marks.transitions if reference == "transitions"
-                else song_marks.flares)
+    def _read() -> dict:
+        estimate = _estimate_for(engine, uri, mark_kind)
+        if estimate is None:
+            return {"uri": uri, "engine": engine, "mark_kind": mark_kind,
+                    "reference": reference, "tolerance_ms": tolerance_ms,
+                    "available": False, "estimate": [], "reference_marks": [],
+                    "metrics": None}
 
-    result = testbed_metrics.match_marks(
-        [m.timestamp_ms for m in ref_marks],
-        [m.time_ms for m in estimate],
-        tolerance_ms,
-    )
-    return {
-        "uri": uri, "engine": engine, "mark_kind": mark_kind,
-        "reference": reference, "tolerance_ms": tolerance_ms,
-        "available": True,
-        "estimate": [{"time_ms": m.time_ms, "label": m.label, "score": m.score}
-                     for m in estimate],
-        "reference_marks": [{"id": m.id, "timestamp_ms": m.timestamp_ms,
-                             "kind": m.kind} for m in ref_marks],
-        "metrics": testbed_metrics.match_result_dict(result),
-    }
+        transitions, flares = testbed_marks.reference_marks_for_song(uri)
+        ref_marks = transitions if reference == "transitions" else flares
+        result = testbed_metrics.match_marks(
+            [m.timestamp_ms for m in ref_marks],
+            [m.time_ms for m in estimate],
+            tolerance_ms,
+        )
+        return {
+            "uri": uri, "engine": engine, "mark_kind": mark_kind,
+            "reference": reference, "tolerance_ms": tolerance_ms,
+            "available": True,
+            "estimate": _estimate_payload(estimate),
+            "reference_marks": [{"id": m.id, "timestamp_ms": m.timestamp_ms,
+                                 "kind": m.kind} for m in ref_marks],
+            "metrics": testbed_metrics.match_result_dict(result),
+        }
+    return await asyncio.to_thread(_read)
 
 
 @router.get("/audio/status")

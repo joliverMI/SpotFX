@@ -34,9 +34,9 @@ _shape_index: dict[str, str] = {}
 _index_built = False
 
 
-def _build_index() -> None:
-    global _index_built
-    _shape_index.clear()
+def _build_index() -> dict[str, str]:
+    global _shape_index, _index_built
+    fresh: dict[str, str] = {}
     shapes_dir = config.AUDIO_SHAPES_DIR
     if shapes_dir.exists():
         for path in shapes_dir.glob("*.json"):
@@ -48,14 +48,15 @@ def _build_index() -> None:
             except Exception:
                 continue
             if uri:
-                _shape_index[uri] = path.stem
+                fresh[uri] = path.stem
+    _shape_index = fresh
     _index_built = True
+    return fresh
 
 
 def stem_for_uri(uri: str) -> Optional[str]:
     """uri -> audio-shape file stem, rebuilding the index once on a miss so
     a freshly captured song appears without a restart."""
-    global _index_built
     if not _index_built:
         _build_index()
     stem = _shape_index.get(uri)
@@ -66,14 +67,22 @@ def stem_for_uri(uri: str) -> Optional[str]:
 
 
 def stem_index() -> dict[str, str]:
-    """A snapshot of the whole uri -> stem index after ONE rebuild — for a
-    bulk listing over many URIs. stem_for_uri() rebuilds the entire index
-    (a glob + parse of every sidecar under AUDIO_SHAPES_DIR) on every MISS,
-    which is right for a live lookup of one freshly captured song and wrong
-    for a corpus walk, where every song without captured audio would pay a
-    full rebuild per lookup."""
+    """The whole uri -> stem index after ONE rebuild — for a bulk listing
+    over many URIs. stem_for_uri() rebuilds the entire index (a glob +
+    parse of every sidecar under AUDIO_SHAPES_DIR) on every MISS, which is
+    right for a live lookup of one freshly captured song and wrong for a
+    corpus walk, where every song without captured audio would pay a full
+    rebuild per lookup.
+
+    A rebuild builds a NEW dict and rebinds `_shape_index` in one
+    assignment; it never clears the dict readers already hold. This index
+    is read on the event-loop thread every tick (bridge.intensity() via
+    section_energy_at) while the test bed's corpus listing rebuilds it
+    from a worker thread, so every reader sees either the old complete
+    index or the new complete one, and the returned dict is safe to hold
+    across a whole walk."""
     _build_index()
-    return dict(_shape_index)
+    return _shape_index
 
 
 def librosa_analysis_for_stem(stem: Optional[str]) -> Optional[dict]:

@@ -160,6 +160,14 @@ def _song_marks(uri: str, triggers: list[SpectraTrigger],
                      title=summary.title, artist=summary.artist)
 
 
+def reference_marks_for_song(uri: str) -> tuple[list[ReferenceMark], list[ReferenceMark]]:
+    """(transitions, flares) for ONE song from the fired copy alone — no
+    profile-directory scan. The comparison endpoint needs only the marks
+    to match against; provenance is the page's caveat display and is
+    served by marks_for_song()."""
+    return _split(trigger_store.list_for_song(uri))
+
+
 def marks_for_song(uri: str) -> SongMarks:
     profile = _find_profile(uri)
     summary = _NO_PROFILE if profile is None else _summarize(profile)

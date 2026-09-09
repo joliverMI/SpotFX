@@ -16,7 +16,7 @@ import {
   useTestbedPromotions, useTestbedSongs, useTestbedWaveform,
 } from '../queries';
 import type {
-  TestbedCompareResult, TestbedEstimateMark, TestbedMetrics, TestbedReferenceMark, TestbedSong,
+  TestbedEngineMarks, TestbedEstimateMark, TestbedMetrics, TestbedReferenceMark, TestbedSong,
 } from '../types';
 import PromotionReviewDialog from './components/PromotionReviewDialog';
 import TestbedLaneBar from './components/TestbedLaneBar';
@@ -61,7 +61,7 @@ function SongPickerButton({ song, active, onClick }: { song: TestbedSong; active
  * matcher — the indices in `matches` are into exactly these two arrays,
  * which is what the lanes' tinting reads. null = engine not computed. */
 function localMetrics(
-  engineMarks: TestbedCompareResult | undefined,
+  engineMarks: TestbedEngineMarks | undefined,
   referenceMarks: TestbedReferenceMark[],
   toleranceMs: number,
 ): TestbedMetrics | null {
@@ -257,8 +257,8 @@ export default function TestbedPage() {
             <div className="card-title">Metrics</div>
             <TestbedMetricsPanel
               rows={[
-                { label: engineLanes[0].label, metrics: metricsA, available: !!engineMarksA?.available },
-                ...(engineB ? [{ label: engineLanes[1]?.label ?? 'Engine B', metrics: metricsB, available: !!engineMarksB?.available }] : []),
+                { key: 'a', label: engineLanes[0].label, metrics: metricsA, available: !!engineMarksA?.available },
+                ...(engineB ? [{ key: 'b', label: engineLanes[1]?.label ?? 'Engine B', metrics: metricsB, available: !!engineMarksB?.available }] : []),
               ]}
               toleranceMs={toleranceMs}
               onToleranceChange={setToleranceMs}

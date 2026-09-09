@@ -1508,6 +1508,14 @@ export interface TestbedMetrics {
   matches: TestbedMatch[];
 }
 
+export interface TestbedEngineMarks {
+  uri: string;
+  engine: string;
+  mark_kind: string;
+  available: boolean;
+  estimate: TestbedEstimateMark[];
+}
+
 export interface TestbedCompareResult {
   uri: string;
   engine: string;

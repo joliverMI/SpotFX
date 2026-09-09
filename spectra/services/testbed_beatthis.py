@@ -75,7 +75,7 @@ def compute_marks_ms(wav_path: Path, device: str = "cpu") -> list[dict]:
     a labeled subset of beats, not a disjoint stream), matching how
     testbed_engines._librosa_marks reads the current pipeline's own beats
     (is_downbeat flag on a beat, not a separate list)."""
-    result = compute(wav_path)
+    result = compute(wav_path, device=device)
     downbeat_set = {round(s, 3) for s in result["downbeats_s"]}
     marks: list[dict] = []
     for s in result["beats_s"]:

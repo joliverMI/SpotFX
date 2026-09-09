@@ -24,12 +24,14 @@ def test_compute_marks_parses_beats_and_downbeats(monkeypatch):
     — testbed_beatthis.py's own docstring) so it must be tagged
     'downbeat', not double-counted as a separate 'beat' mark."""
     fake_inference = types.ModuleType("beat_this.inference")
+    constructed = []
 
     class FakeFile2Beats:
         def __init__(self, checkpoint_path, device, dbn):
             assert dbn is False, "dbn must stay False -- no madmom pulled in"
             self.checkpoint_path = checkpoint_path
             self.device = device
+            constructed.append(self)
 
         def __call__(self, wav_path):
             beats = [0.5, 1.0, 1.5, 2.0]
@@ -43,10 +45,12 @@ def test_compute_marks_parses_beats_and_downbeats(monkeypatch):
     monkeypatch.setitem(sys.modules, "beat_this.inference", fake_inference)
 
     from spectra.services import testbed_beatthis
-    marks = testbed_beatthis.compute_marks_ms(Path("/fake.wav"))
+    marks = testbed_beatthis.compute_marks_ms(Path("/fake.wav"), device="cuda")
 
     downbeat_times = sorted(m["time_ms"] for m in marks if m["kind"] == "downbeat")
     beat_times = sorted(m["time_ms"] for m in marks if m["kind"] == "beat")
     assert downbeat_times == [500.0, 2000.0]
     assert beat_times == [1000.0, 1500.0]
     assert len(marks) == 4  # every beat_s time appears exactly once
+    assert [f.device for f in constructed] == ["cuda"]
+    assert constructed[0].checkpoint_path == "final0"

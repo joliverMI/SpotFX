@@ -213,14 +213,13 @@ def test_songs_listing_and_pin_run_off_the_event_loop(monkeypatch):
     stall the trigger engine, the bridge poll and every WS broadcast."""
     import asyncio
     from spectra import config as scfg
-    from spectra.services import testbed_audio, testbed_marks
+    from spectra.services import testbed_audio, testbed_engines, testbed_marks
     import numpy as np
     import soundfile as sf
 
+    _seed_librosa(scfg)
     _write_trigger(URI, 10000, "fire_scene")
     stem = "Artist - Song"
-    (scfg.AUDIO_SHAPES_DIR / f"{stem}.json").write_text(
-        json.dumps({"spotify_uri": URI}), encoding="utf-8")
     sf.write(str(scfg.AUDIO_SHAPES_DIR / f"{stem}.wav"),
              np.zeros(4000, dtype="float32"), 8000)
 
@@ -234,23 +233,49 @@ def test_songs_listing_and_pin_run_off_the_event_loop(monkeypatch):
             return False
 
     real_listing = testbed_marks.all_song_marks
+    real_single = testbed_marks.marks_for_song
+    real_reference = testbed_marks.reference_marks_for_song
+    real_engine = testbed_engines.marks_for
     real_pin = testbed_audio.pin
 
     def _listing():
         on_loop["songs"] = _ran_on_loop()
         return real_listing()
 
+    def _single(uri):
+        on_loop["marks"] = _ran_on_loop()
+        return real_single(uri)
+
+    def _reference(uri):
+        on_loop["compare"] = _ran_on_loop()
+        return real_reference(uri)
+
+    def _engine(engine, uri):
+        on_loop.setdefault("engine_reads", []).append(_ran_on_loop())
+        return real_engine(engine, uri)
+
     def _pin(uri):
         on_loop["pin"] = _ran_on_loop()
         return real_pin(uri)
 
     monkeypatch.setattr(testbed_marks, "all_song_marks", _listing)
+    monkeypatch.setattr(testbed_marks, "marks_for_song", _single)
+    monkeypatch.setattr(testbed_marks, "reference_marks_for_song", _reference)
+    monkeypatch.setattr(testbed_engines, "marks_for", _engine)
     monkeypatch.setattr(testbed_audio, "pin", _pin)
 
     client = _client()
     assert client.get("/api/testbed/songs").status_code == 200
+    assert client.get(f"/api/testbed/marks?uri={URI}").status_code == 200
+    assert client.get(
+        f"/api/testbed/compare?uri={URI}&engine=librosa&mark_kind=section_boundary",
+    ).status_code == 200
+    assert client.get(
+        f"/api/testbed/engine-marks?uri={URI}&engine=librosa&mark_kind=beat",
+    ).status_code == 200
     assert client.post(f"/api/testbed/audio/pin?uri={URI}").status_code == 200
-    assert on_loop == {"songs": False, "pin": False}
+    assert on_loop == {"songs": False, "marks": False, "compare": False,
+                       "engine_reads": [False, False], "pin": False}
 
 
 def test_compare_unavailable_payload_keeps_the_available_shape():
@@ -268,3 +293,77 @@ def test_compare_unavailable_payload_keeps_the_available_shape():
     assert resp["estimate"] == []
     assert resp["tolerance_ms"] == 250.0
     assert resp["metrics"] is None
+
+
+def test_engine_marks_serves_one_engines_marks_without_touching_his_stores(monkeypatch):
+    """The page's per-lane fetch. It must answer from the engine's own
+    output alone: the trigger store and the profile directory are made to
+    raise, and the route still answers — those reads are what /compare
+    pays for a match this caller throws away."""
+    from spectra import config as scfg
+    from spectra.services import testbed_marks, trigger_store
+    _seed_librosa(scfg)
+
+    def _forbidden(*a, **kw):
+        raise AssertionError("engine-marks touched a store it must not read")
+    monkeypatch.setattr(trigger_store, "_load_raw", _forbidden)
+    monkeypatch.setattr(testbed_marks, "_find_profile", _forbidden)
+
+    client = _client()
+    resp = client.get(
+        f"/api/testbed/engine-marks?uri={URI}&engine=librosa&mark_kind=section_boundary",
+    ).json()
+    assert resp["available"] is True
+    assert [m["time_ms"] for m in resp["estimate"]] == [10000.0]
+    assert resp["estimate"][0]["label"] == "drop"
+    assert set(resp) == {"uri", "engine", "mark_kind", "available", "estimate"}
+
+    beats = client.get(
+        f"/api/testbed/engine-marks?uri={URI}&engine=librosa&mark_kind=downbeat",
+    ).json()
+    assert [m["time_ms"] for m in beats["estimate"]] == [10050.0]
+
+    missing = client.get(
+        f"/api/testbed/engine-marks?uri=spotify:track:noanalysis&engine=librosa&mark_kind=beat",
+    ).json()
+    assert missing == {"uri": "spotify:track:noanalysis", "engine": "librosa",
+                       "mark_kind": "beat", "available": False, "estimate": []}
+
+    not_computed = client.get(
+        f"/api/testbed/engine-marks?uri={URI}&engine=beat_this&mark_kind=downbeat",
+    ).json()
+    assert not_computed["available"] is False and not_computed["estimate"] == []
+
+    assert client.get(
+        f"/api/testbed/engine-marks?uri={URI}&engine=nope&mark_kind=beat",
+    ).status_code == 404
+
+
+def test_compare_never_scans_the_profile_directory(monkeypatch):
+    """/compare needs the fired-copy marks to match against and nothing
+    from the editor copy — provenance is /marks' caveat, not a metric."""
+    from spectra import config as scfg
+    from spectra.services import testbed_marks
+    _seed_librosa(scfg)
+    _write_trigger(URI, 10000, "fire_scene")
+    _write_trigger(URI, 10020, "fire_response", event_class="flare")
+
+    def _forbidden(*a, **kw):
+        raise AssertionError("compare scanned the profile directory")
+    monkeypatch.setattr(testbed_marks, "_find_profile", _forbidden)
+
+    client = _client()
+    transitions = client.get(
+        f"/api/testbed/compare?uri={URI}&engine=librosa&mark_kind=section_boundary"
+        "&reference=transitions&tolerance_ms=500",
+    ).json()
+    assert transitions["metrics"]["n_reference"] == 1
+    assert transitions["metrics"]["n_matched"] == 1
+    assert [r["timestamp_ms"] for r in transitions["reference_marks"]] == [10000]
+
+    flares = client.get(
+        f"/api/testbed/compare?uri={URI}&engine=librosa&mark_kind=section_boundary"
+        "&reference=flares&tolerance_ms=500",
+    ).json()
+    assert [r["timestamp_ms"] for r in flares["reference_marks"]] == [10020]
+    assert flares["metrics"]["n_matched"] == 1

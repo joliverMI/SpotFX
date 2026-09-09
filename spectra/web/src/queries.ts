@@ -11,7 +11,7 @@ import type {
   ReviewSession, ReviewTimeline, RoomColorState, RoomControlState, RoomControlsSaveResult,
   SceneV2, SettingChangeEntry, SettingsMessageResult, SettingsRegistry, SonicAppliedChange,
   Liveness, SonicUsageSummary, SpectraTrigger, SpotColorSetCard, TestSessionStatus,
-  TestbedCompareResult, TestbedMarks, TestbedPromoteRequest, TestbedPromoteResult,
+  TestbedEngineMarks, TestbedMarks, TestbedPromoteRequest, TestbedPromoteResult,
   TestbedPromotionLogEntry, TestbedSong, TestbedWaveform,
   TranscribeResult, UndoResult,
 } from './types';
@@ -1160,16 +1160,17 @@ export function useTestbedWaveform(uri: string | null) {
  * kind) — deliberately keyed WITHOUT the tolerance or reference set. The
  * page recomputes P/R/F1 and every tint client-side with
  * testbed/metrics.ts's matchMarks (the byte-for-byte port of the server's
- * matcher) on every slider step, so a drag never round-trips; the
- * `metrics`/`reference_marks` the server includes here are at its own
- * defaults and are superseded by that local computation. */
+ * matcher) on every slider step, so a drag never round-trips. This hits
+ * /engine-marks, which reads only the engine's own output — never the
+ * trigger store or the profile directory — since the server-side match
+ * /compare would carry is computed and discarded here anyway. */
 export function useTestbedEngineMarks(
   uri: string | null, engine: string | null, markKind: string | null,
 ) {
   return useQuery({
     queryKey: ['testbed-engine-marks', uri, engine, markKind],
-    queryFn: () => apiGet<TestbedCompareResult>(
-      `/testbed/compare?uri=${enc(uri!)}&engine=${enc(engine!)}&mark_kind=${enc(markKind!)}`),
+    queryFn: () => apiGet<TestbedEngineMarks>(
+      `/testbed/engine-marks?uri=${enc(uri!)}&engine=${enc(engine!)}&mark_kind=${enc(markKind!)}`),
     enabled: !!uri && !!engine && !!markKind,
   });
 }

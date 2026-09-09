@@ -11,7 +11,7 @@ function pct(v: number) {
 export default function TestbedMetricsPanel({
   rows, toleranceMs, onToleranceChange,
 }: {
-  rows: { label: string; metrics: TestbedMetrics | null | undefined; available: boolean }[];
+  rows: { key: string; label: string; metrics: TestbedMetrics | null | undefined; available: boolean }[];
   toleranceMs: number;
   onToleranceChange: (ms: number) => void;
 }) {
@@ -47,7 +47,7 @@ export default function TestbedMetricsPanel({
         </thead>
         <tbody>
           {rows.map((r) => (
-            <tr key={r.label}>
+            <tr key={r.key}>
               <td>{r.label}</td>
               {!r.available || !r.metrics ? (
                 <td colSpan={6} style={{ color: 'var(--text-muted)', textAlign: 'center' }}>
