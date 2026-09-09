@@ -7123,6 +7123,113 @@ partial file (`soundfile`'s "System error"/"Format not recognised"). This was
 the 2026-08-14 librosa-backfill failure root cause (19/500 songs); the same
 race exists for anything else that writes into `audio_shapes/` — write atomically.
 
+**A capture used to be cut off at BOTH ends — fixed 2026-09-09**
+(`services/audio_shape_service.py`). Beginning: pre-roll from the always-on
+PCM ring buffer only ran for `force_recapture=True` ("to preserve legacy
+behavior"), silently dropping the head of every ORDINARY capture between
+song-start and URI-detection (typically 5-10s) — the origin timestamp
+(`song_start`) is already correctly derived from the acoustic boundary (or
+Spotify's progress estimate, for a session's first capture) regardless of
+force_recapture, so pre-rolling from it is safe either way; it now runs
+unconditionally whenever the ring buffer has PCM to offer. End: both
+tail-wait sites (`on_track_change`'s boundary-wait, `_stop_and_save`'s
+tail-wait) used `if 0 < wait_s <= 3.0: sleep(wait_s)` — a wait that needed
+MORE than 3s got skipped ENTIRELY (zero wait) rather than shortened, which
+is exactly the "stopping immediately is what cut the end off captures"
+failure the surrounding comment already named. `_capped_wait_s()` (module-
+level, one definition instead of two inline copies) now sleeps
+`min(needed, cap)` at both sites instead of an all-or-nothing window. Spec:
+`tests/test_audio_shape_capture_trim.py` (no live audio device — the ring
+buffer / capture stream / recorder are faked at the seam, matching this
+file's own "no live access from tests, ever" rule).
+
+## The music-analysis test bed (`/testbed`)
+
+Admiral-approved phased build, 2026-09-09, grounded in
+`data/spotfx-music-analysis-plan/report.md` (read that report before
+touching any of this — it has the real measurements: today's librosa
+section-boundary detector recalls only 7-10% of his hand-placed marks at
+±500ms, and beat_this (CPJKU 2024) roughly doubles downbeat F1 over the
+current pipeline at the same tolerance). A read-only comparison surface
+with exactly one write exception (push-to-real), extending the ported
+timeline surface family (`ReviewLaneBar`'s read-only multi-lane pattern,
+above) rather than inventing a parallel one.
+
+**Backend**, all in `spectra/services/testbed_*.py` +
+`spectra/api/testbed.py` (`/api/testbed/*`, mounted in `spectra/app.py`):
+`testbed_marks.py` reads his real marks from the FIRED trigger copy
+(`trigger_store`, not the legacy editor copy — same "TWO trigger copies"
+choice the plan report itself makes, with the editor copy's own trigger
+COUNT + `ai_generated`/`verified` provenance surfaced as a caveat, not a
+second definition of "his marks"), split transitions
+(`fire_scene`/`fire_scene_update`) vs flares (`fire_response`/
+`select_color_set`). `testbed_metrics.py` is the greedy nearest-neighbor
+precision/recall/F1 matcher — the report's own methodology, made
+executable — with a deliberate byte-for-byte TypeScript port
+(`spectra/web/src/testbed/metrics.ts`) so the frontend's tolerance slider
+recomputes instantly with no round-trip; `scripts/check_testbed_metrics.mjs`
+cross-checks both sides against the same fixed vectors. `testbed_engines.py`
+is the engine registry: `librosa` derives marks LIVE from the
+already-computed `.librosa.json` (via `analysis_reader.py`, which gained
+`beats_for_uri()` alongside its existing `sections_for_uri()`); `beat_this`
+reads from an OFFLINE precompute cache (`testbed_cache.py`,
+`storage/spectra/testbed/analysis/<engine>/<uri>.json`) — never re-run in
+the request path (some engines take 80-560s/song per the report's own
+timings). `testbed_beatthis.py` is the actual `beat_this` call
+(`File2Beats(checkpoint_path="final0", dbn=False)` — `dbn=False` is
+load-bearing, it's what keeps madmom out), invoked only by
+`scripts/testbed_precompute.py`; `beat_this` is an OPTIONAL dependency
+(`requirements-testbed.txt`, mirroring `requirements-capture-client.txt`'s
+precedent) — code and published checkpoints are both MIT-licensed (checked
+before shipping; unlike madmom's CC-BY-NC-SA models), and an uninstalled
+host reports the engine "unavailable" rather than crashing anything.
+
+**Test-bed audio retention is its OWN policy** (`testbed_audio.py`,
+Admiral-approved test-bed pinning), deliberately independent of
+production's `settings.audio_wav_max_songs`/`librosa_service.
+manage_wav_retention()`: pinning COPIES a song's current WAV into
+`storage/spectra/testbed/audio/` (never moves/symlinks) — a directory
+`manage_wav_retention()`'s own glob (scoped to `AUDIO_SHAPES_DIR` only)
+never reaches, so a pin structurally cannot be evicted by production's LRU
+cap, and unpinning never touches production's own copy. Peaks (a
+downsampled min/max waveform-lane render) are computed once at pin time.
+The waveform lane falls back to production's `.npz` RMS-envelope shape
+(retained for every played song, unlike the WAV) when nothing is pinned,
+labeled honestly as coarse rather than silently rendering nothing.
+
+**Push-to-real is gated, structurally, not by UI convention**
+(`testbed_promote.py`): `promote()` refuses (`PromotionNotConfirmed`,
+writes nothing, logs the refusal) unless `confirmed=True` arrives on the
+call itself — there's no way to "confirm once and it stays confirmed."
+`PromotionReviewDialog.tsx` is the ONLY component wired to the promote
+mutation, and only from its own explicit "Confirm & push" button, never the
+mark-click that opens it. The write lands in the FIRED copy only
+(`trigger_store.upsert`, `source="authored"`, `generator_key=None` — never
+"generated," so front 3's regeneration/ownership-transfer rule can never
+silently claim a promoted trigger back), through
+`trigger_store.validate_action()` — the SAME reference-integrity check
+`spectra/api/triggers.py`'s human-authoring POST uses (refactored out of
+that module's former private `_validate_action` specifically so both write
+surfaces share one choke point and can't diverge). Every attempt, accepted
+or refused, is appended to a durable, bounded audit log
+(`storage/spectra/testbed/promotions.json`, `GET /api/testbed/promotions`)
+— the visible proof the button cannot write silently.
+
+**Frontend**: `spectra/web/src/testbed/TestbedPage.tsx` (`/testbed`, "Test
+Bed" nav link, route-mapped in `routeTopics.ts`) — song picker, an A/B
+engine picker, `TestbedLaneBar.tsx` (waveform/energy lane + his marks +
+up to two engine lanes, green/amber/red tinting by match tightness — the
+`ReviewLaneBar` pattern generalized to N lanes), `TestbedMetricsPanel.tsx`
+(live P/R/F1 table + tolerance slider), and `PromotionReviewDialog.tsx`
+(the review gate's UI half). Help: `analysis-testbed` section +
+`testbed-promotion` entry in `helpContent.ts`, both linked (not orphaned).
+
+Executable specs: `tests/test_testbed_*.py` (marks split/provenance,
+metrics matcher, audio pinning + production-eviction independence, engine
+registry, the guarded beat_this call, the promotion gate, and a full
+`TestClient(create_app())` route-shape pass) + `scripts/
+check_testbed_metrics.mjs` (TS/Python parity).
+
 ## Maintaining this file
 
 Keep this file for knowledge useful to almost every future agent session in this project.
