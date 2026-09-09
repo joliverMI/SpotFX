@@ -1391,11 +1391,13 @@ export const HELP_SECTIONS: HelpSection[] = [
           ['Red tick', 'One of your marks with no match at all — a miss.'],
           ['Dim/grey tick (engine lane)', 'An engine mark with no match to any of your marks — extra, not necessarily wrong (over-segmentation).'],
           ['Dashed tick (your lane)', 'A mark you pushed from this page. Shown so it is never hidden, but left out of the scores — it sits exactly where the engine suggested it.'],
+          ['Plain white tick (your lane)', 'One of your marks with nothing to compare it against yet — the selected engine has not been precomputed for this song, so no match was attempted either way.'],
         ],
         body: [
           'Drag the tolerance slider on the Metrics card to see precision/recall/F1 and every tint recompute for the currently selected tolerance — there is no one "correct" tolerance; how close counts as close enough is your call, not this page\'s.',
           'The waveform lane shows the real retained WAV when one is pinned; otherwise it falls back to the coarser RMS-energy shape production already keeps for every played song, labeled honestly as coarse rather than silently showing nothing.',
           'Every lane shares one timebase, so a spot on the waveform sits directly under the marks at that moment in the song. Where a capture is shorter than the song\'s last mark or beat, the waveform simply stops where the audio does instead of being stretched to fill the lane.',
+          'A capture usually starts a few seconds into the song (that is how long it takes to work out which song is playing), so the waveform is drawn starting at the moment its own recording began rather than at the far left. If that start time cannot be worked out for a particular capture, the lane says "start time unknown" and greys itself out — it is still worth looking at, but do not read alignment into it.',
         ],
       },
       {

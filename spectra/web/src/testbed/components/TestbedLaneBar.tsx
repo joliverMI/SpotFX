@@ -20,7 +20,14 @@
  * EVERY LANE IS THE SAME ms -> % SCALE. `durationMs` is the one timebase;
  * a lane that positioned its own content by index (the waveform's buckets)
  * instead of by TIME would drift against every mark lane beside it, which
- * is the one thing a comparison surface must not do. */
+ * is the one thing a comparison surface must not do.
+ *
+ * AND THE WAVEFORM'S OWN ZERO IS NOT THE SONG'S. A production capture
+ * starts MID-SONG, so the pinned WAV's first sample sits at
+ * `capture_offset_ms` in song time; drawing it from x=0 puts a real
+ * transient EARLIER than the mark that names it, by the capture lag. When
+ * the backend cannot establish that offset the lane SAYS SO rather than
+ * implying an alignment it cannot justify. */
 import { useState } from 'react';
 import { fmtMs } from '../../lib/time';
 import type { TestbedEstimateMark, TestbedMetrics, TestbedReferenceMark, TestbedWaveform } from '../../types';
@@ -30,17 +37,22 @@ function tintFor(offsetMs: number | undefined, toleranceMs: number): string {
   return offsetMs <= toleranceMs / 2 ? 'matched-tight' : 'matched-loose';
 }
 
-/** The waveform's buckets span the WAV's own duration, which is not always
- * the lane's timebase (an engine's beats can run past a capture that was
- * trimmed, and then `durationMs` is the longer one). Scaling by the
- * waveform's own duration is what keeps a transient at 3:00 under the mark
- * at 3:00. Falling back to `dur` when the payload carries no duration
- * reproduces the old full-width stretch for that one case rather than
- * collapsing the lane to nothing. */
-function waveformSpanPct(waveform: TestbedWaveform, dur: number): number {
+/** Where the pinned WAV sits on the SONG's timebase: bucket i covers
+ * `offset + (i / (n-1)) * waveDur` ms, the same ms -> % mapping every mark
+ * lane uses. `offset` is the capture's own start in song time; `spanPct` is
+ * the WAV's own length as a share of the lane (an engine's beats can run
+ * past a capture that was trimmed, so `dur` is often the longer one).
+ * A missing duration falls back to the full width rather than collapsing
+ * the lane to nothing, and is reported as unpositioned. */
+function waveformPlacement(waveform: TestbedWaveform, dur: number) {
   const waveDur = waveform.duration_ms ?? 0;
-  if (waveDur <= 0) return 100;
-  return Math.min(100, (waveDur / dur) * 100);
+  const offsetMs = waveform.capture_offset_ms;
+  const offsetKnown = offsetMs != null && Number.isFinite(offsetMs);
+  const startPct = offsetKnown ? Math.max(0, Math.min(100, (offsetMs! / dur) * 100)) : 0;
+  const spanPct = waveDur > 0
+    ? Math.max(0, Math.min(100 - startPct, (waveDur / dur) * 100))
+    : 100 - startPct;
+  return { startPct, spanPct, offsetKnown, offsetMs: offsetKnown ? offsetMs! : 0 };
 }
 
 function WaveformLane({ waveform, durationMs }: { waveform: TestbedWaveform | undefined; durationMs: number }) {
@@ -59,23 +71,36 @@ function WaveformLane({ waveform, durationMs }: { waveform: TestbedWaveform | un
   const dur = Math.max(1, durationMs);
   if (waveform.source === 'wav_peaks' && waveform.mins && waveform.maxs) {
     const n = waveform.mins.length;
-    const spanPct = waveformSpanPct(waveform, dur);
+    const { startPct, spanPct, offsetKnown, offsetMs } = waveformPlacement(waveform, dur);
     const points = waveform.mins.map((min, i) => {
       const max = waveform.maxs![i];
-      const x = (i / Math.max(1, n - 1)) * spanPct;
+      const x = startPct + (i / Math.max(1, n - 1)) * spanPct;
       return { x, min, max };
     });
     return (
       <div className="testbed-lane-row">
-        <span className="testbed-lane-label">Waveform (retained WAV)</span>
-        <div className="testbed-lane-bar testbed-lane-waveform">
+        <span className="testbed-lane-label">
+          {offsetKnown ? 'Waveform (retained WAV)' : 'Waveform (start time unknown)'}
+        </span>
+        <div
+          className="testbed-lane-bar testbed-lane-waveform"
+          title={offsetKnown
+            ? `Retained WAV, starting at ${fmtMs(offsetMs)} in the song`
+            : 'Retained WAV — this capture\'s start time in the song is unknown'}
+        >
+          {!offsetKnown && (
+            <span className="testbed-waveform-caption">
+              this capture&apos;s start time in the song is unknown — drawn from 0, so
+              it is NOT aligned with the mark lanes
+            </span>
+          )}
           <svg className="testbed-waveform-svg" viewBox="0 0 100 100" preserveAspectRatio="none">
             {points.map((p, i) => (
               <line
                 key={i}
                 x1={p.x} x2={p.x}
                 y1={50 - p.max * 48} y2={50 - p.min * 48}
-                stroke="var(--accent)" strokeWidth="0.4"
+                stroke={offsetKnown ? 'var(--accent)' : 'var(--text-muted)'} strokeWidth="0.4"
               />
             ))}
           </svg>
@@ -139,7 +164,12 @@ function ReferenceMarksLane({
         {hover && <div className="review-lane-tooltip" style={{ left: hover.leftPct }}>{hover.text}</div>}
         {marks.map((m) => {
           const offset = offsetById.get(m.id);
-          const tint = m.promoted ? 'promoted' : metrics ? tintFor(offset, toleranceMs) : 'extra';
+          // 'unscored', never 'extra': the legend defines the dim/grey
+          // swatch as an ENGINE mark with no match to any of his. With no
+          // metrics (the selected engine has nothing precomputed for this
+          // song) nothing has been compared at all, and painting his own
+          // ground truth as the engine's over-segmentation is a lie.
+          const tint = m.promoted ? 'promoted' : metrics ? tintFor(offset, toleranceMs) : 'unscored';
           const text = m.promoted
             ? `${fmtMs(m.timestamp_ms)} — ${m.kind} (pushed from this page — not scored)`
             : `${fmtMs(m.timestamp_ms)} — ${m.kind}${offset != null ? ` (matched, ${Math.round(offset)}ms off)` : metrics ? ' (no match)' : ''}`;

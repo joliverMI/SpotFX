@@ -212,6 +212,34 @@ def status(uri: str, *, stem_index: Optional[dict[str, str]] = None,
     }
 
 
+def capture_offset_ms(uri: str) -> Optional[int]:
+    """The SONG-TIME of the WAV's first sample, or None when it cannot be
+    established — a production capture starts MID-SONG (URI detection lags
+    5-10s), so a pinned WAV's sample 0 is not song-time 0 and a waveform
+    drawn from x=0 sits left of every mark lane by exactly this much.
+
+    Read from the `.npz` sidecar's own first `timestamps_ms`, which is the
+    song-relative stamp `AudioCaptureStream` gave the first PCM it held
+    (`_pcm_start_song_ms`) — a measured quantity from the same capture.
+    Deliberately NOT `LibrosaAnalysis.librosa_offset_ms`: AGENTS.md records
+    that stored value as unreliable (nonzero on ~74% of analyses, outliers
+    into the tens of thousands of seconds), and this module's own npz
+    fallback lane already positions by these same timestamps.
+
+    None means UNKNOWN and callers must say so rather than assume 0 — the
+    npz can be absent (a pin whose sidecar aged out) or unreadable."""
+    shape = load_npz_shape(uri)
+    if not shape:
+        return None
+    stamps = shape.get("timestamps_ms") or []
+    if not stamps:
+        return None
+    try:
+        return max(0, int(stamps[0]))
+    except (TypeError, ValueError):
+        return None
+
+
 def load_npz_shape(uri: str) -> Optional[dict]:
     """The coarse RMS-envelope fallback the report's own Methodology names
     ("the test bed should visibly say 'coarse energy view only, no

@@ -130,7 +130,11 @@ export default function TestbedPage() {
    * song does not have; a mark or beat past a short capture still widens
    * it, so nothing is ever clamped out of view. */
   const durationMs = useMemo(() => {
-    const fromWaveform = waveform?.duration_ms ?? 0;
+    // A pinned WAV's own duration is its LENGTH; it ends at
+    // capture_offset_ms + length in SONG time (a capture starts mid-song).
+    const fromWaveform = (waveform?.duration_ms ?? 0) > 0
+      ? (waveform?.capture_offset_ms ?? 0) + (waveform?.duration_ms ?? 0)
+      : 0;
     const fromNpz = waveform?.timestamps_ms?.length
       ? waveform.timestamps_ms[waveform.timestamps_ms.length - 1] : 0;
     const fromMarks = Math.max(

@@ -398,8 +398,9 @@ class AudioShapeService:
         # trim). Fall back to Spotify's reported progress for the first
         # capture of a session or when no PCM was available in the ring
         # buffer.
-        if (self._pending_boundary_monotonic is not None
-                and self._pending_boundary_uri == track.spotify_uri):
+        at_track_boundary = (self._pending_boundary_monotonic is not None
+                             and self._pending_boundary_uri == track.spotify_uri)
+        if at_track_boundary:
             song_start = self._pending_boundary_monotonic
         else:
             progress_s = track.interpolated_progress_ms() / 1000.0
@@ -419,17 +420,31 @@ class AudioShapeService:
         # Also feed the raw PCM into the recorder's pre-roll PCM list so the
         # WAV file includes the leading audio.
         #
-        # Runs for every capture start, not just force-recapture (fixed —
-        # this used to be force-recapture-only "to preserve legacy
-        # behavior," which silently cut the head off every ORDINARY
-        # capture: `song_start` is already the correct song-time-0 origin
-        # for any track change, whether force-recapture or not (set above
-        # from the acoustic boundary or, for a session's first capture,
-        # Spotify's own progress estimate) — pre-rolling from that anchor
-        # is safe and correct regardless of how the anchor was derived. The
-        # `pcm.size > 0` check below already degrades cleanly to a no-op
-        # when the ring buffer has nothing to offer.
+        # GATED ON A GENUINE TRACK BOUNDARY (or an explicit force-recapture),
+        # never on every start. The splice is only sound when the ring
+        # buffer's contents between `song_start` and now really ARE this
+        # song's own contiguous audio, and that is exactly what
+        # `at_track_boundary` establishes: on_track_change saw the URI flip
+        # into this track and computed the acoustic boundary the origin came
+        # from. A MID-SONG start has no such signal — `_start` also runs from
+        # on_track_change's tail for any playing song with no complete shape,
+        # e.g. a resume after a pause discarded a too-short partial, where
+        # `song_start` is `now - progress` and the intervening ring buffer
+        # holds the PAUSE, not the song. Splicing there would stamp silence
+        # (or another source entirely) as this song's own head, feed it to
+        # librosa and the WAV, and inflate the `captured_ms` the too-short
+        # guard reads. Head truncation on a real track change — the reported
+        # defect — is still fixed; a mid-song start simply takes the ordinary
+        # no-pre-roll path. The `pcm.size > 0` check below still degrades to
+        # a no-op when the ring buffer has nothing to offer.
         pre_roll_pcm: list = []
+        pre_roll_allowed = at_track_boundary or bool(force_recapture)
+        if not pre_roll_allowed:
+            logger.info(
+                "Pre-roll skipped for %s — capture starts mid-song (no track "
+                "boundary), so the ring buffer is not this song's own audio",
+                track.title,
+            )
         try:
             from api.pcm_ring_buffer import pcm_ring_buffer
             from api.audio_capture import synthesize_frames_from_pcm
@@ -439,8 +454,10 @@ class AudioShapeService:
             # Snapshotting from song_start itself grabbed the previous
             # track's tail and labeled it as this song's first second.
             want_monotonic = song_start + _cfg.audio_latency_ms / 1000.0
-            pcm, got_monotonic = pcm_ring_buffer.snapshot_since_with_start(
-                want_monotonic
+            pcm, got_monotonic = (
+                pcm_ring_buffer.snapshot_since_with_start(want_monotonic)
+                if pre_roll_allowed
+                else (np.array([], dtype=np.float32), want_monotonic)
             )
             if pcm.size > 0:
                 pre_roll_seconds = pcm.size / _cfg.audio_sample_rate
@@ -459,7 +476,7 @@ class AudioShapeService:
                     pre_roll_seconds, len(frames), track.title,
                     " (force-recapture)" if force_recapture else "",
                 )
-            else:
+            elif pre_roll_allowed:
                 logger.info(
                     "Pre-roll: no PCM available for %s (ring buffer empty or stale)",
                     track.title,

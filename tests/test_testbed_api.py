@@ -535,3 +535,48 @@ def test_a_pushed_mark_is_shown_flagged_and_kept_out_of_compare(monkeypatch):
     assert [r["timestamp_ms"] for r in compare["reference_marks"]] == [25000]
     assert compare["metrics"]["n_reference"] == 1
     assert compare["metrics"]["n_matched"] == 0
+
+
+def _seed_pinned_wav_with_offset(scfg, first_ms):
+    """A pinned WAV plus production's own `.npz` sidecar — the two the
+    waveform lane has to reconcile onto one song-relative timebase."""
+    import numpy as np
+    import soundfile as sf
+    from spectra.services import testbed_audio
+    stem = "Artist - Song"
+    (scfg.AUDIO_SHAPES_DIR / f"{stem}.json").write_text(
+        json.dumps({"spotify_uri": URI}), encoding="utf-8")
+    sf.write(str(scfg.AUDIO_SHAPES_DIR / f"{stem}.wav"),
+             np.zeros(8000, dtype="float32"), 8000)
+    if first_ms is not None:
+        np.savez_compressed(
+            scfg.AUDIO_SHAPES_DIR / f"{stem}.npz",
+            timestamps_ms=np.array([first_ms, first_ms + 500], dtype=np.int64),
+            rms_total=np.array([0.1, 0.2], dtype=np.float32),
+        )
+    assert testbed_audio.pin(URI)["status"] == "pinned"
+
+
+def test_waveform_route_carries_the_captures_start_time_in_the_song():
+    """A capture starts MID-SONG, so the pinned WAV's sample 0 is not
+    song-time 0. Without this on the payload the lane draws from the left
+    edge and every transient reads EARLIER than the mark naming it, by the
+    capture lag — on precisely the lane the page exists to compare against."""
+    from spectra import config as scfg
+    _seed_pinned_wav_with_offset(scfg, 8123)
+
+    resp = _client().get(f"/api/testbed/waveform?uri={URI}").json()
+    assert resp["source"] == "wav_peaks"
+    assert resp["capture_offset_ms"] == 8123
+    assert resp["duration_ms"] == 1000        # the WAV's LENGTH, not the song's end
+
+
+def test_waveform_route_says_unknown_rather_than_claiming_zero():
+    """UNKNOWN is its own answer: the page relabels the lane instead of
+    drawing at a position nothing measured."""
+    from spectra import config as scfg
+    _seed_pinned_wav_with_offset(scfg, None)   # WAV pinned, no sidecar
+
+    resp = _client().get(f"/api/testbed/waveform?uri={URI}").json()
+    assert resp["source"] == "wav_peaks"
+    assert resp["capture_offset_ms"] is None

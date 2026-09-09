@@ -205,3 +205,66 @@ def test_a_malformed_registry_reads_as_empty_and_a_pin_still_lands():
     assert testbed_audio.pin(URI)["status"] == "pinned"
     assert testbed_audio.is_pinned(URI) is True
     assert testbed_audio.status(URI)["pinned"] is True
+
+
+def _seed_npz(scfg, stem, first_ms):
+    """production's own `.npz` sidecar shape (services/audio_analyzer.py's
+    save format) — the song-relative stamps a capture actually recorded."""
+    np.savez(
+        scfg.AUDIO_SHAPES_DIR / f"{stem}.npz",
+        timestamps_ms=np.array([first_ms, first_ms + 500, first_ms + 1000]),
+        rms_total=np.array([0.1, 0.2, 0.3]),
+    )
+
+
+def test_capture_offset_is_the_song_time_of_the_wavs_first_sample():
+    """A capture starts MID-SONG, so a pinned WAV's sample 0 is not
+    song-time 0. Drawing the waveform lane from the left edge without this
+    puts a real transient earlier than the mark that names it, by the
+    capture lag."""
+    from spectra import config as scfg
+    from spectra.services import testbed_audio
+    stem = _seed_source_wav(scfg)
+    _seed_npz(scfg, stem, 8123)
+
+    assert testbed_audio.capture_offset_ms(URI) == 8123
+
+
+def test_capture_offset_is_None_when_it_cannot_be_established():
+    """UNKNOWN is its own answer — a caller must say so rather than assume
+    0 and imply an alignment nothing measured."""
+    from spectra import config as scfg
+    from spectra.services import testbed_audio
+    _seed_source_wav(scfg)          # a WAV, but no .npz beside it
+    assert testbed_audio.capture_offset_ms(URI) is None
+    assert testbed_audio.capture_offset_ms("spotify:track:nosuchsong") is None
+
+
+def test_capture_offset_never_reads_the_unreliable_librosa_offset():
+    """AGENTS.md records LibrosaAnalysis.librosa_offset_ms as noise
+    (outliers into tens of thousands of seconds). A stored analysis
+    claiming a wild offset must not move this answer."""
+    from spectra import config as scfg
+    from spectra.services import testbed_audio
+    stem = _seed_source_wav(scfg)
+    _seed_npz(scfg, stem, 4000)
+    (scfg.AUDIO_SHAPES_DIR / f"{stem}.librosa.json").write_text(
+        json.dumps({"spotify_uri": URI, "librosa_offset_ms": 75_308_324,
+                    "sections": [], "beats": []}), encoding="utf-8")
+
+    assert testbed_audio.capture_offset_ms(URI) == 4000
+
+
+def test_the_waveform_route_carries_the_offset_beside_the_peaks():
+    """Resolved at READ time, so a pin taken before this existed carries it
+    too — nothing has to be re-pinned."""
+    from spectra import config as scfg
+    from spectra.services import testbed_audio
+    stem = _seed_source_wav(scfg)
+    assert testbed_audio.pin(URI)["status"] == "pinned"
+    _seed_npz(scfg, stem, 6500)
+
+    peaks = testbed_audio.load_peaks(URI)
+    assert peaks is not None and peaks["duration_ms"] > 0
+    assert "capture_offset_ms" not in peaks      # not baked into the pin
+    assert testbed_audio.capture_offset_ms(URI) == 6500

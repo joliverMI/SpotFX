@@ -1489,7 +1489,13 @@ export interface TestbedWaveform {
   uri: string;
   source: 'wav_peaks' | 'npz_rms_fallback' | 'none';
   sample_rate?: number;
+  /** The WAV's own LENGTH, not the song's end. */
   duration_ms?: number;
+  /** Song-time of the pinned WAV's FIRST sample — a capture starts
+   * mid-song. null/absent = unknown, and the lane must say so rather than
+   * draw from 0 as if it were aligned (spectra/services/testbed_audio.py's
+   * capture_offset_ms). */
+  capture_offset_ms?: number | null;
   mins?: number[];
   maxs?: number[];
   timestamps_ms?: number[];

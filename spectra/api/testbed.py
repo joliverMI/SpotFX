@@ -102,7 +102,15 @@ async def get_marks(uri: str = Query(...)):
 def _waveform(uri: str) -> dict:
     peaks = testbed_audio.load_peaks(uri)
     if peaks is not None:
-        return {"uri": uri, "source": "wav_peaks", **peaks}
+        # The pinned WAV's sample 0 is NOT song-time 0 — a capture starts
+        # mid-song. Resolved at READ time (not baked into the stored peaks)
+        # so a pin taken before this existed carries it too, and so a later
+        # re-analysis of the sidecar is picked up without re-pinning. None =
+        # genuinely unknown, which the page renders as such rather than
+        # drawing the lane at a position it cannot justify.
+        return {"uri": uri, "source": "wav_peaks",
+                "capture_offset_ms": testbed_audio.capture_offset_ms(uri),
+                **peaks}
     shape = testbed_audio.load_npz_shape(uri)
     if shape is not None:
         return {"uri": uri, "source": "npz_rms_fallback", **shape}

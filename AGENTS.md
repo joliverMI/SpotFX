@@ -7127,11 +7127,21 @@ race exists for anything else that writes into `audio_shapes/` — write atomica
 (`services/audio_shape_service.py`). Beginning: pre-roll from the always-on
 PCM ring buffer only ran for `force_recapture=True` ("to preserve legacy
 behavior"), silently dropping the head of every ORDINARY capture between
-song-start and URI-detection (typically 5-10s) — the origin timestamp
-(`song_start`) is already correctly derived from the acoustic boundary (or
-Spotify's progress estimate, for a session's first capture) regardless of
-force_recapture, so pre-rolling from it is safe either way; it now runs
-unconditionally whenever the ring buffer has PCM to offer. End: both
+song-start and URI-detection (typically 5-10s). It now runs for an ordinary
+TRACK CHANGE too — but **gated on `at_track_boundary` (or an explicit
+force-recapture), NEVER on every `_start`**. The splice is only sound when
+the ring buffer between `song_start` and now really is THIS song's own
+contiguous audio, and the boundary flag is exactly that evidence:
+`on_track_change` saw the URI flip into this track and computed the
+acoustic boundary `song_start` came from. A MID-SONG start has no such
+signal — `_start` also runs from `on_track_change`'s tail for any playing
+song with no complete shape (a resume after a pause discarded a too-short
+partial), where `song_start` is `now - progress` and the intervening ring
+buffer holds the PAUSE. Splicing there stamped silence as the song's own
+head, fed it to librosa AND the WAV, and inflated the `captured_ms` the
+too-short guard reads — a shape that should have been rejected persisted
+with minutes of wrong audio. So a mid-song start takes the ordinary
+no-pre-roll path and says so in the log. End: both
 tail-wait sites (`on_track_change`'s boundary-wait, `_stop_and_save`'s
 tail-wait) used `if 0 < wait_s <= 3.0: sleep(wait_s)` — a wait that needed
 MORE than 3s got skipped ENTIRELY (zero wait) rather than shortened, which
@@ -7141,7 +7151,9 @@ level, one definition instead of two inline copies) now sleeps
 `min(needed, cap)` at both sites instead of an all-or-nothing window. Spec:
 `tests/test_audio_shape_capture_trim.py` (no live audio device — the ring
 buffer / capture stream / recorder are faked at the seam, matching this
-file's own "no live access from tests, ever" rule).
+file's own "no live access from tests, ever" rule; it carries BOTH the
+track-change case that must splice and the mid-song-resume case that must
+not).
 
 ## The music-analysis test bed (`/testbed`)
 
@@ -7252,6 +7264,21 @@ The waveform lane falls back to production's `.npz` RMS-envelope shape
 (retained for every played song, unlike the WAV) when nothing is pinned,
 labeled honestly as coarse rather than silently rendering nothing.
 
+**A PINNED WAV'S SAMPLE 0 IS NOT SONG-TIME 0** — a capture starts mid-song,
+so a waveform drawn from the left edge sits EARLIER than every mark lane by
+the capture lag (5-10s, the code's own figure). `testbed_audio.
+capture_offset_ms(uri)` is the one resolver and `/waveform` carries it on
+the `wav_peaks` payload, resolved at READ time so a pin taken before this
+existed gets it too. It reads the `.npz` sidecar's own first
+`timestamps_ms` — the song-relative stamp `AudioCaptureStream` gave the
+first PCM it held — and **deliberately NOT `LibrosaAnalysis.
+librosa_offset_ms`**, which this file already records as unreliable. `None`
+means genuinely UNKNOWN: the lane then relabels itself "start time
+unknown", greys its trace and captions that it is not aligned, rather than
+drawing at a position it cannot justify. The page's own timebase counts a
+WAV as ending at `capture_offset_ms + duration_ms`, since `duration_ms` is
+the recording's LENGTH and not the song's end.
+
 **Push-to-real is gated, structurally, not by UI convention**
 (`testbed_promote.py`): `promote()` refuses (`PromotionNotConfirmed`,
 writes nothing, logs the refusal) unless `confirmed=True` arrives on the
@@ -7308,7 +7335,13 @@ engine picker, `TestbedLaneBar.tsx` (waveform/energy lane + his marks +
 up to two engine lanes, green/amber/red tinting by match tightness — the
 `ReviewLaneBar` pattern generalized to N lanes), `TestbedMetricsPanel.tsx`
 (live P/R/F1 table + tolerance slider), and `PromotionReviewDialog.tsx`
-(the review gate's UI half). **EVERY LANE IS THE SAME `ms / durationMs`
+(the review gate's UI half). **A TINT MEANS WHAT THE LEGEND SAYS**: the
+dim/grey `extra` swatch is documented as an ENGINE mark with no match to
+any of his, so his OWN marks under a no-metrics condition (the selected
+engine has nothing precomputed for this song — every song today for
+`beat_this`) render `unscored`, never `extra`; nothing was compared, so
+neither "matched" nor "over-segmented" is true of them.
+**EVERY LANE IS THE SAME `ms / durationMs`
 SCALE** — the waveform used to position its buckets by INDEX across the
 full lane width, so it drifted against every mark lane beside it by
 whatever the timebase exceeded the WAV's own duration; `durationMs` is
