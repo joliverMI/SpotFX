@@ -11,15 +11,17 @@
  * and spectra/services/testbed_promote.py). */
 import { useEffect, useMemo, useState } from 'react';
 import HelpLink from '../help/HelpLink';
-import { useProfileByUri } from '../timeline/queries';
 import {
-  useTestbedAudioPin, useTestbedAudioUnpin, useTestbedCompare, useTestbedMarks,
+  useTestbedAudioPin, useTestbedAudioUnpin, useTestbedEngineMarks, useTestbedMarks,
   useTestbedPromotions, useTestbedSongs, useTestbedWaveform,
 } from '../queries';
-import type { TestbedEstimateMark, TestbedReferenceMark } from '../types';
+import type {
+  TestbedCompareResult, TestbedEstimateMark, TestbedMetrics, TestbedReferenceMark, TestbedSong,
+} from '../types';
 import PromotionReviewDialog from './components/PromotionReviewDialog';
 import TestbedLaneBar from './components/TestbedLaneBar';
 import TestbedMetricsPanel from './components/TestbedMetricsPanel';
+import { matchMarks } from './metrics';
 
 const ENGINE_MARK_KINDS: Record<string, { label: string; kinds: { key: string; label: string }[] }> = {
   librosa: {
@@ -39,15 +41,35 @@ const ENGINE_MARK_KINDS: Record<string, { label: string; kinds: { key: string; l
   },
 };
 
-function SongPickerButton({ uri, active, onClick }: { uri: string; active: boolean; onClick: () => void }) {
-  const { data: profile } = useProfileByUri(uri);
-  const label = profile?.title
-    ? `${profile.title}${profile.artist ? ` — ${profile.artist}` : ''}`
-    : uri.split(':').pop()?.slice(0, 14) ?? uri;
+/** Labels come off the /songs listing itself (title/artist read from the
+ * editor-copy profile in the same one-pass scan that reads provenance) —
+ * never a per-song profile query, which at his corpus size is ~850
+ * simultaneous requests through the reverse proxy on first mount. */
+function SongPickerButton({ song, active, onClick }: { song: TestbedSong; active: boolean; onClick: () => void }) {
+  const label = song.title
+    ? `${song.title}${song.artist ? ` — ${song.artist}` : ''}`
+    : song.uri.split(':').pop()?.slice(0, 14) ?? song.uri;
   return (
-    <button className={active ? 'primary' : ''} onClick={onClick} title={uri}>
+    <button className={active ? 'primary' : ''} onClick={onClick} title={song.uri}>
       {label}
     </button>
+  );
+}
+
+/** P/R/F1 + matched pairs for one engine lane against the active reference
+ * set, computed locally with the byte-for-byte port of the server's
+ * matcher — the indices in `matches` are into exactly these two arrays,
+ * which is what the lanes' tinting reads. null = engine not computed. */
+function localMetrics(
+  engineMarks: TestbedCompareResult | undefined,
+  referenceMarks: TestbedReferenceMark[],
+  toleranceMs: number,
+): TestbedMetrics | null {
+  if (!engineMarks?.available) return null;
+  return matchMarks(
+    referenceMarks.map((m) => m.timestamp_ms),
+    engineMarks.estimate.map((m) => m.time_ms),
+    toleranceMs,
   );
 }
 
@@ -72,9 +94,9 @@ export default function TestbedPage() {
   const song = songs?.find((s) => s.uri === uri) ?? null;
   const { data: marks } = useTestbedMarks(uri);
   const { data: waveform } = useTestbedWaveform(uri);
-  const { data: compareA } = useTestbedCompare(uri, engineA.engine, engineA.kind, reference, toleranceMs);
-  const { data: compareB } = useTestbedCompare(
-    uri, engineB?.engine ?? null, engineB?.kind ?? null, reference, toleranceMs,
+  const { data: engineMarksA } = useTestbedEngineMarks(uri, engineA.engine, engineA.kind);
+  const { data: engineMarksB } = useTestbedEngineMarks(
+    uri, engineB?.engine ?? null, engineB?.kind ?? null,
   );
   const { data: promotions } = useTestbedPromotions(uri);
 
@@ -83,6 +105,7 @@ export default function TestbedPage() {
 
   const referenceMarks = marks?.transitions ?? [];
   const flareMarks = marks?.flares ?? [];
+  const activeReferenceMarks = reference === 'transitions' ? referenceMarks : flareMarks;
   const durationMs = useMemo(() => {
     const fromWaveform = waveform?.duration_ms ?? 0;
     const fromMarks = Math.max(
@@ -92,16 +115,25 @@ export default function TestbedPage() {
     return Math.max(fromWaveform, fromMarks * 1.05, 1);
   }, [waveform, referenceMarks, flareMarks]);
 
+  const metricsA = useMemo(
+    () => localMetrics(engineMarksA, activeReferenceMarks, toleranceMs),
+    [engineMarksA, activeReferenceMarks, toleranceMs],
+  );
+  const metricsB = useMemo(
+    () => localMetrics(engineMarksB, activeReferenceMarks, toleranceMs),
+    [engineMarksB, activeReferenceMarks, toleranceMs],
+  );
+
   const engineLanes = [
     {
       key: 'a', label: ENGINE_MARK_KINDS[engineA.engine]?.label ?? engineA.engine,
-      estimate: (compareA?.estimate ?? []) as TestbedEstimateMark[],
-      metrics: compareA?.metrics,
+      estimate: (engineMarksA?.estimate ?? []) as TestbedEstimateMark[],
+      metrics: metricsA,
     },
     ...(engineB ? [{
       key: 'b', label: ENGINE_MARK_KINDS[engineB.engine]?.label ?? engineB.engine,
-      estimate: (compareB?.estimate ?? []) as TestbedEstimateMark[],
-      metrics: compareB?.metrics,
+      estimate: (engineMarksB?.estimate ?? []) as TestbedEstimateMark[],
+      metrics: metricsB,
     }] : []),
   ];
 
@@ -126,7 +158,7 @@ export default function TestbedPage() {
         ) : (
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
             {songs.map((s) => (
-              <SongPickerButton key={s.uri} uri={s.uri} active={s.uri === uri} onClick={() => setUri(s.uri)} />
+              <SongPickerButton key={s.uri} song={s} active={s.uri === uri} onClick={() => setUri(s.uri)} />
             ))}
           </div>
         )}
@@ -156,7 +188,9 @@ export default function TestbedPage() {
                 </div>
               </div>
               <div>
-                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Retained audio</div>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  Retained audio <HelpLink topic="testbed-audio-retention" title="Pinning a song's audio" />
+                </div>
                 {song.audio.pinned ? (
                   <button onClick={() => unpin.mutate(uri)} disabled={unpin.isPending}>
                     ⛓ Pinned — unpin
@@ -183,7 +217,9 @@ export default function TestbedPage() {
           </div>
 
           <div className="card">
-            <div className="card-title">Engines (A/B)</div>
+            <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              Engines (A/B) <HelpLink topic="testbed-engines" title="Engines" />
+            </div>
             <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 12 }}>
               <EnginePicker
                 label="Engine A" value={engineA}
@@ -194,6 +230,9 @@ export default function TestbedPage() {
                 label="Engine B (optional)"
                 value={engineB} onChange={setEngineB} song={song} clearable
               />
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+              Lanes <HelpLink topic="testbed-lanes-and-tolerance" title="Lanes, tinting, and the tolerance slider" />
             </div>
             <TestbedLaneBar
               durationMs={durationMs}
@@ -218,8 +257,8 @@ export default function TestbedPage() {
             <div className="card-title">Metrics</div>
             <TestbedMetricsPanel
               rows={[
-                { label: engineLanes[0].label, metrics: compareA?.metrics, available: !!compareA?.available },
-                ...(engineB ? [{ label: engineLanes[1]?.label ?? 'Engine B', metrics: compareB?.metrics, available: !!compareB?.available }] : []),
+                { label: engineLanes[0].label, metrics: metricsA, available: !!engineMarksA?.available },
+                ...(engineB ? [{ label: engineLanes[1]?.label ?? 'Engine B', metrics: metricsB, available: !!engineMarksB?.available }] : []),
               ]}
               toleranceMs={toleranceMs}
               onToleranceChange={setToleranceMs}

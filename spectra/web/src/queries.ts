@@ -1156,15 +1156,20 @@ export function useTestbedWaveform(uri: string | null) {
   });
 }
 
-export function useTestbedCompare(
+/** One engine's detected marks for a song, fetched ONCE per (song, engine,
+ * kind) — deliberately keyed WITHOUT the tolerance or reference set. The
+ * page recomputes P/R/F1 and every tint client-side with
+ * testbed/metrics.ts's matchMarks (the byte-for-byte port of the server's
+ * matcher) on every slider step, so a drag never round-trips; the
+ * `metrics`/`reference_marks` the server includes here are at its own
+ * defaults and are superseded by that local computation. */
+export function useTestbedEngineMarks(
   uri: string | null, engine: string | null, markKind: string | null,
-  reference: 'transitions' | 'flares', toleranceMs: number,
 ) {
   return useQuery({
-    queryKey: ['testbed-compare', uri, engine, markKind, reference, toleranceMs],
+    queryKey: ['testbed-engine-marks', uri, engine, markKind],
     queryFn: () => apiGet<TestbedCompareResult>(
-      `/testbed/compare?uri=${enc(uri!)}&engine=${enc(engine!)}&mark_kind=${enc(markKind!)}`
-      + `&reference=${enc(reference)}&tolerance_ms=${toleranceMs}`),
+      `/testbed/compare?uri=${enc(uri!)}&engine=${enc(engine!)}&mark_kind=${enc(markKind!)}`),
     enabled: !!uri && !!engine && !!markKind,
   });
 }

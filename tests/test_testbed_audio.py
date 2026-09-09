@@ -121,3 +121,65 @@ def test_npz_shape_fallback_reads_production_rms_envelope():
 def test_npz_shape_fallback_none_when_nothing_captured():
     from spectra.services import testbed_audio
     assert testbed_audio.load_npz_shape("spotify:track:neverseen") is None
+
+
+def test_a_failure_mid_copy_leaves_no_partial_wav_and_no_registry_entry(monkeypatch):
+    """A crash or kill halfway through the WAV copy must not leave a
+    truncated .wav at wav_copy_path() — scripts/testbed_precompute.py only
+    checks that the path exists before feeding it to an engine."""
+    import shutil
+    from spectra import config as scfg
+    from spectra.services import testbed_audio
+    _seed_source_wav(scfg)
+    source = scfg.AUDIO_SHAPES_DIR / "Artist - Song.wav"
+    real_copyfile = shutil.copyfile
+
+    def _dies_halfway(src, dst, *a, **kw):
+        data = source.read_bytes()
+        with open(dst, "wb") as fh:
+            fh.write(data[: len(data) // 2])
+        raise OSError("disk full")
+    monkeypatch.setattr(shutil, "copyfile", _dies_halfway)
+
+    with pytest.raises(OSError):
+        testbed_audio.pin(URI)
+    assert not testbed_audio.wav_copy_path(URI).exists()
+    assert list(scfg.TESTBED_AUDIO_DIR.glob("*.tmp")) == []
+    assert testbed_audio.is_pinned(URI) is False
+    assert testbed_audio.status(URI)["pinned"] is False
+
+    monkeypatch.setattr(shutil, "copyfile", real_copyfile)
+    result = testbed_audio.pin(URI)
+    assert result["status"] == "pinned"
+    assert testbed_audio.wav_copy_path(URI).read_bytes() == source.read_bytes()
+    assert list(scfg.TESTBED_AUDIO_DIR.glob("*.tmp")) == []
+
+
+def test_concurrent_pins_of_two_songs_both_land_in_the_registry():
+    """pin() runs off the event loop (spectra/api/testbed.py), so two
+    presses can overlap; the registry's read-modify-write must not lose
+    one of them."""
+    import threading
+    from spectra import config as scfg
+    from spectra.services import testbed_audio
+    other = "spotify:track:testbedaudio2"
+    _seed_source_wav(scfg)
+    (scfg.AUDIO_SHAPES_DIR / "Other - Song.json").write_text(
+        json.dumps({"spotify_uri": other}), encoding="utf-8")
+    sf.write(str(scfg.AUDIO_SHAPES_DIR / "Other - Song.wav"),
+             np.zeros(8000, dtype=np.float32), 8000)
+
+    barrier = threading.Barrier(2)
+    results = {}
+
+    def _pin(uri):
+        barrier.wait()
+        results[uri] = testbed_audio.pin(uri)
+
+    threads = [threading.Thread(target=_pin, args=(u,)) for u in (URI, other)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert {r["status"] for r in results.values()} == {"pinned"}
+    assert set(testbed_audio.list_pinned()) == {URI, other}

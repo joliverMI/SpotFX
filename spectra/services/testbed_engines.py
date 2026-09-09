@@ -58,9 +58,12 @@ class EngineMark:
     score: Optional[float] = None
 
 
-def _librosa_marks(uri: str) -> Optional[list[EngineMark]]:
-    sections = analysis_reader.sections_for_uri(uri)
-    beats = analysis_reader.beats_for_uri(uri)
+def librosa_marks_for_stem(stem: Optional[str]) -> Optional[list[EngineMark]]:
+    """The librosa baseline's marks off ONE parse of <stem>.librosa.json;
+    None when there is no stem or nothing usable in the file."""
+    doc = analysis_reader.librosa_analysis_for_stem(stem)
+    sections = (doc or {}).get("sections") or None
+    beats = (doc or {}).get("beats") or None
     if sections is None and beats is None:
         return None
     out: list[EngineMark] = []
@@ -78,6 +81,10 @@ def _librosa_marks(uri: str) -> Optional[list[EngineMark]]:
     return sorted(out, key=lambda m: m.time_ms)
 
 
+def _librosa_marks(uri: str) -> Optional[list[EngineMark]]:
+    return librosa_marks_for_stem(analysis_reader.stem_for_uri(uri))
+
+
 def marks_for(engine: str, uri: str) -> Optional[list[EngineMark]]:
     """None = not available for this song (either the engine hasn't been
     precomputed for it, or — for librosa — no analysis exists yet)."""
@@ -91,14 +98,23 @@ def marks_for(engine: str, uri: str) -> Optional[list[EngineMark]]:
             for m in cached.get("marks", [])]
 
 
-def availability_for(uri: str) -> dict[str, dict]:
+def availability_for(uri: str, *,
+                     stem_index: Optional[dict[str, str]] = None) -> dict[str, dict]:
     """Per-engine {available, computed_at, mark_count} — the songs/engines
     listing's own status, so the frontend can say "not computed yet"
-    instead of an empty lane."""
+    instead of an empty lane.
+
+    `stem_index`: a snapshot from analysis_reader.stem_index(), for a
+    caller walking the whole corpus — a per-song stem_for_uri() lookup
+    rebuilds the entire sidecar index on every miss, i.e. once per song
+    that has no captured audio."""
     out: dict[str, dict] = {}
     for key, meta in ENGINES.items():
         if key == ENGINE_LIBROSA:
-            marks = _librosa_marks(uri)
+            if stem_index is None:
+                marks = _librosa_marks(uri)
+            else:
+                marks = librosa_marks_for_stem(stem_index.get(uri))
             out[key] = {
                 "label": meta["label"], "kinds": meta["kinds"],
                 "available": marks is not None,

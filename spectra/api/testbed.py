@@ -21,30 +21,51 @@ song this build hasn't been pinned/precomputed for.
 """
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from spectra.models.trigger import TriggerAction
-from spectra.services import (testbed_audio, testbed_engines, testbed_marks,
-                              testbed_metrics, testbed_promote, trigger_store)
+from spectra.services import (analysis_reader, testbed_audio, testbed_engines,
+                              testbed_marks, testbed_metrics, testbed_promote,
+                              trigger_store)
 
 router = APIRouter(prefix="/api/testbed", tags=["spectra-testbed"])
 
 
-@router.get("/songs")
-async def list_songs():
+def _song_list() -> list[dict]:
+    """ONE read of each store for the whole corpus — triggers.json once
+    (~9.5MB on his real corpus), the profile directory once, the
+    audio-shape index once, the pin registry once — then a per-song walk
+    over what's already in memory. The per-song helpers this composes
+    (marks_for_song / availability_for / status) each re-read their store
+    on every call; looping them over ~850 songs is a full parse per song."""
+    stems = analysis_reader.stem_index()
+    pinned = testbed_audio.list_pinned()
     out = []
-    for uri in testbed_marks.known_uris():
-        marks = testbed_marks.marks_for_song(uri)
+    for uri, marks in testbed_marks.all_song_marks().items():
         out.append({
             "uri": uri,
+            "title": marks.title,
+            "artist": marks.artist,
             "n_transitions": len(marks.transitions),
             "n_flares": len(marks.flares),
             "provenance": marks.provenance.__dict__,
-            "audio": testbed_audio.status(uri),
-            "engines": testbed_engines.availability_for(uri),
+            "audio": testbed_audio.status(uri, stem_index=stems, registry=pinned),
+            "engines": testbed_engines.availability_for(uri, stem_index=stems),
         })
     return out
+
+
+@router.get("/songs")
+async def list_songs():
+    """Runs off the event loop (asyncio.to_thread, the sync-from-profile
+    precedent in spectra/api/triggers.py): even as one read per store this
+    is synchronous file I/O over the whole corpus, and this process's
+    bridge polls / trigger ticks / WS broadcasts must not stall behind a
+    page mount."""
+    return await asyncio.to_thread(_song_list)
 
 
 @router.get("/marks")
@@ -52,6 +73,8 @@ async def get_marks(uri: str = Query(...)):
     marks = testbed_marks.marks_for_song(uri)
     return {
         "uri": uri,
+        "title": marks.title,
+        "artist": marks.artist,
         "transitions": [m.__dict__ for m in marks.transitions],
         "flares": [m.__dict__ for m in marks.flares],
         "provenance": marks.provenance.__dict__,
@@ -88,7 +111,8 @@ async def compare(
     engine_marks = testbed_engines.marks_for(engine, uri)
     if engine_marks is None:
         return {"uri": uri, "engine": engine, "mark_kind": mark_kind,
-                "available": False, "estimate": [], "reference": [],
+                "reference": reference, "tolerance_ms": tolerance_ms,
+                "available": False, "estimate": [], "reference_marks": [],
                 "metrics": None}
 
     estimate = [m for m in engine_marks if m.kind == mark_kind]
@@ -120,7 +144,10 @@ async def audio_status(uri: str = Query(...)):
 
 @router.post("/audio/pin")
 async def audio_pin(uri: str = Query(...)):
-    result = testbed_audio.pin(uri)
+    """Off the event loop: a pin copies a full-length WAV (tens of MB for
+    a four-minute capture) and decodes it again for the peaks — seconds of
+    blocking I/O the trigger engine and bridge must not wait behind."""
+    result = await asyncio.to_thread(testbed_audio.pin, uri)
     if result.get("status") in ("unknown_song", "no_source_wav"):
         raise HTTPException(409, result["status"])
     return result

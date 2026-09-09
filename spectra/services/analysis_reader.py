@@ -65,33 +65,44 @@ def stem_for_uri(uri: str) -> Optional[str]:
     return stem
 
 
-def sections_for_uri(uri: str) -> Optional[list]:
-    stem = stem_for_uri(uri)
+def stem_index() -> dict[str, str]:
+    """A snapshot of the whole uri -> stem index after ONE rebuild — for a
+    bulk listing over many URIs. stem_for_uri() rebuilds the entire index
+    (a glob + parse of every sidecar under AUDIO_SHAPES_DIR) on every MISS,
+    which is right for a live lookup of one freshly captured song and wrong
+    for a corpus walk, where every song without captured audio would pay a
+    full rebuild per lookup."""
+    _build_index()
+    return dict(_shape_index)
+
+
+def librosa_analysis_for_stem(stem: Optional[str]) -> Optional[dict]:
+    """The parsed <stem>.librosa.json, or None when there is no stem, no
+    file, or it doesn't parse — ONE read for every key a caller wants
+    (sections, beats, ...) rather than one parse per key."""
     if stem is None:
         return None
     path = config.AUDIO_SHAPES_DIR / f"{stem}.librosa.json"
     try:
-        sections = json.loads(path.read_text(encoding="utf-8")).get("sections")
-        return sections or None
+        doc = json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return None
+    return doc if isinstance(doc, dict) else None
+
+
+def sections_for_uri(uri: str) -> Optional[list]:
+    doc = librosa_analysis_for_stem(stem_for_uri(uri))
+    return (doc or {}).get("sections") or None
 
 
 def beats_for_uri(uri: str) -> Optional[list]:
     """Raw beat list (each a LibrosaBeat dict: ms + is_downbeat + per-beat
     RMS/onset scores) from the same .librosa.json sections_for_uri reads —
     the test bed's own librosa baseline engine
-    (spectra/services/testbed_engines.py) uses this plus sections_for_uri
-    rather than opening a third parse of the file."""
-    stem = stem_for_uri(uri)
-    if stem is None:
-        return None
-    path = config.AUDIO_SHAPES_DIR / f"{stem}.librosa.json"
-    try:
-        beats = json.loads(path.read_text(encoding="utf-8")).get("beats")
-        return beats or None
-    except Exception:
-        return None
+    (spectra/services/testbed_engines.py) reads both off one
+    librosa_analysis_for_stem() parse."""
+    doc = librosa_analysis_for_stem(stem_for_uri(uri))
+    return (doc or {}).get("beats") or None
 
 
 def section_energy_at(uri: str, now_ms: int) -> Optional[float]:

@@ -73,16 +73,32 @@ def _save_raw(data: dict) -> None:
         raise
 
 
-def list_for_song(uri: str) -> list[SpectraTrigger]:
-    raw = _load_raw().get(uri, [])
+def _parse_rows(uri: str, rows: list[dict]) -> list[SpectraTrigger]:
     out: list[SpectraTrigger] = []
-    for v in raw:
+    for v in rows:
         try:
             out.append(SpectraTrigger(**v))
         except Exception as exc:
             logger.warning("trigger %s (song %s) skipped: %s",
                            v.get("id"), uri, exc)
     return sorted(out, key=lambda t: t.timestamp_ms)
+
+
+def list_for_song(uri: str) -> list[SpectraTrigger]:
+    return _parse_rows(uri, _load_raw().get(uri, []))
+
+
+def list_all() -> dict[str, list[SpectraTrigger]]:
+    """Every song's triggers from ONE read of triggers.json — the read
+    shape a whole-corpus listing needs (spectra/services/testbed_marks.py's
+    song list). list_for_song() is deliberately per-song (one lookup, one
+    read), but it re-reads and re-parses the entire ~9.5MB file every call;
+    looping it over every stored URI costs a full parse per song, on the
+    live process's event loop when called from a handler. Songs whose row
+    list is empty are omitted, matching the store's own delete() rule that
+    an emptied song is dropped from the file."""
+    raw = _load_raw()
+    return {uri: _parse_rows(uri, rows) for uri, rows in raw.items() if rows}
 
 
 def upsert(uri: str, trigger: SpectraTrigger) -> None:

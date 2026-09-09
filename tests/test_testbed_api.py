@@ -183,3 +183,88 @@ def test_promote_confirmed_lands_a_real_trigger_and_logs_it():
     log = client.get(f"/api/testbed/promotions?uri={URI}").json()
     assert len(log) == 1
     assert log[0]["status"] == "promoted"
+
+
+def test_songs_carry_title_and_artist_from_the_editor_profile():
+    """The page labels every song from this ONE listing — never one
+    /api/profiles/by-uri request per song."""
+    from spectra import config as scfg
+    _write_trigger(URI, 10000, "fire_scene")
+    (scfg.PROFILES_DIR / "A - T.json").write_text(json.dumps({
+        "spotify_uri": URI, "title": "Dopamine", "artist": "Purple Disco",
+        "duration_ms": 1000, "verified": True, "ai_generated": False, "triggers": [],
+    }), encoding="utf-8")
+    _write_trigger("spotify:track:noprofile", 1000, "fire_scene")
+
+    client = _client()
+    rows = {s["uri"]: s for s in client.get("/api/testbed/songs").json()}
+    assert (rows[URI]["title"], rows[URI]["artist"]) == ("Dopamine", "Purple Disco")
+    assert rows[URI]["provenance"]["found"] is True
+    assert (rows["spotify:track:noprofile"]["title"],
+            rows["spotify:track:noprofile"]["artist"]) == (None, None)
+
+    marks = client.get(f"/api/testbed/marks?uri={URI}").json()
+    assert (marks["title"], marks["artist"]) == ("Dopamine", "Purple Disco")
+
+
+def test_songs_listing_and_pin_run_off_the_event_loop(monkeypatch):
+    """Both are synchronous file I/O over the corpus / a whole WAV; they
+    must never run on the SPECTRA process's event loop, where they would
+    stall the trigger engine, the bridge poll and every WS broadcast."""
+    import asyncio
+    from spectra import config as scfg
+    from spectra.services import testbed_audio, testbed_marks
+    import numpy as np
+    import soundfile as sf
+
+    _write_trigger(URI, 10000, "fire_scene")
+    stem = "Artist - Song"
+    (scfg.AUDIO_SHAPES_DIR / f"{stem}.json").write_text(
+        json.dumps({"spotify_uri": URI}), encoding="utf-8")
+    sf.write(str(scfg.AUDIO_SHAPES_DIR / f"{stem}.wav"),
+             np.zeros(4000, dtype="float32"), 8000)
+
+    on_loop = {}
+
+    def _ran_on_loop() -> bool:
+        try:
+            asyncio.get_running_loop()
+            return True
+        except RuntimeError:
+            return False
+
+    real_listing = testbed_marks.all_song_marks
+    real_pin = testbed_audio.pin
+
+    def _listing():
+        on_loop["songs"] = _ran_on_loop()
+        return real_listing()
+
+    def _pin(uri):
+        on_loop["pin"] = _ran_on_loop()
+        return real_pin(uri)
+
+    monkeypatch.setattr(testbed_marks, "all_song_marks", _listing)
+    monkeypatch.setattr(testbed_audio, "pin", _pin)
+
+    client = _client()
+    assert client.get("/api/testbed/songs").status_code == 200
+    assert client.post(f"/api/testbed/audio/pin?uri={URI}").status_code == 200
+    assert on_loop == {"songs": False, "pin": False}
+
+
+def test_compare_unavailable_payload_keeps_the_available_shape():
+    """The "not computed" branch must describe itself the way the computed
+    one does (types.ts's TestbedCompareResult): `reference` is the set name,
+    `reference_marks` the (empty) list — never a list under `reference`."""
+    client = _client()
+    resp = client.get(
+        f"/api/testbed/compare?uri={URI}&engine=librosa&mark_kind=section_boundary"
+        "&reference=flares&tolerance_ms=250",
+    ).json()
+    assert resp["available"] is False
+    assert resp["reference"] == "flares"
+    assert resp["reference_marks"] == []
+    assert resp["estimate"] == []
+    assert resp["tolerance_ms"] == 250.0
+    assert resp["metrics"] is None

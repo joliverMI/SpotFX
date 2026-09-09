@@ -31,6 +31,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from spectra import config
+from spectra.models.trigger import SpectraTrigger
 from spectra.services import trigger_store
 
 logger = logging.getLogger(__name__)
@@ -61,12 +62,17 @@ class SongMarks:
     transitions: list[ReferenceMark] = field(default_factory=list)
     flares: list[ReferenceMark] = field(default_factory=list)
     provenance: Provenance = field(default_factory=Provenance)
+    # From the same editor-copy profile the provenance is read off — the
+    # song list carries these so the page can label ~850 songs from ONE
+    # listing instead of one /api/profiles/by-uri round-trip per song.
+    title: Optional[str] = None
+    artist: Optional[str] = None
 
 
-def _split(uri: str) -> tuple[list[ReferenceMark], list[ReferenceMark]]:
+def _split(triggers: list[SpectraTrigger]) -> tuple[list[ReferenceMark], list[ReferenceMark]]:
     transitions: list[ReferenceMark] = []
     flares: list[ReferenceMark] = []
-    for t in trigger_store.list_for_song(uri):
+    for t in triggers:
         mark = ReferenceMark(id=t.id, timestamp_ms=t.timestamp_ms,
                              kind=t.action.kind, enabled=t.enabled)
         if t.action.kind in TRANSITION_KINDS:
@@ -74,6 +80,29 @@ def _split(uri: str) -> tuple[list[ReferenceMark], list[ReferenceMark]]:
         elif t.action.kind in FLARE_KINDS:
             flares.append(mark)
     return transitions, flares
+
+
+@dataclass(frozen=True)
+class _ProfileSummary:
+    provenance: Provenance
+    title: Optional[str]
+    artist: Optional[str]
+
+
+_NO_PROFILE = _ProfileSummary(Provenance(), None, None)
+
+
+def _summarize(profile: dict) -> _ProfileSummary:
+    return _ProfileSummary(
+        provenance=Provenance(
+            found=True,
+            ai_generated=bool(profile.get("ai_generated", False)),
+            verified=bool(profile.get("verified", False)),
+            editor_trigger_count=len(profile.get("triggers") or []),
+        ),
+        title=(profile.get("title") or None),
+        artist=(profile.get("artist") or None),
+    )
 
 
 def _find_profile(uri: str) -> Optional[dict]:
@@ -91,27 +120,62 @@ def _find_profile(uri: str) -> Optional[dict]:
             data = json.loads(path.read_text(encoding="utf-8"))
         except Exception:
             continue
-        if data.get("spotify_uri") == uri:
+        if isinstance(data, dict) and data.get("spotify_uri") == uri:
             return data
     return None
+
+
+def _profile_index() -> dict[str, _ProfileSummary]:
+    """ONE pass over storage/profiles/*.json -> {spotify_uri: summary}, for
+    the whole-corpus song list. _find_profile() stops at the first match
+    and is the right shape for one song; called once per stored URI it
+    re-parses the profile directory per song (O(songs x profiles))."""
+    profiles_dir = config.PROFILES_DIR
+    out: dict[str, _ProfileSummary] = {}
+    if not profiles_dir.exists():
+        return out
+    for path in profiles_dir.glob("*.json"):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        uri = data.get("spotify_uri") if isinstance(data, dict) else None
+        if uri and uri not in out:
+            out[uri] = _summarize(data)
+    return out
 
 
 def provenance_for(uri: str) -> Provenance:
     profile = _find_profile(uri)
     if profile is None:
         return Provenance()
-    return Provenance(
-        found=True,
-        ai_generated=bool(profile.get("ai_generated", False)),
-        verified=bool(profile.get("verified", False)),
-        editor_trigger_count=len(profile.get("triggers") or []),
-    )
+    return _summarize(profile).provenance
+
+
+def _song_marks(uri: str, triggers: list[SpectraTrigger],
+                summary: _ProfileSummary) -> SongMarks:
+    transitions, flares = _split(triggers)
+    return SongMarks(uri=uri, transitions=transitions, flares=flares,
+                     provenance=summary.provenance,
+                     title=summary.title, artist=summary.artist)
 
 
 def marks_for_song(uri: str) -> SongMarks:
-    transitions, flares = _split(uri)
-    return SongMarks(uri=uri, transitions=transitions, flares=flares,
-                     provenance=provenance_for(uri))
+    profile = _find_profile(uri)
+    summary = _NO_PROFILE if profile is None else _summarize(profile)
+    return _song_marks(uri, trigger_store.list_for_song(uri), summary)
+
+
+def all_song_marks() -> dict[str, SongMarks]:
+    """marks_for_song() for every stored song, from ONE triggers.json read
+    and ONE profile-directory pass — the song list's read shape. Keyed by
+    URI in sorted order; a song with an empty row list is omitted, exactly
+    as known_uris() omits it."""
+    profiles = _profile_index()
+    out: dict[str, SongMarks] = {}
+    for uri, triggers in sorted(trigger_store.list_all().items()):
+        out[uri] = _song_marks(uri, triggers, profiles.get(uri, _NO_PROFILE))
+    return out
 
 
 def known_uris() -> list[str]:

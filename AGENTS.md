@@ -7183,6 +7183,18 @@ load-bearing, it's what keeps madmom out), invoked only by
 precedent) — code and published checkpoints are both MIT-licensed (checked
 before shipping; unlike madmom's CC-BY-NC-SA models), and an uninstalled
 host reports the engine "unavailable" rather than crashing anything.
+**`GET /api/testbed/songs` is ONE read per store, off the event loop**
+(`trigger_store.list_all` + `testbed_marks.all_song_marks` +
+`analysis_reader.stem_index`, composed in `spectra/api/testbed.py`'s
+`_song_list` under `asyncio.to_thread`, the `sync-from-profile` precedent) —
+never loop `marks_for_song`/`stem_for_uri` over the corpus in a handler: the
+former is a full ~9.5MB `triggers.json` parse PER SONG, and the latter
+rebuilds the whole audio-shape sidecar index on every MISS, i.e. once per
+stored song with no captured audio. The song list also carries each song's
+`title`/`artist` from the same one-pass profile scan its provenance comes
+from, so the page never fans out one `/api/profiles/by-uri` per song. A pin
+(a full WAV copy + decode) runs under `asyncio.to_thread` too, which is why
+`testbed_audio` locks its registry read-modify-write.
 
 **Test-bed audio retention is its OWN policy** (`testbed_audio.py`,
 Admiral-approved test-bed pinning), deliberately independent of

@@ -69,3 +69,59 @@ def test_known_uris_only_lists_songs_with_stored_triggers():
     _write_trigger(URI, 1000, "fire_scene")
     assert URI in testbed_marks.known_uris()
     assert "spotify:track:neverplaced" not in testbed_marks.known_uris()
+
+
+def _write_profile(scfg, uri, filename, **fields):
+    profile = {"spotify_uri": uri, "title": "T", "artist": "A", "duration_ms": 1000,
+               "verified": False, "ai_generated": False, "triggers": [], **fields}
+    (scfg.PROFILES_DIR / filename).write_text(json.dumps(profile), encoding="utf-8")
+
+
+def test_all_song_marks_agrees_with_per_song_reads_and_carries_title_artist():
+    from spectra import config as scfg
+    from spectra.services import testbed_marks
+    other = "spotify:track:testbedmarks2"
+    _write_trigger(URI, 1000, "fire_scene")
+    _write_trigger(URI, 3000, "fire_response", event_class="flare")
+    _write_trigger(other, 500, "fire_scene_update")
+    _write_profile(scfg, URI, "A - T.json", title="Dopamine", artist="Purple Disco",
+                   verified=True, ai_generated=True,
+                   triggers=[{"timestamp_ms": 1, "event_id": "e1"}])
+
+    listing = testbed_marks.all_song_marks()
+    assert list(listing) == testbed_marks.known_uris() == sorted([URI, other])
+    for uri, marks in listing.items():
+        single = testbed_marks.marks_for_song(uri)
+        assert marks.transitions == single.transitions
+        assert marks.flares == single.flares
+        assert marks.provenance == single.provenance
+        assert (marks.title, marks.artist) == (single.title, single.artist)
+    assert (listing[URI].title, listing[URI].artist) == ("Dopamine", "Purple Disco")
+    assert listing[URI].provenance.ai_generated is True
+    assert listing[URI].provenance.editor_trigger_count == 1
+    assert (listing[other].title, listing[other].artist) == (None, None)
+    assert listing[other].provenance.found is False
+
+
+def test_all_song_marks_reads_the_trigger_store_once_and_never_scans_profiles_per_song(monkeypatch):
+    """The whole point of the listing shape: N stored songs cost ONE
+    triggers.json parse and ONE profile-directory pass, not N of each."""
+    from spectra import config as scfg
+    from spectra.services import testbed_marks, trigger_store
+    uris = [f"spotify:track:bulk{i}" for i in range(5)]
+    for i, uri in enumerate(uris):
+        _write_trigger(uri, 1000 * (i + 1), "fire_scene")
+        _write_profile(scfg, uri, f"bulk{i}.json", title=f"Song {i}")
+
+    loads = []
+    real_load = trigger_store._load_raw
+    monkeypatch.setattr(trigger_store, "_load_raw",
+                        lambda: loads.append(1) or real_load())
+
+    def _per_song_scan(uri):
+        raise AssertionError(f"per-song profile scan for {uri}")
+    monkeypatch.setattr(testbed_marks, "_find_profile", _per_song_scan)
+
+    listing = testbed_marks.all_song_marks()
+    assert len(loads) == 1
+    assert [m.title for m in listing.values()] == [f"Song {i}" for i in range(5)]

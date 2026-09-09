@@ -27,10 +27,12 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shutil
 import tempfile
+import threading
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 import numpy as np
 
@@ -41,9 +43,34 @@ logger = logging.getLogger(__name__)
 
 _PEAKS_BUCKETS = 2000
 
+# pin()/unpin() run off the event loop (spectra/api/testbed.py hands them to
+# asyncio.to_thread — a WAV copy + decode is seconds of blocking I/O), so
+# two presses can genuinely overlap; the registry is a read-modify-write
+# and must not lose one of them.
+_registry_lock = threading.Lock()
+
 
 def _safe_stem(uri: str) -> str:
     return uri.replace(":", "_").replace("/", "_")
+
+
+def _replace_with(path: Path, fill: Callable[[str], None]) -> None:
+    """tmp + os.replace, the same atomic-landing shape every other store in
+    this feature uses: `fill(tmp_path)` writes the whole file, and `path`
+    either keeps its previous contents or becomes the complete new one —
+    never a truncated copy a crash mid-write would leave behind."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=path.name, suffix=".tmp")
+    os.close(fd)
+    try:
+        fill(tmp)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def _load_registry() -> dict:
@@ -56,19 +83,9 @@ def _load_registry() -> dict:
 
 
 def _save_registry(data: dict) -> None:
-    path = config.TESTBED_PINNED_FILE
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=path.name, suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            json.dump(data, fh, indent=2)
-        os.replace(tmp, path)
-    except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
+    _replace_with(config.TESTBED_PINNED_FILE,
+                  lambda tmp: Path(tmp).write_text(json.dumps(data, indent=2),
+                                                   encoding="utf-8"))
 
 
 def wav_copy_path(uri: str) -> Path:
@@ -130,30 +147,32 @@ def pin(uri: str) -> dict:
         return {"status": "no_source_wav"}
 
     dest = wav_copy_path(uri)
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_bytes(source.read_bytes())
+    _replace_with(dest, lambda tmp: shutil.copyfile(source, tmp))
 
     try:
         peaks = _compute_peaks(dest)
-        peaks_path(uri).write_text(json.dumps(peaks), encoding="utf-8")
+        _replace_with(peaks_path(uri),
+                      lambda tmp: Path(tmp).write_text(json.dumps(peaks), encoding="utf-8"))
         peaks_ok = True
     except Exception as exc:
         logger.warning("testbed pin: peaks computation failed for %s: %s", uri, exc)
         peaks_ok = False
 
-    registry = _load_registry()
-    registry[uri] = {"pinned_at": time.time(), "source_wav_name": source.name}
-    _save_registry(registry)
+    with _registry_lock:
+        registry = _load_registry()
+        registry[uri] = {"pinned_at": time.time(), "source_wav_name": source.name}
+        _save_registry(registry)
     logger.info("testbed audio pinned: %s (%s)", uri, source.name)
     return {"status": "pinned", "peaks_computed": peaks_ok}
 
 
 def unpin(uri: str) -> bool:
-    registry = _load_registry()
-    if uri not in registry:
-        return False
-    del registry[uri]
-    _save_registry(registry)
+    with _registry_lock:
+        registry = _load_registry()
+        if uri not in registry:
+            return False
+        del registry[uri]
+        _save_registry(registry)
     for p in (wav_copy_path(uri), peaks_path(uri)):
         try:
             p.unlink(missing_ok=True)
@@ -163,10 +182,16 @@ def unpin(uri: str) -> bool:
     return True
 
 
-def status(uri: str) -> dict:
-    registry = _load_registry()
+def status(uri: str, *, stem_index: Optional[dict[str, str]] = None,
+           registry: Optional[dict] = None) -> dict:
+    """`stem_index` / `registry`: snapshots (analysis_reader.stem_index(),
+    list_pinned()) for a caller walking the whole corpus, so a listing
+    reads each file once instead of once per song."""
+    if registry is None:
+        registry = _load_registry()
     entry = registry.get(uri)
-    stem = analysis_reader.stem_for_uri(uri)
+    stem = (analysis_reader.stem_for_uri(uri) if stem_index is None
+            else stem_index.get(uri))
     has_source_wav = stem is not None and (config.AUDIO_SHAPES_DIR / f"{stem}.wav").exists()
     return {
         "pinned": entry is not None,

@@ -1448,6 +1448,8 @@ export interface TestbedAudioStatus {
 
 export interface TestbedSong {
   uri: string;
+  title: string | null;
+  artist: string | null;
   n_transitions: number;
   n_flares: number;
   provenance: TestbedProvenance;
@@ -1464,6 +1466,8 @@ export interface TestbedReferenceMark {
 
 export interface TestbedMarks {
   uri: string;
+  title: string | null;
+  artist: string | null;
   transitions: TestbedReferenceMark[];
   flares: TestbedReferenceMark[];
   provenance: TestbedProvenance;

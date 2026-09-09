@@ -83,3 +83,31 @@ def test_availability_reports_both_engines_honestly():
     assert avail["librosa"]["mark_count"] == 3  # 1 boundary + 2 beats
     assert avail["beat_this"]["available"] is False
     assert avail["beat_this"]["mark_count"] == 0
+
+
+def test_availability_with_a_stem_index_snapshot_matches_the_lookup_path(monkeypatch):
+    """A whole-corpus listing hands availability_for() one snapshot of the
+    audio-shape index. It must answer exactly as the per-song lookup does,
+    and must NOT pay stem_for_uri()'s rebuild-on-miss for a song with no
+    captured audio — the per-song path rebuilds the entire sidecar index
+    on every such miss, once per unanalysed song."""
+    from spectra import config as scfg
+    from spectra.services import analysis_reader, testbed_engines
+    _seed_librosa_json(scfg)
+    unknown = "spotify:track:noaudioyet"
+
+    stems = analysis_reader.stem_index()
+    assert testbed_engines.availability_for(URI, stem_index=stems) == \
+        testbed_engines.availability_for(URI)
+    assert testbed_engines.availability_for(unknown, stem_index=stems) == \
+        testbed_engines.availability_for(unknown)
+
+    rebuilds = []
+    real_build = analysis_reader._build_index
+    monkeypatch.setattr(analysis_reader, "_build_index",
+                        lambda: rebuilds.append(1) or real_build())
+    testbed_engines.availability_for(unknown)
+    assert len(rebuilds) >= 1  # the per-song path's miss cost, for contrast
+    rebuilds.clear()
+    testbed_engines.availability_for(unknown, stem_index=stems)
+    assert rebuilds == []
