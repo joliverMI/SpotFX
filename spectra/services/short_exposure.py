@@ -140,6 +140,21 @@ Three things follow anyway, and none of them is a fudge:
     lever_not_connected` names the cap in the NO_SIGNAL sentence so the
     reader is sent to the light rather than to the camera.
 
+WHAT IS DELIBERATELY NOT CAPPED, and it is a real gap rather than an
+oversight: THE MAP. A night map still runs at whatever integration time he
+asks for, or at the camera's own converged exposure when he asks for
+nothing — so a map may still be taken in the half of the range this module
+distrusts, and the lever self-test that ran before it proved the lever only
+inside the SHORT regime. Two reasons it is left alone. A map's exposure is
+his (`capture_settings`' own "asking for nothing preserves today's
+behaviour exactly"), and capping it would change what every night run of
+his does on the strength of one camera's evidence. And a map is a
+DIFFERENT measurement from a decode: a footprint is compared against other
+footprints of the same pose and regime, where a gray-code stack is one
+measurement whose own internal comparison a wandering camera corrupts. If
+his maps turn out to wander too, the fix is to widen this deliberately —
+not to discover that it already had been.
+
 GAIN IS DELIBERATELY NOT RAISED to compensate. It is one of his four pinned
 levers, a run that wants it names it, and raising it unasked would lift the
 sensor's own noise into the very `lit - dark` difference this instrument
