@@ -213,7 +213,7 @@ def test_songs_listing_and_pin_run_off_the_event_loop(monkeypatch):
     stall the trigger engine, the bridge poll and every WS broadcast."""
     import asyncio
     from spectra import config as scfg
-    from spectra.services import testbed_audio, testbed_engines, testbed_marks
+    from spectra.services import testbed_audio, testbed_engines, testbed_marks, testbed_promote
     import numpy as np
     import soundfile as sf
 
@@ -236,7 +236,11 @@ def test_songs_listing_and_pin_run_off_the_event_loop(monkeypatch):
     real_single = testbed_marks.marks_for_song
     real_reference = testbed_marks.reference_marks_for_song
     real_engine = testbed_engines.marks_for
+    real_availability = testbed_engines.availability_for
+    real_peaks = testbed_audio.load_peaks
+    real_status = testbed_audio.status
     real_pin = testbed_audio.pin
+    real_promote = testbed_promote.promote
 
     def _listing():
         on_loop["songs"] = _ran_on_loop()
@@ -254,19 +258,42 @@ def test_songs_listing_and_pin_run_off_the_event_loop(monkeypatch):
         on_loop.setdefault("engine_reads", []).append(_ran_on_loop())
         return real_engine(engine, uri)
 
+    def _availability(uri, **kw):
+        on_loop.setdefault("availability_reads", []).append(_ran_on_loop())
+        return real_availability(uri, **kw)
+
+    def _peaks(uri):
+        on_loop["waveform"] = _ran_on_loop()
+        return real_peaks(uri)
+
+    def _status(uri, **kw):
+        on_loop.setdefault("status_reads", []).append(_ran_on_loop())
+        return real_status(uri, **kw)
+
     def _pin(uri):
         on_loop["pin"] = _ran_on_loop()
         return real_pin(uri)
+
+    def _promote(**kw):
+        on_loop["promote"] = _ran_on_loop()
+        return real_promote(**kw)
 
     monkeypatch.setattr(testbed_marks, "all_song_marks", _listing)
     monkeypatch.setattr(testbed_marks, "marks_for_song", _single)
     monkeypatch.setattr(testbed_marks, "reference_marks_for_song", _reference)
     monkeypatch.setattr(testbed_engines, "marks_for", _engine)
+    monkeypatch.setattr(testbed_engines, "availability_for", _availability)
+    monkeypatch.setattr(testbed_audio, "load_peaks", _peaks)
+    monkeypatch.setattr(testbed_audio, "status", _status)
     monkeypatch.setattr(testbed_audio, "pin", _pin)
+    monkeypatch.setattr(testbed_promote, "promote", _promote)
 
     client = _client()
     assert client.get("/api/testbed/songs").status_code == 200
     assert client.get(f"/api/testbed/marks?uri={URI}").status_code == 200
+    assert client.get(f"/api/testbed/waveform?uri={URI}").status_code == 200
+    assert client.get(f"/api/testbed/engines?uri={URI}").status_code == 200
+    assert client.get(f"/api/testbed/audio/status?uri={URI}").status_code == 200
     assert client.get(
         f"/api/testbed/compare?uri={URI}&engine=librosa&mark_kind=section_boundary",
     ).status_code == 200
@@ -274,14 +301,22 @@ def test_songs_listing_and_pin_run_off_the_event_loop(monkeypatch):
         f"/api/testbed/engine-marks?uri={URI}&engine=librosa&mark_kind=beat",
     ).status_code == 200
     assert client.post(f"/api/testbed/audio/pin?uri={URI}").status_code == 200
-    assert on_loop == {"songs": False, "marks": False, "compare": False,
-                       "engine_reads": [False, False], "pin": False}
+    assert client.post("/api/testbed/promote", json={
+        "uri": URI, "timestamp_ms": 30000,
+        "action": {"kind": "fire_response", "event_class": "flare", "intensity": 0.5},
+        "source_engine": "beat_this", "source_mark_kind": "downbeat", "confirmed": True,
+    }).status_code == 200
+    assert on_loop == {
+        "songs": False, "marks": False, "waveform": False, "compare": False,
+        "engine_reads": [False, False], "availability_reads": [False, False],
+        "status_reads": [False, False], "pin": False, "promote": False,
+    }
 
 
 def test_compare_unavailable_payload_keeps_the_available_shape():
     """The "not computed" branch must describe itself the way the computed
-    one does (types.ts's TestbedCompareResult): `reference` is the set name,
-    `reference_marks` the (empty) list — never a list under `reference`."""
+    one does: `reference` is the set name, `reference_marks` the (empty)
+    list — never a list under `reference`."""
     client = _client()
     resp = client.get(
         f"/api/testbed/compare?uri={URI}&engine=librosa&mark_kind=section_boundary"
@@ -367,3 +402,74 @@ def test_compare_never_scans_the_profile_directory(monkeypatch):
     ).json()
     assert [r["timestamp_ms"] for r in flares["reference_marks"]] == [10020]
     assert flares["metrics"]["n_matched"] == 1
+
+
+def test_waveform_npz_fallback_carries_a_duration():
+    """With no pinned WAV the page has only the coarse energy shape; it
+    must still learn how long the song is, or the timeline ends at his
+    last mark and every later engine mark piles up on the right edge."""
+    from spectra import config as scfg
+    import numpy as np
+    stem = "Artist - Song"
+    (scfg.AUDIO_SHAPES_DIR / f"{stem}.json").write_text(
+        json.dumps({"spotify_uri": URI}), encoding="utf-8")
+    np.savez_compressed(
+        scfg.AUDIO_SHAPES_DIR / f"{stem}.npz",
+        timestamps_ms=np.array([0, 60000, 120000, 240000], dtype=np.int64),
+        rms_total=np.array([0.1, 0.5, 0.2, 0.3], dtype=np.float32),
+    )
+    client = _client()
+    resp = client.get(f"/api/testbed/waveform?uri={URI}").json()
+    assert resp["source"] == "npz_rms_fallback"
+    assert resp["duration_ms"] == 240000
+
+
+def test_generated_only_song_is_listed_with_no_reference_marks():
+    """A song seeded only by midsong_generator stays in the picker, but
+    its reference lists are empty and the generated rows are counted —
+    never served as if he had placed them."""
+    from spectra.models.trigger import SpectraTrigger
+    from spectra.services import trigger_store
+    generated_only = "spotify:track:generatedonly"
+    for ts in (20000, 40000):
+        trigger_store.upsert(generated_only, SpectraTrigger(
+            timestamp_ms=ts, action={"kind": "fire_scene"},
+            source="generated", generator_key=f"section:{ts}"))
+    _write_trigger(URI, 10000, "fire_scene")
+
+    client = _client()
+    rows = {s["uri"]: s for s in client.get("/api/testbed/songs").json()}
+    assert rows[generated_only]["n_transitions"] == 0
+    assert rows[generated_only]["n_flares"] == 0
+    assert rows[generated_only]["n_generated"] == 2
+    assert rows[URI]["n_transitions"] == 1
+    assert rows[URI]["n_generated"] == 0
+
+    marks = client.get(f"/api/testbed/marks?uri={generated_only}").json()
+    assert marks["transitions"] == [] and marks["flares"] == []
+    assert marks["n_generated"] == 2
+
+    compare = client.get(
+        f"/api/testbed/compare?uri={generated_only}&engine=librosa&mark_kind=section_boundary",
+    ).json()
+    assert compare["reference_marks"] == []
+
+
+def test_promote_refuses_a_second_push_at_the_same_moment_with_409():
+    client = _client()
+    body = {
+        "uri": URI, "timestamp_ms": 3000,
+        "action": {"kind": "fire_response", "event_class": "flare", "intensity": 0.6},
+        "source_engine": "beat_this", "source_mark_kind": "downbeat",
+        "confirmed": True,
+    }
+    assert client.post("/api/testbed/promote", json=body).status_code == 200
+    resp = client.post("/api/testbed/promote", json=body)
+    assert resp.status_code == 409
+    assert "already exists" in resp.json()["detail"]
+
+    from spectra.services import trigger_store
+    assert len(trigger_store.list_for_song(URI)) == 1
+    log = client.get(f"/api/testbed/promotions?uri={URI}").json()
+    assert [e["status"] for e in log] == ["promoted", "refused"]
+    assert log[-1]["reason"] == "duplicate"

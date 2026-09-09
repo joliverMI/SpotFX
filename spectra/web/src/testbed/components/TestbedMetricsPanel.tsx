@@ -9,11 +9,12 @@ function pct(v: number) {
 }
 
 export default function TestbedMetricsPanel({
-  rows, toleranceMs, onToleranceChange,
+  rows, toleranceMs, onToleranceChange, emptyNote,
 }: {
   rows: { key: string; label: string; metrics: TestbedMetrics | null | undefined; available: boolean }[];
   toleranceMs: number;
   onToleranceChange: (ms: number) => void;
+  emptyNote?: string;
 }) {
   return (
     <div>
@@ -32,6 +33,11 @@ export default function TestbedMetricsPanel({
           style={{ flex: 1, maxWidth: 240 }}
         />
       </div>
+      {emptyNote ? (
+        <p className="empty-note" style={{ fontSize: 12 }}>
+          {emptyNote} — precision/recall need at least one of your own marks to score against.
+        </p>
+      ) : (
       <table className="testbed-metrics-table">
         <thead>
           <tr>
@@ -68,6 +74,7 @@ export default function TestbedMetricsPanel({
           ))}
         </tbody>
       </table>
+      )}
     </div>
   );
 }

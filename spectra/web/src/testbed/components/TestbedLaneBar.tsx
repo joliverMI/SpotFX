@@ -77,7 +77,7 @@ function WaveformLane({ waveform, durationMs }: { waveform: TestbedWaveform | un
 }
 
 function ReferenceMarksLane({
-  label, marks, durationMs, metrics, toleranceMs, hover, setHover,
+  label, marks, durationMs, metrics, toleranceMs, hover, setHover, emptyNote,
 }: {
   label: string;
   marks: TestbedReferenceMark[];
@@ -86,11 +86,22 @@ function ReferenceMarksLane({
   toleranceMs: number;
   hover: { text: string; leftPct: string } | null;
   setHover: (h: { text: string; leftPct: string } | null) => void;
+  emptyNote?: string;
 }) {
   const dur = Math.max(1, durationMs);
   const pct = (ms: number) => `${Math.max(0, Math.min(100, (ms / dur) * 100))}%`;
   const offsetByRefIndex = new Map<number, number>();
   metrics?.matches.forEach((m) => offsetByRefIndex.set(m.ref_index, m.abs_offset_ms));
+  if (marks.length === 0 && emptyNote) {
+    return (
+      <div className="testbed-lane-row">
+        <span className="testbed-lane-label">{label}</span>
+        <div className="testbed-lane-bar" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <span className="empty-note" style={{ fontSize: 11 }}>{emptyNote}</span>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="testbed-lane-row">
       <span className="testbed-lane-label">{label}</span>
@@ -159,7 +170,7 @@ export function EngineLane({
 }
 
 export default function TestbedLaneBar({
-  durationMs, waveform, transitions, flares, reference, referenceLabel,
+  durationMs, waveform, transitions, flares, reference, referenceLabel, referenceEmptyNote,
   engineLanes, toleranceMs, onEstimateMarkClick,
 }: {
   durationMs: number;
@@ -168,6 +179,7 @@ export default function TestbedLaneBar({
   flares: TestbedReferenceMark[];
   reference: 'transitions' | 'flares';
   referenceLabel: string;
+  referenceEmptyNote?: string;
   engineLanes: { key: string; label: string; estimate: TestbedEstimateMark[];
                 metrics: TestbedMetrics | null | undefined }[];
   toleranceMs: number;
@@ -187,6 +199,7 @@ export default function TestbedLaneBar({
         toleranceMs={toleranceMs}
         hover={hover}
         setHover={setHover}
+        emptyNote={referenceEmptyNote}
       />
       {engineLanes.map((lane) => (
         <EngineLane

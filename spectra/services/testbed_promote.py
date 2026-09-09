@@ -37,6 +37,14 @@ decision, not a generation pass, and must never be silently overwritten by
 a later `POST /api/triggers/generate` the way an untouched generated
 trigger would be.
 
+A repeat of the same click is REFUSED, never landed twice: an authored
+trigger of the same action kind already within DUPLICATE_WINDOW_MS of the
+requested moment on that song refuses by name (`PromotionDuplicate`) and is
+logged like any other refusal. Every call mints a fresh id, so without this
+a second confirm would stack a second trigger on the same tick — for a
+fire_response that is the double-flare class the trigger engine's own
+history is full of.
+
 Every promotion (accepted or refused) is appended to a durable, bounded log
 (`storage/spectra/testbed/promotions.json`) — the visible proof this
 button cannot write silently, readable via `GET /api/testbed/promotions`.
@@ -58,11 +66,26 @@ from spectra.services import trigger_store
 logger = logging.getLogger(__name__)
 
 _LOG_MAX_ENTRIES = 500
+DUPLICATE_WINDOW_MS = 250
 
 
 class PromotionNotConfirmed(ValueError):
     """confirmed=True didn't arrive on the call — the structural half of
     the review gate. Never caught and silently ignored by any caller."""
+
+
+class PromotionDuplicate(ValueError):
+    """An authored trigger of the same action kind already sits within
+    DUPLICATE_WINDOW_MS of the requested moment on this song. Refused and
+    logged, never a silent no-op: the caller is told which trigger."""
+
+
+def _nearby_authored(uri: str, timestamp_ms: int, kind: str) -> Optional[SpectraTrigger]:
+    for existing in trigger_store.list_for_song(uri):
+        if (existing.source == "authored" and existing.action.kind == kind
+                and abs(existing.timestamp_ms - timestamp_ms) <= DUPLICATE_WINDOW_MS):
+            return existing
+    return None
 
 
 def _load_log() -> list[dict]:
@@ -103,8 +126,9 @@ def promote(uri: str, timestamp_ms: int, action: TriggerAction,
     never logs a fabricated success) when confirmed is not literally True.
     Raises trigger_store.InvalidTriggerAction (the SAME check
     spectra/api/triggers.py's own POST applies) when the action references
-    something that doesn't exist. Returns {"status": "promoted",
-    "trigger_id": ...} on success."""
+    something that doesn't exist, and PromotionDuplicate when an authored
+    trigger of this kind already sits within DUPLICATE_WINDOW_MS of the
+    moment. Returns {"status": "promoted", "trigger_id": ...} on success."""
     at = time.time()
     if not confirmed:
         _record({
@@ -139,6 +163,18 @@ def promote(uri: str, timestamp_ms: int, action: TriggerAction,
             "status": "refused", "reason": str(exc),
         })
         raise
+    nearby = _nearby_authored(uri, timestamp_ms, trigger.action.kind)
+    if nearby is not None:
+        message = (f"a {trigger.action.kind} trigger already exists near this "
+                   f"moment ({nearby.timestamp_ms}ms, id {nearby.id}) — not "
+                   f"pushing a second one")
+        _record({
+            "at": at, "uri": uri, "timestamp_ms": timestamp_ms,
+            "source_engine": source_engine, "source_mark_kind": source_mark_kind,
+            "status": "refused", "reason": "duplicate",
+            "detail": message, "existing_trigger_id": nearby.id,
+        })
+        raise PromotionDuplicate(message)
     # source/generator_key stay "authored"/None per the module docstring —
     # provenance is carried in the promotion LOG entry below, not on the
     # trigger itself, so front 3's regeneration rule never sees this as a

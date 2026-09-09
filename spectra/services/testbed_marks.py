@@ -16,6 +16,15 @@ Split, per the report's own Part 1/Part 3 convention:
   flares      — fire_response / select_color_set actions ("where something
                 sparks" — a much denser, beat-anchored set)
 
+ONLY source=="authored" rows are reference marks. midsong_generator seeds a
+source=="generated" fire_scene at every librosa section boundary — the
+exact times testbed_engines emits as the librosa engine's own
+section_boundary marks — and 63% of his stored songs hold nothing else
+(AGENTS.md's own count), so admitting them would grade librosa against
+itself and every other engine against librosa. The excluded rows are
+COUNTED (`SongMarks.n_generated`) so a song with no authored marks reads
+as "nothing to compare against yet", never as an empty comparison.
+
 Provenance (ai_generated / verified) comes from the legacy editor-copy
 SongProfile (storage/profiles/*.json, read-only, same file AGENTS.md's own
 "A scene's stored data is not proof he authored it" caution applies to) —
@@ -67,19 +76,31 @@ class SongMarks:
     # listing instead of one /api/profiles/by-uri round-trip per song.
     title: Optional[str] = None
     artist: Optional[str] = None
+    n_generated: int = 0
 
 
-def _split(triggers: list[SpectraTrigger]) -> tuple[list[ReferenceMark], list[ReferenceMark]]:
+@dataclass(frozen=True)
+class _SplitMarks:
+    transitions: list[ReferenceMark]
+    flares: list[ReferenceMark]
+    n_generated: int
+
+
+def _split(triggers: list[SpectraTrigger]) -> _SplitMarks:
     transitions: list[ReferenceMark] = []
     flares: list[ReferenceMark] = []
+    n_generated = 0
     for t in triggers:
+        if t.source != "authored":
+            n_generated += 1
+            continue
         mark = ReferenceMark(id=t.id, timestamp_ms=t.timestamp_ms,
                              kind=t.action.kind, enabled=t.enabled)
         if t.action.kind in TRANSITION_KINDS:
             transitions.append(mark)
         elif t.action.kind in FLARE_KINDS:
             flares.append(mark)
-    return transitions, flares
+    return _SplitMarks(transitions, flares, n_generated)
 
 
 @dataclass(frozen=True)
@@ -145,19 +166,13 @@ def _profile_index() -> dict[str, _ProfileSummary]:
     return out
 
 
-def provenance_for(uri: str) -> Provenance:
-    profile = _find_profile(uri)
-    if profile is None:
-        return Provenance()
-    return _summarize(profile).provenance
-
-
 def _song_marks(uri: str, triggers: list[SpectraTrigger],
                 summary: _ProfileSummary) -> SongMarks:
-    transitions, flares = _split(triggers)
-    return SongMarks(uri=uri, transitions=transitions, flares=flares,
+    split = _split(triggers)
+    return SongMarks(uri=uri, transitions=split.transitions, flares=split.flares,
                      provenance=summary.provenance,
-                     title=summary.title, artist=summary.artist)
+                     title=summary.title, artist=summary.artist,
+                     n_generated=split.n_generated)
 
 
 def reference_marks_for_song(uri: str) -> tuple[list[ReferenceMark], list[ReferenceMark]]:
@@ -165,7 +180,8 @@ def reference_marks_for_song(uri: str) -> tuple[list[ReferenceMark], list[Refere
     profile-directory scan. The comparison endpoint needs only the marks
     to match against; provenance is the page's caveat display and is
     served by marks_for_song()."""
-    return _split(trigger_store.list_for_song(uri))
+    split = _split(trigger_store.list_for_song(uri))
+    return split.transitions, split.flares
 
 
 def marks_for_song(uri: str) -> SongMarks:
@@ -177,18 +193,11 @@ def marks_for_song(uri: str) -> SongMarks:
 def all_song_marks() -> dict[str, SongMarks]:
     """marks_for_song() for every stored song, from ONE triggers.json read
     and ONE profile-directory pass — the song list's read shape. Keyed by
-    URI in sorted order; a song with an empty row list is omitted, exactly
-    as known_uris() omits it."""
+    URI in sorted order. A song whose stored triggers are ALL generated
+    stays in the listing with empty reference lists and its n_generated
+    count, so the page can say so rather than drop it."""
     profiles = _profile_index()
     out: dict[str, SongMarks] = {}
     for uri, triggers in sorted(trigger_store.list_all().items()):
         out[uri] = _song_marks(uri, triggers, profiles.get(uri, _NO_PROFILE))
     return out
-
-
-def known_uris() -> list[str]:
-    """Every URI with at least one fired-copy trigger — the candidate song
-    list's base set (spectra/api/testbed.py adds pin/audio-availability
-    state on top)."""
-    raw = trigger_store._load_raw()
-    return sorted(uri for uri, rows in raw.items() if rows)

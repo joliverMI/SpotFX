@@ -40,6 +40,7 @@ export default function PromotionReviewDialog({
   const [offsetMs, setOffsetMs] = useState(0);
 
   const setKind = (kind: TriggerActionKind) => setAction(blankAction(kind));
+  const confirmable = action.kind !== 'select_color_set' || !!action.set_id;
 
   const handleConfirm = () => {
     promote.mutate({
@@ -139,7 +140,12 @@ export default function PromotionReviewDialog({
 
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
           <button onClick={onClose} disabled={promote.isPending}>Cancel</button>
-          <button className="primary" onClick={handleConfirm} disabled={promote.isPending}>
+          <button
+            className="primary"
+            onClick={handleConfirm}
+            disabled={promote.isPending || !confirmable}
+            title={confirmable ? undefined : 'Choose a colour set first'}
+          >
             {promote.isPending ? 'Pushing…' : 'Confirm & push to real triggers'}
           </button>
         </div>

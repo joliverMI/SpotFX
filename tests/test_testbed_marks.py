@@ -19,11 +19,18 @@ URI = "spotify:track:testbedmarks1"
 
 
 def _write_trigger(uri, timestamp_ms, kind, **action_extra):
-    from spectra import config as scfg
     from spectra.models.trigger import SpectraTrigger
     from spectra.services import trigger_store
     action = {"kind": kind, **action_extra}
     trigger_store.upsert(uri, SpectraTrigger(timestamp_ms=timestamp_ms, action=action))
+
+
+def _write_generated(uri, timestamp_ms, kind="fire_scene", **action_extra):
+    from spectra.models.trigger import SpectraTrigger
+    from spectra.services import trigger_store
+    trigger_store.upsert(uri, SpectraTrigger(
+        timestamp_ms=timestamp_ms, action={"kind": kind, **action_extra},
+        source="generated", generator_key=f"section:{timestamp_ms}"))
 
 
 def test_split_transitions_vs_flares():
@@ -57,18 +64,48 @@ def test_provenance_read_from_profile_by_uri():
     }
     (scfg.PROFILES_DIR / "A - T.json").write_text(json.dumps(profile), encoding="utf-8")
 
-    prov = testbed_marks.provenance_for(URI)
+    prov = testbed_marks.marks_for_song(URI).provenance
     assert prov.found is True
     assert prov.verified is True
     assert prov.ai_generated is False
     assert prov.editor_trigger_count == 2
 
 
-def test_known_uris_only_lists_songs_with_stored_triggers():
+def test_generated_triggers_are_never_reference_marks_but_are_counted():
+    """midsong_generator seeds a fire_scene at every librosa section
+    boundary — the librosa engine's own section_boundary times. If those
+    counted as his marks, librosa would score itself; they are excluded
+    from BOTH lists and reported as n_generated instead."""
     from spectra.services import testbed_marks
     _write_trigger(URI, 1000, "fire_scene")
-    assert URI in testbed_marks.known_uris()
-    assert "spotify:track:neverplaced" not in testbed_marks.known_uris()
+    _write_trigger(URI, 3000, "fire_response", event_class="flare")
+    _write_generated(URI, 20000)
+    _write_generated(URI, 45000)
+    _write_generated(URI, 46000, kind="fire_response", event_class="flare")
+
+    marks = testbed_marks.marks_for_song(URI)
+    assert [m.timestamp_ms for m in marks.transitions] == [1000]
+    assert [m.timestamp_ms for m in marks.flares] == [3000]
+    assert marks.n_generated == 3
+
+    transitions, flares = testbed_marks.reference_marks_for_song(URI)
+    assert [m.timestamp_ms for m in transitions] == [1000]
+    assert [m.timestamp_ms for m in flares] == [3000]
+
+
+def test_a_generated_only_song_stays_listed_with_nothing_to_compare_against():
+    from spectra.services import testbed_marks
+    generated_only = "spotify:track:generatedonly"
+    _write_generated(generated_only, 20000)
+    _write_generated(generated_only, 40000)
+    _write_trigger(URI, 1000, "fire_scene")
+
+    listing = testbed_marks.all_song_marks()
+    assert set(listing) == {URI, generated_only}
+    assert listing[generated_only].transitions == []
+    assert listing[generated_only].flares == []
+    assert listing[generated_only].n_generated == 2
+    assert listing[URI].n_generated == 0
 
 
 def _write_profile(scfg, uri, filename, **fields):
@@ -89,13 +126,14 @@ def test_all_song_marks_agrees_with_per_song_reads_and_carries_title_artist():
                    triggers=[{"timestamp_ms": 1, "event_id": "e1"}])
 
     listing = testbed_marks.all_song_marks()
-    assert list(listing) == testbed_marks.known_uris() == sorted([URI, other])
+    assert list(listing) == sorted([URI, other])
     for uri, marks in listing.items():
         single = testbed_marks.marks_for_song(uri)
         assert marks.transitions == single.transitions
         assert marks.flares == single.flares
         assert marks.provenance == single.provenance
         assert (marks.title, marks.artist) == (single.title, single.artist)
+        assert marks.n_generated == single.n_generated
     assert (listing[URI].title, listing[URI].artist) == ("Dopamine", "Purple Disco")
     assert listing[URI].provenance.ai_generated is True
     assert listing[URI].provenance.editor_trigger_count == 1

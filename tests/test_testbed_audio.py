@@ -116,6 +116,7 @@ def test_npz_shape_fallback_reads_production_rms_envelope():
     shape = testbed_audio.load_npz_shape(URI)
     assert shape["timestamps_ms"] == [0, 1000, 2000]
     assert len(shape["rms_total"]) == 3
+    assert shape["duration_ms"] == 2000
 
 
 def test_npz_shape_fallback_none_when_nothing_captured():

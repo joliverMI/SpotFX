@@ -7163,7 +7163,14 @@ choice the plan report itself makes, with the editor copy's own trigger
 COUNT + `ai_generated`/`verified` provenance surfaced as a caveat, not a
 second definition of "his marks"), split transitions
 (`fire_scene`/`fire_scene_update`) vs flares (`fire_response`/
-`select_color_set`). `testbed_metrics.py` is the greedy nearest-neighbor
+`select_color_set`). **ONLY `source=="authored"` rows are reference marks**
+— `midsong_generator` seeds a generated `fire_scene` at every librosa
+section boundary, the librosa engine's own `section_boundary` times, and
+63% of his stored songs hold nothing else, so admitting them would grade
+librosa against itself; the excluded rows are counted (`n_generated` on
+`/songs` and `/marks`) and a generated-only song stays listed with an
+honest "no authored marks yet" lane/metrics state instead of an empty
+comparison. `testbed_metrics.py` is the greedy nearest-neighbor
 precision/recall/F1 matcher — the report's own methodology, made
 executable — with a deliberate byte-for-byte TypeScript port
 (`spectra/web/src/testbed/metrics.ts`) so the frontend's tolerance slider
@@ -7232,7 +7239,12 @@ that module's former private `_validate_action` specifically so both write
 surfaces share one choke point and can't diverge). Every attempt, accepted
 or refused, is appended to a durable, bounded audit log
 (`storage/spectra/testbed/promotions.json`, `GET /api/testbed/promotions`)
-— the visible proof the button cannot write silently.
+— the visible proof the button cannot write silently. **A repeat confirm
+is refused, never stacked**: an authored trigger of the same action kind
+within `testbed_promote.DUPLICATE_WINDOW_MS` of the moment refuses by name
+(`PromotionDuplicate`, HTTP 409, logged `reason="duplicate"` with the
+existing id) — every call mints a fresh id, so without it the second
+confirm of one click would land a double-fire on one tick.
 
 **Frontend**: `spectra/web/src/testbed/TestbedPage.tsx` (`/testbed`, "Test
 Bed" nav link, route-mapped in `routeTopics.ts`) — song picker, an A/B

@@ -1452,6 +1452,7 @@ export interface TestbedSong {
   artist: string | null;
   n_transitions: number;
   n_flares: number;
+  n_generated: number;
   provenance: TestbedProvenance;
   audio: TestbedAudioStatus;
   engines: Record<string, TestbedEngineAvailability>;
@@ -1470,6 +1471,7 @@ export interface TestbedMarks {
   artist: string | null;
   transitions: TestbedReferenceMark[];
   flares: TestbedReferenceMark[];
+  n_generated: number;
   provenance: TestbedProvenance;
 }
 
@@ -1514,18 +1516,6 @@ export interface TestbedEngineMarks {
   mark_kind: string;
   available: boolean;
   estimate: TestbedEstimateMark[];
-}
-
-export interface TestbedCompareResult {
-  uri: string;
-  engine: string;
-  mark_kind: string;
-  reference?: 'transitions' | 'flares';
-  tolerance_ms?: number;
-  available: boolean;
-  estimate: TestbedEstimateMark[];
-  reference_marks: { id: string; timestamp_ms: number; kind: string }[];
-  metrics: TestbedMetrics | null;
 }
 
 export interface TestbedPromoteRequest {

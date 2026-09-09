@@ -53,6 +53,7 @@ def _song_list() -> list[dict]:
             "artist": marks.artist,
             "n_transitions": len(marks.transitions),
             "n_flares": len(marks.flares),
+            "n_generated": marks.n_generated,
             "provenance": marks.provenance.__dict__,
             "audio": testbed_audio.status(uri, stem_index=stems, registry=pinned),
             "engines": testbed_engines.availability_for(uri, stem_index=stems),
@@ -82,13 +83,13 @@ async def get_marks(uri: str = Query(...)):
             "artist": marks.artist,
             "transitions": [m.__dict__ for m in marks.transitions],
             "flares": [m.__dict__ for m in marks.flares],
+            "n_generated": marks.n_generated,
             "provenance": marks.provenance.__dict__,
         }
     return await asyncio.to_thread(_read)
 
 
-@router.get("/waveform")
-async def get_waveform(uri: str = Query(...)):
+def _waveform(uri: str) -> dict:
     peaks = testbed_audio.load_peaks(uri)
     if peaks is not None:
         return {"uri": uri, "source": "wav_peaks", **peaks}
@@ -99,9 +100,18 @@ async def get_waveform(uri: str = Query(...)):
             "shape data available for this song"}
 
 
+@router.get("/waveform")
+async def get_waveform(uri: str = Query(...)):
+    """Off the loop like every other per-song read here: the npz fallback
+    resolves the song's stem, and a miss (the common case — most stored
+    songs have no captured audio) rebuilds the whole sidecar index."""
+    return await asyncio.to_thread(_waveform, uri)
+
+
 @router.get("/engines")
 async def get_engines(uri: str = Query(...)):
-    return {"uri": uri, "engines": testbed_engines.availability_for(uri)}
+    engines = await asyncio.to_thread(testbed_engines.availability_for, uri)
+    return {"uri": uri, "engines": engines}
 
 
 def _estimate_for(engine: str, uri: str, mark_kind: str):
@@ -185,7 +195,8 @@ async def compare(
 
 @router.get("/audio/status")
 async def audio_status(uri: str = Query(...)):
-    return {"uri": uri, **testbed_audio.status(uri)}
+    status = await asyncio.to_thread(testbed_audio.status, uri)
+    return {"uri": uri, **status}
 
 
 @router.post("/audio/pin")
@@ -221,14 +232,20 @@ class PromoteRequest(BaseModel):
 
 @router.post("/promote")
 async def promote(body: PromoteRequest):
-    try:
+    """Off the loop: the duplicate check and the upsert are each a full
+    triggers.json parse (the upsert a rewrite too)."""
+    def _run() -> dict:
         return testbed_promote.promote(
             uri=body.uri, timestamp_ms=body.timestamp_ms, action=body.action,
             source_engine=body.source_engine, source_mark_kind=body.source_mark_kind,
             confirmed=body.confirmed, trigger_offset_ms=body.trigger_offset_ms,
         )
+    try:
+        return await asyncio.to_thread(_run)
     except testbed_promote.PromotionNotConfirmed as exc:
         raise HTTPException(422, str(exc)) from exc
+    except testbed_promote.PromotionDuplicate as exc:
+        raise HTTPException(409, str(exc)) from exc
     except trigger_store.InvalidTriggerAction as exc:
         raise HTTPException(422, str(exc)) from exc
 

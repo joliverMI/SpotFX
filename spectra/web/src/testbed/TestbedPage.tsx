@@ -59,13 +59,15 @@ function SongPickerButton({ song, active, onClick }: { song: TestbedSong; active
 /** P/R/F1 + matched pairs for one engine lane against the active reference
  * set, computed locally with the byte-for-byte port of the server's
  * matcher — the indices in `matches` are into exactly these two arrays,
- * which is what the lanes' tinting reads. null = engine not computed. */
+ * which is what the lanes' tinting reads. null = engine not computed, or
+ * nothing of his to compare against (a 0% score over zero marks would be
+ * a claim about the engine that the data cannot make). */
 function localMetrics(
   engineMarks: TestbedEngineMarks | undefined,
   referenceMarks: TestbedReferenceMark[],
   toleranceMs: number,
 ): TestbedMetrics | null {
-  if (!engineMarks?.available) return null;
+  if (!engineMarks?.available || referenceMarks.length === 0) return null;
   return matchMarks(
     referenceMarks.map((m) => m.timestamp_ms),
     engineMarks.estimate.map((m) => m.time_ms),
@@ -106,14 +108,28 @@ export default function TestbedPage() {
   const referenceMarks = marks?.transitions ?? [];
   const flareMarks = marks?.flares ?? [];
   const activeReferenceMarks = reference === 'transitions' ? referenceMarks : flareMarks;
+  const noAuthoredMarks = !!marks && referenceMarks.length === 0 && flareMarks.length === 0;
+  const referenceEmptyNote = !marks ? undefined
+    : noAuthoredMarks
+      ? `no authored marks yet for this song${marks.n_generated ? ` — only ${marks.n_generated} machine-generated trigger${marks.n_generated === 1 ? '' : 's'}, which are never used as ground truth` : ''}`
+      : activeReferenceMarks.length === 0
+        ? `no authored ${reference} for this song`
+        : undefined;
   const durationMs = useMemo(() => {
     const fromWaveform = waveform?.duration_ms ?? 0;
+    const fromNpz = waveform?.timestamps_ms?.length
+      ? waveform.timestamps_ms[waveform.timestamps_ms.length - 1] : 0;
     const fromMarks = Math.max(
       0,
       ...[...referenceMarks, ...flareMarks].map((m: TestbedReferenceMark) => m.timestamp_ms),
     );
-    return Math.max(fromWaveform, fromMarks * 1.05, 1);
-  }, [waveform, referenceMarks, flareMarks]);
+    const fromEngines = Math.max(
+      0,
+      ...(engineMarksA?.estimate ?? []).map((m) => m.time_ms),
+      ...(engineMarksB?.estimate ?? []).map((m) => m.time_ms),
+    );
+    return Math.max(fromWaveform, fromNpz, fromMarks * 1.05, fromEngines * 1.02, 1);
+  }, [waveform, referenceMarks, flareMarks, engineMarksA, engineMarksB]);
 
   const metricsA = useMemo(
     () => localMetrics(engineMarksA, activeReferenceMarks, toleranceMs),
@@ -241,6 +257,7 @@ export default function TestbedPage() {
               flares={flareMarks}
               reference={reference}
               referenceLabel={reference}
+              referenceEmptyNote={referenceEmptyNote}
               engineLanes={engineLanes}
               toleranceMs={toleranceMs}
               onEstimateMarkClick={(engineKey, mark) => {
@@ -262,6 +279,7 @@ export default function TestbedPage() {
               ]}
               toleranceMs={toleranceMs}
               onToleranceChange={setToleranceMs}
+              emptyNote={referenceEmptyNote}
             />
           </div>
 

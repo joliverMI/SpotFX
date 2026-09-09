@@ -77,20 +77,3 @@ def save(engine: str, uri: str, engine_version: str, marks: list[dict]) -> Path:
         raise
     logger.info("testbed cache saved: %s/%s (%d marks)", engine, uri, len(marks))
     return path
-
-
-def cached_songs(engine: str) -> list[str]:
-    """Every URI with a cache entry for `engine` — used by the songs list
-    to say which engines are already computed for which songs."""
-    engine_dir = config.TESTBED_ANALYSIS_DIR / engine
-    if not engine_dir.exists():
-        return []
-    out = []
-    for p in engine_dir.glob("*.json"):
-        try:
-            uri = json.loads(p.read_text(encoding="utf-8")).get("uri")
-        except Exception:
-            continue
-        if uri:
-            out.append(uri)
-    return sorted(out)

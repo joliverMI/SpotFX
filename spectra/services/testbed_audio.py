@@ -217,9 +217,11 @@ def load_npz_shape(uri: str) -> Optional[dict]:
         return None
     try:
         data = np.load(npz_path)
+        timestamps = data["timestamps_ms"].astype(int).tolist()
         return {
-            "timestamps_ms": data["timestamps_ms"].astype(int).tolist(),
+            "timestamps_ms": timestamps,
             "rms_total": data["rms_total"].astype(float).tolist(),
+            "duration_ms": int(timestamps[-1]) if timestamps else 0,
         }
     except Exception as exc:
         logger.warning("testbed: failed to read npz shape for %s: %s", uri, exc)
