@@ -12,15 +12,21 @@
  * the other goes red here.
  *
  * Run: node scripts/check_testbed_metrics.mjs
+ * Interpreter: $PYTHON, else the repo's own .venv/bin/python, else
+ * python3 — a disposable worktree carries no .venv (the filesystem is
+ * isolated, the toolchain is not), and a parity proof that cannot run
+ * there is a parity proof nobody runs.
  */
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync } from 'node:fs';
+import { existsSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const TS = path.join(REPO, 'spectra/web/src/testbed/metrics.ts');
+const VENV_PY = path.join(REPO, '.venv/bin/python');
+const PYTHON = process.env.PYTHON || (existsSync(VENV_PY) ? VENV_PY : 'python3');
 
 let failures = 0;
 const ok = (cond, msg) => {
@@ -57,7 +63,7 @@ for v in vectors:
     out.append(match_result_dict(r))
 print(json.dumps(out))
 `;
-const pyOutRaw = execFileSync('.venv/bin/python', ['-c', pyScript], {
+const pyOutRaw = execFileSync(PYTHON, ['-c', pyScript], {
   cwd: REPO, input: JSON.stringify(VECTORS), encoding: 'utf8',
 });
 const pyResults = JSON.parse(pyOutRaw);

@@ -23,23 +23,20 @@ import TestbedLaneBar from './components/TestbedLaneBar';
 import TestbedMetricsPanel from './components/TestbedMetricsPanel';
 import { matchMarks } from './metrics';
 
-const ENGINE_MARK_KINDS: Record<string, { label: string; kinds: { key: string; label: string }[] }> = {
-  librosa: {
-    label: 'Current (librosa)',
-    kinds: [
-      { key: 'section_boundary', label: 'Section boundaries' },
-      { key: 'beat', label: 'Beats' },
-      { key: 'downbeat', label: 'Downbeats' },
-    ],
-  },
-  beat_this: {
-    label: 'beat_this (CPJKU 2024)',
-    kinds: [
-      { key: 'beat', label: 'Beats' },
-      { key: 'downbeat', label: 'Downbeats' },
-    ],
-  },
+/** Pretty labels for the mark kinds the registry emits — a DISPLAY lookup
+ * only. Which engines exist, what they are called and which kinds each one
+ * emits all come off the /songs payload (spectra/services/testbed_engines.py's
+ * own ENGINES registry): a third engine registered server-side has to show
+ * up in this picker without a frontend edit, which is the whole point of a
+ * test bed. An unknown kind falls back to its raw key rather than
+ * disappearing. */
+const MARK_KIND_LABEL: Record<string, string> = {
+  section_boundary: 'Section boundaries',
+  beat: 'Beats',
+  downbeat: 'Downbeats',
 };
+
+const markKindLabel = (kind: string) => MARK_KIND_LABEL[kind] ?? kind;
 
 /** Labels come off the /songs listing itself (title/artist read from the
  * editor-copy profile in the same one-pass scan that reads provenance) —
@@ -64,12 +61,12 @@ function SongPickerButton({ song, active, onClick }: { song: TestbedSong; active
  * a claim about the engine that the data cannot make). */
 function localMetrics(
   engineMarks: TestbedEngineMarks | undefined,
-  referenceMarks: TestbedReferenceMark[],
+  scoredMarks: TestbedReferenceMark[],
   toleranceMs: number,
 ): TestbedMetrics | null {
-  if (!engineMarks?.available || referenceMarks.length === 0) return null;
+  if (!engineMarks?.available || scoredMarks.length === 0) return null;
   return matchMarks(
-    referenceMarks.map((m) => m.timestamp_ms),
+    scoredMarks.map((m) => m.timestamp_ms),
     engineMarks.estimate.map((m) => m.time_ms),
     toleranceMs,
   );
@@ -108,13 +105,30 @@ export default function TestbedPage() {
   const referenceMarks = marks?.transitions ?? [];
   const flareMarks = marks?.flares ?? [];
   const activeReferenceMarks = reference === 'transitions' ? referenceMarks : flareMarks;
+  /** The scoring set: his own marks minus every one this page pushed. Same
+   * rule the server applies (spectra/services/testbed_marks.scoring_marks) —
+   * a promoted mark sits at the suggesting engine's exact time and would
+   * grade that engine on its own suggestion. They stay in the lane, drawn
+   * and labelled; only the number leaves them out. */
+  const scoredMarks = useMemo(
+    () => activeReferenceMarks.filter((m) => !m.promoted),
+    [activeReferenceMarks],
+  );
+  const nPromotedActive = activeReferenceMarks.length - scoredMarks.length;
   const noAuthoredMarks = !!marks && referenceMarks.length === 0 && flareMarks.length === 0;
   const referenceEmptyNote = !marks ? undefined
     : noAuthoredMarks
       ? `no authored marks yet for this song${marks.n_generated ? ` — only ${marks.n_generated} machine-generated trigger${marks.n_generated === 1 ? '' : 's'}, which are never used as ground truth` : ''}`
       : activeReferenceMarks.length === 0
         ? `no authored ${reference} for this song`
-        : undefined;
+        : scoredMarks.length === 0
+          ? `every authored ${reference} for this song was pushed from this page — nothing left to score an engine against`
+          : undefined;
+  /** ONE timebase for every lane, and it is a REAL duration wherever the
+   * song has one (the pinned WAV, else the coarse npz envelope). Padding a
+   * mark-derived fallback would put a duration on the axis label that the
+   * song does not have; a mark or beat past a short capture still widens
+   * it, so nothing is ever clamped out of view. */
   const durationMs = useMemo(() => {
     const fromWaveform = waveform?.duration_ms ?? 0;
     const fromNpz = waveform?.timestamps_ms?.length
@@ -128,26 +142,27 @@ export default function TestbedPage() {
       ...(engineMarksA?.estimate ?? []).map((m) => m.time_ms),
       ...(engineMarksB?.estimate ?? []).map((m) => m.time_ms),
     );
-    return Math.max(fromWaveform, fromNpz, fromMarks * 1.05, fromEngines * 1.02, 1);
+    return Math.max(fromWaveform, fromNpz, fromMarks, fromEngines, 1);
   }, [waveform, referenceMarks, flareMarks, engineMarksA, engineMarksB]);
 
   const metricsA = useMemo(
-    () => localMetrics(engineMarksA, activeReferenceMarks, toleranceMs),
-    [engineMarksA, activeReferenceMarks, toleranceMs],
+    () => localMetrics(engineMarksA, scoredMarks, toleranceMs),
+    [engineMarksA, scoredMarks, toleranceMs],
   );
   const metricsB = useMemo(
-    () => localMetrics(engineMarksB, activeReferenceMarks, toleranceMs),
-    [engineMarksB, activeReferenceMarks, toleranceMs],
+    () => localMetrics(engineMarksB, scoredMarks, toleranceMs),
+    [engineMarksB, scoredMarks, toleranceMs],
   );
 
+  const engineLabel = (key: string) => song?.engines[key]?.label ?? key;
   const engineLanes = [
     {
-      key: 'a', label: ENGINE_MARK_KINDS[engineA.engine]?.label ?? engineA.engine,
+      key: 'a', label: engineLabel(engineA.engine),
       estimate: (engineMarksA?.estimate ?? []) as TestbedEstimateMark[],
       metrics: metricsA,
     },
     ...(engineB ? [{
-      key: 'b', label: ENGINE_MARK_KINDS[engineB.engine]?.label ?? engineB.engine,
+      key: 'b', label: engineLabel(engineB.engine),
       estimate: (engineMarksB?.estimate ?? []) as TestbedEstimateMark[],
       metrics: metricsB,
     }] : []),
@@ -255,6 +270,7 @@ export default function TestbedPage() {
               waveform={waveform}
               transitions={referenceMarks}
               flares={flareMarks}
+              scoredMarks={scoredMarks}
               reference={reference}
               referenceLabel={reference}
               referenceEmptyNote={referenceEmptyNote}
@@ -272,6 +288,13 @@ export default function TestbedPage() {
 
           <div className="card">
             <div className="card-title">Metrics</div>
+            {nPromotedActive > 0 && (
+              <p className="empty-note" style={{ fontSize: 12, marginTop: 0 }}>
+                {nPromotedActive} of these {reference} were pushed to your real
+                triggers from this page — shown in the lane, but left out of the
+                scores below, since they sit exactly where the engine put them.
+              </p>
+            )}
             <TestbedMetricsPanel
               rows={[
                 { key: 'a', label: engineLanes[0].label, metrics: metricsA, available: !!engineMarksA?.available },
@@ -327,7 +350,7 @@ function EnginePicker({
   label: string;
   value: { engine: string; kind: string } | null;
   onChange: (v: { engine: string; kind: string } | null) => void;
-  song: { engines: Record<string, { available: boolean }> };
+  song: TestbedSong;
   clearable?: boolean;
 }) {
   return (
@@ -342,10 +365,10 @@ function EnginePicker({
         }}
       >
         {clearable && <option value="">— none —</option>}
-        {Object.entries(ENGINE_MARK_KINDS).map(([engineKey, meta]) => (
-          <optgroup key={engineKey} label={`${meta.label}${song.engines[engineKey]?.available ? '' : ' (not computed)'}`}>
-            {meta.kinds.map((k) => (
-              <option key={k.key} value={`${engineKey}:${k.key}`}>{k.label}</option>
+        {Object.entries(song.engines).map(([engineKey, meta]) => (
+          <optgroup key={engineKey} label={`${meta.label}${meta.available ? '' : ' (not computed)'}`}>
+            {meta.kinds.map((kind) => (
+              <option key={kind} value={`${engineKey}:${kind}`}>{markKindLabel(kind)}</option>
             ))}
           </optgroup>
         ))}

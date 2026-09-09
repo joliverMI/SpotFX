@@ -7170,7 +7170,19 @@ section boundary, the librosa engine's own `section_boundary` times, and
 librosa against itself; the excluded rows are counted (`n_generated` on
 `/songs` and `/marks`) and a generated-only song stays listed with an
 honest "no authored marks yet" lane/metrics state instead of an empty
-comparison. `testbed_metrics.py` is the greedy nearest-neighbor
+comparison. **A TEST-BED-PROMOTED ROW IS NOT SCORED EITHER** — the same
+circularity through the authored door: push-to-real lands a suggestion
+`source="authored"` at the suggesting engine's OWN exact `time_ms`, so
+every promotion would lift that engine's own P/R/F1 on the next look.
+Nothing on the trigger can tell it from a hand-placed one (that is
+deliberate — see below), so the PROMOTION AUDIT LOG is the provenance:
+`testbed_promote.promoted_trigger_ids()`/`promoted_ids_by_uri()` →
+`ReferenceMark.promoted`. The exclusion is VISIBLE, never silent — the
+mark stays in `transitions`/`flares` flagged, is drawn in its own dashed
+tint with an "excluded from scoring" label, is counted (`n_promoted`), and
+is dropped only by `testbed_marks.scoring_marks()`, the ONE definition
+both `reference_marks_for_song()` (the `/compare` route) and the page's
+own local matcher apply. `testbed_metrics.py` is the greedy nearest-neighbor
 precision/recall/F1 matcher — the report's own methodology, made
 executable — with a deliberate byte-for-byte TypeScript port
 (`spectra/web/src/testbed/metrics.ts`) so the frontend's tolerance slider
@@ -7190,14 +7202,22 @@ load-bearing, it's what keeps madmom out), invoked only by
 precedent) — code and published checkpoints are both MIT-licensed (checked
 before shipping; unlike madmom's CC-BY-NC-SA models), and an uninstalled
 host reports the engine "unavailable" rather than crashing anything.
-**`GET /api/testbed/songs` is ONE read per store, off the event loop**
-(`trigger_store.list_all` + `testbed_marks.all_song_marks` +
-`analysis_reader.stem_index`, composed in `spectra/api/testbed.py`'s
+**`GET /api/testbed/songs` is ONE read per store, off the event loop, and
+it never PARSES an engine's output at all** (`trigger_store.list_all` +
+`testbed_marks.all_song_marks` + `analysis_reader.stem_index` +
+`testbed_promote.promoted_ids_by_uri`, composed in `spectra/api/testbed.py`'s
 `_song_list` under `asyncio.to_thread`, the `sync-from-profile` precedent) —
 never loop `marks_for_song`/`stem_for_uri` over the corpus in a handler: the
 former is a full ~9.5MB `triggers.json` parse PER SONG, and the latter
 rebuilds the whole audio-shape sidecar index on every MISS, i.e. once per
-stored song with no captured audio. The song list also carries each song's
+stored song with no captured audio. The listing passes
+`availability_for(..., count_marks=False)`, which answers each engine's
+availability with a STAT (`analysis_reader.has_librosa_analysis` /
+`testbed_cache.has_cache`) and reports `mark_count: None` rather than a
+fabricated 0 — parsing every song's `.librosa.json` to build marks the
+payload discards is 965 files / 417MB of his real storage per request, and
+this listing is re-fetched on every pin, unpin and promotion. The full
+parse stays on `/engines` and `/engine-marks`, one song each. The song list also carries each song's
 `title`/`artist` from the same one-pass profile scan its provenance comes
 from, so the page never fans out one `/api/profiles/by-uri` per song. A pin
 (a full WAV copy + decode) runs under `asyncio.to_thread` too, which is why
@@ -7229,7 +7249,15 @@ writes nothing, logs the refusal) unless `confirmed=True` arrives on the
 call itself — there's no way to "confirm once and it stays confirmed."
 `PromotionReviewDialog.tsx` is the ONLY component wired to the promote
 mutation, and only from its own explicit "Confirm & push" button, never the
-mark-click that opens it. The write lands in the FIRED copy only
+mark-click that opens it. **It also DISCLOSES the consequence**: under
+`scene_change_mode == "triggers_only"` (his live setting) a song holding
+≥1 authored trigger fires ONLY authored triggers, so on a song with none
+yet this push does not ADD a mark — it REPLACES that song's whole
+automatic show with it. The dialog reads `useRoomControls()` +
+`useTestbedMarks()` and says so plainly when both conditions hold.
+Disclosure, NOT a gate: Confirm stays enabled and nothing about
+`room_controls` or the firing rules is touched. The write lands in the
+FIRED copy only
 (`trigger_store.upsert`, `source="authored"`, `generator_key=None` — never
 "generated," so front 3's regeneration/ownership-transfer rule can never
 silently claim a promoted trigger back), through
@@ -7245,14 +7273,21 @@ within `testbed_promote.DUPLICATE_WINDOW_MS` of the moment refuses by name
 (`PromotionDuplicate`, HTTP 409, logged `reason="duplicate"` with the
 existing id) — every call mints a fresh id, so without it the second
 confirm of one click would land a double-fire on one tick. **The fired
-copy's writers are serialised by `trigger_store.write_lock`** (re-entrant;
-held inside `upsert`/`delete`/`apply_batch` across each load+save, and by
-`promote()` across its duplicate check AND the write): the store is
-written from the event loop (`POST/DELETE /api/triggers`) and from
-`asyncio.to_thread` workers (the generator, the promotion) at once, and an
-unserialised read-modify-write of the whole file loses whichever write
-landed first. A new check-then-act on this store holds that lock itself;
-plain reads never take it.
+copy's writers are serialised by `trigger_store.write_lock`, AND NONE OF
+THEM RUNS ON THE EVENT LOOP** (re-entrant; held inside `upsert`/`delete`/
+`apply_batch` across each load+save, and by `promote()` across its
+duplicate check AND the write): an unserialised read-modify-write of the
+whole file loses whichever write landed first. Serialising is only half of
+it — a WAITER must not be the loop. `POST`/`DELETE`/`generate`
+`/api/triggers` therefore hand their store calls to `asyncio.to_thread`
+alongside `sync-from-profile`, the generator and the promotion: the
+promotion's critical section is two whole-file parses plus a rewrite, so a
+route awaiting that lock inline would park the 200ms trigger tick, the
+bridge poll and every WS broadcast behind one Timeline save. A new
+check-then-act on this store holds that lock itself; plain reads never
+take it; a new MUTATING caller goes on a worker thread. Proof:
+`tests/test_trigger_store_write_lock.py` (both the lost-update shape and
+the real routes' own thread, verified RED against an inline call).
 
 **Frontend**: `spectra/web/src/testbed/TestbedPage.tsx` (`/testbed`, "Test
 Bed" nav link, route-mapped in `routeTopics.ts`) — song picker, an A/B
@@ -7260,8 +7295,20 @@ engine picker, `TestbedLaneBar.tsx` (waveform/energy lane + his marks +
 up to two engine lanes, green/amber/red tinting by match tightness — the
 `ReviewLaneBar` pattern generalized to N lanes), `TestbedMetricsPanel.tsx`
 (live P/R/F1 table + tolerance slider), and `PromotionReviewDialog.tsx`
-(the review gate's UI half). Help: `analysis-testbed` section +
-`testbed-promotion` entry in `helpContent.ts`, both linked (not orphaned).
+(the review gate's UI half). **EVERY LANE IS THE SAME `ms / durationMs`
+SCALE** — the waveform used to position its buckets by INDEX across the
+full lane width, so it drifted against every mark lane beside it by
+whatever the timebase exceeded the WAV's own duration; `durationMs` is
+also a REAL duration wherever the song has one (no `×1.05`/`×1.02` padding
+putting a length on the axis label the song does not have). **The engine
+picker is driven by the `/songs` payload's own `engines` map**, not a
+hardcoded frontend copy of the registry — a third engine registered in
+`testbed_engines.ENGINES` appears with no frontend edit; only pretty
+mark-kind labels are local, with a raw-key fallback. Help:
+`analysis-testbed` section + `testbed-promotion` entry in
+`helpContent.ts`, both linked (not orphaned) — `testbed-promotion` from
+`PromotionReviewDialog`'s own header as well as the promotion-history
+card, since that card only renders once a promotion exists.
 
 Executable specs: `tests/test_testbed_*.py` (marks split/provenance,
 metrics matcher, audio pinning + production-eviction independence, engine

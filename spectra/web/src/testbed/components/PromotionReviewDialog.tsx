@@ -5,9 +5,22 @@
  * mutation with confirmed: true, from its own explicit "Confirm & push"
  * button — never from the click that opened it. See
  * spectra/services/testbed_promote.py's module docstring for the server
- * side of this gate. */
+ * side of this gate.
+ *
+ * IT ALSO DISCLOSES THE CONSEQUENCE BEFORE HE PRESSES. Under scene-change
+ * mode "My triggers only" the rule is PER SONG (spectra/services/
+ * trigger_engine.py's _effective_mode_for_song): a song holding at least
+ * one authored trigger fires ONLY authored triggers — its automatic
+ * transition fire and every analysed mid-song change go quiet for that
+ * song. So on a song with none yet, this one push does not ADD a mark, it
+ * REPLACES the song's whole automatic show with it. That is said plainly
+ * here. It is DISCLOSURE, never a gate: Confirm stays enabled, nothing
+ * about room_controls or the firing rules is touched. */
 import { useState } from 'react';
-import { useScenes, useSpotColorSets, usePromoteToReal } from '../../queries';
+import HelpLink from '../../help/HelpLink';
+import {
+  useRoomControls, useScenes, useSpotColorSets, usePromoteToReal, useTestbedMarks,
+} from '../../queries';
 import { RESPONSE_CLASSES } from '../../types';
 import type { ResponseClass, TriggerAction, TriggerActionKind } from '../../types';
 
@@ -34,7 +47,18 @@ export default function PromotionReviewDialog({
 }) {
   const { data: scenes } = useScenes();
   const { data: colorSets } = useSpotColorSets();
+  const { data: roomControls } = useRoomControls();
+  const { data: marks } = useTestbedMarks(uri);
   const promote = usePromoteToReal();
+
+  // Every authored trigger, PROMOTED ONES INCLUDED — the trigger engine's
+  // own per-song test counts them all; the scoring set's exclusion is a
+  // different question and must not be borrowed here.
+  const authoredCount = marks
+    ? marks.transitions.length + marks.flares.length
+    : null;
+  const silencesTheSong = roomControls?.scene_change_mode === 'triggers_only'
+    && authoredCount === 0;
 
   const [action, setAction] = useState<TriggerAction>(blankAction('fire_response'));
   const [offsetMs, setOffsetMs] = useState(0);
@@ -54,14 +78,24 @@ export default function PromotionReviewDialog({
   return (
     <div className="testbed-promote-dialog-backdrop" onClick={onClose}>
       <div className="testbed-promote-dialog" onClick={(e) => e.stopPropagation()}>
-        <div className="card-title" style={{ marginBottom: 8 }}>
-          Push suggestion to your real triggers?
+        <div className="card-title" style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+          Push suggestion to your real triggers? <HelpLink topic="testbed-promotion" title="What push-to-real does" />
         </div>
         <div className="testbed-promote-dialog-warn">
           This writes a real, fireable trigger into your live show
           (storage/spectra/triggers.json) at the moment you confirm below —
           it never happens silently.
         </div>
+        {silencesTheSong && (
+          <div className="testbed-promote-dialog-consequence">
+            <strong>This song has no triggers of your own yet.</strong> Scene
+            changes are set to “My triggers only”, so the moment you push this
+            one, this song plays <strong>only your own triggers — this one</strong>.
+            Its automatic scene change and every analysed mid-song change stop
+            for this song until you place more. Every other song is unaffected,
+            and deleting this trigger puts the song back the way it is now.
+          </div>
+        )}
         <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>
           Suggested by <strong>{sourceEngine}</strong> ({sourceMarkKind}) at{' '}
           <strong>{(timestampMs / 1000).toFixed(2)}s</strong>. Review and, if

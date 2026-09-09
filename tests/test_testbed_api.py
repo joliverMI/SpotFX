@@ -473,3 +473,64 @@ def test_promote_refuses_a_second_push_at_the_same_moment_with_409():
     log = client.get(f"/api/testbed/promotions?uri={URI}").json()
     assert [e["status"] for e in log] == ["promoted", "refused"]
     assert log[-1]["reason"] == "duplicate"
+
+
+def test_songs_listing_never_parses_a_librosa_analysis(monkeypatch):
+    """The listing reads each engine's availability BIT and nothing else;
+    the parse is what /engines and /engine-marks are for. Against his real
+    corpus that difference is 965 files and 417MB per request, re-fetched
+    on every pin, unpin and promotion."""
+    from spectra import config as scfg
+    from spectra.services import analysis_reader
+    _seed_librosa(scfg)
+    _write_trigger(URI, 10000, "fire_scene")
+
+    def _forbidden(*a, **kw):
+        raise AssertionError("the songs listing parsed a .librosa.json")
+    monkeypatch.setattr(analysis_reader, "librosa_analysis_for_stem", _forbidden)
+
+    client = _client()
+    rows = {s["uri"]: s for s in client.get("/api/testbed/songs").json()}
+    assert rows[URI]["engines"]["librosa"]["available"] is True
+    assert rows[URI]["engines"]["librosa"]["mark_count"] is None
+    assert rows[URI]["engines"]["librosa"]["kinds"] == [
+        "section_boundary", "beat", "downbeat"]
+
+
+def test_a_pushed_mark_is_shown_flagged_and_kept_out_of_compare(monkeypatch):
+    """Push-to-real lands a mark at the engine's own exact time, so
+    scoring against it would grade that engine on its own suggestion.
+    /marks still shows it (flagged); /compare must not count it."""
+    from spectra import config as scfg
+    _seed_librosa(scfg)
+    _write_trigger(URI, 25000, "fire_scene")
+    client = _client()
+
+    pushed = client.post("/api/testbed/promote", json={
+        "uri": URI, "timestamp_ms": 10000,
+        "action": {"kind": "fire_scene", "intensity": 0.5},
+        "source_engine": "librosa", "source_mark_kind": "section_boundary",
+        "confirmed": True,
+    })
+    assert pushed.status_code == 200
+    pushed_id = pushed.json()["trigger_id"]
+
+    marks = client.get(f"/api/testbed/marks?uri={URI}").json()
+    assert marks["n_promoted"] == 1
+    by_id = {m["id"]: m for m in marks["transitions"]}
+    assert by_id[pushed_id]["promoted"] is True
+    assert [m["promoted"] for m in marks["transitions"] if m["id"] != pushed_id] == [False]
+
+    rows = {s["uri"]: s for s in client.get("/api/testbed/songs").json()}
+    assert rows[URI]["n_promoted"] == 1
+    assert rows[URI]["n_transitions"] == 2
+
+    # librosa's only interior section boundary is at 10000 — exactly where
+    # the pushed mark sits. Counting it would report a perfect match.
+    compare = client.get(
+        f"/api/testbed/compare?uri={URI}&engine=librosa&mark_kind=section_boundary"
+        "&reference=transitions&tolerance_ms=500",
+    ).json()
+    assert [r["timestamp_ms"] for r in compare["reference_marks"]] == [25000]
+    assert compare["metrics"]["n_reference"] == 1
+    assert compare["metrics"]["n_matched"] == 0

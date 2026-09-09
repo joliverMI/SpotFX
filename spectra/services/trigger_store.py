@@ -5,18 +5,26 @@ authoring surface's place/move/edit/delete gestures each land one write —
 matching the legacy Builder's per-trigger feel without its whole-profile
 save.
 
-WRITERS ARE SERIALISED BY `write_lock`. Every mutation here is a full
-load -> edit -> save of one file, and the writers no longer share one
-thread: spectra/api/triggers.py's POST/DELETE run on the event loop,
-midsong_generator.generate_for_song and testbed_promote.promote run under
-asyncio.to_thread, and a file read releases the GIL. Two unserialised
-read-modify-writes interleaving lose whichever landed first — a
-hand-placed trigger silently vanishing from the corpus. upsert/delete/
+WRITERS ARE SERIALISED BY `write_lock`, AND NONE OF THEM RUNS ON THE EVENT
+LOOP. Every mutation here is a full load -> edit -> save of one file
+(~126ms against his real ~9.5MB corpus), and the writers do not share one
+thread: spectra/api/triggers.py's POST/DELETE/generate, the profile sync,
+midsong_generator.generate_for_song and testbed_promote.promote all reach
+this module under asyncio.to_thread, and a file read releases the GIL. Two
+unserialised read-modify-writes interleaving lose whichever landed first —
+a hand-placed trigger silently vanishing from the corpus. upsert/delete/
 apply_batch each hold the lock across their own load+save; a caller whose
 correctness depends on a READ staying true until its WRITE (a
 check-then-act, e.g. the promotion duplicate guard) holds `write_lock`
 itself around both — it is re-entrant, so the nested upsert is fine. Plain
 reads are deliberately not serialised.
+
+Serialising is only half of it: a WAITER must not be the event loop. The
+promotion's critical section is its duplicate check plus the nested
+upsert, i.e. two whole-file parses and a rewrite, so a route that took
+this lock from the loop would park the bridge poll, the 200ms trigger tick
+and every WS broadcast behind it. Any NEW caller of a mutation here does
+the same — hand it to a worker thread, never `await` it inline.
 """
 from __future__ import annotations
 
@@ -65,11 +73,21 @@ def validate_action(action) -> None:
 
 
 def _load_raw() -> dict:
+    """A file that doesn't parse — or parses to something that isn't a
+    {uri: rows} object — reads as EMPTY. Every mutation below is a
+    read-modify-write of this; returning a non-dict would raise inside a
+    write path rather than at the read, which is how a landed change ends
+    up reported as a 500."""
     if config.TRIGGERS_FILE.exists():
         try:
-            return json.loads(config.TRIGGERS_FILE.read_text(encoding="utf-8"))
+            data = json.loads(config.TRIGGERS_FILE.read_text(encoding="utf-8"))
         except Exception as exc:
             logger.warning("spectra triggers.json parse failed: %s", exc)
+            return {}
+        if isinstance(data, dict):
+            return data
+        logger.warning("spectra triggers.json is a %s, not an object — "
+                       "reading it as empty", type(data).__name__)
     return {}
 
 
@@ -89,8 +107,12 @@ def _save_raw(data: dict) -> None:
         raise
 
 
-def _parse_rows(uri: str, rows: list[dict]) -> list[SpectraTrigger]:
+def _parse_rows(uri: str, rows) -> list[SpectraTrigger]:
     out: list[SpectraTrigger] = []
+    if not isinstance(rows, list):
+        logger.warning("song %s holds a %s, not a trigger list — skipped",
+                       uri, type(rows).__name__)
+        return out
     for v in rows:
         try:
             out.append(SpectraTrigger(**v))
@@ -114,7 +136,8 @@ def list_all() -> dict[str, list[SpectraTrigger]]:
     list is empty are omitted, matching the store's own delete() rule that
     an emptied song is dropped from the file."""
     raw = _load_raw()
-    return {uri: _parse_rows(uri, rows) for uri, rows in raw.items() if rows}
+    return {uri: _parse_rows(uri, rows) for uri, rows in raw.items()
+            if isinstance(rows, list) and rows}
 
 
 def upsert(uri: str, trigger: SpectraTrigger) -> None:

@@ -27,15 +27,26 @@ own upsert-only/provenance-gated-delete rules (spectra/services/
 profile_trigger_sync.py) are never at risk of colliding with it — nothing
 here EVER calls that reconciler.
 
-A promoted trigger's generator_key carries where it came from
-("testbed:<engine>:<mark_kind>:<uri>@<timestamp_ms>") for audit ONLY —
-its source is still stamped "authored" (never "generated"), because
-front 3's regeneration/ownership-transfer rule
-(spectra/models/trigger.py's own docstring) only ever applies to
-midsong_generator's own seeded triggers; a test-bed promotion is a human
+A promoted trigger carries NO provenance of its own: source="authored"
+and generator_key=None, exactly like a hand-placed one. Both halves are
+deliberate. "authored" because front 3's regeneration/ownership-transfer
+rule (spectra/models/trigger.py's own docstring) only ever applies to
+midsong_generator's own seeded rows — a test-bed promotion is a human
 decision, not a generation pass, and must never be silently overwritten by
-a later `POST /api/triggers/generate` the way an untouched generated
-trigger would be.
+a later `POST /api/triggers/generate`. generator_key=None because that
+field is midsong_generator's own matching key; stamping a "testbed:..."
+value there would put a non-generated row into the space a generated one
+is identified by.
+
+So the promotion LOG below is the ONLY record that a given trigger came
+from this page — which is what `promoted_trigger_ids()` /
+`promoted_ids_by_uri()` exist for. spectra/services/testbed_marks.py reads
+them to keep a promoted mark OUT of the scoring reference set: it sits at
+the suggesting engine's own exact time_ms, so scoring against it would
+grade that engine on marks it authored — the same circularity the
+authored-only rule already refuses for generated rows, arriving through
+the authored door. The mark is still SHOWN (flagged `promoted`), never
+silently dropped.
 
 A repeat of the same click is REFUSED, never landed twice: an authored
 trigger of the same action kind already within DUPLICATE_WINDOW_MS of the
@@ -95,11 +106,21 @@ def _nearby_authored(uri: str, timestamp_ms: int, kind: str) -> Optional[Spectra
 
 
 def _load_log() -> list[dict]:
+    """A malformed or hand-edited file reads as an EMPTY log, never as
+    whatever it happened to parse to. _record() appends to this and runs
+    AFTER trigger_store.upsert has already landed the write: a non-list
+    here would raise there, 500 a promotion that really happened, leave it
+    out of the audit trail, and then refuse his retry as a duplicate."""
     if config.TESTBED_PROMOTIONS_FILE.exists():
         try:
-            return json.loads(config.TESTBED_PROMOTIONS_FILE.read_text(encoding="utf-8"))
+            data = json.loads(config.TESTBED_PROMOTIONS_FILE.read_text(encoding="utf-8"))
         except Exception as exc:
             logger.warning("testbed promotions.json parse failed: %s", exc)
+            return []
+        if isinstance(data, list):
+            return [e for e in data if isinstance(e, dict)]
+        logger.warning("testbed promotions.json is a %s, not a list — "
+                       "reading it as an empty log", type(data).__name__)
     return []
 
 
@@ -170,10 +191,6 @@ def promote(uri: str, timestamp_ms: int, action: TriggerAction,
             "status": "refused", "reason": str(exc),
         })
         raise
-    # source/generator_key stay "authored"/None per the module docstring —
-    # provenance is carried in the promotion LOG entry below, not on the
-    # trigger itself, so front 3's regeneration rule never sees this as a
-    # generated row it's free to overwrite.
     with trigger_store.write_lock:
         nearby = _nearby_authored(uri, timestamp_ms, trigger.action.kind)
         if nearby is None:
@@ -206,3 +223,25 @@ def log_for_song(uri: Optional[str] = None) -> list[dict]:
     if uri is None:
         return entries
     return [e for e in entries if e.get("uri") == uri]
+
+
+def promoted_trigger_ids(uri: str) -> set[str]:
+    """The fired-copy trigger ids this page pushed for ONE song — the only
+    thing that can tell a promoted authored trigger from one he placed by
+    hand (see the module docstring: nothing on the trigger itself does)."""
+    return {tid for e in _load_log()
+            if e.get("uri") == uri and e.get("status") == "promoted"
+            and isinstance(tid := e.get("trigger_id"), str)}
+
+
+def promoted_ids_by_uri() -> dict[str, set[str]]:
+    """{uri: {trigger_id, ...}} from ONE log read — the whole-corpus
+    listing's shape, so a song walk never re-reads the log per song."""
+    out: dict[str, set[str]] = {}
+    for e in _load_log():
+        if e.get("status") != "promoted":
+            continue
+        uri, tid = e.get("uri"), e.get("trigger_id")
+        if isinstance(uri, str) and isinstance(tid, str):
+            out.setdefault(uri, set()).add(tid)
+    return out

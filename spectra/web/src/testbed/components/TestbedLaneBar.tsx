@@ -11,7 +11,16 @@
  * ("matched-tight"), matched but in the looser half = amber
  * ("matched-loose"), unmatched = red. An engine's own OVER-segmented marks
  * (no match to any of his) render dim/muted, not red — they aren't wrong,
- * just extra (report Part 1.2's own reading). */
+ * just extra (report Part 1.2's own reading). A mark this page itself
+ * pushed to his real triggers renders as its own "promoted" tint and is
+ * labelled excluded-from-scoring: it sits at the suggesting engine's exact
+ * time, so it is deliberately not in the matched set (see
+ * spectra/services/testbed_marks.py).
+ *
+ * EVERY LANE IS THE SAME ms -> % SCALE. `durationMs` is the one timebase;
+ * a lane that positioned its own content by index (the waveform's buckets)
+ * instead of by TIME would drift against every mark lane beside it, which
+ * is the one thing a comparison surface must not do. */
 import { useState } from 'react';
 import { fmtMs } from '../../lib/time';
 import type { TestbedEstimateMark, TestbedMetrics, TestbedReferenceMark, TestbedWaveform } from '../../types';
@@ -19,6 +28,19 @@ import type { TestbedEstimateMark, TestbedMetrics, TestbedReferenceMark, Testbed
 function tintFor(offsetMs: number | undefined, toleranceMs: number): string {
   if (offsetMs == null) return 'unmatched';
   return offsetMs <= toleranceMs / 2 ? 'matched-tight' : 'matched-loose';
+}
+
+/** The waveform's buckets span the WAV's own duration, which is not always
+ * the lane's timebase (an engine's beats can run past a capture that was
+ * trimmed, and then `durationMs` is the longer one). Scaling by the
+ * waveform's own duration is what keeps a transient at 3:00 under the mark
+ * at 3:00. Falling back to `dur` when the payload carries no duration
+ * reproduces the old full-width stretch for that one case rather than
+ * collapsing the lane to nothing. */
+function waveformSpanPct(waveform: TestbedWaveform, dur: number): number {
+  const waveDur = waveform.duration_ms ?? 0;
+  if (waveDur <= 0) return 100;
+  return Math.min(100, (waveDur / dur) * 100);
 }
 
 function WaveformLane({ waveform, durationMs }: { waveform: TestbedWaveform | undefined; durationMs: number }) {
@@ -37,9 +59,10 @@ function WaveformLane({ waveform, durationMs }: { waveform: TestbedWaveform | un
   const dur = Math.max(1, durationMs);
   if (waveform.source === 'wav_peaks' && waveform.mins && waveform.maxs) {
     const n = waveform.mins.length;
+    const spanPct = waveformSpanPct(waveform, dur);
     const points = waveform.mins.map((min, i) => {
       const max = waveform.maxs![i];
-      const x = (i / Math.max(1, n - 1)) * 100;
+      const x = (i / Math.max(1, n - 1)) * spanPct;
       return { x, min, max };
     });
     return (
@@ -77,10 +100,14 @@ function WaveformLane({ waveform, durationMs }: { waveform: TestbedWaveform | un
 }
 
 function ReferenceMarksLane({
-  label, marks, durationMs, metrics, toleranceMs, hover, setHover, emptyNote,
+  label, marks, scoredMarks, durationMs, metrics, toleranceMs, hover, setHover, emptyNote,
 }: {
   label: string;
   marks: TestbedReferenceMark[];
+  /** The exact array `metrics` was computed over — promoted marks already
+   * dropped. `metrics.matches[].ref_index` indexes into THIS, not into
+   * `marks`, so a tint is resolved by mark id rather than by position. */
+  scoredMarks: TestbedReferenceMark[];
   durationMs: number;
   metrics: TestbedMetrics | null | undefined;
   toleranceMs: number;
@@ -90,8 +117,11 @@ function ReferenceMarksLane({
 }) {
   const dur = Math.max(1, durationMs);
   const pct = (ms: number) => `${Math.max(0, Math.min(100, (ms / dur) * 100))}%`;
-  const offsetByRefIndex = new Map<number, number>();
-  metrics?.matches.forEach((m) => offsetByRefIndex.set(m.ref_index, m.abs_offset_ms));
+  const offsetById = new Map<string, number>();
+  metrics?.matches.forEach((m) => {
+    const scored = scoredMarks[m.ref_index];
+    if (scored) offsetById.set(scored.id, m.abs_offset_ms);
+  });
   if (marks.length === 0 && emptyNote) {
     return (
       <div className="testbed-lane-row">
@@ -107,10 +137,12 @@ function ReferenceMarksLane({
       <span className="testbed-lane-label">{label}</span>
       <div className="testbed-lane-bar">
         {hover && <div className="review-lane-tooltip" style={{ left: hover.leftPct }}>{hover.text}</div>}
-        {marks.map((m, i) => {
-          const offset = offsetByRefIndex.get(i);
-          const tint = metrics ? tintFor(offset, toleranceMs) : 'extra';
-          const text = `${fmtMs(m.timestamp_ms)} — ${m.kind}${offset != null ? ` (matched, ${Math.round(offset)}ms off)` : metrics ? ' (no match)' : ''}`;
+        {marks.map((m) => {
+          const offset = offsetById.get(m.id);
+          const tint = m.promoted ? 'promoted' : metrics ? tintFor(offset, toleranceMs) : 'extra';
+          const text = m.promoted
+            ? `${fmtMs(m.timestamp_ms)} — ${m.kind} (pushed from this page — not scored)`
+            : `${fmtMs(m.timestamp_ms)} — ${m.kind}${offset != null ? ` (matched, ${Math.round(offset)}ms off)` : metrics ? ' (no match)' : ''}`;
           return (
             <button
               key={m.id}
@@ -170,13 +202,15 @@ export function EngineLane({
 }
 
 export default function TestbedLaneBar({
-  durationMs, waveform, transitions, flares, reference, referenceLabel, referenceEmptyNote,
-  engineLanes, toleranceMs, onEstimateMarkClick,
+  durationMs, waveform, transitions, flares, scoredMarks, reference, referenceLabel,
+  referenceEmptyNote, engineLanes, toleranceMs, onEstimateMarkClick,
 }: {
   durationMs: number;
   waveform: TestbedWaveform | undefined;
   transitions: TestbedReferenceMark[];
   flares: TestbedReferenceMark[];
+  /** The scored subset of the ACTIVE reference set — see ReferenceMarksLane. */
+  scoredMarks: TestbedReferenceMark[];
   reference: 'transitions' | 'flares';
   referenceLabel: string;
   referenceEmptyNote?: string;
@@ -194,6 +228,7 @@ export default function TestbedLaneBar({
       <ReferenceMarksLane
         label={`His ${referenceLabel}`}
         marks={activeReferenceMarks}
+        scoredMarks={scoredMarks}
         durationMs={durationMs}
         metrics={activeMetrics}
         toleranceMs={toleranceMs}

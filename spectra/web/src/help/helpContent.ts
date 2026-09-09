@@ -1377,7 +1377,7 @@ export const HELP_SECTIONS: HelpSection[] = [
   {
     id: 'analysis-testbed',
     title: 'Music-Analysis Test Bed',
-    keywords: 'testbed test bed engine compare beat downbeat section boundary librosa beat_this precision recall f1 waveform pin wav promote push real',
+    keywords: 'testbed test bed engine compare beat downbeat section boundary librosa beat_this precision recall f1 waveform pin wav promote push real promoted excluded scoring my triggers only',
     intro:
       'A read-only comparison surface: your real marks, the waveform (or a coarser fallback), and every candidate analysis engine\'s own detected marks, all on one shared timeline — with precision/recall/F1 computed the same way for every engine, so you can judge them by eye and by number instead of by argument. Nothing here fires anything in your real show except through the reviewed "push to real" button.',
     entries: [
@@ -1390,10 +1390,12 @@ export const HELP_SECTIONS: HelpSection[] = [
           ['Amber tick', 'Matched, but in the looser half of the tolerance window.'],
           ['Red tick', 'One of your marks with no match at all — a miss.'],
           ['Dim/grey tick (engine lane)', 'An engine mark with no match to any of your marks — extra, not necessarily wrong (over-segmentation).'],
+          ['Dashed tick (your lane)', 'A mark you pushed from this page. Shown so it is never hidden, but left out of the scores — it sits exactly where the engine suggested it.'],
         ],
         body: [
           'Drag the tolerance slider on the Metrics card to see precision/recall/F1 and every tint recompute for the currently selected tolerance — there is no one "correct" tolerance; how close counts as close enough is your call, not this page\'s.',
           'The waveform lane shows the real retained WAV when one is pinned; otherwise it falls back to the coarser RMS-energy shape production already keeps for every played song, labeled honestly as coarse rather than silently showing nothing.',
+          'Every lane shares one timebase, so a spot on the waveform sits directly under the marks at that moment in the song. Where a capture is shorter than the song\'s last mark or beat, the waveform simply stops where the audio does instead of being stretched to fill the lane.',
         ],
       },
       {
@@ -1421,6 +1423,8 @@ export const HELP_SECTIONS: HelpSection[] = [
         body: [
           'Clicking a mark in an engine\'s own lane opens a review dialog — it never writes anything by itself. Choose or adjust the action it would fire (which scene, response class, colour set, intensity, and an optional timing offset), then press "Confirm & push to real triggers" to actually place it as an ordinary, editable trigger in your real show. Every attempt — pushed or refused — is kept in the promotion history table below, so nothing here can happen silently.',
           'A pushed trigger is marked the same as anything you place by hand ("authored") — it will never be silently touched or removed by a later automatic regeneration pass.',
+          'On a song that has no triggers of your own yet, while scene changes are set to "My triggers only", pushing one is not an addition — that mode plays only your own triggers on any song that has some, so the song\'s automatic scene change and every analysed mid-song change stop for it. The dialog says so before you confirm, and deleting the trigger again puts the song back.',
+          'A pushed mark is still drawn in your own lane, in its own colour, but it is deliberately left OUT of precision/recall/F1: it sits exactly where the engine put it, so counting it would score that engine against its own suggestion. The Metrics card says how many were left out.',
         ],
       },
     ],

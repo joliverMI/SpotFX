@@ -48,21 +48,33 @@ async def upsert_trigger(trigger: SpectraTrigger, uri: str = Query(...)):
     """Every write through this human-facing endpoint lands source=
     "authored" (generator_key cleared) regardless of what the caller sent —
     the ownership-transfer rule front 3 depends on: dragging or editing a
-    generated trigger claims it, so a later regenerate leaves it alone."""
+    generated trigger claims it, so a later regenerate leaves it alone.
+
+    The store call runs off the event loop (asyncio.to_thread, the
+    sync-from-profile precedent below). It is a full read+rewrite of a
+    ~9.5MB triggers.json (~126ms on his corpus) AND it takes
+    trigger_store.write_lock, which an off-loop writer — the mid-song
+    generator, a test-bed promotion — may already be holding across its own
+    read+write. Waiting for either on the loop stalls this process's bridge
+    poll, the 200ms trigger tick and every WS broadcast behind one save."""
     trigger = trigger.model_copy(update={"source": "authored", "generator_key": None})
     _validate_action(trigger)
-    trigger_store.upsert(uri, trigger)
+    await asyncio.to_thread(trigger_store.upsert, uri, trigger)
     return {"status": "saved", "id": trigger.id}
 
 
 @router.post("/generate")
 async def generate_triggers(uri: str = Query(...)):
-    return midsong_generator.generate_for_song(uri)
+    """Off the loop too: the generator writes the same store under the same
+    lock, one upsert per seeded section."""
+    return await asyncio.to_thread(midsong_generator.generate_for_song, uri)
 
 
 @router.delete("/{trigger_id}")
 async def delete_trigger(trigger_id: str, uri: str = Query(...)):
-    if not trigger_store.delete(uri, trigger_id):
+    """Off the loop for the same reason as the upsert above — same whole-file
+    rewrite, same write_lock."""
+    if not await asyncio.to_thread(trigger_store.delete, uri, trigger_id):
         raise HTTPException(404, "trigger not found")
     return {"status": "deleted"}
 

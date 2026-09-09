@@ -1,12 +1,16 @@
 """spectra/services/trigger_store.py — writers of the fired trigger copy
-are serialised. The store is written from the event loop (POST/DELETE
-/api/triggers) and from asyncio.to_thread workers (midsong_generator,
-testbed_promote) at once; every mutation is a full load -> edit -> save of
-one file, so two unserialised writers interleaving lose whichever landed
-first. These tests put two writers inside that window on purpose and
-assert nothing is lost."""
+are serialised, AND none of them waits for that lock on the event loop.
+Every mutation is a full load -> edit -> save of one file, so two
+unserialised writers interleaving lose whichever landed first; and the
+promotion's critical section spans two whole-file parses plus a rewrite,
+so a route that took the lock from the loop would park the trigger tick,
+the bridge poll and every WS broadcast behind it. These tests put two
+writers inside that window on purpose, and drive the real HTTP routes to
+prove where they run."""
 from __future__ import annotations
 
+import asyncio
+import json
 import threading
 
 import pytest
@@ -90,3 +94,88 @@ def test_reads_are_not_serialised_behind_a_writer():
         reader.join(timeout=2)
         assert not reader.is_alive()
     assert seen == [1]
+
+
+def _ran_on_loop() -> bool:
+    try:
+        asyncio.get_running_loop()
+        return True
+    except RuntimeError:
+        return False
+
+
+def _client():
+    from fastapi.testclient import TestClient
+    from spectra.app import create_app
+    return TestClient(create_app())
+
+
+def test_authoring_routes_never_touch_the_store_on_the_event_loop(monkeypatch):
+    """POST/DELETE /api/triggers each take write_lock across a full
+    read+rewrite. Run on the loop, one Timeline save waits out whatever
+    off-loop writer (the generator, a test-bed promotion) currently holds
+    it — with the trigger engine's 200ms tick stalled behind it."""
+    from spectra.services import trigger_store
+    where: dict[str, bool] = {}
+    real_upsert, real_delete = trigger_store.upsert, trigger_store.delete
+
+    def _upsert(uri, trigger):
+        where["upsert"] = _ran_on_loop()
+        return real_upsert(uri, trigger)
+
+    def _delete(uri, trigger_id):
+        where["delete"] = _ran_on_loop()
+        return real_delete(uri, trigger_id)
+
+    monkeypatch.setattr(trigger_store, "upsert", _upsert)
+    monkeypatch.setattr(trigger_store, "delete", _delete)
+
+    client = _client()
+    placed = client.post(f"/api/triggers?uri={URI}", json=json.loads(
+        _trigger(1000).model_dump_json()))
+    assert placed.status_code == 200
+    assert client.delete(
+        f"/api/triggers/{placed.json()['id']}?uri={URI}").status_code == 200
+
+    assert where == {"upsert": False, "delete": False}
+    assert trigger_store.list_for_song(URI) == []
+
+
+def test_a_held_write_lock_does_not_stall_the_authoring_route_s_loop(monkeypatch):
+    """The consequence, measured rather than argued: with the lock held by
+    a worker (a promotion mid-critical-section), the event loop the POST is
+    served on stays free to run other work."""
+    from spectra.services import trigger_store
+    released = threading.Event()
+    ticked = threading.Event()
+
+    def _hold():
+        with trigger_store.write_lock:
+            ticked.wait(timeout=5)
+        released.set()
+
+    holder = threading.Thread(target=_hold)
+    holder.start()
+    try:
+        client = _client()
+        # The route's own worker thread will block on the lock; the loop
+        # must still be able to serve an unrelated request meanwhile.
+        result: dict = {}
+
+        def _save():
+            result["status"] = client.post(
+                f"/api/triggers?uri={URI}",
+                json=json.loads(_trigger(2000).model_dump_json())).status_code
+
+        saver = threading.Thread(target=_save)
+        saver.start()
+        assert client.get(f"/api/triggers?uri={URI}").status_code == 200
+        ticked.set()
+        saver.join(timeout=10)
+        assert not saver.is_alive()
+        assert result["status"] == 200
+    finally:
+        ticked.set()
+        holder.join(timeout=5)
+    assert released.is_set()
+    assert len(trigger_store.list_for_song(URI)) == 1

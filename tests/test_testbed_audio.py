@@ -184,3 +184,24 @@ def test_concurrent_pins_of_two_songs_both_land_in_the_registry():
         t.join()
     assert {r["status"] for r in results.values()} == {"pinned"}
     assert set(testbed_audio.list_pinned()) == {URI, other}
+
+
+def test_a_malformed_registry_reads_as_empty_and_a_pin_still_lands():
+    """pin() does a read-modify-write of pinned_audio.json AFTER the WAV
+    copy has already landed, so a file that parses to something other than
+    an object used to raise there — leaving a copied WAV nothing records
+    as pinned."""
+    from spectra import config as scfg
+    from spectra.services import testbed_audio
+    _seed_source_wav(scfg)
+    scfg.TESTBED_PINNED_FILE.parent.mkdir(parents=True, exist_ok=True)
+    scfg.TESTBED_PINNED_FILE.write_text(json.dumps(["not", "a", "registry"]),
+                                        encoding="utf-8")
+
+    assert testbed_audio.list_pinned() == {}
+    assert testbed_audio.is_pinned(URI) is False
+    assert testbed_audio.status(URI)["pinned"] is False
+
+    assert testbed_audio.pin(URI)["status"] == "pinned"
+    assert testbed_audio.is_pinned(URI) is True
+    assert testbed_audio.status(URI)["pinned"] is True

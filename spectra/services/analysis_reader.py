@@ -85,6 +85,20 @@ def stem_index() -> dict[str, str]:
     return _shape_index
 
 
+def has_librosa_analysis(stem: Optional[str]) -> bool:
+    """Whether <stem>.librosa.json EXISTS — a stat, deliberately not a
+    parse. The whole-corpus listing needs one availability bit per song
+    and discards everything a parse would build; against his real
+    storage/audio_shapes/ that is 965 files and 417MB re-read on every
+    listing (and every pin/unpin/promotion that invalidates it). A file
+    that exists but holds no usable sections/beats still reports available
+    here; the lane fetch (librosa_marks_for_stem, the ONE parse) is what
+    answers that, and reports the lane unavailable."""
+    if stem is None:
+        return False
+    return (config.AUDIO_SHAPES_DIR / f"{stem}.librosa.json").exists()
+
+
 def librosa_analysis_for_stem(stem: Optional[str]) -> Optional[dict]:
     """The parsed <stem>.librosa.json, or None when there is no stem, no
     file, or it doesn't parse — ONE read for every key a caller wants

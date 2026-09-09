@@ -74,11 +74,20 @@ def _replace_with(path: Path, fill: Callable[[str], None]) -> None:
 
 
 def _load_registry() -> dict:
+    """A malformed or hand-edited file reads as an EMPTY registry, never as
+    whatever it happened to parse to — pin()/unpin() do a read-modify-write
+    of this, and a non-dict would raise mid-pin with the WAV copy already
+    landed."""
     if config.TESTBED_PINNED_FILE.exists():
         try:
-            return json.loads(config.TESTBED_PINNED_FILE.read_text(encoding="utf-8"))
+            data = json.loads(config.TESTBED_PINNED_FILE.read_text(encoding="utf-8"))
         except Exception as exc:
             logger.warning("testbed pinned_audio.json parse failed: %s", exc)
+            return {}
+        if isinstance(data, dict):
+            return data
+        logger.warning("testbed pinned_audio.json is a %s, not an object — "
+                       "reading it as empty", type(data).__name__)
     return {}
 
 
@@ -190,6 +199,8 @@ def status(uri: str, *, stem_index: Optional[dict[str, str]] = None,
     if registry is None:
         registry = _load_registry()
     entry = registry.get(uri)
+    if not isinstance(entry, dict):
+        entry = None
     stem = (analysis_reader.stem_for_uri(uri) if stem_index is None
             else stem_index.get(uri))
     has_source_wav = stem is not None and (config.AUDIO_SHAPES_DIR / f"{stem}.wav").exists()

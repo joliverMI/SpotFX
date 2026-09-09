@@ -111,3 +111,53 @@ def test_availability_with_a_stem_index_snapshot_matches_the_lookup_path(monkeyp
     rebuilds.clear()
     testbed_engines.availability_for(unknown, stem_index=stems)
     assert rebuilds == []
+
+
+def test_a_listing_answers_availability_without_parsing_the_analysis(monkeypatch):
+    """The corpus listing reads only the availability BIT. Parsing every
+    song's .librosa.json to build marks it discards is 965 files / 417MB of
+    his real storage per request — and this listing is re-fetched on every
+    pin, unpin and promotion. The parse is made to raise: a listing that
+    still answers is one that never called it."""
+    from spectra import config as scfg
+    from spectra.services import analysis_reader, testbed_engines
+    _seed_librosa_json(scfg)
+
+    def _forbidden(*a, **kw):
+        raise AssertionError("the listing parsed a .librosa.json")
+    monkeypatch.setattr(analysis_reader, "librosa_analysis_for_stem", _forbidden)
+
+    stems = analysis_reader.stem_index()
+    avail = testbed_engines.availability_for(URI, stem_index=stems, count_marks=False)
+    assert avail["librosa"]["available"] is True
+    assert avail["librosa"]["mark_count"] is None
+    assert avail["beat_this"]["available"] is False
+    assert avail["beat_this"]["mark_count"] is None
+
+    unknown = testbed_engines.availability_for(
+        "spotify:track:noaudioyet", stem_index=stems, count_marks=False)
+    assert unknown["librosa"]["available"] is False
+
+
+def test_the_cheap_and_counting_paths_agree_about_availability():
+    """The listing's answer and the per-song route's answer are about the
+    same song; a listing that says "computed" where the lane says
+    "not computed" is the drift this pair exists to rule out."""
+    from spectra import config as scfg
+    from spectra.services import analysis_reader, testbed_engines
+    _seed_librosa_json(scfg)
+    stems = analysis_reader.stem_index()
+    for uri in (URI, "spotify:track:noaudioyet"):
+        cheap = testbed_engines.availability_for(uri, stem_index=stems, count_marks=False)
+        counted = testbed_engines.availability_for(uri, stem_index=stems)
+        assert {k: v["available"] for k, v in cheap.items()} == \
+            {k: v["available"] for k, v in counted.items()}
+
+
+def test_a_precomputed_engine_reads_as_available_in_a_listing():
+    from spectra.services import analysis_reader, testbed_cache, testbed_engines
+    testbed_cache.save(testbed_engines.ENGINE_BEAT_THIS, URI, "v1",
+                       [{"time_ms": 100.0, "kind": "downbeat", "label": None, "score": None}])
+    avail = testbed_engines.availability_for(
+        URI, stem_index=analysis_reader.stem_index(), count_marks=False)
+    assert avail["beat_this"]["available"] is True

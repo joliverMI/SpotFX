@@ -12,6 +12,9 @@ def _isolated(tmp_path, monkeypatch):
     from spectra import config as scfg
     monkeypatch.setattr(scfg, "TRIGGERS_FILE", tmp_path / "triggers.json")
     monkeypatch.setattr(scfg, "PROFILES_DIR", tmp_path / "profiles")
+    monkeypatch.setattr(scfg, "TESTBED_PROMOTIONS_FILE", tmp_path / "promotions.json")
+    monkeypatch.setattr(scfg, "SCENES_FILE", tmp_path / "scenes.json")
+    monkeypatch.setattr(scfg, "COLOR_SETS_FILE", tmp_path / "color_sets.json")
     (tmp_path / "profiles").mkdir()
 
 
@@ -163,3 +166,82 @@ def test_all_song_marks_reads_the_trigger_store_once_and_never_scans_profiles_pe
     listing = testbed_marks.all_song_marks()
     assert len(loads) == 1
     assert [m.title for m in listing.values()] == [f"Song {i}" for i in range(5)]
+
+
+def _push_from_the_testbed(uri, timestamp_ms, kind="fire_scene", **action_extra):
+    """A mark that reached the corpus through push-to-real — the real
+    write path, so the promotion log is the real one too."""
+    from spectra.services import testbed_promote
+    result = testbed_promote.promote(
+        uri=uri, timestamp_ms=timestamp_ms,
+        action={"kind": kind, **action_extra},
+        source_engine="beat_this", source_mark_kind="downbeat", confirmed=True)
+    return result["trigger_id"]
+
+
+def test_a_pushed_mark_is_flagged_shown_and_left_out_of_the_scoring_set():
+    """The circularity guard: a promoted mark sits at the suggesting
+    engine's own exact time, so scoring against it grades that engine on
+    its own suggestion. It stays visible (flagged), the number leaves it
+    out."""
+    from spectra.services import testbed_marks
+    _write_trigger(URI, 1000, "fire_scene")
+    pushed = _push_from_the_testbed(URI, 20000)
+
+    marks = testbed_marks.marks_for_song(URI)
+    by_id = {m.id: m for m in marks.transitions}
+    assert set(by_id) == {pushed} | {m.id for m in marks.transitions if m.id != pushed}
+    assert len(marks.transitions) == 2
+    assert by_id[pushed].promoted is True
+    assert [m.promoted for m in marks.transitions if m.id != pushed] == [False]
+    assert marks.n_promoted == 1
+
+    transitions, _flares = testbed_marks.reference_marks_for_song(URI)
+    assert [m.timestamp_ms for m in transitions] == [1000]
+
+
+def test_a_hand_placed_mark_is_never_flagged_promoted():
+    """His own marks keep counting exactly as before — nothing on the
+    trigger distinguishes them, so an over-broad rule would silently drop
+    real ground truth."""
+    from spectra.services import testbed_marks
+    _write_trigger(URI, 1000, "fire_scene")
+    _write_trigger(URI, 2000, "fire_response", event_class="flare")
+    marks = testbed_marks.marks_for_song(URI)
+    assert [m.promoted for m in marks.transitions] == [False]
+    assert [m.promoted for m in marks.flares] == [False]
+    assert marks.n_promoted == 0
+    transitions, flares = testbed_marks.reference_marks_for_song(URI)
+    assert len(transitions) == 1 and len(flares) == 1
+
+
+def test_a_refused_promotion_never_marks_anything_as_promoted():
+    """Only a LANDED promotion carries a trigger_id; a refusal must not
+    make some unrelated authored row read as pushed."""
+    import pytest as _pytest
+    from spectra.services import testbed_marks, testbed_promote
+    _write_trigger(URI, 1000, "fire_scene")
+    with _pytest.raises(testbed_promote.PromotionNotConfirmed):
+        testbed_promote.promote(
+            uri=URI, timestamp_ms=1000, action={"kind": "fire_scene"},
+            source_engine="librosa", source_mark_kind="section_boundary",
+            confirmed=False)
+    marks = testbed_marks.marks_for_song(URI)
+    assert marks.n_promoted == 0
+    assert [m.promoted for m in marks.transitions] == [False]
+
+
+def test_the_listing_resolves_promotions_per_song():
+    """all_song_marks reads the promotion log ONCE for the whole corpus;
+    a push on one song must not flag a same-id-less row on another."""
+    from spectra.services import testbed_marks
+    other = "spotify:track:testbedmarks2"
+    _write_trigger(URI, 1000, "fire_scene")
+    pushed = _push_from_the_testbed(URI, 5000)
+    _write_trigger(other, 1000, "fire_scene")
+
+    rows = testbed_marks.all_song_marks()
+    assert rows[URI].n_promoted == 1
+    assert {m.id for m in rows[URI].transitions if m.promoted} == {pushed}
+    assert rows[other].n_promoted == 0
+    assert [m.promoted for m in rows[other].transitions] == [False]

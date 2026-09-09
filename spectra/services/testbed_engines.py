@@ -99,7 +99,8 @@ def marks_for(engine: str, uri: str) -> Optional[list[EngineMark]]:
 
 
 def availability_for(uri: str, *,
-                     stem_index: Optional[dict[str, str]] = None) -> dict[str, dict]:
+                     stem_index: Optional[dict[str, str]] = None,
+                     count_marks: bool = True) -> dict[str, dict]:
     """Per-engine {available, computed_at, mark_count} — the songs/engines
     listing's own status, so the frontend can say "not computed yet"
     instead of an empty lane.
@@ -107,19 +108,41 @@ def availability_for(uri: str, *,
     `stem_index`: a snapshot from analysis_reader.stem_index(), for a
     caller walking the whole corpus — a per-song stem_for_uri() lookup
     rebuilds the entire sidecar index on every miss, i.e. once per song
-    that has no captured audio."""
+    that has no captured audio.
+
+    `count_marks=False`: answer AVAILABILITY without parsing the engine's
+    output, and report `mark_count: None` rather than a fabricated 0 — the
+    whole-corpus listing's shape. librosa's own marks come out of a
+    <stem>.librosa.json that is 400KB+ on his real corpus and are then
+    discarded; the listing reads only `available`. The full parse stays on
+    the per-song routes (/engines, /engine-marks), where exactly one song
+    pays for it."""
     out: dict[str, dict] = {}
     for key, meta in ENGINES.items():
         if key == ENGINE_LIBROSA:
-            if stem_index is None:
-                marks = _librosa_marks(uri)
-            else:
-                marks = librosa_marks_for_stem(stem_index.get(uri))
+            stem = (analysis_reader.stem_for_uri(uri) if stem_index is None
+                    else stem_index.get(uri))
+            if not count_marks:
+                out[key] = {
+                    "label": meta["label"], "kinds": meta["kinds"],
+                    "available": analysis_reader.has_librosa_analysis(stem),
+                    "computed_at": None,
+                    "mark_count": None,
+                }
+                continue
+            marks = librosa_marks_for_stem(stem)
             out[key] = {
                 "label": meta["label"], "kinds": meta["kinds"],
                 "available": marks is not None,
                 "computed_at": None,
                 "mark_count": len(marks) if marks else 0,
+            }
+        elif not count_marks:
+            out[key] = {
+                "label": meta["label"], "kinds": meta["kinds"],
+                "available": testbed_cache.has_cache(key, uri),
+                "computed_at": None,
+                "mark_count": None,
             }
         else:
             cached = testbed_cache.load(key, uri)

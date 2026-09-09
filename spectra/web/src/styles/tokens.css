@@ -1451,6 +1451,10 @@ kbd {
 .testbed-lane-marker.matched-loose { background: var(--warning); }
 .testbed-lane-marker.unmatched { background: var(--danger); }
 .testbed-lane-marker.extra { background: var(--text-muted); opacity: 0.6; }
+.testbed-lane-marker.promoted {
+  background: var(--accent); opacity: 0.85;
+  outline: 1px dashed var(--text-muted); outline-offset: 1px;
+}
 .testbed-lane-marker.selected { outline: 2px solid var(--text); outline-offset: 1px; z-index: 2; }
 .testbed-waveform-svg { width: 100%; height: 100%; display: block; }
 .testbed-lane-times {
@@ -1474,3 +1478,9 @@ kbd {
   background: #3a2c0e; color: var(--warning); border-radius: 6px; padding: 8px 10px;
   font-size: 12px; margin-bottom: 10px;
 }
+.testbed-promote-dialog-consequence {
+  background: #3d1414; color: var(--danger); border: 1px solid var(--danger);
+  border-radius: 6px; padding: 10px; font-size: 13px; line-height: 1.45;
+  margin-bottom: 10px;
+}
+.testbed-promote-dialog-consequence strong { color: var(--text); }

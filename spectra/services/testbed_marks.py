@@ -25,6 +25,23 @@ itself and every other engine against librosa. The excluded rows are
 COUNTED (`SongMarks.n_generated`) so a song with no authored marks reads
 as "nothing to compare against yet", never as an empty comparison.
 
+AND A TEST-BED-PROMOTED ROW IS NOT SCORED EITHER — the same circularity
+arriving through the authored door. testbed_promote lands a pushed
+suggestion source=="authored" (deliberately — see that module's docstring)
+at the SUGGESTING ENGINE'S OWN exact time_ms, so every promotion would add
+a mark that engine matches by construction and lift its own P/R/F1 on the
+next look. The promotion AUDIT LOG is the only thing that can tell such a
+row from one he placed by hand (nothing on the trigger itself can), so
+`ReferenceMark.promoted` is resolved from `testbed_promote.
+promoted_trigger_ids()` / `promoted_ids_by_uri()`.
+
+The exclusion is VISIBLE, not silent: a promoted mark stays in
+`SongMarks.transitions`/`.flares` carrying its flag (the page renders it,
+labelled), is counted in `SongMarks.n_promoted`, and is dropped only from
+the SCORING set — `scoring_marks()`, which is the one definition both
+`reference_marks_for_song()` (the /compare route) and the frontend's own
+local matcher apply.
+
 Provenance (ai_generated / verified) comes from the legacy editor-copy
 SongProfile (storage/profiles/*.json, read-only, same file AGENTS.md's own
 "A scene's stored data is not proof he authored it" caution applies to) —
@@ -41,7 +58,7 @@ from typing import Optional
 
 from spectra import config
 from spectra.models.trigger import SpectraTrigger
-from spectra.services import trigger_store
+from spectra.services import testbed_promote, trigger_store
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +72,10 @@ class ReferenceMark:
     timestamp_ms: int
     kind: str          # the TriggerAction.kind that produced it
     enabled: bool
+    # True = this row reached the corpus through the test bed's own
+    # push-to-real button, per the promotion audit log. Shown, never
+    # scored — see the module docstring.
+    promoted: bool = False
 
 
 @dataclass(frozen=True)
@@ -77,6 +98,7 @@ class SongMarks:
     title: Optional[str] = None
     artist: Optional[str] = None
     n_generated: int = 0
+    n_promoted: int = 0
 
 
 @dataclass(frozen=True)
@@ -84,23 +106,41 @@ class _SplitMarks:
     transitions: list[ReferenceMark]
     flares: list[ReferenceMark]
     n_generated: int
+    n_promoted: int
 
 
-def _split(triggers: list[SpectraTrigger]) -> _SplitMarks:
+def _split(triggers: list[SpectraTrigger],
+           promoted_ids: set[str]) -> _SplitMarks:
     transitions: list[ReferenceMark] = []
     flares: list[ReferenceMark] = []
     n_generated = 0
+    n_promoted = 0
     for t in triggers:
         if t.source != "authored":
             n_generated += 1
             continue
+        promoted = t.id in promoted_ids
         mark = ReferenceMark(id=t.id, timestamp_ms=t.timestamp_ms,
-                             kind=t.action.kind, enabled=t.enabled)
+                             kind=t.action.kind, enabled=t.enabled,
+                             promoted=promoted)
         if t.action.kind in TRANSITION_KINDS:
             transitions.append(mark)
         elif t.action.kind in FLARE_KINDS:
             flares.append(mark)
-    return _SplitMarks(transitions, flares, n_generated)
+        else:
+            continue
+        if promoted:
+            n_promoted += 1
+    return _SplitMarks(transitions, flares, n_generated, n_promoted)
+
+
+def scoring_marks(marks: list[ReferenceMark]) -> list[ReferenceMark]:
+    """The subset a P/R/F1 comparison may be computed against: his own
+    marks, minus every test-bed-promoted one. THE one definition — the
+    /compare route calls it and spectra/web/src/testbed/TestbedPage.tsx
+    filters on the same `promoted` flag for its local matcher, so the
+    page's number and the server's never disagree about what was scored."""
+    return [m for m in marks if not m.promoted]
 
 
 @dataclass(frozen=True)
@@ -167,37 +207,43 @@ def _profile_index() -> dict[str, _ProfileSummary]:
 
 
 def _song_marks(uri: str, triggers: list[SpectraTrigger],
-                summary: _ProfileSummary) -> SongMarks:
-    split = _split(triggers)
+                summary: _ProfileSummary, promoted_ids: set[str]) -> SongMarks:
+    split = _split(triggers, promoted_ids)
     return SongMarks(uri=uri, transitions=split.transitions, flares=split.flares,
                      provenance=summary.provenance,
                      title=summary.title, artist=summary.artist,
-                     n_generated=split.n_generated)
+                     n_generated=split.n_generated, n_promoted=split.n_promoted)
 
 
 def reference_marks_for_song(uri: str) -> tuple[list[ReferenceMark], list[ReferenceMark]]:
-    """(transitions, flares) for ONE song from the fired copy alone — no
-    profile-directory scan. The comparison endpoint needs only the marks
-    to match against; provenance is the page's caveat display and is
-    served by marks_for_song()."""
-    split = _split(trigger_store.list_for_song(uri))
-    return split.transitions, split.flares
+    """(transitions, flares) SCORING marks for ONE song from the fired copy
+    alone — no profile-directory scan. Test-bed-promoted rows are already
+    dropped here (scoring_marks): this is what /compare matches against,
+    and matching an engine against its own pushed suggestions is the one
+    thing that would make the number a lie. The page's own display list
+    (promoted rows included, flagged) is marks_for_song()'s."""
+    split = _split(trigger_store.list_for_song(uri),
+                   testbed_promote.promoted_trigger_ids(uri))
+    return scoring_marks(split.transitions), scoring_marks(split.flares)
 
 
 def marks_for_song(uri: str) -> SongMarks:
     profile = _find_profile(uri)
     summary = _NO_PROFILE if profile is None else _summarize(profile)
-    return _song_marks(uri, trigger_store.list_for_song(uri), summary)
+    return _song_marks(uri, trigger_store.list_for_song(uri), summary,
+                       testbed_promote.promoted_trigger_ids(uri))
 
 
 def all_song_marks() -> dict[str, SongMarks]:
-    """marks_for_song() for every stored song, from ONE triggers.json read
-    and ONE profile-directory pass — the song list's read shape. Keyed by
-    URI in sorted order. A song whose stored triggers are ALL generated
-    stays in the listing with empty reference lists and its n_generated
-    count, so the page can say so rather than drop it."""
+    """marks_for_song() for every stored song, from ONE triggers.json read,
+    ONE profile-directory pass and ONE promotion-log read — the song list's
+    read shape. Keyed by URI in sorted order. A song whose stored triggers
+    are ALL generated stays in the listing with empty reference lists and
+    its n_generated count, so the page can say so rather than drop it."""
     profiles = _profile_index()
+    promoted = testbed_promote.promoted_ids_by_uri()
     out: dict[str, SongMarks] = {}
     for uri, triggers in sorted(trigger_store.list_all().items()):
-        out[uri] = _song_marks(uri, triggers, profiles.get(uri, _NO_PROFILE))
+        out[uri] = _song_marks(uri, triggers, profiles.get(uri, _NO_PROFILE),
+                               promoted.get(uri, set()))
     return out

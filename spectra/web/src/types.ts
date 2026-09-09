@@ -1436,7 +1436,11 @@ export interface TestbedEngineAvailability {
   kinds: string[];
   available: boolean;
   computed_at: number | null;
-  mark_count: number;
+  /** null = not counted. The whole-corpus /songs listing answers
+   * availability with a stat instead of parsing every engine's output
+   * (spectra/services/testbed_engines.availability_for's `count_marks`), so
+   * it reports no count rather than a fabricated 0. /engines counts. */
+  mark_count: number | null;
 }
 
 export interface TestbedAudioStatus {
@@ -1453,6 +1457,7 @@ export interface TestbedSong {
   n_transitions: number;
   n_flares: number;
   n_generated: number;
+  n_promoted: number;
   provenance: TestbedProvenance;
   audio: TestbedAudioStatus;
   engines: Record<string, TestbedEngineAvailability>;
@@ -1463,6 +1468,10 @@ export interface TestbedReferenceMark {
   timestamp_ms: number;
   kind: string;
   enabled: boolean;
+  /** Pushed to the real trigger store by this page's own push-to-real
+   * button (resolved from the promotion audit log). Rendered, labelled,
+   * and deliberately NOT scored — see spectra/services/testbed_marks.py. */
+  promoted: boolean;
 }
 
 export interface TestbedMarks {
@@ -1472,6 +1481,7 @@ export interface TestbedMarks {
   transitions: TestbedReferenceMark[];
   flares: TestbedReferenceMark[];
   n_generated: number;
+  n_promoted: number;
   provenance: TestbedProvenance;
 }
 

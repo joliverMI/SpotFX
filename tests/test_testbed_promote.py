@@ -223,3 +223,60 @@ def test_two_concurrent_confirms_of_one_moment_land_exactly_one_trigger(monkeypa
 
     statuses = sorted(e["status"] for e in testbed_promote.log_for_song(URI))
     assert statuses == ["promoted", "refused"]
+
+
+def test_a_malformed_log_never_turns_a_landed_write_into_a_500():
+    """_record appends AFTER trigger_store.upsert has landed the trigger.
+    A promotions.json that parses to something other than a list used to
+    raise there: the write stood, the audit trail had no entry for it, and
+    his retry was then refused as a duplicate."""
+    import json
+    from spectra import config as scfg
+    from spectra.services import testbed_promote, trigger_store
+    scfg.TESTBED_PROMOTIONS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    scfg.TESTBED_PROMOTIONS_FILE.write_text(json.dumps({"oops": True}),
+                                            encoding="utf-8")
+
+    result = testbed_promote.promote(
+        uri=URI, timestamp_ms=5000, action=_fire_response_action(),
+        source_engine="beat_this", source_mark_kind="downbeat", confirmed=True)
+
+    assert result["status"] == "promoted"
+    assert [t.id for t in trigger_store.list_for_song(URI)] == [result["trigger_id"]]
+    log = testbed_promote.log_for_song(URI)
+    assert [e["status"] for e in log] == ["promoted"]
+    assert log[0]["trigger_id"] == result["trigger_id"]
+
+
+
+def test_promoted_ids_name_only_landed_pushes():
+    """The audit log is the ONLY provenance a promoted trigger has (its
+    source/generator_key are deliberately indistinguishable from a
+    hand-placed one), so these two lookups are what testbed_marks uses to
+    keep a pushed mark out of the scoring set."""
+    import pytest as _pytest
+    from spectra.services import testbed_promote
+    landed = testbed_promote.promote(
+        uri=URI, timestamp_ms=5000, action=_fire_response_action(),
+        source_engine="beat_this", source_mark_kind="downbeat", confirmed=True)
+    with _pytest.raises(testbed_promote.PromotionNotConfirmed):
+        testbed_promote.promote(
+            uri=URI, timestamp_ms=9000, action=_fire_response_action(),
+            source_engine="beat_this", source_mark_kind="downbeat", confirmed=False)
+
+    assert testbed_promote.promoted_trigger_ids(URI) == {landed["trigger_id"]}
+    assert testbed_promote.promoted_trigger_ids("spotify:track:other") == set()
+    assert testbed_promote.promoted_ids_by_uri() == {URI: {landed["trigger_id"]}}
+
+
+def test_a_promoted_trigger_carries_no_generator_key():
+    """generator_key is midsong_generator's own matching key; a
+    "testbed:..." value there would put a non-generated row into the space
+    a generated one is identified by. Provenance lives in the log."""
+    from spectra.services import testbed_promote, trigger_store
+    testbed_promote.promote(
+        uri=URI, timestamp_ms=5000, action=_fire_response_action(),
+        source_engine="beat_this", source_mark_kind="downbeat", confirmed=True)
+    stored = trigger_store.list_for_song(URI)[0]
+    assert stored.source == "authored"
+    assert stored.generator_key is None

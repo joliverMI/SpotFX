@@ -38,11 +38,18 @@ router = APIRouter(prefix="/api/testbed", tags=["spectra-testbed"])
 
 def _song_list() -> list[dict]:
     """ONE read of each store for the whole corpus — triggers.json once
-    (~9.5MB on his real corpus), the profile directory once, the
-    audio-shape index once, the pin registry once — then a per-song walk
-    over what's already in memory. The per-song helpers this composes
-    (marks_for_song / availability_for / status) each re-read their store
-    on every call; looping them over ~850 songs is a full parse per song."""
+    (~9.5MB on his real corpus), the profile directory once, the promotion
+    log once, the audio-shape index once, the pin registry once — then a
+    per-song walk over what's already in memory. The per-song helpers this
+    composes (marks_for_song / availability_for / status) each re-read
+    their store on every call; looping them over ~850 songs is a full
+    parse per song.
+
+    `count_marks=False` is the same discipline one layer down: a listing
+    needs each engine's availability BIT, and parsing every song's
+    .librosa.json to produce a mark count it then discards is 965 files
+    and 417MB of his real storage per request (and this listing is
+    re-fetched on every pin, unpin and promotion)."""
     stems = analysis_reader.stem_index()
     pinned = testbed_audio.list_pinned()
     out = []
@@ -54,9 +61,11 @@ def _song_list() -> list[dict]:
             "n_transitions": len(marks.transitions),
             "n_flares": len(marks.flares),
             "n_generated": marks.n_generated,
+            "n_promoted": marks.n_promoted,
             "provenance": marks.provenance.__dict__,
             "audio": testbed_audio.status(uri, stem_index=stems, registry=pinned),
-            "engines": testbed_engines.availability_for(uri, stem_index=stems),
+            "engines": testbed_engines.availability_for(
+                uri, stem_index=stems, count_marks=False),
         })
     return out
 
@@ -84,6 +93,7 @@ async def get_marks(uri: str = Query(...)):
             "transitions": [m.__dict__ for m in marks.transitions],
             "flares": [m.__dict__ for m in marks.flares],
             "n_generated": marks.n_generated,
+            "n_promoted": marks.n_promoted,
             "provenance": marks.provenance.__dict__,
         }
     return await asyncio.to_thread(_read)
@@ -174,6 +184,10 @@ async def compare(
                     "available": False, "estimate": [], "reference_marks": [],
                     "metrics": None}
 
+        # SCORING marks only — reference_marks_for_song has already
+        # dropped every test-bed-promoted row (see testbed_marks.py's
+        # docstring: an engine must not be graded against its own pushed
+        # suggestions).
         transitions, flares = testbed_marks.reference_marks_for_song(uri)
         ref_marks = transitions if reference == "transitions" else flares
         result = testbed_metrics.match_marks(
