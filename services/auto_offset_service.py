@@ -42,6 +42,9 @@ from config import settings, AUDIO_SHAPES_DIR
 from models.state import SpotifyTrackInfo, state as app_state
 from api.audio_capture import AudioCaptureStream
 from services.audio_analyzer import load_audio_shape_meta
+# Badge-only lifecycle reporting. Observation, never a decision — see that
+# module's docstring before adding a call.
+from services import lock_state
 # Math kernel extracted to services/xcorr_core.py so the offline bench harness
 # can drive the exact production math. Aliased to the historical private names
 # so the rest of this module reads unchanged.
@@ -296,6 +299,7 @@ class AutoOffsetService:
         # user_verified: still run for logging; _detect_loop_xcorr won't save.
         meta = load_audio_shape_meta(new_uri)
         if meta is None or not meta.capture_complete:
+            lock_state.note_skipped(new_uri, "no_shape")
             return
 
         # Skip xcorr while ANY capture is in progress. xcorr opens its own
@@ -313,6 +317,7 @@ class AutoOffsetService:
                     "Auto-offset xcorr: deferred for %s — capture in progress (recording=%s)",
                     new_uri, audio_shape_service._recording_uri,
                 )
+                lock_state.note_skipped(new_uri, "capture_in_progress")
                 return
         except Exception:
             # Defensive: if the import fails for any reason, fall through to
@@ -327,6 +332,7 @@ class AutoOffsetService:
                 "Auto-offset xcorr: skipped for %s — Set List has xcorr disabled",
                 new_uri,
             )
+            lock_state.note_skipped(new_uri, "setlist_disabled")
             self._watching_uri = new_uri  # prevent re-checking every poll
             return
 
@@ -362,6 +368,7 @@ class AutoOffsetService:
                 "Auto-offset xcorr: no reachable windows for %s — %s (pos=%dms, dur=%dms)",
                 track.artist, track.title, int(current_pos_ms), track.duration_ms,
             )
+            lock_state.note_skipped(new_uri, "no_windows")
             self._watching_uri = new_uri  # prevent re-checking every poll
             return
 
@@ -382,10 +389,20 @@ class AutoOffsetService:
             }))
         except Exception:
             pass
+        lock_state.note_searching(new_uri, windows_total=len(windows),
+                                  play_type=play_type)
         self._watching_uri = new_uri
         self._task = asyncio.create_task(
             self._detect_loop_xcorr(new_uri, windows, meta.offset_verification, play_type),
             name="auto-offset-xcorr",
+        )
+        # Badge backstop: "searching" must never outlive the task that was
+        # searching, so a sweep that dies on an unexpected exception (or is
+        # cancelled) still resolves it. Only downgrades a record still reading
+        # searching — a real outcome always wins. See lock_state's docstring
+        # for why the terminal signal is task-end and not window exhaustion.
+        self._task.add_done_callback(
+            lambda _t, _u=new_uri: lock_state.note_search_ended(_u)
         )
 
     async def _stop(self) -> None:
@@ -961,6 +978,7 @@ class AutoOffsetService:
                 }))
             except Exception:
                 pass
+            lock_state.note_window_done(uri)
 
             # Engine snap (uncluttered): every high-r window also tries to
             # snap the live engine via apply_save. apply_save only takes
@@ -1281,6 +1299,9 @@ class AutoOffsetService:
                     monitor.recovery_done()
                     if locked:
                         _locked_via_stop = True
+                        lock_state.note_outcome(
+                            uri, locked=True, offset_ms=int(evaluator.best_offset),
+                            quality=float(evaluator.best_quality))
                         if _lock_song_ms is None:
                             _lock_song_ms = int(frame.timestamp_ms)
                         if not _monitor_active:
@@ -1306,7 +1327,14 @@ class AutoOffsetService:
 
                 locked = await _run_window(win_start, win_end)
                 if locked:
+                    # A hard lock is a fact now, not at the end of the play:
+                    # the badge must not read "searching" for a locked song
+                    # if the monitor's own tick goes quiet. The terminal note
+                    # below refines the numbers; the phase is already right.
                     _locked_via_stop = True
+                    lock_state.note_outcome(
+                        uri, locked=True, offset_ms=int(evaluator.best_offset),
+                        quality=float(evaluator.best_quality))
                     if _lock_song_ms is None:
                         _lock_song_ms = int(frame.timestamp_ms)
                     if not _monitor_active:
@@ -1349,6 +1377,7 @@ class AutoOffsetService:
 
         if evaluator.n_measurements == 0:
             logger.info("Auto-offset xcorr: no measurements obtained for %s", uri)
+            lock_state.note_outcome(uri, locked=False, reason="no_measurements")
             self._watching_uri = None
             self._task = None
             return
@@ -1363,6 +1392,16 @@ class AutoOffsetService:
         # Post-loop decisions (anti-corr majority detector, cluster override,
         # final save gates) live in the evaluator; side effects below.
         final = evaluator.finalize()
+
+        # Badge: this play's result, reported not re-derived — `_locked_via_stop`
+        # is the same hard-lock flag handed to lock_history.record below. A
+        # result without a lock does NOT resolve the badge (the engine may
+        # still be looking); note_search_ended does. lock_state never feeds
+        # anything back into the sweep.
+        lock_state.note_outcome(
+            uri, locked=_locked_via_stop,
+            offset_ms=int(final.best_offset), quality=float(final.best_quality),
+        )
 
         # ── OLD-anti-correlated detector ───────────────────────────────────
         # When a majority of windows (with non-trivial OLD samples) showed the

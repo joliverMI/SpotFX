@@ -8,10 +8,7 @@ import { onMessage } from '../api/ws';
 import { fmtMs } from '../lib/time';
 import { ensureLiveState, useLiveStore, useLiveTick } from '../live/liveStore';
 import AmbientButton from '../nowplaying/AmbientButton';
-
-const LOCK_STALE_MS = 12_000;
-const LOCK_LABEL: Record<string, string> = { ok: 'Locked', suspect: 'Suspect', recovering: 'Recovering' };
-const LOCK_COLOR: Record<string, string> = { ok: '#00ff88', suspect: '#ffb300', recovering: '#ff5252' };
+import { lockBadge, lockForUri } from './lockBadge';
 
 /** Cool blue (0) → hot red (1). */
 const intensityHue = (v: number) => Math.round(215 - 215 * Math.min(1, Math.max(0, v)));
@@ -68,6 +65,7 @@ export default function TopBar() {
   const activeSceneGroup = useLiveStore((s) => s.activeSceneGroup);
   const lastColorSet = useLiveStore((s) => s.lastColorSet);
   const timing = useLiveStore((s) => s.timing);
+  const lockState = useLiveStore((s) => s.lockState);
   const progressMs = useLiveTick(500);
 
   const uri = track?.spotify_uri ?? null;
@@ -103,11 +101,17 @@ export default function TopBar() {
     setLastFire(null);
   }, [uri]);
 
-  const fresh = monitor && Date.now() - monitor.at < LOCK_STALE_MS;
-  const lockLabel = fresh
-    ? LOCK_LABEL[monitor.state] ?? monitor.state
-    : timing.shape_offset_ms != null ? 'Lock idle' : 'No lock';
-  const lockColor = fresh ? LOCK_COLOR[monitor.state] ?? '#888' : '#888';
+  // Every state the badge can show is decided in ./lockBadge — one pure
+  // function, driven whole by scripts/check_lock_badge_states.mjs. The 2 s
+  // re-render tick above is what makes a monitor message ageing past
+  // lockBadge's own LOCK_STALE_MS flip the badge with no new message to
+  // trigger it.
+  const badge = lockBadge({
+    monitor,
+    nowMs: Date.now(),
+    lock: lockForUri(lockState, uri),
+    storedOffsetMs: timing.shape_offset_ms ?? null,
+  });
 
   return (
     <div className="top-bar">
@@ -141,9 +145,8 @@ export default function TopBar() {
         </span>
       )}
 
-      <span className="tb-lock" style={{ color: lockColor }}
-        title="Audio sync lock — the live-capture matcher's confidence in the current offset">
-        ● {lockLabel}
+      <span className="tb-lock" style={{ color: badge.color }} title={badge.title}>
+        ● {badge.label}
       </span>
 
       <span className="tb-track" title={track ? `${track.title} — ${track.artist}` : ''}>
