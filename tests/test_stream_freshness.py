@@ -158,6 +158,14 @@ class _Session(cs.SessionCameraDouble):
             return {"exposure_locked": True, "white_balance_locked": True,
                     "exposure_time": None, "gain": None,
                     "exposure_time_range": [3.0, 2047.0],
+                    # THIS RIG'S SENSOR REALLY DOES RUN AT `Stream.fps`, and
+                    # saying so is what keeps `short_exposure`'s ceiling out
+                    # of a file that is about the TRANSPORT. A 5 fps sensor
+                    # has 200 ms of frame interval and can honestly hold the
+                    # regimes below; a camera that reported 30 would be
+                    # capped, correctly, and this file's numbers would then
+                    # be measuring the cap rather than the queue.
+                    "sensor_fps": 5.0,
                     "manual_refusals": []}
 
     def __init__(self, stream: Stream, *, fresh_frames=True) -> None:

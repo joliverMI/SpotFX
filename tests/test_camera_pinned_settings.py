@@ -264,7 +264,12 @@ def test_naming_one_lever_does_not_un_pin_the_others(ctl):
 
     asyncio.run(go())
     assert client._pinned == {"exposure_time": 800, "gain": 96,   # noqa: SLF001
-                              "white_balance": 4600, "focus": 120}
+                              "white_balance": 4600, "focus": 120,
+                              # THE PINNED SWITCH sits in the same dict and
+                              # obeys the same rule (2026-09-09): naming an
+                              # integration time must not un-pin it either.
+                              # Nothing pinned it here, so it is None.
+                              "dynamic_framerate": None}
 
     async def release():
         await client._apply_config(Ws(), {"focus": None})  # noqa: SLF001

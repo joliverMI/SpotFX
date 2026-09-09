@@ -80,7 +80,7 @@ from typing import Any, Callable, Optional
 
 import websockets
 
-from spectra.capture_client.camera import (LEVERS, BaseCamera, CameraLock,
+from spectra.capture_client.camera import (LEVERS, SWITCHES, BaseCamera, CameraLock,
                                            CameraUnavailable, GREY_MIME)
 
 logger = logging.getLogger(__name__)
@@ -173,6 +173,12 @@ class CaptureClient:
         #: itself. Both are in memory only: nothing about a pinned camera
         #: is written to disk, and re-asserting is what makes that free.
         self._pinned: dict = {name: None for name, *_ in LEVERS}
+        #: AND THE PINNED SWITCHES beside them, re-asserted the same way and
+        #: for the same reason. A switch is OWNED as well as set (see
+        #: `camera._apply_switches`), so re-asserting a pin after a
+        #: reconnect must not look like a fresh pin — the camera's own
+        #: memory of his value is what keeps that true, not this dict.
+        self._pinned.update({name: None for name, _c in SWITCHES})
 
     # ── lifecycle ─────────────────────────────────────────────────────────
     async def start_camera(self) -> Optional[str]:
@@ -367,12 +373,15 @@ class CaptureClient:
                     # side of it are not comparable.
                     self.state.pose_token = self.camera.pose_token
                     self.state.camera_reopens += 1
-            # EVERY LEVER THIS SESSION HAS EVER BEEN ASKED FOR, not just
-            # the ones in this message: a config that names an integration
-            # time must not silently un-pin the focus a previous one set.
-            # A lever is un-pinned by naming it null, which is the only way
-            # to say "let this one go" without saying it about all of them.
-            for lever, *_ in LEVERS:
+            # EVERY LEVER AND SWITCH THIS SESSION HAS EVER BEEN ASKED FOR,
+            # not just the ones in this message: a config that names an
+            # integration time must not silently un-pin the focus a previous
+            # one set. One is un-pinned by naming it null, which is the only
+            # way to say "let this one go" without saying it about all of
+            # them — and for a SWITCH that null is also what hands his own
+            # value back (`camera._apply_switches`), so a run's restore is
+            # the same message shape as every other config.
+            for lever in list(self._pinned):
                 if lever in msg:
                     value = msg.get(lever)
                     self._pinned[lever] = (None if value is None

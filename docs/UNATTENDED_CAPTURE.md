@@ -297,7 +297,37 @@ own measured shape and a re-clamping camera are each refused by name
   Its own honest bound is stated in the module — a camera whose declared
   exposure range cannot span the factor reports `unprovable` and the run
   goes ahead, because "we could not check" is not "we checked and it is
-  broken".
+  broken". **IT HAS SINCE WATCHED ONE, and it refused it — twice, in two
+  different shapes** (2026-09-09, his kiosk Brio, night and daylight). See
+  the next entry.
+- **THE SHORT-EXPOSURE REGIME HAS NOT BEEN VERIFIED BY A CAMERA.** The
+  self-test's two refusals on his kiosk Brio located a real property of
+  that camera — honest at the short end of its exposure range, not honest
+  above it, with `exposure_dynamic_framerate` as the line between — and the
+  commissioning and lever paths are now bounded to the short end, with that
+  control pinned off for the run and handed back
+  (`spectra/services/short_exposure.py` is the binding statement). **THERE
+  WAS NO CAMERA ON THE KIOSK WHEN THIS SHIPPED**, so what is proven is:
+  the ceiling arithmetic against the device's own reported frame rate; the
+  clamp, the command and the sentence; the pin's whole round trip through
+  the real client and the real `V4L2Camera` against a `v4l2-ctl` that
+  remembers; and — the one that matters most — that the judgement was not
+  weakened to buy it, with both of his refusing shapes re-refused INSIDE
+  the short regime and the four constants asserted unmoved
+  (`scripts/check_short_exposure.py`, `tests/test_short_exposure.py`).
+  **What is NOT proven is the thing the change is for: that his camera, at
+  his pose, measures enough light at the exposure it can hold.** His own
+  62-unit readings (6.49, 5.68, 12.577 against a floor of 1.0) say it
+  should, and the ceiling is longer than 62 — but the first live
+  Calibration One with a camera attached is the measurement, and until it
+  passes this is "the change that should let commissioning run", never
+  "commissioning works".
+- **`v4l2-ctl --get-parm` has never been read from a real device either.**
+  The sensor's own negotiated frame rate is what the ceiling is derived
+  from, and it is parsed from that command's documented output against a
+  fake `v4l2-ctl`. A driver that will not answer is handled — the ceiling
+  says it ASSUMED 30 fps rather than hiding it, and assuming 30 can only
+  ever produce a shorter (safer) ceiling than a slower real rate would.
 - **No frame larger than 320x180 has crossed a real network.** The
   negotiation, the downgrade and the never-upscale rule are proven over a
   real uvicorn server and a real WebSocket with a synthetic camera

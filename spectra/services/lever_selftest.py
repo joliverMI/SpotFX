@@ -72,12 +72,35 @@ THE TOLERANCES, and why each is where it is rather than tuned to pass:
     exposure alone — so a saturated B that measured more than A passes with
     a note rather than failing the ratio bar it can no longer meet.
 
+WHERE IT MEASURES, SINCE 2026-09-09, AND WHY THAT IS NOT A RELAXATION.
+Both commands are bounded by `short_exposure.ceiling_for` — the longest
+integration time this camera can hold without dropping its own frame rate —
+and `exposure_dynamic_framerate` is PINNED OFF for the three captures and
+handed back afterwards. His kiosk Brio refused every commissioning run in
+two different shapes depending on that one control (DRIFT with it on,
+NO_RESPONSE with it off), and both refusals were correct: the camera is
+honest in the short part of its range and is not honest above it.
+`short_exposure.py`'s module docstring carries the evidence and the
+derivation.
+
+NOTHING IN THE JUDGEMENT MOVED. Two DIFFERENT commands, one of them
+REPEATED, `COMMANDED_FACTOR`, `MIN_PROVABLE_FACTOR`, `MIN_RESPONSE_FRACTION`
+and `REPEAT_BAND` are all exactly as they were, and `judge` is byte for byte
+the function it was. A camera that drifts inside the short regime still
+refuses; one that does not respond inside it still refuses. The test is if
+anything HARDER to pass there — every reading has less light in it — which
+is why the driven fixture is now taken to full firmware brightness for the
+three captures (`fixture_brightness.owned`, which this test was the only
+capture path never to run inside) and why a bright regime that still cannot
+clear the floor is reported as what it is rather than passed.
+
 WHAT IT NEVER DOES. It never writes a footprint (throwaway room, no
 `save_room`). It never leaves the camera where it put it (the previous
-request is restored in a `finally`). It never acquires anything: it drives
-the emitter inside the SAME held room every capture uses, through the same
-program, and if the room is not ours it refuses on the same ownership
-sentence every other run does.
+request is restored in a `finally`, and that restore is also what un-pins
+the frame-rate control and gives his own value back). It never acquires
+anything: it drives the emitter inside the SAME held room every capture
+uses, through the same program, and if the room is not ours it refuses on
+the same ownership sentence every other run does.
 
 AND IT IS NOT A WALL. A verdict of `unprovable` or `unproven` — a camera
 whose range cannot span the factor, frames that never arrived, an
@@ -128,8 +151,9 @@ from dataclasses import dataclass, field, replace
 from typing import Any, Optional
 
 from spectra.models.room_map import RoomMap
-from spectra.services import (capture_settings, capture_source, light_field,
-                              mapping_refusals)
+from spectra.services import (capture_settings, capture_source,
+                              fixture_brightness, light_field,
+                              mapping_refusals, short_exposure)
 from spectra.services import emitters as emitters_mod
 from spectra.services import room_mapping
 
@@ -171,10 +195,11 @@ DEFAULT_BRIGHT_EXPOSURE = 200
 is_native = capture_source.is_native
 
 
-def choose_regimes(lock: dict, requested: Optional[int] = None
+def choose_regimes(lock: dict, requested: Optional[int] = None,
+                   ceiling: "Optional[short_exposure.Ceiling]" = None
                    ) -> tuple[Optional[int], Optional[int], str]:
     """(dim, bright, why-not) — two commanded integration times a known
-    factor apart, inside whatever range this camera declares.
+    factor apart, inside the range this camera can actually be trusted in.
 
     THE BRIGHT ONE IS THE RUN'S OWN, when the run named one: proving the
     lever at the regime the run is about to use is a stronger statement
@@ -182,20 +207,42 @@ def choose_regimes(lock: dict, requested: Optional[int] = None
     camera's currently read-back exposure, and failing that a plainly
     ordinary indoor one.
 
-    A camera whose declared range cannot span `MIN_PROVABLE_FACTOR` gets
+    SINCE 2026-09-09 THE UPPER BOUND IS THE SHORT REGIME'S, not the
+    camera's declared maximum: `short_exposure.ceiling_for` (its module
+    docstring is the binding statement) is the longest integration a
+    commissioning-grade run may command, because above it a UVC camera has
+    to drop its own frame rate to deliver — and his kiosk Brio's readings
+    above that line were measured, twice, in two different failure shapes.
+
+    THIS MOVES WHERE THE TEST MEASURES AND NOTHING ELSE. `COMMANDED_FACTOR`,
+    `MIN_PROVABLE_FACTOR`, `MIN_RESPONSE_FRACTION` and `REPEAT_BAND` are
+    untouched: the two regimes are still a real factor apart, one is still
+    repeated, and `judge` still refuses on drift and on no-response exactly
+    as hard. A shorter pair of commands is a harder test to pass, not an
+    easier one — there is less light in every reading.
+
+    A camera whose usable range cannot span `MIN_PROVABLE_FACTOR` gets
     (None, None, reason) and the caller reports `unprovable` — this
-    function never invents a factor it cannot ask for."""
+    function never invents a factor it cannot ask for, and the reason names
+    WHICH bound closed the range so a reader is not sent to the camera for
+    a limit that is ours."""
     rng = lock.get("exposure_time_range") or []
     lo = float(rng[0]) if len(rng) == 2 else float(capture_settings.MIN_EXPOSURE_TIME)
     hi = float(rng[1]) if len(rng) == 2 else float(capture_settings.MAX_EXPOSURE_TIME)
+    where = f"this camera's declared exposure range ({lo:g}..{hi:g})"
+    why = ""
+    if ceiling is not None and float(ceiling.units) < hi:
+        hi = float(ceiling.units)
+        where = f"the range this camera can hold steady ({lo:g}..{hi:g})"
+        why = " " + ceiling.sentence()
     if hi <= lo:
-        return None, None, (f"this camera declares an exposure range of "
-                            f"{lo:g}..{hi:g}, which spans nothing")
+        return None, None, (f"this camera can be commanded only "
+                            f"{lo:g}..{hi:g}, which spans nothing.{why}")
     if hi / max(lo, 1.0) < MIN_PROVABLE_FACTOR:
         return None, None, (
-            f"this camera's declared exposure range ({lo:g}..{hi:g}) spans "
-            f"less than the {MIN_PROVABLE_FACTOR:g}x this test needs to make "
-            f"a claim, so the lever cannot be proven either way here")
+            f"{where} spans less than the {MIN_PROVABLE_FACTOR:g}x this "
+            f"test needs to make a claim, so the lever cannot be proven "
+            f"either way here.{why}")
     want = requested
     if want is None:
         want = lock.get("exposure_time")
@@ -212,7 +259,7 @@ def choose_regimes(lock: dict, requested: Optional[int] = None
     if bright / max(dim, 1e-9) < MIN_PROVABLE_FACTOR:
         return None, None, (
             f"no two integration times {MIN_PROVABLE_FACTOR:g}x apart fit "
-            f"inside this camera's declared range ({lo:g}..{hi:g})")
+            f"inside {where}.{why}")
     return int(round(dim)), int(round(bright)), ""
 
 
@@ -264,6 +311,14 @@ class Verdict:
     response_ratio: Optional[float] = None
     repeat_ratio: Optional[float] = None
     signal_floor: float = light_field.UNSEEN_WEIGHT
+    #: THE SHORT REGIME this verdict was earned inside
+    #: (`short_exposure.Ceiling.as_dict`), or {} when none applied. It is on
+    #: the verdict because a NO_SIGNAL refusal reads completely differently
+    #: depending on it: at a capped exposure "the camera measured nothing"
+    #: has a third explanation — not enough light for the time this camera
+    #: can hold — and `mapping_refusals.lever_not_connected` names it from
+    #: here rather than sending a reader to check the aim first.
+    ceiling: dict = field(default_factory=dict)
     #: Did the client holding this camera promise that a frame it sent is
     #: the newest one it had? True / False / None — `capture_source.
     #: serves_fresh_frames` owns the three answers. Carried onto the
@@ -299,6 +354,7 @@ class Verdict:
                 "response_ratio": self.response_ratio,
                 "repeat_ratio": self.repeat_ratio,
                 "signal_floor": self.signal_floor,
+                "ceiling": dict(self.ceiling),
                 "fresh_frames": self.fresh_frames,
                 "min_response_ratio": min_response_ratio(),
                 "repeat_band": REPEAT_BAND,
@@ -530,8 +586,24 @@ async def run_selftest(room: RoomMap, deps: "room_mapping.RunDeps", *,
         out.reason = "this room has no carriers assigned yet"
         return out
 
-    dim, bright, why_not = choose_regimes(sess.camera_lock_view(),
-                                          requested_exposure)
+    lock_now = sess.camera_lock_view()
+    # THE SHORT REGIME. Derived from what this camera reports about itself
+    # — see `short_exposure.ceiling_for` — and applied as the UPPER BOUND on
+    # both commands below. It never touches the bars `judge` applies.
+    ceiling = short_exposure.ceiling_for(lock_now)
+    out.ceiling = ceiling.as_dict()
+    if ceiling.caps(requested_exposure):
+        # THE RUN'S OWN REGIME IS OUTSIDE THE TRUSTED RANGE, and this test
+        # no longer proves the lever AT it. Said, because the alternative is
+        # a verdict quietly making a narrower claim than its own docstring
+        # promises.
+        out.notes.append(
+            f"This run asked for an integration time of "
+            f"{requested_exposure} x100 us, which is longer than this camera "
+            f"can hold steady, so the lever was proven at {ceiling.units} "
+            f"instead. {ceiling.sentence()}")
+    dim, bright, why_not = choose_regimes(lock_now, requested_exposure,
+                                          ceiling)
     out.fingerprint = fingerprint(sess, requested_exposure)
     if dim is None or bright is None:
         out.verdict, out.reason = mapping_refusals.LEVER_UNPROVABLE, why_not
@@ -593,12 +665,34 @@ async def run_selftest(room: RoomMap, deps: "room_mapping.RunDeps", *,
     sess.run_abort = None
     before = sess.camera_request
     try:
-        for label, exposure in (("dim", dim), ("bright", bright),
-                                ("repeat", bright)):
-            out.readings.append(await _one_regime(
-                label, exposure, scratch, program, emitter, live, quiet, out))
-            if not out.readings[-1].ok and label != "repeat":
-                break
+        # TAKE THE ONE DRIVEN FIXTURE TO FULL FOR THE THREE CAPTURES and put
+        # his own level back — `fixture_brightness.owned`, the same guard
+        # the map, the commissioning pass and the pose fingerprint have all
+        # run inside since it was written. THIS TEST NEVER DID, and that
+        # gap is exactly where the short regime bites: a shorter integration
+        # collects less light, and a fixture sitting at his own 84% while
+        # the bright regime has to clear `light_field.UNSEEN_WEIGHT` turns a
+        # working camera into a NO_SIGNAL refusal about nothing.
+        #
+        # SCOPED TO THE DRIVEN EMITTER'S OWN FIXTURES, never the room's: the
+        # plan handed to `fixture_readings` is the same one-emitter plan the
+        # activation above used, so this touches no fixture the self-test is
+        # not lighting.
+        one = replace(plan, emitters=[emitter])
+        brightness_readings, fixtures = await room_mapping.fixture_readings(
+            one, await room_mapping._chains(quiet), quiet)   # noqa: SLF001
+        async with fixture_brightness.owned(
+                fixtures, brightness_readings) as owned:
+            for label, exposure in (("dim", dim), ("bright", bright),
+                                    ("repeat", bright)):
+                out.readings.append(await _one_regime(
+                    label, exposure, scratch, program, emitter, live, quiet,
+                    out))
+                if not out.readings[-1].ok and label != "repeat":
+                    break
+        if owned.note:
+            out.notes.append(owned.note)
+        out.problems.extend(owned.problems)
     finally:
         # PUT THE CAMERA BACK. A self-test that left its own bright regime
         # running would silently retune the very run it just cleared.
@@ -664,8 +758,21 @@ async def _one_regime(label: str, exposure: int, scratch: RoomMap, program,
     map's own single-emitter measurement in it."""
     sess = deps.session
     reading = Reading(label=label, exposure_time=exposure)
-    req = capture_settings.CameraRequest(
-        frame_size=capture_settings.MAP_PROFILE, exposure_time=exposure)
+    # PIN THE FRAME-RATE CONTROL OFF FOR EVERY REGIME THIS TEST COMMANDS.
+    # Bounding the integration time and leaving the camera free to
+    # renegotiate its own frame rate underneath the measurement would have
+    # bounded nothing — and it is the leaving-it-on half that measured DRIFT
+    # on his kiosk Brio. Through `short_exposure.cap`, the ONE function, so
+    # the pin's own "only a control this camera reported having" rule is not
+    # written twice; the exposure is already inside the ceiling here, so the
+    # clamp is a no-op and only the pin does anything. The client owns the
+    # control and hands his own value back when the run un-pins
+    # (`run_selftest`'s `finally` re-applies the request it saved, which
+    # names it null).
+    req, _ceiling, _note = short_exposure.cap(
+        capture_settings.CameraRequest(
+            frame_size=capture_settings.MAP_PROFILE, exposure_time=exposure),
+        sess.camera_lock_view())
     await sess.apply_camera(req)
     await sess.await_frame_size(req.frame_size, room_mapping.FRAME_SWITCH_WAIT_S)
     # WAIT FOR THE CAMERA TO ANSWER THIS request, not the previous one —

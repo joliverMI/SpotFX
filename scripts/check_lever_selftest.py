@@ -458,10 +458,17 @@ async def main():
                   and lever.get("verdict") == mapping_refusals.LEVER_DRIFT,
                   f"a camera that wanders between two IDENTICAL commands is "
                   f"refused ({lever.get('verdict')})")
-            check((lever.get("repeat_ratio") or 1.0)
-                  < 1.0 / lever_selftest.REPEAT_BAND,
+            # NOT `or 1.0`: a repeat that fell UNDER the floor entirely is
+            # reported as exactly 0.0, and a falsy-zero read turned the
+            # STRONGEST form of this drift into a failed check.
+            _moved = lever.get("repeat_ratio")
+            check(_moved is not None
+                  and _moved < 1.0 / lever_selftest.REPEAT_BAND,
                   f"and the refusal quotes how far it moved "
-                  f"({lever.get('repeat_ratio')})")
+                  f"({_moved}"
+                  + ("; 0.0 is the strongest form of it — the repeat of the "
+                     "SAME command fell under the floor entirely)"
+                     if _moved == 0.0 else ")"))
 
         # ── 4. THE BROWSER IS REFUSED EARLIER, AND FOR A BROADER REASON ───
         #

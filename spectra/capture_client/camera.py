@@ -244,6 +244,41 @@ WB_AUTO_OFF = 0
 #: night sees rather than pinning what a calibration asked for.
 FOCUS_AUTO_OFF = 0
 
+#: THE PINNED SWITCH (2026-09-09) — the control that lets a UVC camera DROP
+#: ITS FRAME RATE to reach an integration time longer than one frame
+#: interval. `spectra/services/short_exposure.py` is the binding statement
+#: for why a commissioning-grade run pins it off; the short version is that
+#: his kiosk Brio renegotiates its own timing underneath a measurement while
+#: this is on, and the lever self-test correctly refuses every run as DRIFT.
+#:
+#: THE VALUE IS THE DRIVER'S OWN, like every other control on this wire, so
+#: the server names the same number (`short_exposure.DYNAMIC_FRAMERATE_OFF`)
+#: without converting. The two are asserted equal in
+#: `tests/test_short_exposure.py` rather than left to agree — this package
+#: may not import `spectra.services` at all, which is why there are two
+#: declarations and one proof.
+DYNAMIC_FRAMERATE_CONTROLS = ("exposure_dynamic_framerate",)
+DYNAMIC_FRAMERATE_OFF = 0
+
+#: THE PINNED SWITCHES, in the shape `LEVERS` uses: (name, control
+#: candidates). Separate from `LEVERS` because the two have DIFFERENT
+#: refusal contracts — a lever a camera does not have refuses the run that
+#: asked for it, and a switch a camera does not have is simply a camera
+#: that cannot do the thing the pin exists to prevent. See
+#: `capture_settings.PINNED_SWITCHES`, which carries the same split on the
+#: server side.
+#:
+#: AND A SWITCH IS OWNED, NOT JUST SET. The value read off the device before
+#: the first pin is remembered and written back the moment the switch is
+#: un-pinned (named null in a `config` message) — his camera's setting,
+#: borrowed for a run and given back, which is `fixture_brightness.owned`
+#: one layer down. A killed client leaves it pinned off: unlike a lounge
+#: left at full brightness that costs nothing and is corrected by the next
+#: run's own un-pin, so there is deliberately no file anywhere holding it.
+SWITCHES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("dynamic_framerate", DYNAMIC_FRAMERATE_CONTROLS),
+)
+
 #: THE FOUR PINNED LEVERS, in the order they are written and read back.
 #: One tuple so the client, the read-back and the refusal cannot disagree
 #: about what "all four" means — adding a fifth control is one row here.
@@ -295,6 +330,18 @@ class CameraLock:
     #: Whether the camera's own continuous autofocus reads OFF right now.
     #: None means this camera has no such control to read.
     focus_auto: Optional[bool] = None
+    #: THE PINNED SWITCH as the device reports it: 0 off, 1 on, None when
+    #: this camera has no such control — which is not a fault and is never
+    #: refused (`capture_settings.camera_refusal`).
+    dynamic_framerate: Optional[int] = None
+    #: THE SENSOR'S OWN NEGOTIATED FRAME RATE, read off the device
+    #: (`v4l2-ctl --get-parm`) after the pixel pipe is up — never the tap
+    #: rate this client paces its sends at, which is a different number and
+    #: says nothing about how long the sensor can integrate. It is what
+    #: `short_exposure.ceiling_for` derives the frame interval from; None
+    #: means the camera would not say, and the ceiling then names its own
+    #: assumption rather than hiding it.
+    sensor_fps: Optional[float] = None
     #: A lever a run asked for that this camera does not have, or gave back
     #: a different number for. The server refuses on these; this module
     #: only ever reports what it read.
@@ -316,6 +363,8 @@ class CameraLock:
                 "exposure_time": self.exposure_time, "gain": self.gain,
                 "white_balance": self.white_balance, "focus": self.focus,
                 "focus_auto": self.focus_auto,
+                "dynamic_framerate": self.dynamic_framerate,
+                "sensor_fps": self.sensor_fps,
                 "exposure_time_range": (list(self.exposure_time_range)
                                         if self.exposure_time_range else None),
                 "gain_range": (list(self.gain_range) if self.gain_range
@@ -507,6 +556,17 @@ class V4L2Camera(BaseCamera):
         #: back up pinned the way the session pinned it, and the read-back
         #: that follows is what says whether it took.
         self._wanted: dict = {name: None for name, *_ in LEVERS}
+        self._wanted.update({name: None for name, _c in SWITCHES})
+        #: THE OWNED HALF of a pinned switch: what the device reported
+        #: BEFORE the first pin, so un-pinning can put it back. A switch
+        #: that is not currently pinned is simply absent from here, which
+        #: is what makes "restore once, then forget" a property of the dict
+        #: rather than a flag somebody has to clear.
+        self._switch_original: dict = {}
+        #: The sensor's own negotiated frame rate, read once per open (see
+        #: `_read_sensor_fps`). None until a pixel pipe has come up, and
+        #: None forever on a driver that will not answer.
+        self.sensor_fps: Optional[float] = None
 
     @property
     def frame_bytes(self) -> int:
@@ -575,6 +635,36 @@ class V4L2Camera(BaseCamera):
         except ValueError:
             return None
 
+    def _read_sensor_fps(self) -> Optional[float]:
+        """The frame rate the DEVICE says it is streaming at, out of
+        `v4l2-ctl --get-parm` ("Frames per second: 30.000 (30/1)").
+
+        WHY NOT `self.fps`: that is what this client asks ffmpeg for and
+        what it paces its own sends at. The sensor negotiates its own frame
+        interval with the driver and frequently ignores an unsupported
+        request, so the tap rate is not evidence about how long the sensor
+        can integrate — and the integration ceiling is exactly what
+        `short_exposure.ceiling_for` needs this for.
+
+        Returns None rather than guessing when the tool is missing, the
+        driver has no G_PARM, or the line cannot be parsed. An assumption
+        made here would be invisible; one made in `short_exposure` is
+        reported in the ceiling's own sentence."""
+        ctl = _tool("v4l2-ctl")
+        if not ctl:
+            return None
+        code, out = _run([ctl, "-d", self.device, "--get-parm"])
+        if code != 0:
+            return None
+        for line in out.splitlines():
+            if "frames per second" not in line.lower():
+                continue
+            value = _as_float(line.split(":", 1)[1].strip()
+                              if ":" in line else "")
+            if value and value > 0:
+                return value
+        return None
+
     def _set(self, control: str, value: int) -> bool:
         ctl = _tool("v4l2-ctl")
         if not ctl:
@@ -611,6 +701,13 @@ class V4L2Camera(BaseCamera):
                   for name, ctlname in found.items()}
         focus_auto_name = next((c for c in FOCUS_AUTO_CONTROLS if c in controls), "")
         focus_auto_val = self._get(focus_auto_name) if focus_auto_name else None
+        # THE PINNED SWITCH, read the same way as everything else: out of
+        # the device. A camera with no such control reports None, which is
+        # a fact about the camera and never a refusal.
+        switch_name = next((c for c in DYNAMIC_FRAMERATE_CONTROLS
+                            if c in controls), "")
+        switch_val = (_menu_value(self._get(switch_name)) if switch_name
+                      else None)
         self.lock = CameraLock(
             exposure_locked=_menu_value(exp_val) == EXPOSURE_MANUAL,
             white_balance_locked=_menu_value(wb_val) == WB_AUTO_OFF,
@@ -629,6 +726,8 @@ class V4L2Camera(BaseCamera):
             white_balance=read["white_balance"], focus=read["focus"],
             focus_auto=(None if _menu_value(focus_auto_val) is None
                         else _menu_value(focus_auto_val) != FOCUS_AUTO_OFF),
+            dynamic_framerate=switch_val,
+            sensor_fps=self.sensor_fps,
             exposure_time_range=ranges["exposure_time"],
             gain_range=ranges["gain"],
             white_balance_range=ranges["white_balance"],
@@ -637,6 +736,44 @@ class V4L2Camera(BaseCamera):
             source=f"v4l2:{exp_name or 'no-exposure-control'}/"
                    f"{wb_name or 'no-white-balance-control'}")
         return self.lock
+
+    def _apply_switches(self, wanted: dict, controls: dict) -> None:
+        """OWN A PINNED SWITCH FOR A RUN, AND GIVE IT BACK — the
+        `fixture_brightness.owned` contract, one layer down and living here
+        because this is the only thing that can read the camera.
+
+        THREE STATES, and the middle one is the whole of it:
+
+          pinned for the first time   read the device's current value and
+                                      REMEMBER IT, then write the pin.
+          pinned again                write the pin. The remembered value
+                                      is never overwritten, so a run that
+                                      re-asserts (a reconnect, a reopen)
+                                      cannot turn the pin itself into "his
+                                      setting".
+          un-pinned (named null)      write the remembered value back and
+                                      forget it.
+
+        A CAMERA WITHOUT THE CONTROL IS LEFT COMPLETELY ALONE and nothing is
+        recorded as owed — never a refusal, and never a remembered value
+        that a later un-pin would try to write to a control that is not
+        there. See `SWITCHES` for why absence is not a fault."""
+        for name, candidates in SWITCHES:
+            control = next((c for c in candidates if c in controls), "")
+            if not control:
+                continue
+            want = wanted.get(name)
+            if want is not None:
+                if name not in self._switch_original:
+                    # HIS value, read before anything of ours touched it.
+                    self._switch_original[name] = _menu_value(
+                        self._get(control))
+                self._set(control, int(want))
+                continue
+            if name in self._switch_original:
+                original = self._switch_original.pop(name)
+                if original is not None:
+                    self._set(control, int(original))
 
     async def apply_lock(self, **levers) -> CameraLock:
         """Ask for manual exposure and manual white balance — and, for every
@@ -694,6 +831,7 @@ class V4L2Camera(BaseCamera):
                 if name in controls:
                     self._set(name, FOCUS_AUTO_OFF)
                     break
+        self._apply_switches(wanted, controls)
         for lever, names, what, unit in LEVERS:
             want = wanted.get(lever)
             if want is None:
@@ -721,6 +859,18 @@ class V4L2Camera(BaseCamera):
             if abs(got - want) > 1e-6:
                 extra.append(f"asked for {what} of {want}{unit} and the "
                              f"device reports {got:g}")
+        # A SWITCH THAT WAS WRITTEN AND CAME BACK WRONG IS A REFUSAL, just
+        # like a lever — a driver that takes the write and keeps its own
+        # value is the dangerous case, because the frames still arrive.
+        # `got is None` (no such control) is the case that is NOT one.
+        for name, _candidates in SWITCHES:
+            want = wanted.get(name)
+            got = getattr(lock, name)
+            if want is None or got is None:
+                continue
+            if int(got) != int(want):
+                extra.append(f"asked for {name}={int(want)} and the device "
+                             f"reports {int(got)}")
         if extra:
             self._manual_refusals = refusals + extra
             lock.manual_refusals = list(self._manual_refusals)
@@ -822,6 +972,12 @@ class V4L2Camera(BaseCamera):
             return (f"{self.device} produced no frames at "
                     f"{capture_size[0]}x{capture_size[1]}"
                     + (f" ({err})" if err else f" ({exc!r})"))
+        # ASK THE DEVICE ITS OWN FRAME RATE, ONCE PER OPEN. It is negotiated
+        # here and nowhere else, so re-reading it on every paced lock read
+        # would be a subprocess a second answering a question that cannot
+        # have changed. It is what bounds how long this sensor can
+        # integrate — `spectra/services/short_exposure.py`.
+        self.sensor_fps = self._read_sensor_fps()
         return None
 
     async def set_frame_size(self, size: tuple[int, int]) -> tuple[int, int]:

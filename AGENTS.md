@@ -4372,6 +4372,73 @@ and the whole thing over a real server, WebSocket and capture client —
 0.15 s from capture to stamp where the shipped read served 2.2 s of queued
 frames).
 
+### THE SHORT-EXPOSURE COMMISSIONING REGIME — a camera honest only at the short end
+
+**`spectra/services/short_exposure.py`'s module docstring is the binding
+statement.** 2026-09-09: the lever self-test refused every commissioning run
+on his kiosk Brio, night AND daylight, in TWO DIFFERENT SHAPES depending on
+ONE V4L2 control — `exposure_dynamic_framerate` ON gave DRIFT (the same
+command measured 33.61 then 16.03), OFF gave NO_RESPONSE (commanded 62
+measured 12.577, commanded 250 measured 2.46). **Both refusals were
+correct**: that control is what lets a UVC camera DROP ITS FRAME RATE to
+integrate longer than one frame interval, so leaving it on lets the camera
+renegotiate its own timing under a measurement and pinning it off makes a
+long command undeliverable. There is no third setting. Six things:
+
+- **HALF THE CEILING IS DERIVED AND HALF IS A SETTING, and which is which
+  is stated.** Derived: a sensor delivering F frames a second cannot
+  integrate longer than 1/F, and F is READ OFF THE DEVICE (`v4l2-ctl
+  --get-parm` → `CameraLock.sensor_fps`, once per open, never the tap rate
+  the client paces its sends at). Not derived: WHERE inside that interval
+  the camera stops being honest — his two points bracket it (62 good, 250
+  bad, frame interval 333) and two points cannot locate a boundary. So the
+  fraction is `config.short_exposure_fraction` (`SPECTRA_SHORT_EXPOSURE_
+  FRACTION`, default 0.25 → 83 at 30 fps), anchored on those points. **It
+  is not a knob to turn until a run passes** — a run that passes because
+  the bar moved has measured nothing; re-anchor by MEASURING more points.
+- **NOTHING IN THE JUDGEMENT MOVED, and that is the whole point.**
+  `COMMANDED_FACTOR`, `MIN_PROVABLE_FACTOR`, `MIN_RESPONSE_FRACTION`,
+  `REPEAT_BAND` and `light_field.UNSEEN_WEIGHT` are untouched and asserted
+  untouched; the self-test still commands two different times and still
+  repeats one. This moved WHERE it measures, never WHETHER the readings
+  must agree — a drifting or non-responding camera INSIDE the short regime
+  still refuses, proven with his own numbers.
+- **ONLY A CONTROL THE CAMERA HAS REPORTED IS EVER ASKED FOR.** The pin and
+  the commanded default both gate on the read-back (`Ceiling.commandable`,
+  `short_exposure.pinnable`): a camera that never reported an
+  integration-time control is not commanded one, and one with no
+  `exposure_dynamic_framerate` is left alone — it cannot renegotiate its
+  frame rate, so there is nothing to pin. **Absence is never a refusal;** a
+  control WRITTEN and read back WRONG still is.
+- **THE SWITCH IS OWNED, NOT JUST SET** — `capture_settings.
+  PINNED_SWITCHES` (server) / `camera.SWITCHES` (client), declared apart
+  from the four levers because their refusal contracts differ. The client
+  reads his value before the first pin and writes it back on the un-pin
+  (`camera._apply_switches`), which every run's existing all-default
+  restore already sends. `fixture_brightness.owned` one layer down.
+- **THE COMPENSATION IS SMALLER THAN IT SOUNDS, and saying so is the
+  useful part.** `room_mapping.LIT_BRIGHTNESS` is already 1.0, the
+  commissioning pattern lamp already writes `brightness: 1.0` and
+  `fixture_brightness.FULL` is already 255 — full is full. What was
+  genuinely missing is that **the lever self-test was the ONE capture path
+  never wrapped in `fixture_brightness.owned`**; it is now. Gain is
+  deliberately NOT raised to compensate: it would lift the sensor's noise
+  into the `lit - dark` difference this instrument measures.
+- **A REGIME THAT STILL CANNOT SEE SAYS SO.** `mapping_refusals`'
+  NO_SIGNAL wording ADDS the third explanation (not enough light for the
+  time this camera can hold) to the two it always had — it never replaces
+  them, or a genuinely dead lever would read as a room problem.
+
+**UNVERIFIED AGAINST A LIVE CAMERA.** There was none on the kiosk when this
+shipped; it is proven offline only and does not become "his commissioning
+works" until a live Calibration One passes. Specs:
+`tests/test_short_exposure.py`, `scripts/check_short_exposure.py` (his six
+readings replayed through the real `judge`, the ceiling and light budget
+computed from his own numbers, the pin's round trip through the real client
+and the real `V4L2Camera`) — the check script's LAST LINE is that
+unverified statement, asserted by `tests/test_light_field_checks.py` so the
+claim cannot quietly go missing.
+
 ## THE BROWSER IS A VIEWFINDER — a calibration-grade run refuses it BY NAME
 
 **`spectra/services/capture_source.py` is the binding statement** for which

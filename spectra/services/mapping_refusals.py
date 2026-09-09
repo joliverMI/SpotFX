@@ -423,10 +423,7 @@ def lever_not_connected(verdict: dict) -> str:
            "a calibration through it measured would be the camera's mood, "
            "not the room. Nothing was written."
            if kind in (LEVER_NO_RESPONSE, LEVER_DRIFT) else
-           "Either this pose sees none of that emitter's light, or the "
-           "exposure control is doing nothing — and either way a "
-           "calibration taken through it would measure nothing. Check the "
-           "aim first, then the camera. Nothing was written."
+           _no_signal_words(verdict)
            if kind == LEVER_NO_SIGNAL else
            "The driver refused the commanded controls, so there is no "
            "regime to measure in. Nothing was written.")
@@ -434,6 +431,42 @@ def lever_not_connected(verdict: dict) -> str:
            if verdict.get("fresh_frames") is False else "")
         + " (spectra/services/lever_selftest.py; the driver's own read-back "
           "passed — this is the measurement it cannot make.)")
+
+
+def _no_signal_words(verdict: dict) -> str:
+    """WHAT "the camera saw nothing" MEANS, and it depends on whether the
+    exposure was capped.
+
+    Uncapped it has always had two explanations — the pose, or a dead
+    exposure control — and the sentence sends a reader to the aim first.
+    Since the SHORT-EXPOSURE REGIME (2026-09-09,
+    `spectra/services/short_exposure.py`) there is a THIRD, and on his own
+    camera it is the likeliest: the room genuinely does not put enough light
+    in the frame in the time this camera can hold steady. That is the
+    honest report the brief asks for — a stated result, never a pass, and
+    never bought by lowering `light_field.UNSEEN_WEIGHT`.
+
+    IT STILL REFUSES. This changes the words, not the verdict: NO_SIGNAL is
+    in `LEVER_REFUSING` and stays there."""
+    plain = ("Either this pose sees none of that emitter's light, or the "
+             "exposure control is doing nothing — and either way a "
+             "calibration taken through it would measure nothing. Check the "
+             "aim first, then the camera. Nothing was written.")
+    ceiling = verdict.get("ceiling") or {}
+    if not ceiling.get("units") or not ceiling.get("commandable"):
+        return plain
+    return (
+        plain[:-len(" Nothing was written.")]
+        + " And since 2026-09-09 there is a THIRD reading, which on a "
+          "capped camera is often the likeliest: there may simply not be "
+          "enough light for the time this camera can hold. "
+        + str(ceiling.get("sentence") or "")
+        + " The fixture was already at full firmware brightness for the "
+          "measurement and the lamp was already full white, so there is no "
+          "more light to give it from this side — moving the camera closer, "
+          "or giving that emitter more of the frame, is what would change "
+          "the answer. Nothing was written, and the floor was not lowered "
+          "to make it pass.")
 
 
 def _lever_pair(verdict: dict) -> tuple[str, str]:
