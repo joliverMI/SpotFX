@@ -119,6 +119,7 @@ from spectra.services import commission_compare as compare
 from spectra.services import emitters as emitters_mod
 from spectra.services import (ambient_stability, capture_settings,
                               fixture_brightness, flare_preview_hold,
+                              short_exposure,
                               gray_code, mapping_refusals, mapping_session,
                               room_mapping)
 
@@ -791,6 +792,14 @@ class RunResult:
     #: capture window this run used. A decode is only as good as the frame
     #: it was read from, so the frame is part of the record.
     camera: dict = field(default_factory=dict)
+    #: THE SHORT-EXPOSURE CEILING this run was held to
+    #: (`short_exposure.Ceiling.as_dict`) — the longest integration time it
+    #: was allowed to command, the frame rate that bound was derived from,
+    #: and whether the camera itself reported that rate or it was assumed.
+    #: Recorded on the RESULT rather than only in a note because a decode is
+    #: only as good as the regime it was read in, and a stored result that
+    #: cannot say which regime it used cannot be compared with the next one.
+    exposure_ceiling: dict = field(default_factory=dict)
     problems: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     at: float = field(default_factory=time.time)
@@ -808,6 +817,7 @@ class RunResult:
                 "layout_note": self.layout_note,
                 "decodes": self.decodes, "agreement": self.agreement,
                 "table": self.table, "captures": self.captures,
+                "exposure_ceiling": dict(self.exposure_ceiling),
                 "resolution": self.resolution, "ambient": self.ambient,
                 "witness": self.witness,
                 "targets": self.targets,
@@ -1374,10 +1384,31 @@ async def run_commission(mapper_id: str, deps: room_mapping.RunDeps, *,
         still averaged (`capture_window`), and one so long that no legal
         window can refuses by name.
 
+    AND SINCE 2026-09-09 THE INTEGRATION TIME IS BOUNDED BY THE SHORT
+    REGIME, and COMMANDED rather than left to converge. `short_exposure.cap`
+    (that module's docstring is the binding statement) holds it at or under
+    the longest time this camera can deliver WITHOUT dropping its own frame
+    rate, and pins `exposure_dynamic_framerate` off for the run. Three
+    things follow:
+
+      * a caller asking for MORE has its value shortened and SAID
+        (`result.notes`), never silently substituted;
+      * a caller asking for LESS is never overridden upward;
+      * a caller asking for NOTHING gets the ceiling commanded, because a
+        run that bounds nothing and pins the frame-rate control off would be
+        measured at whatever the camera happened to converge to — which on
+        his own kiosk is the half of the range this instrument does not
+        trust, and pinning the control off makes a long converged value
+        worse rather than better.
+
+    The regime is on the stored result (`exposure_ceiling`), not only in a
+    note: a decode is only as good as the regime it was read in.
+
     Restored in the same `finally` as everything else this run borrows: the
     session goes back to the map's own 320x180 with no manual levers, so a
     night of ordinary footprint runs after a commissioning pass costs what
-    it always did.
+    it always did — and that same all-default request is what UN-PINS the
+    frame-rate switch, which is how his own camera setting comes back.
 
     RESTORES IN A `finally`, three separate things, in the order they were
     taken: the hold (the lights), any virtual this run brought up, and the
@@ -1479,7 +1510,23 @@ async def run_commission(mapper_id: str, deps: room_mapping.RunDeps, *,
         frame_size=req.frame_size or READ_PROFILE,
         exposure_time=req.exposure_time, gain=req.gain,
         white_balance=req.white_balance, focus=req.focus,
+        dynamic_framerate=req.dynamic_framerate,
         notes=list(req.notes))
+    # THE SHORT-EXPOSURE REGIME (2026-09-09). A gray-code stack is ONE
+    # measurement against one dark and one full reference, so a camera that
+    # renegotiates its own timing part-way through it corrupts the decode
+    # rather than one row of it — which is the failure his kiosk Brio
+    # produced twice, in two shapes, in one evening. So this run commands
+    # an integration time inside the range that camera can actually hold
+    # and pins `exposure_dynamic_framerate` off for its own duration.
+    # `spectra/services/short_exposure.py` is the binding statement,
+    # including for why the ceiling is COMMANDED when the caller named
+    # nothing rather than left to whatever the camera converged to.
+    req, exposure_ceiling, ceiling_note = short_exposure.cap(
+        req, sess.camera_lock_view())
+    if ceiling_note:
+        result.notes.append(ceiling_note)
+    result.exposure_ceiling = exposure_ceiling.as_dict()
     capture_s, too_long = capture_window(
         req.exposure_time, sess.observed_fps() or mapping_session.FRAME_FPS)
     if too_long:
@@ -1562,6 +1609,13 @@ async def run_commission(mapper_id: str, deps: room_mapping.RunDeps, *,
         # after it cost thirty-six times the bandwidth and expose for a
         # regime it never asked for.
         try:
+            # ALL LEVERS AND SWITCHES NAMED NULL. For the four levers that
+            # is "stop asking"; for the PINNED SWITCH it is also what hands
+            # HIS OWN `exposure_dynamic_framerate` back — the client
+            # remembered the value it read before the pin and writes it
+            # here (`spectra/capture_client/camera.py::_apply_switches`).
+            # An all-default request is exactly that message, which is why
+            # this line did not have to change shape to own a control.
             await sess.apply_camera(capture_settings.CameraRequest(
                 frame_size=capture_settings.MAP_PROFILE))
         except Exception:                              # noqa: BLE001

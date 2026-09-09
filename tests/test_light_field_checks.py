@@ -106,6 +106,17 @@ def _run(name: str, timeout: int) -> str:
     # so an unavailable facility is a hole in the ledger rather than a pass.
     ("check_capture_client_fresh_host.py", 1200,
      "FRESH-HOST CHECKS PASSED"),
+    # THE SHORT-EXPOSURE COMMISSIONING REGIME: his own six measured
+    # readings replayed through the REAL judge (both refusals were right),
+    # the ceiling derived by the real function from what his camera reports,
+    # the light budget his own readings imply for the regime it allows, the
+    # four judgement constants proven unmoved with both refusing shapes
+    # re-refused INSIDE the short regime, and the pin's round trip through
+    # the real client and the real V4L2Camera against a v4l2-ctl that
+    # remembers. Its LAST LINE is the unverified-against-a-live-camera
+    # statement, asserted here so the claim cannot quietly go missing.
+    ("check_short_exposure.py", 300,
+     "UNVERIFIED AGAINST A LIVE CAMERA — there is none on the kiosk."),
     # WHAT THE CLIENT IMPORTS, which is the only part of the ARM question
     # an x86 machine can answer: it imports with every server-only package
     # blocked at the meta path, its third-party closure is exactly the two

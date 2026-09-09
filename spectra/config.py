@@ -437,3 +437,35 @@ def ledfx_ws_url() -> str:
     base = ledfx_url()
     return ("wss://" + base[len("https://"):] if base.startswith("https://")
             else "ws://" + base[len("http://"):]) + "/api/websocket"
+
+
+#: THE SHORT-EXPOSURE COMMISSIONING REGIME's one tunable — the fraction of
+#: one camera frame interval a commissioning-grade run may command as its
+#: integration time. `spectra/services/short_exposure.py` is the binding
+#: statement for what it means and, more importantly, for what it is NOT:
+#: the frame-interval bound it scales is derived from physics and the
+#: device's own reported frame rate, this fraction is ANCHORED ON TWO
+#: MEASURED POINTS from his kiosk Brio and is not derived from them.
+#:
+#: It is here rather than in `short_exposure.py` for one reason: the day a
+#: live camera measures more points, the honest way to move it is a systemd
+#: `Environment=` edit and a restart while the evidence is gathered, and a
+#: code edit once it is settled. It is NEVER a knob to turn until a run
+#: passes — a run that passes because the bar moved has measured nothing.
+SHORT_EXPOSURE_FRACTION_DEFAULT = 0.25
+
+
+def short_exposure_fraction() -> float:
+    """The configured fraction, or the default on anything unparseable.
+
+    READ AT CALL TIME, the posture every other lever in this file takes.
+    Bounds are applied by `short_exposure.fraction()` — the one place that
+    knows what a legal fraction is — so this only has to answer "what did
+    the environment say"."""
+    raw = os.getenv("SPECTRA_SHORT_EXPOSURE_FRACTION", "").strip()
+    if not raw:
+        return SHORT_EXPOSURE_FRACTION_DEFAULT
+    try:
+        return float(raw)
+    except ValueError:
+        return SHORT_EXPOSURE_FRACTION_DEFAULT

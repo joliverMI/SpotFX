@@ -191,40 +191,72 @@ def test_an_honest_downgrade_is_still_measured_and_still_gated():
 # ── the manual levers ─────────────────────────────────────────────────────
 
 def _long_exposure_session(h, exposure_time=5000):
+    """A run that ASKS for a long integration time. Since 2026-09-09 what it
+    GETS is bounded by `short_exposure` — see the two tests below, which is
+    where that consequence is stated rather than absorbed."""
     h.session.camera_lock = {"exposure_locked": True,
                              "white_balance_locked": True,
                              "exposure_time": float(exposure_time),
+                             "sensor_fps": 30.0,
                              "gain": None, "manual_refusals": []}
     return cs.request(exposure_time=exposure_time)
 
 
-def test_both_dark_references_are_averaged_over_the_same_widened_window():
+def test_both_dark_references_are_averaged_over_the_same_window():
     """THE ONE THING A LONG INTEGRATION COULD HAVE BROKEN. The gate's most
     unarguable reading is the opening dark against the closing one — and
     that comparison is only honest if both were taken the same way. A
-    manual exposure widens every capture window (`capture_window`); a
-    closing dark left on the shipped window would have been averaging a
+    closing dark left on a different window would have been averaging a
     different number of frames and the difference would have read as the
-    room moving."""
+    room moving.
+
+    THE INVARIANT IS UNCHANGED; WHAT REACHES IT IS. Since the
+    SHORT-EXPOSURE REGIME (2026-09-09) a commissioning run cannot COMMAND a
+    long integration time on a 30 fps camera — `short_exposure.cap` holds it
+    to a fraction of one frame interval — so the widening this test used to
+    reach through the run is no longer reachable that way. That is asserted
+    below rather than absorbed, and the widening ARITHMETIC is proven
+    directly in the next test so it cannot go silently dead."""
     h = RungRoom(rung=cs.MAP_PROFILE, source=cs.MAP_PROFILE)
     req = _long_exposure_session(h)
-    widened, refusal = commissioning.capture_window(
-        req.exposure_time, h.session.observed_fps()
-        or commissioning.mapping_session.FRAME_FPS)
-    assert refusal is None and widened > commissioning.CAPTURE_S
-
     result = h.run(layout=h.layout, instrument={}, camera=req)
     assert result.ok, result.reason
+
+    # THE ASK WAS SHORTENED, AND SAID.
+    ceiling = result.exposure_ceiling
+    assert ceiling["units"] < req.exposure_time
+    assert result.camera["requested"]["exposure_time"] == ceiling["units"]
+    assert any("longer than this camera can hold steady" in n
+               for n in result.notes)
+
+    # AND EVERY CAPTURE IN THE STACK SHARES ONE WINDOW — both dark
+    # references included, which is the whole of what the gate needs.
     windows = {c["label"]: c["capture_s"] for c in result.captures}
-    assert windows["run1/dark"] == pytest.approx(widened)
-    assert windows["run1/dark-end"] == pytest.approx(widened)
-    assert windows and all(v == pytest.approx(widened)
+    used = windows["run1/dark"]
+    assert windows["run1/dark-end"] == pytest.approx(used)
+    assert windows and all(v == pytest.approx(used)
                            for v in windows.values()), \
         "every capture in the stack, not just the references"
     assert result.ambient["measurable"] and not result.ambient["exceeded"]
 
 
-def test_a_long_integration_does_not_stop_the_gate_seeing_the_weather():
+def test_the_widening_arithmetic_is_still_live_for_a_camera_that_can_hold_one():
+    """A MACHINERY NOBODY CAN REACH ROTS, so the widening is proven where it
+    still applies: `commissioning.capture_window` itself, which the MAP
+    route still drives with an uncapped exposure. A long integration lowers
+    what a camera can deliver, and the window is widened to still average
+    MIN_FRAMES."""
+    tap = commissioning.mapping_session.FRAME_FPS
+    plain, refusal = commissioning.capture_window(None, tap)
+    assert refusal is None and plain == pytest.approx(commissioning.CAPTURE_S)
+    widened, refusal = commissioning.capture_window(5000, tap)
+    assert refusal is None and widened > commissioning.CAPTURE_S
+
+
+def test_a_long_integration_ask_does_not_stop_the_gate_seeing_the_weather():
+    """The ask is shortened; the gate still measures the room. Both halves
+    are asserted, because "the exposure moved" and "the gate still works"
+    are separate claims and one passing does not carry the other."""
     h = RungRoom(rung=cs.MAP_PROFILE, source=cs.MAP_PROFILE,
                  ambient=_moving_cloud(50.0))
     req = _long_exposure_session(h)
@@ -232,7 +264,8 @@ def test_a_long_integration_does_not_stop_the_gate_seeing_the_weather():
 
     assert result.refusal == "ambient"
     assert result.ambient["exceeded"]
-    assert any("integration time" in n for n in result.notes)
+    assert any("longer than this camera can hold steady" in n
+               for n in result.notes)
 
 
 def test_a_lever_the_camera_refused_still_stops_before_the_gate_ever_runs():

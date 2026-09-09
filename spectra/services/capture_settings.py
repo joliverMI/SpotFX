@@ -120,6 +120,12 @@ side only. The rule the exposure lock already lives by: automating the
 REQUEST is the point; automating the CONFIRMATION is forging the
 instrument's signature. A returning write call is never evidence.
 
+AND ONE PINNED SWITCH BESIDE THEM (2026-09-09, `PINNED_SWITCHES`):
+`dynamic_framerate`, which a commissioning-grade run pins OFF for its own
+duration. It is declared separately from the four levers because its
+ABSENCE is not a refusal — see that declaration, and
+`spectra/services/short_exposure.py` for why a run pins it at all.
+
 ────────────────────────────────────────────────────────────────────────────
 FOUR. FRAME-RATE HONESTY — a long integration is not free
 ────────────────────────────────────────────────────────────────────────────
@@ -394,6 +400,27 @@ LEVER_BOUNDS: tuple[tuple[str, int, int, str, str], ...] = (
     ("focus", MIN_FOCUS, MAX_FOCUS, "", "a focus"),
 )
 
+#: THE PINNED SWITCHES — device controls a RUN pins for its own reasons,
+#: about the camera's behaviour rather than about the light it collects.
+#: (field, refusal words). One row today: `exposure_dynamic_framerate`, the
+#: control that lets a UVC camera drop its frame rate to reach an
+#: integration time longer than one frame interval —
+#: `spectra/services/short_exposure.py` is the binding statement for why a
+#: commissioning-grade run pins it off.
+#:
+#: DELIBERATELY NOT A FIFTH `LEVER_BOUNDS` ROW, and the difference is a
+#: refusal. A lever is asked for BY A RUN, so a camera that does not have
+#: one refuses that run by name (`camera_refusal`'s own loop below). A
+#: switch is asked for by the INSTRUMENT, about a control most cameras do
+#: not have — and a camera without it cannot renegotiate its frame rate
+#: under a measurement, so it has nothing to pin and nothing to refuse.
+#: ABSENCE IS NOT A REFUSAL here; a control that was written and read back
+#: WRONG still is, on the client's own `manual_refusals`, exactly like a
+#: lever.
+PINNED_SWITCHES: tuple[tuple[str, str], ...] = (
+    ("dynamic_framerate", "the dynamic-framerate exposure control"),
+)
+
 
 @dataclass
 class CameraRequest:
@@ -411,6 +438,13 @@ class CameraRequest:
     #: first two — a request, never a claim, and the read-back decides.
     white_balance: Optional[int] = None
     focus: Optional[int] = None
+    #: THE PINNED SWITCH (2026-09-09), in the device's own scale: 0 turns
+    #: `exposure_dynamic_framerate` off, 1 turns it on, None does not ask.
+    #: A run that pins it OWNS it — the client restores the value it read
+    #: off the device before the pin the moment this goes back to None
+    #: (`spectra/capture_client/camera.py`, the `fixture_brightness.owned`
+    #: contract one layer down). See `PINNED_SWITCHES`.
+    dynamic_framerate: Optional[int] = None
     #: what was clamped on the way in, in his words, so a bounded value is
     #: never silently different from the one he typed
     notes: list[str] = field(default_factory=list)
@@ -423,10 +457,25 @@ class CameraRequest:
                 if getattr(self, name) is not None}
 
     @property
+    def switches(self) -> dict:
+        """The pinned switches this request actually names, by field."""
+        return {name: getattr(self, name)
+                for name, _words in PINNED_SWITCHES
+                if getattr(self, name) is not None}
+
+    @property
     def manual(self) -> bool:
-        """Does this ask for ANY of the four pinned levers? A request that
-        asks for none must not make a camera that offers none refuse."""
-        return bool(self.levers)
+        """Does this ask the camera for ANYTHING it would otherwise decide
+        for itself — one of the four pinned levers, or a pinned switch? A
+        request that asks for none must not make a camera that offers none
+        refuse.
+
+        THE SWITCH COUNTS HERE ON PURPOSE, even though its absence is never
+        a refusal: this is what `await_camera` waits on, and a request that
+        pins the frame-rate control must be ANSWERED before anything reads
+        the lock, or the gate reads the previous request's read-back — the
+        one failure `await_camera`'s own docstring exists to describe."""
+        return bool(self.levers or self.switches)
 
     @property
     def exposure_seconds(self) -> Optional[float]:
@@ -440,13 +489,14 @@ class CameraRequest:
                                if self.frame_size else None),
                 "exposure_time": self.exposure_time, "gain": self.gain,
                 "white_balance": self.white_balance, "focus": self.focus,
+                "dynamic_framerate": self.dynamic_framerate,
                 "exposure_seconds": self.exposure_seconds,
                 "notes": list(self.notes)}
 
 
 def request(*, frame_size: Optional[tuple[int, int]] = None,
             exposure_time=None, gain=None, white_balance=None,
-            focus=None) -> CameraRequest:
+            focus=None, dynamic_framerate=None) -> CameraRequest:
     """A bounded request from whatever a caller sent. Out-of-range values
     are CLAMPED AND SAID — unlike the protocol waits, which fall silently
     back to their default, because these are deliberate levers and a
@@ -465,6 +515,12 @@ def request(*, frame_size: Optional[tuple[int, int]] = None,
     for name, lo, hi, unit, _words in LEVER_BOUNDS:
         setattr(req, name, _clamp_int(asked[name], lo, hi, name, unit,
                                       req.notes))
+    # A SWITCH IS 0 OR 1 and has no range to clamp into — anything else is
+    # a typo reaching a driver, which is what this function exists to stop.
+    if dynamic_framerate is not None:
+        req.dynamic_framerate = _clamp_int(dynamic_framerate, 0, 1,
+                                           "dynamic_framerate", "",
+                                           req.notes)
     return req
 
 
@@ -905,6 +961,14 @@ class CameraNegotiation:
         # have — and more dangerously, because the frames still arrive and
         # only the numbers are wrong. Checked for ALL FOUR levers off one
         # declaration, so a fifth cannot be added on one side only.
+        #
+        # THE PINNED SWITCHES ARE DELIBERATELY NOT IN THIS LOOP. A camera
+        # with no `exposure_dynamic_framerate` control reports None for it,
+        # and refusing on that would refuse every run on every camera that
+        # cannot do the thing the pin exists to prevent. A camera that HAS
+        # it and did not take the write is still refused — by the client's
+        # own `manual_refusals`, read three lines above, exactly like a
+        # lever that read back wrong.
         for name, _lo, _hi, _unit, words in LEVER_BOUNDS:
             if getattr(req, name) is not None and lock.get(name) is None:
                 refused.append(f"the camera never reported {words} back, so "

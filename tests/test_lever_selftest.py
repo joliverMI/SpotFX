@@ -79,6 +79,14 @@ class _Session(cs.SessionCameraDouble):
             return {"exposure_locked": True, "white_balance_locked": True,
                     "exposure_time": None, "gain": None,
                     "exposure_time_range": [3.0, 2047.0],
+                    # HIS OWN KIOSK BRIO'S SHAPE (2026-09-09): a 30 fps
+                    # sensor with the dynamic-framerate control present and
+                    # ON. That makes the SHORT-EXPOSURE REGIME real in every
+                    # run below rather than modelled — the double inherits
+                    # the production negotiation, so a camera that reports
+                    # these is a camera the ceiling actually applies to.
+                    "sensor_fps": 30.0,
+                    "dynamic_framerate": 1,
                     "manual_refusals": []}
 
     def __init__(self, camera: _Camera, *, native=True):
@@ -99,10 +107,17 @@ class _Session(cs.SessionCameraDouble):
     def _camera_lock_view(self):
         """A DRIVER THAT TAKES EVERY SETTING — which is tonight's whole
         point. The read-back always agrees with the request; only the
-        measured light can tell an honest camera from a dead lever."""
-        return {**self.camera_lock,
-                "exposure_time": self.camera_request.exposure_time,
-                "gain": self.camera_request.gain}
+        measured light can tell an honest camera from a dead lever.
+
+        THE SWITCH ECHOES TOO, for the same reason: a driver that took the
+        write reports the value back, and only what the LIGHT does can
+        separate that from a sensor ignoring it."""
+        out = {**self.camera_lock,
+               "exposure_time": self.camera_request.exposure_time,
+               "gain": self.camera_request.gain}
+        if self.camera_request.dynamic_framerate is not None:
+            out["dynamic_framerate"] = self.camera_request.dynamic_framerate
+        return out
 
     async def gather(self, seconds, min_frames=1):
         exposure = self.camera_request.exposure_time
@@ -267,22 +282,46 @@ def test_the_run_refuses_tonights_camera_by_name():
     sess, verdict = _run(_Camera(tonight))
     assert verdict.verdict == mapping_refusals.LEVER_NO_SIGNAL
     assert verdict.refuses and not verdict.proven
-    # THE REFUSAL NAMES BOTH COMMANDS AND BOTH MEASUREMENTS.
-    assert "integration time of 50" in verdict.reason
-    assert "integration time of 200" in verdict.reason
+    # THE REFUSAL NAMES BOTH COMMANDS AND BOTH MEASUREMENTS. The two
+    # commands are whatever the SHORT REGIME allowed on this camera, read
+    # off the verdict rather than typed here — pinning them would make this
+    # a test about two constants instead of about the refusal.
+    dim, bright = (r.exposure_time for r in verdict.readings[:2])
+    assert f"integration time of {dim}" in verdict.reason
+    assert f"integration time of {bright}" in verdict.reason
     assert "below the 1 an emitter must clear" in verdict.reason
     assert "measure the camera" not in verdict.reason  # it says "mood"
     assert "calibration taken through it would measure nothing" in verdict.reason
+    # AND THE THIRD READING IS ADDED, NOT SUBSTITUTED. A capped camera has
+    # one more honest explanation for "no light" — not enough light for the
+    # time it can hold — and naming it must not delete the two that were
+    # already true, or a genuinely dead lever reads as a room problem.
+    assert "Check the aim first, then the camera" in verdict.reason
+    assert "THIRD reading" in verdict.reason
+    assert "floor was not lowered" in verdict.reason
 
 
 def test_the_run_passes_an_honest_camera_and_says_what_it_measured():
     sess, verdict = _run(_Camera(honest))
     assert verdict.proven, verdict.reason
     assert not verdict.refuses
-    assert verdict.response_ratio == pytest.approx(4.0, rel=0.01)
+    dim, bright, repeat = (r.exposure_time for r in verdict.readings)
+    # STILL TWO DIFFERENT COMMANDS, STILL ONE OF THEM REPEATED, still a real
+    # factor apart. The short regime moved WHERE this is measured; it did
+    # not soften WHAT has to be true.
+    assert bright == repeat and bright > dim
+    assert bright / dim >= lever_selftest.MIN_PROVABLE_FACTOR
+    assert verdict.response_ratio == pytest.approx(bright / dim, rel=0.01)
     assert verdict.repeat_ratio == pytest.approx(1.0, rel=0.01)
     assert "reaches its sensor" in verdict.reason
-    assert [r.exposure_time for r in verdict.readings] == [50, 200, 200]
+    # AND BOTH COMMANDS SAT INSIDE THE RANGE THIS CAMERA CAN HOLD.
+    ceiling = verdict.ceiling
+    assert ceiling["units"] == 83 and ceiling["measured_fps"] is True
+    assert bright <= ceiling["units"]
+    # THE FRAME-RATE CONTROL WAS PINNED OFF FOR EVERY COMMANDED REGIME.
+    pins = [c.get("dynamic_framerate") for c in sess.camera_configs
+            if c.get("exposure_time") is not None]
+    assert pins == [0, 0, 0], pins
 
 
 def test_the_run_catches_a_camera_that_re_clamps_between_two_identical_asks():
@@ -307,7 +346,11 @@ def test_the_run_stores_nothing_and_puts_the_camera_back():
 
 def test_a_camera_whose_range_cannot_span_the_factor_is_unprovable_not_refused():
     sess = _Session(_Camera(honest))
-    sess.camera_lock = {**sess.camera_lock,
+    # A SLOW SENSOR, so the short regime's ceiling (0.25 of a frame
+    # interval, 500 units at 5 fps) is nowhere near this camera's own
+    # 100..120 and the property under test is the DEVICE's narrow range,
+    # exactly as it was before the ceiling existed.
+    sess.camera_lock = {**sess.camera_lock, "sensor_fps": 5.0,
                         "exposure_time_range": [100.0, 120.0]}
     verdict = asyncio.run(lever_selftest.run_selftest(_room(), _deps(sess)))
     assert verdict.verdict == mapping_refusals.LEVER_UNPROVABLE
@@ -334,9 +377,44 @@ def test_a_camera_that_refuses_the_tests_own_command_is_unprovable():
 
 def test_the_bright_regime_is_the_one_the_run_itself_asked_for():
     """Proving the lever at the regime the run is about to use is a stronger
-    statement than proving it somewhere else and assuming."""
-    sess, verdict = _run(_Camera(honest), requested_exposure=800)
-    assert [r.exposure_time for r in verdict.readings] == [200, 800, 800]
+    statement than proving it somewhere else and assuming — SO LONG AS that
+    regime is one this camera can hold. 60 is inside the ceiling (83), so it
+    is used verbatim and nothing is said about it."""
+    _sess, verdict = _run(_Camera(honest), requested_exposure=60)
+    assert [r.exposure_time for r in verdict.readings] == [15, 60, 60]
+    assert not any("longer than this camera can hold" in n
+                   for n in verdict.notes)
+
+
+def test_a_run_asking_past_the_ceiling_is_shortened_and_says_so():
+    """AND WHEN IT IS NOT. His own failing command was 250; the ceiling on a
+    30 fps camera is 83. The test still runs — it is a claim about the
+    CAMERA, and refusing to make it because the run wanted an untrustworthy
+    regime would be the wrong trade — but the verdict SAYS the claim is
+    narrower than the run's own ask, because a quietly narrower claim is
+    exactly what this instrument exists not to make."""
+    _sess, verdict = _run(_Camera(honest), requested_exposure=250)
+    assert [r.exposure_time for r in verdict.readings] == [21, 83, 83]
+    assert verdict.proven
+    said = [n for n in verdict.notes if "longer than this camera can hold" in n]
+    assert said and "250" in said[0] and "83" in said[0]
+
+
+def test_the_ceiling_never_commands_below_what_the_camera_accepts():
+    """A camera whose SHORTEST legal exposure is already past its own frame
+    interval has no short regime available. The honest answer is
+    `unprovable` and a sentence — never a command the driver would refuse,
+    which would arrive as a refusal wearing the camera's name for a limit
+    that is ours."""
+    sess = _Session(_Camera(honest))
+    sess.camera_lock = {**sess.camera_lock, "sensor_fps": 30.0,
+                        "exposure_time_range": [100.0, 120.0]}
+    verdict = asyncio.run(lever_selftest.run_selftest(_room(), _deps(sess)))
+    assert verdict.verdict == mapping_refusals.LEVER_UNPROVABLE
+    assert not verdict.refuses
+    assert verdict.ceiling["units"] == 100, "never under the device minimum"
+    assert verdict.ceiling["bound_by"] == "device_min"
+    assert "shorter regime is not available" in verdict.reason
 
 
 # ── 3. THE PREFLIGHT, at the one seam every run passes through ─────────────

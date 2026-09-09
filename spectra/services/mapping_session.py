@@ -244,6 +244,17 @@ class LockState:
     #: Whether this camera's own continuous autofocus reads OFF. None when
     #: it has no such control.
     focus_auto: Optional[bool] = None
+    #: THE PINNED SWITCH (2026-09-09) as the device reports it — 0 off, 1
+    #: on, None when this camera has no `exposure_dynamic_framerate`
+    #: control. Absence is NOT a refusal; see
+    #: `capture_settings.PINNED_SWITCHES`.
+    dynamic_framerate: Optional[int] = None
+    #: THE SENSOR'S OWN NEGOTIATED FRAME RATE, as the client read it off the
+    #: device — never the tap rate frames arrive at. It is the one input
+    #: `short_exposure.ceiling_for` derives a frame interval from, and None
+    #: means the camera would not say, which that function reports rather
+    #: than hides.
+    sensor_fps: Optional[float] = None
     #: The device's own declared ranges, when it declares them — what a
     #: refusal quotes so "gain 800 was refused" says what the camera offers.
     exposure_time_range: Optional[list[float]] = None
@@ -273,6 +284,8 @@ class LockState:
                 "exposure_time": self.exposure_time, "gain": self.gain,
                 "white_balance": self.white_balance, "focus": self.focus,
                 "focus_auto": self.focus_auto,
+                "dynamic_framerate": self.dynamic_framerate,
+                "sensor_fps": self.sensor_fps,
                 "exposure_time_range": (list(self.exposure_time_range)
                                         if self.exposure_time_range else None),
                 "gain_range": (list(self.gain_range) if self.gain_range
@@ -597,6 +610,9 @@ class MappingSession(capture_settings.CameraNegotiation):
             focus=_number(payload.get("focus")),
             focus_auto=(None if payload.get("focus_auto") is None
                         else bool(payload.get("focus_auto"))),
+            dynamic_framerate=(None if payload.get("dynamic_framerate") is None
+                               else int(payload.get("dynamic_framerate"))),
+            sensor_fps=_number(payload.get("sensor_fps")),
             exposure_time_range=_pair(payload.get("exposure_time_range")),
             gain_range=_pair(payload.get("gain_range")),
             white_balance_range=_pair(payload.get("white_balance_range")),
