@@ -13,6 +13,7 @@ def _isolated(tmp_path, monkeypatch):
     monkeypatch.setattr(scfg, "TRIGGERS_FILE", tmp_path / "triggers.json")
     monkeypatch.setattr(scfg, "PROFILES_DIR", tmp_path / "profiles")
     monkeypatch.setattr(scfg, "TESTBED_PROMOTIONS_FILE", tmp_path / "promotions.json")
+    monkeypatch.setattr(scfg, "TESTBED_PROMOTED_IDS_FILE", tmp_path / "promoted_ids.json")
     monkeypatch.setattr(scfg, "SCENES_FILE", tmp_path / "scenes.json")
     monkeypatch.setattr(scfg, "COLOR_SETS_FILE", tmp_path / "color_sets.json")
     (tmp_path / "profiles").mkdir()

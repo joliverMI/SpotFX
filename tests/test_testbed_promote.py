@@ -12,6 +12,7 @@ def _isolated(tmp_path, monkeypatch):
     from spectra import config as scfg
     monkeypatch.setattr(scfg, "TRIGGERS_FILE", tmp_path / "triggers.json")
     monkeypatch.setattr(scfg, "TESTBED_PROMOTIONS_FILE", tmp_path / "promotions.json")
+    monkeypatch.setattr(scfg, "TESTBED_PROMOTED_IDS_FILE", tmp_path / "promoted_ids.json")
     monkeypatch.setattr(scfg, "SCENES_FILE", tmp_path / "scenes.json")
     monkeypatch.setattr(scfg, "COLOR_SETS_FILE", tmp_path / "color_sets.json")
 
@@ -280,3 +281,66 @@ def test_a_promoted_trigger_carries_no_generator_key():
     stored = trigger_store.list_for_song(URI)[0]
     assert stored.source == "authored"
     assert stored.generator_key is None
+
+
+
+
+def test_provenance_survives_the_display_log_rotating_past_its_cap(monkeypatch):
+    """The display log is BOUNDED; the scoring exclusion must not be. Once
+    the log rotates, an evicted promotion used to read as hand-authored
+    again and silently re-enter the reference set — the engine graded
+    against its own pushed suggestion, which is the exact circularity the
+    exclusion exists to close."""
+    from spectra.services import testbed_marks, testbed_promote
+    monkeypatch.setattr(testbed_promote, "_LOG_MAX_ENTRIES", 4)
+
+    first = _promote(1000)["trigger_id"]
+    assert testbed_promote.promoted_trigger_ids(URI) == {first}
+
+    # Enough later attempts to push the first promotion out of the log.
+    for ms in (5000, 9000, 13000, 17000, 21000):
+        _promote(ms)
+
+    assert not any(e.get("trigger_id") == first
+                   for e in testbed_promote.log_for_song(URI))
+    assert first in testbed_promote.promoted_trigger_ids(URI)
+    assert first in testbed_promote.promoted_ids_by_uri()[URI]
+
+    marks = testbed_marks.marks_for_song(URI)
+    by_id = {m.id: m for m in marks.flares}
+    assert by_id[first].promoted is True
+    assert first not in {m.id for m in testbed_marks.scoring_marks(marks.flares)}
+
+
+def test_a_log_only_promotion_is_still_excluded(monkeypatch):
+    """An install that promoted before the durable index existed keeps its
+    provenance: the reads union the index with whatever the log can still
+    see, so nothing needs migrating."""
+    import json
+    from spectra import config as scfg
+    from spectra.services import testbed_promote
+    scfg.TESTBED_PROMOTIONS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    scfg.TESTBED_PROMOTIONS_FILE.write_text(json.dumps([{
+        "at": 1.0, "uri": URI, "timestamp_ms": 1000,
+        "source_engine": "librosa", "source_mark_kind": "section_boundary",
+        "status": "promoted", "trigger_id": "legacy-id",
+    }]), encoding="utf-8")
+    assert not scfg.TESTBED_PROMOTED_IDS_FILE.exists()
+    assert testbed_promote.promoted_trigger_ids(URI) == {"legacy-id"}
+    assert testbed_promote.promoted_ids_by_uri() == {URI: {"legacy-id"}}
+
+
+def test_a_malformed_promoted_index_never_blocks_a_promotion():
+    """Same never-raise posture as the log loader: this store is written
+    after the trigger has already landed."""
+    import json
+    from spectra import config as scfg
+    from spectra.services import testbed_promote, trigger_store
+    scfg.TESTBED_PROMOTED_IDS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    scfg.TESTBED_PROMOTED_IDS_FILE.write_text(json.dumps(["not", "an", "index"]),
+                                              encoding="utf-8")
+    assert testbed_promote.promoted_trigger_ids(URI) == set()
+
+    landed = _promote(5000)["trigger_id"]
+    assert [t.id for t in trigger_store.list_for_song(URI)] == [landed]
+    assert testbed_promote.promoted_trigger_ids(URI) == {landed}

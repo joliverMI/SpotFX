@@ -187,6 +187,12 @@ TESTBED_PINNED_FILE = TESTBED_DIR / "pinned_audio.json"
 # that a suggestion only ever reaches storage/spectra/triggers.json through
 # a recorded, reviewed press. See testbed_promote.py.
 TESTBED_PROMOTIONS_FILE = TESTBED_DIR / "promotions.json"
+# TWO STORES, DELIBERATELY. The bounded log above is the HISTORY a human
+# reads; this one is the PROVENANCE the scoring exclusion depends on, and
+# it is NEVER truncated — a trigger id that ages out of the display log
+# must not quietly re-enter the reference set it was excluded from. See
+# testbed_promote.py's module docstring.
+TESTBED_PROMOTED_IDS_FILE = TESTBED_DIR / "promoted_ids.json"
 
 
 def handover_armed() -> bool:

@@ -7175,9 +7175,18 @@ circularity through the authored door: push-to-real lands a suggestion
 `source="authored"` at the suggesting engine's OWN exact `time_ms`, so
 every promotion would lift that engine's own P/R/F1 on the next look.
 Nothing on the trigger can tell it from a hand-placed one (that is
-deliberate — see below), so the PROMOTION AUDIT LOG is the provenance:
-`testbed_promote.promoted_trigger_ids()`/`promoted_ids_by_uri()` →
-`ReferenceMark.promoted`. The exclusion is VISIBLE, never silent — the
+deliberate — see below), so `testbed_promote` keeps its OWN provenance
+store: `promoted_ids.json` (`{uri: [trigger_id, ...]}`, **never
+truncated**) → `promoted_trigger_ids()`/`promoted_ids_by_uri()` →
+`ReferenceMark.promoted`. **That is a SECOND store beside the bounded
+`promotions.json`, and the split is the point** — the display log caps at
+`_LOG_MAX_ENTRIES` and refusals share that budget, so sourcing the
+exclusion from it meant an evicted promotion silently read as
+hand-authored again and re-entered `scoring_marks()`, with the lane tint,
+the `n_promoted` count and the metrics note all quietly stopping saying
+so. The reads UNION the durable index with whatever the log window still
+shows, so an install that promoted before the index existed keeps its
+provenance with no migration; the union can only ADD ids. The exclusion is VISIBLE, never silent — the
 mark stays in `transitions`/`flares` flagged, is drawn in its own dashed
 tint with an "excluded from scoring" label, is counted (`n_promoted`), and
 is dropped only by `testbed_marks.scoring_marks()`, the ONE definition
@@ -7267,7 +7276,11 @@ that module's former private `_validate_action` specifically so both write
 surfaces share one choke point and can't diverge). Every attempt, accepted
 or refused, is appended to a durable, bounded audit log
 (`storage/spectra/testbed/promotions.json`, `GET /api/testbed/promotions`)
-— the visible proof the button cannot write silently. **A repeat confirm
+— the visible proof the button cannot write silently. That log is HISTORY
+for a human; the scoring exclusion reads the unbounded
+`promoted_ids.json` beside it (above), and a new store here needs its own
+`tests/conftest`-style repoint in every testbed test fixture or it writes
+into the real `storage/spectra/testbed/`. **A repeat confirm
 is refused, never stacked**: an authored trigger of the same action kind
 within `testbed_promote.DUPLICATE_WINDOW_MS` of the moment refuses by name
 (`PromotionDuplicate`, HTTP 409, logged `reason="duplicate"` with the

@@ -38,8 +38,8 @@ field is midsong_generator's own matching key; stamping a "testbed:..."
 value there would put a non-generated row into the space a generated one
 is identified by.
 
-So the promotion LOG below is the ONLY record that a given trigger came
-from this page — which is what `promoted_trigger_ids()` /
+So a STORE OF OUR OWN is the only record that a given trigger came from
+this page — which is what `promoted_trigger_ids()` /
 `promoted_ids_by_uri()` exist for. spectra/services/testbed_marks.py reads
 them to keep a promoted mark OUT of the scoring reference set: it sits at
 the suggesting engine's own exact time_ms, so scoring against it would
@@ -47,6 +47,25 @@ grade that engine on marks it authored — the same circularity the
 authored-only rule already refuses for generated rows, arriving through
 the authored door. The mark is still SHOWN (flagged `promoted`), never
 silently dropped.
+
+THIS MODULE THEREFORE OWNS TWO STORES, AND THEIR BOUNDS DIFFER ON PURPOSE:
+
+  promotions.json   — the HISTORY a human reads (every attempt, accepted or
+                      refused), BOUNDED at _LOG_MAX_ENTRIES. Display and
+                      audit; `GET /api/testbed/promotions` serves it.
+  promoted_ids.json — the PROVENANCE the scoring exclusion depends on,
+                      `{uri: [trigger_id, ...]}`, NEVER truncated.
+
+Sourcing the exclusion from the bounded log is the defect this split
+exists to prevent: refusals share that log's budget, so a run of refused
+clicks evicts real promotions, `ReferenceMark.promoted` silently flips
+back to False, and the excluded marks re-enter `scoring_marks()` — the
+engine graded against its own pushed suggestions again, with the lane
+tint, the `n_promoted` count and the metrics note all quietly stopping
+saying so. The reads below UNION the durable index with whatever the log
+window still shows, so a store written before this split existed keeps
+its provenance with no migration; the union can only ADD ids, never
+resurrect an expiry.
 
 A repeat of the same click is REFUSED, never landed twice: an authored
 trigger of the same action kind already within DUPLICATE_WINDOW_MS of the
@@ -147,6 +166,58 @@ def _record(entry: dict) -> None:
         _save_log(entries)
 
 
+def _load_promoted_index() -> dict[str, list[str]]:
+    """{uri: [trigger_id, ...]}, or an EMPTY index when the file is absent,
+    unparseable or the wrong shape — the same never-raise posture
+    `_load_log` has, and for the same reason: this is written after the
+    trigger has already landed."""
+    path = config.TESTBED_PROMOTED_IDS_FILE
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        logger.warning("testbed promoted_ids.json parse failed: %s", exc)
+        return {}
+    if not isinstance(data, dict):
+        logger.warning("testbed promoted_ids.json is a %s, not an object — "
+                       "reading it as empty", type(data).__name__)
+        return {}
+    out: dict[str, list[str]] = {}
+    for uri, ids in data.items():
+        if isinstance(uri, str) and isinstance(ids, list):
+            out[uri] = [i for i in ids if isinstance(i, str)]
+    return out
+
+
+def _save_promoted_index(index: dict[str, list[str]]) -> None:
+    """NEVER truncated — see the module docstring. This file grows by one
+    short id per promotion; his whole corpus is ~21k triggers, so even a
+    pathological future of pushing every one of them is a few hundred KB."""
+    path = config.TESTBED_PROMOTED_IDS_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=path.name, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(index, fh, indent=2)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def _remember_promoted(uri: str, trigger_id: str) -> None:
+    with _log_lock:
+        index = _load_promoted_index()
+        ids = index.setdefault(uri, [])
+        if trigger_id not in ids:
+            ids.append(trigger_id)
+        _save_promoted_index(index)
+
+
 def promote(uri: str, timestamp_ms: int, action: TriggerAction,
            source_engine: str, source_mark_kind: str,
            confirmed: bool, trigger_offset_ms: int = 0) -> dict:
@@ -207,6 +278,10 @@ def promote(uri: str, timestamp_ms: int, action: TriggerAction,
         })
         raise PromotionDuplicate(message)
 
+    # The durable provenance lands BEFORE the display log: if either write
+    # were to fail, the one that keeps this trigger out of the scoring
+    # reference set is the one that must already be on disk.
+    _remember_promoted(uri, trigger.id)
     _record({
         "at": at, "uri": uri, "timestamp_ms": timestamp_ms,
         "source_engine": source_engine, "source_mark_kind": source_mark_kind,
@@ -225,18 +300,11 @@ def log_for_song(uri: Optional[str] = None) -> list[dict]:
     return [e for e in entries if e.get("uri") == uri]
 
 
-def promoted_trigger_ids(uri: str) -> set[str]:
-    """The fired-copy trigger ids this page pushed for ONE song — the only
-    thing that can tell a promoted authored trigger from one he placed by
-    hand (see the module docstring: nothing on the trigger itself does)."""
-    return {tid for e in _load_log()
-            if e.get("uri") == uri and e.get("status") == "promoted"
-            and isinstance(tid := e.get("trigger_id"), str)}
-
-
-def promoted_ids_by_uri() -> dict[str, set[str]]:
-    """{uri: {trigger_id, ...}} from ONE log read — the whole-corpus
-    listing's shape, so a song walk never re-reads the log per song."""
+def _logged_promoted_ids() -> dict[str, set[str]]:
+    """Whatever the BOUNDED display log can still see. Unioned into the
+    reads below purely so an install that promoted before promoted_ids.json
+    existed keeps its provenance without a migration — never the source of
+    truth, because entries here expire."""
     out: dict[str, set[str]] = {}
     for e in _load_log():
         if e.get("status") != "promoted":
@@ -244,4 +312,25 @@ def promoted_ids_by_uri() -> dict[str, set[str]]:
         uri, tid = e.get("uri"), e.get("trigger_id")
         if isinstance(uri, str) and isinstance(tid, str):
             out.setdefault(uri, set()).add(tid)
+    return out
+
+
+def promoted_trigger_ids(uri: str) -> set[str]:
+    """The fired-copy trigger ids this page pushed for ONE song — the only
+    thing that can tell a promoted authored trigger from one he placed by
+    hand (see the module docstring: nothing on the trigger itself does).
+    Read from the NEVER-TRUNCATED index, so this answer does not change
+    when the display log rotates."""
+    ids = set(_load_promoted_index().get(uri, ()))
+    ids |= _logged_promoted_ids().get(uri, set())
+    return ids
+
+
+def promoted_ids_by_uri() -> dict[str, set[str]]:
+    """{uri: {trigger_id, ...}} from ONE read of each store — the
+    whole-corpus listing's shape, so a song walk never re-reads per song."""
+    out: dict[str, set[str]] = {
+        uri: set(ids) for uri, ids in _load_promoted_index().items()}
+    for uri, ids in _logged_promoted_ids().items():
+        out.setdefault(uri, set()).update(ids)
     return out

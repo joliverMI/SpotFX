@@ -56,7 +56,7 @@ export default function TestbedMetricsPanel({
             <tr key={r.key}>
               <td>{r.label}</td>
               {!r.available || !r.metrics ? (
-                <td colSpan={6} style={{ color: 'var(--text-muted)', textAlign: 'center' }}>
+                <td colSpan={7} style={{ color: 'var(--text-muted)', textAlign: 'center' }}>
                   not computed for this song
                 </td>
               ) : (

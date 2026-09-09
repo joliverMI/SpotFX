@@ -22,6 +22,7 @@ def _isolated(tmp_path, monkeypatch):
     monkeypatch.setattr(scfg, "TESTBED_ANALYSIS_DIR", tmp_path / "spectra" / "testbed" / "analysis")
     monkeypatch.setattr(scfg, "TESTBED_PINNED_FILE", tmp_path / "spectra" / "testbed" / "pinned_audio.json")
     monkeypatch.setattr(scfg, "TESTBED_PROMOTIONS_FILE", tmp_path / "spectra" / "testbed" / "promotions.json")
+    monkeypatch.setattr(scfg, "TESTBED_PROMOTED_IDS_FILE", tmp_path / "spectra" / "testbed" / "promoted_ids.json")
     (tmp_path / "profiles").mkdir()
     scfg.AUDIO_SHAPES_DIR.mkdir(parents=True)
     analysis_reader._shape_index.clear()
