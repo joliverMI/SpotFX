@@ -171,6 +171,23 @@ TEST_SESSION_FILE = SPECTRA_STORAGE / "test_session.json"
 # both worlds read one implementation).
 FX_LIVE_CONFIG_DIR = SPECTRA_STORAGE / "fx-live"
 
+# Music-analysis test bed (spectra/services/testbed_*.py, spectra/api/
+# testbed.py) — a read-only comparison surface with ONE write exception
+# (the reviewed push-to-real button). Its own directory, own retention
+# policy, deliberately independent of production's `storage/audio_shapes/`
+# and `settings.audio_wav_max_songs`/`librosa_service.manage_wav_retention()`
+# — a pinned WAV lives here, in a copy, so production's LRU eviction (which
+# only ever globs AUDIO_SHAPES_DIR) can never touch it. See
+# testbed_audio.py's module docstring.
+TESTBED_DIR = SPECTRA_STORAGE / "testbed"
+TESTBED_AUDIO_DIR = TESTBED_DIR / "audio"
+TESTBED_ANALYSIS_DIR = TESTBED_DIR / "analysis"
+TESTBED_PINNED_FILE = TESTBED_DIR / "pinned_audio.json"
+# Durable, bounded audit trail of every push-to-real promotion — the proof
+# that a suggestion only ever reaches storage/spectra/triggers.json through
+# a recorded, reviewed press. See testbed_promote.py.
+TESTBED_PROMOTIONS_FILE = TESTBED_DIR / "promotions.json"
+
 
 def handover_armed() -> bool:
     """The safety latch on the handover API: run_handover is refused unless

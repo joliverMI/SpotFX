@@ -19,6 +19,35 @@ from spectra.models.trigger import SpectraTrigger
 logger = logging.getLogger(__name__)
 
 
+class InvalidTriggerAction(ValueError):
+    """A trigger's action references a scene/colour-set/scene-pool member
+    that doesn't exist in SPECTRA's own stores. Raised by validate_action,
+    the ONE validator spectra/api/triggers.py's human-authoring POST and
+    spectra/services/testbed_promote.py's push-to-real gate both call —
+    two write surfaces, one reference check, so a promoted mark can never
+    reach storage under a laxer rule than a hand-typed one."""
+
+
+def validate_action(action) -> None:
+    # Imported here (not at module top) to avoid a service->service import
+    # cycle at load time: scene_store/color_sets both live in
+    # spectra/services/ alongside this module.
+    from spectra.services import color_sets, scene_store
+
+    if action.kind == "fire_scene":
+        if action.scene_id is not None and scene_store.get_by_id(action.scene_id) is None:
+            raise InvalidTriggerAction(f"scene '{action.scene_id}' not found")
+        if action.color_set_id and color_sets.get_by_id(action.color_set_id) is None:
+            raise InvalidTriggerAction(f"colour set '{action.color_set_id}' not found")
+        for member in action.scene_pool or []:
+            if scene_store.get_by_id(member.scene_id) is None:
+                raise InvalidTriggerAction(
+                    f"scene_pool scene '{member.scene_id}' not found")
+    elif action.kind == "select_color_set":
+        if color_sets.get_by_id(action.set_id) is None:
+            raise InvalidTriggerAction(f"colour set '{action.set_id}' not found")
+
+
 def _load_raw() -> dict:
     if config.TRIGGERS_FILE.exists():
         try:

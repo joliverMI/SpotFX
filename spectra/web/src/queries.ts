@@ -11,6 +11,8 @@ import type {
   ReviewSession, ReviewTimeline, RoomColorState, RoomControlState, RoomControlsSaveResult,
   SceneV2, SettingChangeEntry, SettingsMessageResult, SettingsRegistry, SonicAppliedChange,
   Liveness, SonicUsageSummary, SpectraTrigger, SpotColorSetCard, TestSessionStatus,
+  TestbedCompareResult, TestbedMarks, TestbedPromoteRequest, TestbedPromoteResult,
+  TestbedPromotionLogEntry, TestbedSong, TestbedWaveform,
   TranscribeResult, UndoResult,
 } from './types';
 
@@ -1126,4 +1128,93 @@ export function useSetDeviceCategories() {
     (v) => apiPut<DeviceWriteResult>(
       `/devices/virtuals/${encodeURIComponent(v.virtualId)}/categories`,
       { categories: v.categories }));
+}
+
+/* ── music-analysis test bed (spectra/api/testbed.py,
+ * data/spotfx-music-analysis-plan/report.md Part 3) ── */
+
+export function useTestbedSongs() {
+  return useQuery({
+    queryKey: ['testbed-songs'],
+    queryFn: () => apiGet<TestbedSong[]>('/testbed/songs'),
+  });
+}
+
+export function useTestbedMarks(uri: string | null) {
+  return useQuery({
+    queryKey: ['testbed-marks', uri],
+    queryFn: () => apiGet<TestbedMarks>(`/testbed/marks?uri=${enc(uri!)}`),
+    enabled: !!uri,
+  });
+}
+
+export function useTestbedWaveform(uri: string | null) {
+  return useQuery({
+    queryKey: ['testbed-waveform', uri],
+    queryFn: () => apiGet<TestbedWaveform>(`/testbed/waveform?uri=${enc(uri!)}`),
+    enabled: !!uri,
+  });
+}
+
+export function useTestbedCompare(
+  uri: string | null, engine: string | null, markKind: string | null,
+  reference: 'transitions' | 'flares', toleranceMs: number,
+) {
+  return useQuery({
+    queryKey: ['testbed-compare', uri, engine, markKind, reference, toleranceMs],
+    queryFn: () => apiGet<TestbedCompareResult>(
+      `/testbed/compare?uri=${enc(uri!)}&engine=${enc(engine!)}&mark_kind=${enc(markKind!)}`
+      + `&reference=${enc(reference)}&tolerance_ms=${toleranceMs}`),
+    enabled: !!uri && !!engine && !!markKind,
+  });
+}
+
+export function useTestbedAudioPin() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (uri: string) => apiPost<{ status: string }>(
+      `/testbed/audio/pin?uri=${enc(uri)}`),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['testbed-songs'] });
+      void qc.invalidateQueries({ queryKey: ['testbed-waveform'] });
+    },
+  });
+}
+
+export function useTestbedAudioUnpin() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (uri: string) => apiDel<{ status: string }>(
+      `/testbed/audio/pin?uri=${enc(uri)}`),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['testbed-songs'] });
+      void qc.invalidateQueries({ queryKey: ['testbed-waveform'] });
+    },
+  });
+}
+
+/** POST /api/testbed/promote — the ONE write this whole page can make, and
+ * only when `confirmed: true` arrives on the call itself (see
+ * spectra/services/testbed_promote.py's module docstring for the full
+ * gate). PromotionReviewDialog.tsx is the only component wired to this. */
+export function usePromoteToReal() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: TestbedPromoteRequest) =>
+      apiPost<TestbedPromoteResult>('/testbed/promote', body),
+    onSuccess: (_data, variables) => {
+      void qc.invalidateQueries({ queryKey: ['testbed-marks', variables.uri] });
+      void qc.invalidateQueries({ queryKey: ['testbed-promotions', variables.uri] });
+      void qc.invalidateQueries({ queryKey: ['testbed-songs'] });
+    },
+  });
+}
+
+export function useTestbedPromotions(uri: string | null) {
+  return useQuery({
+    queryKey: ['testbed-promotions', uri],
+    queryFn: () => apiGet<TestbedPromotionLogEntry[]>(
+      `/testbed/promotions${uri ? `?uri=${enc(uri)}` : ''}`),
+    enabled: !!uri,
+  });
 }

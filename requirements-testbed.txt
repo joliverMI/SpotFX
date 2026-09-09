@@ -1,0 +1,21 @@
+# OPTIONAL dependencies for the music-analysis test bed's beat_this engine
+# (data/spotfx-music-analysis-plan/report.md, Part 1.3/1.4;
+# spectra/services/testbed_beatthis.py). NOT part of requirements.txt on
+# purpose — this pulls in PyTorch (a CPU wheel is fine, no GPU needed) plus
+# a ~77MB model checkpoint downloaded on first use, and neither the SPECTRA
+# app nor the test bed's own read/compare/promote paths need it to run:
+# spectra/services/testbed_beatthis.py guards its import and reports the
+# engine as "unavailable" — never a crash — when this file hasn't been
+# installed.
+#
+# Install into the same venv the app runs from (offline precompute only —
+# scripts/testbed_precompute.py is never invoked from a request handler):
+#
+#     .venv/bin/pip install -r requirements-testbed.txt
+#
+# License, checked before this was wired in: both beat_this's code and its
+# published pretrained checkpoints are MIT-licensed (no non-commercial
+# restriction, unlike madmom's CC BY-NC-SA-licensed models — see the report's
+# Part 1.3 and testbed_beatthis.py's own module docstring for why that's
+# exactly the reason this engine was picked over madmom).
+beat_this>=1.1.0

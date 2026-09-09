@@ -22,26 +22,20 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from spectra.models.trigger import SpectraTrigger
-from spectra.services import (color_sets, midsong_generator, profile_sync_ledger,
-                              profile_trigger_sync, scene_store, trigger_store)
+from spectra.services import midsong_generator, profile_sync_ledger, profile_trigger_sync, trigger_store
 
 router = APIRouter(prefix="/api/triggers", tags=["spectra-triggers"])
 
 
 def _validate_action(trigger: SpectraTrigger) -> None:
-    action = trigger.action
-    if action.kind == "fire_scene":
-        if action.scene_id is not None and scene_store.get_by_id(action.scene_id) is None:
-            raise HTTPException(422, f"scene '{action.scene_id}' not found")
-        if action.color_set_id and color_sets.get_by_id(action.color_set_id) is None:
-            raise HTTPException(422, f"colour set '{action.color_set_id}' not found")
-        for member in action.scene_pool or []:
-            if scene_store.get_by_id(member.scene_id) is None:
-                raise HTTPException(
-                    422, f"scene_pool scene '{member.scene_id}' not found")
-    elif action.kind == "select_color_set":
-        if color_sets.get_by_id(action.set_id) is None:
-            raise HTTPException(422, f"colour set '{action.set_id}' not found")
+    """trigger_store.validate_action is the shared choke point — also used
+    by spectra/services/testbed_promote.py's push-to-real gate, so a
+    reference check can never be laxer through one write surface than the
+    other."""
+    try:
+        trigger_store.validate_action(trigger.action)
+    except trigger_store.InvalidTriggerAction as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 @router.get("")

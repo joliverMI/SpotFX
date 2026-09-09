@@ -1,0 +1,211 @@
+"""Test-bed audio retention — ITS OWN policy, deliberately independent of
+production's `settings.audio_wav_max_songs` / `services/librosa_service.py`'s
+`manage_wav_retention()` (data/spotfx-music-analysis-plan/report.md's
+Methodology + "Two decisions this plan surfaces" #1, Admiral-approved
+2026-09-09: test-bed audio pinning).
+
+A pinned song's WAV is COPIED (never moved, never symlinked) from
+`storage/audio_shapes/` into `storage/spectra/testbed/audio/` — a directory
+`manage_wav_retention()`'s own glob (scoped to `AUDIO_SHAPES_DIR` only)
+never reaches, so a pin structurally cannot be evicted by production's LRU
+cap. Unpinning deletes only the copy; production's own WAV (if it still has
+one) is never touched — this module never writes into `AUDIO_SHAPES_DIR`.
+
+Alongside the WAV copy, a downsampled min/max peaks JSON is computed ONCE
+at pin time (`_PEAKS_BUCKETS` buckets across the whole file) for the test
+bed's waveform lane — the point of pinning at all is to have real audio for
+offline engine precompute AND a real waveform to eyeball, so both land in
+one action rather than a second "compute peaks" step he'd have to remember.
+
+`pinned_audio.json` is the registry: `{uri: {pinned_at, source_wav_name}}`.
+Absence from it means "not pinned" — production's own retention still
+governs whether a source WAV to pin FROM even exists (see `pin()`'s own
+refusal when it doesn't).
+"""
+from __future__ import annotations
+
+import json
+import logging
+import os
+import tempfile
+import time
+from pathlib import Path
+from typing import Optional
+
+import numpy as np
+
+from spectra import config
+from spectra.services import analysis_reader
+
+logger = logging.getLogger(__name__)
+
+_PEAKS_BUCKETS = 2000
+
+
+def _safe_stem(uri: str) -> str:
+    return uri.replace(":", "_").replace("/", "_")
+
+
+def _load_registry() -> dict:
+    if config.TESTBED_PINNED_FILE.exists():
+        try:
+            return json.loads(config.TESTBED_PINNED_FILE.read_text(encoding="utf-8"))
+        except Exception as exc:
+            logger.warning("testbed pinned_audio.json parse failed: %s", exc)
+    return {}
+
+
+def _save_registry(data: dict) -> None:
+    path = config.TESTBED_PINNED_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=path.name, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, indent=2)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def wav_copy_path(uri: str) -> Path:
+    return config.TESTBED_AUDIO_DIR / f"{_safe_stem(uri)}.wav"
+
+
+def peaks_path(uri: str) -> Path:
+    return config.TESTBED_AUDIO_DIR / f"{_safe_stem(uri)}.peaks.json"
+
+
+def is_pinned(uri: str) -> bool:
+    return uri in _load_registry()
+
+
+def list_pinned() -> dict:
+    return _load_registry()
+
+
+def _compute_peaks(wav_path: Path) -> dict:
+    """min/max envelope over `_PEAKS_BUCKETS` buckets — a lightweight
+    waveform-lane render, not a full-resolution sample dump (a 4-minute
+    44.1kHz WAV is ~44M samples; the browser only needs enough points to
+    fill its own pixel width)."""
+    import soundfile as sf
+    data, sample_rate = sf.read(str(wav_path), dtype="float32", always_2d=False)
+    if data.ndim > 1:
+        data = data.mean(axis=1)
+    n = len(data)
+    if n == 0:
+        return {"sample_rate": sample_rate, "duration_ms": 0, "mins": [], "maxs": []}
+    bucket_size = max(1, n // _PEAKS_BUCKETS)
+    n_buckets = (n + bucket_size - 1) // bucket_size
+    mins: list[float] = []
+    maxs: list[float] = []
+    for i in range(n_buckets):
+        chunk = data[i * bucket_size:(i + 1) * bucket_size]
+        if chunk.size == 0:
+            continue
+        mins.append(float(chunk.min()))
+        maxs.append(float(chunk.max()))
+    duration_ms = int(n / sample_rate * 1000)
+    return {"sample_rate": sample_rate, "duration_ms": duration_ms,
+            "mins": mins, "maxs": maxs}
+
+
+def pin(uri: str) -> dict:
+    """Copy production's current WAV for `uri` into the test bed's own
+    retained-audio directory and compute its peaks. Refuses (returns
+    {"status": "no_source_wav"}) when production has no WAV for this song
+    right now — pinning can only retain audio that exists; it never
+    triggers a (re)capture (that's a live-room action, out of this
+    read-mostly module's scope — see the Rooms Phase-1 recapture note in
+    the plan report)."""
+    stem = analysis_reader.stem_for_uri(uri)
+    if stem is None:
+        return {"status": "unknown_song"}
+    source = config.AUDIO_SHAPES_DIR / f"{stem}.wav"
+    if not source.exists():
+        return {"status": "no_source_wav"}
+
+    dest = wav_copy_path(uri)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(source.read_bytes())
+
+    try:
+        peaks = _compute_peaks(dest)
+        peaks_path(uri).write_text(json.dumps(peaks), encoding="utf-8")
+        peaks_ok = True
+    except Exception as exc:
+        logger.warning("testbed pin: peaks computation failed for %s: %s", uri, exc)
+        peaks_ok = False
+
+    registry = _load_registry()
+    registry[uri] = {"pinned_at": time.time(), "source_wav_name": source.name}
+    _save_registry(registry)
+    logger.info("testbed audio pinned: %s (%s)", uri, source.name)
+    return {"status": "pinned", "peaks_computed": peaks_ok}
+
+
+def unpin(uri: str) -> bool:
+    registry = _load_registry()
+    if uri not in registry:
+        return False
+    del registry[uri]
+    _save_registry(registry)
+    for p in (wav_copy_path(uri), peaks_path(uri)):
+        try:
+            p.unlink(missing_ok=True)
+        except OSError:
+            pass
+    logger.info("testbed audio unpinned: %s", uri)
+    return True
+
+
+def status(uri: str) -> dict:
+    registry = _load_registry()
+    entry = registry.get(uri)
+    stem = analysis_reader.stem_for_uri(uri)
+    has_source_wav = stem is not None and (config.AUDIO_SHAPES_DIR / f"{stem}.wav").exists()
+    return {
+        "pinned": entry is not None,
+        "pinned_at": entry.get("pinned_at") if entry else None,
+        "has_source_wav": has_source_wav,
+        "has_peaks": peaks_path(uri).exists(),
+    }
+
+
+def load_npz_shape(uri: str) -> Optional[dict]:
+    """The coarse RMS-envelope fallback the report's own Methodology names
+    ("the test bed should visibly say 'coarse energy view only, no
+    waveform' rather than silently rendering nothing when a .wav has aged
+    out") — read-only from production's `.npz` sidecar (retained for every
+    played song, unlike the WAV; services/audio_analyzer.py's own
+    save/load shape). Never touched by production's WAV-only retention cap,
+    so this is available even for songs the test bed hasn't pinned."""
+    stem = analysis_reader.stem_for_uri(uri)
+    if stem is None:
+        return None
+    npz_path = config.AUDIO_SHAPES_DIR / f"{stem}.npz"
+    if not npz_path.exists():
+        return None
+    try:
+        data = np.load(npz_path)
+        return {
+            "timestamps_ms": data["timestamps_ms"].astype(int).tolist(),
+            "rms_total": data["rms_total"].astype(float).tolist(),
+        }
+    except Exception as exc:
+        logger.warning("testbed: failed to read npz shape for %s: %s", uri, exc)
+        return None
+
+
+def load_peaks(uri: str) -> Optional[dict]:
+    p = peaks_path(uri)
+    if not p.exists():
+        return None
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return None

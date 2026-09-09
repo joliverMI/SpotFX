@@ -77,6 +77,23 @@ def sections_for_uri(uri: str) -> Optional[list]:
         return None
 
 
+def beats_for_uri(uri: str) -> Optional[list]:
+    """Raw beat list (each a LibrosaBeat dict: ms + is_downbeat + per-beat
+    RMS/onset scores) from the same .librosa.json sections_for_uri reads —
+    the test bed's own librosa baseline engine
+    (spectra/services/testbed_engines.py) uses this plus sections_for_uri
+    rather than opening a third parse of the file."""
+    stem = stem_for_uri(uri)
+    if stem is None:
+        return None
+    path = config.AUDIO_SHAPES_DIR / f"{stem}.librosa.json"
+    try:
+        beats = json.loads(path.read_text(encoding="utf-8")).get("beats")
+        return beats or None
+    except Exception:
+        return None
+
+
 def section_energy_at(uri: str, now_ms: int) -> Optional[float]:
     """Librosa section energy at a playback position (RAW ms), 0–1."""
     sections = sections_for_uri(uri)
