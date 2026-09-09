@@ -5,6 +5,7 @@
 import { useEffect, useState } from 'react';
 import { create } from 'zustand';
 import { onMessage } from '../api/ws';
+import type { LockStateRecord } from '../components/lockBadge';
 
 export interface LiveTrack {
   spotify_uri: string;
@@ -55,6 +56,11 @@ interface LiveState {
   lastColorSet: { name: string; color: string } | null;
   ledfxRttMs: number | null;
   timing: TimingInfo;
+  /** Per-play sync-lock lifecycle (services/lock_state.py). Written by BOTH
+   * the `lock_state` push and every `state` poll — one field, so neither is a
+   * second source of truth. Null when the server knows nothing about the song
+   * playing now; always filter with lockForUri() before rendering it. */
+  lockState: LockStateRecord | null;
   nextTrackUri: string | null;
   /** engine mode flags (AI Triggers page toggles) */
   analysisEnabled: boolean;
@@ -81,6 +87,7 @@ export const useLiveStore = create<LiveState>(() => ({
   lastColorSet: null,
   ledfxRttMs: null,
   timing: {},
+  lockState: null,
   nextTrackUri: null,
   analysisEnabled: false,
   autoGenEnabled: false,
@@ -148,11 +155,18 @@ export function ensureLiveState(): void {
         msg.timing && Object.keys(msg.timing as object).length
           ? (msg.timing as TimingInfo)
           : useLiveStore.getState().timing,
+      lockState: (msg.lock_state as LockStateRecord | null) ?? null,
       nextTrackUri: (msg.next_track_uri as string) ?? null,
       analysisEnabled: Boolean(msg.audio_analysis_enabled ?? false),
       autoGenEnabled: Boolean(msg.auto_generate_enabled ?? false),
       lastPollAt: Date.now(),
     });
+  });
+
+  // Sync-lock lifecycle push — the same record the `state` poll above carries,
+  // arriving the instant it changes so a transition does not wait for a poll.
+  onMessage('lock_state', (msg) => {
+    useLiveStore.setState({ lockState: msg as LockStateRecord });
   });
 
   // Immediate offset refresh between 1Hz state broadcasts (anchor snap/sweep saves).

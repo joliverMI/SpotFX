@@ -6989,6 +6989,49 @@ the last fired trigger (`trigger_fired` WS now carries `intensity`; both
 engine broadcast sites pass `trigger.intensity`). Now Playing no longer
 shows these controls/info.
 
+**`xcorr_monitor` IS THE POST-LOCK DRIFT MONITOR — it only ever runs after a
+song HARD-LOCKS, so no absence of it is evidence about a song that has not.**
+That is the whole of the 2026-09-08 defect: the lock badge was driven by that
+WS alone, so with no monitor message and any stored offset it printed the
+literal string "Lock idle" — a song still searching, one that finished at
+grade F, and one genuinely idle after a good lock all read identically. His
+report, verbatim: when a song has not locked the badge "should be failed or
+still trying". The per-play SWEEP, where searching and failing actually
+happen, is `services/auto_offset_service.py`; it now REPORTS its lifecycle
+through `services/lock_state.py` (four phases; its module docstring is the
+binding statement) as both a `lock_state` push and a copy on every `state`
+broadcast — the push-plus-poll-backstop shape, one store field, so a client
+that connects mid-song is never blind. Three things before touching any of it:
+
+- **THE TERMINAL SIGNAL MEANS "THE ENGINE STOPPED SEARCHING", never "the
+  windows ran out" and never "`lock_history` was written."** A weak result
+  calls `note_outcome(locked=False)`, which records the numbers and LEAVES the
+  phase at `searching`; only `note_search_ended()` resolves it, wired today as
+  the sweep task's own done-callback (so a search can never outlive the task
+  doing it). A later keep-searching engine keeps its task alive and the badge
+  stays "Searching…" with nothing to change here.
+- **THE BADGE'S DECISION IS ONE PURE FUNCTION**, `web/src/components/
+  lockBadge.ts`, kept out of React so `scripts/check_lock_badge_states.mjs`
+  can transpile the real module with esbuild and drive the whole table (it
+  carries the pre-fix rule alongside as its own red control). Its invariant:
+  **`Lock idle` is reachable from EXACTLY ONE input — a search that ended in a
+  hard lock whose live monitor has since gone quiet.** Never widen that; a
+  song nobody checked says "Not checked", and one we have not heard about yet
+  says "Lock unknown", because "we did not check" and "we checked and it was
+  fine" are different facts.
+- **NOTHING THIS REPORTS MAY REACH A TIMING DECISION.**
+  `tests/test_lock_state_badge.py` asserts by AST that every `lock_state.*`
+  call in the sweep is a bare statement whose value is discarded, that
+  `lock_state` imports none of the timing kernels, and that
+  `xcorr_core`/`xcorr_sweep`/`lock_history`/`trigger_engine` never mention it.
+  The `offset_ms` it carries is a display copy with its own row in
+  `docs/SPECTRA_TIMING_CONVENTIONS.md`'s master table.
+
+DELIBERATELY SEPARATE, filed as `spotfx-lock-early-window-exhaustion`: the
+U-Score planner packs every window into the first ~30 s, so a song that does
+not lock early gets no further attempts. That is why songs fail; this is only
+why nobody could see it.
+
 ## `librosa_offset_ms` is unreliable — don't shift section/beat times by it
 
 `LibrosaAnalysis.librosa_offset_ms` is meant to convert WAV-capture time to
