@@ -500,11 +500,15 @@ touched is a no-op for the other. Dry-run by default, matching
 `scripts/migrate_legacy_triggers.py`'s convention. **Write cost is real**:
 `trigger_store.upsert` does a full read+rewrite of the whole
 `triggers.json` per trigger (measured ~126ms/call against the live
-~11k-trigger corpus) — fine for one human edit, not fine looped inside an
-async request handler for a multi-song batch (blocks the SPECTRA process's
-event loop, stalling bridge polls/ticks/WS broadcasts for the run's whole
-duration). Run bulk generation as a separate offline process against
-`storage/spectra/triggers.json` directly, the same shape
+~11k-trigger corpus) — fine for one human edit, not fine looped inside a
+request handler for a multi-song batch. Since 2026-09-09 every mutating
+route hands that call to `asyncio.to_thread` and every writer serialises on
+`trigger_store.write_lock` (that module's docstring is the binding
+statement for both rules), so a batch no longer stalls bridge polls/ticks/
+WS broadcasts — it holds the lock instead, starving every OTHER writer (his
+Timeline saves included) for the run's whole duration. Run bulk generation
+as a separate offline process against `storage/spectra/triggers.json`
+directly, the same shape
 `migrate_legacy_triggers.py` already used for the authored corpus, never
 through the live HTTP endpoint in a loop.
 
@@ -7148,7 +7152,9 @@ MORE than 3s got skipped ENTIRELY (zero wait) rather than shortened, which
 is exactly the "stopping immediately is what cut the end off captures"
 failure the surrounding comment already named. `_capped_wait_s()` (module-
 level, one definition instead of two inline copies) now sleeps
-`min(needed, cap)` at both sites instead of an all-or-nothing window. Spec:
+`min(needed, cap)` at both sites instead of an all-or-nothing window (the
+cap's own row, unit and status: `docs/SPECTRA_TIMING_CONVENTIONS.md`'s
+master table, beside the `audio_latency_ms` it is derived from). Spec:
 `tests/test_audio_shape_capture_trim.py` (no live audio device — the ring
 buffer / capture stream / recorder are faked at the seam, matching this
 file's own "no live access from tests, ever" rule; it carries BOTH the
@@ -7157,6 +7163,7 @@ not).
 
 ## The music-analysis test bed (`/testbed`)
 
+Capability state and honest deployment status: `docs/SPECTRA_SPEC.md` §109.
 Admiral-approved phased build, 2026-09-09, grounded in
 `data/spotfx-music-analysis-plan/report.md` (read that report before
 touching any of this — it has the real measurements: today's librosa
@@ -7298,10 +7305,11 @@ FIRED copy only
 "generated," so front 3's regeneration/ownership-transfer rule can never
 silently claim a promoted trigger back), through
 `trigger_store.validate_action()` — the SAME reference-integrity check
-`spectra/api/triggers.py`'s human-authoring POST uses (refactored out of
-that module's former private `_validate_action` specifically so both write
-surfaces share one choke point and can't diverge). Every attempt, accepted
-or refused, is appended to a durable, bounded audit log
+`spectra/api/triggers.py`'s human-authoring POST uses (lifted out of that
+module's own `_validate_action`, which is now a thin 422-mapping wrapper
+over it, specifically so both write surfaces share one choke point and
+can't diverge). Every attempt, accepted or refused, is appended to a
+durable, bounded audit log
 (`storage/spectra/testbed/promotions.json`, `GET /api/testbed/promotions`)
 — the visible proof the button cannot write silently. That log is HISTORY
 for a human; the scoring exclusion reads the unbounded

@@ -209,3 +209,123 @@ def test_capture_with_no_ring_buffer_pcm_still_starts_cleanly(monkeypatch):
     assert started is True
     assert service._recorder.ingested == []
     assert service._capture._pcm_chunks == []
+
+
+# ── the tail-wait AT ITS REAL CALL SITE ─────────────────────────────────────
+#
+# The arithmetic tests above prove the shared helper. These drive the two
+# places the capture actually waits, because that is where the reported
+# defect lived: a needed wait longer than the cap was skipped ENTIRELY
+# (zero sleep, tail never waited for) rather than clamped.
+
+class _RecordedSleeps:
+    def __init__(self, monkeypatch):
+        import services.audio_shape_service as svc_mod
+        self.slept: list = []
+
+        async def fake_sleep(seconds):
+            self.slept.append(seconds)
+
+        monkeypatch.setattr(svc_mod.asyncio, "sleep", fake_sleep)
+
+
+def _stoppable_service(monkeypatch):
+    """A service positioned as if a capture were running, with finalize
+    stubbed out — enough to reach _stop_and_save's tail-wait for real."""
+    import services.audio_shape_service as svc_mod
+
+    service = AudioShapeService()
+    service._capture = _FakeCaptureStream(time.monotonic())
+    service._capture.stop = lambda: None
+    service._recorder = _FakeRecorder()
+    service._recording_uri = URI
+
+    async def no_finalize(*a, **kw):
+        return None
+
+    monkeypatch.setattr(svc_mod.AudioShapeService, "_finalize_capture", no_finalize)
+    return service
+
+
+def test_stop_and_save_tail_wait_clamps_instead_of_skipping(monkeypatch):
+    """THE END-TRUNCATION BUG, at its own call site. A boundary far enough
+    ahead that the required wait exceeds the cap used to fall outside the
+    `0 < wait_s <= 3.0` window and be skipped completely — the capture
+    stopped immediately and lost its tail. It must now sleep the cap."""
+    sleeps = _RecordedSleeps(monkeypatch)
+    service = _stoppable_service(monkeypatch)
+
+    # Needed wait = boundary + latency + 0.3 - now, made comfortably > cap.
+    boundary = time.monotonic() + 10.0
+    _run(service._stop_and_save(boundary))
+
+    assert sleeps.slept == [AudioShapeService._TAIL_WAIT_CAP_S], (
+        "a tail-wait longer than the cap was skipped entirely instead of "
+        f"clamped -- slept {sleeps.slept}"
+    )
+
+
+def test_stop_and_save_tail_wait_sleeps_the_exact_wait_when_under_the_cap(monkeypatch):
+    """The ordinary case is unchanged: a short wait is slept in full."""
+    from config import settings as _cfg
+
+    sleeps = _RecordedSleeps(monkeypatch)
+    service = _stoppable_service(monkeypatch)
+
+    boundary = time.monotonic() + 0.5 - _cfg.audio_latency_ms / 1000.0 - 0.3
+    _run(service._stop_and_save(boundary))
+
+    assert len(sleeps.slept) == 1
+    assert 0.0 < sleeps.slept[0] <= AudioShapeService._TAIL_WAIT_CAP_S
+    assert sleeps.slept[0] == pytest.approx(0.5, abs=0.1)
+
+
+def test_stop_and_save_does_not_wait_when_the_boundary_audio_already_arrived(monkeypatch):
+    """A deadline already in the past is not a wait at all."""
+    sleeps = _RecordedSleeps(monkeypatch)
+    service = _stoppable_service(monkeypatch)
+
+    _run(service._stop_and_save(time.monotonic() - 60.0))
+
+    assert sleeps.slept == []
+
+
+def test_on_track_change_boundary_wait_clamps_instead_of_skipping(monkeypatch):
+    """The SECOND call site (on_track_change's wait for the previous
+    track's tail to arrive) carried the identical all-or-nothing shape."""
+    import services.audio_shape_service as svc_mod
+
+    from models.state import state as app_state
+
+    # Never let this test reach the real PCM ring buffer's watchdog (which
+    # would open an audio device) -- the repo's rule is no live access.
+    monkeypatch.setattr(app_state, "audio_analysis_enabled", False)
+
+    sleeps = _RecordedSleeps(monkeypatch)
+    service = _stoppable_service(monkeypatch)
+    service._capture_started_at = time.monotonic() - 60.0
+
+    # Stop the flow right after the wait so nothing downstream runs.
+    class _Stop(Exception):
+        pass
+
+    async def boom(*a, **kw):
+        raise _Stop()
+
+    monkeypatch.setattr(svc_mod.AudioShapeService, "_stop_and_save", boom)
+
+    # A track whose reported progress puts the arrival deadline far ahead.
+    now = time.monotonic()
+    nxt = SpotifyTrackInfo(
+        spotify_uri="spotify:track:next", title="N", artist="A",
+        duration_ms=200_000, progress_ms=0, is_playing=True,
+        fetched_at=now + 10.0,
+    )
+
+    with pytest.raises(_Stop):
+        _run(service.on_track_change(nxt))
+
+    assert sleeps.slept == [AudioShapeService._TAIL_WAIT_CAP_S], (
+        "the boundary-wait longer than the cap was skipped entirely "
+        f"instead of clamped -- slept {sleeps.slept}"
+    )

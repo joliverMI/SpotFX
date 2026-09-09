@@ -8,12 +8,14 @@ one-directional, read-only, no spot-effects imports):
       spot-effects reader: *.librosa.json shares the uri field and must not
       shadow the sidecar)
   storage/audio_shapes/<stem>.librosa.json  — librosa analysis; sections
-      carry start_ms/end_ms/energy_rms (normalized 0–1 per song)
+      carry start_ms/end_ms/energy_rms (normalized 0–1 per song), beats
+      carry ms + is_downbeat (beats_for_uri, read by the music-analysis
+      test bed's librosa baseline engine)
   storage/training_profiles.json            — genre buckets
 
-Section times are read RAW — the standing librosa_offset_ms rule: the
-stored offset is noise, and runtime values must agree with the live
-bindings, which read raw. section_energy_at() is the ported
+Section and beat times are read RAW — the standing librosa_offset_ms
+rule: the stored offset is noise, and runtime values must agree with the
+live bindings, which read raw. section_energy_at() is the ported
 signal_resolver._section_energy: containing section, else nearest, clamped
 0–1. Missing files degrade to None — the callers' stated fallbacks apply
 (intensity 0.5 neutral, no genre bucket).
