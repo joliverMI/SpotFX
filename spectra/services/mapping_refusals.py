@@ -448,25 +448,23 @@ def _no_signal_words(verdict: dict) -> str:
 
     IT STILL REFUSES. This changes the words, not the verdict: NO_SIGNAL is
     in `LEVER_REFUSING` and stays there."""
-    plain = ("Either this pose sees none of that emitter's light, or the "
-             "exposure control is doing nothing — and either way a "
-             "calibration taken through it would measure nothing. Check the "
-             "aim first, then the camera. Nothing was written.")
+    two = ("Either this pose sees none of that emitter's light, or the "
+           "exposure control is doing nothing — and either way a "
+           "calibration taken through it would measure nothing. Check the "
+           "aim first, then the camera.")
     ceiling = verdict.get("ceiling") or {}
     if not ceiling.get("units") or not ceiling.get("commandable"):
-        return plain
+        return f"{two} Nothing was written."
     return (
-        plain[:-len(" Nothing was written.")]
-        + " And since 2026-09-09 there is a THIRD reading, which on a "
-          "capped camera is often the likeliest: there may simply not be "
-          "enough light for the time this camera can hold. "
-        + str(ceiling.get("sentence") or "")
-        + " The fixture was already at full firmware brightness for the "
-          "measurement and the lamp was already full white, so there is no "
-          "more light to give it from this side — moving the camera closer, "
-          "or giving that emitter more of the frame, is what would change "
-          "the answer. Nothing was written, and the floor was not lowered "
-          "to make it pass.")
+        f"{two} And since 2026-09-09 there is a THIRD reading, which on a "
+        f"capped camera is often the likeliest: there may simply not be "
+        f"enough light for the time this camera can hold. "
+        f"{ceiling.get('sentence') or ''} The fixture was already at full "
+        f"firmware brightness for the measurement and the lamp was already "
+        f"full white, so there is no more light to give it from this side — "
+        f"moving the camera closer, or giving that emitter more of the "
+        f"frame, is what would change the answer. Nothing was written, and "
+        f"the floor was not lowered to make it pass.")
 
 
 def _lever_pair(verdict: dict) -> tuple[str, str]:

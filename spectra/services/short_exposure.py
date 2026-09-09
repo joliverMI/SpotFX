@@ -394,7 +394,13 @@ def cap(req: "capture_settings.CameraRequest", lock: Optional[dict],
         exposure = min(int(asked), ceiling.units)
     out = replace(req, exposure_time=exposure,
                   dynamic_framerate=(DYNAMIC_FRAMERATE_OFF if pinnable(lock)
-                                     else req.dynamic_framerate))
+                                     else req.dynamic_framerate),
+                  # A FRESH LIST. `replace` copies the REFERENCE, and a
+                  # clamped-value note appended to one of these would then
+                  # appear on the other — two requests describing one
+                  # camera differently is the exact confusion this field
+                  # exists to prevent.
+                  notes=list(req.notes))
     if asked is not None and exposure != int(asked):
         note = (f"The integration time asked for ({int(asked)} x100 us) is "
                 f"longer than this camera can hold steady, and was shortened "
