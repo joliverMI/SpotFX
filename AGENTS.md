@@ -7244,7 +7244,15 @@ is refused, never stacked**: an authored trigger of the same action kind
 within `testbed_promote.DUPLICATE_WINDOW_MS` of the moment refuses by name
 (`PromotionDuplicate`, HTTP 409, logged `reason="duplicate"` with the
 existing id) — every call mints a fresh id, so without it the second
-confirm of one click would land a double-fire on one tick.
+confirm of one click would land a double-fire on one tick. **The fired
+copy's writers are serialised by `trigger_store.write_lock`** (re-entrant;
+held inside `upsert`/`delete`/`apply_batch` across each load+save, and by
+`promote()` across its duplicate check AND the write): the store is
+written from the event loop (`POST/DELETE /api/triggers`) and from
+`asyncio.to_thread` workers (the generator, the promotion) at once, and an
+unserialised read-modify-write of the whole file loses whichever write
+landed first. A new check-then-act on this store holds that lock itself;
+plain reads never take it.
 
 **Frontend**: `spectra/web/src/testbed/TestbedPage.tsx` (`/testbed`, "Test
 Bed" nav link, route-mapped in `routeTopics.ts`) — song picker, an A/B

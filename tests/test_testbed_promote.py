@@ -166,3 +166,60 @@ def test_a_generated_trigger_at_the_same_moment_does_not_block_a_promotion():
     assert result["status"] == "promoted"
     sources = sorted(t.source for t in trigger_store.list_for_song(URI))
     assert sources == ["authored", "generated"]
+
+
+def _meet_at_every_read(monkeypatch, parties=2, timeout_s=0.3):
+    """Slow every triggers.json read so that two writers which are NOT
+    serialised meet inside their read-modify-write window (both read, then
+    both write). A writer that IS serialised arrives at the read alone,
+    waits out the barrier once, and every later read passes straight
+    through — so the same fixture reproduces the race unlocked and stays
+    cheap locked."""
+    import threading
+    from spectra.services import trigger_store
+    gate = threading.Barrier(parties)
+    real_load = trigger_store._load_raw
+
+    def slow_load():
+        data = real_load()
+        try:
+            gate.wait(timeout=timeout_s)
+        except threading.BrokenBarrierError:
+            pass
+        return data
+    monkeypatch.setattr(trigger_store, "_load_raw", slow_load)
+
+
+def test_two_concurrent_confirms_of_one_moment_land_exactly_one_trigger(monkeypatch):
+    """Two tabs, one double-tap: both confirms are in flight on worker
+    threads at once. The duplicate check and the write are one critical
+    section, so exactly one lands and the other is refused by name — never
+    two authored triggers on the same tick, and never a lost write."""
+    import threading
+    from spectra.services import testbed_promote, trigger_store
+    _meet_at_every_read(monkeypatch)
+
+    outcomes: list = []
+
+    def confirm():
+        try:
+            outcomes.append(_promote(5000))
+        except testbed_promote.PromotionDuplicate as exc:
+            outcomes.append(exc)
+
+    threads = [threading.Thread(target=confirm) for _ in range(2)]
+    for th in threads:
+        th.start()
+    for th in threads:
+        th.join(timeout=10)
+    assert not any(th.is_alive() for th in threads)
+
+    promoted = [o for o in outcomes if isinstance(o, dict)]
+    refused = [o for o in outcomes if isinstance(o, testbed_promote.PromotionDuplicate)]
+    assert len(promoted) == 1 and len(refused) == 1
+    stored = trigger_store.list_for_song(URI)
+    assert [t.id for t in stored] == [promoted[0]["trigger_id"]]
+    assert promoted[0]["trigger_id"] in str(refused[0])
+
+    statuses = sorted(e["status"] for e in testbed_promote.log_for_song(URI))
+    assert statuses == ["promoted", "refused"]

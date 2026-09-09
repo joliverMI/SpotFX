@@ -1208,7 +1208,7 @@ export function usePromoteToReal() {
   return useMutation({
     mutationFn: (body: TestbedPromoteRequest) =>
       apiPost<TestbedPromoteResult>('/testbed/promote', body),
-    onSuccess: (_data, variables) => {
+    onSettled: (_data, _error, variables) => {
       void qc.invalidateQueries({ queryKey: ['testbed-marks', variables.uri] });
       void qc.invalidateQueries({ queryKey: ['testbed-promotions', variables.uri] });
       void qc.invalidateQueries({ queryKey: ['testbed-songs'] });

@@ -4,6 +4,19 @@ scene_store.py. Per-trigger operations (not whole-song replace) so the
 authoring surface's place/move/edit/delete gestures each land one write —
 matching the legacy Builder's per-trigger feel without its whole-profile
 save.
+
+WRITERS ARE SERIALISED BY `write_lock`. Every mutation here is a full
+load -> edit -> save of one file, and the writers no longer share one
+thread: spectra/api/triggers.py's POST/DELETE run on the event loop,
+midsong_generator.generate_for_song and testbed_promote.promote run under
+asyncio.to_thread, and a file read releases the GIL. Two unserialised
+read-modify-writes interleaving lose whichever landed first — a
+hand-placed trigger silently vanishing from the corpus. upsert/delete/
+apply_batch each hold the lock across their own load+save; a caller whose
+correctness depends on a READ staying true until its WRITE (a
+check-then-act, e.g. the promotion duplicate guard) holds `write_lock`
+itself around both — it is re-entrant, so the nested upsert is fine. Plain
+reads are deliberately not serialised.
 """
 from __future__ import annotations
 
@@ -11,12 +24,15 @@ import json
 import logging
 import os
 import tempfile
+import threading
 from typing import Optional
 
 from spectra import config
 from spectra.models.trigger import SpectraTrigger
 
 logger = logging.getLogger(__name__)
+
+write_lock = threading.RLock()
 
 
 class InvalidTriggerAction(ValueError):
@@ -103,27 +119,29 @@ def list_all() -> dict[str, list[SpectraTrigger]]:
 
 def upsert(uri: str, trigger: SpectraTrigger) -> None:
     """Add or replace by id."""
-    data = _load_raw()
-    song = data.setdefault(uri, [])
-    song[:] = [t for t in song if t.get("id") != trigger.id]
-    song.append(json.loads(trigger.model_dump_json()))
-    _save_raw(data)
+    with write_lock:
+        data = _load_raw()
+        song = data.setdefault(uri, [])
+        song[:] = [t for t in song if t.get("id") != trigger.id]
+        song.append(json.loads(trigger.model_dump_json()))
+        _save_raw(data)
     logger.info("Saved SPECTRA trigger %s for %s @ %dms (%s)",
                 trigger.id, uri, trigger.timestamp_ms, trigger.action.kind)
 
 
 def delete(uri: str, trigger_id: str) -> bool:
-    data = _load_raw()
-    song = data.get(uri)
-    if song is None:
-        return False
-    before = len(song)
-    song[:] = [t for t in song if t.get("id") != trigger_id]
-    if len(song) == before:
-        return False
-    if not song:
-        del data[uri]
-    _save_raw(data)
+    with write_lock:
+        data = _load_raw()
+        song = data.get(uri)
+        if song is None:
+            return False
+        before = len(song)
+        song[:] = [t for t in song if t.get("id") != trigger_id]
+        if len(song) == before:
+            return False
+        if not song:
+            del data[uri]
+        _save_raw(data)
     return True
 
 
@@ -150,22 +168,23 @@ def apply_batch(uri: str, upserts: list[SpectraTrigger],
     Deletes are applied BEFORE upserts, so an id appearing in both lists ends
     up written, not removed. Returns (written, deleted) — the deleted count
     is ids actually present, not ids asked for."""
-    data = _load_raw()
-    song = data.get(uri, [])
-    dead = set(delete_ids)
-    before = len(song)
-    song = [t for t in song if t.get("id") not in dead]
-    deleted = before - len(song)
+    with write_lock:
+        data = _load_raw()
+        song = data.get(uri, [])
+        dead = set(delete_ids)
+        before = len(song)
+        song = [t for t in song if t.get("id") not in dead]
+        deleted = before - len(song)
 
-    replacing = {t.id for t in upserts}
-    song = [t for t in song if t.get("id") not in replacing]
-    song.extend(json.loads(t.model_dump_json()) for t in upserts)
+        replacing = {t.id for t in upserts}
+        song = [t for t in song if t.get("id") not in replacing]
+        song.extend(json.loads(t.model_dump_json()) for t in upserts)
 
-    if song:
-        data[uri] = song
-    else:
-        data.pop(uri, None)
-    _save_raw(data)
+        if song:
+            data[uri] = song
+        else:
+            data.pop(uri, None)
+        _save_raw(data)
     logger.info("Batch trigger write for %s: %d written, %d deleted",
                 uri, len(upserts), deleted)
     return len(upserts), deleted

@@ -43,7 +43,11 @@ requested moment on that song refuses by name (`PromotionDuplicate`) and is
 logged like any other refusal. Every call mints a fresh id, so without this
 a second confirm would stack a second trigger on the same tick — for a
 fire_response that is the double-flare class the trigger engine's own
-history is full of.
+history is full of. The check and the write are ONE critical section under
+trigger_store.write_lock (this runs on a worker thread, beside the
+event-loop POST and the generator's own off-loop writes): two confirms in
+flight at once — two tabs, a double-tap — cannot both pass the guard, and
+the write cannot overwrite a trigger another writer landed in between.
 
 Every promotion (accepted or refused) is appended to a durable, bounded log
 (`storage/spectra/testbed/promotions.json`) — the visible proof this
@@ -55,6 +59,7 @@ import json
 import logging
 import os
 import tempfile
+import threading
 import time
 import uuid
 from typing import Optional
@@ -67,6 +72,7 @@ logger = logging.getLogger(__name__)
 
 _LOG_MAX_ENTRIES = 500
 DUPLICATE_WINDOW_MS = 250
+_log_lock = threading.Lock()
 
 
 class PromotionNotConfirmed(ValueError):
@@ -114,9 +120,10 @@ def _save_log(entries: list[dict]) -> None:
 
 
 def _record(entry: dict) -> None:
-    entries = _load_log()
-    entries.append(entry)
-    _save_log(entries)
+    with _log_lock:
+        entries = _load_log()
+        entries.append(entry)
+        _save_log(entries)
 
 
 def promote(uri: str, timestamp_ms: int, action: TriggerAction,
@@ -163,7 +170,14 @@ def promote(uri: str, timestamp_ms: int, action: TriggerAction,
             "status": "refused", "reason": str(exc),
         })
         raise
-    nearby = _nearby_authored(uri, timestamp_ms, trigger.action.kind)
+    # source/generator_key stay "authored"/None per the module docstring —
+    # provenance is carried in the promotion LOG entry below, not on the
+    # trigger itself, so front 3's regeneration rule never sees this as a
+    # generated row it's free to overwrite.
+    with trigger_store.write_lock:
+        nearby = _nearby_authored(uri, timestamp_ms, trigger.action.kind)
+        if nearby is None:
+            trigger_store.upsert(uri, trigger)
     if nearby is not None:
         message = (f"a {trigger.action.kind} trigger already exists near this "
                    f"moment ({nearby.timestamp_ms}ms, id {nearby.id}) — not "
@@ -175,11 +189,6 @@ def promote(uri: str, timestamp_ms: int, action: TriggerAction,
             "detail": message, "existing_trigger_id": nearby.id,
         })
         raise PromotionDuplicate(message)
-    # source/generator_key stay "authored"/None per the module docstring —
-    # provenance is carried in the promotion LOG entry below, not on the
-    # trigger itself, so front 3's regeneration rule never sees this as a
-    # generated row it's free to overwrite.
-    trigger_store.upsert(uri, trigger)
 
     _record({
         "at": at, "uri": uri, "timestamp_ms": timestamp_ms,
