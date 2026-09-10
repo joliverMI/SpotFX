@@ -41,7 +41,7 @@ from spectra.api import (av_sync, device_preview, devices as devices_api,
                          ownership, preview, registry, room_controls,
                          room_effects as room_effects_api, room_preview, rooms,
                          scenes, sequencer, settings_console, show_review,
-                         sonic_usage, spec, test_session, triggers)
+                         sonic_usage, spec, test_session, testbed, triggers)
 
 
 class SPAStaticFiles(StaticFiles):
@@ -100,6 +100,7 @@ def create_app() -> FastAPI:
     app.include_router(gradient2d.router)
     app.include_router(av_sync.router)
     app.include_router(test_session.router)
+    app.include_router(testbed.router)
     # BEFORE rooms: `/rooms/capture-queue` must never be eaten by a
     # `/rooms/{room_id}` pattern.
     app.include_router(capture_queue_api.router)

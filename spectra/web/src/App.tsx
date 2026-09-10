@@ -14,6 +14,7 @@ import HelpLink from './help/HelpLink';
 import { topicForPath } from './help/routeTopics';
 import ReviewPage from './review/ReviewPage';
 import ScenesPage from './scenes/ScenesPage';
+import TestbedPage from './testbed/TestbedPage';
 import SettingsConsolePage from './settings/SettingsConsolePage';
 import StatusPage from './status/StatusPage';
 import BuilderPage from './timeline/BuilderPage';
@@ -29,6 +30,7 @@ const PAGE_TITLES: [string, string][] = [
   ['/timeline', 'Timeline'],
   ['/feedback', 'Feedback'],
   ['/review', 'Review'],
+  ['/testbed', 'Test Bed'],
   ['/timing', 'Timing'],
   ['/avsync', 'AV Sync'],
   ['/rooms', 'Rooms'],
@@ -67,6 +69,7 @@ function NavBar() {
       <Link to="/timeline" className={cls((p) => p === '/timeline')}>Timeline</Link>
       <Link to="/feedback" className={cls((p) => p === '/feedback')}>Feedback</Link>
       <Link to="/review" className={cls((p) => p === '/review')}>Review</Link>
+      <Link to="/testbed" className={cls((p) => p === '/testbed')}>Test Bed</Link>
       <Link to="/timing" className={cls((p) => p === '/timing')}>Timing</Link>
       <Link to="/avsync" className={cls((p) => p === '/avsync')}>AV Sync</Link>
       <Link to="/rooms" className={cls((p) => p === '/rooms')}>Rooms</Link>
@@ -102,6 +105,7 @@ export default function App() {
           <Route path="/timeline" element={<BuilderPage />} />
           <Route path="/feedback" element={<FeedbackPage />} />
           <Route path="/review" element={<ReviewPage />} />
+          <Route path="/testbed" element={<TestbedPage />} />
           <Route path="/timing" element={<TimingVizPage />} />
           <Route path="/avsync" element={<AvSyncPage />} />
           <Route path="/rooms" element={<RoomsPage />} />

@@ -1420,3 +1420,143 @@ export interface DeviceWriteResult {
   timing_offset_ms?: number;
   categories?: string[];
 }
+
+/** Music-analysis test bed (spectra/api/testbed.py,
+ * data/spotfx-music-analysis-plan/report.md Part 3) — a read-only
+ * comparison surface with one write exception (promote). */
+export interface TestbedProvenance {
+  found: boolean;
+  ai_generated: boolean;
+  verified: boolean;
+  editor_trigger_count: number;
+}
+
+export interface TestbedEngineAvailability {
+  label: string;
+  kinds: string[];
+  available: boolean;
+  computed_at: number | null;
+  /** null = not counted. The whole-corpus /songs listing answers
+   * availability with a stat instead of parsing every engine's output
+   * (spectra/services/testbed_engines.availability_for's `count_marks`), so
+   * it reports no count rather than a fabricated 0. /engines counts. */
+  mark_count: number | null;
+}
+
+export interface TestbedAudioStatus {
+  pinned: boolean;
+  pinned_at: number | null;
+  has_source_wav: boolean;
+  has_peaks: boolean;
+}
+
+export interface TestbedSong {
+  uri: string;
+  title: string | null;
+  artist: string | null;
+  n_transitions: number;
+  n_flares: number;
+  n_generated: number;
+  n_promoted: number;
+  provenance: TestbedProvenance;
+  audio: TestbedAudioStatus;
+  engines: Record<string, TestbedEngineAvailability>;
+}
+
+export interface TestbedReferenceMark {
+  id: string;
+  timestamp_ms: number;
+  kind: string;
+  enabled: boolean;
+  /** Pushed to the real trigger store by this page's own push-to-real
+   * button (resolved from the promotion audit log). Rendered, labelled,
+   * and deliberately NOT scored — see spectra/services/testbed_marks.py. */
+  promoted: boolean;
+}
+
+export interface TestbedMarks {
+  uri: string;
+  title: string | null;
+  artist: string | null;
+  transitions: TestbedReferenceMark[];
+  flares: TestbedReferenceMark[];
+  n_generated: number;
+  n_promoted: number;
+  provenance: TestbedProvenance;
+}
+
+export interface TestbedWaveform {
+  uri: string;
+  source: 'wav_peaks' | 'npz_rms_fallback' | 'none';
+  sample_rate?: number;
+  /** The WAV's own LENGTH, not the song's end. */
+  duration_ms?: number;
+  /** Song-time of the pinned WAV's FIRST sample — a capture starts
+   * mid-song. null/absent = unknown, and the lane must say so rather than
+   * draw from 0 as if it were aligned (spectra/services/testbed_audio.py's
+   * capture_offset_ms). */
+  capture_offset_ms?: number | null;
+  mins?: number[];
+  maxs?: number[];
+  timestamps_ms?: number[];
+  rms_total?: number[];
+  note?: string;
+}
+
+export interface TestbedEstimateMark {
+  time_ms: number;
+  label: string | null;
+  score: number | null;
+}
+
+export interface TestbedMatch {
+  ref_index: number;
+  est_index: number;
+  abs_offset_ms: number;
+}
+
+export interface TestbedMetrics {
+  precision: number;
+  recall: number;
+  f1: number;
+  n_reference: number;
+  n_estimate: number;
+  n_matched: number;
+  mean_abs_offset_ms: number;
+  matches: TestbedMatch[];
+}
+
+export interface TestbedEngineMarks {
+  uri: string;
+  engine: string;
+  mark_kind: string;
+  available: boolean;
+  estimate: TestbedEstimateMark[];
+}
+
+export interface TestbedPromoteRequest {
+  uri: string;
+  timestamp_ms: number;
+  action: TriggerAction;
+  source_engine: string;
+  source_mark_kind: string;
+  trigger_offset_ms: number;
+  confirmed: boolean;
+}
+
+export interface TestbedPromoteResult {
+  status: string;
+  trigger_id?: string;
+}
+
+export interface TestbedPromotionLogEntry {
+  at: number;
+  uri: string;
+  timestamp_ms: number;
+  source_engine: string;
+  source_mark_kind: string;
+  status: 'promoted' | 'refused';
+  reason?: string;
+  trigger_id?: string;
+  action_kind?: string;
+}

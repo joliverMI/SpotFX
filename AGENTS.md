@@ -500,11 +500,15 @@ touched is a no-op for the other. Dry-run by default, matching
 `scripts/migrate_legacy_triggers.py`'s convention. **Write cost is real**:
 `trigger_store.upsert` does a full read+rewrite of the whole
 `triggers.json` per trigger (measured ~126ms/call against the live
-~11k-trigger corpus) — fine for one human edit, not fine looped inside an
-async request handler for a multi-song batch (blocks the SPECTRA process's
-event loop, stalling bridge polls/ticks/WS broadcasts for the run's whole
-duration). Run bulk generation as a separate offline process against
-`storage/spectra/triggers.json` directly, the same shape
+~11k-trigger corpus) — fine for one human edit, not fine looped inside a
+request handler for a multi-song batch. Since 2026-09-09 every mutating
+route hands that call to `asyncio.to_thread` and every writer serialises on
+`trigger_store.write_lock` (that module's docstring is the binding
+statement for both rules), so a batch no longer stalls bridge polls/ticks/
+WS broadcasts — it holds the lock instead, starving every OTHER writer (his
+Timeline saves included) for the run's whole duration. Run bulk generation
+as a separate offline process against `storage/spectra/triggers.json`
+directly, the same shape
 `migrate_legacy_triggers.py` already used for the authored corpus, never
 through the live HTTP endpoint in a loop.
 
@@ -7122,6 +7126,249 @@ path while a live re-capture of that song overwrites it — a direct in-place
 partial file (`soundfile`'s "System error"/"Format not recognised"). This was
 the 2026-08-14 librosa-backfill failure root cause (19/500 songs); the same
 race exists for anything else that writes into `audio_shapes/` — write atomically.
+
+**A capture used to be cut off at BOTH ends — fixed 2026-09-09**
+(`services/audio_shape_service.py`). Beginning: pre-roll from the always-on
+PCM ring buffer only ran for `force_recapture=True` ("to preserve legacy
+behavior"), silently dropping the head of every ORDINARY capture between
+song-start and URI-detection (typically 5-10s). It now runs for an ordinary
+TRACK CHANGE too — but **gated on `at_track_boundary` (or an explicit
+force-recapture), NEVER on every `_start`**. The splice is only sound when
+the ring buffer between `song_start` and now really is THIS song's own
+contiguous audio, and the boundary flag is exactly that evidence:
+`on_track_change` saw the URI flip into this track and computed the
+acoustic boundary `song_start` came from. A MID-SONG start has no such
+signal — `_start` also runs from `on_track_change`'s tail for any playing
+song with no complete shape (a resume after a pause discarded a too-short
+partial), where `song_start` is `now - progress` and the intervening ring
+buffer holds the PAUSE. Splicing there stamped silence as the song's own
+head, fed it to librosa AND the WAV, and inflated the `captured_ms` the
+too-short guard reads — a shape that should have been rejected persisted
+with minutes of wrong audio. So a mid-song start takes the ordinary
+no-pre-roll path and says so in the log. End: both
+tail-wait sites (`on_track_change`'s boundary-wait, `_stop_and_save`'s
+tail-wait) used `if 0 < wait_s <= 3.0: sleep(wait_s)` — a wait that needed
+MORE than 3s got skipped ENTIRELY (zero wait) rather than shortened, which
+is exactly the "stopping immediately is what cut the end off captures"
+failure the surrounding comment already named. `_capped_wait_s()` (module-
+level, one definition instead of two inline copies) now sleeps
+`min(needed, cap)` at both sites instead of an all-or-nothing window (the
+cap's own row, unit and status: `docs/SPECTRA_TIMING_CONVENTIONS.md`'s
+master table, beside the `audio_latency_ms` it is derived from). Spec:
+`tests/test_audio_shape_capture_trim.py` (no live audio device — the ring
+buffer / capture stream / recorder are faked at the seam, matching this
+file's own "no live access from tests, ever" rule; it carries BOTH the
+track-change case that must splice and the mid-song-resume case that must
+not).
+
+## The music-analysis test bed (`/testbed`)
+
+Capability state and honest deployment status: `docs/SPECTRA_SPEC.md` §109.
+Admiral-approved phased build, 2026-09-09, grounded in
+`data/spotfx-music-analysis-plan/report.md` (read that report before
+touching any of this — it has the real measurements: today's librosa
+section-boundary detector recalls only 7-10% of his hand-placed marks at
+±500ms, and beat_this (CPJKU 2024) roughly doubles downbeat F1 over the
+current pipeline at the same tolerance). A read-only comparison surface
+with exactly one write exception (push-to-real), extending the ported
+timeline surface family (`ReviewLaneBar`'s read-only multi-lane pattern,
+above) rather than inventing a parallel one.
+
+**Backend**, all in `spectra/services/testbed_*.py` +
+`spectra/api/testbed.py` (`/api/testbed/*`, mounted in `spectra/app.py`):
+`testbed_marks.py` reads his real marks from the FIRED trigger copy
+(`trigger_store`, not the legacy editor copy — same "TWO trigger copies"
+choice the plan report itself makes, with the editor copy's own trigger
+COUNT + `ai_generated`/`verified` provenance surfaced as a caveat, not a
+second definition of "his marks"), split transitions
+(`fire_scene`/`fire_scene_update`) vs flares (`fire_response`/
+`select_color_set`). **ONLY `source=="authored"` rows are reference marks**
+— `midsong_generator` seeds a generated `fire_scene` at every librosa
+section boundary, the librosa engine's own `section_boundary` times, and
+63% of his stored songs hold nothing else, so admitting them would grade
+librosa against itself; the excluded rows are counted (`n_generated` on
+`/songs` and `/marks`) and a generated-only song stays listed with an
+honest "no authored marks yet" lane/metrics state instead of an empty
+comparison. **A TEST-BED-PROMOTED ROW IS NOT SCORED EITHER** — the same
+circularity through the authored door: push-to-real lands a suggestion
+`source="authored"` at the suggesting engine's OWN exact `time_ms`, so
+every promotion would lift that engine's own P/R/F1 on the next look.
+Nothing on the trigger can tell it from a hand-placed one (that is
+deliberate — see below), so `testbed_promote` keeps its OWN provenance
+store: `promoted_ids.json` (`{uri: [trigger_id, ...]}`, **never
+truncated**) → `promoted_trigger_ids()`/`promoted_ids_by_uri()` →
+`ReferenceMark.promoted`. **That is a SECOND store beside the bounded
+`promotions.json`, and the split is the point** — the display log caps at
+`_LOG_MAX_ENTRIES` and refusals share that budget, so sourcing the
+exclusion from it meant an evicted promotion silently read as
+hand-authored again and re-entered `scoring_marks()`, with the lane tint,
+the `n_promoted` count and the metrics note all quietly stopping saying
+so. The reads UNION the durable index with whatever the log window still
+shows, so an install that promoted before the index existed keeps its
+provenance with no migration; the union can only ADD ids. The exclusion is VISIBLE, never silent — the
+mark stays in `transitions`/`flares` flagged, is drawn in its own dashed
+tint with an "excluded from scoring" label, is counted (`n_promoted`), and
+is dropped only by `testbed_marks.scoring_marks()`, the ONE definition
+both `reference_marks_for_song()` (the `/compare` route) and the page's
+own local matcher apply. `testbed_metrics.py` is the greedy nearest-neighbor
+precision/recall/F1 matcher — the report's own methodology, made
+executable — with a deliberate byte-for-byte TypeScript port
+(`spectra/web/src/testbed/metrics.ts`) so the frontend's tolerance slider
+recomputes instantly with no round-trip; `scripts/check_testbed_metrics.mjs`
+cross-checks both sides against the same fixed vectors. `testbed_engines.py`
+is the engine registry: `librosa` derives marks LIVE from the
+already-computed `.librosa.json` (via `analysis_reader.py`, which gained
+`beats_for_uri()` alongside its existing `sections_for_uri()`); `beat_this`
+reads from an OFFLINE precompute cache (`testbed_cache.py`,
+`storage/spectra/testbed/analysis/<engine>/<uri>.json`) — never re-run in
+the request path (some engines take 80-560s/song per the report's own
+timings). `testbed_beatthis.py` is the actual `beat_this` call
+(`File2Beats(checkpoint_path="final0", dbn=False)` — `dbn=False` is
+load-bearing, it's what keeps madmom out), invoked only by
+`scripts/testbed_precompute.py`; `beat_this` is an OPTIONAL dependency
+(`requirements-testbed.txt`, mirroring `requirements-capture-client.txt`'s
+precedent) — code and published checkpoints are both MIT-licensed (checked
+before shipping; unlike madmom's CC-BY-NC-SA models), and an uninstalled
+host reports the engine "unavailable" rather than crashing anything.
+**`GET /api/testbed/songs` is ONE read per store, off the event loop, and
+it never PARSES an engine's output at all** (`trigger_store.list_all` +
+`testbed_marks.all_song_marks` + `analysis_reader.stem_index` +
+`testbed_promote.promoted_ids_by_uri`, composed in `spectra/api/testbed.py`'s
+`_song_list` under `asyncio.to_thread`, the `sync-from-profile` precedent) —
+never loop `marks_for_song`/`stem_for_uri` over the corpus in a handler: the
+former is a full ~9.5MB `triggers.json` parse PER SONG, and the latter
+rebuilds the whole audio-shape sidecar index on every MISS, i.e. once per
+stored song with no captured audio. The listing passes
+`availability_for(..., count_marks=False)`, which answers each engine's
+availability with a STAT (`analysis_reader.has_librosa_analysis` /
+`testbed_cache.has_cache`) and reports `mark_count: None` rather than a
+fabricated 0 — parsing every song's `.librosa.json` to build marks the
+payload discards is 965 files / 417MB of his real storage per request, and
+this listing is re-fetched on every pin, unpin and promotion. The full
+parse stays on `/engines` and `/engine-marks`, one song each. The song list also carries each song's
+`title`/`artist` from the same one-pass profile scan its provenance comes
+from, so the page never fans out one `/api/profiles/by-uri` per song. A pin
+(a full WAV copy + decode) runs under `asyncio.to_thread` too, which is why
+`testbed_audio` locks its registry read-modify-write — and because that
+worker thread rebuilds `analysis_reader`'s uri→stem index while the loop
+thread reads it every tick, `_build_index` REBINDS a fresh dict and never
+clears in place (`tests/test_analysis_reader_index.py`). The page's
+per-lane fetch is `GET /api/testbed/engine-marks` (one engine's marks,
+nothing else — the slider matches locally); `/compare` is the
+server-computed number at a fixed tolerance and reads the fired copy only,
+never the profile directory.
+
+**Test-bed audio retention is its OWN policy** (`testbed_audio.py`,
+Admiral-approved test-bed pinning), deliberately independent of
+production's `settings.audio_wav_max_songs`/`librosa_service.
+manage_wav_retention()`: pinning COPIES a song's current WAV into
+`storage/spectra/testbed/audio/` (never moves/symlinks) — a directory
+`manage_wav_retention()`'s own glob (scoped to `AUDIO_SHAPES_DIR` only)
+never reaches, so a pin structurally cannot be evicted by production's LRU
+cap, and unpinning never touches production's own copy. Peaks (a
+downsampled min/max waveform-lane render) are computed once at pin time.
+The waveform lane falls back to production's `.npz` RMS-envelope shape
+(retained for every played song, unlike the WAV) when nothing is pinned,
+labeled honestly as coarse rather than silently rendering nothing.
+
+**A PINNED WAV'S SAMPLE 0 IS NOT SONG-TIME 0** — a capture starts mid-song,
+so a waveform drawn from the left edge sits EARLIER than every mark lane by
+the capture lag (5-10s, the code's own figure). `testbed_audio.
+capture_offset_ms(uri)` is the one resolver and `/waveform` carries it on
+the `wav_peaks` payload, resolved at READ time so a pin taken before this
+existed gets it too. It reads the `.npz` sidecar's own first
+`timestamps_ms` — the song-relative stamp `AudioCaptureStream` gave the
+first PCM it held — and **deliberately NOT `LibrosaAnalysis.
+librosa_offset_ms`**, which this file already records as unreliable. `None`
+means genuinely UNKNOWN: the lane then relabels itself "start time
+unknown", greys its trace and captions that it is not aligned, rather than
+drawing at a position it cannot justify. The page's own timebase counts a
+WAV as ending at `capture_offset_ms + duration_ms`, since `duration_ms` is
+the recording's LENGTH and not the song's end.
+
+**Push-to-real is gated, structurally, not by UI convention**
+(`testbed_promote.py`): `promote()` refuses (`PromotionNotConfirmed`,
+writes nothing, logs the refusal) unless `confirmed=True` arrives on the
+call itself — there's no way to "confirm once and it stays confirmed."
+`PromotionReviewDialog.tsx` is the ONLY component wired to the promote
+mutation, and only from its own explicit "Confirm & push" button, never the
+mark-click that opens it. **It also DISCLOSES the consequence**: under
+`scene_change_mode == "triggers_only"` (his live setting) a song holding
+≥1 authored trigger fires ONLY authored triggers, so on a song with none
+yet this push does not ADD a mark — it REPLACES that song's whole
+automatic show with it. The dialog reads `useRoomControls()` +
+`useTestbedMarks()` and says so plainly when both conditions hold.
+Disclosure, NOT a gate: Confirm stays enabled and nothing about
+`room_controls` or the firing rules is touched. The write lands in the
+FIRED copy only
+(`trigger_store.upsert`, `source="authored"`, `generator_key=None` — never
+"generated," so front 3's regeneration/ownership-transfer rule can never
+silently claim a promoted trigger back), through
+`trigger_store.validate_action()` — the SAME reference-integrity check
+`spectra/api/triggers.py`'s human-authoring POST uses (lifted out of that
+module's own `_validate_action`, which is now a thin 422-mapping wrapper
+over it, specifically so both write surfaces share one choke point and
+can't diverge). Every attempt, accepted or refused, is appended to a
+durable, bounded audit log
+(`storage/spectra/testbed/promotions.json`, `GET /api/testbed/promotions`)
+— the visible proof the button cannot write silently. That log is HISTORY
+for a human; the scoring exclusion reads the unbounded
+`promoted_ids.json` beside it (above), and a new store here needs its own
+`tests/conftest`-style repoint in every testbed test fixture or it writes
+into the real `storage/spectra/testbed/`. **A repeat confirm
+is refused, never stacked**: an authored trigger of the same action kind
+within `testbed_promote.DUPLICATE_WINDOW_MS` of the moment refuses by name
+(`PromotionDuplicate`, HTTP 409, logged `reason="duplicate"` with the
+existing id) — every call mints a fresh id, so without it the second
+confirm of one click would land a double-fire on one tick. **The fired
+copy's writers are serialised by `trigger_store.write_lock`, AND NONE OF
+THEM RUNS ON THE EVENT LOOP** (re-entrant; held inside `upsert`/`delete`/
+`apply_batch` across each load+save, and by `promote()` across its
+duplicate check AND the write): an unserialised read-modify-write of the
+whole file loses whichever write landed first. Serialising is only half of
+it — a WAITER must not be the loop. `POST`/`DELETE`/`generate`
+`/api/triggers` therefore hand their store calls to `asyncio.to_thread`
+alongside `sync-from-profile`, the generator and the promotion: the
+promotion's critical section is two whole-file parses plus a rewrite, so a
+route awaiting that lock inline would park the 200ms trigger tick, the
+bridge poll and every WS broadcast behind one Timeline save. A new
+check-then-act on this store holds that lock itself; plain reads never
+take it; a new MUTATING caller goes on a worker thread. Proof:
+`tests/test_trigger_store_write_lock.py` (both the lost-update shape and
+the real routes' own thread, verified RED against an inline call).
+
+**Frontend**: `spectra/web/src/testbed/TestbedPage.tsx` (`/testbed`, "Test
+Bed" nav link, route-mapped in `routeTopics.ts`) — song picker, an A/B
+engine picker, `TestbedLaneBar.tsx` (waveform/energy lane + his marks +
+up to two engine lanes, green/amber/red tinting by match tightness — the
+`ReviewLaneBar` pattern generalized to N lanes), `TestbedMetricsPanel.tsx`
+(live P/R/F1 table + tolerance slider), and `PromotionReviewDialog.tsx`
+(the review gate's UI half). **A TINT MEANS WHAT THE LEGEND SAYS**: the
+dim/grey `extra` swatch is documented as an ENGINE mark with no match to
+any of his, so his OWN marks under a no-metrics condition (the selected
+engine has nothing precomputed for this song — every song today for
+`beat_this`) render `unscored`, never `extra`; nothing was compared, so
+neither "matched" nor "over-segmented" is true of them.
+**EVERY LANE IS THE SAME `ms / durationMs`
+SCALE** — the waveform used to position its buckets by INDEX across the
+full lane width, so it drifted against every mark lane beside it by
+whatever the timebase exceeded the WAV's own duration; `durationMs` is
+also a REAL duration wherever the song has one (no `×1.05`/`×1.02` padding
+putting a length on the axis label the song does not have). **The engine
+picker is driven by the `/songs` payload's own `engines` map**, not a
+hardcoded frontend copy of the registry — a third engine registered in
+`testbed_engines.ENGINES` appears with no frontend edit; only pretty
+mark-kind labels are local, with a raw-key fallback. Help:
+`analysis-testbed` section + `testbed-promotion` entry in
+`helpContent.ts`, both linked (not orphaned) — `testbed-promotion` from
+`PromotionReviewDialog`'s own header as well as the promotion-history
+card, since that card only renders once a promotion exists.
+
+Executable specs: `tests/test_testbed_*.py` (marks split/provenance,
+metrics matcher, audio pinning + production-eviction independence, engine
+registry, the guarded beat_this call, the promotion gate, and a full
+`TestClient(create_app())` route-shape pass) + `scripts/
+check_testbed_metrics.mjs` (TS/Python parity).
 
 ## Maintaining this file
 

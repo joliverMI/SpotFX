@@ -1375,6 +1375,63 @@ export const HELP_SECTIONS: HelpSection[] = [
     ],
   },
   {
+    id: 'analysis-testbed',
+    title: 'Music-Analysis Test Bed',
+    keywords: 'testbed test bed engine compare beat downbeat section boundary librosa beat_this precision recall f1 waveform pin wav promote push real promoted excluded scoring my triggers only',
+    intro:
+      'A read-only comparison surface: your real marks, the waveform (or a coarser fallback), and every candidate analysis engine\'s own detected marks, all on one shared timeline — with precision/recall/F1 computed the same way for every engine, so you can judge them by eye and by number instead of by argument. Nothing here fires anything in your real show except through the reviewed "push to real" button.',
+    entries: [
+      {
+        id: 'testbed-lanes-and-tolerance',
+        title: 'Lanes, tinting, and the tolerance slider',
+        keywords: 'lane waveform green yellow amber red matched unmatched extra over-segmentation offset',
+        table: [
+          ['Green tick', 'One of your marks, matched by the selected engine within half the current tolerance.'],
+          ['Amber tick', 'Matched, but in the looser half of the tolerance window.'],
+          ['Red tick', 'One of your marks with no match at all — a miss.'],
+          ['Dim/grey tick (engine lane)', 'An engine mark with no match to any of your marks — extra, not necessarily wrong (over-segmentation).'],
+          ['Dashed tick (your lane)', 'A mark you pushed from this page. Shown so it is never hidden, but left out of the scores — it sits exactly where the engine suggested it.'],
+          ['Plain white tick (your lane)', 'One of your marks with nothing to compare it against yet — the selected engine has not been precomputed for this song, so no match was attempted either way.'],
+        ],
+        body: [
+          'Drag the tolerance slider on the Metrics card to see precision/recall/F1 and every tint recompute for the currently selected tolerance — there is no one "correct" tolerance; how close counts as close enough is your call, not this page\'s.',
+          'The waveform lane shows the real retained WAV when one is pinned; otherwise it falls back to the coarser RMS-energy shape production already keeps for every played song, labeled honestly as coarse rather than silently showing nothing.',
+          'Every lane shares one timebase, so a spot on the waveform sits directly under the marks at that moment in the song. Where a capture is shorter than the song\'s last mark or beat, the waveform simply stops where the audio does instead of being stretched to fill the lane.',
+          'A capture usually starts a few seconds into the song (that is how long it takes to work out which song is playing), so the waveform is drawn starting at the moment its own recording began rather than at the far left. If that start time cannot be worked out for a particular capture, the lane says "start time unknown" and greys itself out — it is still worth looking at, but do not read alignment into it.',
+        ],
+      },
+      {
+        id: 'testbed-audio-retention',
+        title: 'Pinning a song\'s audio',
+        keywords: 'pin unpin wav retention audio_wav_max_songs recapture cache independent',
+        body: [
+          'Production only keeps a handful of songs\' full WAV captures at a time (an old one is deleted to make room for a new one). "Pin WAV for this song" copies the current WAV into the test bed\'s own storage, completely independent of that cap — a pinned song\'s audio survives production evicting its own copy. Pinning is disabled when production has no WAV to pin from right now (play or recapture the song first).',
+          'Pinning also computes the waveform lane\'s peaks once, so opening the page afterward is instant.',
+        ],
+      },
+      {
+        id: 'testbed-engines',
+        title: 'Engines',
+        keywords: 'librosa current baseline beat_this cpjku downbeat section boundary precompute offline',
+        body: [
+          'Current (librosa) is the production pipeline\'s own already-computed analysis — always available once a song has been analysed, and it\'s exactly what generates today\'s automatic scene-change triggers.',
+          'beat_this (CPJKU 2024) is a modern neural beat/downbeat tracker, measurably tighter on beat/downbeat timing than the current pipeline. It has to be precomputed offline first (scripts/testbed_precompute.py) — an engine lane reads "not computed" until that\'s been run for this song; nothing here ever runs a slow engine live while you\'re looking at the page.',
+        ],
+      },
+      {
+        id: 'testbed-promotion',
+        title: 'Push to real',
+        keywords: 'promote push real trigger confirm review gate safety authored source engine offset',
+        body: [
+          'Clicking a mark in an engine\'s own lane opens a review dialog — it never writes anything by itself. Choose or adjust the action it would fire (which scene, response class, colour set, intensity, and an optional timing offset), then press "Confirm & push to real triggers" to actually place it as an ordinary, editable trigger in your real show. Every attempt — pushed or refused — is kept in the promotion history table below, so nothing here can happen silently.',
+          'A pushed trigger is marked the same as anything you place by hand ("authored") — it will never be silently touched or removed by a later automatic regeneration pass.',
+          'On a song that has no triggers of your own yet, while scene changes are set to "My triggers only", pushing one is not an addition — that mode plays only your own triggers on any song that has some, so the song\'s automatic scene change and every analysed mid-song change stop for it. The dialog says so before you confirm, and deleting the trigger again puts the song back.',
+          'A pushed mark is still drawn in your own lane, in its own colour, but it is deliberately left OUT of precision/recall/F1: it sits exactly where the engine put it, so counting it would score that engine against its own suggestion. The Metrics card says how many were left out.',
+        ],
+      },
+    ],
+  },
+  {
     id: 'settings-console',
     title: 'Sonic — talk to it instead of hunting a form',
     keywords: 'settings console sonic agent chat voice dictation mic microphone brightness ambient transition scene change undo change log talk to the software',

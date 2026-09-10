@@ -24,6 +24,21 @@ from services.audio_analyzer import AudioShapeRecorder, MusicMarkDetector, load_
 logger = logging.getLogger(__name__)
 
 
+def _capped_wait_s(wait_s: float, cap_s: float) -> Optional[float]:
+    """The tail-wait arithmetic both capture-trim wait sites below share —
+    extracted so it's one definition, not two inline copies that can drift
+    apart. Returns None when no wait is needed (wait_s <= 0); otherwise the
+    wait, CLAMPED to cap_s rather than dropped to zero when it exceeds the
+    cap. FIXED (this was the capture-trim bug): the previous shape was
+    `if 0 < wait_s <= cap_s: sleep(wait_s)` — a wait that needed MORE than
+    the cap got skipped ENTIRELY (zero wait), not just shortened, which is
+    exactly what cut the end off a capture whenever the true required wait
+    ran past the cap."""
+    if wait_s <= 0:
+        return None
+    return min(wait_s, cap_s)
+
+
 class AudioShapeService:
     def __init__(self) -> None:
         self._recorder: Optional[AudioShapeRecorder] = None
@@ -58,6 +73,14 @@ class AudioShapeService:
     # How far into a song (ms) counts as "restarted from the beginning"
     _RESTART_THRESHOLD_MS = 10000
     _CAPTURE_GRACE_S = 5.0  # ignore transient URI changes for this long after capture starts
+    # Ceiling on how long either tail-wait (below, and in _stop_and_save)
+    # will block the poll loop for. FIXED: this used to be the wait's own
+    # eligibility bound ("if 0 < wait_s <= 3.0: sleep(wait_s)") — a wait
+    # that needed MORE than 3s got skipped ENTIRELY rather than clamped,
+    # which is what actually cut the end off captures the surrounding
+    # comment already names as the thing to avoid. Now every wait sleeps
+    # for min(needed, this cap) instead of an all-or-nothing 3s window.
+    _TAIL_WAIT_CAP_S = 3.0
 
     async def on_track_change(self, track: Optional[SpotifyTrackInfo]) -> None:
         """
@@ -95,9 +118,16 @@ class AudioShapeService:
                 hint = track.fetched_at - track.progress_ms / 1000.0
                 arrival_deadline = hint + _cfg_w.audio_latency_ms / 1000.0 + 0.5
                 wait_s = arrival_deadline - time.monotonic()
-                if 0 < wait_s <= 3.0:
-                    logger.debug("Boundary-wait: %.2fs for prev tail to arrive", wait_s)
-                    await asyncio.sleep(wait_s)
+                capped = _capped_wait_s(wait_s, self._TAIL_WAIT_CAP_S)
+                if capped is not None:
+                    if capped < wait_s:
+                        logger.debug(
+                            "Boundary-wait: needed %.2fs, capped to %.2fs",
+                            wait_s, capped,
+                        )
+                    else:
+                        logger.debug("Boundary-wait: %.2fs for prev tail to arrive", capped)
+                    await asyncio.sleep(capped)
             # Compute one acoustic boundary that BOTH the prev capture's
             # _stop_and_save (tail trim) and the new song's _start (pre-roll
             # origin) will use. None when no new track is playing (pause /
@@ -368,8 +398,9 @@ class AudioShapeService:
         # trim). Fall back to Spotify's reported progress for the first
         # capture of a session or when no PCM was available in the ring
         # buffer.
-        if (self._pending_boundary_monotonic is not None
-                and self._pending_boundary_uri == track.spotify_uri):
+        at_track_boundary = (self._pending_boundary_monotonic is not None
+                             and self._pending_boundary_uri == track.spotify_uri)
+        if at_track_boundary:
             song_start = self._pending_boundary_monotonic
         else:
             progress_s = track.interpolated_progress_ms() / 1000.0
@@ -387,45 +418,71 @@ class AudioShapeService:
         # song-start and now (URI detection typically lags by 5-10s). Synthesize
         # AudioFrames and ingest into the recorder before live capture begins.
         # Also feed the raw PCM into the recorder's pre-roll PCM list so the
-        # WAV file includes the leading audio. Skipped for non-force captures
-        # to preserve legacy behavior.
+        # WAV file includes the leading audio.
+        #
+        # GATED ON A GENUINE TRACK BOUNDARY (or an explicit force-recapture),
+        # never on every start. The splice is only sound when the ring
+        # buffer's contents between `song_start` and now really ARE this
+        # song's own contiguous audio, and that is exactly what
+        # `at_track_boundary` establishes: on_track_change saw the URI flip
+        # into this track and computed the acoustic boundary the origin came
+        # from. A MID-SONG start has no such signal — `_start` also runs from
+        # on_track_change's tail for any playing song with no complete shape,
+        # e.g. a resume after a pause discarded a too-short partial, where
+        # `song_start` is `now - progress` and the intervening ring buffer
+        # holds the PAUSE, not the song. Splicing there would stamp silence
+        # (or another source entirely) as this song's own head, feed it to
+        # librosa and the WAV, and inflate the `captured_ms` the too-short
+        # guard reads. Head truncation on a real track change — the reported
+        # defect — is still fixed; a mid-song start simply takes the ordinary
+        # no-pre-roll path. The `pcm.size > 0` check below still degrades to
+        # a no-op when the ring buffer has nothing to offer.
         pre_roll_pcm: list = []
-        if force_recapture:
-            try:
-                from api.pcm_ring_buffer import pcm_ring_buffer
-                from api.audio_capture import synthesize_frames_from_pcm
-                from config import settings as _cfg
-                # Ring-buffer stamps are audio ARRIVAL time; song-time-0 audio
-                # arrives audio_latency_ms after the Spotify-time song_start.
-                # Snapshotting from song_start itself grabbed the previous
-                # track's tail and labeled it as this song's first second.
-                want_monotonic = song_start + _cfg.audio_latency_ms / 1000.0
-                pcm, got_monotonic = pcm_ring_buffer.snapshot_since_with_start(
-                    want_monotonic
+        pre_roll_allowed = at_track_boundary or bool(force_recapture)
+        if not pre_roll_allowed:
+            logger.info(
+                "Pre-roll skipped for %s — capture starts mid-song (no track "
+                "boundary), so the ring buffer is not this song's own audio",
+                track.title,
+            )
+        try:
+            from api.pcm_ring_buffer import pcm_ring_buffer
+            from api.audio_capture import synthesize_frames_from_pcm
+            from config import settings as _cfg
+            # Ring-buffer stamps are audio ARRIVAL time; song-time-0 audio
+            # arrives audio_latency_ms after the Spotify-time song_start.
+            # Snapshotting from song_start itself grabbed the previous
+            # track's tail and labeled it as this song's first second.
+            want_monotonic = song_start + _cfg.audio_latency_ms / 1000.0
+            pcm, got_monotonic = (
+                pcm_ring_buffer.snapshot_since_with_start(want_monotonic)
+                if pre_roll_allowed
+                else (np.array([], dtype=np.float32), want_monotonic)
+            )
+            if pcm.size > 0:
+                pre_roll_seconds = pcm.size / _cfg.audio_sample_rate
+                # Label from the buffer's EFFECTIVE start: 0 when the ring
+                # covered the whole head, later when it was too shallow
+                # (e.g. capture start delayed past the ring depth) — the
+                # coverage/gap checks then judge the real hole instead of
+                # mislabeled frames.
+                pre_roll_start_ms = max(0, int((got_monotonic - want_monotonic) * 1000))
+                frames = synthesize_frames_from_pcm(pcm, pre_roll_start_ms)
+                for f in frames:
+                    self._recorder.ingest(f)
+                pre_roll_pcm = [pcm.copy()]  # for WAV concatenation later
+                logger.info(
+                    "Pre-roll: %.1fs of PCM (%d frames synthesized) for %s%s",
+                    pre_roll_seconds, len(frames), track.title,
+                    " (force-recapture)" if force_recapture else "",
                 )
-                if pcm.size > 0:
-                    pre_roll_seconds = pcm.size / _cfg.audio_sample_rate
-                    # Label from the buffer's EFFECTIVE start: 0 when the ring
-                    # covered the whole head, later when it was too shallow
-                    # (e.g. capture start delayed past the ring depth) — the
-                    # coverage/gap checks then judge the real hole instead of
-                    # mislabeled frames.
-                    pre_roll_start_ms = max(0, int((got_monotonic - want_monotonic) * 1000))
-                    frames = synthesize_frames_from_pcm(pcm, pre_roll_start_ms)
-                    for f in frames:
-                        self._recorder.ingest(f)
-                    pre_roll_pcm = [pcm.copy()]  # for WAV concatenation later
-                    logger.info(
-                        "Recapture: pre-rolled %.1fs of PCM (%d frames synthesized) for %s",
-                        pre_roll_seconds, len(frames), track.title,
-                    )
-                else:
-                    logger.info(
-                        "Recapture: no pre-roll PCM available for %s (ring buffer empty or stale)",
-                        track.title,
-                    )
-            except Exception as exc:
-                logger.warning("Recapture: pre-roll ingestion failed: %s", exc)
+            elif pre_roll_allowed:
+                logger.info(
+                    "Pre-roll: no PCM available for %s (ring buffer empty or stale)",
+                    track.title,
+                )
+        except Exception as exc:
+            logger.warning("Pre-roll ingestion failed: %s", exc)
 
         self._capture = AudioCaptureStream(song_start)
         # Seed the capture's raw PCM buffer so WAV write includes pre-roll
@@ -477,9 +534,13 @@ class AudioShapeService:
             from config import settings as _cfg_t
             tail_deadline = boundary + _cfg_t.audio_latency_ms / 1000.0 + 0.3
             wait_s = tail_deadline - time.monotonic()
-            if 0 < wait_s <= 3.0:
-                logger.debug("Tail-wait: %.2fs for boundary audio to arrive", wait_s)
-                await asyncio.sleep(wait_s)
+            capped = _capped_wait_s(wait_s, self._TAIL_WAIT_CAP_S)
+            if capped is not None:
+                if capped < wait_s:
+                    logger.debug("Tail-wait: needed %.2fs, capped to %.2fs", wait_s, capped)
+                else:
+                    logger.debug("Tail-wait: %.2fs for boundary audio to arrive", capped)
+                await asyncio.sleep(capped)
 
         # Detach the capture state so the service is immediately free for the
         # next song.
