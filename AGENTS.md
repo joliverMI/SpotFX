@@ -6598,9 +6598,10 @@ dummy-swap is the general recipe for proving anything about his real config
 offline** — it is the only change made, so ordering, segments and pixel
 counts are all his.
 
-## Black Hole (`fx/effects/blackhole.py`) — three things that bite
+## Black Hole (`fx/effects/blackhole.py`) — four things that bite
 
-Everything below is recorded in `fx/VENDOR.md` (#12, #14, #18, #19, #20)
+Everything below is recorded in `fx/VENDOR.md` (#12, #14, #18, #19, #20,
+#38)
 with the mechanism detail; this is the short list of traps.
 
 1. **`reverse` is a SPAWN-SIDE flag that also picks the sign of every live
@@ -6633,6 +6634,25 @@ with the mechanism detail; this is the short list of traps.
    the dummy rectangle a headless harness renders — see
    `scripts/check_blackhole_charge_lull.py` for the instrument and
    `.claude/skills/crystal-hex-grid/SKILL.md` for why.
+4. **A BLOB POPULATION IS LITTLE'S LAW, so a spawn RATE is not a blob
+   COUNT.** Blobs are captured by the horizon and retire, so the live
+   population is `rate × how long a blob stays visible` — and the charge's
+   own `_phase_speed_mult` keeps shortening that time as it ramps. Raising
+   `CHARGE_SPAWN_RATE_MAX` from 12 to 45 moved the measured count from 19
+   to 41; integrating the rate would have predicted nearly four times the
+   blobs. **Measure the count on rendered frames; never derive it.** Two
+   companion traps, both of which have already cost a wrong answer here:
+   a VISIBLE blob means `p_cap < 0` (a captive is pinned on the ring and
+   blending to the horizon colour — it is "in the event horizon") AND
+   `r <= HEX_FILL_RADIUS` (past that his crystal has no real cells, so a
+   particle parked there is not on screen); and the drop's TOTAL visible
+   peak is NOT its payoff — `_phase_step` releases every captive on entry
+   (`p_cap = -1`), so the total is `PHASE_BURST_N` plus whatever the
+   charge/lull just fed the horizon, and it therefore GROWS with the charge
+   (81-118 → 148-199 across one calibration). Anchor a ratio on
+   `p_is_burst`, never on the total, or the target is a divergent fixed
+   point. `fx/VENDOR.md` #38 is the binding statement; the instrument is
+   `scripts/check_blackhole_charge_target.py`.
 
 ## A SATURATING SIGNAL MEETING `>=` MAKES A "never" THRESHOLD FIRE
 

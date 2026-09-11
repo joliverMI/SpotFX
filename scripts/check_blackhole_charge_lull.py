@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import sys
 import tempfile
 from pathlib import Path
@@ -50,6 +51,7 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from fx import headless  # noqa: E402
 from fx.effects import blackhole as bh  # noqa: E402
+from fx.effects import blackhole1d as bh1  # noqa: E402
 from spectra.services import scene_response as sr  # noqa: E402
 
 DT = 1.0 / 60.0
@@ -273,7 +275,8 @@ def main() -> int:
           f"ring half-thickness grows {bh.CHARGE_HALO_W_MIN} -> "
           f"{bh.CHARGE_HALO_W_MAX} across the build")
 
-    print("\n§2 CHARGE: formation accelerates to 12/s, past the cap")
+    print(f"\n§2 CHARGE: formation accelerates to "
+          f"{bh.CHARGE_SPAWN_RATE_MAX:.0f}/s, past the cap")
     early = _rate_at(res, "charge", 0.0, 0.25, CHARGE_S)
     late = _rate_at(res, "charge", 0.9, 1.0, CHARGE_S)
     print(f"  measured FORCED formation rate: {early:.1f}/s at p<=0.25, "
@@ -281,7 +284,8 @@ def main() -> int:
           f"{bh.CHARGE_SPAWN_RATE_MAX:.0f}/s — the ordinary music-driven "
           "spawn keeps running underneath it)")
     check(late >= bh.CHARGE_SPAWN_RATE_MAX,
-          f"reaches his 12/second as p->1 ({late:.1f}/s)")
+          f"reaches its ceiling {bh.CHARGE_SPAWN_RATE_MAX:.0f}/second as "
+          f"p->1 ({late:.1f}/s)")
     check(early < late / 2.0,
           f"…and ACCELERATES into it, never all at once ({early:.1f}/s "
           f"early vs {late:.1f}/s late)")
@@ -303,9 +307,16 @@ def main() -> int:
     for r in res["spawns"]["charge"]:
         if r["forced"]:
             per_frame[r["frame"]] = per_frame.get(r["frame"], 0) + r["added"]
-    check(per_frame and max(per_frame.values()) <= 2,
+    # The bound is the RATE's own: an accumulator can only ever hand out
+    # rate x dt in one frame, and dt is clamped at DT_MAX. Hardcoding it
+    # would pin this assertion to whatever CHARGE_SPAWN_RATE_MAX happened
+    # to be the day it was written.
+    per_frame_bound = int(math.ceil(bh.CHARGE_SPAWN_RATE_MAX * bh.DT_MAX))
+    check(per_frame and max(per_frame.values()) <= per_frame_bound,
           f"at most {max(per_frame.values())} forced blob(s) land on any "
-          "single frame — a rate through an accumulator, not a batch")
+          f"single frame (bound {per_frame_bound} = "
+          f"{bh.CHARGE_SPAWN_RATE_MAX:.0f}/s x the {bh.DT_MAX}s dt clamp) — "
+          "a rate through an accumulator, not a batch")
     forced_at_cap = [r for r in res["spawns"]["charge"] if r["forced"]]
     check(len(forced_at_cap) > 10,
           f"{len(forced_at_cap)} blobs were forced into being past the cap "
@@ -383,8 +394,12 @@ def main() -> int:
     lu1 = [r for r in res1d["s"]["lull"] if "rh" in r]
     late1 = _rate_at(res1d, "charge", 0.9, 1.0, CHARGE_S)
     after1 = [r for r in lu1 if r["p"] > bh.LULL_FILL_PROGRESS]
-    check(late1 >= bh.CHARGE_SPAWN_RATE_MAX,
-          f"charge formation reaches 12/second on the strip too "
+    # the strip has its OWN constants (fx/effects/blackhole1d.py restates
+    # them deliberately — see its module comment); comparing its measured
+    # rate against the 2D module's ceiling is a cross-module mistake
+    check(late1 >= bh1.CHARGE_SPAWN_RATE_MAX,
+          f"charge formation reaches its own "
+          f"{bh1.CHARGE_SPAWN_RATE_MAX:.0f}/second on the strip too "
           f"({late1:.1f}/s)")
     dot = max(r["lit"] for r in after1)
     check(dot <= 70.0 + 1e-6,

@@ -63,10 +63,75 @@ PHASE_BURST_SPEED_MULT = 2.0
 # it by CHARGE_HALO_LEAD, are both gone) — what grows instead is the ring's
 # THICKNESS (_phase_halo's `w`, CHARGE_HALO_W_*), the blob formation RATE,
 # and the fall speed.
-CHARGE_SPAWN_RATE_MAX = 12.0   # blobs/second at p=1 — his number
-CHARGE_SPAWN_CURVE = 2.0       # rate = MAX * p**CURVE: "not all at once"
-                               # is the whole point — the rate ACCELERATES
-                               # from ~0, it never steps up
+#
+# CALIBRATED TO A MEASURED TARGET, 2026-09-10 (his ask: "the black hole
+# charge should be more pronounced. there should be a steady increase in
+# particles following. it should be about 80 percent as bright in terms of
+# blob count not in the event horizon (visible blobs) as the drop by the
+# end of the charge. then, that rate continues as the lull reaches the
+# point where the event horizon has fully taken the screen. then the drop
+# is as before"). These two numbers are NOT free parameters any more —
+# they are whatever lands the MEASURED visible-blob count on his target.
+# See scripts/check_blackhole_charge_target.py, which measures it on the
+# real render pipeline rather than integrating the rate (spawn rate
+# integrated over time is NOT the live count: blobs are captured by the
+# horizon and retire, so the population is Little's law — count ~= rate x
+# the time a blob stays visible, which the charge's own accelerating fall
+# speed keeps shortening).
+#
+# THE QUANTITY, in his own terms: a VISIBLE BLOB is a live particle NOT
+# captured by the event horizon (p_cap < 0 — a captive is pinned on the
+# ring and morphing to the horizon colour, which is exactly what he
+# excluded) and inside the panel's own light field (r <= HEX_FILL_RADIUS —
+# past that bound his crystal has no real cells, so a particle there is
+# not on screen at all).
+#
+# THE DENOMINATOR is the DROP'S OWN PAYOFF — PHASE_BURST_N (48) blobs,
+# measured at 48 in every condition tested. It is deliberately NOT the
+# drop's TOTAL visible peak: entering "drop" releases every captive
+# (_phase_step sets p_cap = -1), so that total is 48 + whatever the
+# charge/lull just fed the horizon, and it therefore GROWS with whatever
+# this constant is set to — at his fallback spawn_rate, 109 before this
+# calibration and 176 after — with the ratio against it pinned near 0.2
+# either way. An 80% target anchored on it is a divergent fixed point, not
+# a target. The measured total and its composition are reported by the
+# check script rather than hidden.
+#
+# MEASURED at MAX=45 / CURVE=1.2, across his real spawn_rate binding
+# (0.5-2.0, plus a loud-music proxy) and 2/4/8s charges: charge-end 30-43
+# visible blobs, ratio 0.62-0.90, mean 0.81 — "about 80 percent". These
+# are RENDERED runs with a live rng, so they move a blob or two between
+# runs; the check script asserts a band around the mean, never a figure.
+# The build is monotone at every sample and its increments are even (a 4s
+# charge at his fallback spawn_rate steps 2 -> 4 -> 13 -> 22 -> 30 -> 41),
+# which is the "steady increase" half of the ask; CURVE below 2.0 is what
+# moves the build off the back of the charge without ever stepping it up.
+# The low end of that ratio band is the SHORT charge and is inherent: a
+# blob stays visible for about a second, so a 2s charge only has time to
+# build a population for its second half.
+CHARGE_SPAWN_RATE_MAX = 45.0   # blobs/second at p=1 — calibrated, above
+                               # (was 12.0, his earlier number from
+                               # 2026-08-24, which measured 17-19 visible
+                               # blobs at charge end, ~0.4 of the drop,
+                               # and a build so flat it read as no build
+                               # at all: increments [-1, 0, 0, 1, 4])
+CHARGE_SPAWN_CURVE = 1.2       # rate = MAX * p**CURVE: "not all at once"
+                               # is still the whole point — the rate
+                               # ACCELERATES from ~0, it never steps up.
+                               # Lowered from 2.0 because a square-law
+                               # rate spends the first half of the charge
+                               # below a quarter of its max, so the build
+                               # only arrived in the last fifth; 1.2 keeps
+                               # the accelerate-from-zero shape while
+                               # making the increase STEADY across the
+                               # whole charge (his new word).
+# SCOPED TO THE 2D MATRIX EFFECT. fx/effects/blackhole1d.py keeps its own
+# 12.0/2.0: the strip has no event horizon and no capture at all (its
+# blobs fall to the centre and die — there is no p_cap), so "blob count
+# not in the event horizon" has no referent there, and its visible
+# population is whatever is crossing a 1px sample ring rather than a
+# field. Its own drop payoff is separately scaled (PHASE_BURST_N = 12),
+# and 45 blobs/second on a 7-17 pixel strip is mush, not a build.
 CHARGE_FALL_SPEED_MAX = 2.0    # infall speed multiplier at p=1 (linear in
                                # p, held through the lull)
 CHARGE_HALO_W_MIN = 0.05       # ring half-thickness at p=0 …
@@ -1088,13 +1153,30 @@ class Blackhole2d(Twod, GradientEffect):
     def _phase_spawn_rate(self):
         """Blobs per second the charge/lull FORCES into being, on top of
         whatever the ambient/beat spawn is already doing (his ask, 2026-08-24:
-        "accelerate the number of blobs forming (up to 12/second, but not all
-        at once), ignore max counts"). A RATE through an accumulator, never a
-        batch: it accelerates from ~0 to CHARGE_SPAWN_RATE_MAX as the charge
-        builds (p**CHARGE_SPAWN_CURVE), and the lull CONTINUES at the charge's
-        final rate until the horizon has swallowed the panel, after which
-        there is nothing left to see (_phase_spawn_paused draws the same
-        line)."""
+        "accelerate the number of blobs forming ... but not all at once,
+        ignore max counts" — the ceiling he named then was 12/second; it is
+        CHARGE_SPAWN_RATE_MAX now, calibrated 2026-09-10 to land a MEASURED
+        visible-blob count, see that constant). A RATE through an
+        accumulator, never a batch: it accelerates from ~0 to
+        CHARGE_SPAWN_RATE_MAX as the charge builds (p**CHARGE_SPAWN_CURVE),
+        and the lull CONTINUES at the charge's final rate until the horizon
+        has swallowed the panel, after which there is nothing left to see
+        (_phase_spawn_paused draws the same line).
+
+        THE LULL CLAUSE IS HIS "then, that rate continues as the lull reaches
+        the point where the event horizon has fully taken the screen"
+        (2026-09-10) and is deliberately UNCHANGED by that calibration: the
+        charge's own final rate carries across the phase seam with no step,
+        and stops exactly at LULL_FILL_PROGRESS, which IS the moment the
+        horizon has taken the screen (_horizon_radius reaches
+        HEX_FILL_RADIUS there). What the lull CANNOT do is keep the visible
+        count climbing: a free blob lives from the hex boundary down to the
+        horizon, and the lull's expansion collapses that distance to zero,
+        so the count necessarily falls to 0 at the fill however hard this
+        rate is driven. The rate continuing — the horizon still swallowing
+        blobs at the charge's full rate right up to the moment it closes —
+        is the part that is real, and the check script measures the arrival
+        rate across the seam rather than claiming the count holds up."""
         phase = getattr(self, "_phase", "none")
         p = float(np.clip(self.phase_progress, 0.0, 1.0))
         if phase == "charge":
