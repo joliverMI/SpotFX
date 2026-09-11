@@ -21,6 +21,12 @@
       light it could not bring up and why (spectra/services/
       activation_report.py); the same report rides on GET /ownership as
       `activation` until the stack is torn down, rechecked every 30 s.
+      EVERY CALL TO THIS ROUTE NAMES ITS CALLER at WARNING before anything
+      is decided — peer address:port, User-Agent, and for a caller on this
+      host the pid, cwd and command line of the process that actually
+      asked (spectra/services/caller_identity.py). Refusals are named too.
+      Observation only: best effort, bounded, and incapable of failing,
+      delaying or altering a take.
   POST /api/ownership/release  — THE PANIC HANDLE (spectra/services/
       release.py): one press, no body, no confirmation — the press is the
       consent. NOT gated by SPECTRA_HANDOVER_ARMED (going to no-writer is
@@ -99,22 +105,26 @@
 """
 from __future__ import annotations
 
+import logging
 import time
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from fx import light_ownership
 from spectra import config
 from spectra.services import activation_report, pretake_ping
+from spectra.services import caller_identity
 from spectra.services import dark_fixture_watch
 from spectra.services import fx_seam
 from spectra.services import handover as handover_svc
 from spectra.services import param_watchdog
 from spectra.services import release as release_svc
 from spectra.services.live_host import STALE_AFTER_S, live
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["spectra-ownership"])
 
@@ -222,8 +232,44 @@ def _requested_scope(body: HandoverRequest):
     return take_scope.resolve_for_items([_Item()])
 
 
+async def _name_the_caller(request: Optional[Request], to_world: str) -> None:
+    """WHO ASKED FOR THE ROOM — logged before anything is decided.
+
+    Two unannounced takes in two days (2026-09-09 18:10:31, 2026-09-10
+    19:59:45) could only have their origin INFERRED, because nothing on this
+    route recorded who called it. This is that record, and it runs FIRST —
+    ahead of the `to` validation and the armed gate — so a REFUSED take is
+    named too. An attempt nobody owns up to is exactly as worth knowing about
+    as one that landed.
+
+    OBSERVATION ONLY, AND NEVER IN THE WAY: `describe_request` does not
+    raise, runs its /proc work on a worker thread, and is bounded by
+    `caller_identity.AWAIT_BUDGET_S`; the `except` below is the last
+    backstop. Nothing here can fail, hang or alter a handover — see
+    spectra/services/caller_identity.py, which also carries WHY the lookup
+    resolves the CLIENT end of the socket rather than this server's."""
+    try:
+        if request is None:
+            logger.warning("handover: REQUESTED to=%s by an IN-PROCESS "
+                           "caller (no HTTP request, so no peer to name)",
+                           to_world)
+            return
+        caller = await caller_identity.describe_request(request)
+        logger.warning("handover: REQUESTED to=%s by %s", to_world,
+                       caller.line())
+    except Exception:                                   # pragma: no cover
+        logger.exception("handover: could not name the caller (the take "
+                         "itself is unaffected)")
+
+
 @router.post("/ownership/handover")
-async def post_handover(body: HandoverRequest):
+async def post_handover(body: HandoverRequest, request: Request = None):
+    # `request` defaults so the route stays callable as a plain coroutine —
+    # several existing tests drive it that way, and an in-process call has no
+    # peer to name, which `_name_the_caller` reports as exactly that. FastAPI
+    # special-cases the `Request` annotation, so a real HTTP call still gets
+    # the real request regardless of the default.
+    await _name_the_caller(request, body.to)
     if body.to not in light_ownership.WORLDS:
         raise HTTPException(422, f"to must be one of {light_ownership.WORLDS}")
     if not config.handover_armed():

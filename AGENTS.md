@@ -6276,6 +6276,50 @@ this decision does not touch — don't conflate the two. Full note:
 `docs/SPECTRA_HANDOVER.md` § "STANDING DESIGN". Spec:
 `.venv/bin/python scripts/check_ownership.py` + `tests/test_handover.py`.
 
+### THE HANDOVER ROUTE NAMES ITS CALLER — and it names the CALLER, not itself
+
+Two unannounced takes in two days (2026-09-09 18:10:31, 2026-09-10 19:59:45)
+moved his room and the origin could only be INFERRED, because nothing on
+`POST /spectra/api/ownership/handover` recorded who asked.
+**`spectra/services/caller_identity.py`'s module docstring is the binding
+statement.** Every call to that route now logs peer address:port, User-Agent
+and — for a caller on this host — the pid, cwd and (redacted) command line of
+the process that actually asked, at WARNING, BEFORE anything is decided, so a
+REFUSED take is named too. Four things:
+
+- **RESOLVE THE CLIENT END OF THE SOCKET, NEVER THE SERVER'S.** River built
+  the same capture on her own endpoint and it printed the pid/cmdline of her
+  own LISTENING process — it named herself every time and identified nobody.
+  The two ends of one connection are mirrors, so `find_socket_inode` matches
+  `local == the peer AND rem == the server` in `/proc/net/tcp{,6}`, then walks
+  `/proc/<pid>/fd/*` for that inode. A lookup keyed on the other end is the
+  defect; `tests/test_handover_caller_logging.py` asserts the discriminating
+  pair (the resolved pid IS a known child's and IS NOT this process's own),
+  and was verified RED against a re-introduced wrong-side lookup.
+- **A CALLER THAT CANNOT BE RESOLVED IS SAID SO, NEVER GUESSED.** A remote
+  peer has no pid here; printing a local one is River's failure inverted.
+  Each unresolvable case gets its OWN sentence (remote / socket already
+  closed / rewritten in between / no peer at all).
+- **A BEST-EFFORT LOOKUP OFF THE LOOP MUST BE A *DAEMON* THREAD, not
+  `asyncio.to_thread`** — measured, and it generalizes past this module:
+  `to_thread` runs on the loop's default executor, whose threads are JOINED at
+  loop shutdown, so a lookup abandoned at its budget still held the process
+  (a deliberately wedged one held a test teardown 30 s after the route had
+  already returned in 200 ms). On his box that is a wedged read sitting in
+  front of a `spectra.service` restart — the thing a stuck room is recovered
+  with. A daemon thread is joined by nobody.
+- **NO SECRETS.** Headers come from an explicit allowlist (`SAFE_HEADERS`),
+  never a loop over what arrived, so `Authorization` cannot leak by accident;
+  and the cmdline is redacted PER ARGV ELEMENT (`redact_argv`) — a
+  `-H 'Authorization: Bearer <token>'` is two words inside one argument, so
+  the mask has to be greedy within it, and redacting the joined string ate the
+  `-d` payload after it.
+
+Observation only: it reads /proc and logs, changes no ownership behaviour and
+writes nothing. The route function keeps a defaulted `request` parameter so it
+stays callable as a plain coroutine (several tests drive it that way); an
+in-process call has no peer and is logged as exactly that.
+
 A third owner state, `released` (`fx/light_ownership.RELEASED`), is the
 owner's panic handle — `spectra/services/release.py`, `POST
 /spectra/api/ownership/release`, the SPECTRA UI's red button
