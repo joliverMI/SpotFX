@@ -1219,3 +1219,100 @@ against that commit.
     `tests/test_repair_copy_carrier_active_flags.py` +
     `scripts/repair_copy_carrier_active_flags.py` (the one-time catch-up for
     a config that already carries either residue shape).
+
+38. `effects/blackhole.py`: THE CHARGE IS CALIBRATED TO A MEASURED
+    VISIBLE-BLOB TARGET (TUNING CHANGE on top of deviation #20, PR
+    fm/black-hole-charge-more-pronounced-steady; the DROP and the STRIP are
+    both untouched). His ask, verbatim: "the black hole charge should be
+    more pronounced. there should be a steady increase in particles
+    following. it should be about 80 percent as bright in terms of blob
+    count not in the event horizon (visible blobs) as the drop by the end
+    of the charge. then, that rate continues as the lull reaches the point
+    where the event horizon has fully taken the screen. then the drop is as
+    before"
+
+    `CHARGE_SPAWN_RATE_MAX` 12.0 → 45.0 and `CHARGE_SPAWN_CURVE` 2.0 → 1.2.
+    Nothing else moved: the mechanism, the accumulator, the `ignore_cap`
+    tag, the fall-speed ramp, the halo, the lull's own fill and hold, and
+    every drop constant are #20's and are unchanged.
+
+    THESE TWO NUMBERS ARE NOT FREE PARAMETERS. They are whatever lands the
+    MEASURED count of visible blobs on his target, and the quantity is
+    defined once: a live particle NOT captured by the horizon (`p_cap < 0`
+    — his own "not in the event horizon"; a captive is pinned on the ring
+    and blending to the horizon colour) and inside the panel's own light
+    field (`r <= HEX_FILL_RADIUS`; past that bound his crystal has no real
+    cells, so a particle there is not on screen). It is a COUNT, never a
+    luminance — he said "in terms of blob count" twice. Spawn rate
+    integrated over time is a DIFFERENT quantity: blobs are captured and
+    retire, so the live population is Little's law — count ≈ rate × how
+    long a blob stays visible — and the charge's own accelerating fall
+    speed keeps shortening that time. Hence the rate had to rise far past
+    the 12/s #20 records before the COUNT moved at all.
+
+    THE DENOMINATOR IS THE DROP'S OWN PAYOFF, `PHASE_BURST_N` (48),
+    measured at exactly 48 visible payoff blobs in every condition tested.
+    It is deliberately NOT the drop's TOTAL visible peak: entering "drop"
+    releases every captive (`_phase_step` sets `p_cap = -1` on the whole
+    population), so that total is the 48-blob payoff PLUS everything the
+    charge and lull just fed the horizon — measured at 81–118 before this
+    change and 148–199 after, with the ratio pinned near 0.2 throughout. An
+    80% target anchored on it is a divergent fixed point, not a target. The
+    knock-on is real and is reported rather than hidden: a more pronounced
+    charge hands the drop a bigger population to release, which is what
+    "more pronounced" costs; whether the payoff should scale with it is his
+    call and nothing here assumes it should.
+
+    MEASURED, across his real `spawn_rate` binding (trigger_intensity →
+    0.5–2.0, plus a loud-music proxy) and 2/4/8 s charges: charge-end
+    30–43 visible blobs, ratio 0.62–0.90, mean 0.81 (rendered runs with a
+    live rng, so they move a blob or two between runs — the spec asserts a
+    band around the mean, never a figure). The build is monotone
+    at every sampled point and its increments are even (a 4 s charge at his
+    fallback steps 2 → 4 → 13 → 22 → 30 → 41), which is the "steady
+    increase" half; at 12.0/2.0 the same measurement read
+    `[15, 14, 14, 14, 15, 19]`, increments `[-1, 0, 0, 1, 4]` — a charge
+    that delivered 4 of its 19 blobs in the last fifth and was otherwise
+    flat. `CURVE` below 2.0 is what moves the build off the back of the
+    charge; it is still above 1.0, so the rate still accelerates from ~0
+    and never steps up ("not all at once", #20's own point). The low end of
+    the ratio band is the SHORT charge and is inherent: a blob stays
+    visible for about a second, so a 2 s charge only has time to build a
+    population for its second half.
+
+    THE LULL CLAUSE IS UNCHANGED AND VERIFIED, not rebuilt.
+    `_phase_spawn_rate` already carried the charge's final rate across the
+    phase seam and stopped at `LULL_FILL_PROGRESS`, which IS his "the point
+    where the event horizon has fully taken the screen" (`_horizon_radius`
+    reaches `HEX_FILL_RADIUS` there — measured 1.178 against the hex
+    bound 1.128). Measured: 39/s at the charge's tail → 44/s through the
+    lull's first half → 0 blobs formed after the fill. What the lull CANNOT
+    do, stated rather than claimed away: keep the visible COUNT climbing. A
+    free blob lives from the hex boundary down to the horizon, and the
+    lull's expansion collapses that distance to zero, so the count reaches
+    0 at the fill however hard the rate is driven (measured 37 → 27 → 14 →
+    6 → 0). The RATE continuing — the horizon still swallowing blobs at the
+    charge's full rate right up to the moment it closes — is the part that
+    is real, and it is the rate that is asserted.
+
+    SCOPED TO THE 2D MATRIX EFFECT. `effects/blackhole1d.py` keeps its own
+    12.0/2.0: the strip has no event horizon and no capture at all (its
+    blobs fall to the centre and die — there is no `p_cap`), so "blob count
+    not in the event horizon" has no referent there, its visible population
+    is whatever is crossing a 1 px sample ring rather than a field, its own
+    drop payoff is separately scaled (`PHASE_BURST_N` = 12), and 45
+    blobs/second on a 7–17 pixel strip is mush rather than a build.
+
+    Evidence: `scripts/check_blackhole_charge_target.py` (the whole
+    condition sweep, the denominator with its discrepancy spelled out, the
+    steadiness, the lull seam, and a BEFORE/AFTER driving the same drop
+    under 12.0/2.0 and under 45.0/1.2 — the payoff's blob count and the
+    horizon's post-burst ease-back identical frame for frame) and
+    `tests/test_blackhole_charge_target.py` (the same claims as
+    assertions; the two calibration claims verified RED against the
+    previous constants set back in the module source). #20's own spec
+    `scripts/check_blackhole_charge_lull.py` still passes: two assertions
+    there had hardcoded the 12/s scale and now read the constants instead —
+    the per-frame accumulator bound is `CHARGE_SPAWN_RATE_MAX × DT_MAX`,
+    and its §8 strip check was comparing the STRIP's measured rate against
+    the 2D module's ceiling, a cross-module mistake this change exposed.
