@@ -405,6 +405,19 @@ class Settings(BaseSettings):
     xcorr_monitor_spike_halfwin_ms: int = 2500
     xcorr_monitor_demote_q: float = 0.40
     xcorr_monitor_accum_decay: float = 0.5
+    # Keep searching (2026-09-15, the Admiral: "if it has low confidence, it
+    # should keep spike detection on to try to get better"). When the planned
+    # windows run out WITHOUT a hard lock, the play no longer stops: it keeps
+    # placing one spike-targeted window every interval through the ordinary
+    # per-window gates, and hands off to the post-lock path the moment one
+    # locks. It gives up — and only then reads as failed — after give_up_ms of
+    # song without a single usable measurement, in the song's last 30s (where
+    # no window is ever planned), or at once for a user-verified offset.
+    # services/xcorr_sweep.py KeepSearching is the binding statement. A play
+    # that locks never reaches it. False = the old stop-at-queue-drain exit.
+    xcorr_keep_searching_enabled: bool = True
+    xcorr_keep_searching_interval_ms: int = 5000
+    xcorr_keep_searching_give_up_ms: int = 45000
     # Phase 6: capture-gap rejection. A window (or monitor rolling check)
     # whose live span contains a consecutive-frame gap larger than this is
     # discarded/neutralized — np.interp would otherwise bridge the hole with

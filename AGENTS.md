@@ -7162,10 +7162,39 @@ that connects mid-song is never blind. Three things before touching any of it:
   The `offset_ms` it carries is a display copy with its own row in
   `docs/SPECTRA_TIMING_CONVENTIONS.md`'s master table.
 
-DELIBERATELY SEPARATE, filed as `spotfx-lock-early-window-exhaustion`: the
-U-Score planner packs every window into the first ~30 s, so a song that does
-not lock early gets no further attempts. That is why songs fail; this is only
-why nobody could see it.
+**A PLAY THAT DRAINS ITS PLANNED WINDOWS WITHOUT A HARD LOCK KEEPS SEARCHING
+(2026-09-15, `spotfx-lock-early-window-exhaustion`, the Admiral: "if it has
+low confidence, it should keep spike detection on to try to get better").**
+`services/xcorr_sweep.py`'s `KeepSearching` docstring is the binding
+statement. A song's planned windows can all sit near its start, and the loop
+used to `break` the moment that queue drained, so MAYDAY stopped 32 s into a
+4-minute song. It now places one spike-targeted window (`mismatch_spike`, the drift
+monitor's own placement) every 5 s through the ordinary per-window gates,
+hands off to the post-lock path on a lock, and gives up with a named reason
+— `nothing_to_find` (45 s of song, no usable measurement), `no_time_left`
+(the last 30 s, where no window is planned), `user_verified` — holding
+`_watching_uri` so the next poll cannot relaunch and overwrite "Lock failed"
+with "Not checked" (the pre-change sweep did exactly that). Four things
+before touching it:
+
+- **It is armed at ONE exit only**: planned queue empty AND
+  `_locked_via_stop` False. A play that ever locked — including a drift-monitor
+  recovery whose re-armed queue just drained — keeps its old exit, which is
+  what makes the early-lock and post-lock paths byte-identical.
+- **Evidence is a confirmation VOTE** (the evaluator's
+  `confirmation_shifts` grew), and a continued window may not re-measure more
+  than the U-Score planner's own 1 s of audio: the same seconds scored twice
+  would manufacture agreement out of one measurement.
+- **`tests/sweep_world_driver.py` drives the REAL `on_track_change` →
+  `_detect_loop_xcorr`** over a scripted world (only capture, math kernel,
+  engine and disk replaced) and can load the pinned pre-change module out of
+  git (`BASELINE_REF`); `tests/test_keep_searching.py` compares whole traces
+  against it. Reuse the driver for any future sweep-control-flow change
+  rather than modelling the loop.
+- The badge's Searching half fell out of the terminal-signal design by
+  construction; the one thing that did not was "Searching… 4/4" printing a
+  finished fraction on an unfinished search — hence `continued`/
+  `continued_windows`, added ONLY to plays that continue.
 
 ## `librosa_offset_ms` is unreliable — don't shift section/beat times by it
 

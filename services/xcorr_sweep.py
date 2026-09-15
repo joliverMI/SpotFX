@@ -226,6 +226,151 @@ class MismatchMonitor:
         self.state = "ok"
 
 
+KEEP_SEARCHING_NOTHING_TO_FIND = "nothing_to_find"
+KEEP_SEARCHING_NO_TIME_LEFT = "no_time_left"
+KEEP_SEARCHING_USER_VERIFIED = "user_verified"
+
+
+@dataclass
+class KeepSearchingConfig:
+    """Knobs for `KeepSearching`. `end_buffer_ms` is the planners' own
+    no-window tail (`auto_offset_service._XCORR_END_BUFFER_MS`,
+    `uscore_planner._END_BUFFER_MS`) and `max_overlap_ms` the U-Score
+    planner's `_MAX_OVERLAP_MS` — handed in / mirrored rather than tuned
+    separately, so a continued window lives by the same rules a planned one
+    does. `tests/test_keep_searching.py` asserts both still agree."""
+    enabled: bool = True
+    interval_ms: int = 5000
+    give_up_ms: int = 45000
+    end_buffer_ms: int = 30000
+    max_overlap_ms: int = 1000
+
+    @classmethod
+    def from_settings(cls, settings, *, end_buffer_ms: int) -> "KeepSearchingConfig":
+        return cls(
+            enabled=bool(getattr(settings, "xcorr_keep_searching_enabled", True)),
+            interval_ms=int(getattr(settings, "xcorr_keep_searching_interval_ms", 5000)),
+            give_up_ms=int(getattr(settings, "xcorr_keep_searching_give_up_ms", 45000)),
+            end_buffer_ms=int(end_buffer_ms),
+        )
+
+
+class KeepSearching:
+    """Continued search after the planned windows ran out WITHOUT a hard lock.
+
+    WHY (2026-09-15, the Admiral: "if it has low confidence, it should keep
+    spike detection on to try to get better"): a song's planned windows can
+    all sit near its start (the U-Score planner mandates four before 40s and
+    fills the rest only from windows that pass its uniqueness gates), and the
+    sweep used to end the moment that queue drained. MAYDAY,
+    2026-09-08: four windows in the first ~30s, `final offset=+1325ms
+    Q=0.39`, a far jump distrusted for want of prior agreement, grade F —
+    then `no reachable windows (pos=32611ms, dur=247339ms)` and silence for
+    the remaining three and a half minutes.
+
+    WHEN IT RUNS: only from the one exit where a play drains its planned
+    queue and has NOT hard-locked (`_locked_via_stop` False). A play that
+    locked — early, or after a drift-monitor recovery — never reaches it, so
+    the lock path and the post-lock drift monitor are untouched.
+
+    WHAT IT DOES: every `interval_ms` of song it asks for ONE spike-targeted
+    window — `xcorr_core.mismatch_spike`, the same placement the drift
+    monitor's recovery windows use — and the caller runs it through the
+    sweep's ordinary per-window evaluation. Every gate (winner pick, envelope
+    clip, snap stickiness, save gates, lock-and-stop) applies unchanged, so
+    "adopting a better lock" is exactly the engine's own strictly-better-Q
+    snap, and a hard lock hands the play to the normal post-lock path. Nothing
+    here touches an offset or a threshold: it decides WHEN to measure and
+    WHEN TO STOP, never what a measurement means.
+
+    A window must not re-measure audio an earlier window of this play already
+    measured (more than `max_overlap_ms` of overlap, the U-Score planner's own
+    cap): the same seconds scored twice would cast the same vote twice and
+    could manufacture agreement out of one measurement.
+
+    It is admitted like a planned window: the caller dispatches it once the
+    live clock passes its end plus the sweep's margin — the planned queue's
+    own readiness rule, compared the same way, with no offset applied.
+
+    IT TERMINATES, and each ending is a named give-up reason:
+      nothing_to_find — `give_up_ms` of song passed since the search started
+                        (or since its last usable measurement) without a
+                        single continued window casting a confirmation vote.
+                        A genuinely unlockable song lands here.
+      no_time_left    — the song reached its last `end_buffer_ms`, where no
+                        planned window is ever placed either.
+      user_verified   — the stored offset is pinned by the user, so the sweep
+                        can never move the engine: no better lock is
+                        reachable, and searching would only burn work.
+    A song that keeps producing usable measurements without ever locking
+    keeps trying until `no_time_left` — that is the ask, "keep trying across
+    the rest of the song", bounded by the song itself.
+    """
+
+    def __init__(self, cfg: KeepSearchingConfig, *, verification: str,
+                 started_ms: int, duration_ms: int,
+                 evaluated: list[tuple[int, int]]) -> None:
+        self.cfg = cfg
+        self.verification = verification
+        self.started_ms = int(started_ms)
+        self.duration_ms = int(duration_ms or 0)
+        self.evaluated: list[tuple[int, int]] = [(int(s), int(e)) for s, e in evaluated]
+        self.last_evidence_ms = self.started_ms
+        self.next_attempt_ms = self.started_ms + int(cfg.interval_ms)
+        self.pending: Optional[tuple[int, int]] = None
+        self.attempts = 0
+        self.windows_run = 0
+
+    def give_up_reason(self, t_now_ms: int) -> Optional[str]:
+        if self.verification == "user_verified":
+            return KEEP_SEARCHING_USER_VERIFIED
+        if t_now_ms >= self.duration_ms - self.cfg.end_buffer_ms:
+            return KEEP_SEARCHING_NO_TIME_LEFT
+        if t_now_ms - self.last_evidence_ms >= self.cfg.give_up_ms:
+            return KEEP_SEARCHING_NOTHING_TO_FIND
+        return None
+
+    def wants_window(self, t_now_ms: int) -> bool:
+        """True when it is time to place the next window."""
+        return self.pending is None and t_now_ms >= self.next_attempt_ms
+
+    def admits(self, win_start: int, win_end: int) -> bool:
+        if win_end <= win_start:
+            return False
+        for s, e in self.evaluated:
+            if min(win_end, e) - max(win_start, s) > self.cfg.max_overlap_ms:
+                return False
+        return True
+
+    def offer(self, t_now_ms: int, window: Optional[tuple[int, int]]) -> bool:
+        """One placement attempt. `window` is the spike-targeted candidate,
+        or None when the recent span had nothing to aim at. Returns True when
+        it was accepted and is now pending."""
+        self.attempts += 1
+        self.next_attempt_ms = int(t_now_ms) + int(self.cfg.interval_ms)
+        if window is None or not self.admits(int(window[0]), int(window[1])):
+            return False
+        self.pending = (int(window[0]), int(window[1]))
+        return True
+
+    def take_ready(self, t_now_ms: int, margin_ms: int) -> Optional[tuple[int, int]]:
+        """The pending window once the live clock has passed its end plus the
+        margin — the planned queue's readiness rule — else None."""
+        if self.pending is None or t_now_ms < self.pending[1] + margin_ms:
+            return None
+        ready, self.pending = self.pending, None
+        return ready
+
+    def note_window(self, t_now_ms: int, window: tuple[int, int], *,
+                    evidence: bool) -> None:
+        """A continued window was evaluated. `evidence` = it cast at least one
+        confirmation vote (a measurement cleared the global r threshold)."""
+        self.evaluated.append((int(window[0]), int(window[1])))
+        self.windows_run += 1
+        if evidence:
+            self.last_evidence_ms = int(t_now_ms)
+
+
 @dataclass
 class WindowOutcome:
     """Everything the caller needs to perform this window's side effects."""

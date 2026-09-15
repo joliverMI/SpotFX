@@ -64,6 +64,7 @@ from services.xcorr_core import (
     max_frame_gap_ms as _max_frame_gap_ms,
 )
 from services.xcorr_sweep import (
+    KeepSearching, KeepSearchingConfig,
     MismatchMonitor, MonitorConfig, SearchLadder, SweepConfig, SweepEvaluator,
 )
 from services.xcorr_evidence import EvidenceAccumulator
@@ -1051,6 +1052,15 @@ class AutoOffsetService:
         monitor_mode = False
         _mon_next_ms = 0
         pending_dynamic: Optional[tuple[int, int]] = None
+        # Keep searching (xcorr_sweep.KeepSearching is the binding statement):
+        # armed only where the planned queue drains without a hard lock.
+        _keep_cfg = KeepSearchingConfig.from_settings(
+            settings, end_buffer_ms=_XCORR_END_BUFFER_MS)
+        keep: Optional[KeepSearching] = None
+        # Why the continued search stopped. None = it never ran, or it was
+        # still running when the loop ended some other way (song change,
+        # capture end) — only a real give-up keeps this play from relaunching.
+        _keep_gave_up: Optional[str] = None
 
         capture.start()
         try:
@@ -1311,6 +1321,86 @@ class AutoOffsetService:
                         _mon_next_ms = frame.timestamp_ms + _mon_cfg.interval_ms
                     continue
 
+                # ── Keep searching (planned queue spent, no hard lock) ───────
+                # Only ever armed by the drain exit below. One spike-targeted
+                # window per interval, run through the ordinary per-window
+                # gates; a lock hands the play to the post-lock path exactly
+                # like a planned-window lock, and a give-up ends the loop.
+                if keep is not None:
+                    _why = keep.give_up_reason(frame.timestamp_ms)
+                    if _why is not None:
+                        _keep_gave_up = _why
+                        logger.info(
+                            "Auto-offset xcorr: keep-searching gave up (%s) at %dms after "
+                            "%d extra window(s) — best %+dms Q=%.2f for %s",
+                            _why, frame.timestamp_ms, keep.windows_run,
+                            evaluator.best_offset, evaluator.best_quality, uri,
+                        )
+                        break
+                    _kw = keep.take_ready(frame.timestamp_ms, _XCORR_MARGIN_MS)
+                    if _kw is not None:
+                        _votes_before = len(evaluator.confirmation_shifts)
+                        locked = await _run_window(_kw[0], _kw[1])
+                        keep.note_window(
+                            frame.timestamp_ms, _kw,
+                            evidence=len(evaluator.confirmation_shifts) > _votes_before)
+                        if locked:
+                            logger.info(
+                                "Auto-offset xcorr: keep-searching locked at %dms after "
+                                "%d extra window(s) for %s",
+                                frame.timestamp_ms, keep.windows_run, uri,
+                            )
+                            keep = None
+                            _locked_via_stop = True
+                            lock_state.note_outcome(
+                                uri, locked=True, offset_ms=int(evaluator.best_offset),
+                                quality=float(evaluator.best_quality))
+                            if _lock_song_ms is None:
+                                _lock_song_ms = int(frame.timestamp_ms)
+                            if not _monitor_active:
+                                break
+                            monitor_mode = True
+                            window_queue = []
+                            _mon_next_ms = frame.timestamp_ms + _mon_cfg.interval_ms
+                        continue
+                    if keep.wants_window(frame.timestamp_ms):
+                        try:
+                            from main import engine as _eng_keep
+                            _keep_off = int(_eng_keep._shape_offset_ms)
+                        except Exception:
+                            _keep_off = 0
+                        _kspike = await asyncio.to_thread(
+                            _mismatch_spike,
+                            stored_ts, stored_bands, frames,
+                            engine_offset_ms=_keep_off,
+                            t_now_ms=frame.timestamp_ms,
+                            lookback_ms=_mon_cfg.spike_lookback_ms,
+                            halfwin_ms=_mon_cfg.spike_halfwin_ms,
+                        )
+                        if keep.offer(frame.timestamp_ms,
+                                      (_kspike[0], _kspike[1]) if _kspike else None):
+                            _kws, _kwe, _kspike_ms, _kstrength = _kspike
+                            logger.info(
+                                "Auto-offset xcorr: keep-searching window [%d–%d]ms at spike "
+                                "%dms (strength=%.2f) for %s",
+                                _kws, _kwe, _kspike_ms, _kstrength, uri,
+                            )
+                            try:
+                                from services.websocket_manager import ws_manager
+                                asyncio.create_task(ws_manager.broadcast({
+                                    "type":      "xcorr_spike",
+                                    "uri":       uri,
+                                    "t_ms":      frame.timestamp_ms,
+                                    "spike_ms":  _kspike_ms,
+                                    "win_start": _kws,
+                                    "win_end":   _kwe,
+                                    "strength":  round(float(_kstrength), 3),
+                                    "source":    "keep_searching",
+                                }))
+                            except Exception:
+                                pass
+                    continue
+
                 if not window_queue:
                     if not _monitor_active:
                         break          # flags-off: byte-identical exit
@@ -1344,7 +1434,13 @@ class AutoOffsetService:
                     _mon_next_ms = frame.timestamp_ms + _mon_cfg.interval_ms
                     continue
 
-                if not window_queue:
+                # The planned queue is spent and this play never hard-locked:
+                # keep searching instead of stopping (the MAYDAY defect). A
+                # play that ever locked — incl. a drift-monitor recovery whose
+                # re-armed queue just drained — keeps its old exit below.
+                _keep_next = (not window_queue and not _locked_via_stop
+                              and _keep_cfg.enabled)
+                if not window_queue and not _keep_next:
                     if not _monitor_active:
                         break          # flags-off: byte-identical exit
                     monitor_mode = True
@@ -1366,7 +1462,31 @@ class AutoOffsetService:
                     pass
 
                 if not window_queue:
-                    break
+                    if not _keep_next:
+                        break
+                    keep = KeepSearching(
+                        _keep_cfg, verification=verification,
+                        started_ms=int(frame.timestamp_ms),
+                        duration_ms=int(meta.duration_ms or 0),
+                        evaluated=all_planned,
+                    )
+                    _why = keep.give_up_reason(frame.timestamp_ms)
+                    if _why is not None:
+                        _keep_gave_up = _why
+                        logger.info(
+                            "Auto-offset xcorr: planned windows spent without a hard lock "
+                            "and no better lock is reachable (%s) — best %+dms Q=%.2f for %s",
+                            _why, evaluator.best_offset, evaluator.best_quality, uri,
+                        )
+                        break
+                    logger.info(
+                        "Auto-offset xcorr: planned windows spent without a hard lock "
+                        "(best %+dms Q=%.2f) — keep searching the rest of the song "
+                        "(every %dms, give up after %dms without a usable measurement) for %s",
+                        evaluator.best_offset, evaluator.best_quality,
+                        _keep_cfg.interval_ms, _keep_cfg.give_up_ms, uri,
+                    )
+                    lock_state.note_continued_search(uri)
 
         except asyncio.CancelledError:
             pass
@@ -1378,7 +1498,11 @@ class AutoOffsetService:
         if evaluator.n_measurements == 0:
             logger.info("Auto-offset xcorr: no measurements obtained for %s", uri)
             lock_state.note_outcome(uri, locked=False, reason="no_measurements")
-            self._watching_uri = None
+            # A continued search that GAVE UP has already spent the rest of
+            # the song's chances; relaunching would only find "no reachable
+            # windows" and overwrite the failed badge with "Not checked".
+            if _keep_gave_up is None:
+                self._watching_uri = None
             self._task = None
             return
 
@@ -1401,6 +1525,7 @@ class AutoOffsetService:
         lock_state.note_outcome(
             uri, locked=_locked_via_stop,
             offset_ms=int(final.best_offset), quality=float(final.best_quality),
+            reason=_keep_gave_up,
         )
 
         # ── OLD-anti-correlated detector ───────────────────────────────────
@@ -1487,7 +1612,10 @@ class AutoOffsetService:
         # spawn until the song actually changes. Without this, the task ends
         # → guard sees no watch → next poll starts a new xcorr → lock-and-stop
         # fires again on the next ~3 windows → endless loop.
-        if not _locked_via_stop:
+        # A keep-searching give-up holds the watch for the same reason: it
+        # already searched the rest of the song, so a relaunch could only
+        # report "no reachable windows" over the badge's honest "Lock failed".
+        if not _locked_via_stop and _keep_gave_up is None:
             self._watching_uri = None
         self._task = None
 

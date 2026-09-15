@@ -30,11 +30,18 @@
  *           engine keeps looking (phase still `searching`, numbers attached)
  *           stays "Searching…". The badge is keyed off "is it still looking",
  *           never off a first sweep's window exhaustion.
+ *   NINE  — KEEP SEARCHING (2026-09-15): the engine now keeps searching past
+ *           its plan. A `continued` record reads "Searching…" with no spent
+ *           fraction (the PRE-CHANGE badge, transpiled from the pinned git
+ *           ref, is driven over the same record and printed "Searching… 4/4"),
+ *           never "Lock failed" or "Lock idle"; each give-up reason reads
+ *           "Lock failed" in words; and the record shape the backend emits is
+ *           read out of services/lock_state.py.
  *
  * Run: node scripts/check_lock_badge_states.mjs
  */
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -103,9 +110,13 @@ console.log('\nTWO — THE INVARIANT: exactly one input may say "Lock idle"');
     for (const storedOffsetMs of offsets) {
       for (const monitor of monitors) {
         for (const present of [true, false]) {
-          const lock = present && phase ? rec(phase) : null;
-          const label = lockBadge({ monitor, nowMs: NOW, lock, storedOffsetMs }).label;
-          if (label === 'Lock idle') idle.push({ phase, storedOffsetMs, present });
+          for (const continued of [undefined, true]) {
+            const lock = present && phase
+              ? rec(phase, continued ? { continued, continued_windows: 3 } : {})
+              : null;
+            const label = lockBadge({ monitor, nowMs: NOW, lock, storedOffsetMs }).label;
+            if (label === 'Lock idle') idle.push({ phase, storedOffsetMs, present });
+          }
         }
       }
     }
@@ -201,13 +212,68 @@ console.log('\nEIGHT — the phase vocabulary matches services/lock_state.py');
        `lock_state.py still spells ${name} "${word}"`);
     ok(ts.includes(`'${word}'`), `lockBadge.ts still tests for '${word}'`);
   }
+  const backend = [py, ...['services/auto_offset_service.py', 'services/xcorr_sweep.py']
+    .map((f) => readFileSync(path.join(REPO, f), 'utf8'))].join('\n');
   for (const reason of ['no_shape', 'capture_in_progress', 'setlist_disabled',
-                        'no_windows', 'no_measurements']) {
-    ok(py.includes(`"${reason}"`) || readFileSync(
-         path.join(REPO, 'services/auto_offset_service.py'), 'utf8').includes(`"${reason}"`),
-       `the reason "${reason}" is emitted by the backend`);
+                        'no_windows', 'no_measurements',
+                        'nothing_to_find', 'no_time_left', 'user_verified']) {
+    ok(backend.includes(`"${reason}"`), `the reason "${reason}" is emitted by the backend`);
     ok(ts.includes(`'${reason}'`), `and rendered in words by the badge`);
   }
+}
+
+console.log('\nNINE — keep searching: "Searching…" while it works past the plan, failed only on give-up');
+{
+  // The pinned pre-change badge (PR #266), transpiled the same way.
+  const BASELINE_REF = '4795fd3a69391e0577bdfc8a2bc8e597e4fd1910';
+  const oldTs = path.join(tmp, 'lockBadge.baseline.ts');
+  const oldJs = path.join(tmp, 'lockBadge.baseline.mjs');
+  writeFileSync(oldTs, execFileSync('git', ['show', `${BASELINE_REF}:web/src/components/lockBadge.ts`],
+    { cwd: REPO, encoding: 'utf8' }));
+  execFileSync('npx', ['esbuild', oldTs, '--format=esm', '--log-level=warning', `--outfile=${oldJs}`], {
+    cwd: path.join(REPO, 'web'), stdio: ['ignore', 'ignore', 'inherit'],
+  });
+  const { lockBadge: preChangeBadge } = await import(oldJs);
+
+  // MAYDAY past its plan: 4 planned windows spent, 3 more measured, the best
+  // it has is still the distrusted +1325 at Q=0.39.
+  const pastPlan = rec('searching', {
+    windows_total: 4, windows_done: 7, offset_ms: 1325, quality: 0.39,
+    continued: true, continued_windows: 3,
+  });
+  const input = { monitor: null, nowMs: NOW, lock: pastPlan, storedOffsetMs: 1325 };
+  eq(preChangeBadge(input).label, 'Searching… 4/4',
+     'PRE-CHANGE: a search past its plan printed a finished fraction');
+  eq(badge(pastPlan).label, 'Searching…', 'NOW: it reads plain "Searching…"');
+  ok(badge(pastPlan).color === badge(rec('searching')).color, 'in the searching colour');
+  ok(badge(pastPlan).title.includes('still searching the rest of this song'),
+     'the tooltip says it is working past the plan');
+  ok(badge(pastPlan).title.includes('3 more windows measured'), 'and how far it has got');
+  ok(badge(pastPlan).title.includes('+1325ms'), 'and the best it has so far');
+  eq(badge({ ...pastPlan, continued_windows: 1 }).title.includes('1 more window measured'), true,
+     'one window is singular');
+  eq(badge({ ...pastPlan, continued_windows: 0 }).label, 'Searching…',
+     'the instant it goes past the plan, before a new window lands');
+  ok(!badge(pastPlan).title.includes('planned windows measured.'),
+     'it never claims "N of M planned windows" for a spent plan');
+  eq(badge(rec('searching', { windows_done: 2 })).label, 'Searching… 2/4',
+     'a search still inside its plan keeps its fraction');
+
+  for (const [reason, words] of [
+    ['nothing_to_find', 'nothing usable turned up'],
+    ['no_time_left', 'last stretch of the song'],
+    ['user_verified', 'user-verified'],
+  ]) {
+    const gaveUp = rec('unlocked', { continued: true, continued_windows: 9, reason });
+    eq(badge(gaveUp).label, 'Lock failed', `a give-up (${reason}) reads "Lock failed"`);
+    ok(badge(gaveUp).title.includes(words), `and says why: "${words}"`);
+  }
+
+  // The record shape the badge reads is the one the backend writes.
+  const py = readFileSync(PY, 'utf8');
+  ok(/nxt\["continued"\] = True/.test(py), 'lock_state.py sets `continued`');
+  ok(/"continued_windows"/.test(py), 'lock_state.py counts `continued_windows`');
+  ok(/def note_continued_search\(/.test(py), 'through note_continued_search');
 }
 
 rmSync(tmp, { recursive: true, force: true });

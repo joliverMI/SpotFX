@@ -47,6 +47,19 @@ here; an engine that instead wants to declare itself done calls
 `note_search_ended()` explicitly. Never re-key this off window
 exhaustion, a `lock_history` write or a first-sweep boundary.
 
+THAT ENGINE NOW EXISTS (2026-09-15, `xcorr_sweep.KeepSearching`): when the
+planned windows run out without a hard lock the sweep keeps searching the
+rest of the song in the SAME task, so the phase stays `searching` by
+construction. The one thing that did not fall out for free was the words:
+a badge reading "Searching… 4/4" says the plan is finished, which is the
+opposite of what is happening. `note_continued_search()` marks the record
+`continued` (and counts `continued_windows`), and the badge drops the
+spent fraction. Both keys are ADDED only to a play that actually continues,
+so every other play's record — an early lock's included — is exactly the
+shape it was. When the continued search gives up, the sweep hands its
+reason (`nothing_to_find` / `no_time_left` / `user_verified`) to
+`note_outcome()`, and task-end resolves the badge exactly as before.
+
 PUSH PLUS POLL, ONE RECORD. `note_*()` broadcasts a `lock_state` message
 so a transition shows immediately, and `services/websocket_manager.py`'s
 per-poll `broadcast_state` carries the SAME record (filtered to the
@@ -163,6 +176,23 @@ def note_window_done(uri: str) -> None:
         return
     nxt = dict(rec)
     nxt["windows_done"] = int(rec.get("windows_done", 0)) + 1
+    if rec.get("continued"):
+        nxt["continued_windows"] = int(rec.get("continued_windows", 0)) + 1
+    nxt["at_ms"] = int(time.time() * 1000)
+    _publish(nxt)
+
+
+def note_continued_search(uri: str) -> None:
+    """The planned windows ran out without a hard lock and the engine is
+    STILL searching `uri` — the rest of the song, not the plan. Ignored
+    unless a search for this uri is the published record: this refines a
+    live search, it never revives a resolved one."""
+    rec = _record
+    if rec is None or rec.get("uri") != uri or rec.get("phase") != PHASE_SEARCHING:
+        return
+    nxt = dict(rec)
+    nxt["continued"] = True
+    nxt["continued_windows"] = int(rec.get("continued_windows", 0))
     nxt["at_ms"] = int(time.time() * 1000)
     _publish(nxt)
 
@@ -180,6 +210,7 @@ def note_outcome(uri: str, *, locked: bool, offset_ms: Optional[int] = None,
     rec = _record
     if rec is None or rec.get("uri") != uri:
         return
+    carried = {k: rec[k] for k in ("continued", "continued_windows") if k in rec}
     _publish(_new(
         uri, PHASE_LOCKED if locked else rec.get("phase", PHASE_SEARCHING),
         windows_total=int(rec.get("windows_total", 0)),
@@ -188,6 +219,7 @@ def note_outcome(uri: str, *, locked: bool, offset_ms: Optional[int] = None,
         quality=None if quality is None else round(float(quality), 3),
         reason=reason,
         play_type=rec.get("play_type"),
+        **carried,
     ))
 
 
