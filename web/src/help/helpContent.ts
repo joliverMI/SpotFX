@@ -125,9 +125,10 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         id: 'topbar-status',
         title: 'Status readouts',
-        keywords: 'scene color set chip lock locked suspect recovering idle song artist truncated progress duration intensity score color coded',
+        keywords: 'scene color set chip lock locked suspect recovering idle searching failed unlocked not checked unknown song artist truncated progress duration intensity score color coded',
         body: [
-          'Chips show the active Scene and Color Set (dot = marker color; hover the scene chip for the active Scene Group). The lock indicator is the audio-sync monitor: green Locked, amber Suspect, red Recovering; gray "Lock idle" means an offset is held but the matcher is quiet, "No lock" means no live match data yet.',
+          'Chips show the active Scene and Color Set (dot = marker color; hover the scene chip for the active Scene Group).',
+          'The lock indicator says what the audio-sync matcher is doing with THIS song. While it is watching a locked song it reports live: green Locked, amber Suspect, red Recovering. Otherwise it says where the song got to — blue "Searching… 2/4" (still looking, and how many planned windows it has measured), red "Lock failed" (it finished searching and never reached a lock, so triggers are firing on whatever offset was already stored), gray "Lock idle" (this song locked and the matcher has gone quiet — the only state that means all is well), gray "Not checked" (no sweep ran this play; hover for why, e.g. the Set List has xcorr turned off), gray "No lock" (nothing stored for this song at all) and gray "Lock unknown" (nothing has reported yet; it resolves on the next poll). Hover it for the detail, including the best offset it found.',
           'The right side shows the current track ("Title — Artist", truncated when long) and position / duration.',
           'The ⚡ score is the intensity of the last fired trigger (0–100), color-coded cool blue (low) → hot red (high). It clears on track change.',
         ],

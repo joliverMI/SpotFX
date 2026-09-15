@@ -123,6 +123,17 @@ class WebSocketManager:
                 "context_type": track.context_type,
             }
         payload["timing"] = state.timing or {}
+        # Sync-lock lifecycle for the TopBar badge — the PUSH's backstop, not a
+        # second source of truth: `services/lock_state.py` also broadcasts each
+        # transition, and both write the one store field. Filtered to the track
+        # actually playing, so a record for the previous song is never rendered
+        # against this one. None when nothing is known (an honest unknown).
+        try:
+            from services import lock_state as _lock_state
+            payload["lock_state"] = _lock_state.for_uri(
+                track.spotify_uri if track else None)
+        except Exception:
+            payload["lock_state"] = None
         # Last Scene Update — the scene the fixed Update/Reset Scene events act on.
         if state.last_scene_update_id:
             try:
