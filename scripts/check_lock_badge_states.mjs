@@ -37,8 +37,8 @@
  *           never "Lock failed" or "Lock idle"; and each give-up reason reads
  *           "Lock failed" in words — claiming it "kept searching" only when
  *           the record says it did (`continued`), never for a give-up the
- *           moment the plan ran out. The records themselves are the ones
- *           tests/test_keep_searching.py captures from the real sweep.
+ *           moment the plan ran out. The records are hand-built to mirror
+ *           the shape services/lock_state.py publishes.
  *
  * Run: node scripts/check_lock_badge_states.mjs
  */

@@ -50,20 +50,19 @@ BASELINE_REF = "4795fd3a69391e0577bdfc8a2bc8e597e4fd1910"
 FRAME_MS = 100
 
 
-def load_baseline_module() -> ModuleType:
-    """`services/auto_offset_service.py` as of BASELINE_REF, as its own module.
+def load_baseline_module(path: str = "services/auto_offset_service.py") -> ModuleType:
+    """`path` as of BASELINE_REF, as its own module.
     Raises (never skips) when git cannot produce it: a byte-identity proof
     that quietly skips reads exactly like one that passed."""
     src = subprocess.run(
-        ["git", "show", f"{BASELINE_REF}:services/auto_offset_service.py"],
+        ["git", "show", f"{BASELINE_REF}:{path}"],
         cwd=REPO, capture_output=True, text=True, check=True,
     ).stdout
-    name = "auto_offset_service_baseline_4795fd3"
+    name = f"{Path(path).stem}_baseline_4795fd3"
     spec = importlib.util.spec_from_loader(name, loader=None)
     mod = importlib.util.module_from_spec(spec)
-    mod.__file__ = str(REPO / "services" / "auto_offset_service.py")
-    exec(compile(src, f"<{BASELINE_REF[:7]}:services/auto_offset_service.py>", "exec"),
-         mod.__dict__)
+    mod.__file__ = str(REPO / path)
+    exec(compile(src, f"<{BASELINE_REF[:7]}:{path}>", "exec"), mod.__dict__)
     return mod
 
 
@@ -98,6 +97,13 @@ class World:
     # ones (their timestamps) finds: (offset_ms, match_r, match_q) or None.
     anchors: list[dict] = field(default_factory=list)
     anchor_match: Optional[Callable[[list[int]], Optional[tuple[int, float, float]]]] = None
+    # The stored shape's raw rms bands as a function of their timestamps (what
+    # the U-Score planner reads). None = the same ramp the loop's *_sq bands
+    # carry.
+    raw_band: Optional[Callable[[np.ndarray], np.ndarray]] = None
+    # What a free search finds at a window start INSTEAD of the truth — a beat
+    # twin — as (offset_ms, r), or None to find the truth as usual.
+    twin: Optional[Callable[[int], Optional[tuple[int, float]]]] = None
 
 
 def mayday_world(**over) -> World:
@@ -341,7 +347,7 @@ def run_world(mod: ModuleType, world: World, monkeypatch, tmp_path: Path, *,
     stored_ts = np.arange(0, world.duration_ms + FRAME_MS, FRAME_MS, dtype=float)
     npz = _Npz({"timestamps_ms": stored_ts})
     for b in ("rms_total", "rms_low", "rms_mid", "rms_high"):
-        npz[b] = stored_ts.copy()
+        npz[b] = stored_ts.copy() if world.raw_band is None else world.raw_band(stored_ts)
         npz[b + "_sq"] = stored_ts.copy()
     monkeypatch.setattr(np, "load", lambda _p, *a, **k: npz)
 
@@ -389,6 +395,10 @@ def run_world(mod: ModuleType, world: World, monkeypatch, tmp_path: Path, *,
     def k_xcorr(_ts, _bands, _frames, ws_, we_, *, search_ms, old_r=None, tempo_bpm=None):
         trace.kernel.append(("xcorr_window", int(ws_), int(we_)))
         trace.lock_during.append(lock_state.for_uri(URI))
+        if world.twin is not None:
+            found = world.twin(int(ws_))
+            if found is not None:
+                return (int(found[0]), float(found[1]))
         r, _d = world.clarity(int(ws_))
         return (world.truth(int(ws_)), r) if r >= 0.5 else None
 

@@ -33,6 +33,9 @@ math kernel, the trigger engine and disk are replaced.
           still reads live state exactly as the pre-change sweep does.
   EIGHT — anchor matching stays a second adoption path during the continued
           search.
+  NINE  — a continued window carries the envelope the U-Score planner assigns
+          a window at that position, so a beat twin cannot be snapped, saved
+          or locked; the planner's own output is unchanged by sharing it.
 
 Timing sign conventions: this change decides WHEN and HOW LONG the search
 runs, never what a measurement means. TWO is the proof — every engine snap,
@@ -478,3 +481,137 @@ def test_without_the_anchor_the_same_play_never_locks(new, monkeypatch, tmp_path
     assert t.history[-1]["locked"] is False
     assert t.final_lock_state["phase"] == lock_state.PHASE_UNLOCKED
     assert t.final_lock_state["reason"] == KEEP_SEARCHING_NO_TIME_LEFT
+
+
+# ── NINE — a continued window carries the planner's envelope ────────────────
+
+TWIN_PERIOD_MS = 1000
+TWIN_TRUTH_MS = 700
+
+
+def _beat_periodic(ts):
+    """A pulse every TWIN_PERIOD_MS that grows slowly across the song: each
+    stretch looks almost exactly like the one a period away, which is what a
+    beat twin is to the matcher and to the planner's envelope alike."""
+    import numpy as np
+    phase = np.mod(ts, TWIN_PERIOD_MS)
+    return 0.2 + (1.0 + ts / 300_000.0) * np.exp(
+        -((phase - TWIN_PERIOD_MS / 2) ** 2) / (2 * 150.0 ** 2))
+
+
+def _twin_world() -> d.World:
+    """A low-confidence play whose engine has snapped to the true offset
+    (Q 0.6, below the 0.70 lock bar). Past the planned windows a free search
+    is fooled by the beat one period later and reports it with r 0.95."""
+    return d.World(
+        duration_ms=150_000,
+        windows=[(10_000, 15_000), (16_000, 21_000), (22_000, 27_000), (28_000, 33_000)],
+        loaded_offset_ms=TWIN_TRUTH_MS, truth=lambda _ms: TWIN_TRUTH_MS,
+        clarity=lambda _ms: (0.6, 1.0),
+        raw_band=_beat_periodic,
+        twin=lambda ms: (TWIN_TRUTH_MS + TWIN_PERIOD_MS, 0.95) if ms >= 30_000 else None,
+    )
+
+
+def _twin_snaps(t: d.Trace) -> list[tuple]:
+    return [c for c in t.engine.calls
+            if c[0] == "apply_save" and c[2] == TWIN_TRUTH_MS + TWIN_PERIOD_MS]
+
+
+def test_the_twin_world_has_a_narrow_envelope_where_the_search_continues():
+    import numpy as np
+    from services import uscore_planner
+    world = _twin_world()
+    ts = np.arange(0, world.duration_ms + d.FRAME_MS, d.FRAME_MS, dtype=float)
+    bands = uscore_planner.normalized_song_bands(
+        ts, {k: world.raw_band(ts) for k in ("rms_total", "rms_low", "rms_mid", "rms_high")},
+        world.duration_ms)
+    shift = uscore_planner.global_max_shift_bins([])
+    for start in range(30_000, 116_000, 500):
+        neg, pos, _beat = uscore_planner.window_envelope(bands, [], shift, start, 5000)
+        assert neg <= 0 <= pos
+        assert pos < TWIN_PERIOD_MS, f"the twin would sit inside the envelope at {start}ms"
+
+
+def test_a_beat_twin_in_the_continued_search_is_clipped(new, monkeypatch, tmp_path):
+    world = _twin_world()
+    t = d.run_world(new, world, monkeypatch, tmp_path)
+
+    assert t.engine._play_best_quality > 0 and t.engine._shape_offset_ms == TWIN_TRUTH_MS
+    assert _continued(t, world), "the search continued into the twin stretch"
+    assert any("envelope [-900, +900]ms" in line for line in t.logs), (
+        "each continued window was handed the planner's envelope for its position"
+    )
+    assert _twin_snaps(t) == [], "no snap was ever asked for at the twin"
+    assert all(s[1] != TWIN_TRUTH_MS + TWIN_PERIOD_MS for s in t.saves), "the twin was never saved"
+    assert t.history[-1]["locked"] is False and t.history[-1]["offset_ms"] == TWIN_TRUTH_MS
+    assert t.final_lock_state["reason"] == KEEP_SEARCHING_NO_TIME_LEFT
+    assert t.saves and t.saves[-1][1] == TWIN_TRUTH_MS, "the final save kept the true offset"
+
+
+def test_without_the_envelope_the_same_world_adopts_the_twin(new, monkeypatch, tmp_path):
+    """RED CONTROL. The same play with continued windows handed the lookup's
+    own wide-open "no envelope" entry snaps to the twin, saves it and locks on
+    it — so the clip, not the world, is what held the true offset above."""
+    monkeypatch.setattr(new, "_continued_window_envelope",
+                        lambda _source, _ws, _we: (-10**9, 10**9))
+    world = _twin_world()
+    t = d.run_world(new, world, monkeypatch, tmp_path)
+
+    twin = TWIN_TRUTH_MS + TWIN_PERIOD_MS
+    assert any(c[-1] is True for c in _twin_snaps(t)), "the engine snapped to the twin"
+    assert any(s[1] == twin for s in t.saves), "the twin was saved to disk"
+    assert t.history[-1]["locked"] is True and t.history[-1]["offset_ms"] == twin
+
+
+def _synthetic_shape(duration_ms: int, seed: int):
+    import numpy as np
+    rng = np.random.default_rng(seed)
+    ts = np.arange(0, duration_ms + 100, 100, dtype=float)
+    base = _beat_periodic(ts)
+    bands = {k: base * (1.0 + 0.3 * rng.random(ts.size)) + rng.random(ts.size) * i * 0.1
+             for i, k in enumerate(("rms_total", "rms_low", "rms_mid", "rms_high"))}
+    return ts, bands
+
+
+@pytest.mark.parametrize("seed,beats", [
+    (1, []),
+    (2, list(range(0, 70_000, 400))),
+    (3, sorted(set(range(0, 70_000, 350)) | set(range(175, 70_000, 700)))),
+])
+def test_sharing_the_envelope_leaves_the_planners_own_output_identical(seed, beats):
+    from services import uscore_planner
+    pinned = d.load_baseline_module("services/uscore_planner.py")
+    ts, bands = _synthetic_shape(70_000, seed)
+    before = pinned.plan_uscore_windows(ts, bands, 70_000, beats)
+    after = uscore_planner.plan_uscore_windows(ts, bands, 70_000, beats)
+    assert before and after == before
+    missing = {k: v for k, v in bands.items() if k != "rms_mid"}
+    assert uscore_planner.plan_uscore_windows(ts, missing, 70_000, beats) == \
+        pinned.plan_uscore_windows(ts, missing, 70_000, beats) == []
+
+
+def test_a_continued_window_gets_exactly_the_envelope_the_planner_stores(new, monkeypatch):
+    """The runtime path — its own bands read from the shape, its own beats
+    read through librosa — gives a window the same envelope the planner
+    stored for a window at that position."""
+    import sys
+    import services
+    from types import SimpleNamespace
+    from services import uscore_planner
+    beats = list(range(0, 70_000, 400))
+    ts, bands = _synthetic_shape(70_000, 5)
+    planned = uscore_planner.plan_uscore_windows(ts, bands, 70_000, beats)
+    assert planned
+
+    analysis = SimpleNamespace(beats=[SimpleNamespace(ms=b) for b in beats])
+    fake_librosa = SimpleNamespace(get_analysis=lambda _m: analysis)
+    monkeypatch.setitem(sys.modules, "services.librosa_service", fake_librosa)
+    monkeypatch.setattr(services, "librosa_service", fake_librosa, raising=False)
+    data = d._Npz(bands)
+    source = new._continued_envelope_source(URI, SimpleNamespace(duration_ms=70_000), data, ts)
+
+    assert source.beats_ms == beats
+    for w in planned:
+        assert new._continued_window_envelope(source, w["start_ms"], w["end_ms"]) == \
+            (w["safe_neg_ms"], w["safe_pos_ms"]), w

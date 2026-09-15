@@ -488,14 +488,7 @@ class AutoOffsetService:
 
         planned: list[dict] = []
         params_hash = ""
-        beats_ms: list[int] = []
-        try:
-            from services import librosa_service
-            analysis = librosa_service.get_analysis(meta)
-            if analysis and analysis.beats:
-                beats_ms = [int(b.ms) for b in analysis.beats]
-        except Exception:
-            beats_ms = []
+        beats_ms = _planner_beats(meta)
 
         if beats_ms:
             try:
@@ -1088,6 +1081,7 @@ class AutoOffsetService:
             settings, end_buffer_ms=_XCORR_END_BUFFER_MS)
         keep: Optional[KeepSearching] = None
         _keep_engaged = False
+        _keep_envelopes: Optional[ContinuedEnvelopes] = None
         # Why the continued search stopped. None = it never ran, or it was
         # still running when the loop ended some other way (song change,
         # capture end) — only a real give-up keeps this play from relaunching.
@@ -1411,10 +1405,15 @@ class AutoOffsetService:
                         if keep.offer(frame.timestamp_ms,
                                       (_kspike[0], _kspike[1]) if _kspike else None):
                             _kws, _kwe, _kspike_ms, _kstrength = _kspike
+                            _kenv = await asyncio.to_thread(
+                                _continued_window_envelope, _keep_envelopes,
+                                int(_kws), int(_kwe),
+                            )
+                            evaluator.envelope_lookup[(int(_kws), int(_kwe))] = _kenv
                             logger.info(
                                 "Auto-offset xcorr: keep-searching window [%d–%d]ms at spike "
-                                "%dms (strength=%.2f) for %s",
-                                _kws, _kwe, _kspike_ms, _kstrength, uri,
+                                "%dms (strength=%.2f, envelope [%+d, %+d]ms) for %s",
+                                _kws, _kwe, _kspike_ms, _kstrength, _kenv[0], _kenv[1], uri,
                             )
                             try:
                                 from services.websocket_manager import ws_manager
@@ -1511,6 +1510,9 @@ class AutoOffsetService:
                             _why, evaluator.best_offset, evaluator.best_quality, uri,
                         )
                         break
+                    _keep_envelopes = await asyncio.to_thread(
+                        _continued_envelope_source, uri, meta, data, stored_ts,
+                    )
                     logger.info(
                         "Auto-offset xcorr: planned windows spent without a hard lock "
                         "(best %+dms Q=%.2f) — keep searching the rest of the song "
@@ -1780,6 +1782,68 @@ class AutoOffsetService:
 
 
 # ── Module-level helpers ───────────────────────────────────────────────────────
+
+
+def _planner_beats(meta) -> list[int]:
+    """Librosa beat onsets in ms, as the U-Score planner is handed them."""
+    try:
+        from services import librosa_service
+        analysis = librosa_service.get_analysis(meta)
+        if analysis and analysis.beats:
+            return [int(b.ms) for b in analysis.beats]
+    except Exception:
+        pass
+    return []
+
+
+@dataclass(frozen=True)
+class ContinuedEnvelopes:
+    """What a continued (spike-placed) window's safe-shift envelope is computed
+    from: the U-Score planner's own full-song bands, beats and shift range for
+    this song, built once per play when `KeepSearching` engages.
+
+    A planned window carries the envelope the planner stored for it; a
+    continued window is placed at runtime, so it is given the envelope the
+    planner assigns a window at that exact position
+    (`uscore_planner.window_envelope`) and the sweep's envelope clip reads it
+    from the same lookup. No bands means the planner's own no-data answer,
+    (0, 0)."""
+    bands_full_norm: list
+    beats_ms: list[int]
+    max_shift_bins: int
+
+
+def _continued_envelope_source(uri: str, meta, data, stored_ts: np.ndarray) -> ContinuedEnvelopes:
+    from services import uscore_planner
+    beats_ms = _planner_beats(meta)
+    bands_full_norm: list = []
+    try:
+        bands = {k: data[k] for k in ("rms_total", "rms_low", "rms_mid", "rms_high")
+                 if k in data.files}
+        bands_full_norm = uscore_planner.normalized_song_bands(
+            stored_ts, bands, int(meta.duration_ms or 0))
+    except Exception as exc:
+        logger.warning("Auto-offset xcorr: planner bands unavailable for %s: %s", uri, exc)
+    if not bands_full_norm:
+        logger.warning(
+            "Auto-offset xcorr: no planner bands for %s — continued windows get the "
+            "planner's no-data envelope (0, 0)", uri,
+        )
+    return ContinuedEnvelopes(
+        bands_full_norm=bands_full_norm,
+        beats_ms=beats_ms,
+        max_shift_bins=uscore_planner.global_max_shift_bins(beats_ms),
+    )
+
+
+def _continued_window_envelope(source: ContinuedEnvelopes, win_start: int,
+                               win_end: int) -> tuple[int, int]:
+    from services import uscore_planner
+    safe_neg_ms, safe_pos_ms, _beat_ms = uscore_planner.window_envelope(
+        source.bands_full_norm, source.beats_ms, source.max_shift_bins,
+        int(win_start), int(win_end) - int(win_start),
+    )
+    return safe_neg_ms, safe_pos_ms
 
 
 def _compute_params_hash(npz_mtime: float) -> str:

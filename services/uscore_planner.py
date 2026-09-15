@@ -358,6 +358,93 @@ def _compute_safe_envelope(
     return safe_neg, safe_pos
 
 
+def normalized_song_bands(
+    timestamps_ms: np.ndarray,
+    bands: dict[str, np.ndarray],
+    duration_ms: int,
+) -> list[np.ndarray]:
+    """The planner's full-song band preprocessing: the four primary bands
+    resampled onto the 25ms grid and AGC-normalized, then the two round-10
+    derived bands. Empty when the song has no duration or a primary band is
+    missing — `_compute_safe_envelope` answers (0, 0) for no bands."""
+    if duration_ms <= 0:
+        return []
+    grid_ms = np.arange(0, duration_ms, _BIN_MS, dtype=float)
+    bands_full_norm: list[np.ndarray] = []
+    rms_low_resampled: Optional[np.ndarray] = None
+    for key in _BAND_KEYS:
+        b = bands.get(key)
+        if b is None:
+            return []
+        squared = _resample_band(timestamps_ms, b, grid_ms)
+        bands_full_norm.append(_agc(squared))
+        if key == "rms_low":
+            # Keep the raw resampled-and-squared rms_low for deriving the
+            # silence/onset bands below — we want the same time grid and AGC
+            # treatment but different transformations.
+            rms_low_resampled = squared
+
+    # Round 10: derived bands. Computed from the same rms_low grid so the
+    # window indexing aligns. Both go through _agc independently so each
+    # band's AGC scale is internally consistent.
+    if rms_low_resampled is not None:
+        # Inverse-energy: high during quiet, low during loud. signed_square has
+        # already been applied in _resample_band; here we invert in normalized
+        # space. Take |rms_low|, normalize by 95th percentile, invert (1 − x),
+        # clip to [0, 1], then re-square for amplitude weighting consistency.
+        abs_low = np.abs(rms_low_resampled)
+        p95 = float(np.percentile(abs_low, 95)) + 1e-6
+        inv = 1.0 - np.clip(abs_low / p95, 0.0, 1.0)
+        inv_sq = _signed_square(inv)
+        bands_full_norm.append(_agc(inv_sq))
+
+        # Onset-derivative: |d/dt rms_low| spikes at any abrupt energy change
+        # (loud→quiet or quiet→loud). Use np.diff and pad to keep length
+        # aligned with the other bands.
+        deriv = np.abs(np.diff(rms_low_resampled, prepend=rms_low_resampled[:1]))
+        deriv_sq = _signed_square(deriv)
+        bands_full_norm.append(_agc(deriv_sq))
+    return bands_full_norm
+
+
+def global_max_shift_bins(beats_ms: list[int]) -> int:
+    """The residual matrix's shift range: the largest beat period in the song
+    × _BEAT_RANGE, so every position has its full ±N-beat search covered."""
+    if beats_ms and len(beats_ms) >= 2:
+        beat_diffs = np.diff(np.asarray(beats_ms, dtype=float))
+        global_beat_ms = float(np.max(beat_diffs))
+    else:
+        global_beat_ms = _DEFAULT_BEAT_MS_FALLBACK
+    return max(1, int(np.ceil(_BEAT_RANGE * global_beat_ms / _BIN_MS)))
+
+
+def window_envelope(
+    bands_full_norm: list[np.ndarray],
+    beats_ms: list[int],
+    max_shift_bins: int,
+    start_ms: int,
+    window_length_ms: int,
+) -> tuple[int, int, float]:
+    """The safe-shift envelope the planner assigns a window at `start_ms`:
+    (safe_neg_ms, safe_pos_ms, local beat period ms). The runtime sweep clips
+    a NEW measurement to engine_current + [safe_neg_ms, safe_pos_ms]."""
+    beat_ms = _local_beat_period_ms(beats_ms, start_ms + window_length_ms // 2)
+    beat_period_bins = max(1, int(round(beat_ms / _BIN_MS)))
+    # Round 9.5: envelope replaces binary beat-twin / ambiguous-margin gates.
+    # Search range is the smaller of the global matrix max and the local
+    # ±_BEAT_RANGE in this window's local beat period — we don't need to
+    # inspect shifts farther than what the runtime would search.
+    env_max_shift_bins = min(
+        max_shift_bins,
+        max(1, _BEAT_RANGE * beat_period_bins),
+        _AMBIGUOUS_SEARCH_MS // _BIN_MS,
+    )
+    safe_neg_bins, safe_pos_bins = _compute_safe_envelope(
+        bands_full_norm, start_ms // _BIN_MS, window_length_ms // _BIN_MS, env_max_shift_bins,
+    )
+    return int(-safe_neg_bins * _BIN_MS), int(safe_pos_bins * _BIN_MS), beat_ms
+
+
 def _gate_check_window(
     bands_full_norm: list[np.ndarray],
     win_start_bin: int,
@@ -470,51 +557,13 @@ def plan_uscore_windows(
 
     # Build a uniform 25ms grid covering the full song (used for both reference
     # window slices and the shifted candidate slices).
-    grid_ms = np.arange(0, duration_ms, _BIN_MS, dtype=float)
-    bands_full_norm: list[np.ndarray] = []
-    rms_low_resampled: Optional[np.ndarray] = None
-    for key in _BAND_KEYS:
-        b = bands.get(key)
-        if b is None:
-            return []
-        squared = _resample_band(timestamps_ms, b, grid_ms)
-        bands_full_norm.append(_agc(squared))
-        if key == "rms_low":
-            # Keep the raw resampled-and-squared rms_low for deriving the
-            # silence/onset bands below — we want the same time grid and AGC
-            # treatment but different transformations.
-            rms_low_resampled = squared
+    bands_full_norm = normalized_song_bands(timestamps_ms, bands, duration_ms)
+    if not bands_full_norm:
+        return []
 
-    # Round 10: derived bands. Computed from the same rms_low grid so the
-    # window indexing aligns. Both go through _agc independently so each
-    # band's AGC scale is internally consistent.
-    if rms_low_resampled is not None:
-        # Inverse-energy: high during quiet, low during loud. signed_square has
-        # already been applied in _resample_band; here we invert in normalized
-        # space. Take |rms_low|, normalize by 95th percentile, invert (1 − x),
-        # clip to [0, 1], then re-square for amplitude weighting consistency.
-        abs_low = np.abs(rms_low_resampled)
-        p95 = float(np.percentile(abs_low, 95)) + 1e-6
-        inv = 1.0 - np.clip(abs_low / p95, 0.0, 1.0)
-        inv_sq = _signed_square(inv)
-        bands_full_norm.append(_agc(inv_sq))
-
-        # Onset-derivative: |d/dt rms_low| spikes at any abrupt energy change
-        # (loud→quiet or quiet→loud). Use np.diff and pad to keep length
-        # aligned with the other bands.
-        deriv = np.abs(np.diff(rms_low_resampled, prepend=rms_low_resampled[:1]))
-        deriv_sq = _signed_square(deriv)
-        bands_full_norm.append(_agc(deriv_sq))
-
-    # Determine the global shift range for the residual matrix. Use the largest
-    # local beat period × _BEAT_RANGE so every position has its full ±N-beat
-    # search covered. The matrix is built once for the whole song.
-    if beats_ms and len(beats_ms) >= 2:
-        beat_diffs = np.diff(np.asarray(beats_ms, dtype=float))
-        global_beat_ms = float(np.max(beat_diffs))
-    else:
-        global_beat_ms = _DEFAULT_BEAT_MS_FALLBACK
-    max_shift_bins = max(1, int(np.ceil(_BEAT_RANGE * global_beat_ms / _BIN_MS)))
+    # Determine the global shift range for the residual matrix. The matrix is
+    # built once for the whole song.
+    max_shift_bins = global_max_shift_bins(beats_ms)
 
 
     # One matrix pass: per-band per-position WINDOW uniqueness + per-tick
@@ -530,27 +579,14 @@ def plan_uscore_windows(
     )
     scored: list[dict] = []
     for start_ms in candidate_starts_ms:
-        beat_ms = _local_beat_period_ms(beats_ms, start_ms + window_length_ms // 2)
-        beat_period_bins = max(1, int(round(beat_ms / _BIN_MS)))
         win_start_bin = start_ms // _BIN_MS
         agg = _window_u_score(per_band_window_uniq, win_start_bin)
         if agg is None:
             continue
         u_score, per_band_values = agg
-        # Round 9.5: envelope replaces binary beat-twin / ambiguous-margin gates.
-        # Search range is the smaller of the global matrix max and the local
-        # ±_BEAT_RANGE in this window's local beat period — we don't need to
-        # inspect shifts farther than what the runtime would search.
-        env_max_shift_bins = min(
-            max_shift_bins,
-            max(1, _BEAT_RANGE * beat_period_bins),
-            _AMBIGUOUS_SEARCH_MS // _BIN_MS,
+        safe_neg_ms, safe_pos_ms, beat_ms = window_envelope(
+            bands_full_norm, beats_ms, max_shift_bins, start_ms, window_length_ms,
         )
-        safe_neg_bins, safe_pos_bins = _compute_safe_envelope(
-            bands_full_norm, win_start_bin, win_len_bins, env_max_shift_bins,
-        )
-        safe_neg_ms = -safe_neg_bins * _BIN_MS
-        safe_pos_ms = safe_pos_bins * _BIN_MS
         scored.append({
             "start_ms": start_ms,
             "end_ms": start_ms + window_length_ms,

@@ -7174,7 +7174,7 @@ hands off to the post-lock path on a lock, and gives up with a named reason
 — `nothing_to_find` (45 s of song, no usable measurement), `no_time_left`
 (the last 30 s, where no window is planned), `user_verified` — holding
 `_watching_uri` so the next poll cannot relaunch and overwrite "Lock failed"
-with "Not checked" (the pre-change sweep did exactly that). Five things
+with "Not checked" (the pre-change sweep did exactly that). Six things
 before touching it:
 
 - **It is armed at ONE exit only**: planned queue empty AND
@@ -7187,6 +7187,17 @@ before touching it:
   `_save_offset` — take the `PlayContext` snapshot the play started under. A
   play that never continued still reads live state, byte-identically. Anchor
   matching stays live during the continued search, by decision.
+- **A continued window carries the envelope the U-Score planner would assign
+  a window at that exact position.** The envelope clip looks a window up by
+  its exact bounds in the planner's stored windows, so a spike-placed window
+  had none and the clip was silently a no-op — in exactly the stretches the
+  planner rejected as too self-similar to place a window. The shared
+  `uscore_planner.window_envelope` (which `plan_uscore_windows` itself now
+  calls, output proven identical against the pinned ref) is applied over the
+  planner's own full-song bands and beats (`ContinuedEnvelopes`, built once
+  when the search engages) and registered in the evaluator's lookup before
+  each window runs. The clip is otherwise unchanged. A new place a window can
+  come from needs the same treatment, or the clip will not see it.
 - **Evidence is a confirmation VOTE** (the evaluator's
   `confirmation_shifts` grew), and a continued window may not re-measure more
   than the U-Score planner's own 1 s of audio: the same seconds scored twice

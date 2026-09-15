@@ -283,6 +283,20 @@ class KeepSearching:
     here touches an offset or a threshold: it decides WHEN to measure and
     WHEN TO STOP, never what a measurement means.
 
+    THE ENVELOPE CLIP HAS TO BE GIVEN TO A CONTINUED WINDOW, because the clip
+    reads its envelope out of the planner's stored windows by exact bounds and
+    a spike-placed window is never one of them — without it the clip would be
+    a silent no-op, and continued windows land exactly where the planner
+    found the song too self-similar to place one. So each accepted window is
+    handed the envelope the U-Score planner assigns a window at that exact
+    position (`uscore_planner.window_envelope`, the planner's own function,
+    over its own full-song bands and beats built once when this search
+    engages — `auto_offset_service.ContinuedEnvelopes`), registered in the
+    evaluator's lookup under the window's bounds before it is evaluated. The
+    clip itself is unchanged, including its cold-start skip and the global
+    ladder stage's exemption: a beat twin outside the envelope cannot drive a
+    snap, a save or a lock.
+
     ANCHORS STAY A SECOND ADOPTION PATH, by decision. The sweep's per-frame
     anchor match (on whenever the Set List slot is not coarse-locked) keeps
     running while this search does, exactly as it does during post-lock
