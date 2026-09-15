@@ -283,6 +283,21 @@ class KeepSearching:
     here touches an offset or a threshold: it decides WHEN to measure and
     WHEN TO STOP, never what a measurement means.
 
+    ANCHORS STAY A SECOND ADOPTION PATH, by decision. The sweep's per-frame
+    anchor match (on whenever the Set List slot is not coarse-locked) keeps
+    running while this search does, exactly as it does during post-lock
+    monitoring: a candidate whose horizon passes after the planned windows
+    ran out can still match, save through `_save_offset_from_anchor` (the
+    engine's same strictly-better-Q gate, with the anchor's own quality
+    boost) and add its vote to the evaluator — and a continued window that
+    agrees with it can then hard-lock. This search neither adds nor gates
+    that path.
+
+    A play that engaged this search can end because its song changed, when
+    `app_state` already describes the next song, so its end-of-play writes
+    use the context the play started under (`auto_offset_service.
+    PlayContext`); a play that never engaged it keeps reading live state.
+
     A window must not re-measure audio an earlier window of this play already
     measured (more than `max_overlap_ms` of overlap, the U-Score planner's own
     cap): the same seconds scored twice would cast the same vote twice and

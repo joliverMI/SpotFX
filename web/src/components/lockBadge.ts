@@ -112,14 +112,18 @@ function skipReason(reason: string | null | undefined): string {
   }
 }
 
-function failReason(reason: string | null | undefined): string {
-  switch (reason) {
+function failReason(rec: LockStateRecord): string {
+  switch (rec.reason) {
     case 'no_measurements':
       return ' — no window produced a usable measurement';
     case 'nothing_to_find':
-      return ' — it kept searching past its planned windows, but nothing usable turned up';
+      return rec.continued
+        ? ' — it kept searching past its planned windows, but nothing usable turned up'
+        : ' — its planned windows ran out and nothing usable turned up';
     case 'no_time_left':
-      return ' — it kept searching past its planned windows until the last stretch of the song, where no match window is placed';
+      return rec.continued
+        ? ' — it kept searching past its planned windows until the last stretch of the song, where no match window is placed'
+        : ' — its planned windows ran out inside the last stretch of the song, where no match window is placed, so there was nothing left to search';
     case 'user_verified':
       return ' — this song\'s offset is user-verified, so the matcher measures but never moves it';
     default:
@@ -182,7 +186,7 @@ export function lockBadge(input: LockBadgeInput): LockBadge {
       color: FAILED_COLOR,
       title:
         `Audio sync lock — the matcher finished searching this song without reaching a lock${failReason(
-          lock.reason,
+          lock,
         )}. Triggers are firing against whatever offset was already stored.${offsetPhrase(lock)}`,
     };
   }

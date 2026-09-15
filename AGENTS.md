@@ -7174,13 +7174,19 @@ hands off to the post-lock path on a lock, and gives up with a named reason
 — `nothing_to_find` (45 s of song, no usable measurement), `no_time_left`
 (the last 30 s, where no window is planned), `user_verified` — holding
 `_watching_uri` so the next poll cannot relaunch and overwrite "Lock failed"
-with "Not checked" (the pre-change sweep did exactly that). Four things
+with "Not checked" (the pre-change sweep did exactly that). Five things
 before touching it:
 
 - **It is armed at ONE exit only**: planned queue empty AND
   `_locked_via_stop` False. A play that ever locked — including a drift-monitor
   recovery whose re-armed queue just drained — keeps its old exit, which is
   what makes the early-lock and post-lock paths byte-identical.
+- **A play that continued can end AFTER its song did** (a track change cancels
+  it, and `app_state` already holds the next song's Set List and duration),
+  so its end-of-play writes — anti-corr streak, `lock_history`, the final
+  `_save_offset` — take the `PlayContext` snapshot the play started under. A
+  play that never continued still reads live state, byte-identically. Anchor
+  matching stays live during the continued search, by decision.
 - **Evidence is a confirmation VOTE** (the evaluator's
   `confirmation_shifts` grew), and a continued window may not re-measure more
   than the U-Score planner's own 1 s of audio: the same seconds scored twice

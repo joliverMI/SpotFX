@@ -32,6 +32,7 @@ import hashlib
 import logging
 import os
 from collections import deque
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path                         # DIAGNOSTIC CSV
 from typing import Optional
@@ -83,6 +84,34 @@ _OFFSET_HISTORY_CAP   = 5       # rolling window of saved offsets per (track, Se
 _SETLIST_DELTA_CAP    = 10      # rolling deltas per Set List for cross-track bias hint
 _PRE_FLIGHT_INTRO_MS  = 8_000   # how much of the intro we sample for the pre-flight scan
 _PRE_FLIGHT_MIN_R     = 0.55    # acceptance threshold for pre-flight displacement
+
+
+@dataclass(frozen=True)
+class PlayContext:
+    """The Set List slot, polled duration and track one sweep play started
+    under.
+
+    A play's end-of-play writes (the anti-corr streak, the lock-history
+    record, the final disk save and its `observed_cut_ms`) read the play's
+    context. While a play only ever ended while its own song was playing,
+    live `app_state` WAS that context. A play that keeps searching past its
+    planned windows (`xcorr_sweep.KeepSearching`) can instead end because
+    the song changed — `on_track_change` cancels it — and by then
+    `app_state` already describes the NEXT song: its Set List slot and its
+    polled duration. Such a play hands this snapshot to those writes so they
+    land on the song and Set List it measured."""
+    setlist_id: Optional[str]
+    polled_duration_ms: int
+    track: Optional[SpotifyTrackInfo]
+
+    @classmethod
+    def capture(cls) -> "PlayContext":
+        t = app_state.current_track
+        return cls(
+            setlist_id=app_state.active_setlist_id,
+            polled_duration_ms=int(t.duration_ms or 0) if t else 0,
+            track=t,
+        )
 
 
 def _median_offset(history: list[dict]) -> int | None:
@@ -621,6 +650,7 @@ class AutoOffsetService:
         cut_ms = max(0, int(meta.duration_ms or 0) - int(polled_dur or 0))
         search_ms = _xcorr_search_ms(int(meta.duration_ms or 0))
         sl_id = app_state.active_setlist_id
+        _play_ctx = PlayContext.capture()
         offset_source = f"setlist:{sl_id}" if sl_id else "default"
         sl_name = ""
         if sl_id:
@@ -1057,6 +1087,7 @@ class AutoOffsetService:
         _keep_cfg = KeepSearchingConfig.from_settings(
             settings, end_buffer_ms=_XCORR_END_BUFFER_MS)
         keep: Optional[KeepSearching] = None
+        _keep_engaged = False
         # Why the continued search stopped. None = it never ran, or it was
         # still running when the loop ended some other way (song change,
         # capture end) — only a real give-up keeps this play from relaunching.
@@ -1470,6 +1501,7 @@ class AutoOffsetService:
                         duration_ms=int(meta.duration_ms or 0),
                         evaluated=all_planned,
                     )
+                    _keep_engaged = True
                     _why = keep.give_up_reason(frame.timestamp_ms)
                     if _why is not None:
                         _keep_gave_up = _why
@@ -1533,9 +1565,11 @@ class AutoOffsetService:
         # stored offset as anti-correlated, the stored baseline doesn't fit
         # this play. Bump anti_corr_count on the Set List slot so the UI can
         # surface drifting songs. Reset on any "well-correlated" play.
+        _end_ctx = _play_ctx if _keep_engaged else None
+        _end_setlist_id = _end_ctx.setlist_id if _end_ctx else app_state.active_setlist_id
         try:
-            if app_state.active_setlist_id and final.is_drifting is not None:
-                _bump_anti_corr_count(uri, app_state.active_setlist_id, final.is_drifting)
+            if _end_setlist_id and final.is_drifting is not None:
+                _bump_anti_corr_count(uri, _end_setlist_id, final.is_drifting)
         except Exception as exc:
             logger.debug("anti_corr_count update failed: %s", exc)
 
@@ -1565,7 +1599,7 @@ class AutoOffsetService:
             uri=uri,
             title=meta.title or "",
             artist=meta.artist or "",
-            setlist_id=app_state.active_setlist_id,
+            setlist_id=_end_setlist_id,
             play_type=play_type,
             locked=_locked_via_stop,
             time_to_lock_ms=_lock_song_ms,
@@ -1594,7 +1628,7 @@ class AutoOffsetService:
         # DIAGNOSTIC CSV ──────────────────────────────────────────────────
         if settings.xcorr_csv_logging and final.n_measurements > 0:
             _write_csv_row(
-                track=app_state.current_track, uri=uri,
+                track=_end_ctx.track if _end_ctx else app_state.current_track, uri=uri,
                 final_offset=final.best_offset, final_quality=final.best_quality,
                 n_windows=final.n_measurements, prev_offset=prev_offset_ms,
                 window_rows=_csv_window_rows,
@@ -1605,7 +1639,8 @@ class AutoOffsetService:
         if final.disk_save is not None:
             _fin_offset, _fin_q, _fin_source, _fin_bypass = final.disk_save
             _save_offset(uri, _fin_offset, _fin_q,
-                         source=_fin_source, bypass_drift_cap=_fin_bypass)
+                         source=_fin_source, bypass_drift_cap=_fin_bypass,
+                         play_context=_end_ctx)
 
         # Lock-and-stop: keep `_watching_uri` set so on_track_change's
         # "already watching this URI" guard suppresses a fresh xcorr task
@@ -2185,7 +2220,8 @@ def _save_offset_from_anchor(uri: str, offset_ms: int, quality: float) -> None:
 
 def _save_offset(uri: str, offset_ms: int, quality: float = 0.0,
                  source: str = "sweep",
-                 bypass_drift_cap: bool = False) -> None:
+                 bypass_drift_cap: bool = False,
+                 play_context: Optional[PlayContext] = None) -> None:
     """Persist offset + quality score, mark as auto_verified, hot-reload trigger engine.
 
     When the active context is a tracked Set List, write into
@@ -2197,15 +2233,23 @@ def _save_offset(uri: str, offset_ms: int, quality: float = 0.0,
 
     `source` is recorded on the history entry: "sweep" for cluster-confirmed
     per-window xcorr saves, "anchor" for early-feature snap saves.
+
+    `play_context` names the Set List slot and polled duration to save
+    against instead of live `app_state` (see `PlayContext`); None reads live
+    state, as every caller did before it existed.
     """
     from datetime import datetime, timezone
     meta = load_audio_shape_meta(uri)
     if meta is None:
         return
 
-    polled = app_state.current_track.duration_ms if app_state.current_track else 0
+    if play_context is None:
+        polled = app_state.current_track.duration_ms if app_state.current_track else 0
+        sl_id = app_state.active_setlist_id
+    else:
+        polled = play_context.polled_duration_ms
+        sl_id = play_context.setlist_id
     cut_ms = max(0, int(meta.duration_ms or 0) - int(polled or 0))
-    sl_id = app_state.active_setlist_id
 
     now_iso = datetime.now(timezone.utc).isoformat()
     if sl_id:

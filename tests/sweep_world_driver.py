@@ -29,6 +29,7 @@ recorded traces compared.
 from __future__ import annotations
 
 import asyncio
+import copy
 import importlib.util
 import logging
 import subprocess
@@ -93,6 +94,10 @@ class World:
     spike: Optional[Callable[[int, int], Optional[tuple[int, int, int]]]] = None
     # Hold the capture open at this song time until cancelled (a track change).
     hang_at_ms: Optional[int] = None
+    # Anchor candidates stored on the shape, and what matching the eligible
+    # ones (their timestamps) finds: (offset_ms, match_r, match_q) or None.
+    anchors: list[dict] = field(default_factory=list)
+    anchor_match: Optional[Callable[[list[int]], Optional[tuple[int, float, float]]]] = None
 
 
 def mayday_world(**over) -> World:
@@ -211,6 +216,9 @@ class Trace:
     after_poll_lock_state: Optional[dict] = None
     watching_after: Optional[str] = None
     task_after_poll: bool = False
+    # The shape's Set List slots as each write to its metadata file left them.
+    meta_writes: list[dict] = field(default_factory=list)
+    meta: Optional[SimpleNamespace] = None
 
     def comparable(self) -> dict:
         """The trace with wall-clock stamps removed — everything else must
@@ -275,14 +283,22 @@ SETTINGS = dict(
 def run_world(mod: ModuleType, world: World, monkeypatch, tmp_path: Path, *,
               settings_over: Optional[dict] = None,
               poll_after_ms: Optional[int] = None,
-              stop_after: bool = False) -> Trace:
+              stop_after: bool = False,
+              setlist_id: Optional[str] = None,
+              switch_to: Optional[tuple[Optional[str], str, int]] = None,
+              real_saves: bool = False) -> Trace:
     """Run one play of `world` through `mod`'s real sweep. `poll_after_ms`
     re-runs `on_track_change` once the sweep has ended, as the next Spotify
     poll would, at that song position. `stop_after` stops the service as a
-    track change does (for a world that hangs its capture)."""
+    track change does (for a world that hangs its capture); `switch_to`
+    = (setlist_id, uri, duration_ms) is the next song's context, installed in
+    app state just before that stop, as the Spotify poll and the Set List
+    runtime install it before the sweep hears of the change. `setlist_id` is
+    the Set List this play starts under. `real_saves` runs the module's own
+    `_save_offset` / `_save_offset_from_anchor` instead of recording calls."""
     from config import settings
     from models.state import SpotifyTrackInfo, state as app_state
-    from services import lock_state
+    from services import anchor_detector, lock_state, setlist_store
     import services
     import services.lock_history as lock_history
     import services.websocket_manager as wm
@@ -329,6 +345,10 @@ def run_world(mod: ModuleType, world: World, monkeypatch, tmp_path: Path, *,
         npz[b + "_sq"] = stored_ts.copy()
     monkeypatch.setattr(np, "load", lambda _p, *a, **k: npz)
 
+    def dump_meta(**_k) -> str:
+        trace.meta_writes.append(copy.deepcopy(meta.setlist_offsets))
+        return "{}"
+
     meta = SimpleNamespace(
         capture_complete=True, npz_file="world.npz",
         xcorr_windows=[{"start_ms": s, "end_ms": e, "difficulty": 1.0}
@@ -336,9 +356,11 @@ def run_world(mod: ModuleType, world: World, monkeypatch, tmp_path: Path, *,
         offset_verification=world.verification,
         timestamp_offset_ms=world.loaded_offset_ms, offset_quality=0.5,
         offset_history=[], setlist_offsets={}, duration_ms=world.duration_ms,
-        anchor_candidates=[], title="MAYDAY", artist="world",
-        model_dump_json=lambda **_k: "{}",
+        anchor_candidates=[dict(a) for a in world.anchors],
+        title="MAYDAY", artist="world",
+        model_dump_json=dump_meta,
     )
+    trace.meta = meta
 
     engine = FakeEngine(world.loaded_offset_ms)
     trace.engine = engine
@@ -379,7 +401,17 @@ def run_world(mod: ModuleType, world: World, monkeypatch, tmp_path: Path, *,
             return None
         return (int(got[0]), int(got[1]), int(got[2]), 0.8)
 
-    def record_save(uri, offset_ms, quality=0.0, source="sweep", bypass_drift_cap=False):
+    def k_anchor(candidates, _frames):
+        stamps = [int(c.timestamp_ms) for c in candidates]
+        trace.kernel.append(("anchor_match", stamps))
+        got = world.anchor_match(stamps) if world.anchor_match else None
+        if got is None:
+            return None
+        return anchor_detector.AnchorMatch(offset_ms=int(got[0]), match_r=float(got[1]),
+                                           match_q=float(got[2]), candidate=candidates[-1])
+
+    def record_save(uri, offset_ms, quality=0.0, source="sweep", bypass_drift_cap=False,
+                    play_context=None):
         trace.saves.append((uri, int(offset_ms), round(float(quality), 6), source,
                             bool(bypass_drift_cap)))
 
@@ -392,24 +424,29 @@ def run_world(mod: ModuleType, world: World, monkeypatch, tmp_path: Path, *,
         "_xcorr_window": k_xcorr,
         "_mismatch_spike": k_spike,
         "_max_frame_gap_ms": lambda *_a, **_k: 0,
-        "_save_offset": record_save,
-        "_save_offset_from_anchor": lambda uri, o, q: record_save(uri, o, q, source="anchor"),
     }
+    if not real_saves:
+        patches["_save_offset"] = record_save
+        patches["_save_offset_from_anchor"] = (
+            lambda uri, o, q: record_save(uri, o, q, source="anchor"))
     for name, value in patches.items():
         monkeypatch.setattr(mod, name, value)
     monkeypatch.setattr(mod.AutoOffsetService, "_get_or_compute_windows",
                         lambda self, uri, m: list(world.windows))
+    monkeypatch.setattr(anchor_detector, "match_in_frames", k_anchor)
+    if setlist_id is not None or switch_to is not None:
+        monkeypatch.setattr(setlist_store, "get_by_id", lambda _id: None)
 
     monkeypatch.setattr(app_state, "on_target_device", True)
-    monkeypatch.setattr(app_state, "active_setlist_id", None)
+    monkeypatch.setattr(app_state, "active_setlist_id", setlist_id)
     monkeypatch.setattr(app_state, "active_setlist_xcorr_enabled", True)
 
-    def track_at(progress_ms: int):
+    def track_at(progress_ms: int, uri: str = URI, duration_ms: Optional[int] = None):
         import time
         return SpotifyTrackInfo(
-            spotify_uri=URI, title="MAYDAY", artist="world",
-            duration_ms=world.duration_ms, progress_ms=progress_ms,
-            is_playing=True, fetched_at=time.monotonic(),
+            spotify_uri=uri, title="MAYDAY" if uri == URI else "next", artist="world",
+            duration_ms=world.duration_ms if duration_ms is None else duration_ms,
+            progress_ms=progress_ms, is_playing=True, fetched_at=time.monotonic(),
         )
 
     monkeypatch.setattr(app_state, "current_track", track_at(500))
@@ -429,6 +466,11 @@ def run_world(mod: ModuleType, world: World, monkeypatch, tmp_path: Path, *,
                 await real_sleep(0)
             for _ in range(5):
                 await real_sleep(0)
+            if switch_to is not None:
+                next_setlist, next_uri, next_duration = switch_to
+                monkeypatch.setattr(app_state, "active_setlist_id", next_setlist)
+                monkeypatch.setattr(app_state, "current_track",
+                                    track_at(500, uri=next_uri, duration_ms=next_duration))
             await svc._stop()
         await asyncio.gather(task, return_exceptions=True)
         for _ in range(5):

@@ -35,7 +35,9 @@
  *           fraction (the PRE-CHANGE badge, transpiled from the pinned git
  *           ref, is driven over the same record and printed "Searching… 4/4"),
  *           never "Lock failed" or "Lock idle"; and each give-up reason reads
- *           "Lock failed" in words. The records themselves are the ones
+ *           "Lock failed" in words — claiming it "kept searching" only when
+ *           the record says it did (`continued`), never for a give-up the
+ *           moment the plan ran out. The records themselves are the ones
  *           tests/test_keep_searching.py captures from the real sweep.
  *
  * Run: node scripts/check_lock_badge_states.mjs
@@ -267,7 +269,26 @@ console.log('\nNINE — keep searching: "Searching…" while it works past the p
     eq(badge(gaveUp).label, 'Lock failed', `a give-up (${reason}) reads "Lock failed"`);
     ok(badge(gaveUp).title.includes(words), `and says why: "${words}"`);
   }
+  ok(badge(rec('unlocked', { continued: true, continued_windows: 9, reason: 'no_time_left' }))
+       .title.includes('kept searching past its planned windows'),
+     'a continued search that ran into the last stretch says it kept searching');
 
+  // A give-up the moment the plan ran out — the last planned window landed
+  // inside the song's last stretch — never searched past the plan, so the
+  // record carries no `continued`, and the words must not claim it did.
+  for (const [reason, words] of [
+    ['no_time_left', 'last stretch of the song'],
+    ['nothing_to_find', 'nothing usable turned up'],
+    ['user_verified', 'user-verified'],
+  ]) {
+    const immediate = rec('unlocked', { reason, offset_ms: 1325, quality: 0.39 });
+    eq(badge(immediate).label, 'Lock failed', `an immediate give-up (${reason}) reads "Lock failed"`);
+    ok(badge(immediate).title.includes(words), `and says why: "${words}"`);
+    ok(!badge(immediate).title.includes('kept searching'),
+       `and never claims it kept searching past its planned windows (${reason})`);
+  }
+  ok(badge(rec('unlocked', { reason: 'no_time_left' })).title.includes('planned windows ran out'),
+     'an immediate no_time_left says its planned windows ran out');
 }
 
 rmSync(tmp, { recursive: true, force: true });

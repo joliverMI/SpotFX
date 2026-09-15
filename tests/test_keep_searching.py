@@ -28,6 +28,11 @@ math kernel, the trigger engine and disk are replaced.
   FIVE  — the same seconds of audio are never measured twice.
   SIX   — the pure state machine and the constants it borrows from the
           planners.
+  SEVEN — a continued search the song change ends writes against ITS OWN
+          song and Set List, not the next one's; a play that never continued
+          still reads live state exactly as the pre-change sweep does.
+  EIGHT — anchor matching stays a second adoption path during the continued
+          search.
 
 Timing sign conventions: this change decides WHEN and HOW LONG the search
 runs, never what a measurement means. TWO is the proof — every engine snap,
@@ -346,3 +351,130 @@ def test_borrowed_constants_still_agree_with_the_planners():
     assert cfg.end_buffer_ms == aos._XCORR_END_BUFFER_MS == uscore_planner._END_BUFFER_MS
     assert KeepSearchingConfig().max_overlap_ms == uscore_planner._MAX_OVERLAP_MS
     assert settings.xcorr_keep_searching_enabled is True, "the Admiral authorised it: on"
+
+
+# ── SEVEN — a continued search ended by a song change keeps its own context ──
+
+THIS_SETLIST = "setlist-this-play"
+NEXT_SETLIST = "setlist-next-song"
+NEXT_URI = "spotify:track:next"
+NEXT_DURATION_MS = 180_000
+
+
+def _without_clock(value):
+    """A persisted write with its wall-clock stamps removed."""
+    if isinstance(value, dict):
+        return {k: _without_clock(v) for k, v in value.items() if k != "generated_at"}
+    if isinstance(value, list):
+        return [_without_clock(v) for v in value]
+    return value
+
+
+def test_a_continued_search_ended_by_the_next_song_writes_against_its_own(new, monkeypatch, tmp_path):
+    """Song A keeps searching; at 70s the listener starts another playlist.
+    By the time the track change cancels the sweep, app state already holds
+    the NEXT song and its Set List — A's anti-corr streak, lock-history record
+    and final save must still land on A's slot, cut from A's own duration."""
+    world = _unlockable(clarity=lambda _ms: (0.6, 1.0), loaded_offset_ms=700,
+                        hang_at_ms=70_000)
+    t = d.run_world(new, world, monkeypatch, tmp_path, stop_after=True, real_saves=True,
+                    setlist_id=THIS_SETLIST,
+                    switch_to=(NEXT_SETLIST, NEXT_URI, NEXT_DURATION_MS))
+
+    assert _continued(t, world), "it was mid continued search when the song changed"
+    assert t.history[0]["setlist_id"] == THIS_SETLIST, "lock history names this play's Set List"
+
+    assert t.meta_writes, "the play wrote its metadata"
+    assert all(set(w) == {THIS_SETLIST} for w in t.meta_writes), (
+        "no write ever touched the next song's Set List slot"
+    )
+    assert t.meta_writes[0] == {THIS_SETLIST: {}}, (
+        "the anti-corr streak (the first write) was recorded on this play's slot"
+    )
+    slot = t.meta.setlist_offsets[THIS_SETLIST]
+    assert slot["timestamp_offset_ms"] == 700 and slot["history"][0]["source"] == "sweep", (
+        "the final disk save landed on this play's slot"
+    )
+    assert slot["observed_cut_ms"] == 0, (
+        "cut from this play's own polled duration, not the next song's "
+        f"({world.duration_ms - NEXT_DURATION_MS}ms)"
+    )
+
+
+def test_a_play_that_never_continued_still_reads_live_state_as_before(baseline, new, monkeypatch, tmp_path):
+    """CONTRAST. The same mid-play song change on a play that locked early and
+    never continued: byte-identical to the pinned pre-change sweep, disk
+    writes included — and the harness sees those writes follow the live
+    context, so the test above is not passing for want of a switch."""
+    world = _early_lock_loaded_right()
+    world.hang_at_ms = 70_000
+    kw = dict(stop_after=True, real_saves=True, setlist_id=THIS_SETLIST,
+              switch_to=(NEXT_SETLIST, NEXT_URI, NEXT_DURATION_MS))
+    a = d.run_world(baseline, world, monkeypatch, tmp_path, **kw)
+    b = d.run_world(new, world, monkeypatch, tmp_path, **kw)
+    ca, cb = a.comparable(), b.comparable()
+    for key in ca:
+        assert ca[key] == cb[key], f"{key} diverged from the pre-change sweep"
+    assert _without_clock(a.meta_writes) == _without_clock(b.meta_writes), (
+        "every metadata write matches the pre-change sweep"
+    )
+    assert b.history[0]["locked"] is True and "continued" not in b.final_lock_state
+    assert b.history[0]["setlist_id"] == NEXT_SETLIST
+    assert NEXT_SETLIST in b.meta.setlist_offsets
+
+
+# ── EIGHT — anchors stay a second adoption path ─────────────────────────────
+
+def _mayday_with_a_late_anchor(**over) -> d.World:
+    """MAYDAY's low-confidence stretch never lifts, so no window alone can
+    lock; one stored anchor candidate's horizon only passes at 66s, well
+    after the planned windows ran out."""
+    return d.mayday_world(
+        clarity=lambda _ms: (0.65, 0.6),
+        anchors=[{"timestamp_ms": 20_000, "band": "rms_low", "uniqueness": 0.6},
+                 {"timestamp_ms": 60_000, "band": "rms_low", "uniqueness": 0.6}],
+        anchor_match=lambda stamps: (1325, 0.9, 0.54) if 60_000 in stamps else None,
+        **over,
+    )
+
+
+_ANCHORS_ON = {"anchor_enabled": True, "anchor_search_radius_ms": 5000,
+               "anchor_template_radius_ms": 1000}
+
+
+def test_an_anchor_matched_during_the_continued_search_is_adopted(new, monkeypatch, tmp_path):
+    world = _mayday_with_a_late_anchor()
+    t = d.run_world(new, world, monkeypatch, tmp_path, settings_over=_ANCHORS_ON,
+                    real_saves=True)
+
+    anchor_calls = [i for i, c in enumerate(t.kernel) if c[0] == "anchor_match"]
+    assert [t.kernel[i][1] for i in anchor_calls] == [[20_000], [20_000, 60_000]]
+    planned = set(world.windows) | {(0, 8000)}
+    continued_before_anchor = [c for c in t.kernel[:anchor_calls[-1]]
+                               if c[0] == "xcorr_window" and (c[1], c[2]) not in planned]
+    assert continued_before_anchor, "the continued search was already running when the anchor matched"
+
+    assert ("apply_save", URI, 1325, round(0.54 * 1.6, 6), "anchor", False, True) in t.engine.calls, (
+        "the anchor match reached the engine through its own save path and was adopted"
+    )
+    assert any("Anchor: snap matched candidate at song-time=60000ms" in line for line in t.logs)
+
+    lock = t.history[-1]
+    assert lock["locked"] is True and lock["offset_ms"] == 1325
+    assert lock["time_to_lock_ms"] > 66_000, "the lock came after the anchor, in the continued search"
+    assert len(t.history) == 1
+    assert t.engine._shape_offset_ms == 1325
+    assert t.final_lock_state["phase"] == lock_state.PHASE_LOCKED
+    assert t.watching_after == URI
+
+
+def test_without_the_anchor_the_same_play_never_locks(new, monkeypatch, tmp_path):
+    """CONTRAST: the anchor is what adopted the lock above — the same world
+    with anchor matching off searches to the song's last stretch unlocked."""
+    world = _mayday_with_a_late_anchor()
+    t = d.run_world(new, world, monkeypatch, tmp_path, settings_over={"anchor_enabled": False},
+                    real_saves=True)
+    assert not any(c[0] == "anchor_match" for c in t.kernel)
+    assert t.history[-1]["locked"] is False
+    assert t.final_lock_state["phase"] == lock_state.PHASE_UNLOCKED
+    assert t.final_lock_state["reason"] == KEEP_SEARCHING_NO_TIME_LEFT
