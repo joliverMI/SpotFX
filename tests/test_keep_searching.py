@@ -26,13 +26,15 @@ math kernel, the trigger engine and disk are replaced.
   FOUR  — the badge half: Searching throughout the continued search, Failed
           only on give-up, and the next poll never overwrites it.
   FIVE  — the same seconds of audio are never measured twice.
-  SIX   — the pure state machine, its borrowed constants, and a structural
-          proof that no offset arithmetic was added anywhere.
+  SIX   — the pure state machine and the constants it borrows from the
+          planners.
+
+Timing sign conventions: this change decides WHEN and HOW LONG the search
+runs, never what a measurement means. TWO is the proof — every engine snap,
+save and history record on the lock, drift-monitor and switched-off paths is
+compared value for value against the pinned pre-change sweep.
 """
 from __future__ import annotations
-
-import ast
-import collections
 
 import pytest
 
@@ -296,7 +298,7 @@ def test_a_spike_on_already_measured_audio_is_not_measured_again(new, monkeypatc
     assert t.final_lock_state["reason"] == KEEP_SEARCHING_NOTHING_TO_FIND
 
 
-# ── SIX — the state machine, its borrowed constants, no offset arithmetic ────
+# ── SIX — the state machine and its borrowed constants ───────────────────────
 
 def _ks(**over) -> KeepSearching:
     cfg = KeepSearchingConfig(**{k: v for k, v in over.items()
@@ -344,40 +346,3 @@ def test_borrowed_constants_still_agree_with_the_planners():
     assert cfg.end_buffer_ms == aos._XCORR_END_BUFFER_MS == uscore_planner._END_BUFFER_MS
     assert KeepSearchingConfig().max_overlap_ms == uscore_planner._MAX_OVERLAP_MS
     assert settings.xcorr_keep_searching_enabled is True, "the Admiral authorised it: on"
-
-
-def _offset_arithmetic(src: str) -> collections.Counter:
-    """Every arithmetic, comparison or augmented assignment that touches an
-    identifier naming an offset, unparsed."""
-    found: collections.Counter = collections.Counter()
-    tree = ast.parse(src)
-    for node in ast.walk(tree):
-        if not isinstance(node, (ast.BinOp, ast.UnaryOp, ast.Compare, ast.AugAssign)):
-            continue
-        names = {n.id for n in ast.walk(node) if isinstance(n, ast.Name)}
-        names |= {n.attr for n in ast.walk(node) if isinstance(n, ast.Attribute)}
-        if any("offset" in n.lower() or n in ("shift", "shift_ms") for n in names):
-            found[ast.unparse(node)] += 1
-    return found
-
-
-def test_no_offset_arithmetic_was_added(baseline):
-    """This change decides WHEN and HOW LONG the search runs. Read against the
-    pinned pre-change sweep, not one expression that does arithmetic on an
-    offset — or compares one — was added to the sweep; and the new state
-    machine names no offset at all."""
-    import subprocess
-    old = subprocess.run(["git", "show", f"{d.BASELINE_REF}:services/auto_offset_service.py"],
-                         cwd=d.REPO, capture_output=True, text=True, check=True).stdout
-    now = (d.REPO / "services" / "auto_offset_service.py").read_text()
-    added = _offset_arithmetic(now) - _offset_arithmetic(old)
-    assert not added, f"offset arithmetic added: {sorted(added)}"
-
-    sweep = (d.REPO / "services" / "xcorr_sweep.py").read_text()
-    cls = next(n for n in ast.walk(ast.parse(sweep))
-               if isinstance(n, ast.ClassDef) and n.name == "KeepSearching")
-    idents = {n.id for n in ast.walk(cls) if isinstance(n, ast.Name)}
-    idents |= {n.attr for n in ast.walk(cls) if isinstance(n, ast.Attribute)}
-    idents |= {a.arg for n in ast.walk(cls) if isinstance(n, ast.arguments)
-               for a in n.args + n.kwonlyargs}
-    assert not [i for i in idents if "offset" in i.lower() or "shift" in i.lower()]

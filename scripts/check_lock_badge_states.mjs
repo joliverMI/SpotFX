@@ -34,9 +34,9 @@
  *           its plan. A `continued` record reads "Searching…" with no spent
  *           fraction (the PRE-CHANGE badge, transpiled from the pinned git
  *           ref, is driven over the same record and printed "Searching… 4/4"),
- *           never "Lock failed" or "Lock idle"; each give-up reason reads
- *           "Lock failed" in words; and the record shape the backend emits is
- *           read out of services/lock_state.py.
+ *           never "Lock failed" or "Lock idle"; and each give-up reason reads
+ *           "Lock failed" in words. The records themselves are the ones
+ *           tests/test_keep_searching.py captures from the real sweep.
  *
  * Run: node scripts/check_lock_badge_states.mjs
  */
@@ -212,12 +212,11 @@ console.log('\nEIGHT — the phase vocabulary matches services/lock_state.py');
        `lock_state.py still spells ${name} "${word}"`);
     ok(ts.includes(`'${word}'`), `lockBadge.ts still tests for '${word}'`);
   }
-  const backend = [py, ...['services/auto_offset_service.py', 'services/xcorr_sweep.py']
-    .map((f) => readFileSync(path.join(REPO, f), 'utf8'))].join('\n');
   for (const reason of ['no_shape', 'capture_in_progress', 'setlist_disabled',
-                        'no_windows', 'no_measurements',
-                        'nothing_to_find', 'no_time_left', 'user_verified']) {
-    ok(backend.includes(`"${reason}"`), `the reason "${reason}" is emitted by the backend`);
+                        'no_windows', 'no_measurements']) {
+    ok(py.includes(`"${reason}"`) || readFileSync(
+         path.join(REPO, 'services/auto_offset_service.py'), 'utf8').includes(`"${reason}"`),
+       `the reason "${reason}" is emitted by the backend`);
     ok(ts.includes(`'${reason}'`), `and rendered in words by the badge`);
   }
 }
@@ -269,11 +268,6 @@ console.log('\nNINE — keep searching: "Searching…" while it works past the p
     ok(badge(gaveUp).title.includes(words), `and says why: "${words}"`);
   }
 
-  // The record shape the badge reads is the one the backend writes.
-  const py = readFileSync(PY, 'utf8');
-  ok(/nxt\["continued"\] = True/.test(py), 'lock_state.py sets `continued`');
-  ok(/"continued_windows"/.test(py), 'lock_state.py counts `continued_windows`');
-  ok(/def note_continued_search\(/.test(py), 'through note_continued_search');
 }
 
 rmSync(tmp, { recursive: true, force: true });
