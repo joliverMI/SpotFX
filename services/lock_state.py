@@ -57,7 +57,8 @@ opposite of what is happening. `note_continued_search()` marks the record
 spent fraction. Both keys are ADDED only to a play that actually continues,
 so every other play's record — an early lock's included — is exactly the
 shape it was. When the continued search gives up, the sweep hands its
-reason (`nothing_to_find` / `no_time_left` / `user_verified`) to
+reason (`nothing_to_find` / `no_time_left` / `user_verified` /
+`nothing_admissible`) to
 `note_outcome()`, and task-end resolves the badge exactly as before.
 
 PUSH PLUS POLL, ONE RECORD. `note_*()` broadcasts a `lock_state` message

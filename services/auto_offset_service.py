@@ -949,6 +949,8 @@ class AutoOffsetService:
                 envelope_exempt=_envelope_exempt(_stage, continued),
                 continued_window=continued,
             )
+            if continued:
+                _continued_outcomes.append(outcome)
 
             # Phase 4: ladder escalation — when the current stage keeps
             # finding nothing, widen; an anti-correlated baseline goes
@@ -1084,6 +1086,7 @@ class AutoOffsetService:
         keep: Optional[KeepSearching] = None
         _keep_engaged = False
         _keep_envelopes: Optional[ContinuedEnvelopes] = None
+        _continued_outcomes: list = []
         # Why the continued search stopped. None = it never ran, or it was
         # still running when the loop ended some other way (song change,
         # capture end) — only a real give-up keeps this play from relaunching.
@@ -1367,10 +1370,14 @@ class AutoOffsetService:
                     _kw = keep.take_ready(frame.timestamp_ms, _XCORR_MARGIN_MS)
                     if _kw is not None:
                         _votes_before = len(evaluator.confirmation_shifts)
+                        _continued_outcomes.clear()
                         locked = await _run_window(_kw[0], _kw[1], continued=True)
+                        _kout = _continued_outcomes[-1] if _continued_outcomes else None
                         keep.note_window(
                             frame.timestamp_ms, _kw,
-                            evidence=len(evaluator.confirmation_shifts) > _votes_before)
+                            evidence=len(evaluator.confirmation_shifts) > _votes_before,
+                            clipped=None if _kout is None else bool(_kout.envelope_clipped),
+                            engine_offset_ms=None if _kout is None else int(_kout.old_offset_ms))
                         if locked:
                             logger.info(
                                 "Auto-offset xcorr: keep-searching locked at %dms after "
@@ -1407,9 +1414,12 @@ class AutoOffsetService:
                         if keep.offer(frame.timestamp_ms,
                                       (_kspike[0], _kspike[1]) if _kspike else None):
                             _kws, _kwe, _kspike_ms, _kstrength = _kspike
-                            _kenv = await asyncio.to_thread(
-                                _continued_window_envelope, _keep_envelopes,
-                                int(_kws), int(_kwe),
+                            _kenv = _floored_envelope(
+                                await asyncio.to_thread(
+                                    _continued_window_envelope, _keep_envelopes,
+                                    int(_kws), int(_kwe),
+                                ),
+                                evaluator.cfg.save_confirm_tol_ms,
                             )
                             evaluator.envelope_lookup[(int(_kws), int(_kwe))] = _kenv
                             logger.info(
@@ -1857,6 +1867,16 @@ def _ladder_hears(outcome, continued: bool) -> bool:
     empty would escalate the ladder into the global stage, which is exempt
     from the very clip that stopped it."""
     return not (continued and outcome.envelope_clipped)
+
+
+def _floored_envelope(envelope: tuple[int, int], tol_ms: int) -> tuple[int, int]:
+    """A continued window's envelope, widened (never narrowed) to at least
+    ±`tol_ms` — the sweep's own agreement tolerance. KeepSearching's docstring
+    carries the measurement that makes this necessary and why it restores a
+    bound rather than weakening one."""
+    safe_neg_ms, safe_pos_ms = envelope
+    tol = abs(int(tol_ms))
+    return min(int(safe_neg_ms), -tol), max(int(safe_pos_ms), tol)
 
 
 def _continued_window_envelope(source: ContinuedEnvelopes, win_start: int,

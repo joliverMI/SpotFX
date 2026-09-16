@@ -37,8 +37,10 @@
  *           never "Lock failed" or "Lock idle"; and each give-up reason reads
  *           "Lock failed" in words — claiming it "kept searching" only when
  *           the record says it did (`continued`), never for a give-up the
- *           moment the plan ran out. The records are hand-built to mirror
- *           the shape services/lock_state.py publishes.
+ *           moment the plan ran out. `nothing_admissible` (every recent
+ *           window found something the envelope would not let it adopt)
+ *           never reads as "nothing usable turned up". The records are
+ *           hand-built to mirror the shape services/lock_state.py publishes.
  *
  * Run: node scripts/check_lock_badge_states.mjs
  */
@@ -264,11 +266,15 @@ console.log('\nNINE — keep searching: "Searching…" while it works past the p
     ['nothing_to_find', 'nothing usable turned up'],
     ['no_time_left', 'last stretch of the song'],
     ['user_verified', 'user-verified'],
+    ['nothing_admissible', 'nothing it found could be adopted'],
   ]) {
     const gaveUp = rec('unlocked', { continued: true, continued_windows: 9, reason });
     eq(badge(gaveUp).label, 'Lock failed', `a give-up (${reason}) reads "Lock failed"`);
     ok(badge(gaveUp).title.includes(words), `and says why: "${words}"`);
   }
+  ok(!badge(rec('unlocked', { continued: true, continued_windows: 3, reason: 'nothing_admissible' }))
+       .title.includes('nothing usable turned up'),
+     'a search that found only what it could not adopt never says nothing usable turned up');
   ok(badge(rec('unlocked', { continued: true, continued_windows: 9, reason: 'no_time_left' }))
        .title.includes('kept searching past its planned windows'),
      'a continued search that ran into the last stretch says it kept searching');

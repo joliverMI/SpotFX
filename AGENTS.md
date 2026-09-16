@@ -7197,7 +7197,18 @@ before touching it:
   planner's own full-song bands and beats (`ContinuedEnvelopes`, built once
   when the search engages) and registered in the evaluator's lookup before
   each window runs. A new place a window can come from needs the same
-  treatment, or the clip will not see it. **The clip holds at EVERY ladder
+  treatment, or the clip will not see it. **That envelope is floored,
+  widen-only, at ±`xcorr_save_confirm_tol_ms` (300ms)** (`_floored_envelope`):
+  124 of 563 of his uscore-v8 songs, MAYDAY included, carry a ZERO-WIDTH
+  (0, 0) envelope on every planned window — force-picked past the planner's
+  own 100ms eligibility gate — which admits only a measurement equal to the
+  engine's offset to the millisecond, so after the first off-grid snap the
+  continued search could neither confirm nor correct. 300ms stays under a
+  one-beat twin (500ms at 120bpm). And **a run of `clip_give_up_windows` (3)
+  clipped continued windows against an unchanging engine offset gives up as
+  `nothing_admissible`** — the OLD measurement still casts votes there, so
+  without it such a play burns a window every 5 s to `no_time_left` having
+  learned nothing. **The clip holds at EVERY ladder
   stage for a continued window** (`_envelope_exempt`): the global stage still
   exempts planned and drift-recovery windows, never a continued one, because
   the ladder gets there without any clip firing (empty continued windows, an

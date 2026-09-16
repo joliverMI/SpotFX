@@ -49,6 +49,14 @@ math kernel, the trigger engine and disk are replaced.
           exactly the stated one — a planned window at global is still
           exempt, byte-identical to the pre-change sweep, and a cold-start
           continued window still adopts a correction far outside its envelope.
+  TWELVE — MAYDAY's own envelope is ZERO-WIDTH, like 124 of 563 of his songs:
+          floored at the sweep's 300ms agreement tolerance, a continued window
+          measuring the engine's offset (exactly, one bin off, or off the grid
+          altogether) is admitted and the play locks — without the floor it
+          burns every window to no_time_left and reads "Lock failed" with the
+          engine already right; a beat twin 500ms off is still refused; and a
+          run of clipped windows against one engine offset gives up promptly
+          as nothing_admissible, with red controls for the floor and the rule.
 
 Timing sign conventions: this change decides WHEN and HOW LONG the search
 runs, never what a measurement means. TWO is the proof — every engine snap,
@@ -62,11 +70,13 @@ import pytest
 import sweep_world_driver as d
 from services import lock_state
 from services.xcorr_sweep import (
-    KEEP_SEARCHING_NO_TIME_LEFT, KEEP_SEARCHING_NOTHING_TO_FIND,
-    KEEP_SEARCHING_USER_VERIFIED, KeepSearching, KeepSearchingConfig,
+    KEEP_SEARCHING_NO_TIME_LEFT, KEEP_SEARCHING_NOTHING_ADMISSIBLE,
+    KEEP_SEARCHING_NOTHING_TO_FIND, KEEP_SEARCHING_USER_VERIFIED, KeepSearching,
+    KeepSearchingConfig,
 )
 
 URI = d.URI
+NO_CLIP_RULE = {"xcorr_keep_searching_clip_give_up_windows": 10**6}
 
 
 @pytest.fixture(scope="module")
@@ -344,6 +354,41 @@ def test_give_up_rules_and_their_precedence():
     assert _ks(duration_ms=0).give_up_reason(30_000) == KEEP_SEARCHING_NO_TIME_LEFT
 
 
+def test_clip_exhaustion_counts_consecutive_clips_against_one_engine_offset():
+    ks = _ks(clip_give_up_windows=3)
+    ks.note_window(40_000, (34_000, 39_000), evidence=True, clipped=True, engine_offset_ms=1350)
+    ks.note_window(45_000, (39_500, 44_500), evidence=True, clipped=True, engine_offset_ms=1350)
+    assert ks.give_up_reason(45_000) is None
+    ks.note_window(50_000, (45_000, 50_000), evidence=False, clipped=None)
+    assert ks.give_up_reason(50_000) is None, "a window discarded unmeasured leaves the run alone"
+    ks.note_window(55_000, (50_500, 55_500), evidence=True, clipped=True, engine_offset_ms=1350)
+    assert ks.give_up_reason(55_000) == KEEP_SEARCHING_NOTHING_ADMISSIBLE
+    assert ks.give_up_reason(210_000) == KEEP_SEARCHING_NO_TIME_LEFT, "the song's end outranks it"
+
+    reset = _ks(clip_give_up_windows=3)
+    reset.note_window(40_000, (34_000, 39_000), evidence=True, clipped=True, engine_offset_ms=1350)
+    reset.note_window(45_000, (39_500, 44_500), evidence=True, clipped=False, engine_offset_ms=1350)
+    reset.note_window(50_000, (45_000, 50_000), evidence=True, clipped=True, engine_offset_ms=1350)
+    reset.note_window(55_000, (50_500, 55_500), evidence=True, clipped=True, engine_offset_ms=1350)
+    assert reset.give_up_reason(55_000) is None, "an admitted window starts the count again"
+
+    moved = _ks(clip_give_up_windows=3)
+    moved.note_window(40_000, (34_000, 39_000), evidence=True, clipped=True, engine_offset_ms=1350)
+    moved.note_window(45_000, (39_500, 44_500), evidence=True, clipped=True, engine_offset_ms=1350)
+    moved.note_window(50_000, (45_000, 50_000), evidence=True, clipped=True, engine_offset_ms=1325)
+    assert moved.give_up_reason(50_000) is None, "the engine moving starts the count again"
+    moved.note_window(55_000, (50_500, 55_500), evidence=True, clipped=True, engine_offset_ms=1325)
+    moved.note_window(60_000, (56_000, 61_000), evidence=True, clipped=True, engine_offset_ms=1325)
+    assert moved.give_up_reason(60_000) == KEEP_SEARCHING_NOTHING_ADMISSIBLE
+
+
+def test_a_continued_envelope_is_widened_to_the_agreement_tolerance_never_narrowed(new):
+    assert new._floored_envelope((0, 0), 300) == (-300, 300)
+    assert new._floored_envelope((-900, 900), 300) == (-900, 900)
+    assert new._floored_envelope((-100, 600), 300) == (-300, 600)
+    assert new._floored_envelope((-800, 50), 300) == (-800, 300)
+
+
 def test_placement_cadence_readiness_and_overlap():
     ks = _ks()
     assert not ks.wants_window(34_999) and ks.wants_window(35_000)
@@ -367,6 +412,7 @@ def test_borrowed_constants_still_agree_with_the_planners():
     assert cfg.end_buffer_ms == aos._XCORR_END_BUFFER_MS == uscore_planner._END_BUFFER_MS
     assert KeepSearchingConfig().max_overlap_ms == uscore_planner._MAX_OVERLAP_MS
     assert settings.xcorr_keep_searching_enabled is True, "the Admiral authorised it: on"
+    assert cfg.clip_give_up_windows == settings.xcorr_keep_searching_clip_give_up_windows
 
 
 # ── SEVEN — a continued search ended by a song change keeps its own context ──
@@ -558,7 +604,7 @@ def test_a_beat_twin_in_the_continued_search_is_clipped(new, monkeypatch, tmp_pa
     assert _twin_snaps(t) == [], "no snap was ever asked for at the twin"
     assert all(s[1] != TWIN_TRUTH_MS + TWIN_PERIOD_MS for s in t.saves), "the twin was never saved"
     assert t.history[-1]["locked"] is False and t.history[-1]["offset_ms"] == TWIN_TRUTH_MS
-    assert t.final_lock_state["reason"] == KEEP_SEARCHING_NO_TIME_LEFT
+    assert t.final_lock_state["reason"] == KEEP_SEARCHING_NOTHING_ADMISSIBLE
     assert t.saves and t.saves[-1][1] == TWIN_TRUTH_MS, "the final save kept the true offset"
 
 
@@ -683,7 +729,7 @@ def test_live_a_clipped_continued_window_never_promotes_the_ladder(new, monkeypa
     assert _twin_snaps(t) == []
     assert all(s[1] != TWIN_TRUTH_MS + TWIN_PERIOD_MS for s in t.saves)
     assert t.history[-1]["locked"] is False and t.history[-1]["offset_ms"] == TWIN_TRUTH_MS
-    assert t.final_lock_state["reason"] == KEEP_SEARCHING_NO_TIME_LEFT
+    assert t.final_lock_state["reason"] == KEEP_SEARCHING_NOTHING_ADMISSIBLE
 
 
 def test_live_a_clipped_continued_window_never_feeds_the_accumulator(new, monkeypatch, tmp_path):
@@ -728,7 +774,9 @@ def test_live_red_counting_a_clipped_continued_window_as_empty_promotes_the_ladd
 def test_live_red_feeding_the_accumulator_saves_the_twin(new, monkeypatch, tmp_path):
     """RED CONTROL for the accumulator. Let a clipped continued window's
     landscape in, as a planned window's is, and the twin's mass overtakes the
-    truth and is saved, although no single window was ever allowed to adopt it."""
+    truth and is saved, although no single window was ever allowed to adopt it.
+    The clip-exhaustion give-up (TWELVE) is switched off here: it would end the
+    search after three clipped windows and hide this route rather than close it."""
     from services.xcorr_sweep import SweepEvaluator
     real = SweepEvaluator.process_window
 
@@ -738,7 +786,7 @@ def test_live_red_feeding_the_accumulator_saves_the_twin(new, monkeypatch, tmp_p
 
     monkeypatch.setattr(SweepEvaluator, "process_window", planned_accumulation)
     world = _live_twin_world()
-    t = d.run_world(new, world, monkeypatch, tmp_path, settings_over=LIVE)
+    t = d.run_world(new, world, monkeypatch, tmp_path, settings_over={**LIVE, **NO_CLIP_RULE})
 
     twin = TWIN_TRUTH_MS + TWIN_PERIOD_MS
     accumulator = t.accumulators[0]
@@ -878,7 +926,7 @@ def test_live_a_twin_at_the_global_stage_is_clipped_for_a_continued_window(new, 
         "window before the song went quiet — none from the global stage"
     )
     assert accumulator.dominant().offset_ms == TWIN_TRUTH_MS
-    assert t.final_lock_state["reason"] == KEEP_SEARCHING_NO_TIME_LEFT
+    assert t.final_lock_state["reason"] == KEEP_SEARCHING_NOTHING_ADMISSIBLE
     assert t.saves and t.saves[-1][1] == TWIN_TRUTH_MS
 
 
@@ -976,3 +1024,143 @@ def test_live_a_cold_start_continued_window_still_adopts_a_large_correction(new,
     assert t.history[-1]["locked"] is True and t.history[-1]["offset_ms"] == FAR_TRUTH_MS
     assert t.history[-1]["time_to_lock_ms"] > _drain_ms(world)
     assert t.engine._shape_offset_ms == FAR_TRUTH_MS
+
+
+# ── TWELVE — a zero-width envelope, the shape a fifth of his library has ─────
+
+ZERO_TRUTH_MS = 1325
+ZERO_TWIN_MS = ZERO_TRUTH_MS + 500
+TOL_MS = d.SETTINGS["xcorr_save_confirm_tol_ms"]
+
+
+def _zero_width_world(engine_ms: int, twin_ms: int | None = None) -> d.World:
+    """MAYDAY as his library stores it: the planner's envelope is (0, 0) on
+    every planned window and at every position the search continues into —
+    124 of 563 of his uscore-v8 songs look like this. Progressive matching
+    snaps the engine to `engine_ms` before any window runs: on the truth, one
+    25ms bin from it, or off the grid window measurements land on. OLD there
+    correlates as well as the truth does, because a real correlation a few ms
+    off its peak barely moves. The planned windows are the founding report's
+    weak Q=0.39 ones, so only continued windows can supply the evidence a lock
+    needs; from 60s the song is clear. With `twin_ms`, every continued
+    window's free search is fooled by that beat instead."""
+    def planned(ms):
+        return ms < 34_000
+
+    world = d.mayday_world(
+        progressive=lambda _t: (engine_ms, 0.7, 0.5),
+        planned_envelope=(0, 0),
+        eval_tol_ms=25,
+        peaks=lambda ms: [(ZERO_TRUTH_MS, 0.3 if planned(ms) else d.mayday_world().clarity(ms)[0])],
+    )
+    if twin_ms is not None:
+        world.twin = lambda ms: None if planned(ms) else (twin_ms, 0.95)
+        world.peaks = lambda ms: (
+            [(ZERO_TRUTH_MS, 0.3)] if planned(ms)
+            else [(ZERO_TRUTH_MS, d.mayday_world().clarity(ms)[0]), (twin_ms, 0.95)])
+    return world
+
+
+def _planned_clip_lines(t: d.Trace, world: d.World) -> list[str]:
+    planned = [f"window [{s}–{e}]ms envelope clip" for s, e in world.windows]
+    return [line for line in t.logs if any(p in line for p in planned)]
+
+
+def _continued_clip_lines(t: d.Trace, world: d.World) -> list[str]:
+    planned = set(_planned_clip_lines(t, world))
+    return [line for line in t.logs if "envelope clip" in line and line not in planned]
+
+
+def test_zero_width_is_what_the_planner_really_gives_mayday_shaped_songs():
+    import numpy as np
+    from services import uscore_planner
+    world = _zero_width_world(1337)
+    ts = np.arange(0, world.duration_ms + d.FRAME_MS, d.FRAME_MS, dtype=float)
+    bands = uscore_planner.normalized_song_bands(
+        ts, {k: ts.copy() for k in ("rms_total", "rms_low", "rms_mid", "rms_high")},
+        world.duration_ms)
+    shift = uscore_planner.global_max_shift_bins([])
+    for start in range(30_000, 212_000, 500):
+        assert uscore_planner.window_envelope(bands, [], shift, start, 5000)[:2] == (0, 0), start
+
+
+@pytest.mark.parametrize("engine_ms", [1337, 1350, 1325], ids=["off-grid", "one-bin", "exact"])
+def test_zero_width_continued_windows_are_admitted_and_the_play_locks(new, monkeypatch, tmp_path, engine_ms):
+    world = _zero_width_world(engine_ms)
+    t = d.run_world(new, world, monkeypatch, tmp_path, settings_over=LIVE)
+
+    assert _continued(t, world), "the planned windows ran out without a lock"
+    assert any(f"envelope [-{TOL_MS}, +{TOL_MS}]ms" in line for line in t.logs), (
+        "each continued window's zero-width envelope was floored at the agreement tolerance"
+    )
+    assert _continued_clip_lines(t, world) == [], "no continued window was clipped"
+    if engine_ms != ZERO_TRUTH_MS:
+        assert _planned_clip_lines(t, world), "planned windows keep their stored (0, 0) envelope"
+
+    peak = t.accumulators[0].dominant()
+    assert abs(peak.offset_ms - ZERO_TRUTH_MS) <= 25
+    assert peak.mass >= LIVE["xcorr_accum_lock_mass"], "continued windows fed the accumulator"
+    lock = t.history[-1]
+    assert lock["locked"] is True and lock["time_to_lock_ms"] > _drain_ms(world)
+    assert lock["offset_ms"] == engine_ms == t.engine._shape_offset_ms
+    assert t.final_lock_state["phase"] == lock_state.PHASE_LOCKED
+
+
+@pytest.mark.parametrize("engine_ms", [1337, 1350], ids=["off-grid", "one-bin"])
+def test_zero_width_red_without_the_floor_the_play_never_locks(new, monkeypatch, tmp_path, engine_ms):
+    """RED CONTROL, and the finding reproduced: the pre-floor, pre-rule sweep on
+    the same song clips every continued window, starves the accumulator, and
+    burns a window every 5s to the end of the song — reading "Lock failed"
+    while the engine sits on the right offset at Q=0.95."""
+    monkeypatch.setattr(new, "_floored_envelope", lambda envelope, _tol: envelope)
+    world = _zero_width_world(engine_ms)
+    t = d.run_world(new, world, monkeypatch, tmp_path, settings_over={**LIVE, **NO_CLIP_RULE})
+
+    assert len(_continued(t, world)) >= 30
+    assert len(_continued_clip_lines(t, world)) == len(_continued(t, world)), (
+        "every continued window was clipped"
+    )
+    assert t.accumulators[0].dominant().mass < LIVE["xcorr_accum_lock_mass"]
+    assert t.engine._shape_offset_ms == engine_ms and t.engine._play_best_quality >= 0.9
+    assert t.history[-1]["locked"] is False
+    assert t.final_lock_state["phase"] == lock_state.PHASE_UNLOCKED
+    assert t.final_lock_state["reason"] == KEEP_SEARCHING_NO_TIME_LEFT
+
+
+def test_zero_width_a_beat_twin_is_still_refused(new, monkeypatch, tmp_path):
+    world = _zero_width_world(1350, twin_ms=ZERO_TWIN_MS)
+    t = d.run_world(new, world, monkeypatch, tmp_path, settings_over=LIVE)
+
+    assert _continued_clip_lines(t, world), "the twin was measured"
+    assert all(f"outside [-{TOL_MS}, +{TOL_MS}]" in line for line in _continued_clip_lines(t, world))
+    assert not any(c[0] == "apply_save" and c[2] == ZERO_TWIN_MS for c in t.engine.calls)
+    assert all(s[1] != ZERO_TWIN_MS for s in t.saves), "the twin was never saved, by any route"
+    assert _mass_at(t.accumulators[0], ZERO_TWIN_MS) == pytest.approx(0.0, abs=1e-3)
+    assert not any("lock-and-stop" in line for line in t.logs)
+    assert t.history[-1]["locked"] is False
+
+
+def test_zero_width_clipped_windows_against_one_offset_give_up_promptly(new, monkeypatch, tmp_path):
+    world = _zero_width_world(1350, twin_ms=ZERO_TWIN_MS)
+    t = d.run_world(new, world, monkeypatch, tmp_path, settings_over=LIVE)
+
+    rule = d.SETTINGS["xcorr_keep_searching_clip_give_up_windows"]
+    assert len(_continued_clip_lines(t, world)) == rule
+    assert len(_continued(t, world)) <= rule + 1
+    assert t.last_frame_ms < _drain_ms(world) + (rule + 2) * d.SETTINGS["xcorr_keep_searching_interval_ms"]
+    assert any("keep-searching gave up (nothing_admissible)" in line for line in t.logs)
+    assert t.final_lock_state["phase"] == lock_state.PHASE_UNLOCKED
+    assert t.final_lock_state["reason"] == KEEP_SEARCHING_NOTHING_ADMISSIBLE
+    assert t.final_lock_state["continued"] is True
+
+
+def test_zero_width_red_without_the_clip_rule_the_same_world_burns_to_no_time_left(new, monkeypatch, tmp_path):
+    """RED CONTROL for the give-up: the OLD measurement at the engine's offset
+    keeps casting votes, so nothing_to_find never arrives and the search
+    measures a window every 5s to the end of the song, learning nothing."""
+    world = _zero_width_world(1350, twin_ms=ZERO_TWIN_MS)
+    t = d.run_world(new, world, monkeypatch, tmp_path, settings_over={**LIVE, **NO_CLIP_RULE})
+
+    assert len(_continued(t, world)) >= 30
+    assert t.final_lock_state["reason"] == KEEP_SEARCHING_NO_TIME_LEFT
+    assert all(s[1] != ZERO_TWIN_MS for s in t.saves)

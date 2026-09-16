@@ -126,6 +126,8 @@ function failReason(rec: LockStateRecord): string {
         : ' — its planned windows ran out inside the last stretch of the song, where no match window is placed, so there was nothing left to search';
     case 'user_verified':
       return ' — this song\'s offset is user-verified, so the matcher measures but never moves it';
+    case 'nothing_admissible':
+      return ' — it kept searching past its planned windows, but each new measurement pointed further from the offset in use than that part of the song can safely confirm, so nothing it found could be adopted';
     default:
       return '';
   }

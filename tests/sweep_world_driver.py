@@ -114,6 +114,9 @@ class World:
     progressive: Optional[Callable[[int], Optional[tuple[int, float, float]]]] = None
     # The planner's stored (safe_neg_ms, safe_pos_ms) on every planned window.
     planned_envelope: Optional[tuple[int, int]] = None
+    # OLD scores the window's r when tested within this many ms of the truth
+    # (a real correlation a few ms off its peak barely moves); 0 = exactly.
+    eval_tol_ms: int = 0
 
 
 def mayday_world(**over) -> World:
@@ -296,6 +299,7 @@ SETTINGS = dict(
     xcorr_keep_searching_enabled=True,
     xcorr_keep_searching_interval_ms=5000,
     xcorr_keep_searching_give_up_ms=45000,
+    xcorr_keep_searching_clip_give_up_windows=3,
 )
 
 # His live storage/settings.json: the FFT kernel, evidence accumulation, the
@@ -436,7 +440,7 @@ def run_world(mod: ModuleType, world: World, monkeypatch, tmp_path: Path, *,
     def k_eval(_ts, _bands, _frames, ws_, we_, shift_ms):
         trace.kernel.append(("eval_at_shift", int(ws_), int(we_), int(shift_ms)))
         r, _d = world.clarity(int(ws_))
-        return r if -int(shift_ms) == world.truth(int(ws_)) else world.off_r
+        return r if abs(-int(shift_ms) - world.truth(int(ws_))) <= world.eval_tol_ms else world.off_r
 
     def k_xcorr(_ts, _bands, _frames, ws_, we_, *, search_ms, old_r=None, tempo_bpm=None):
         trace.kernel.append(("xcorr_window", int(ws_), int(we_)))

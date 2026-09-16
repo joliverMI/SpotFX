@@ -229,6 +229,7 @@ class MismatchMonitor:
 KEEP_SEARCHING_NOTHING_TO_FIND = "nothing_to_find"
 KEEP_SEARCHING_NO_TIME_LEFT = "no_time_left"
 KEEP_SEARCHING_USER_VERIFIED = "user_verified"
+KEEP_SEARCHING_NOTHING_ADMISSIBLE = "nothing_admissible"
 
 
 @dataclass
@@ -244,6 +245,7 @@ class KeepSearchingConfig:
     give_up_ms: int = 45000
     end_buffer_ms: int = 30000
     max_overlap_ms: int = 1000
+    clip_give_up_windows: int = 3
 
     @classmethod
     def from_settings(cls, settings, *, end_buffer_ms: int) -> "KeepSearchingConfig":
@@ -252,6 +254,8 @@ class KeepSearchingConfig:
             interval_ms=int(getattr(settings, "xcorr_keep_searching_interval_ms", 5000)),
             give_up_ms=int(getattr(settings, "xcorr_keep_searching_give_up_ms", 45000)),
             end_buffer_ms=int(end_buffer_ms),
+            clip_give_up_windows=int(getattr(
+                settings, "xcorr_keep_searching_clip_give_up_windows", 3)),
         )
 
 
@@ -294,6 +298,25 @@ class KeepSearching:
     engages — `auto_offset_service.ContinuedEnvelopes`), registered in the
     evaluator's lookup under the window's bounds before it is evaluated. The
     clip itself is unchanged, including its cold-start skip.
+
+    THAT ENVELOPE IS FLOORED AT THE SWEEP'S OWN AGREEMENT TOLERANCE
+    (`auto_offset_service._floored_envelope`, `SweepConfig.save_confirm_tol_ms`,
+    300ms), WIDEN-ONLY: `safe_neg = min(planner, -tol)`, `safe_pos =
+    max(planner, +tol)`, so a planner envelope already wider is left exactly
+    as it is. Planned windows keep their stored envelopes untouched. Measured
+    on his library (2026-09-16, read-only): 124 of 563 uscore-v8 songs carry a
+    ZERO-WIDTH (0, 0) envelope on every planned window, zero-width is the
+    most common width there is, and MAYDAY is one of them. Unfloored, such a
+    song admits only a measurement equal to the engine's offset to the
+    millisecond, and window measurements sit on a 25ms grid while progressive
+    and anchor snaps do not — so after the first snap every continued window
+    was clipped and the search could neither confirm nor correct. The floor
+    RESTORES a bound rather than weakening one: the planner itself refuses a
+    window whose envelope totals under `uscore_planner._MIN_TOTAL_ENVELOPE_MS`
+    (100ms) as ineligible, and these songs' windows are FORCE-PICKED past
+    that gate, so on them the envelope was never a working safeguard. 300ms
+    stays under a one-beat twin at 120bpm (500ms), so a beat twin is still
+    refused.
 
     THE CLIP HOLDS AT EVERY LADDER STAGE FOR A CONTINUED WINDOW
     (`auto_offset_service._envelope_exempt`). The ladder's global stage skips
@@ -362,6 +385,16 @@ class KeepSearching:
       user_verified   — the stored offset is pinned by the user, so the sweep
                         can never move the engine: no better lock is
                         reachable, and searching would only burn work.
+      nothing_admissible — `clip_give_up_windows` consecutive continued
+                        windows were all CLIPPED against the SAME engine
+                        offset. A clipped window is not nothing to find — it
+                        found something the envelope will not let it adopt,
+                        and the OLD measurement at the engine's offset still
+                        casts votes, so without this rule such a play would
+                        burn a window every interval to `no_time_left`
+                        having learned nothing. An unclipped window, or the
+                        engine's offset moving, resets the count; a window
+                        discarded unmeasured leaves it alone.
     A song that keeps producing usable measurements without ever locking
     keeps trying until `no_time_left` — that is the ask, "keep trying across
     the rest of the song", bounded by the song itself.
@@ -380,12 +413,16 @@ class KeepSearching:
         self.pending: Optional[tuple[int, int]] = None
         self.attempts = 0
         self.windows_run = 0
+        self.clip_streak = 0
+        self.clip_engine_offset_ms: Optional[int] = None
 
     def give_up_reason(self, t_now_ms: int) -> Optional[str]:
         if self.verification == "user_verified":
             return KEEP_SEARCHING_USER_VERIFIED
         if t_now_ms >= self.duration_ms - self.cfg.end_buffer_ms:
             return KEEP_SEARCHING_NO_TIME_LEFT
+        if self.clip_streak >= max(1, int(self.cfg.clip_give_up_windows)):
+            return KEEP_SEARCHING_NOTHING_ADMISSIBLE
         if t_now_ms - self.last_evidence_ms >= self.cfg.give_up_ms:
             return KEEP_SEARCHING_NOTHING_TO_FIND
         return None
@@ -422,13 +459,28 @@ class KeepSearching:
         return ready
 
     def note_window(self, t_now_ms: int, window: tuple[int, int], *,
-                    evidence: bool) -> None:
+                    evidence: bool, clipped: Optional[bool] = None,
+                    engine_offset_ms: Optional[int] = None) -> None:
         """A continued window was evaluated. `evidence` = it cast at least one
-        confirmation vote (a measurement cleared the global r threshold)."""
+        confirmation vote (a measurement cleared the global r threshold).
+        `clipped` = the envelope clip refused its NEW measurement, against
+        `engine_offset_ms`; None = it was discarded without a measurement."""
         self.evaluated.append((int(window[0]), int(window[1])))
         self.windows_run += 1
         if evidence:
             self.last_evidence_ms = int(t_now_ms)
+        if clipped is None:
+            return
+        if not clipped:
+            self.clip_streak = 0
+            self.clip_engine_offset_ms = None
+            return
+        offset = None if engine_offset_ms is None else int(engine_offset_ms)
+        if self.clip_streak and offset == self.clip_engine_offset_ms:
+            self.clip_streak += 1
+        else:
+            self.clip_streak = 1
+            self.clip_engine_offset_ms = offset
 
 
 @dataclass
