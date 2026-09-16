@@ -39,6 +39,12 @@ off responses.pending_color_rotate_holds() — see scene_response._color_rotate'
 own docstring for why it can't share the param/gain queue above. The
 parameter watchdog (spectra/services/param_watchdog.py, its own supervised
 task in spectra/app.py — PR #186) backstops a release that never lands.
+
+PER-FLARE TRIGGER MOMENT (2026-09-16): a THIRD schedule shares this same
+shape — responses.take_kind_batch_schedule() hands back the kinds a fire
+staggered to a later moment than the band's own anchor (scene_response.py's
+module docstring, "PER-FLARE TRIGGER MOMENT"); one task per batch, sleeping
+until its own absolute due_at, then responses.run_kind_batch(batch).
 """
 from __future__ import annotations
 
@@ -163,6 +169,12 @@ async def fire_response_event(event_class: str, intensity: float,
     # Same shape, separate queue, separate scheduling loop.
     for dwell_s in responses.pending_color_rotate_holds():
         asyncio.create_task(_release_color_rotate_after_dwell(dwell_s))
+    # PER-FLARE TRIGGER MOMENT (2026-09-16): one task per kind batch this
+    # fire staggered to a later moment than the band's own anchor — the
+    # SAME shape as the release scheduling immediately above (sleep until
+    # the batch's own absolute due time, then run it).
+    for batch in responses.take_kind_batch_schedule():
+        asyncio.create_task(_run_kind_batch(batch))
 
 
 async def _release_group(group) -> None:
@@ -174,6 +186,11 @@ async def _release_group(group) -> None:
 async def _release_color_rotate_after_dwell(dwell_s: float) -> None:
     await asyncio.sleep(dwell_s)
     await responses.flush_color_rotates(dwell_s)
+
+
+async def _run_kind_batch(batch) -> None:
+    await asyncio.sleep(responses.seconds_until(batch.due_at))
+    await responses.run_kind_batch(batch)
 
 
 async def fire_scene_update_event(intensity: float) -> Optional[dict]:
@@ -226,6 +243,8 @@ async def fire_scene_update_event(intensity: float) -> Optional[dict]:
         asyncio.create_task(_release_group(group))
     for dwell_s in responses.pending_color_rotate_holds():
         asyncio.create_task(_release_color_rotate_after_dwell(dwell_s))
+    for batch in responses.take_kind_batch_schedule():
+        asyncio.create_task(_run_kind_batch(batch))
     return record
 
 

@@ -374,7 +374,18 @@ class FlareKind(BaseModel):
     automatic lead exactly the way #172 composes the trigger-level
     sibling field (target = timestamp + offset; fire_at = target -
     lead). Dragging the preview's marker therefore retimes his real
-    show, not only the preview."""
+    show, not only the preview.
+
+    PER-FLARE TRIGGER MOMENT (2026-09-16, his order: "build the offset
+    independence for flares and implement it"): the band-wide relocation
+    above is only HALF the story now — a band no longer fires every kind
+    atomically. `scene_response.ResponseEngine._execute_band_locked`
+    splits the band's attached kinds by `max(0, this kind's offset - the
+    band's anchor)`, so a kind whose own offset differs from its
+    band-mates fires at ITS OWN moment instead of dragging the whole band
+    with it (the legacy MorphLane shape, ported). A band whose kinds all
+    share one offset — including every one at the untouched default 0 —
+    is unaffected."""
     name: str = Field(min_length=1)
     type: Literal["drift_jump", "momentary", "permanent", "color_rotate",
                   "firework_burst", "blob_rush"]

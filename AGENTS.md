@@ -2967,8 +2967,10 @@ PATH READS IT TOO**: `trigger_engine.tick()` relocates a `fire_response`
 trigger's target by the fired band's authored kind offset
 (`scene_response.band_trigger_offset_ms` — its docstring carries the
 multi-kind aggregation rule: min over the NONZERO offsets, a kind at the
-untouched default 0 never vetoes a sibling's authored ask, because a band
-fires atomically), read LIVE off the ACTIVE scene at render intensity,
+untouched default 0 never vetoes a sibling's authored ask — this is the
+ONE band-wide relocation `tick()` still applies, unaffected by PER-FLARE
+TRIGGER MOMENT below, which only changed what happens once the fire
+lands), read LIVE off the ACTIVE scene at render intensity,
 composed with the automatic lead exactly as #172 composes the
 trigger-level sibling field (`target = timestamp + his_offset`, then
 `fire_at = target - lead` — never the same sign added/subtracted). All 61
@@ -2987,6 +2989,33 @@ playback advanced). Scoped like the lead system: stored triggers only —
 a bridge-classified flare has no forward notice, nothing to relocate.
 Specs: `scripts/check_triggers.py` §11,
 `tests/test_flare_kind_trigger_offset.py`.
+
+**PER-FLARE TRIGGER MOMENT (2026-09-16, his order: "build the offset
+independence for flares and implement it" — exactly the authorisation
+`band_trigger_offset_ms`'s own docstring said this needed).** Before this,
+a band fired ATOMICALLY (one `_execute_band_locked` burst), so ONE offset
+had to speak for every kind attached to it — the aggregate `min()` above
+is unchanged and still governs the band's own tick-level relocation, but
+INSIDE the fire every kind now honours its OWN `trigger_offset_ms`
+independently, ported verbatim from legacy `services/trigger_engine.py`'s
+`MorphLane` shape: `_band_anchor_ms` (the same value `band_trigger_offset_
+ms` always computed) stays the anchor; each attached kind then waits
+`max(0, kind.trigger_offset_ms - anchor_ms)` (always >= 0 — clamped
+because SPECTRA's anchor excludes untouched-0 kinds from its own min,
+unlike legacy's literal min-over-all) before executing. A delay of 0 runs
+INLINE (`ResponseEngine._run_kinds`, the extracted pipeline
+`_execute_band_locked` always ran); any other delay is a
+`PendingKindBatch`, scheduled by `services/engine.py` the SAME shape
+`take_release_schedule`/`_release_group` already established for
+momentary releases (`take_kind_batch_schedule`/`run_kind_batch`). A band
+whose kinds all sit at 0 is byte-identical (no batch is ever created).
+The fixed dice -> permanent -> momentary -> gain -> colour order still
+governs collisions WITHIN one batch; two kinds staggered into DIFFERENT
+batches are deliberately reordered in real time — that IS the feature.
+`fire_kind` (the isolated single-kind preview) is untouched: a lone
+kind's own anchor is itself, so its delay is always 0. Spec:
+`tests/test_flare_per_kind_stagger.py`, `tests/
+test_flare_preview_shows_stagger.py`.
 
 Help: `spectra/web/src/help/helpContent.ts` id `flare-preview-timeline`
 (under the `scenes-page` section, next to `flare-kind-edit-box`),
