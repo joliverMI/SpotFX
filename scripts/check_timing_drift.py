@@ -17,10 +17,15 @@ anchors kept in a sidecar store beside the log — `<log stem>_anchors.json`
 (storage/lock_history_anchors.json for the live log) — because the capped
 log itself drops the plays those anchors came from. Copy the sidecar next
 to the log copy under that name, or pass --anchors. A log whose anchors
-store was already written cannot rebuild it once it has evicted past what
-seeded it, so a copy of the log alone reports no level; the report says so
-and exits 2 rather than showing an empty level column as if it were a
-reading.
+store was already written never rebuilds it, so a copy of the log alone
+reports no level; the report says so and exits 2 rather than showing an
+empty level column as if it were a reading.
+
+The era never moves on its own. Adopting a new one is a person's explicit,
+audited act: preview with GET /api/lock-history/drift/reanchor-preview, then
+POST /api/lock-history/drift/reanchor with start_at, by, reason and
+confirm: true (services/lock_history.reanchor). The report prints the latest
+re-anchor it finds in the store.
 
 The instrument exists because of the Aug 25 → Sep 2 2026 incident: the audio
 pipeline ratcheted ~350 ms/day to −3.2 s and nothing said so until locks were
@@ -34,6 +39,24 @@ leads with LEVEL — each play's winning offset vs that song's own FIXED,
 quality-gated anchor — plus a per-session ramp/step/stable `shape`, instead
 of only the legacy sliding-baseline residual, which reads recent CHANGE
 rather than level and turned a real ramp-then-step into "scatter" twice.
+
+WHAT HIS REAL HISTORY READS AS: RAMP-THEN-STEP. Run 2026-09-16 against a
+read-only copy of the live log (500 plays, Aug 28 → Sep 16; no anchors store
+written yet, so the era was derived from the log as it stood: Aug 28 → Sep 1,
+75 anchored songs): −1384 start (Sep 3), then ramp −1612, −2596, −3061,
+−3187 (Sep 11 00:04, within the 200 ms band of the session before it, so
+tagged stable), ramp −3554 (Sep 11 22:40), then STEP to +1460 over 17
+counted plays (Sep 13 21:06). No scatter, no sign flips. There is no
+"stable" reading AFTER the step, and that is the data, not the classifier:
+the step itself landed inside the Sep 11 22:40 session two plays before it
+ended (so that session still reads ramp), the Sep 13 01:36 evening holds a
+single counted play and is correctly "insufficient", and no qualifying
+session follows Sep 13 21:06 yet. The originally stated bar —
+ramp-then-step-then-STABLE — was wrong about his data; the synthetic
+tests/test_lock_history_drift.py world that has all three phases proves
+the classifier's logic, not this history. While no store is written the
+log's oldest plays keep evicting, so re-running this later can shift these
+numbers a little.
 """
 from __future__ import annotations
 
@@ -67,20 +90,27 @@ def report(path: Path, sessions: int, anchors: Optional[Path] = None) -> int:
         lock_history._anchor_path = derived_anchor_path
     print(f"pipeline drift over {path} — alarm at ±{d['alarm_threshold_ms']}ms, "
           f"sessions need ≥{d['min_baselined']} gated plays to drive it")
-    seeded_at = lock_history._anchor_seed_oldest
+    persisted_at = lock_history._anchors_persisted_at
     missing_store = not anchors_path.exists()
     print(f"anchors store: {anchors_path} ({'not found' if missing_store else 'found'})")
-    if missing_store and seeded_at is not None:
-        print(f"  !! this log's anchors store was already written (seeded from plays back to "
-              f"{seeded_at[:16]}), and it is not beside this log. Copy the live "
-              f"storage/lock_history_anchors.json to {anchors_path} or pass --anchors; "
-              f"a copy of the log alone cannot reproduce the level.")
+    if missing_store and persisted_at is not None:
+        print(f"  !! this log's anchors store was already written ({persisted_at[:16]}), and "
+              f"it is not beside this log. Copy the live storage/lock_history_anchors.json "
+              f"to {anchors_path} or pass --anchors; a copy of the log alone cannot "
+              f"reproduce the level.")
+    elif missing_store and d["anchor_status"] == "save_pending":
+        print("  this log's anchors store has not been written yet and the log has evicted "
+              "plays since the last attempt — the next recorded play retries the write")
     elif missing_store:
         print("  this log has never had an anchors store written — the era is derived "
               "from the log as it stands")
     era = d["anchor_era"]
-    print("anchor era: none — no song has an anchor\n" if era is None else
-          f"anchor era: {era['start_at'][:16]} → {era['end_at'][:16]} ({era['songs']} anchored songs)\n")
+    print(f"anchor era: none — no song has an anchor ({d['anchor_status']})" if era is None else
+          f"anchor era: {era['start_at'][:16]} → {era['end_at'][:16]} ({era['songs']} anchored songs)")
+    if era is not None and era["last_reanchor"] is not None:
+        ev = era["last_reanchor"]
+        print(f"  re-anchored {era['reanchors']}×, latest {ev['at'][:16]} by {ev['by']}: {ev['reason']}")
+    print()
     print(f"{'session start (UTC)':>20s} {'plays':>5s} {'lvl n':>5s} {'LEVEL':>9s} "
           f"{'shape':>12s}  |  {'old n':>5s} {'old resid':>10s}")
     for s in reversed(d["sessions"]):     # oldest → newest, reads as a story
@@ -98,19 +128,21 @@ def report(path: Path, sessions: int, anchors: Optional[Path] = None) -> int:
         print(f"\ncurrent: {cur['level_ms']:+d}ms level ({cur['shape']}) over "
               f"{cur['level_baselined']} gated plays (session {cur['start_at'][:16]}) "
               f"→ {'ALARM' if d['alarm'] else 'steady'}")
-    return 2 if era is None and missing_store and seeded_at is not None else 0
+    return 2 if era is None and missing_store and persisted_at is not None else 0
 
 
 def selftest() -> int:
-    saved = (lock_history._STORE_PATH, lock_history._entries, lock_history._anchor_seed_oldest)
+    saved = (lock_history._STORE_PATH, lock_history._entries,
+             lock_history._anchor_seed_oldest, lock_history._anchors_persisted_at)
     with tempfile.TemporaryDirectory(prefix="check_timing_drift_") as tmp:
         lock_history._STORE_PATH = Path(tmp) / "lock_history.json"
         lock_history._anchor_seed_oldest = None
+        lock_history._anchors_persisted_at = None
         try:
             return _selftest_worlds()
         finally:
             (lock_history._STORE_PATH, lock_history._entries,
-             lock_history._anchor_seed_oldest) = saved
+             lock_history._anchor_seed_oldest, lock_history._anchors_persisted_at) = saved
 
 
 def _selftest_worlds() -> int:

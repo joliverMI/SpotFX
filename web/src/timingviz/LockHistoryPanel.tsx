@@ -53,11 +53,21 @@ interface DriftStatus {
   alarm: boolean;
   alarm_threshold_ms: number;
   min_baselined: number;
-  anchor_era: { start_at: string; end_at: string; songs: number } | null;
+  anchor_era: {
+    start_at: string; end_at: string; songs: number; reanchors: number;
+    last_reanchor: { at: string; by: string; reason: string } | null;
+  } | null;
+  anchor_status: 'recorded' | 'not_yet_recorded' | 'no_gated_history' | 'save_pending' | 'missing' | 'unreadable';
 }
 
 const fmtDriftS = (ms: number): string =>
   `${ms >= 0 ? '+' : '-'}${(Math.abs(ms) / 1000).toFixed(1)}s`;
+
+const ANCHOR_STATUS_NOTE: Partial<Record<DriftStatus['anchor_status'], string>> = {
+  save_pending: 'no level yet — the anchors store could not be written; the next play retries',
+  missing: 'no level — the anchors store is missing and is never rebuilt on its own; re-anchor on purpose',
+  unreadable: 'no level — the anchors store is unreadable; re-anchor on purpose',
+};
 
 const SHAPE_LABEL: Record<DriftSession['shape'], string> = {
   start: 'first reading', ramp: 'ramp', reversal: 'reversal', step: 'step',
@@ -99,7 +109,7 @@ function DriftStrip() {
         <>
           <span
             style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: 13, color }}
-            title={`Median of ${cur.level_baselined} gated plays' winning offsets vs their own fixed anchor${data.anchor_era ? ` (set by their plays ${new Date(data.anchor_era.start_at).toLocaleDateString()}–${new Date(data.anchor_era.end_at).toLocaleDateString()})` : ''}, over the session that started ${new Date(cur.start_at).toLocaleString()}. Alarms at ±${(data.alarm_threshold_ms / 1000).toFixed(1)}s. Legacy sliding-baseline reading for this session: ${cur.median_residual_ms == null ? '—' : fmtDriftS(cur.median_residual_ms)}.`}>
+            title={`Median of ${cur.level_baselined} gated plays' winning offsets vs their own fixed anchor${data.anchor_era ? ` (set by their plays ${new Date(data.anchor_era.start_at).toLocaleDateString()}–${new Date(data.anchor_era.end_at).toLocaleDateString()}${data.anchor_era.last_reanchor ? `, re-anchored ${new Date(data.anchor_era.last_reanchor.at).toLocaleDateString()} by ${data.anchor_era.last_reanchor.by}: ${data.anchor_era.last_reanchor.reason}` : ''})` : ''}, over the session that started ${new Date(cur.start_at).toLocaleString()}. Alarms at ±${(data.alarm_threshold_ms / 1000).toFixed(1)}s. Legacy sliding-baseline reading for this session: ${cur.median_residual_ms == null ? '—' : fmtDriftS(cur.median_residual_ms)}.`}>
             {fmtDriftS(cur.level_ms as number)}
           </span>
           <span
@@ -128,7 +138,7 @@ function DriftStrip() {
         </>
       ) : (
         <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-          not enough repeat plays to measure yet
+          {ANCHOR_STATUS_NOTE[data.anchor_status] ?? 'not enough repeat plays to measure yet'}
         </span>
       )}
     </div>
