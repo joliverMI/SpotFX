@@ -369,3 +369,90 @@ def test_the_engine_event_route_runs_staggered_batches_before_returning(monkeypa
     assert [b["outcome"] for b in body["kind_batches"]] == ["landed"]
     assert responder.take_kind_batch_schedule() == []
     assert _written(executor, "spin") == [pytest.approx(SPIN_SPIKE)]
+
+
+# ── 8. an overlapping fire never starts a staggered batch's hold early ─────
+
+def test_an_overlapping_fire_never_arms_a_staggered_batchs_release(monkeypatch):
+    """A staggered batch runs as its own task, so the next fire routinely
+    overlaps it. Here the batch's momentary spin spike takes 400ms to land
+    (a slow fixture), and a second, unrelated fire starts and FINISHES
+    inside that window — its own safety-net arming and its release
+    scheduling both run while the batch's spike is still going out. The
+    batch's hold must still be measured from ITS OWN spike landing: a
+    blanket sweep by the second fire would arm the entry ~250ms before the
+    spike lands and release it almost as soon as it did."""
+    from spectra.models.scene import (FlareBand, FlareKind, ParamTarget,
+                                      ResponseSpec, SceneDeviceConfig, SceneV2)
+    from spectra.services import engine
+    from spectra.services import room_controls as rc
+    from spectra.services.fx_executor import RecordingExecutor
+
+    hold_s = 0.3
+    write_cost = {"spin": 0.4, "star": 0.02}
+
+    class _SlowFixture(RecordingExecutor):
+        def __init__(self) -> None:
+            super().__init__(clock=time.monotonic,
+                             room_controls_load=lambda: rc.RoomControlState())
+            self.issued: list[tuple[float, dict]] = []
+
+        async def _cost(self, params) -> None:
+            self.issued.append((time.monotonic(), dict(params)))
+            await asyncio.sleep(max(write_cost.get(p, 0.0) for p in params))
+
+        async def glide(self, vid, effect_type, params, duration_ms):
+            if params:
+                await self._cost(params)
+            await super().glide(vid, effect_type, params, duration_ms)
+
+        async def jump(self, vid, effect_type, params):
+            if params:
+                await self._cost(params)
+            await super().jump(vid, effect_type, params)
+
+    scene = SceneV2(
+        name="Overlap",
+        devices=[SceneDeviceConfig(id="d1", target_kind="virtual", target=VID,
+                                   effect_type="radial",
+                                   params={"spin": SPIN_BASE, "star": STAR_BASE})],
+        flare_kinds=[
+            FlareKind(name="Star Lead", type="permanent", trigger_offset_ms=-100,
+                      params={"star": ParamTarget(mode="absolute", value=0.5)}),
+            FlareKind(name="Spin Spike", type="momentary", trigger_offset_ms=0,
+                      hold_ms=int(hold_s * 1000),
+                      params={"spin": ParamTarget(mode="absolute",
+                                                  value=SPIN_SPIKE)}),
+            FlareKind(name="Star Late", type="permanent",
+                      params={"star": ParamTarget(mode="absolute", value=0.7)}),
+        ],
+        responses={"flare": ResponseSpec(bands=[
+            FlareBand(intensity_min=0.0, intensity_max=0.5,
+                      kinds={"Star Lead": 1.0, "Spin Spike": 1.0}),
+            FlareBand(intensity_min=0.5, intensity_max=1.0,
+                      kinds={"Star Late": 1.0})])})
+    responder, executor = _install(monkeypatch, scene, _SlowFixture())
+
+    async def main():
+        await engine.fire_response_event("flare", 0.2)
+        await asyncio.sleep(0.2)
+        # The batch's spin spike was issued ~100ms after the first fire and
+        # is still on its way out; this second fire starts and ends inside it.
+        await engine.fire_response_event("flare", 0.9)
+        assert _written(executor, "star") == [pytest.approx(0.5), pytest.approx(0.7)]
+        assert _written(executor, "spin") == [], "the spike must still be in flight"
+        await asyncio.sleep(1.4)
+
+    asyncio.run(main())
+
+    spike_landed = next(w["at"] for w in executor.writes
+                        if w["params"].get("spin") == pytest.approx(SPIN_SPIKE))
+    release_issued = next(t for t, params in executor.issued
+                          if params.get("spin") == pytest.approx(SPIN_BASE))
+    assert release_issued - spike_landed >= hold_s - 0.03, (
+        f"the release went out {release_issued - spike_landed:.3f}s after the "
+        f"spike landed, against a {hold_s}s hold — another fire armed it")
+    assert _written(executor, "spin") == [pytest.approx(SPIN_SPIKE),
+                                          pytest.approx(SPIN_BASE)]
+    assert responder.pending_release_keys() == set()
+    assert [e["outcome"] for e in responder.kind_batch_log] == ["landed"]

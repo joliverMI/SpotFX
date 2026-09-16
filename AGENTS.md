@@ -3015,8 +3015,11 @@ roll, one colour jump — are now per batch); two kinds staggered into
 DIFFERENT batches are deliberately reordered in real time — that IS the
 feature. Four rules ride with it, all in `scene_response.py`'s module
 docstring: a batch is due at the fire's START + its delay, never after
-the inline burst; a batch is a fire in miniature (own `_fire_seq`, and
-`engine._schedule_fire_tail` schedules what it armed — the kind-batch
+the inline burst; a batch is a fire in miniature (own `_fire_seq`,
+captured once and threaded to every release it pushes, and no other fire
+may arm or schedule its releases while it is still in flight —
+`_fires_in_flight`; `engine._schedule_fire_tail` schedules what it armed once
+it ends — the kind-batch
 queue is the FOURTH queue every drain point must schedule, including
 `flare_preview_hold` and `POST /api/engine/event`); a woken batch re-checks
 the gate its fire passed and SKIPS (never fires) onto a changed scene;

@@ -16,7 +16,9 @@ live bridge/executor singletons)."""
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 import json
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -139,30 +141,160 @@ def _params_written(executor, param: str) -> list:
 
 
 # ── 1. byte-identical when every kind sits at the default 0 ─────────────────
+#
+# Proven against the PRE-CHANGE module itself, loaded out of git at a PINNED
+# ref (tests/sweep_world_driver.py's BASELINE_REF precedent): master
+# immediately before this feature. Never a moving ref — a proof whose
+# reference moves out from under it retires itself silently.
+BASELINE_REF = "829f55e3d16c6b0f14fa41021b85c4d3d97254a6"
 
-def test_byte_identical_when_every_kind_is_at_the_default_offset(tmp_path):
+
+def _baseline_scene_response():
+    """scene_response.py as of BASELINE_REF, as its own module. Raises
+    (never skips) when git cannot produce it."""
+    path = "spectra/services/scene_response.py"
+    src = subprocess.run(
+        ["git", "show", f"{BASELINE_REF}:{path}"],
+        cwd=REPO_ROOT, capture_output=True, text=True, check=True,
+    ).stdout
+    assert "PendingKindBatch" not in src, (
+        f"the pinned baseline {BASELINE_REF} already carries the per-kind "
+        "stagger — the pin is wrong, and this proof would compare the "
+        "feature with itself")
+    name = "scene_response_baseline_829f55e"
+    spec = importlib.util.spec_from_loader(name, loader=None)
+    mod = importlib.util.module_from_spec(spec)
+    mod.__file__ = str(REPO_ROOT / path)
+    sys.modules[name] = mod
+    try:
+        exec(compile(src, f"<{BASELINE_REF[:7]}:{path}>", "exec"), mod.__dict__)
+    finally:
+        sys.modules.pop(name, None)
+    return mod
+
+
+class _WriteCostClock:
+    """Time passes only while a write goes out (~30ms, his live room's
+    measured cost), so every stamped `at`/`due_at` is deterministic AND
+    distinguishes a hold measured from a spike's landing from one measured
+    anywhere else."""
+
+    def __init__(self) -> None:
+        self.t = 100.0
+
+    def __call__(self) -> float:
+        return self.t
+
+
+def _every_kind_scene():
+    """One band, every kind family that needs no colour-set storage — dice,
+    a smooth (glide) and a non-smooth (jump) permanent move, a momentary
+    spike with its own hold, a momentary gain and a colour rotate — all at
+    the untouched default offset 0."""
+    from spectra.models.binding import ValueBinding
+    from spectra.models.scene import (FlareBand, FlareKind, ResponseSpec,
+                                      SceneDeviceConfig, SceneV2)
+    kinds = [
+        FlareKind(name="Dice", type="drift_jump", jump="dice"),
+        FlareKind(name="Star Patch", type="permanent",
+                  params={"star": {"mode": "absolute", "value": 0.8}}),
+        FlareKind(name="Edges Patch", type="permanent",
+                  params={"edges": {"mode": "absolute", "value": 4}}),
+        FlareKind(name="Spin Spike", type="momentary", hold_ms=300,
+                  params={"spin": {"mode": "absolute", "value": 0.9}}),
+        FlareKind(name="Gain Pulse", type="momentary", hold_ms=200, gain=0.5),
+        FlareKind(name="Rotate", type="color_rotate"),
+    ]
+    return SceneV2(
+        name="Byte Identity",
+        devices=[SceneDeviceConfig(
+            id="dev1", target_kind="virtual", target=VID, effect_type="radial",
+            params={"spin": 0.2, "star": 0.3, "edges": 6,
+                    "twist": ValueBinding(signal="random", mode="map",
+                                          out_min=0.0, out_max=5.0)})],
+        flare_kinds=kinds,
+        responses={"flare": ResponseSpec(bands=[
+            FlareBand(intensity_min=0.0, intensity_max=1.0,
+                      kinds={"Dice": 1.0, "Star Patch": 0.8,
+                             "Edges Patch": 1.0, "Spin Spike": 1.0,
+                             "Gain Pulse": 0.6, "Rotate": 1.0})])})
+
+
+async def _one_fire_and_its_releases(engine_cls, scene):
+    """The whole observable life of one fire: on_event, then every release
+    and colour rotate it armed, drained at their own due times."""
+    from spectra.services import room_controls as rc
+    from spectra.services.drift_conductor import DriftConductor
+    from spectra.services.fx_executor import RecordingExecutor
+
+    clock = _WriteCostClock()
+
+    class _CostlyWrites(RecordingExecutor):
+        def _record(self, *a, **kw):
+            super()._record(*a, **kw)
+            clock.t = round(clock.t + 0.03, 6)
+
+    executor = _CostlyWrites(clock=clock,
+                             room_controls_load=lambda: rc.RoomControlState())
+    conductor = DriftConductor(
+        executor=executor, clock=clock, leg_s=20.0,
+        intensity=lambda: 1.0, drift_profiles=lambda: {},
+        curve_profiles=lambda: {}, gradient_profiles=lambda: {},
+        room_controls=lambda: rc.RoomControlState(), rng=Random(11))
+    responder = engine_cls(
+        conductor=conductor, executor=executor, rng=Random(7), clock=clock,
+        curve_profiles=lambda: {},
+        room_controls=lambda: rc.RoomControlState())
+    config = {"spin": 0.2, "star": 0.3, "edges": 6, "twist": 1.0,
+              "brightness": 0.9, "gradient": "#ff0000"}
+    conductor.on_scene_fire(scene, [{
+        "virtual_id": VID, "effect_type": "radial", "config": dict(config),
+        "entry_id": "dev1", "color_mode": "set"}])
+
+    record = await responder.on_event("flare", 0.5)
+    groups = responder.take_release_schedule()
+    for group in groups:
+        clock.t = max(clock.t, group.due_at)
+        await responder.flush_releases(group.hold_s, fire_seq=group.fire_seq,
+                                       due_by=group.due_at)
+    for dwell_s in responder.pending_color_rotate_holds():
+        clock.t = round(clock.t + dwell_s, 6)
+        await responder.flush_color_rotates(dwell_s)
+
+    writes = [{k: w[k] for k in ("seq", "at", "kind", "virtual_id",
+                                 "effect_type", "params", "duration_ms")}
+              for w in executor.writes]
+    return {"record": json.dumps(record),
+            "writes": writes,
+            "groups": [tuple(g) for g in groups],
+            "pending_releases": responder.pending_release_keys(),
+            "param_baseline": dict(conductor.virtuals[VID].param_baseline)}
+
+
+def test_byte_identical_when_every_kind_is_at_the_default_offset():
     """A band whose kinds all sit at trigger_offset_ms=0 must be
-    byte-identical to before this feature existed: no PendingKindBatch is
-    ever created, and both kinds' writes land in the SAME synchronous
-    burst (record["kinds"] carries both, nothing deferred)."""
-    _categories_fixture(tmp_path)
-    scene = _stagger_scene(offset_a=0, offset_b=0)
+    byte-identical to before this feature existed: the same writes in the
+    same order with the same params, durations, kinds and timestamps, the
+    same on_event() record field for field and in the same key order, the
+    same release schedule, and the same carried state — asserted against
+    the pinned pre-change module, not a hand-written expectation."""
+    from spectra.services import scene_response
+    baseline = _baseline_scene_response()
+    scene = _every_kind_scene()
 
-    async def main():
-        host, virtual = await _host(tmp_path, "byte-identical")
-        try:
-            headless.attach_effect(host, virtual, "blackhole", CFG)
-            _, conductor, responder = _engine(_Wall())
-            _fire(conductor, scene, CFG)
-            record = await responder.on_event("flare", 0.5)
-            assert responder.take_kind_batch_schedule() == []
-            names = {k["name"] for k in record["kinds"]}
-            assert names == {"Kind A", "Kind B"}
-        finally:
-            facade.set_host(None)
-            await host.shutdown()
+    before = asyncio.run(_one_fire_and_its_releases(baseline.ResponseEngine, scene))
+    after = asyncio.run(_one_fire_and_its_releases(scene_response.ResponseEngine, scene))
 
-    _run(main())
+    kinds_fired = {k["name"] for k in json.loads(after["record"])["kinds"]}
+    assert kinds_fired == {"Dice", "Star Patch", "Edges Patch", "Spin Spike",
+                           "Gain Pulse", "Rotate"}
+    assert {w["kind"] for w in after["writes"]} == {"jump", "glide"}
+    assert after["groups"], "the momentary kinds must have armed releases"
+    assert after["writes"] == before["writes"]
+    assert after["record"] == before["record"]
+    assert after["groups"] == before["groups"]
+    assert after["pending_releases"] == before["pending_releases"] == set()
+    assert after["param_baseline"] == before["param_baseline"]
 
 
 # ── 2. the swim-burst shape: a negative offset fires NOW, the band-mate  ────

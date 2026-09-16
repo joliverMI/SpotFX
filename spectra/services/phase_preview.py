@@ -33,13 +33,15 @@ does-not-explode):
                 that no drop band happens to carry a qualifying kind today.
 
 THE OFFSETS. Each class's band carries its kinds' own
-FlareKind.trigger_offset_ms, aggregated by scene_response.
-band_trigger_offset_ms (min over the nonzero values — a band fires
-atomically, so one offset speaks for it), and the firing path honours it
-for a DROP band too: that drop rule pins the automatic anchor-family LEAD,
-never his explicit hand on a marker. So each mark here sits at its
-class's authored offset and the ruler tells the truth about where the show
-will actually fire.
+FlareKind.trigger_offset_ms, and the mark drawn here is still the BAND
+ANCHOR — scene_response.band_trigger_offset_ms, min over the nonzero
+values, unchanged — which is where the firing path relocates the whole
+fire, for a DROP band too: that drop rule pins the automatic anchor-family
+LEAD, never his explicit hand on a marker. Kinds inside the fire no longer
+land together at that anchor: each lands at its own per-kind offset
+relative to it (scene_response's "PER-FLARE TRIGGER MOMENT"), so the mark
+tells the truth about where the fire begins, and a kind authored after the
+anchor lands that much after the mark.
 
 WHY THE MARKS ARE NOT DRAGGABLE HERE, stated rather than quietly omitted: a
 band's offset is an AGGREGATE over however many kinds it attaches, so a

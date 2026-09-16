@@ -189,7 +189,14 @@ up and then it gets stuck in Reverse"; the same build finally pinned his
     about the tween, the record_fire cost, or the lead system.
   * A release is OWNED by the fire that created it (fire_seq): one fire's
     timer never drains another fire's entries — the old by-hold_s drain let
-    the FIRST of two 500ms flares release the SECOND one mid-hold.
+    the FIRST of two 500ms flares release the SECOND one mid-hold. The seq
+    is captured ONCE when a fire begins (_begin_fire) and handed down to
+    every _push_release/_arm_pending it makes, never re-read off the shared
+    counter mid-fire, and while a fire is still IN FLIGHT no other fire may
+    arm or schedule its entries (_fires_in_flight): since staggered kind
+    batches run as their own tasks, a fire and a batch routinely overlap,
+    and a blanket sweep by one would start the other's hold before its
+    spike had landed.
   * A later spike on the SAME (virtual, param) SUPERSEDES an earlier
     pending release: the param returns to baseline when the LAST spike's
     hold matures, never when the first one's does (overlapping holds
@@ -906,8 +913,13 @@ class ResponseEngine:
         # than glide it; every other entry glides over PULSE_RELEASE_S.
         self._pending_releases: list[PendingRelease] = []
         # Monotonic per-engine fire counter — stamped onto every entry a
-        # fire arms (ownership), bumped at the top of _execute_band/fire_kind.
+        # fire arms (ownership), bumped by _begin_fire at the top of
+        # _execute_band/fire_kind/run_kind_batch.
         self._fire_seq = 0
+        # The fires whose writes are still going out — their entries belong
+        # to them alone until _end_fire (module docstring, "RELEASE
+        # OWNERSHIP").
+        self._fires_in_flight: set[int] = set()
         # (virtual_id, original_gradient, dwell_s, fade_ms) — the colour
         # ROTATE-AND-BACK flare's OWN release queue, separate from
         # _pending_releases: its fade-back duration is itself
@@ -981,16 +993,28 @@ class ResponseEngine:
         staggered batch's due_at is measured from (None = now)."""
         if started_at is None:
             started_at = self._clock()
-        self._fire_seq += 1
+        fire_seq = self._begin_fire()
         try:
             await self._execute_band_locked(scene, band, intensity, record,
-                                            started_at)
+                                            started_at, fire_seq)
         finally:
-            self._arm_pending()   # safety net: nothing a fire armed stays unstamped
+            self._end_fire(fire_seq)
+
+    def _begin_fire(self) -> int:
+        """A new fire's own seq, marked in flight until _end_fire."""
+        self._fire_seq += 1
+        self._fires_in_flight.add(self._fire_seq)
+        return self._fire_seq
+
+    def _end_fire(self, fire_seq: int) -> None:
+        """Safety net (nothing this fire pushed stays unstamped), then hand
+        its entries to take_release_schedule."""
+        self._arm_pending(fire_seq=fire_seq)
+        self._fires_in_flight.discard(fire_seq)
 
     async def _execute_band_locked(self, scene: SceneV2, band: FlareBand,
                                    intensity: float, record: dict[str, Any],
-                                   started_at: float) -> None:
+                                   started_at: float, fire_seq: int) -> None:
         """PER-FLARE TRIGGER MOMENT (module docstring, "PER-FLARE TRIGGER
         MOMENT"): splits the band's already lane-picked, enabled kinds by
         each one's own delay relative to the band's anchor
@@ -1040,7 +1064,8 @@ class ResponseEngine:
             else:
                 deferred.setdefault(delay_ms, []).append((kind, scale))
 
-        record.update(await self._run_kinds(scene, now_kinds, intensity))
+        record.update(await self._run_kinds(scene, now_kinds, intensity,
+                                            fire_seq))
 
         if deferred:
             record["deferred_kinds"] = [
@@ -1051,11 +1076,11 @@ class ResponseEngine:
             self._pending_kind_batches.append(PendingKindBatch(
                 scene=scene, kinds=kinds, intensity=intensity,
                 due_at=started_at + delay_ms / 1000.0,
-                fire_seq=self._fire_seq, delay_ms=delay_ms))
+                fire_seq=fire_seq, delay_ms=delay_ms))
 
     async def _run_kinds(self, scene: SceneV2,
                          attached: list[tuple[FlareKind, float]],
-                         intensity: float) -> dict[str, Any]:
+                         intensity: float, fire_seq: int) -> dict[str, Any]:
         """The fixed dice -> permanent -> momentary -> gain -> colour
         pipeline (the legacy reroll -> patch -> gain -> colour pass,
         generalized) over exactly `attached` — already lane-picked, already
@@ -1107,7 +1132,8 @@ class ResponseEngine:
         for kind, scale in moves:
             kind_records.append({
                 "name": kind.name, "type": kind.type, "scale": scale,
-                "moved": self._move_params(kind, scale, jumps, glides, carry)})
+                "moved": self._move_params(kind, scale, jumps, glides, carry,
+                                           fire_seq)})
         # An explicit param-patch kind (moves, above — the legacy
         # reroll→patch precedence) targeting the same param on the same
         # event must still win over a dice re-roll: since _move_params now
@@ -1132,17 +1158,18 @@ class ResponseEngine:
             if state is not None and params:
                 await self.executor.glide(
                     vid, state.effect_type, params, DICE_REROLL_GLIDE_MS)
-                self._arm_pending(vid, params)
+                self._arm_pending(vid, params, fire_seq=fire_seq)
         for vid, params in jumps.items():
             state = self.conductor.virtuals.get(vid)
             if state is not None:
                 await self.executor.jump(vid, state.effect_type, params)
-                self._arm_pending(vid, params)
+                self._arm_pending(vid, params, fire_seq=fire_seq)
 
         for kind, scale in gains:
             kind_records.append({
                 "name": kind.name, "type": kind.type, "scale": scale,
-                "gain_envelope": await self._gain(kind, scale, carry)})
+                "gain_envelope": await self._gain(kind, scale, carry,
+                                                  fire_seq)})
 
         if colours:   # one selector roll per batch — a jump is a jump
             kind, scale = colours[0]
@@ -1214,10 +1241,10 @@ class ResponseEngine:
             return self.note_kind_batch(
                 batch, "skipped_stale_scene",
                 current_scene_id=current.id if current is not None else None)
-        self._fire_seq += 1
+        fire_seq = self._begin_fire()
         try:
             result = await self._run_kinds(batch.scene, batch.kinds,
-                                           batch.intensity)
+                                           batch.intensity, fire_seq)
         except Exception as exc:
             logger.exception(
                 "kind batch failed: %s (delay %dms, queued by fire %d)",
@@ -1226,7 +1253,7 @@ class ResponseEngine:
             return self.note_kind_batch(
                 batch, "error", error=f"{type(exc).__name__}: {exc}")
         finally:
-            self._arm_pending()
+            self._end_fire(fire_seq)
         return self.note_kind_batch(batch, "landed", kinds=result["kinds"],
                                     carried=result["carried"])
 
@@ -1273,21 +1300,24 @@ class ResponseEngine:
         if scene is None:
             record["result"] = "no_active_scene"
             return record
-        self._fire_seq += 1
+        fire_seq = self._begin_fire()
         try:
-            return await self._fire_kind_locked(scene, kind, intensity, record)
+            return await self._fire_kind_locked(scene, kind, intensity, record,
+                                                fire_seq)
         finally:
-            self._arm_pending()
+            self._end_fire(fire_seq)
 
     async def _fire_kind_locked(self, scene: SceneV2, kind: FlareKind,
-                                intensity: float, record: dict[str, Any]) -> dict:
+                                intensity: float, record: dict[str, Any],
+                                fire_seq: int) -> dict:
         carry: dict[tuple[str, str], Any] = {}
         jumps: dict[str, dict[str, Any]] = {}
         glides: dict[str, dict[str, Any]] = {}
         if kind.type == "drift_jump" and kind.jump == "dice":
             record["rolled"] = self._reroll(scene, intensity, jumps, glides, carry)
         if kind.params:
-            record["moved"] = self._move_params(kind, 1.0, jumps, glides, carry)
+            record["moved"] = self._move_params(kind, 1.0, jumps, glides, carry,
+                                                fire_seq)
         for vid, patched in jumps.items():
             for pname in patched:
                 glides.get(vid, {}).pop(pname, None)
@@ -1296,14 +1326,15 @@ class ResponseEngine:
             if state is not None and params:
                 await self.executor.glide(
                     vid, state.effect_type, params, DICE_REROLL_GLIDE_MS)
-                self._arm_pending(vid, params)   # hold clock starts as the spike lands
+                self._arm_pending(vid, params, fire_seq=fire_seq)   # hold clock starts as the spike lands
         for vid, params in jumps.items():
             state = self.conductor.virtuals.get(vid)
             if state is not None:
                 await self.executor.jump(vid, state.effect_type, params)
-                self._arm_pending(vid, params)
+                self._arm_pending(vid, params, fire_seq=fire_seq)
         if kind.gain != 1.0:
-            record["gain_envelope"] = await self._gain(kind, 1.0, carry)
+            record["gain_envelope"] = await self._gain(kind, 1.0, carry,
+                                                       fire_seq)
         if kind.type == "drift_jump" and kind.jump == "color_set":
             record["color_jump"] = await self._color_jump(scene, intensity, carry)
         if kind.type == "color_rotate":
@@ -1428,7 +1459,7 @@ class ResponseEngine:
         return rolled[pname]   # random — pre-rolled once, broadcast to all
 
     def _compute_param_moves(
-        self, kind: FlareKind, scale: float, carry: dict,
+        self, kind: FlareKind, scale: float, carry: dict, fire_seq: int,
     ) -> tuple[dict[str, dict[str, float]], set[tuple[str, str]]]:
         """Per-virtual param moves for one kind at this scale — the pure
         declared/scale/clamp computation. Split out of _move_params so any
@@ -1512,7 +1543,8 @@ class ResponseEngine:
                         self._push_release(
                             vid, real_pname, hold_s, instant=True,
                             return_to=self._resting_value(
-                                vid, state, real_pname, carry))
+                                vid, state, real_pname, carry),
+                            fire_seq=fire_seq)
                     continue
                 mkind, lo, hi = binding_resolver.kind_for_meta(meta)
                 base = None
@@ -1547,13 +1579,15 @@ class ResponseEngine:
                     self._push_release(
                         vid, pname, hold_s,
                         instant=(mkind == binding_resolver.KIND_TOGGLE),
-                        return_to=self._resting_value(vid, state, pname, carry))
+                        return_to=self._resting_value(vid, state, pname, carry),
+                        fire_seq=fire_seq)
             if moves:
                 out[vid] = moves
         return out, forced_instant
 
     def _move_params(self, kind: FlareKind, scale: float,
-                     jumps: dict, glides: dict, carry: dict) -> list[dict]:
+                     jumps: dict, glides: dict, carry: dict,
+                     fire_seq: int) -> list[dict]:
         """The band-driven path (on_event): collects this kind's moves into
         the shared `jumps`/`glides` dicts, split by the SAME registry
         smooth gate _reroll already applies to dice re-rolls (fixed
@@ -1575,7 +1609,8 @@ class ResponseEngine:
         tag — a sign flip is never allowed to glide, see that function's
         and the module's own docstring for why."""
         landed: list[dict] = []
-        moves_by_vid, forced_instant = self._compute_param_moves(kind, scale, carry)
+        moves_by_vid, forced_instant = self._compute_param_moves(
+            kind, scale, carry, fire_seq)
         for vid, moves in moves_by_vid.items():
             state = self.conductor.virtuals.get(vid)
             instant: dict[str, Any] = {}
@@ -1798,7 +1833,7 @@ class ResponseEngine:
         return count
 
     async def _gain(self, kind: FlareKind, scale: float,
-                    carry: dict) -> list[dict]:
+                    carry: dict, fire_seq: int) -> list[dict]:
         """One kind's brightness envelope around the carried baseline, at
         effective gain 1 + (gain − 1)·scale — neutral stays neutral, a duck
         scales into a deeper duck. MOMENTARY: spike to baseline×effective,
@@ -1816,7 +1851,8 @@ class ResponseEngine:
                 await self.executor.jump(vid, state.effect_type,
                                          {"brightness": peak})
                 self._push_release(vid, "brightness", hold_s, instant=False,
-                                   return_to=float(baseline), arm_now=True)
+                                   return_to=float(baseline), arm_now=True,
+                                   fire_seq=fire_seq)
                 out.append({"virtual_id": vid, "peak": round(peak, 4),
                             "returns_to": round(float(baseline), 4)})
             else:
@@ -1918,8 +1954,9 @@ class ResponseEngine:
     # ── release bookkeeping (module docstring, "RELEASE OWNERSHIP") ─────────
 
     def _push_release(self, vid: str, pname: str, hold_s: float, *,
-                      instant: bool, return_to: Any, arm_now: bool = False) -> None:
-        entry = PendingRelease(vid, pname, hold_s, instant, self._fire_seq,
+                      instant: bool, return_to: Any, fire_seq: int,
+                      arm_now: bool = False) -> None:
+        entry = PendingRelease(vid, pname, hold_s, instant, fire_seq,
                                return_to=return_to)
         if arm_now:
             entry.armed_at = self._clock()
@@ -1927,15 +1964,16 @@ class ResponseEngine:
         self._pending_releases.append(entry)
 
     def _arm_pending(self, vid: Optional[str] = None,
-                     params: Any = None) -> None:
-        """Stamp armed_at/due_at on not-yet-armed entries — for `vid` (and,
-        if given, only the params in `params`) right after that write has
-        gone out, so each spike's hold is measured from ITS OWN landing,
-        never from the end of the fire's whole write burst. No arguments =
-        every unarmed entry (the fire's own safety net)."""
+                     params: Any = None, *, fire_seq: int) -> None:
+        """Stamp armed_at/due_at on fire `fire_seq`'s not-yet-armed entries
+        — for `vid` (and, if given, only the params in `params`) right after
+        that write has gone out, so each spike's hold is measured from ITS
+        OWN landing, never from the end of the fire's whole write burst. No
+        vid = every unarmed entry of that fire (its own safety net). Never
+        touches another fire's entries."""
         now = self._clock()
         for e in self._pending_releases:
-            if e.armed_at is not None:
+            if e.armed_at is not None or e.fire_seq != fire_seq:
                 continue
             if vid is not None and e.virtual_id != vid:
                 continue
@@ -1976,12 +2014,18 @@ class ResponseEngine:
         hold yields exactly one group — the old one-task-per-hold shape,
         now owned by the fire and due at an absolute time. An entry that is
         somehow still unarmed (no write ever went out for it) is armed now
-        rather than never scheduled."""
-        self._arm_pending()
+        rather than never scheduled. A fire still IN FLIGHT is left alone
+        entirely — its spikes may not have landed yet, so arming them here
+        would start their holds early; its own caller schedules them once it
+        ends (module docstring, "RELEASE OWNERSHIP")."""
+        now = self._clock()
         groups: dict[ReleaseGroup, None] = {}
         for e in self._pending_releases:
-            if e.scheduled:
+            if e.scheduled or e.fire_seq in self._fires_in_flight:
                 continue
+            if e.armed_at is None:
+                e.armed_at = now
+                e.due_at = now + e.hold_s
             e.scheduled = True
             groups.setdefault(ReleaseGroup(e.fire_seq, e.hold_s, e.due_at), None)
         return sorted(groups, key=lambda g: (g.due_at, g.fire_seq, g.hold_s))
