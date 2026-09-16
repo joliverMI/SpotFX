@@ -125,10 +125,10 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         id: 'topbar-status',
         title: 'Status readouts',
-        keywords: 'scene color set chip lock locked suspect recovering idle searching failed unlocked not checked unknown song artist truncated progress duration intensity score color coded',
+        keywords: 'scene color set chip lock locked suspect recovering idle searching keep searching still searching low confidence failed unlocked give up not checked unknown song artist truncated progress duration intensity score color coded',
         body: [
           'Chips show the active Scene and Color Set (dot = marker color; hover the scene chip for the active Scene Group).',
-          'The lock indicator says what the audio-sync matcher is doing with THIS song. While it is watching a locked song it reports live: green Locked, amber Suspect, red Recovering. Otherwise it says where the song got to — blue "Searching… 2/4" (still looking, and how many planned windows it has measured), red "Lock failed" (it finished searching and never reached a lock, so triggers are firing on whatever offset was already stored), gray "Lock idle" (this song locked and the matcher has gone quiet — the only state that means all is well), gray "Not checked" (no sweep ran this play; hover for why, e.g. the Set List has xcorr turned off), gray "No lock" (nothing stored for this song at all) and gray "Lock unknown" (nothing has reported yet; it resolves on the next poll). Hover it for the detail, including the best offset it found.',
+          'The lock indicator says what the audio-sync matcher is doing with THIS song. While it is watching a locked song it reports live: green Locked, amber Suspect, red Recovering. Otherwise it says where the song got to — blue "Searching… 2/4" (still looking, and how many planned windows it has measured), blue "Searching…" with no count (its planned windows ran out without a confident lock, so it keeps searching the rest of the song and adopts a better lock the moment it finds one; hover for how many extra windows it has measured), red "Lock failed" (it genuinely gave up without a lock — the song reached its last 30 seconds, 45 seconds of song went by without one usable measurement, every window it measured over 45 seconds of song pointed further from the offset in use than that part of the song can safely confirm, or the offset is user-verified — so triggers are firing on whatever offset was already in use; hover for which), gray "Lock idle" (this song locked and the matcher has gone quiet — the only state that means all is well), gray "Not checked" (no sweep ran this play; hover for why, e.g. the Set List has xcorr turned off), gray "No lock" (nothing stored for this song at all) and gray "Lock unknown" (nothing has reported yet; it resolves on the next poll). Hover it for the detail, including the best offset it found.',
           'The right side shows the current track ("Title — Artist", truncated when long) and position / duration.',
           'The ⚡ score is the intensity of the last fired trigger (0–100), color-coded cool blue (low) → hot red (high). It clears on track change.',
         ],
@@ -1217,7 +1217,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         title: 'Reading the shape canvas',
         keywords: 'saved live capture mismatch magenta centerline legend',
         body: [
-          'The saved shape draws upward from the centerline; live capture (25 ms bins) draws downward, so a good lock looks like a mirror image. Brackets mark the xcorr windows; magenta spikes are confirmed mismatches. Middle-drag pans; the timeline handles zoom. Follow resumes automatically when the page opens or the song changes.',
+          'The saved shape draws upward from the centerline; live capture (25 ms bins) draws downward, so a good lock looks like a mirror image. Brackets mark the xcorr windows; magenta spikes are confirmed mismatches — or, on a song that never locked, the windows the matcher placed while it kept searching (the spike list names which). Middle-drag pans; the timeline handles zoom. Follow resumes automatically when the page opens or the song changes.',
           'Perception trim is a per-track manual offset layered on top of the xcorr result — negative fires lighting earlier, positive later.',
         ],
       },

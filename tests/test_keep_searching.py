@@ -1,0 +1,1342 @@
+"""
+Keep searching after a low-confidence sweep — `services/xcorr_sweep.py`
+`KeepSearching`, wired into `services/auto_offset_service.py`'s one exit where
+a play drains its planned windows without a hard lock.
+
+The Admiral, verbatim: "if it has low confidence, it should keep spike
+detection on to try to get better." MAYDAY, spotfx.service, 2026-09-08 21:15:
+four windows inside the first ~30s, `final offset=+1325ms Q=0.39`,
+`Engine: skip snap — far jump +1325ms (Δ=3416ms) without prior agreement`,
+`lock_history: no hard lock grade=F`, `no reachable windows (pos=32611ms,
+dur=247339ms)` — then silence for the remaining three and a half minutes.
+
+Every sweep here is the REAL `on_track_change` → `_detect_loop_xcorr`, driven
+over a scripted world by `tests/sweep_world_driver.py`; only the capture, the
+math kernel, the trigger engine and disk are replaced.
+
+  ONE   — the founding defect: reproduced on the pinned pre-change sweep, then
+          fixed — the search keeps going and the better lock is adopted.
+  TWO   — an early clean lock, the post-lock drift monitor (recovery and all),
+          and the switched-off path are BYTE-IDENTICAL to the pre-change
+          sweep: every engine call, save, websocket message, log line, kernel
+          call, history record and badge record compared, not asserted.
+  THREE — it terminates: nothing to find, no time left, a user-verified
+          offset, and the song changing mid-search each end it, and each
+          reads as failed only once it has genuinely stopped.
+  FOUR  — the badge half: Searching throughout the continued search, Failed
+          only on give-up, and the next poll never overwrites it.
+  FIVE  — the same seconds of audio are never measured twice.
+  SIX   — the pure state machine and the constants it borrows from the
+          planners.
+  SEVEN — a continued search the song change ends writes against ITS OWN
+          song and Set List, not the next one's; a play that never continued
+          still reads live state exactly as the pre-change sweep does.
+  EIGHT — anchor matching stays a second adoption path during the continued
+          search.
+  NINE  — a continued window carries the envelope the U-Score planner assigns
+          a window at that position, so a beat twin cannot be snapped, saved
+          or locked; the planner's own output is unchanged by sharing it.
+  TEN   — the same proofs on the path his room runs (FFT kernel, evidence
+          accumulator, search ladder, progressive matching): a clipped
+          continued window neither promotes the ladder into the global stage
+          nor feeds the accumulator, with a red control for each; a planned
+          window's handling is unchanged; MAYDAY, termination and the
+          byte-identity proofs hold there too.
+  ELEVEN — on that path the clip holds at EVERY ladder stage for a continued
+          window: the ladder reaches global with no window clipped, and the
+          twin presented there is still refused (red control: the global
+          stage exempting continued windows adopts it). The trade-off is
+          exactly the stated one — a planned window at global is still
+          exempt, byte-identical to the pre-change sweep, and a cold-start
+          continued window still adopts a correction far outside its envelope.
+  TWELVE — MAYDAY's own envelope is ZERO-WIDTH, like 124 of 563 of his songs:
+          floored at the sweep's 300ms agreement tolerance, a continued window
+          measuring the engine's offset (exactly, one bin off, or off the grid
+          altogether) is admitted and the play locks — without the floor it
+          burns every window to no_time_left and reads "Lock failed" with the
+          engine already right; a beat twin 500ms off is still refused. The
+          floor reaches ONLY envelopes the planner's own gate refused: one it
+          measured narrower than 300ms still refuses the twin it found (red
+          control: the broad floor admitted it), and a wider one is untouched.
+          Clipped windows against one engine offset give up as
+          nothing_admissible only after the same 45s budget nothing_to_find
+          spends — a shorter clipped stretch followed by a clear one still
+          locks (red control: a three-window rule gave up first) — and without
+          the rule the search burns every window to no_time_left.
+
+Timing sign conventions: this change decides WHEN and HOW LONG the search
+runs, never what a measurement means. TWO is the proof — every engine snap,
+save and history record on the lock, drift-monitor and switched-off paths is
+compared value for value against the pinned pre-change sweep.
+"""
+from __future__ import annotations
+
+import pytest
+
+import sweep_world_driver as d
+from services import lock_state
+from services.xcorr_sweep import (
+    KEEP_SEARCHING_NO_TIME_LEFT, KEEP_SEARCHING_NOTHING_ADMISSIBLE,
+    KEEP_SEARCHING_NOTHING_TO_FIND, KEEP_SEARCHING_USER_VERIFIED, KeepSearching,
+    KeepSearchingConfig,
+)
+
+URI = d.URI
+
+
+def _without_clip_rule(monkeypatch):
+    monkeypatch.setattr(KeepSearching, "clips_exhausted", lambda self: False)
+
+
+@pytest.fixture(scope="module")
+def baseline():
+    return d.load_baseline_module()
+
+
+@pytest.fixture
+def new():
+    return d.current_module()
+
+
+def _drain_ms(world: d.World) -> int:
+    """When the last planned window is dispatched (its end + the margin)."""
+    return world.windows[-1][1] + 1000
+
+
+def _continued(trace: d.Trace, world: d.World) -> list[tuple[int, int]]:
+    planned = set(world.windows) | {(0, 8000)}
+    return [w for w in trace.windows_evaluated() if w not in planned]
+
+
+# ── ONE — the founding defect ────────────────────────────────────────────────
+
+def test_the_pinned_baseline_reproduces_mayday(baseline, monkeypatch, tmp_path):
+    """RED CONTROL. The harness must fail on the defect it was written for:
+    the pre-change sweep stops at the end of its plan, never locks, and the
+    very next poll overwrites the honest failure with "not checked"."""
+    world = d.mayday_world()
+    t = d.run_world(baseline, world, monkeypatch, tmp_path, poll_after_ms=200_000)
+
+    assert any("skip snap — far jump +1325ms (Δ=3416ms, Q=0.39) without prior agreement"
+               in line for line in t.logs), "the MAYDAY log line itself"
+    assert t.last_frame_ms < _drain_ms(world) + 1000, "the baseline stops at its plan's end"
+    assert _continued(t, world) == []
+    assert t.history[-1]["locked"] is False and t.history[-1]["quality"] == 0.39
+    assert t.final_lock_state["phase"] == lock_state.PHASE_UNLOCKED
+    assert t.after_poll_lock_state["phase"] == lock_state.PHASE_SKIPPED
+    assert t.after_poll_lock_state["reason"] == "no_windows"
+
+
+def test_mayday_keeps_searching_and_adopts_the_better_lock(new, monkeypatch, tmp_path):
+    world = d.mayday_world()
+    t = d.run_world(new, world, monkeypatch, tmp_path, poll_after_ms=200_000)
+
+    extra = _continued(t, world)
+    assert extra, "the search went on past the plan"
+    assert all(ws >= world.windows[-1][1] - 1000 for ws, _we in extra)
+    lock = t.history[-1]
+    assert lock["locked"] is True, "a hard lock was found in the continued search"
+    assert lock["time_to_lock_ms"] > 60_000, "found where the song turned clean, past the plan"
+    assert lock["offset_ms"] == 1325 and lock["quality"] == 0.95
+    assert t.engine._shape_offset_ms == 1325 and t.engine._play_best_quality == 0.95, (
+        "the engine adopted the better lock through its own strictly-better-Q gate"
+    )
+    assert len(t.history) == 1, "one play, one history record"
+
+    # Past the lock the play is in the ordinary post-lock drift monitor.
+    lock_at = lock["time_to_lock_ms"]
+    assert any(m["type"] == "xcorr_monitor" and m["t_ms"] > lock_at for m in t.ws.sent)
+    assert t.last_frame_ms >= world.duration_ms - d.FRAME_MS
+    assert t.watching_after == URI and not t.task_after_poll
+
+
+# ── TWO — byte-identical wherever the play locks, or the switch is off ───────
+
+def _early_lock_loaded_right() -> d.World:
+    return d.World(duration_ms=150_000,
+                   windows=[(10_000, 15_000), (16_000, 21_000), (22_000, 27_000),
+                            (28_000, 33_000), (60_000, 65_000)],
+                   loaded_offset_ms=-400, truth=lambda _ms: -400,
+                   clarity=lambda _ms: (0.9, 1.0))
+
+
+def _early_lock_needs_correction() -> d.World:
+    return d.World(duration_ms=150_000,
+                   windows=[(10_000, 15_000), (16_000, 21_000), (22_000, 27_000),
+                            (28_000, 33_000), (60_000, 65_000)],
+                   loaded_offset_ms=+300, truth=lambda _ms: -650,
+                   clarity=lambda ms: (0.92, 1.0) if ms >= 10_000 else (0.4, 0.5))
+
+
+def _lock_then_drift() -> d.World:
+    """Locks early; at 50s the song re-syncs 1500ms later, the drift monitor
+    confirms the mismatch, fires a recovery window and re-arms the remaining
+    planned window, which then drains — with no fresh hard lock."""
+    return d.World(duration_ms=150_000,
+                   windows=[(10_000, 15_000), (16_000, 21_000), (22_000, 27_000),
+                            (80_000, 85_000)],
+                   loaded_offset_ms=-400,
+                   truth=lambda ms: -400 if ms < 50_000 else +1100,
+                   clarity=lambda _ms: (0.9, 1.0))
+
+
+def _compare(baseline, new, world, monkeypatch, tmp_path, **kw):
+    a = d.run_world(baseline, world, monkeypatch, tmp_path, **kw)
+    b = d.run_world(new, world, monkeypatch, tmp_path, **kw)
+    ca, cb = a.comparable(), b.comparable()
+    for key in ca:
+        assert ca[key] == cb[key], f"{key} diverged from the pre-change sweep"
+    return a
+
+
+def test_an_early_clean_lock_is_byte_identical(baseline, new, monkeypatch, tmp_path):
+    t = _compare(baseline, new, _early_lock_loaded_right(), monkeypatch, tmp_path,
+                 poll_after_ms=120_000)
+    assert t.history[0]["locked"] and t.history[0]["time_to_lock_ms"] < 35_000
+    assert sum(m["type"] == "xcorr_monitor" for m in t.ws.sent) > 30, "monitor ran to song end"
+    assert "continued" not in t.final_lock_state, "an early lock's badge record keeps its shape"
+
+
+def test_an_early_lock_that_corrects_the_engine_is_byte_identical(baseline, new, monkeypatch, tmp_path):
+    t = _compare(baseline, new, _early_lock_needs_correction(), monkeypatch, tmp_path,
+                 poll_after_ms=120_000)
+    assert t.history[0]["locked"] and t.engine._shape_offset_ms == -650
+
+
+def test_the_post_lock_drift_monitor_is_byte_identical(baseline, new, monkeypatch, tmp_path):
+    """Recovery, the dynamic spike window, the re-armed queue AND the drain
+    that follows it: a play that ever hard-locked keeps its old exit."""
+    t = _compare(baseline, new, _lock_then_drift(), monkeypatch, tmp_path,
+                 poll_after_ms=140_000)
+    assert t.history[0]["locked"] is True
+    assert any(c[0] == "demote" for c in t.engine.calls), "a mismatch was confirmed"
+    assert any(c == ("xcorr_window", 80_000, 85_000) for c in t.kernel), (
+        "the re-armed planned window ran and drained"
+    )
+
+
+def test_switched_off_is_the_old_stop_at_the_end_of_the_plan(baseline, new, monkeypatch, tmp_path):
+    t = _compare(baseline, new, d.mayday_world(), monkeypatch, tmp_path,
+                 settings_over={"xcorr_keep_searching_enabled": False},
+                 poll_after_ms=200_000)
+    assert t.history[0]["locked"] is False
+
+
+# ── THREE — it terminates ─────────────────────────────────────────────────────
+
+def _unlockable(**over) -> d.World:
+    base = dict(duration_ms=240_000,
+                windows=[(10_000, 15_000), (16_000, 21_000), (22_000, 27_000),
+                         (28_000, 33_000)],
+                loaded_offset_ms=0, truth=lambda _ms: 700,
+                clarity=lambda _ms: (0.1, 0.9))
+    base.update(over)
+    return d.World(**base)
+
+
+def test_an_unlockable_song_gives_up_instead_of_spinning(new, monkeypatch, tmp_path):
+    world = _unlockable()
+    t = d.run_world(new, world, monkeypatch, tmp_path, poll_after_ms=100_000)
+
+    give_up_ms = d.SETTINGS["xcorr_keep_searching_give_up_ms"]
+    interval = d.SETTINGS["xcorr_keep_searching_interval_ms"]
+    drain = _drain_ms(world)
+    assert drain + give_up_ms <= t.last_frame_ms <= drain + give_up_ms + d.FRAME_MS, (
+        "it stops once the budget of song without a usable measurement is spent"
+    )
+    assert t.last_frame_ms < world.duration_ms - 150_000, "long before the song ends"
+    assert 0 < len(_continued(t, world)) <= give_up_ms // interval, "bounded work"
+    assert any("keep-searching gave up (nothing_to_find)" in line for line in t.logs)
+    assert t.history[-1]["locked"] is False and len(t.history) == 1
+
+    assert t.final_lock_state["phase"] == lock_state.PHASE_UNLOCKED
+    assert t.final_lock_state["reason"] == KEEP_SEARCHING_NOTHING_TO_FIND
+
+
+def test_usable_but_unconvincing_measurements_search_until_no_time_is_left(new, monkeypatch, tmp_path):
+    """Every window measures (so there IS something to find) but none is ever
+    confident enough to lock: it keeps trying across the rest of the song and
+    stops where no window is ever planned — the last 30s."""
+    world = _unlockable(duration_ms=150_000, loaded_offset_ms=700,
+                        clarity=lambda _ms: (0.6, 1.0))
+    t = d.run_world(new, world, monkeypatch, tmp_path)
+
+    end_of_search = world.duration_ms - 30_000
+    assert end_of_search <= t.last_frame_ms <= end_of_search + d.FRAME_MS
+    extra = _continued(t, world)
+    assert len(extra) >= 15, "it kept measuring across the rest of the song"
+    assert len(extra) <= (end_of_search - _drain_ms(world)) // 5000
+    assert t.final_lock_state["phase"] == lock_state.PHASE_UNLOCKED
+    assert t.final_lock_state["reason"] == KEEP_SEARCHING_NO_TIME_LEFT
+    assert t.history[-1]["locked"] is False
+
+
+def test_a_user_verified_offset_has_no_better_lock_to_reach(new, monkeypatch, tmp_path):
+    world = _unlockable(verification="user_verified", clarity=lambda _ms: (0.6, 1.0))
+    t = d.run_world(new, world, monkeypatch, tmp_path)
+    assert _continued(t, world) == [], "the sweep can never move a pinned offset"
+    assert t.last_frame_ms <= _drain_ms(world)
+    assert t.final_lock_state["reason"] == KEEP_SEARCHING_USER_VERIFIED
+    assert "continued" not in t.final_lock_state, "it never claimed to keep searching"
+
+
+def test_the_song_changing_mid_search_ends_it_as_failed(new, monkeypatch, tmp_path):
+    world = _unlockable(clarity=lambda _ms: (0.6, 1.0), loaded_offset_ms=700,
+                        hang_at_ms=70_000)
+    t = d.run_world(new, world, monkeypatch, tmp_path, stop_after=True)
+    assert _continued(t, world), "it was mid-search"
+    assert t.final_lock_state is not None
+    assert t.final_lock_state["phase"] == lock_state.PHASE_UNLOCKED
+    assert t.final_lock_state["reason"] is None, "the song ended; the search did not give up"
+    assert len(t.history) == 1 and t.history[0]["locked"] is False
+
+
+# ── FOUR — the badge: Searching while trying, Failed only on give-up ─────────
+
+def test_the_badge_reads_searching_through_the_continued_search(new, monkeypatch, tmp_path):
+    world = _unlockable()
+    t = d.run_world(new, world, monkeypatch, tmp_path)
+    planned = set(world.windows) | {(0, 8000)}
+    samples = [(w, rec) for w, rec in zip(t.windows_evaluated(), t.lock_during)
+               if w not in planned]
+    assert samples
+    for w, rec in samples:
+        assert rec["phase"] == lock_state.PHASE_SEARCHING, f"window {w} was not Searching"
+        assert rec["continued"] is True, f"window {w} did not say it had gone past the plan"
+    pushed = [m for m in t.ws.sent if m["type"] == "lock_state"]
+    phases = [m["phase"] for m in pushed]
+    assert phases.count(lock_state.PHASE_UNLOCKED) == 1 and phases[-1] == lock_state.PHASE_UNLOCKED, (
+        "Failed is pushed exactly once, at the very end"
+    )
+    assert pushed[-1]["continued_windows"] == len(samples)
+
+
+def test_a_give_up_is_not_overwritten_by_the_next_poll(new, monkeypatch, tmp_path):
+    """The pre-change sweep let the next poll relaunch, find "no reachable
+    windows" and replace "Lock failed" with "Not checked" (ONE's red control).
+    A search that genuinely gave up holds the watch until the song changes."""
+    world = _unlockable()
+    t = d.run_world(new, world, monkeypatch, tmp_path, poll_after_ms=100_000)
+    assert t.watching_after == URI
+    assert not t.task_after_poll, "no relaunch"
+    assert t.after_poll_lock_state["phase"] == lock_state.PHASE_UNLOCKED
+    assert t.after_poll_lock_state["reason"] == KEEP_SEARCHING_NOTHING_TO_FIND
+    assert not any("no reachable windows" in line for line in t.logs)
+
+
+# ── FIVE — the same audio is never measured twice ────────────────────────────
+
+def test_a_spike_on_already_measured_audio_is_not_measured_again(new, monkeypatch, tmp_path):
+    """Two measurements of the same seconds cast the same vote twice and could
+    manufacture agreement out of one. A spike that keeps landing in one spot
+    is measured once, and the search still ends."""
+    world = _unlockable(spike=lambda _t, _o: (40_000, 45_000, 42_500))
+    t = d.run_world(new, world, monkeypatch, tmp_path)
+    assert t.windows_evaluated().count((40_000, 45_000)) == 1
+    spikes = [c for c in t.kernel if c[0] == "mismatch_spike"]
+    assert len(spikes) > 1, "it kept asking, and kept refusing the same audio"
+    assert t.final_lock_state["reason"] == KEEP_SEARCHING_NOTHING_TO_FIND
+
+
+# ── SIX — the state machine and its borrowed constants ───────────────────────
+
+def _ks(**over) -> KeepSearching:
+    cfg = KeepSearchingConfig(**{k: v for k, v in over.items()
+                                 if k in KeepSearchingConfig.__dataclass_fields__})
+    return KeepSearching(cfg, verification=over.get("verification", "auto_verified"),
+                         started_ms=over.get("started_ms", 30_000),
+                         duration_ms=over.get("duration_ms", 240_000),
+                         evaluated=over.get("evaluated", [(22_000, 27_000), (28_000, 33_000)]))
+
+
+def test_give_up_rules_and_their_precedence():
+    ks = _ks()
+    assert ks.give_up_reason(30_000) is None
+    assert ks.give_up_reason(74_999) is None
+    assert ks.give_up_reason(75_000) == KEEP_SEARCHING_NOTHING_TO_FIND
+    ks.note_window(70_000, (60_000, 65_000), evidence=True)
+    assert ks.give_up_reason(114_999) is None, "a usable measurement restarts the budget"
+    ks.note_window(80_000, (70_000, 75_000), evidence=False)
+    assert ks.give_up_reason(115_000) == KEEP_SEARCHING_NOTHING_TO_FIND
+    assert ks.give_up_reason(210_000) == KEEP_SEARCHING_NO_TIME_LEFT
+    assert _ks(verification="user_verified").give_up_reason(30_000) == KEEP_SEARCHING_USER_VERIFIED
+    assert _ks(duration_ms=0).give_up_reason(30_000) == KEEP_SEARCHING_NO_TIME_LEFT
+
+
+def _clips(ks: KeepSearching, times, *, offset_ms: int = 1350, evidence: bool = True) -> None:
+    for t in times:
+        ks.note_window(t, (t - 6_000, t - 1_000), evidence=evidence, clipped=True,
+                       engine_offset_ms=offset_ms)
+
+
+def test_clip_exhaustion_spends_the_same_budget_as_nothing_to_find():
+    budget = KeepSearchingConfig().give_up_ms
+    ks = _ks()
+    _clips(ks, range(40_000, 85_000, 5_000))
+    assert ks.give_up_reason(80_000) is None, "40s of clipped windows is not the budget"
+    ks.note_window(82_000, (76_000, 81_000), evidence=False, clipped=None)
+    assert ks.give_up_reason(82_000) is None, "a window discarded unmeasured leaves the run alone"
+    _clips(ks, [40_000 + budget])
+    assert ks.give_up_reason(40_000 + budget) == KEEP_SEARCHING_NOTHING_ADMISSIBLE
+    assert ks.give_up_reason(210_000) == KEEP_SEARCHING_NO_TIME_LEFT, "the song's end outranks it"
+
+    reset = _ks()
+    _clips(reset, range(40_000, 85_000, 5_000))
+    reset.note_window(85_000, (79_000, 84_000), evidence=True, clipped=False, engine_offset_ms=1350)
+    _clips(reset, range(90_000, 135_000, 5_000))
+    assert reset.give_up_reason(130_000) is None, "an admitted window starts the run again"
+    _clips(reset, [135_000])
+    assert reset.give_up_reason(135_000) == KEEP_SEARCHING_NOTHING_ADMISSIBLE
+
+    moved = _ks()
+    _clips(moved, range(40_000, 80_000, 5_000))
+    _clips(moved, range(80_000, 125_000, 5_000), offset_ms=1325)
+    assert moved.give_up_reason(120_000) is None, "the engine moving starts the run again"
+    _clips(moved, [125_000], offset_ms=1325)
+    assert moved.give_up_reason(125_000) == KEEP_SEARCHING_NOTHING_ADMISSIBLE
+
+    silent = _ks()
+    _clips(silent, range(30_000, 80_000, 5_000), evidence=False)
+    assert silent.give_up_reason(75_000) == KEEP_SEARCHING_NOTHING_ADMISSIBLE, (
+        "clipped windows that cast no vote are named for the clip, not for finding nothing"
+    )
+
+
+def test_a_continued_envelope_is_floored_only_where_the_planners_gate_failed(new):
+    from services import uscore_planner
+    gate = uscore_planner._MIN_TOTAL_ENVELOPE_MS
+    assert new._floored_envelope((0, 0), 300) == (-300, 300)
+    assert new._floored_envelope((-40, 40), 300) == (-300, 300)
+    assert new._floored_envelope((0, gate - 1), 300) == (-300, 300)
+    assert new._floored_envelope((0, gate), 300) == (0, gate), "a width the gate accepts is measured"
+    assert new._floored_envelope((-150, 150), 300) == (-150, 150)
+    assert new._floored_envelope((-100, 600), 300) == (-100, 600)
+    assert new._floored_envelope((-800, 50), 300) == (-800, 50)
+    assert new._floored_envelope((-900, 900), 300) == (-900, 900)
+
+
+def test_placement_cadence_readiness_and_overlap():
+    ks = _ks()
+    assert not ks.wants_window(34_999) and ks.wants_window(35_000)
+    assert ks.offer(35_000, None) is False, "a flat span places nothing"
+    assert not ks.wants_window(39_999) and ks.wants_window(40_000)
+    assert ks.offer(40_000, (31_500, 36_500)) is False, "1500ms over a measured window"
+    assert ks.offer(45_000, (32_000, 37_000)) is True, "1000ms of overlap is the planner's own cap"
+    assert not ks.wants_window(60_000), "one window pending at a time"
+    assert ks.take_ready(37_999, 1000) is None
+    assert ks.take_ready(38_000, 1000) == (32_000, 37_000)
+    ks.note_window(38_000, (32_000, 37_000), evidence=False)
+    assert not ks.admits(32_000, 37_000)
+    assert ks.windows_run == 1 and ks.attempts == 3
+
+
+def test_borrowed_constants_still_agree_with_the_planners():
+    import services.auto_offset_service as aos
+    from services import uscore_planner
+    from config import settings
+    cfg = KeepSearchingConfig.from_settings(settings, end_buffer_ms=aos._XCORR_END_BUFFER_MS)
+    assert cfg.end_buffer_ms == aos._XCORR_END_BUFFER_MS == uscore_planner._END_BUFFER_MS
+    assert KeepSearchingConfig().max_overlap_ms == uscore_planner._MAX_OVERLAP_MS
+    assert settings.xcorr_keep_searching_enabled is True, "the Admiral authorised it: on"
+
+
+# ── SEVEN — a continued search ended by a song change keeps its own context ──
+
+THIS_SETLIST = "setlist-this-play"
+NEXT_SETLIST = "setlist-next-song"
+NEXT_URI = "spotify:track:next"
+NEXT_DURATION_MS = 180_000
+
+
+def _without_clock(value):
+    """A persisted write with its wall-clock stamps removed."""
+    if isinstance(value, dict):
+        return {k: _without_clock(v) for k, v in value.items() if k != "generated_at"}
+    if isinstance(value, list):
+        return [_without_clock(v) for v in value]
+    return value
+
+
+def test_a_continued_search_ended_by_the_next_song_writes_against_its_own(new, monkeypatch, tmp_path):
+    """Song A keeps searching; at 70s the listener starts another playlist.
+    By the time the track change cancels the sweep, app state already holds
+    the NEXT song and its Set List — A's anti-corr streak, lock-history record
+    and final save must still land on A's slot, cut from A's own duration."""
+    world = _unlockable(clarity=lambda _ms: (0.6, 1.0), loaded_offset_ms=700,
+                        hang_at_ms=70_000)
+    t = d.run_world(new, world, monkeypatch, tmp_path, stop_after=True, real_saves=True,
+                    setlist_id=THIS_SETLIST,
+                    switch_to=(NEXT_SETLIST, NEXT_URI, NEXT_DURATION_MS))
+
+    assert _continued(t, world), "it was mid continued search when the song changed"
+    assert t.history[0]["setlist_id"] == THIS_SETLIST, "lock history names this play's Set List"
+
+    assert t.meta_writes, "the play wrote its metadata"
+    assert all(set(w) == {THIS_SETLIST} for w in t.meta_writes), (
+        "no write ever touched the next song's Set List slot"
+    )
+    assert t.meta_writes[0] == {THIS_SETLIST: {}}, (
+        "the anti-corr streak (the first write) was recorded on this play's slot"
+    )
+    slot = t.meta.setlist_offsets[THIS_SETLIST]
+    assert slot["timestamp_offset_ms"] == 700 and slot["history"][0]["source"] == "sweep", (
+        "the final disk save landed on this play's slot"
+    )
+    assert slot["observed_cut_ms"] == 0, (
+        "cut from this play's own polled duration, not the next song's "
+        f"({world.duration_ms - NEXT_DURATION_MS}ms)"
+    )
+
+
+def test_a_play_that_never_continued_still_reads_live_state_as_before(baseline, new, monkeypatch, tmp_path):
+    """CONTRAST. The same mid-play song change on a play that locked early and
+    never continued: byte-identical to the pinned pre-change sweep, disk
+    writes included — and the harness sees those writes follow the live
+    context, so the test above is not passing for want of a switch."""
+    world = _early_lock_loaded_right()
+    world.hang_at_ms = 70_000
+    kw = dict(stop_after=True, real_saves=True, setlist_id=THIS_SETLIST,
+              switch_to=(NEXT_SETLIST, NEXT_URI, NEXT_DURATION_MS))
+    a = d.run_world(baseline, world, monkeypatch, tmp_path, **kw)
+    b = d.run_world(new, world, monkeypatch, tmp_path, **kw)
+    ca, cb = a.comparable(), b.comparable()
+    for key in ca:
+        assert ca[key] == cb[key], f"{key} diverged from the pre-change sweep"
+    assert _without_clock(a.meta_writes) == _without_clock(b.meta_writes), (
+        "every metadata write matches the pre-change sweep"
+    )
+    assert b.history[0]["locked"] is True and "continued" not in b.final_lock_state
+    assert b.history[0]["setlist_id"] == NEXT_SETLIST
+    assert NEXT_SETLIST in b.meta.setlist_offsets
+
+
+# ── EIGHT — anchors stay a second adoption path ─────────────────────────────
+
+def _mayday_with_a_late_anchor(**over) -> d.World:
+    """MAYDAY's low-confidence stretch never lifts, so no window alone can
+    lock; one stored anchor candidate's horizon only passes at 66s, well
+    after the planned windows ran out."""
+    return d.mayday_world(
+        clarity=lambda _ms: (0.65, 0.6),
+        anchors=[{"timestamp_ms": 20_000, "band": "rms_low", "uniqueness": 0.6},
+                 {"timestamp_ms": 60_000, "band": "rms_low", "uniqueness": 0.6}],
+        anchor_match=lambda stamps: (1325, 0.9, 0.54) if 60_000 in stamps else None,
+        **over,
+    )
+
+
+_ANCHORS_ON = {"anchor_enabled": True, "anchor_search_radius_ms": 5000,
+               "anchor_template_radius_ms": 1000}
+
+
+def test_an_anchor_matched_during_the_continued_search_is_adopted(new, monkeypatch, tmp_path):
+    world = _mayday_with_a_late_anchor()
+    t = d.run_world(new, world, monkeypatch, tmp_path, settings_over=_ANCHORS_ON,
+                    real_saves=True)
+
+    anchor_calls = [i for i, c in enumerate(t.kernel) if c[0] == "anchor_match"]
+    assert [t.kernel[i][1] for i in anchor_calls] == [[20_000], [20_000, 60_000]]
+    planned = set(world.windows) | {(0, 8000)}
+    continued_before_anchor = [c for c in t.kernel[:anchor_calls[-1]]
+                               if c[0] == "xcorr_window" and (c[1], c[2]) not in planned]
+    assert continued_before_anchor, "the continued search was already running when the anchor matched"
+
+    assert ("apply_save", URI, 1325, round(0.54 * 1.6, 6), "anchor", False, True) in t.engine.calls, (
+        "the anchor match reached the engine through its own save path and was adopted"
+    )
+    assert any("Anchor: snap matched candidate at song-time=60000ms" in line for line in t.logs)
+
+    lock = t.history[-1]
+    assert lock["locked"] is True and lock["offset_ms"] == 1325
+    assert lock["time_to_lock_ms"] > 66_000, "the lock came after the anchor, in the continued search"
+    assert len(t.history) == 1
+    assert t.engine._shape_offset_ms == 1325
+    assert t.final_lock_state["phase"] == lock_state.PHASE_LOCKED
+    assert t.watching_after == URI
+
+
+def test_without_the_anchor_the_same_play_never_locks(new, monkeypatch, tmp_path):
+    """CONTRAST: the anchor is what adopted the lock above — the same world
+    with anchor matching off searches to the song's last stretch unlocked."""
+    world = _mayday_with_a_late_anchor()
+    t = d.run_world(new, world, monkeypatch, tmp_path, settings_over={"anchor_enabled": False},
+                    real_saves=True)
+    assert not any(c[0] == "anchor_match" for c in t.kernel)
+    assert t.history[-1]["locked"] is False
+    assert t.final_lock_state["phase"] == lock_state.PHASE_UNLOCKED
+    assert t.final_lock_state["reason"] == KEEP_SEARCHING_NO_TIME_LEFT
+
+
+# ── NINE — a continued window carries the planner's envelope ────────────────
+
+TWIN_PERIOD_MS = 1000
+TWIN_TRUTH_MS = 700
+
+
+def _beat_periodic(ts):
+    """A pulse every TWIN_PERIOD_MS that grows slowly across the song: each
+    stretch looks almost exactly like the one a period away, which is what a
+    beat twin is to the matcher and to the planner's envelope alike."""
+    import numpy as np
+    phase = np.mod(ts, TWIN_PERIOD_MS)
+    return 0.2 + (1.0 + ts / 300_000.0) * np.exp(
+        -((phase - TWIN_PERIOD_MS / 2) ** 2) / (2 * 150.0 ** 2))
+
+
+def _twin_world() -> d.World:
+    """A low-confidence play whose engine has snapped to the true offset
+    (Q 0.6, below the 0.70 lock bar). Past the planned windows a free search
+    is fooled by the beat one period later and reports it with r 0.95."""
+    return d.World(
+        duration_ms=150_000,
+        windows=[(10_000, 15_000), (16_000, 21_000), (22_000, 27_000), (28_000, 33_000)],
+        loaded_offset_ms=TWIN_TRUTH_MS, truth=lambda _ms: TWIN_TRUTH_MS,
+        clarity=lambda _ms: (0.6, 1.0),
+        raw_band=_beat_periodic,
+        twin=lambda ms: (TWIN_TRUTH_MS + TWIN_PERIOD_MS, 0.95) if ms >= 30_000 else None,
+    )
+
+
+def _twin_snaps(t: d.Trace) -> list[tuple]:
+    return [c for c in t.engine.calls
+            if c[0] == "apply_save" and c[2] == TWIN_TRUTH_MS + TWIN_PERIOD_MS]
+
+
+def test_the_twin_world_has_a_narrow_envelope_where_the_search_continues():
+    import numpy as np
+    from services import uscore_planner
+    world = _twin_world()
+    ts = np.arange(0, world.duration_ms + d.FRAME_MS, d.FRAME_MS, dtype=float)
+    bands = uscore_planner.normalized_song_bands(
+        ts, {k: world.raw_band(ts) for k in ("rms_total", "rms_low", "rms_mid", "rms_high")},
+        world.duration_ms)
+    shift = uscore_planner.global_max_shift_bins([])
+    for start in range(30_000, 116_000, 500):
+        neg, pos, _beat = uscore_planner.window_envelope(bands, [], shift, start, 5000)
+        assert neg <= 0 <= pos
+        assert pos < TWIN_PERIOD_MS, f"the twin would sit inside the envelope at {start}ms"
+
+
+def test_a_beat_twin_in_the_continued_search_is_clipped(new, monkeypatch, tmp_path):
+    world = _twin_world()
+    t = d.run_world(new, world, monkeypatch, tmp_path)
+
+    assert t.engine._play_best_quality > 0 and t.engine._shape_offset_ms == TWIN_TRUTH_MS
+    assert _continued(t, world), "the search continued into the twin stretch"
+    assert any("envelope [-900, +900]ms" in line for line in t.logs), (
+        "each continued window was handed the planner's envelope for its position"
+    )
+    assert _twin_snaps(t) == [], "no snap was ever asked for at the twin"
+    assert all(s[1] != TWIN_TRUTH_MS + TWIN_PERIOD_MS for s in t.saves), "the twin was never saved"
+    assert t.history[-1]["locked"] is False and t.history[-1]["offset_ms"] == TWIN_TRUTH_MS
+    assert t.final_lock_state["reason"] == KEEP_SEARCHING_NOTHING_ADMISSIBLE
+    assert t.saves and t.saves[-1][1] == TWIN_TRUTH_MS, "the final save kept the true offset"
+
+
+def test_without_the_envelope_the_same_world_adopts_the_twin(new, monkeypatch, tmp_path):
+    """RED CONTROL. The same play with continued windows handed the lookup's
+    own wide-open "no envelope" entry snaps to the twin, saves it and locks on
+    it — so the clip, not the world, is what held the true offset above."""
+    monkeypatch.setattr(new, "_continued_window_envelope",
+                        lambda _source, _ws, _we: (-10**9, 10**9))
+    world = _twin_world()
+    t = d.run_world(new, world, monkeypatch, tmp_path)
+
+    twin = TWIN_TRUTH_MS + TWIN_PERIOD_MS
+    assert any(c[-1] is True for c in _twin_snaps(t)), "the engine snapped to the twin"
+    assert any(s[1] == twin for s in t.saves), "the twin was saved to disk"
+    assert t.history[-1]["locked"] is True and t.history[-1]["offset_ms"] == twin
+
+
+def _synthetic_shape(duration_ms: int, seed: int):
+    import numpy as np
+    rng = np.random.default_rng(seed)
+    ts = np.arange(0, duration_ms + 100, 100, dtype=float)
+    base = _beat_periodic(ts)
+    bands = {k: base * (1.0 + 0.3 * rng.random(ts.size)) + rng.random(ts.size) * i * 0.1
+             for i, k in enumerate(("rms_total", "rms_low", "rms_mid", "rms_high"))}
+    return ts, bands
+
+
+@pytest.mark.parametrize("seed,beats", [
+    (1, []),
+    (2, list(range(0, 70_000, 400))),
+    (3, sorted(set(range(0, 70_000, 350)) | set(range(175, 70_000, 700)))),
+])
+def test_sharing_the_envelope_leaves_the_planners_own_output_identical(seed, beats):
+    from services import uscore_planner
+    pinned = d.load_baseline_module("services/uscore_planner.py")
+    ts, bands = _synthetic_shape(70_000, seed)
+    before = pinned.plan_uscore_windows(ts, bands, 70_000, beats)
+    after = uscore_planner.plan_uscore_windows(ts, bands, 70_000, beats)
+    assert before and after == before
+    missing = {k: v for k, v in bands.items() if k != "rms_mid"}
+    assert uscore_planner.plan_uscore_windows(ts, missing, 70_000, beats) == \
+        pinned.plan_uscore_windows(ts, missing, 70_000, beats) == []
+
+
+def test_a_continued_window_gets_exactly_the_envelope_the_planner_stores(new, monkeypatch):
+    """The runtime path — its own bands read from the shape, its own beats
+    read through librosa — gives a window the same envelope the planner
+    stored for a window at that position."""
+    import sys
+    import services
+    from types import SimpleNamespace
+    from services import uscore_planner
+    beats = list(range(0, 70_000, 400))
+    ts, bands = _synthetic_shape(70_000, 5)
+    planned = uscore_planner.plan_uscore_windows(ts, bands, 70_000, beats)
+    assert planned
+
+    analysis = SimpleNamespace(beats=[SimpleNamespace(ms=b) for b in beats])
+    fake_librosa = SimpleNamespace(get_analysis=lambda _m: analysis)
+    monkeypatch.setitem(sys.modules, "services.librosa_service", fake_librosa)
+    monkeypatch.setattr(services, "librosa_service", fake_librosa, raising=False)
+    data = d._Npz(bands)
+    source = new._continued_envelope_source(URI, SimpleNamespace(duration_ms=70_000), data, ts)
+
+    assert source.beats_ms == beats
+    for w in planned:
+        assert new._continued_window_envelope(source, w["start_ms"], w["end_ms"]) == \
+            (w["safe_neg_ms"], w["safe_pos_ms"]), w
+
+
+# ── TEN — the path his room runs ────────────────────────────────────────────
+
+LIVE = d.LIVE_FLAGS
+WIDE_SPAN = 3500
+
+
+def _span(call: tuple) -> int:
+    return call[4] - call[3]
+
+
+def _mass_at(accumulator, offset_ms: int) -> float:
+    import numpy as np
+    return float(accumulator.mass[int(np.flatnonzero(accumulator.offsets == offset_ms)[0])])
+
+
+def _live_twin_world(**over) -> d.World:
+    """The twin world as the FFT kernel sees it: every landscape carries the
+    truth and a twin one beat later, the twin weak where planned windows sit
+    and the free search's winner where the search continues; progressive
+    matching finds the truth early, so the engine holds a snap before any
+    planned window runs."""
+    base = dict(
+        peaks=lambda ms: [(TWIN_TRUTH_MS, 0.6),
+                          (TWIN_TRUTH_MS + TWIN_PERIOD_MS, 0.95 if ms >= 30_000 else 0.3)],
+        progressive=lambda _t: (TWIN_TRUTH_MS, 0.7, 0.5),
+    )
+    base.update(over)
+    world = _twin_world()
+    for key, value in base.items():
+        setattr(world, key, value)
+    return world
+
+
+def test_live_flags_run_the_fft_accumulator_and_ladder_path(new, monkeypatch, tmp_path):
+    t = d.run_world(new, _live_twin_world(), monkeypatch, tmp_path, settings_over=LIVE)
+    assert t.accumulators and t.ladders, "the play built its own accumulator and ladder"
+    assert all(len(c) == 5 for c in t.kernel if c[0] == "xcorr_window"), "the FFT kernel ran"
+    assert any(c[0] == "progressive_match" and c[-1] is not None for c in t.kernel)
+
+
+def test_live_a_clipped_continued_window_never_promotes_the_ladder(new, monkeypatch, tmp_path):
+    """The clip-exhaustion give-up is switched off here and in its red control,
+    so both see the same run of clipped windows to the end of the song."""
+    _without_clip_rule(monkeypatch)
+    world = _live_twin_world()
+    t = d.run_world(new, world, monkeypatch, tmp_path, settings_over=LIVE)
+
+    assert _continued(t, world), "the search continued into the twin stretch"
+    assert t.ladders[0].current.name != "global"
+    assert all(_span(c) <= 2 * WIDE_SPAN for c in t.kernel if c[0] == "xcorr_window"), (
+        "no window was ever searched at the global stage"
+    )
+    assert not any("search ladder → global" in line for line in t.logs)
+    assert _twin_snaps(t) == []
+    assert all(s[1] != TWIN_TRUTH_MS + TWIN_PERIOD_MS for s in t.saves)
+    assert t.history[-1]["locked"] is False and t.history[-1]["offset_ms"] == TWIN_TRUTH_MS
+    assert t.final_lock_state["reason"] == KEEP_SEARCHING_NO_TIME_LEFT
+
+
+def test_live_a_clipped_continued_window_never_feeds_the_accumulator(new, monkeypatch, tmp_path):
+    world = _live_twin_world()
+    t = d.run_world(new, world, monkeypatch, tmp_path, settings_over=LIVE)
+
+    accumulator = t.accumulators[0]
+    assert _mass_at(accumulator, TWIN_TRUTH_MS + TWIN_PERIOD_MS) == pytest.approx(
+        0.3 * len(world.windows), abs=1e-3), "only the planned windows' weak twin peaks"
+    assert accumulator.dominant().offset_ms == TWIN_TRUTH_MS
+    assert not any(s[3] == "sweep-accum" and s[1] == TWIN_TRUTH_MS + TWIN_PERIOD_MS
+                   for s in t.saves)
+    assert t.saves and t.saves[-1][1] == TWIN_TRUTH_MS
+
+
+def _global_exempts_every_window(stage, _continued):
+    return stage is not None and stage.name == "global"
+
+
+def test_live_red_counting_a_clipped_continued_window_as_empty_promotes_the_ladder(new, monkeypatch, tmp_path):
+    """RED CONTROL for the ladder. Counting the clipped window as empty, as a
+    planned one is, walks the ladder into the global stage. A continued window
+    is no longer exempt from the clip there (ELEVEN), so the twin stays out —
+    but with the global stage exempting every window, as it once did, the twin
+    is snapped, saved and locked: each rule closes the route on its own."""
+    _without_clip_rule(monkeypatch)
+    monkeypatch.setattr(new, "_ladder_hears", lambda _outcome, _continued: True)
+    t = d.run_world(new, _live_twin_world(), monkeypatch, tmp_path, settings_over=LIVE)
+
+    twin = TWIN_TRUTH_MS + TWIN_PERIOD_MS
+    assert t.ladders[0].current.name == "global"
+    assert any(_span(c) > 2 * WIDE_SPAN for c in t.kernel if c[0] == "xcorr_window")
+    assert _twin_snaps(t) == [] and all(s[1] != twin for s in t.saves)
+
+    monkeypatch.setattr(new, "_envelope_exempt", _global_exempts_every_window)
+    t = d.run_world(new, _live_twin_world(), monkeypatch, tmp_path, settings_over=LIVE)
+    assert t.ladders[0].current.name == "global"
+    assert any(c[-1] is True for c in _twin_snaps(t)), "the engine snapped to the twin"
+    assert any(s[1] == twin for s in t.saves), "the twin was saved"
+    assert t.history[-1]["locked"] is True and t.history[-1]["offset_ms"] == twin
+
+
+def test_live_red_feeding_the_accumulator_saves_the_twin(new, monkeypatch, tmp_path):
+    """RED CONTROL for the accumulator. Let a clipped continued window's
+    landscape in, as a planned window's is, and the twin's mass overtakes the
+    truth and is saved, although no single window was ever allowed to adopt it.
+    The clip-exhaustion give-up (TWELVE) is switched off here: it would end the
+    search part-way and hide this route rather than close it."""
+    from services.xcorr_sweep import SweepEvaluator
+    real = SweepEvaluator.process_window
+
+    def planned_accumulation(self, *args, **kwargs):
+        kwargs["continued_window"] = False
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(SweepEvaluator, "process_window", planned_accumulation)
+    _without_clip_rule(monkeypatch)
+    world = _live_twin_world()
+    t = d.run_world(new, world, monkeypatch, tmp_path, settings_over=LIVE)
+
+    twin = TWIN_TRUTH_MS + TWIN_PERIOD_MS
+    accumulator = t.accumulators[0]
+    assert _mass_at(accumulator, twin) > _mass_at(accumulator, TWIN_TRUTH_MS)
+    assert accumulator.dominant().offset_ms == twin
+    assert any(s[3] == "sweep-accum" and s[1] == twin for s in t.saves)
+
+
+def test_live_a_clipped_planned_window_is_handled_exactly_as_before(baseline, new, monkeypatch, tmp_path):
+    """The planned-window default under the same flags: two planned windows
+    the stored envelope clips still count empty for the ladder (which reaches
+    the global stage) and still feed the accumulator — byte-identical to the
+    pinned pre-change sweep, accumulated mass included."""
+    world = _live_twin_world(
+        windows=[(10_000, 15_000), (16_000, 21_000), (22_000, 27_000), (28_000, 33_000),
+                 (40_000, 45_000), (46_000, 51_000)],
+        planned_envelope=(-900, 900),
+        twin=lambda ms: (TWIN_TRUTH_MS + TWIN_PERIOD_MS, 0.95) if ms >= 38_000 else None,
+        peaks=lambda ms: [(TWIN_TRUTH_MS, 0.6),
+                          (TWIN_TRUTH_MS + TWIN_PERIOD_MS, 0.95 if ms >= 38_000 else 0.3)],
+    )
+    kw = dict(settings_over={**LIVE, "xcorr_keep_searching_enabled": False})
+    a = d.run_world(baseline, world, monkeypatch, tmp_path, **kw)
+    b = d.run_world(new, world, monkeypatch, tmp_path, **kw)
+    ca, cb = a.comparable(), b.comparable()
+    for key in ca:
+        assert ca[key] == cb[key], f"{key} diverged from the pre-change sweep"
+    import numpy as np
+    assert np.array_equal(a.accumulators[0].mass, b.accumulators[0].mass)
+
+    assert b.ladders[0].current.name == "global", "the clipped planned windows counted empty"
+    assert _mass_at(b.accumulators[0], TWIN_TRUTH_MS + TWIN_PERIOD_MS) == pytest.approx(
+        0.3 * 4 + 0.95 * 2, abs=1e-3), "and their landscapes were accumulated"
+
+
+def test_live_mayday_keeps_searching_and_adopts_the_better_lock(new, monkeypatch, tmp_path):
+    world = d.mayday_world()
+    t = d.run_world(new, world, monkeypatch, tmp_path, settings_over=LIVE, poll_after_ms=200_000)
+
+    assert _continued(t, world), "the search went on past the plan"
+    lock = t.history[-1]
+    assert lock["locked"] is True and lock["time_to_lock_ms"] > 60_000
+    assert lock["offset_ms"] == 1325
+    assert t.engine._shape_offset_ms == 1325
+    assert t.watching_after == URI and not t.task_after_poll
+
+
+def test_live_an_unlockable_song_gives_up(new, monkeypatch, tmp_path):
+    world = _unlockable()
+    t = d.run_world(new, world, monkeypatch, tmp_path, settings_over=LIVE)
+    drain = _drain_ms(world)
+    give_up_ms = d.SETTINGS["xcorr_keep_searching_give_up_ms"]
+    assert drain + give_up_ms <= t.last_frame_ms <= drain + give_up_ms + d.FRAME_MS
+    assert t.final_lock_state["phase"] == lock_state.PHASE_UNLOCKED
+    assert t.final_lock_state["reason"] == KEEP_SEARCHING_NOTHING_TO_FIND
+    assert t.history[-1]["locked"] is False
+
+
+@pytest.mark.parametrize("make_world,poll_after_ms,extra", [
+    (_early_lock_loaded_right, 120_000, {}),
+    (_early_lock_needs_correction, 120_000, {}),
+    (_lock_then_drift, 140_000, {}),
+    (d.mayday_world, 200_000, {"xcorr_keep_searching_enabled": False}),
+])
+def test_live_byte_identical_where_the_play_locks_or_the_switch_is_off(
+        baseline, new, monkeypatch, tmp_path, make_world, poll_after_ms, extra):
+    world = make_world()
+    kw = dict(settings_over={**LIVE, **extra}, poll_after_ms=poll_after_ms)
+    a = d.run_world(baseline, world, monkeypatch, tmp_path, **kw)
+    b = d.run_world(new, world, monkeypatch, tmp_path, **kw)
+    ca, cb = a.comparable(), b.comparable()
+    for key in ca:
+        assert ca[key] == cb[key], f"{key} diverged from the pre-change sweep"
+    assert b.accumulators and b.ladders
+    import numpy as np
+    assert np.array_equal(a.accumulators[0].mass, b.accumulators[0].mass)
+
+
+# ── ELEVEN — the clip holds at every ladder stage for a continued window ─────
+
+EMPTY_STRETCH = (34_000, 58_000)
+
+
+def _global_twin_world() -> d.World:
+    """The ladder reaches the global stage with no window ever clipped: past
+    the planned windows the song goes quiet, so continued windows find nothing
+    and count empty (wide → global). Only then does the beat twin appear, as
+    the free search's winner at r 0.95, while the engine holds its snap to the
+    truth."""
+    def empty(ms):
+        return EMPTY_STRETCH[0] <= ms < EMPTY_STRETCH[1]
+
+    return _live_twin_world(
+        clarity=lambda ms: (0.1, 0.9) if empty(ms) else (0.6, 1.0),
+        twin=lambda ms: ((TWIN_TRUTH_MS + TWIN_PERIOD_MS, 0.95)
+                         if ms >= EMPTY_STRETCH[1] else None),
+        peaks=lambda ms: [] if empty(ms) else [
+            (TWIN_TRUTH_MS, 0.6),
+            (TWIN_TRUTH_MS + TWIN_PERIOD_MS, 0.95 if ms >= EMPTY_STRETCH[1] else 0.3)],
+    )
+
+
+def _clips_before_global(t: d.Trace) -> list[str]:
+    promoted = next(i for i, line in enumerate(t.logs) if "search ladder → global" in line)
+    return [line for line in t.logs[:promoted] if "envelope clip" in line]
+
+
+def test_live_the_ladder_reaches_global_with_no_window_clipped(new, monkeypatch, tmp_path):
+    world = _global_twin_world()
+    t = d.run_world(new, world, monkeypatch, tmp_path, settings_over=LIVE)
+
+    assert t.ladders[0].current.name == "global"
+    assert _clips_before_global(t) == [], "no clipped window walked the ladder there"
+    at_global = [c for c in t.kernel
+                 if c[0] == "xcorr_window" and _span(c) > 2 * WIDE_SPAN and c[1] >= EMPTY_STRETCH[1]]
+    assert at_global and all((c[1], c[2]) in _continued(t, world) for c in at_global), (
+        "the twin was presented to continued windows searched at the global stage"
+    )
+
+
+def test_live_a_twin_at_the_global_stage_is_clipped_for_a_continued_window(new, monkeypatch, tmp_path):
+    world = _global_twin_world()
+    t = d.run_world(new, world, monkeypatch, tmp_path, settings_over=LIVE)
+
+    twin = TWIN_TRUTH_MS + TWIN_PERIOD_MS
+    assert t.ladders[0].current.name == "global"
+    assert any("envelope clip — NEW +1700ms" in line for line in t.logs)
+    assert _twin_snaps(t) == [], "no snap was ever asked for at the twin"
+    assert all(s[1] != twin for s in t.saves), "the twin was never saved, by any route"
+    assert not any("lock-and-stop" in line for line in t.logs)
+    assert t.history[-1]["locked"] is False and t.history[-1]["offset_ms"] == TWIN_TRUTH_MS
+
+    accumulator = t.accumulators[0]
+    assert _mass_at(accumulator, twin) == pytest.approx(
+        0.3 * (len(world.windows) + 1), abs=1e-3), (
+        "only the weak twin peaks of the planned windows and the one continued "
+        "window before the song went quiet — none from the global stage"
+    )
+    assert accumulator.dominant().offset_ms == TWIN_TRUTH_MS
+    assert t.final_lock_state["reason"] == KEEP_SEARCHING_NOTHING_ADMISSIBLE
+    assert t.saves and t.saves[-1][1] == TWIN_TRUTH_MS
+
+
+def test_live_red_exempting_a_continued_window_at_global_adopts_the_twin(new, monkeypatch, tmp_path):
+    """RED CONTROL. The same world with the global stage exempting continued
+    windows too — the rule before this change — snaps to the twin, saves it,
+    locks on it and piles twin mass into the accumulator."""
+    monkeypatch.setattr(new, "_envelope_exempt", _global_exempts_every_window)
+    world = _global_twin_world()
+    t = d.run_world(new, world, monkeypatch, tmp_path, settings_over=LIVE)
+
+    twin = TWIN_TRUTH_MS + TWIN_PERIOD_MS
+    assert _clips_before_global(t) == []
+    assert not any("envelope clip" in line for line in t.logs)
+    assert any(c[-1] is True for c in _twin_snaps(t)), "the engine snapped to the twin"
+    assert any(s[1] == twin for s in t.saves), "the twin was saved"
+    assert t.history[-1]["locked"] is True and t.history[-1]["offset_ms"] == twin
+    assert _mass_at(t.accumulators[0], twin) > 0.3 * (len(world.windows) + 1) + 0.5
+
+
+def _planned_global_twin_world() -> d.World:
+    """Keep-searching never engages: two planned windows find nothing (wide →
+    global), and the three planned windows after them present the twin, each
+    carrying the planner's stored ±900ms envelope."""
+    def empty(ms):
+        return 22_000 <= ms < 34_000
+
+    return _live_twin_world(
+        windows=[(10_000, 15_000), (16_000, 21_000), (22_000, 27_000), (28_000, 33_000),
+                 (40_000, 45_000), (46_000, 51_000), (52_000, 57_000)],
+        planned_envelope=(-900, 900),
+        clarity=lambda ms: (0.1, 0.9) if empty(ms) else (0.6, 1.0),
+        twin=lambda ms: (TWIN_TRUTH_MS + TWIN_PERIOD_MS, 0.95) if ms >= 38_000 else None,
+        peaks=lambda ms: [] if empty(ms) else [
+            (TWIN_TRUTH_MS, 0.6),
+            (TWIN_TRUTH_MS + TWIN_PERIOD_MS, 0.95 if ms >= 38_000 else 0.3)],
+    )
+
+
+def test_live_a_planned_window_at_the_global_stage_is_still_exempt(baseline, new, monkeypatch, tmp_path):
+    """The planned-window default is unchanged: at the global stage a planned
+    window's twin passes the stored envelope, exactly as the pinned pre-change
+    sweep lets it — and forcing the clip on shows that envelope would have
+    rejected it."""
+    world = _planned_global_twin_world()
+    kw = dict(settings_over=LIVE, poll_after_ms=120_000)
+    a = d.run_world(baseline, world, monkeypatch, tmp_path, **kw)
+    b = d.run_world(new, world, monkeypatch, tmp_path, **kw)
+    ca, cb = a.comparable(), b.comparable()
+    for key in ca:
+        assert ca[key] == cb[key], f"{key} diverged from the pre-change sweep"
+
+    twin = TWIN_TRUTH_MS + TWIN_PERIOD_MS
+    assert b.ladders[0].current.name == "global"
+    assert not any("keep-searching window" in line for line in b.logs), "every window here was planned"
+    assert "continued" not in b.final_lock_state
+    assert any(c[-1] is True for c in _twin_snaps(b))
+    assert not any("envelope clip" in line for line in b.logs)
+
+    monkeypatch.setattr(new, "_envelope_exempt", lambda _stage, _continued: False)
+    forced = d.run_world(new, world, monkeypatch, tmp_path, settings_over=LIVE)
+    assert any("window [40000–45000]ms envelope clip — NEW +1700ms" in line
+               for line in forced.logs)
+
+
+FAR_TRUTH_MS = 5000
+
+
+def _cold_start_world() -> d.World:
+    """No progressive match and planned windows that find nothing, so the
+    engine has never snapped when the search continues (play-best 0) — at the
+    global stage — into a stretch where the truth is +5000ms, far outside the
+    ±900ms envelope the planner assigns there."""
+    return d.World(
+        duration_ms=150_000,
+        windows=[(10_000, 15_000), (16_000, 21_000), (22_000, 27_000), (28_000, 33_000)],
+        loaded_offset_ms=0, truth=lambda _ms: FAR_TRUTH_MS,
+        clarity=lambda ms: (0.1, 0.9) if ms < 36_000 else (0.95, 1.0),
+        raw_band=_beat_periodic,
+    )
+
+
+def test_live_a_cold_start_continued_window_still_adopts_a_large_correction(new, monkeypatch, tmp_path):
+    world = _cold_start_world()
+    t = d.run_world(new, world, monkeypatch, tmp_path, settings_over=LIVE)
+
+    assert t.ladders[0].current.name == "global"
+    applied = [c for c in t.engine.calls if c[0] == "apply_save" and c[-1] is True]
+    assert applied and applied[0][2] == FAR_TRUTH_MS, "the first snap of the play is the correction"
+    assert any(f"keep-searching window [{s}–{e}]ms" in line and "envelope [-900, +900]ms" in line
+               for s, e in _continued(t, world) for line in t.logs), (
+        "the correction lies outside the envelope a continued window carries"
+    )
+    assert not any("envelope clip" in line for line in t.logs)
+    assert t.history[-1]["locked"] is True and t.history[-1]["offset_ms"] == FAR_TRUTH_MS
+    assert t.history[-1]["time_to_lock_ms"] > _drain_ms(world)
+    assert t.engine._shape_offset_ms == FAR_TRUTH_MS
+
+
+# ── TWELVE — a zero-width envelope, the shape a fifth of his library has ─────
+
+ZERO_TRUTH_MS = 1325
+ZERO_TWIN_MS = ZERO_TRUTH_MS + 500
+TOL_MS = d.SETTINGS["xcorr_save_confirm_tol_ms"]
+
+
+def _zero_width_world(engine_ms: int, twin_ms: int | None = None,
+                      twin_until_ms: int | None = None) -> d.World:
+    """MAYDAY as his library stores it: the planner's envelope is (0, 0) on
+    every planned window and at every position the search continues into —
+    124 of 563 of his uscore-v8 songs look like this. Progressive matching
+    snaps the engine to `engine_ms` before any window runs: on the truth, one
+    25ms bin from it, or off the grid window measurements land on. OLD there
+    correlates as well as the truth does, because a real correlation a few ms
+    off its peak barely moves. The planned windows are the founding report's
+    weak Q=0.39 ones, so only continued windows can supply the evidence a lock
+    needs; from 60s the song is clear. With `twin_ms`, every continued
+    window's free search is fooled by that beat instead — until
+    `twin_until_ms`, when given."""
+    def planned(ms):
+        return ms < 34_000
+
+    def twinned(ms):
+        return not planned(ms) and (twin_until_ms is None or ms < twin_until_ms)
+
+    world = d.mayday_world(
+        progressive=lambda _t: (engine_ms, 0.7, 0.5),
+        planned_envelope=(0, 0),
+        eval_tol_ms=25,
+        peaks=lambda ms: [(ZERO_TRUTH_MS, 0.3 if planned(ms) else d.mayday_world().clarity(ms)[0])],
+    )
+    if twin_ms is not None:
+        world.twin = lambda ms: (twin_ms, 0.95) if twinned(ms) else None
+        world.peaks = lambda ms: (
+            [(ZERO_TRUTH_MS, 0.3)] if planned(ms)
+            else [(ZERO_TRUTH_MS, d.mayday_world().clarity(ms)[0])]
+            + ([(twin_ms, 0.95)] if twinned(ms) else []))
+    return world
+
+
+def _planned_clip_lines(t: d.Trace, world: d.World) -> list[str]:
+    planned = [f"window [{s}–{e}]ms envelope clip" for s, e in world.windows]
+    return [line for line in t.logs if any(p in line for p in planned)]
+
+
+def _continued_clip_lines(t: d.Trace, world: d.World) -> list[str]:
+    planned = set(_planned_clip_lines(t, world))
+    return [line for line in t.logs if "envelope clip" in line and line not in planned]
+
+
+def test_zero_width_is_what_the_planner_really_gives_mayday_shaped_songs():
+    import numpy as np
+    from services import uscore_planner
+    world = _zero_width_world(1337)
+    ts = np.arange(0, world.duration_ms + d.FRAME_MS, d.FRAME_MS, dtype=float)
+    bands = uscore_planner.normalized_song_bands(
+        ts, {k: ts.copy() for k in ("rms_total", "rms_low", "rms_mid", "rms_high")},
+        world.duration_ms)
+    shift = uscore_planner.global_max_shift_bins([])
+    for start in range(30_000, 212_000, 500):
+        assert uscore_planner.window_envelope(bands, [], shift, start, 5000)[:2] == (0, 0), start
+
+
+@pytest.mark.parametrize("engine_ms", [1337, 1350, 1325], ids=["off-grid", "one-bin", "exact"])
+def test_zero_width_continued_windows_are_admitted_and_the_play_locks(new, monkeypatch, tmp_path, engine_ms):
+    world = _zero_width_world(engine_ms)
+    t = d.run_world(new, world, monkeypatch, tmp_path, settings_over=LIVE)
+
+    assert _continued(t, world), "the planned windows ran out without a lock"
+    assert any(f"envelope [-{TOL_MS}, +{TOL_MS}]ms" in line for line in t.logs), (
+        "each continued window's zero-width envelope was floored at the agreement tolerance"
+    )
+    assert _continued_clip_lines(t, world) == [], "no continued window was clipped"
+    if engine_ms != ZERO_TRUTH_MS:
+        assert _planned_clip_lines(t, world), "planned windows keep their stored (0, 0) envelope"
+
+    peak = t.accumulators[0].dominant()
+    assert abs(peak.offset_ms - ZERO_TRUTH_MS) <= 25
+    assert peak.mass >= LIVE["xcorr_accum_lock_mass"], "continued windows fed the accumulator"
+    lock = t.history[-1]
+    assert lock["locked"] is True and lock["time_to_lock_ms"] > _drain_ms(world)
+    assert lock["offset_ms"] == engine_ms == t.engine._shape_offset_ms
+    assert t.final_lock_state["phase"] == lock_state.PHASE_LOCKED
+
+
+@pytest.mark.parametrize("engine_ms", [1337, 1350], ids=["off-grid", "one-bin"])
+def test_zero_width_red_without_the_floor_the_play_never_locks(new, monkeypatch, tmp_path, engine_ms):
+    """RED CONTROL, and the finding reproduced: the pre-floor, pre-rule sweep on
+    the same song clips every continued window, starves the accumulator, and
+    burns a window every 5s to the end of the song — reading "Lock failed"
+    while the engine sits on the right offset at Q=0.95."""
+    monkeypatch.setattr(new, "_floored_envelope", lambda envelope, _tol: envelope)
+    _without_clip_rule(monkeypatch)
+    world = _zero_width_world(engine_ms)
+    t = d.run_world(new, world, monkeypatch, tmp_path, settings_over=LIVE)
+
+    assert len(_continued(t, world)) >= 30
+    assert len(_continued_clip_lines(t, world)) == len(_continued(t, world)), (
+        "every continued window was clipped"
+    )
+    assert t.accumulators[0].dominant().mass < LIVE["xcorr_accum_lock_mass"]
+    assert t.engine._shape_offset_ms == engine_ms and t.engine._play_best_quality >= 0.9
+    assert t.history[-1]["locked"] is False
+    assert t.final_lock_state["phase"] == lock_state.PHASE_UNLOCKED
+    assert t.final_lock_state["reason"] == KEEP_SEARCHING_NO_TIME_LEFT
+
+
+def test_zero_width_a_beat_twin_is_still_refused(new, monkeypatch, tmp_path):
+    world = _zero_width_world(1350, twin_ms=ZERO_TWIN_MS)
+    t = d.run_world(new, world, monkeypatch, tmp_path, settings_over=LIVE)
+
+    assert _continued_clip_lines(t, world), "the twin was measured"
+    assert all(f"outside [-{TOL_MS}, +{TOL_MS}]" in line for line in _continued_clip_lines(t, world))
+    assert not any(c[0] == "apply_save" and c[2] == ZERO_TWIN_MS for c in t.engine.calls)
+    assert all(s[1] != ZERO_TWIN_MS for s in t.saves), "the twin was never saved, by any route"
+    assert _mass_at(t.accumulators[0], ZERO_TWIN_MS) == pytest.approx(0.0, abs=1e-3)
+    assert not any("lock-and-stop" in line for line in t.logs)
+    assert t.history[-1]["locked"] is False
+
+
+def _clipped_windows(t: d.Trace, world: d.World, twin_ms: int) -> list[tuple[int, int]]:
+    return [w for w in _continued(t, world) if world.twin(w[0]) == (twin_ms, 0.95)]
+
+
+def test_zero_width_clipped_windows_give_up_after_the_budget_not_before(new, monkeypatch, tmp_path):
+    world = _zero_width_world(1350, twin_ms=ZERO_TWIN_MS)
+    t = d.run_world(new, world, monkeypatch, tmp_path, settings_over=LIVE)
+
+    budget = d.SETTINGS["xcorr_keep_searching_give_up_ms"]
+    interval = d.SETTINGS["xcorr_keep_searching_interval_ms"]
+    clipped = _clipped_windows(t, world, ZERO_TWIN_MS)
+    assert len(_continued_clip_lines(t, world)) == len(clipped) >= budget // interval
+    first_clip_ms = clipped[0][1] + 1000
+    assert budget <= t.last_frame_ms - first_clip_ms < budget + interval + d.FRAME_MS, (
+        "it gave up once the clipped run spanned the budget, and no earlier"
+    )
+    assert t.last_frame_ms < world.duration_ms - 30_000, "well before the song's last stretch"
+    assert any("keep-searching gave up (nothing_admissible)" in line for line in t.logs)
+    assert t.final_lock_state["phase"] == lock_state.PHASE_UNLOCKED
+    assert t.final_lock_state["reason"] == KEEP_SEARCHING_NOTHING_ADMISSIBLE
+    assert t.final_lock_state["continued"] is True
+
+
+def test_zero_width_a_clipped_stretch_shorter_than_the_budget_still_locks_after_it(new, monkeypatch, tmp_path):
+    world = _zero_width_world(1350, twin_ms=ZERO_TWIN_MS, twin_until_ms=70_000)
+    t = d.run_world(new, world, monkeypatch, tmp_path, settings_over=LIVE)
+
+    clipped = _clipped_windows(t, world, ZERO_TWIN_MS)
+    assert len(clipped) >= 4, "a run of clipped windows came first"
+    assert all(s[1] != ZERO_TWIN_MS for s in t.saves)
+    lock = t.history[-1]
+    assert lock["locked"] is True and lock["time_to_lock_ms"] > 70_000
+    assert t.final_lock_state["phase"] == lock_state.PHASE_LOCKED
+
+
+def test_zero_width_red_a_three_window_clip_rule_gives_up_before_the_clear_stretch(new, monkeypatch, tmp_path):
+    """RED CONTROL for the budget: the rule counted three clipped windows, and
+    on the same song it gave up in the self-similar stretch and never reached
+    the clear one that locks."""
+    real_note = KeepSearching.note_window
+
+    def counting_note(self, t_now_ms, window, *, evidence, clipped=None, engine_offset_ms=None):
+        real_note(self, t_now_ms, window, evidence=evidence, clipped=clipped,
+                  engine_offset_ms=engine_offset_ms)
+        if clipped is not None:
+            self.red_clip_count = getattr(self, "red_clip_count", 0) + 1 if clipped else 0
+
+    monkeypatch.setattr(KeepSearching, "note_window", counting_note)
+    monkeypatch.setattr(KeepSearching, "clips_exhausted",
+                        lambda self: getattr(self, "red_clip_count", 0) >= 3)
+    world = _zero_width_world(1350, twin_ms=ZERO_TWIN_MS, twin_until_ms=70_000)
+    t = d.run_world(new, world, monkeypatch, tmp_path, settings_over=LIVE)
+
+    assert len(_clipped_windows(t, world, ZERO_TWIN_MS)) == 3
+    assert t.last_frame_ms < 70_000
+    assert t.history[-1]["locked"] is False
+    assert t.final_lock_state["reason"] == KEEP_SEARCHING_NOTHING_ADMISSIBLE
+
+
+def test_zero_width_red_without_the_clip_rule_the_same_world_burns_to_no_time_left(new, monkeypatch, tmp_path):
+    """RED CONTROL for the give-up: the OLD measurement at the engine's offset
+    keeps casting votes, so nothing_to_find never arrives and the search
+    measures a window every 5s to the end of the song."""
+    _without_clip_rule(monkeypatch)
+    world = _zero_width_world(1350, twin_ms=ZERO_TWIN_MS)
+    t = d.run_world(new, world, monkeypatch, tmp_path, settings_over=LIVE)
+
+    assert len(_continued(t, world)) >= 30
+    assert t.final_lock_state["reason"] == KEEP_SEARCHING_NO_TIME_LEFT
+    assert all(s[1] != ZERO_TWIN_MS for s in t.saves)
+
+
+NARROW_PERIOD_MS = 300
+NEAR_TWIN_MS = TWIN_TRUTH_MS + 275
+
+
+def _narrow_band(ts):
+    """A pulse every NARROW_PERIOD_MS: the planner measures a twin that close,
+    so the envelope it assigns is a real bound narrower than the 300ms floor."""
+    import numpy as np
+    phase = np.mod(ts, NARROW_PERIOD_MS)
+    return 0.2 + (1.0 + ts / 300_000.0) * np.exp(
+        -((phase - NARROW_PERIOD_MS / 2) ** 2) / (2 * (NARROW_PERIOD_MS / 6) ** 2))
+
+
+def _measured_narrow_world() -> d.World:
+    """The engine holds the truth (progressive), and past the planned windows
+    the free search is fooled by a near twin 275ms later — outside the ±200ms
+    envelope the planner MEASURED there, inside a 300ms floor."""
+    return d.World(
+        duration_ms=150_000,
+        windows=[(10_000, 15_000), (16_000, 21_000), (22_000, 27_000), (28_000, 33_000)],
+        loaded_offset_ms=TWIN_TRUTH_MS, truth=lambda _ms: TWIN_TRUTH_MS,
+        clarity=lambda _ms: (0.6, 1.0),
+        raw_band=_narrow_band,
+        twin=lambda ms: (NEAR_TWIN_MS, 0.95) if ms >= 34_000 else None,
+        peaks=lambda ms: [(TWIN_TRUTH_MS, 0.6), (NEAR_TWIN_MS, 0.95 if ms >= 34_000 else 0.3)],
+        progressive=lambda _t: (TWIN_TRUTH_MS, 0.7, 0.5),
+    )
+
+
+def _broad_floor(envelope, tol_ms):
+    return min(int(envelope[0]), -abs(int(tol_ms))), max(int(envelope[1]), abs(int(tol_ms)))
+
+
+def test_the_narrow_world_has_a_measured_envelope_narrower_than_the_floor():
+    import numpy as np
+    from services import uscore_planner
+    world = _measured_narrow_world()
+    ts = np.arange(0, world.duration_ms + d.FRAME_MS, d.FRAME_MS, dtype=float)
+    bands = uscore_planner.normalized_song_bands(
+        ts, {k: world.raw_band(ts) for k in ("rms_total", "rms_low", "rms_mid", "rms_high")},
+        world.duration_ms)
+    shift = uscore_planner.global_max_shift_bins([])
+    for start in range(30_000, 116_000, 500):
+        neg, pos, _beat = uscore_planner.window_envelope(bands, [], shift, start, 5000)
+        assert pos - neg >= uscore_planner._MIN_TOTAL_ENVELOPE_MS, "the planner's gate accepts it"
+        assert -TOL_MS < neg and pos < NEAR_TWIN_MS - TWIN_TRUTH_MS < TOL_MS, start
+
+
+def test_live_a_measured_envelope_narrower_than_the_floor_is_not_widened(new, monkeypatch, tmp_path):
+    world = _measured_narrow_world()
+    t = d.run_world(new, world, monkeypatch, tmp_path, settings_over=LIVE)
+
+    assert _continued(t, world), "the search continued into the near-twin stretch"
+    assert any("envelope [-200, +200]ms" in line for line in t.logs), "used as the planner measured it"
+    assert not any(f"envelope [-{TOL_MS}, +{TOL_MS}]ms" in line for line in t.logs)
+    assert any(f"envelope clip — NEW +{NEAR_TWIN_MS}ms" in line and "outside [-200, +200]" in line
+               for line in t.logs)
+    assert not any(c[0] == "apply_save" and c[2] == NEAR_TWIN_MS for c in t.engine.calls)
+    assert all(abs(s[1] - NEAR_TWIN_MS) > 25 for s in t.saves), "the near twin was never saved"
+    assert t.history[-1]["offset_ms"] == TWIN_TRUTH_MS
+    assert _mass_at(t.accumulators[0], NEAR_TWIN_MS) == pytest.approx(
+        0.3 * (len(world.windows) + 1), abs=5e-2), (
+        "only the weak near-twin peaks of the planned windows and the one continued "
+        "window placed before the near twin appears"
+    )
+    assert t.engine._shape_offset_ms == TWIN_TRUTH_MS
+
+
+def test_live_red_the_broad_floor_admitted_the_twin_the_planner_measured(new, monkeypatch, tmp_path):
+    """RED CONTROL for the floor's scope: widening every side to 300ms, as the
+    floor first did, lets the same near twin in — snapped, saved and piled into
+    the accumulator."""
+    monkeypatch.setattr(new, "_floored_envelope", _broad_floor)
+    world = _measured_narrow_world()
+    t = d.run_world(new, world, monkeypatch, tmp_path, settings_over=LIVE)
+
+    assert any(f"envelope [-{TOL_MS}, +{TOL_MS}]ms" in line for line in t.logs)
+    assert any(c[0] == "apply_save" and c[2] == NEAR_TWIN_MS and c[-1] is True
+               for c in t.engine.calls), "the engine snapped to the near twin"
+    assert any(abs(s[1] - NEAR_TWIN_MS) <= 25 for s in t.saves), "the near twin was saved"
+    assert _mass_at(t.accumulators[0], NEAR_TWIN_MS) > 0.3 * (len(world.windows) + 1) + 0.3
+    assert t.history[-1]["locked"] is True and t.history[-1]["offset_ms"] == NEAR_TWIN_MS
+
+
+def test_live_a_measured_envelope_wider_than_the_floor_is_untouched(new, monkeypatch, tmp_path):
+    world = _live_twin_world()
+    t = d.run_world(new, world, monkeypatch, tmp_path, settings_over=LIVE)
+
+    assert _continued(t, world)
+    lines = [line for line in t.logs if "keep-searching window" in line]
+    assert lines and all("envelope [-900, +900]ms" in line for line in lines)

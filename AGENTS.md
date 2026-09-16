@@ -7143,8 +7143,8 @@ that connects mid-song is never blind. Three things before touching any of it:
   calls `note_outcome(locked=False)`, which records the numbers and LEAVES the
   phase at `searching`; only `note_search_ended()` resolves it, wired today as
   the sweep task's own done-callback (so a search can never outlive the task
-  doing it). A later keep-searching engine keeps its task alive and the badge
-  stays "Searching…" with nothing to change here.
+  doing it). The keep-searching engine below keeps its task alive, so the
+  phase stays `searching` by construction.
 - **THE BADGE'S DECISION IS ONE PURE FUNCTION**, `web/src/components/
   lockBadge.ts`, kept out of React so `scripts/check_lock_badge_states.mjs`
   can transpile the real module with esbuild and drive the whole table (it
@@ -7162,10 +7162,95 @@ that connects mid-song is never blind. Three things before touching any of it:
   The `offset_ms` it carries is a display copy with its own row in
   `docs/SPECTRA_TIMING_CONVENTIONS.md`'s master table.
 
-DELIBERATELY SEPARATE, filed as `spotfx-lock-early-window-exhaustion`: the
-U-Score planner packs every window into the first ~30 s, so a song that does
-not lock early gets no further attempts. That is why songs fail; this is only
-why nobody could see it.
+**A PLAY THAT DRAINS ITS PLANNED WINDOWS WITHOUT A HARD LOCK KEEPS SEARCHING
+(2026-09-15, `spotfx-lock-early-window-exhaustion`, the Admiral: "if it has
+low confidence, it should keep spike detection on to try to get better").**
+`services/xcorr_sweep.py`'s `KeepSearching` docstring is the binding
+statement. A song's planned windows can all sit near its start, and the loop
+used to `break` the moment that queue drained, so MAYDAY stopped 32 s into a
+4-minute song. It now places one spike-targeted window (`mismatch_spike`, the drift
+monitor's own placement) every 5 s through the ordinary per-window gates,
+hands off to the post-lock path on a lock, and gives up with a named reason
+— `nothing_to_find` (45 s of song, no usable measurement), `no_time_left`
+(the last 30 s, where no window is planned), `nothing_admissible` (below),
+`user_verified` — holding
+`_watching_uri` so the next poll cannot relaunch and overwrite "Lock failed"
+with "Not checked" (the pre-change sweep did exactly that). Six things
+before touching it:
+
+- **It is armed at ONE exit only**: planned queue empty AND
+  `_locked_via_stop` False. A play that ever locked — including a drift-monitor
+  recovery whose re-armed queue just drained — keeps its old exit, which is
+  what makes the early-lock and post-lock paths byte-identical.
+- **A play that continued can end AFTER its song did** (a track change cancels
+  it, and `app_state` already holds the next song's Set List and duration),
+  so its end-of-play writes — anti-corr streak, `lock_history`, the final
+  `_save_offset` — take the `PlayContext` snapshot the play started under. A
+  play that never continued still reads live state, byte-identically. Anchor
+  matching stays live during the continued search, by decision.
+- **A continued window carries the envelope the U-Score planner would assign
+  a window at that exact position.** The envelope clip looks a window up by
+  its exact bounds in the planner's stored windows, so a spike-placed window
+  had none and the clip was silently a no-op — in exactly the stretches the
+  planner rejected as too self-similar to place a window. The shared
+  `uscore_planner.window_envelope` (which `plan_uscore_windows` itself now
+  calls, output proven identical against the pinned ref) is applied over the
+  planner's own full-song bands and beats (`ContinuedEnvelopes`, built once
+  when the search engages) and registered in the evaluator's lookup before
+  each window runs. A new place a window can come from needs the same
+  treatment, or the clip will not see it. **That envelope is floored at
+  ±`xcorr_save_confirm_tol_ms` (300ms) ONLY where the planner's own gate
+  failed** (`_floored_envelope`: total width under `_MIN_TOTAL_ENVELOPE_MS`,
+  100ms) and used verbatim otherwise — a side the planner measured narrower
+  than 300ms is a twin it found, never widened. 124 of 563 of his uscore-v8
+  songs, MAYDAY included, carry a ZERO-WIDTH (0, 0) envelope on every
+  planned window — force-picked past that gate — which admits only a
+  measurement equal to the engine's offset to the millisecond, so after the
+  first off-grid snap the continued search could neither confirm nor
+  correct. 300ms stays under a one-beat twin (500ms at 120bpm). And **clipped
+  continued windows against an unchanging engine offset give up as
+  `nothing_admissible` only once they have spanned the same 45 s budget
+  `nothing_to_find` uses** — the OLD measurement still casts votes there, so
+  without it such a play burns a window every 5 s to `no_time_left`; it is no
+  faster because a clip belongs to the STRETCH (a clearer section later can
+  still lock) and a clipped window's OLD vote still feeds agreement and
+  lock-and-stop. **The clip holds at EVERY ladder
+  stage for a continued window** (`_envelope_exempt`): the global stage still
+  exempts planned and drift-recovery windows, never a continued one, because
+  the ladder gets there without any clip firing (empty continued windows, an
+  escalated plan, an anti-correlated baseline). THE TRADE-OFF, stated: once
+  the engine has snapped, a continued window cannot make a LARGE correction
+  the envelope rejects at its position; a cold start still can (play-best 0
+  skips the clip), and anything inside the envelope is untouched — it refuses
+  probably-wrong locks, not better ones. **A clipped continued window
+  leaves no other trace**: the search ladder does not hear it (counted empty,
+  a run of them walks into the global stage) and the evidence accumulator
+  does not take its landscape (the clip only
+  nulls the discrete NEW; the accumulator's own save and lock-and-stop never
+  read the envelope). Both are scoped to continued windows — planned and
+  drift-recovery windows are unchanged — and beyond them a continued window
+  chooses AND SAVES exactly like a planned one (his ruling, "it should save
+  also"). **His room runs the FFT kernel, accumulator, ladder and progressive
+  matching** (`storage/settings.json`), so a proof on the driver's default
+  legacy-kernel `SETTINGS` says nothing about it: `LIVE_FLAGS` is that path.
+- **Evidence is a confirmation VOTE** (the evaluator's
+  `confirmation_shifts` grew), and a continued window may not re-measure more
+  than the U-Score planner's own 1 s of audio: the same seconds scored twice
+  would manufacture agreement out of one measurement.
+- **`tests/sweep_world_driver.py` drives the REAL `on_track_change` →
+  `_detect_loop_xcorr`** over a scripted world (only capture, math kernel,
+  engine and disk replaced) and can load the pinned pre-change module out of
+  git (`BASELINE_REF`); `tests/test_keep_searching.py` compares whole traces
+  against it. Reuse the driver for any future sweep-control-flow change
+  rather than modelling the loop.
+- The badge's Searching half fell out of the terminal-signal design by
+  construction; the one thing that did not was "Searching… 4/4" printing a
+  finished fraction on an unfinished search — hence `continued`/
+  `continued_windows`, added ONLY to plays that continue. The debug page
+  holds itself to the same rule: a continued window's `xcorr_spike` carries
+  `source: "keep_searching"` and `web/src/debug/spikeLine.ts` (and its
+  `spectra/web` twin) never files it under "Mismatch spikes (recovery
+  windows)" (`node scripts/check_debug_spike_lines.mjs`).
 
 ## `librosa_offset_ms` is unreliable — don't shift section/beat times by it
 

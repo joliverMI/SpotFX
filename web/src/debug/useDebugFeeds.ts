@@ -8,6 +8,7 @@ import { onMessage } from '../api/ws';
 import type { LiveShapeLayerData, MonitorPoint, SpikeMarker, XcorrWinMarker } from '../builder/canvas/frame';
 import type { AudioShapeData } from '../builder/types';
 import { binTo25ms, computeDiff, shiftLive } from './diff';
+import { spikeHeading, spikeKind, spikeLine, type SpikeKind } from './spikeLine';
 
 export interface MonitorStatus {
   state: 'ok' | 'suspect' | 'recovering' | string;
@@ -37,7 +38,7 @@ export function useDebugFeeds(uri: string | null, shapeOffsetMs: number, savedSh
   const [xcorrWindows, setXcorrWindows] = useState<XcorrWinMarker[]>([]);
   const [xcorrLines, setXcorrLines] = useState<string[]>([]);
   const [spikes, setSpikes] = useState<SpikeMarker[]>([]);
-  const [spikeLines, setSpikeLines] = useState<string[]>([]);
+  const [spikeLog, setSpikeLog] = useState<{ line: string; kind: SpikeKind }[]>([]);
   const [monitorHistory, setMonitorHistory] = useState<MonitorPoint[]>([]);
   const [monitor, setMonitor] = useState<MonitorStatus | null>(null);
   const [anchorMatch, setAnchorMatch] = useState<AnchorMatch | null>(null);
@@ -52,7 +53,7 @@ export function useDebugFeeds(uri: string | null, shapeOffsetMs: number, savedSh
     setXcorrWindows([]);
     setXcorrLines([]);
     setSpikes([]);
-    setSpikeLines([]);
+    setSpikeLog([]);
     setMonitorHistory([]);
     setMonitor(null);
     setAnchorMatch(null);
@@ -87,11 +88,7 @@ export function useDebugFeeds(uri: string | null, shapeOffsetMs: number, savedSh
           spike_ms: Number(msg.spike_ms), win_start: Number(msg.win_start),
           win_end: Number(msg.win_end), strength: Number(msg.strength ?? 0),
         }]);
-        setSpikeLines((ls) => [
-          `spike @${msg.spike_ms}ms → window [${msg.win_start}-${msg.win_end}] ` +
-          `strength=${Number(msg.strength ?? 0).toFixed(2)}`,
-          ...ls.slice(0, 9),
-        ]);
+        setSpikeLog((ls) => [{ line: spikeLine(msg), kind: spikeKind(msg) }, ...ls.slice(0, 9)]);
       }),
       onMessage('xcorr_monitor', (msg) => {
         if (!mine(msg)) return;
@@ -152,8 +149,11 @@ export function useDebugFeeds(uri: string | null, shapeOffsetMs: number, savedSh
     if (liveEdge.current?.ms !== edge) liveEdge.current = { ms: edge, wallMs: Date.now() };
   }, [live]);
 
+  const spikeLines = useMemo(() => spikeLog.map((e) => e.line), [spikeLog]);
+  const spikeTitle = useMemo(() => spikeHeading(spikeLog.map((e) => e.kind)), [spikeLog]);
+
   return {
-    xcorrWindows, xcorrLines, spikes, spikeLines,
+    xcorrWindows, xcorrLines, spikes, spikeLines, spikeTitle,
     monitorHistory, monitor, anchorMatch, lastFire,
     live, diff, liveEdge,
   };

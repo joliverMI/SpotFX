@@ -32,6 +32,7 @@ import hashlib
 import logging
 import os
 from collections import deque
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path                         # DIAGNOSTIC CSV
 from typing import Optional
@@ -64,6 +65,7 @@ from services.xcorr_core import (
     max_frame_gap_ms as _max_frame_gap_ms,
 )
 from services.xcorr_sweep import (
+    KeepSearching, KeepSearchingConfig,
     MismatchMonitor, MonitorConfig, SearchLadder, SweepConfig, SweepEvaluator,
 )
 from services.xcorr_evidence import EvidenceAccumulator
@@ -82,6 +84,34 @@ _OFFSET_HISTORY_CAP   = 5       # rolling window of saved offsets per (track, Se
 _SETLIST_DELTA_CAP    = 10      # rolling deltas per Set List for cross-track bias hint
 _PRE_FLIGHT_INTRO_MS  = 8_000   # how much of the intro we sample for the pre-flight scan
 _PRE_FLIGHT_MIN_R     = 0.55    # acceptance threshold for pre-flight displacement
+
+
+@dataclass(frozen=True)
+class PlayContext:
+    """The Set List slot, polled duration and track one sweep play started
+    under.
+
+    A play's end-of-play writes (the anti-corr streak, the lock-history
+    record, the final disk save and its `observed_cut_ms`) read the play's
+    context. While a play only ever ended while its own song was playing,
+    live `app_state` WAS that context. A play that keeps searching past its
+    planned windows (`xcorr_sweep.KeepSearching`) can instead end because
+    the song changed — `on_track_change` cancels it — and by then
+    `app_state` already describes the NEXT song: its Set List slot and its
+    polled duration. Such a play hands this snapshot to those writes so they
+    land on the song and Set List it measured."""
+    setlist_id: Optional[str]
+    polled_duration_ms: int
+    track: Optional[SpotifyTrackInfo]
+
+    @classmethod
+    def capture(cls) -> "PlayContext":
+        t = app_state.current_track
+        return cls(
+            setlist_id=app_state.active_setlist_id,
+            polled_duration_ms=int(t.duration_ms or 0) if t else 0,
+            track=t,
+        )
 
 
 def _median_offset(history: list[dict]) -> int | None:
@@ -458,14 +488,7 @@ class AutoOffsetService:
 
         planned: list[dict] = []
         params_hash = ""
-        beats_ms: list[int] = []
-        try:
-            from services import librosa_service
-            analysis = librosa_service.get_analysis(meta)
-            if analysis and analysis.beats:
-                beats_ms = [int(b.ms) for b in analysis.beats]
-        except Exception:
-            beats_ms = []
+        beats_ms = _planner_beats(meta)
 
         if beats_ms:
             try:
@@ -620,6 +643,7 @@ class AutoOffsetService:
         cut_ms = max(0, int(meta.duration_ms or 0) - int(polled_dur or 0))
         search_ms = _xcorr_search_ms(int(meta.duration_ms or 0))
         sl_id = app_state.active_setlist_id
+        _play_ctx = PlayContext.capture()
         offset_source = f"setlist:{sl_id}" if sl_id else "default"
         sl_name = ""
         if sl_id:
@@ -806,7 +830,7 @@ class AutoOffsetService:
         # dynamically scheduled (mismatch-spike) windows. Returns True when
         # lock-and-stop fired. Body moved verbatim from the loop (closure
         # over frames/stored_*/evaluator/_ladder/...).
-        async def _run_window(win_start: int, win_end: int) -> bool:
+        async def _run_window(win_start: int, win_end: int, continued: bool = False) -> bool:
             # ── Capture-gap rejection (Phase 6) ───────────────────────────
             # If the live capture stalled anywhere in this window's searched
             # span, np.interp would bridge the hole with fabricated samples
@@ -922,14 +946,18 @@ class AutoOffsetService:
                 engine_current_offset_ms=(engine_offset_ms if engine_offset_ms is not None else 0),
                 engine_play_best_quality=engine_play_best,
                 landscape=_win_landscape,
-                envelope_exempt=(_stage is not None and _stage.name == "global"),
+                envelope_exempt=_envelope_exempt(_stage, continued),
+                continued_window=continued,
             )
+            if continued:
+                _continued_outcomes.append(outcome)
 
             # Phase 4: ladder escalation — when the current stage keeps
             # finding nothing, widen; an anti-correlated baseline goes
             # straight to global (the loaded center is provably wrong).
             if _ladder is not None:
-                _new_stage = _ladder.note_window(outcome.new_result is not None)
+                _new_stage = (_ladder.note_window(outcome.new_result is not None)
+                              if _ladder_hears(outcome, continued) else None)
                 if _new_stage is None and outcome.baseline_anti_corr:
                     _new_stage = _ladder.escalate_to_global()
                 if _new_stage is not None:
@@ -1051,6 +1079,18 @@ class AutoOffsetService:
         monitor_mode = False
         _mon_next_ms = 0
         pending_dynamic: Optional[tuple[int, int]] = None
+        # Keep searching (xcorr_sweep.KeepSearching is the binding statement):
+        # armed only where the planned queue drains without a hard lock.
+        _keep_cfg = KeepSearchingConfig.from_settings(
+            settings, end_buffer_ms=_XCORR_END_BUFFER_MS)
+        keep: Optional[KeepSearching] = None
+        _keep_engaged = False
+        _keep_envelopes: Optional[ContinuedEnvelopes] = None
+        _continued_outcomes: list = []
+        # Why the continued search stopped. None = it never ran, or it was
+        # still running when the loop ended some other way (song change,
+        # capture end) — only a real give-up keeps this play from relaunching.
+        _keep_gave_up: Optional[str] = None
 
         capture.start()
         try:
@@ -1311,6 +1351,98 @@ class AutoOffsetService:
                         _mon_next_ms = frame.timestamp_ms + _mon_cfg.interval_ms
                     continue
 
+                # ── Keep searching (planned queue spent, no hard lock) ───────
+                # Only ever armed by the drain exit below. One spike-targeted
+                # window per interval, run through the ordinary per-window
+                # gates; a lock hands the play to the post-lock path exactly
+                # like a planned-window lock, and a give-up ends the loop.
+                if keep is not None:
+                    _why = keep.give_up_reason(frame.timestamp_ms)
+                    if _why is not None:
+                        _keep_gave_up = _why
+                        logger.info(
+                            "Auto-offset xcorr: keep-searching gave up (%s) at %dms after "
+                            "%d extra window(s) — best %+dms Q=%.2f for %s",
+                            _why, frame.timestamp_ms, keep.windows_run,
+                            evaluator.best_offset, evaluator.best_quality, uri,
+                        )
+                        break
+                    _kw = keep.take_ready(frame.timestamp_ms, _XCORR_MARGIN_MS)
+                    if _kw is not None:
+                        _votes_before = len(evaluator.confirmation_shifts)
+                        _continued_outcomes.clear()
+                        locked = await _run_window(_kw[0], _kw[1], continued=True)
+                        _kout = _continued_outcomes[-1] if _continued_outcomes else None
+                        keep.note_window(
+                            frame.timestamp_ms, _kw,
+                            evidence=len(evaluator.confirmation_shifts) > _votes_before,
+                            clipped=None if _kout is None else bool(_kout.envelope_clipped),
+                            engine_offset_ms=None if _kout is None else int(_kout.old_offset_ms))
+                        if locked:
+                            logger.info(
+                                "Auto-offset xcorr: keep-searching locked at %dms after "
+                                "%d extra window(s) for %s",
+                                frame.timestamp_ms, keep.windows_run, uri,
+                            )
+                            keep = None
+                            _locked_via_stop = True
+                            lock_state.note_outcome(
+                                uri, locked=True, offset_ms=int(evaluator.best_offset),
+                                quality=float(evaluator.best_quality))
+                            if _lock_song_ms is None:
+                                _lock_song_ms = int(frame.timestamp_ms)
+                            if not _monitor_active:
+                                break
+                            monitor_mode = True
+                            window_queue = []
+                            _mon_next_ms = frame.timestamp_ms + _mon_cfg.interval_ms
+                        continue
+                    if keep.wants_window(frame.timestamp_ms):
+                        try:
+                            from main import engine as _eng_keep
+                            _keep_off = int(_eng_keep._shape_offset_ms)
+                        except Exception:
+                            _keep_off = 0
+                        _kspike = await asyncio.to_thread(
+                            _mismatch_spike,
+                            stored_ts, stored_bands, frames,
+                            engine_offset_ms=_keep_off,
+                            t_now_ms=frame.timestamp_ms,
+                            lookback_ms=_mon_cfg.spike_lookback_ms,
+                            halfwin_ms=_mon_cfg.spike_halfwin_ms,
+                        )
+                        if keep.offer(frame.timestamp_ms,
+                                      (_kspike[0], _kspike[1]) if _kspike else None):
+                            _kws, _kwe, _kspike_ms, _kstrength = _kspike
+                            _kenv = _floored_envelope(
+                                await asyncio.to_thread(
+                                    _continued_window_envelope, _keep_envelopes,
+                                    int(_kws), int(_kwe),
+                                ),
+                                evaluator.cfg.save_confirm_tol_ms,
+                            )
+                            evaluator.envelope_lookup[(int(_kws), int(_kwe))] = _kenv
+                            logger.info(
+                                "Auto-offset xcorr: keep-searching window [%d–%d]ms at spike "
+                                "%dms (strength=%.2f, envelope [%+d, %+d]ms) for %s",
+                                _kws, _kwe, _kspike_ms, _kstrength, _kenv[0], _kenv[1], uri,
+                            )
+                            try:
+                                from services.websocket_manager import ws_manager
+                                asyncio.create_task(ws_manager.broadcast({
+                                    "type":      "xcorr_spike",
+                                    "uri":       uri,
+                                    "t_ms":      frame.timestamp_ms,
+                                    "spike_ms":  _kspike_ms,
+                                    "win_start": _kws,
+                                    "win_end":   _kwe,
+                                    "strength":  round(float(_kstrength), 3),
+                                    "source":    "keep_searching",
+                                }))
+                            except Exception:
+                                pass
+                    continue
+
                 if not window_queue:
                     if not _monitor_active:
                         break          # flags-off: byte-identical exit
@@ -1344,7 +1476,13 @@ class AutoOffsetService:
                     _mon_next_ms = frame.timestamp_ms + _mon_cfg.interval_ms
                     continue
 
-                if not window_queue:
+                # The planned queue is spent and this play never hard-locked:
+                # keep searching instead of stopping (the MAYDAY defect). A
+                # play that ever locked — incl. a drift-monitor recovery whose
+                # re-armed queue just drained — keeps its old exit below.
+                _keep_next = (not window_queue and not _locked_via_stop
+                              and _keep_cfg.enabled)
+                if not window_queue and not _keep_next:
                     if not _monitor_active:
                         break          # flags-off: byte-identical exit
                     monitor_mode = True
@@ -1366,7 +1504,35 @@ class AutoOffsetService:
                     pass
 
                 if not window_queue:
-                    break
+                    if not _keep_next:
+                        break
+                    keep = KeepSearching(
+                        _keep_cfg, verification=verification,
+                        started_ms=int(frame.timestamp_ms),
+                        duration_ms=int(meta.duration_ms or 0),
+                        evaluated=all_planned,
+                    )
+                    _keep_engaged = True
+                    _why = keep.give_up_reason(frame.timestamp_ms)
+                    if _why is not None:
+                        _keep_gave_up = _why
+                        logger.info(
+                            "Auto-offset xcorr: planned windows spent without a hard lock "
+                            "and no better lock is reachable (%s) — best %+dms Q=%.2f for %s",
+                            _why, evaluator.best_offset, evaluator.best_quality, uri,
+                        )
+                        break
+                    _keep_envelopes = await asyncio.to_thread(
+                        _continued_envelope_source, uri, meta, data, stored_ts,
+                    )
+                    logger.info(
+                        "Auto-offset xcorr: planned windows spent without a hard lock "
+                        "(best %+dms Q=%.2f) — keep searching the rest of the song "
+                        "(every %dms, give up after %dms without a usable measurement) for %s",
+                        evaluator.best_offset, evaluator.best_quality,
+                        _keep_cfg.interval_ms, _keep_cfg.give_up_ms, uri,
+                    )
+                    lock_state.note_continued_search(uri)
 
         except asyncio.CancelledError:
             pass
@@ -1378,7 +1544,11 @@ class AutoOffsetService:
         if evaluator.n_measurements == 0:
             logger.info("Auto-offset xcorr: no measurements obtained for %s", uri)
             lock_state.note_outcome(uri, locked=False, reason="no_measurements")
-            self._watching_uri = None
+            # A continued search that GAVE UP has already spent the rest of
+            # the song's chances; relaunching would only find "no reachable
+            # windows" and overwrite the failed badge with "Not checked".
+            if _keep_gave_up is None:
+                self._watching_uri = None
             self._task = None
             return
 
@@ -1401,6 +1571,7 @@ class AutoOffsetService:
         lock_state.note_outcome(
             uri, locked=_locked_via_stop,
             offset_ms=int(final.best_offset), quality=float(final.best_quality),
+            reason=_keep_gave_up,
         )
 
         # ── OLD-anti-correlated detector ───────────────────────────────────
@@ -1408,9 +1579,11 @@ class AutoOffsetService:
         # stored offset as anti-correlated, the stored baseline doesn't fit
         # this play. Bump anti_corr_count on the Set List slot so the UI can
         # surface drifting songs. Reset on any "well-correlated" play.
+        _end_ctx = _play_ctx if _keep_engaged else None
+        _end_setlist_id = _end_ctx.setlist_id if _end_ctx else app_state.active_setlist_id
         try:
-            if app_state.active_setlist_id and final.is_drifting is not None:
-                _bump_anti_corr_count(uri, app_state.active_setlist_id, final.is_drifting)
+            if _end_setlist_id and final.is_drifting is not None:
+                _bump_anti_corr_count(uri, _end_setlist_id, final.is_drifting)
         except Exception as exc:
             logger.debug("anti_corr_count update failed: %s", exc)
 
@@ -1440,7 +1613,7 @@ class AutoOffsetService:
             uri=uri,
             title=meta.title or "",
             artist=meta.artist or "",
-            setlist_id=app_state.active_setlist_id,
+            setlist_id=_end_setlist_id,
             play_type=play_type,
             locked=_locked_via_stop,
             time_to_lock_ms=_lock_song_ms,
@@ -1469,7 +1642,7 @@ class AutoOffsetService:
         # DIAGNOSTIC CSV ──────────────────────────────────────────────────
         if settings.xcorr_csv_logging and final.n_measurements > 0:
             _write_csv_row(
-                track=app_state.current_track, uri=uri,
+                track=_end_ctx.track if _end_ctx else app_state.current_track, uri=uri,
                 final_offset=final.best_offset, final_quality=final.best_quality,
                 n_windows=final.n_measurements, prev_offset=prev_offset_ms,
                 window_rows=_csv_window_rows,
@@ -1480,14 +1653,18 @@ class AutoOffsetService:
         if final.disk_save is not None:
             _fin_offset, _fin_q, _fin_source, _fin_bypass = final.disk_save
             _save_offset(uri, _fin_offset, _fin_q,
-                         source=_fin_source, bypass_drift_cap=_fin_bypass)
+                         source=_fin_source, bypass_drift_cap=_fin_bypass,
+                         play_context=_end_ctx)
 
         # Lock-and-stop: keep `_watching_uri` set so on_track_change's
         # "already watching this URI" guard suppresses a fresh xcorr task
         # spawn until the song actually changes. Without this, the task ends
         # → guard sees no watch → next poll starts a new xcorr → lock-and-stop
         # fires again on the next ~3 windows → endless loop.
-        if not _locked_via_stop:
+        # A keep-searching give-up holds the watch for the same reason: it
+        # already searched the rest of the song, so a relaunch could only
+        # report "no reachable windows" over the badge's honest "Lock failed".
+        if not _locked_via_stop and _keep_gave_up is None:
             self._watching_uri = None
         self._task = None
 
@@ -1617,6 +1794,104 @@ class AutoOffsetService:
 
 
 # ── Module-level helpers ───────────────────────────────────────────────────────
+
+
+def _planner_beats(meta) -> list[int]:
+    """Librosa beat onsets in ms, as the U-Score planner is handed them."""
+    try:
+        from services import librosa_service
+        analysis = librosa_service.get_analysis(meta)
+        if analysis and analysis.beats:
+            return [int(b.ms) for b in analysis.beats]
+    except Exception:
+        pass
+    return []
+
+
+@dataclass(frozen=True)
+class ContinuedEnvelopes:
+    """What a continued (spike-placed) window's safe-shift envelope is computed
+    from: the U-Score planner's own full-song bands, beats and shift range for
+    this song, built once per play when `KeepSearching` engages.
+
+    A planned window carries the envelope the planner stored for it; a
+    continued window is placed at runtime, so it is given the envelope the
+    planner assigns a window at that exact position
+    (`uscore_planner.window_envelope`) and the sweep's envelope clip reads it
+    from the same lookup. No bands means the planner's own no-data answer,
+    (0, 0)."""
+    bands_full_norm: list
+    beats_ms: list[int]
+    max_shift_bins: int
+
+
+def _continued_envelope_source(uri: str, meta, data, stored_ts: np.ndarray) -> ContinuedEnvelopes:
+    from services import uscore_planner
+    beats_ms = _planner_beats(meta)
+    bands_full_norm: list = []
+    try:
+        bands = {k: data[k] for k in ("rms_total", "rms_low", "rms_mid", "rms_high")
+                 if k in data.files}
+        bands_full_norm = uscore_planner.normalized_song_bands(
+            stored_ts, bands, int(meta.duration_ms or 0))
+    except Exception as exc:
+        logger.warning("Auto-offset xcorr: planner bands unavailable for %s: %s", uri, exc)
+    if not bands_full_norm:
+        logger.warning(
+            "Auto-offset xcorr: no planner bands for %s — continued windows get the "
+            "planner's no-data envelope (0, 0)", uri,
+        )
+    return ContinuedEnvelopes(
+        bands_full_norm=bands_full_norm,
+        beats_ms=beats_ms,
+        max_shift_bins=uscore_planner.global_max_shift_bins(beats_ms),
+    )
+
+
+def _envelope_exempt(stage, continued: bool) -> bool:
+    """Whether this window skips the envelope clip. The ladder's global stage
+    is exempt (its search reaches past the ±12 beats the planner vetted), but
+    never for a continued window: the ladder can reach global without the clip
+    ever firing (empty continued windows, a planned run that already escalated,
+    an anti-correlated baseline), and a continued window sits exactly where
+    the planner found the song too self-similar to place one. The cost is
+    stated: once the engine has snapped, a continued window cannot make a
+    correction the envelope rejects at its position; a cold start still can,
+    because the clip itself skips while the engine's play-best is 0."""
+    return stage is not None and stage.name == "global" and not continued
+
+
+def _ladder_hears(outcome, continued: bool) -> bool:
+    """Whether the search ladder counts this window as found-or-empty. A
+    continued window whose NEW the envelope clipped is neither: counting it
+    empty would escalate the ladder into the global stage, which is exempt
+    from the very clip that stopped it."""
+    return not (continued and outcome.envelope_clipped)
+
+
+def _floored_envelope(envelope: tuple[int, int], tol_ms: int) -> tuple[int, int]:
+    """A continued window's envelope: widened to at least ±`tol_ms` (the
+    sweep's own agreement tolerance) only when the planner's own eligibility
+    gate would have refused it — total width under
+    `uscore_planner._MIN_TOTAL_ENVELOPE_MS` — and otherwise exactly as the
+    planner measured it. KeepSearching's docstring carries the measurement
+    and why that scope restores a bound rather than weakening one."""
+    from services import uscore_planner
+    safe_neg_ms, safe_pos_ms = int(envelope[0]), int(envelope[1])
+    if safe_pos_ms - safe_neg_ms >= uscore_planner._MIN_TOTAL_ENVELOPE_MS:
+        return safe_neg_ms, safe_pos_ms
+    tol = abs(int(tol_ms))
+    return min(safe_neg_ms, -tol), max(safe_pos_ms, tol)
+
+
+def _continued_window_envelope(source: ContinuedEnvelopes, win_start: int,
+                               win_end: int) -> tuple[int, int]:
+    from services import uscore_planner
+    safe_neg_ms, safe_pos_ms, _beat_ms = uscore_planner.window_envelope(
+        source.bands_full_norm, source.beats_ms, source.max_shift_bins,
+        int(win_start), int(win_end) - int(win_start),
+    )
+    return safe_neg_ms, safe_pos_ms
 
 
 def _compute_params_hash(npz_mtime: float) -> str:
@@ -2057,7 +2332,8 @@ def _save_offset_from_anchor(uri: str, offset_ms: int, quality: float) -> None:
 
 def _save_offset(uri: str, offset_ms: int, quality: float = 0.0,
                  source: str = "sweep",
-                 bypass_drift_cap: bool = False) -> None:
+                 bypass_drift_cap: bool = False,
+                 play_context: Optional[PlayContext] = None) -> None:
     """Persist offset + quality score, mark as auto_verified, hot-reload trigger engine.
 
     When the active context is a tracked Set List, write into
@@ -2069,15 +2345,23 @@ def _save_offset(uri: str, offset_ms: int, quality: float = 0.0,
 
     `source` is recorded on the history entry: "sweep" for cluster-confirmed
     per-window xcorr saves, "anchor" for early-feature snap saves.
+
+    `play_context` names the Set List slot and polled duration to save
+    against instead of live `app_state` (see `PlayContext`); None reads live
+    state, as every caller did before it existed.
     """
     from datetime import datetime, timezone
     meta = load_audio_shape_meta(uri)
     if meta is None:
         return
 
-    polled = app_state.current_track.duration_ms if app_state.current_track else 0
+    if play_context is None:
+        polled = app_state.current_track.duration_ms if app_state.current_track else 0
+        sl_id = app_state.active_setlist_id
+    else:
+        polled = play_context.polled_duration_ms
+        sl_id = play_context.setlist_id
     cut_ms = max(0, int(meta.duration_ms or 0) - int(polled or 0))
-    sl_id = app_state.active_setlist_id
 
     now_iso = datetime.now(timezone.utc).isoformat()
     if sl_id:

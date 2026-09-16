@@ -23,6 +23,15 @@
  *   5  no offset   — nothing stored to be in sync with (unchanged behaviour)
  *   6  skipped     — no sweep ran this play, and why
  *   7  unknown     — we have not heard yet; say so rather than guess
+ *
+ * KEEP SEARCHING (2026-09-15, `services/xcorr_sweep.py` KeepSearching): when
+ * the planned windows run out without a hard lock the engine now keeps
+ * searching the rest of the song, so the phase simply stays `searching` —
+ * that half needed nothing here. What did: a record marked `continued` would
+ * otherwise print "Searching… 4/4", a finished fraction on a search that is
+ * not finished. A continued search drops the spent plan's fraction and says
+ * in its tooltip that it is working past the plan. It reads "Lock failed"
+ * only once the engine has genuinely given up, and says which way it did.
  */
 
 /** A monitor message is live evidence for this long after it lands. */
@@ -54,6 +63,10 @@ export interface LockStateRecord {
   quality?: number | null;
   reason?: string | null;
   play_type?: string | null;
+  /** Present only once the planned windows ran out without a hard lock and
+   * the engine kept searching the rest of the song. */
+  continued?: boolean;
+  continued_windows?: number;
 }
 
 export interface LockBadge {
@@ -99,9 +112,25 @@ function skipReason(reason: string | null | undefined): string {
   }
 }
 
-function failReason(reason: string | null | undefined): string {
-  if (reason === 'no_measurements') return ' — no window produced a usable measurement';
-  return '';
+function failReason(rec: LockStateRecord): string {
+  switch (rec.reason) {
+    case 'no_measurements':
+      return ' — no window produced a usable measurement';
+    case 'nothing_to_find':
+      return rec.continued
+        ? ' — it kept searching past its planned windows, but nothing usable turned up'
+        : ' — its planned windows ran out and nothing usable turned up';
+    case 'no_time_left':
+      return rec.continued
+        ? ' — it kept searching past its planned windows until the last stretch of the song, where no match window is placed'
+        : ' — its planned windows ran out inside the last stretch of the song, where no match window is placed, so there was nothing left to search';
+    case 'user_verified':
+      return ' — this song\'s offset is user-verified, so the matcher measures but never moves it';
+    case 'nothing_admissible':
+      return ' — it kept searching past its planned windows, but each new measurement pointed further from the offset in use than that part of the song can safely confirm, so nothing it found could be adopted';
+    default:
+      return '';
+  }
 }
 
 function offsetPhrase(rec: LockStateRecord): string {
@@ -126,6 +155,18 @@ export function lockBadge(input: LockBadgeInput): LockBadge {
   const phase = lock?.phase;
 
   // 2 — still trying.
+  if (lock && phase === 'searching' && lock.continued) {
+    // Past the plan: its fraction is spent, so printing it would say done.
+    const extra = lock.continued_windows ?? 0;
+    return {
+      label: 'Searching…',
+      color: SEARCHING_COLOR,
+      title:
+        `Audio sync lock — the planned windows ran out without a confident lock, so the matcher is still searching the rest of this song for a better one.${
+          extra > 0 ? ` ${extra} more window${extra === 1 ? '' : 's'} measured so far.` : ''
+        }${offsetPhrase(lock)}`,
+    };
+  }
   if (lock && phase === 'searching') {
     const done = lock.windows_done ?? 0;
     const total = lock.windows_total ?? 0;
@@ -147,7 +188,7 @@ export function lockBadge(input: LockBadgeInput): LockBadge {
       color: FAILED_COLOR,
       title:
         `Audio sync lock — the matcher finished searching this song without reaching a lock${failReason(
-          lock.reason,
+          lock,
         )}. Triggers are firing against whatever offset was already stored.${offsetPhrase(lock)}`,
     };
   }

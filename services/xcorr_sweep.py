@@ -226,6 +226,278 @@ class MismatchMonitor:
         self.state = "ok"
 
 
+KEEP_SEARCHING_NOTHING_TO_FIND = "nothing_to_find"
+KEEP_SEARCHING_NO_TIME_LEFT = "no_time_left"
+KEEP_SEARCHING_USER_VERIFIED = "user_verified"
+KEEP_SEARCHING_NOTHING_ADMISSIBLE = "nothing_admissible"
+
+
+@dataclass
+class KeepSearchingConfig:
+    """Knobs for `KeepSearching`. `end_buffer_ms` is the planners' own
+    no-window tail (`auto_offset_service._XCORR_END_BUFFER_MS`,
+    `uscore_planner._END_BUFFER_MS`) and `max_overlap_ms` the U-Score
+    planner's `_MAX_OVERLAP_MS` — handed in / mirrored rather than tuned
+    separately, so a continued window lives by the same rules a planned one
+    does. `tests/test_keep_searching.py` asserts both still agree."""
+    enabled: bool = True
+    interval_ms: int = 5000
+    give_up_ms: int = 45000
+    end_buffer_ms: int = 30000
+    max_overlap_ms: int = 1000
+
+    @classmethod
+    def from_settings(cls, settings, *, end_buffer_ms: int) -> "KeepSearchingConfig":
+        return cls(
+            enabled=bool(getattr(settings, "xcorr_keep_searching_enabled", True)),
+            interval_ms=int(getattr(settings, "xcorr_keep_searching_interval_ms", 5000)),
+            give_up_ms=int(getattr(settings, "xcorr_keep_searching_give_up_ms", 45000)),
+            end_buffer_ms=int(end_buffer_ms),
+        )
+
+
+class KeepSearching:
+    """Continued search after the planned windows ran out WITHOUT a hard lock.
+
+    WHY (2026-09-15, the Admiral: "if it has low confidence, it should keep
+    spike detection on to try to get better"): a song's planned windows can
+    all sit near its start (the U-Score planner mandates four before 40s and
+    fills the rest only from windows that pass its uniqueness gates), and the
+    sweep used to end the moment that queue drained. MAYDAY,
+    2026-09-08: four windows in the first ~30s, `final offset=+1325ms
+    Q=0.39`, a far jump distrusted for want of prior agreement, grade F —
+    then `no reachable windows (pos=32611ms, dur=247339ms)` and silence for
+    the remaining three and a half minutes.
+
+    WHEN IT RUNS: only from the one exit where a play drains its planned
+    queue and has NOT hard-locked (`_locked_via_stop` False). A play that
+    locked — early, or after a drift-monitor recovery — never reaches it, so
+    the lock path and the post-lock drift monitor are untouched.
+
+    WHAT IT DOES: every `interval_ms` of song it asks for ONE spike-targeted
+    window — `xcorr_core.mismatch_spike`, the same placement the drift
+    monitor's recovery windows use — and the caller runs it through the
+    sweep's ordinary per-window evaluation. Every gate (winner pick, envelope
+    clip, snap stickiness, save gates, lock-and-stop) applies unchanged, so
+    "adopting a better lock" is exactly the engine's own strictly-better-Q
+    snap, and a hard lock hands the play to the normal post-lock path. Nothing
+    here touches an offset or a threshold: it decides WHEN to measure and
+    WHEN TO STOP, never what a measurement means.
+
+    THE ENVELOPE CLIP HAS TO BE GIVEN TO A CONTINUED WINDOW, because the clip
+    reads its envelope out of the planner's stored windows by exact bounds and
+    a spike-placed window is never one of them — without it the clip would be
+    a silent no-op, and continued windows land exactly where the planner
+    found the song too self-similar to place one. So each accepted window is
+    handed the envelope the U-Score planner assigns a window at that exact
+    position (`uscore_planner.window_envelope`, the planner's own function,
+    over its own full-song bands and beats built once when this search
+    engages — `auto_offset_service.ContinuedEnvelopes`), registered in the
+    evaluator's lookup under the window's bounds before it is evaluated. The
+    clip itself is unchanged, including its cold-start skip.
+
+    THAT ENVELOPE IS FLOORED ONLY WHERE THE PLANNER'S OWN GATE FAILED
+    (`auto_offset_service._floored_envelope`). An envelope totalling under
+    `uscore_planner._MIN_TOTAL_ENVELOPE_MS` (100ms) — a width the planner
+    itself refuses as ineligible, and the one its FORCE-PICKED windows carry
+    past that gate — is widened to the sweep's own agreement tolerance
+    (`SweepConfig.save_confirm_tol_ms`, ±300ms). Every other envelope is used
+    VERBATIM, on both sides: a side the planner measured narrower than 300ms
+    is a twin it found 125-400ms away, and widening it would admit exactly
+    that twin. Planned windows keep their stored envelopes untouched. Measured
+    on his library (2026-09-16, read-only): 124 of 563 uscore-v8 songs carry a
+    ZERO-WIDTH (0, 0) envelope on every planned window, zero-width is the
+    most common width there is, and MAYDAY is one of them. Unfloored, such a
+    song admits only a measurement equal to the engine's offset to the
+    millisecond, and window measurements sit on a 25ms grid while progressive
+    and anchor snaps do not — so after the first snap every continued window
+    was clipped and the search could neither confirm nor correct. On those
+    windows alone the floor RESTORES a bound that never worked rather than
+    weakening one the planner measured, and 300ms stays under a one-beat twin
+    at 120bpm (500ms), so a beat twin is still refused.
+
+    THE CLIP HOLDS AT EVERY LADDER STAGE FOR A CONTINUED WINDOW
+    (`auto_offset_service._envelope_exempt`). The ladder's global stage skips
+    the clip for planned and drift-recovery windows, as it always did, but
+    never for a continued one: the ladder reaches global without any clip
+    firing — continued windows that find nothing count empty, the planned
+    run may already have escalated, an anti-correlated baseline goes straight
+    there — and with ~35 continued windows a song, an exempt global stage
+    would hand the twin every one of them. THE TRADE-OFF, accepted knowingly:
+    once the engine has snapped, a continued window can no longer make a
+    LARGE correction the envelope rejects at its position. It only ever
+    refuses an offset the planner deems unsafe THERE; a cold start still gets
+    its big correction (the clip skips while the engine's play-best is 0);
+    corrections and saves inside the envelope are untouched. It refuses
+    probably-wrong locks, not better ones.
+
+    A CLIPPED CONTINUED WINDOW LEAVES NO OTHER TRACE, because two consumers
+    downstream of the clip would otherwise carry the twin past it:
+      - the SEARCH LADDER does not hear it (`auto_offset_service.
+        _ladder_hears`). Counted as an empty window, as a clipped planned one
+        is, a run of them walks the ladder into the global stage, where
+        every later continued window searches ±30s and a drift-recovery
+        window after a lock is exempt from the clip;
+      - the EVIDENCE ACCUMULATOR does not ingest its landscape
+        (`SweepEvaluator.process_window(continued_window=True)`). The clip
+        only nulls the discrete NEW, so the curve would still pile twin mass
+        into the accumulator's own save and lock-and-stop, neither of which
+        reads the envelope.
+    Both are scoped to continued windows: a planned or drift-recovery window
+    is handled exactly as it always was. Beyond the clip and those two,
+    a continued window CHOOSES AND SAVES exactly like a planned one — its
+    votes, snaps, per-window saves, the final save and lock-and-stop all
+    count, by the owner's ruling ("it should save also").
+
+    ANCHORS STAY A SECOND ADOPTION PATH, by decision. The sweep's per-frame
+    anchor match (on whenever the Set List slot is not coarse-locked) keeps
+    running while this search does, exactly as it does during post-lock
+    monitoring: a candidate whose horizon passes after the planned windows
+    ran out can still match, save through `_save_offset_from_anchor` (the
+    engine's same strictly-better-Q gate, with the anchor's own quality
+    boost) and add its vote to the evaluator — and a continued window that
+    agrees with it can then hard-lock. This search neither adds nor gates
+    that path.
+
+    A play that engaged this search can end because its song changed, when
+    `app_state` already describes the next song, so its end-of-play writes
+    use the context the play started under (`auto_offset_service.
+    PlayContext`); a play that never engaged it keeps reading live state.
+
+    A window must not re-measure audio an earlier window of this play already
+    measured (more than `max_overlap_ms` of overlap, the U-Score planner's own
+    cap): the same seconds scored twice would cast the same vote twice and
+    could manufacture agreement out of one measurement.
+
+    It is admitted like a planned window: the caller dispatches it once the
+    live clock passes its end plus the sweep's margin — the planned queue's
+    own readiness rule, compared the same way, with no offset applied.
+
+    IT TERMINATES, and each ending is a named give-up reason:
+      nothing_to_find — `give_up_ms` of song passed since the search started
+                        (or since its last usable measurement) without a
+                        single continued window casting a confirmation vote.
+                        A genuinely unlockable song lands here.
+      no_time_left    — the song reached its last `end_buffer_ms`, where no
+                        planned window is ever placed either.
+      user_verified   — the stored offset is pinned by the user, so the sweep
+                        can never move the engine: no better lock is
+                        reachable, and searching would only burn work.
+      nothing_admissible — consecutive continued windows, all CLIPPED
+                        against the SAME engine offset, have spanned
+                        `give_up_ms` of song — the same budget
+                        `nothing_to_find` spends. A clipped window is not
+                        nothing to find: it found something the envelope will
+                        not let it adopt, and the OLD measurement at the
+                        engine's offset still casts votes, so without this
+                        rule `nothing_to_find` never arrives and such a play
+                        measures a window every interval to `no_time_left`.
+                        It is not faster than that budget because a clip is a
+                        property of the STRETCH — continued windows sit where
+                        the planner already judged the song too self-similar,
+                        and a clearer section later can still measure the
+                        truth inside the envelope and lock — and because a
+                        clipped window has not learned nothing: its OLD vote
+                        still feeds the sweep's agreement, `lock_and_stop`
+                        and the final cluster save. An unclipped window, or
+                        the engine's offset moving, starts the run again; a
+                        window discarded unmeasured leaves it alone.
+    A song that keeps producing usable measurements without ever locking
+    keeps trying until `no_time_left` — that is the ask, "keep trying across
+    the rest of the song", bounded by the song itself.
+    """
+
+    def __init__(self, cfg: KeepSearchingConfig, *, verification: str,
+                 started_ms: int, duration_ms: int,
+                 evaluated: list[tuple[int, int]]) -> None:
+        self.cfg = cfg
+        self.verification = verification
+        self.started_ms = int(started_ms)
+        self.duration_ms = int(duration_ms or 0)
+        self.evaluated: list[tuple[int, int]] = [(int(s), int(e)) for s, e in evaluated]
+        self.last_evidence_ms = self.started_ms
+        self.next_attempt_ms = self.started_ms + int(cfg.interval_ms)
+        self.pending: Optional[tuple[int, int]] = None
+        self.attempts = 0
+        self.windows_run = 0
+        self.clip_streak_started_ms: Optional[int] = None
+        self.clip_streak_last_ms: Optional[int] = None
+        self.clip_engine_offset_ms: Optional[int] = None
+
+    def give_up_reason(self, t_now_ms: int) -> Optional[str]:
+        if self.verification == "user_verified":
+            return KEEP_SEARCHING_USER_VERIFIED
+        if t_now_ms >= self.duration_ms - self.cfg.end_buffer_ms:
+            return KEEP_SEARCHING_NO_TIME_LEFT
+        if self.clips_exhausted():
+            return KEEP_SEARCHING_NOTHING_ADMISSIBLE
+        if t_now_ms - self.last_evidence_ms >= self.cfg.give_up_ms:
+            return KEEP_SEARCHING_NOTHING_TO_FIND
+        return None
+
+    def clips_exhausted(self) -> bool:
+        """The current run of clipped windows against one engine offset has
+        spanned the give-up budget of song."""
+        if self.clip_streak_started_ms is None or self.clip_streak_last_ms is None:
+            return False
+        return self.clip_streak_last_ms - self.clip_streak_started_ms >= int(self.cfg.give_up_ms)
+
+    def wants_window(self, t_now_ms: int) -> bool:
+        """True when it is time to place the next window."""
+        return self.pending is None and t_now_ms >= self.next_attempt_ms
+
+    def admits(self, win_start: int, win_end: int) -> bool:
+        if win_end <= win_start:
+            return False
+        for s, e in self.evaluated:
+            if min(win_end, e) - max(win_start, s) > self.cfg.max_overlap_ms:
+                return False
+        return True
+
+    def offer(self, t_now_ms: int, window: Optional[tuple[int, int]]) -> bool:
+        """One placement attempt. `window` is the spike-targeted candidate,
+        or None when the recent span had nothing to aim at. Returns True when
+        it was accepted and is now pending."""
+        self.attempts += 1
+        self.next_attempt_ms = int(t_now_ms) + int(self.cfg.interval_ms)
+        if window is None or not self.admits(int(window[0]), int(window[1])):
+            return False
+        self.pending = (int(window[0]), int(window[1]))
+        return True
+
+    def take_ready(self, t_now_ms: int, margin_ms: int) -> Optional[tuple[int, int]]:
+        """The pending window once the live clock has passed its end plus the
+        margin — the planned queue's readiness rule — else None."""
+        if self.pending is None or t_now_ms < self.pending[1] + margin_ms:
+            return None
+        ready, self.pending = self.pending, None
+        return ready
+
+    def note_window(self, t_now_ms: int, window: tuple[int, int], *,
+                    evidence: bool, clipped: Optional[bool] = None,
+                    engine_offset_ms: Optional[int] = None) -> None:
+        """A continued window was evaluated. `evidence` = it cast at least one
+        confirmation vote (a measurement cleared the global r threshold).
+        `clipped` = the envelope clip refused its NEW measurement, against
+        `engine_offset_ms`; None = it was discarded without a measurement."""
+        self.evaluated.append((int(window[0]), int(window[1])))
+        self.windows_run += 1
+        if evidence:
+            self.last_evidence_ms = int(t_now_ms)
+        if clipped is None:
+            return
+        if not clipped:
+            self.clip_streak_started_ms = None
+            self.clip_streak_last_ms = None
+            self.clip_engine_offset_ms = None
+            return
+        offset = None if engine_offset_ms is None else int(engine_offset_ms)
+        if self.clip_streak_started_ms is None or offset != self.clip_engine_offset_ms:
+            self.clip_streak_started_ms = int(t_now_ms)
+            self.clip_engine_offset_ms = offset
+        self.clip_streak_last_ms = int(t_now_ms)
+
+
 @dataclass
 class WindowOutcome:
     """Everything the caller needs to perform this window's side effects."""
@@ -361,12 +633,15 @@ class SweepEvaluator:
         envelope_exempt: bool = False,   # global-stage search (Phase 4): the
                                          # U-Score envelopes were vetted only
                                          # over ±12 beats — skip the clip
+        continued_window: bool = False,  # placed by KeepSearching, not planned
     ) -> WindowOutcome:
         """Evaluate one completed window. `stored_offset_ms` is the OLD test
         point (the engine's runtime offset, or the disk median fallback);
         `stored_quality` is the slot's stored quality used for the
         displacement threshold. `landscape` feeds the evidence accumulator
-        when one is attached."""
+        when one is attached — except a `continued_window` whose NEW the
+        envelope clipped: that window sits where the planner found the song
+        too self-similar to place one, so its landscape is not evidence."""
         cfg = self.cfg
 
         if old_r is not None:
@@ -461,7 +736,8 @@ class SweepEvaluator:
         # (offset domain = −shift), weighted by window difficulty. The
         # envelope clip above only nulls the discrete NEW result — the curve
         # itself is still evidence.
-        if self.accumulator is not None and landscape is not None:
+        if (self.accumulator is not None and landscape is not None
+                and not (continued_window and envelope_clipped)):
             self.accumulator.add_curve(
                 -np.asarray(landscape.shifts_ms, dtype=float),
                 landscape.r, float(difficulty),

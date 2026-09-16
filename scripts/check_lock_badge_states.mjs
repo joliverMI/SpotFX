@@ -30,11 +30,22 @@
  *           engine keeps looking (phase still `searching`, numbers attached)
  *           stays "Searching…". The badge is keyed off "is it still looking",
  *           never off a first sweep's window exhaustion.
+ *   NINE  — KEEP SEARCHING (2026-09-15): the engine now keeps searching past
+ *           its plan. A `continued` record reads "Searching…" with no spent
+ *           fraction (the PRE-CHANGE badge, transpiled from the pinned git
+ *           ref, is driven over the same record and printed "Searching… 4/4"),
+ *           never "Lock failed" or "Lock idle"; and each give-up reason reads
+ *           "Lock failed" in words — claiming it "kept searching" only when
+ *           the record says it did (`continued`), never for a give-up the
+ *           moment the plan ran out. `nothing_admissible` (every recent
+ *           window found something the envelope would not let it adopt)
+ *           never reads as "nothing usable turned up". The records are
+ *           hand-built to mirror the shape services/lock_state.py publishes.
  *
  * Run: node scripts/check_lock_badge_states.mjs
  */
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -103,9 +114,13 @@ console.log('\nTWO — THE INVARIANT: exactly one input may say "Lock idle"');
     for (const storedOffsetMs of offsets) {
       for (const monitor of monitors) {
         for (const present of [true, false]) {
-          const lock = present && phase ? rec(phase) : null;
-          const label = lockBadge({ monitor, nowMs: NOW, lock, storedOffsetMs }).label;
-          if (label === 'Lock idle') idle.push({ phase, storedOffsetMs, present });
+          for (const continued of [undefined, true]) {
+            const lock = present && phase
+              ? rec(phase, continued ? { continued, continued_windows: 3 } : {})
+              : null;
+            const label = lockBadge({ monitor, nowMs: NOW, lock, storedOffsetMs }).label;
+            if (label === 'Lock idle') idle.push({ phase, storedOffsetMs, present });
+          }
         }
       }
     }
@@ -208,6 +223,78 @@ console.log('\nEIGHT — the phase vocabulary matches services/lock_state.py');
        `the reason "${reason}" is emitted by the backend`);
     ok(ts.includes(`'${reason}'`), `and rendered in words by the badge`);
   }
+}
+
+console.log('\nNINE — keep searching: "Searching…" while it works past the plan, failed only on give-up');
+{
+  // The pinned pre-change badge (PR #266), transpiled the same way.
+  const BASELINE_REF = '4795fd3a69391e0577bdfc8a2bc8e597e4fd1910';
+  const oldTs = path.join(tmp, 'lockBadge.baseline.ts');
+  const oldJs = path.join(tmp, 'lockBadge.baseline.mjs');
+  writeFileSync(oldTs, execFileSync('git', ['show', `${BASELINE_REF}:web/src/components/lockBadge.ts`],
+    { cwd: REPO, encoding: 'utf8' }));
+  execFileSync('npx', ['esbuild', oldTs, '--format=esm', '--log-level=warning', `--outfile=${oldJs}`], {
+    cwd: path.join(REPO, 'web'), stdio: ['ignore', 'ignore', 'inherit'],
+  });
+  const { lockBadge: preChangeBadge } = await import(oldJs);
+
+  // MAYDAY past its plan: 4 planned windows spent, 3 more measured, the best
+  // it has is still the distrusted +1325 at Q=0.39.
+  const pastPlan = rec('searching', {
+    windows_total: 4, windows_done: 7, offset_ms: 1325, quality: 0.39,
+    continued: true, continued_windows: 3,
+  });
+  const input = { monitor: null, nowMs: NOW, lock: pastPlan, storedOffsetMs: 1325 };
+  eq(preChangeBadge(input).label, 'Searching… 4/4',
+     'PRE-CHANGE: a search past its plan printed a finished fraction');
+  eq(badge(pastPlan).label, 'Searching…', 'NOW: it reads plain "Searching…"');
+  ok(badge(pastPlan).color === badge(rec('searching')).color, 'in the searching colour');
+  ok(badge(pastPlan).title.includes('still searching the rest of this song'),
+     'the tooltip says it is working past the plan');
+  ok(badge(pastPlan).title.includes('3 more windows measured'), 'and how far it has got');
+  ok(badge(pastPlan).title.includes('+1325ms'), 'and the best it has so far');
+  eq(badge({ ...pastPlan, continued_windows: 1 }).title.includes('1 more window measured'), true,
+     'one window is singular');
+  eq(badge({ ...pastPlan, continued_windows: 0 }).label, 'Searching…',
+     'the instant it goes past the plan, before a new window lands');
+  ok(!badge(pastPlan).title.includes('planned windows measured.'),
+     'it never claims "N of M planned windows" for a spent plan');
+  eq(badge(rec('searching', { windows_done: 2 })).label, 'Searching… 2/4',
+     'a search still inside its plan keeps its fraction');
+
+  for (const [reason, words] of [
+    ['nothing_to_find', 'nothing usable turned up'],
+    ['no_time_left', 'last stretch of the song'],
+    ['user_verified', 'user-verified'],
+    ['nothing_admissible', 'nothing it found could be adopted'],
+  ]) {
+    const gaveUp = rec('unlocked', { continued: true, continued_windows: 9, reason });
+    eq(badge(gaveUp).label, 'Lock failed', `a give-up (${reason}) reads "Lock failed"`);
+    ok(badge(gaveUp).title.includes(words), `and says why: "${words}"`);
+  }
+  ok(!badge(rec('unlocked', { continued: true, continued_windows: 3, reason: 'nothing_admissible' }))
+       .title.includes('nothing usable turned up'),
+     'a search that found only what it could not adopt never says nothing usable turned up');
+  ok(badge(rec('unlocked', { continued: true, continued_windows: 9, reason: 'no_time_left' }))
+       .title.includes('kept searching past its planned windows'),
+     'a continued search that ran into the last stretch says it kept searching');
+
+  // A give-up the moment the plan ran out — the last planned window landed
+  // inside the song's last stretch — never searched past the plan, so the
+  // record carries no `continued`, and the words must not claim it did.
+  for (const [reason, words] of [
+    ['no_time_left', 'last stretch of the song'],
+    ['nothing_to_find', 'nothing usable turned up'],
+    ['user_verified', 'user-verified'],
+  ]) {
+    const immediate = rec('unlocked', { reason, offset_ms: 1325, quality: 0.39 });
+    eq(badge(immediate).label, 'Lock failed', `an immediate give-up (${reason}) reads "Lock failed"`);
+    ok(badge(immediate).title.includes(words), `and says why: "${words}"`);
+    ok(!badge(immediate).title.includes('kept searching'),
+       `and never claims it kept searching past its planned windows (${reason})`);
+  }
+  ok(badge(rec('unlocked', { reason: 'no_time_left' })).title.includes('planned windows ran out'),
+     'an immediate no_time_left says its planned windows ran out');
 }
 
 rmSync(tmp, { recursive: true, force: true });
