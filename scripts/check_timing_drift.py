@@ -16,6 +16,12 @@ failing at the ~3 s search cliff. Against the stored history of that period,
 the newest sessions read seconds of drift and alarm; healthy periods read
 under ~1 s and stay quiet. --selftest proves both directions synthetically
 (no stored file needed) and exits non-zero on failure.
+
+Rebuilt 2026-09 (data/spectra-timing-drift-cause/report.md): the table now
+leads with LEVEL — each play's winning offset vs that song's own FIXED,
+quality-gated anchor — plus a per-session ramp/step/stable `shape`, instead
+of only the legacy sliding-baseline residual, which reads recent CHANGE
+rather than level and turned a real ramp-then-step into "scatter" twice.
 """
 from __future__ import annotations
 
@@ -37,22 +43,24 @@ def report(path: Path, sessions: int) -> int:
     lock_history._entries = None          # drop any cached copy; re-read the file
     d = lock_history.pipeline_drift(max_sessions=sessions)
     print(f"pipeline drift over {path} — alarm at ±{d['alarm_threshold_ms']}ms, "
-          f"sessions need ≥{d['min_baselined']} baselined repeat plays to drive it\n")
-    print(f"{'session start (UTC)':>20s} {'plays':>5s} {'baselined':>9s} {'median drift':>12s}")
+          f"sessions need ≥{d['min_baselined']} gated plays to drive it\n")
+    print(f"{'session start (UTC)':>20s} {'plays':>5s} {'lvl n':>5s} {'LEVEL':>9s} "
+          f"{'shape':>12s}  |  {'old n':>5s} {'old resid':>10s}")
     for s in reversed(d["sessions"]):     # oldest → newest, reads as a story
-        med = s["median_residual_ms"]
-        mark = ""
-        if med is not None and s["baselined"] >= d["min_baselined"] \
-                and abs(med) >= d["alarm_threshold_ms"]:
-            mark = "  << past the alarm line"
-        print(f"{s['start_at'][:16]:>20s} {s['plays']:>5d} {s['baselined']:>9d} "
-              f"{'—' if med is None else f'{med:+d}ms':>12s}{mark}")
+        lvl, old = s["level_ms"], s["median_residual_ms"]
+        mark = "  << past the alarm line" if (
+            lvl is not None and s["level_baselined"] >= d["min_baselined"]
+            and abs(lvl) >= d["alarm_threshold_ms"]) else ""
+        print(f"{s['start_at'][:16]:>20s} {s['plays']:>5d} {s['level_baselined']:>5d} "
+              f"{'—' if lvl is None else f'{lvl:+d}ms':>9s} {s['shape']:>12s}  |  "
+              f"{s['baselined']:>5d} {'—' if old is None else f'{old:+d}ms':>10s}{mark}")
     cur = d["current"]
     if cur is None:
-        print("\ncurrent: no session with enough baselined repeat plays — nothing to judge")
+        print("\ncurrent: no session with enough gated plays — nothing to judge")
     else:
-        print(f"\ncurrent: {cur['median_residual_ms']:+d}ms over {cur['baselined']} repeat plays "
-              f"(session {cur['start_at'][:16]}) → {'ALARM' if d['alarm'] else 'steady'}")
+        print(f"\ncurrent: {cur['level_ms']:+d}ms level ({cur['shape']}) over "
+              f"{cur['level_baselined']} gated plays (session {cur['start_at'][:16]}) "
+              f"→ {'ALARM' if d['alarm'] else 'steady'}")
     return 0
 
 
@@ -66,7 +74,8 @@ def selftest() -> int:
             for k, uri in enumerate(songs):
                 at = t0 + timedelta(days=day, minutes=4 * k)
                 out.append({"at": at.isoformat(), "uri": uri,
-                            "offset_ms": offset_for(day, k)})
+                            "offset_ms": offset_for(day, k),
+                            "locked": True, "quality": 0.9})
         out.reverse()                     # store order: newest first
         return out
 
@@ -74,16 +83,16 @@ def selftest() -> int:
 
     lock_history._entries = world(lambda day, k: 1000 * k)
     d = lock_history.pipeline_drift()
-    ok = not d["alarm"] and abs(d["current"]["median_residual_ms"]) < 200
+    ok = not d["alarm"] and abs(d["current"]["level_ms"]) < 200
     print(f"steady world stays quiet: {'ok' if ok else 'FAIL'} "
-          f"(median {d['current']['median_residual_ms']:+d}ms, alarm={d['alarm']})")
+          f"(level {d['current']['level_ms']:+d}ms, alarm={d['alarm']})")
     failures += 0 if ok else 1
 
     lock_history._entries = world(lambda day, k: 1000 * k - 400 * day)
     d = lock_history.pipeline_drift()
-    ok = d["alarm"] and d["current"]["median_residual_ms"] <= -d["alarm_threshold_ms"]
+    ok = d["alarm"] and d["current"]["level_ms"] <= -d["alarm_threshold_ms"]
     print(f"−400ms/day ratchet alarms:  {'ok' if ok else 'FAIL'} "
-          f"(median {d['current']['median_residual_ms']:+d}ms, alarm={d['alarm']})")
+          f"(level {d['current']['level_ms']:+d}ms, alarm={d['alarm']})")
     failures += 0 if ok else 1
 
     lock_history._entries = None

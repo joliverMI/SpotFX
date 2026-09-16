@@ -20,13 +20,15 @@ T0 = datetime(2026, 9, 1, 20, 0, 0, tzinfo=timezone.utc)
 SONGS = [f"spotify:track:song{i}" for i in range(6)]
 
 
-def _entry(at: datetime, uri: str, offset_ms: int, prev: int | None = 0) -> dict:
+def _entry(at: datetime, uri: str, offset_ms: int, prev: int | None = 0,
+           locked: bool = True, quality: float = 0.8) -> dict:
     return {
         "at": at.isoformat(),
         "uri": uri,
         "offset_ms": int(offset_ms),
         "prev_offset_ms": prev,
-        "quality": 0.8,
+        "quality": quality,
+        "locked": locked,
         "grade": "B",
     }
 
@@ -129,3 +131,77 @@ def test_session_split_on_two_hour_gap():
     d = lock_history.pipeline_drift()
     assert len(d["sessions"]) == 2
     assert d["sessions"][0]["plays"] == 3          # newest first
+
+
+def test_garbage_plays_never_enter_the_baseline_or_level_pool():
+    # An unlocked or near-zero-Q play is not evidence of a song's normal
+    # state — report §5.1's "+27575ms @ Q .41" class. A run of such plays,
+    # scattered through an otherwise healthy world, must move neither the
+    # legacy residual nor the new level, though they still count as plays.
+    world = _daily_world(10, lambda day, k: 1000 * k)
+    for i in range(15):
+        world.append(_entry(T0 + timedelta(days=6, hours=i), SONGS[0],
+                             27000, locked=False, quality=0.2))
+        world.append(_entry(T0 + timedelta(days=6, hours=i, minutes=1), SONGS[1],
+                             -19000, locked=True, quality=0.1))
+    _install(world)
+    d = lock_history.pipeline_drift(max_sessions=20)
+    cur = d["current"]
+    assert cur is not None
+    assert abs(cur["median_residual_ms"]) < 200
+    assert abs(cur["level_ms"]) < 200
+    assert d["alarm"] is False
+    # the garbage plays are visible in the raw play count, not the pools
+    garbage_session = next(s for s in d["sessions"]
+                            if s["start_at"][:10] == (T0 + timedelta(days=6)).date().isoformat())
+    assert garbage_session["plays"] > 6
+    assert garbage_session["baselined"] <= 6
+    assert garbage_session["level_baselined"] <= 6
+
+
+def _step_world() -> list[dict]:
+    """The report's own shape (§2/§4): a flat anchor era, a steady ramp,
+    one discrete step, then a stable era holding the new level — never a
+    scattered, sign-flipping sequence."""
+    world: list[dict] = []
+    for day in range(4):                                    # anchor era
+        for k, uri in enumerate(SONGS):
+            world.append(_entry(T0 + timedelta(days=day, minutes=4 * k),
+                                 uri, 1000 * k))
+    for i, day in enumerate(range(5, 10)):                   # ramp era
+        for k, uri in enumerate(SONGS):
+            world.append(_entry(T0 + timedelta(days=day, minutes=4 * k),
+                                 uri, 1000 * k - 400 * (i + 1)))
+    step_level = -400 * 5 + 5000                              # THE STEP
+    for k, uri in enumerate(SONGS):
+        world.append(_entry(T0 + timedelta(days=11, minutes=4 * k),
+                             uri, 1000 * k + step_level))
+    for day in range(12, 14):                                 # stable era
+        for k, uri in enumerate(SONGS):
+            world.append(_entry(T0 + timedelta(days=day, minutes=4 * k),
+                                 uri, 1000 * k + step_level))
+    return world
+
+
+def test_level_reads_ramp_then_step_then_stable_not_scatter():
+    # The regression this instrument was rebuilt for
+    # (data/spectra-timing-drift-cause/report.md): fed the same shaped
+    # history, the OLD lagged-baseline number turns a clean ramp-then-step
+    # into what reads as scatter with a sign flip. The LEVEL must not.
+    _install(_step_world())
+    d = lock_history.pipeline_drift(max_sessions=20)
+    ordered = list(reversed(d["sessions"]))       # oldest → newest
+    shapes = [s["shape"] for s in ordered if s["shape"] != "insufficient"]
+    assert shapes == ["start", "ramp", "ramp", "ramp", "step", "stable", "stable"]
+
+    step_session = next(s for s in ordered if s["shape"] == "step")
+    stable_sessions = [s for s in ordered if s["shape"] == "stable"]
+    assert step_session["level_ms"] > 2500                   # the real jump
+    assert all(abs(s["level_ms"] - stable_sessions[0]["level_ms"]) < 200
+               for s in stable_sessions)                     # settled, not drifting
+
+    # `current` (and the alarm) read the level, not the lagged residual —
+    # the newest session is stable, so it must not misreport as still moving.
+    assert d["current"] is not None
+    assert d["current"]["shape"] == "stable"
+    assert d["alarm"] is True   # the settled level itself is past the threshold

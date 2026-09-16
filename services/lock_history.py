@@ -46,22 +46,80 @@ _SLOW_LOCK_MS = 30_000   # hard lock landing after this long costs one grade not
 # A pipeline-level latency change (a snapclient/monitor-chain fault, an audio
 # routing shuffle) moves EVERY song's winning offset in the same direction.
 # Per-song saves quietly re-learn it one play at a time, so the only place it
-# is visible is the common component across a listening session: each play's
-# winning offset minus that same song's own OLDER baseline, median'd per
-# session. Calibrated against the real Aug 25 → Sep 2 2026 ratchet
-# (~350 ms/day, reaching −3.2 s): with a 36 h minimum baseline age the median
-# crossed 1.5 s on Aug 28 — four days before locks started failing — while
-# every healthy session before the ratchet stayed well under 1 s. A younger
-# baseline chases the drift and mutes the signal; a much older one starves
-# sessions of baselined plays.
+# is visible is the common component across a listening session.
+#
+# TWO readings are computed from the same gated pool, and they answer
+# different questions — data/spectra-timing-drift-cause/report.md §4/§9:
+#   - `level_ms` (LEVEL — the primary reading): each play's winning offset
+#     minus that SAME SONG's own FIXED anchor (the median of its earliest
+#     gated plays, never re-chosen as time passes). A steady chain reads
+#     near zero; a step reads as a step; a ramp reads as a ramp. This is
+#     what drives `current`/`alarm`.
+#   - `median_residual_ms` (kept for continuity — NOT the headline any
+#     more): each play's offset minus a SLIDING 36h–21d-old window of that
+#     song's own gated plays. Because that window keeps re-centering on
+#     recent history, this number approximates the *recent change in
+#     level*, not the level itself — a steady ratchet reads as a small
+#     constant, and a one-time step reads as a sign flip that decays over
+#     days as the step ages into the sliding window. This is exactly what
+#     turned a real ramp-then-step into "scattered further and crossed
+#     sign" for two independent reports in 2026-09 (report §4, §6).
+#
+# Both pools are gated to LOCKED, quality-floor plays (`_is_baseline_grade`)
+# — an unlocked or near-zero-Q play is not evidence of "this song's normal
+# state," whichever mechanism is asking. Before this gate, real garbage sat
+# in the pool at any quality (report §5.1: `Como Antes` +27575ms @ Q .41).
 _DRIFT_SESSION_GAP_S = 2 * 3600   # a >2h silence starts a new listening session
 _DRIFT_BASELINE_MIN_AGE_H = 36    # baseline plays must be at least this old …
 _DRIFT_BASELINE_MAX_AGE_D = 21    # … and no older than this
-DRIFT_ALARM_MS = 1500             # |session median| past this alarms — the lock
+DRIFT_ALARM_MS = 1500             # |session level| past this alarms — the lock
                                   # search tips over near 3 s stale-offset error,
                                   # so this fires with real headroom left
-_DRIFT_MIN_BASELINED = 3          # sessions with fewer baselined plays are
-                                  # reported but never drive the alarm
+_DRIFT_MIN_BASELINED = 3          # sessions with fewer gated plays are
+                                  # reported but never drive the alarm (applies
+                                  # to both the level and the legacy residual)
+_DRIFT_ANCHOR_ERA_DAYS = 4        # a song's fixed LEVEL anchor is the median of
+                                  # its gated plays within this many days of the
+                                  # OLDEST retained history — one shared
+                                  # calendar window, not a per-song play count
+                                  # (report §2's own method: "reference =
+                                  # median offset over the oldest era the store
+                                  # still holds"). Never re-chosen as later
+                                  # plays arrive.
+_DRIFT_STEP_MS = 2500             # a session-to-session LEVEL jump at/above this
+                                  # is a discrete step (report's measured step
+                                  # was ~4.7–5.1 s; its ramp deltas topped out
+                                  # ~1.2 s) — never a session drifting on its own
+_DRIFT_STABLE_BAND_MS = 200       # consecutive LEVELs within this band of each
+                                  # other read as settled, not still moving
+                                  # (the report's own post-step "rock-stable"
+                                  # session held an IQR of ~150 ms)
+
+
+def _drift_quality_floor() -> float:
+    """The same bar `xcorr_sweep` requires before it will save an offset to
+    disk (services/xcorr_sweep.py, `settings.xcorr_save_min_quality`,
+    default 0.50) — a play too weak to trust for storage is too weak to
+    trust as this song's "normal" state either."""
+    try:
+        from config import settings
+        return float(getattr(settings, "xcorr_save_min_quality", 0.50))
+    except Exception:
+        return 0.50
+
+
+def _is_baseline_grade(e: dict, floor: float) -> bool:
+    """A play worth remembering as "this song's normal state": hard-locked
+    (not just a best-of-planned-windows guess) and at/above the quality
+    floor. Filters the unlocked/near-zero-Q garbage class out of both the
+    legacy sliding baseline and the new fixed anchor — report §5.1."""
+    if not e.get("locked"):
+        return False
+    try:
+        q = float(e.get("quality", 0.0))
+    except (TypeError, ValueError):
+        return False
+    return q >= floor
 
 _lock = threading.Lock()
 _entries: Optional[list[dict]] = None   # lazily loaded cache
@@ -225,27 +283,51 @@ def _parse_at(ts: str) -> Optional[datetime]:
 def pipeline_drift(max_sessions: int = 10) -> dict:
     """The pipeline-drift instrument behind the Timing page's drift line.
 
-    For each recorded play whose song has an OLDER baseline (plays of the
-    same uri between _DRIFT_BASELINE_MIN_AGE_H and _DRIFT_BASELINE_MAX_AGE_D
-    before it), the residual is `winning offset − median(baseline offsets)`.
-    Plays are grouped into listening sessions (a >2h silence starts a new
-    one) and each session reports the median residual over its baselined
-    plays. Per-song capture quirks cancel in that median; what survives is
-    the common component — exactly what a pipeline-level latency change
-    (audio-chain fault, routing shuffle) produces and what per-song saves
-    quietly absorb before anyone notices.
+    Every play is gated to `_is_baseline_grade` (locked, at/above the same
+    quality floor a disk save requires) before it can form or be measured
+    against either pool below — an unlocked/near-zero-Q play is not
+    evidence of a song's normal state, whichever pool is asking
+    (report §5.1: this is what let `Como Antes` +27575ms @ Q .41 poison a
+    session's numbers).
 
-    First-ever plays have no baseline and are excluded by construction, so
-    an album of new songs cannot move this number.
+    Two readings per session, from that one gated pool:
+
+    - LEVEL (`level_ms` / `level_baselined`, the primary reading): a song's
+      FIXED anchor is the median of its own gated plays that fall inside one
+      shared calendar era — the oldest _DRIFT_ANCHOR_ERA_DAYS of gated
+      history the store still holds — never re-chosen as later plays
+      arrive. A play only measures against the anchor once it is itself at
+      least _DRIFT_BASELINE_MIN_AGE_H past the era's end. Every such play's
+      residual is `offset − anchor`. Because the anchor never moves, a
+      steady chain reads near zero, a step reads as a step, and a ramp
+      reads as a ramp — this is what `current`/`alarm`/`shape` are built
+      from. `shape` per session is computed against the previous qualifying
+      session's level: "step" (|Δ| ≥ _DRIFT_STEP_MS), "stable" (|Δ| ≤
+      _DRIFT_STABLE_BAND_MS), "ramp" (between), "start" (first qualifying
+      session — nothing to compare yet), or "insufficient" (too few gated
+      plays this session to trust a level at all).
+    - median_residual_ms / baselined (kept for continuity, no longer the
+      headline): the legacy SLIDING 36h–21d-old-baseline residual. Because
+      that window keeps re-centering on recent history, it approximates the
+      *recent change* in level, not the level — a steady ratchet reads as a
+      small constant, and a one-time step reads as a sign flip that decays
+      over days as the step ages into the window. This is what turned a
+      real ramp-then-step into "scattered further and crossed sign" twice
+      in 2026-09 (report §4, §6) — see the module-level comment above.
+
+    A song with no gated play in the anchor era has no anchor and never
+    contributes to the level pool — so an album of new songs, or a song
+    first heard after the era, cannot move that number either.
 
     `current` is the most recent session with at least _DRIFT_MIN_BASELINED
-    baselined plays; `alarm` is true when its |median| ≥ DRIFT_ALARM_MS.
+    level-gated plays; `alarm` is true when its |level| ≥ DRIFT_ALARM_MS.
     Sessions come back newest first, capped at `max_sessions`.
     """
     with _lock:
         entries = list(_load())
 
-    plays: list[tuple[datetime, str, int]] = []
+    floor = _drift_quality_floor()
+    plays: list[tuple[datetime, str, int, bool]] = []
     for e in entries:
         at = _parse_at(e.get("at", ""))
         if at is None:
@@ -254,50 +336,103 @@ def pipeline_drift(max_sessions: int = 10) -> dict:
             off = int(e.get("offset_ms", 0))
         except (TypeError, ValueError):
             continue
-        plays.append((at, str(e.get("uri", "")), off))
+        plays.append((at, str(e.get("uri", "")), off, _is_baseline_grade(e, floor)))
     plays.sort(key=lambda p: p[0])
 
-    by_uri: dict[str, list[tuple[datetime, int]]] = {}
-    for at, uri, off in plays:
-        by_uri.setdefault(uri, []).append((at, off))
+    by_uri_gated: dict[str, list[tuple[datetime, int]]] = {}
+    for at, uri, off, gated in plays:
+        if gated:
+            by_uri_gated.setdefault(uri, []).append((at, off))
 
     min_age = timedelta(hours=_DRIFT_BASELINE_MIN_AGE_H)
     max_age = timedelta(days=_DRIFT_BASELINE_MAX_AGE_D)
 
+    # Fixed per-song anchor: one shared calendar era (the oldest
+    # _DRIFT_ANCHOR_ERA_DAYS of gated history the store still holds), never
+    # re-chosen as later plays arrive. A play only measures against it once
+    # it is itself at least min_age past the era's end, so the era is never
+    # immediately treated as a settled reference the moment it closes.
+    gated_ats = [at for (at, _, _, gated) in plays if gated]
+    anchor_era_end = (min(gated_ats) + timedelta(days=_DRIFT_ANCHOR_ERA_DAYS)
+                       if gated_ats else None)
+    anchor_val: dict[str, float] = {}
+    if anchor_era_end is not None:
+        for uri, samples in by_uri_gated.items():
+            era_samples = [o for (t, o) in samples if t <= anchor_era_end]
+            if era_samples:
+                anchor_val[uri] = statistics.median(era_samples)
+
     sessions: list[dict] = []
     cur: Optional[dict] = None
     last_at: Optional[datetime] = None
-    for at, uri, off in plays:
+    for at, uri, off, gated in plays:
         if (last_at is None
                 or (at - last_at).total_seconds() > _DRIFT_SESSION_GAP_S):
-            cur = {"start": at, "end": at, "plays": 0, "residuals": []}
+            cur = {"start": at, "end": at, "plays": 0, "residuals": [], "levels": []}
             sessions.append(cur)
         assert cur is not None
         cur["plays"] += 1
         cur["end"] = at
         last_at = at
-        baseline = [o for (t, o) in by_uri.get(uri, ())
+        if not gated:
+            continue
+        baseline = [o for (t, o) in by_uri_gated.get(uri, ())
                     if at - max_age <= t <= at - min_age]
         if baseline:
             cur["residuals"].append(off - statistics.median(baseline))
+        anchor = anchor_val.get(uri)
+        if (anchor is not None
+                and anchor_era_end is not None
+                and at - anchor_era_end >= min_age):
+            cur["levels"].append(off - anchor)
+
+    # Second pass, oldest → newest (sessions is already in that order): fold
+    # each session's residual/level lists into their reported numbers, and
+    # classify LEVEL shape against the previous qualifying session.
+    prev_level: Optional[float] = None
+    for s in sessions:
+        rs = s["residuals"]
+        lv = s["levels"]
+        s["baselined"] = len(rs)
+        s["median_residual_ms"] = int(round(statistics.median(rs))) if rs else None
+        s["level_baselined"] = len(lv)
+        level = statistics.median(lv) if lv else None
+        s["level_ms"] = int(round(level)) if level is not None else None
+        if level is not None and len(lv) >= _DRIFT_MIN_BASELINED:
+            if prev_level is None:
+                s["shape"] = "start"
+            else:
+                delta = level - prev_level
+                if abs(delta) >= _DRIFT_STEP_MS:
+                    s["shape"] = "step"
+                elif abs(delta) <= _DRIFT_STABLE_BAND_MS:
+                    s["shape"] = "stable"
+                else:
+                    s["shape"] = "ramp"
+            prev_level = level
+        else:
+            s["shape"] = "insufficient"
 
     out: list[dict] = []
     for s in reversed(sessions):                     # newest first
-        rs = s["residuals"]
         out.append({
             "start_at": s["start"].isoformat(),
             "end_at": s["end"].isoformat(),
             "plays": s["plays"],
-            "baselined": len(rs),
-            "median_residual_ms": int(round(statistics.median(rs))) if rs else None,
+            "baselined": s["baselined"],
+            "median_residual_ms": s["median_residual_ms"],
+            "level_baselined": s["level_baselined"],
+            "level_ms": s["level_ms"],
+            "shape": s["shape"],
         })
         if len(out) >= max_sessions:
             break
 
     current = next((s for s in out
-                    if s["baselined"] >= _DRIFT_MIN_BASELINED), None)
+                    if s["level_baselined"] >= _DRIFT_MIN_BASELINED), None)
     alarm = bool(current
-                 and abs(current["median_residual_ms"]) >= DRIFT_ALARM_MS)
+                 and current["level_ms"] is not None
+                 and abs(current["level_ms"]) >= DRIFT_ALARM_MS)
     return {
         "sessions": out,
         "current": current,
