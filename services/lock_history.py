@@ -148,6 +148,8 @@ def _is_baseline_grade(e: dict, floor: float) -> bool:
 
 _lock = threading.Lock()
 _entries: Optional[list[dict]] = None   # lazily loaded cache
+_anchor_seed_oldest: Optional[str] = None   # oldest `at` the log held when the
+                                            # anchors store was first written
 
 
 def _now_iso() -> str:
@@ -155,21 +157,25 @@ def _now_iso() -> str:
 
 
 def _load() -> list[dict]:
-    global _entries
+    global _entries, _anchor_seed_oldest
     if _entries is not None:
         return _entries
     try:
         raw = json.loads(_STORE_PATH.read_text(encoding="utf-8"))
         _entries = list(raw.get("entries") or [])
+        _anchor_seed_oldest = raw.get("anchor_seed_oldest_at")
     except (FileNotFoundError, ValueError, OSError):
         _entries = []
+        _anchor_seed_oldest = None
     return _entries
 
 
 def _persist() -> None:
     try:
         _STORE_PATH.write_text(
-            json.dumps({"entries": _entries, "updated_at": _now_iso()}, indent=2),
+            json.dumps({"entries": _entries,
+                        "anchor_seed_oldest_at": _anchor_seed_oldest,
+                        "updated_at": _now_iso()}, indent=2),
             encoding="utf-8",
         )
     except OSError as exc:
@@ -354,11 +360,31 @@ def _load_anchor_era() -> Optional[dict]:
     return {"start": start, "end": end, "samples": samples}
 
 
+def _oldest_at(entries: list[dict]) -> Optional[datetime]:
+    ats = [at for at in (_parse_at(e.get("at", "")) for e in entries) if at is not None]
+    return min(ats) if ats else None
+
+
+def _log_unevicted_since_anchor_seed(entries: list[dict]) -> bool:
+    """Whether deriving the anchor era from `entries` reproduces exactly what
+    the anchors store was (or was about to be) seeded from: true until the
+    anchors store has first been written, and after that only while the log
+    still holds the oldest play it held at that moment. A store that went
+    missing after the log evicted past that play — its save failed, or it
+    was removed — cannot be rebuilt from the log without moving anchors."""
+    if _anchor_seed_oldest is None:
+        return True
+    seed = _parse_at(_anchor_seed_oldest)
+    oldest = _oldest_at(entries)
+    return seed is not None and oldest is not None and oldest <= seed
+
+
 def _derive_anchor_era(plays: list[tuple[datetime, str, int, bool]]) -> Optional[dict]:
     """The anchor era as the log holds it right now: the oldest
     _DRIFT_ANCHOR_ERA_DAYS of gated plays. Only ever used where nothing has
-    been evicted since — to seed the store before the first eviction, or to
-    read a log that has never had a play recorded into it by this code."""
+    been evicted since (`_log_unevicted_since_anchor_seed`) — to seed the
+    store before the first eviction, or to read a log that has never had
+    an anchors store written for it."""
     gated = [(at, uri, off) for (at, uri, off, ok) in plays if ok]
     if not gated:
         return None
@@ -389,6 +415,7 @@ def _extend_anchor_era(entries: list[dict], entry: dict) -> None:
     the first time, then adds `entry` if it is a gated play inside the era.
     Once a play lands past the era's end nothing is ever added again, so
     every song's anchor is fixed from then on."""
+    global _anchor_seed_oldest
     try:
         floor = _drift_quality_floor()
         try:
@@ -399,6 +426,11 @@ def _extend_anchor_era(entries: list[dict], entry: dict) -> None:
             return
         changed = False
         if era is None:
+            if not _log_unevicted_since_anchor_seed(entries):
+                logger.warning("lock_history: anchors store %s is missing and the log has "
+                               "evicted plays since it was first written — not rebuilt; "
+                               "the drift level reports no anchors", _anchor_path())
+                return
             era = _derive_anchor_era(_gated_plays(entries, floor))
             changed = era is not None
         at = _parse_at(entry.get("at", ""))
@@ -411,6 +443,10 @@ def _extend_anchor_era(entries: list[dict], entry: dict) -> None:
                 era["samples"].setdefault(str(entry.get("uri", "")), []).append(
                     int(entry.get("offset_ms", 0)))
                 changed = True
+        if era is not None and _anchor_seed_oldest is None:
+            oldest = _oldest_at(entries + [entry])
+            if oldest is not None:
+                _anchor_seed_oldest = oldest.isoformat()
         if changed and era is not None:
             _save_anchor_era(era)
     except Exception as exc:
@@ -434,11 +470,12 @@ def pipeline_drift(max_sessions: int = 10) -> dict:
       shared calendar era — the first _DRIFT_ANCHOR_ERA_DAYS of gated
       history. record() writes the era and its plays into the anchors store
       as they arrive (seeding it from the log before its first eviction), so
-      the capped log dropping them never re-chooses either. A log no play
-      has been recorded into since has lost nothing yet, and derives the
-      same era in memory; an anchors store that exists but cannot be read
-      yields NO anchors — every level is None — never a re-derived, moving
-      one. A play only measures against the anchor once it is itself at
+      the capped log dropping them never re-chooses either. A log that has
+      lost nothing since the store was first written (or never had one
+      written) derives the same era in memory; an anchors store that exists
+      but cannot be read, or is missing after the log has evicted past what
+      seeded it (its save failed), yields NO anchors — every level is None —
+      never a re-derived, moving one. A play only measures against the anchor once it is itself at
       least _DRIFT_BASELINE_MIN_AGE_H past the era's end. Every such play's
       residual is `offset − anchor`. Because the anchor never moves, a
       steady chain reads near zero, a step reads as a step, and a ramp
@@ -478,7 +515,12 @@ def pipeline_drift(max_sessions: int = 10) -> dict:
         try:
             era = _load_anchor_era()
             if era is None:
-                era = _derive_anchor_era(plays)
+                if _log_unevicted_since_anchor_seed(entries):
+                    era = _derive_anchor_era(plays)
+                else:
+                    logger.warning("lock_history: anchors store %s is missing and the log "
+                                   "has evicted plays since it was first written — no song "
+                                   "has an anchor", _anchor_path())
         except AnchorStoreUnreadable as exc:
             logger.warning("lock_history: anchors store unreadable — no song has "
                            "an anchor until it is repaired: %s", exc)
