@@ -227,11 +227,12 @@ def test_apply_flare_kind_create_then_update_by_name():
 
 def test_sonic_sets_a_flare_kinds_trigger_offset_and_an_unrelated_edit_keeps_it():
     """His ask for the Fish swim burst: "make sure Sonic can adjust those
-    numbers easily" — the burst's length (hold_ms) AND how early it starts
-    (trigger_offset_ms, OFFSET family, negative = earlier). The second one
-    was not on Sonic's surface before. Omitting it on a later edit must
-    KEEP it, exactly like `enabled`: retuning anything else on the kind can
-    never silently move his authored timing back onto the mark."""
+    numbers easily" — the burst's length (hold_ms) AND where it starts
+    relative to the trigger (trigger_offset_ms, OFFSET family, negative =
+    earlier; the burst itself ships at 0, on the trigger). The offset was not
+    on Sonic's surface before. Omitting EITHER number on a later edit must
+    KEEP it, exactly like `enabled`: nudging one can never silently reset the
+    other (a lost hold falls back to the 250 ms default)."""
     from spectra.services import scene_console as sc
     from spectra.services import scene_store
     from spectra.models.scene import SceneV2
@@ -239,37 +240,53 @@ def test_sonic_sets_a_flare_kinds_trigger_offset_and_an_unrelated_edit_keeps_it(
     scene = SceneV2(name="Throwaway")
     scene_store.save(scene)
 
-    _run(sc._op_set_flare_kind(scene.id, name="Fish Swim Burst", type="momentary",
+    _run(sc._op_set_flare_kind(scene.id, name="Burst", type="momentary",
                                params={"swim_burst": 1.0}, hold_ms=300,
+                               trigger_offset_ms=0))
+    kind = scene_store.get_by_id(scene.id).flare_kinds[0]
+    assert (kind.hold_ms, kind.trigger_offset_ms) == (300, 0)
+
+    _run(sc._op_set_flare_kind(scene.id, name="Burst", type="momentary",
+                               params={"swim_burst": 1.0},
                                trigger_offset_ms=-100))
     kind = scene_store.get_by_id(scene.id).flare_kinds[0]
-    assert (kind.hold_ms, kind.trigger_offset_ms) == (300, -100)
+    assert (kind.hold_ms, kind.trigger_offset_ms) == (300, -100), (
+        "an edit that sets only trigger_offset_ms must keep the stored hold")
 
-    _run(sc._op_set_flare_kind(scene.id, name="Fish Swim Burst", type="momentary",
+    _run(sc._op_set_flare_kind(scene.id, name="Burst", type="momentary",
                                params={"swim_burst": 1.0}, hold_ms=250))
     kind = scene_store.get_by_id(scene.id).flare_kinds[0]
     assert (kind.hold_ms, kind.trigger_offset_ms) == (250, -100), (
         "an edit that omits trigger_offset_ms must keep the stored offset")
 
-    _run(sc._op_set_flare_kind(scene.id, name="Fish Swim Burst", type="momentary",
-                               params={"swim_burst": 1.0}, hold_ms=250,
+    _run(sc._op_set_flare_kind(scene.id, name="Burst", type="momentary",
+                               params={"swim_burst": 1.0},
                                trigger_offset_ms=-150))
-    assert scene_store.get_by_id(scene.id).flare_kinds[0].trigger_offset_ms == -150
+    kind = scene_store.get_by_id(scene.id).flare_kinds[0]
+    assert (kind.hold_ms, kind.trigger_offset_ms) == (250, -150)
 
-    bad = _run(sc._op_set_flare_kind(scene.id, name="Fish Swim Burst",
+    bad = _run(sc._op_set_flare_kind(scene.id, name="Burst",
                                      type="momentary", params={"swim_burst": 1.0},
                                      trigger_offset_ms=999_999))
     assert bad.get("status") != "applied", "out-of-range offset must be refused"
     assert scene_store.get_by_id(scene.id).flare_kinds[0].trigger_offset_ms == -150
 
+    # re-typing to permanent (which refuses any hold) with hold_ms omitted
+    # must not inherit the momentary hold and get refused for it
+    retyped = _run(sc._op_set_flare_kind(scene.id, name="Burst", type="permanent",
+                                         params={"swim_burst": 1.0}))
+    assert retyped.get("status") == "applied", retyped
+    kind = scene_store.get_by_id(scene.id).flare_kinds[0]
+    assert (kind.type, kind.hold_ms) == ("permanent", None)
+
     schema = sc.OPERATIONS["set_flare_kind"].input_schema["properties"]
     assert "trigger_offset_ms" in schema and "hold_ms" in schema
 
-    # a CREATE that omits it lands on the model's own default
+    # a CREATE that omits both lands on the model's own defaults
     _run(sc._op_set_flare_kind(scene.id, name="Other", type="momentary",
                                params={"swim_burst": 1.0}))
     other = [k for k in scene_store.get_by_id(scene.id).flare_kinds if k.name == "Other"]
-    assert other[0].trigger_offset_ms == 0
+    assert (other[0].hold_ms, other[0].trigger_offset_ms) == (None, 0)
 
 
 def test_create_scene_persists_and_logs():

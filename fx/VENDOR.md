@@ -1326,10 +1326,15 @@ against that commit.
     per-fish deadline (`p_dl`) its speed is derived from, retired only once
     the whole body is off the panel. The lull's first third becomes a swirl
     and a rank-ordered leak (the thirds themselves are unchanged). An
-    outgoing crossfade to any non-radial effect scatters every fish inside
-    `TRANSITION_EXIT_BY` of it, with the bodies compensated for an additive
-    blend. New config key `swim_burst` (bool, default False, registry
-    toggle) — a level a momentary flare holds. Ordinary swimming with
+    outgoing crossfade into an effect with no blobs of its own scatters
+    every fish inside `TRANSITION_EXIT_BY` of it, with the bodies
+    compensated for an additive blend (as far as the virtual's clip at 255
+    allows); an incoming effect in `TRANSITION_ADOPTERS` (blackhole, orbits,
+    fireworks, squiggles, eye, dancer, fish) takes the fish as its own
+    particles and the shoal is left as before, and radial keeps its
+    collapse. New config key `swim_burst` (bool, default False, registry
+    toggle) — a level a momentary flare holds; the Fish Swim Burst kind
+    fires it ON the trigger for 300 ms. Ordinary swimming with
     nothing dispersing and no burst is byte-identical to before
     (`tests/test_fish_camera.py`'s merge-base proof still passes). Two SoA
     arrays added (`p_dl`, `p_lk`, float64 on the effect clock). Proof:

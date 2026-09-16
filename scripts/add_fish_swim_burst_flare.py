@@ -5,22 +5,28 @@ fish-effect-disperse-off-screen-instead--wyxr): "add a flare at all levels
 that can run instead of other shape flares that makes the fish swim fast for
 a burst, and have a dramatic change in the frequency of their fin strokes.
 time it so that the burst starts 100ms before the trigger and lasts 300ms
-total, and make sure Sonic can adjust those numbers easily".
+total, and make sure Sonic can adjust those numbers easily". He then
+corrected the start himself: "no, dont pull the band forward, just dont add
+the 100ms pre-fire" — so the burst fires ON the trigger.
 
 THE KIND IS AN ORDINARY MOMENTARY TOGGLE — no new flare type, no new release
 queue. `params={"swim_burst": true}` spikes the fish effect's own
 `swim_burst` level (fx/effects/fish.py, "the swim burst flare" block); the
 release is an instant jump back (a toggle never glides — scene_response's
 RELEASE OWNERSHIP rule), armed from the spike's own landing. So:
-  * hold_ms=300            — the burst's whole length, his "300ms total";
-  * trigger_offset_ms=-100 — OFFSET family, NEGATIVE = EARLIER
-    (docs/SPECTRA_TIMING_CONVENTIONS.md), his "starts 100ms before the
-    trigger". A toggle computes an automatic lead of 0, so nothing else
-    moves the start.
+  * hold_ms=300          — the burst's whole length, his "300ms total";
+  * trigger_offset_ms=0  — the burst starts ON the trigger mark. A toggle
+    computes an automatic lead of 0, so nothing else moves the start.
+    The field is OFFSET family (docs/SPECTRA_TIMING_CONVENTIONS.md) and
+    stays Sonic-adjustable, but no pre-fire is authored here: a kind's
+    offset moves its WHOLE band (see the consequence below), and the early
+    start he first asked for is DEFERRED to the per-flare trigger-moment
+    work, where a lead sits on the flare itself rather than on the band
+    aggregate.
 Both are plain FlareKind fields Sonic edits through set_flare_kind (hold_ms
-already was; trigger_offset_ms was added to that surface by the same change)
-— e.g. "make the fish burst 400ms starting 50ms early" is one set_flare_kind
-call with hold_ms=400, trigger_offset_ms=-50.
+already was; trigger_offset_ms was added to that surface by the same
+change), each omit-means-keep so changing one never resets the other — e.g.
+"make the fish burst 400ms" is one set_flare_kind call with hold_ms=400.
 
 "INSTEAD OF OTHER SHAPE FLARES" IS A LANE. A kind absent from every pool is
 its own one-member lane and fires ALONGSIDE the band's other kinds (that is
@@ -40,16 +46,18 @@ the gains, Dice Re-roll and the two colour kinds. THIS IS HIS CALL: if he
 meant the patches too, drag them into the "Shape" lane on the Scenes page's
 lane rack; nothing here needs re-running.
 
-TWO CONSEQUENCES, NAMED BEFORE HE SEES THEM IN HIS ROOM:
-  1. A BAND FIRES ATOMICALLY, so its trigger offset is the most-negative
-     nonzero offset among ALL its attached kinds, pool members included
-     (scene_response.band_trigger_offset_ms — the lane pick is only known at
-     fire time). Once this kind is attached, EVERY Fish flare moves 100 ms
-     earlier — the colour jumps, the patches, and the Reverse when the lane
-     picks it — not only the burst. Detaching it (--revert) restores the
-     old timing exactly.
-  2. Pooling halves how often "Reverse Momentarily (500ms)" fires on Fish:
-     each flare now picks the burst or the reverse, 50/50.
+THE CONSEQUENCE, NAMED BEFORE HE SEES IT IN HIS ROOM: pooling halves how
+often "Reverse Momentarily (500ms)" fires on Fish — each flare now picks the
+burst or the reverse, 50/50. Band timing is unchanged: the kind is authored
+at offset 0, and a band's trigger offset is the most-negative NONZERO offset
+among its attached kinds (scene_response.band_trigger_offset_ms), so
+attaching it moves no Fish flare. (Sonic giving it a nonzero offset later
+WOULD move that whole band — a band fires atomically.)
+
+A "Shape" LANE THAT ALREADY EXISTS IS HIS. On any band where some kind is
+already pooled in a lane named "Shape" before this script runs, it REFUSES
+by name rather than merging into (and, on --revert, tearing down) a pool he
+built himself — which is what keeps --revert an exact inverse.
 
 RAW-DICT PATCH, NOT scene_store.save() — the add_fireworks_burst_flare.py /
 set_scene_colorset_preference.py rule (a model round-trip re-serializes every
@@ -94,7 +102,7 @@ NEW_KIND = {
                               "offset": None, "lo": None, "hi": None}},
     "gain": 1.0,
     "hold_ms": 300,
-    "trigger_offset_ms": -100,
+    "trigger_offset_ms": 0,
     "enabled": True,
 }
 REGISTRY = Path(__file__).resolve().parent.parent / "config" / "effect_params.json"
@@ -137,7 +145,28 @@ def _flare_bands(raw_scene: dict) -> list[dict]:
 
 
 def forward(raw: dict) -> list[str]:
-    """Apply the forward patch in place; return the report lines."""
+    """Apply the forward patch in place; return the report lines. Every band
+    is checked BEFORE anything is changed, so a refusal leaves `raw` as it
+    was."""
+    bands = _flare_bands(raw)
+    pooled_by_band = [shape_flares(raw, band) for band in bands]
+    for i, (band, pooled) in enumerate(zip(bands, pooled_by_band)):
+        lanes = band.get("kind_lanes") or {}
+        ours = ({KIND_NAME, *pooled} if lanes.get(KIND_NAME) == LANE_NAME
+                else set())
+        for name, lane in lanes.items():
+            if lane == LANE_NAME and name not in ours:
+                raise SystemExit(
+                    f"flare band {i}: '{name}' is already pooled in a lane "
+                    f"named '{LANE_NAME}' — refusing to merge into a pool he "
+                    "built himself (--revert could not undo it exactly)")
+        for name in pooled:
+            if lanes.get(name) not in (None, LANE_NAME):
+                raise SystemExit(
+                    f"flare band {i}: '{name}' is already pooled in lane "
+                    f"'{lanes[name]}' — refusing to move it; he pooled it "
+                    "himself")
+
     lines = []
     kinds = raw.setdefault("flare_kinds", [])
     if any(k.get("name") == KIND_NAME for k in kinds):
@@ -145,16 +174,9 @@ def forward(raw: dict) -> list[str]:
     else:
         kinds.append(copy.deepcopy(NEW_KIND))
         lines.append(f"'{KIND_NAME}': declared (momentary swim_burst, "
-                     "hold_ms=300, trigger_offset_ms=-100)")
-    for i, band in enumerate(_flare_bands(raw)):
-        pooled = shape_flares(raw, band)
+                     "hold_ms=300, trigger_offset_ms=0 — on the trigger)")
+    for i, (band, pooled) in enumerate(zip(bands, pooled_by_band)):
         lanes = band.setdefault("kind_lanes", {})
-        for name in pooled:
-            if lanes.get(name) not in (None, LANE_NAME):
-                raise SystemExit(
-                    f"flare band {i}: '{name}' is already pooled in lane "
-                    f"'{lanes[name]}' — refusing to move it; he pooled it "
-                    "himself")
         band.setdefault("kinds", {})[KIND_NAME] = 1.0
         lanes[KIND_NAME] = LANE_NAME
         for name in pooled:

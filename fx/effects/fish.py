@@ -47,7 +47,8 @@ SLOT_EASE_S = 0.6    # home-anchor re-spacing ease time constant
 # off the screen." Every way a fish used to leave by dimming — the ordinary
 # population trim (the old 1.2 s LEAVE_FADE_S horizon), the lull's paced
 # exodus, a phase abandoned, the drop's surplus rush fish, and an outgoing
-# scene crossfade — is now ONE mode, DISPERSING (mode 4): the fish keeps its
+# scene crossfade into an effect with no blobs of its own to merge into — is
+# now ONE mode, DISPERSING (mode 4): the fish keeps its
 # full brightness, steers out of the window along the turn-radius-bounded
 # arc every other steer obeys, and is retired only once its whole body is
 # off the panel. There is no brightness term on a dispersing fish at all,
@@ -83,32 +84,66 @@ DISPERSE_OFF_MARGIN = 2.0  # px past the panel edge, beyond a body length,
 # ── the outgoing crossfade ──────────────────────────────────────────────────
 # A scene change away from Fish crossfades (his crystal-mapper is "Add",
 # 0.5 s), and "Add" multiplies the OUTGOING frame by (1 - weight): the fish
-# used to simply dim away underneath the incoming effect. Now, the moment we
-# are the outgoing sibling, every fish disperses with a deadline inside the
-# crossfade, and for an additive blend the bodies are drawn brighter by the
-# inverse of that weight (floored) so what he sees is fish swimming off, not
-# fish dimming. A radial incoming keeps its own gather-into-the-bloom
-# collapse, untouched. The trail and wake are NOT compensated — once the
-# fish are gone the panel should go to black, which is the ask.
+# used to simply dim away underneath the incoming effect. HIS SPLIT: "merge
+# into blobs from the other effects that have them ... when there isnt a
+# blob, have them disperse to black, rather than fade". So which way a fish
+# leaves depends on the INCOMING effect:
+#   * an ADOPTER (TRANSITION_ADOPTERS) reads our live snapshot on its first
+#     draw and spawns its own particles at the fish positions — the fish ARE
+#     its blobs now, and the outgoing shoal is left exactly as it always was
+#     (scattering it too would show the shoal twice: once adopted, once
+#     swimming away);
+#   * radial keeps its own gather-into-the-bloom collapse, untouched;
+#   * anything else has no blob to merge into, so every fish disperses with
+#     a deadline inside the crossfade, and for an additive blend the bodies
+#     are drawn brighter by the inverse of that weight (floored). The trail
+#     and wake are NOT compensated — once the fish are gone the panel should
+#     go to black, which is the ask.
 TRANSITION_EXIT_BY = 0.6     # of the crossfade: every fish off by here
 TRANSITION_GAIN_FLOOR = 0.3  # the blend weight compensation never exceeds
                              # 1 / this, so a body cannot blow out to white
+# A NAMED LIMIT, measured and accepted: the virtual clips the OUTGOING frame
+# at 255 before weighting it by (1 - weight), so no gain inside the effect
+# can lift a core that is already saturated — the compensation only helps
+# the parts of a fish below full. Rendered pixels through his Add 0.5 s
+# crossfade into black, four seeds: median on-panel body peak 0.90-0.96 of
+# its pre-switch value at weight 0.03, 0.80-0.89 at 0.23, ~0.6-0.75 on the
+# last fish still centred on the panel (weight 0.32-0.42), every centre off
+# by ~0.36-0.45 and every body by 0.48-0.55 (scripts/check_fish_disperse.py
+# section 2 prints it frame by frame). Lifting that needs a change to the
+# virtual's blend, not to this effect.
+#
+# Keyed by the incoming effect's MODULE basename. Measured on fx.headless:
+# each of these reads the live fish sibling's _handoff_snapshot() (or the
+# registry snapshot) in its own _adopt_handoff and spawns its own particles
+# at the fish positions — "fish" is the same-type native restore. Pacman is
+# the one of his named five with NO adopt path at all, so it still gets the
+# dispersal until it grows one (carded separately); concentric, equalizer2d,
+# blender, noise, keybeat2d, gifplayer, singleColor and everything else
+# likewise have no blob to merge into.
+TRANSITION_ADOPTERS = frozenset(
+    {"blackhole", "orbits", "fireworks", "squiggles", "eye", "dancer", "fish"}
+)
 
 # ── the swim burst flare ────────────────────────────────────────────────────
 # HIS WORDS: "a flare ... that makes the fish swim fast for a burst, and have
-# a dramatic change in the frequency of their fin strokes. time it so that
-# the burst starts 100ms before the trigger and lasts 300ms total, and make
-# sure Sonic can adjust those numbers easily."
+# a dramatic change in the frequency of their fin strokes ... lasts 300ms
+# total, and make sure Sonic can adjust those numbers easily." (He also asked
+# for it to start 100 ms before the trigger, then corrected that himself —
+# "no, dont pull the band forward, just dont add the 100ms pre-fire" — so it
+# fires ON the trigger; an early start belongs to per-flare trigger-moment
+# work, not to this band.)
 #
 # The effect side is only a LEVEL, `swim_burst` (a toggle): while it is on,
 # every fish swims SWIM_BURST_SPEED_X faster and strokes FLAP_BURST_X faster.
 # The TIMING lives entirely in the flare kind that drives it — a momentary
-# kind (`hold_ms` = the 300 ms, `trigger_offset_ms` = -100, OFFSET family,
-# negative = earlier; docs/SPECTRA_TIMING_CONVENTIONS.md) — so both numbers
-# are ordinary FlareKind fields Sonic already edits, and the effect has no
-# duration of its own to disagree with them. A toggle's momentary write and
-# release are both instant jumps, which is what makes the kind's hold the
-# burst's real length. The envelope below only rounds the edges.
+# kind (`hold_ms` = the 300 ms length, `trigger_offset_ms` = where it starts
+# relative to the trigger, OFFSET family, authored 0 = on the mark;
+# docs/SPECTRA_TIMING_CONVENTIONS.md) — so both numbers are ordinary
+# FlareKind fields Sonic already edits, and the effect has no duration of
+# its own to disagree with them. A toggle's momentary write and release are
+# both instant jumps, which is what makes the kind's hold the burst's real
+# length. The envelope below only rounds the edges.
 SWIM_BURST_SPEED_X = 2.2   # extra swim speed, as a multiple of cruise
 FLAP_BURST_X = 2.5         # extra fin-stroke frequency (x3.5 at full)
 BURST_ATTACK_S = 0.03      # envelope rise ...
@@ -1102,12 +1137,11 @@ class Fish2d(Twod, GradientEffect):
                 self.p_slot[fresh].astype(np.float32) / max(tracked.size, 1)
             )
 
-    def _depart(self, idx, within=DEPART_S, leak_at=None):
+    def _depart(self, idx, within=DEPART_S):
         """Send fish away by DISPERSING them (mode 4): full brightness, off
         the panel by `within` seconds from now, retired only once gone. A
         fish already dispersing keeps whichever deadline is SOONER, so a
-        later, lazier departure can never slow one down. `leak_at` (effect
-        clock) holds a lull fish in its swirl until then; default = now."""
+        later, lazier departure can never slow one down."""
         if len(idx) == 0:
             return
         idx = np.asarray(idx)
@@ -1119,7 +1153,7 @@ class Fish2d(Twod, GradientEffect):
         # a fish not yet heading out (new, or a lull fish still swirling)
         # starts now; one already on its way keeps its own turn clock
         unleaked = idx[(self.p_mode[idx] != 4) | ~np.isfinite(self.p_lk[idx])]
-        self.p_lk[unleaked] = self.t if leak_at is None else leak_at
+        self.p_lk[unleaked] = self.t
         self.p_mode[idx] = 4
         self.p_nocap[idx] = 0
         self.p_disp[idx] = np.nan
@@ -2298,12 +2332,18 @@ class Fish2d(Twod, GradientEffect):
             self._draw_collapse(dt)
             return
 
-        # scatter latch: we are the outgoing crossfade sibling and anything
-        # OTHER than radial is incoming — every fish disperses off the panel
-        # inside the crossfade instead of dimming away under it (see the
+        # scatter latch: we are the outgoing crossfade sibling and the
+        # incoming effect has no blobs to merge the fish into (neither radial
+        # nor an adopter) — every fish disperses off the panel inside the
+        # crossfade instead of dimming away under it (see the
         # outgoing-crossfade block at the top of the module)
         inc = particle_handoff.incoming_sibling(virtual, self)
-        if inc is not None and inc is not self:
+        if (
+            inc is not None
+            and inc is not self
+            and type(inc).__module__.rsplit(".", 1)[-1]
+            not in TRANSITION_ADOPTERS
+        ):
             frames = float(getattr(virtual, "transition_frame_total", 0) or 0)
             # the virtual advances its counter straight AFTER rendering us,
             # so the weight this frame is blended at is one frame further on

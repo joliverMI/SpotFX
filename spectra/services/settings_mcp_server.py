@@ -221,7 +221,8 @@ async def set_flare_kind(scene_id: str, name: str, type: _FlareTypeEnum,  # noqa
     enabled=false disables it (never fires automatically); omit to leave
     the current setting alone. trigger_offset_ms is signed ms relative to
     the trigger mark, NEGATIVE = EARLIER; omit to keep the stored value.
-    hold_ms is a momentary kind's spike length."""
+    hold_ms is a momentary kind's spike length; omit to keep the stored
+    hold."""
     return await _call("set_flare_kind", scene_id=scene_id, name=name, type=type,
                        jump=jump, params=params, gain=gain, hold_ms=hold_ms,
                        enabled=enabled, trigger_offset_ms=trigger_offset_ms)

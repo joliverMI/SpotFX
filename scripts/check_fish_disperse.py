@@ -1,5 +1,5 @@
 """Measured proof: FISH NEVER FADE OUT — they disperse off the screen — and
-the swim-burst flare lands 100 ms early and lasts 300 ms.
+the swim-burst flare fires on the trigger and lasts 300 ms.
 
 HIS WORDS (2026-09-16, the Admiral's card fish-effect-disperse-off-screen-
 instead--wyxr): "the fish just fade out in the lull before the drop or
@@ -10,7 +10,10 @@ off the screen so that by half way through the lull, they are all gone ...
 add a flare at all levels that can run instead of other shape flares that
 makes the fish swim fast for a burst, and have a dramatic change in the
 frequency of their fin strokes. time it so that the burst starts 100ms
-before the trigger and lasts 300ms total".
+before the trigger and lasts 300ms total". He then corrected the timing
+himself — "no, dont pull the band forward, just dont add the 100ms
+pre-fire" — so the burst ships with NO pre-fire: 300 ms starting ON the
+trigger (section 5).
 
 Everything here runs on the REAL vendored render pipeline (fx.headless, his
 crystal-mapper's 72x37 shape, audio silenced) or on SPECTRA's real flare
@@ -22,8 +25,9 @@ written for proves nothing.
 
 With the audio silenced every fish's brightness is one constant, so "never
 fades" is measured as: while a fish is on the panel, its brightness never
-drops below that constant (the perceived brightness through an additive
-crossfade, for section 2).
+drops below that constant. Section 2 (the additive crossfade) is measured on
+RENDERED PIXELS instead, because the virtual's own blend sits between the
+effect and the light — and it reports the one limit that blend imposes.
 
     .venv/bin/python scripts/check_fish_disperse.py
 """
@@ -240,13 +244,55 @@ def section_lull(base):
 
 
 # ── 2. the outgoing crossfade ───────────────────────────────────────────
+def body_on_panel(eff):
+    """Indices of fish any part of whose DRAWN body can reach a panel pixel:
+    the spine's half length from its centre, the widest splat's radius, and
+    this frame's own smear back along its travel."""
+    px, py = screen(eff)
+    reach = (
+        0.5 * eff._body_len_px() + eff._half_width_px()
+        + np.abs(eff.p_spd[: eff.n]) * DT + 1.0
+    )
+    inside = (
+        (px >= -reach) & (px <= eff.r_width - 1 + reach)
+        & (py >= -reach) & (py <= eff.r_height - 1 + reach)
+    )
+    return np.flatnonzero(inside)
+
+
+def body_peaks(frame, eff):
+    """Each on-panel fish's RENDERED body peak: the brightest channel in the
+    3x3 of rendered pixels at its screen position (only fish whose centre
+    is on the panel — a centre past the edge has no window to read)."""
+    img = np.asarray(frame, dtype=np.float32).reshape(ROWS, COLS, 3).max(axis=2)
+    px, py = screen(eff)
+    out = []
+    for x, y in zip(px, py):
+        xi, yi = int(round(float(x))), int(round(float(y)))
+        if 0 <= xi < COLS and 0 <= yi < ROWS:
+            out.append(float(
+                img[max(yi - 1, 0):yi + 2, max(xi - 1, 0):xi + 2].max()
+            ))
+    return out
+
+
 async def crossfade_run(effect_type, seed, seconds=0.5):
+    """Crossfade Fish into a black singleColor — an incoming effect with no
+    blobs to merge into, so the fish must disperse — at his crystal-mapper's
+    Add 0.5 s, and read the RENDERED frame the blend produces."""
     r = await room(f"xf{seed}{effect_type[-3:]}", effect_type, seed=seed)
     fish = r.effect
-    r.step(240)
-    B = float(np.max(fish.p_bright[: fish.n]))
     v = r.virtual
-    headless.attach_effect(r.host, v, "orbits", {"particle_count": 4})
+    r.step(240)
+    ref = []
+    for _ in range(60):
+        r.clock.advance(DT)
+        f = v.assemble_frame()
+        v.flush(f)
+        ref.extend(body_peaks(f, fish))
+    reference = float(np.median(ref))
+    headless.attach_effect(r.host, v, "singleColor",
+                           {"color": "#000000", "brightness": 0.0})
     v._transition_effect = fish
     v._config["transition_mode"] = "Add"
     v.frame_transitions = v.transitions["Add"]
@@ -254,48 +300,56 @@ async def crossfade_run(effect_type, seed, seconds=0.5):
     v.transition_frame_counter = 0
     rows = []
     while v._transition_effect is fish:
-        r.step(1)
+        r.clock.advance(DT)
+        f = v.assemble_frame()
+        v.flush(f)
         w = v.transition_frame_counter / max(v.transition_frame_total, 1)
-        vis = on_panel(fish)
-        # what the blend actually shows of the dimmest fish on the panel:
-        # its brightness x the body gain it was drawn with x (1 - weight)
-        gain = (getattr(fish, "_scatter", None) or {}).get("gain", 1.0)
-        perceived = (
-            float(fish.p_bright[vis].min()) * gain * (1.0 - w) / B
-            if vis.size else None
-        )
-        rows.append((w, vis.size, perceived))
+        peaks = body_peaks(f, fish)
+        rows.append((
+            w, body_on_panel(fish).size,
+            float(np.median(peaks)) / reference if peaks else None,
+            min(peaks) / reference if peaks else None,
+        ))
     await close(r)
-    return rows
+    return reference, rows
 
 
 def section_crossfade(base):
-    print("\n2. THE OUTGOING CROSSFADE (his crystal-mapper: Add, 0.5 s) — "
-          "fish swim off, they do not dim under the blend")
+    print("\n2. THE OUTGOING CROSSFADE into an effect with no blobs (his "
+          "crystal-mapper: Add, 0.5 s), RENDERED PIXELS — fish swim off; the "
+          "blend's own clip still dims their cores (a named limit)")
     for seed in (3, 5, 11, 17):
-        rows = asyncio.run(crossfade_run("fish", seed))
+        reference, rows = asyncio.run(crossfade_run("fish", seed))
         start = rows[0][1]
-        gone_w = next((w for w, n, _p in rows if n == 0), None)
-        seen = [p for _w, n, p in rows if n and p is not None]
-        print(f"   seed {seed:>2}: {start} fish at the switch, all off the "
-              f"panel by weight {gone_w}, min perceived brightness while on "
-              f"it {min(seen) if seen else float('nan'):.3f}")
+        gone_w = next((w for w, n, _m, _l in rows if n == 0), None)
+        print(f"   seed {seed:>2}: {start} fish at the switch, reference "
+              f"body peak {reference:.0f}")
+        for w, n, med, low in rows:
+            if n == 0 and w > (gone_w or 0.0):
+                break
+            print(f"      weight {w:.3f}: {n} fish on the panel, on-panel "
+                  "body peak / reference "
+                  + (f"median {med:.2f} min {low:.2f}" if med is not None
+                     else "(no centre on the panel)"))
+        print(f"      every fish body off the panel by weight {gone_w}")
+        early = [med for w, _n, med, _l in rows
+                 if w <= 0.2 and med is not None]
         check(start > 0, f"seed {seed}: fish on the panel at the switch")
-        check(gone_w is not None
-              and gone_w <= FX.TRANSITION_EXIT_BY + 0.08,
-              f"seed {seed}: every fish off the panel by ~"
-              f"{FX.TRANSITION_EXIT_BY:.0%} of the crossfade")
-        check(not seen or min(seen) >= 0.97,
-              f"seed {seed}: a fish on the panel reads at full brightness "
-              "through the additive blend")
+        check(gone_w is not None and gone_w <= FX.TRANSITION_EXIT_BY,
+              f"seed {seed}: every fish off the panel by "
+              f"{FX.TRANSITION_EXIT_BY:.0%} of the crossfade, well before "
+              "it ends")
+        check(bool(early) and min(early) >= 0.8,
+              f"seed {seed}: the median on-panel body peak stays >= 0.8 of "
+              "its pre-switch value through weight 0.2")
     if base:
-        rows = asyncio.run(crossfade_run(base, 11))
-        late = [(w, n, p) for w, n, p in rows if w >= 0.85]
-        on_late = max((n for _w, n, _p in late), default=0)
-        dim = min((p for _w, n, p in late if n and p is not None),
-                  default=1.0)
+        reference, rows = asyncio.run(crossfade_run(base, 11))
+        late = [(w, n, med) for w, n, med, _l in rows if w >= 0.85]
+        on_late = max((n for _w, n, _m in late), default=0)
+        dim = max((m for _w, n, m in late if n and m is not None),
+                  default=0.0)
         print(f"   RED CONTROL: at weight >= 0.85, {on_late} fish still on "
-              f"the panel, perceived {dim:.3f}")
+              f"the panel, brightest median body peak {dim:.2f} of reference")
         check(on_late > 0 and dim < 0.2, "red control: the pre-change fish "
               "sit on the panel and DIM away under the blend")
 
@@ -397,7 +451,7 @@ def section_burst():
 # ── 5. the flare, on SPECTRA's real machinery ───────────────────────────
 def section_flare():
     print("\n5. THE FLARE — momentary swim_burst, hold 300 ms, offset "
-          "-100 ms, on scene_response + flare_preview")
+          "0 ms (on the trigger), on scene_response + flare_preview")
     td = Path(tempfile.mkdtemp(prefix="fish-burst-flare-"))
     from fx import device_model
     device_model.CATEGORIES_FILE = td / "device_categories.json"
@@ -458,12 +512,14 @@ def section_flare():
         check(on["duration_ms"] <= scene_response.DICE_REROLL_GLIDE_MS
               and on["kind"] == "jump" and off["kind"] == "jump",
               "both edges are instant jumps (a toggle never glides)")
+    check(kind.trigger_offset_ms == 0 and kind.hold_ms == 300,
+          "the migration's kind is authored hold 300 ms, offset 0 ms")
     check(tl["lead_ms"] == 0, "no automatic lead (nothing glides)")
-    check(abs((tl["trigger_mark_s"] - tl["fire_at_s"]) - 0.100) < 1e-6,
-          "the burst STARTS 100 ms before the trigger mark")
+    check(abs(tl["trigger_mark_s"] - tl["fire_at_s"]) < 1e-6,
+          "the burst STARTS on the trigger mark — no pre-fire")
     off_ms = scene_response.band_trigger_offset_ms(scene, "flare", 0.8)
     print(f"   band_trigger_offset_ms for the band it is pooled into: {off_ms}")
-    check(off_ms == -100, "the firing path relocates that band 100 ms early")
+    check(off_ms == 0, "the firing path leaves that band on its trigger mark")
 
 
 def main():

@@ -634,6 +634,15 @@ def _validate_set_flare_kind(scene_id: str, **kind_fields: Any) -> tuple[SceneV2
     if kind_fields.get("trigger_offset_ms") is None:
         kind_fields["trigger_offset_ms"] = (
             0 if existing is None else existing.trigger_offset_ms)
+    # ... and so does `hold_ms`, so nudging a kind's offset (or anything
+    # else) never silently resets its authored hold back to PULSE_HOLD_S.
+    # Only a momentary kind carries a hold at all, so it is kept only when
+    # the edit is still momentary: re-typing a kind to permanent must not
+    # inherit a hold its new type refuses (and that an omitted value could
+    # then never clear).
+    if (kind_fields.get("hold_ms") is None and existing is not None
+            and kind_fields.get("type") == "momentary"):
+        kind_fields["hold_ms"] = existing.hold_ms
     try:
         kind = FlareKind.model_validate(kind_fields)
     except ValidationError as exc:
@@ -1102,9 +1111,12 @@ OPERATIONS: dict[str, SonicOperation] = {
             "fires all its kinds together, so a band holding several kinds "
             "moves by the most-negative nonzero offset among them. Like "
             "enabled, OMIT it to keep the stored value. For a momentary "
-            "kind, hold_ms is how long the spike lasts — e.g. Fish's swim "
-            "burst: hold_ms=300, trigger_offset_ms=-100 (starts 100ms "
-            "before the trigger, 300ms total)."),
+            "kind, hold_ms is how long the spike lasts; OMIT it too to keep "
+            "the stored hold (omitting it on a new kind means the 250ms "
+            "default) — so changing one number never resets the other. "
+            "e.g. Fish's swim burst is hold_ms=300, trigger_offset_ms=0 "
+            "(300ms, starting on the trigger): 'make it 400ms' is "
+            "hold_ms=400 alone."),
         input_schema={
             "type": "object",
             "properties": {

@@ -1756,7 +1756,7 @@
           "smooth": false,
           "aspect": "shape",
           "default": false,
-          "note": "Driven by the Fish Swim Burst flare, not set by hand: while on, every fish dashes and strokes its fins much faster. The flare kind's hold_ms is the burst's length and its trigger_offset_ms how early it starts (negative = earlier), both Sonic-editable."
+          "note": "Driven by the Fish Swim Burst flare, not set by hand: while on, every fish dashes and strokes its fins much faster. The flare kind's hold_ms (300) is the burst's length and it fires on the trigger (trigger_offset_ms 0; negative = earlier), both Sonic-editable."
         }
       },
       "defaults": {

@@ -6859,7 +6859,7 @@ A new Matrix effect + a Fish scene that is a WHOLESALE COPY of his Orbits V2
    `fm/spotfx-fish-disperse-and-speed-flare`, his words: "the fish shouldn't
    fade out, they should disperse off the screen").** Every exit — the
    population trim, the lull, `_settle_rush`/`_release_nocap`, and an
-   OUTGOING crossfade to anything but radial — is ONE mode, DISPERSING
+   OUTGOING crossfade into an effect with no blobs of its own — is ONE mode, DISPERSING
    (`p_mode == 4`): full brightness, steered out of the window under the
    same turn clamp, retired only once the whole body is off the panel. Mode
    2 (a linear fade) now belongs to the drop's ejecta ALONE. Three things
@@ -6871,22 +6871,35 @@ A new Matrix effect + a Fish scene that is a WHOLESALE COPY of his Orbits V2
    2026-08-28 thirds, unchanged — only the manner moved (school → swirl →
    rank-ordered leak, `LULL_LEAK_*`, with `LULL_EXIT_MIN_S` making a lull too
    short to swirl in scatter straight out rather than be retired on the
-   panel by the backstop); (3) the crossfade's body gain (`1 / (1 - weight)`,
-   floored) compensates only an ADDITIVE blend and only the bodies, and it
-   reads the weight ONE FRAME AHEAD — the virtual advances its counter right
-   after rendering the outgoing effect, and reading it as-is left fish 7%
-   dim. Scope: `fish.py` only — the Fish scene's Strips entry is still
-   `orbits1d`, which still fades. Nothing here hands particles to another
-   effect ("merge into blobs" is escalated, not built).
+   panel by the backstop); (3) the crossfade scatter is SKIPPED when the
+   incoming effect adopts the fish as its own particles
+   (`TRANSITION_ADOPTERS`, keyed by module basename: blackhole, orbits,
+   fireworks, squiggles, eye, dancer, fish — measured, each reads the live
+   fish snapshot and spawns from it; scattering too would show the shoal
+   twice), radial keeps its collapse, and everything else (pacman included —
+   it has no adopt path) scatters. The scatter's body gain (`1 / (1 -
+   weight)`, floored) compensates only an ADDITIVE blend and only the
+   bodies, and reads the weight ONE FRAME AHEAD (the virtual advances its
+   counter right after rendering the outgoing effect) — but it CANNOT keep a
+   fish at full brightness: the virtual clips the outgoing frame at 255
+   before weighting it by `(1 - weight)`, so a saturated core dims anyway.
+   A named, accepted limit, measured on rendered pixels in
+   `check_fish_disperse.py` section 2 (the numbers are in the comment beside
+   `TRANSITION_GAIN_FLOOR`); lifting it needs a change to the virtual's
+   blend, not to the effect. Scope: `fish.py` only — the Fish scene's Strips
+   entry is still `orbits1d`, which still fades.
    **The swim burst is an ordinary momentary TOGGLE flare** (`swim_burst`,
    registry-declared so `_compute_param_moves` lands a real bool): the
    effect owns only a level, the flare kind owns ALL the timing (`hold_ms`
-   = length, `trigger_offset_ms` = start, negative = earlier). Sonic's
-   `set_flare_kind` carries `trigger_offset_ms` for it, omit-means-keep like
-   `enabled`. `scripts/add_fish_swim_burst_flare.py` pools it in a pick-one
-   "Shape" lane with the band's MOMENTARY shape flares — and because a band
-   fires atomically, attaching it moves every Fish flare 100 ms early (its
-   docstring names both consequences). Proof + red controls:
+   = length, 300; `trigger_offset_ms` = start, authored 0 — it fires ON the
+   trigger, by his own correction; an early start is deferred to per-flare
+   trigger-moment work, because a kind's offset moves its whole band).
+   Sonic's `set_flare_kind` carries `trigger_offset_ms` for it, and both it
+   and `hold_ms` are omit-means-keep like `enabled` (a hold is only carried
+   while the kind stays momentary). `scripts/add_fish_swim_burst_flare.py`
+   pools it in a pick-one "Shape" lane with the band's MOMENTARY shape
+   flares (so Reverse fires half as often) and refuses a band where a
+   "Shape" lane already exists. Proof + red controls:
    `scripts/check_fish_disperse.py`, `tests/test_fish_disperse.py`.
 
 Every new fish knob is a first guess pending his eye; the effect ships
