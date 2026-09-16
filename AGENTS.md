@@ -6855,6 +6855,40 @@ A new Matrix effect + a Fish scene that is a WHOLESALE COPY of his Orbits V2
      merge-base. If you change ordinary swimming, that second one goes red —
      which is the point.
 
+7. **A FISH NEVER FADES OUT — IT DISPERSES (2026-09-16,
+   `fm/spotfx-fish-disperse-and-speed-flare`, his words: "the fish shouldn't
+   fade out, they should disperse off the screen").** Every exit — the
+   population trim, the lull, `_settle_rush`/`_release_nocap`, and an
+   OUTGOING crossfade to anything but radial — is ONE mode, DISPERSING
+   (`p_mode == 4`): full brightness, steered out of the window under the
+   same turn clamp, retired only once the whole body is off the panel. Mode
+   2 (a linear fade) now belongs to the drop's ejecta ALONE. Three things
+   not to undo: (1) a dispersing fish carries a DEADLINE (`p_dl`, effect
+   clock), and its speed is DERIVED every frame from the distance still to
+   cover (`_disperse_speed`, measured along its heading, bounded by the
+   outward line plus a half turn) — never a tuned speed, which is what lets
+   a 900 ms lull and a 6 s one both land; (2) the lull CLOCK is his
+   2026-08-28 thirds, unchanged — only the manner moved (school → swirl →
+   rank-ordered leak, `LULL_LEAK_*`, with `LULL_EXIT_MIN_S` making a lull too
+   short to swirl in scatter straight out rather than be retired on the
+   panel by the backstop); (3) the crossfade's body gain (`1 / (1 - weight)`,
+   floored) compensates only an ADDITIVE blend and only the bodies, and it
+   reads the weight ONE FRAME AHEAD — the virtual advances its counter right
+   after rendering the outgoing effect, and reading it as-is left fish 7%
+   dim. Scope: `fish.py` only — the Fish scene's Strips entry is still
+   `orbits1d`, which still fades. Nothing here hands particles to another
+   effect ("merge into blobs" is escalated, not built).
+   **The swim burst is an ordinary momentary TOGGLE flare** (`swim_burst`,
+   registry-declared so `_compute_param_moves` lands a real bool): the
+   effect owns only a level, the flare kind owns ALL the timing (`hold_ms`
+   = length, `trigger_offset_ms` = start, negative = earlier). Sonic's
+   `set_flare_kind` carries `trigger_offset_ms` for it, omit-means-keep like
+   `enabled`. `scripts/add_fish_swim_burst_flare.py` pools it in a pick-one
+   "Shape" lane with the band's MOMENTARY shape flares — and because a band
+   fires atomically, attaching it moves every Fish flare 100 ms early (its
+   docstring names both consequences). Proof + red controls:
+   `scripts/check_fish_disperse.py`, `tests/test_fish_disperse.py`.
+
 Every new fish knob is a first guess pending his eye; the effect ships
 tunable, not tuned. Proof: `scripts/check_fish.py`,
 `scripts/check_fish_avoidance.py`, `scripts/check_fish_lunge.py`,

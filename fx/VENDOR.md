@@ -1316,3 +1316,22 @@ against that commit.
     the per-frame accumulator bound is `CHARGE_SPAWN_RATE_MAX × DT_MAX`,
     and its §8 strip check was comparing the STRIP's measured rate against
     the 2D module's ceiling, a cross-module mistake this change exposed.
+
+39. `effects/fish.py` (SpotFX-authored, #21): A FISH NEVER FADES OUT — IT
+    DISPERSES, and the SWIM BURST level (PR
+    fm/spotfx-fish-disperse-and-speed-flare; his card
+    fish-effect-disperse-off-screen-instead--wyxr). A new swim mode, 4
+    DISPERSING, replaces every brightness fade a fish had (`LEAVE_FADE_S`
+    is gone; mode 2 now serves the drop's ejecta only): full brightness, a
+    per-fish deadline (`p_dl`) its speed is derived from, retired only once
+    the whole body is off the panel. The lull's first third becomes a swirl
+    and a rank-ordered leak (the thirds themselves are unchanged). An
+    outgoing crossfade to any non-radial effect scatters every fish inside
+    `TRANSITION_EXIT_BY` of it, with the bodies compensated for an additive
+    blend. New config key `swim_burst` (bool, default False, registry
+    toggle) — a level a momentary flare holds. Ordinary swimming with
+    nothing dispersing and no burst is byte-identical to before
+    (`tests/test_fish_camera.py`'s merge-base proof still passes). Two SoA
+    arrays added (`p_dl`, `p_lk`, float64 on the effect clock). Proof:
+    `scripts/check_fish_disperse.py` (red controls against the pre-change
+    module), `tests/test_fish_disperse.py`.

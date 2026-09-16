@@ -1749,6 +1749,14 @@
           "aspect": "shape",
           "note": "How disorderly the rush is: 0 = a clean shoal, 1 = scattered.",
           "default": 0.5
+        },
+        "swim_burst": {
+          "label": "Swim Burst",
+          "type": "toggle",
+          "smooth": false,
+          "aspect": "shape",
+          "default": false,
+          "note": "Driven by the Fish Swim Burst flare, not set by hand: while on, every fish dashes and strokes its fins much faster. The flare kind's hold_ms is the burst's length and its trigger_offset_ms how early it starts (negative = earlier), both Sonic-editable."
         }
       },
       "defaults": {

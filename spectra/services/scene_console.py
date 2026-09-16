@@ -623,10 +623,17 @@ def _validate_set_flare_kind(scene_id: str, **kind_fields: Any) -> tuple[SceneV2
     # kind must round-trip intact through an unrelated edit — re-enabling
     # his room's flares as a side effect of retuning a gain would be a
     # silent, invisible behaviour change), and True on a CREATE.
+    existing = next((k for k in scene.flare_kinds
+                     if k.name == kind_fields.get("name")), None)
     if kind_fields.get("enabled") is None:
-        existing = next((k for k in scene.flare_kinds
-                         if k.name == kind_fields.get("name")), None)
         kind_fields["enabled"] = True if existing is None else existing.enabled
+    # `trigger_offset_ms` follows the SAME omit-means-keep rule, for the same
+    # reason: his authored timing (OFFSET family, signed ms, NEGATIVE =
+    # EARLIER — docs/SPECTRA_TIMING_CONVENTIONS.md) must survive a retune of
+    # anything else on the kind. 0 on a create, the model's own default.
+    if kind_fields.get("trigger_offset_ms") is None:
+        kind_fields["trigger_offset_ms"] = (
+            0 if existing is None else existing.trigger_offset_ms)
     try:
         kind = FlareKind.model_validate(kind_fields)
     except ValidationError as exc:
@@ -654,10 +661,12 @@ async def apply_flare_kind(scene_id: str, *, name: str, type: str,  # noqa: A002
                            jump: Optional[str] = None, params: Optional[dict] = None,
                            gain: float = 1.0, hold_ms: Optional[int] = None,
                            enabled: Optional[bool] = None,
+                           trigger_offset_ms: Optional[int] = None,
                            source: str = "agent") -> dict:
     scene, candidate, op = _validate_set_flare_kind(
         scene_id, name=name, type=type, jump=jump, params=params or {},
-        gain=gain, hold_ms=hold_ms, enabled=enabled)
+        gain=gain, hold_ms=hold_ms, enabled=enabled,
+        trigger_offset_ms=trigger_offset_ms)
     backup = _write_and_verify_backup(scene_id, scene, op=f"flare_kind_{op}")
     scene_store.save(candidate)
     entry = {"id": str(uuid.uuid4()), "ts_ms": int(time.time() * 1000),
@@ -888,11 +897,12 @@ async def _op_set_scene_setting(scene_id: str, key: str, value: Any) -> dict:
 async def _op_set_flare_kind(scene_id: str, name: str, type: str,  # noqa: A002
                              jump: Optional[str] = None, params: Optional[dict] = None,
                              gain: float = 1.0, hold_ms: Optional[int] = None,
-                             enabled: Optional[bool] = None) -> dict:
+                             enabled: Optional[bool] = None,
+                             trigger_offset_ms: Optional[int] = None) -> dict:
     try:
         return await apply_flare_kind(
             scene_id, name=name, type=type, jump=jump, params=params, gain=gain,
-            hold_ms=hold_ms, enabled=enabled)
+            hold_ms=hold_ms, enabled=enabled, trigger_offset_ms=trigger_offset_ms)
     except SceneOpError as exc:
         return exc.payload()
 
@@ -1085,7 +1095,16 @@ OPERATIONS: dict[str, SonicOperation] = {
             "temporarily disables the kind (it stays declared and attached "
             "but never fires automatically; an explicit preview still "
             "works and says so) — OMIT it to leave the current setting "
-            "alone, which is what you want for any unrelated edit."),
+            "alone, which is what you want for any unrelated edit. "
+            "trigger_offset_ms moves WHEN the kind fires relative to its "
+            "trigger mark: signed milliseconds, NEGATIVE = EARLIER, "
+            "positive = later, 0 = on the mark (-60000..60000). A band "
+            "fires all its kinds together, so a band holding several kinds "
+            "moves by the most-negative nonzero offset among them. Like "
+            "enabled, OMIT it to keep the stored value. For a momentary "
+            "kind, hold_ms is how long the spike lasts — e.g. Fish's swim "
+            "burst: hold_ms=300, trigger_offset_ms=-100 (starts 100ms "
+            "before the trigger, 300ms total)."),
         input_schema={
             "type": "object",
             "properties": {
@@ -1097,6 +1116,8 @@ OPERATIONS: dict[str, SonicOperation] = {
                 "gain": {"type": "number"},
                 "hold_ms": {"type": "integer"},
                 "enabled": {"type": "boolean"},
+                "trigger_offset_ms": {"type": "integer",
+                                      "minimum": -60000, "maximum": 60000},
             },
             "required": ["scene_id", "name", "type"], "additionalProperties": False},
         handler=_op_set_flare_kind),

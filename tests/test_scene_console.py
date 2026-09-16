@@ -225,6 +225,53 @@ def test_apply_flare_kind_create_then_update_by_name():
     assert len(kinds) == 1 and kinds[0].gain == 2.0, "same name replaces, never duplicates"
 
 
+def test_sonic_sets_a_flare_kinds_trigger_offset_and_an_unrelated_edit_keeps_it():
+    """His ask for the Fish swim burst: "make sure Sonic can adjust those
+    numbers easily" — the burst's length (hold_ms) AND how early it starts
+    (trigger_offset_ms, OFFSET family, negative = earlier). The second one
+    was not on Sonic's surface before. Omitting it on a later edit must
+    KEEP it, exactly like `enabled`: retuning anything else on the kind can
+    never silently move his authored timing back onto the mark."""
+    from spectra.services import scene_console as sc
+    from spectra.services import scene_store
+    from spectra.models.scene import SceneV2
+
+    scene = SceneV2(name="Throwaway")
+    scene_store.save(scene)
+
+    _run(sc._op_set_flare_kind(scene.id, name="Fish Swim Burst", type="momentary",
+                               params={"swim_burst": 1.0}, hold_ms=300,
+                               trigger_offset_ms=-100))
+    kind = scene_store.get_by_id(scene.id).flare_kinds[0]
+    assert (kind.hold_ms, kind.trigger_offset_ms) == (300, -100)
+
+    _run(sc._op_set_flare_kind(scene.id, name="Fish Swim Burst", type="momentary",
+                               params={"swim_burst": 1.0}, hold_ms=250))
+    kind = scene_store.get_by_id(scene.id).flare_kinds[0]
+    assert (kind.hold_ms, kind.trigger_offset_ms) == (250, -100), (
+        "an edit that omits trigger_offset_ms must keep the stored offset")
+
+    _run(sc._op_set_flare_kind(scene.id, name="Fish Swim Burst", type="momentary",
+                               params={"swim_burst": 1.0}, hold_ms=250,
+                               trigger_offset_ms=-150))
+    assert scene_store.get_by_id(scene.id).flare_kinds[0].trigger_offset_ms == -150
+
+    bad = _run(sc._op_set_flare_kind(scene.id, name="Fish Swim Burst",
+                                     type="momentary", params={"swim_burst": 1.0},
+                                     trigger_offset_ms=999_999))
+    assert bad.get("status") != "applied", "out-of-range offset must be refused"
+    assert scene_store.get_by_id(scene.id).flare_kinds[0].trigger_offset_ms == -150
+
+    schema = sc.OPERATIONS["set_flare_kind"].input_schema["properties"]
+    assert "trigger_offset_ms" in schema and "hold_ms" in schema
+
+    # a CREATE that omits it lands on the model's own default
+    _run(sc._op_set_flare_kind(scene.id, name="Other", type="momentary",
+                               params={"swim_burst": 1.0}))
+    other = [k for k in scene_store.get_by_id(scene.id).flare_kinds if k.name == "Other"]
+    assert other[0].trigger_offset_ms == 0
+
+
 def test_create_scene_persists_and_logs():
     from spectra.services import scene_console as sc
     from spectra.services import scene_store
