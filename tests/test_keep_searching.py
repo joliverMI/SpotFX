@@ -54,9 +54,15 @@ math kernel, the trigger engine and disk are replaced.
           measuring the engine's offset (exactly, one bin off, or off the grid
           altogether) is admitted and the play locks — without the floor it
           burns every window to no_time_left and reads "Lock failed" with the
-          engine already right; a beat twin 500ms off is still refused; and a
-          run of clipped windows against one engine offset gives up promptly
-          as nothing_admissible, with red controls for the floor and the rule.
+          engine already right; a beat twin 500ms off is still refused. The
+          floor reaches ONLY envelopes the planner's own gate refused: one it
+          measured narrower than 300ms still refuses the twin it found (red
+          control: the broad floor admitted it), and a wider one is untouched.
+          Clipped windows against one engine offset give up as
+          nothing_admissible only after the same 45s budget nothing_to_find
+          spends — a shorter clipped stretch followed by a clear one still
+          locks (red control: a three-window rule gave up first) — and without
+          the rule the search burns every window to no_time_left.
 
 Timing sign conventions: this change decides WHEN and HOW LONG the search
 runs, never what a measurement means. TWO is the proof — every engine snap,
@@ -76,7 +82,10 @@ from services.xcorr_sweep import (
 )
 
 URI = d.URI
-NO_CLIP_RULE = {"xcorr_keep_searching_clip_give_up_windows": 10**6}
+
+
+def _without_clip_rule(monkeypatch):
+    monkeypatch.setattr(KeepSearching, "clips_exhausted", lambda self: False)
 
 
 @pytest.fixture(scope="module")
@@ -354,39 +363,56 @@ def test_give_up_rules_and_their_precedence():
     assert _ks(duration_ms=0).give_up_reason(30_000) == KEEP_SEARCHING_NO_TIME_LEFT
 
 
-def test_clip_exhaustion_counts_consecutive_clips_against_one_engine_offset():
-    ks = _ks(clip_give_up_windows=3)
-    ks.note_window(40_000, (34_000, 39_000), evidence=True, clipped=True, engine_offset_ms=1350)
-    ks.note_window(45_000, (39_500, 44_500), evidence=True, clipped=True, engine_offset_ms=1350)
-    assert ks.give_up_reason(45_000) is None
-    ks.note_window(50_000, (45_000, 50_000), evidence=False, clipped=None)
-    assert ks.give_up_reason(50_000) is None, "a window discarded unmeasured leaves the run alone"
-    ks.note_window(55_000, (50_500, 55_500), evidence=True, clipped=True, engine_offset_ms=1350)
-    assert ks.give_up_reason(55_000) == KEEP_SEARCHING_NOTHING_ADMISSIBLE
+def _clips(ks: KeepSearching, times, *, offset_ms: int = 1350, evidence: bool = True) -> None:
+    for t in times:
+        ks.note_window(t, (t - 6_000, t - 1_000), evidence=evidence, clipped=True,
+                       engine_offset_ms=offset_ms)
+
+
+def test_clip_exhaustion_spends_the_same_budget_as_nothing_to_find():
+    budget = KeepSearchingConfig().give_up_ms
+    ks = _ks()
+    _clips(ks, range(40_000, 85_000, 5_000))
+    assert ks.give_up_reason(80_000) is None, "40s of clipped windows is not the budget"
+    ks.note_window(82_000, (76_000, 81_000), evidence=False, clipped=None)
+    assert ks.give_up_reason(82_000) is None, "a window discarded unmeasured leaves the run alone"
+    _clips(ks, [40_000 + budget])
+    assert ks.give_up_reason(40_000 + budget) == KEEP_SEARCHING_NOTHING_ADMISSIBLE
     assert ks.give_up_reason(210_000) == KEEP_SEARCHING_NO_TIME_LEFT, "the song's end outranks it"
 
-    reset = _ks(clip_give_up_windows=3)
-    reset.note_window(40_000, (34_000, 39_000), evidence=True, clipped=True, engine_offset_ms=1350)
-    reset.note_window(45_000, (39_500, 44_500), evidence=True, clipped=False, engine_offset_ms=1350)
-    reset.note_window(50_000, (45_000, 50_000), evidence=True, clipped=True, engine_offset_ms=1350)
-    reset.note_window(55_000, (50_500, 55_500), evidence=True, clipped=True, engine_offset_ms=1350)
-    assert reset.give_up_reason(55_000) is None, "an admitted window starts the count again"
+    reset = _ks()
+    _clips(reset, range(40_000, 85_000, 5_000))
+    reset.note_window(85_000, (79_000, 84_000), evidence=True, clipped=False, engine_offset_ms=1350)
+    _clips(reset, range(90_000, 135_000, 5_000))
+    assert reset.give_up_reason(130_000) is None, "an admitted window starts the run again"
+    _clips(reset, [135_000])
+    assert reset.give_up_reason(135_000) == KEEP_SEARCHING_NOTHING_ADMISSIBLE
 
-    moved = _ks(clip_give_up_windows=3)
-    moved.note_window(40_000, (34_000, 39_000), evidence=True, clipped=True, engine_offset_ms=1350)
-    moved.note_window(45_000, (39_500, 44_500), evidence=True, clipped=True, engine_offset_ms=1350)
-    moved.note_window(50_000, (45_000, 50_000), evidence=True, clipped=True, engine_offset_ms=1325)
-    assert moved.give_up_reason(50_000) is None, "the engine moving starts the count again"
-    moved.note_window(55_000, (50_500, 55_500), evidence=True, clipped=True, engine_offset_ms=1325)
-    moved.note_window(60_000, (56_000, 61_000), evidence=True, clipped=True, engine_offset_ms=1325)
-    assert moved.give_up_reason(60_000) == KEEP_SEARCHING_NOTHING_ADMISSIBLE
+    moved = _ks()
+    _clips(moved, range(40_000, 80_000, 5_000))
+    _clips(moved, range(80_000, 125_000, 5_000), offset_ms=1325)
+    assert moved.give_up_reason(120_000) is None, "the engine moving starts the run again"
+    _clips(moved, [125_000], offset_ms=1325)
+    assert moved.give_up_reason(125_000) == KEEP_SEARCHING_NOTHING_ADMISSIBLE
+
+    silent = _ks()
+    _clips(silent, range(30_000, 80_000, 5_000), evidence=False)
+    assert silent.give_up_reason(75_000) == KEEP_SEARCHING_NOTHING_ADMISSIBLE, (
+        "clipped windows that cast no vote are named for the clip, not for finding nothing"
+    )
 
 
-def test_a_continued_envelope_is_widened_to_the_agreement_tolerance_never_narrowed(new):
+def test_a_continued_envelope_is_floored_only_where_the_planners_gate_failed(new):
+    from services import uscore_planner
+    gate = uscore_planner._MIN_TOTAL_ENVELOPE_MS
     assert new._floored_envelope((0, 0), 300) == (-300, 300)
+    assert new._floored_envelope((-40, 40), 300) == (-300, 300)
+    assert new._floored_envelope((0, gate - 1), 300) == (-300, 300)
+    assert new._floored_envelope((0, gate), 300) == (0, gate), "a width the gate accepts is measured"
+    assert new._floored_envelope((-150, 150), 300) == (-150, 150)
+    assert new._floored_envelope((-100, 600), 300) == (-100, 600)
+    assert new._floored_envelope((-800, 50), 300) == (-800, 50)
     assert new._floored_envelope((-900, 900), 300) == (-900, 900)
-    assert new._floored_envelope((-100, 600), 300) == (-300, 600)
-    assert new._floored_envelope((-800, 50), 300) == (-800, 300)
 
 
 def test_placement_cadence_readiness_and_overlap():
@@ -412,7 +438,6 @@ def test_borrowed_constants_still_agree_with_the_planners():
     assert cfg.end_buffer_ms == aos._XCORR_END_BUFFER_MS == uscore_planner._END_BUFFER_MS
     assert KeepSearchingConfig().max_overlap_ms == uscore_planner._MAX_OVERLAP_MS
     assert settings.xcorr_keep_searching_enabled is True, "the Admiral authorised it: on"
-    assert cfg.clip_give_up_windows == settings.xcorr_keep_searching_clip_give_up_windows
 
 
 # ── SEVEN — a continued search ended by a song change keeps its own context ──
@@ -717,6 +742,9 @@ def test_live_flags_run_the_fft_accumulator_and_ladder_path(new, monkeypatch, tm
 
 
 def test_live_a_clipped_continued_window_never_promotes_the_ladder(new, monkeypatch, tmp_path):
+    """The clip-exhaustion give-up is switched off here and in its red control,
+    so both see the same run of clipped windows to the end of the song."""
+    _without_clip_rule(monkeypatch)
     world = _live_twin_world()
     t = d.run_world(new, world, monkeypatch, tmp_path, settings_over=LIVE)
 
@@ -729,7 +757,7 @@ def test_live_a_clipped_continued_window_never_promotes_the_ladder(new, monkeypa
     assert _twin_snaps(t) == []
     assert all(s[1] != TWIN_TRUTH_MS + TWIN_PERIOD_MS for s in t.saves)
     assert t.history[-1]["locked"] is False and t.history[-1]["offset_ms"] == TWIN_TRUTH_MS
-    assert t.final_lock_state["reason"] == KEEP_SEARCHING_NOTHING_ADMISSIBLE
+    assert t.final_lock_state["reason"] == KEEP_SEARCHING_NO_TIME_LEFT
 
 
 def test_live_a_clipped_continued_window_never_feeds_the_accumulator(new, monkeypatch, tmp_path):
@@ -755,6 +783,7 @@ def test_live_red_counting_a_clipped_continued_window_as_empty_promotes_the_ladd
     is no longer exempt from the clip there (ELEVEN), so the twin stays out —
     but with the global stage exempting every window, as it once did, the twin
     is snapped, saved and locked: each rule closes the route on its own."""
+    _without_clip_rule(monkeypatch)
     monkeypatch.setattr(new, "_ladder_hears", lambda _outcome, _continued: True)
     t = d.run_world(new, _live_twin_world(), monkeypatch, tmp_path, settings_over=LIVE)
 
@@ -776,7 +805,7 @@ def test_live_red_feeding_the_accumulator_saves_the_twin(new, monkeypatch, tmp_p
     landscape in, as a planned window's is, and the twin's mass overtakes the
     truth and is saved, although no single window was ever allowed to adopt it.
     The clip-exhaustion give-up (TWELVE) is switched off here: it would end the
-    search after three clipped windows and hide this route rather than close it."""
+    search part-way and hide this route rather than close it."""
     from services.xcorr_sweep import SweepEvaluator
     real = SweepEvaluator.process_window
 
@@ -785,8 +814,9 @@ def test_live_red_feeding_the_accumulator_saves_the_twin(new, monkeypatch, tmp_p
         return real(self, *args, **kwargs)
 
     monkeypatch.setattr(SweepEvaluator, "process_window", planned_accumulation)
+    _without_clip_rule(monkeypatch)
     world = _live_twin_world()
-    t = d.run_world(new, world, monkeypatch, tmp_path, settings_over={**LIVE, **NO_CLIP_RULE})
+    t = d.run_world(new, world, monkeypatch, tmp_path, settings_over=LIVE)
 
     twin = TWIN_TRUTH_MS + TWIN_PERIOD_MS
     accumulator = t.accumulators[0]
@@ -1033,7 +1063,8 @@ ZERO_TWIN_MS = ZERO_TRUTH_MS + 500
 TOL_MS = d.SETTINGS["xcorr_save_confirm_tol_ms"]
 
 
-def _zero_width_world(engine_ms: int, twin_ms: int | None = None) -> d.World:
+def _zero_width_world(engine_ms: int, twin_ms: int | None = None,
+                      twin_until_ms: int | None = None) -> d.World:
     """MAYDAY as his library stores it: the planner's envelope is (0, 0) on
     every planned window and at every position the search continues into —
     124 of 563 of his uscore-v8 songs look like this. Progressive matching
@@ -1043,9 +1074,13 @@ def _zero_width_world(engine_ms: int, twin_ms: int | None = None) -> d.World:
     off its peak barely moves. The planned windows are the founding report's
     weak Q=0.39 ones, so only continued windows can supply the evidence a lock
     needs; from 60s the song is clear. With `twin_ms`, every continued
-    window's free search is fooled by that beat instead."""
+    window's free search is fooled by that beat instead — until
+    `twin_until_ms`, when given."""
     def planned(ms):
         return ms < 34_000
+
+    def twinned(ms):
+        return not planned(ms) and (twin_until_ms is None or ms < twin_until_ms)
 
     world = d.mayday_world(
         progressive=lambda _t: (engine_ms, 0.7, 0.5),
@@ -1054,10 +1089,11 @@ def _zero_width_world(engine_ms: int, twin_ms: int | None = None) -> d.World:
         peaks=lambda ms: [(ZERO_TRUTH_MS, 0.3 if planned(ms) else d.mayday_world().clarity(ms)[0])],
     )
     if twin_ms is not None:
-        world.twin = lambda ms: None if planned(ms) else (twin_ms, 0.95)
+        world.twin = lambda ms: (twin_ms, 0.95) if twinned(ms) else None
         world.peaks = lambda ms: (
             [(ZERO_TRUTH_MS, 0.3)] if planned(ms)
-            else [(ZERO_TRUTH_MS, d.mayday_world().clarity(ms)[0]), (twin_ms, 0.95)])
+            else [(ZERO_TRUTH_MS, d.mayday_world().clarity(ms)[0])]
+            + ([(twin_ms, 0.95)] if twinned(ms) else []))
     return world
 
 
@@ -1113,8 +1149,9 @@ def test_zero_width_red_without_the_floor_the_play_never_locks(new, monkeypatch,
     burns a window every 5s to the end of the song — reading "Lock failed"
     while the engine sits on the right offset at Q=0.95."""
     monkeypatch.setattr(new, "_floored_envelope", lambda envelope, _tol: envelope)
+    _without_clip_rule(monkeypatch)
     world = _zero_width_world(engine_ms)
-    t = d.run_world(new, world, monkeypatch, tmp_path, settings_over={**LIVE, **NO_CLIP_RULE})
+    t = d.run_world(new, world, monkeypatch, tmp_path, settings_over=LIVE)
 
     assert len(_continued(t, world)) >= 30
     assert len(_continued_clip_lines(t, world)) == len(_continued(t, world)), (
@@ -1140,27 +1177,166 @@ def test_zero_width_a_beat_twin_is_still_refused(new, monkeypatch, tmp_path):
     assert t.history[-1]["locked"] is False
 
 
-def test_zero_width_clipped_windows_against_one_offset_give_up_promptly(new, monkeypatch, tmp_path):
+def _clipped_windows(t: d.Trace, world: d.World, twin_ms: int) -> list[tuple[int, int]]:
+    return [w for w in _continued(t, world) if world.twin(w[0]) == (twin_ms, 0.95)]
+
+
+def test_zero_width_clipped_windows_give_up_after_the_budget_not_before(new, monkeypatch, tmp_path):
     world = _zero_width_world(1350, twin_ms=ZERO_TWIN_MS)
     t = d.run_world(new, world, monkeypatch, tmp_path, settings_over=LIVE)
 
-    rule = d.SETTINGS["xcorr_keep_searching_clip_give_up_windows"]
-    assert len(_continued_clip_lines(t, world)) == rule
-    assert len(_continued(t, world)) <= rule + 1
-    assert t.last_frame_ms < _drain_ms(world) + (rule + 2) * d.SETTINGS["xcorr_keep_searching_interval_ms"]
+    budget = d.SETTINGS["xcorr_keep_searching_give_up_ms"]
+    interval = d.SETTINGS["xcorr_keep_searching_interval_ms"]
+    clipped = _clipped_windows(t, world, ZERO_TWIN_MS)
+    assert len(_continued_clip_lines(t, world)) == len(clipped) >= budget // interval
+    first_clip_ms = clipped[0][1] + 1000
+    assert budget <= t.last_frame_ms - first_clip_ms < budget + interval + d.FRAME_MS, (
+        "it gave up once the clipped run spanned the budget, and no earlier"
+    )
+    assert t.last_frame_ms < world.duration_ms - 30_000, "well before the song's last stretch"
     assert any("keep-searching gave up (nothing_admissible)" in line for line in t.logs)
     assert t.final_lock_state["phase"] == lock_state.PHASE_UNLOCKED
     assert t.final_lock_state["reason"] == KEEP_SEARCHING_NOTHING_ADMISSIBLE
     assert t.final_lock_state["continued"] is True
 
 
+def test_zero_width_a_clipped_stretch_shorter_than_the_budget_still_locks_after_it(new, monkeypatch, tmp_path):
+    world = _zero_width_world(1350, twin_ms=ZERO_TWIN_MS, twin_until_ms=70_000)
+    t = d.run_world(new, world, monkeypatch, tmp_path, settings_over=LIVE)
+
+    clipped = _clipped_windows(t, world, ZERO_TWIN_MS)
+    assert len(clipped) >= 4, "a run of clipped windows came first"
+    assert all(s[1] != ZERO_TWIN_MS for s in t.saves)
+    lock = t.history[-1]
+    assert lock["locked"] is True and lock["time_to_lock_ms"] > 70_000
+    assert t.final_lock_state["phase"] == lock_state.PHASE_LOCKED
+
+
+def test_zero_width_red_a_three_window_clip_rule_gives_up_before_the_clear_stretch(new, monkeypatch, tmp_path):
+    """RED CONTROL for the budget: the rule counted three clipped windows, and
+    on the same song it gave up in the self-similar stretch and never reached
+    the clear one that locks."""
+    real_note = KeepSearching.note_window
+
+    def counting_note(self, t_now_ms, window, *, evidence, clipped=None, engine_offset_ms=None):
+        real_note(self, t_now_ms, window, evidence=evidence, clipped=clipped,
+                  engine_offset_ms=engine_offset_ms)
+        if clipped is not None:
+            self.red_clip_count = getattr(self, "red_clip_count", 0) + 1 if clipped else 0
+
+    monkeypatch.setattr(KeepSearching, "note_window", counting_note)
+    monkeypatch.setattr(KeepSearching, "clips_exhausted",
+                        lambda self: getattr(self, "red_clip_count", 0) >= 3)
+    world = _zero_width_world(1350, twin_ms=ZERO_TWIN_MS, twin_until_ms=70_000)
+    t = d.run_world(new, world, monkeypatch, tmp_path, settings_over=LIVE)
+
+    assert len(_clipped_windows(t, world, ZERO_TWIN_MS)) == 3
+    assert t.last_frame_ms < 70_000
+    assert t.history[-1]["locked"] is False
+    assert t.final_lock_state["reason"] == KEEP_SEARCHING_NOTHING_ADMISSIBLE
+
+
 def test_zero_width_red_without_the_clip_rule_the_same_world_burns_to_no_time_left(new, monkeypatch, tmp_path):
     """RED CONTROL for the give-up: the OLD measurement at the engine's offset
     keeps casting votes, so nothing_to_find never arrives and the search
-    measures a window every 5s to the end of the song, learning nothing."""
+    measures a window every 5s to the end of the song."""
+    _without_clip_rule(monkeypatch)
     world = _zero_width_world(1350, twin_ms=ZERO_TWIN_MS)
-    t = d.run_world(new, world, monkeypatch, tmp_path, settings_over={**LIVE, **NO_CLIP_RULE})
+    t = d.run_world(new, world, monkeypatch, tmp_path, settings_over=LIVE)
 
     assert len(_continued(t, world)) >= 30
     assert t.final_lock_state["reason"] == KEEP_SEARCHING_NO_TIME_LEFT
     assert all(s[1] != ZERO_TWIN_MS for s in t.saves)
+
+
+NARROW_PERIOD_MS = 300
+NEAR_TWIN_MS = TWIN_TRUTH_MS + 275
+
+
+def _narrow_band(ts):
+    """A pulse every NARROW_PERIOD_MS: the planner measures a twin that close,
+    so the envelope it assigns is a real bound narrower than the 300ms floor."""
+    import numpy as np
+    phase = np.mod(ts, NARROW_PERIOD_MS)
+    return 0.2 + (1.0 + ts / 300_000.0) * np.exp(
+        -((phase - NARROW_PERIOD_MS / 2) ** 2) / (2 * (NARROW_PERIOD_MS / 6) ** 2))
+
+
+def _measured_narrow_world() -> d.World:
+    """The engine holds the truth (progressive), and past the planned windows
+    the free search is fooled by a near twin 275ms later — outside the ±200ms
+    envelope the planner MEASURED there, inside a 300ms floor."""
+    return d.World(
+        duration_ms=150_000,
+        windows=[(10_000, 15_000), (16_000, 21_000), (22_000, 27_000), (28_000, 33_000)],
+        loaded_offset_ms=TWIN_TRUTH_MS, truth=lambda _ms: TWIN_TRUTH_MS,
+        clarity=lambda _ms: (0.6, 1.0),
+        raw_band=_narrow_band,
+        twin=lambda ms: (NEAR_TWIN_MS, 0.95) if ms >= 34_000 else None,
+        peaks=lambda ms: [(TWIN_TRUTH_MS, 0.6), (NEAR_TWIN_MS, 0.95 if ms >= 34_000 else 0.3)],
+        progressive=lambda _t: (TWIN_TRUTH_MS, 0.7, 0.5),
+    )
+
+
+def _broad_floor(envelope, tol_ms):
+    return min(int(envelope[0]), -abs(int(tol_ms))), max(int(envelope[1]), abs(int(tol_ms)))
+
+
+def test_the_narrow_world_has_a_measured_envelope_narrower_than_the_floor():
+    import numpy as np
+    from services import uscore_planner
+    world = _measured_narrow_world()
+    ts = np.arange(0, world.duration_ms + d.FRAME_MS, d.FRAME_MS, dtype=float)
+    bands = uscore_planner.normalized_song_bands(
+        ts, {k: world.raw_band(ts) for k in ("rms_total", "rms_low", "rms_mid", "rms_high")},
+        world.duration_ms)
+    shift = uscore_planner.global_max_shift_bins([])
+    for start in range(30_000, 116_000, 500):
+        neg, pos, _beat = uscore_planner.window_envelope(bands, [], shift, start, 5000)
+        assert pos - neg >= uscore_planner._MIN_TOTAL_ENVELOPE_MS, "the planner's gate accepts it"
+        assert -TOL_MS < neg and pos < NEAR_TWIN_MS - TWIN_TRUTH_MS < TOL_MS, start
+
+
+def test_live_a_measured_envelope_narrower_than_the_floor_is_not_widened(new, monkeypatch, tmp_path):
+    world = _measured_narrow_world()
+    t = d.run_world(new, world, monkeypatch, tmp_path, settings_over=LIVE)
+
+    assert _continued(t, world), "the search continued into the near-twin stretch"
+    assert any("envelope [-200, +200]ms" in line for line in t.logs), "used as the planner measured it"
+    assert not any(f"envelope [-{TOL_MS}, +{TOL_MS}]ms" in line for line in t.logs)
+    assert any(f"envelope clip — NEW +{NEAR_TWIN_MS}ms" in line and "outside [-200, +200]" in line
+               for line in t.logs)
+    assert not any(c[0] == "apply_save" and c[2] == NEAR_TWIN_MS for c in t.engine.calls)
+    assert all(abs(s[1] - NEAR_TWIN_MS) > 25 for s in t.saves), "the near twin was never saved"
+    assert t.history[-1]["offset_ms"] == TWIN_TRUTH_MS
+    assert _mass_at(t.accumulators[0], NEAR_TWIN_MS) == pytest.approx(
+        0.3 * (len(world.windows) + 1), abs=5e-2), (
+        "only the weak near-twin peaks of the planned windows and the one continued "
+        "window placed before the near twin appears"
+    )
+    assert t.engine._shape_offset_ms == TWIN_TRUTH_MS
+
+
+def test_live_red_the_broad_floor_admitted_the_twin_the_planner_measured(new, monkeypatch, tmp_path):
+    """RED CONTROL for the floor's scope: widening every side to 300ms, as the
+    floor first did, lets the same near twin in — snapped, saved and piled into
+    the accumulator."""
+    monkeypatch.setattr(new, "_floored_envelope", _broad_floor)
+    world = _measured_narrow_world()
+    t = d.run_world(new, world, monkeypatch, tmp_path, settings_over=LIVE)
+
+    assert any(f"envelope [-{TOL_MS}, +{TOL_MS}]ms" in line for line in t.logs)
+    assert any(c[0] == "apply_save" and c[2] == NEAR_TWIN_MS and c[-1] is True
+               for c in t.engine.calls), "the engine snapped to the near twin"
+    assert any(abs(s[1] - NEAR_TWIN_MS) <= 25 for s in t.saves), "the near twin was saved"
+    assert _mass_at(t.accumulators[0], NEAR_TWIN_MS) > 0.3 * (len(world.windows) + 1) + 0.3
+    assert t.history[-1]["locked"] is True and t.history[-1]["offset_ms"] == NEAR_TWIN_MS
+
+
+def test_live_a_measured_envelope_wider_than_the_floor_is_untouched(new, monkeypatch, tmp_path):
+    world = _live_twin_world()
+    t = d.run_world(new, world, monkeypatch, tmp_path, settings_over=LIVE)
+
+    assert _continued(t, world)
+    lines = [line for line in t.logs if "keep-searching window" in line]
+    assert lines and all("envelope [-900, +900]ms" in line for line in lines)

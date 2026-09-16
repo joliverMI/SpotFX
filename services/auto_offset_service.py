@@ -1870,13 +1870,18 @@ def _ladder_hears(outcome, continued: bool) -> bool:
 
 
 def _floored_envelope(envelope: tuple[int, int], tol_ms: int) -> tuple[int, int]:
-    """A continued window's envelope, widened (never narrowed) to at least
-    ±`tol_ms` — the sweep's own agreement tolerance. KeepSearching's docstring
-    carries the measurement that makes this necessary and why it restores a
-    bound rather than weakening one."""
-    safe_neg_ms, safe_pos_ms = envelope
+    """A continued window's envelope: widened to at least ±`tol_ms` (the
+    sweep's own agreement tolerance) only when the planner's own eligibility
+    gate would have refused it — total width under
+    `uscore_planner._MIN_TOTAL_ENVELOPE_MS` — and otherwise exactly as the
+    planner measured it. KeepSearching's docstring carries the measurement
+    and why that scope restores a bound rather than weakening one."""
+    from services import uscore_planner
+    safe_neg_ms, safe_pos_ms = int(envelope[0]), int(envelope[1])
+    if safe_pos_ms - safe_neg_ms >= uscore_planner._MIN_TOTAL_ENVELOPE_MS:
+        return safe_neg_ms, safe_pos_ms
     tol = abs(int(tol_ms))
-    return min(int(safe_neg_ms), -tol), max(int(safe_pos_ms), tol)
+    return min(safe_neg_ms, -tol), max(safe_pos_ms, tol)
 
 
 def _continued_window_envelope(source: ContinuedEnvelopes, win_start: int,

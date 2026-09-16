@@ -299,7 +299,6 @@ SETTINGS = dict(
     xcorr_keep_searching_enabled=True,
     xcorr_keep_searching_interval_ms=5000,
     xcorr_keep_searching_give_up_ms=45000,
-    xcorr_keep_searching_clip_give_up_windows=3,
 )
 
 # His live storage/settings.json: the FFT kernel, evidence accumulation, the
