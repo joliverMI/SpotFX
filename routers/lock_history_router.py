@@ -38,9 +38,12 @@ async def song(uri: str, limit: int = 50) -> dict:
 
 @router.get("/drift")
 async def drift() -> dict:
-    """Pipeline-drift instrument: per listening session, the median of each
-    play's winning offset vs that song's own older baseline — the common
-    component a pipeline-level latency change leaves across a whole session,
-    which per-song saves otherwise quietly absorb. Drives the Timing page's
-    drift line and its alarm."""
+    """Pipeline-drift instrument: per listening session, the LEVEL of each
+    play's winning offset vs that song's own FIXED, quality-gated anchor —
+    the common component a pipeline-level latency change leaves across a
+    whole session, which per-song saves otherwise quietly absorb. Also
+    carries the legacy sliding-baseline `median_residual_ms` for continuity
+    (see services/lock_history.pipeline_drift's docstring for why it reads
+    change, not level). Drives the Timing page's drift line, its alarm, and
+    its per-session ramp/step/stable shape."""
     return lock_history.pipeline_drift()
