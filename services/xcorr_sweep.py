@@ -293,9 +293,24 @@ class KeepSearching:
     over its own full-song bands and beats built once when this search
     engages — `auto_offset_service.ContinuedEnvelopes`), registered in the
     evaluator's lookup under the window's bounds before it is evaluated. The
-    clip itself is unchanged, including its cold-start skip and the global
-    ladder stage's exemption: a beat twin outside the envelope cannot drive a
-    snap, a save or a lock.
+    clip itself is unchanged, including its cold-start skip.
+
+    A CLIPPED CONTINUED WINDOW LEAVES NO OTHER TRACE, because two consumers
+    downstream of the clip would otherwise carry the twin past it:
+      - the SEARCH LADDER does not hear it (`auto_offset_service.
+        _ladder_hears`). Counted as an empty window, as a clipped planned one
+        is, a run of them walks the ladder into the global stage, which is
+        exempt from the clip, and the twin is adopted there;
+      - the EVIDENCE ACCUMULATOR does not ingest its landscape
+        (`SweepEvaluator.process_window(continued_window=True)`). The clip
+        only nulls the discrete NEW, so the curve would still pile twin mass
+        into the accumulator's own save and lock-and-stop, neither of which
+        reads the envelope.
+    Both are scoped to continued windows: a planned or drift-recovery window
+    is handled exactly as it always was. Beyond the clip and those two,
+    a continued window CHOOSES AND SAVES exactly like a planned one — its
+    votes, snaps, per-window saves, the final save and lock-and-stop all
+    count, by the owner's ruling ("it should save also").
 
     ANCHORS STAY A SECOND ADOPTION PATH, by decision. The sweep's per-frame
     anchor match (on whenever the Set List slot is not coarse-locked) keeps
@@ -535,12 +550,15 @@ class SweepEvaluator:
         envelope_exempt: bool = False,   # global-stage search (Phase 4): the
                                          # U-Score envelopes were vetted only
                                          # over ±12 beats — skip the clip
+        continued_window: bool = False,  # placed by KeepSearching, not planned
     ) -> WindowOutcome:
         """Evaluate one completed window. `stored_offset_ms` is the OLD test
         point (the engine's runtime offset, or the disk median fallback);
         `stored_quality` is the slot's stored quality used for the
         displacement threshold. `landscape` feeds the evidence accumulator
-        when one is attached."""
+        when one is attached — except a `continued_window` whose NEW the
+        envelope clipped: that window sits where the planner found the song
+        too self-similar to place one, so its landscape is not evidence."""
         cfg = self.cfg
 
         if old_r is not None:
@@ -635,7 +653,8 @@ class SweepEvaluator:
         # (offset domain = −shift), weighted by window difficulty. The
         # envelope clip above only nulls the discrete NEW result — the curve
         # itself is still evidence.
-        if self.accumulator is not None and landscape is not None:
+        if (self.accumulator is not None and landscape is not None
+                and not (continued_window and envelope_clipped)):
             self.accumulator.add_curve(
                 -np.asarray(landscape.shifts_ms, dtype=float),
                 landscape.r, float(difficulty),

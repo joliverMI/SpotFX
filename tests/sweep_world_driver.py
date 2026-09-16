@@ -7,7 +7,8 @@ planned-queue dispatch, drift monitor, done-callback and post-loop finalize —
 with only the edges of the world replaced:
 
   * the live capture (frames on a fixed 100 ms clock, ending at song end);
-  * the math kernel (`_xcorr_window`, `_eval_at_shift`, `_difficulty_score`,
+  * the math kernel (`_xcorr_window`, `_xcorr_window_fft_full`,
+    `_progressive_match`, `_eval_at_shift`, `_difficulty_score`,
     `_mismatch_spike`, `_max_frame_gap_ms`) — answered from a `World`
     describing where the song truly aligns and how clearly each stretch of it
     can be measured, so which windows find what is decided up front;
@@ -18,8 +19,10 @@ with only the edges of the world replaced:
     and the websocket, both recorded.
 
 The decision logic between those edges — `SweepEvaluator`, `MismatchMonitor`,
-`KeepSearching` and every branch of the loop — is the production code, not a
-model of it.
+`KeepSearching`, `EvidenceAccumulator`, `SearchLadder`, the envelope and every
+branch of the loop — is the production code, not a model of it. `LIVE_FLAGS`
+runs it on the path his room runs (FFT kernel, accumulator, ladder,
+progressive); `SETTINGS` alone is the legacy kernel path.
 
 `load_baseline_module()` loads the sweep as it stood BEFORE keep-searching
 (`BASELINE_REF`, pinned — a moving ref retires a byte-identity proof the day
@@ -104,6 +107,13 @@ class World:
     # What a free search finds at a window start INSTEAD of the truth — a beat
     # twin — as (offset_ms, r), or None to find the truth as usual.
     twin: Optional[Callable[[int], Optional[tuple[int, float]]]] = None
+    # The FFT path's full landscape for a window start: (offset_ms, r) peaks.
+    # None = the truth at its clarity r, plus the twin where there is one.
+    peaks: Optional[Callable[[int], list[tuple[int, float]]]] = None
+    # What progressive matching finds at a song time: (offset_ms, r, quality).
+    progressive: Optional[Callable[[int], Optional[tuple[int, float, float]]]] = None
+    # The planner's stored (safe_neg_ms, safe_pos_ms) on every planned window.
+    planned_envelope: Optional[tuple[int, int]] = None
 
 
 def mayday_world(**over) -> World:
@@ -224,6 +234,9 @@ class Trace:
     task_after_poll: bool = False
     # The shape's Set List slots as each write to its metadata file left them.
     meta_writes: list[dict] = field(default_factory=list)
+    # The play's own EvidenceAccumulator / SearchLadder, as constructed.
+    accumulators: list = field(default_factory=list)
+    ladders: list = field(default_factory=list)
     meta: Optional[SimpleNamespace] = None
 
     def comparable(self) -> dict:
@@ -285,6 +298,35 @@ SETTINGS = dict(
     xcorr_keep_searching_give_up_ms=45000,
 )
 
+# His live storage/settings.json: the FFT kernel, evidence accumulation, the
+# search ladder and progressive matching all on (the ladder/accumulator knobs
+# pinned at the shipped defaults so a local .env cannot move them).
+LIVE_FLAGS = dict(
+    xcorr_fft_enabled=True,
+    xcorr_accum_enabled=True,
+    xcorr_search_ladder_enabled=True,
+    xcorr_progressive_enabled=True,
+    xcorr_search_narrow_ms=2500,
+    xcorr_search_global_ms=30000,
+    xcorr_ladder_escalate_after=2,
+    xcorr_accum_lock_mass=1.6,
+    xcorr_accum_dominance=0.5,
+    xcorr_prior_bonus_mass=0.3,
+    xcorr_prior_sigma_ms=400,
+    xcorr_progressive_start_ms=2500,
+    xcorr_progressive_interval_ms=1500,
+)
+
+
+def capturing(cls, sink: list):
+    """`cls` itself, except every instance it builds is also kept in `sink`
+    so a test can read the real object's state after the play."""
+    def build(*args, **kwargs):
+        made = cls(*args, **kwargs)
+        sink.append(made)
+        return made
+    return build
+
 
 def run_world(mod: ModuleType, world: World, monkeypatch, tmp_path: Path, *,
               settings_over: Optional[dict] = None,
@@ -305,6 +347,7 @@ def run_world(mod: ModuleType, world: World, monkeypatch, tmp_path: Path, *,
     from config import settings
     from models.state import SpotifyTrackInfo, state as app_state
     from services import anchor_detector, lock_state, setlist_store
+    from services.xcorr_core import Landscape, ProgressiveMatch
     import services
     import services.lock_history as lock_history
     import services.websocket_manager as wm
@@ -357,7 +400,10 @@ def run_world(mod: ModuleType, world: World, monkeypatch, tmp_path: Path, *,
 
     meta = SimpleNamespace(
         capture_complete=True, npz_file="world.npz",
-        xcorr_windows=[{"start_ms": s, "end_ms": e, "difficulty": 1.0}
+        xcorr_windows=[{"start_ms": s, "end_ms": e, "difficulty": 1.0,
+                        **({} if world.planned_envelope is None else
+                           {"safe_neg_ms": world.planned_envelope[0],
+                            "safe_pos_ms": world.planned_envelope[1]})}
                        for s, e in world.windows],
         offset_verification=world.verification,
         timestamp_offset_ms=world.loaded_offset_ms, offset_quality=0.5,
@@ -402,6 +448,47 @@ def run_world(mod: ModuleType, world: World, monkeypatch, tmp_path: Path, *,
         r, _d = world.clarity(int(ws_))
         return (world.truth(int(ws_)), r) if r >= 0.5 else None
 
+    def world_peaks(ws_: int) -> list[tuple[int, float]]:
+        if world.peaks is not None:
+            return list(world.peaks(ws_))
+        found = [(world.truth(ws_), world.clarity(ws_)[0])]
+        if world.twin is not None and world.twin(ws_) is not None:
+            found.append(world.twin(ws_))
+        return found
+
+    def k_xcorr_fft_full(_ts, _bands, _frames, ws_, we_, *, search_ms=None,
+                         search_lo_ms=None, search_hi_ms=None, old_r=None,
+                         tempo_bpm=None):
+        lo, hi = ((-int(search_ms), int(search_ms)) if search_lo_ms is None
+                  else (int(search_lo_ms), int(search_hi_ms)))
+        trace.kernel.append(("xcorr_window", int(ws_), int(we_), lo, hi))
+        trace.lock_during.append(lock_state.for_uri(URI))
+        inside = [(int(o), float(r)) for o, r in world_peaks(int(ws_)) if lo <= -o <= hi]
+        shifts = np.arange(lo, hi + FRAME_MS // 4, FRAME_MS // 4, dtype=float)
+        curve = np.zeros(len(shifts))
+        for o, r in inside:
+            curve = np.maximum(curve, r * np.exp(-((shifts + o) ** 2) / (2 * 60.0 ** 2)))
+        landscape = Landscape(shifts_ms=shifts, r=curve,
+                              peaks=sorted(((-o, r) for o, r in inside), key=lambda p: -p[1]),
+                              comb_period_ms=None, comb_strength=0.0)
+        twin = world.twin(int(ws_)) if world.twin is not None else None
+        if twin is not None and lo <= -int(twin[0]) <= hi:
+            return (int(twin[0]), float(twin[1])), landscape
+        r, _d = world.clarity(int(ws_))
+        truth = world.truth(int(ws_))
+        return ((truth, r) if r >= 0.5 and lo <= -truth <= hi else None), landscape
+
+    def k_progressive(_frames, _ts, _bands, *, t_now_ms, search_ms, center_offset_ms=0):
+        got = world.progressive(int(t_now_ms)) if world.progressive is not None else None
+        trace.kernel.append(("progressive_match", int(t_now_ms), int(search_ms),
+                             int(center_offset_ms), got))
+        if got is None:
+            return None
+        empty = Landscape(shifts_ms=np.zeros(0), r=np.zeros(0), peaks=[],
+                          comb_period_ms=None, comb_strength=0.0)
+        return ProgressiveMatch(offset_ms=int(got[0]), r=float(got[1]),
+                                quality=float(got[2]), span_ms=8000, landscape=empty)
+
     def k_spike(_ts, _bands, _frames, *, engine_offset_ms, t_now_ms,
                 lookback_ms, halfwin_ms):
         fn = world.spike or default_spike
@@ -434,6 +521,10 @@ def run_world(mod: ModuleType, world: World, monkeypatch, tmp_path: Path, *,
         "_xcorr_window": k_xcorr,
         "_mismatch_spike": k_spike,
         "_max_frame_gap_ms": lambda *_a, **_k: 0,
+        "_xcorr_window_fft_full": k_xcorr_fft_full,
+        "_progressive_match": k_progressive,
+        "EvidenceAccumulator": capturing(mod.EvidenceAccumulator, trace.accumulators),
+        "SearchLadder": capturing(mod.SearchLadder, trace.ladders),
     }
     if not real_saves:
         patches["_save_offset"] = record_save

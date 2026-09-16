@@ -36,6 +36,12 @@ math kernel, the trigger engine and disk are replaced.
   NINE  — a continued window carries the envelope the U-Score planner assigns
           a window at that position, so a beat twin cannot be snapped, saved
           or locked; the planner's own output is unchanged by sharing it.
+  TEN   — the same proofs on the path his room runs (FFT kernel, evidence
+          accumulator, search ladder, progressive matching): a clipped
+          continued window neither promotes the ladder into the envelope-
+          exempt global stage nor feeds the accumulator, with a red control
+          for each; a planned window's handling is unchanged; MAYDAY,
+          termination and the byte-identity proofs hold there too.
 
 Timing sign conventions: this change decides WHEN and HOW LONG the search
 runs, never what a measurement means. TWO is the proof — every engine snap,
@@ -615,3 +621,178 @@ def test_a_continued_window_gets_exactly_the_envelope_the_planner_stores(new, mo
     for w in planned:
         assert new._continued_window_envelope(source, w["start_ms"], w["end_ms"]) == \
             (w["safe_neg_ms"], w["safe_pos_ms"]), w
+
+
+# ── TEN — the path his room runs ────────────────────────────────────────────
+
+LIVE = d.LIVE_FLAGS
+WIDE_SPAN = 3500
+
+
+def _span(call: tuple) -> int:
+    return call[4] - call[3]
+
+
+def _mass_at(accumulator, offset_ms: int) -> float:
+    import numpy as np
+    return float(accumulator.mass[int(np.flatnonzero(accumulator.offsets == offset_ms)[0])])
+
+
+def _live_twin_world(**over) -> d.World:
+    """The twin world as the FFT kernel sees it: every landscape carries the
+    truth and a twin one beat later, the twin weak where planned windows sit
+    and the free search's winner where the search continues; progressive
+    matching finds the truth early, so the engine holds a snap before any
+    planned window runs."""
+    base = dict(
+        peaks=lambda ms: [(TWIN_TRUTH_MS, 0.6),
+                          (TWIN_TRUTH_MS + TWIN_PERIOD_MS, 0.95 if ms >= 30_000 else 0.3)],
+        progressive=lambda _t: (TWIN_TRUTH_MS, 0.7, 0.5),
+    )
+    base.update(over)
+    world = _twin_world()
+    for key, value in base.items():
+        setattr(world, key, value)
+    return world
+
+
+def test_live_flags_run_the_fft_accumulator_and_ladder_path(new, monkeypatch, tmp_path):
+    t = d.run_world(new, _live_twin_world(), monkeypatch, tmp_path, settings_over=LIVE)
+    assert t.accumulators and t.ladders, "the play built its own accumulator and ladder"
+    assert all(len(c) == 5 for c in t.kernel if c[0] == "xcorr_window"), "the FFT kernel ran"
+    assert any(c[0] == "progressive_match" and c[-1] is not None for c in t.kernel)
+
+
+def test_live_a_clipped_continued_window_never_promotes_the_ladder(new, monkeypatch, tmp_path):
+    world = _live_twin_world()
+    t = d.run_world(new, world, monkeypatch, tmp_path, settings_over=LIVE)
+
+    assert _continued(t, world), "the search continued into the twin stretch"
+    assert t.ladders[0].current.name != "global"
+    assert all(_span(c) <= 2 * WIDE_SPAN for c in t.kernel if c[0] == "xcorr_window"), (
+        "no window was ever searched at the envelope-exempt global stage"
+    )
+    assert not any("search ladder → global" in line for line in t.logs)
+    assert _twin_snaps(t) == []
+    assert all(s[1] != TWIN_TRUTH_MS + TWIN_PERIOD_MS for s in t.saves)
+    assert t.history[-1]["locked"] is False and t.history[-1]["offset_ms"] == TWIN_TRUTH_MS
+    assert t.final_lock_state["reason"] == KEEP_SEARCHING_NO_TIME_LEFT
+
+
+def test_live_a_clipped_continued_window_never_feeds_the_accumulator(new, monkeypatch, tmp_path):
+    world = _live_twin_world()
+    t = d.run_world(new, world, monkeypatch, tmp_path, settings_over=LIVE)
+
+    accumulator = t.accumulators[0]
+    assert _mass_at(accumulator, TWIN_TRUTH_MS + TWIN_PERIOD_MS) == pytest.approx(
+        0.3 * len(world.windows), abs=1e-3), "only the planned windows' weak twin peaks"
+    assert accumulator.dominant().offset_ms == TWIN_TRUTH_MS
+    assert not any(s[3] == "sweep-accum" and s[1] == TWIN_TRUTH_MS + TWIN_PERIOD_MS
+                   for s in t.saves)
+    assert t.saves and t.saves[-1][1] == TWIN_TRUTH_MS
+
+
+def test_live_red_counting_a_clipped_continued_window_as_empty_adopts_the_twin(new, monkeypatch, tmp_path):
+    """RED CONTROL for the ladder. Counting the clipped window as empty, as a
+    planned one is, walks the ladder into the global stage, where the clip
+    does not apply — and the twin is snapped, saved and locked."""
+    monkeypatch.setattr(new, "_ladder_hears", lambda _outcome, _continued: True)
+    t = d.run_world(new, _live_twin_world(), monkeypatch, tmp_path, settings_over=LIVE)
+
+    twin = TWIN_TRUTH_MS + TWIN_PERIOD_MS
+    assert t.ladders[0].current.name == "global"
+    assert any(c[-1] is True for c in _twin_snaps(t)), "the engine snapped to the twin"
+    assert any(s[1] == twin for s in t.saves), "the twin was saved"
+    assert t.history[-1]["locked"] is True and t.history[-1]["offset_ms"] == twin
+
+
+def test_live_red_feeding_the_accumulator_saves_the_twin(new, monkeypatch, tmp_path):
+    """RED CONTROL for the accumulator. Let a clipped continued window's
+    landscape in, as a planned window's is, and the twin's mass overtakes the
+    truth and is saved, although no single window was ever allowed to adopt it."""
+    from services.xcorr_sweep import SweepEvaluator
+    real = SweepEvaluator.process_window
+
+    def planned_accumulation(self, *args, **kwargs):
+        kwargs["continued_window"] = False
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(SweepEvaluator, "process_window", planned_accumulation)
+    world = _live_twin_world()
+    t = d.run_world(new, world, monkeypatch, tmp_path, settings_over=LIVE)
+
+    twin = TWIN_TRUTH_MS + TWIN_PERIOD_MS
+    accumulator = t.accumulators[0]
+    assert _mass_at(accumulator, twin) > _mass_at(accumulator, TWIN_TRUTH_MS)
+    assert accumulator.dominant().offset_ms == twin
+    assert any(s[3] == "sweep-accum" and s[1] == twin for s in t.saves)
+
+
+def test_live_a_clipped_planned_window_is_handled_exactly_as_before(baseline, new, monkeypatch, tmp_path):
+    """The planned-window default under the same flags: two planned windows
+    the stored envelope clips still count empty for the ladder (which reaches
+    the global stage) and still feed the accumulator — byte-identical to the
+    pinned pre-change sweep, accumulated mass included."""
+    world = _live_twin_world(
+        windows=[(10_000, 15_000), (16_000, 21_000), (22_000, 27_000), (28_000, 33_000),
+                 (40_000, 45_000), (46_000, 51_000)],
+        planned_envelope=(-900, 900),
+        twin=lambda ms: (TWIN_TRUTH_MS + TWIN_PERIOD_MS, 0.95) if ms >= 38_000 else None,
+        peaks=lambda ms: [(TWIN_TRUTH_MS, 0.6),
+                          (TWIN_TRUTH_MS + TWIN_PERIOD_MS, 0.95 if ms >= 38_000 else 0.3)],
+    )
+    kw = dict(settings_over={**LIVE, "xcorr_keep_searching_enabled": False})
+    a = d.run_world(baseline, world, monkeypatch, tmp_path, **kw)
+    b = d.run_world(new, world, monkeypatch, tmp_path, **kw)
+    ca, cb = a.comparable(), b.comparable()
+    for key in ca:
+        assert ca[key] == cb[key], f"{key} diverged from the pre-change sweep"
+    import numpy as np
+    assert np.array_equal(a.accumulators[0].mass, b.accumulators[0].mass)
+
+    assert b.ladders[0].current.name == "global", "the clipped planned windows counted empty"
+    assert _mass_at(b.accumulators[0], TWIN_TRUTH_MS + TWIN_PERIOD_MS) == pytest.approx(
+        0.3 * 4 + 0.95 * 2, abs=1e-3), "and their landscapes were accumulated"
+
+
+def test_live_mayday_keeps_searching_and_adopts_the_better_lock(new, monkeypatch, tmp_path):
+    world = d.mayday_world()
+    t = d.run_world(new, world, monkeypatch, tmp_path, settings_over=LIVE, poll_after_ms=200_000)
+
+    assert _continued(t, world), "the search went on past the plan"
+    lock = t.history[-1]
+    assert lock["locked"] is True and lock["time_to_lock_ms"] > 60_000
+    assert lock["offset_ms"] == 1325
+    assert t.engine._shape_offset_ms == 1325
+    assert t.watching_after == URI and not t.task_after_poll
+
+
+def test_live_an_unlockable_song_gives_up(new, monkeypatch, tmp_path):
+    world = _unlockable()
+    t = d.run_world(new, world, monkeypatch, tmp_path, settings_over=LIVE)
+    drain = _drain_ms(world)
+    give_up_ms = d.SETTINGS["xcorr_keep_searching_give_up_ms"]
+    assert drain + give_up_ms <= t.last_frame_ms <= drain + give_up_ms + d.FRAME_MS
+    assert t.final_lock_state["phase"] == lock_state.PHASE_UNLOCKED
+    assert t.final_lock_state["reason"] == KEEP_SEARCHING_NOTHING_TO_FIND
+    assert t.history[-1]["locked"] is False
+
+
+@pytest.mark.parametrize("make_world,poll_after_ms,extra", [
+    (_early_lock_loaded_right, 120_000, {}),
+    (_early_lock_needs_correction, 120_000, {}),
+    (_lock_then_drift, 140_000, {}),
+    (d.mayday_world, 200_000, {"xcorr_keep_searching_enabled": False}),
+])
+def test_live_byte_identical_where_the_play_locks_or_the_switch_is_off(
+        baseline, new, monkeypatch, tmp_path, make_world, poll_after_ms, extra):
+    world = make_world()
+    kw = dict(settings_over={**LIVE, **extra}, poll_after_ms=poll_after_ms)
+    a = d.run_world(baseline, world, monkeypatch, tmp_path, **kw)
+    b = d.run_world(new, world, monkeypatch, tmp_path, **kw)
+    ca, cb = a.comparable(), b.comparable()
+    for key in ca:
+        assert ca[key] == cb[key], f"{key} diverged from the pre-change sweep"
+    assert b.accumulators and b.ladders
+    import numpy as np
+    assert np.array_equal(a.accumulators[0].mass, b.accumulators[0].mass)

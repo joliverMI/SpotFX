@@ -7196,8 +7196,18 @@ before touching it:
   calls, output proven identical against the pinned ref) is applied over the
   planner's own full-song bands and beats (`ContinuedEnvelopes`, built once
   when the search engages) and registered in the evaluator's lookup before
-  each window runs. The clip is otherwise unchanged. A new place a window can
-  come from needs the same treatment, or the clip will not see it.
+  each window runs. A new place a window can come from needs the same
+  treatment, or the clip will not see it. **A clipped continued window
+  leaves no other trace**: the search ladder does not hear it (counted empty,
+  a run of them walks into the global stage, which is EXEMPT from the clip)
+  and the evidence accumulator does not take its landscape (the clip only
+  nulls the discrete NEW; the accumulator's own save and lock-and-stop never
+  read the envelope). Both are scoped to continued windows — planned and
+  drift-recovery windows are unchanged — and beyond them a continued window
+  chooses AND SAVES exactly like a planned one (his ruling, "it should save
+  also"). **His room runs the FFT kernel, accumulator, ladder and progressive
+  matching** (`storage/settings.json`), so a proof on the driver's default
+  legacy-kernel `SETTINGS` says nothing about it: `LIVE_FLAGS` is that path.
 - **Evidence is a confirmation VOTE** (the evaluator's
   `confirmation_shifts` grew), and a continued window may not re-measure more
   than the U-Score planner's own 1 s of audio: the same seconds scored twice

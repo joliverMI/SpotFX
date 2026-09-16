@@ -830,7 +830,7 @@ class AutoOffsetService:
         # dynamically scheduled (mismatch-spike) windows. Returns True when
         # lock-and-stop fired. Body moved verbatim from the loop (closure
         # over frames/stored_*/evaluator/_ladder/...).
-        async def _run_window(win_start: int, win_end: int) -> bool:
+        async def _run_window(win_start: int, win_end: int, continued: bool = False) -> bool:
             # ── Capture-gap rejection (Phase 6) ───────────────────────────
             # If the live capture stalled anywhere in this window's searched
             # span, np.interp would bridge the hole with fabricated samples
@@ -947,13 +947,15 @@ class AutoOffsetService:
                 engine_play_best_quality=engine_play_best,
                 landscape=_win_landscape,
                 envelope_exempt=(_stage is not None and _stage.name == "global"),
+                continued_window=continued,
             )
 
             # Phase 4: ladder escalation — when the current stage keeps
             # finding nothing, widen; an anti-correlated baseline goes
             # straight to global (the loaded center is provably wrong).
             if _ladder is not None:
-                _new_stage = _ladder.note_window(outcome.new_result is not None)
+                _new_stage = (_ladder.note_window(outcome.new_result is not None)
+                              if _ladder_hears(outcome, continued) else None)
                 if _new_stage is None and outcome.baseline_anti_corr:
                     _new_stage = _ladder.escalate_to_global()
                 if _new_stage is not None:
@@ -1365,7 +1367,7 @@ class AutoOffsetService:
                     _kw = keep.take_ready(frame.timestamp_ms, _XCORR_MARGIN_MS)
                     if _kw is not None:
                         _votes_before = len(evaluator.confirmation_shifts)
-                        locked = await _run_window(_kw[0], _kw[1])
+                        locked = await _run_window(_kw[0], _kw[1], continued=True)
                         keep.note_window(
                             frame.timestamp_ms, _kw,
                             evidence=len(evaluator.confirmation_shifts) > _votes_before)
@@ -1834,6 +1836,14 @@ def _continued_envelope_source(uri: str, meta, data, stored_ts: np.ndarray) -> C
         beats_ms=beats_ms,
         max_shift_bins=uscore_planner.global_max_shift_bins(beats_ms),
     )
+
+
+def _ladder_hears(outcome, continued: bool) -> bool:
+    """Whether the search ladder counts this window as found-or-empty. A
+    continued window whose NEW the envelope clipped is neither: counting it
+    empty would escalate the ladder into the global stage, which is exempt
+    from the very clip that stopped it."""
+    return not (continued and outcome.envelope_clipped)
 
 
 def _continued_window_envelope(source: ContinuedEnvelopes, win_start: int,
