@@ -258,14 +258,35 @@ one reads the carried baseline THAT one just set, not a stale snapshot).
 The ordering rule two kinds targeting one param rely on
 (dice -> permanent -> momentary -> gain -> colour) still governs
 WITHIN one batch; two kinds staggered into DIFFERENT batches are
-deliberately reordered in real time — that IS the feature. A deferred
-batch's own writes still arm their own PendingRelease entries and get
-their own _arm_pending() safety-net call (run_kind_batch mirrors
-_execute_band's try/finally shape) — but its kind_records/carried/result
-are NOT folded back into the original on_event() record, which has
-already returned and broadcast by the time a staggered batch lands; this
-matches the release/colour-rotate precedent above, where a scheduled
-completion is likewise never retro-fitted into the original surge record.
+deliberately reordered in real time — that IS the feature, and it is also
+why the per-fire singletons (one dice roll, one colour-set jump, one
+rotation, one burst, one rush) are now one PER BATCH.
+
+A batch's `due_at` is measured from the fire's START (the clock read at
+the top of on_event/on_update, before _drive_phase and before the inline
+group's writes) — the RELEASE OWNERSHIP rule above, applied to the
+stagger: a -100/0 band's 0-kinds land 100ms after the -100 kind, never
+100ms plus however long the inline burst took to write.
+
+A batch is its own fire in miniature when it runs: run_kind_batch takes
+its own _fire_seq (so a momentary spike it lands owns its param against
+the earlier group's release, exactly like a later fire's would), and
+whoever runs it schedules what it armed — every place that drives
+on_event/on_update drains take_kind_batch_schedule too
+(services/engine.py's fire_response_event/fire_scene_update_event,
+flare_preview_hold.open_program_hold, POST /api/engine/event). A batch
+never writes onto a room that has moved on: run_kind_batch SKIPS one
+whose scene is no longer the conductor's (a permanent kind's carry would
+otherwise move the NEW scene's baseline with the OLD scene's content —
+late but never wrong, the lookahead pin's trade), and engine.py re-checks
+the SAME preview/scene_change_mode gate the original fire passed before
+it wakes a batch. Its kind_records/carried/result are NOT folded back into
+the original on_event() record, which has already returned and broadcast
+by the time a staggered batch lands (the release/colour-rotate precedent);
+instead the original record names what it queued (`deferred_kinds`) and
+every batch's outcome — landed, skipped (stale scene / a show gate) or
+error — lands in `kind_batch_log`, so a held room and a broken one never
+look the same.
 
 Executable specs: scripts/check_spectra.py, tests/test_spectra_engine.py.
 """
@@ -338,20 +359,21 @@ class PendingKindBatch:
     everything at delay 0 runs INLINE inside _execute_band_locked instead
     of becoming one of these; a batch only exists for a kind whose own
     FlareKind.trigger_offset_ms genuinely differs from the anchor.
-    `due_at` is an ABSOLUTE responder-clock time, stamped the same way a
-    PendingRelease's is — services/engine.py sleeps until it via
-    seconds_until() and then calls run_kind_batch(), the identical shape
+    `due_at` is an ABSOLUTE responder-clock time — the fire's START plus
+    `delay_ms` — so services/engine.py sleeps until it via seconds_until()
+    and then calls run_kind_batch(), the identical shape
     take_release_schedule/_release_group already established. `fire_seq`
-    is carried for symmetry with PendingRelease/ReleaseGroup (every batch
-    from one fire shares the fire's own counter) though nothing currently
-    reads it back — a batch is claimed and cleared in one call
-    (take_kind_batch_schedule), unlike a PendingRelease which can persist
-    across fires and needs the counter to tell them apart."""
+    is the QUEUING fire's counter, carried into kind_batch_log so a batch's
+    outcome can be traced back to the fire that queued it; the batch takes
+    its own counter when it runs (run_kind_batch). `scene` is the scene the
+    conductor was on at queue time — run_kind_batch skips the batch if the
+    conductor has moved on."""
     scene: SceneV2
     kinds: list[tuple[FlareKind, float]]
     intensity: float
     due_at: float
     fire_seq: int
+    delay_ms: int = 0
 
 # A dice re-roll's own eased landing (registry "smooth": true params only —
 # see _reroll). Live-measured ordinary flare cadence during active music is
@@ -900,14 +922,18 @@ class ResponseEngine:
         # claimed and cleared in one call (take_kind_batch_schedule), same
         # "claim once" shape as take_release_schedule.
         self._pending_kind_batches: list[PendingKindBatch] = []
+        # Every batch's OUTCOME (landed / skipped_* / error), bounded like
+        # `surges` — note_kind_batch is the one writer.
+        self.kind_batch_log: deque[dict] = deque(maxlen=SURGE_LOG_LIMIT)
 
     # ── the event ────────────────────────────────────────────────────────────
 
     async def on_event(self, event_class: ResponseClass,
                        intensity: float, gap_ms: Optional[int] = None) -> dict:
         scene = self.conductor.scene
+        started_at = self._clock()
         record: dict[str, Any] = {
-            "at": self._clock(), "class": event_class,
+            "at": started_at, "class": event_class,
             "intensity": round(intensity, 4),
         }
         if scene is None:
@@ -930,13 +956,15 @@ class ResponseEngine:
             return record
         record["band"] = {"intensity_min": band.intensity_min,
                           "intensity_max": band.intensity_max}
-        await self._execute_band(scene, band, intensity, record)
+        await self._execute_band(scene, band, intensity, record,
+                                 started_at=started_at)
         self.surges.append(record)
         await self._broadcast({"type": "surge", **record})
         return record
 
     async def _execute_band(self, scene: SceneV2, band: FlareBand,
-                            intensity: float, record: dict[str, Any]) -> None:
+                            intensity: float, record: dict[str, Any], *,
+                            started_at: Optional[float] = None) -> None:
         """Run every kind attached to an already-selected band at `intensity`
         and fold the results into `record` — the shared tail of on_event
         (a genuine flare/charge/lull/drop) and on_update's placeholder
@@ -947,15 +975,22 @@ class ResponseEngine:
         picks (above) first drops every pooled alternative that lost this
         fire's per-lane roll — a band with no kind_lanes pools is
         unaffected (all attached kinds survive the resolve, the pre-lanes
-        behaviour, byte-identical for every band that predates the field)."""
+        behaviour, byte-identical for every band that predates the field).
+
+        `started_at` is the fire's START on this engine's clock — what every
+        staggered batch's due_at is measured from (None = now)."""
+        if started_at is None:
+            started_at = self._clock()
         self._fire_seq += 1
         try:
-            await self._execute_band_locked(scene, band, intensity, record)
+            await self._execute_band_locked(scene, band, intensity, record,
+                                            started_at)
         finally:
             self._arm_pending()   # safety net: nothing a fire armed stays unstamped
 
     async def _execute_band_locked(self, scene: SceneV2, band: FlareBand,
-                                   intensity: float, record: dict[str, Any]) -> None:
+                                   intensity: float, record: dict[str, Any],
+                                   started_at: float) -> None:
         """PER-FLARE TRIGGER MOMENT (module docstring, "PER-FLARE TRIGGER
         MOMENT"): splits the band's already lane-picked, enabled kinds by
         each one's own delay relative to the band's anchor
@@ -967,7 +1002,18 @@ class ResponseEngine:
         straight onto `record` exactly as this method always did; any
         OTHER delay is queued as a PendingKindBatch for services/engine.py
         to schedule later, off the SAME shape take_release_schedule
-        already established for momentary releases."""
+        already established for momentary releases, due at `started_at`
+        plus its delay (never measured from the end of the inline burst)
+        and named on `record["deferred_kinds"]`.
+
+        What this does NOT promise: that every kind's real moment relative
+        to the nominal trigger equals its own trigger_offset_ms. That holds
+        only for a kind whose delay is not clamped by max(0, ...), i.e. whose
+        offset is at or after the anchor. With every authored offset in a
+        band positive, a 0-offset kind is clamped and rides the band's
+        already-relocated (later) moment — while its own flare preview still
+        draws it exactly on the mark. That gap is a pre-existing property of
+        the min-over-nonzero anchor, out of this build's scope."""
         declared = {k.name: k for k in scene.flare_kinds}
         picked_names, lane_picks = resolve_lane_picks(band, self._rng, declared)
         if lane_picks:
@@ -996,11 +1042,16 @@ class ResponseEngine:
 
         record.update(await self._run_kinds(scene, now_kinds, intensity))
 
-        for delay_ms, kinds in deferred.items():
+        if deferred:
+            record["deferred_kinds"] = [
+                {"name": kind.name, "type": kind.type, "delay_ms": delay_ms}
+                for delay_ms, kinds in sorted(deferred.items())
+                for kind, _scale in kinds]
+        for delay_ms, kinds in sorted(deferred.items()):
             self._pending_kind_batches.append(PendingKindBatch(
                 scene=scene, kinds=kinds, intensity=intensity,
-                due_at=self._clock() + delay_ms / 1000.0,
-                fire_seq=self._fire_seq))
+                due_at=started_at + delay_ms / 1000.0,
+                fire_seq=self._fire_seq, delay_ms=delay_ms))
 
     async def _run_kinds(self, scene: SceneV2,
                          attached: list[tuple[FlareKind, float]],
@@ -1047,7 +1098,7 @@ class ResponseEngine:
         kind_records: list[dict] = []
         result: dict[str, Any] = {}
 
-        if dice:   # one fresh roll per fire, however many dice kinds attach
+        if dice:   # one fresh roll per batch, however many dice kinds share it
             kind, scale = dice[0]
             kind_records.append({
                 "name": kind.name, "type": kind.type, "jump": "dice",
@@ -1093,7 +1144,7 @@ class ResponseEngine:
                 "name": kind.name, "type": kind.type, "scale": scale,
                 "gain_envelope": await self._gain(kind, scale, carry)})
 
-        if colours:   # one selector roll per fire — a jump is a jump
+        if colours:   # one selector roll per batch — a jump is a jump
             kind, scale = colours[0]
             sel_intensity = max(0.0, min(1.0, intensity * scale))
             result["color_jump"] = await self._color_jump(
@@ -1102,7 +1153,7 @@ class ResponseEngine:
                 "name": kind.name, "type": kind.type, "jump": "color_set",
                 "scale": scale, **result["color_jump"]})
 
-        if rotates:   # one rotation per fire — a spike is a spike
+        if rotates:   # one rotation per batch — a spike is a spike
             kind, scale = rotates[0]
             sel_intensity = max(0.0, min(1.0, intensity * scale))
             result["color_rotate"] = await self._color_rotate(sel_intensity)
@@ -1110,7 +1161,7 @@ class ResponseEngine:
                 "name": kind.name, "type": kind.type,
                 "scale": scale, **result["color_rotate"]})
 
-        if bursts:   # one burst per fire — the count already scales
+        if bursts:   # one burst per batch — the count already scales
             kind, scale = bursts[0]
             sel_intensity = max(0.0, min(1.0, intensity * scale))
             result["firework_burst"] = await self._firework_burst(sel_intensity)
@@ -1118,7 +1169,7 @@ class ResponseEngine:
                 "name": kind.name, "type": kind.type,
                 "scale": scale, **result["firework_burst"]})
 
-        if rushes:   # one rush per fire — a rush is a rush (fixed count)
+        if rushes:   # one rush per batch — a rush is a rush (fixed count)
             kind, scale = rushes[0]
             sel_intensity = max(0.0, min(1.0, intensity * scale))
             result["blob_rush"] = await self._blob_rush(sel_intensity)
@@ -1144,16 +1195,57 @@ class ResponseEngine:
     async def run_kind_batch(self, batch: PendingKindBatch) -> dict[str, Any]:
         """Execute one scheduled PendingKindBatch's own subset of kinds, at
         its own later moment — the deferred half of _execute_band_locked's
-        per-kind stagger. Mirrors _execute_band's own try/finally shape
-        (the safety net still applies: nothing THIS batch armed should
-        stay unstamped) without folding its result back into the
-        ALREADY-RETURNED, already-broadcast outer surge record — the same
-        posture a momentary release or a colour-rotate fade-back already
-        takes when it lands after on_event has returned."""
+        per-kind stagger. A fire in miniature: it takes its own _fire_seq
+        and mirrors _execute_band's try/finally safety net, and the CALLER
+        schedules whatever it armed (take_release_schedule/
+        pending_color_rotate_holds/take_kind_batch_schedule), exactly as
+        after on_event. Its result is never folded back into the
+        ALREADY-RETURNED outer surge record.
+
+        SKIPS, never fires, when the conductor is no longer on the scene
+        fire the batch was queued under (identity, not id: every scene fire
+        re-baselines the conductor, so even a re-fire of the same scene is
+        a new fire the batch was not part of). Every outcome — landed,
+        skipped_stale_scene, error — is recorded via note_kind_batch and
+        returned; an exception inside the kinds is logged, never swallowed
+        silently, and never raised into a detached task."""
+        current = self.conductor.scene
+        if current is not batch.scene:
+            return self.note_kind_batch(
+                batch, "skipped_stale_scene",
+                current_scene_id=current.id if current is not None else None)
+        self._fire_seq += 1
         try:
-            return await self._run_kinds(batch.scene, batch.kinds, batch.intensity)
+            result = await self._run_kinds(batch.scene, batch.kinds,
+                                           batch.intensity)
+        except Exception as exc:
+            logger.exception(
+                "kind batch failed: %s (delay %dms, queued by fire %d)",
+                [k.name for k, _s in batch.kinds], batch.delay_ms,
+                batch.fire_seq)
+            return self.note_kind_batch(
+                batch, "error", error=f"{type(exc).__name__}: {exc}")
         finally:
             self._arm_pending()
+        return self.note_kind_batch(batch, "landed", kinds=result["kinds"],
+                                    carried=result["carried"])
+
+    def note_kind_batch(self, batch: PendingKindBatch, outcome: str,
+                        **detail: Any) -> dict[str, Any]:
+        """The one writer of kind_batch_log: what happened to a staggered
+        batch. `outcome` is "landed", "error", or "skipped_<why>" — a
+        skipped batch (stale scene, a show gate holding the room) and a
+        broken one are different words, never the same silence."""
+        entry: dict[str, Any] = {
+            "at": self._clock(), "outcome": outcome,
+            "kind_names": [k.name for k, _s in batch.kinds],
+            "delay_ms": batch.delay_ms, "queued_by_fire": batch.fire_seq,
+            "scene_id": batch.scene.id, **detail}
+        self.kind_batch_log.append(entry)
+        if outcome.startswith("skipped_"):
+            logger.info("kind batch %s skipped (%s), delay %dms",
+                        entry["kind_names"], outcome, batch.delay_ms)
+        return entry
 
     async def fire_kind(self, kind: FlareKind, intensity: float) -> dict:
         """Fire ONE declared kind in isolation, bypassing band selection
@@ -1767,7 +1859,8 @@ class ResponseEngine:
         it without a fresh ask."""
         scene = self.conductor.scene
         doubled = min(1.0, intensity * 2.0)
-        record: dict[str, Any] = {"at": self._clock(), "class": "update",
+        started_at = self._clock()
+        record: dict[str, Any] = {"at": started_at, "class": "update",
                                   "intensity": round(intensity, 4),
                                   "doubled_intensity": round(doubled, 4)}
         if scene is None:
@@ -1782,7 +1875,8 @@ class ResponseEngine:
             return record
         record["band"] = {"intensity_min": band.intensity_min,
                           "intensity_max": band.intensity_max}
-        await self._execute_band(scene, band, doubled, record)
+        await self._execute_band(scene, band, doubled, record,
+                                 started_at=started_at)
         self.surges.append(record)
         await self._broadcast({"type": "surge", **record})
         return record

@@ -217,12 +217,13 @@ class PhaseSequenceProgram(flare_preview_hold.PreviewProgram):
     itself, exactly as in the show. The gap is threaded through, so the
     ramp the room renders is the ramp the ruler drew.
 
-    NO NEW RELEASE QUEUE. on_event can arm the momentary-release queue and
-    the colour-rotate queue; both are already drained by the hold at every
-    one of the four drain points a queue must be scheduled at (a queue
-    missed at one of them has already shipped one real defect — see
+    NO NEW RELEASE QUEUE. on_event can arm the momentary-release queue, the
+    colour-rotate queue and a band's staggered kind batches (scene_response's
+    "PER-FLARE TRIGGER MOMENT"); the hold drains all three
+    (flare_preview_hold._schedule_responder_tail), as every drain point must
+    (a queue missed at one of them has already shipped one real defect — see
     scene_response's colour-rotate note). release_phases() is a direct
-    write, not a queue, so it adds no fifth thing to schedule."""
+    write, not a queue, so it adds nothing more to schedule."""
 
     steps = SEQUENCE + ("release",)
 

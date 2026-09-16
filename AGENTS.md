@@ -3010,11 +3010,23 @@ INLINE (`ResponseEngine._run_kinds`, the extracted pipeline
 momentary releases (`take_kind_batch_schedule`/`run_kind_batch`). A band
 whose kinds all sit at 0 is byte-identical (no batch is ever created).
 The fixed dice -> permanent -> momentary -> gain -> colour order still
-governs collisions WITHIN one batch; two kinds staggered into DIFFERENT
-batches are deliberately reordered in real time — that IS the feature.
-`fire_kind` (the isolated single-kind preview) is untouched: a lone
-kind's own anchor is itself, so its delay is always 0. Spec:
+governs collisions WITHIN one batch (so the per-fire singletons — one dice
+roll, one colour jump — are now per batch); two kinds staggered into
+DIFFERENT batches are deliberately reordered in real time — that IS the
+feature. Four rules ride with it, all in `scene_response.py`'s module
+docstring: a batch is due at the fire's START + its delay, never after
+the inline burst; a batch is a fire in miniature (own `_fire_seq`, and
+`engine._schedule_fire_tail` schedules what it armed — the kind-batch
+queue is the FOURTH queue every drain point must schedule, including
+`flare_preview_hold` and `POST /api/engine/event`); a woken batch re-checks
+the gate its fire passed and SKIPS (never fires) onto a changed scene;
+and every outcome lands in `responses.kind_batch_log` (landed / skipped_* /
+error). `fire_kind` (the isolated single-kind preview) is untouched: a
+lone kind's own anchor is itself, so its delay is always 0. Known,
+pre-existing, out of scope: in an all-positive-offset band a 0-kind is
+clamped and fires late while its preview draws it on the mark. Spec:
 `tests/test_flare_per_kind_stagger.py`, `tests/
+test_flare_kind_batch_lifecycle.py`, `tests/
 test_flare_preview_shows_stagger.py`.
 
 Help: `spectra/web/src/help/helpContent.ts` id `flare-preview-timeline`

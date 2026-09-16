@@ -10,8 +10,9 @@ was always `animation_anchor_s - kind.trigger_offset_ms/1000`, independent
 of any band-mate. What THIS proves is that the independence the preview
 already drew is the SAME independence the real per-kind stagger mechanism
 (scene_response._execute_band_locked) now honours when the two kinds share
-a real band — the preview was never aspirational, it was the mechanism the
-band execution was missing until this shipped."""
+a real band — for every kind whose stagger delay is not clamped (its offset
+at or after the band's anchor). An all-positive band is the named exception
+(see the last test)."""
 from __future__ import annotations
 
 import asyncio
@@ -84,34 +85,60 @@ def test_two_kinds_on_one_band_preview_independently_staggered_marks():
         tl_b["trigger_mark_s"] + 0.1, abs=1e-6)
 
 
+def _real_fire_moments_ms(scene, intensity=0.8) -> dict[str, int]:
+    """Each attached kind's REAL moment relative to the nominal trigger, as
+    the engine itself schedules it: tick() relocates the whole fire by the
+    band's anchor (band_trigger_offset_ms), then the fire runs a kind inline
+    (record["kinds"]) or queues it `delay_ms` later
+    (record["deferred_kinds"])."""
+    from spectra.services import flare_preview, scene_response
+    from spectra.services.fx_executor import RecordingExecutor
+
+    async def main():
+        clock = flare_preview._FakeClock()
+        _c, responder, _w = flare_preview._scratch_engine(
+            scene, intensity, clock, RecordingExecutor(clock=clock))
+        return await responder.on_event("flare", intensity)
+
+    record = asyncio.run(main())
+    anchor_ms = scene_response.band_trigger_offset_ms(scene, "flare", intensity)
+    moments = {k["name"]: anchor_ms for k in record["kinds"]}
+    for d in record.get("deferred_kinds", []):
+        moments[d["name"]] = anchor_ms + d["delay_ms"]
+    return moments
+
+
+def _preview_write_minus_mark_ms(scene, kind) -> int:
+    tl = _timeline(scene, kind)
+    return round((tl["animation_anchor_s"] - tl["trigger_mark_s"]) * 1000)
+
+
 def test_the_preview_reflects_the_same_real_fire_moment_the_stagger_computes():
-    """A single-kind preview fixes the WRITE at animation_anchor_s and
-    draws the trigger MARK at anchor_s - offset/1000 — there is no shared
-    real reference between two SEPARATE build_timeline() calls, so their
-    marks are not directly comparable as cross-kind wall-clock positions
-    (each preview is self-contained, by design — module docstring, "TRUE
-    SIMULATION"). What IS a shared, checkable invariant: each kind's own
-    REAL fire moment relative to the nominal (un-relocated) trigger —
-    `anchor_ms + delay_ms` in _execute_band_locked's own arithmetic —
-    always equals that kind's own trigger_offset_ms, regardless of the
-    band's anchor. This is exactly what the preview's own
-    `write - mark == offset_ms/1000` formula already encodes per kind, so
-    the preview was never aspirational: it already showed, for each kind
-    on its own, precisely the real relationship the new per-kind stagger
-    mechanism now honours when kinds share a real band."""
-    from spectra.services.scene_response import _band_anchor_ms
+    """For a kind whose stagger delay is NOT clamped by max(0, ...) — its
+    offset at or after the band's anchor — its real fire moment relative to
+    the nominal trigger, read off the engine's own schedule, equals its own
+    trigger_offset_ms, which is exactly what its single-kind preview draws
+    (`write - mark == offset`). [-100, 0] is that case for both kinds: the
+    -100 kind IS the anchor, the 0 kind waits 100ms behind it."""
     scene, kind_a, kind_b = _band_scene(offset_a=-100, offset_b=0)
-    band = scene.responses["flare"].bands[0]
-    declared = {k.name: k for k in scene.flare_kinds}
-    anchor_ms = _band_anchor_ms(band, declared)
-    assert anchor_ms == -100
-
+    moments = _real_fire_moments_ms(scene)
+    assert moments == {"Kind A": -100, "Kind B": 0}
     for kind in (kind_a, kind_b):
-        delay_ms = max(0, kind.trigger_offset_ms - anchor_ms)
-        real_fire_relative_to_nominal_ms = anchor_ms + delay_ms
-        assert real_fire_relative_to_nominal_ms == kind.trigger_offset_ms
+        assert moments[kind.name] == kind.trigger_offset_ms
+        assert _preview_write_minus_mark_ms(scene, kind) == kind.trigger_offset_ms
 
-        tl = _timeline(scene, kind)
-        write_minus_mark_ms = round(
-            (tl["animation_anchor_s"] - tl["trigger_mark_s"]) * 1000)
-        assert write_minus_mark_ms == kind.trigger_offset_ms
+
+def test_an_all_positive_band_is_outside_that_invariant():
+    """The invariant above does NOT extend to a band whose every authored
+    offset is positive. The anchor is min over NONZERO offsets (+50 here),
+    so tick() moves the whole fire +50 and the 0-offset kind's delay clamps
+    to 0: it fires 50ms late while its own preview still draws it exactly
+    on the mark. A known, pre-existing, OUT-OF-SCOPE gap between preview
+    and light for this configuration — a property of the min-over-nonzero
+    anchor, not something the per-kind stagger introduced or is authorised
+    to change."""
+    scene, kind_a, kind_b = _band_scene(offset_a=0, offset_b=50)
+    moments = _real_fire_moments_ms(scene)
+    assert moments == {"Kind A": 50, "Kind B": 50}
+    assert _preview_write_minus_mark_ms(scene, kind_a) == 0
+    assert _preview_write_minus_mark_ms(scene, kind_b) == 50

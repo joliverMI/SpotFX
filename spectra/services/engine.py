@@ -44,12 +44,19 @@ PER-FLARE TRIGGER MOMENT (2026-09-16): a THIRD schedule shares this same
 shape — responses.take_kind_batch_schedule() hands back the kinds a fire
 staggered to a later moment than the band's own anchor (scene_response.py's
 module docstring, "PER-FLARE TRIGGER MOMENT"); one task per batch, sleeping
-until its own absolute due_at, then responses.run_kind_batch(batch).
+until its own absolute due_at, then responses.run_kind_batch(batch). All
+three schedules are spawned by ONE tail (_schedule_fire_tail), called after
+on_event/on_update AND after every batch runs, so whatever a batch arms is
+scheduled exactly like a fire's own. A woken batch re-checks the SAME gate
+the fire that queued it passed (_response_gate/_update_gate) before it
+writes; a refusal is recorded on responses.kind_batch_log and in
+fire_history's "deferred" bucket, never silent.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
+from typing import Callable, Optional
 
 from fx import light_ownership
 from spectra.models.scene import SceneV2
@@ -129,13 +136,8 @@ async def fire_response_event(event_class: str, intensity: float,
     bridge's own classified-event call (no SPECTRA trigger context) and a
     manual /api/engine/event test-fire both omit it, its documented
     default — an honest "unknown," not a zero."""
-    from spectra.services import fire_history, preview_pause
-    from spectra.services.room_controls import load_room_controls
-    if preview_pause.active():
-        return
-    mode = load_room_controls().scene_change_mode
-    allowed = mode in ("full", "triggers_only") if via_trigger else mode == "full"
-    if not allowed:
+    from spectra.services import fire_history
+    if _response_gate(via_trigger) is not None:
         return
     await responses.on_event(event_class, intensity, gap_ms)
     # The 2D drift gradient's DROP kick (owner ask 2026-08-24, order item 2):
@@ -154,6 +156,37 @@ async def fire_response_event(event_class: str, intensity: float,
             logger.exception("gradient drift: on_drop_event failed")
     fire_history.record_fire("responses", event_class,
                              {"event_class": event_class, "intensity": intensity})
+    _schedule_fire_tail(lambda: _response_gate(via_trigger))
+
+
+def _response_gate(via_trigger: bool) -> Optional[str]:
+    """fire_response_event's gate, as a reason: "preview" (a live Preview
+    holds the room), "scene_change_mode" (this caller's tier is closed —
+    see fire_response_event's docstring for the via_trigger split), or
+    None to fire. Also what a staggered batch from such a fire re-checks
+    when it wakes."""
+    from spectra.services import preview_pause
+    from spectra.services.room_controls import load_room_controls
+    if preview_pause.active():
+        return "preview"
+    mode = load_room_controls().scene_change_mode
+    allowed = mode in ("full", "triggers_only") if via_trigger else mode == "full"
+    return None if allowed else "scene_change_mode"
+
+
+def _update_gate() -> Optional[str]:
+    """fire_scene_update_event's gate, same shape as _response_gate."""
+    from spectra.services import preview_pause
+    from spectra.services.room_controls import load_room_controls
+    if preview_pause.active():
+        return "preview"
+    if load_room_controls().scene_change_mode not in ("full", "triggers_only"):
+        return "scene_change_mode"
+    return None
+
+
+def _schedule_fire_tail(gate: Callable[[], Optional[str]]) -> None:
+    """Spawn everything a fire (or a staggered batch) just armed."""
     # One release task per ReleaseGroup this fire armed — owned by THIS
     # fire (fire_seq), sleeping until the group's ABSOLUTE due time, which
     # was stamped when the spike writes went out, not now: on_event's own
@@ -174,7 +207,7 @@ async def fire_response_event(event_class: str, intensity: float,
     # SAME shape as the release scheduling immediately above (sleep until
     # the batch's own absolute due time, then run it).
     for batch in responses.take_kind_batch_schedule():
-        asyncio.create_task(_run_kind_batch(batch))
+        asyncio.create_task(_run_kind_batch(batch, gate))
 
 
 async def _release_group(group) -> None:
@@ -188,9 +221,31 @@ async def _release_color_rotate_after_dwell(dwell_s: float) -> None:
     await responses.flush_color_rotates(dwell_s)
 
 
-async def _run_kind_batch(batch) -> None:
+async def _run_kind_batch(batch, gate: Callable[[], Optional[str]]) -> None:
+    """A staggered batch's own task: wake at its due time, re-check the
+    gate the queuing fire passed, then run it and schedule what it armed.
+    A gate refusal is recorded (kind_batch_log + fire_history "deferred")
+    and writes nothing; a failure anywhere here is logged and recorded,
+    never lost inside a detached task."""
     await asyncio.sleep(responses.seconds_until(batch.due_at))
-    await responses.run_kind_batch(batch)
+    names = [k.name for k, _s in batch.kinds]
+    try:
+        refusal = gate()
+        if refusal is not None:
+            from spectra.services import fire_history
+            responses.note_kind_batch(batch, f"skipped_{refusal}")
+            fire_history.record_fire("deferred", "kind_batch", {
+                "reason": refusal, "kind_names": names,
+                "delay_ms": batch.delay_ms})
+            return
+    except Exception as exc:
+        logger.exception("kind batch %s: gate check failed — not fired", names)
+        responses.note_kind_batch(batch, "error",
+                                  error=f"{type(exc).__name__}: {exc}")
+        return
+    entry = await responses.run_kind_batch(batch)
+    if not entry["outcome"].startswith("skipped_"):
+        _schedule_fire_tail(gate)
 
 
 async def fire_scene_update_event(intensity: float) -> Optional[dict]:
@@ -232,19 +287,10 @@ async def fire_scene_update_event(intensity: float) -> Optional[dict]:
     on an early gate-out above) so a caller that needs to know what
     happened — dwell's own fire_history "deferred" record — can log it;
     the trigger-driven caller still discards it, unchanged."""
-    from spectra.services import preview_pause
-    from spectra.services.room_controls import load_room_controls
-    if preview_pause.active():
-        return None
-    if load_room_controls().scene_change_mode not in ("full", "triggers_only"):
+    if _update_gate() is not None:
         return None
     record = await responses.on_update(intensity)
-    for group in responses.take_release_schedule():
-        asyncio.create_task(_release_group(group))
-    for dwell_s in responses.pending_color_rotate_holds():
-        asyncio.create_task(_release_color_rotate_after_dwell(dwell_s))
-    for batch in responses.take_kind_batch_schedule():
-        asyncio.create_task(_run_kind_batch(batch))
+    _schedule_fire_tail(_update_gate)
     return record
 
 
@@ -398,7 +444,8 @@ def status() -> dict:
         "executor": {"mode": executor.mode,
                      "recent_writes": list(executor.writes)[-20:]},
         "conductor": conductor.status(),
-        "responses": {"recent_surges": list(responses.surges)[-10:]},
+        "responses": {"recent_surges": list(responses.surges)[-10:],
+                      "recent_kind_batches": list(responses.kind_batch_log)[-10:]},
         "bridge": bridge.status(),
         "triggers": trigger_engine.status(),
         "ambient": ambient_music_gate.status(),
