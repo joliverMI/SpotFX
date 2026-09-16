@@ -295,12 +295,28 @@ class KeepSearching:
     evaluator's lookup under the window's bounds before it is evaluated. The
     clip itself is unchanged, including its cold-start skip.
 
+    THE CLIP HOLDS AT EVERY LADDER STAGE FOR A CONTINUED WINDOW
+    (`auto_offset_service._envelope_exempt`). The ladder's global stage skips
+    the clip for planned and drift-recovery windows, as it always did, but
+    never for a continued one: the ladder reaches global without any clip
+    firing — continued windows that find nothing count empty, the planned
+    run may already have escalated, an anti-correlated baseline goes straight
+    there — and with ~35 continued windows a song, an exempt global stage
+    would hand the twin every one of them. THE TRADE-OFF, accepted knowingly:
+    once the engine has snapped, a continued window can no longer make a
+    LARGE correction the envelope rejects at its position. It only ever
+    refuses an offset the planner deems unsafe THERE; a cold start still gets
+    its big correction (the clip skips while the engine's play-best is 0);
+    corrections and saves inside the envelope are untouched. It refuses
+    probably-wrong locks, not better ones.
+
     A CLIPPED CONTINUED WINDOW LEAVES NO OTHER TRACE, because two consumers
     downstream of the clip would otherwise carry the twin past it:
       - the SEARCH LADDER does not hear it (`auto_offset_service.
         _ladder_hears`). Counted as an empty window, as a clipped planned one
-        is, a run of them walks the ladder into the global stage, which is
-        exempt from the clip, and the twin is adopted there;
+        is, a run of them walks the ladder into the global stage, where
+        every later continued window searches ±30s and a drift-recovery
+        window after a lock is exempt from the clip;
       - the EVIDENCE ACCUMULATOR does not ingest its landscape
         (`SweepEvaluator.process_window(continued_window=True)`). The clip
         only nulls the discrete NEW, so the curve would still pile twin mass

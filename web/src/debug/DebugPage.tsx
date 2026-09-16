@@ -635,7 +635,7 @@ export default function DebugPage() {
       {/* ── Mismatch spikes ── */}
       <div className="card" style={{ padding: '10px 14px' }}>
         <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
-          Mismatch spikes <span style={{ color: '#ff2d95' }}>●</span> (recovery windows)
+          {feeds.spikeTitle.title} <span style={{ color: '#ff2d95' }}>●</span> {feeds.spikeTitle.note}
         </div>
         <div className="dbg-mono" style={{ color: feeds.spikeLines.length ? '#ff2d95' : undefined }}>
           {feeds.spikeLines.length ? feeds.spikeLines.join('\n') : 'no spikes yet'}

@@ -38,10 +38,17 @@ math kernel, the trigger engine and disk are replaced.
           or locked; the planner's own output is unchanged by sharing it.
   TEN   — the same proofs on the path his room runs (FFT kernel, evidence
           accumulator, search ladder, progressive matching): a clipped
-          continued window neither promotes the ladder into the envelope-
-          exempt global stage nor feeds the accumulator, with a red control
-          for each; a planned window's handling is unchanged; MAYDAY,
-          termination and the byte-identity proofs hold there too.
+          continued window neither promotes the ladder into the global stage
+          nor feeds the accumulator, with a red control for each; a planned
+          window's handling is unchanged; MAYDAY, termination and the
+          byte-identity proofs hold there too.
+  ELEVEN — on that path the clip holds at EVERY ladder stage for a continued
+          window: the ladder reaches global with no window clipped, and the
+          twin presented there is still refused (red control: the global
+          stage exempting continued windows adopts it). The trade-off is
+          exactly the stated one — a planned window at global is still
+          exempt, byte-identical to the pre-change sweep, and a cold-start
+          continued window still adopts a correction far outside its envelope.
 
 Timing sign conventions: this change decides WHEN and HOW LONG the search
 runs, never what a measurement means. TWO is the proof — every engine snap,
@@ -670,7 +677,7 @@ def test_live_a_clipped_continued_window_never_promotes_the_ladder(new, monkeypa
     assert _continued(t, world), "the search continued into the twin stretch"
     assert t.ladders[0].current.name != "global"
     assert all(_span(c) <= 2 * WIDE_SPAN for c in t.kernel if c[0] == "xcorr_window"), (
-        "no window was ever searched at the envelope-exempt global stage"
+        "no window was ever searched at the global stage"
     )
     assert not any("search ladder → global" in line for line in t.logs)
     assert _twin_snaps(t) == []
@@ -692,14 +699,26 @@ def test_live_a_clipped_continued_window_never_feeds_the_accumulator(new, monkey
     assert t.saves and t.saves[-1][1] == TWIN_TRUTH_MS
 
 
-def test_live_red_counting_a_clipped_continued_window_as_empty_adopts_the_twin(new, monkeypatch, tmp_path):
+def _global_exempts_every_window(stage, _continued):
+    return stage is not None and stage.name == "global"
+
+
+def test_live_red_counting_a_clipped_continued_window_as_empty_promotes_the_ladder(new, monkeypatch, tmp_path):
     """RED CONTROL for the ladder. Counting the clipped window as empty, as a
-    planned one is, walks the ladder into the global stage, where the clip
-    does not apply — and the twin is snapped, saved and locked."""
+    planned one is, walks the ladder into the global stage. A continued window
+    is no longer exempt from the clip there (ELEVEN), so the twin stays out —
+    but with the global stage exempting every window, as it once did, the twin
+    is snapped, saved and locked: each rule closes the route on its own."""
     monkeypatch.setattr(new, "_ladder_hears", lambda _outcome, _continued: True)
     t = d.run_world(new, _live_twin_world(), monkeypatch, tmp_path, settings_over=LIVE)
 
     twin = TWIN_TRUTH_MS + TWIN_PERIOD_MS
+    assert t.ladders[0].current.name == "global"
+    assert any(_span(c) > 2 * WIDE_SPAN for c in t.kernel if c[0] == "xcorr_window")
+    assert _twin_snaps(t) == [] and all(s[1] != twin for s in t.saves)
+
+    monkeypatch.setattr(new, "_envelope_exempt", _global_exempts_every_window)
+    t = d.run_world(new, _live_twin_world(), monkeypatch, tmp_path, settings_over=LIVE)
     assert t.ladders[0].current.name == "global"
     assert any(c[-1] is True for c in _twin_snaps(t)), "the engine snapped to the twin"
     assert any(s[1] == twin for s in t.saves), "the twin was saved"
@@ -796,3 +815,164 @@ def test_live_byte_identical_where_the_play_locks_or_the_switch_is_off(
     assert b.accumulators and b.ladders
     import numpy as np
     assert np.array_equal(a.accumulators[0].mass, b.accumulators[0].mass)
+
+
+# ── ELEVEN — the clip holds at every ladder stage for a continued window ─────
+
+EMPTY_STRETCH = (34_000, 58_000)
+
+
+def _global_twin_world() -> d.World:
+    """The ladder reaches the global stage with no window ever clipped: past
+    the planned windows the song goes quiet, so continued windows find nothing
+    and count empty (wide → global). Only then does the beat twin appear, as
+    the free search's winner at r 0.95, while the engine holds its snap to the
+    truth."""
+    def empty(ms):
+        return EMPTY_STRETCH[0] <= ms < EMPTY_STRETCH[1]
+
+    return _live_twin_world(
+        clarity=lambda ms: (0.1, 0.9) if empty(ms) else (0.6, 1.0),
+        twin=lambda ms: ((TWIN_TRUTH_MS + TWIN_PERIOD_MS, 0.95)
+                         if ms >= EMPTY_STRETCH[1] else None),
+        peaks=lambda ms: [] if empty(ms) else [
+            (TWIN_TRUTH_MS, 0.6),
+            (TWIN_TRUTH_MS + TWIN_PERIOD_MS, 0.95 if ms >= EMPTY_STRETCH[1] else 0.3)],
+    )
+
+
+def _clips_before_global(t: d.Trace) -> list[str]:
+    promoted = next(i for i, line in enumerate(t.logs) if "search ladder → global" in line)
+    return [line for line in t.logs[:promoted] if "envelope clip" in line]
+
+
+def test_live_the_ladder_reaches_global_with_no_window_clipped(new, monkeypatch, tmp_path):
+    world = _global_twin_world()
+    t = d.run_world(new, world, monkeypatch, tmp_path, settings_over=LIVE)
+
+    assert t.ladders[0].current.name == "global"
+    assert _clips_before_global(t) == [], "no clipped window walked the ladder there"
+    at_global = [c for c in t.kernel
+                 if c[0] == "xcorr_window" and _span(c) > 2 * WIDE_SPAN and c[1] >= EMPTY_STRETCH[1]]
+    assert at_global and all((c[1], c[2]) in _continued(t, world) for c in at_global), (
+        "the twin was presented to continued windows searched at the global stage"
+    )
+
+
+def test_live_a_twin_at_the_global_stage_is_clipped_for_a_continued_window(new, monkeypatch, tmp_path):
+    world = _global_twin_world()
+    t = d.run_world(new, world, monkeypatch, tmp_path, settings_over=LIVE)
+
+    twin = TWIN_TRUTH_MS + TWIN_PERIOD_MS
+    assert t.ladders[0].current.name == "global"
+    assert any("envelope clip — NEW +1700ms" in line for line in t.logs)
+    assert _twin_snaps(t) == [], "no snap was ever asked for at the twin"
+    assert all(s[1] != twin for s in t.saves), "the twin was never saved, by any route"
+    assert not any("lock-and-stop" in line for line in t.logs)
+    assert t.history[-1]["locked"] is False and t.history[-1]["offset_ms"] == TWIN_TRUTH_MS
+
+    accumulator = t.accumulators[0]
+    assert _mass_at(accumulator, twin) == pytest.approx(
+        0.3 * (len(world.windows) + 1), abs=1e-3), (
+        "only the weak twin peaks of the planned windows and the one continued "
+        "window before the song went quiet — none from the global stage"
+    )
+    assert accumulator.dominant().offset_ms == TWIN_TRUTH_MS
+    assert t.final_lock_state["reason"] == KEEP_SEARCHING_NO_TIME_LEFT
+    assert t.saves and t.saves[-1][1] == TWIN_TRUTH_MS
+
+
+def test_live_red_exempting_a_continued_window_at_global_adopts_the_twin(new, monkeypatch, tmp_path):
+    """RED CONTROL. The same world with the global stage exempting continued
+    windows too — the rule before this change — snaps to the twin, saves it,
+    locks on it and piles twin mass into the accumulator."""
+    monkeypatch.setattr(new, "_envelope_exempt", _global_exempts_every_window)
+    world = _global_twin_world()
+    t = d.run_world(new, world, monkeypatch, tmp_path, settings_over=LIVE)
+
+    twin = TWIN_TRUTH_MS + TWIN_PERIOD_MS
+    assert _clips_before_global(t) == []
+    assert not any("envelope clip" in line for line in t.logs)
+    assert any(c[-1] is True for c in _twin_snaps(t)), "the engine snapped to the twin"
+    assert any(s[1] == twin for s in t.saves), "the twin was saved"
+    assert t.history[-1]["locked"] is True and t.history[-1]["offset_ms"] == twin
+    assert _mass_at(t.accumulators[0], twin) > 0.3 * (len(world.windows) + 1) + 0.5
+
+
+def _planned_global_twin_world() -> d.World:
+    """Keep-searching never engages: two planned windows find nothing (wide →
+    global), and the three planned windows after them present the twin, each
+    carrying the planner's stored ±900ms envelope."""
+    def empty(ms):
+        return 22_000 <= ms < 34_000
+
+    return _live_twin_world(
+        windows=[(10_000, 15_000), (16_000, 21_000), (22_000, 27_000), (28_000, 33_000),
+                 (40_000, 45_000), (46_000, 51_000), (52_000, 57_000)],
+        planned_envelope=(-900, 900),
+        clarity=lambda ms: (0.1, 0.9) if empty(ms) else (0.6, 1.0),
+        twin=lambda ms: (TWIN_TRUTH_MS + TWIN_PERIOD_MS, 0.95) if ms >= 38_000 else None,
+        peaks=lambda ms: [] if empty(ms) else [
+            (TWIN_TRUTH_MS, 0.6),
+            (TWIN_TRUTH_MS + TWIN_PERIOD_MS, 0.95 if ms >= 38_000 else 0.3)],
+    )
+
+
+def test_live_a_planned_window_at_the_global_stage_is_still_exempt(baseline, new, monkeypatch, tmp_path):
+    """The planned-window default is unchanged: at the global stage a planned
+    window's twin passes the stored envelope, exactly as the pinned pre-change
+    sweep lets it — and forcing the clip on shows that envelope would have
+    rejected it."""
+    world = _planned_global_twin_world()
+    kw = dict(settings_over=LIVE, poll_after_ms=120_000)
+    a = d.run_world(baseline, world, monkeypatch, tmp_path, **kw)
+    b = d.run_world(new, world, monkeypatch, tmp_path, **kw)
+    ca, cb = a.comparable(), b.comparable()
+    for key in ca:
+        assert ca[key] == cb[key], f"{key} diverged from the pre-change sweep"
+
+    twin = TWIN_TRUTH_MS + TWIN_PERIOD_MS
+    assert b.ladders[0].current.name == "global"
+    assert not any("keep-searching window" in line for line in b.logs), "every window here was planned"
+    assert "continued" not in b.final_lock_state
+    assert any(c[-1] is True for c in _twin_snaps(b))
+    assert not any("envelope clip" in line for line in b.logs)
+
+    monkeypatch.setattr(new, "_envelope_exempt", lambda _stage, _continued: False)
+    forced = d.run_world(new, world, monkeypatch, tmp_path, settings_over=LIVE)
+    assert any("window [40000–45000]ms envelope clip — NEW +1700ms" in line
+               for line in forced.logs)
+
+
+FAR_TRUTH_MS = 5000
+
+
+def _cold_start_world() -> d.World:
+    """No progressive match and planned windows that find nothing, so the
+    engine has never snapped when the search continues (play-best 0) — at the
+    global stage — into a stretch where the truth is +5000ms, far outside the
+    ±900ms envelope the planner assigns there."""
+    return d.World(
+        duration_ms=150_000,
+        windows=[(10_000, 15_000), (16_000, 21_000), (22_000, 27_000), (28_000, 33_000)],
+        loaded_offset_ms=0, truth=lambda _ms: FAR_TRUTH_MS,
+        clarity=lambda ms: (0.1, 0.9) if ms < 36_000 else (0.95, 1.0),
+        raw_band=_beat_periodic,
+    )
+
+
+def test_live_a_cold_start_continued_window_still_adopts_a_large_correction(new, monkeypatch, tmp_path):
+    world = _cold_start_world()
+    t = d.run_world(new, world, monkeypatch, tmp_path, settings_over=LIVE)
+
+    assert t.ladders[0].current.name == "global"
+    applied = [c for c in t.engine.calls if c[0] == "apply_save" and c[-1] is True]
+    assert applied and applied[0][2] == FAR_TRUTH_MS, "the first snap of the play is the correction"
+    assert any(f"keep-searching window [{s}–{e}]ms" in line and "envelope [-900, +900]ms" in line
+               for s, e in _continued(t, world) for line in t.logs), (
+        "the correction lies outside the envelope a continued window carries"
+    )
+    assert not any("envelope clip" in line for line in t.logs)
+    assert t.history[-1]["locked"] is True and t.history[-1]["offset_ms"] == FAR_TRUTH_MS
+    assert t.history[-1]["time_to_lock_ms"] > _drain_ms(world)
+    assert t.engine._shape_offset_ms == FAR_TRUTH_MS

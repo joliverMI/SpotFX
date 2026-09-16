@@ -946,7 +946,7 @@ class AutoOffsetService:
                 engine_current_offset_ms=(engine_offset_ms if engine_offset_ms is not None else 0),
                 engine_play_best_quality=engine_play_best,
                 landscape=_win_landscape,
-                envelope_exempt=(_stage is not None and _stage.name == "global"),
+                envelope_exempt=_envelope_exempt(_stage, continued),
                 continued_window=continued,
             )
 
@@ -1836,6 +1836,19 @@ def _continued_envelope_source(uri: str, meta, data, stored_ts: np.ndarray) -> C
         beats_ms=beats_ms,
         max_shift_bins=uscore_planner.global_max_shift_bins(beats_ms),
     )
+
+
+def _envelope_exempt(stage, continued: bool) -> bool:
+    """Whether this window skips the envelope clip. The ladder's global stage
+    is exempt (its search reaches past the ±12 beats the planner vetted), but
+    never for a continued window: the ladder can reach global without the clip
+    ever firing (empty continued windows, a planned run that already escalated,
+    an anti-correlated baseline), and a continued window sits exactly where
+    the planner found the song too self-similar to place one. The cost is
+    stated: once the engine has snapped, a continued window cannot make a
+    correction the envelope rejects at its position; a cold start still can,
+    because the clip itself skips while the engine's play-best is 0."""
+    return stage is not None and stage.name == "global" and not continued
 
 
 def _ladder_hears(outcome, continued: bool) -> bool:

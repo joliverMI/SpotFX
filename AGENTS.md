@@ -7197,10 +7197,18 @@ before touching it:
   planner's own full-song bands and beats (`ContinuedEnvelopes`, built once
   when the search engages) and registered in the evaluator's lookup before
   each window runs. A new place a window can come from needs the same
-  treatment, or the clip will not see it. **A clipped continued window
+  treatment, or the clip will not see it. **The clip holds at EVERY ladder
+  stage for a continued window** (`_envelope_exempt`): the global stage still
+  exempts planned and drift-recovery windows, never a continued one, because
+  the ladder gets there without any clip firing (empty continued windows, an
+  escalated plan, an anti-correlated baseline). THE TRADE-OFF, stated: once
+  the engine has snapped, a continued window cannot make a LARGE correction
+  the envelope rejects at its position; a cold start still can (play-best 0
+  skips the clip), and anything inside the envelope is untouched — it refuses
+  probably-wrong locks, not better ones. **A clipped continued window
   leaves no other trace**: the search ladder does not hear it (counted empty,
-  a run of them walks into the global stage, which is EXEMPT from the clip)
-  and the evidence accumulator does not take its landscape (the clip only
+  a run of them walks into the global stage) and the evidence accumulator
+  does not take its landscape (the clip only
   nulls the discrete NEW; the accumulator's own save and lock-and-stop never
   read the envelope). Both are scoped to continued windows — planned and
   drift-recovery windows are unchanged — and beyond them a continued window
@@ -7221,7 +7229,11 @@ before touching it:
 - The badge's Searching half fell out of the terminal-signal design by
   construction; the one thing that did not was "Searching… 4/4" printing a
   finished fraction on an unfinished search — hence `continued`/
-  `continued_windows`, added ONLY to plays that continue.
+  `continued_windows`, added ONLY to plays that continue. The debug page
+  holds itself to the same rule: a continued window's `xcorr_spike` carries
+  `source: "keep_searching"` and `web/src/debug/spikeLine.ts` (and its
+  `spectra/web` twin) never files it under "Mismatch spikes (recovery
+  windows)" (`node scripts/check_debug_spike_lines.mjs`).
 
 ## `librosa_offset_ms` is unreliable — don't shift section/beat times by it
 
