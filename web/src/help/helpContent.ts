@@ -1217,7 +1217,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         title: 'Reading the shape canvas',
         keywords: 'saved live capture mismatch magenta centerline legend',
         body: [
-          'The saved shape draws upward from the centerline; live capture (25 ms bins) draws downward, so a good lock looks like a mirror image. Brackets mark the xcorr windows; magenta spikes are confirmed mismatches. Middle-drag pans; the timeline handles zoom. Follow resumes automatically when the page opens or the song changes.',
+          'The saved shape draws upward from the centerline; live capture (25 ms bins) draws downward, so a good lock looks like a mirror image. Brackets mark the xcorr windows; magenta spikes are confirmed mismatches — or, on a song that never locked, the windows the matcher placed while it kept searching (the spike list names which). Middle-drag pans; the timeline handles zoom. Follow resumes automatically when the page opens or the song changes.',
           'Perception trim is a per-track manual offset layered on top of the xcorr result — negative fires lighting earlier, positive later.',
         ],
       },

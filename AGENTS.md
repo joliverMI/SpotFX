@@ -7143,8 +7143,8 @@ that connects mid-song is never blind. Three things before touching any of it:
   calls `note_outcome(locked=False)`, which records the numbers and LEAVES the
   phase at `searching`; only `note_search_ended()` resolves it, wired today as
   the sweep task's own done-callback (so a search can never outlive the task
-  doing it). A later keep-searching engine keeps its task alive and the badge
-  stays "Searching…" with nothing to change here.
+  doing it). The keep-searching engine below keeps its task alive, so the
+  phase stays `searching` by construction.
 - **THE BADGE'S DECISION IS ONE PURE FUNCTION**, `web/src/components/
   lockBadge.ts`, kept out of React so `scripts/check_lock_badge_states.mjs`
   can transpile the real module with esbuild and drive the whole table (it
@@ -7172,7 +7172,8 @@ used to `break` the moment that queue drained, so MAYDAY stopped 32 s into a
 monitor's own placement) every 5 s through the ordinary per-window gates,
 hands off to the post-lock path on a lock, and gives up with a named reason
 — `nothing_to_find` (45 s of song, no usable measurement), `no_time_left`
-(the last 30 s, where no window is planned), `user_verified` — holding
+(the last 30 s, where no window is planned), `nothing_admissible` (below),
+`user_verified` — holding
 `_watching_uri` so the next poll cannot relaunch and overwrite "Lock failed"
 with "Not checked" (the pre-change sweep did exactly that). Six things
 before touching it:
