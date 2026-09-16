@@ -43,7 +43,10 @@ def report(path: Path, sessions: int) -> int:
     lock_history._entries = None          # drop any cached copy; re-read the file
     d = lock_history.pipeline_drift(max_sessions=sessions)
     print(f"pipeline drift over {path} — alarm at ±{d['alarm_threshold_ms']}ms, "
-          f"sessions need ≥{d['min_baselined']} gated plays to drive it\n")
+          f"sessions need ≥{d['min_baselined']} gated plays to drive it")
+    era = d["anchor_era"]
+    print("anchor era: none — no song has an anchor\n" if era is None else
+          f"anchor era: {era['start_at'][:16]} → {era['end_at'][:16]} ({era['songs']} anchored songs)\n")
     print(f"{'session start (UTC)':>20s} {'plays':>5s} {'lvl n':>5s} {'LEVEL':>9s} "
           f"{'shape':>12s}  |  {'old n':>5s} {'old resid':>10s}")
     for s in reversed(d["sessions"]):     # oldest → newest, reads as a story
