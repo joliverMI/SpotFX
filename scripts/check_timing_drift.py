@@ -107,6 +107,9 @@ def report(path: Path, sessions: int, anchors: Optional[Path] = None) -> int:
     era = d["anchor_era"]
     print(f"anchor era: none — no song has an anchor ({d['anchor_status']})" if era is None else
           f"anchor era: {era['start_at'][:16]} → {era['end_at'][:16]} ({era['songs']} anchored songs)")
+    if d["anchor_samples_unsaved"]:
+        print(f"  !! {d['anchor_samples_unsaved']} anchor-era play(s) not saved into the anchors "
+              f"store ({d['anchor_status']})")
     if era is not None and era["last_reanchor"] is not None:
         ev = era["last_reanchor"]
         print(f"  re-anchored {era['reanchors']}×, latest {ev['at'][:16]} by {ev['by']}: {ev['reason']}")
@@ -133,16 +136,19 @@ def report(path: Path, sessions: int, anchors: Optional[Path] = None) -> int:
 
 def selftest() -> int:
     saved = (lock_history._STORE_PATH, lock_history._entries,
-             lock_history._anchor_seed_oldest, lock_history._anchors_persisted_at)
+             lock_history._anchor_seed_oldest, lock_history._anchors_persisted_at,
+             lock_history._anchor_samples_unsaved)
     with tempfile.TemporaryDirectory(prefix="check_timing_drift_") as tmp:
         lock_history._STORE_PATH = Path(tmp) / "lock_history.json"
         lock_history._anchor_seed_oldest = None
         lock_history._anchors_persisted_at = None
+        lock_history._anchor_samples_unsaved = []
         try:
             return _selftest_worlds()
         finally:
             (lock_history._STORE_PATH, lock_history._entries,
-             lock_history._anchor_seed_oldest, lock_history._anchors_persisted_at) = saved
+             lock_history._anchor_seed_oldest, lock_history._anchors_persisted_at,
+             lock_history._anchor_samples_unsaved) = saved
 
 
 def _selftest_worlds() -> int:

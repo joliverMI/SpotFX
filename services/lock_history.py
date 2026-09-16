@@ -35,6 +35,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shutil
 import statistics
 import threading
 from datetime import datetime, timedelta, timezone
@@ -158,6 +159,9 @@ _anchor_seed_oldest: Optional[str] = None   # oldest `at` the log held when an
 _anchors_persisted_at: Optional[str] = None  # when an anchors store was first
                                              # written; once set, a missing
                                              # store is never rebuilt on its own
+_anchor_samples_unsaved: list[dict] = []     # gated in-era plays whose save into
+                                             # an already-written store failed,
+                                             # retried while their era is open
 
 
 def _now_iso() -> str:
@@ -165,7 +169,7 @@ def _now_iso() -> str:
 
 
 def _load() -> list[dict]:
-    global _entries, _anchor_seed_oldest, _anchors_persisted_at
+    global _entries, _anchor_seed_oldest, _anchors_persisted_at, _anchor_samples_unsaved
     if _entries is not None:
         return _entries
     try:
@@ -173,10 +177,13 @@ def _load() -> list[dict]:
         _entries = list(raw.get("entries") or [])
         _anchor_seed_oldest = raw.get("anchor_seed_oldest_at")
         _anchors_persisted_at = raw.get("anchors_persisted_at")
+        _anchor_samples_unsaved = [dict(p) for p in raw.get("anchor_samples_unsaved") or []
+                                   if isinstance(p, dict)]
     except (FileNotFoundError, ValueError, OSError):
         _entries = []
         _anchor_seed_oldest = None
         _anchors_persisted_at = None
+        _anchor_samples_unsaved = []
     return _entries
 
 
@@ -186,6 +193,7 @@ def _persist() -> None:
             json.dumps({"entries": _entries,
                         "anchor_seed_oldest_at": _anchor_seed_oldest,
                         "anchors_persisted_at": _anchors_persisted_at,
+                        "anchor_samples_unsaved": _anchor_samples_unsaved,
                         "updated_at": _now_iso()}, indent=2),
             encoding="utf-8",
         )
@@ -440,13 +448,25 @@ def _extend_anchor_era(entries: list[dict], entry: dict) -> None:
     save that fails (a transient OSError) is simply tried again on the next
     play, from whatever the log still holds, instead of blinding the level
     for good. Once one has landed, the call only adds `entry` if it is a
-    gated play inside the era; once a play lands past the era's end nothing
-    is ever added again, so every song's anchor is fixed from then on. A
-    store that was written and later goes missing is never rebuilt here —
-    that would be the anchor moving on its own; reanchor() is the way back."""
-    global _anchor_seed_oldest, _anchors_persisted_at
+    gated play inside the era, plus any earlier in-era play whose own save
+    failed (`_anchor_samples_unsaved`) while the era is still open; once a
+    play lands past the era's end nothing is ever added again, so every
+    song's anchor is fixed from then on. A store that was written and later
+    goes missing is never rebuilt here — that would be the anchor moving on
+    its own; reanchor() is the way back."""
+    global _anchor_seed_oldest, _anchors_persisted_at, _anchor_samples_unsaved
     try:
         floor = _drift_quality_floor()
+        # A store that was written once and later vanishes or turns
+        # unreadable is deliberately NOT rebuilt or re-derived here, unlike a
+        # store whose first write never landed. On a capped log a re-anchor
+        # to the original era's own start is refused as evicted, so an
+        # automatic rebuild could only adopt a DIFFERENT era while presenting
+        # as the original — a confident wrong answer, the one outcome this
+        # instrument exists to refuse. A vanished store is an operator-visible
+        # event (a disk fault, a deletion, corruption): it is reported loudly
+        # (anchor_status "missing"/"unreadable") and repaired only by a
+        # person's explicit reanchor().
         try:
             era = _load_anchor_era()
         except AnchorStoreUnreadable as exc:
@@ -455,6 +475,8 @@ def _extend_anchor_era(entries: list[dict], entry: dict) -> None:
                            "on purpose: %s", exc)
             return
         changed = False
+        retried: list[dict] = []
+        at = _parse_at(entry.get("at", ""))
         if era is None:
             if _anchors_persisted_at is not None:
                 logger.warning("lock_history: anchors store %s was written %s and is now "
@@ -465,35 +487,61 @@ def _extend_anchor_era(entries: list[dict], entry: dict) -> None:
                 return
             era = _derive_anchor_era(_gated_plays(entries, floor))
             changed = era is not None
-        elif _anchors_persisted_at is None:
-            _anchors_persisted_at = _now_iso()
-        at = _parse_at(entry.get("at", ""))
+        else:
+            if _anchors_persisted_at is None:
+                _anchors_persisted_at = _now_iso()
+            # Retrying an in-era play whose save failed only ever adds its
+            # sample to the still-open era: bounds and every sample already
+            # stored stay exactly as they are, and nothing is added once the
+            # era has closed, when its anchors start being read against. His
+            # live era closed long ago, so this cannot bite today — but the
+            # explicit reanchor() this instrument offers is exactly what makes
+            # an era that includes the present reachable again.
+            now_at = at if at is not None else _parse_at(_now_iso())
+            if _anchor_samples_unsaved and now_at is not None and now_at <= era["end"]:
+                for pending in _anchor_samples_unsaved:
+                    p_at = _parse_at(pending.get("at", ""))
+                    if p_at is not None and era["start"] <= p_at <= era["end"]:
+                        era["samples"].setdefault(str(pending.get("uri", "")), []).append(
+                            int(pending.get("offset_ms", 0)))
+                        retried.append(pending)
+                changed = bool(retried)
+        added: Optional[dict] = None
         if at is not None and _is_baseline_grade(entry, floor):
             if era is None:
                 era = {"start": at,
                        "end": at + timedelta(days=_DRIFT_ANCHOR_ERA_DAYS),
                        "samples": {}, "reanchors": []}
             if era["start"] <= at <= era["end"]:
-                era["samples"].setdefault(str(entry.get("uri", "")), []).append(
-                    int(entry.get("offset_ms", 0)))
+                added = {"at": entry.get("at", ""), "uri": str(entry.get("uri", "")),
+                         "offset_ms": int(entry.get("offset_ms", 0))}
+                era["samples"].setdefault(added["uri"], []).append(added["offset_ms"])
                 changed = True
         if not (changed and era is not None):
             return
-        if _anchors_persisted_at is None:
+        was_persisted = _anchors_persisted_at is not None
+        if not was_persisted:
             oldest = _oldest_at(entries + [entry])
             _anchor_seed_oldest = oldest.isoformat() if oldest is not None else None
         try:
             _save_anchor_era(era)
         except Exception as exc:
-            if _anchors_persisted_at is None:
+            if not was_persisted:
                 logger.warning("lock_history: could not write the anchors store — no song "
                                "has a level until a later play's save lands, which retries "
                                "from the history the log still holds: %s", exc)
-            else:
-                logger.warning("lock_history: could not add this play to the anchors "
-                               "store: %s", exc)
+                return
+            if added is not None:
+                _anchor_samples_unsaved = _anchor_samples_unsaved + [added]
+            logger.warning("lock_history: could not save %d in-era play(s) into the anchors "
+                           "store — retried on every later play while the era is open "
+                           "(until %s): %s", len(_anchor_samples_unsaved),
+                           era["end"].isoformat(), exc)
             return
-        if _anchors_persisted_at is None:
+        if retried:
+            _anchor_samples_unsaved = [p for p in _anchor_samples_unsaved
+                                       if not any(p is r for r in retried)]
+        if not was_persisted:
             _anchors_persisted_at = _now_iso()
     except Exception as exc:
         logger.warning("lock_history: could not update anchors store: %s", exc)
@@ -539,16 +587,29 @@ def _plan_reanchor(entries: list[dict], start_at: str, now: datetime) -> dict:
     return {"start": start, "end": end, "samples": samples, "reanchors": []}
 
 
-def _current_era_for_reanchor() -> tuple[Optional[dict], Optional[str]]:
-    """The era a re-anchor would replace, and a note when there is none to read."""
+def _salvage_reanchors() -> list[dict]:
+    """Every re-anchor audit event still recoverable from an anchors store
+    that no longer loads as a whole — one bad sample or era bound must not
+    cost the history of who re-anchored, when, why, and what they replaced."""
+    try:
+        raw = json.loads(_anchor_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    events = raw.get("reanchors") if isinstance(raw, dict) else None
+    return [dict(ev) for ev in events if isinstance(ev, dict)] if isinstance(events, list) else []
+
+
+def _current_era_for_reanchor() -> tuple[Optional[dict], Optional[str], list[dict]]:
+    """The era a re-anchor would replace, a note when there is none to read,
+    and the audit trail to carry forward (salvaged when the store is unreadable)."""
     try:
         era = _load_anchor_era()
     except AnchorStoreUnreadable as exc:
-        return None, f"unreadable: {exc}"
+        return None, f"unreadable: {exc}", _salvage_reanchors()
     if era is None:
         return None, ("missing after it was written" if _anchors_persisted_at is not None
-                      else "never written")
-    return era, None
+                      else "never written"), []
+    return era, None, era["reanchors"]
 
 
 def _anchor_moves(previous: Optional[dict], new: dict) -> dict:
@@ -566,7 +627,7 @@ def preview_reanchor(start_at: str) -> dict:
         now = _parse_at(_now_iso())
         assert now is not None
         new = _plan_reanchor(entries, start_at, now)
-        previous, note = _current_era_for_reanchor()
+        previous, note, history = _current_era_for_reanchor()
     return {
         "new": {**_era_summary(new),
                 "open": new["end"] > now,
@@ -574,6 +635,7 @@ def preview_reanchor(start_at: str) -> dict:
                                     + timedelta(hours=_DRIFT_BASELINE_MIN_AGE_H)).isoformat()},
         "previous": _era_summary(previous) if previous is not None else None,
         "previous_note": note,
+        "reanchors_carried": len(history),
         "anchor_moves": _anchor_moves(previous, new),
     }
 
@@ -589,10 +651,12 @@ def reanchor(*, start_at: str, by: str, reason: str,
     its bounds and every sample — is kept in the store's `reanchors` audit
     trail with who asked, why, when, and from where, and a WARNING is logged.
     Also the repair for a store that is unreadable or missing after it was
-    written. Raises ReanchorRefused (nothing written) when it cannot be done
+    written; an unreadable store is first copied aside byte-for-byte (its
+    path recorded in the event's `previous_note`) and every audit event
+    still recoverable from it is carried forward. Raises ReanchorRefused (nothing written) when it cannot be done
     honestly; an OSError writing the store propagates, also with nothing
     changed."""
-    global _anchor_seed_oldest, _anchors_persisted_at
+    global _anchor_seed_oldest, _anchors_persisted_at, _anchor_samples_unsaved
     by = (by or "").strip()
     reason = (reason or "").strip()
     if not by:
@@ -605,7 +669,14 @@ def reanchor(*, start_at: str, by: str, reason: str,
         now = _parse_at(now_iso)
         assert now is not None
         new = _plan_reanchor(entries, start_at, now)
-        previous, note = _current_era_for_reanchor()
+        previous, note, history = _current_era_for_reanchor()
+        if note is not None and note.startswith("unreadable"):
+            path = _anchor_path()
+            stamp = now.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+            aside = path.with_name(f"{path.stem}.unreadable-{stamp}{path.suffix}")
+            shutil.copy2(path, aside)
+            note = (f"{note} — the unreadable store was kept as {aside}; "
+                    f"{len(history)} earlier re-anchor event(s) recovered from it")
         event = {
             "at": now_iso,
             "by": by,
@@ -617,11 +688,12 @@ def reanchor(*, start_at: str, by: str, reason: str,
             "new": _era_summary(new),
             "anchor_moves": _anchor_moves(previous, new),
         }
-        new["reanchors"] = (previous["reanchors"] if previous is not None else []) + [event]
+        new["reanchors"] = history + [event]
         _save_anchor_era(new)
         oldest = _oldest_at(entries)
         _anchor_seed_oldest = oldest.isoformat() if oldest is not None else None
         _anchors_persisted_at = now_iso
+        _anchor_samples_unsaved = []
         _persist()
     logger.warning(
         "lock_history: anchor era RE-ANCHORED by %s from %s (reason: %s) — was %s, now "
@@ -696,7 +768,10 @@ def pipeline_drift(max_sessions: int = 10) -> dict:
     Sessions come back newest first, capped at `max_sessions`.
     `anchor_status` says where the era came from, or why there is none:
     "recorded", "not_yet_recorded" (derived from a log whose store has never
-    been written), "no_gated_history", "save_pending", "missing", "unreadable".
+    been written), "no_gated_history", "save_pending", "missing", "unreadable"
+    — or, for a recorded era, "samples_pending" / "samples_lost" when
+    `anchor_samples_unsaved` in-era plays could not be saved into it (still
+    retried while the era is open / no longer, once it has closed).
     """
     floor = _drift_quality_floor()
     with _lock:
@@ -725,8 +800,20 @@ def pipeline_drift(max_sessions: int = 10) -> dict:
                            "an anchor until someone re-anchors on purpose: %s", exc)
             era = None
             anchor_status = "unreadable"
+        unsaved = len(_anchor_samples_unsaved)
     if era is None and anchor_status in ("recorded", "not_yet_recorded"):
         anchor_status = "no_gated_history"
+    if anchor_status == "recorded" and unsaved:
+        now = _parse_at(_now_iso())
+        anchor_status = ("samples_pending" if now is not None and now <= era["end"]
+                         else "samples_lost")
+        logger.warning("lock_history: %d gated play(s) inside the anchor era (until %s) "
+                       "could not be saved into the anchors store — %s", unsaved,
+                       era["end"].isoformat(),
+                       "retried on every later play while the era is open"
+                       if anchor_status == "samples_pending" else
+                       "the era has closed, so their songs' anchors are missing those "
+                       "plays until someone re-anchors on purpose")
 
     by_uri_gated: dict[str, list[tuple[datetime, int]]] = {}
     for at, uri, off, gated in plays:
@@ -840,4 +927,5 @@ def pipeline_drift(max_sessions: int = 10) -> dict:
                                           if era["reanchors"] else None)}
                        if era is not None else None),
         "anchor_status": anchor_status,
+        "anchor_samples_unsaved": unsaved,
     }

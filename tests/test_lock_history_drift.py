@@ -40,6 +40,7 @@ def _isolated_history(tmp_path, monkeypatch):
     monkeypatch.setattr(lock_history, "_entries", None)
     monkeypatch.setattr(lock_history, "_anchor_seed_oldest", None)
     monkeypatch.setattr(lock_history, "_anchors_persisted_at", None)
+    monkeypatch.setattr(lock_history, "_anchor_samples_unsaved", [])
 
 
 def _install(entries: list[dict]) -> None:
@@ -538,3 +539,91 @@ def test_the_reanchor_route_needs_confirm_and_records_the_caller(monkeypatch):
     drift = client.get("/api/lock-history/drift").json()
     assert drift["anchor_era"]["start_at"] == new_start
     assert drift["anchor_era"]["last_reanchor"]["reason"] == "confirmed new normal"
+
+
+def test_a_failed_save_into_an_open_era_is_retried_until_it_lands_and_never_moves_the_era(
+        monkeypatch):
+    import json
+
+    era_plays = [(T0 + timedelta(days=day, minutes=4 * k), uri, 1000 * k)
+                 for day in range(4) for k, uri in enumerate(SONGS)]
+    _record(monkeypatch, era_plays[:1])                         # store written, era still open
+    store = lock_history._anchor_path()
+    first = json.loads(store.read_text(encoding="utf-8"))
+
+    _failing_saves(monkeypatch, failures=2)
+    _record(monkeypatch, era_plays[1:3])                        # both in-era saves fail
+    pending = lock_history.pipeline_drift(max_sessions=50)
+    assert pending["anchor_status"] == "samples_pending"
+    assert pending["anchor_samples_unsaved"] == 2
+    assert json.loads(store.read_text(encoding="utf-8"))["samples"] == first["samples"]
+
+    lock_history._entries = None                                # as after a restart
+    _record(monkeypatch, era_plays[3:])                         # saves work again
+    stored = json.loads(store.read_text(encoding="utf-8"))
+    assert (stored["era_start"], stored["era_end"]) == (first["era_start"], first["era_end"])
+    assert stored["samples"] == {uri: [1000 * k] * 4 for k, uri in enumerate(SONGS)}
+    healed = lock_history.pipeline_drift(max_sessions=50)
+    assert healed["anchor_status"] == "recorded"
+    assert healed["anchor_samples_unsaved"] == 0
+
+
+def test_an_in_era_play_never_saved_before_the_era_closes_is_reported_lost(monkeypatch):
+    import json
+
+    _record(monkeypatch, [(T0, SONGS[0], 0)])
+    store = lock_history._anchor_path()
+    first = json.loads(store.read_text(encoding="utf-8"))
+    _failing_saves(monkeypatch, failures=1)
+    _record(monkeypatch, [(T0 + timedelta(days=3, hours=23), SONGS[1], 1000)])
+    _record(monkeypatch, [(T0 + timedelta(days=5), SONGS[1], 1000)])   # era has closed
+
+    stored = json.loads(store.read_text(encoding="utf-8"))
+    assert stored["samples"] == first["samples"]
+    assert (stored["era_start"], stored["era_end"]) == (first["era_start"], first["era_end"])
+    lost = lock_history.pipeline_drift(max_sessions=50)
+    assert lost["anchor_status"] == "samples_lost"
+    assert lost["anchor_samples_unsaved"] == 1
+
+    lock_history.reanchor(start_at=T0.isoformat(), by="Javi",
+                          reason="take the anchor-era play that never saved")
+    repaired = lock_history.pipeline_drift(max_sessions=50)
+    assert repaired["anchor_status"] == "recorded"
+    assert repaired["anchor_samples_unsaved"] == 0
+    assert json.loads(store.read_text(encoding="utf-8"))["samples"][SONGS[1]] == [1000]
+
+
+def test_reanchoring_an_unreadable_store_keeps_the_audit_trail_it_can_recover(monkeypatch):
+    import json
+
+    _record(monkeypatch, _settled_world_plays(range(6, 10)))
+    lock_history.reanchor(start_at=T0.isoformat(), by="Javi", reason="first re-anchor")
+    store = lock_history._anchor_path()
+    doc = json.loads(store.read_text(encoding="utf-8"))
+    doc["samples"][SONGS[0]][0] = "not a number"
+    one_bad_sample = json.dumps(doc)
+    store.write_text(one_bad_sample, encoding="utf-8")
+    assert lock_history.pipeline_drift()["anchor_status"] == "unreadable"
+
+    new_start = (T0 + timedelta(days=6)).isoformat()
+    assert lock_history.preview_reanchor(new_start)["reanchors_carried"] == 1
+    assert store.read_text(encoding="utf-8") == one_bad_sample
+
+    event = lock_history.reanchor(start_at=new_start, by="Javi",
+                                  reason="repair after a corrupted sample")
+    stored = json.loads(store.read_text(encoding="utf-8"))
+    assert [ev["reason"] for ev in stored["reanchors"]] == [
+        "first re-anchor", "repair after a corrupted sample"]
+    asides = sorted(store.parent.glob("lock_history_anchors.unreadable-*.json"))
+    assert len(asides) == 1
+    assert asides[0].read_text(encoding="utf-8") == one_bad_sample
+    assert str(asides[0]) in event["previous_note"]
+
+    store.write_text("{ not json", encoding="utf-8")
+    later = (T0 + timedelta(days=9, hours=23)).isoformat()
+    monkeypatch.setattr(lock_history, "_now_iso", lambda: later)
+    lock_history.reanchor(start_at=new_start, by="Javi", reason="repair after truncation")
+    stored = json.loads(store.read_text(encoding="utf-8"))
+    assert [ev["reason"] for ev in stored["reanchors"]] == ["repair after truncation"]
+    asides = sorted(store.parent.glob("lock_history_anchors.unreadable-*.json"))
+    assert [a.read_text(encoding="utf-8") for a in asides] == [one_bad_sample, "{ not json"]

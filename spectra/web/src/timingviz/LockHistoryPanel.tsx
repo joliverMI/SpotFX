@@ -57,7 +57,9 @@ interface DriftStatus {
     start_at: string; end_at: string; songs: number; reanchors: number;
     last_reanchor: { at: string; by: string; reason: string } | null;
   } | null;
-  anchor_status: 'recorded' | 'not_yet_recorded' | 'no_gated_history' | 'save_pending' | 'missing' | 'unreadable';
+  anchor_status: 'recorded' | 'not_yet_recorded' | 'no_gated_history' | 'save_pending' | 'missing' | 'unreadable'
+    | 'samples_pending' | 'samples_lost';
+  anchor_samples_unsaved: number;
 }
 
 const fmtDriftS = (ms: number): string =>
@@ -67,6 +69,8 @@ const ANCHOR_STATUS_NOTE: Partial<Record<DriftStatus['anchor_status'], string>> 
   save_pending: 'no level yet — the anchors store could not be written; the next play retries',
   missing: 'no level — the anchors store is missing and is never rebuilt on its own; re-anchor on purpose',
   unreadable: 'no level — the anchors store is unreadable; re-anchor on purpose',
+  samples_pending: 'some anchor-era plays could not be saved yet — retried on every play while the era is open',
+  samples_lost: 'some anchor-era plays were never saved and the era has closed — those songs\' anchors are missing them',
 };
 
 const SHAPE_LABEL: Record<DriftSession['shape'], string> = {
@@ -123,6 +127,13 @@ function DriftStrip() {
           <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
             {cur.level_baselined} gated plays · session {fmtWhen(cur.start_at)}
           </span>
+          {ANCHOR_STATUS_NOTE[data.anchor_status] && (
+            <span
+              style={{ fontSize: 11, color: '#ff9800' }}
+              title={`${data.anchor_samples_unsaved} anchor-era play(s) not saved into the anchors store`}>
+              ⚠ {ANCHOR_STATUS_NOTE[data.anchor_status]}
+            </span>
+          )}
           {alarm && (
             <span style={{ fontSize: 11, fontWeight: 700, color }}>
               ⚠ the whole room's audio timing has moved — locks start failing near ±3s; check the audio chain
