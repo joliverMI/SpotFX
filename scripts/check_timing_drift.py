@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -45,7 +46,8 @@ def report(path: Path, sessions: int) -> int:
     print(f"pipeline drift over {path} — alarm at ±{d['alarm_threshold_ms']}ms, "
           f"sessions need ≥{d['min_baselined']} gated plays to drive it")
     era = d["anchor_era"]
-    print("anchor era: none — no song has an anchor\n" if era is None else
+    print(f"anchor era: none — no song has an anchor (anchors store: {lock_history._anchor_path()})\n"
+          if era is None else
           f"anchor era: {era['start_at'][:16]} → {era['end_at'][:16]} ({era['songs']} anchored songs)\n")
     print(f"{'session start (UTC)':>20s} {'plays':>5s} {'lvl n':>5s} {'LEVEL':>9s} "
           f"{'shape':>12s}  |  {'old n':>5s} {'old resid':>10s}")
@@ -68,6 +70,18 @@ def report(path: Path, sessions: int) -> int:
 
 
 def selftest() -> int:
+    saved = (lock_history._STORE_PATH, lock_history._entries, lock_history._anchor_seed_oldest)
+    with tempfile.TemporaryDirectory(prefix="check_timing_drift_") as tmp:
+        lock_history._STORE_PATH = Path(tmp) / "lock_history.json"
+        lock_history._anchor_seed_oldest = None
+        try:
+            return _selftest_worlds()
+        finally:
+            (lock_history._STORE_PATH, lock_history._entries,
+             lock_history._anchor_seed_oldest) = saved
+
+
+def _selftest_worlds() -> int:
     t0 = datetime(2026, 9, 1, 20, 0, 0, tzinfo=timezone.utc)
     songs = [f"spotify:track:s{i}" for i in range(6)]
 
@@ -97,8 +111,6 @@ def selftest() -> int:
     print(f"−400ms/day ratchet alarms:  {'ok' if ok else 'FAIL'} "
           f"(level {d['current']['level_ms']:+d}ms, alarm={d['alarm']})")
     failures += 0 if ok else 1
-
-    lock_history._entries = None
     return failures
 
 

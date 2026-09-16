@@ -38,6 +38,7 @@ def _isolated_history(tmp_path, monkeypatch):
     """Never read or write the repo's real storage/lock_history.json."""
     monkeypatch.setattr(lock_history, "_STORE_PATH", tmp_path / "lock_history.json")
     monkeypatch.setattr(lock_history, "_entries", None)
+    monkeypatch.setattr(lock_history, "_anchor_seed_oldest", None)
 
 
 def _install(entries: list[dict]) -> None:
@@ -264,6 +265,76 @@ def test_an_unreadable_anchor_store_means_no_anchor_not_a_rederived_one(monkeypa
 
     _record(monkeypatch, [(T0 + timedelta(days=11), SONGS[0], 0)])
     assert path.read_text(encoding="utf-8") == "{ not json"
+
+
+def _settled_world_plays(days: range) -> list[tuple[datetime, str, int]]:
+    era = [(T0 + timedelta(days=day, minutes=4 * k), uri, 1000 * k)
+           for day in range(4) for k, uri in enumerate(SONGS)]
+    return era + [(T0 + timedelta(days=day, minutes=4 * k), uri, 1000 * k - 2000)
+                  for day in days for k, uri in enumerate(SONGS)]
+
+
+def _failing_saves(monkeypatch, failures: int) -> None:
+    real_save = lock_history._save_anchor_era
+    calls = {"n": 0}
+
+    def save(era):
+        calls["n"] += 1
+        if calls["n"] <= failures:
+            raise OSError("disk full")
+        real_save(era)
+
+    monkeypatch.setattr(lock_history, "_save_anchor_era", save)
+
+
+def test_a_failed_anchor_save_is_no_anchor_once_the_log_evicts_past_it(monkeypatch):
+    # Every save fails until the capped log has already dropped the anchor
+    # era's first plays. Rebuilding the era from what the log holds then —
+    # on read, or on the next save that works — would be a moved anchor.
+    monkeypatch.setattr(lock_history, "_CAP", 48)
+    plays = _settled_world_plays(range(6, 14))
+    _failing_saves(monkeypatch, failures=60)
+    _record(monkeypatch, plays[:60])                            # evicts 12 era plays
+    during = lock_history.pipeline_drift(max_sessions=50)
+    assert during["anchor_era"] is None
+    assert all(s["level_ms"] is None for s in during["sessions"])
+
+    _record(monkeypatch, plays[60:])                            # saves work again
+    lock_history._entries = None                                # as after a restart
+    after = lock_history.pipeline_drift(max_sessions=50)
+    assert not lock_history._anchor_path().exists()
+    assert after["anchor_era"] is None
+    assert all(s["level_ms"] is None for s in after["sessions"])
+    assert after["current"] is None and after["alarm"] is False
+    assert any(s["median_residual_ms"] is not None for s in after["sessions"])
+
+
+def test_a_failed_anchor_save_recovers_while_the_log_still_holds_the_era(monkeypatch):
+    _failing_saves(monkeypatch, failures=5)
+    _record(monkeypatch, _settled_world_plays(range(6, 10)))
+    d = lock_history.pipeline_drift(max_sessions=50)
+    assert lock_history._anchor_path().exists()
+    assert d["anchor_era"]["start_at"] == T0.isoformat()
+    assert d["current"]["level_ms"] == -2000
+
+
+def test_selftest_ignores_an_anchors_store_beside_the_real_log(tmp_path, monkeypatch):
+    import importlib.util
+    from pathlib import Path
+
+    script = Path(__file__).resolve().parent.parent / "scripts" / "check_timing_drift.py"
+    spec = importlib.util.spec_from_file_location("check_timing_drift", script)
+    check = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(check)
+
+    _record(monkeypatch, [(T0 + timedelta(days=day), "spotify:track:unrelated", 0)
+                          for day in range(6)])
+    assert lock_history._anchor_path().exists()
+    real_store = lock_history._STORE_PATH
+
+    assert check.selftest() == 0
+    assert lock_history._STORE_PATH == real_store
+    assert lock_history.pipeline_drift()["anchor_era"]["songs"] == 1
 
 
 def _anchored_world(levels_by_day: dict[int, int]) -> list[dict]:
