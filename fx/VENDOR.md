@@ -1329,7 +1329,7 @@ against that commit.
     outgoing crossfade into an effect with no blobs of its own scatters
     every fish inside `TRANSITION_EXIT_BY` of it, with the bodies
     compensated for an additive blend (as far as the virtual's clip at 255
-    allows); an incoming effect in `TRANSITION_ADOPTERS` (blackhole, orbits,
+    allows) and clipped hue-preserving, so a saturated colour keeps its hue; an incoming effect in `TRANSITION_ADOPTERS` (blackhole, orbits,
     fireworks, squiggles, eye, dancer, fish) takes the fish as its own
     particles and the shoal is left as before, and radial keeps its
     collapse. New config key `swim_burst` (bool, default False, registry

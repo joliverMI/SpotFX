@@ -287,6 +287,63 @@ def test_sonic_sets_a_flare_kinds_trigger_offset_and_an_unrelated_edit_keeps_it(
                                params={"swim_burst": 1.0}))
     other = [k for k in scene_store.get_by_id(scene.id).flare_kinds if k.name == "Other"]
     assert (other[0].hold_ms, other[0].trigger_offset_ms) == (None, 0)
+    assert (other[0].gain, set(other[0].params)) == (1.0, {"swim_burst"})
+
+
+def test_sonic_nudges_one_number_on_a_flare_kind_and_keeps_the_rest():
+    """"make the fish burst 400ms" is hold_ms=400 ALONE on the stored kind:
+    its params, gain, offset and enabled flag all survive, and the call is
+    accepted rather than refused as a kind that moves nothing."""
+    from spectra.services import scene_console as sc
+    from spectra.services import scene_store
+    from spectra.models.scene import SceneV2
+
+    scene = SceneV2(name="Throwaway")
+    scene_store.save(scene)
+    _run(sc._op_set_flare_kind(scene.id, name="Fish Swim Burst", type="momentary",
+                               params={"swim_burst": 1.0, "blob_size": 3.0},
+                               gain=1.6, hold_ms=300, trigger_offset_ms=0,
+                               enabled=False))
+    before = scene_store.get_by_id(scene.id).flare_kinds[0]
+
+    nudged = _run(sc._op_set_flare_kind(scene.id, name="Fish Swim Burst",
+                                        type="momentary", hold_ms=400))
+    assert nudged.get("status") == "applied", nudged
+    after = scene_store.get_by_id(scene.id).flare_kinds[0]
+    assert after.hold_ms == 400
+    assert after.model_dump(exclude={"hold_ms"}) == before.model_dump(exclude={"hold_ms"})
+
+    # an edit that sends new params but omits gain keeps the tuned gain
+    _run(sc._op_set_flare_kind(scene.id, name="Fish Swim Burst", type="momentary",
+                               params={"swim_burst": 1.0}))
+    after = scene_store.get_by_id(scene.id).flare_kinds[0]
+    assert (after.gain, set(after.params), after.hold_ms) == (1.6, {"swim_burst"}, 400)
+
+    # an explicit gain still lands
+    _run(sc._op_set_flare_kind(scene.id, name="Fish Swim Burst", type="momentary",
+                               gain=1.0))
+    after = scene_store.get_by_id(scene.id).flare_kinds[0]
+    assert (after.gain, set(after.params)) == (1.0, {"swim_burst"})
+
+    # a drift jump re-timed alone keeps its jump
+    _run(sc._op_set_flare_kind(scene.id, name="Colour Jump", type="drift_jump",
+                               jump="color_set"))
+    moved = _run(sc._op_set_flare_kind(scene.id, name="Colour Jump",
+                                       type="drift_jump", trigger_offset_ms=-50))
+    assert moved.get("status") == "applied", moved
+    jump = [k for k in scene_store.get_by_id(scene.id).flare_kinds
+            if k.name == "Colour Jump"][0]
+    assert (jump.jump, jump.trigger_offset_ms, jump.gain, jump.params) == (
+        "color_set", -50, 1.0, {})
+
+    # re-typing to a drift jump carries none of the momentary kind's moves
+    retyped = _run(sc._op_set_flare_kind(scene.id, name="Fish Swim Burst",
+                                         type="drift_jump", jump="dice"))
+    assert retyped.get("status") == "applied", retyped
+    kind = [k for k in scene_store.get_by_id(scene.id).flare_kinds
+            if k.name == "Fish Swim Burst"][0]
+    assert (kind.type, kind.params, kind.gain, kind.hold_ms) == (
+        "drift_jump", {}, 1.0, None)
 
 
 def test_create_scene_persists_and_logs():

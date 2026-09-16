@@ -6886,7 +6886,11 @@ A new Matrix effect + a Fish scene that is a WHOLESALE COPY of his Orbits V2
    A named, accepted limit, measured on rendered pixels in
    `check_fish_disperse.py` section 2 (the numbers are in the comment beside
    `TRANSITION_GAIN_FLOOR`); lifting it needs a change to the virtual's
-   blend, not to the effect. Scope: `fish.py` only — the Fish scene's Strips
+   blend, not to the effect. A gained body clips HUE-PRESERVING
+   (`_clip_body_layer`, scatter only — ordinary swimming keeps its exact
+   per-channel clip), or a saturated colour washes toward yellow-white on its
+   way out; section 2b reads the rendered chromaticity of lone fish and puts
+   the per-channel clip back as its red control. Scope: `fish.py` only — the Fish scene's Strips
    entry is still `orbits1d`, which still fades.
    **The swim burst is an ordinary momentary TOGGLE flare** (`swim_burst`,
    registry-declared so `_compute_param_moves` lands a real bool): the
@@ -6894,9 +6898,10 @@ A new Matrix effect + a Fish scene that is a WHOLESALE COPY of his Orbits V2
    = length, 300; `trigger_offset_ms` = start, authored 0 — it fires ON the
    trigger, by his own correction; an early start is deferred to per-flare
    trigger-moment work, because a kind's offset moves its whole band).
-   Sonic's `set_flare_kind` carries `trigger_offset_ms` for it, and both it
-   and `hold_ms` are omit-means-keep like `enabled` (a hold is only carried
-   while the kind stays momentary). `scripts/add_fish_swim_burst_flare.py`
+   Sonic's `set_flare_kind` carries `trigger_offset_ms` for it, and on an
+   update `trigger_offset_ms`, `hold_ms`, `params`, `gain` and `jump` are all
+   omit-means-keep like `enabled` — "make it 400ms" is `hold_ms` alone — each
+   carried only where the requested type accepts it. `scripts/add_fish_swim_burst_flare.py`
    pools it in a pick-one "Shape" lane with the band's MOMENTARY shape
    flares (so Reverse fires half as often) and refuses a band where a
    "Shape" lane already exists. Proof + red controls:

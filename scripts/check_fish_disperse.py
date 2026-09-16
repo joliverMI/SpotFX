@@ -354,6 +354,110 @@ def section_crossfade(base):
               "sit on the panel and DIM away under the blend")
 
 
+# ── 2b. the colour of a scattering fish ─────────────────────────────────
+# A fish has to reach the 255 ceiling for any clip to act, so the colour is a
+# saturated non-primary orange like his real palettes' (#ff7800-style): an
+# #c86432 body at his blob size never reaches it and would pass under either
+# clip. Only fish with no other fish near them are read — two bodies summing
+# on one pixel saturate in ORDINARY swimming too, which this change leaves
+# exactly as it was.
+HUE_GRADIENT = "#ff8040"
+HUE_TOLERANCE = 0.04
+
+
+def body_chroma(frame, eff):
+    """Chromaticity (every channel over the brightest) of the brightest
+    RENDERED pixel at each lone fish: a 3x3 at a centre on the panel, or a
+    half-body window at the nearest edge for one whose centre has left but
+    whose body can still reach it."""
+    img = np.asarray(frame, dtype=np.float32).reshape(ROWS, COLS, 3)
+    px, py = screen(eff)
+    apart = 2.0 * eff._body_len_px() + 2.0 * eff._half_width_px()
+    reach = int(np.ceil(0.5 * eff._body_len_px()))
+    out = []
+    for k, (x, y) in enumerate(zip(px, py)):
+        gaps = np.hypot(px - x, py - y)
+        gaps[k] = np.inf
+        if gaps.size and gaps.min() < apart:
+            continue
+        xi, yi = int(round(float(x))), int(round(float(y)))
+        cx, cy = min(max(xi, 0), COLS - 1), min(max(yi, 0), ROWS - 1)
+        inside = (cx, cy) == (xi, yi)
+        if not inside and max(abs(xi - cx), abs(yi - cy)) > reach:
+            continue
+        r = 1 if inside else reach
+        win = img[max(cy - r, 0):cy + r + 1,
+                  max(cx - r, 0):cx + r + 1].reshape(-1, 3)
+        pix = win[int(np.argmax(win.max(axis=1)))]
+        if pix.max() >= 24.0:
+            out.append(pix / pix.max())
+    return out
+
+
+async def hue_run(seed, per_channel_clip, seconds=0.5):
+    """The worst departure of a lone fish's rendered colour from its own
+    pre-switch colour, through his Add 0.5 s crossfade into black.
+    `per_channel_clip` puts back the clip this change replaced (each channel
+    clipped on its own) — the red control."""
+    r = await room(f"hue{seed}{int(per_channel_clip)}", "fish",
+                   dict(HIS, gradient=HUE_GRADIENT), seed=seed)
+    fish = r.effect
+    v = r.virtual
+    if per_channel_clip:
+        fish._clip_body_layer = lambda frame: np.minimum(frame, 255.0)
+    r.step(240)
+    ref = []
+    for _ in range(60):
+        r.clock.advance(DT)
+        f = v.assemble_frame()
+        v.flush(f)
+        ref.extend(body_chroma(f, fish))
+    ref = np.median(np.array(ref), axis=0) if ref else None
+    headless.attach_effect(r.host, v, "singleColor",
+                           {"color": "#000000", "brightness": 0.0})
+    v._transition_effect = fish
+    v._config["transition_mode"] = "Add"
+    v.frame_transitions = v.transitions["Add"]
+    v.transition_frame_total = int(round(v.refresh_rate * seconds))
+    v.transition_frame_counter = 0
+    worst, samples = 0.0, 0
+    while v._transition_effect is fish:
+        r.clock.advance(DT)
+        f = v.assemble_frame()
+        v.flush(f)
+        if ref is None:
+            continue
+        for c in body_chroma(f, fish):
+            worst = max(worst, float(np.max(np.abs(c - ref))))
+            samples += 1
+    await close(r)
+    return ref, worst, samples
+
+
+def section_crossfade_hue():
+    print("\n2b. THE COLOUR OF A SCATTERING FISH (Add 0.5 s into black, "
+          f"{HUE_GRADIENT}) — a gained body keeps its hue at the rendered "
+          "pixel; clipping each channel on its own washes it toward "
+          "yellow-white")
+    for seed in (3, 5, 11):
+        ref, worst, samples = asyncio.run(hue_run(seed, False))
+        _ref, red, red_samples = asyncio.run(hue_run(seed, True))
+        chroma = "none" if ref is None else "/".join(f"{c:.3f}" for c in ref)
+        print(f"   seed {seed:>2}: pre-switch chromaticity {chroma}, worst "
+              f"departure through the crossfade {worst:.3f} over {samples} "
+              f"readings; RED CONTROL (per-channel clip) {red:.3f} over "
+              f"{red_samples}")
+        print(f"   HUE seed={seed} hue_clip_worst={worst:.4f} "
+              f"per_channel_worst={red:.4f} tolerance={HUE_TOLERANCE}")
+        check(ref is not None and samples > 0 and red_samples > 0,
+              f"seed {seed}: lone fish were read before and during the "
+              "crossfade")
+        check(worst <= HUE_TOLERANCE, f"seed {seed}: a scattering fish's "
+              f"rendered colour stays within {HUE_TOLERANCE} of its own")
+        check(red > HUE_TOLERANCE, f"seed {seed}: red control — the "
+              "per-channel clip FAILS the same bar (the wash is visible)")
+
+
 # ── 3. an ordinary population trim ──────────────────────────────────────
 async def trim_run(effect_type, seed):
     r = await room(f"trim{seed}{effect_type[-3:]}", effect_type,
@@ -530,6 +634,7 @@ def main():
         print(f"(red controls SKIPPED: cannot read {BASELINE_REF}: {exc})")
     section_lull(base)
     section_crossfade(base)
+    section_crossfade_hue()
     section_trim(base)
     section_burst()
     section_flare()

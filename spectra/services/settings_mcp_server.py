@@ -213,7 +213,8 @@ async def set_scene_setting(scene_id: str, key: _SceneKeyEnum, value: Any) -> di
 @mcp.tool()
 async def set_flare_kind(scene_id: str, name: str, type: _FlareTypeEnum,  # noqa: A002
                          jump: Optional[_JumpEnum] = None,
-                         params: Optional[dict] = None, gain: float = 1.0,
+                         params: Optional[dict] = None,
+                         gain: Optional[float] = None,
                          hold_ms: Optional[int] = None,
                          enabled: Optional[bool] = None,
                          trigger_offset_ms: Optional[int] = None) -> dict:
@@ -221,8 +222,8 @@ async def set_flare_kind(scene_id: str, name: str, type: _FlareTypeEnum,  # noqa
     enabled=false disables it (never fires automatically); omit to leave
     the current setting alone. trigger_offset_ms is signed ms relative to
     the trigger mark, NEGATIVE = EARLIER; omit to keep the stored value.
-    hold_ms is a momentary kind's spike length; omit to keep the stored
-    hold."""
+    hold_ms is a momentary kind's spike length. On an update, params, gain,
+    jump and hold_ms are omit-means-keep too: send only what changes."""
     return await _call("set_flare_kind", scene_id=scene_id, name=name, type=type,
                        jump=jump, params=params, gain=gain, hold_ms=hold_ms,
                        enabled=enabled, trigger_offset_ms=trigger_offset_ms)

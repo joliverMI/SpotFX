@@ -96,9 +96,14 @@ DISPERSE_OFF_MARGIN = 2.0  # px past the panel edge, beyond a body length,
 #   * radial keeps its own gather-into-the-bloom collapse, untouched;
 #   * anything else has no blob to merge into, so every fish disperses with
 #     a deadline inside the crossfade, and for an additive blend the bodies
-#     are drawn brighter by the inverse of that weight (floored). The trail
-#     and wake are NOT compensated — once the fish are gone the panel should
-#     go to black, which is the ask.
+#     are drawn brighter by the inverse of that weight (floored). The body
+#     layer is what carries that gain — the smear it leaves in the trail
+#     decays from the gained value — and the wake is NOT compensated, so
+#     once the fish are gone the panel goes to black, which is the ask. A
+#     gained body clips HUE-PRESERVING (`_clip_body_layer`): a pixel past
+#     255 is scaled down as a whole, so an orange fish stays orange on its
+#     way out instead of washing toward yellow-white the way clipping each
+#     channel on its own would.
 TRANSITION_EXIT_BY = 0.6     # of the crossfade: every fish off by here
 TRANSITION_GAIN_FLOOR = 0.3  # the blend weight compensation never exceeds
                              # 1 / this, so a body cannot blow out to white
@@ -2922,7 +2927,7 @@ class Fish2d(Twod, GradientEffect):
                 hd[visible], drawn[visible], half_w[visible],
                 flap_amp[visible], self.p_grad[:n][visible],
             )
-        np.maximum(self.trail, np.minimum(frame, 255.0), out=self.trail)
+        np.maximum(self.trail, self._clip_body_layer(frame), out=self.trail)
 
         self.p_x0[:n] = self.p_x[:n]
         self.p_y0[:n] = self.p_y[:n]
@@ -2958,6 +2963,19 @@ class Fish2d(Twod, GradientEffect):
             out = out + self.wake
         self.matrix = Image.fromarray(
             np.clip(out, 0, 255).astype(np.uint8), "RGB"
+        )
+
+    def _clip_body_layer(self, frame):
+        """The body layer's 255 ceiling. Ordinary swimming clips each channel
+        on its own; a scatter's gained bodies are scaled down as a whole
+        wherever the brightest channel passes 255, keeping the colour."""
+        if self._scatter is None:
+            return np.minimum(frame, 255.0)
+        peak = frame.max(axis=2, keepdims=True)
+        return np.where(
+            peak > 255.0,
+            frame * (np.float32(255.0) / np.maximum(peak, np.float32(1.0))),
+            frame,
         )
 
     def _apply_lull_dark(self):

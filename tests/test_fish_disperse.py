@@ -54,6 +54,18 @@ def test_the_measured_dispersal_and_burst_proof_passes():
     assert "ALL CHECKS PASSED" in proc.stdout, tail
     # the red controls must have RUN, not been skipped
     assert "RED CONTROL" in proc.stdout and "SKIPPED" not in proc.stdout, tail
+    # the scatter's colour, read at the rendered pixel: the hue-preserving
+    # clip holds a lone fish's colour, and the per-channel clip it replaced
+    # fails the same bar on every seed
+    hue = [
+        dict(field.split("=") for field in line.split()[1:])
+        for line in proc.stdout.splitlines() if line.strip().startswith("HUE ")
+    ]
+    assert len(hue) == 3, tail
+    for row in hue:
+        tolerance = float(row["tolerance"])
+        assert float(row["hue_clip_worst"]) <= tolerance, row
+        assert float(row["per_channel_worst"]) > tolerance, row
 
 
 def _fish_store():
