@@ -24,14 +24,19 @@ Each entry:
 
 Storage: storage/lock_history.json, most-recent first, capped. Same
 single-process threading.Lock pattern as services/systemic_offset.py.
+The drift instrument's per-song anchors live beside it in
+storage/lock_history_anchors.json, written as plays are recorded and never
+evicted with the capped log — see pipeline_drift().
 """
 from __future__ import annotations
 
 import json
 import logging
+import os
 import statistics
 import threading
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Optional
 
 from config import BASE_DIR
@@ -51,8 +56,9 @@ _SLOW_LOCK_MS = 30_000   # hard lock landing after this long costs one grade not
 # TWO readings are computed from the same gated pool, and they answer
 # different questions — data/spectra-timing-drift-cause/report.md §4/§9:
 #   - `level_ms` (LEVEL — the primary reading): each play's winning offset
-#     minus that SAME SONG's own FIXED anchor (the median of its earliest
-#     gated plays, never re-chosen as time passes). A steady chain reads
+#     minus that SAME SONG's own FIXED anchor (the median of its gated plays
+#     in the anchor era, recorded into the anchors store as they arrive, so
+#     the capped log evicting them can never move it). A steady chain reads
 #     near zero; a step reads as a step; a ramp reads as a ramp. This is
 #     what drives `current`/`alarm`.
 #   - `median_residual_ms` (kept for continuity — NOT the headline any
@@ -80,16 +86,35 @@ _DRIFT_MIN_BASELINED = 3          # sessions with fewer gated plays are
                                   # to both the level and the legacy residual)
 _DRIFT_ANCHOR_ERA_DAYS = 4        # a song's fixed LEVEL anchor is the median of
                                   # its gated plays within this many days of the
-                                  # OLDEST retained history — one shared
-                                  # calendar window, not a per-song play count
-                                  # (report §2's own method: "reference =
-                                  # median offset over the oldest era the store
-                                  # still holds"). Never re-chosen as later
-                                  # plays arrive.
+                                  # OLDEST gated history — one shared calendar
+                                  # window, not a per-song play count (report
+                                  # §2's own method: "reference = median offset
+                                  # over the oldest era the store still holds").
+                                  # The era and its samples are recorded once
+                                  # into the anchors store, so later eviction
+                                  # from the capped log cannot re-choose them.
 _DRIFT_STEP_MS = 2500             # a session-to-session LEVEL jump at/above this
                                   # is a discrete step (report's measured step
                                   # was ~4.7–5.1 s; its ramp deltas topped out
                                   # ~1.2 s) — never a session drifting on its own
+_DRIFT_RAMP_MAX_MS_PER_DAY = 1000 # … but only when no ramp this fast could have
+                                  # covered the jump in the time between the two
+                                  # readings (previous session's start → this
+                                  # session's end); otherwise two points that far
+                                  # apart cannot tell a step from a ramp, and the
+                                  # session reads "step_or_ramp". Measured on a
+                                  # read-only copy of storage/lock_history.json
+                                  # (500 plays, Aug 28 → Sep 14 2026): 6 transitions
+                                  # between qualifying sessions, 0.94–4.02 d apart;
+                                  # the four ramps ran −236/−455/−290/−297 ms/d
+                                  # (fastest −491 start→start); the one real step,
+                                  # +5122 ms, ran +2370 ms/d; 94 same-song gated
+                                  # pairs ≥12 h apart that do not straddle it:
+                                  # |rate| p50 254 / p90 550 / p95 986 ms/d. 1000 is
+                                  # ~2× the fastest session ramp and ≥2.3× under
+                                  # the step. (At 491 ms/d the flat 2500 ms bound
+                                  # alone mislabels a ramp only across ≥5.1 d; the
+                                  # longest real gap so far is 4.02 d.)
 _DRIFT_STABLE_BAND_MS = 200       # consecutive LEVELs within this band of each
                                   # other read as settled, not still moving
                                   # (the report's own post-step "rock-stable"
@@ -214,6 +239,7 @@ def record(
         }
         with _lock:
             entries = _load()
+            _extend_anchor_era(entries, entry)
             entries.insert(0, entry)
             del entries[_CAP:]
             _persist()
@@ -280,6 +306,117 @@ def _parse_at(ts: str) -> Optional[datetime]:
     return at
 
 
+def _gated_plays(entries: list[dict], floor: float) -> list[tuple[datetime, str, int, bool]]:
+    """(at, uri, offset_ms, baseline-grade) for every parseable entry, oldest first."""
+    plays: list[tuple[datetime, str, int, bool]] = []
+    for e in entries:
+        at = _parse_at(e.get("at", ""))
+        if at is None:
+            continue
+        try:
+            off = int(e.get("offset_ms", 0))
+        except (TypeError, ValueError):
+            continue
+        plays.append((at, str(e.get("uri", "")), off, _is_baseline_grade(e, floor)))
+    plays.sort(key=lambda p: p[0])
+    return plays
+
+
+def _anchor_path() -> Path:
+    return _STORE_PATH.with_name(_STORE_PATH.stem + "_anchors.json")
+
+
+class AnchorStoreUnreadable(ValueError):
+    """The anchors store exists but cannot be trusted. It is never rebuilt
+    from the capped log in that case: re-deriving it there would silently
+    swap every song's fixed anchor for a later, moving one."""
+
+
+def _load_anchor_era() -> Optional[dict]:
+    """The recorded anchor era — {"start", "end", "samples": {uri: [ms]}} —
+    or None when none has been recorded yet."""
+    path = _anchor_path()
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError) as exc:
+        raise AnchorStoreUnreadable(f"{path}: {exc}") from exc
+    try:
+        start = _parse_at(raw["era_start"])
+        end = _parse_at(raw["era_end"])
+        samples = {str(uri): [int(o) for o in offs]
+                   for uri, offs in dict(raw["samples"]).items()}
+    except (KeyError, TypeError, ValueError, AttributeError) as exc:
+        raise AnchorStoreUnreadable(f"{path}: {exc!r}") from exc
+    if start is None or end is None:
+        raise AnchorStoreUnreadable(f"{path}: unparseable era bounds")
+    return {"start": start, "end": end, "samples": samples}
+
+
+def _derive_anchor_era(plays: list[tuple[datetime, str, int, bool]]) -> Optional[dict]:
+    """The anchor era as the log holds it right now: the oldest
+    _DRIFT_ANCHOR_ERA_DAYS of gated plays. Only ever used where nothing has
+    been evicted since — to seed the store before the first eviction, or to
+    read a log that has never had a play recorded into it by this code."""
+    gated = [(at, uri, off) for (at, uri, off, ok) in plays if ok]
+    if not gated:
+        return None
+    start = min(at for at, _, _ in gated)
+    end = start + timedelta(days=_DRIFT_ANCHOR_ERA_DAYS)
+    samples: dict[str, list[int]] = {}
+    for at, uri, off in gated:
+        if at <= end:
+            samples.setdefault(uri, []).append(off)
+    return {"start": start, "end": end, "samples": samples}
+
+
+def _save_anchor_era(era: dict) -> None:
+    path = _anchor_path()
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps({
+        "era_start": era["start"].isoformat(),
+        "era_end": era["end"].isoformat(),
+        "samples": era["samples"],
+        "updated_at": _now_iso(),
+    }, indent=2), encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def _extend_anchor_era(entries: list[dict], entry: dict) -> None:
+    """Called under _lock with the log as it stands BEFORE `entry` is
+    inserted and anything is evicted: seeds the anchors store from that log
+    the first time, then adds `entry` if it is a gated play inside the era.
+    Once a play lands past the era's end nothing is ever added again, so
+    every song's anchor is fixed from then on."""
+    try:
+        floor = _drift_quality_floor()
+        try:
+            era = _load_anchor_era()
+        except AnchorStoreUnreadable as exc:
+            logger.warning("lock_history: anchors store unreadable, left untouched — "
+                           "the drift level reports no anchors until it is repaired: %s", exc)
+            return
+        changed = False
+        if era is None:
+            era = _derive_anchor_era(_gated_plays(entries, floor))
+            changed = era is not None
+        at = _parse_at(entry.get("at", ""))
+        if at is not None and _is_baseline_grade(entry, floor):
+            if era is None:
+                era = {"start": at,
+                       "end": at + timedelta(days=_DRIFT_ANCHOR_ERA_DAYS),
+                       "samples": {}}
+            if era["start"] <= at <= era["end"]:
+                era["samples"].setdefault(str(entry.get("uri", "")), []).append(
+                    int(entry.get("offset_ms", 0)))
+                changed = True
+        if changed and era is not None:
+            _save_anchor_era(era)
+    except Exception as exc:
+        logger.warning("lock_history: could not update anchors store: %s", exc)
+
+
 def pipeline_drift(max_sessions: int = 10) -> dict:
     """The pipeline-drift instrument behind the Timing page's drift line.
 
@@ -294,17 +431,28 @@ def pipeline_drift(max_sessions: int = 10) -> dict:
 
     - LEVEL (`level_ms` / `level_baselined`, the primary reading): a song's
       FIXED anchor is the median of its own gated plays that fall inside one
-      shared calendar era — the oldest _DRIFT_ANCHOR_ERA_DAYS of gated
-      history the store still holds — never re-chosen as later plays
-      arrive. A play only measures against the anchor once it is itself at
+      shared calendar era — the first _DRIFT_ANCHOR_ERA_DAYS of gated
+      history. record() writes the era and its plays into the anchors store
+      as they arrive (seeding it from the log before its first eviction), so
+      the capped log dropping them never re-chooses either. A log no play
+      has been recorded into since has lost nothing yet, and derives the
+      same era in memory; an anchors store that exists but cannot be read
+      yields NO anchors — every level is None — never a re-derived, moving
+      one. A play only measures against the anchor once it is itself at
       least _DRIFT_BASELINE_MIN_AGE_H past the era's end. Every such play's
       residual is `offset − anchor`. Because the anchor never moves, a
       steady chain reads near zero, a step reads as a step, and a ramp
       reads as a ramp — this is what `current`/`alarm`/`shape` are built
       from. `shape` per session is computed against the previous qualifying
-      session's level: "step" (|Δ| ≥ _DRIFT_STEP_MS), "stable" (|Δ| ≤
-      _DRIFT_STABLE_BAND_MS), "ramp" (between), "start" (first qualifying
-      session — nothing to compare yet), or "insufficient" (too few gated
+      session's level: "stable" (|Δ| ≤ _DRIFT_STABLE_BAND_MS); "step" (|Δ| ≥
+      _DRIFT_STEP_MS and faster than _DRIFT_RAMP_MAX_MS_PER_DAY over the
+      previous session's start → this session's end); "step_or_ramp" (a
+      step-sized move across a gap long enough that a ramp could also have
+      made it); "ramp" (a smaller move in the same direction as the last
+      session that moved, or with no earlier move to compare); "reversal"
+      (a smaller move the opposite way from the last session that moved —
+      several in a row is scatter, not a trend); "start" (first qualifying
+      session — nothing to compare yet); or "insufficient" (too few gated
       plays this session to trust a level at all).
     - median_residual_ms / baselined (kept for continuity, no longer the
       headline): the legacy SLIDING 36h–21d-old-baseline residual. Because
@@ -323,21 +471,18 @@ def pipeline_drift(max_sessions: int = 10) -> dict:
     level-gated plays; `alarm` is true when its |level| ≥ DRIFT_ALARM_MS.
     Sessions come back newest first, capped at `max_sessions`.
     """
+    floor = _drift_quality_floor()
     with _lock:
         entries = list(_load())
-
-    floor = _drift_quality_floor()
-    plays: list[tuple[datetime, str, int, bool]] = []
-    for e in entries:
-        at = _parse_at(e.get("at", ""))
-        if at is None:
-            continue
+        plays = _gated_plays(entries, floor)
         try:
-            off = int(e.get("offset_ms", 0))
-        except (TypeError, ValueError):
-            continue
-        plays.append((at, str(e.get("uri", "")), off, _is_baseline_grade(e, floor)))
-    plays.sort(key=lambda p: p[0])
+            era = _load_anchor_era()
+            if era is None:
+                era = _derive_anchor_era(plays)
+        except AnchorStoreUnreadable as exc:
+            logger.warning("lock_history: anchors store unreadable — no song has "
+                           "an anchor until it is repaired: %s", exc)
+            era = None
 
     by_uri_gated: dict[str, list[tuple[datetime, int]]] = {}
     for at, uri, off, gated in plays:
@@ -347,20 +492,15 @@ def pipeline_drift(max_sessions: int = 10) -> dict:
     min_age = timedelta(hours=_DRIFT_BASELINE_MIN_AGE_H)
     max_age = timedelta(days=_DRIFT_BASELINE_MAX_AGE_D)
 
-    # Fixed per-song anchor: one shared calendar era (the oldest
-    # _DRIFT_ANCHOR_ERA_DAYS of gated history the store still holds), never
-    # re-chosen as later plays arrive. A play only measures against it once
-    # it is itself at least min_age past the era's end, so the era is never
-    # immediately treated as a settled reference the moment it closes.
-    gated_ats = [at for (at, _, _, gated) in plays if gated]
-    anchor_era_end = (min(gated_ats) + timedelta(days=_DRIFT_ANCHOR_ERA_DAYS)
-                       if gated_ats else None)
+    # A play only measures against its song's anchor once it is itself at
+    # least min_age past the era's end, so the era is never immediately
+    # treated as a settled reference the moment it closes.
+    anchor_era_end = era["end"] if era is not None else None
     anchor_val: dict[str, float] = {}
-    if anchor_era_end is not None:
-        for uri, samples in by_uri_gated.items():
-            era_samples = [o for (t, o) in samples if t <= anchor_era_end]
-            if era_samples:
-                anchor_val[uri] = statistics.median(era_samples)
+    if era is not None:
+        for uri, samples in era["samples"].items():
+            if samples:
+                anchor_val[uri] = statistics.median(samples)
 
     sessions: list[dict] = []
     cur: Optional[dict] = None
@@ -389,7 +529,8 @@ def pipeline_drift(max_sessions: int = 10) -> dict:
     # Second pass, oldest → newest (sessions is already in that order): fold
     # each session's residual/level lists into their reported numbers, and
     # classify LEVEL shape against the previous qualifying session.
-    prev_level: Optional[float] = None
+    prev: Optional[dict] = None
+    last_move_sign = 0
     for s in sessions:
         rs = s["residuals"]
         lv = s["levels"]
@@ -399,17 +540,24 @@ def pipeline_drift(max_sessions: int = 10) -> dict:
         level = statistics.median(lv) if lv else None
         s["level_ms"] = int(round(level)) if level is not None else None
         if level is not None and len(lv) >= _DRIFT_MIN_BASELINED:
-            if prev_level is None:
+            if prev is None:
                 s["shape"] = "start"
             else:
-                delta = level - prev_level
-                if abs(delta) >= _DRIFT_STEP_MS:
-                    s["shape"] = "step"
-                elif abs(delta) <= _DRIFT_STABLE_BAND_MS:
+                delta = level - prev["level"]
+                sign = 1 if delta > 0 else -1
+                span_days = (s["end"] - prev["start"]).total_seconds() / 86400
+                if abs(delta) <= _DRIFT_STABLE_BAND_MS:
                     s["shape"] = "stable"
+                elif abs(delta) >= _DRIFT_STEP_MS:
+                    s["shape"] = ("step" if abs(delta) > _DRIFT_RAMP_MAX_MS_PER_DAY * span_days
+                                  else "step_or_ramp")
+                elif last_move_sign and sign != last_move_sign:
+                    s["shape"] = "reversal"
                 else:
                     s["shape"] = "ramp"
-            prev_level = level
+                if s["shape"] != "stable":
+                    last_move_sign = sign
+            prev = {"level": level, "start": s["start"]}
         else:
             s["shape"] = "insufficient"
 
@@ -439,4 +587,8 @@ def pipeline_drift(max_sessions: int = 10) -> dict:
         "alarm": alarm,
         "alarm_threshold_ms": DRIFT_ALARM_MS,
         "min_baselined": _DRIFT_MIN_BASELINED,
+        "anchor_era": ({"start_at": era["start"].isoformat(),
+                        "end_at": era["end"].isoformat(),
+                        "songs": len(anchor_val)}
+                       if era is not None else None),
     }

@@ -205,3 +205,89 @@ def test_level_reads_ramp_then_step_then_stable_not_scatter():
     assert d["current"] is not None
     assert d["current"]["shape"] == "stable"
     assert d["alarm"] is True   # the settled level itself is past the threshold
+
+
+def _record(monkeypatch, plays: list[tuple[datetime, str, int]]) -> None:
+    """Drive the real write path, one play at a time, on a controlled clock."""
+    clock: dict[str, datetime] = {}
+    monkeypatch.setattr(lock_history, "_now_iso", lambda: clock["now"].isoformat())
+    for at, uri, off in plays:
+        clock["now"] = at
+        lock_history.record(uri=uri, locked=True, offset_ms=off, quality=0.8, n_windows=3)
+
+
+def _levels_by_day(d: dict) -> dict[str, int | None]:
+    return {s["start_at"][:10]: s["level_ms"] for s in d["sessions"]}
+
+
+def test_the_capped_log_evicting_the_anchor_era_never_moves_an_anchor(monkeypatch):
+    # The store is capped; every new play past the cap evicts the oldest.
+    # Once the anchor era's own plays are gone from the log, each song's
+    # anchor — and so every level already read against it — must not move.
+    monkeypatch.setattr(lock_history, "_CAP", 48)
+    era = [(T0 + timedelta(days=day, minutes=4 * k), uri, 1000 * k)
+           for day in range(4) for k, uri in enumerate(SONGS)]
+    settled = [(T0 + timedelta(days=day, minutes=4 * k), uri, 1000 * k - 2000)
+               for day in range(6, 14) for k, uri in enumerate(SONGS)]
+
+    _record(monkeypatch, era + settled[:24])                  # days 6–9, log exactly full
+    before = lock_history.pipeline_drift(max_sessions=50)
+    assert before["anchor_era"]["start_at"] == T0.isoformat()
+    kept_days = {(T0 + timedelta(days=day)).date().isoformat() for day in range(6, 10)}
+    assert {day: before_lvl for day, before_lvl in _levels_by_day(before).items()
+            if day in kept_days} == {day: -2000 for day in kept_days}
+
+    _record(monkeypatch, settled[24:])                         # days 10–13 evict the era
+    oldest_kept = min(datetime.fromisoformat(e["at"]) for e in lock_history._entries)
+    assert oldest_kept > T0 + timedelta(days=4)                # not one era play left
+    after = lock_history.pipeline_drift(max_sessions=50)
+    assert after["anchor_era"] == before["anchor_era"]
+    after_levels = _levels_by_day(after)
+    assert all(after_levels[day] == -2000 for day in kept_days)
+    assert after["current"]["level_ms"] == -2000
+    assert after["alarm"] is True
+
+
+def test_an_unreadable_anchor_store_means_no_anchor_not_a_rederived_one(monkeypatch):
+    # Re-deriving from whatever the capped log still holds would quietly
+    # swap in a later, moving anchor; an honest "no anchor" is the answer.
+    world = _daily_world(10, lambda day, k: 1000 * k - 400 * day)
+    _install(world)
+    path = lock_history._anchor_path()
+    path.write_text("{ not json", encoding="utf-8")
+    d = lock_history.pipeline_drift(max_sessions=20)
+    assert d["anchor_era"] is None
+    assert all(s["level_ms"] is None for s in d["sessions"])
+    assert d["current"] is None and d["alarm"] is False
+    assert all(s["median_residual_ms"] is not None
+               for s in d["sessions"] if s["baselined"])        # legacy reading unaffected
+
+    _record(monkeypatch, [(T0 + timedelta(days=11), SONGS[0], 0)])
+    assert path.read_text(encoding="utf-8") == "{ not json"
+
+
+def _anchored_world(levels_by_day: dict[int, int]) -> list[dict]:
+    world = [_entry(T0 + timedelta(days=day, minutes=4 * k), uri, 1000 * k)
+             for day in range(4) for k, uri in enumerate(SONGS)]
+    for day, level in levels_by_day.items():
+        world += [_entry(T0 + timedelta(days=day, minutes=4 * k), uri, 1000 * k + level)
+                  for k, uri in enumerate(SONGS)]
+    return world
+
+
+def _shapes(d: dict) -> list[str]:
+    return [s["shape"] for s in reversed(d["sessions"]) if s["shape"] != "insufficient"]
+
+
+def test_sign_flipping_scatter_reads_as_reversals_not_a_ramp():
+    _install(_anchored_world({6: -900, 7: 0, 8: -900, 9: 0}))
+    assert _shapes(lock_history.pipeline_drift(max_sessions=20)) == [
+        "start", "ramp", "reversal", "reversal"]
+
+
+@pytest.mark.parametrize("gap_days, shape", [(1, "step"), (8, "step_or_ramp")])
+def test_a_step_sized_move_is_only_a_step_when_no_ramp_could_have_made_it(gap_days, shape):
+    # The incident's −400 ms/day ratchet, read only 8 days apart, moves
+    # 3.2 s — a step's size, but not a step. The same move in one day is.
+    _install(_anchored_world({6: -2400, 6 + gap_days: -2400 - 3200}))
+    assert _shapes(lock_history.pipeline_drift(max_sessions=20)) == ["start", shape]
