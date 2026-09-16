@@ -318,7 +318,7 @@ def test_a_failed_anchor_save_recovers_while_the_log_still_holds_the_era(monkeyp
     assert d["current"]["level_ms"] == -2000
 
 
-def test_selftest_ignores_an_anchors_store_beside_the_real_log(tmp_path, monkeypatch):
+def _check_script():
     import importlib.util
     from pathlib import Path
 
@@ -326,6 +326,11 @@ def test_selftest_ignores_an_anchors_store_beside_the_real_log(tmp_path, monkeyp
     spec = importlib.util.spec_from_file_location("check_timing_drift", script)
     check = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(check)
+    return check
+
+
+def test_selftest_ignores_an_anchors_store_beside_the_real_log(tmp_path, monkeypatch):
+    check = _check_script()
 
     _record(monkeypatch, [(T0 + timedelta(days=day), "spotify:track:unrelated", 0)
                           for day in range(6)])
@@ -335,6 +340,36 @@ def test_selftest_ignores_an_anchors_store_beside_the_real_log(tmp_path, monkeyp
     assert check.selftest() == 0
     assert lock_history._STORE_PATH == real_store
     assert lock_history.pipeline_drift()["anchor_era"]["songs"] == 1
+
+
+def test_report_on_a_log_copy_without_its_anchors_says_so(tmp_path, monkeypatch, capsys):
+    # The validation method: a read-only copy of the live log. Once its
+    # anchors store exists and the log has evicted past what seeded it, the
+    # log alone cannot reproduce the level — the report must say so, not
+    # print an empty level column as if it were a reading.
+    import shutil
+
+    monkeypatch.setattr(lock_history, "_CAP", 48)
+    _record(monkeypatch, _settled_world_plays(range(6, 14)))
+    live_log, live_anchors = lock_history._STORE_PATH, lock_history._anchor_path()
+    assert live_anchors.exists()
+    copy = tmp_path / "copy"
+    copy.mkdir()
+    shutil.copy(live_log, copy / "lock_history.json")
+    check = _check_script()
+
+    assert check.report(copy / "lock_history.json", 20) == 2
+    out = capsys.readouterr().out
+    assert str(copy / "lock_history_anchors.json") in out and "not found" in out
+
+    assert check.report(copy / "lock_history.json", 20, anchors=live_anchors) == 0
+    out = capsys.readouterr().out
+    assert "anchor era: none" not in out
+    assert "current: -2000ms level" in out
+
+    shutil.copy(live_anchors, copy / "lock_history_anchors.json")
+    assert check.report(copy / "lock_history.json", 20) == 0
+    assert lock_history._anchor_path() == copy / "lock_history_anchors.json"
 
 
 def _anchored_world(levels_by_day: dict[int, int]) -> list[dict]:

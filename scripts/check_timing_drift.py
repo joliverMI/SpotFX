@@ -8,7 +8,19 @@ Timing page's drift line is built from, plus the current alarm verdict.
 
   .venv/bin/python scripts/check_timing_drift.py                  # repo storage
   .venv/bin/python scripts/check_timing_drift.py --file /path/to/lock_history.json
+  .venv/bin/python scripts/check_timing_drift.py --file /copy/lock_history.json \
+      --anchors /copy/lock_history_anchors.json
   .venv/bin/python scripts/check_timing_drift.py --selftest       # synthetic proof
+
+A READ-ONLY COPY NEEDS BOTH FILES. The level is measured against per-song
+anchors kept in a sidecar store beside the log — `<log stem>_anchors.json`
+(storage/lock_history_anchors.json for the live log) — because the capped
+log itself drops the plays those anchors came from. Copy the sidecar next
+to the log copy under that name, or pass --anchors. A log whose anchors
+store was already written cannot rebuild it once it has evicted past what
+seeded it, so a copy of the log alone reports no level; the report says so
+and exits 2 rather than showing an empty level column as if it were a
+reading.
 
 The instrument exists because of the Aug 25 → Sep 2 2026 incident: the audio
 pipeline ratcheted ~350 ms/day to −3.2 s and nothing said so until locks were
@@ -30,24 +42,44 @@ import sys
 import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from services import lock_history  # noqa: E402
 
 
-def report(path: Path, sessions: int) -> int:
+def report(path: Path, sessions: int, anchors: Optional[Path] = None) -> int:
     if not path.exists():
         print(f"no lock history at {path}")
         return 1
+    if anchors is not None and not anchors.exists():
+        print(f"no anchors store at {anchors}")
+        return 1
     lock_history._STORE_PATH = path
     lock_history._entries = None          # drop any cached copy; re-read the file
-    d = lock_history.pipeline_drift(max_sessions=sessions)
+    anchors_path = anchors if anchors is not None else lock_history._anchor_path()
+    derived_anchor_path = lock_history._anchor_path
+    lock_history._anchor_path = lambda: anchors_path
+    try:
+        d = lock_history.pipeline_drift(max_sessions=sessions)
+    finally:
+        lock_history._anchor_path = derived_anchor_path
     print(f"pipeline drift over {path} — alarm at ±{d['alarm_threshold_ms']}ms, "
           f"sessions need ≥{d['min_baselined']} gated plays to drive it")
+    seeded_at = lock_history._anchor_seed_oldest
+    missing_store = not anchors_path.exists()
+    print(f"anchors store: {anchors_path} ({'not found' if missing_store else 'found'})")
+    if missing_store and seeded_at is not None:
+        print(f"  !! this log's anchors store was already written (seeded from plays back to "
+              f"{seeded_at[:16]}), and it is not beside this log. Copy the live "
+              f"storage/lock_history_anchors.json to {anchors_path} or pass --anchors; "
+              f"a copy of the log alone cannot reproduce the level.")
+    elif missing_store:
+        print("  this log has never had an anchors store written — the era is derived "
+              "from the log as it stands")
     era = d["anchor_era"]
-    print(f"anchor era: none — no song has an anchor (anchors store: {lock_history._anchor_path()})\n"
-          if era is None else
+    print("anchor era: none — no song has an anchor\n" if era is None else
           f"anchor era: {era['start_at'][:16]} → {era['end_at'][:16]} ({era['songs']} anchored songs)\n")
     print(f"{'session start (UTC)':>20s} {'plays':>5s} {'lvl n':>5s} {'LEVEL':>9s} "
           f"{'shape':>12s}  |  {'old n':>5s} {'old resid':>10s}")
@@ -66,7 +98,7 @@ def report(path: Path, sessions: int) -> int:
         print(f"\ncurrent: {cur['level_ms']:+d}ms level ({cur['shape']}) over "
               f"{cur['level_baselined']} gated plays (session {cur['start_at'][:16]}) "
               f"→ {'ALARM' if d['alarm'] else 'steady'}")
-    return 0
+    return 2 if era is None and missing_store and seeded_at is not None else 0
 
 
 def selftest() -> int:
@@ -115,15 +147,19 @@ def _selftest_worlds() -> int:
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description=__doc__)
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--file", type=Path, default=lock_history._STORE_PATH,
                     help="lock_history.json to read (default: this checkout's storage)")
+    ap.add_argument("--anchors", type=Path, default=None,
+                    help="its anchors store (default: <file stem>_anchors.json beside --file; "
+                         "a copy of the log needs this copied with it)")
     ap.add_argument("--sessions", type=int, default=20)
     ap.add_argument("--selftest", action="store_true")
     args = ap.parse_args()
     if args.selftest:
         sys.exit(selftest())
-    sys.exit(report(args.file, args.sessions))
+    sys.exit(report(args.file, args.sessions, args.anchors))
 
 
 if __name__ == "__main__":

@@ -42,6 +42,9 @@ interface DriftSession {
   plays: number;
   baselined: number;
   median_residual_ms: number | null;
+  level_baselined: number;
+  level_ms: number | null;
+  shape: 'start' | 'ramp' | 'reversal' | 'step' | 'step_or_ramp' | 'stable' | 'insufficient';
 }
 
 interface DriftStatus {
@@ -50,16 +53,25 @@ interface DriftStatus {
   alarm: boolean;
   alarm_threshold_ms: number;
   min_baselined: number;
+  anchor_era: { start_at: string; end_at: string; songs: number } | null;
 }
 
 const fmtDriftS = (ms: number): string =>
   `${ms >= 0 ? '+' : '-'}${(Math.abs(ms) / 1000).toFixed(1)}s`;
 
+const SHAPE_LABEL: Record<DriftSession['shape'], string> = {
+  start: 'first reading', ramp: 'ramp', reversal: 'reversal', step: 'step',
+  step_or_ramp: 'step or ramp?', stable: 'stable', insufficient: '—',
+};
+
 /** The pipeline-drift line: each play's winning offset vs that song's own
- * older baseline, median'd per listening session. Per-song quirks cancel;
- * what survives is the common component only an audio-chain latency change
- * produces. Alarms past the threshold — before the ~3s stale-offset error
- * where the lock search starts failing outright. */
+ * FIXED, quality-gated anchor — a LEVEL, not a lagged difference. Per-song
+ * quirks cancel; what survives is the common component only an audio-chain
+ * latency change produces. Each session is also tagged ramp/reversal/step/stable
+ * against the previous trustworthy session, so a real step never reads as
+ * scatter (data/spectra-timing-drift-cause/report.md). Alarms past the
+ * threshold — before the ~3s stale-offset error where the lock search
+ * starts failing outright. */
 function DriftStrip() {
   const { data } = useQuery({
     queryKey: ['lock-history-drift'],
@@ -72,8 +84,8 @@ function DriftStrip() {
   const alarm = data.alarm;
   const color = alarm ? '#f44336' : cur ? '#4caf50' : 'var(--text-muted)';
   const trend = [...data.sessions].reverse()
-    .filter((s) => s.median_residual_ms != null && s.baselined >= data.min_baselined)
-    .map((s) => fmtDriftS(s.median_residual_ms as number));
+    .filter((s) => s.level_ms != null && s.level_baselined >= data.min_baselined)
+    .map((s) => `${fmtDriftS(s.level_ms as number)}${s.shape === 'step' ? '⚡' : ''}`);
   return (
     <div style={{
       display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
@@ -87,11 +99,19 @@ function DriftStrip() {
         <>
           <span
             style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: 13, color }}
-            title={`Median of ${cur.baselined} repeat plays' winning offsets vs their own older baselines, over the session that started ${new Date(cur.start_at).toLocaleString()}. Alarms at ±${(data.alarm_threshold_ms / 1000).toFixed(1)}s.`}>
-            {fmtDriftS(cur.median_residual_ms as number)}
+            title={`Median of ${cur.level_baselined} gated plays' winning offsets vs their own fixed anchor${data.anchor_era ? ` (set by their plays ${new Date(data.anchor_era.start_at).toLocaleDateString()}–${new Date(data.anchor_era.end_at).toLocaleDateString()})` : ''}, over the session that started ${new Date(cur.start_at).toLocaleString()}. Alarms at ±${(data.alarm_threshold_ms / 1000).toFixed(1)}s. Legacy sliding-baseline reading for this session: ${cur.median_residual_ms == null ? '—' : fmtDriftS(cur.median_residual_ms)}.`}>
+            {fmtDriftS(cur.level_ms as number)}
+          </span>
+          <span
+            style={{
+              fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px',
+              padding: '1px 6px', borderRadius: 4, color, border: `1px solid ${color}`,
+            }}
+            title="Compared with the previous session that had a level · ramp = moved 0.2–2.5s the same way as the last move, or with no earlier move · reversal = moved 0.2–2.5s the opposite way (reversals in a row are scatter, not a trend) · step = jumped 2.5s or more, faster than 1s a day (about twice the fastest ramp measured) · step or ramp? = a jump that size across a gap long enough that a ramp could also explain it · stable = within 0.2s">
+            {SHAPE_LABEL[cur.shape]}
           </span>
           <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-            {cur.baselined} repeat plays · session {fmtWhen(cur.start_at)}
+            {cur.level_baselined} gated plays · session {fmtWhen(cur.start_at)}
           </span>
           {alarm && (
             <span style={{ fontSize: 11, fontWeight: 700, color }}>
@@ -101,7 +121,7 @@ function DriftStrip() {
           {trend.length >= 2 && (
             <span
               style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--text-muted)', marginLeft: 'auto' }}
-              title="Session medians, oldest → newest">
+              title="Session levels, oldest → newest — ⚡ marks a session tagged as a step">
               {trend.join(' → ')}
             </span>
           )}
