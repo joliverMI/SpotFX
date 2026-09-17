@@ -64,6 +64,12 @@ from typing import Callable, Optional
 from fx import light_ownership
 from spectra.models.scene import SceneV2
 from spectra.services import av_sync_lead
+# Safe at module scope: known_buffer constructs nothing at import time
+# and reaches room_controls/the bridge only lazily, inside functions
+# (AGENTS.md's light-mode cold-start rule). tests/
+# test_light_mode_cold_start.py proves the cold start in a fresh
+# interpreter, which is the only check that can speak to this.
+from spectra.services import known_buffer
 from spectra.services.bridge import SpotEffectsBridge
 from spectra.services.drift_conductor import DriftConductor
 from spectra.services.fx_executor import RecordingExecutor
@@ -372,8 +378,16 @@ async def _run_trigger_engine() -> None:
             # takes effect without a restart. The sign law and the reason
             # this term exists at all are in av_sync_lead.py's docstring —
             # do NOT add a second application point.
+            # The THIRD term, ruled 2026-09-17: River's published audio
+            # buffer, SUBTRACTED because it is the opposite family from
+            # the lead (positive = fire LATER). It is 0 unless the apply
+            # gate is open AND this song has no xcorr lock — the lock taps
+            # speaker time and already tracks the buffer, so a delta on
+            # top of it would correct the same milliseconds twice. Read
+            # fresh every tick, same as the lead; never raises.
             await trigger_engine.tick(av_sync_lead.show_clock_ms(
-                bridge.effective_position_ms(), av_sync_lead.current_lead_ms()))
+                bridge.effective_position_ms(), av_sync_lead.current_lead_ms(),
+                known_buffer.compensation_ms()))
         except Exception:
             logger.exception("trigger engine: tick failed")
         await asyncio.sleep(TICK_S)
@@ -447,7 +461,7 @@ async def stop() -> None:
 
 def status() -> dict:
     from spectra.services import (ambient_music_gate, dark_fixture_watch,
-                                   known_buffer, night_run, param_watchdog)
+                                   night_run, param_watchdog)
     return {
         "increment": "S3",
         "dark": executor.mode == "recording",

@@ -994,16 +994,28 @@ subscribes. Six things:
   reference anchored on the first reading the GATE ACCEPTS and re-based
   whenever `av_sync_lead_ms` is applied), so going live changes nothing in
   his room.
-- **THE SEAM IS PARKED and nothing consumes `compensation_ms` yet.**
-  MEASURED 2026-09-17, not inferred: his live `AUDIO_INPUT_DEVICE=pulse`
-  resolves to default source `snapcast.monitor`, and `pactl list
-  sink-inputs` shows `snapclient-0.35.0` writing INTO that sink — so both
-  the root xcorr lock and SPECTRA's own audio hub tap SPEAKER TIME,
-  downstream of the snapserver buffer, the network, the snapclient, and
-  River's own source-side segment. A LOCKED song therefore already absorbs
-  this buffer; an unlocked one (`bridge.shape_offset_ms()` None) absorbs
-  none of it. Read the PR for the full finding before proposing any
-  application point.
+- **THE SEAM IS THE SHOW CLOCK, LOCK-GATED (ruled 2026-09-17).** MEASURED,
+  not inferred: his live `AUDIO_INPUT_DEVICE=pulse` resolves to default
+  source `snapcast.monitor`, and `pactl list sink-inputs` shows
+  `snapclient-0.35.0` writing INTO that sink — so both the root xcorr lock
+  and SPECTRA's own audio hub tap SPEAKER TIME, downstream of the
+  snapserver buffer, the network, the snapclient, and River's own
+  source-side segment. So `show_clock_ms = effective_position_ms +
+  av_sync_lead_ms − known_buffer_ms`, and `known_buffer.compensation()` is
+  the ONE definition of that last term, with three answers, two of them
+  zero: `gate` (the apply gate is shut), `lock` (`bridge.shape_offset_ms()`
+  is not None — the lock already tracks this buffer, and a delta on top
+  would correct the same milliseconds twice; an UNKNOWABLE lock counts as
+  present, the safe direction), `applied` (no lock, so the
+  reference-based delta is real). **IT SUBTRACTS because the families are
+  opposite** — `av_sync_lead_ms` is LEAD family (positive = earlier) and
+  this is positive = LATER; the two sit on ONE line in
+  `av_sync_lead.show_clock_ms`, still the single application point, and
+  the new argument defaults to 0 so every pre-existing caller is
+  byte-identical. No smoothing at either lock transition or across an
+  epoch change. **KNOWN FOLLOW-UP, not done:** on a LOCKED song a drain is
+  corrected only as fast as the lock's own chase (2 s × 3 confirms, max 2
+  recoveries/play) — see `docs/SPECTRA_TIMING_CONVENTIONS.md`'s own note.
 
 ## SPECTRA per-song intensity scale (genre-anchored port + headroom reserve)
 

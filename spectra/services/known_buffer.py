@@ -124,21 +124,49 @@ So compensation is applied ONLY when `floor_clamped == false` (equivalently
 Ingestion, display and logging all run meanwhile — the drift picture is
 being built the whole time. `av_sync_lead_ms` is untouched in every case.
 
-THE SEAM — PARKED, and this module does not wire it
-----------------------------------------------------
-Whether the published value belongs at the show clock at all is a
-DECISION, not an implementation detail, because SPECTRA's fire clock
-already carries a correction that may or may not have absorbed this
-buffer: `effective_position_ms = raw position + shape_offset_ms`, where
-`shape_offset_ms` is spot-effects' per-song xcorr lock. That lock
-correlates against `snapcast.monitor`, and the measured fact is that
-`snapcast.monitor` is the monitor of the sink the SNAPCLIENT plays into —
-speaker time, downstream of every buffer including the source-side one
-River publishes. See the PR for the full finding.
+THE SEAM — THE SHOW CLOCK, LOCK-GATED (ruled 2026-09-17)
+---------------------------------------------------------
+SPECTRA's fire clock already carries a correction that MAY have absorbed
+this buffer: `effective_position_ms = raw position + shape_offset_ms`,
+where `shape_offset_ms` is spot-effects' per-song xcorr lock. The measured
+fact that decides this — not inferred, read off his live box: his
+`AUDIO_INPUT_DEVICE=pulse` resolves to default source `snapcast.monitor`,
+and `pactl list sink-inputs` shows `snapclient-0.35.0` writing INTO that
+sink. So the lock taps SPEAKER TIME, downstream of the snapserver buffer,
+the network, the snapclient — and therefore downstream of the source-side
+segment River publishes.
 
-`compensation_ms` is therefore computed and SURFACED here, and consumed
-nowhere. When the seam is ruled, the consumer is added at the ruled seam
-and this docstring records which one.
+So a LOCKED song already absorbs this buffer, and an UNLOCKED one absorbs
+none of it (`bridge.effective_position_ms()` falls back to the raw Spotify
+position whenever `timing.shape_offset_ms` is absent). The ruling is
+therefore LOCK-GATED, and the three-way rule is `compensation()` below:
+
+    show_clock_ms = effective_position_ms + av_sync_lead_ms - compensation_ms
+
+    reason "gate"    -> 0, the apply gate is shut (floor_clamped)
+    reason "lock"    -> 0, a lock is present and already tracks the buffer
+    reason "applied" -> effective_value_ms - reference_ms
+
+It SUBTRACTS because the families are opposite: `av_sync_lead_ms` is LEAD
+family (positive = EARLIER) and this term is OFFSET-like (positive =
+LATER). The two are never added with the same sign — that is this fleet's
+single most repeated failure (docs/SPECTRA_TIMING_CONVENTIONS.md).
+
+THE UNCONDITIONAL DELTA WAS CONSIDERED AND REJECTED: on a locked song
+every drain would then be corrected twice for as long as the lock chases
+it — a visible multi-second glitch at the worst moment in his show.
+
+NO SMOOTHING AT EITHER TRANSITION. A lock dropping mid-song applies the
+delta AT ONCE (the absorption vanished with the lock); a lock appearing
+returns the compensation to 0 at once. Same rule as an epoch change: this
+module never interpolates between two states of the world.
+
+KNOWN LIMITATION, STATED RATHER THAN HIDDEN: on a LOCKED song a drain is
+corrected only as fast as the lock's OWN chase (the mismatch monitor's
+2 s interval x 3 confirms, at most 2 recoveries per play). Bridging that
+chase with River's step event is a SEPARATE follow-up and deliberately not
+done here; it is named in the help topic and in
+docs/SPECTRA_TIMING_CONVENTIONS.md so nobody has to rediscover it.
 
 REFERENCE-BASED, so going live changes nothing in his room
 -----------------------------------------------------------
@@ -354,7 +382,7 @@ def record(payload: Any, via: str = "") -> Reading:
     global _reading, _reference_ms, _readings_seen, _last_error
     reading = parse(payload, via=via)
     _readings_seen += 1
-    _log(reading)
+    _log(reading, _reason_for(reading))
     current = _reading
     if current is not None and reading.t_ms < current.t_ms and reading.epoch == current.epoch:
         logger.debug("known buffer: ignoring an out-of-order reading (%d < %d)",
@@ -459,11 +487,89 @@ def flags(reading: Optional[Reading], st: Any) -> list[str]:
     return out
 
 
+# ── the compensation, and the ONE definition of it ──────────────────────
+# Reasons, so the state block, the log line and the sentence cannot end up
+# describing three different things.
+REASON_GATE = "gate"        # the apply gate is shut (floor_clamped)
+REASON_LOCK = "lock"        # a lock is present and already tracks the buffer
+REASON_APPLIED = "applied"  # raw-position fallback: the delta is real
+
+
+def lock_present() -> Optional[bool]:
+    """Is spot-effects' per-song xcorr lock currently correcting the show
+    clock? True whenever `bridge.shape_offset_ms()` has a value, which is
+    exactly when `effective_position_ms()` is NOT the raw Spotify position.
+
+    None means unknowable (the bridge object is not reachable at all — an
+    import failure, a process where the engine was never built). Unknowable
+    is treated as PRESENT by `compensation()`, deliberately: the safe
+    direction is to apply nothing, because applying a delta on top of a
+    lock that is quietly still running is the double-correction this seam
+    was ruled to avoid."""
+    try:
+        from spectra.services.engine import bridge
+        return bridge.shape_offset_ms() is not None
+    except Exception:
+        return None
+
+
+def compensation(reading: Optional[Reading], st: Any, reference: Optional[int],
+                 lock: Optional[bool], lad: str) -> tuple[int, str]:
+    """THE RULED SEAM, as one function — read by the state block AND by the
+    show clock, so the number he is shown is the number his lights use.
+
+    Three answers, and two of them are zero:
+      gate    the apply gate is shut (floor_clamped / not governed) — the
+              published number is the contractual floor, not a delay
+      lock    a lock is present, and it taps speaker time, so it is
+              already tracking this buffer; a delta here would correct the
+              same milliseconds twice
+      applied no lock, so nothing else is absorbing it: the reference-based
+              delta, positive = fire LATER
+
+    There is NO smoothing at any transition between these — see the module
+    docstring."""
+    if reading is None or lad not in (STATE_FRESH, STATE_STALE) \
+            or not reading.gate_open():
+        return 0, REASON_GATE
+    if lock is not False:
+        # True, or None (unknowable) — see lock_present()'s docstring for
+        # why unknowable is the same answer as present.
+        return 0, REASON_LOCK
+    if reference is None:
+        # The gate is OPEN and this is the first reading through it, so the
+        # reference is about to be anchored ON this value: the delta is
+        # definitionally zero. Reporting "gate" here would name a gate that
+        # is not in fact shut.
+        return 0, REASON_APPLIED
+    return effective_value_ms(reading, st) - int(reference), REASON_APPLIED
+
+
+def compensation_ms() -> int:
+    """What the show clock SUBTRACTS right now. The trigger poll's single
+    call site (spectra/services/engine.py, through
+    av_sync_lead.show_clock_ms) — read fresh every tick like the A/V lead
+    beside it, so a step lands without a restart. Never raises: a fault in
+    this whole feature must cost the correction, never the clock."""
+    try:
+        st = _settings()
+        reading = _reading
+        lad = ladder_state(reading, st)
+        value, _reason = compensation(reading, st, _reference_ms,
+                                      lock_present(), lad)
+        return value
+    except Exception:
+        logger.debug("known buffer: compensation unavailable", exc_info=True)
+        return 0
+
+
 # ── the state block ─────────────────────────────────────────────────────
 def _sentence(state: str, value_ms: int, reading: Optional[Reading],
-              age: Optional[float], st: Any, gate: str) -> str:
-    """One plain sentence for a human. Never a bare number he has to
-    interpret, and never a claim the ladder does not support."""
+              age: Optional[float], st: Any, reason: str,
+              compensation_value: int) -> str:
+    """One plain sentence for a human, SAYING WHICH of the three answers
+    this is in words. Never a bare number he has to interpret, and never a
+    claim the ladder does not support."""
     if state == STATE_UNCONFIGURED:
         return ("River's buffer reader is not configured, so effects fire "
                 f"against the {int(st.known_buffer_floor_ms)} ms floor.")
@@ -474,16 +580,29 @@ def _sentence(state: str, value_ms: int, reading: Optional[Reading],
         return (f"Sound behind: falling back to the {int(st.known_buffer_floor_ms)} ms "
                 f"floor — {heard}.")
     held = f", held for {age:.0f} s" if state == STATE_STALE and age is not None else ""
-    lead = (f"Sound is running {value_ms} ms behind{held}")
-    if gate:
-        return lead + f" — nothing is applied yet: {gate}."
-    return lead + ", and effects fire that much later."
+    lead = f"Sound is running {value_ms} ms behind{held}"
+    if reason == REASON_GATE:
+        return (lead + " — nothing is applied yet: " + APPLY_GATE_WAITING + ".")
+    if reason == REASON_LOCK:
+        return (lead + " — nothing is added to the show clock right now, because "
+                "this song's audio lock is already tracking it. A sudden drain "
+                "is corrected only as fast as that lock re-checks itself.")
+    if compensation_value == 0:
+        return lead + " — the same as when this was last calibrated, so nothing is added."
+    direction = "later" if compensation_value > 0 else "less late"
+    return (lead + f" — no audio lock on this song, so effects fire "
+            f"{abs(compensation_value)} ms {direction} than they otherwise would.")
 
 
-def state() -> dict:
+def state(lock: Optional[bool] = None) -> dict:
     """THE STATE BLOCK — the one shape, returned by
     `GET /api/timing/effects-fire-later` and folded into
-    `GET /api/engine/status` as `known_buffer`."""
+    `GET /api/engine/status` as `known_buffer`.
+
+    `lock` is the injection seam for specs; production leaves it None and
+    the live bridge answers. The compensation reported here is computed by
+    the SAME function the show clock subtracts, so the number he reads is
+    the number his lights use."""
     st = _settings()
     reading = _reading
     lad = ladder_state(reading, st)
@@ -496,9 +615,8 @@ def state() -> dict:
     gate_open = bool(reading is not None and lad in (STATE_FRESH, STATE_STALE)
                      and reading.gate_open())
     gate = APPLY_GATE_OPEN if gate_open else APPLY_GATE_WAITING
-    compensation = 0
-    if gate_open and _reference_ms is not None:
-        compensation = applied - int(_reference_ms)
+    lock = lock_present() if lock is None else lock
+    compensation_value, reason = compensation(reading, st, _reference_ms, lock, lad)
     return {
         # THE NAME IS THE INSTRUCTION — this key is River's field name
         # verbatim, and carries the value SPECTRA actually stands behind.
@@ -515,10 +633,17 @@ def state() -> dict:
         "stale_periods": float(st.known_buffer_stale_periods),
         "flags": flags(reading, st),
         "reference_ms": None if _reference_ms is None else int(_reference_ms),
-        "compensation_ms": compensation,
+        # THE RULED SEAM's two fields: how much the show clock subtracts
+        # right now, and WHICH of the three answers it is (gate | lock |
+        # applied). A bare zero would be three different situations wearing
+        # one number.
+        "compensation_ms": compensation_value,
+        "compensation_reason": reason,
+        "lock_present": lock,
         "apply_gate": gate,
-        "applied": gate_open,
-        "sentence": _sentence(lad, applied, reading, age, st, gate),
+        "applied": reason == REASON_APPLIED,
+        "sentence": _sentence(lad, applied, reading, age, st, reason,
+                              compensation_value),
         "url": base_url(st),
         # RIVER'S OWN VIEW, beside ours and never collapsed into it: ours
         # says whether SPECTRA is still hearing from River, River's says
@@ -548,7 +673,20 @@ def state() -> dict:
 
 
 # ── the raw series ──────────────────────────────────────────────────────
-def _log(reading: Reading) -> None:
+def _reason_for(reading: Reading) -> str:
+    """What the show clock would do with this reading, right now — logged
+    beside it so the raw series says what happened and not only what was
+    published. Best effort: a reading is never lost to this."""
+    try:
+        st = _settings()
+        _value, reason = compensation(reading, st, _reference_ms,
+                                      lock_present(), ladder_state(reading, st))
+        return reason
+    except Exception:
+        return ""
+
+
+def _log(reading: Reading, reason: str = "") -> None:
     """Append the reading to the drift log and prune to LOG_RETENTION_S.
 
     Best effort by construction: a log that cannot be written must never
@@ -566,6 +704,10 @@ def _log(reading: Reading) -> None:
         "governed": reading.governed,
         "flowing": reading.flowing,
         "via": reading.via,
+        # WHICH of the three answers this reading produced, so the drift
+        # picture shows not just the number but what the show clock did
+        # with it (gate | lock | applied).
+        "compensation_reason": reason,
     }, separators=(",", ":"))
     try:
         path.parent.mkdir(parents=True, exist_ok=True)

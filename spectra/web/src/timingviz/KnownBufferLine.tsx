@@ -12,9 +12,13 @@
  *    reading is already up to a period old when it arrives and a healthy
  *    steady state oscillates fresh/stale. It is drawn as an ordinary
  *    HOLDING state with its age, never as a warning.
- *  - NOTHING IS APPLIED while `apply_gate` is set. The line says so in
- *    words rather than showing a compensation figure a reader would take
- *    for something his lights are doing. */
+ *  - THE COMPENSATION HAS THREE ANSWERS and two of them are zero
+ *    (`compensation_reason`): "gate" (River's bounding half is off, so the
+ *    number is the contractual floor rather than a delay), "lock" (this
+ *    song's xcorr lock already tracks the buffer at the speaker tap), and
+ *    "applied" (no lock, so the delta is real). A bare zero would be three
+ *    different situations wearing one number, so the line always says
+ *    WHICH. */
 import { useQuery } from '@tanstack/react-query';
 import { apiGet } from '../api/client';
 import HelpLink from '../help/HelpLink';
@@ -34,6 +38,8 @@ interface KnownBuffer {
   flags: string[];
   reference_ms: number | null;
   compensation_ms: number;
+  compensation_reason: 'gate' | 'lock' | 'applied';
+  lock_present: boolean | null;
   apply_gate: string;
   applied: boolean;
   sentence: string;
@@ -96,21 +102,31 @@ export default function KnownBufferLine() {
       </div>
       <div style={{ fontSize: 12, marginTop: 6 }}>{data.sentence}</div>
       <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4, fontFamily: 'monospace' }}>
-        {data.applied
-          ? `compensation ${data.compensation_ms >= 0 ? '+' : ''}${data.compensation_ms} ms later`
-          : 'compensation 0 ms — nothing reaches the show clock'}
+        {data.compensation_reason === 'applied'
+          ? `show clock ${data.compensation_ms >= 0 ? '+' : ''}${data.compensation_ms} ms later (no audio lock on this song)`
+          : data.compensation_reason === 'lock'
+            ? 'show clock unchanged — this song\'s audio lock already tracks it'
+            : 'show clock unchanged — nothing is applied while the gate is shut'}
         {' · '}floor {data.floor_ms} ms{' · '}ceiling {data.ceiling_ms} ms (not a clamp)
         {data.reference_ms != null ? ` · reference ${data.reference_ms} ms` : ''}
         {' · '}River {data.river?.source || '—'}
         {data.river?.floor_clamped ? ' (floor_clamped)' : ''}
         {' · '}{data.sse_connected ? 'events connected' : 'events reconnecting'}
       </div>
-      {!data.applied && data.apply_gate ? (
+      {data.compensation_reason === 'gate' && data.apply_gate ? (
         <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
           Why nothing is applied: with River's bounding half off it can only see the
           parec buffer, so this number is the contractual floor rather than a measured
           delay — applying it would push the lights 300–500&nbsp;ms behind the sound.
           Your A/V lead is untouched.
+        </div>
+      ) : null}
+      {data.compensation_reason === 'lock' ? (
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
+          Why nothing is added: this song has an audio lock, and that lock listens at
+          the speakers — so it is already following this buffer, and adding the number
+          again would correct the same milliseconds twice. Known limit: on a locked
+          song a sudden drain is only corrected as fast as that lock re-checks itself.
         </div>
       ) : null}
     </div>

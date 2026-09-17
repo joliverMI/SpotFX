@@ -124,21 +124,40 @@ def _effective(lead_ms: Optional[int]) -> int:
     return int(lead_ms or 0)
 
 
-def show_clock_ms(position_ms: Optional[int], lead_ms: Optional[int]) -> Optional[int]:
-    """THE ONE PLACE the setting reaches the show (called from
-    spectra/services/engine.py's trigger poll, nowhere else — a second
-    application point could quietly disagree with this one).
+def show_clock_ms(position_ms: Optional[int], lead_ms: Optional[int],
+                  known_buffer_ms: int = 0) -> Optional[int]:
+    """THE ONE PLACE the two authored/derived clock terms reach the show
+    (called from spectra/services/engine.py's trigger poll, nowhere else —
+    a second application point could quietly disagree with this one).
+
+        show_clock_ms = effective_position_ms + av_sync_lead_ms
+                                              - known_buffer_ms
 
     LEAD family: positive lead => the position reads further along =>
     trigger marks are reached sooner => the lights fire EARLIER. Exactly
     the shape bridge.effective_position_ms() already applies for
     shape_offset_ms; this term is layered on top of that one.
 
+    `known_buffer_ms` IS THE OPPOSITE FAMILY AND THEREFORE SUBTRACTS. It
+    is River's published audio buffer compensation (spectra/services/
+    known_buffer.py, ruled 2026-09-17): positive = the sound is running
+    that much further behind, so the lights must fire that much LATER.
+    Adding it with the lead's own sign would silently invert one of the
+    two — the single most repeated failure in this fleet, which is why
+    the two terms appear on one line here rather than in two places.
+
+    It defaults to 0, so every caller that does not pass it — and every
+    pre-existing test — is byte-identical to before this term existed.
+    That default is also what the whole feature degrades to: a shut apply
+    gate, a present xcorr lock, or any fault in that module all produce 0
+    here (see known_buffer.compensation_ms), so the clock cannot be worse
+    off than it was.
+
     A position of None (bridge down / no track) stays None — a missing
     clock is never invented from a lead."""
     if position_ms is None:
         return None
-    return int(position_ms) + _effective(lead_ms)
+    return int(position_ms) + _effective(lead_ms) - int(known_buffer_ms or 0)
 
 
 def current_lead_ms() -> Optional[int]:

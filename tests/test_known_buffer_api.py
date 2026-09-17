@@ -175,12 +175,19 @@ def test_an_unrelated_put_does_not_re_base_the_reference():
     assert kb.state()["compensation_ms"] == 300
 
 
-def test_nothing_here_reaches_the_show_clock_yet():
-    """The seam is PARKED. Until it is ruled, no consumer exists: the show
-    clock is av_sync_lead.show_clock_ms and nothing in it mentions this."""
+def test_the_show_clock_is_still_the_only_application_point():
+    """The seam is RULED and wired — at exactly one place. A second
+    application point could quietly disagree with this one, so the trigger
+    poll must be the only caller and show_clock_ms the only formula."""
     import inspect
     from spectra.services import av_sync_lead, engine
-    for mod in (av_sync_lead,):
-        assert "known_buffer" not in inspect.getsource(mod)
-    assert "known_buffer.state()" in inspect.getsource(engine.status)
-    assert "known_buffer" not in inspect.getsource(engine._run_trigger_engine)
+    poll = inspect.getsource(engine._run_trigger_engine)
+    assert "known_buffer.compensation_ms()" in poll
+    assert poll.count("show_clock_ms") == 1
+    # and nothing else in the engine reaches for it as a clock term
+    whole = inspect.getsource(engine)
+    assert whole.count("known_buffer.compensation_ms") == 1
+    # the subtraction lives in one line, beside the lead it must never be
+    # added to with the same sign
+    body = inspect.getsource(av_sync_lead.show_clock_ms)
+    assert "- int(known_buffer_ms or 0)" in body
