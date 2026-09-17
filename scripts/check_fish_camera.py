@@ -71,7 +71,29 @@ REPO = Path(__file__).resolve().parent.parent
 #       merge-base — so this PR provably changed nothing about the fish's
 #       kinematics or its body render, only the wake and the two phases.
 # Both keep the same negative controls. Override with --baseline <ref>.
+#
+# NOTE: this constant is also imported by scripts/check_fish_charge_spread.py
+# for ITS OWN, unrelated before/after (the school-spacing feature) — moving
+# it changes that script's comparison basis too. Do not advance it for a
+# claim that is local to THIS file's own section 1b; give that claim its
+# own constant instead (see THRUST_BASELINE_REF below, added exactly for
+# this reason by fm/spotfx-fish-body-trails-head-tail-thrust).
 BASELINE_REF = "801ad9395b618af4681c94c812ea1b47d69b3921"
+
+# THE THRUST/TRAIL PREDECESSOR — fm/spotfx-fish-body-trails-head-tail-thrust,
+# 2026-09-16, section 1b ONLY (never imported elsewhere — see the note on
+# BASELINE_REF above for why this had to be a second constant). That PR's
+# whole point is a deliberate change to ordinary swimming (tail-stroke
+# thrust plus a trail-following body), so 1b's old claim — "this PR changed
+# nothing about kinematics" — is no longer the right thing to assert about
+# the CURRENT code. His own required dial (`min_drift_speed`/
+# `stroke_speed_cap`) is what makes a restatement possible without losing
+# the proof: AT THE DIAL'S NEUTRAL SETTING (min_drift_speed=1,
+# stroke_speed_cap=0), swimming's KINEMATICS (not its rendered pixels — the
+# body-trail render is always live, see section 1b's own code) must still
+# match this pinned predecessor's bit for bit; at the SHIPPED DEFAULT
+# setting they must NOT match, or the feature would not exist.
+THRUST_BASELINE_REF = "bf7738b51a09f2bd5f47b436a04d59c7d4931e8f"
 DT = 1.0 / 60.0
 ROWS, COLS = 37, 72
 
@@ -181,6 +203,33 @@ async def frames_of(tag, cfg, seed, effect_type, script):
     return np.array(seq)
 
 
+async def positions_of(tag, cfg, seed, effect_type, script):
+    """Per-frame (p_x, p_y, p_hd) snapshots, padded to a common width — the
+    KINEMATICS claim (1b, post fm/spotfx-fish-body-trails-head-tail-thrust):
+    the body-trail rework always changes the RENDERED frame (a trail is
+    never exactly the rigid stick it replaces once a fish has wandered even
+    slightly, which every real run does), so identical kinematics has to be
+    proven on the physics state directly, not on `frames_of`'s pixels."""
+    r = await room(tag, cfg, seed=seed, effect_type=effect_type)
+    eff = r.effect
+    seq = []
+
+    def grab():
+        n = eff.n
+        seq.append((eff.p_x[:n].copy(), eff.p_y[:n].copy(),
+                     eff.p_hd[:n].copy()))
+
+    for kind, arg, beats in script:
+        if kind == "swim":
+            for _ in range(int(arg / DT)):
+                r.step(1)
+                grab()
+        else:
+            r.phase(kind, arg, beats_every=beats, watch=lambda _e: grab())
+    await close(r)
+    return seq
+
+
 SCRIPT = [
     ("swim", 4.0, None),
     ("charge", 4.0, 12),
@@ -195,11 +244,18 @@ SWIM_ONLY = [("swim", 6.0, None)]
 
 def section_one(ref=None):
     """1a: the window at rest never leaves the origin (the identity claim).
-    1b: ordinary swimming with the wake OFF is byte-identical to the
-        merge-base — so this PR touched the wake and the two phases, and
-        nothing about the fish's own kinematics or body render.
+    1b, RESTATED 2026-09-16 by fm/spotfx-fish-body-trails-head-tail-thrust
+        (see THRUST_BASELINE_REF's own comment): ordinary swimming's
+        KINEMATICS, AT THE THRUST DIAL'S NEUTRAL SETTING, matches that
+        pinned predecessor bit for bit — the new tail-stroke/body-trail
+        mechanism, dialled all the way off, provably reduces to exactly
+        what was there before it. AT THE SHIPPED DEFAULT dial the same
+        comparison must NOT match, or the feature would not exist — that
+        is the negative control this restatement needs (the old claim's
+        own "the wake IS what changed" control no longer applies to 1b,
+        since 1b is no longer claiming nothing about kinematics changed).
     """
-    ref = ref or BASELINE_REF
+    ref = ref or THRUST_BASELINE_REF
     print("\n1a WINDOW AT REST — camera_follow=0 never leaves the origin")
     residues = []
     for seed in (3, 5, 11, 17):
@@ -217,29 +273,60 @@ def section_one(ref=None):
     if on["max"] <= 0.0:
         raise SystemExit("the origin trace is blind")
 
-    print(f"\n1b SWIMMING, WAKE OFF  vs merge-base {ref[:12]}")
+    print(f"\n1b KINEMATICS, DIAL NEUTRAL  vs merge-base {ref[:12]}")
     master = load_master_effect(ref=ref)
     if master is None:
         return
     off = dict(HIS, particle_count=6, camera_follow=0.0, ripple_amount=0.0)
+    neutral = dict(off, min_drift_speed=1.0, stroke_speed_cap=0.0)
+
+    def positions_equal(a, b):
+        if len(a) != len(b):
+            return False
+        for (ax, ay, ah), (bx, by, bh) in zip(a, b):
+            if ax.shape != bx.shape:
+                return False
+            if not (np.array_equal(ax, bx) and np.array_equal(ay, by)
+                    and np.array_equal(ah, bh)):
+                return False
+        return True
+
     for seed in (3, 5, 11, 17):
-        a = asyncio.run(frames_of(f"m{seed}", off, seed, master, SWIM_ONLY))
-        b = asyncio.run(frames_of(f"z{seed}", off, seed, "fish", SWIM_ONLY))
-        same = a.shape == b.shape and np.array_equal(a, b)
-        print(f"   seed {seed:>2}: {a.shape[0]:>4} frames  "
+        a = asyncio.run(
+            positions_of(f"m{seed}", off, seed, master, SWIM_ONLY)
+        )
+        b = asyncio.run(
+            positions_of(f"z{seed}", neutral, seed, "fish", SWIM_ONLY)
+        )
+        same = positions_equal(a, b)
+        print(f"   seed {seed:>2}: {len(a):>4} frames  "
               f"{'IDENTICAL' if same else 'DIFFER'}")
         if not same:
             raise SystemExit(
-                "this PR changed ordinary swimming — it must not"
+                "the thrust dial at its neutral setting must reproduce "
+                "the merge-base's kinematics exactly"
             )
-    # ... and the wake IS what changed, or the comparison above is vacuous
-    on_cfg = dict(HIS, particle_count=6, camera_follow=0.0)
-    a = asyncio.run(frames_of("m-wake", on_cfg, 5, master, SWIM_ONLY))
-    b = asyncio.run(frames_of("z-wake", on_cfg, 5, "fish", SWIM_ONLY))
-    print(f"   control: with the wake ON, the same run differs from the "
-          f"merge-base -> {not np.array_equal(a, b)}")
-    if np.array_equal(a, b):
-        raise SystemExit("the wake rework rendered nothing new")
+    # ... and at the shipped DEFAULT dial the kinematics must NOT be
+    # identical, or the feature this PR built would not exist
+    a = asyncio.run(positions_of("m-default", off, 5, master, SWIM_ONLY))
+    b = asyncio.run(positions_of("z-default", off, 5, "fish", SWIM_ONLY))
+    print("   control: at the shipped default dial, the kinematics differ "
+          f"from the merge-base -> {not positions_equal(a, b)}")
+    if positions_equal(a, b):
+        raise SystemExit(
+            "the shipped dial defaults changed nothing — the thrust "
+            "feature is inert"
+        )
+
+    # ... and the body-trail render IS what changed the pixels at neutral
+    # (never identical, wander alone guarantees the trail is never exactly
+    # straight) — named, not silently accepted, so the 1b claim above
+    # cannot be mistaken for "rendered frames are unaffected too"
+    ra = asyncio.run(frames_of("m-render", off, 5, master, SWIM_ONLY))
+    rb = asyncio.run(frames_of("z-render", neutral, 5, "fish", SWIM_ONLY))
+    print("   note: at dial-neutral, RENDERED frames still differ from "
+          f"the merge-base (the always-on body trail) -> "
+          f"{not np.array_equal(ra, rb)}")
 
 
 def camera_origin_trace(seed, cf=0.0):
@@ -440,7 +527,10 @@ def section_five():
 
 
 if __name__ == "__main__":
-    _baseline = BASELINE_REF
+    # section_one's 1b is the only consumer of a baseline ref here, and it
+    # is the THRUST pin, not the shared BASELINE_REF (see that constant's
+    # own note on why check_fish_charge_spread.py must not see this move).
+    _baseline = THRUST_BASELINE_REF
     if "--baseline" in sys.argv:
         _baseline = sys.argv[sys.argv.index("--baseline") + 1]
     print("FISH CAMERA WINDOW — measured, offline, against his own state")

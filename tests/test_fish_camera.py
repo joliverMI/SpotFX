@@ -137,7 +137,20 @@ def _baseline_ref():
     return module.BASELINE_REF
 
 
-def _load_master(name="fish_master_probe"):
+def _thrust_baseline_ref():
+    """The pinned pre-thrust/body-trail commit (fm/spotfx-fish-body-trails-
+    head-tail-thrust), read from the check script — same file, same reason:
+    one baseline, one place. Used ONLY by the kinematics test below; every
+    other use of `_load_master` in this file predates and is unrelated to
+    that PR and keeps the older `_baseline_ref()` pin."""
+    path = REPO / "scripts" / "check_fish_camera.py"
+    spec = importlib.util.spec_from_file_location("_fish_camera_check", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.THRUST_BASELINE_REF
+
+
+def _load_master(name="fish_master_probe", ref=None, expect_no_wake=True):
     """Register the PINNED pre-camera fish.py beside the current one.
 
     An Effect subclass registers itself under its module's last name
@@ -147,7 +160,7 @@ def _load_master(name="fish_master_probe"):
     """
     if name in sys.modules:
         return name
-    ref = _baseline_ref()
+    ref = ref or _baseline_ref()
     try:
         src = subprocess.run(
             ["git", "show", f"{ref}:fx/effects/fish.py"],
@@ -159,17 +172,23 @@ def _load_master(name="fish_master_probe"):
         # missing input rather than retiring the proof.
         pytest.skip(f"cannot read {ref}:fx/effects/fish.py out of git: {exc}")
     # The baseline must genuinely PREDATE this PR: it still has to carry
-    # the camera (it is post-#210) and must NOT carry the wake rework. If
-    # either is wrong the pin has drifted — a loud FAILURE, never a skip.
+    # the camera (it is post-#210). If wrong the pin has drifted — a loud
+    # FAILURE, never a skip.
     assert "camera_follow" in src, (
         f"the pinned baseline {ref} predates the camera — the pin in "
         "scripts/check_fish_camera.py::BASELINE_REF has slipped backwards"
     )
-    assert "_step_wake" not in src, (
-        f"the pinned baseline {ref} already carries the wake rework — the "
-        "pin in scripts/check_fish_camera.py::BASELINE_REF is wrong; this "
-        "proof must fail loudly rather than skip itself into silence"
-    )
+    # It must NOT carry the wake rework — EXCEPT for `_thrust_baseline_ref`
+    # (fm/spotfx-fish-body-trails-head-tail-thrust's own pin), which is
+    # deliberately post-wake-rework (it only needs to predate THIS PR's
+    # thrust/trail change, not the much older wake one).
+    if expect_no_wake:
+        assert "_step_wake" not in src, (
+            f"the pinned baseline {ref} already carries the wake rework — "
+            "the pin in scripts/check_fish_camera.py::BASELINE_REF is "
+            "wrong; this proof must fail loudly rather than skip itself "
+            "into silence"
+        )
     path = Path(tempfile.mkdtemp()) / f"{name}.py"
     path.write_text(src)
     spec = importlib.util.spec_from_file_location(name, path)
@@ -260,28 +279,97 @@ def test_the_origin_trace_can_see_a_window_that_moves(tmp_path):
     _run(main())
 
 
+async def _positions(tmp_path, tag, cfg, seed, effect_type, script=None):
+    """Per-frame (p_x, p_y, p_hd) snapshots — the KINEMATICS claim (see the
+    test below): fm/spotfx-fish-body-trails-head-tail-thrust's body-trail
+    render is always live, so a rigid-vs-trail body never goes back to
+    bit-identical RENDERED frames even when the trail is exactly straight
+    in the degenerate case; the physics state is what has to match."""
+    room = await _room(tmp_path, tag, cfg, seed=seed, effect_type=effect_type)
+    eff = room.effect
+    seq = []
+
+    def grab(_eff=None):
+        n = eff.n
+        seq.append((eff.p_x[:n].copy(), eff.p_y[:n].copy(),
+                     eff.p_hd[:n].copy()))
+
+    for kind, secs, beats in (script or _SCRIPT):
+        if kind == "swim":
+            room.step(int(secs / DT), watch=grab)
+        else:
+            room.ramp(kind, secs, beats_every=beats, watch=grab)
+    await _close(room)
+    return seq
+
+
+def _positions_equal(a, b):
+    if len(a) != len(b):
+        return False
+    for (ax, ay, ah), (bx, by, bh) in zip(a, b):
+        if ax.shape != bx.shape:
+            return False
+        if not (np.array_equal(ax, bx) and np.array_equal(ay, by)
+                and np.array_equal(ah, bh)):
+            return False
+    return True
+
+
 @pytest.mark.parametrize("seed", (3, 5, 11, 17))
 def test_swimming_with_the_wake_off_is_the_merge_base_bit_for_bit(
     tmp_path, seed
 ):
-    """This PR reworks the wake and the two phases. Ordinary swimming, with
-    the wake switched off, must therefore render EXACTLY what the pinned
-    merge-base rendered — proven against that commit's OWN module, read out
-    of git and registered beside this one, not against this file with a
-    constant zeroed."""
-    master = _load_master()
-    cfg = dict(HIS, particle_count=6, camera_follow=0.0, ripple_amount=0.0)
+    """RESTATED 2026-09-16 by fm/spotfx-fish-body-trails-head-tail-thrust:
+    that PR's whole point is a deliberate change to ordinary swimming (a
+    tail-stroke thrust pulse plus a trail-following body), so "this PR
+    changed nothing about kinematics" is no longer a true claim about the
+    CURRENT code — it would be stale the moment this PR landed. Its own
+    required dial (`min_drift_speed`/`stroke_speed_cap`) is what makes a
+    real restatement possible: AT THE DIAL'S NEUTRAL SETTING
+    (min_drift_speed=1, stroke_speed_cap=0), the fish's KINEMATICS — not
+    its rendered pixels, since the body-trail render is always on — must
+    match the pin from immediately before this PR, bit for bit. This test
+    pins against `_thrust_baseline_ref()` (THAT PR's own merge-base), never
+    the older `_baseline_ref()` shared by every other test in this file —
+    see `_thrust_baseline_ref`'s own docstring for why."""
+    master = _load_master(
+        "fish_master_thrust_probe", ref=_thrust_baseline_ref(),
+        expect_no_wake=False,
+    )
+    off = dict(HIS, particle_count=6, camera_follow=0.0, ripple_amount=0.0)
+    neutral = dict(off, min_drift_speed=1.0, stroke_speed_cap=0.0)
 
     async def main():
-        a = await _frames(tmp_path, f"m{seed}", cfg, seed, master,
-                          script=_SWIM_ONLY)
-        b = await _frames(tmp_path, f"z{seed}", cfg, seed, "fish",
-                          script=_SWIM_ONLY)
-        assert a.shape == b.shape and a.size, (a.shape, b.shape)
-        assert np.array_equal(a, b), (
-            "this PR changed ordinary swimming, which it must not: "
-            f"{int(np.count_nonzero((a != b).any(axis=(1, 2))))} of "
-            f"{a.shape[0]} frames differ"
+        a = await _positions(tmp_path, f"m{seed}", off, seed, master,
+                             script=_SWIM_ONLY)
+        b = await _positions(tmp_path, f"z{seed}", neutral, seed, "fish",
+                             script=_SWIM_ONLY)
+        assert _positions_equal(a, b), (
+            "the thrust dial at its neutral setting must reproduce the "
+            "merge-base's kinematics exactly"
+        )
+    _run(main())
+
+
+def test_the_shipped_default_dial_actually_changes_the_kinematics(
+    tmp_path,
+):
+    """... and at the shipped DEFAULT dial the kinematics must NOT match
+    the pre-thrust pin, or the feature this PR built would be inert."""
+    master = _load_master(
+        "fish_master_thrust_probe", ref=_thrust_baseline_ref(),
+        expect_no_wake=False,
+    )
+    off = dict(HIS, particle_count=6, camera_follow=0.0, ripple_amount=0.0)
+
+    async def main():
+        a = await _positions(tmp_path, "m-default", off, 5, master,
+                             script=_SWIM_ONLY)
+        b = await _positions(tmp_path, "z-default", off, 5, "fish",
+                             script=_SWIM_ONLY)
+        assert not _positions_equal(a, b), (
+            "the shipped dial defaults changed nothing — the thrust "
+            "feature is inert"
         )
     _run(main())
 

@@ -195,6 +195,38 @@ SPINE_PROFILE = np.array(
 SPINE_WAVE = 0.42
 SPINE_THROW = SPINE_U ** 1.6
 
+# ── body trail (his 2026-09-16 ruling: "let the body BE the head's recent
+# path") ─────────────────────────────────────────────────────────────────
+# The HEAD (the front half of the spine, u<=0.5) still points the CURRENT
+# heading by straight extrapolation — a real fish's nose does lead where
+# it is going, and that much of the old rigid-stick layout was already
+# right. Only the trailing half (u>0.5) is walked back along the fish's
+# own recorded path instead of projected along that same heading — see
+# `p_trail_x`/`p_trail_y` (set up in __init__, pushed in draw(), read in
+# `_draw_bodies`). A fish on a straight run has a trail that IS that
+# straight line, so the body reduces to exactly its old rigid shape; a
+# fish mid-turn gets a body that bends through the arc it actually swam,
+# with the head at the front of that curve rather than a stick pivoted to
+# the tangent — his own complaint, and no separate "how much to bend"
+# number to disagree with the path.
+#
+# Sampled by ARC LENGTH — a fresh sample every BODY_TRAIL_STEP_PX of real
+# travel, never every frame — so the trail always covers roughly the same
+# physical distance of path regardless of how fast the fish is moving
+# right now (a time-sampled trail would instead spread the same history
+# over a longer or shorter path depending on speed, exactly the coupling
+# a speed-independent body shape needs to avoid — and speed is no longer
+# smooth, see the THRUST block below).
+BODY_TRAIL_LEN = 28       # recorded path samples behind the tracked point
+BODY_TRAIL_STEP_PX = 4.0  # spacing between samples, in SCREEN px — the
+                          # trail covers up to BODY_TRAIL_LEN * this
+                          # (112px) of real path. A body asking for more
+                          # than that (an extreme blob_size/body_aspect/
+                          # size_audio combination) holds at the oldest
+                          # recorded point instead of extending further —
+                          # a soft truncation, not a crash, for a
+                          # combination far past anything ever tuned.
+
 FLAP_BASE = 0.35        # amplitude floor — a drifting fish still breathes
 FLAP_SPEED_GAIN = 0.65  # ... plus this much at cruise speed
 FLAP_ACCEL_REF = 40.0   # px/s^2 that counts as "full" acceleration
@@ -207,7 +239,46 @@ CRUISE_K = 1.8          # px/s of cruise per unit base_speed per unit of
                         # "revolutions per second" reading of base_speed)
                         # makes a tight turner a slow swimmer, and the two
                         # are separately judged by eye.
-SPEED_TAU = 0.28        # speed ease time constant (real acceleration)
+SPEED_TAU = 0.28        # speed ease time constant (real acceleration) —
+                        # this is what `want` above eases toward when the
+                        # tail-stroke cap below is 0. See THE DIAL comment.
+
+# ── tail-stroke thrust (his 2026-09-16 ruling, "the tail beat must
+# actually produce the forward movement") ──────────────────────────────
+# Speed is no longer one smooth continuous target: every fish keeps a
+# MINIMUM DRIFT floor (`min_drift_speed`, a fraction of the ordinary
+# continuous target this effect always computed) plus a PULSE synced to
+# its own tail-beat phase (`p_flap` — the SAME oscillator the visual flap
+# already runs on, so the surge on screen and the stroke that supposedly
+# produced it can never drift apart), capped by `stroke_speed_cap` (a
+# fraction of that same target). ONE PULSE PER FLAP CYCLE — his "tail
+# flipping ... drives the speed": one flip, one push — shaped to rise and
+# fall smoothly rather than snap.
+#
+# THE DIAL, his explicit design requirement: he is taking a bigger change
+# than usual on faith and asked for a way back that costs no rebuild.
+# Raising `min_drift_speed` to its max (1.0) while lowering
+# `stroke_speed_cap` to 0 makes the speed target exactly the old
+# continuous one again, with SPEED_TAU exactly restored too (see the
+# speed section in draw()) — this is NOT a redundant pair collapsing to
+# one knob: a single "pulse amount" slider cannot express "smooth AND
+# fast" and "pulsed AND slow" as different points on the same line, and
+# he asked for the escape hatch specifically, not just an amount. Do not
+# fold these into one parameter or drop the floor as decoration.
+#
+# This also delivers his separate "more jerky to the music, especially in
+# slower sections" WITHOUT a second mechanism: a quiet passage lowers
+# `want_full` (less audio-driven jump/lunge), which lowers `speed_norm`,
+# which lowers `flap_freq` — so the SAME stroke that pulses the speed
+# also slows down, spacing its pushes further apart in slow music and
+# blurring them together in fast music, exactly as he described it.
+PULSE_SHAPE_POWER = 2.0  # sharpens the hump so a stroke reads as a push,
+                         # not a smooth sine wobble
+THRUST_TAU = 0.09        # speed-ease time constant once any stroke cap is
+                         # in play — fast enough that the coast between
+                         # strokes is visible instead of eased away. Blended
+                         # with SPEED_TAU by `stroke_speed_cap` itself (see
+                         # draw()), so at cap=0 this is never reached at all.
 ACCEL_TAU = 0.18        # acceleration smoothing
 TURN_GAIN = 3.0         # 1/s: desired turn rate per radian of heading
                         # error, BEFORE the turn-rate clamp. Frame-rate
@@ -474,6 +545,7 @@ _SOA_NAMES = (
     "p_enter", "p_erate", "p_leave", "p_lfade", "p_dl", "p_lk",
     "p_nf1", "p_nf2", "p_np1", "p_np2", "p_wf", "p_wp", "p_gf", "p_gp",
     "p_grad", "p_grad_from", "p_scatter", "p_bright",
+    "p_trail_x", "p_trail_y", "p_trail_acc",
 )
 
 
@@ -676,6 +748,25 @@ class Fish2d(Twod, GradientEffect):
                 default=1.2,
             ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=3.0)),
             vol.Optional(
+                "min_drift_speed",
+                description=(
+                    "Minimum swim speed kept independent of the tail "
+                    "stroke, as a fraction of the ordinary continuous "
+                    "swim target — his escape hatch: raise this to 1 "
+                    "with Stroke speed cap at 0 to get back tonight's "
+                    "smooth motion"
+                ),
+                default=0.6,
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1.0)),
+            vol.Optional(
+                "stroke_speed_cap",
+                description=(
+                    "Cap on the extra speed a single tail stroke can add "
+                    "on top of the minimum drift speed; 0 = no pulse at all"
+                ),
+                default=0.45,
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=2.0)),
+            vol.Optional(
                 "ripple_amount",
                 description="Wake strength: how much smear a fish lays down",
                 default=0.35,
@@ -811,6 +902,12 @@ class Fish2d(Twod, GradientEffect):
         self.p_grad_from = np.full(CAP, np.nan, dtype=np.float32)
         self.p_scatter = np.zeros(CAP, dtype=np.float32)
         self.p_bright = np.zeros(CAP, dtype=np.float32)
+        # body trail (his ask): a recorded path of the tracked point, WORLD
+        # units, newest sample at column 0. NaN in column 0 flags "needs
+        # backfill" — see the seeding pass near the top of draw().
+        self.p_trail_x = np.full((CAP, BODY_TRAIL_LEN), np.nan, dtype=np.float32)
+        self.p_trail_y = np.full((CAP, BODY_TRAIL_LEN), np.nan, dtype=np.float32)
+        self.p_trail_acc = np.zeros(CAP, dtype=np.float32)
         self._soa = tuple(getattr(self, name) for name in _SOA_NAMES)
         self.n = 0
 
@@ -897,6 +994,8 @@ class Fish2d(Twod, GradientEffect):
         self.flap_amount = self._config["flap_amount"]
         self.flap_rate = self._config["flap_rate"]
         self.flap_accel = self._config["flap_accel"]
+        self.min_drift_speed = self._config["min_drift_speed"]
+        self.stroke_speed_cap = self._config["stroke_speed_cap"]
         self.ripple_amount = self._config["ripple_amount"]
         self.ripple_spread = self._config["ripple_spread"]
         self.ripple_life = self._config["ripple_life"]
@@ -1078,6 +1177,11 @@ class Fish2d(Twod, GradientEffect):
         self.p_y[s] = 0.0
         self.p_x0[s] = np.nan
         self.p_y0[s] = np.nan
+        # body trail: NaN flags "needs backfill" — seeded from the final
+        # spawn position/heading each caller sets right after this returns
+        self.p_trail_x[s] = np.nan
+        self.p_trail_y[s] = np.nan
+        self.p_trail_acc[s] = 0.0
         for freq, phase in (
             (self.p_nf1, self.p_np1),
             (self.p_nf2, self.p_np2),
@@ -2180,6 +2284,7 @@ class Fish2d(Twod, GradientEffect):
                 np.full(k, self._half_width_px(), dtype=np.float32),
                 np.zeros(k, dtype=np.float32),
                 col["grad0"][:k],
+                use_trail=False,
             )
             np.maximum(self.trail, np.minimum(frame, 255.0), out=self.trail)
             self.p_x0[:k] = x
@@ -2191,12 +2296,23 @@ class Fish2d(Twod, GradientEffect):
         )
 
     def _draw_bodies(self, frame, idx, x, y, hd, bright, half_w, flap_amp,
-                     grad):
+                     grad, use_trail=True):
         """Lay each fish's spine out in SCREEN space and splat it.
 
-        The oval's long axis IS the heading, so a fish always points where
-        it is going; the lateral throw is a wave travelling from head to
-        tail, which is what reads as a flap."""
+        The HEAD (the front half of the spine, u<=0.5) still points the
+        CURRENT heading by straight extrapolation, exactly as before the
+        body-trail rework — a fish's nose really does lead where it is
+        going. The trailing half (u>0.5) is instead walked back along the
+        fish's own recorded path (`p_trail_x`/`p_trail_y`; see the
+        BODY_TRAIL_* comment near the top of the module), so the body
+        bends through a turn it actually swam rather than pivoting as a
+        rigid stick to the tangent. `use_trail=False` (the outgoing radial
+        collapse, which overwrites position/heading directly every frame
+        into a synthetic spiral with no recorded path of its own) keeps
+        the old all-heading layout for every node.
+
+        On top of that backbone, the lateral throw is a wave travelling
+        from head to tail, which is what reads as a flap."""
         k = len(idx)
         if k == 0:
             return
@@ -2205,8 +2321,43 @@ class Fish2d(Twod, GradientEffect):
         length = half_w * 2.0 * self.body_aspect
         cos_h = np.cos(hd)
         sin_h = np.sin(hd)
-        # along-body offsets: +half at the nose, -half at the tail
-        along = (0.5 - SPINE_U)[None, :] * length[:, None]
+
+        n_front = int(np.count_nonzero(SPINE_U <= 0.5)) if use_trail else SPINE_U.size
+        along_front = (0.5 - SPINE_U[:n_front])[None, :] * length[:, None]
+        base_x = np.empty((k, SPINE_U.size), dtype=np.float32)
+        base_y = np.empty((k, SPINE_U.size), dtype=np.float32)
+        base_x[:, :n_front] = px[:, None] + along_front * cos_h[:, None]
+        base_y[:, :n_front] = py[:, None] + along_front * sin_h[:, None]
+        if n_front < SPINE_U.size:
+            # walk the trailing nodes back along the recorded path instead
+            # of along the current heading: `chain` is [current point,
+            # trail[0] (~BODY_TRAIL_STEP_PX back), trail[1] (~2x back),
+            # ...] and a rear node at distance d behind the CENTER is
+            # linearly interpolated between whichever two chain points
+            # bracket it — an approximation that treats consecutive trail
+            # samples as evenly spaced, true up to the per-frame travel
+            # that can overshoot the push threshold (see the push in
+            # draw()), which is not worth chasing for a body shape judged
+            # by eye.
+            trail_x = self.cx + self.p_trail_x[idx] * self.sx - self.cam_px
+            trail_y = self.cy + self.p_trail_y[idx] * self.sy - self.cam_py
+            chain_x = np.concatenate([px[:, None], trail_x], axis=1)
+            chain_y = np.concatenate([py[:, None], trail_y], axis=1)
+            rear_u = SPINE_U[n_front:]
+            d = (rear_u[None, :] - 0.5) * length[:, None]
+            idx_f = np.clip(
+                d / BODY_TRAIL_STEP_PX, 0.0, BODY_TRAIL_LEN - 1e-4
+            )
+            floor_j = np.floor(idx_f).astype(np.int32)
+            frac = idx_f - floor_j
+            rows = np.arange(k)[:, None]
+            near_x = chain_x[rows, floor_j]
+            far_x = chain_x[rows, np.minimum(floor_j + 1, BODY_TRAIL_LEN)]
+            near_y = chain_y[rows, floor_j]
+            far_y = chain_y[rows, np.minimum(floor_j + 1, BODY_TRAIL_LEN)]
+            base_x[:, n_front:] = near_x + (far_x - near_x) * frac
+            base_y[:, n_front:] = near_y + (far_y - near_y) * frac
+
         lat = (
             flap_amp[:, None]
             * np.sin(
@@ -2215,8 +2366,8 @@ class Fish2d(Twod, GradientEffect):
             )
             * SPINE_THROW[None, :]
         )
-        sx_ = px[:, None] + along * cos_h[:, None] - lat * sin_h[:, None]
-        sy_ = py[:, None] + along * sin_h[:, None] + lat * cos_h[:, None]
+        sx_ = base_x - lat * sin_h[:, None]
+        sy_ = base_y + lat * cos_h[:, None]
         sizes = np.clip(
             half_w[:, None] * SPINE_PROFILE[None, :], 0.4, float(KERNEL_R)
         )
@@ -2421,6 +2572,27 @@ class Fish2d(Twod, GradientEffect):
             self._fade_only(dt)
             return
 
+        # ── body trail backfill ─────────────────────────────────────────
+        # A fish born this frame has no recorded path yet (flagged NaN in
+        # _spawn) — seed one straight back along its own heading at the
+        # ordinary sample spacing, so its very first drawn frame already
+        # has a real (if momentarily straight) tail instead of a
+        # collapsed point. Matches the ongoing push in this same draw()
+        # exactly (see BODY_TRAIL_STEP_PX), so nothing needs re-seeding
+        # once real travel starts overwriting it.
+        need_trail = ~np.isfinite(self.p_trail_x[:n, 0])
+        if need_trail.any():
+            ni = np.flatnonzero(need_trail)
+            steps = (
+                np.arange(1, BODY_TRAIL_LEN + 1, dtype=np.float32)
+                * BODY_TRAIL_STEP_PX
+            )
+            back_x = np.cos(self.p_hd[ni])[:, None] * steps[None, :] / self.sx
+            back_y = np.sin(self.p_hd[ni])[:, None] * steps[None, :] / self.sy
+            self.p_trail_x[ni, :] = self.p_x[ni][:, None] - back_x
+            self.p_trail_y[ni, :] = self.p_y[ni][:, None] - back_y
+            self.p_trail_acc[ni] = 0.0
+
         if beat_now and self._phase != "charge":
             spike = max(spike, 0.4 + 0.5 * impulse)
             self._beat_pending = False
@@ -2475,7 +2647,7 @@ class Fish2d(Twod, GradientEffect):
 
         # ── speed ───────────────────────────────────────────────────────
         cruise = self.cruise_px
-        want = (
+        want_full = (
             cruise
             * (1.0 + jump_eff * impulse * gain)
             * (1.0 + self.p_lun[:n])
@@ -2484,10 +2656,38 @@ class Fish2d(Twod, GradientEffect):
             * self._speed_scale
             * np.where(mode == 1, ENTER_SPEED_X, 1.0)
         )
+        # tail-stroke thrust (his ruling — see the THRUST block at the top
+        # of the module for the full reasoning): `want_full` above is the
+        # plain continuous target this effect always computed; the speed a
+        # fish actually chases is a MINIMUM DRIFT floor plus a PULSE synced
+        # to its own tail-beat phase, capped as a fraction of that same
+        # target. `p_flap` is read here BEFORE its own increment further
+        # down in this frame (the flap section) — a one-frame lag, which is
+        # fine since the two feed back into each other every frame anyway
+        # (faster swimming -> faster flap -> a stronger/more frequent
+        # pulse -> ...).
+        # SCOPED to the ordinary population only — mode<2 (swimming/
+        # entering) AND not a school/rush fish. The charge's school and the
+        # drop's rush are authored choreography, not ordinary swimmers ("the
+        # school moves 'almost identically'", the same reasoning that keeps
+        # mutual avoidance off while a school is formed above) — a pulsing
+        # speed on top of that would perturb a moment he has already tuned
+        # for something this feature was never asked to touch.
+        pulse_eligible = (mode < 2) & (self.p_nocap[:n] == 0)
+        stroke_phase = self.p_flap[:n] % (2.0 * np.pi)
+        pulse_shape = (0.5 - 0.5 * np.cos(stroke_phase)) ** PULSE_SHAPE_POWER
+        pulsed_want = want_full * self.min_drift_speed + (
+            want_full * self.stroke_speed_cap * pulse_shape
+        )
+        want = np.where(pulse_eligible, pulsed_want, want_full)
         # A per-fish ease only when something needs one: with nothing
         # dispersing and no burst the ease stays the plain scalar it always
-        # was, so ordinary swimming is bit-for-bit unchanged.
-        tau = SPEED_TAU
+        # was. At stroke_speed_cap=0 (with min_drift_speed at its max of 1)
+        # `want` above is `want_full` exactly and `tau` below is SPEED_TAU
+        # exactly — his stated escape hatch back to the pre-pulse motion.
+        pulse_engage = min(max(self.stroke_speed_cap, 0.0), 1.0)
+        fast_tau = SPEED_TAU * (1.0 - pulse_engage) + THRUST_TAU * pulse_engage
+        tau = np.where(pulse_eligible, fast_tau, SPEED_TAU)
         if dispersing.any():
             want = np.where(
                 swirling,
@@ -2823,6 +3023,25 @@ class Fish2d(Twod, GradientEffect):
             self._flow_py = -sch[1]
         self.p_x[:n] += vx_px * dt / self.sx
         self.p_y[:n] += vy_px * dt / self.sy
+
+        # ── body trail push ────────────────────────────────────────────
+        # A new sample every BODY_TRAIL_STEP_PX of REAL travel (the
+        # already-clamped world velocity above), never every frame — see
+        # the BODY_TRAIL_* comment near the top of the module for why arc
+        # length, not time. `push` fires at most once per frame; a fish
+        # moving fast enough to need two in one frame just pushes again
+        # next frame, a fraction of a sample late — not worth the extra
+        # bookkeeping for a body-shape effect tuned by eye.
+        travelled = np.hypot(vx_px, vy_px) * dt
+        self.p_trail_acc[:n] += np.where(steered, travelled, 0.0)
+        push = self.p_trail_acc[:n] >= BODY_TRAIL_STEP_PX
+        if push.any():
+            pidx = np.flatnonzero(push)
+            self.p_trail_x[pidx, 1:] = self.p_trail_x[pidx, :-1]
+            self.p_trail_y[pidx, 1:] = self.p_trail_y[pidx, :-1]
+            self.p_trail_x[pidx, 0] = self.p_x[pidx]
+            self.p_trail_y[pidx, 0] = self.p_y[pidx]
+            self.p_trail_acc[pidx] -= BODY_TRAIL_STEP_PX
 
         entering = mode == 1
         if (entering | dispersing).any():

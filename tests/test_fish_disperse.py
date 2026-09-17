@@ -56,8 +56,14 @@ def test_the_measured_dispersal_and_burst_proof_passes():
     # the red controls must have RUN, not been skipped
     assert "RED CONTROL" in proc.stdout and "SKIPPED" not in proc.stdout, tail
     # the scatter's colour, read at the rendered pixel: the hue-preserving
-    # clip holds a lone fish's colour, and the per-channel clip it replaced
-    # fails the same bar on every seed
+    # clip holds a lone fish's colour on every seed; the per-channel clip
+    # it replaced fails the same bar on AT LEAST ONE seed (whether a given
+    # seed's random draw ever saturates a channel at all is circumstantial
+    # — fm/spotfx-fish-body-trails-head-tail-thrust's trail-based tail can
+    # shift that seed to seed — so the instrument only needs to prove it
+    # CAN see the defect, not that every seed's draw reproduces it; see
+    # scripts/check_fish_disperse.py's own section_crossfade_hue for the
+    # full reasoning).
     hue = [
         dict(field.split("=") for field in line.split()[1:])
         for line in proc.stdout.splitlines() if line.strip().startswith("HUE ")
@@ -66,7 +72,10 @@ def test_the_measured_dispersal_and_burst_proof_passes():
     for row in hue:
         tolerance = float(row["tolerance"])
         assert float(row["hue_clip_worst"]) <= tolerance, row
-        assert float(row["per_channel_worst"]) > tolerance, row
+    assert any(
+        float(row["per_channel_worst"]) > float(row["tolerance"])
+        for row in hue
+    ), tail
 
 
 # ── the trail-gain hotfix (2026-09-16, his live report the same night) ──

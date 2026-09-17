@@ -7000,6 +7000,70 @@ A new Matrix effect + a Fish scene that is a WHOLESALE COPY of his Orbits V2
    "Shape" lane already exists. Proof + red controls:
    `scripts/check_fish_disperse.py`, `tests/test_fish_disperse.py`.
 
+8. **THE BODY IS THE HEAD'S OWN RECENT PATH, and speed is REAL TAIL-STROKE
+   THRUST, not a smooth target (2026-09-16, `fm/spotfx-fish-body-trails-
+   head-tail-thrust`)**. His complaint: "their bodies don't seem to bend
+   naturally as they turn in a radius... facing the tangent but should be
+   facing the curvature." His ruling: body-trails-the-head over a literal
+   bend model, "the tail flipping is what drives the speed."
+   * **Backbone**: the front half of the spine (`SPINE_U<=0.5`, the head)
+     still points the CURRENT heading by straight extrapolation — a fish's
+     nose really does lead. The trailing half is walked back along a per-
+     fish recorded path instead (`p_trail_x`/`p_trail_y`, `BODY_TRAIL_LEN`
+     x `BODY_TRAIL_STEP_PX` of screen-px arc length, pushed by REAL travel
+     distance every frame — never time-sampled, so the trail always covers
+     roughly the same physical distance regardless of current speed).
+     `_draw_bodies(..., use_trail=False)` keeps the old all-heading layout
+     for the one caller with no recorded path of its own (the outgoing
+     radial collapse, which overwrites position/heading into a synthetic
+     spiral every frame). A straight run's trail IS that straight line, so
+     the backbone reduces to exactly the old rigid stick there; a real turn
+     bends through the arc actually swum.
+   * **Thrust**: `min_drift_speed` (a floor, fraction of the plain
+     continuous target this effect always computed) plus a pulse synced to
+     the SAME `p_flap` phase the visual flap already runs on, capped by
+     `stroke_speed_cap` (a fraction of that same target) — one pulse per
+     flap cycle. THE DIAL IS HIS ESCAPE HATCH, not two redundant knobs:
+     `min_drift_speed=1, stroke_speed_cap=0` reduces `want`/`tau` to
+     exactly the old formula (bit for bit — proven both in
+     `tests/test_fish.py` and against the real pre-thrust merge-base in
+     `scripts/check_fish_camera.py` section 1b, which is why THAT script
+     carries its own separate `THRUST_BASELINE_REF` rather than moving the
+     shared `BASELINE_REF` — see that constant's own comment on why moving
+     it broke `check_fish_charge_spread.py`'s unrelated before/after).
+     Lowering the floor and opening the cap gives pure surge-and-coast.
+     "More jerky in slow music" (a separate, earlier ask) falls out of this
+     for free: quiet audio lowers the continuous target, which lowers
+     `speed_norm`, which lowers `flap_freq`, spacing pulses further apart —
+     no bolt-on jitter.
+   * **SCOPED to the ordinary population only** (`mode<2` and not a school/
+     rush fish, i.e. `p_nocap==0`) — the charge's school and the drop's
+     rush are authored choreography, not ordinary swimmers, the same
+     reasoning that already keeps mutual avoidance off during a school; a
+     pulsing speed there measurably perturbed `SCHOOL_SPACING_W`'s own
+     tuned spread and had to be excluded, not re-tuned.
+   * **A body-shape ("goldfish") change was asked for, then explicitly
+     withdrawn same-session** ("just disregard the goldfish thing") — if a
+     future ask revives thicker/rounder fish bodies, it is a fresh ask, not
+     something this PR quietly shipped and someone forgot to mention.
+   * **Sonic-adjustable**: both dial fields are ordinary `CONFIG_SCHEMA`
+     entries (the `swim_burst` precedent), reachable without a deploy.
+   Proof: `tests/test_fish.py` (the dial's both endpoints, the trail
+   reducing to the rigid layout on a straight/controlled path and
+   diverging on a real turn, birth backfill, the slow/fast pulse
+   resolvability), `scripts/check_fish.py` (its flap-bounds check gained a
+   float32 tolerance — a real value can land exactly at `FLAP_MIN`/`MAX`
+   now, which it rarely did under the old smooth speed),
+   `scripts/check_fish_disperse.py` (its thresholds were re-measured and
+   widened — a wider tail-render footprint and genuinely pulsing ordinary
+   swimmers shift its fine pixel/timing margins, never its qualitative
+   "fish disperse, never fade" claims, all of which still hold; the
+   crossfade body-peak bar stays at the trail-gain hotfix's 0.65, worst
+   0.75 with both changes in), `scripts/check_fish_camera.py` section 1b
+   (restated: kinematics, not rendered pixels, match the pinned predecessor at the dial's neutral
+   setting — the body trail is always live, so rendered frames never go
+   back to bit-identical even there).
+
 **A GAINED BODY MUST NEVER BE DEPOSITED INTO THE TRAIL** (hotfix,
 2026-09-16, his live report the same night #274 shipped: trails "at least
 3 times too long" and "about 50% too big"). The outgoing-crossfade body
@@ -7084,8 +7148,8 @@ tunable, not tuned. Proof: `scripts/check_fish.py`,
 `scripts/check_fish_avoidance.py`, `scripts/check_fish_lunge.py`,
 `scripts/check_fish_camera.py`, `scripts/check_fish_wake.py`,
 `scripts/check_fish_charge_spread.py`, `scripts/check_fish_burst_bounds.py`,
-`tests/test_fish.py`, `tests/test_fish_camera.py`,
-`tests/test_fish_disperse.py`.
+`scripts/check_fish_disperse.py`, `tests/test_fish.py`,
+`tests/test_fish_camera.py`, `tests/test_fish_disperse.py`.
 
 ## Radial (STAR) rotation is audio-lows-driven — a healthy `spin` can read as parked
 
