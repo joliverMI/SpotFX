@@ -24,7 +24,8 @@ motion; treat "Orbits semantics" as a false friend here.
 single smooth speed target with surge-and-coast thrust. Setting
 `min_drift_speed=1, stroke_speed_cap=0` reduces the formula to EXACTLY the
 old smooth target, bit for bit (`scripts/check_fish_camera.py` §1b proves
-this against the real pre-thrust merge-base) — that's the dial's whole
+swimming KINEMATICS match the pinned pre-thrust `THRUST_BASELINE_REF` at
+that setting) — that's the dial's whole
 purpose: a way back to the old feel without touching code.
 **The shipped defaults (`min_drift_speed=0.85`, `stroke_speed_cap=0.4`)
 are SOLVED, not picked**: a pulse must redistribute speed in time without
@@ -36,19 +37,28 @@ regression exactly like the one caught live 2026-09-17 (a rebase surfaced
 a 23% slowdown from defaults that hadn't been re-solved). See the THRUST
 comment block in `fish.py` itself before touching either number.
 
-## The swim-burst flare ships at `trigger_offset_ms = 0` DELIBERATELY —
-   the -100ms he asked for is a KNOWN, deferred gap
+## The "Fish Swim Burst" flare kind ships at `trigger_offset_ms = 0` —
+   his own ruling, and per-kind timing has since made a pre-fire SAFE
 
-He asked for the burst to start 100ms before the trigger; he then
-corrected himself — "no, dont pull the band forward, just dont add the
-100ms pre-fire" — because a BAND takes the MOST-NEGATIVE offset among all
-its attached kinds (`band_trigger_offset_ms`), so an early swim-burst
-would drag every OTHER flare on the same band early too. It ships at 0
-(fires ON the trigger) and the early start is explicitly deferred to
-per-flare-kind lead work (see AGENTS.md's "PER-FLARE TRIGGER MOMENT"
-section) — do not "fix" this by giving the kind a negative offset without
-first checking whether per-kind independent timing has landed; before
-that lands, doing so silently drags every sibling kind on the band early.
+The flare KIND is named **"Fish Swim Burst"**
+(`scripts/add_fish_swim_burst_flare.py`); `swim_burst` is the EFFECT PARAM
+it spikes (a momentary toggle, `hold_ms=300`). He first asked for the burst
+to start 100ms before the trigger, then corrected himself — "no, dont pull
+the band forward, just dont add the 100ms pre-fire" — so it fires ON the
+trigger. That ruling is the reason it sits at 0, not a mechanical limit.
+
+The mechanical limit that motivated it is CLOSED: PER-FLARE TRIGGER MOMENT
+has shipped (`scene_response._band_anchor_ms`, `PendingKindBatch`; AGENTS.md
+"PER-FLARE TRIGGER MOMENT"). A band's anchor is the min over every
+declared, enabled kind's offset, zero included; on a trigger-relocated fire
+the whole band starts at that anchor and each kind then waits
+`max(0, kind.trigger_offset_ms - anchor_ms)`. So giving this kind -100ms
+would start the burst 100ms early while every sibling left at 0 still fires
+exactly on the mark. Two caveats before doing it: a bridge-classified
+flare, `on_update` or `POST /api/engine/event` fires the band ATOMICALLY
+(no offset honoured there at all), and the automatic lead
+(`_response_switch_lead_ms`) stays band-wide. Adding the pre-fire is a
+change to his authored behaviour — ask him, don't "fix" it.
 
 ## The trail must be fed the UNGAINED body — a scatter/crossfade gain must
    never be deposited into a PERSISTENT decaying buffer
@@ -87,8 +97,9 @@ instrumenting the real pipeline. The fix (`BOUND_BRAKE_AT`/
 `BOUND_BRAKE_TAU`) is live ONLY while a swim-burst is active
 (`self._burst`/`self._burst_tail`) and only for a fish heading OUTWARD —
 ordinary swimming near the edge is completely untouched. Don't widen its
-trigger condition without re-running `scripts/check_fish_camera.py`'s
-byte-identity guard on ordinary swimming.
+trigger condition without re-running `scripts/check_fish_burst_bounds.py`
+and `scripts/check_fish_camera.py` §1b's ordinary-swimming kinematics
+guard.
 
 ## Everything else worth knowing before a change
 
@@ -101,11 +112,17 @@ byte-identity guard on ordinary swimming.
   turn-rate clamp as everything else, and OFF during the charge's school
   and the drop's rush (authored choreography, not crowds to fix).
 - **`camera_follow` is a WINDOW, not a world remap** — at `camera_follow=0`
-  the mapping is the identity (byte-identical to the pre-camera baseline,
-  proven against a pinned git ref, `BASELINE_REF` in
-  `scripts/check_fish_camera.py` — pin a NEW reference when a mechanic
-  changes the render at knob-zero, never let a moving `master` ref
-  silently retire the proof to a skip).
+  the world→screen mapping is the identity. It is NO LONGER proven
+  byte-identical to the pre-camera render (the wake rework changed the
+  render at knob zero, so `BASELINE_REF` moved forward); `scripts/
+  check_fish_camera.py` §1 now asserts two narrower things: **1a** the
+  window origin never leaves zero across the whole arc (exact, against
+  `BASELINE_REF`), and **1b** ordinary-swimming KINEMATICS — motion, not
+  rendered pixels — match a SEPARATE pinned ref, `THRUST_BASELINE_REF`, at
+  the thrust dial's neutral setting (`min_drift_speed=1,
+  stroke_speed_cap=0`). Pin a NEW reference constant when a mechanic
+  changes what a claim compares, never let a moving `master` ref silently
+  retire the proof to a skip.
 - **A pulse/thrust config disagreement between the effect's own docstring
   math and the shipped defaults is the class of bug to watch for** — the
   2026-09-17 mean-speed regression is the cautionary tale; re-derive, don't
@@ -115,10 +132,13 @@ byte-identity guard on ordinary swimming.
 
 ## Sonic reach
 
-The `swim_burst` flare kind IS Sonic-editable via `set_flare_kind`
+The "Fish Swim Burst" flare kind IS Sonic-editable via `set_flare_kind`
 (`trigger_offset_ms`, `hold_ms`, `params`, `gain` are all omit-means-keep)
 — this is the one fish control Sonic can reach directly, because it's a
-FlareKind, not a raw effect param. Every other param here follows the
+FlareKind, not a raw effect param. **`set_flare_kind` looks kinds up BY
+NAME: pass `name="Fish Swim Burst"`, never `name="swim_burst"`** — the
+latter is the effect param, and naming it would CREATE a duplicate kind
+instead of editing the existing one. Every other param here follows the
 usual rule: no direct edit, only through an attached FlareKind.
 
 ## Executable proofs

@@ -2,8 +2,8 @@
 name: power-effect
 description: >
   fx/effects/power.py (`Classic` category, Strips/Singles) — the classic
-  LedFX bass-percussive "power" effect, bound onto the Singles device (and
-  several scenes' Strips) across EVERY one of his 10 live scenes. Load
+  LedFX bass-percussive "power" effect, bound onto the Singles device —
+  and only Singles — across EVERY one of his 10 live scenes. Load
   before touching `sparks_color` (an accent param) or before assuming a
   scene's stored sparks colour reflects what he actually tuned.
 ---
@@ -11,9 +11,10 @@ description: >
 # Power
 
 A near-stock LedFX `Classic` effect (`mirror`, `blur`, `sparks_color`,
-`bass_decay_rate`, ...) — shared across virtually every scene here via the
-Singles device, so a change here has the widest blast radius of any
-effect on this list. Check `EFFECT_SCENE_MAP.json`'s scene entries before
+`bass_decay_rate`, ...) — the Singles entry of all 10 live scenes, and no
+scene's Strips entry today (STAR's Strips `power` step was removed by the
+"always do melt" ruling), so a change here has the widest blast radius of
+any effect on this list. Check `EFFECT_SCENE_MAP.json`'s scene entries before
 assuming a fix is scoped to one scene.
 
 ## `sparks_color` is an ACCENT param — force-written black unless the
@@ -41,8 +42,7 @@ move).
 ## Executable proofs
 
 No dedicated `check_power_*.py`/`test_power_*.py` exists — a named gap;
-this effect is close to stock LedFX behaviour and its documented invariant
-(the accent param) is proven generically by
-`tests/test_dark_light.py`/the scene-fire test suite rather than a
-power-specific script. History: AGENTS.md's "SPECTRA app" section,
+this effect is close to stock LedFX behaviour. Its documented invariant
+(the accent param) is proven by `scripts/check_spectra.py`'s "STAR power/
+Singles accent" section, not by any pytest test. History: AGENTS.md's "SPECTRA app" section,
 "accent" param paragraph.

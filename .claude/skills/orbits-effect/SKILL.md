@@ -3,8 +3,8 @@ name: orbits-effect
 description: >
   fx/effects/orbits.py (Matrix, crystal-mapper) and fx/effects/orbits1d.py
   (Strips) — orbiting-particle effect behind Orbits V2, and the strip
-  effect several OTHER scenes' Strips entries reuse (Squiggles V2,
-  Dancers V2, Pacman V2). Load before touching either module, before
+  effect four OTHER scenes' Strips entries reuse (Squiggles V2,
+  Dancers V2, Pacman V2, Fish). Load before touching either module, before
   tuning drop-ejecta persistence, or before assuming Fish's kinematics —
   Fish is a wholesale copy of this scene's params/bands but moves
   completely differently; see the fish-effect skill for the split.
@@ -16,10 +16,10 @@ Matrix effect renders to `crystal-mapper` — load `crystal-hex-grid` first
 for anything about coverage/spawn radius on this device.
 
 **Orbits1d is load-bearing for scenes that aren't "Orbits" at all** —
-Squiggles V2, Dancers V2 and Pacman V2 all use `orbits1d` for their Strips
-entry (their own Matrix effect is something else). A change here can move
-four scenes at once; check `EFFECT_SCENE_MAP.json`'s scene entries before
-assuming a fix is Orbits-only.
+Squiggles V2, Dancers V2, Pacman V2 and Fish all use `orbits1d` for their
+Strips entry (their own Matrix effect is something else). A change here can
+move five scenes at once (Orbits V2 plus those four); check the live scenes
+(`GET /spectra/api/scenes`) before assuming a fix is Orbits-only.
 
 ## Params worth knowing before tuning
 
@@ -29,12 +29,17 @@ assuming a fix is Orbits-only.
   an authored profile built for a different param (e.g. a [0,1]-ish
   default) can't silently wander below the effect's own floor and get
   rejected by the config schema while the conductor's model keeps moving.
-- `reverse` (toggle, default False): spawn-side direction flag, same
-  semantics as blackhole's — see that skill's note; it does NOT reverse a
-  particle already in flight.
-- `spin` (0..1): current swirl amount, an ordinary numeric here (unlike
-  radial's `spin`, which is squared and audio-driven — don't cross-apply
-  that mental model).
+- `reverse` (toggle, "Reverse Spin", default False): read LIVE on every
+  frame in `draw()` (`direction = -1.0 if self.reverse else 1.0`), so it
+  flips the rotation of EVERY particle AND the tether ring continuously,
+  including ones already in flight (`orbits1d`: the oscillation and the
+  ring). This is the OPPOSITE of blackhole's spawn-side `reverse` — never
+  port a blackhole reverse fix here, or an orbits one there.
+- `spin` ("Ring Spin", 0..1, registry aspect `reactivity`): the tether
+  RING's rotation speed as a fraction of `base_speed`, boosted by the audio
+  impulse (`ring_phase += spin * base_speed * direction * (1 + 0.5 *
+  speed_jump * impulse) * dt`). Not a swirl amount — that is Fish's
+  meaning for its own `spin` — and not radial's squared audio gain either.
 - `speed_jump`/`speed_jog`/`brightness_audio`/`size_audio`: audio gains —
   idle near their floor during quiet passages; see the audio-idle trap
   documented on the radial-effect skill.
@@ -65,6 +70,7 @@ effect.
 
 `scripts/check_orbits_drop_burst_and_persistence.py`,
 `scripts/smoke_orbits_params.py`, `tests/test_orbits_drop_persistence.py`.
-History: AGENTS.md's "Fish" section (the comparison table for orbits vs.
-fish motion) and the drop-timing-reference withdrawal note
+History: AGENTS.md's "Fish (`fx/effects/fish.py`) — Orbits' twin,
+different kinematics" section (how Fish reuses Orbits' patterns but not its
+motion) and the drop-timing-reference withdrawal note
 (`data/drops-still-fire-early-star-does-not-explode/`).

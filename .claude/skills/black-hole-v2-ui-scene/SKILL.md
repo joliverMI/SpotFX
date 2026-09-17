@@ -1,49 +1,66 @@
 ---
 name: black-hole-v2-ui-scene
 description: >
-  The "Black Hole V2 UI" SPECTRA scene — a second, distinct scene id
-  binding the same blackhole/blackhole1d/power effect shape as Black Hole
-  V2. Load before editing this scene's own bands/kinds/colour preference;
-  load the blackhole-effect skill first for the underlying effect, and
-  the black-hole-v2-scene skill for the sibling scene's own notes (most
-  of what's known applies to both, since they can't be structurally told
-  apart by the tooling that exists today).
+  The "Black Hole V2 UI" SPECTRA scene — a separate, structurally THINNER
+  scene than Black Hole V2: its `blackhole` entry targets the Particles
+  device category (not Matrix/crystal-mapper), with `blackhole1d` on
+  Strips and `power` on Singles, and far fewer flare kinds. Load before
+  editing this scene's own bands/kinds/colour preference; load the
+  blackhole-effect skill first for the effect's code-level semantics.
 ---
 
 # Black Hole V2 UI (scene)
 
-A SEPARATE scene id from "Black Hole V2" — same effect shapes
-(`blackhole` on Matrix, `blackhole1d` on Strips, `power` on Singles), but
-its own bands/kinds/curves live independently in
-`storage/spectra/scenes.json`. Treat it as its own scene: don't assume an
-edit to one scene's bands also applies to the other.
+A SEPARATE scene id from "Black Hole V2", and NOT a twin of it. Its real
+shape, read live 2026-09-16 (verify against `GET /spectra/api/scenes` —
+this drifts):
 
-**Everything in the `black-hole-v2-scene` skill's "Known invariants" list
-applies here too** (reverse-kind coercion, accent params on
-`horizon_color`/`sparks_color`, the raw-JSON-dict script-editing rule, the
-permanent-reverse-sticks-baseline shape) — read that skill in full; this
-one exists only because it is a genuinely separate scene id in his room,
-not because the mechanics differ.
+- Matrix-slot entry: `blackhole` targeting the **Particles** category,
+  where Black Hole V2 targets **Matrix**;
+- Strips: `blackhole1d`; Singles: `power`;
+- flare kinds: Dice Re-roll, Colour Jump, two flare gains and Colour Rotate
+  & Back — none of Black Hole V2's "Flare patch" kinds, no reverse kind,
+  no blob rush.
 
-## The known imprecision, named
+`scripts/set_scene_colorset_preference.py`'s own docstring, verbatim:
+"'Black Hole V2 UI' is structurally thinner than its sibling — worth
+reading before assuming it's an equal, fired scene rather than a
+work-in-progress: it targets a Particles device entry where 'Black Hole V2'
+targets Matrix, it carries noticeably fewer flare kinds once loaded, and
+nothing outside scenes.json (no scene id search anywhere else in storage)
+references it." He was told this and still had its colour-set preference
+set to `"dark"` alongside Black Hole V2, Fireworks V2 and Dancers V2.
 
-No script or test in this repo can currently tell "Black Hole V2" changes
-from "Black Hole V2 UI" changes apart — both are attributed to the same
-`check_blackhole_*.py`/`test_blackhole_*.py` trigger set in
-`EFFECT_SCENE_MAP.json`. If a future change is genuinely scoped to only
-one of the two scenes, verify against the live `GET /spectra/api/scenes`
-(never a worktree's stale local copy) and update ONLY the scene skill that
-actually changed — don't assume the manifest's duplication means both
-always need touching, only that the CHECK can't tell them apart yet.
+## What carries over from the blackhole-effect skill, and what does not
+
+- **Carries over — code-level param semantics.** They live in the effect
+  module regardless of which device category runs it: `reverse`'s real-
+  `bool` coercion for any toggle-targeting kind, the accent params
+  (`blackhole.horizon_color`, `power.sparks_color` force-written black
+  unless the entry authors them), the charge/lull/drop state machine and
+  its orphan-crash rule.
+- **Likely does NOT carry over — crystal-mapper geometry.** The hex-grid
+  spawn radius, `HEX_FILL_RADIUS` and "measure darkness over real cells"
+  notes are about the Matrix `crystal-mapper` virtual. Check which device
+  actually backs the Particles category before applying any of them here.
+- **Does not carry over — Black Hole V2's band notes.** A reverse-kind or
+  "Flare patch" observation from the sibling scene has nothing to attach
+  to here. Don't assume an edit to one scene's bands applies to the other.
+
+The raw-JSON-dict rule for script edits still applies (load the raw dict,
+mutate one key, never round-trip through `SceneV2`/`scene_store.save()` —
+see the black-hole-v2-scene skill and AGENTS.md).
 
 ## Sonic reach
 
-Same boundary as Black Hole V2 — scene settings and flare kinds only,
-never the device entries.
+Scene settings and flare kinds only via the scene console — never the
+device entries.
 
 ## Executable proofs
 
-Shares the blackhole-effect skill's proof corpus — a named gap for a
-scene-specific script/test. Add one and register it under this scene's
-own key in `EFFECT_SCENE_MAP.json` (not just the sibling's) if this scene
-ever needs a distinguishing check.
+None scene-specific — a named gap, which is why this scene's manifest entry
+lists no trigger files. The `check_blackhole_*.py`/`test_blackhole_*.py`
+corpus measures the effect (mostly on crystal-mapper geometry) and belongs
+to the blackhole-effect skill alone. If this scene ever needs its own
+check or migration, register it under this scene's own key in
+`EFFECT_SCENE_MAP.json`.

@@ -1,8 +1,9 @@
 ---
 name: star-scene
 description: >
-  The "STAR" SPECTRA scene — Matrix `radial`, Strips `melt` (was `power`,
-  see below), Singles `power`. Load before editing this scene's flare
+  The "STAR" SPECTRA scene — Matrix `radial`, Strips `melt` (always melt
+  now — an intensity-stepped `power` overlay at ⚡0.7+ was removed, see
+  below), Singles `power`. Load before editing this scene's flare
   bands/kinds (especially anything Reverse-shaped), its Strips config, or
   the `edges` param — this scene has the most edit-history and the most
   "his own tuning got silently replaced by a rebuild" precedent of any
@@ -63,11 +64,12 @@ function is for).
 
 ## Strips: `melt`, always — a superseded seeder still exists
 
-His 2026-08-25 ruling "always do melt" removed STAR's Strips power step.
+STAR's Strips base effect was always `melt`; `scripts/seed_star_strips.py
+--apply` added an intensity STEP on top (`power` at/above ⚡0.7, melt
+below). His 2026-08-25 ruling "always do melt" removed that step.
 `scripts/star_strips_always_melt.py` is the current, correct script;
-`scripts/seed_star_strips.py --apply` is the ORIGINAL, now-superseded
-seeder for the intensity-stepped `effect_steps` binding — re-running it
-would silently put the power step back. See the melt-effect skill.
+`seed_star_strips.py` is the ORIGINAL, now-superseded seeder — re-running
+it would silently put the power step back. See the melt-effect skill.
 
 ## Sonic reach
 
@@ -75,6 +77,8 @@ Scene settings and flare kinds only via the scene console.
 
 ## Executable proofs
 
-`scripts/check_star_spin_motion.py`, `tests/test_star_strips_always_melt.py`.
+`tests/test_star_strips_always_melt.py` (this scene's Strips migration).
+The radial-effect skill owns the effect's own instruments
+(`scripts/check_star_spin_motion.py`, `scripts/check_radial_base_rotation.py`).
 History: AGENTS.md's "STAR" scene and "A scene's stored data is not proof
 he authored it" sections — read both before a non-trivial change.

@@ -4,7 +4,8 @@ description: >
   fx/effects/squiggles.py (Matrix, crystal-mapper) — the segmented worm/
   chain effect behind Squiggles V2. Load before touching drop-burst
   timing, background handling (his own reversal on this specific effect —
-  §85 then §87), or the `reverse` toggle's release path.
+  docs/SPECTRA_SPEC.md §85 then §87), or the `reverse` toggle's release
+  path.
 ---
 
 # Squiggles
@@ -31,12 +32,13 @@ to prevent.
 ## `no_background_color` was set, then explicitly REMOVED — his call, not
    a defect fix
 
-§85 added `no_background_color` to squiggles after measuring a bright
-authored background flooding ~100% of a real headless render. §87
-reversed it on his own ruling: "keep the backgrounds, i want to control
+`docs/SPECTRA_SPEC.md` §85 (also referenced in AGENTS.md's own prose)
+added `no_background_color` to squiggles after measuring a bright authored
+background flooding ~100% of a real headless render. §87 reversed it on his
+own ruling: "keep the backgrounds, i want to control
 them with overrides" — made possible once colour-GROUP overrides were
 proven to actually reach the wire (three choke points were silently
-discarding them before that fix, AGENTS.md §86). If a Squiggles colour-set
+discarding them before that fix, `docs/SPECTRA_SPEC.md` §86). If a Squiggles colour-set
 accept list looks narrow, check that flag's CURRENT state and the group-
 override machinery before assuming either is broken — squiggles' widened
 accept list (`accept_all_sets=True`, §85) is untouched by the background
@@ -44,12 +46,15 @@ reversal and independent of it.
 
 ## A momentary/permanent kind targeting `reverse` needs a real bool
 
-`reverse` is a toggle-type param — `ParamTarget.value` is a plain float
-field, so an authored `true`/`false` silently coerces to `1.0`/`0.0`
-unless `scene_response._compute_param_moves` coerces it back to a real
-`bool` (fixed for blackhole/orbits/squiggles together, PR
-fm/momentary-reverse-flare-on-black-hole-orbits-squiggles — see
-`config/effect_params.json`'s `KIND_TOGGLE` handling). The release side
+`reverse` is a toggle-type param ("Flip travel: every chain turns around
+and retraces its path") — `ParamTarget.value` is a plain float field, so an
+authored `true`/`false` silently coerces to `1.0`/`0.0` unless
+`scene_response._compute_param_moves` coerces it back to a real `bool`
+(fixed for blackhole/orbits/squiggles together, PR
+fm/momentary-reverse-flare-on-black-hole-orbits-squiggles). That handling
+lives in `spectra/services/scene_response.py` (its
+`binding_resolver.KIND_TOGGLE` branches); `config/effect_params.json` only
+declares the param's `"type": "toggle"`. The release side
 needed the SAME fix: a toggle baseline had to start being tracked in
 `param_baseline`/`_carried_value` (both used to explicitly exclude bools
 as "NUMERIC baselines only"), or a momentary release could never resolve
@@ -70,9 +75,11 @@ No direct param edit — reachable only through an already-attached
 ## Executable proofs
 
 `scripts/check_squiggles_drop_timing.py`,
-`scripts/widen_squiggles_colorset_accept.py`,
 `tests/test_squiggles_drop_timing.py`,
-`tests/test_squiggles_colorset_widen.py`. History: AGENTS.md §85, §86,
-§87, and the "A saturating signal meeting >=" section (check `min_volume`/
+`tests/test_squiggles_colorset_widen.py`. The accept-list migration,
+`scripts/widen_squiggles_colorset_accept.py`, is scene data and belongs to
+the squiggles-v2-scene skill. History: `docs/SPECTRA_SPEC.md` §85, §86, §87
+(also referenced in AGENTS.md's own prose), and AGENTS.md's "A saturating
+signal meeting >=" section (check `min_volume`/
 `burst_threshold`-shaped gates on this effect against that pattern before
 adding one).

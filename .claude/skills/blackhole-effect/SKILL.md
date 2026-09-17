@@ -6,8 +6,7 @@ description: >
   the Black Hole V2 and Black Hole V2 UI scenes. Load before touching
   either module, before tuning reverse/charge/lull/drop behaviour on this
   effect, or before reasoning about a "black hole isn't exploding on time"
-  / "the star freezes on every flare" style report that turns out to be
-  this effect via a shared param (spin_sign).
+  or "stuck reversed" style report on either Black Hole scene.
 ---
 
 # Blackhole / Blackhole1d
@@ -19,28 +18,39 @@ downstream of that geometry, not independent tuning.
 
 ## Params that mean something other than their name suggests
 
-- `reverse` (toggle, default True on Matrix / True on Strips): NOT "run
-  backwards right now" — it's a SPAWN-SIDE flag that picks the sign of new
-  particles' motion. Nothing reverses a particle already in flight. A
-  `False→True` edge that used to snap the whole outbound population now
-  ARMS a real turnaround (`_reverse_edge`/`_arm_reverse_fallback`,
-  `REVERSE_FALLBACK_TURN_S`) that merges onto the speed curve with no
-  visible step. **Do not "fix" a horizon captive by releasing it** — that
-  was tried (PR #179) and reverted the same day: release evicts blobs the
-  flare never moved and makes them immortal. The real fix pins a captive
-  to the ring only while it's AT the ring (`REVERSE_FALLBACK_RING_TOL`).
-- `swirl`, `spawn_rate`, `beat_burst`, `spawn_audio`, `speed_audio`: these
-  are AUDIO GAINS (aspect: reactivity in the registry), not fixed
-  speeds/counts — the live signal they multiply idles near 0 during quiet
-  passages, so a "healthy" value can visibly read as frozen. See the
-  radial-effect skill's audio-idle note for the general shape of this
-  trap; it applies here too via the shared audio callback.
-- `horizon_scale` / `HEX_FILL_RADIUS` (0.2..0.8, default 0.19-0.25): the
-  lull's fill stops at the crystal's own real-cell boundary
-  (`HEX_FILL_RADIUS ≈ 1.128` normalized-r), NOT at the addressable
-  rectangle's corner (`r_max ≈ 1.49`) — growth past the hex covers dead
-  cells only. Measure "is the panel dark?" over real cells (device
-  profile mask), never the dummy rectangle.
+- `reverse` (toggle, "Reverse Flow", default True on both Matrix and
+  Strips): True means blobs flow OUTWARD, False means infall. It is a
+  SPAWN-SIDE flag that also picks the sign of every live blob's motion —
+  nothing turns a particle already in flight around by itself, which is why
+  flipping it used to snap the whole outbound population in one frame. The
+  edge is detected in `config_updated` (`_reverse_edge = "fallback" if
+  prev_reverse else "eject"`): a **True→False** edge now ARMS a real
+  turnaround (`_arm_reverse_fallback`, `REVERSE_FALLBACK_TURN_S`) that
+  merges onto the speed curve with no visible step; a False→True edge is
+  the outward "eject", still instant by his own ask. **Do not "fix" a
+  horizon captive by releasing it** — that was tried (PR #179) and
+  reverted the same day (#181): release evicts blobs the flare never moved
+  and makes them immortal. The real fix pins a captive to the ring only
+  while it's AT the ring (`REVERSE_FALLBACK_RING_TOL`).
+- `swirl` ("Swirl", -6..6, default 3.0, registry aspect `shape`,
+  `flip_sign`): a SHAPE param, not an audio gain — the sign sets the swirl
+  direction and 0 is straight infall.
+- `spawn_rate` (0..60, blobs/s), `beat_burst` (0..12, blobs per detected
+  beat), `spawn_audio` (0..2), `speed_audio` (0..5): the reactivity family.
+  `spawn_rate` is a base rate the live impulse multiplies up
+  (`spawn_rate * (1 + spawn_audio * impulse * 3)`), and `speed_audio`
+  scales speed by `(1 + speed_audio * impulse * 2)` — the impulse idles
+  near 0 during quiet passages, so a "healthy" gain can read as doing
+  nothing. See the radial-effect skill's audio-idle note for the general
+  shape of this trap.
+- `horizon_scale` ("Horizon Size", 0..0.8, default 0.25; 0 disables the
+  horizon): the event-horizon radius baseline blobs orbit at instead of
+  falling in. Separately, the lull's fill stops at the crystal's own
+  real-cell boundary — the CONSTANT `HEX_FILL_RADIUS ≈ 1.128`
+  normalized-r, not a param — NOT at the addressable rectangle's corner
+  (`r_max ≈ 1.49`); growth past the hex covers dead cells only. Measure
+  "is the panel dark?" over real cells (device profile mask), never the
+  dummy rectangle.
 - `horizon_color`: an ACCENT param (`config/effect_params.json`
   `blackhole.params.horizon_color.accent = true`) — forced black by
   `scene_compiler._entry_config` on every compile unless the scene entry
@@ -51,7 +61,8 @@ downstream of that geometry, not independent tuning.
   `no_background_color` flag (unlike `radial`/`pacman`), and an authored
   black `bg_color` on a colour set is LOAD-BEARING here in Hybrid mode —
   it's what resets the background to black on every fire. Never strip it
-  as "redundant" (AGENTS.md §72 has the full colour-bleed proof).
+  as "redundant" (`docs/SPECTRA_SPEC.md` §72, also referenced in
+  AGENTS.md's own prose, has the full colour-bleed proof).
 
 ## Particle-flag vocabulary (don't conflate these two)
 

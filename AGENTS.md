@@ -105,7 +105,12 @@ visible from reading the code cold (a saturating audio signal meeting a
 `>=` never-threshold, a param that means something different on one
 effect than every sibling effect, a fix that was tried and withdrawn once
 already). `.claude/skills/EFFECT_SCENE_MAP.json` is the hand-maintained
-manifest naming which files trigger which skill.
+manifest naming which files trigger which skill, under ONE mapping rule: an
+effect's own code (`fx/effects/<name>.py`) and its instrument/measurement
+scripts and tests trigger ONLY that effect's skill; a scene's own authored
+data/configuration (its seed script, a flare-kind migration naming that
+scene, a test asserting that scene's stored config) triggers ONLY that
+scene's skill — no file is listed under both.
 
 **Whenever you change an effect's or scene's behaviour — touch
 `fx/effects/<name>.py`, tune a param default, fix a timing/threshold
@@ -121,12 +126,20 @@ skill the day it gets bound into a live scene.
 Unlike the help-topic orphan audit above, this one doesn't rely on running
 a grep by hand after the fact: `.venv/bin/python scripts/
 check_effect_scene_skills_current.py` diffs the branch's changes (working
-tree + committed) against the manifest and FAILS if a mapped effect/scene
-file changed without its skill also changing, or if a brand-new registered
-effect appears in neither the manifest nor the acknowledged gaps — a
-"remember to update the docs" reminder lapses exactly when things are
-busy, so this is a script, not a paragraph anyone can skip. Run it as part
-of `no-mistakes`'s own gate set. See that script's own module docstring
+tree + committed, against its merge-base with `origin/master`) against the
+manifest and FAILS if a mapped effect/scene file changed without its skill
+also changing, or if a brand-new registered effect appears in neither the
+manifest nor the acknowledged gaps — a "remember to update the docs"
+reminder lapses exactly when things are busy, so this is a check, not a
+paragraph anyone can skip. **The enforcement is a pytest test, not a
+separately configured gate**: `tests/test_effect_scene_skills_current.py::
+test_the_real_branch_diff_leaves_no_effect_or_scene_skill_stale` runs that
+same real-diff evaluation, so it fires on every full test run — including
+the one `no-mistakes` runs on every change — and FAILS LOUDLY when the diff
+cannot be computed at all (no base ref, a git error) rather than passing
+having checked nothing. The new-effect half is also held by
+`test_every_live_registered_effect_is_either_mapped_or_acknowledged`, which
+re-scans `fx/effects/*.py` directly. See that script's own module docstring
 for exactly what it checks and its one named, honest limitation: scene
 data lives in the gitignored `storage/spectra/scenes.json`, so a scene
 skill can go stale from a LIVE-app-only edit with nothing in git to catch

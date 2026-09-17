@@ -4,8 +4,10 @@ description: >
   fx/effects/radial.py (Matrix, crystal-mapper) — the polygon/star effect
   behind the STAR scene. Load before touching rotation/spin behaviour, or
   before diagnosing any "the effect isn't reacting to X" report on this
-  module — its ONLY motion source is a squared audio gain, so a healthy
-  `spin` can read as frozen during quiet passages and that is not a bug.
+  module — its ordinary motion is a squared audio gain (`spin`), so a
+  healthy `spin` can read as frozen during quiet passages and that is not
+  a bug; `base_rotation` (a linear floor) and a charge-phase spin-up are
+  the only other rotation sources.
 ---
 
 # Radial (STAR)
@@ -41,6 +43,15 @@ sum, so it never adds anything at a peak. It advances on the RENDER clock
 (`draw()`), not `audio_data_updated` — a base term there would stall in
 exactly the quiet case it exists for. Default 0.0 keeps every pre-existing
 scene byte-identical until he sets one. `fx/VENDOR.md` deviation #22.
+
+## The charge phase adds its own spin-up — a third rotation source
+
+During a charge, `_phase_step` adds `CHARGE_SPIN_REV_S * p² * dt` (0.9 rev/s
+at full charge, `p` = charge progress) to `spin_total` — an ease-in that
+maxes at the charge ramp's END. Its direction is `spin`'s sign if it has
+one, else `twist`'s, else clockwise. So a star that visibly spins up before
+a drop, even in a quiet passage, is this choreography, not `spin` or
+`base_rotation` misbehaving.
 
 ## `spin_sign` — a real sign-flip control, ported for STAR's Reverse kinds
 

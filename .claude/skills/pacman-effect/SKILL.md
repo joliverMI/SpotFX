@@ -4,8 +4,8 @@ description: >
   fx/effects/pacman.py (Matrix, crystal-mapper) — a mini Ms. Pac-Man game
   rendered as a music-reactive matrix effect, behind Pacman V2. Load
   before touching ghost AI, the `reverse` param (means "frighten the
-  ghosts" here, NOT a motion-direction flag like every other effect on
-  this device), or the effect-switch crossfade morph.
+  ghosts" here — `reverse` means something different on nearly every
+  effect on this device), or the effect-switch crossfade morph.
 ---
 
 # Pacman
@@ -18,12 +18,16 @@ maze).
 ## `reverse` DOES NOT MEAN "reverse direction" HERE — it means "frighten
    the ghosts"
 
-Every other effect on this list (blackhole, orbits, squiggles, fireworks)
-uses `reverse` as a spawn-direction/motion-sign flag. On Pacman it is one
-of TWO ways to frighten the ghosts (the other being eating a power dot):
-forcing it turns every ghost blue and fleeing, hunted by her instead of
-hunting her. Do not port a `reverse`-shaped fix from another effect skill
-onto this one without re-reading what the flag actually does here.
+`reverse` is one name for several unrelated behaviours on this device:
+blackhole's picks outward flow vs. infall (spawn-side), orbits' flips the
+live spin of every particle and the ring, squiggles' makes every chain
+retrace its path, fireworks' implodes instead of exploding, fish's reverses
+the current's swirl, and dancer's adds a mirrored PARTNER dancer. On Pacman
+it is "force power-dot mode" (`game.forced_fright`), one of TWO ways to
+frighten the ghosts (the other being eating a power dot): forcing it turns
+every ghost blue and fleeing, hunted by her instead of hunting her. Do not
+port a `reverse`-shaped fix from another effect skill onto this one without
+re-reading what the flag actually does here.
 
 ## Game rules that are invariants, not tuning
 
@@ -38,11 +42,21 @@ into the state machine, not parameters — `ghost_count`/`ghost_speed`/
 ## It participates in the SAME particle_handoff transition choreography
    as eye/blackhole
 
-`pacman.py` imports `fx.effects.particle_handoff` and reads
-`PACMAN_MORPH_START` (0.45, the same constant `eye.py` and
-`spectra/services/transition_phases.py` share) — an effect switch INTO
-Pacman rides the LedFX crossfade as "a big chomping Pac-Man that wipes the
-old effect away," gated on transition progress crossing that constant.
+`pacman.py` imports `fx.effects.particle_handoff` (`_wipe_state`,
+`draw()`). Two directions, two different mechanisms:
+
+- **INTO Pacman** (role `"in"`): the crossfade is "a big chomping Pac-Man
+  that wipes the old effect away", and the wipe front tracks
+  `particle_handoff.transition_progress` CONTINUOUSLY (smoothstepped) —
+  it is NOT gated on any threshold. The same continuous wipe runs in
+  reverse (role `"out"`) when Pacman leaves for a non-particle effect.
+- **OUT OF Pacman into a particle sibling** (`PARTICLE_SIBLINGS`:
+  Blackhole, Orbits, Fireworks, Squiggles): the wipe is SKIPPED entirely.
+  Below `PACMAN_MORPH_START` (0.45, the same constant `eye.py` and
+  `spectra/services/transition_phases.py` use) the maze fades while the
+  entities keep playing; at that constant the sibling adopts Pacman's
+  entities as particles and Pacman stops drawing them.
+
 See the eye-effect skill's particle_handoff note; the same caution about
 touching transition timing applies here.
 

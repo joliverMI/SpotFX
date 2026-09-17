@@ -15,9 +15,9 @@ after the drop mark, against the pre-charge baseline rate.
 What is proven:
   1. the drop phase itself still self-resets to "none" at DROP_SETTLE_S
      (unchanged choreography timing) — the tail is its own clock;
-  2. right after the payoff the ordinary launch rate is ELEVATED
-     (>= 1 + DROP_TAIL_X * (1 - t/DROP_TAIL_S)^2 of baseline, to the
-     frame), not the flat baseline it used to return to;
+  2. right after the payoff the ordinary launch rate is ELEVATED by an
+     additive tail of DROP_TAIL_RATE * (1 - t/DROP_TAIL_S) launches/s on
+     top of the baseline rate, not the flat baseline it used to return to;
   3. the tail EASES back to exactly baseline by DROP_TAIL_S and never
      overshoots below it;
   4. the density cap (max_blobs) does not swallow the tail: the payoff

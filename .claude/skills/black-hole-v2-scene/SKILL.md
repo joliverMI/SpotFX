@@ -27,7 +27,9 @@ regressed).
 
 - **Reverse-flare toggle**: `reverse` on `blackhole`/`blackhole1d` needs
   the real-`bool` coercion (see blackhole-effect skill) — a momentary/
-  permanent kind targeting it silently did nothing before that fix.
+  permanent kind targeting it silently did nothing before that fix. This
+  scene attaches "Reverse Momentarily (500ms)"; Black Hole V2 UI does not
+  (check live — kinds drift).
 - **`preferred_color_set_mode`**: Black Hole V2 and Black Hole V2 UI were
   both set to `"dark"` preference by `scripts/
   set_scene_colorset_preference.py` (his ask: "black hole would prefer
@@ -61,9 +63,13 @@ section for the full boundary.
 
 ## Executable proofs
 
-Shares the blackhole-effect skill's proof corpus
-(`scripts/check_blackhole_*.py`, `tests/test_blackhole_*.py`) since no
-scene-specific script exists yet — a named gap. If you add a scene-level
-migration/seed script for this scene, add it to
-`EFFECT_SCENE_MAP.json`'s `scenes.black-hole-v2-scene.files` (and the UI
-twin's) in the same change.
+No scene-specific script or test exists — a named gap, which is why this
+scene's manifest entry lists no trigger files. The blackhole-effect skill's
+proof corpus (`scripts/check_blackhole_*.py`, `tests/test_blackhole_*.py`)
+measures the EFFECT, not this scene's data, and belongs to that skill alone.
+If you add a scene-level migration/seed script for this scene, add it to
+`EFFECT_SCENE_MAP.json`'s `scenes.black-hole-v2-scene.files` in the same
+change. It does NOT automatically belong to Black Hole V2 UI as well: that
+is a structurally different, thinner scene (a Particles-category
+`blackhole` entry, far fewer flare kinds), so a script scoped to this
+scene's data does not apply there without checking.

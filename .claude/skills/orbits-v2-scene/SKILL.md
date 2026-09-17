@@ -14,12 +14,25 @@ description: >
 
 Load `orbits-effect` first for the effect module itself.
 
-`scripts/seed_orbits_scene.py` and `scripts/seed_orbits_colorsets.py` are
-this scene's own seed scripts (dry-run default, per repo convention) —
-the closest thing to ground truth for what this scene's bands/kinds/
-colour sets are meant to look like; `storage/spectra/scenes.json` is the
-live/gitignored runtime copy, verify against the live process for current
-state (same caution as every other scene skill here).
+`scripts/seed_orbits_scene.py` is the LEGACY seed script
+this scene was originally authored with — a historical record, NOT a dry
+run and NOT current ground truth. It POSTs straight to the retired
+spot-effects `/api/events` world on `:8000` the moment it runs (the data
+SPECTRA's scenes were later migrated FROM by
+`scripts/seed_spectra_from_v2.py`); it never touches SPECTRA's own
+`storage/spectra/scenes.json`. Do not run it to "check" anything. For what
+this scene actually is today, read `GET /spectra/api/scenes` on the live
+process — a scene's stored data (and a legacy seeder's) is not proof he
+authored it (AGENTS.md).
+
+It has already diverged from the live scene, which is exactly why it is not
+ground truth: it sets its legacy Strips to `melt`, while the live SPECTRA
+Orbits V2 runs `orbits1d` on Strips.
+
+`scripts/seed_orbits_colorsets.py` is also not a dry run: it POSTs the
+"Orbits" colour group and its "Orbit - <Color>" sets to the running
+spot-effects `/api/color-sets` — the colour-set store SPECTRA reads — so
+running it rewrites those cards in his live library.
 
 ## The Fish scene is a wholesale copy of this scene's data
 
@@ -49,5 +62,7 @@ device entries.
 
 ## Executable proofs
 
-`scripts/check_orbits_drop_burst_and_persistence.py`,
-`scripts/smoke_orbits_params.py`, `tests/test_orbits_drop_persistence.py`.
+Shares the orbits-effect skill's proof corpus
+(`scripts/check_orbits_drop_burst_and_persistence.py`,
+`scripts/smoke_orbits_params.py`, `tests/test_orbits_drop_persistence.py`).
+Named gap: no check proves this scene's own band attachments end to end.

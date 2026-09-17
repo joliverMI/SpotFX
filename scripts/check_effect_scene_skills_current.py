@@ -13,20 +13,24 @@ written down and still failed twice within the hour. Fail loud here, not a
 reminder that can be skipped.
 
 WHAT IT CHECKS, precisely:
-  1. A changed file under `fx/effects/*.py` (or a check/test script the
-     manifest names as belonging to that effect) requires the matching
-     effect skill's SKILL.md to be among the changed files too.
+  1. A changed file under `fx/effects/*.py` (or an instrument/measurement
+     check or test the manifest names as belonging to that effect) requires
+     the matching effect skill's SKILL.md to be among the changed files too.
   2. A changed file the manifest names as belonging to a SCENE requires
      that scene's skill's SKILL.md to be among the changed files too.
      (Scenes have no git-tracked per-scene file of their own — their live
      data lives in the gitignored `storage/spectra/scenes.json`, see
      AGENTS.md's "A worktree's own storage/spectra/*.json is gitignored"
-     note — so scene triggers are a hand-curated, necessarily imprecise
-     list of the scripts/tests that touch that scene by name. This is a
+     note — so scene triggers are a hand-curated list of the scripts/tests
+     that author or assert that scene's own data: its seed script, a
+     flare-kind migration naming it, a test of its stored config. This is a
      named, accepted limitation, not a silent gap: see the manifest's own
      `note` fields and AGENTS.md.)
+     THE MAPPING RULE: an effect's code and its instruments require ONLY
+     that effect's skill; a scene's authored data/configuration requires
+     ONLY that scene's skill. No file is listed under both.
   3. A NEW registered effect module (a `fx/effects/*.py` file whose class
-     body declares `NAME = "..."`) that appears in neither
+     body declares `NAME = "..."`, annotated or not) that appears in neither
      `effects.*.files` nor `acknowledged_effect_gaps.files` in the
      manifest is flagged outright — "new effect with no skill and no
      acknowledged gap". This is what makes "new effects get one as they
@@ -49,16 +53,29 @@ USAGE:
       # uncommitted/staged/untracked changes, and evaluates them.
 
   .venv/bin/python scripts/check_effect_scene_skills_current.py --files a b c
-      # synthetic file list (what the test suite and CI feed it), skips git
-      # entirely — this is also how you check a specific PR's file list.
+      # synthetic file list, skips git entirely — this is also how you
+      # check a specific PR's file list.
+
+WHERE IT IS ENFORCED: tests/test_effect_scene_skills_current.py runs this
+same real-diff evaluation on every pytest run
+(`test_the_real_branch_diff_leaves_no_effect_or_scene_skill_stale`), so the
+gate fires wherever the suite does, not only when someone remembers to run
+this script.
+
+A DIFF THAT CANNOT BE COMPUTED IS A FAILURE, NEVER A CLEAN PASS: no
+resolvable base ref, or any git command failing, raises GitDiffUnavailable
+and exits 1 — an empty changed-file set would otherwise print "OK" having
+checked nothing.
 
 Exit 0 = clean (or nothing effect/scene-shaped changed). Exit 1 = named
-violations, printed with the exact skill path to touch.
+violations (printed with the exact skill path to touch), or a diff that
+could not be computed.
 """
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -68,7 +85,13 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 MANIFEST_PATH = REPO_ROOT / ".claude" / "skills" / "EFFECT_SCENE_MAP.json"
 EFFECTS_DIR = "fx/effects/"
-NAME_ATTR_RE = re.compile(r'^\s*NAME\s*=\s*["\']')
+NAME_ATTR_RE = re.compile(r'^\s*NAME\s*(?::[^=]*)?=\s*["\']')
+BASE_REF_CANDIDATES = ("origin/master", "origin/main", "master", "main")
+
+
+class GitDiffUnavailable(RuntimeError):
+    """The changed-file set could not be computed — never read as "nothing
+    changed"."""
 
 
 @dataclass
@@ -124,44 +147,95 @@ def _norm(paths: list[str]) -> set[str]:
     return {p.strip().replace("\\", "/") for p in paths if p.strip()}
 
 
-def git_changed_files(base: str | None, repo_root: Path = REPO_ROOT) -> set[str]:
+_GIT_LOCATION_ENV = (
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_COMMON_DIR",
+    "GIT_PREFIX",
+)
+
+
+def _git(repo_root: Path, *args: str) -> str:
+    env = {k: v for k, v in os.environ.items() if k not in _GIT_LOCATION_ENV}
+    try:
+        return subprocess.run(
+            ["git", *args],
+            cwd=repo_root,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+    except FileNotFoundError as exc:
+        raise GitDiffUnavailable(f"git is not available: {exc}") from exc
+    except subprocess.CalledProcessError as exc:
+        detail = (exc.stderr or "").strip() or f"exit status {exc.returncode}"
+        raise GitDiffUnavailable(f"`git {' '.join(args)}` failed: {detail}") from exc
+
+
+def _ref_exists(repo_root: Path, ref: str) -> bool:
+    try:
+        _git(repo_root, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}")
+    except GitDiffUnavailable:
+        return False
+    return True
+
+
+def git_changed_files(
+    base: str | None,
+    repo_root: Path = REPO_ROOT,
+    require_committed_diff: bool = True,
+) -> set[str]:
     """Union of: committed diff against the branch's merge-base with a base
     ref, plus the working tree's own staged/unstaged/untracked changes.
-    Best-effort — any git failure degrades to an empty set rather than
-    raising, so a shallow/detached checkout never crashes the gate."""
-    changed: set[str] = set()
 
-    def run(*args: str) -> list[str]:
-        try:
-            out = subprocess.run(
-                ["git", *args], cwd=repo_root, capture_output=True, text=True, check=True
-            ).stdout
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            return []
-        return [line for line in out.splitlines() if line.strip()]
+    Raises GitDiffUnavailable when any git command fails. With
+    `require_committed_diff` (the default) an unresolvable base ref raises
+    too; without it, the committed half is skipped when no base resolves and
+    only the working tree is evaluated."""
+    changed: set[str] = set()
 
     base_ref = base
     if base_ref is None:
-        for candidate in ("origin/master", "origin/main", "master", "main"):
-            if run("rev-parse", "--verify", "--quiet", candidate):
-                base_ref = candidate
-                break
+        base_ref = next(
+            (c for c in BASE_REF_CANDIDATES if _ref_exists(repo_root, c)), None
+        )
+        if base_ref is None and require_committed_diff:
+            raise GitDiffUnavailable(
+                "no base ref resolves (tried "
+                + ", ".join(BASE_REF_CANDIDATES)
+                + ") — the branch's committed changes cannot be computed; "
+                "pass --base <ref>"
+            )
+    elif not _ref_exists(repo_root, base_ref):
+        raise GitDiffUnavailable(f"base ref {base_ref!r} does not resolve to a commit")
 
-    if base_ref:
-        merge_base = run("merge-base", "HEAD", base_ref)
-        if merge_base:
-            changed |= _norm(run("diff", "--name-only", merge_base[0], "HEAD"))
-        else:
-            changed |= _norm(run("diff", "--name-only", base_ref, "HEAD"))
+    if base_ref is not None:
+        merge_base = _git(repo_root, "merge-base", "HEAD", base_ref).strip()
+        if not merge_base:
+            raise GitDiffUnavailable(f"no merge-base between HEAD and {base_ref!r}")
+        changed |= _norm(
+            _git(repo_root, "diff", "--name-only", "--no-renames", merge_base, "HEAD").splitlines()
+        )
 
-    # Working tree: staged, unstaged, and untracked-but-not-ignored files.
-    status_lines = run("status", "--porcelain=v1")
-    for line in status_lines:
-        # "XY path" or "XY orig -> new" for renames; take the final path.
-        path = line[3:].split(" -> ")[-1]
-        changed.add(path.strip())
+    status = _git(repo_root, "status", "--porcelain=v1", "-z", "--untracked-files=all")
+    entries = status.split("\0")
+    i = 0
+    while i < len(entries):
+        entry = entries[i]
+        i += 1
+        if len(entry) < 4:
+            continue
+        xy, path = entry[:2], entry[3:]
+        changed.add(path)
+        if ("R" in xy or "C" in xy) and i < len(entries):
+            changed.add(entries[i])
+            i += 1
 
-    return {p for p in changed if p}
+    return {p for p in _norm(list(changed)) if p}
 
 
 def declares_registered_effect(text: str) -> bool:
@@ -231,7 +305,7 @@ def main(argv: list[str] | None = None) -> int:
         "--files",
         nargs="*",
         default=None,
-        help="Explicit changed-file list (skips git entirely). For CI/testing.",
+        help="Explicit changed-file list (skips git entirely).",
     )
     parser.add_argument(
         "--base",
@@ -249,10 +323,13 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.files is not None:
         changed = set(args.files)
-        registered = find_registered_effect_files() & changed
     else:
-        changed = git_changed_files(args.base)
-        registered = find_registered_effect_files() & changed
+        try:
+            changed = git_changed_files(args.base, require_committed_diff=True)
+        except GitDiffUnavailable as exc:
+            print(f"FAILED: could not compute the changed files to check: {exc}")
+            return 1
+    registered = find_registered_effect_files() & changed
 
     report = evaluate(manifest, changed, registered)
     print(report.render())

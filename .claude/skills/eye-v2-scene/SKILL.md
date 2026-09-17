@@ -14,7 +14,16 @@ Load `eye-effect` (Matrix) and `blackhole-effect` (Strips — this scene's
 Strips entry is `blackhole1d`, shared with the Black Hole scenes' strip
 render, not a distinct Eye strip effect) first.
 
-`scripts/seed_eye_scene.py` is this scene's own seed script.
+`scripts/seed_eye_scene.py` is the LEGACY seed script
+this scene was originally authored with — a historical record, NOT a dry
+run and NOT current ground truth. It POSTs straight to the retired
+spot-effects `/api/events` world on `:8000` the moment it runs (the data
+SPECTRA's scenes were later migrated FROM by
+`scripts/seed_spectra_from_v2.py`); it never touches SPECTRA's own
+`storage/spectra/scenes.json`. Do not run it to "check" anything. For what
+this scene actually is today, read `GET /spectra/api/scenes` on the live
+process — a scene's stored data (and a legacy seeder's) is not proof he
+authored it (AGENTS.md).
 
 ## `snap_threshold`'s saturating-`>=` defect is UNFIXED here — a reported,
    not-yet-actioned gap

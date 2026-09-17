@@ -15,8 +15,8 @@ The work splits around a **manual tuning gate**:
    entry, phase wiring, aliases, seeder script *written but not run*.
 3. **Gate:** Javi tunes the defaults in the LedFX UI and says done.
 4. **Phase 3 — finish:** absorb the tuned values into defaults + setter
-   presets, run the seeder (scene + scene groups), update the Help page,
-   verify live.
+   presets, run the seeder (scene + scene groups), update the Help page
+   and the effect/scene skills, verify live.
 
 Scenes must NOT be seeded before the gate — the setter bakes shape/reactivity
 presets, and pre-gate values would fossilize untuned guesses.
@@ -130,6 +130,16 @@ LedFX crossfades handle the switch.
      action with `fallback_s` — LedFX restores the prior config server-side.
 3. **Help page** (definition of done): add the effect + scene to
    `web/src/help/helpContent.ts`, `cd web && npx vite build`.
-4. Verify: fire the setter (`POST /api/events/preview`), confirm the LedFX
+4. **Effect and scene skills** (definition of done, see AGENTS.md's
+   effect/scene-skill rule): write `.claude/skills/<name>-effect/SKILL.md`
+   and `.claude/skills/<scene>-scene/SKILL.md`, and register both in
+   `.claude/skills/EFFECT_SCENE_MAP.json` — the effect module and its
+   instruments under `effects`, the scene's seeder and migrations under
+   `scenes`, never one file under both (and take the effect out of
+   `acknowledged_effect_gaps` if it was listed there). Then run
+   `.venv/bin/python scripts/check_effect_scene_skills_current.py` and
+   `python -m pytest tests/test_effect_scene_skills_current.py` — both must
+   be clean before the work is done.
+5. Verify: fire the setter (`POST /api/events/preview`), confirm the LedFX
    live effect + params, fire Charge/Lull/Drop, watch both journals. Then
    ask Javi for the eyeball pass.
