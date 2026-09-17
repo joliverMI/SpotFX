@@ -1490,6 +1490,28 @@ def test_stroke_cap_zero_is_bit_for_bit_the_old_continuous_target(tmp_path):
     _run(main())
 
 
+@pytest.mark.parametrize("name", ["min_drift_speed", "stroke_speed_cap"])
+def test_the_dial_is_reachable_by_sonic_with_the_effects_own_bounds(name):
+    """The dial is only an escape hatch if Sonic and the Scenes page can
+    reach it, and both read the shared registry, not the effect schema: a
+    param missing there is refused by name. Its registry range and default
+    must also be the ones the effect itself validates against."""
+    import voluptuous as vol
+    from fx import device_model
+    from spectra.services import scene_console
+
+    info = scene_console.get_param_info("fish", name)
+    assert info["type"] == "numeric"
+    assert info["default"] == device_model.resting_default("fish", name)
+    schema = FX.Fish2d.schema()
+    assert schema({})[name] == info["default"]
+    assert schema({name: info["min"]})[name] == info["min"]
+    assert schema({name: info["max"]})[name] == info["max"]
+    for outside in (info["min"] - 1e-3, info["max"] + 1e-3):
+        with pytest.raises(vol.Invalid):
+            schema({name: outside})
+
+
 def test_slow_music_reads_as_distinct_pushes_fast_blurs_them(tmp_path):
     """Section 6 of the brief: this falls out of the stroke being real
     thrust, not a bolt-on jitter. Quiet/low-impulse audio lowers
