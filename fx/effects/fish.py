@@ -72,8 +72,19 @@ DISPERSE_MAX_PANELS_S = 5.0  # ceiling: panel long-axes per second. Past this
                          # only a deadline far shorter than any real lull or
                          # crossfade can ask for it (measured in
                          # scripts/check_fish_disperse.py)
-DISPERSE_TAU = 0.07      # speed ease while dispersing — far quicker than
-                         # SPEED_TAU, or the derived speed arrives too late
+DISPERSE_TAU = 0.05      # speed ease while dispersing — far quicker than
+                         # SPEED_TAU, or the derived speed arrives too late.
+                         # Tightened from 0.07 by fm/spotfx-fish-body-
+                         # trails-head-tail-thrust (his ruling): 0.07 could
+                         # not always close the gap to a demanding deadline
+                         # in time at his tightest tested lull gap (0.9s),
+                         # a real regression this PR's own dynamics changes
+                         # exposed (never a pre-existing failure — proven 0
+                         # of 60 seed/gap combinations on master, 3 of 60
+                         # on this PR at 0.07, 0 of 60 at 0.05). This is a
+                         # GENERAL tightening of the whole class of
+                         # "deadline-driven speed must actually arrive in
+                         # time" margin, not a special case for thrust.
 DISPERSE_MIN_LEFT_S = 0.05  # the "time left" a deadline is never read below,
                          # so a missed deadline asks for the ceiling, never
                          # for infinity
@@ -314,6 +325,28 @@ THRUST_TAU = 0.09        # speed-ease time constant once any stroke cap is
                          # strokes is visible instead of eased away. Blended
                          # with SPEED_TAU by `stroke_speed_cap` itself (see
                          # draw()), so at cap=0 this is never reached at all.
+#
+# THE ONE DEGENERATE COMBINATION, found by review: `min_drift_speed` and
+# `stroke_speed_cap` both go down to 0 in the schema (each independently a
+# legitimate value — 0 drift is the "pure surge and coast" endpoint's own
+# floor, 0 cap is the "no pulse" endpoint's own ceiling). Set TOGETHER,
+# `pulsed_want` is a permanent, exact zero for every ordinary swimmer —
+# not a momentary trough between pulses, which is fine and intended, but a
+# speed that never recovers. Zero speed means zero turn rate too
+# (`omega_max = p_spd / turn_radius_px`), so heading freezes as well, and
+# an off-panel ENTERING fish (mode 1, itself pulse-eligible) never reaches
+# the pond at all — the population can visibly stall. `MOTION_FLOOR_FRAC`
+# is a tiny floor under `pulsed_want` (as a fraction of `want_full`), the
+# same shape `cruise_px` already floors `base_speed` at 0.1px/s so speed
+# can never be a literal, permanent zero anywhere in this effect. Picked
+# small enough to be provably inert everywhere it matters: it sits well
+# below the shipped defaults' own trough (0.85x) and below the neutral
+# setting's constant 1.0x, and even at the "pure surge and coast" test
+# endpoint (0, 1) it only lifts that cycle's true trough from exactly 0 to
+# 0.02x — still comfortably under the 0.05x the endpoint test itself
+# requires for "the coast approaches a stop." It only ever engages in the
+# one combination that would otherwise be permanent, never a real one.
+MOTION_FLOOR_FRAC = 0.02
 ACCEL_TAU = 0.18        # acceleration smoothing
 TURN_GAIN = 3.0         # 1/s: desired turn rate per radian of heading
                         # error, BEFORE the turn-rate clamp. Frame-rate
@@ -2336,6 +2369,44 @@ class Fish2d(Twod, GradientEffect):
             np.clip(out, 0, 255).astype(np.uint8), "RGB"
         )
 
+    def _trail_tail_point(self, idx, x, y, length):
+        """The TRUE tail point (SCREEN space), walked back along the
+        recorded path exactly the way `_draw_bodies`'s rear spine nodes
+        are — a single-distance (`d = length/2`, the same as `SPINE_U=1.0`
+        there) instance of that same interpolation, factored out so the
+        wake deposit (below) lays its smear at the body's own curved tail
+        during a turn instead of the old rigid heading projection. No
+        heading needed — that is the whole point of a trail-based point.
+        See `_draw_bodies`'s own docstring for the chain/interpolation
+        shape; this must stay mathematically identical to it or the wake
+        and the drawn tail will disagree about where the tail is."""
+        px = self.cx + x * self.sx - self.cam_px
+        py = self.cy + y * self.sy - self.cam_py
+        d = length * 0.5
+        trail_x = self.cx + self.p_trail_x[idx] * self.sx - self.cam_px
+        trail_y = self.cy + self.p_trail_y[idx] * self.sy - self.cam_py
+        chain_x = np.concatenate([px[:, None], trail_x], axis=1)
+        chain_y = np.concatenate([py[:, None], trail_y], axis=1)
+        acc = self.p_trail_acc[idx]
+        first = d <= acc
+        idx_f = np.clip(
+            (d - acc) / BODY_TRAIL_STEP_PX, 0.0, BODY_TRAIL_LEN - 1 - 1e-4
+        )
+        floor_j = np.floor(idx_f).astype(np.int32)
+        near_j = np.where(first, 0, floor_j + 1)
+        frac = np.clip(
+            np.where(first, d / np.maximum(acc, 1e-6), idx_f - floor_j),
+            0.0, 1.0,
+        )
+        rows = np.arange(len(idx))
+        near_x = chain_x[rows, near_j]
+        far_x = chain_x[rows, near_j + 1]
+        near_y = chain_y[rows, near_j]
+        far_y = chain_y[rows, near_j + 1]
+        tail_x = near_x + (far_x - near_x) * frac
+        tail_y = near_y + (far_y - near_y) * frac
+        return tail_x, tail_y
+
     def _draw_bodies(self, frame, idx, x, y, hd, bright, half_w, flap_amp,
                      grad, use_trail=True):
         """Lay each fish's spine out in SCREEN space and splat it.
@@ -2727,8 +2798,10 @@ class Fish2d(Twod, GradientEffect):
         )
         stroke_phase = self.p_flap[:n] % (2.0 * np.pi)
         pulse_shape = (0.5 - 0.5 * np.cos(stroke_phase)) ** PULSE_SHAPE_POWER
-        pulsed_want = want_full * self.min_drift_speed + (
-            want_full * self.stroke_speed_cap * pulse_shape
+        pulsed_want = np.maximum(
+            want_full * self.min_drift_speed
+            + want_full * self.stroke_speed_cap * pulse_shape,
+            want_full * MOTION_FLOOR_FRAC,
         )
         want = np.where(pulse_eligible, pulsed_want, want_full)
         # The ease is per fish (the pulse split makes `tau` an array even
@@ -3218,15 +3291,15 @@ class Fish2d(Twod, GradientEffect):
         laying = np.flatnonzero(bright > 0.02)
         if laying.size and self.ripple_amount > 0.0 and self.wake is not None:
             body_len = half_w[laying] * 2.0 * self.body_aspect
-            # the deposit is laid at the tail, sized by the motion that made
-            # it: the body's own length and the tail's lateral throw
-            tail_px = (
-                self.cx + self.p_x[:n][laying] * self.sx
-                - np.cos(hd[laying]) * body_len * 0.5
-            )
-            tail_py = (
-                self.cy + self.p_y[:n][laying] * self.sy
-                - np.sin(hd[laying]) * body_len * 0.5
+            # the deposit is laid at the TRUE tail (the same recorded-path
+            # point _draw_bodies draws, via _trail_tail_point — found by
+            # review: laying it at the old rigid heading projection put the
+            # wake ~2px outside the drawn tail during a real turn, the same
+            # facing-the-tangent effect the body-trail rework was built to
+            # remove), sized by the motion that made it: the body's own
+            # length and the tail's lateral throw
+            tail_px, tail_py = self._trail_tail_point(
+                laying, self.p_x[:n][laying], self.p_y[:n][laying], body_len,
             )
             sizes = np.minimum(
                 WAKE_R0_BODY * body_len + WAKE_R0_FLAP * flap_amp[laying],

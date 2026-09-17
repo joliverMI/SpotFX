@@ -1533,6 +1533,44 @@ def test_default_dial_preserves_the_old_mean_speed(tmp_path):
     _run(main())
 
 
+def test_dial_floor_and_cap_both_at_zero_never_freezes(tmp_path):
+    """Found by review: `min_drift_speed` and `stroke_speed_cap` are each
+    independently legitimate at 0 (the "pure surge and coast" and "no
+    pulse" endpoints, respectively), but SET TOGETHER `pulsed_want` would
+    be a permanent, exact zero for every ordinary swimmer — not a
+    momentary trough, a speed that never recovers, freezing heading too
+    (`omega_max = p_spd / turn_radius_px`) and stranding an off-panel
+    entering fish forever. `MOTION_FLOOR_FRAC` exists to keep this
+    reachable-but-nonsensical combination from ever being a true freeze."""
+    async def main():
+        room = await _room(tmp_path, "dial-zero-zero", dict(
+            HIS_MATRIX, particle_count=1, jiggle=0.0, speed_jump=0.0,
+            speed_jog=0.0, horizon_scale=0.0, spin=0.0, roam_scale=1.4,
+            min_drift_speed=0.0, stroke_speed_cap=0.0,
+        ), seed=1)
+        eff = room.effect
+        # an entering fish must actually reach the pond within a bounded
+        # time, not stay mode=1 (entering) forever
+        for _ in range(int(20.0 / DT)):
+            room.step(1)
+            if eff.n and eff.p_mode[0] == 0:
+                break
+        assert eff.n and eff.p_mode[0] == 0, (
+            "an entering fish never reached the pond at min_drift_speed=0, "
+            "stroke_speed_cap=0 — the population can visibly stall"
+        )
+        speeds = []
+        for _ in range(int(2.0 / DT)):
+            room.step(1)
+            speeds.append(float(eff.p_spd[0]))
+        assert min(speeds) > 0.0, (
+            "speed must never be a literal, permanent zero: "
+            f"saw {speeds}"
+        )
+        await _close(room)
+    _run(main())
+
+
 @pytest.mark.parametrize("name", ["min_drift_speed", "stroke_speed_cap"])
 def test_the_dial_is_reachable_by_sonic_with_the_effects_own_bounds(name):
     """The dial is only an escape hatch if Sonic and the Scenes page can
@@ -1670,6 +1708,88 @@ def test_body_trails_the_recorded_path_through_a_turn(tmp_path):
             "heading another, a body walked back along that path must "
             "render differently from one still pivoted to the current "
             "heading"
+        )
+        await _close(room)
+    _run(main())
+
+
+def test_wake_tail_point_follows_the_trail_not_the_rigid_heading(tmp_path):
+    """Found by review: the wake deposit used to lay at the old rigid
+    heading projection even after the body-trail rework, so during a real
+    turn the wake sat off the actual drawn tail by the same facing-the-
+    tangent amount the body itself was fixed for. `_trail_tail_point`
+    fixes this by reusing the same recorded-path interpolation
+    `_draw_bodies` uses for its own rear nodes."""
+    async def main():
+        room = await _room(tmp_path, "wake-tail", dict(
+            HIS_MATRIX, particle_count=1, flap_amount=0.0,
+        ), seed=1)
+        eff = room.effect
+        room.step(5)
+
+        def lay_straight_trail(heading):
+            eff.p_trail_acc[0] = 1.5
+            steps = (
+                eff.p_trail_acc[0]
+                + np.arange(FX.BODY_TRAIL_LEN, dtype=np.float32)
+                * FX.BODY_TRAIL_STEP_PX
+            )
+            eff.p_trail_x[0, :] = (
+                eff.p_x[0] - np.cos(heading) * steps / eff.sx
+            )
+            eff.p_trail_y[0, :] = (
+                eff.p_y[0] - np.sin(heading) * steps / eff.sy
+            )
+
+        def rigid_tail(hd, length):
+            px = eff.cx + eff.p_x[0] * eff.sx - eff.cam_px
+            py = eff.cy + eff.p_y[0] * eff.sy - eff.cam_py
+            return (
+                px - np.cos(hd) * length * 0.5,
+                py - np.sin(hd) * length * 0.5,
+            )
+
+        length = eff._half_width_px() * 2.0 * eff.body_aspect
+        hd0 = float(eff.p_hd[0])
+        lay_straight_trail(hd0)
+
+        # a straight run: the trail-based tail must match the rigid one
+        tx, ty = eff._trail_tail_point(
+            np.array([0]), eff.p_x[:1].copy(), eff.p_y[:1].copy(),
+            np.array([length], dtype=np.float32),
+        )
+        rx, ry = rigid_tail(hd0, length)
+        assert abs(float(tx[0]) - rx) < 1e-2 and abs(float(ty[0]) - ry) < 1e-2, (
+            "on a straight run the trail-based tail must match the old "
+            f"rigid one: trail=({tx[0]:.3f},{ty[0]:.3f}) "
+            f"rigid=({rx:.3f},{ry:.3f})"
+        )
+
+        # a fish caught mid-turn: the trail still records the OLD heading,
+        # the current heading has since turned 90 degrees off it — the
+        # trail-based tail must NOT match the rigid projection along the
+        # new heading (that mismatch is exactly the bug)
+        hd_new = (hd0 + np.pi / 2.0) % (2 * np.pi)
+        eff.p_hd[0] = hd_new
+        tx2, ty2 = eff._trail_tail_point(
+            np.array([0]), eff.p_x[:1].copy(), eff.p_y[:1].copy(),
+            np.array([length], dtype=np.float32),
+        )
+        rx2, ry2 = rigid_tail(hd_new, length)
+        dist = float(np.hypot(tx2[0] - rx2, ty2[0] - ry2))
+        assert dist > 1.0, (
+            "mid-turn, the wake's trail-based tail point must diverge "
+            f"from the rigid heading projection, saw only {dist:.3f}px "
+            "apart"
+        )
+        # ... and it must still be close to the OLD heading's rigid point
+        # (the direction the body actually came from)
+        rx_old, ry_old = rigid_tail(hd0, length)
+        dist_old = float(np.hypot(tx2[0] - rx_old, ty2[0] - ry_old))
+        assert dist_old < 1.0, (
+            "the trail-based tail should still track where the body "
+            f"actually came from, saw {dist_old:.3f}px off the old "
+            "heading's own rigid point"
         )
         await _close(room)
     _run(main())

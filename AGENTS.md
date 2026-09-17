@@ -6964,9 +6964,15 @@ A new Matrix effect + a Fish scene that is a WHOLESALE COPY of his Orbits V2
    2026-08-28 thirds, unchanged — only the manner moved (school → swirl →
    rank-ordered leak, `LULL_LEAK_*`, with `LULL_EXIT_MIN_S` meant to make a
    lull too short to swirl in scatter straight out rather than be retired
-   on the panel by the backstop — UNPROVEN for one straggler since the
-   thrust change; `scripts/check_fish_disperse.py` §1 says exactly what it
-   still proves); (3) the crossfade scatter is SKIPPED when the
+   on the panel by the backstop — a real gap opened here by fm/spotfx-fish-
+   body-trails-head-tail-thrust (its dynamics changes pushed an already-
+   thin margin over the edge for specific seeds at his tightest tested gap,
+   0.9s: 3 of 60 seed/gap combinations left one straggler still on the
+   panel the instant the hard backstop empties the population, which pops
+   at full brightness with no fade — exactly the visible defect this whole
+   mechanism exists to prevent) and closed by tightening `DISPERSE_TAU`
+   0.07 -> 0.05 (0 of 60 fail at 0.05; see that constant's own comment).
+   `scripts/check_fish_disperse.py` §1 keeps the check strict; (3) the crossfade scatter is SKIPPED when the
    incoming effect adopts the fish as its own particles
    (`TRANSITION_ADOPTERS`, keyed by module basename: blackhole, orbits,
    fireworks, squiggles, eye, dancer, fish — measured, each reads the live
@@ -7097,14 +7103,17 @@ A new Matrix effect + a Fish scene that is a WHOLESALE COPY of his Orbits V2
      are tunable without another deploy. Help: `fish-effect`.
    Proof: `tests/test_fish.py` (both dial endpoints, the trail on straight
    and turning paths, the rear body holding its length on swimmers, ejecta
-   and a clamped school, birth backfill), `scripts/check_fish_camera.py`
-   section 1b + `tests/test_fish_camera.py` (KINEMATICS, not rendered
-   pixels, match `THRUST_BASELINE_REF` at the dial's neutral setting, with
-   the shipped default as the negative control — the trail is always live,
-   so rendered frames never return to bit-identical). The thresholds this
-   change relaxed in `scripts/check_fish.py` and
-   `scripts/check_fish_disperse.py` each carry a comment beside the check
-   saying what it still proves (the lull's off-panel one names a gap).
+   and a clamped school, birth backfill, the shipped default's mean-speed
+   preservation), `scripts/check_fish_camera.py` section 1b +
+   `tests/test_fish_camera.py` (KINEMATICS, not rendered pixels, match
+   `THRUST_BASELINE_REF` at the dial's neutral setting, with the shipped
+   default as the negative control — the trail is always live, so rendered
+   frames never return to bit-identical). `scripts/check_fish.py`'s
+   flap-bounds check carries a float32 tolerance for a real, legitimate
+   boundary landing (see its own comment); `scripts/check_fish_disperse.py`'s
+   lull check STAYS STRICT (`== 0`) — its one real violation was traced to
+   `DISPERSE_TAU` and fixed there, not by loosening the check (see the
+   dispersal item above and `DISPERSE_TAU`'s own comment in `fish.py`).
 
 **A GAINED BODY MUST NEVER BE DEPOSITED INTO THE TRAIL** (hotfix,
 2026-09-16, his live report the same night #274 shipped: trails "at least

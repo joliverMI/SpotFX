@@ -222,28 +222,25 @@ def section_lull(base):
                   "with fish in it")
             check(minb.min() >= 0.99, f"gap {gap}s seed {seed}: no fish "
                   "dims while it is on the panel")
-            # Relaxed from `== 0` by fm/spotfx-fish-body-trails-head-tail-
-            # thrust, for the tightest tested gap (0.9s); the tolerance
-            # applies at every gap. What it verifies: at most ONE fish is
-            # still inside on_panel's generous bound on the last frame
-            # before the third. What it no longer verifies: `watch` samples
-            # EVERY frame and the backstop empties the population on the
-            # first frame at the third, so when that straggler is present
-            # nothing here can tell a fish about to leave on its own from
-            # one the backstop retired while still on the panel.
-            # LULL_EXIT_BY's "the backstop retires nothing visible" is
-            # therefore unproven whenever this reads 1. The cause is not
-            # established: dispersing fish (mode 4) are not pulse-eligible,
-            # so the thrust change can only have moved where fish are when
-            # the lull begins.
-            check(last_before <= 1, f"gap {gap}s seed {seed}: at most one "
-                  "fish is still on the panel on the last frame before the "
-                  "third's backstop runs")
-            # Structural, not independent: the backstop itself empties the
-            # population at the third, so this cannot go red while it
-            # exists. It proves the third is honoured, NOT that no fish
-            # vanished from view there — the check above is the only
-            # evidence for that, and it tolerates one.
+            # STAYS STRICT ( == 0 ). fm/spotfx-fish-body-trails-head-tail-
+            # thrust briefly loosened this to `<= 1` for the tightest
+            # tested gap (0.9s) and was told, correctly, to fix the real
+            # cause instead: a straggler here is not "about to leave on its
+            # own" — the very next frame's hard backstop (`_lull_step`'s
+            # unconditional `_compact` at the third) pops EVERY remaining
+            # fish at full brightness with no fade, so a straggler counted
+            # here would vanish ON SCREEN, exactly the visible pop his
+            # "never fade, disperse properly" ask exists to prevent.
+            # ROOT CAUSE, found and fixed: `DISPERSE_TAU` (0.07) could not
+            # always close the gap to a demanding deadline-driven speed in
+            # time at his tightest tested gap — tightened to 0.05 (0 of 60
+            # seed/gap combinations fail at 0.05 where 3 of 60 failed at
+            # 0.07; master itself is 0 of 60 at its own 0.07, since this PR's
+            # dynamics changes are what pushed a pre-existing, already-thin
+            # margin over the edge for specific seeds — see DISPERSE_TAU's
+            # own comment in fish.py).
+            check(last_before == 0, f"gap {gap}s seed {seed}: every fish is "
+                  "OFF the panel before the third's backstop runs")
             check(int(vis[f >= third].max(initial=0)) == 0,
                   f"gap {gap}s seed {seed}: none after the third (the "
                   "backstop guarantees this by construction)")
