@@ -1313,7 +1313,7 @@
           "min": 1,
           "max": 16,
           "aspect": "shape",
-          "note": "Number of fish kept alive on the matrix. The charge's school and the lull's rush deliberately exceed it for their own moment only.",
+          "note": "Number of fish kept alive on the matrix. The charge's school and the drop's rush deliberately exceed it for their own moment only.",
           "default": 6
         },
         "x_offset": {
@@ -1664,7 +1664,7 @@
           "min": 0.0,
           "max": 1.0,
           "aspect": "shape",
-          "note": "How hard they avoid each other. Steering only - it adds one more pull to the desired heading and is bounded by the same turn-rate clamp as every other steer, so it can never reverse a fish on the spot or move one. The dodging distance is DERIVED from body length, not a second knob. 0 = they swim straight through, byte-identical to before. Off during the charge's school and the lull's rush by design.",
+          "note": "How hard they avoid each other. Steering only - it adds one more pull to the desired heading and is bounded by the same turn-rate clamp as every other steer, so it can never reverse a fish on the spot or move one. The dodging distance is DERIVED from body length, not a second knob. 0 = they swim straight through, byte-identical to before. Off during the charge's school and the drop's rush by design.",
           "help_topic": "fish-effect",
           "default": 0.45
         },
@@ -1727,7 +1727,7 @@
           "min": 0,
           "max": 24,
           "aspect": "shape",
-          "note": "Fish in the LULL's rush. Exceeds the population cap for that moment only.",
+          "note": "Fish in the DROP's rush. Exceeds the population cap for that moment only.",
           "default": 20
         },
         "rush_time": {
@@ -1737,7 +1737,7 @@
           "min": 0.2,
           "max": 3.0,
           "aspect": "shape",
-          "note": "Seconds the lull's rush takes to sweep past.",
+          "note": "Seconds the drop's rush sweeps inward before it starts to swirl.",
           "default": 1.0
         },
         "rush_chaos": {

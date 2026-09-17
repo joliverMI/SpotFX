@@ -1110,7 +1110,7 @@ class Fish2d(Twod, GradientEffect):
     def _manage_population(self):
         """Keep the ORDINARY (non-nocap) swimming population equal to
         `particle_count`, then (re)assign evenly spaced home anchors.
-        Fish tagged `p_nocap` are the charge school / lull rush and are
+        Fish tagged `p_nocap` are the charge school / drop rush and are
         deliberately outside this accounting — their own choreography
         retires them, so the parameter's limit is never permanently
         ignored."""
@@ -1868,11 +1868,12 @@ class Fish2d(Twod, GradientEffect):
         if self.camera_follow <= 0.0:
             return
         # ONLY the charge and the lull move the window — and a lull only
-        # while there is still a school in it. Under his 2026-08-28 lull
-        # clock every fish is gone by the first third, so from there on
-        # there is nothing to follow and the window EASES HOME instead of
-        # holding wherever it had got to; the ripples then stream past a
-        # settling view for the rest of the lull.
+        # while there is still a school in it. Since the 2026-09-16
+        # dispersal the lull turns every fish into a DISPERSING one (mode 4)
+        # on its first frame, so there is nothing to follow from the moment
+        # the swirl starts and the window EASES HOME instead of holding
+        # wherever the charge left it; the swirl, the leak and the ripples
+        # all play out against a settling view.
         active = self._phase in ("charge", "lull")
         if active and self._phase == "lull" and not np.any(
             self.p_mode[: self.n] < 2
@@ -2583,7 +2584,7 @@ class Fish2d(Twod, GradientEffect):
         # SCOPE, deliberate: only ordinary swimming fish (mode < 2) steer
         # here AND only they count as neighbours, and the whole term is off
         # while a school is formed. The charge's school moves "almost
-        # identically" and the lull's rush is deliberately chaotic — both are
+        # identically" and the drop's rush is deliberately chaotic — both are
         # authored choreography, not crowds to fix — so avoidance is never
         # allowed to argue with either.
         if self.avoid_strength > 0.0 and n > 1 and not self._school_on:

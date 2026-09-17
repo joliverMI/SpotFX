@@ -6763,7 +6763,7 @@ A new Matrix effect + a Fish scene that is a WHOLESALE COPY of his Orbits V2
    FORWARD arc count and the answer is a lateral swerve (a point-away
    vector asks for a 180 and measurably made crossings WORSE); the
    separation radius is DERIVED from body length, never a second knob; and
-   it is off during the charge's school and the lull's rush, which are
+   it is off during the charge's school and the drop's rush, which are
    authored choreography, not crowds to fix. Sweep + tuned default:
    `scripts/check_fish_avoidance.py`.
 
@@ -6839,7 +6839,9 @@ A new Matrix effect + a Fish scene that is a WHOLESALE COPY of his Orbits V2
      fish gone by 1/3 — no lone fish, no survivor, with a hard backstop, not
      just a schedule; ripples only to 2/3; fully dark after (the wake is
      RAMPED to zero, because a half-life never reaches it). The window eases
-     home once there is nothing left to follow. **The lull's rush MOVED INTO
+     home once there is nothing left to follow — since 7 below, from the
+     lull's first frame, because every fish is dispersing from the moment
+     the swirl starts. **The lull's rush MOVED INTO
      THE DROP** (his addendum): it rushes in at the drop instant, swirls for
      the drop's duration (`RUSH_SWIRL_W`), and `particle_count` of them stay
      behind — read ONCE at the settle, after which the ordinary
