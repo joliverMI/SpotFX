@@ -124,4 +124,16 @@ async def put_room_controls(body: Any = Body(...)):
     force_color_result = await room_controls.reconcile_force_color_if_changed(previous, state)
     if force_color_result is not None:
         response["force_color_result"] = force_color_result
+    # THE A/V LEAD APPLY RE-BASES THE KNOWN BUFFER's reference (spectra/
+    # services/known_buffer.py). That measurement was taken with the
+    # buffer AS IT STOOD, so it already absorbed whatever the buffer was
+    # at that moment; leaving the old reference in place would make the
+    # next compensation count the same milliseconds twice. Imported here
+    # rather than in services/room_controls.py, which must stay a leaf its
+    # callers can import at any scope. Never touches av_sync_lead_ms —
+    # this reads that it changed and re-anchors its OWN delta.
+    if previous.av_sync_lead_ms != state.av_sync_lead_ms:
+        from spectra.services import known_buffer
+        rebased = known_buffer.rebase_reference()
+        response["known_buffer_reference_ms"] = rebased
     return response

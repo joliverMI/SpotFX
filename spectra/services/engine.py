@@ -447,7 +447,7 @@ async def stop() -> None:
 
 def status() -> dict:
     from spectra.services import (ambient_music_gate, dark_fixture_watch,
-                                   night_run, param_watchdog)
+                                   known_buffer, night_run, param_watchdog)
     return {
         "increment": "S3",
         "dark": executor.mode == "recording",
@@ -458,6 +458,13 @@ def status() -> dict:
         "responses": {"recent_surges": list(responses.surges)[-10:],
                       "recent_kind_batches": list(responses.kind_batch_log)[-10:]},
         "bridge": bridge.status(),
+        # THE KNOWN AUDIO BUFFER (spectra/services/known_buffer.py), beside
+        # `bridge` because it is the same question one layer out: bridge
+        # says where the SONG is, this says how far the SOUND is running
+        # behind. Read-only here — nothing in this block reaches the show
+        # clock, and while the application gate is shut nothing does at
+        # all.
+        "known_buffer": known_buffer.state(),
         "triggers": trigger_engine.status(),
         "ambient": ambient_music_gate.status(),
         # The param orphan watchdog (spectra/services/param_watchdog.py):

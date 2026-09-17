@@ -165,6 +165,16 @@ NIGHT_WINDOW_FILE = SPECTRA_STORAGE / "night_window.json"
 # background prunes this file.
 TEST_SESSION_FILE = SPECTRA_STORAGE / "test_session.json"
 
+# THE KNOWN AUDIO BUFFER's raw series (spectra/services/known_buffer.py) —
+# every reading River publishes, appended as JSONL and pruned on write to
+# the last LOG_RETENTION_S. This is the DRIFT PICTURE: it exists to make a
+# slowly-ramping buffer and its drains visible over days, which a single
+# current value never can. JSONL rather than a capped JSON document
+# because the common operation is "append one line" at River's 15 s
+# period, and rewriting a whole document that often is the write cost the
+# trigger store's docstring already warns about one store over.
+KNOWN_BUFFER_LOG_FILE = SPECTRA_STORAGE / "known_buffer_log.jsonl"
+
 # S3: SPECTRA's OWN fx config dir for the live device layer (seeded from the
 # live LedFX config by scripts/seed_spectra_fx_live.py — never ~/.ledfx).
 # The ownership record itself lives in fx/light_ownership.py (shared library:

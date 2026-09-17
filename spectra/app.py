@@ -35,6 +35,7 @@ from spectra.api import calibrations as calibrations_api
 from spectra.api import capture_queue as capture_queue_api
 from spectra.api import engine as engine_api
 from spectra.api import night_run as night_run_api
+from spectra.api import timing as timing_api
 from spectra.api import (av_sync, device_preview, devices as devices_api,
                          feedback, fire_history,
                          flare_preview, gradient2d, intensity_scale, journey,
@@ -100,6 +101,7 @@ def create_app() -> FastAPI:
     app.include_router(gradient2d.router)
     app.include_router(av_sync.router)
     app.include_router(test_session.router)
+    app.include_router(timing_api.router)
     app.include_router(testbed.router)
     # BEFORE rooms: `/rooms/capture-queue` must never be eaten by a
     # `/rooms/{room_id}` pattern.
@@ -167,8 +169,8 @@ async def _standalone_lifespan(app):
     from spectra.services import (activation_report, ambient_music_gate,
                                    dark_fixture_watch, device_preview, engine,
                                    flare_preview_hold, frame_watchdog,
-                                   handover, night_run, ownership_reconciler,
-                                   param_watchdog)
+                                   handover, known_buffer, night_run,
+                                   ownership_reconciler, param_watchdog)
     await engine.start()
     await device_preview.start()
     # A SELF-TAKEN NIGHT ORPHANED BY A CRASH, and this MUST run before the
@@ -275,11 +277,25 @@ async def _standalone_lifespan(app):
     # anything. Stands down by itself while SPECTRA is not driving the room.
     dark_fixture_task = asyncio.create_task(
         dark_fixture_watch.run_supervised(), name="spectra-dark-fixture-watch")
+    # THE KNOWN AUDIO BUFFER (card 1ylu, 2026-09-17 — spectra/services/
+    # known_buffer.py): River publishes how far his sound is running
+    # behind on its own loopback surface, and SPECTRA MIRRORS it. TWO
+    # feeds, one record: the SSE subscriber carries a STEP (a drain) the
+    # instant River emits it, and the poll is the slow ramp's backstop on
+    # his own known_buffer_update_period_s. Both are read-only HTTP to
+    # 127.0.0.1 and neither touches a light; with the setting empty both
+    # idle. Nothing they ingest reaches the show clock while the
+    # application gate is shut (floor_clamped) — see that docstring.
+    known_buffer_poll_task = asyncio.create_task(
+        known_buffer.run_poll_supervised(), name="spectra-known-buffer-poll")
+    known_buffer_sse_task = asyncio.create_task(
+        known_buffer.run_sse_supervised(), name="spectra-known-buffer-events")
     logger.info("SPECTRA started — own process, pid %d", os.getpid())
     yield
     all_tasks = (watchdog_task, reconciler_task, ambient_verify_task,
                 flare_preview_sweep_task, param_watchdog_task,
-                activation_recheck_task, dark_fixture_task)
+                activation_recheck_task, dark_fixture_task,
+                known_buffer_poll_task, known_buffer_sse_task)
     for task in all_tasks:
         task.cancel()
     for task in all_tasks:

@@ -239,6 +239,24 @@ def _isolated_capture_health(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolated_known_buffer(tmp_path, monkeypatch):
+    """THE KNOWN AUDIO BUFFER (spectra/services/known_buffer.py) — same
+    class as _isolated_fire_history below: no DI seam, module globals, and
+    reached from a production surface (`engine.status()` calls state() on
+    every poll, which reads room_controls and can log). Without this a test
+    that records a reading writes the repo's real
+    storage/spectra/known_buffer_log.jsonl, and a reading recorded in one
+    test is still the "current" one in the next."""
+    from spectra import config as scfg
+    from spectra.services import known_buffer
+    monkeypatch.setattr(scfg, "KNOWN_BUFFER_LOG_FILE",
+                        tmp_path / "known_buffer_log.jsonl")
+    known_buffer.reset_for_tests()
+    yield
+    known_buffer.reset_for_tests()
+
+
+@pytest.fixture(autouse=True)
 def _isolated_fire_history(tmp_path, monkeypatch):
     """SPECTRA's fire-history counter/show-log (spectra/services/
     fire_history.py) is written from inside production choke points

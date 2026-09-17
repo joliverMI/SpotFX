@@ -1142,6 +1142,22 @@ export const HELP_SECTIONS: HelpSection[] = [
       'Read-only diagnostics ported from spot-effects\' own /timing and /debug pages, unchanged — both call spot-effects\' existing endpoints directly (same-origin), the same live xcorr/anchor machinery spot-effects has always run. Timing is a read-only xcorr/anchor dump for any song; Debug shows the live sync state for whatever is playing now. SPECTRA\'s own trigger clock consumes spot-effects\' shape_offset term (see "SPECTRA Triggers" below) — these pages are how you see the offset it\'s using.',
     entries: [
       {
+        id: 'known-audio-buffer',
+        title: 'Sound running behind — the known audio buffer',
+        keywords: 'known audio buffer effects_fire_later_by_ms river sound behind lag delay floor ceiling fresh stale missing held drain step epoch governed floor_clamped mirror headroom timing page',
+        body: [
+          'THE ONE-LINE VERSION, and it is the whole idea: something on this machine watches how far your sound is running behind, and reports that number to SPECTRA, so your lights can line up with what you actually hear.',
+          'THE NUMBER IS CALLED effects_fire_later_by_ms and its name is the instruction. A LARGER value means the sound is FURTHER behind, so effects have to fire that many milliseconds LATER to land on what reaches your ears. It is used exactly as published and is never flipped around.',
+          'SPECTRA MIRRORS IT — it never asks for a smaller one. The buffer is your headroom: it is what keeps the audio from breaking up, and nothing here touches the audio, shortens a delay, or changes your A/V sync lead. This page only reads the number.',
+          'HOW IT ARRIVES: two ways, into one reading. The slow drift is polled every 15 seconds. A sudden step — a drain, where the buffer empties in one instant — arrives the moment it happens, over a live stream, so SPECTRA is never a quarter of a minute behind a jump. A step is taken whole, never averaged into the old value.',
+          'FRESH, HOLDING, MISSING — what the badge means. FRESH is a reading inside one 15-second period. HOLDING (stale) means the last known value is being kept and its age is shown beside it; this is NOT a fault and is half of normal, because the reader re-measures on its own 15-second clock and a reading is already up to a period old when it arrives. MISSING means nothing has been heard for four periods, and then the FLOOR applies.',
+          'THE FLOOR IS NEVER ZERO, on purpose. Zero would claim your speakers are in step with the source, which is the one thing known to be untrue — so when the number is missing, SPECTRA falls back to the floor (500 ms by default, a setting, not something baked in) rather than to "no correction". A published value below the floor is held AT the floor and flagged.',
+          'THE CEILING IS NOT A LIMIT. It is a setting (1500 ms by default) that says where the number stops being expected. A buffer that is genuinely tracking higher is allowed through and flagged rather than quietly trimmed — trimming it would hide the very thing this is for.',
+          'NOTHING IS APPLIED YET, and the line says so. The half that actually bounds the buffer is not live, so the reader can only see part of the picture and publishes the floor rather than a measured delay. Applying a floor as though it were a measurement would push the lights 300–500 ms BEHIND the sound — exactly the harm this exists to prevent. So until that half is live, the compensation reads 0, the reason is printed on the line, and your A/V sync lead is untouched. Everything is still being read and logged meanwhile, which is how the drift picture gets built.',
+          'WHERE TO SEE IT: the top of the Timing page, and in the engine status as known_buffer. The reader\'s own view of itself — whether it is measuring, holding, or falling back to its floor — is shown next to SPECTRA\'s, because they answer different questions and can honestly disagree.',
+        ],
+      },
+      {
         id: 'timing-lock-history',
         title: 'Lock history',
         keywords: 'last 10 songs grade time to lock offset delta search recent plays first play repeat 1st',
