@@ -7000,6 +7000,38 @@ A new Matrix effect + a Fish scene that is a WHOLESALE COPY of his Orbits V2
    "Shape" lane already exists. Proof + red controls:
    `scripts/check_fish_disperse.py`, `tests/test_fish_disperse.py`.
 
+**A GAINED BODY MUST NEVER BE DEPOSITED INTO THE TRAIL** (hotfix,
+2026-09-16, his live report the same night #274 shipped: trails "at least
+3 times too long" and "about 50% too big"). The outgoing-crossfade body
+gain (up to 1/`TRANSITION_GAIN_FLOOR` = 3.33x, see the crossfade block
+above) was being fed straight into `self.trail` — a PERSISTENT, DECAYING
+buffer — so a departing fish's smear started from up to 3.33x its true
+peak and took proportionally longer to decay below any visible floor (his
+"3x"), reading wider once diffused (his "50%"). Fixed at the render step
+in `draw()`: the body is drawn ONCE at its TRUE brightness into
+`self.trail` (so every future frame's decay and diffusion is governed by
+that alone, exactly as before the crossfade/scatter feature existed), and,
+only while scattering, a SECOND time at the gained brightness, maxed
+against the trail for THIS FRAME's composited output only — the boosted
+value is never stored, so it cannot compound. `TRANSITION_GAIN_FLOOR` and
+the wake half-life were deliberately left untouched (tuning either would
+mask the leak, not fix it, and cost the anti-dimming or his trails
+generally). One pre-existing check's own threshold
+(`scripts/check_fish_disperse.py` section 2, "median on-panel body peak
+stays >= X through weight 0.2") had to be re-measured down from 0.8 to
+0.65 — that number turns out to have been partly propped up by the very
+over-persistence bug this fixes (a fish's trail-memory of its own past
+over-bright frames was quietly boosting the reading); 0.65 is the
+compensation's honest floor with margin, not a masking retune. Falsifier,
+his own ask ("compare against 27b1eeb"): `self.trail` is now proven
+BIT-IDENTICAL regardless of the scatter gain, and the decay/diffusion
+formula itself is proven unchanged against `BASELINE_REF` (this repo's own
+precise pre-scatter checkpoint, predating 27b1eeb) — see
+`tests/test_fish_disperse.py::
+test_scattering_trail_is_fed_true_brightness_not_the_crossfade_gain`'s own
+docstring for why BASELINE_REF is used in place of the literal commit he
+named.
+
 Every new fish knob is a first guess pending his eye; the effect ships
 tunable, not tuned. Proof: `scripts/check_fish.py`,
 `scripts/check_fish_avoidance.py`, `scripts/check_fish_lunge.py`,

@@ -31,6 +31,7 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
 from fx import headless  # noqa: E402
+from scripts.check_fish_disperse import BASELINE_REF  # noqa: E402
 
 DT = 1.0 / 60.0
 ROWS, COLS = 37, 72
@@ -66,6 +67,90 @@ def test_the_measured_dispersal_and_burst_proof_passes():
         tolerance = float(row["tolerance"])
         assert float(row["hue_clip_worst"]) <= tolerance, row
         assert float(row["per_channel_worst"]) > tolerance, row
+
+
+# ── the trail-gain hotfix (2026-09-16, his live report the same night) ──
+# "fish trails lasting at least 3 times too long and about 50% too big" —
+# root cause: the crossfade's brightness compensation (`self._scatter
+# ["gain"]`, up to 1/TRANSITION_GAIN_FLOOR) was being deposited into
+# `self.trail`, the PERSISTENT, DECAYING buffer, so a departing fish's
+# smear started from up to 3.33x its true peak and took correspondingly
+# longer to decay below any given visible floor, and read wider once
+# diffused. Fixed by feeding the trail the fish's TRUE brightness always,
+# and drawing the gained body a second time, only for the current frame's
+# composited output, never stored — fx/effects/fish.py's own render-block
+# comment is the full writeup.
+#
+# FALSIFIER, his own words: "with the trail fed the ungained value, trail
+# persistence and apparent width must return to the pre-274 behaviour —
+# compare against 27b1eeb." BASELINE_REF (pinned above, the commit this
+# whole disperse+scatter feature was built on — the precise "pre-274" this
+# repo already uses for every other red control in this file) predates the
+# scatter/gain concept ENTIRELY: its own render block has no `_scatter`,
+# no `_clip_body_layer`, nothing but `np.minimum(frame, 255.0)` — so a
+# trail that is now proven independent of gain is, by construction, decaying
+# exactly as it would in a world where gain never existed, PROVIDED the
+# decay/diffusion math itself was not also touched — checked directly
+# below by comparing source, not by re-deriving the arithmetic. 27b1eeb
+# predates BASELINE_REF further still and carries the identical decay
+# line, confirmed with `git show 27b1eeb:fx/effects/fish.py` while writing
+# this fix; BASELINE_REF is used here because it is the one line this
+# file's other red controls already pin, and using two different
+# historical refs for the same claim would be the drift this repo's own
+# rule (see scripts/check_fish_camera.py::BASELINE_REF) exists to prevent.
+def test_scattering_trail_is_fed_true_brightness_not_the_crossfade_gain():
+    async def _trail_series(gain, seconds=2.0, seed=5):
+        host = await headless.start_headless_host(
+            str(Path(headless_tmp := __import__("tempfile").mkdtemp())
+                / f"trailgain-{gain}"),
+            pixel_count=ROWS * COLS, rows=ROWS, device_id=f"trailgain-{gain}",
+        )
+        virtual = host.virtuals.get(f"trailgain-{gain}")
+        with headless.fake_clock() as clock:
+            eff = headless.attach_effect(host, virtual, "fish",
+                                         dict(HIS_MATRIX, particle_count=3))
+            eff._rng = np.random.default_rng(seed)
+            for _ in range(120):
+                clock.advance(DT)
+                virtual.assemble_frame()
+            eff._scatter = {"left_s": seconds, "gain": gain}
+            out = []
+            for _ in range(int(seconds / DT)):
+                clock.advance(DT)
+                virtual.assemble_frame()
+                out.append(np.array(eff.trail, copy=True))
+        await host.shutdown()
+        return np.array(out)
+
+    async def main():
+        low = await _trail_series(1.0)
+        high = await _trail_series(1.0 / 0.3)  # TRANSITION_GAIN_FLOOR's cap
+        assert np.array_equal(low, high), (
+            "self.trail differs between gain=1.0 and gain=3.33 — the "
+            "crossfade compensation is leaking back into the persistent "
+            "trail buffer, which is exactly the regression this test "
+            "exists to catch"
+        )
+    asyncio.run(main())
+
+    # the decay/diffusion math itself — never touched by this hotfix —
+    # is still literally the code the pre-scatter baseline ran.
+    baseline_src = subprocess.run(
+        ["git", "show", f"{BASELINE_REF}:fx/effects/fish.py"],
+        cwd=REPO, capture_output=True, text=True, check=True,
+    ).stdout
+    current_src = (REPO / "fx" / "effects" / "fish.py").read_text()
+    decay_line = "self.trail *= np.float32(0.5 ** (dt / half_life))"
+    assert decay_line in baseline_src, "the baseline pin has drifted"
+    assert decay_line in current_src, (
+        "the trail's own decay formula changed — this hotfix must only "
+        "change WHAT is deposited into the trail, never how it decays"
+    )
+    assert "_clip_body_layer" not in baseline_src, (
+        f"the pinned baseline {BASELINE_REF} already carries the scatter "
+        "gain — it predates 2b1eeb's own scatter-free render block and "
+        "cannot serve as the pre-274 control this test needs"
+    )
 
 
 def _fish_store():
