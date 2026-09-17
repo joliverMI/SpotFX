@@ -6835,12 +6835,13 @@ A new Matrix effect + a Fish scene that is a WHOLESALE COPY of his Orbits V2
 1. **It reuses Orbits' patterns, not its motion.** Each fish has its own
    position, speed and SCREEN-space heading; the thin oval's head is laid
    out along that heading (never in normalized space — that would shear it
-   by the panel's aspect; the rear half follows the recorded path, see 8). A real turn RADIUS (`orbit_radius`, re-read) caps the
-   turn rate, so an about-face is structurally an arc. Several shared param
-   keys keep their names but mean something else on a fish (`orbit_radius` →
-   turn radius, `spin` → current swirl, `horizon_scale` → home ring,
-   `base_speed` → swim speed, decoupled from the turn radius) — the registry
-   `note` on each says so; read it before assuming Orbits semantics.
+   by the panel's aspect; the rear half follows the recorded path, see 8).
+   A real turn RADIUS (`orbit_radius`, re-read) caps the turn rate, so an
+   about-face is structurally an arc. Several shared param keys keep their
+   names but mean something else on a fish (`orbit_radius` → turn radius,
+   `spin` → current swirl, `horizon_scale` → home ring, `base_speed` → swim
+   speed, decoupled from the turn radius) — the registry `note` on each says
+   so; read it before assuming Orbits semantics.
 2. **The population-cap bypass is scoped to two moments**, by his own
    decision: the charge's school and the DROP's rush, via `p_nocap` (the
    rush was the lull's until 2026-08-28 — see 6 below). A cap-exempt fish
@@ -6961,9 +6962,11 @@ A new Matrix effect + a Fish scene that is a WHOLESALE COPY of his Orbits V2
    outward line plus a half turn) — never a tuned speed, which is what lets
    a 900 ms lull and a 6 s one both land; (2) the lull CLOCK is his
    2026-08-28 thirds, unchanged — only the manner moved (school → swirl →
-   rank-ordered leak, `LULL_LEAK_*`, with `LULL_EXIT_MIN_S` making a lull too
-   short to swirl in scatter straight out rather than be retired on the
-   panel by the backstop); (3) the crossfade scatter is SKIPPED when the
+   rank-ordered leak, `LULL_LEAK_*`, with `LULL_EXIT_MIN_S` meant to make a
+   lull too short to swirl in scatter straight out rather than be retired
+   on the panel by the backstop — UNPROVEN for one straggler since the
+   thrust change; `scripts/check_fish_disperse.py` §1 says exactly what it
+   still proves); (3) the crossfade scatter is SKIPPED when the
    incoming effect adopts the fish as its own particles
    (`TRANSITION_ADOPTERS`, keyed by module basename: blackhole, orbits,
    fireworks, squiggles, eye, dancer, fish — measured, each reads the live
@@ -7067,8 +7070,8 @@ A new Matrix effect + a Fish scene that is a WHOLESALE COPY of his Orbits V2
    the shipped default as the negative control — the trail is always live,
    so rendered frames never return to bit-identical). The thresholds this
    change relaxed in `scripts/check_fish.py` and
-   `scripts/check_fish_disperse.py` carry their measured reasons in a
-   comment beside each check.
+   `scripts/check_fish_disperse.py` each carry a comment beside the check
+   saying what it still proves (the lull's off-panel one names a gap).
 
 **A GAINED BODY MUST NEVER BE DEPOSITED INTO THE TRAIL** (hotfix,
 2026-09-16, his live report the same night #274 shipped: trails "at least

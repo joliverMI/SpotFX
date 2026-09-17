@@ -222,19 +222,31 @@ def section_lull(base):
                   "with fish in it")
             check(minb.min() >= 0.99, f"gap {gap}s seed {seed}: no fish "
                   "dims while it is on the panel")
-            # tolerance of 1 added by fm/spotfx-fish-body-trails-head-tail-
-            # thrust: ordinary swimmers now carry a genuine speed pulse
-            # (his tail-stroke-thrust ruling) instead of a smooth target,
-            # so exactly which sampled frame the very last straggler
-            # crosses the panel edge on can land one ~17ms tick either
-            # side of a sample boundary at the tightest tested gap (0.9s).
-            # The section's OWN guarantees — nothing dims, nothing survives
-            # past the third at all (the next check) — are unaffected;
-            # only this one-sample-early read moved.
-            check(last_before <= 1, f"gap {gap}s seed {seed}: every fish is "
-                  "OFF the panel before the third's backstop runs")
+            # Relaxed from `== 0` by fm/spotfx-fish-body-trails-head-tail-
+            # thrust, for the tightest tested gap (0.9s); the tolerance
+            # applies at every gap. What it verifies: at most ONE fish is
+            # still inside on_panel's generous bound on the last frame
+            # before the third. What it no longer verifies: `watch` samples
+            # EVERY frame and the backstop empties the population on the
+            # first frame at the third, so when that straggler is present
+            # nothing here can tell a fish about to leave on its own from
+            # one the backstop retired while still on the panel.
+            # LULL_EXIT_BY's "the backstop retires nothing visible" is
+            # therefore unproven whenever this reads 1. The cause is not
+            # established: dispersing fish (mode 4) are not pulse-eligible,
+            # so the thrust change can only have moved where fish are when
+            # the lull begins.
+            check(last_before <= 1, f"gap {gap}s seed {seed}: at most one "
+                  "fish is still on the panel on the last frame before the "
+                  "third's backstop runs")
+            # Structural, not independent: the backstop itself empties the
+            # population at the third, so this cannot go red while it
+            # exists. It proves the third is honoured, NOT that no fish
+            # vanished from view there — the check above is the only
+            # evidence for that, and it tolerates one.
             check(int(vis[f >= third].max(initial=0)) == 0,
-                  f"gap {gap}s seed {seed}: none after the third")
+                  f"gap {gap}s seed {seed}: none after the third (the "
+                  "backstop guarantees this by construction)")
             # the swirl needs real time to wheel a school round (every turn
             # is bounded by the turn radius): asserted on his long lull, and
             # printed for the shorter ones, where it is honestly partial

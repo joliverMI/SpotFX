@@ -512,13 +512,15 @@ LULL_LEAK_FROM = 0.4     # the school breaks into the swirl at once; the
                          # time to form — measured, see
                          # scripts/check_fish_disperse.py) ...
 LULL_LEAK_TO = 0.72      # ... the last one here ...
-LULL_EXIT_BY = 0.92      # ... and every one is off the panel by here, so the
-                         # backstop at the third retires nothing visible
+LULL_EXIT_BY = 0.92      # ... and every one is aimed to be off the panel by
+                         # here, so the backstop at the third retires nothing
+                         # visible (not proven for one straggler at a 0.9 s
+                         # gap — scripts/check_fish_disperse.py section 1)
 LULL_EXIT_MIN_S = 0.3    # ... but no fish leaks later than this many SECONDS
                          # before that exit moment. A lull too short to swirl
                          # in (his real gaps run from 900 ms to 6 s) scatters
                          # straight out instead of being retired on the panel
-                         # by the backstop.
+                         # by the backstop (same caveat).
 LULL_SWIRL_W = 10.0      # tangential steer around the centre of view
 LULL_SWIRL_RING = 0.45   # ... held near this fraction of the pond radius
 LULL_SWIRL_RING_W = 4.0  # ... by a radial correction this strong
