@@ -25,7 +25,12 @@ also where new timing quantities get recorded, not here.
 Follow `docs/ADDING_EFFECTS.md` — the full checklist (LedFX effect →
 smoke test → **tuning gate: Javi tunes defaults before any scene is
 seeded** → registry/phase wiring → scene seeder → scene groups → Help
-page). Don't improvise the order; the tuning gate is deliberate.
+page). Don't improvise the order; the tuning gate is deliberate. **A new
+registered effect (a `NAME = "..."` class in `fx/effects/*.py`) also needs
+a skill or an explicit acknowledged gap — see the effect/scene-skill rule
+at the end of the Help page section below;
+`scripts/check_effect_scene_skills_current.py` refuses to let a new effect
+land silently unclassified.**
 
 ## In-app Help page (KEEP IT CURRENT)
 
@@ -83,6 +88,64 @@ leaves it attached on unmount**: the second click of a double-click lands
 on an anchor React has already detached, React's delegated root listener
 never sees it, and the browser follows the `href` — a full page reload of
 the SPA. Any in-app link that navigates away on click has this shape.
+
+**The same "keep it current" discipline applies one layer down, to a
+skill per effect and per scene** (card
+a-skill-per-effect-scene-kept-current-by-jgt7, his ask verbatim: "have dj
+make sure we have a skill for each effect/scene and a rule to update the
+skills as we work on each effect/scene and add more"). `.claude/skills/`
+carries one skill per **effect** (`fx/effects/*.py` that's actually bound
+into a live scene — a `NAME = "..."` registered effect) and one per
+**scene** (his 10 live SPECTRA scenes) — cold-start knowledge for an agent
+picking that effect/scene up fresh: what each param actually means and its
+real range, which params Sonic can reach (almost never directly — only
+through an already-attached `FlareKind`, see `.claude/skills/*-effect/
+SKILL.md`'s own "Sonic reach" section), and the invariants that are NOT
+visible from reading the code cold (a saturating audio signal meeting a
+`>=` never-threshold, a param that means something different on one
+effect than every sibling effect, a fix that was tried and withdrawn once
+already). `.claude/skills/EFFECT_SCENE_MAP.json` is the hand-maintained
+manifest naming which files trigger which skill, under ONE mapping rule: an
+effect's own code (`fx/effects/<name>.py`) and its instrument/measurement
+scripts and tests trigger ONLY that effect's skill; a scene's own authored
+data/configuration (its seed script, a flare-kind migration naming that
+scene, a test asserting that scene's stored config) triggers ONLY that
+scene's skill — no file is listed under both.
+
+**Whenever you change an effect's or scene's behaviour — touch
+`fx/effects/<name>.py`, tune a param default, fix a timing/threshold
+defect, add or rewire a flare kind's authored data — update that effect's
+and/or scene's own `SKILL.md` in the same change.** Treat it as part of the
+definition of done, exactly like `helpContent.ts` above. Not every effect
+has a scene-authoring skill yet and not every registered effect has ANY
+skill yet — `EFFECT_SCENE_MAP.json`'s `acknowledged_effect_gaps` names the
+ones deliberately skipped (not bound into any live scene today) rather
+than padding with thin stubs; move an effect out of that list into a real
+skill the day it gets bound into a live scene.
+
+Unlike the help-topic orphan audit above, this one doesn't rely on running
+a grep by hand after the fact: `.venv/bin/python scripts/
+check_effect_scene_skills_current.py` diffs the branch's changes (working
+tree + committed, against its merge-base with `origin/master`) against the
+manifest and FAILS if a mapped effect/scene file changed without its skill
+also changing, or if a brand-new registered effect appears in neither the
+manifest nor the acknowledged gaps — a "remember to update the docs"
+reminder lapses exactly when things are busy, so this is a check, not a
+paragraph anyone can skip. **The enforcement is a pytest test, not a
+separately configured gate**: `tests/test_effect_scene_skills_current.py::
+test_the_real_branch_diff_leaves_no_effect_or_scene_skill_stale` runs that
+same real-diff evaluation, so it fires on every full test run — including
+the one `no-mistakes` runs on every change — and FAILS LOUDLY when the diff
+cannot be computed at all (no base ref, a git error) rather than passing
+having checked nothing. The new-effect half is also held by
+`test_every_live_registered_effect_is_either_mapped_or_acknowledged`, which
+re-scans `fx/effects/*.py` directly. See that script's own module docstring
+for exactly what it checks and its one named, honest limitation: scene
+data lives in the gitignored `storage/spectra/scenes.json`, so a scene
+skill can go stale from a LIVE-app-only edit with nothing in git to catch
+it — the agent still owes the scene skill an update by hand in that case,
+the same as the help-topic rule above already relies on human diligence
+for anything not machine-checkable.
 
 ## SPECTRA capability & decision spec (live — check here first)
 

@@ -15,8 +15,8 @@ The work splits around a **manual tuning gate**:
    entry, phase wiring, aliases, seeder script *written but not run*.
 3. **Gate:** Javi tunes the defaults in the LedFX UI and says done.
 4. **Phase 3 — finish:** absorb the tuned values into defaults + setter
-   presets, run the seeder (scene + scene groups), update the Help page,
-   verify live.
+   presets, run the seeder (scene + scene groups), update the Help page
+   and the effect/scene skills, verify live.
 
 Scenes must NOT be seeded before the gate — the setter bakes shape/reactivity
 presets, and pre-gate values would fossilize untuned guesses.
@@ -26,6 +26,16 @@ presets, and pre-gate values would fossilize untuned guesses.
 New file `ledfx/effects/<type>.py`, class `<Name>2d(Twod, GradientEffect)`
 with `NAME` / `CATEGORY = "Matrix"`. Effects are auto-discovered by the
 registry's module scan — there is no registration table.
+
+**Classify it in the skill manifest in the same change.** The moment the
+module exists in this repo as `fx/effects/<name>.py` (vendored into SPECTRA's
+`fx/` or written there directly), add that path to
+`acknowledged_effect_gaps.files` in `.claude/skills/EFFECT_SCENE_MAP.json`.
+`scripts/check_effect_scene_skills_current.py` (enforced on every pytest run)
+fails any registered effect module listed in neither `effects` nor
+`acknowledged_effect_gaps`, so skipping this turns the suite red long before
+Phase 3. The list's shared `_reason` (not bound into any live scene) is true
+of a mid-build effect; Phase 3 step 4 moves it out.
 
 Conventions (see `blackhole.py`, `eye.py`):
 
@@ -130,6 +140,16 @@ LedFX crossfades handle the switch.
      action with `fallback_s` — LedFX restores the prior config server-side.
 3. **Help page** (definition of done): add the effect + scene to
    `web/src/help/helpContent.ts`, `cd web && npx vite build`.
-4. Verify: fire the setter (`POST /api/events/preview`), confirm the LedFX
+4. **Effect and scene skills** (definition of done, see AGENTS.md's
+   effect/scene-skill rule): write `.claude/skills/<name>-effect/SKILL.md`
+   and `.claude/skills/<scene>-scene/SKILL.md`, and register both in
+   `.claude/skills/EFFECT_SCENE_MAP.json` — the effect module and its
+   instruments under `effects`, the scene's seeder and migrations under
+   `scenes`, never one file under both, and take the effect out of
+   `acknowledged_effect_gaps`, where Phase 1 listed it. Then run
+   `.venv/bin/python scripts/check_effect_scene_skills_current.py` and
+   `python -m pytest tests/test_effect_scene_skills_current.py` — both must
+   be clean before the work is done.
+5. Verify: fire the setter (`POST /api/events/preview`), confirm the LedFX
    live effect + params, fire Charge/Lull/Drop, watch both journals. Then
    ask Javi for the eyeball pass.
