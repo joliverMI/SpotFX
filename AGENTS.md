@@ -2982,8 +2982,9 @@ offset and work with the offset like we had in spot FX") THE REAL FIRING
 PATH READS IT TOO**: `trigger_engine.tick()` relocates a `fire_response`
 trigger's target by the fired band's authored kind offset
 (`scene_response.band_trigger_offset_ms` — its docstring carries the
-multi-kind aggregation rule: min over the NONZERO offsets, a kind at the
-untouched default 0 never vetoes a sibling's authored ask — this is the
+multi-kind aggregation rule: min over EVERY declared, enabled kind's
+offset, zero included — it was min over the NONZERO offsets until the
+2026-09-16 fix recorded under PER-FLARE TRIGGER MOMENT below — this is the
 ONE band-wide relocation `tick()` still applies, unaffected by PER-FLARE
 TRIGGER MOMENT below, which only changed what happens once the fire
 lands), read LIVE off the ACTIVE scene at render intensity,
@@ -3016,9 +3017,10 @@ INSIDE the fire every kind now honours its OWN `trigger_offset_ms`
 independently, ported verbatim from legacy `services/trigger_engine.py`'s
 `MorphLane` shape: `_band_anchor_ms` (the same value `band_trigger_offset_
 ms` always computed) stays the anchor; each attached kind then waits
-`max(0, kind.trigger_offset_ms - anchor_ms)` (always >= 0 — clamped
-because SPECTRA's anchor excludes untouched-0 kinds from its own min,
-unlike legacy's literal min-over-all) before executing. A delay of 0 runs
+`max(0, kind.trigger_offset_ms - anchor_ms)` (always >= 0 — structurally
+so since the 2026-09-16 fix below, `_band_anchor_ms`'s min is taken over
+EVERY declared offset including 0, matching legacy's own literal
+min-over-all) before executing. A delay of 0 runs
 INLINE (`ResponseEngine._run_kinds`, the extracted pipeline
 `_execute_band_locked` always ran); any other delay is a
 `PendingKindBatch`, scheduled by `services/engine.py` the SAME shape
@@ -3048,13 +3050,30 @@ queue is the third queue every drain point must schedule, including
 the gate its fire passed and SKIPS (never fires) onto a changed scene;
 and every outcome lands in `responses.kind_batch_log` (landed / skipped_* /
 error). `fire_kind` (the isolated single-kind preview) is untouched: a
-lone kind's own anchor is itself, so its delay is always 0. Known,
-pre-existing, out of scope: in an all-positive-offset band a 0-kind is
-clamped and fires late while its preview draws it on the mark; and the
-automatic lead (`_response_switch_lead_ms`) stays BAND-wide, subtracted
-once from the whole fire's start, so a kind sharing a band with a smooth
-glide or a colour rotate fires earlier than its own preview's per-kind
-head start shows. Spec:
+lone kind's own anchor is itself, so its delay is always 0. **FIXED
+2026-09-16 (spotfx-zero-offset-fires-on-mark, captain's ruling "yes
+fix"): an all-positive-offset band used to anchor on its positive value
+(`_band_anchor_ms`'s min was over the NONZERO offsets only), so a 0-kind
+was clamped to the band's already-delayed moment and fired late while its
+own preview drew it on the mark.** `_band_anchor_ms` now takes the min
+over EVERY declared offset, zero included — matching legacy's own
+literal min-over-all — so a 0-kind on an all-positive band anchors the
+fire (fires on the mark) and its positive sibling is deferred behind it;
+a band containing a negative offset is unaffected (zero never competed
+with it). **The anchor is also where a charge/lull/drop's phase drive
+begins** (`on_event` runs `_drive_phase` at the relocated fire start), so
+delaying a class's phase choreography now needs EVERY enabled kind in its
+band, pooled alternatives included, to carry a positive offset — one
+untouched-0 kind anchors the phase on the mark. Accepted on purpose, not
+narrowed: exempting phase bands would be a new special case, and starting
+on the mark honours the settled drop-begins-on-its-mark rule.
+Measured against his real scenes at fix time: 0 of 83 authored
+flare kinds (every response class) carried a nonzero offset, so this
+changed nothing on disk.
+Remaining out of scope: the automatic lead (`_response_switch_lead_ms`)
+stays BAND-wide, subtracted once from the whole fire's start, so a kind
+sharing a band with a smooth glide or a colour rotate fires earlier than
+its own preview's per-kind head start shows. Spec:
 `tests/test_flare_per_kind_stagger.py`, `tests/
 test_flare_kind_batch_lifecycle.py`, `tests/
 test_flare_preview_shows_stagger.py`.
@@ -3425,7 +3444,8 @@ they show — and both run on the ONE hold above, never a second one.
   the reason two gap sliders exist: the hang is a thing to SEE, not a
   number to set. Drop is never stretched and BEGINS on its mark. **Marks
   are deliberately not draggable** — a band's offset is an aggregate over
-  its attached kinds (`band_trigger_offset_ms`, min over nonzero), so a
+  its attached kinds (`band_trigger_offset_ms`, min over every declared
+  offset, zero included since the 2026-09-16 fix above), so a
   drag would have to pick one; the per-kind flare preview already authors
   it and the panel says so. `release_phases()` gained `force=` for the
   per-lap release (each step runs on a FRESH scratch pair, and a drop arms
