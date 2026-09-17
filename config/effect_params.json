@@ -1634,7 +1634,7 @@
           "min": 0.0,
           "max": 3.0,
           "aspect": "shape",
-          "note": "How fast a ripple opens out, as a multiple of swim speed. Capped so the wake stays fish-sized.",
+          "note": "How fast the wake trail laid at the tail opens outward as it fades.",
           "default": 0.45
         },
         "ripple_life": {
@@ -1644,7 +1644,7 @@
           "min": 0.2,
           "max": 4.0,
           "aspect": "shape",
-          "note": "Seconds a ripple takes to fade.",
+          "note": "Seconds the wake trail takes to fade.",
           "default": 0.9
         },
         "ripple_width": {
@@ -1654,7 +1654,7 @@
           "min": 0.5,
           "max": 4.0,
           "aspect": "shape",
-          "note": "Ripple ring thickness in pixels.",
+          "note": "Wake thickness: how wide each deposit laid at the tail is, relative to the fish.",
           "default": 1.3
         },
         "avoid_strength": {
