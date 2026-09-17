@@ -271,16 +271,19 @@ def test_single_kind_band_returns_that_kinds_offset():
     assert band_trigger_offset_ms(scene, "flare", 0.5) == -400
 
 
-def test_multi_kind_band_earliest_nonzero_ask_wins():
-    """min over the NONZERO offsets — the earliest explicitly-authored ask
-    wins (mirroring the lead system's own documented max-lead rule), and a
-    kind still at the untouched default 0 doesn't veto a sibling's ask."""
+def test_multi_kind_band_earliest_ask_wins():
+    """min over EVERY declared offset, zero included (fixed 2026-09-16,
+    spotfx-zero-offset-fires-on-mark) — the earliest requested moment wins
+    (mirroring the lead system's own documented max-lead rule). A negative
+    sibling still wins over an untouched 0, exactly as before; the case
+    that changed is an all-positive-or-zero band, where 0 is now itself
+    the earliest ask and wins rather than being filtered out of the min."""
     scene = _scene([_kind("A", 0), _kind("B", -400)],
                    {"A": 1.0, "B": 1.0})
     assert band_trigger_offset_ms(scene, "flare", 0.5) == -400
     scene = _scene([_kind("A", 300), _kind("B", 0)],
                    {"A": 1.0, "B": 1.0})
-    assert band_trigger_offset_ms(scene, "flare", 0.5) == 300
+    assert band_trigger_offset_ms(scene, "flare", 0.5) == 0
     scene = _scene([_kind("A", -500), _kind("B", 300)],
                    {"A": 1.0, "B": 1.0})
     assert band_trigger_offset_ms(scene, "flare", 0.5) == -500

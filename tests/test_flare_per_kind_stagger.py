@@ -424,10 +424,14 @@ def test_negative_offset_kind_fires_now_zero_offset_kind_waits(tmp_path):
 #      anchor band_trigger_offset_ms already computes ───────────────────────
 
 def test_three_kind_delays_match_the_anchor_arithmetic(tmp_path):
-    """offsets [-100, 0, +50]: anchor = min(nonzero) = -100 (the -100 and
-    +50 kinds are the only authored asks; 0 never competes). Delays:
-    kind(-100) -> 0 (runs now), kind(0) -> 100, kind(+50) -> 150 — two
-    distinct PendingKindBatch entries, never one merged, never negative."""
+    """offsets [-100, 0, +50]: anchor = min(-100, 0, +50) = -100 (zero
+    included in the min since the 2026-09-16 fix, spotfx-zero-offset-
+    fires-on-mark — unchanged here since -100 is still the smallest).
+    Delays: kind(-100) -> 0 (runs now), kind(0) -> 100, kind(+50) -> 150 —
+    two distinct PendingKindBatch entries, never one merged, never
+    negative. REGRESSION GUARD: this band already contained a negative
+    offset, so the fix changes nothing about it — a band-arithmetic test
+    that survives byte-identical proves the fix is scoped."""
     from spectra.models.scene import (FlareBand, FlareKind, ResponseSpec,
                                       SceneDeviceConfig, SceneV2)
     kinds = [
@@ -475,14 +479,20 @@ async def _check_three_kind(scene):
             await host.shutdown()
 
 
-# ── 4. all-positive offsets clamp to zero delay, never negative ─────────────
+# ── 4. a zero-offset kind on an all-positive band fires ON THE MARK,     ────
+#      the positive-offset sibling is deferred behind it (never negative) ──
 
-def test_all_positive_offsets_never_produce_a_negative_delay(tmp_path):
-    """offsets [0, +50]: anchor = min(nonzero) = 50 (0 never competes).
-    Naively kind(0)'s delay would be 0-50=-50 — clamped to 0 instead, so
-    it simply rides along at the band's own already-relocated moment
-    (its pre-existing behaviour) rather than crashing or scheduling
-    something impossible."""
+def test_zero_offset_kind_fires_on_the_mark_on_an_all_positive_band(tmp_path):
+    """FIX PROOF (2026-09-16, spotfx-zero-offset-fires-on-mark): offsets
+    [0, +50] — the exact shape of the bug report. Before the fix the
+    anchor was min(nonzero) = 50, so tick() would have relocated the whole
+    fire +50ms and Kind A's clamped delay-0 would have landed it AT that
+    already-delayed moment (50ms late). The fix takes the min over EVERY
+    declared offset, zero included: anchor = min(0, 50) = 0, so tick()
+    never relocates the fire at all — Kind A (0) runs INLINE, on the mark,
+    in the SAME batch band_trigger_offset_ms's anchor sits at, and Kind B
+    (+50) is deferred exactly 50ms behind it via ONE PendingKindBatch,
+    never negative, never merged into the inline group."""
     _categories_fixture(tmp_path)
     scene = _stagger_scene(offset_a=0, offset_b=50)
 
@@ -492,13 +502,24 @@ def test_all_positive_offsets_never_produce_a_negative_delay(tmp_path):
             headless.attach_effect(host, virtual, "blackhole", CFG)
             executor, conductor, responder = _engine(_Wall())
             _fire(conductor, scene, CFG)
+            t0 = time.monotonic()
             record = await responder.on_event("flare", 0.5,
                                               anchor_relocated=True)
-            assert responder.take_kind_batch_schedule() == []
-            names = {k["name"] for k in record["kinds"]}
-            assert names == {"Kind A", "Kind B"}
-            assert _params_written(executor, "swirl")
-            assert _params_written(executor, "horizon_scale")
+            # Kind A (offset 0) fired INLINE, on the mark — not deferred.
+            inline_names = {k["name"] for k in record["kinds"]}
+            assert inline_names == {"Kind A"}
+            assert _params_written(executor, "swirl")          # A ran now
+            assert not _params_written(executor, "horizon_scale")  # B waits
+
+            batches = responder.take_kind_batch_schedule()
+            assert len(batches) == 1, batches
+            assert record["deferred_kinds"] == [
+                {"name": "Kind B", "type": "permanent", "delay_ms": 50}]
+            due_s = batches[0].due_at - t0
+            assert 0.03 <= due_s <= 0.10, due_s   # ~50ms
+
+            await responder.run_kind_batch(batches[0])
+            assert _params_written(executor, "horizon_scale")  # B lands late
         finally:
             facade.set_host(None)
             await host.shutdown()

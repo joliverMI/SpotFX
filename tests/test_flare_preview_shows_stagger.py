@@ -15,17 +15,23 @@ relocated by the band's anchor) — for every kind whose stagger delay is not
 clamped (its offset at or after the band's anchor).
 
 The invariant covers the AUTHORED OFFSET component of a kind's moment ONLY.
-Two pre-existing, out-of-scope preview/production parity gaps sit outside
-it, both left for a later decision rather than fixed here:
-  * an all-positive band clamps a 0-offset kind to the band's later moment
-    while its preview draws it on the mark (the last test); and
+One pre-existing, out-of-scope preview/production parity gap sits outside
+it, left for a later decision rather than fixed here:
   * trigger_engine._response_switch_lead_ms's AUTOMATIC lead stays
     band-wide — a max over every attached kind's smooth glide / colour
     rotate ramp, subtracted once from the whole fire's start — where each
     kind's isolated preview applies only its own kind_lead_ms. A kind that
     shares a band with a gliding or rotating kind therefore fires earlier
     than its preview's fire_at_s. Every band here carries permanent kinds
-    only, so both leads are 0 and that gap is deliberately not exercised."""
+    only, so both leads are 0 and that gap is deliberately not exercised.
+
+An all-positive band used to clamp a 0-offset kind to the band's later
+moment while its preview drew it on the mark — a real preview/production
+disagreement, FIXED 2026-09-16 (spotfx-zero-offset-fires-on-mark):
+_band_anchor_ms's min is now taken over EVERY declared offset, zero
+included, not just the nonzero ones, so an all-positive band anchors on 0
+and a 0-offset kind fires exactly where its preview already drew it (the
+last test, below)."""
 from __future__ import annotations
 
 import asyncio
@@ -146,17 +152,18 @@ def test_the_preview_reflects_the_same_real_fire_moment_the_stagger_computes():
         assert _preview_write_minus_mark_ms(scene, kind) == kind.trigger_offset_ms
 
 
-def test_an_all_positive_band_is_outside_that_invariant():
-    """The invariant above does NOT extend to a band whose every authored
-    offset is positive. The anchor is min over NONZERO offsets (+50 here),
-    so tick() moves the whole fire +50 and the 0-offset kind's delay clamps
-    to 0: it fires 50ms late while its own preview still draws it exactly
-    on the mark. A known, pre-existing, OUT-OF-SCOPE gap between preview
-    and light for this configuration — a property of the min-over-nonzero
-    anchor, not something the per-kind stagger introduced or is authorised
-    to change."""
+def test_an_all_positive_band_now_fires_its_zero_offset_kind_on_the_mark():
+    """The invariant above now extends to a band whose every authored
+    offset is zero-or-positive too (fixed 2026-09-16,
+    spotfx-zero-offset-fires-on-mark). The anchor is min over EVERY
+    declared offset, zero included, so [0, +50] anchors on 0 — tick()
+    never relocates the fire — and Kind A (0) fires ON the mark while
+    Kind B (+50) is deferred 50ms behind it, matching both kinds' own
+    preview exactly (write - mark == offset, same as the [-100, 0] case
+    above)."""
     scene, kind_a, kind_b = _band_scene(offset_a=0, offset_b=50)
     moments = _real_fire_moments_ms(scene)
-    assert moments == {"Kind A": 50, "Kind B": 50}
-    assert _preview_write_minus_mark_ms(scene, kind_a) == 0
-    assert _preview_write_minus_mark_ms(scene, kind_b) == 50
+    assert moments == {"Kind A": 0, "Kind B": 50}
+    for kind in (kind_a, kind_b):
+        assert moments[kind.name] == kind.trigger_offset_ms
+        assert _preview_write_minus_mark_ms(scene, kind) == kind.trigger_offset_ms

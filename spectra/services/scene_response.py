@@ -235,20 +235,24 @@ so a single FlareKind.trigger_offset_ms had to speak for every kind
 attached to the band, which is why an authored lead on one kind (e.g. a
 100ms head start) used to drag every band-mate the same amount early.
 Ported from legacy services/trigger_engine.py's MorphLane shape (the exact
-mechanism, not a redesign): `_band_anchor_ms` is UNCHANGED from what
-band_trigger_offset_ms always computed (min over the band's nonzero
-authored offsets, possibility-set-wide — untouched-default kinds never
-veto a sibling's ask) — that anchor still governs the ONE tick-level
-relocation of the whole fire (trigger_engine.tick(), unaffected by this).
-What is new is INSIDE the fire: _execute_band_locked splits its
-already-picked, already-enabled `attached` kinds by
+mechanism, not a redesign): `_band_anchor_ms` is what
+band_trigger_offset_ms always computed — min over the band's declared,
+enabled kinds' trigger_offset_ms, ZERO INCLUDED (fixed 2026-09-16,
+spotfx-zero-offset-fires-on-mark — see that function's own docstring;
+before the fix it filtered zero out first, "min over nonzero", which
+anchored an all-positive band on its positive value instead of 0 and fired
+every untouched-0 kind late) — that anchor still governs the ONE
+tick-level relocation of the whole fire (trigger_engine.tick(), unaffected
+by this). What is new here is INSIDE the fire: _execute_band_locked splits
+its already-picked, already-enabled `attached` kinds by
 `delay_ms = max(0, kind.trigger_offset_ms - anchor_ms)` — always >= 0,
-legacy's own invariant, clamped here because SPECTRA's anchor excludes
-untouched-0 kinds from the min (unlike legacy's literal min-over-all),
-so a 0-kind sitting below a positive-only anchor would otherwise compute a
-negative wait; clamping to 0 means it just rides along at the band's own
-already-relocated moment, exactly its pre-existing behaviour. The
-delay-0 group runs _run_kinds INLINE, synchronously, unchanged from what
+legacy's own invariant, and structurally so now: the anchor is the true
+min over every declared kind's offset (possibility-set-wide, a superset of
+any one fire's lane-picked `attached`), so no kind's own offset can ever
+fall below it and the `max(0, ...)` never actually clamps a live value —
+kept as the defensive floor anyway, never removed on a proof of
+"can't happen this way." The delay-0 group runs _run_kinds INLINE,
+synchronously, unchanged from what
 _execute_band_locked always did (byte-identical whenever every attached
 kind sits at 0, since anchor_ms is then 0 too and every delay is 0) — a
 band with no authored offsets at all never sees a PendingKindBatch. Every
@@ -737,20 +741,33 @@ def _band_anchor_ms(band: FlareBand, declared: dict[str, FlareKind]) -> int:
     tick-level relocation of the whole fire) and _execute_band_locked's own
     PER-KIND stagger (module docstring, "PER-FLARE TRIGGER MOMENT") read —
     factored out so the two can never silently compute two different
-    anchors for the same band. The EARLIEST explicitly-authored (nonzero)
-    offset among the band's declared kinds wins — min over the nonzero
-    values, possibility-set-wide (every declared member, pooled lane
-    alternatives included — the possibility-set bound, see
-    color_rotate_lead_ms's own LANES note), mirroring
-    _response_switch_lead_ms's own documented max-lead rule ("the dominant
-    transition lands on the trigger, shorter ones bloom a hair early").
-    A kind still at the field's untouched default (0) doesn't veto a
-    sibling's authored ask; a band with no authored offset at all is 0 —
-    byte-identical to pre-offset behaviour (every one of his 61 real flare
-    kinds, re-verified live the day this shipped)."""
+    anchors for the same band. The EARLIEST requested moment among the
+    band's declared, enabled kinds wins — min over EVERY one of their
+    trigger_offset_ms values, ZERO INCLUDED, possibility-set-wide (every
+    declared member, pooled lane alternatives included — the possibility-
+    set bound, see color_rotate_lead_ms's own LANES note), mirroring
+    legacy's own MorphLane min-over-all and _response_switch_lead_ms's
+    documented max-lead rule ("the dominant transition lands on the
+    trigger, shorter ones bloom a hair early"). A band with no authored
+    offset at all — every kind still at the field's untouched default (0)
+    — is 0, byte-identical to pre-offset behaviour (every one of his 61
+    real flare kinds, re-verified live the day this shipped).
+
+    FIXED 2026-09-16 (spotfx-zero-offset-fires-on-mark): this used to
+    filter 0 OUT before taking the min ("min over nonzero"), so a band
+    whose only authored offsets were POSITIVE (e.g. [0, +50]) anchored on
+    the positive value instead of 0 — tick() delayed the whole fire by
+    that amount, and the untouched-0 kind, clamped to delay 0 in
+    _execute_band_locked, rode along at that already-delayed moment
+    instead of firing on the mark, while its own flare preview kept
+    drawing it exactly on the mark (trigger_mark_s never went through this
+    function — see flare_preview.trigger_mark_s's own docstring). Zero is
+    an ordinary requested moment like any other; excluding it from the min
+    only ever made sense when every OTHER candidate was more negative
+    (earlier) than it, which the filter got right by accident and broke
+    the instant every other candidate was more positive (later)."""
     offsets = [declared[n].trigger_offset_ms for n in band.kinds
-               if n in declared and declared[n].enabled
-               and declared[n].trigger_offset_ms != 0]
+               if n in declared and declared[n].enabled]
     return min(offsets) if offsets else 0
 
 
@@ -1063,14 +1080,18 @@ class ResponseEngine:
         plus its delay (never measured from the end of the inline burst)
         and named on `record["deferred_kinds"]`.
 
-        What this does NOT promise: that every kind's real moment relative
-        to the nominal trigger equals its own trigger_offset_ms. That holds
-        only for a kind whose delay is not clamped by max(0, ...), i.e. whose
-        offset is at or after the anchor. With every authored offset in a
-        band positive, a 0-offset kind is clamped and rides the band's
-        already-relocated (later) moment — while its own flare preview still
-        draws it exactly on the mark. That gap is a pre-existing property of
-        the min-over-nonzero anchor, out of this build's scope."""
+        What this now promises (fixed 2026-09-16,
+        spotfx-zero-offset-fires-on-mark): every kind's real moment
+        relative to the nominal trigger equals its own trigger_offset_ms,
+        because _band_anchor_ms's min is taken over EVERY declared offset,
+        zero included — an all-positive band (e.g. [0, +50]) anchors on 0,
+        not on its positive value, so an untouched-0 kind's delay is
+        genuinely 0 relative to the (unrelocated) mark rather than 0
+        relative to an already-delayed moment. Before the fix, filtering
+        zero out of the min ("min over nonzero") anchored an all-positive
+        band on its positive value instead, and a 0-offset kind — clamped
+        by max(0, ...) — rode that later moment while its own flare
+        preview still drew it exactly on the mark."""
         declared = {k.name: k for k in scene.flare_kinds}
         picked_names, lane_picks = resolve_lane_picks(band, self._rng, declared)
         if lane_picks:
@@ -1089,12 +1110,11 @@ class ResponseEngine:
         now_kinds: list[tuple[FlareKind, float]] = []
         deferred: dict[int, list[tuple[FlareKind, float]]] = {}
         for kind, scale in attached:
-            # Clamped to >= 0: anchor_ms excludes untouched-0 kinds from its
-            # own min (band_trigger_offset_ms's own possibility-set rule),
-            # so a 0-kind sitting below a positive-only anchor would
-            # otherwise compute a negative wait — it just rides along at
-            # the band's own already-relocated moment instead, its
-            # pre-existing behaviour.
+            # anchor_ms is the min over EVERY declared kind's offset (zero
+            # included, _band_anchor_ms's own docstring), so no attached
+            # kind's own offset can fall below it — delay_ms is always >= 0
+            # by construction; max(0, ...) is a defensive floor, not a live
+            # clamp.
             delay_ms = max(0, kind.trigger_offset_ms - anchor_ms)
             if delay_ms == 0:
                 now_kinds.append((kind, scale))
