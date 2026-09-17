@@ -790,7 +790,11 @@ class Fish2d(Twod, GradientEffect):
             vol.Optional(
                 "trail_decay",
                 description="How long the water holds the wake: 0 = crisp, 1 = long smear",
-                default=0.4,
+                # 2026-09-17, his word: trail duration down 25% from his live
+                # 0.4 (half-life 0.02+0.4*0.5=0.22s). 0.29 -> half-life 0.165s,
+                # exactly 25% shorter; 0.75*0.4=0.3 would only be ~23% at the
+                # effect because of the 0.02s floor.
+                default=0.29,
             ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1.0)),
             vol.Optional(
                 "gradient_spin",
@@ -875,12 +879,16 @@ class Fish2d(Twod, GradientEffect):
             vol.Optional(
                 "ripple_life",
                 description="Seconds the wake takes to fade",
-                default=0.9,
+                # 2026-09-17, his word: trail duration down 25% from his live
+                # 0.9 -> 0.675.
+                default=0.675,
             ): vol.All(vol.Coerce(float), vol.Range(min=0.2, max=4.0)),
             vol.Optional(
                 "ripple_width",
                 description="Wake thickness: the size of each deposit, relative to the fish",
-                default=1.3,
+                # 2026-09-17, his word: trail size down 25% from his live
+                # 1.3 -> 0.975.
+                default=0.975,
             ): vol.All(vol.Coerce(float), vol.Range(min=0.5, max=4.0)),
             vol.Optional(
                 "avoid_strength",

@@ -75,6 +75,30 @@ composited output ONLY — never stored. Generalizes: any effect with a
 persistent trail/wake buffer must never let a transient render-time gain
 leak into what gets stored for the next frame.
 
+## The trails are two things, not one — his 2026-09-17 word trimmed both 25%
+
+"The trails" his eye sees are `self.trail` (the fish's own persistent
+smear, `trail_decay` -> `half_life = 0.02 + trail_decay * 0.5`) AND
+`self.wake` (the Orbits-style trail laid at the tail, `ripple_life` for
+duration, `ripple_width` for size). His ask, verbatim: "turn down the size
+and duration of the trails by 25%." Shipped defaults (also the schema/
+registry defaults, so a fresh instance already lands here):
+`trail_decay` 0.4 -> 0.29 (half-life 0.22s -> 0.165s, -25% — 0.75x0.4=0.3
+would only be -23% because of the 0.02s floor), `ripple_life` 0.9 -> 0.675,
+`ripple_width` 1.3 -> 0.975. `ripple_spread`/`ripple_amount`/`blob_size`/
+colour were deliberately untouched — this is a trail-only change.
+`fx/effects/fish.py`'s vol schema is the default source actually in force
+for a fresh instance on his virtual (voluptuous fills a missing key from
+`CONFIG_SCHEMA` at `_apply_config`'s `schema()(config)` call) — NOT
+`config/effect_params.json`'s `trail_decay` entry (0.15 there, never
+matched his live 0.4, so it was already not the source), though that
+registry's `ripple_life`/`ripple_width` entries DID match and were updated
+alongside. A currently-running instance needs `scripts/
+trim_fish_trails_25.py --apply` (edits `storage/spectra/fx-live/config.json`
+directly — no generic live effects-config HTTP route exists) plus a
+`spectra.service` restart to pick the new values up; a defaults change
+alone only reaches the NEXT fresh Fish instance.
+
 ## Fish never fade — they DISPERSE (steer off-panel), full brightness the
    whole way, on a DEADLINE
 
