@@ -20,13 +20,15 @@ T0 = datetime(2026, 9, 1, 20, 0, 0, tzinfo=timezone.utc)
 SONGS = [f"spotify:track:song{i}" for i in range(6)]
 
 
-def _entry(at: datetime, uri: str, offset_ms: int, prev: int | None = 0) -> dict:
+def _entry(at: datetime, uri: str, offset_ms: int, prev: int | None = 0,
+           locked: bool = True, quality: float = 0.8) -> dict:
     return {
         "at": at.isoformat(),
         "uri": uri,
         "offset_ms": int(offset_ms),
         "prev_offset_ms": prev,
-        "quality": 0.8,
+        "quality": quality,
+        "locked": locked,
         "grade": "B",
     }
 
@@ -36,6 +38,9 @@ def _isolated_history(tmp_path, monkeypatch):
     """Never read or write the repo's real storage/lock_history.json."""
     monkeypatch.setattr(lock_history, "_STORE_PATH", tmp_path / "lock_history.json")
     monkeypatch.setattr(lock_history, "_entries", None)
+    monkeypatch.setattr(lock_history, "_anchor_seed_oldest", None)
+    monkeypatch.setattr(lock_history, "_anchors_persisted_at", None)
+    monkeypatch.setattr(lock_history, "_anchor_samples_unsaved", [])
 
 
 def _install(entries: list[dict]) -> None:
@@ -129,3 +134,496 @@ def test_session_split_on_two_hour_gap():
     d = lock_history.pipeline_drift()
     assert len(d["sessions"]) == 2
     assert d["sessions"][0]["plays"] == 3          # newest first
+
+
+def test_garbage_plays_never_enter_the_baseline_or_level_pool():
+    # An unlocked or near-zero-Q play is not evidence of a song's normal
+    # state — report §5.1's "+27575ms @ Q .41" class. A run of such plays,
+    # scattered through an otherwise healthy world, must move neither the
+    # legacy residual nor the new level, though they still count as plays.
+    world = _daily_world(10, lambda day, k: 1000 * k)
+    for i in range(15):
+        world.append(_entry(T0 + timedelta(days=6, hours=i), SONGS[0],
+                             27000, locked=False, quality=0.2))
+        world.append(_entry(T0 + timedelta(days=6, hours=i, minutes=1), SONGS[1],
+                             -19000, locked=True, quality=0.1))
+    _install(world)
+    d = lock_history.pipeline_drift(max_sessions=20)
+    cur = d["current"]
+    assert cur is not None
+    assert abs(cur["median_residual_ms"]) < 200
+    assert abs(cur["level_ms"]) < 200
+    assert d["alarm"] is False
+    # the garbage plays are visible in the raw play count, not the pools
+    garbage_session = next(s for s in d["sessions"]
+                            if s["start_at"][:10] == (T0 + timedelta(days=6)).date().isoformat())
+    assert garbage_session["plays"] > 6
+    assert garbage_session["baselined"] <= 6
+    assert garbage_session["level_baselined"] <= 6
+
+
+def _step_world() -> list[dict]:
+    """The report's own shape (§2/§4): a flat anchor era, a steady ramp,
+    one discrete step, then a stable era holding the new level — never a
+    scattered, sign-flipping sequence."""
+    world: list[dict] = []
+    for day in range(4):                                    # anchor era
+        for k, uri in enumerate(SONGS):
+            world.append(_entry(T0 + timedelta(days=day, minutes=4 * k),
+                                 uri, 1000 * k))
+    for i, day in enumerate(range(5, 10)):                   # ramp era
+        for k, uri in enumerate(SONGS):
+            world.append(_entry(T0 + timedelta(days=day, minutes=4 * k),
+                                 uri, 1000 * k - 400 * (i + 1)))
+    step_level = -400 * 5 + 5000                              # THE STEP
+    for k, uri in enumerate(SONGS):
+        world.append(_entry(T0 + timedelta(days=11, minutes=4 * k),
+                             uri, 1000 * k + step_level))
+    for day in range(12, 14):                                 # stable era
+        for k, uri in enumerate(SONGS):
+            world.append(_entry(T0 + timedelta(days=day, minutes=4 * k),
+                                 uri, 1000 * k + step_level))
+    return world
+
+
+def test_level_reads_ramp_then_step_then_stable_not_scatter():
+    # The regression this instrument was rebuilt for
+    # (data/spectra-timing-drift-cause/report.md): fed the same shaped
+    # history, the OLD lagged-baseline number turns a clean ramp-then-step
+    # into what reads as scatter with a sign flip. The LEVEL must not.
+    _install(_step_world())
+    d = lock_history.pipeline_drift(max_sessions=20)
+    ordered = list(reversed(d["sessions"]))       # oldest → newest
+    shapes = [s["shape"] for s in ordered if s["shape"] != "insufficient"]
+    assert shapes == ["start", "ramp", "ramp", "ramp", "step", "stable", "stable"]
+
+    step_session = next(s for s in ordered if s["shape"] == "step")
+    stable_sessions = [s for s in ordered if s["shape"] == "stable"]
+    assert step_session["level_ms"] > 2500                   # the real jump
+    assert all(abs(s["level_ms"] - stable_sessions[0]["level_ms"]) < 200
+               for s in stable_sessions)                     # settled, not drifting
+
+    # `current` (and the alarm) read the level, not the lagged residual —
+    # the newest session is stable, so it must not misreport as still moving.
+    assert d["current"] is not None
+    assert d["current"]["shape"] == "stable"
+    assert d["alarm"] is True   # the settled level itself is past the threshold
+
+
+def _record(monkeypatch, plays: list[tuple[datetime, str, int]]) -> None:
+    """Drive the real write path, one play at a time, on a controlled clock."""
+    clock: dict[str, datetime] = {}
+    monkeypatch.setattr(lock_history, "_now_iso", lambda: clock["now"].isoformat())
+    for at, uri, off in plays:
+        clock["now"] = at
+        lock_history.record(uri=uri, locked=True, offset_ms=off, quality=0.8, n_windows=3)
+
+
+def _levels_by_day(d: dict) -> dict[str, int | None]:
+    return {s["start_at"][:10]: s["level_ms"] for s in d["sessions"]}
+
+
+def test_the_capped_log_evicting_the_anchor_era_never_moves_an_anchor(monkeypatch):
+    # The store is capped; every new play past the cap evicts the oldest.
+    # Once the anchor era's own plays are gone from the log, each song's
+    # anchor — and so every level already read against it — must not move.
+    monkeypatch.setattr(lock_history, "_CAP", 48)
+    era = [(T0 + timedelta(days=day, minutes=4 * k), uri, 1000 * k)
+           for day in range(4) for k, uri in enumerate(SONGS)]
+    settled = [(T0 + timedelta(days=day, minutes=4 * k), uri, 1000 * k - 2000)
+               for day in range(6, 14) for k, uri in enumerate(SONGS)]
+
+    _record(monkeypatch, era + settled[:24])                  # days 6–9, log exactly full
+    before = lock_history.pipeline_drift(max_sessions=50)
+    assert before["anchor_era"]["start_at"] == T0.isoformat()
+    kept_days = {(T0 + timedelta(days=day)).date().isoformat() for day in range(6, 10)}
+    assert {day: before_lvl for day, before_lvl in _levels_by_day(before).items()
+            if day in kept_days} == {day: -2000 for day in kept_days}
+
+    _record(monkeypatch, settled[24:])                         # days 10–13 evict the era
+    oldest_kept = min(datetime.fromisoformat(e["at"]) for e in lock_history._entries)
+    assert oldest_kept > T0 + timedelta(days=4)                # not one era play left
+    after = lock_history.pipeline_drift(max_sessions=50)
+    assert after["anchor_era"] == before["anchor_era"]
+    after_levels = _levels_by_day(after)
+    assert all(after_levels[day] == -2000 for day in kept_days)
+    assert after["current"]["level_ms"] == -2000
+    assert after["alarm"] is True
+
+
+def test_an_unreadable_anchor_store_means_no_anchor_not_a_rederived_one(monkeypatch):
+    # Re-deriving from whatever the capped log still holds would quietly
+    # swap in a later, moving anchor; an honest "no anchor" is the answer.
+    world = _daily_world(10, lambda day, k: 1000 * k - 400 * day)
+    _install(world)
+    path = lock_history._anchor_path()
+    path.write_text("{ not json", encoding="utf-8")
+    d = lock_history.pipeline_drift(max_sessions=20)
+    assert d["anchor_era"] is None
+    assert all(s["level_ms"] is None for s in d["sessions"])
+    assert d["current"] is None and d["alarm"] is False
+    assert all(s["median_residual_ms"] is not None
+               for s in d["sessions"] if s["baselined"])        # legacy reading unaffected
+
+    _record(monkeypatch, [(T0 + timedelta(days=11), SONGS[0], 0)])
+    assert path.read_text(encoding="utf-8") == "{ not json"
+
+
+def _settled_world_plays(days: range) -> list[tuple[datetime, str, int]]:
+    era = [(T0 + timedelta(days=day, minutes=4 * k), uri, 1000 * k)
+           for day in range(4) for k, uri in enumerate(SONGS)]
+    return era + [(T0 + timedelta(days=day, minutes=4 * k), uri, 1000 * k - 2000)
+                  for day in days for k, uri in enumerate(SONGS)]
+
+
+def _failing_saves(monkeypatch, failures: int) -> None:
+    real_save = lock_history._save_anchor_era
+    calls = {"n": 0}
+
+    def save(era):
+        calls["n"] += 1
+        if calls["n"] <= failures:
+            raise OSError("disk full")
+        real_save(era)
+
+    monkeypatch.setattr(lock_history, "_save_anchor_era", save)
+
+
+def test_a_failed_anchor_save_on_a_full_log_heals_on_a_later_play(monkeypatch):
+    # His real log is already full, so the first play after deploy evicts the
+    # oldest play in the same call that tries to write the anchors store. A
+    # save that fails there must not blind the level for good: until one
+    # lands, no song has a level (never a moving one), and the first later
+    # play whose save works writes the era from the history the log holds.
+    monkeypatch.setattr(lock_history, "_CAP", 48)
+    plays = _settled_world_plays(range(6, 14))
+    _install([_entry(at, uri, off) for at, uri, off in plays[:48]])
+    pre_deploy = lock_history.pipeline_drift(max_sessions=50)
+    assert pre_deploy["anchor_status"] == "not_yet_recorded"
+    assert pre_deploy["anchor_era"]["start_at"] == T0.isoformat()
+
+    _failing_saves(monkeypatch, failures=12)
+    _record(monkeypatch, plays[48:60])                          # every save fails, each evicts
+    during = lock_history.pipeline_drift(max_sessions=50)
+    assert not lock_history._anchor_path().exists()
+    assert during["anchor_status"] == "save_pending"
+    assert during["anchor_era"] is None
+    assert all(s["level_ms"] is None for s in during["sessions"])
+    assert during["current"] is None and during["alarm"] is False
+
+    _record(monkeypatch, plays[60:61])                          # the next save lands
+    oldest_held_era_start = (T0 + timedelta(days=2)).isoformat()
+    healed = lock_history.pipeline_drift(max_sessions=50)
+    assert lock_history._anchor_path().exists()
+    assert healed["anchor_status"] == "recorded"
+    assert healed["anchor_era"]["start_at"] == oldest_held_era_start
+    assert healed["current"]["level_ms"] == -2000
+    assert healed["alarm"] is True
+
+    _record(monkeypatch, plays[61:])                            # evicts the rest of that era
+    lock_history._entries = None                                # as after a restart
+    later = lock_history.pipeline_drift(max_sessions=50)
+    assert later["anchor_era"]["start_at"] == oldest_held_era_start
+    assert later["current"]["level_ms"] == -2000
+
+
+def test_a_written_anchor_store_that_goes_missing_is_never_rebuilt_on_its_own(monkeypatch):
+    _record(monkeypatch, _settled_world_plays(range(6, 10)))
+    path = lock_history._anchor_path()
+    assert path.exists()
+    path.unlink()
+
+    _record(monkeypatch, [(T0 + timedelta(days=10, minutes=4 * k), uri, 1000 * k - 2000)
+                          for k, uri in enumerate(SONGS)])
+    lock_history._entries = None                                # as after a restart
+    d = lock_history.pipeline_drift(max_sessions=50)
+    assert not path.exists()
+    assert d["anchor_status"] == "missing" and d["anchor_era"] is None
+    assert all(s["level_ms"] is None for s in d["sessions"])
+    assert d["current"] is None and d["alarm"] is False
+
+    lock_history.reanchor(start_at=T0.isoformat(), by="Javi",
+                          reason="restore the anchors store after it was deleted")
+    restored = lock_history.pipeline_drift(max_sessions=50)
+    assert restored["anchor_era"]["start_at"] == T0.isoformat()
+    assert restored["current"]["level_ms"] == -2000
+
+
+def test_a_failed_anchor_save_recovers_while_the_log_still_holds_the_era(monkeypatch):
+    _failing_saves(monkeypatch, failures=5)
+    _record(monkeypatch, _settled_world_plays(range(6, 10)))
+    d = lock_history.pipeline_drift(max_sessions=50)
+    assert lock_history._anchor_path().exists()
+    assert d["anchor_era"]["start_at"] == T0.isoformat()
+    assert d["current"]["level_ms"] == -2000
+
+
+def _check_script():
+    import importlib.util
+    from pathlib import Path
+
+    script = Path(__file__).resolve().parent.parent / "scripts" / "check_timing_drift.py"
+    spec = importlib.util.spec_from_file_location("check_timing_drift", script)
+    check = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(check)
+    return check
+
+
+def test_selftest_ignores_an_anchors_store_beside_the_real_log(tmp_path, monkeypatch):
+    check = _check_script()
+
+    _record(monkeypatch, [(T0 + timedelta(days=day), "spotify:track:unrelated", 0)
+                          for day in range(6)])
+    assert lock_history._anchor_path().exists()
+    real_store = lock_history._STORE_PATH
+
+    assert check.selftest() == 0
+    assert lock_history._STORE_PATH == real_store
+    assert lock_history.pipeline_drift()["anchor_era"]["songs"] == 1
+
+
+def test_report_on_a_log_copy_without_its_anchors_says_so(tmp_path, monkeypatch, capsys):
+    # The validation method: a read-only copy of the live log. Once its
+    # anchors store exists and the log has evicted past what seeded it, the
+    # log alone cannot reproduce the level — the report must say so, not
+    # print an empty level column as if it were a reading.
+    import shutil
+
+    monkeypatch.setattr(lock_history, "_CAP", 48)
+    _record(monkeypatch, _settled_world_plays(range(6, 14)))
+    live_log, live_anchors = lock_history._STORE_PATH, lock_history._anchor_path()
+    assert live_anchors.exists()
+    copy = tmp_path / "copy"
+    copy.mkdir()
+    shutil.copy(live_log, copy / "lock_history.json")
+    check = _check_script()
+
+    assert check.report(copy / "lock_history.json", 20) == 2
+    out = capsys.readouterr().out
+    assert str(copy / "lock_history_anchors.json") in out and "not found" in out
+
+    assert check.report(copy / "lock_history.json", 20, anchors=live_anchors) == 0
+    out = capsys.readouterr().out
+    assert "anchor era: none" not in out
+    assert "current: -2000ms level" in out
+
+    shutil.copy(live_anchors, copy / "lock_history_anchors.json")
+    assert check.report(copy / "lock_history.json", 20) == 0
+    assert lock_history._anchor_path() == copy / "lock_history_anchors.json"
+
+
+def _anchored_world(levels_by_day: dict[int, int]) -> list[dict]:
+    world = [_entry(T0 + timedelta(days=day, minutes=4 * k), uri, 1000 * k)
+             for day in range(4) for k, uri in enumerate(SONGS)]
+    for day, level in levels_by_day.items():
+        world += [_entry(T0 + timedelta(days=day, minutes=4 * k), uri, 1000 * k + level)
+                  for k, uri in enumerate(SONGS)]
+    return world
+
+
+def _shapes(d: dict) -> list[str]:
+    return [s["shape"] for s in reversed(d["sessions"]) if s["shape"] != "insufficient"]
+
+
+def test_sign_flipping_scatter_reads_as_reversals_not_a_ramp():
+    _install(_anchored_world({6: -900, 7: 0, 8: -900, 9: 0}))
+    assert _shapes(lock_history.pipeline_drift(max_sessions=20)) == [
+        "start", "ramp", "reversal", "reversal"]
+
+
+@pytest.mark.parametrize("gap_days, shape", [(1, "step"), (8, "step_or_ramp")])
+def test_a_step_sized_move_is_only_a_step_when_no_ramp_could_have_made_it(gap_days, shape):
+    # The incident's −400 ms/day ratchet, read only 8 days apart, moves
+    # 3.2 s — a step's size, but not a step. The same move in one day is.
+    _install(_anchored_world({6: -2400, 6 + gap_days: -2400 - 3200}))
+    assert _shapes(lock_history.pipeline_drift(max_sessions=20)) == ["start", shape]
+
+
+def test_reanchor_adopts_a_new_era_only_when_a_person_asks_and_keeps_the_audit(monkeypatch):
+    import json
+
+    _record(monkeypatch, _settled_world_plays(range(6, 10)))
+    before = lock_history.pipeline_drift(max_sessions=50)
+    assert before["current"]["level_ms"] == -2000 and before["alarm"] is True
+    assert before["anchor_era"]["last_reanchor"] is None
+    store = lock_history._anchor_path()
+    stored_before = store.read_text(encoding="utf-8")
+    new_start = (T0 + timedelta(days=6)).isoformat()
+
+    preview = lock_history.preview_reanchor(new_start)
+    assert store.read_text(encoding="utf-8") == stored_before
+    assert preview["previous"]["start_at"] == T0.isoformat()
+    assert preview["new"]["start_at"] == new_start and preview["new"]["songs"] == len(SONGS)
+    assert preview["anchor_moves"] == {"songs_compared": len(SONGS), "median_move_ms": -2000}
+
+    event = lock_history.reanchor(start_at=new_start, by="Javi", client="127.0.0.1",
+                                  reason="the Sep audio-chain step is the confirmed new normal")
+    assert event["by"] == "Javi" and event["client"] == "127.0.0.1"
+    assert event["previous"]["start_at"] == T0.isoformat()
+    stored = json.loads(store.read_text(encoding="utf-8"))
+    assert stored["era_start"] == new_start
+    audit = stored["reanchors"][-1]
+    assert audit["reason"] == "the Sep audio-chain step is the confirmed new normal"
+    assert audit["previous"]["samples"] == {uri: [1000 * k] * 4 for k, uri in enumerate(SONGS)}
+
+    _record(monkeypatch, [(T0 + timedelta(days=day, minutes=4 * k), uri, 1000 * k - 2000)
+                          for day in range(10, 14) for k, uri in enumerate(SONGS)])
+    lock_history._entries = None                                # as after a restart
+    after = lock_history.pipeline_drift(max_sessions=50)
+    assert after["anchor_era"]["start_at"] == new_start         # plays never move it again
+    assert after["anchor_era"]["reanchors"] == 1
+    assert after["anchor_era"]["last_reanchor"]["by"] == "Javi"
+    assert after["current"]["level_ms"] == 0 and after["alarm"] is False
+
+
+def test_a_reanchor_that_cannot_be_honest_is_refused_and_writes_nothing(monkeypatch):
+    monkeypatch.setattr(lock_history, "_CAP", 48)
+    _record(monkeypatch, _settled_world_plays(range(6, 14)))    # full, era plays evicted
+    store, log = lock_history._anchor_path(), lock_history._STORE_PATH
+    stored, logged = store.read_text(encoding="utf-8"), log.read_text(encoding="utf-8")
+    ok_start = (T0 + timedelta(days=7)).isoformat()
+    refusals = [
+        (dict(start_at=ok_start, by=" ", reason="new normal"), "`by`"),
+        (dict(start_at=ok_start, by="Javi", reason=""), "`reason`"),
+        (dict(start_at="last tuesday", by="Javi", reason="new normal"), "ISO-8601"),
+        (dict(start_at=(T0 + timedelta(days=30)).isoformat(), by="Javi", reason="x"), "future"),
+        (dict(start_at=T0.isoformat(), by="Javi", reason="x"), "evicted"),
+    ]
+    for kwargs, fragment in refusals:
+        with pytest.raises(lock_history.ReanchorRefused, match=fragment):
+            lock_history.reanchor(**kwargs)
+    assert store.read_text(encoding="utf-8") == stored
+    assert log.read_text(encoding="utf-8") == logged
+
+
+def test_a_reanchor_onto_a_closed_window_with_no_gated_plays_is_refused(monkeypatch):
+    _record(monkeypatch, _settled_world_plays(range(6, 10))
+            + [(T0 + timedelta(days=20, minutes=4 * k), uri, 0) for k, uri in enumerate(SONGS)])
+    stored = lock_history._anchor_path().read_text(encoding="utf-8")
+    with pytest.raises(lock_history.ReanchorRefused, match="no locked, quality-gated play"):
+        lock_history.reanchor(start_at=(T0 + timedelta(days=12)).isoformat(),
+                              by="Javi", reason="new normal")
+    assert lock_history._anchor_path().read_text(encoding="utf-8") == stored
+
+
+def test_the_reanchor_route_needs_confirm_and_records_the_caller(monkeypatch):
+    import json
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from routers import lock_history_router
+
+    _record(monkeypatch, _settled_world_plays(range(6, 10)))
+    app = FastAPI()
+    app.include_router(lock_history_router.router)
+    client = TestClient(app)
+    store = lock_history._anchor_path()
+    stored = store.read_text(encoding="utf-8")
+    new_start = (T0 + timedelta(days=6)).isoformat()
+    body = {"start_at": new_start, "by": "Javi", "reason": "confirmed new normal"}
+
+    assert client.post("/api/lock-history/drift/reanchor", json=body).status_code == 400
+    refused = client.get("/api/lock-history/drift/reanchor-preview",
+                         params={"start_at": "not a time"})
+    assert refused.status_code == 409 and "ISO-8601" in refused.json()["detail"]
+    preview = client.get("/api/lock-history/drift/reanchor-preview",
+                         params={"start_at": new_start})
+    assert preview.status_code == 200 and preview.json()["new"]["start_at"] == new_start
+    assert store.read_text(encoding="utf-8") == stored
+
+    done = client.post("/api/lock-history/drift/reanchor", json={**body, "confirm": True})
+    assert done.status_code == 200
+    audit = json.loads(store.read_text(encoding="utf-8"))["reanchors"][-1]
+    assert audit["by"] == "Javi" and audit["client"] == "testclient"
+    drift = client.get("/api/lock-history/drift").json()
+    assert drift["anchor_era"]["start_at"] == new_start
+    assert drift["anchor_era"]["last_reanchor"]["reason"] == "confirmed new normal"
+
+
+def test_a_failed_save_into_an_open_era_is_retried_until_it_lands_and_never_moves_the_era(
+        monkeypatch):
+    import json
+
+    era_plays = [(T0 + timedelta(days=day, minutes=4 * k), uri, 1000 * k)
+                 for day in range(4) for k, uri in enumerate(SONGS)]
+    _record(monkeypatch, era_plays[:1])                         # store written, era still open
+    store = lock_history._anchor_path()
+    first = json.loads(store.read_text(encoding="utf-8"))
+
+    _failing_saves(monkeypatch, failures=2)
+    _record(monkeypatch, era_plays[1:3])                        # both in-era saves fail
+    pending = lock_history.pipeline_drift(max_sessions=50)
+    assert pending["anchor_status"] == "samples_pending"
+    assert pending["anchor_samples_unsaved"] == 2
+    assert json.loads(store.read_text(encoding="utf-8"))["samples"] == first["samples"]
+
+    lock_history._entries = None                                # as after a restart
+    _record(monkeypatch, era_plays[3:])                         # saves work again
+    stored = json.loads(store.read_text(encoding="utf-8"))
+    assert (stored["era_start"], stored["era_end"]) == (first["era_start"], first["era_end"])
+    assert stored["samples"] == {uri: [1000 * k] * 4 for k, uri in enumerate(SONGS)}
+    healed = lock_history.pipeline_drift(max_sessions=50)
+    assert healed["anchor_status"] == "recorded"
+    assert healed["anchor_samples_unsaved"] == 0
+
+
+def test_an_in_era_play_never_saved_before_the_era_closes_is_reported_lost(monkeypatch):
+    import json
+
+    _record(monkeypatch, [(T0, SONGS[0], 0)])
+    store = lock_history._anchor_path()
+    first = json.loads(store.read_text(encoding="utf-8"))
+    _failing_saves(monkeypatch, failures=1)
+    _record(monkeypatch, [(T0 + timedelta(days=3, hours=23), SONGS[1], 1000)])
+    _record(monkeypatch, [(T0 + timedelta(days=5), SONGS[1], 1000)])   # era has closed
+
+    stored = json.loads(store.read_text(encoding="utf-8"))
+    assert stored["samples"] == first["samples"]
+    assert (stored["era_start"], stored["era_end"]) == (first["era_start"], first["era_end"])
+    lost = lock_history.pipeline_drift(max_sessions=50)
+    assert lost["anchor_status"] == "samples_lost"
+    assert lost["anchor_samples_unsaved"] == 1
+
+    lock_history.reanchor(start_at=T0.isoformat(), by="Javi",
+                          reason="take the anchor-era play that never saved")
+    repaired = lock_history.pipeline_drift(max_sessions=50)
+    assert repaired["anchor_status"] == "recorded"
+    assert repaired["anchor_samples_unsaved"] == 0
+    assert json.loads(store.read_text(encoding="utf-8"))["samples"][SONGS[1]] == [1000]
+
+
+def test_reanchoring_an_unreadable_store_keeps_the_audit_trail_it_can_recover(monkeypatch):
+    import json
+
+    _record(monkeypatch, _settled_world_plays(range(6, 10)))
+    lock_history.reanchor(start_at=T0.isoformat(), by="Javi", reason="first re-anchor")
+    store = lock_history._anchor_path()
+    doc = json.loads(store.read_text(encoding="utf-8"))
+    doc["samples"][SONGS[0]][0] = "not a number"
+    one_bad_sample = json.dumps(doc)
+    store.write_text(one_bad_sample, encoding="utf-8")
+    assert lock_history.pipeline_drift()["anchor_status"] == "unreadable"
+
+    new_start = (T0 + timedelta(days=6)).isoformat()
+    assert lock_history.preview_reanchor(new_start)["reanchors_carried"] == 1
+    assert store.read_text(encoding="utf-8") == one_bad_sample
+
+    event = lock_history.reanchor(start_at=new_start, by="Javi",
+                                  reason="repair after a corrupted sample")
+    stored = json.loads(store.read_text(encoding="utf-8"))
+    assert [ev["reason"] for ev in stored["reanchors"]] == [
+        "first re-anchor", "repair after a corrupted sample"]
+    asides = sorted(store.parent.glob("lock_history_anchors.unreadable-*.json"))
+    assert len(asides) == 1
+    assert asides[0].read_text(encoding="utf-8") == one_bad_sample
+    assert str(asides[0]) in event["previous_note"]
+
+    store.write_text("{ not json", encoding="utf-8")
+    later = (T0 + timedelta(days=9, hours=23)).isoformat()
+    monkeypatch.setattr(lock_history, "_now_iso", lambda: later)
+    lock_history.reanchor(start_at=new_start, by="Javi", reason="repair after truncation")
+    stored = json.loads(store.read_text(encoding="utf-8"))
+    assert [ev["reason"] for ev in stored["reanchors"]] == ["repair after truncation"]
+    asides = sorted(store.parent.glob("lock_history_anchors.unreadable-*.json"))
+    assert [a.read_text(encoding="utf-8") for a in asides] == [one_bad_sample, "{ not json"]

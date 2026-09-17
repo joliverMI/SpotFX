@@ -47,6 +47,8 @@ storage/offset_bias.json
 
 # Runtime data from tune scheduler / lock history
 storage/lock_history.json
+storage/lock_history_anchors.json
+storage/lock_history_anchors.unreadable-*.json
 storage/tune_history.json
 storage/tune_runs.log
 storage/tune_schedule.json
