@@ -42,7 +42,12 @@ fired" — the same key is used for both the count and the show-log entry:
                Without this, a scene with no "flare" response/bands
                declared at all (the same silent-no-op case a genuine flare
                already has) would look indistinguishable from "triggers
-               stopped working."
+               stopped working." Two more shapes share this bucket:
+               fire_scene_by_id's preview gate, keyed by scene id —
+               {scene_name, reason: "preview"}; and a staggered flare-kind
+               batch that woke to a refused gate (engine._run_kind_batch,
+               PER-FLARE TRIGGER MOMENT), keyed "kind_batch" —
+               {reason, kind_names, delay_ms}.
 
 Storage: storage/spectra/fire_history.json (counts) and storage/spectra/
 show_log.json (timeline), same atomic tmp+replace discipline as
