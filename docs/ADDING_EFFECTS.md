@@ -27,6 +27,16 @@ New file `ledfx/effects/<type>.py`, class `<Name>2d(Twod, GradientEffect)`
 with `NAME` / `CATEGORY = "Matrix"`. Effects are auto-discovered by the
 registry's module scan — there is no registration table.
 
+**Classify it in the skill manifest in the same change.** The moment the
+module exists in this repo as `fx/effects/<name>.py` (vendored into SPECTRA's
+`fx/` or written there directly), add that path to
+`acknowledged_effect_gaps.files` in `.claude/skills/EFFECT_SCENE_MAP.json`.
+`scripts/check_effect_scene_skills_current.py` (enforced on every pytest run)
+fails any registered effect module listed in neither `effects` nor
+`acknowledged_effect_gaps`, so skipping this turns the suite red long before
+Phase 3. The list's shared `_reason` (not bound into any live scene) is true
+of a mid-build effect; Phase 3 step 4 moves it out.
+
 Conventions (see `blackhole.py`, `eye.py`):
 
 - **State that must survive config patches goes in `__init__`, not
@@ -135,8 +145,8 @@ LedFX crossfades handle the switch.
    and `.claude/skills/<scene>-scene/SKILL.md`, and register both in
    `.claude/skills/EFFECT_SCENE_MAP.json` — the effect module and its
    instruments under `effects`, the scene's seeder and migrations under
-   `scenes`, never one file under both (and take the effect out of
-   `acknowledged_effect_gaps` if it was listed there). Then run
+   `scenes`, never one file under both, and take the effect out of
+   `acknowledged_effect_gaps`, where Phase 1 listed it. Then run
    `.venv/bin/python scripts/check_effect_scene_skills_current.py` and
    `python -m pytest tests/test_effect_scene_skills_current.py` — both must
    be clean before the work is done.
