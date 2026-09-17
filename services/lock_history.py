@@ -485,6 +485,24 @@ def _extend_anchor_era(entries: list[dict], entry: dict) -> None:
                                "purpose (POST /api/lock-history/drift/reanchor)",
                                _anchor_path(), _anchors_persisted_at)
                 return
+            # KNOWN FOLLOW-UP, not built (firstmate's ruling, decision key
+            # drift-era-shift-on-heal): if the very first save attempt fails
+            # (e.g. a transient OSError) and a LATER record() heals it here,
+            # this derives the era from the log AS IT STANDS NOW — one play
+            # newer than the original attempt saw — rather than from the
+            # exact original window. Measured effect: the era's own start
+            # can shift by minutes and a few already-reported levels can
+            # shift ~15-39ms. Ruled acceptable to ship because nothing
+            # USER-VISIBLE ever moved: a pending save reports
+            # anchor_status="save_pending" and NO level, never a displayed
+            # one that later changes — so the shift is against a value he
+            # never saw, not an anchor moving under him. The gap that still
+            # wants closing: when a heal CANNOT reproduce the original
+            # window (the plays it needs are already evicted), it should
+            # either derive from the ORIGINAL window (if still available)
+            # or refuse to substitute silently and leave it to the audited
+            # re-anchor path (loud-and-missing beats silently-wrong) — it
+            # currently always substitutes from the current log instead.
             era = _derive_anchor_era(_gated_plays(entries, floor))
             changed = era is not None
         else:
