@@ -11,8 +11,9 @@ of any band-mate. What THIS proves is that the independence the preview
 already drew is the SAME independence the real per-kind stagger mechanism
 (scene_response._execute_band_locked) now honours when the two kinds share
 a real band, on the one path that staggers at all (a fire tick() already
-relocated by the band's anchor) — for every kind whose stagger delay is not
-clamped (its offset at or after the band's anchor).
+relocated by the band's anchor) — for every kind, since the band's anchor
+is the min over every declared kind's offset, so no kind's stagger delay is
+ever clamped.
 
 The invariant covers the AUTHORED OFFSET component of a kind's moment ONLY.
 One pre-existing, out-of-scope preview/production parity gap sits outside

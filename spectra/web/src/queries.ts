@@ -325,7 +325,7 @@ export interface PhasePreviewMark {
   gap_ms: number | null;
   stretched: boolean;
   /** The band's authored FlareKind.trigger_offset_ms, aggregated (min over
-   * the nonzero values). Read-only here — a band's offset is an aggregate
+   * every enabled kind's offset, zero included). Read-only here — a band's offset is an aggregate
    * over however many kinds it attaches, so dragging would have to pick
    * one to write to; a kind's own offset is authored per-kind in the flare
    * preview's own marker. */

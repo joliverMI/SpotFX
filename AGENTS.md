@@ -2982,8 +2982,9 @@ offset and work with the offset like we had in spot FX") THE REAL FIRING
 PATH READS IT TOO**: `trigger_engine.tick()` relocates a `fire_response`
 trigger's target by the fired band's authored kind offset
 (`scene_response.band_trigger_offset_ms` — its docstring carries the
-multi-kind aggregation rule: min over the NONZERO offsets, a kind at the
-untouched default 0 never vetoes a sibling's authored ask — this is the
+multi-kind aggregation rule: min over EVERY declared, enabled kind's
+offset, zero included — it was min over the NONZERO offsets until the
+2026-09-16 fix recorded under PER-FLARE TRIGGER MOMENT below — this is the
 ONE band-wide relocation `tick()` still applies, unaffected by PER-FLARE
 TRIGGER MOMENT below, which only changed what happens once the fire
 lands), read LIVE off the ACTIVE scene at render intensity,
@@ -3059,8 +3060,16 @@ over EVERY declared offset, zero included — matching legacy's own
 literal min-over-all — so a 0-kind on an all-positive band anchors the
 fire (fires on the mark) and its positive sibling is deferred behind it;
 a band containing a negative offset is unaffected (zero never competed
-with it). Measured against his real scenes at fix time: 0 of 83 authored
-flare kinds carried a nonzero offset, so this changed nothing on disk.
+with it). **The anchor is also where a charge/lull/drop's phase drive
+begins** (`on_event` runs `_drive_phase` at the relocated fire start), so
+delaying a class's phase choreography now needs EVERY enabled kind in its
+band, pooled alternatives included, to carry a positive offset — one
+untouched-0 kind anchors the phase on the mark. Accepted on purpose, not
+narrowed: exempting phase bands would be a new special case, and starting
+on the mark honours the settled drop-begins-on-its-mark rule.
+Measured against his real scenes at fix time: 0 of 83 authored
+flare kinds (every response class) carried a nonzero offset, so this
+changed nothing on disk.
 Remaining out of scope: the automatic lead (`_response_switch_lead_ms`)
 stays BAND-wide, subtracted once from the whole fire's start, so a kind
 sharing a band with a smooth glide or a colour rotate fires earlier than

@@ -49,10 +49,12 @@ lane rack; nothing here needs re-running.
 THE CONSEQUENCE, NAMED BEFORE HE SEES IT IN HIS ROOM: pooling halves how
 often "Reverse Momentarily (500ms)" fires on Fish — each flare now picks the
 burst or the reverse, 50/50. Band timing is unchanged: the kind is authored
-at offset 0, and a band's trigger offset is the most-negative NONZERO offset
-among its attached kinds (scene_response.band_trigger_offset_ms), so
-attaching it moves no Fish flare. (Sonic giving it a nonzero offset later
-WOULD move that whole band — a band fires atomically.)
+at offset 0, a band's anchor is the smallest offset among its attached
+kinds, zero included (scene_response.band_trigger_offset_ms), and every
+Fish kind sits at 0, so attaching it moves no Fish flare. (Sonic giving it
+a nonzero offset later moves when the burst itself lands — each kind in a
+trigger-relocated band fires at its own offset — and a negative one also
+moves where that band's fire begins.)
 
 A "Shape" LANE THAT ALREADY EXISTS IS HIS. On any band where some kind is
 already pooled in a lane named "Shape" before this script runs, it REFUSES

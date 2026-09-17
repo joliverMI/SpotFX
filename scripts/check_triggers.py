@@ -1609,8 +1609,8 @@ kind_offset_scene = SceneV2(
                   kinds={"Early Pulse": 1.0, "Untouched": 1.0})])})
 
 check(band_trigger_offset_ms(kind_offset_scene, "flare", 0.5) == -500,
-      "band aggregation: the one explicitly-authored (nonzero) offset wins; "
-      "a sibling kind still at the untouched default 0 doesn't veto it")
+      "band aggregation: the earliest offset in the band wins; a sibling "
+      "kind at the untouched default 0 is later, so it doesn't move the anchor")
 
 
 def _kind_offset_engine(trig, *, offset_ms, lead_ms=0):

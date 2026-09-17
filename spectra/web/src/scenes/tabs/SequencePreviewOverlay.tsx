@@ -16,7 +16,7 @@
  *
  * THE MARKS ARE NOT DRAGGABLE HERE, deliberately. Each mark is its band's
  * ANCHOR, an aggregate over however many flare kinds it attaches (min over
- * the nonzero values), while every kind keeps its own offset and lands at
+ * every enabled kind's offset, zero included), while every kind keeps its own offset and lands at
  * it relative to that anchor (scene_response's "PER-FLARE TRIGGER
  * MOMENT") — so a drag would have to pick one kind to write it to, and
  * picking would be invention. The place a kind's own offset is authored
@@ -189,7 +189,7 @@ export default function SequencePreviewOverlay({ scene, onClose }: {
               ))}
               <div style={{ marginTop: 6, color: 'var(--text-muted)' }}>
                 The marks here aren't draggable: each mark is its band's anchor, the earliest offset
-                any of its flare kinds authored, while every kind keeps its own offset, so there's no
+                among its flare kinds (one still at 0 counts), while every kind keeps its own offset, so there's no
                 single kind to write a drag to. Retime one from that kind's own ▶ Preview on the
                 Response tab and it shows up here; kinds authored later than the anchor land that
                 much after the mark.

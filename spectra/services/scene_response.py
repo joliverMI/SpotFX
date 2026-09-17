@@ -289,6 +289,25 @@ anchor on those paths would hold every 0-offset band-mate of a -100 kind
 100ms behind a mark nothing relocated, and would make paths that never
 honoured an authored offset start acting on one.
 
+THE ANCHOR ALSO TIMES A CHARGE/LULL/DROP'S PHASE CHOREOGRAPHY. on_event
+runs _drive_phase at the fire's start, BEFORE any per-kind stagger, and
+tick() moved that start to the band's anchor — so for a phase class the
+anchor decides when the choreography begins, not only when kinds land.
+Since the anchor includes zero (2026-09-16, spotfx-zero-offset-fires-on-
+mark), DELAYING A CLASS'S PHASE CHOREOGRAPHY REQUIRES EVERY ENABLED KIND IN
+THAT BAND (POOLED ALTERNATIVES INCLUDED) TO CARRY A POSITIVE OFFSET; a
+single untouched-0 kind left in the band anchors the phase drive on the
+mark regardless of what any sibling authors. Before the fix, +X on one kind
+beside an untouched-0 kind dragged the whole charge X later. Accepted, not
+narrowed (firstmate's ruling under the captain's "yes fix"): the nonzero-
+only anchor was the special case and zero counting is the general rule, so
+exempting phase bands would invent a new special case (zeros count for
+flare bands but not phase bands) that nobody could explain later; and
+starting on the mark honours this codebase's settled rule that a drop
+anchors its START to the trigger mark, which a sibling's positive offset
+used to violate. Inert when it shipped: 0 of his 83 real flare kinds,
+across every response class, carried a nonzero trigger_offset_ms.
+
 A batch's `due_at` is measured from the fire's START (the clock read at
 the top of on_event/on_update, before _drive_phase and before the inline
 group's writes) — the RELEASE OWNERSHIP rule above, applied to the
@@ -765,7 +784,11 @@ def _band_anchor_ms(band: FlareBand, declared: dict[str, FlareKind]) -> int:
     an ordinary requested moment like any other; excluding it from the min
     only ever made sense when every OTHER candidate was more negative
     (earlier) than it, which the filter got right by accident and broke
-    the instant every other candidate was more positive (later)."""
+    the instant every other candidate was more positive (later). The same
+    anchor is where a charge/lull/drop's _drive_phase begins, so a phase
+    band starts late only when every enabled kind in it carries a positive
+    offset (module docstring, "THE ANCHOR ALSO TIMES A CHARGE/LULL/DROP'S
+    PHASE CHOREOGRAPHY")."""
     offsets = [declared[n].trigger_offset_ms for n in band.kinds
                if n in declared and declared[n].enabled]
     return min(offsets) if offsets else 0
@@ -980,7 +1003,14 @@ class ResponseEngine:
         already moved to the band's anchor (module docstring, "ONLY A FIRE
         ALREADY RELOCATED BY THE ANCHOR STAGGERS") — the one path whose
         kinds each land at their own moment. False fires the band
-        atomically."""
+        atomically.
+
+        _drive_phase runs first, at this fire's start — which on a
+        relocated fire is the band's anchor — so a charge/lull/drop's
+        choreography begins late only when EVERY enabled kind in the band
+        (pooled alternatives included) carries a positive offset; one
+        untouched-0 kind anchors it on the mark (module docstring, "THE
+        ANCHOR ALSO TIMES A CHARGE/LULL/DROP'S PHASE CHOREOGRAPHY")."""
         scene = self.conductor.scene
         started_at = self._clock()
         record: dict[str, Any] = {
