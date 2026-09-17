@@ -2916,19 +2916,57 @@ class Fish2d(Twod, GradientEffect):
         half_life = 0.02 + self.trail_decay * 0.5
         self.trail *= np.float32(0.5 ** (dt / half_life))
 
+        # THE TRAIL IS FED THE FISH'S TRUE (UNGAINED) BRIGHTNESS, NEVER THE
+        # SCATTER'S CROSSFADE COMPENSATION (hotfix 2026-09-16, his live
+        # report: trails "at least 3 times too long" and "about 50% too
+        # big" the same night #274 shipped). The scatter gain
+        # (`self._scatter["gain"]`, up to 1/TRANSITION_GAIN_FLOOR = 3.33x)
+        # exists so a dispersing fish does not visibly dim as the incoming
+        # effect's crossfade weight climbs — but `self.trail` is a
+        # PERSISTENT, DECAYING buffer (`*= 0.5**(dt/half_life)` above), so
+        # depositing the gained value into it made every departing fish's
+        # smear start from up to 3.33x its true peak: an exponential decay
+        # from a 3.33x higher start takes ~1.7 extra half-lives to cross the
+        # same visible-brightness floor (the reported "3x" persistence), and
+        # a brighter smear crosses that same floor, after the wake's own
+        # diffusion, over a wider area (the reported "50% too big"). ONE
+        # cause produces both numbers, which is why this is fixed at its
+        # root rather than by shortening the wake's half-life or lowering
+        # TRANSITION_GAIN_FLOOR — either of those would mask it and cost
+        # him the anti-dimming the gain exists for, or his trails generally.
+        #
+        # So the body is drawn TWICE only while scattering: once at its true
+        # brightness, which is what lands in `self.trail` and therefore
+        # governs every future frame's decay and diffusion exactly as
+        # before #274; and, ONLY for THIS frame's composited output below,
+        # a second time at the gained brightness, maxed against the (true)
+        # trail so the current frame still reads fully anti-dimmed. The
+        # boosted value itself is never stored — next frame's decay starts
+        # from the true value alone, so it cannot compound.
         frame = np.zeros_like(self.trail)
         visible = np.flatnonzero(bright > 0.0)
         if visible.size:
-            drawn = bright
-            if self._scatter is not None:
-                drawn = bright * np.float32(self._scatter["gain"])
             self._draw_bodies(
                 frame, visible,
                 self.p_x[:n][visible], self.p_y[:n][visible],
-                hd[visible], drawn[visible], half_w[visible],
+                hd[visible], bright[visible], half_w[visible],
                 flap_amp[visible], self.p_grad[:n][visible],
             )
         np.maximum(self.trail, self._clip_body_layer(frame), out=self.trail)
+
+        body_out = self.trail
+        if self._scatter is not None and visible.size:
+            gained_frame = np.zeros_like(self.trail)
+            gained = bright * np.float32(self._scatter["gain"])
+            self._draw_bodies(
+                gained_frame, visible,
+                self.p_x[:n][visible], self.p_y[:n][visible],
+                hd[visible], gained[visible], half_w[visible],
+                flap_amp[visible], self.p_grad[:n][visible],
+            )
+            body_out = np.maximum(
+                self.trail, self._clip_body_layer(gained_frame)
+            )
 
         self.p_x0[:n] = self.p_x[:n]
         self.p_y0[:n] = self.p_y[:n]
@@ -2959,7 +2997,7 @@ class Fish2d(Twod, GradientEffect):
             if dead.any():
                 self._compact(~dead)
 
-        out = np.asarray(self.matrix, dtype=np.float32) + self.trail
+        out = np.asarray(self.matrix, dtype=np.float32) + body_out
         if self.wake is not None:
             out = out + self.wake
         self.matrix = Image.fromarray(

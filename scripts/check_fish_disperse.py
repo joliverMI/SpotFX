@@ -339,8 +339,23 @@ def section_crossfade(base):
               f"seed {seed}: every fish off the panel by "
               f"{FX.TRANSITION_EXIT_BY:.0%} of the crossfade, well before "
               "it ends")
-        check(bool(early) and min(early) >= 0.8,
-              f"seed {seed}: the median on-panel body peak stays >= 0.8 of "
+        # Bar RE-MEASURED 2026-09-16 (the trail-gain hotfix, same night):
+        # this reading used to include the residual brightness of the very
+        # defect that hotfix removed — the persistent trail was ALSO
+        # carrying the gained value from earlier frames, so a fish reading
+        # here could still be lit by its own over-bright, slow-to-decay
+        # smear a few frames after the instant that produced it, not by
+        # this frame's compensation alone. With the trail fed the fish's
+        # TRUE brightness (see fx/effects/fish.py's own render-block
+        # comment), this number is now the compensation's honest floor,
+        # not the memory's.
+        # 0.65 sits under the worst of four seeds measured post-fix (0.73)
+        # with margin, comfortably above the RED CONTROL below (0.13) —
+        # never touched TRANSITION_GAIN_FLOOR or the wake half-life to get
+        # here, per the standing order not to mask this reading by tuning
+        # either.
+        check(bool(early) and min(early) >= 0.65,
+              f"seed {seed}: the median on-panel body peak stays >= 0.65 of "
               "its pre-switch value through weight 0.2")
     if base:
         reference, rows = asyncio.run(crossfade_run(base, 11))
