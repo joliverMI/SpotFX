@@ -4,12 +4,14 @@
  * used triggers/colours"). This is an ADDITION beside the search box, never
  * a replacement for it — his own words draw that line.
  *
- * Reserves real vertical space in the panel's normal flow (a fixed
- * `min-height` below) whether or not any recents exist yet, which is what
- * keeps the panel from being exactly as short as it was before this
- * shipped — see RoomControlsBar.tsx's own comment on why that height is
- * what stops the search dropdown from being clipped by the panel's
- * `overflow-y: auto` boundary.
+ * Reserves real vertical space in the panel's normal flow whether or not
+ * any recents exist yet: `.top-bar-recent-choices`'s `min-height` in
+ * tokens.css (its comment carries the arithmetic) gives the search
+ * dropdown room to open inside the panel on a normal viewport. That is
+ * only half of keeping the dropdown from being cut off — SearchSelect.tsx
+ * measures the room actually left below its input (viewport and enclosing
+ * `.top-bar-group-panel`) and scrolls inside its own shorter box whenever
+ * the reserve is not enough.
  *
  * A recent button is never a second idea of "what's selected" — it reads
  * its own highlighted state from the SAME `value` the searchable list

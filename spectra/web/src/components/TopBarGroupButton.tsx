@@ -28,6 +28,7 @@ import { useLongPress } from '../lib/useLongPress';
 
 const VIEWPORT_MARGIN = 8;
 const PANEL_WIDTH = 320;
+const PANEL_MIN_HEIGHT = 160;
 
 export interface TopBarGroupButtonProps {
   className?: string;
@@ -48,7 +49,7 @@ export default function TopBarGroupButton({
   className, title, ariaLabel, style, holdToExpand, onShortPress, panelTitle, panel, children,
 }: TopBarGroupButtonProps) {
   const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const [pos, setPos] = useState<{ top: number; left: number; maxHeight: number } | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const longPress = useLongPress(500);
@@ -66,7 +67,8 @@ export default function TopBarGroupButton({
     // the bottom of the viewport — his rule ("expansion goes down, never
     // off the side") reads as "never off the TOP either" here.
     const top = rect.bottom + 6;
-    setPos({ top, left });
+    const maxHeight = Math.max(PANEL_MIN_HEIGHT, window.innerHeight - top - VIEWPORT_MARGIN);
+    setPos({ top, left, maxHeight });
   };
 
   useLayoutEffect(() => {
@@ -120,7 +122,10 @@ export default function TopBarGroupButton({
         <div
           ref={panelRef}
           className="top-bar-group-panel"
-          style={{ top: pos?.top ?? -9999, left: pos?.left ?? -9999, visibility: pos ? 'visible' : 'hidden' }}
+          style={{
+            top: pos?.top ?? -9999, left: pos?.left ?? -9999, maxHeight: pos?.maxHeight,
+            visibility: pos ? 'visible' : 'hidden',
+          }}
         >
           {panelTitle && <div className="top-bar-group-panel-title">{panelTitle}</div>}
           {panel}

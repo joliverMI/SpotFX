@@ -1784,7 +1784,14 @@ within 88px of the panel/viewport bottom) the list can still overhang that
 edge; the floor keeps a few rows visible rather than collapsing it. Outside
 a top-bar panel the viewport bound applies to every SearchSelect too, so a
 field near the bottom of a page gets a shorter, scrolling list instead of
-one running off-screen. The recents list is `useRecentChoices.ts` over
+one running off-screen. The pin's result badges ("fired"/"not fired"/
+"applied"/…) render directly under the toggle, ABOVE the search field, so
+nothing growing below can push the only feedback the pin gives off-screen.
+And `TopBarGroupButton` bounds every panel's max-height from its OWN
+computed top (`innerHeight - top - 8px`, floor 160px, inline over the CSS
+`calc(100vh - 96px)` fallback) — the static cap ignored where the trigger
+sits, so a low trigger left the panel's lower edge past the viewport with
+no scroll able to reach it. The recents list is `useRecentChoices.ts` over
 `useSticky` (per-viewer localStorage, key prefixed `spotfx.builder.v1.`,
 capped at 6, newest-first — recorded whenever either picker's `onChange` OR
 a recent button is used, reusing the same `sceneOptions`/
