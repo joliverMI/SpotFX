@@ -7042,12 +7042,20 @@ FIXED TIME constant (`TURN_GAIN`'s own proportional gain), never a fixed
 distance, so a burst-speed fish travels proportionally further during that
 same correction time before its heading catches up, and can clear the
 panel edge before the steer finishes turning it back. Fixed with a
-boundary SPEED BRAKE (`BOUND_BRAKE_AT`, near `BOUND_W` at the top of
-`fx/effects/fish.py`) that caps a fish's speed back toward cruise once
-boundary avoidance is genuinely near full effect — **scoped to
-`self._burst`/`self._burst_tail` alone**, deliberately not a general
-"any excess speed near the edge" rule, so ordinary swimming (a lunge, plain
-jiggle variance wandering near the pond edge) is completely untouched —
+boundary SPEED BRAKE (`BOUND_BRAKE_AT`/`BOUND_BRAKE_TAU`, near `BOUND_W` at
+the top of `fx/effects/fish.py`) that takes speed back toward cruise once
+boundary avoidance is genuinely near full effect — **live only while
+`self._burst`/`self._burst_tail` is**, so ordinary swimming (a lunge, plain
+jiggle variance wandering near the pond edge) is completely untouched.
+While live it takes back ANY excess above cruise, but only on a fish heading
+OUTWARD, never speeds up a sub-cruise fish, and compounds per unit time
+(`(1 - brake) ** (dt / BOUND_BRAKE_TAU)`, frame-rate independent and exactly
+the tuned brake at 60 Hz) — a linear `min(1, dt/tau)` ease at 0.05 s was
+measured letting 7.9px of overshoot back in. **"Outward" is the pond
+ellipse's own ray term (`bb > 0`), not "away from the centre"**: the pond
+is ~2:1, and the centre-pointing test (`cos(hd - inward) < 0`) was measured
+leaving ~4px of the overshoot in, from fish pointed at the centre while
+crossing the top edge. Ordinary swimming untouched is
 proven by `test_fish_camera.py`'s own byte-identity guard, which this fix
 had to earn a second time after an earlier draft widened the boundary
 steer's own trigger distance and leaked into ordinary swimming (reverted;
@@ -7065,7 +7073,10 @@ regress for a completely unrelated reason (more fish crowded into the
 same panel, not worse spacing) — fixed by pinning `school_count=12`
 explicitly in that script's own config, matching its own printed
 assumption and isolating the spacing algorithm it actually tests from
-population size. Proof: `scripts/check_fish_burst_bounds.py`,
+population size. The same bump had to land in `config/effect_params.json`
+twice (`params.school_count.default` AND the `defaults` blob): the Initial
+Set tab and `backfill_param_defaults.py` read the registry, and nothing
+checks it against the schema. Proof: `scripts/check_fish_burst_bounds.py`,
 `tests/test_fish.py::test_swim_burst_stays_on_screen`.
 
 Every new fish knob is a first guess pending his eye; the effect ships

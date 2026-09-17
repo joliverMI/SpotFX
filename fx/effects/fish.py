@@ -225,11 +225,18 @@ TURN_CLEAR = 1.0        # turn diameters of clearance the steer needs
 BOUND_SOFT = 1.25       # ... and the multiple of that where it starts
 BOUND_W = 8.0           # inward steer weight relative to wander/home
 BOUND_BRAKE_AT = 0.7    # the boundary SPEED brake (see below, near the
-                        # inward steer) reaches its full effect once w_bound
-                        # is this fraction of BOUND_W, so extra speed (burst,
-                        # lunge, the drop boost) is already gone by the time
-                        # the steer itself is fully engaged, not merely
-                        # starting to fade at the same moment
+                        # inward steer; live only while a swim burst is) acts
+                        # once w_bound passes this fraction of BOUND_W and is
+                        # at full strength when the steer is fully engaged.
+                        # It takes back ANY speed above cruise (burst, lunge,
+                        # the drop boost, whatever produced it), and only on a
+                        # fish heading OUTWARD - one already turning back in
+                        # is left alone
+BOUND_BRAKE_TAU = 1.0 / 60.0  # s over which that brake takes back its own
+                        # fraction of the excess, compounded per unit time so
+                        # it holds the same at any frame rate. Measured: a
+                        # linear ease slow enough to be dt-scaled (0.05 s)
+                        # let the overshoot back in, 7.9px past the panel
 HOME_W = 0.35
 HOME_FREE = 0.5         # no home pull inside this fraction of the pond
 WANDER_W = 1.0
@@ -2575,49 +2582,47 @@ class Fish2d(Twod, GradientEffect):
             0.0, 1.0,
         ) * BOUND_W
         w_bound = np.where(swimming, w_bound, 0.0)
-        # THE SWIM BURST'S OWN BOUNDARY BRAKE — scoped to the burst alone,
-        # not a general "any excess speed near the edge" mechanism. The
-        # steer above is completely unchanged (`need`/`ahead_px`/`w_bound`
-        # are exactly what they were, so a cruising fish is bit-for-bit
-        # what it always was — ordinary swimming, including whatever a
-        # lunge or plain jiggle variance does near the pond edge, is
-        # untouched by this block). What it fixes: the heading correction
-        # above converges on a fixed TIME constant (TURN_GAIN's own
-        # proportional gain — untouched, unread here), so a fish moving at
-        # several times cruise still travels several times as far during
-        # that same correction time before its heading has caught up, and
-        # it can carry the fish past the panel edge before the steer
-        # finishes turning it — measured live 2026-09-16, his report on
-        # the "Fish Swim Burst" flare: "they always fly off the screen".
-        # Braking the BURST'S OWN extra speed once boundary avoidance is
-        # genuinely near its full effect closes that gap without touching
-        # how fast the correction turns, where the turn radius comes from,
-        # or the boundary steer's own trigger distance. `BOUND_BRAKE_AT`
-        # sits WELL INTO the steer's own ramp (0.7 of BOUND_W, not from
-        # zero), so a fish only mildly influenced by the edge is left
-        # alone. `scripts/check_fish_burst_bounds.py` proves both sides:
-        # the excursion held AND the burst's own speed, measured away from
-        # an edge, untouched by this brake.
-        bursting = self._burst > 0.0 or self._burst_tail > 0.0
-        if bursting:
+        # THE SWIM BURST'S BOUNDARY BRAKE - live only while a burst is
+        # (self._burst / self._burst_tail), so ordinary swimming never
+        # reaches it and is bit-for-bit what it always was. The steer above
+        # is unchanged (`need`/`ahead_px`/`w_bound`, the turn radius and
+        # TURN_GAIN are exactly what they were). What it fixes: the heading
+        # correction converges on a fixed TIME constant (TURN_GAIN's own
+        # proportional gain), so a fish moving at several times cruise
+        # travels several times as far before its heading has caught up and
+        # can clear the panel edge before the steer finishes turning it -
+        # measured 2026-09-16, his report on the "Fish Swim Burst" flare:
+        # "they always fly off the screen".
+        #
+        # While a burst is live the brake takes back ANY current speed above
+        # cruise (burst, lunge, the drop boost - whatever produced it), but
+        # ONLY on a fish whose heading has an outward component. The defect
+        # is outward OVERSHOOT: a fish already heading back in is not
+        # overshooting, so braking it buys no safety and costs the burst's
+        # surge where it does no harm - which is also why an arriving fish
+        # swimming in keeps its entry speed. "Outward" is measured against
+        # the pond's own ellipse (`bb`, the ray term above), not as "away
+        # from the centre": the pond is roughly 2:1, so a fish can point
+        # toward the centre and still be crossing its top edge on the way
+        # out. A fish below cruise is never sped up. `BOUND_BRAKE_AT` sits
+        # well into the steer's own ramp, so a fish only mildly influenced
+        # by the edge is left alone, and `BOUND_BRAKE_TAU` makes the
+        # take-back a rate rather than a per-frame fraction.
+        # `scripts/check_fish_burst_bounds.py` proves both sides: the
+        # excursion held, and the burst's own speed away from an edge
+        # untouched.
+        if self._burst > 0.0 or self._burst_tail > 0.0:
             brake = np.clip(
                 (w_bound / BOUND_W - BOUND_BRAKE_AT)
                 / max(1.0 - BOUND_BRAKE_AT, 1e-3),
                 0.0, 1.0,
             )
-            # SELECTED, not computed-then-discarded: `cruise +
-            # extra_spd*(1.0-brake)` at brake==0 is mathematically `p_spd`
-            # but not bit-identical to it (float subtraction-then-addition
-            # can lose a ULP) — irrelevant once gated on `bursting` above
-            # (a burst never coincides with the byte-identity proof's
-            # ordinary-swimming scenario), kept anyway as the cheap,
-            # correct way to leave every non-braked fish's own value
-            # untouched down to the bit.
-            braking = swimming & (brake > 0.0)
+            braking = swimming & (brake > 0.0) & (bb > 0.0)
             if braking.any():
                 extra_spd = np.maximum(self.p_spd[:n] - cruise, 0.0)
+                take = 1.0 - (1.0 - brake) ** (dt / BOUND_BRAKE_TAU)
                 self.p_spd[:n] = np.where(
-                    braking, cruise + extra_spd * (1.0 - brake),
+                    braking, self.p_spd[:n] - extra_spd * take,
                     self.p_spd[:n],
                 )
         inward = np.arctan2(-rel_y * self.sy, -rel_x * self.sx)

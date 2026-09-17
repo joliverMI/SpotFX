@@ -1697,7 +1697,7 @@
           "max": 24,
           "aspect": "shape",
           "note": "Fish that swim in for a CHARGE. Exceeds the population cap for that moment only.",
-          "default": 12
+          "default": 18
         },
         "school_variation": {
           "label": "School Variation",
@@ -1798,7 +1798,7 @@
         "avoid_strength": 0.45,
         "roam_scale": 0.95,
         "camera_follow": 0.8,
-        "school_count": 12,
+        "school_count": 18,
         "school_variation": 0.15,
         "turn_min_time": 0.4,
         "rush_count": 20,

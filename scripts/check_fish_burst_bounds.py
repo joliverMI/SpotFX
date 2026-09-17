@@ -103,7 +103,8 @@ async def _run(cfg, seed, burst_ms=300, period=0.5, seconds=15.0,
                                 float(np.max(eff.p_spd[:n][clear])),
                             )
                 t += DT
-            return worst_off, clear_speed
+        await host.shutdown()
+        return worst_off, clear_speed
 
 
 def section_bounds():
