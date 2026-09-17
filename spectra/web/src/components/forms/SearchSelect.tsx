@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 export interface SearchOption {
   value: string;
@@ -8,6 +8,10 @@ export interface SearchOption {
   /** extra search-only text (e.g. an event's labels) — matched but not shown */
   keywords?: string;
 }
+
+const DROPDOWN_MAX_HEIGHT = 260;
+const DROPDOWN_MIN_HEIGHT = 80;
+const DROPDOWN_EDGE_MARGIN = 8;
 
 /** Searchable dropdown: shows the selected label, filters options as you type.
  * Replaces plain <select> everywhere a list is long (events, scenes, params…). */
@@ -29,6 +33,7 @@ export default function SearchSelect({
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
   const [hi, setHi] = useState(0);
+  const [maxHeight, setMaxHeight] = useState(DROPDOWN_MAX_HEIGHT);
   const rootRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -41,6 +46,32 @@ export default function SearchSelect({
     document.addEventListener('mousedown', onDoc);
     return () => document.removeEventListener('mousedown', onDoc);
   }, []);
+
+  // The dropdown is `position: absolute` under the input, NOT a portal, so it
+  // adds no flow height to its container and is clipped by any ancestor with
+  // `overflow` set. Bound it to the room actually left below the input — the
+  // viewport, and the enclosing top-bar panel (the only container it knows
+  // about) — and let it scroll inside that shorter box. The floor keeps a few
+  // rows usable for an input near that edge, at the cost of overhanging it.
+  useLayoutEffect(() => {
+    if (!open) return;
+    const measure = () => {
+      const input = inputRef.current;
+      if (!input) return;
+      const inputBottom = input.getBoundingClientRect().bottom;
+      const panel = rootRef.current?.closest('.top-bar-group-panel');
+      const panelBottom = panel ? panel.getBoundingClientRect().bottom : Infinity;
+      const limit = Math.min(window.innerHeight, panelBottom) - inputBottom - DROPDOWN_EDGE_MARGIN;
+      setMaxHeight(Math.max(DROPDOWN_MIN_HEIGHT, Math.min(DROPDOWN_MAX_HEIGHT, limit)));
+    };
+    measure();
+    window.addEventListener('resize', measure);
+    window.addEventListener('scroll', measure, true);
+    return () => {
+      window.removeEventListener('resize', measure);
+      window.removeEventListener('scroll', measure, true);
+    };
+  }, [open]);
 
   const visible = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -90,7 +121,7 @@ export default function SearchSelect({
           style={{
             position: 'absolute', zIndex: 60, top: '100%', left: 0, right: 0, marginTop: 2,
             background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8,
-            maxHeight: 260, overflowY: 'auto', boxShadow: '0 6px 20px rgba(0,0,0,0.5)',
+            maxHeight, overflowY: 'auto', boxShadow: '0 6px 20px rgba(0,0,0,0.5)',
           }}
         >
           {allowEmpty && !q && (

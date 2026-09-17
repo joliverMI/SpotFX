@@ -1757,6 +1757,21 @@ response — the passive-redirect trap immediately above is documented, so
 it is not repeated. Help topic `force-color`, linked from the top bar's
 own "Colour" group button. Spec: `tests/test_force_color.py`.
 
+**Force Scene/Force Colour's top-bar panels** (card
+force-colour-and-forced-trigger-dialogs-p99a): each pin is a `PowerButton`
+(with `ariaLabel`, since it toggles a room pin, not an item) with its result
+badge directly under it; only while on, a `SearchSelect` plus
+`RecentChoiceButtons.tsx` (the 6 most-recent picks, per-viewer localStorage
+via `lib/useRecentChoices.ts`) — both write the same field, so they can
+never disagree. **`SearchSelect`'s dropdown is `position: absolute`, NOT a
+portal**: it adds no flow height and is clipped by any `overflow` ancestor.
+It bounds itself only to the viewport and an enclosing `.top-bar-group-panel`
+(its own measure effect), so inside any OTHER scrolling container it still
+clips. In the top bar, `.top-bar-recent-choices` reserves in-flow room below
+it (tokens.css carries the arithmetic) and `TopBarGroupButton` bounds each
+panel from its own computed top. User-facing behaviour: help topics
+`force-scene`/`force-color`.
+
 **Temporary scene disable** (2026-08-18, his ask: "add an ability to
 disable a scene temporarily") — `SceneV2.disabled: bool` (default False),
 a manual reversible toggle, no timer/expiry. STRONGER than mode
