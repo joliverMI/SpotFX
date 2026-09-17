@@ -258,7 +258,12 @@ async def section_flap(stack):
           f"{accel:.3f} vs {steady:.3f}")
     check(decel < steady * 0.6, "tail is subtler when slowing",
           f"{decel:.3f} vs {steady:.3f}")
-    check(FX.FLAP_MIN <= decel and accel <= FX.FLAP_MAX,
+    # tiny float32 tolerance (the turn-radius ceiling check above needs the
+    # same shape): a value genuinely AT the clip floor/ceiling can land a
+    # few ulps outside a bare float64 bound once round-tripped through a
+    # float32 array — that is not a real overrun.
+    eps = 1e-6
+    check(FX.FLAP_MIN - eps <= decel and accel <= FX.FLAP_MAX + eps,
           "flap stays inside its own bounds")
     await _close(room)
 

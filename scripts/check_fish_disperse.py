@@ -222,10 +222,29 @@ def section_lull(base):
                   "with fish in it")
             check(minb.min() >= 0.99, f"gap {gap}s seed {seed}: no fish "
                   "dims while it is on the panel")
+            # STAYS STRICT ( == 0 ). fm/spotfx-fish-body-trails-head-tail-
+            # thrust briefly loosened this to `<= 1` for the tightest
+            # tested gap (0.9s) and was told, correctly, to fix the real
+            # cause instead: a straggler here is not "about to leave on its
+            # own" — the very next frame's hard backstop (`_lull_step`'s
+            # unconditional `_compact` at the third) pops EVERY remaining
+            # fish at full brightness with no fade, so a straggler counted
+            # here would vanish ON SCREEN, exactly the visible pop his
+            # "never fade, disperse properly" ask exists to prevent.
+            # MITIGATED, NOT STRUCTURALLY FIXED: `DISPERSE_TAU` 0.07 -> 0.05
+            # (0 of 60 seed/gap combinations fail at 0.05 where 3 of 60
+            # failed at 0.07 on that branch; master is 0 of 60 at its own
+            # 0.07). It widens a sampled margin. At the 0.9s gap only ~22ms
+            # remains between the exit aim and the backstop's instant
+            # full-brightness `_compact`, so a pre-lull state this sweep
+            # does not sample can still leave a straggler there — a known,
+            # accepted limitation, see DISPERSE_TAU's own comment in
+            # fish.py.
             check(last_before == 0, f"gap {gap}s seed {seed}: every fish is "
                   "OFF the panel before the third's backstop runs")
             check(int(vis[f >= third].max(initial=0)) == 0,
-                  f"gap {gap}s seed {seed}: none after the third")
+                  f"gap {gap}s seed {seed}: none after the third (the "
+                  "backstop guarantees this by construction)")
             # the swirl needs real time to wheel a school round (every turn
             # is bounded by the turn radius): asserted on his long lull, and
             # printed for the shorter ones, where it is honestly partial
@@ -354,6 +373,14 @@ def section_crossfade(base):
         # never touched TRANSITION_GAIN_FLOOR or the wake half-life to get
         # here, per the standing order not to mask this reading by tuning
         # either.
+        # fm/spotfx-fish-body-trails-head-tail-thrust ALSO trims this peak
+        # a little on its own (measured worst 0.75 before the hotfix): the
+        # trailing half of the spine now bends along the fish's own
+        # recorded path rather than a rigid heading projection, which
+        # spreads the tail's splats over a slightly wider area during a
+        # scatter's rapid heading changes (never the total energy).
+        # Re-measured with BOTH changes in: worst of four seeds 0.75, so
+        # the hotfix's 0.65 bar still holds with margin.
         check(bool(early) and min(early) >= 0.65,
               f"seed {seed}: the median on-panel body peak stays >= 0.65 of "
               "its pre-switch value through weight 0.2")
@@ -422,7 +449,16 @@ async def hue_run(seed, per_channel_clip, seconds=0.5):
         fish._clip_body_layer = lambda frame: np.minimum(frame, 255.0)
     r.step(240)
     ref = []
-    for _ in range(60):
+    # a wider window than section 2's (fm/spotfx-fish-body-trails-head-tail-
+    # thrust): tail-stroke thrust genuinely moves ordinary swimmers (their
+    # speed now pulses rather than staying smooth), so how often any given
+    # fish happens to sit "lone" (isolated from every other fish) at a given
+    # seed's exact frame shifts too — a real property of the new motion, not
+    # an instrument defect. Measured in this script's own run order: at the
+    # original 60 frames seed 5 catches no lone fish at all before the
+    # switch; 240 frames (4s) reads 17, rather than tightening the isolation
+    # test itself.
+    for _ in range(240):
         r.clock.advance(DT)
         f = v.assemble_frame()
         v.flush(f)
@@ -454,6 +490,7 @@ def section_crossfade_hue():
           f"{HUE_GRADIENT}) — a gained body keeps its hue at the rendered "
           "pixel; clipping each channel on its own washes it toward "
           "yellow-white")
+    reds = []
     for seed in (3, 5, 11):
         ref, worst, samples = asyncio.run(hue_run(seed, False))
         _ref, red, red_samples = asyncio.run(hue_run(seed, True))
@@ -469,8 +506,20 @@ def section_crossfade_hue():
               "crossfade")
         check(worst <= HUE_TOLERANCE, f"seed {seed}: a scattering fish's "
               f"rendered colour stays within {HUE_TOLERANCE} of its own")
-        check(red > HUE_TOLERANCE, f"seed {seed}: red control — the "
-              "per-channel clip FAILS the same bar (the wash is visible)")
+        reds.append(red)
+    # The red control needs the sampled lone fish to actually SATURATE a
+    # channel at some point — whether it does, for a given random seed's
+    # exact path, is circumstantial: tail-stroke thrust moves each seed's
+    # fish to different places by the switch. Measured in this script's own
+    # run order, seed 3's lone fish never saturate (both clips read 0.012 —
+    # worst==red exactly is the tell: clipping never engaged for either
+    # variant) while seeds 5 and 11 wash to 0.20 and 0.18. So this asserts
+    # the instrument CAN see the defect at all (true if ANY seed's
+    # per-channel run saturates and washes), not that every single seed's
+    # random draw must — a per-seed requirement here would be asserting
+    # something about his RNG, not about the clip.
+    check(max(reds) > HUE_TOLERANCE, "red control — the per-channel clip "
+          "FAILS the same bar on at least one seed (the wash is visible)")
 
 
 # ── 3. an ordinary population trim ──────────────────────────────────────

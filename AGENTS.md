@@ -6830,17 +6830,18 @@ baseline, offline on `fx.headless`):
 A new Matrix effect + a Fish scene that is a WHOLESALE COPY of his Orbits V2
 (flare kinds, bands, initial params, weightings, curves, labels — see
 `scripts/seed_fish_scene.py`, dry-run default, and `docs/SPECTRA_SPEC.md`
-§94). Three things to know before touching it:
+§94). Eight things to know before touching it:
 
 1. **It reuses Orbits' patterns, not its motion.** Each fish has its own
-   position, speed and SCREEN-space heading; the thin oval is laid out along
-   that heading (never in normalized space — that would shear it by the
-   panel's aspect). A real turn RADIUS (`orbit_radius`, re-read) caps the
-   turn rate, so an about-face is structurally an arc. Several shared param
-   keys keep their names but mean something else on a fish (`orbit_radius` →
-   turn radius, `spin` → current swirl, `horizon_scale` → home ring,
-   `base_speed` → swim speed, decoupled from the turn radius) — the registry
-   `note` on each says so; read it before assuming Orbits semantics.
+   position, speed and SCREEN-space heading; the thin oval's head is laid
+   out along that heading (never in normalized space — that would shear it
+   by the panel's aspect; the rear half follows the recorded path, see 8).
+   A real turn RADIUS (`orbit_radius`, re-read) caps the turn rate, so an
+   about-face is structurally an arc. Several shared param keys keep their
+   names but mean something else on a fish (`orbit_radius` → turn radius,
+   `spin` → current swirl, `horizon_scale` → home ring, `base_speed` → swim
+   speed, decoupled from the turn radius) — the registry `note` on each says
+   so; read it before assuming Orbits semantics.
 2. **The population-cap bypass is scoped to two moments**, by his own
    decision: the charge's school and the DROP's rush, via `p_nocap` (the
    rush was the lull's until 2026-08-28 — see 6 below). A cap-exempt fish
@@ -6943,10 +6944,9 @@ A new Matrix effect + a Fish scene that is a WHOLESALE COPY of his Orbits V2
      PR's merge-base, because the old "camera_follow=0 IS the pre-camera
      commit, bit for bit" claim needs a reference differing ONLY by the
      camera, and the wake changes the render at knob zero. What it asserts
-     now: the window origin is EXACTLY zero at knob 0 across the whole arc,
-     and ordinary swimming with the wake off is byte-identical to the
-     merge-base. If you change ordinary swimming, that second one goes red —
-     which is the point.
+     now: the window origin is EXACTLY zero at knob 0 across the whole arc.
+     Its ordinary-swimming comparison (1b) has since moved to its own pin,
+     `THRUST_BASELINE_REF` — see 8.
 
 7. **A FISH NEVER FADES OUT — IT DISPERSES (2026-09-16,
    `fm/spotfx-fish-disperse-and-speed-flare`, his words: "the fish shouldn't
@@ -6962,9 +6962,24 @@ A new Matrix effect + a Fish scene that is a WHOLESALE COPY of his Orbits V2
    outward line plus a half turn) — never a tuned speed, which is what lets
    a 900 ms lull and a 6 s one both land; (2) the lull CLOCK is his
    2026-08-28 thirds, unchanged — only the manner moved (school → swirl →
-   rank-ordered leak, `LULL_LEAK_*`, with `LULL_EXIT_MIN_S` making a lull too
-   short to swirl in scatter straight out rather than be retired on the
-   panel by the backstop); (3) the crossfade scatter is SKIPPED when the
+   rank-ordered leak, `LULL_LEAK_*`, with `LULL_EXIT_MIN_S` meant to make a
+   lull too short to swirl in scatter straight out rather than be retired
+   on the panel by the backstop. fm/spotfx-fish-body-trails-head-tail-
+   thrust found that margin thin: at his tightest tested gap, 0.9s, 3 of 60
+   seed/gap combinations left one straggler still on the panel the instant
+   the hard backstop empties the population, which pops at full brightness
+   with no fade — exactly the visible defect this whole mechanism exists to
+   prevent. `DISPERSE_TAU` 0.07 -> 0.05 (0 of 60 fail) is a MITIGATION, NOT
+   A STRUCTURAL FIX: it widens a sampled margin. At a 0.9s gap the ramp is
+   ~0.81s, the third lands at ~0.27s and the exit aim
+   (`LULL_GONE_AT * LULL_EXIT_BY`) at ~0.248s, leaving ~22ms (~1.3 frames,
+   shorter than the dispersal ease itself) before `_lull_step`'s
+   unconditional instant `_compact` — a pre-lull state the check does not
+   sample (another song, population, no charge first, real dt jitter) can
+   still leave a fish there. Known, accepted, follow-up-worthy: make the
+   backstop disperse rather than pop, or state the exit margin in absolute
+   time. `scripts/check_fish_disperse.py` §1 keeps the check strict over the
+   states it samples; (3) the crossfade scatter is SKIPPED when the
    incoming effect adopts the fish as its own particles
    (`TRANSITION_ADOPTERS`, keyed by module basename: blackhole, orbits,
    fireworks, squiggles, eye, dancer, fish — measured, each reads the live
@@ -6999,6 +7014,128 @@ A new Matrix effect + a Fish scene that is a WHOLESALE COPY of his Orbits V2
    flares (so Reverse fires half as often) and refuses a band where a
    "Shape" lane already exists. Proof + red controls:
    `scripts/check_fish_disperse.py`, `tests/test_fish_disperse.py`.
+
+8. **THE BODY IS THE HEAD'S OWN RECENT PATH, and speed is REAL TAIL-STROKE
+   THRUST, not a smooth target (2026-09-16, `fm/spotfx-fish-body-trails-
+   head-tail-thrust`)**. His complaint: "their bodies don't seem to bend
+   naturally as they turn in a radius... facing the tangent but should be
+   facing the curvature." His ruling: body-trails-the-head over a literal
+   bend model, "the tail flipping is what drives the speed."
+   * **Backbone**: the front half of the spine (`SPINE_U<=0.5`, the head)
+     still points the CURRENT heading by straight extrapolation — a fish's
+     nose really does lead. The trailing half is walked back along a per-
+     fish recorded path instead (`p_trail_x`/`p_trail_y`, `BODY_TRAIL_LEN`
+     x `BODY_TRAIL_STEP_PX` of screen-px arc length, pushed by REAL travel
+     distance every frame — never time-sampled, so the trail always covers
+     roughly the same physical distance regardless of current speed).
+     EVERY moving fish records, drop ejecta included, and each sample is
+     laid at the exact crossing point (several per frame when travel
+     needs it), so `p_trail_acc` IS the path distance back to trail[0] —
+     rear nodes are placed at `acc + (k-1)*STEP`, never a whole sample per
+     index, which made the tail collapse and regrow after every push. The
+     path is recorded IN THE WATER: travel is the fish's UNCLAMPED swim
+     velocity, and whatever the charge's school clamp took out of its world
+     travel (`_flow_px`/`_flow_py`, the wake's own carry) moves its stored
+     samples too — recorded in the world alone, `camera_follow=0` folded a
+     schooling fish's tail forward over its head.
+     `_draw_bodies(..., use_trail=False)` keeps the old all-heading layout
+     for the one caller with no recorded path of its own (the outgoing
+     radial collapse, which overwrites position/heading into a synthetic
+     spiral every frame). A straight run's trail IS that straight line, so
+     the backbone reduces to exactly the old rigid stick there; a real turn
+     bends through the arc actually swum.
+   * **Thrust**: `min_drift_speed` (a floor, fraction of the plain
+     continuous target this effect always computed) plus a pulse synced to
+     the SAME `p_flap` phase the visual flap already runs on, capped by
+     `stroke_speed_cap` (a fraction of that same target) — one pulse per
+     flap cycle. THE DIAL IS HIS ESCAPE HATCH, not two redundant knobs:
+     `min_drift_speed=1, stroke_speed_cap=0` reduces `want`/`tau` to
+     exactly the old formula (bit for bit — proven both in
+     `tests/test_fish.py` and against the real pre-thrust merge-base in
+     `scripts/check_fish_camera.py` section 1b, which is why THAT script
+     carries its own separate `THRUST_BASELINE_REF` rather than moving the
+     shared `BASELINE_REF` — see that constant's own comment on why moving
+     it broke `check_fish_charge_spread.py`'s unrelated before/after).
+     Lowering the floor and opening the cap gives pure surge-and-coast.
+     "More jerky in slow music" (a separate, earlier ask) falls out of this
+     for free: quiet audio lowers the continuous target, which lowers
+     `speed_norm`, which lowers `flap_freq`, spacing pulses further apart —
+     no bolt-on jitter.
+   * **THE SHIPPED DEFAULTS MUST PRESERVE THE OLD MEAN SPEED — found live
+     2026-09-17, when a rebase onto #279's swim-burst boundary brake
+     surfaced it.** The first-shipped defaults (`min_drift_speed=0.6`,
+     `stroke_speed_cap=0.45`) averaged only ~0.77x the old continuous
+     target over a full stroke cycle — a real, unasked-for 23% slowdown
+     (measured: 13.39 vs 17.50 px/s at a fixed test config) that #279's own
+     regression test caught: its unbraked-burst negative control stopped
+     overshooting at all, because the burst's fixed 3.2x multiplier now
+     rode an already-smaller baseline. His correction and the governing
+     principle: **a pulse redistributes speed in time, it must not reduce
+     the average** — within one stroke cycle a fish surges and coasts, but
+     across a whole cycle it covers the same ground the old smooth target
+     did. The shipped defaults (`min_drift_speed=0.85`,
+     `stroke_speed_cap=0.4`) are DERIVED, not tuned by eye: `pulse_shape`'s
+     own cycle mean is `PULSE_SHAPE_CYCLE_MEAN=0.375` (an algebraic fact of
+     the shaping curve, not a measurement), so `want`'s cycle mean is
+     approximately `min_drift_speed + stroke_speed_cap*0.375`, solved for
+     `==1.0`. FIRST-ORDER, not exact: `flap_freq` rises with speed, so the
+     stroke runs faster through the surge and the measured mean lands
+     slightly low — a bias that grows with `stroke_speed_cap`.
+     Measured on the real pipeline: mean speed at the new defaults is
+     17.4681 px/s against 17.4960 px/s at the dial's neutral setting
+     (0.16% low, held within 1% by `tests/test_fish.py::
+     test_default_dial_preserves_the_old_mean_speed`), and #279's negative
+     control passes again unmodified (unbraked overshoot ~3px both seeds,
+     matching master's own 3-5px). **The two sliders stay fully
+     independent** (his own requirement) — this constraint binds only the
+     two DEFAULT values together, never the runtime relationship between
+     them; moving either off its default is still free to raise or lower
+     the mean, same as always. Changing either shipped default number
+     requires re-solving this equation for the other (see the THRUST
+     comment block in `fish.py` and `config/effect_params.json`'s matching
+     defaults), or the defaults will silently reintroduce a mean-speed
+     drift exactly like this one.
+   * **SCOPED to the ordinary population only** (`mode<2`, `p_nocap==0`,
+     AND not while `_school_on`) — the charge's school and the drop's
+     rush are authored choreography, not ordinary swimmers, the same
+     reasoning (and the same `_school_on` flag) that already keeps mutual
+     avoidance off during a school; a pulsing speed there measurably
+     perturbed `SCHOOL_SPACING_W`'s own tuned spread and had to be
+     excluded, not re-tuned. `p_nocap` alone misses half the school: the
+     charge counts and steers the fish already swimming as school members.
+   * **A body-shape ("goldfish") change was asked for, then explicitly
+     withdrawn same-session** ("just disregard the goldfish thing") — if a
+     future ask revives thicker/rounder fish bodies, it is a fresh ask, not
+     something this PR quietly shipped and someone forgot to mention.
+   * **Sonic-adjustable**: both dial fields are ordinary `CONFIG_SCHEMA`
+     entries AND registered in `config/effect_params.json` (Sonic's param
+     discovery reads type/range from the registry), so once deployed they
+     are tunable without another deploy. Help: `fish-effect`.
+   * **THE WAKE NOW SITS UNDER THE SCHOOL DURING A CHARGE OR LULL — a
+     visible change he did not ask for, shipped with this branch.** The
+     wake buffer is SCREEN space, and the old deposit
+     (`cx + p_x*sx - cos(hd)*len/2`) never subtracted the window origin the
+     body is drawn with, so whenever the view had moved (every charge and
+     lull at `camera_follow` > 0) the whole wake was laid tens of px off to
+     one side of its fish. The deposit now reads `_trail_tail_point`, which
+     shares `_trail_points` with `_draw_bodies`' rear spine — one definition
+     of where the tail is, in the body's own world->screen mapping. What
+     `scripts/check_fish_wake.py` measures on this branch is the corrected,
+     window-relative deposit, not the old offset.
+   Proof: `tests/test_fish.py` (both dial endpoints, the trail on straight
+   and turning paths, the rear body holding its length on swimmers, ejecta
+   and a clamped school, birth backfill, the shipped default's mean-speed
+   preservation), `scripts/check_fish_camera.py` section 1b +
+   `tests/test_fish_camera.py` (KINEMATICS, not rendered pixels, match
+   `THRUST_BASELINE_REF` at the dial's neutral setting, with the shipped
+   default as the negative control — the trail is always live, so rendered
+   frames never return to bit-identical). `scripts/check_fish.py`'s
+   flap-bounds check carries a float32 tolerance for a real, legitimate
+   boundary landing (see its own comment); `scripts/check_fish_disperse.py`'s
+   lull check STAYS STRICT (`== 0`) — its one real violation was traced to
+   `DISPERSE_TAU` and mitigated there, not by loosening the check — the
+   ~22ms residual slack at a 0.9s gap remains (see the dispersal item above
+   and `DISPERSE_TAU`'s own comment in `fish.py`).
 
 **A GAINED BODY MUST NEVER BE DEPOSITED INTO THE TRAIL** (hotfix,
 2026-09-16, his live report the same night #274 shipped: trails "at least
@@ -7084,8 +7221,8 @@ tunable, not tuned. Proof: `scripts/check_fish.py`,
 `scripts/check_fish_avoidance.py`, `scripts/check_fish_lunge.py`,
 `scripts/check_fish_camera.py`, `scripts/check_fish_wake.py`,
 `scripts/check_fish_charge_spread.py`, `scripts/check_fish_burst_bounds.py`,
-`tests/test_fish.py`, `tests/test_fish_camera.py`,
-`tests/test_fish_disperse.py`.
+`scripts/check_fish_disperse.py`, `tests/test_fish.py`,
+`tests/test_fish_camera.py`, `tests/test_fish_disperse.py`.
 
 ## Radial (STAR) rotation is audio-lows-driven — a healthy `spin` can read as parked
 

@@ -1416,3 +1416,569 @@ def test_swim_burst_stays_on_screen(tmp_path):
                 f"px/s against cruise {cruise:.1f} px/s"
             )
     _run(main())
+
+
+# ── tail-stroke thrust + the dial back to tonight's smooth motion ───────
+def test_drift_speed_dial_reaches_both_endpoints(tmp_path):
+    """His explicit design requirement (section 4 of the brief): raising
+    min_drift_speed to its max with stroke_speed_cap at 0 must render the
+    old smooth, non-pulsing motion; the opposite corner (floor drift, an
+    open cap) must fully express surge-and-coast. Every other source of
+    speed noise (jiggle, speed_jump, speed_jog) is zeroed so the dial is
+    the only thing that can still move `p_spd`."""
+    async def main():
+        base_cfg = dict(
+            HIS_MATRIX, particle_count=1, jiggle=0.0, speed_jump=0.0,
+            speed_jog=0.0, horizon_scale=0.0, spin=0.0, roam_scale=1.4,
+        )
+
+        async def cycle_speeds(tag, min_drift, cap):
+            room = await _room(tmp_path, f"dial-{tag}", dict(
+                base_cfg, min_drift_speed=min_drift, stroke_speed_cap=cap,
+            ), seed=1)
+            eff = room.effect
+            room.step(int(2.0 / DT))  # let it settle
+            spds = []
+            for _ in range(int(3.0 / DT)):
+                room.step(1)
+                spds.append(float(eff.p_spd[0]))
+            await _close(room)
+            return np.array(spds)
+
+        smooth = await cycle_speeds("smooth", 1.0, 0.0)
+        rng_smooth = (smooth.max() - smooth.min()) / max(smooth.mean(), 1e-6)
+        assert rng_smooth < 1e-4, (
+            "min_drift_speed=1/stroke_speed_cap=0 must show no perceptible "
+            f"pulse: speed varied {rng_smooth:.2%} of its mean"
+        )
+
+        pulsed = await cycle_speeds("pulsed", 0.0, 1.0)
+        rng_pulsed = (pulsed.max() - pulsed.min()) / max(pulsed.mean(), 1e-6)
+        assert rng_pulsed > 0.5, (
+            "min_drift_speed=0/stroke_speed_cap=1 must fully express "
+            f"surge-and-coast: speed only varied {rng_pulsed:.2%} of its "
+            "mean"
+        )
+        assert pulsed.min() < 0.05 * pulsed.max(), (
+            "the coast between strokes must actually approach a stop, not "
+            "just dip"
+        )
+    _run(main())
+
+
+def test_stroke_cap_zero_is_bit_for_bit_the_old_continuous_target(tmp_path):
+    """The stronger form of the smooth endpoint above: with no lunge/jog/
+    jiggle noise and constant (silenced) audio, `want_full` is a plain
+    constant, so `p_spd` must settle to a single value and STAY there —
+    not merely have a small range."""
+    async def main():
+        room = await _room(tmp_path, "dial-const", dict(
+            HIS_MATRIX, particle_count=2, jiggle=0.0, speed_jump=0.0,
+            speed_jog=0.0, horizon_scale=0.0, spin=0.0, roam_scale=1.4,
+            min_drift_speed=1.0, stroke_speed_cap=0.0,
+        ), seed=1)
+        eff = room.effect
+        room.step(int(2.0 / DT))
+        settled = eff.p_spd[: eff.n].copy()
+        for _ in range(int(2.0 / DT)):
+            room.step(1)
+        assert np.allclose(eff.p_spd[: eff.n], settled, atol=1e-6), (
+            "with the stroke cap at 0 the settled speed must never move "
+            "again — any further motion would be a leftover pulse"
+        )
+        await _close(room)
+    _run(main())
+
+
+def test_default_dial_preserves_the_old_mean_speed(tmp_path):
+    """His ruling (2026-09-17), after a rebase onto #279's swim-burst
+    boundary brake caught the first-shipped defaults (0.6/0.45) running a
+    real, unasked-for ~23% slower on average: "A pulse should redistribute
+    speed in time, not reduce the average." The shipped defaults
+    (min_drift_speed=0.85, stroke_speed_cap=0.4) are DERIVED, not tuned by
+    eye, to solve `min_drift_speed + stroke_speed_cap * 0.375 == 1.0` (see
+    PULSE_SHAPE_CYCLE_MEAN's own comment in fish.py) — so measured against
+    the dial's neutral setting (min_drift_speed=1, stroke_speed_cap=0,
+    already proven bit-for-bit the pre-thrust formula), the mean speed at
+    the SHIPPED DEFAULTS over several full stroke cycles must stay within
+    1% of the old smooth target. Close, not exact: that equation is
+    first-order — the flap phase runs faster through the surge (flap_freq
+    rises with speed), so the measured mean lands slightly low (0.16%)."""
+    async def main():
+        base_cfg = dict(
+            HIS_MATRIX, particle_count=1, jiggle=0.0, speed_jump=0.0,
+            speed_jog=0.0, horizon_scale=0.0, spin=0.0, roam_scale=1.4,
+        )
+
+        async def mean_speed(tag, min_drift, cap):
+            room = await _room(tmp_path, f"meanspd-{tag}", dict(
+                base_cfg, min_drift_speed=min_drift, stroke_speed_cap=cap,
+            ), seed=1)
+            eff = room.effect
+            room.step(int(2.0 / DT))  # settle
+            spds = []
+            for _ in range(int(6.0 / DT)):  # several full flap cycles
+                room.step(1)
+                spds.append(float(eff.p_spd[0]))
+            await _close(room)
+            return float(np.mean(spds))
+
+        old_smooth = await mean_speed("neutral", 1.0, 0.0)
+        default = await mean_speed("default", 0.85, 0.4)
+        rel_err = abs(default - old_smooth) / old_smooth
+        assert rel_err < 0.01, (
+            f"the shipped default dial must keep the old mean speed "
+            f"within 1%: "
+            f"neutral (pre-thrust) mean {old_smooth:.3f} px/s, default "
+            f"mean {default:.3f} px/s, {rel_err:.2%} off — a pulse must "
+            f"redistribute speed in time, not reduce the average"
+        )
+    _run(main())
+
+
+def test_dial_floor_and_cap_both_at_zero_never_freezes(tmp_path):
+    """Found by review: `min_drift_speed` and `stroke_speed_cap` are each
+    independently legitimate at 0 (the "pure surge and coast" and "no
+    pulse" endpoints, respectively), but SET TOGETHER `pulsed_want` would
+    be a permanent, exact zero for every ordinary swimmer — not a
+    momentary trough, a speed that never recovers, freezing heading too
+    (`omega_max = p_spd / turn_radius_px`) and stranding an off-panel
+    entering fish forever. `MOTION_FLOOR_FRAC` exists to keep this
+    reachable-but-nonsensical combination from ever being a true freeze."""
+    async def main():
+        room = await _room(tmp_path, "dial-zero-zero", dict(
+            HIS_MATRIX, particle_count=1, jiggle=0.0, speed_jump=0.0,
+            speed_jog=0.0, horizon_scale=0.0, spin=0.0, roam_scale=1.4,
+            min_drift_speed=0.0, stroke_speed_cap=0.0,
+        ), seed=1)
+        eff = room.effect
+        # an entering fish must actually reach the pond within a bounded
+        # time, not stay mode=1 (entering) forever
+        for _ in range(int(20.0 / DT)):
+            room.step(1)
+            if eff.n and eff.p_mode[0] == 0:
+                break
+        assert eff.n and eff.p_mode[0] == 0, (
+            "an entering fish never reached the pond at min_drift_speed=0, "
+            "stroke_speed_cap=0 — the population can visibly stall"
+        )
+        speeds = []
+        for _ in range(int(2.0 / DT)):
+            room.step(1)
+            speeds.append(float(eff.p_spd[0]))
+        assert min(speeds) > 0.0, (
+            "speed must never be a literal, permanent zero: "
+            f"saw {speeds}"
+        )
+        await _close(room)
+    _run(main())
+
+
+@pytest.mark.parametrize("name", ["min_drift_speed", "stroke_speed_cap"])
+def test_the_dial_is_reachable_by_sonic_with_the_effects_own_bounds(name):
+    """The dial is only an escape hatch if Sonic and the Scenes page can
+    reach it, and both read the shared registry, not the effect schema: a
+    param missing there is refused by name. Its registry range and default
+    must also be the ones the effect itself validates against."""
+    import voluptuous as vol
+    from fx import device_model
+    from spectra.services import scene_console
+
+    info = scene_console.get_param_info("fish", name)
+    assert info["type"] == "numeric"
+    assert info["default"] == device_model.resting_default("fish", name)
+    schema = FX.Fish2d.schema()
+    assert schema({})[name] == info["default"]
+    assert schema({name: info["min"]})[name] == info["min"]
+    assert schema({name: info["max"]})[name] == info["max"]
+    for outside in (info["min"] - 1e-3, info["max"] + 1e-3):
+        with pytest.raises(vol.Invalid):
+            schema({name: outside})
+
+
+def test_slow_music_reads_as_distinct_pushes_fast_blurs_them(tmp_path):
+    """Section 6 of the brief: this falls out of the stroke being real
+    thrust, not a bolt-on jitter. Quiet/low-impulse audio lowers
+    `want_full`, which lowers speed_norm, which lowers the tail's own flap
+    frequency — so the SAME fixed-time-constant speed ease has to track a
+    slower oscillation in a quiet section (little attenuation, individual
+    pushes read distinctly) and a much faster one in a loud section (heavy
+    attenuation, pushes blur together)."""
+    async def main():
+        cfg = dict(
+            HIS_MATRIX, particle_count=1, jiggle=0.0, speed_jog=0.0,
+            speed_jump=3.0, horizon_scale=0.0, spin=0.0, roam_scale=1.4,
+            min_drift_speed=0.3, stroke_speed_cap=0.8,
+        )
+
+        async def pulse_range(tag, impulse):
+            room = await _room(tmp_path, f"jerk-{tag}", cfg, seed=1)
+            eff = room.effect
+            eff.impulse = impulse
+            eff.slow = impulse * 0.3
+            room.step(int(2.0 / DT))
+            spds = []
+            for _ in range(int(3.0 / DT)):
+                eff.impulse = impulse
+                eff.slow = impulse * 0.3
+                room.step(1)
+                spds.append(float(eff.p_spd[0]))
+            await _close(room)
+            spds = np.array(spds)
+            return (spds.max() - spds.min()) / max(spds.mean(), 1e-6)
+
+        slow_range = await pulse_range("slow", 0.03)
+        fast_range = await pulse_range("fast", 1.0)
+        assert slow_range > 0.15, (
+            "a quiet/slow section must show a real, resolvable pulse in "
+            f"speed, saw only {slow_range:.2%} of the mean"
+        )
+        assert fast_range < slow_range * 0.7, (
+            "an energetic/fast section must blur strokes together (a "
+            "smaller relative pulse, since the same speed-ease time "
+            f"constant now tracks a faster oscillation): slow={slow_range:.2%} "
+            f"fast={fast_range:.2%}"
+        )
+    _run(main())
+
+
+# ── the body IS the head's own recent path ──────────────────────────────
+def test_body_trails_the_recorded_path_through_a_turn(tmp_path):
+    """His ruling (section 2/3 of the brief): the trailing half of the
+    spine is walked back along the fish's own recorded path instead of
+    projected along the current heading, so it curves through a turn
+    instead of pivoting as a rigid stick to the tangent.
+
+    An ordinary swimming fish never travels in a perfectly straight line
+    (the wander term always adds a little swing — that is by design, not
+    a bug this feature should fight), so both halves of this proof
+    control the recorded trail directly rather than relying on natural
+    swimming to happen to be straight: an EXACTLY straight trail must
+    reduce to exactly the old rigid layout (the trail IS that line); a
+    trail that is straight along an OLD heading, with the CURRENT heading
+    turned 90 degrees off it (a fish caught mid-turn), must render
+    differently from a body still pivoted to the new heading."""
+    async def main():
+        room = await _room(tmp_path, "trail-turn", dict(
+            HIS_MATRIX, particle_count=1, flap_amount=0.0,
+        ), seed=1)
+        eff = room.effect
+        room.step(5)  # past the birth backfill, onto a real body length
+
+        def render(use_trail):
+            n = eff.n
+            frame = np.zeros_like(eff.trail)
+            eff._draw_bodies(
+                frame, np.arange(n),
+                eff.p_x[:n].copy(), eff.p_y[:n].copy(),
+                eff.p_hd[:n].copy(), np.ones(n, dtype=np.float32),
+                np.full(n, eff._half_width_px(), dtype=np.float32),
+                np.zeros(n, dtype=np.float32),
+                eff.p_grad[:n].copy(), use_trail=use_trail,
+            )
+            return frame
+
+        def lay_straight_trail(heading):
+            eff.p_trail_acc[0] = 1.5
+            steps = (
+                eff.p_trail_acc[0]
+                + np.arange(FX.BODY_TRAIL_LEN, dtype=np.float32)
+                * FX.BODY_TRAIL_STEP_PX
+            )
+            eff.p_trail_x[0, :] = (
+                eff.p_x[0] - np.cos(heading) * steps / eff.sx
+            )
+            eff.p_trail_y[0, :] = (
+                eff.p_y[0] - np.sin(heading) * steps / eff.sy
+            )
+
+        hd0 = float(eff.p_hd[0])
+        lay_straight_trail(hd0)
+        straight_trail = render(True)
+        straight_rigid = render(False)
+        assert np.allclose(straight_trail, straight_rigid, atol=1e-3), (
+            "an exactly straight recorded path must render bit-for-bit "
+            "the old rigid body — the trail IS that same straight line"
+        )
+
+        # the trail still records the OLD heading; the current heading has
+        # since turned 90 degrees off it — a fish caught mid-turn
+        eff.p_hd[0] = (hd0 + np.pi / 2.0) % (2 * np.pi)
+        turned_trail = render(True)
+        turned_rigid = render(False)
+        assert not np.allclose(turned_trail, turned_rigid, atol=1.0), (
+            "with the recorded path pointing one way and the current "
+            "heading another, a body walked back along that path must "
+            "render differently from one still pivoted to the current "
+            "heading"
+        )
+        await _close(room)
+    _run(main())
+
+
+def test_wake_tail_point_follows_the_trail_not_the_rigid_heading(tmp_path):
+    """Found by review: the wake deposit used to lay at the old rigid
+    heading projection even after the body-trail rework, so during a real
+    turn the wake sat off the actual drawn tail by the same facing-the-
+    tangent amount the body itself was fixed for. `_trail_tail_point`
+    fixes this by reusing the same recorded-path interpolation
+    `_draw_bodies` uses for its own rear nodes — and it is laid in the
+    SAME world->screen mapping the body is drawn with, so while the window
+    has moved (a charge or lull) the wake sits under its fish instead of
+    off to one side by the window's own displacement, as the pre-rework
+    deposit (`cx + p_x*sx - cos(hd)*len/2`, no window origin) laid it."""
+    async def main():
+        room = await _room(tmp_path, "wake-tail", dict(
+            HIS_MATRIX, particle_count=1, flap_amount=0.0,
+        ), seed=1)
+        eff = room.effect
+        room.step(5)
+
+        def lay_straight_trail(heading):
+            eff.p_trail_acc[0] = 1.5
+            steps = (
+                eff.p_trail_acc[0]
+                + np.arange(FX.BODY_TRAIL_LEN, dtype=np.float32)
+                * FX.BODY_TRAIL_STEP_PX
+            )
+            eff.p_trail_x[0, :] = (
+                eff.p_x[0] - np.cos(heading) * steps / eff.sx
+            )
+            eff.p_trail_y[0, :] = (
+                eff.p_y[0] - np.sin(heading) * steps / eff.sy
+            )
+
+        def rigid_tail(hd, length):
+            px = eff.cx + eff.p_x[0] * eff.sx - eff.cam_px
+            py = eff.cy + eff.p_y[0] * eff.sy - eff.cam_py
+            return (
+                px - np.cos(hd) * length * 0.5,
+                py - np.sin(hd) * length * 0.5,
+            )
+
+        length = eff._half_width_px() * 2.0 * eff.body_aspect
+        hd0 = float(eff.p_hd[0])
+        lay_straight_trail(hd0)
+
+        # a straight run: the trail-based tail must match the rigid one
+        tx, ty = eff._trail_tail_point(
+            np.array([0]), eff.p_x[:1].copy(), eff.p_y[:1].copy(),
+            np.array([length], dtype=np.float32),
+        )
+        rx, ry = rigid_tail(hd0, length)
+        assert abs(float(tx[0]) - rx) < 1e-2 and abs(float(ty[0]) - ry) < 1e-2, (
+            "on a straight run the trail-based tail must match the old "
+            f"rigid one: trail=({tx[0]:.3f},{ty[0]:.3f}) "
+            f"rigid=({rx:.3f},{ry:.3f})"
+        )
+
+        # a fish caught mid-turn: the trail still records the OLD heading,
+        # the current heading has since turned 90 degrees off it — the
+        # trail-based tail must NOT match the rigid projection along the
+        # new heading (that mismatch is exactly the bug)
+        hd_new = (hd0 + np.pi / 2.0) % (2 * np.pi)
+        eff.p_hd[0] = hd_new
+        tx2, ty2 = eff._trail_tail_point(
+            np.array([0]), eff.p_x[:1].copy(), eff.p_y[:1].copy(),
+            np.array([length], dtype=np.float32),
+        )
+        rx2, ry2 = rigid_tail(hd_new, length)
+        dist = float(np.hypot(tx2[0] - rx2, ty2[0] - ry2))
+        assert dist > 1.0, (
+            "mid-turn, the wake's trail-based tail point must diverge "
+            f"from the rigid heading projection, saw only {dist:.3f}px "
+            "apart"
+        )
+        # ... and it must still be close to the OLD heading's rigid point
+        # (the direction the body actually came from)
+        rx_old, ry_old = rigid_tail(hd0, length)
+        dist_old = float(np.hypot(tx2[0] - rx_old, ty2[0] - ry_old))
+        assert dist_old < 1.0, (
+            "the trail-based tail should still track where the body "
+            f"actually came from, saw {dist_old:.3f}px off the old "
+            "heading's own rigid point"
+        )
+
+        # the window has moved: the tail point is laid in screen space,
+        # under the fish as drawn, never in the unshifted world frame
+        eff.p_hd[0] = hd0
+        lay_straight_trail(hd0)
+        eff.cam_px, eff.cam_py = 17.0, -6.0
+        tx3, ty3 = eff._trail_tail_point(
+            np.array([0]), eff.p_x[:1].copy(), eff.p_y[:1].copy(),
+            np.array([length], dtype=np.float32),
+        )
+        rx3, ry3 = rigid_tail(hd0, length)
+        assert abs(float(tx3[0]) - rx3) < 1e-2 and abs(float(ty3[0]) - ry3) < 1e-2, (
+            "with the window moved the wake tail must sit under the drawn "
+            f"fish: trail=({tx3[0]:.3f},{ty3[0]:.3f}) "
+            f"screen=({rx3:.3f},{ry3:.3f})"
+        )
+        unshifted = float(np.hypot(
+            tx3[0] - (rx3 + eff.cam_px), ty3[0] - (ry3 + eff.cam_py)
+        ))
+        assert unshifted > 15.0, (
+            "the moved-window case must be able to tell screen space from "
+            f"the unshifted world frame, saw only {unshifted:.3f}px apart"
+        )
+        await _close(room)
+    _run(main())
+
+
+def test_body_trail_backfill_seeds_a_real_body_on_the_first_frame(tmp_path):
+    """A fish born this frame has no recorded path yet — it must be
+    backfilled straight back along its own heading immediately, not left
+    collapsed to a point (NaN) for its first rendered frames."""
+    async def main():
+        room = await _room(tmp_path, "trail-backfill", dict(
+            HIS_MATRIX, particle_count=4,
+        ), seed=9)
+        room.step(1)
+        eff = room.effect
+        n = eff.n
+        assert n > 0
+        assert np.all(np.isfinite(eff.p_trail_x[:n])), (
+            "every fish must have a fully seeded trail by its first frame"
+        )
+        assert np.all(np.isfinite(eff.p_trail_y[:n]))
+        await _close(room)
+    _run(main())
+
+
+def _record_rear_body(eff):
+    """Wrap the effect's real body layout and record, per drawn fish, how
+    far each trailing spine node sits from the fish's centre against how far
+    it should (its share of the body length). Read off the exact points the
+    effect splats (the zero-smear substep, lateral throw off)."""
+    records = []
+    orig_draw = eff._draw_bodies
+    m = FX.SPINE_U.size
+    n_front = int(np.count_nonzero(FX.SPINE_U <= 0.5))
+
+    def draw_bodies(frame, idx, x, y, hd, bright, half_w, flap_amp, grad,
+                    use_trail=True):
+        captured = {}
+        orig_splat = eff._splat_many
+
+        def splat(buf, xs, ys, rgb, sizes):
+            captured["xs"], captured["ys"] = xs, ys
+            return orig_splat(buf, xs, ys, rgb, sizes)
+
+        eff._splat_many = splat
+        try:
+            orig_draw(frame, idx, x, y, hd, bright, half_w, flap_amp, grad,
+                      use_trail=use_trail)
+        finally:
+            del eff._splat_many
+        k = len(idx)
+        if k == 0 or not use_trail:
+            return
+        nx = captured["xs"][-k * m:].reshape(k, m)[:, n_front:]
+        ny = captured["ys"][-k * m:].reshape(k, m)[:, n_front:]
+        cx = eff.cx + np.asarray(x) * eff.sx - eff.cam_px
+        cy = eff.cy + np.asarray(y) * eff.sy - eff.cam_py
+        length = np.asarray(half_w) * 2.0 * eff.body_aspect
+        want = (FX.SPINE_U[n_front:][None, :] - 0.5) * length[:, None]
+        got = np.hypot(nx - cx[:, None], ny - cy[:, None])
+        heading = np.asarray(hd)
+        behind = -(
+            (nx - cx[:, None]) * np.cos(heading)[:, None]
+            + (ny - cy[:, None]) * np.sin(heading)[:, None]
+        )
+        records.append((
+            np.asarray(idx).copy(), eff.p_mode[np.asarray(idx)].copy(),
+            got / want, behind / want, bool(eff._school_on),
+        ))
+
+    eff._draw_bodies = draw_bodies
+    return records
+
+
+def test_rear_body_holds_its_length_every_frame_while_swimming(tmp_path):
+    """The trailing half of the spine walks back along the recorded path by
+    TRUE path distance: trail[0] lies `p_trail_acc` behind the fish, not a
+    whole sample. Laid out as if it were a whole sample, the tail collapsed
+    onto the centre after every push and regrew — a body pumping between
+    nothing and full length several times a second on a straight run."""
+    async def main():
+        room = await _room(tmp_path, "trail-length", dict(
+            HIS_MATRIX, flap_amount=0.0,
+        ), seed=3)
+        eff = room.effect
+        room.step(30)
+        records = _record_rear_body(eff)
+        room.step(int(4.0 / DT))
+        await _close(room)
+        ratios = np.concatenate([r.ravel() for _i, _m, r, _b, _s in records])
+        assert ratios.size > 0
+        assert ratios.min() >= 0.9, (
+            "a swimming fish's tail must never collapse toward its centre: "
+            f"worst rear node sat at {ratios.min():.2f} of its length"
+        )
+        assert ratios.max() <= 1.001, (
+            "a swimming fish's tail must never stretch past its own length: "
+            f"worst rear node sat at {ratios.max():.2f} of its length"
+        )
+    _run(main())
+
+
+def test_drop_ejecta_keep_a_compact_body_even_past_a_sample_per_frame(
+        tmp_path):
+    """Drop ejecta hold a fixed heading and speed but still travel, so their
+    path must be recorded like any other fish's — including one fast enough
+    to cross several samples in a single frame — or the tail strings back
+    toward where it was born."""
+    async def main():
+        room = await _room(tmp_path, "trail-ejecta", dict(
+            HIS_MATRIX, flap_amount=0.0,
+        ), seed=7)
+        eff = room.effect
+        room.step(30)
+        base = eff.n
+        eff._spawn_drop_ejecta(6)
+        assert eff.n > base
+        eff.p_spd[eff.n - 1] = 3.0 * FX.BODY_TRAIL_STEP_PX / DT
+        records = _record_rear_body(eff)
+        room.step(20)
+        await _close(room)
+        ejecta = [
+            r[m == 2] for _i, m, r, _b, _s in records if np.any(m == 2)
+        ]
+        assert ejecta, "no ejecta were drawn"
+        ratios = np.concatenate([r.ravel() for r in ejecta])
+        assert 0.97 <= ratios.min() and ratios.max() <= 1.001, (
+            "an ejected fish must keep its own body length: rear nodes sat "
+            f"between {ratios.min():.2f} and {ratios.max():.2f} of it"
+        )
+    _run(main())
+
+
+def test_rear_body_rides_the_water_while_the_school_is_clamped(tmp_path):
+    """With the window pinned to the shoal (camera_follow=0) the school
+    clamp takes a lined-up fish's whole travel out of the world and puts it
+    into the water. Its body must still trail the path it swam THROUGH that
+    water: recorded in the world alone, the path stops advancing, and the
+    samples laid while the fish turned onto the school heading sit in front
+    of it, folding the tail forward over the head."""
+    async def main():
+        room = await _room(tmp_path, "trail-school", dict(
+            HIS_MATRIX, flap_amount=0.0, camera_follow=0.0,
+        ), seed=3)
+        eff = room.effect
+        room.step(60)
+        records = _record_rear_body(eff)
+        room.ramp("charge", 4.0, beats_every=30)
+        schooled = eff._school_on
+        await _close(room)
+        assert schooled, "the charge must have formed a school"
+        behind = [
+            b[m < 2] for _i, m, _r, b, s in records if s and np.any(m < 2)
+        ]
+        assert behind, "no schooling fish were drawn"
+        behind = np.concatenate([b.ravel() for b in behind])
+        assert behind.min() >= 0.7, (
+            "a schooling fish's tail must lie behind its head along the "
+            f"path it swam: a rear node sat at {behind.min():.2f} of its "
+            "length behind the centre"
+        )
+    _run(main())
