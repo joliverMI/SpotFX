@@ -1340,3 +1340,25 @@ against that commit.
     arrays added (`p_dl`, `p_lk`, float64 on the effect clock). Proof:
     `scripts/check_fish_disperse.py` (red controls against the pre-change
     module), `tests/test_fish_disperse.py`.
+
+40. `effects/fish.py` (SpotFX-authored, #21): THE BODY TRAILS ITS OWN SWUM
+    PATH, and TAIL-STROKE THRUST (NEW PARAMS + NEW MECHANISM, PR
+    fm/spotfx-fish-body-trails-head-tail-thrust, 2026-09-16/17). #21's
+    spine "along the heading" now holds for the HEAD only (`SPINE_U<=0.5`);
+    the rear half is walked back along a per-fish recorded path (three SoA
+    arrays added: `p_trail_x`/`p_trail_y`, `CAP x BODY_TRAIL_LEN`, and
+    `p_trail_acc`), and the wake deposit reads the same trail tail
+    (`_trail_tail_point`). Speed is a floor plus a pulse on the flap phase,
+    ordinary swimmers only. New config keys `min_drift_speed` (float
+    `[0, 1]`, default **0.85**) and `stroke_speed_cap` (float `[0, 2]`,
+    default **0.4**), both registry-declared; `1.0`/`0.0` restores the
+    pre-thrust speed target and ease exactly, and the shipped pair is
+    derived to keep the old MEAN speed. `DISPERSE_TAU` 0.07 -> 0.05 (a
+    mitigation of #39's lull exit margin, not a structural fix). The
+    binding statements are the module's BODY TRAIL / THRUST comment blocks
+    and AGENTS.md's Fish item 8. #39's "byte-identical ordinary swimming"
+    proof no longer holds for rendered frames (the trail is always live):
+    `scripts/check_fish_camera.py` §1b / `tests/test_fish_camera.py` now
+    compare KINEMATICS at the neutral dial against `THRUST_BASELINE_REF`.
+    Proof: `tests/test_fish.py` (both dial endpoints, the mean-speed
+    default, the trail and wake-tail tests), `scripts/check_fish_disperse.py`.

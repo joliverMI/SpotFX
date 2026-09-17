@@ -6830,7 +6830,7 @@ baseline, offline on `fx.headless`):
 A new Matrix effect + a Fish scene that is a WHOLESALE COPY of his Orbits V2
 (flare kinds, bands, initial params, weightings, curves, labels — see
 `scripts/seed_fish_scene.py`, dry-run default, and `docs/SPECTRA_SPEC.md`
-§94). Three things to know before touching it:
+§94). Eight things to know before touching it:
 
 1. **It reuses Orbits' patterns, not its motion.** Each fish has its own
    position, speed and SCREEN-space heading; the thin oval's head is laid
