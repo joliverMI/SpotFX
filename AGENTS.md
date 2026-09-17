@@ -7048,12 +7048,14 @@ A new Matrix effect + a Fish scene that is a WHOLESALE COPY of his Orbits V2
      for free: quiet audio lowers the continuous target, which lowers
      `speed_norm`, which lowers `flap_freq`, spacing pulses further apart —
      no bolt-on jitter.
-   * **SCOPED to the ordinary population only** (`mode<2` and not a school/
-     rush fish, i.e. `p_nocap==0`) — the charge's school and the drop's
+   * **SCOPED to the ordinary population only** (`mode<2`, `p_nocap==0`,
+     AND not while `_school_on`) — the charge's school and the drop's
      rush are authored choreography, not ordinary swimmers, the same
-     reasoning that already keeps mutual avoidance off during a school; a
-     pulsing speed there measurably perturbed `SCHOOL_SPACING_W`'s own
-     tuned spread and had to be excluded, not re-tuned.
+     reasoning (and the same `_school_on` flag) that already keeps mutual
+     avoidance off during a school; a pulsing speed there measurably
+     perturbed `SCHOOL_SPACING_W`'s own tuned spread and had to be
+     excluded, not re-tuned. `p_nocap` alone misses half the school: the
+     charge counts and steers the fish already swimming as school members.
    * **A body-shape ("goldfish") change was asked for, then explicitly
      withdrawn same-session** ("just disregard the goldfish thing") — if a
      future ask revives thicker/rounder fish bodies, it is a fresh ask, not

@@ -2673,13 +2673,19 @@ class Fish2d(Twod, GradientEffect):
         # (faster swimming -> faster flap -> a stronger/more frequent
         # pulse -> ...).
         # SCOPED to the ordinary population only — mode<2 (swimming/
-        # entering) AND not a school/rush fish. The charge's school and the
-        # drop's rush are authored choreography, not ordinary swimmers ("the
-        # school moves 'almost identically'", the same reasoning that keeps
-        # mutual avoidance off while a school is formed above) — a pulsing
-        # speed on top of that would perturb a moment he has already tuned
-        # for something this feature was never asked to touch.
-        pulse_eligible = (mode < 2) & (self.p_nocap[:n] == 0)
+        # entering), not a cap-exempt school/rush fish, AND not while a
+        # school is formed. The charge's school and the drop's rush are
+        # authored choreography, not ordinary swimmers ("the school moves
+        # 'almost identically'", the same reasoning that keeps mutual
+        # avoidance off while a school is formed below) — a pulsing speed on
+        # top of that would perturb a moment he has already tuned for
+        # something this feature was never asked to touch. `p_nocap` alone
+        # is not enough: the charge counts the fish already swimming toward
+        # its school and steers every one of them, so `_school_on` gates the
+        # whole population for as long as the school holds.
+        pulse_eligible = (
+            (mode < 2) & (self.p_nocap[:n] == 0) & (not self._school_on)
+        )
         stroke_phase = self.p_flap[:n] % (2.0 * np.pi)
         pulse_shape = (0.5 - 0.5 * np.cos(stroke_phase)) ** PULSE_SHAPE_POWER
         pulsed_want = want_full * self.min_drift_speed + (
