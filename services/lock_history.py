@@ -491,7 +491,7 @@ def _extend_anchor_era(entries: list[dict], entry: dict) -> None:
             # this derives the era from the log AS IT STANDS NOW — one play
             # newer than the original attempt saw — rather than from the
             # exact original window. Measured effect: the era's own start
-            # can shift by minutes and a few already-reported levels can
+            # can shift by minutes and a few already-computed levels can
             # shift ~15-39ms. Ruled acceptable to ship because nothing
             # USER-VISIBLE ever moved: a pending save reports
             # anchor_status="save_pending" and NO level, never a displayed
