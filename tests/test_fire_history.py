@@ -217,13 +217,21 @@ def test_response_event_records_when_full_tier(monkeypatch):
     monkeypatch.setattr("spectra.services.room_controls.load_room_controls",
                         lambda: RoomControlState(scene_change_mode="full"))
 
-    async def fake_on_event(event_class, intensity, gap_ms=None):
+    relocated = []
+
+    async def fake_on_event(event_class, intensity, gap_ms=None, *,
+                            anchor_relocated=False):
+        relocated.append(anchor_relocated)
         return None
 
     monkeypatch.setattr(engine.responses, "on_event", fake_on_event)
     monkeypatch.setattr(engine.responses, "_pending_releases", [])
 
     _run(engine.fire_response_event("charge", 0.6))
+    # The bridge's call site is never relocated by a band anchor, so its
+    # band fires atomically (scene_response's "ONLY A FIRE ALREADY
+    # RELOCATED BY THE ANCHOR STAGGERS").
+    assert relocated == [False]
     data = fire_history.load_all()
     assert data["responses"]["charge"]["count"] == 1
     entry = fire_history.load_show_log()[0]
@@ -269,13 +277,20 @@ def test_response_event_triggers_only_trigger_path_records(monkeypatch):
     monkeypatch.setattr("spectra.services.room_controls.load_room_controls",
                         lambda: RoomControlState(scene_change_mode="triggers_only"))
 
-    async def fake_on_event(event_class, intensity, gap_ms=None):
+    relocated = []
+
+    async def fake_on_event(event_class, intensity, gap_ms=None, *,
+                            anchor_relocated=False):
+        relocated.append(anchor_relocated)
         return None
 
     monkeypatch.setattr(engine.responses, "on_event", fake_on_event)
     monkeypatch.setattr(engine.responses, "_pending_releases", [])
 
     _run(engine.fire_response_event("charge", 0.6, via_trigger=True))
+    # tick() already relocated this fire by its band's anchor, so its kinds
+    # may stagger to their own moments.
+    assert relocated == [True]
     data = fire_history.load_all()
     assert data["responses"]["charge"]["count"] == 1
 
