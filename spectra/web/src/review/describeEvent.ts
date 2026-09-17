@@ -19,6 +19,13 @@ export const BUCKET_COLOR: Record<ReviewEventItem['bucket'], string> = {
   deferred: '#94a3b8',
 };
 
+/** engine._response_gate/_update_gate's refusal words, as a reader says them.
+ * An unlisted reason is shown verbatim rather than guessed at. */
+const KIND_BATCH_SKIP_REASON: Record<string, string> = {
+  preview: 'a Preview held the room',
+  scene_change_mode: 'scene-change mode closed',
+};
+
 export function describeEvent(item: ReviewEventItem): string {
   const d = item.detail;
   switch (item.bucket) {
@@ -42,6 +49,16 @@ export function describeEvent(item: ReviewEventItem): string {
       return `Trigger fired: ${kind}${source ? ` (${source})` : ''}`;
     }
     case 'deferred': {
+      if (item.key === 'kind_batch') {
+        // A staggered flare-kind batch that woke to a refused show gate
+        // (engine._run_kind_batch) — not a dwell hold, so it names its own
+        // cause instead of borrowing the dwell wording below.
+        const reason = d.reason as string | undefined;
+        const why = (reason && KIND_BATCH_SKIP_REASON[reason]) ?? reason ?? 'unknown reason';
+        const names = d.kind_names as string[] | undefined;
+        const delay = d.delay_ms as number | undefined;
+        return `Flare kinds skipped (${why}): ${names?.length ? names.join(', ') : item.key}${delay != null ? `, +${delay}ms` : ''}`;
+      }
       const name = (d.scene_name as string | undefined) ?? item.key;
       const remaining = d.remaining_dwell_s as number | undefined;
       const result = d.update_result as string | undefined;
