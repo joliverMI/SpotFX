@@ -30,10 +30,20 @@ from spectra.services import known_buffer as kb
 from spectra.services import room_controls as rc
 
 PERIOD = 15.0
-# A LIVE clock: the retention prune and the ladder both measure against
-# wall time, so a frozen constant here would silently make every fixture
-# reading both "missing" and instantly prunable.
-NOW_MS = int(time.time() * 1000)
+
+
+def _now() -> int:
+    """READ AT CALL TIME, never frozen at import.
+
+    The ladder and the retention prune both measure against WALL TIME, so a
+    timestamp fixed when this module is imported ages as the suite runs: on
+    its own the file passes in seconds, and in a full run — where this
+    module is imported early and these tests execute minutes later — every
+    fixture reading is already `missing` and the assertions quietly measure
+    the floor instead of what they were written for. That is exactly how
+    two of these tests failed a full run while passing alone. An
+    import-time constant is only a slower version of the same bug."""
+    return int(time.time() * 1000)
 
 
 def _settings(**over):
@@ -59,10 +69,10 @@ def room(tmp_path, monkeypatch):
     return write
 
 
-def _payload(value=500, t_ms=NOW_MS, **over):
+def _payload(value=500, t_ms=None, **over):
     """River's real shape (captured live from parec-offset/2, 2026-09-17)."""
     body = {
-        "schema": "parec-offset/2", "t_ms": t_ms,
+        "schema": "parec-offset/2", "t_ms": _now() if t_ms is None else t_ms,
         "effects_fire_later_by_ms": value, "source": "measured",
         "epoch": 0, "discontinuity": False, "step_cause": None,
         "floor_clamped": True, "governed": False, "parec_buffer_ms": 0.0,
@@ -85,8 +95,9 @@ def _payload(value=500, t_ms=NOW_MS, **over):
 ])
 def test_the_ladder_transitions_at_the_declared_multiples(room, age_s, expected):
     st = _settings()
-    reading = kb.parse(_payload(t_ms=NOW_MS))
-    now = NOW_MS + age_s * 1000.0
+    anchor = _now()
+    reading = kb.parse(_payload(t_ms=anchor))
+    now = anchor + age_s * 1000.0
     assert kb.ladder_state(reading, st, now_ms=now) == expected
 
 
@@ -94,14 +105,15 @@ def test_the_ladder_is_a_multiple_so_it_survives_the_period_changing(room):
     """The same ages land in DIFFERENT states once the period is retuned —
     which is what "expressed as a MULTIPLE" buys. A ladder written in
     seconds would silently keep the old widths."""
-    reading = kb.parse(_payload(t_ms=NOW_MS))
+    anchor = _now()
+    reading = kb.parse(_payload(t_ms=anchor))
     slow = _settings(known_buffer_update_period_s=60.0)
     fast = _settings(known_buffer_update_period_s=5.0)
-    at = NOW_MS + 30_000
+    at = anchor + 30_000
     assert kb.ladder_state(reading, slow, now_ms=at) == "fresh"     # 30s <= 60s
     assert kb.ladder_state(reading, fast, now_ms=at) == "missing"   # 30s > 4x5s
     # and the STALE band moves with it, not with a frozen number of seconds
-    assert kb.ladder_state(reading, fast, now_ms=NOW_MS + 15_000) == "stale"
+    assert kb.ladder_state(reading, fast, now_ms=anchor + 15_000) == "stale"
 
 
 def test_unconfigured_is_its_own_answer_not_missing(room):
@@ -205,10 +217,10 @@ def test_a_good_poll_records_the_reading(room):
 @pytest.mark.parametrize("status,body", [
     (500, {"error": "boom"}),
     (200, b"not json at all"),
-    (200, {"t_ms": NOW_MS}),                              # no value
+    (200, {"t_ms": _now()}),                              # no value
     (200, {"effects_fire_later_by_ms": 500}),             # no timestamp
-    (200, {"effects_fire_later_by_ms": -5, "t_ms": NOW_MS}),
-    (200, {"effects_fire_later_by_ms": "soon", "t_ms": NOW_MS}),
+    (200, {"effects_fire_later_by_ms": -5, "t_ms": _now()}),
+    (200, {"effects_fire_later_by_ms": "soon", "t_ms": _now()}),
 ])
 def test_a_bad_poll_records_nothing_and_the_ladder_ages_the_last_good_one(
         room, status, body):
@@ -265,9 +277,10 @@ def test_a_step_with_a_new_epoch_is_applied_at_once_and_never_smoothed(room):
     """A drain is a DISCONTINUITY: the new value replaces the old outright.
     Anything between the two — a mean, a ramp, a filtered value — would be
     SPECTRA inventing a buffer River never published."""
+    anchor = _now()
     factory, _ = _sse_app([[
-        _payload(value=1400, epoch=3),
-        _payload(value=520, t_ms=NOW_MS + 1, epoch=4, discontinuity=True,
+        _payload(value=1400, t_ms=anchor, epoch=3),
+        _payload(value=520, t_ms=anchor + 1, epoch=4, discontinuity=True,
                  step_cause="drain"),
     ]])
     asyncio.run(kb.run_sse_supervised(factory, connects=1))
@@ -281,7 +294,7 @@ def test_a_step_with_a_new_epoch_is_applied_at_once_and_never_smoothed(room):
 def test_the_subscriber_reconnects_after_the_stream_drops(room, monkeypatch):
     monkeypatch.setattr(kb, "SSE_BACKOFF_MIN_S", 0.0)
     factory, calls = _sse_app([[_payload(value=700)],
-                               [_payload(value=810, t_ms=NOW_MS + 5000)]])
+                               [_payload(value=810, t_ms=_now() + 5_000)]])
     asyncio.run(kb.run_sse_supervised(factory, connects=2))
     assert calls["n"] == 2                       # it really did reconnect
     assert kb.state()["published_ms"] == 810     # and re-synced on connect
@@ -371,8 +384,9 @@ def test_rebasing_with_nothing_to_anchor_on_returns_none(room):
 
 # ── the raw series ──────────────────────────────────────────────────────
 def test_every_reading_is_logged_for_the_drift_picture(room):
-    kb.record(_payload(value=500, t_ms=NOW_MS))
-    kb.record(_payload(value=640, t_ms=NOW_MS + 15000))
+    anchor = _now()
+    kb.record(_payload(value=500, t_ms=anchor))
+    kb.record(_payload(value=640, t_ms=anchor + 15_000))
     rows = kb.read_log()
     assert [r["effects_fire_later_by_ms"] for r in rows] == [500, 640]
     assert rows[0]["parec_buffer_ms"] == 0.0
@@ -383,9 +397,9 @@ def test_the_log_is_pruned_to_the_retention_window(room):
     """A reading older than the window does not survive a write — including
     its own, which is the honest behaviour: the file is the LAST SEVEN
     DAYS, not the last seven days plus whatever arrived stamped older."""
-    old = int(time.time() * 1000 - (kb.LOG_RETENTION_S + 3600) * 1000)
+    old = int(_now() - (kb.LOG_RETENTION_S + 3600) * 1000)
     kb.record(_payload(value=500, t_ms=old))
-    kb.record(_payload(value=640, t_ms=NOW_MS))
+    kb.record(_payload(value=640, t_ms=_now()))
     rows = kb.read_log()
     assert [r["effects_fire_later_by_ms"] for r in rows] == [640]
 
