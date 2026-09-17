@@ -1756,6 +1756,39 @@ response — the passive-redirect trap immediately above is documented, so
 it is not repeated. Help topic `force-color`, linked from the top bar's
 own "Colour" group button. Spec: `tests/test_force_color.py`.
 
+**Force Scene/Force Colour's top-bar DIALOGS grow + gained a 6-recent row
++ a toggle button (card force-colour-and-forced-trigger-dialogs-p99a, his
+ask: "choosers... have searchable lists, but when the dropdown expands to
+show results, it's already cut off... it should expand... to fill the
+empty space, add buttons for the 6 most recently used").** Root cause:
+`SearchSelect.tsx`'s own dropdown is `position: absolute` anchored to its
+own input, NOT a portal (unlike `TopBarGroupButton`'s panel or
+`ColorGradientPicker`'s popover) — so it renders inside
+`.top-bar-group-panel`, which has `overflow-y: auto` and sizes to its
+NORMAL-FLOW content only; the dropdown doesn't contribute to that flow
+height, so it visually pops out past the panel's short natural box and
+reads as cut off (technically reachable by scrolling the tiny panel, which
+is not an affordance anyone finds). Fixed by giving both pickers real
+in-flow content to grow the panel BEFORE the dropdown ever opens:
+`RecentChoiceButtons.tsx` (a "Recent" row of up to 6 most-recently-picked
+scenes/colour sets, reusing the same `sceneOptions`/`colorTargetOptions`
+so a recent button and the search box can never name different labels for
+one id) + `useRecentChoices.ts` (a per-viewer localStorage list, capped at
+6, newest-first — recorded whenever either picker's `onChange` OR a recent
+button itself is used, never a second idea of "what's pinned"). The row's
+own CSS `min-height` (`.top-bar-recent-choices`, tokens.css) is what
+reserves the space — it renders even with zero recents (an honest "no
+recent picks yet" line) so the growth doesn't depend on there being
+history yet. This narrows, not eliminates, the clipping: an exceptionally
+long search result (dozens of matches) can still exceed the panel's
+existing `max-height: calc(100vh - 96px)` cap, in which case the panel's
+pre-existing scroll is the fallback, same as before this change — verified
+this is a real improvement, not just parity, with an isolated-component
+harness at real phone widths (392x844) before/after. The checkbox for both
+pins is now `PowerButton` (green=on, same component every other
+enable/disable toggle in the app already uses) instead of a bare
+`<input type="checkbox">` — no other semantics changed.
+
 **Temporary scene disable** (2026-08-18, his ask: "add an ability to
 disable a scene temporarily") — `SceneV2.disabled: bool` (default False),
 a manual reversible toggle, no timer/expiry. STRONGER than mode

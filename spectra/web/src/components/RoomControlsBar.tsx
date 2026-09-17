@@ -33,9 +33,12 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import AmbientGroupsPicker from './AmbientGroupsPicker';
 import ColorGradientPicker from './ColorGradientPicker';
 import DriftGradientBar from './DriftGradientBar';
+import PowerButton from './PowerButton';
+import RecentChoiceButtons from './RecentChoiceButtons';
 import TopBarGroupButton from './TopBarGroupButton';
 import HelpLink from '../help/HelpLink';
 import { useDebouncedApply } from '../lib/useDebouncedApply';
+import { useRecentChoices } from '../lib/useRecentChoices';
 import {
   useAmbientHueGroups, useAmbientStatusPush, useEngineStatus, useRoomControls,
   useSaveRoomControls, useScenes,
@@ -178,6 +181,12 @@ export default function RoomControlsBar() {
   const { data: colorCards } = useSpotColorSets();
   const [hueGroupsResetKey, setHueGroupsResetKey] = useState(0);
   const localRef = useRef<RoomControlState | null>(null);
+  // 6-most-recently-used, one list per picker (owner ask, card
+  // force-colour-and-forced-trigger-dialogs-p99a) — a per-viewer
+  // localStorage convenience, same shape FeedbackPage's own local queue
+  // uses; never a source of truth for what's currently pinned.
+  const forceSceneRecents = useRecentChoices('spectra.forceScene.recents');
+  const forceColorRecents = useRecentChoices('spectra.forceColor.recents');
 
   useEffect(() => { localRef.current = local; }, [local]);
 
@@ -537,21 +546,39 @@ export default function RoomControlsBar() {
             </div>
             <div className="top-bar-group-field">
               <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-                <input
-                  type="checkbox"
-                  checked={local.force_scene_enabled}
-                  onChange={(e) => commit({ ...local, force_scene_enabled: e.target.checked })}
+                <PowerButton
+                  on={local.force_scene_enabled}
+                  onChange={(on) => commit({ ...local, force_scene_enabled: on })}
+                  size={22}
+                  title={local.force_scene_enabled
+                    ? 'Force Scene is on — every automatic pick fires the pinned scene instead. Tap to release it.'
+                    : 'Force Scene is off — the room picks scenes freely. Tap to pin one.'}
                 />
                 Force Scene
               </label>
               <HelpLink topic="force-scene" />
             </div>
             {local.force_scene_enabled && (
-              <div className="top-bar-group-field">
-                <SearchSelect value={local.force_scene_scene_id ?? ''} options={sceneOptions} width={180}
-                  placeholder="— pick scene —" allowEmpty={false}
-                  onChange={(v) => commit({ ...local, force_scene_scene_id: v })} />
-              </div>
+              <>
+                <div className="top-bar-group-field">
+                  <SearchSelect value={local.force_scene_scene_id ?? ''} options={sceneOptions} width={180}
+                    placeholder="— pick scene —" allowEmpty={false}
+                    onChange={(v) => {
+                      commit({ ...local, force_scene_scene_id: v });
+                      forceSceneRecents.record(v);
+                    }} />
+                </div>
+                <RecentChoiceButtons
+                  recentIds={forceSceneRecents.recents}
+                  options={sceneOptions}
+                  value={local.force_scene_scene_id ?? ''}
+                  emptyLabel="No recent picks yet — scenes you pin here will show up as buttons."
+                  onPick={(v) => {
+                    commit({ ...local, force_scene_scene_id: v });
+                    forceSceneRecents.record(v);
+                  }}
+                />
+              </>
             )}
             {forceSceneResult?.status === 'fired' && (
               <span className="badge badge-gray" title="Fired immediately on this pin — not waiting for the next automatic pick">
@@ -605,21 +632,39 @@ export default function RoomControlsBar() {
           <>
             <div className="top-bar-group-field">
               <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-                <input
-                  type="checkbox"
-                  checked={local.force_color_enabled}
-                  onChange={(e) => commit({ ...local, force_color_enabled: e.target.checked })}
+                <PowerButton
+                  on={local.force_color_enabled}
+                  onChange={(on) => commit({ ...local, force_color_enabled: on })}
+                  size={22}
+                  title={local.force_color_enabled
+                    ? 'Force Colour is on — every automatic colour change wears the pinned one instead. Tap to release it.'
+                    : 'Force Colour is off — the room picks colours freely. Tap to pin one.'}
                 />
                 Force Colour
               </label>
               <HelpLink topic="force-color" />
             </div>
             {local.force_color_enabled && (
-              <div className="top-bar-group-field">
-                <SearchSelect value={local.force_color_target_id ?? ''} options={colorTargetOptions}
-                  width={180} placeholder="— pick colour set —" allowEmpty={false}
-                  onChange={(v) => commit({ ...local, force_color_target_id: v })} />
-              </div>
+              <>
+                <div className="top-bar-group-field">
+                  <SearchSelect value={local.force_color_target_id ?? ''} options={colorTargetOptions}
+                    width={180} placeholder="— pick colour set —" allowEmpty={false}
+                    onChange={(v) => {
+                      commit({ ...local, force_color_target_id: v });
+                      forceColorRecents.record(v);
+                    }} />
+                </div>
+                <RecentChoiceButtons
+                  recentIds={forceColorRecents.recents}
+                  options={colorTargetOptions}
+                  value={local.force_color_target_id ?? ''}
+                  emptyLabel="No recent picks yet — colour sets you pin here will show up as buttons."
+                  onPick={(v) => {
+                    commit({ ...local, force_color_target_id: v });
+                    forceColorRecents.record(v);
+                  }}
+                />
+              </>
             )}
             {forceColorResult?.status === 'applied' && (
               <span className="badge badge-gray"

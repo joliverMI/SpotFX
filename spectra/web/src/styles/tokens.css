@@ -343,6 +343,51 @@ button.danger:hover { border-color: var(--danger); color: var(--danger); }
   border: none; box-shadow: none; padding: 0; max-height: none; width: 100%;
 }
 
+/* The 6-most-recent row under Force Scene/Force Colour's search box
+ * (RecentChoiceButtons.tsx). `min-height` reserves real flow space below
+ * the search field even with zero recents yet — that's what keeps the
+ * search dropdown (position: absolute, anchored to the field, NOT a
+ * portal) from popping past the panel's own `overflow-y: auto` boundary
+ * and being clipped, the exact defect this whole block exists to fix. */
+.top-bar-recent-choices {
+  width: 100%;
+  min-height: 128px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.top-bar-recent-choices-label {
+  font-size: 9px;
+  font-weight: 500;
+  opacity: 0.75;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.top-bar-recent-choices-empty { font-size: 12px; color: var(--text-muted); opacity: 0.75; }
+.top-bar-recent-choices-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.top-bar-recent-choice-btn {
+  max-width: 140px;
+  padding: 4px 8px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.top-bar-recent-choice-btn-active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 /* The shared top-bar strip (TopBarStrip.tsx) — first occupant is the
  * live energy readout; a future device-preview strip mounts here too.
  * Its own thin row so it never competes with room-controls-bar's
