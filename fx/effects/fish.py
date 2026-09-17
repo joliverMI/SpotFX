@@ -272,6 +272,41 @@ SPEED_TAU = 0.28        # speed ease time constant (real acceleration) —
 # which lowers `flap_freq` — so the SAME stroke that pulses the speed
 # also slows down, spacing its pushes further apart in slow music and
 # blurring them together in fast music, exactly as he described it.
+#
+# THE SHIPPED DEFAULTS PRESERVE THE OLD MEAN SPEED — found live 2026-09-17
+# (his ruling, after a rebase onto the swim-burst boundary-brake fix #279
+# surfaced it): the first-shipped defaults (0.6 / 0.45) averaged only
+# ~0.77x the old continuous target over a full stroke cycle, a real,
+# unasked-for 23% slowdown that #279's own regression test caught (its
+# unbraked-burst negative control stopped overshooting at all, because the
+# burst's fixed 3.2x multiplier was now applied to an already-smaller
+# baseline). His correction, and the governing principle: A PULSE
+# REDISTRIBUTES SPEED IN TIME, IT MUST NOT REDUCE THE AVERAGE — within one
+# stroke cycle a fish surges and coasts, but across a whole cycle it must
+# cover the same ground the old smooth target did. `min_drift_speed` and
+# `stroke_speed_cap` are otherwise INDEPENDENT (his own requirement, see
+# THE DIAL above) — this constraint binds only the two SHIPPED DEFAULT
+# VALUES together, not the sliders themselves; moving either one off its
+# default is still free to raise or lower the mean, same as it always was.
+#
+# The constraint, derived exactly (not tuned by eye): `pulse_shape`'s own
+# mean over a full 0..2*pi cycle is PULSE_SHAPE_CYCLE_MEAN = 3/8 = 0.375
+# (mean of ((1-cos)/2)^PULSE_SHAPE_POWER at POWER=2 — a fixed algebraic
+# fact of this shaping curve, not a measurement). `want`'s own cycle mean
+# is therefore `min_drift_speed + stroke_speed_cap * PULSE_SHAPE_CYCLE_MEAN`
+# (see the speed section in draw()), and a first-order exponential ease
+# (the `tau` blend just below) tracking a periodic input has unity DC
+# gain in steady state — its OWN mean equals the input's mean regardless
+# of tau — so `p_spd`'s measured mean matches `want`'s algebraic mean
+# exactly, not merely approximately (proven on the real render pipeline in
+# tests/test_fish.py::test_default_dial_preserves_the_old_mean_speed).
+# Solving `min_drift_speed + stroke_speed_cap * 0.375 == 1.0` for the
+# shipped `stroke_speed_cap = 0.4` gives `min_drift_speed = 0.85` (trough
+# 0.85x / peak 1.25x of the old target) — subtle, visible, mean-neutral.
+# Changing either shipped default number requires re-solving this equation
+# for the other, or the defaults will silently reintroduce a mean-speed
+# drift exactly like this one.
+PULSE_SHAPE_CYCLE_MEAN = 0.375  # = 3/8 exactly; see the block above
 PULSE_SHAPE_POWER = 2.0  # sharpens the hump so a stroke reads as a push,
                          # not a smooth sine wobble
 THRUST_TAU = 0.09        # speed-ease time constant once any stroke cap is
@@ -756,17 +791,21 @@ class Fish2d(Twod, GradientEffect):
                     "stroke, as a fraction of the ordinary continuous "
                     "swim target — his escape hatch: raise this to 1 "
                     "with Stroke speed cap at 0 to get back the old "
-                    "smooth, un-pulsed motion"
+                    "smooth, un-pulsed motion. Paired with the default "
+                    "Stroke speed cap so the shipped defaults keep the "
+                    "OLD MEAN SPEED — see PULSE_SHAPE_CYCLE_MEAN below"
                 ),
-                default=0.6,
+                default=0.85,
             ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1.0)),
             vol.Optional(
                 "stroke_speed_cap",
                 description=(
                     "Cap on the extra speed a single tail stroke can add "
-                    "on top of the minimum drift speed; 0 = no pulse at all"
+                    "on top of the minimum drift speed; 0 = no pulse at "
+                    "all. Paired with the default Minimum drift speed so "
+                    "the shipped defaults keep the OLD MEAN SPEED"
                 ),
-                default=0.45,
+                default=0.4,
             ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=2.0)),
             vol.Optional(
                 "ripple_amount",

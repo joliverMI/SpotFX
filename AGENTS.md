@@ -7048,6 +7048,37 @@ A new Matrix effect + a Fish scene that is a WHOLESALE COPY of his Orbits V2
      for free: quiet audio lowers the continuous target, which lowers
      `speed_norm`, which lowers `flap_freq`, spacing pulses further apart —
      no bolt-on jitter.
+   * **THE SHIPPED DEFAULTS MUST PRESERVE THE OLD MEAN SPEED — found live
+     2026-09-17, when a rebase onto #279's swim-burst boundary brake
+     surfaced it.** The first-shipped defaults (`min_drift_speed=0.6`,
+     `stroke_speed_cap=0.45`) averaged only ~0.77x the old continuous
+     target over a full stroke cycle — a real, unasked-for 23% slowdown
+     (measured: 13.39 vs 17.50 px/s at a fixed test config) that #279's own
+     regression test caught: its unbraked-burst negative control stopped
+     overshooting at all, because the burst's fixed 3.2x multiplier now
+     rode an already-smaller baseline. His correction and the governing
+     principle: **a pulse redistributes speed in time, it must not reduce
+     the average** — within one stroke cycle a fish surges and coasts, but
+     across a whole cycle it covers the same ground the old smooth target
+     did. The shipped defaults (`min_drift_speed=0.85`,
+     `stroke_speed_cap=0.4`) are DERIVED, not tuned by eye: `pulse_shape`'s
+     own cycle mean is `PULSE_SHAPE_CYCLE_MEAN=0.375` (an algebraic fact of
+     the shaping curve, not a measurement), so `want`'s cycle mean is
+     `min_drift_speed + stroke_speed_cap*0.375`, solved for `==1.0`.
+     Measured on the real pipeline: mean speed at the new defaults is
+     17.4681 px/s against 17.4960 px/s at the dial's neutral setting
+     (0.16% off, `tests/test_fish.py::
+     test_default_dial_preserves_the_old_mean_speed`), and #279's negative
+     control passes again unmodified (unbraked overshoot ~3px both seeds,
+     matching master's own 3-5px). **The two sliders stay fully
+     independent** (his own requirement) — this constraint binds only the
+     two DEFAULT values together, never the runtime relationship between
+     them; moving either off its default is still free to raise or lower
+     the mean, same as always. Changing either shipped default number
+     requires re-solving this equation for the other (see the THRUST
+     comment block in `fish.py` and `config/effect_params.json`'s matching
+     defaults), or the defaults will silently reintroduce a mean-speed
+     drift exactly like this one.
    * **SCOPED to the ordinary population only** (`mode<2`, `p_nocap==0`,
      AND not while `_school_on`) — the charge's school and the drop's
      rush are authored choreography, not ordinary swimmers, the same

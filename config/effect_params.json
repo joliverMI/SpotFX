@@ -1625,8 +1625,8 @@
           "max": 1.0,
           "aspect": "reactivity",
           "distribute": false,
-          "note": "Swim speed kept between tail strokes, as a fraction of the ordinary continuous swim target. The escape hatch: 1 with Stroke Speed Cap at 0 is the old smooth, un-pulsed motion exactly. Ordinary swimmers only; the charge's school and the drop's rush never pulse.",
-          "default": 0.6
+          "note": "Swim speed kept between tail strokes, as a fraction of the ordinary continuous swim target. The escape hatch: 1 with Stroke Speed Cap at 0 is the old smooth, un-pulsed motion exactly. Ordinary swimmers only; the charge's school and the drop's rush never pulse. Paired with Stroke Speed Cap's own default so the shipped pair keeps the old MEAN speed (0.85 + 0.4*0.375 = 1.0) rather than just pulsing around a slower average.",
+          "default": 0.85
         },
         "stroke_speed_cap": {
           "label": "Stroke Speed Cap",
@@ -1636,8 +1636,8 @@
           "max": 2.0,
           "aspect": "reactivity",
           "distribute": false,
-          "note": "Cap on the extra speed one tail stroke adds on top of Min Drift Speed, synced to the flap. 0 = no pulse at all; quiet music strokes slower, so the pushes read further apart.",
-          "default": 0.45
+          "note": "Cap on the extra speed one tail stroke adds on top of Min Drift Speed, synced to the flap. 0 = no pulse at all; quiet music strokes slower, so the pushes read further apart. Paired with Min Drift Speed's own default so the shipped pair keeps the old MEAN speed.",
+          "default": 0.4
         },
         "ripple_amount": {
           "label": "Ripple Wake",
@@ -1813,8 +1813,8 @@
         "flap_amount": 0.55,
         "flap_rate": 2.2,
         "flap_accel": 1.2,
-        "min_drift_speed": 0.6,
-        "stroke_speed_cap": 0.45,
+        "min_drift_speed": 0.85,
+        "stroke_speed_cap": 0.4,
         "ripple_amount": 0.35,
         "ripple_spread": 0.45,
         "ripple_life": 0.9,

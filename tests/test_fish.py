@@ -1490,6 +1490,49 @@ def test_stroke_cap_zero_is_bit_for_bit_the_old_continuous_target(tmp_path):
     _run(main())
 
 
+def test_default_dial_preserves_the_old_mean_speed(tmp_path):
+    """His ruling (2026-09-17), after a rebase onto #279's swim-burst
+    boundary brake caught the first-shipped defaults (0.6/0.45) running a
+    real, unasked-for ~23% slower on average: "A pulse should redistribute
+    speed in time, not reduce the average." The shipped defaults
+    (min_drift_speed=0.85, stroke_speed_cap=0.4) are DERIVED, not tuned by
+    eye, to solve `min_drift_speed + stroke_speed_cap * 0.375 == 1.0` (see
+    PULSE_SHAPE_CYCLE_MEAN's own comment in fish.py) — so measured against
+    the dial's neutral setting (min_drift_speed=1, stroke_speed_cap=0,
+    already proven bit-for-bit the pre-thrust formula), the mean speed at
+    the SHIPPED DEFAULTS over several full stroke cycles must equal the
+    old smooth target, not merely be close to it."""
+    async def main():
+        base_cfg = dict(
+            HIS_MATRIX, particle_count=1, jiggle=0.0, speed_jump=0.0,
+            speed_jog=0.0, horizon_scale=0.0, spin=0.0, roam_scale=1.4,
+        )
+
+        async def mean_speed(tag, min_drift, cap):
+            room = await _room(tmp_path, f"meanspd-{tag}", dict(
+                base_cfg, min_drift_speed=min_drift, stroke_speed_cap=cap,
+            ), seed=1)
+            eff = room.effect
+            room.step(int(2.0 / DT))  # settle
+            spds = []
+            for _ in range(int(6.0 / DT)):  # several full flap cycles
+                room.step(1)
+                spds.append(float(eff.p_spd[0]))
+            await _close(room)
+            return float(np.mean(spds))
+
+        old_smooth = await mean_speed("neutral", 1.0, 0.0)
+        default = await mean_speed("default", 0.85, 0.4)
+        rel_err = abs(default - old_smooth) / old_smooth
+        assert rel_err < 0.01, (
+            f"the shipped default dial must keep the old mean speed: "
+            f"neutral (pre-thrust) mean {old_smooth:.3f} px/s, default "
+            f"mean {default:.3f} px/s, {rel_err:.2%} off — a pulse must "
+            f"redistribute speed in time, not reduce the average"
+        )
+    _run(main())
+
+
 @pytest.mark.parametrize("name", ["min_drift_speed", "stroke_speed_cap"])
 def test_the_dial_is_reachable_by_sonic_with_the_effects_own_bounds(name):
     """The dial is only an escape hatch if Sonic and the Scenes page can
