@@ -111,7 +111,8 @@ Orbits' twin as a scene, but the charge and the lull are his own
 (2026-08-25, corr=6dd10a8c3c5bd72a) and are the reason the effect exists
 separately at all.
 
-- **Charge** — up to `school_count` (12) fish swim in on an even spread and
+- **Charge** — up to `school_count` (18, +50% from his original 12,
+  2026-09-16, watching it live) fish swim in on an even spread and
   steer onto ONE shared heading, each offset by a little `school_variation`
   so the school is near-identical but never lockstep; a separation steer
   (`SCHOOL_SPACING_W`) keeps them from clumping. The view travels with the

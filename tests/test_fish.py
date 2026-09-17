@@ -1334,3 +1334,85 @@ def test_quiet_swimming_is_untouched_by_the_lunge(tmp_path):
             f"cruise moved at zero impulse: {speeds['off']} -> {speeds['on']}"
         )
     _run(main())
+
+
+# ── the swim burst, held on screen ──────────────────────────────────────
+async def _burst_excursion(tmp_path, name, seed, burst_on):
+    """(worst px any fish CENTRE lands past the panel edge, fastest speed
+    of a fish more than 8px clear of it while bursting) over 12s of a
+    300ms burst every 400ms, at his Matrix entry's own pond (the schema's
+    roam_scale) with a full population — the shape that reproduced his
+    report."""
+    room = await _room(tmp_path, name,
+                       dict(HIS_MATRIX, particle_count=12), seed=seed)
+    eff = room.effect
+    room.step(120)
+    worst_off = -1e9
+    clear_speed = 0.0
+    period_frames = round(0.4 / DT)
+    burst_frames = round(0.3 / DT)
+    for i in range(round(12.0 / DT)):
+        eff.swim_burst = burst_on and (i % period_frames) < burst_frames
+        room.step(1)
+        n = eff.n
+        if n:
+            sx = eff.cx + eff.p_x[:n] * eff.sx - eff.cam_px
+            sy = eff.cy + eff.p_y[:n] * eff.sy - eff.cam_py
+            off_x = np.maximum(-sx, sx - (COLS - 1))
+            off_y = np.maximum(-sy, sy - (ROWS - 1))
+            off = np.maximum(off_x, off_y)
+            worst_off = max(worst_off, float(np.max(off)))
+            if eff.swim_burst:
+                clear = off < -8.0
+                if clear.any():
+                    clear_speed = max(
+                        clear_speed, float(np.max(eff.p_spd[:n][clear]))
+                    )
+    cruise = eff.cruise_px
+    await _close(room)
+    return worst_off, clear_speed, cruise
+
+
+def test_swim_burst_stays_on_screen(tmp_path):
+    """His live report (2026-09-16): "the fish do scatter, but the burst
+    seems a little wrong... they always fly off the screen, but they
+    should stay on the screen." scripts/check_fish_burst_bounds.py has the
+    full sweep and the root-cause writeup (a fixed-time-constant heading
+    correction lets a burst-speed fish outrun it). Measured against two
+    controls on the real pipeline: the same bursts with the boundary brake
+    switched off (must reproduce the overshoot, or this test proves
+    nothing) and no burst at all (the soft steer's own resting overshoot).
+    The fixed burst must land within a pixel of the no-burst baseline, and
+    — the "not a soft no-op" half — a fish clear of the edge must still
+    reach well above cruise while bursting."""
+    async def main():
+        for seed in (3, 7):
+            base, _, _ = await _burst_excursion(
+                tmp_path, f"burst-none-{seed}", seed, burst_on=False
+            )
+            orig = FX.BOUND_BRAKE_AT
+            FX.BOUND_BRAKE_AT = 1.0
+            try:
+                unbraked, _, _ = await _burst_excursion(
+                    tmp_path, f"burst-unbraked-{seed}", seed, burst_on=True
+                )
+            finally:
+                FX.BOUND_BRAKE_AT = orig
+            held, clear_speed, cruise = await _burst_excursion(
+                tmp_path, f"burst-held-{seed}", seed, burst_on=True
+            )
+            assert unbraked > base + 3.0, (
+                f"seed {seed}: the negative control must overshoot, saw "
+                f"{unbraked:.2f}px against a no-burst {base:.2f}px"
+            )
+            assert held <= base + 1.0, (
+                f"seed {seed}: a repeated burst carried a fish "
+                f"{held:.2f}px past the panel edge (no-burst baseline "
+                f"{base:.2f}px, unbraked {unbraked:.2f}px)"
+            )
+            assert clear_speed >= 2.0 * cruise, (
+                f"seed {seed}: the burst reads as a soft no-op away from "
+                f"the edge: fastest clear-of-edge speed {clear_speed:.1f} "
+                f"px/s against cruise {cruise:.1f} px/s"
+            )
+    _run(main())
