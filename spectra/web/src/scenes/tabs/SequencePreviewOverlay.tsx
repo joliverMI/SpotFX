@@ -16,9 +16,9 @@
  *
  * THE MARKS ARE NOT DRAGGABLE HERE, deliberately. Each mark is its band's
  * ANCHOR, an aggregate over however many flare kinds it attaches (min over
- * every enabled kind's offset, zero included), while every kind keeps its own offset and lands at
- * it relative to that anchor (scene_response's "PER-FLARE TRIGGER
- * MOMENT") — so a drag would have to pick one kind to write it to, and
+ * every enabled kind's offset, zero included), while every kind keeps its
+ * own offset and lands at it relative to that anchor (scene_response's
+ * "PER-FLARE TRIGGER MOMENT") — so a drag would have to pick one kind to write it to, and
  * picking would be invention. The place a kind's own offset is authored
  * already exists and is per-kind by construction: the flare preview's own
  * marker. This preview SHOWS where each class's fire begins, so the ruler

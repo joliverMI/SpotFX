@@ -1305,7 +1305,8 @@ class TriggerEngine:
         on_event, so this peek selects the same band the fire will) — and
         delegates the band walk + multi-kind aggregation to
         scene_response.band_trigger_offset_ms (see _band_anchor_ms for the
-        min-over-every-declared-kind rule, zero included, and why a drop band's offset IS honoured
+        min-over-every-declared-kind rule, zero included, and
+        band_trigger_offset_ms for why a drop band's offset IS honoured
         where the lead's drop rule is not). No active scene = 0, the
         conservative nothing-to-read answer, same as the lead's own."""
         from spectra.services.scene_response import band_trigger_offset_ms

@@ -36,8 +36,8 @@ THE OFFSETS. Each class's band carries its kinds' own
 FlareKind.trigger_offset_ms, and the mark drawn here is still the BAND
 ANCHOR — scene_response.band_trigger_offset_ms, min over every declared
 kind's offset, zero included (fixed 2026-09-16,
-spotfx-zero-offset-fires-on-mark) — which is where the firing path relocates the whole
-fire, for a DROP band too: that drop rule pins the automatic anchor-family
+spotfx-zero-offset-fires-on-mark) — which is where the firing path
+relocates the whole fire, for a DROP band too: that drop rule pins the automatic anchor-family
 LEAD, never his explicit hand on a marker. Kinds inside the fire no longer
 land together at that anchor: each lands at its own per-kind offset
 relative to it (scene_response's "PER-FLARE TRIGGER MOMENT"), so the mark
