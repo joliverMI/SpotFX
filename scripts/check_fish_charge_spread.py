@@ -58,8 +58,16 @@ async def charge_run(effect_type, seed):
         )
         virtual = host.virtuals.get(dev)
         with headless.fake_clock() as clock:
+            # school_count PINNED here, deliberately independent of
+            # whatever the schema default currently is (it moved 12 -> 18,
+            # 2026-09-16, his own "+50% more fish" ask): this check is
+            # about the SPACING algorithm, not population size, and the
+            # BEFORE column reads BASELINE_REF's own historical default —
+            # letting the population drift between the two columns would
+            # measure "more fish in the same panel" and call it a spacing
+            # regression.
             eff = headless.attach_effect(
-                host, virtual, effect_type, dict(HIS)
+                host, virtual, effect_type, dict(HIS, school_count=12)
             )
             eff._rng = np.random.default_rng(seed)
 

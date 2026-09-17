@@ -7032,12 +7032,49 @@ test_scattering_trail_is_fed_true_brightness_not_the_crossfade_gain`'s own
 docstring for why BASELINE_REF is used in place of the literal commit he
 named.
 
+**THE SWIM BURST STAYS ON SCREEN, and the charge's school is +50% (both
+2026-09-16, same night he first watched it live).** His words: "it seems
+like they always fly off the screen, but they should stay on the screen."
+Root cause, found by instrumenting the real pipeline (not assumed from the
+turn-radius math, which is speed-invariant by construction and does NOT
+predict this): the boundary steer's heading correction converges on a
+FIXED TIME constant (`TURN_GAIN`'s own proportional gain), never a fixed
+distance, so a burst-speed fish travels proportionally further during that
+same correction time before its heading catches up, and can clear the
+panel edge before the steer finishes turning it back. Fixed with a
+boundary SPEED BRAKE (`BOUND_BRAKE_AT`, near `BOUND_W` at the top of
+`fx/effects/fish.py`) that caps a fish's speed back toward cruise once
+boundary avoidance is genuinely near full effect — **scoped to
+`self._burst`/`self._burst_tail` alone**, deliberately not a general
+"any excess speed near the edge" rule, so ordinary swimming (a lunge, plain
+jiggle variance wandering near the pond edge) is completely untouched —
+proven by `test_fish_camera.py`'s own byte-identity guard, which this fix
+had to earn a second time after an earlier draft widened the boundary
+steer's own trigger distance and leaked into ordinary swimming (reverted;
+only the speed brake survived). The steer itself
+(`need`/`ahead_px`/`w_bound`, and everything about `turn_radius_px`/
+`omega_max`) is UNCHANGED. `school_count`'s schema default moved 12 → 18
+(his ask, a plain +50%, well inside `MAX_SCHOOL`'s existing 24 headroom —
+no `CAP`/`p_nocap` change needed, that exemption already covers the whole
+school). **A default bump that isn't pinned in a check script's own config
+silently changes what that check measures** — `scripts/
+check_fish_charge_spread.py` compares a BEFORE (`BASELINE_REF`'s own
+historical default) against an AFTER that read the SCHEMA default rather
+than an explicit value, so raising it made "cells per on-panel fish"
+regress for a completely unrelated reason (more fish crowded into the
+same panel, not worse spacing) — fixed by pinning `school_count=12`
+explicitly in that script's own config, matching its own printed
+assumption and isolating the spacing algorithm it actually tests from
+population size. Proof: `scripts/check_fish_burst_bounds.py`,
+`tests/test_fish.py::test_swim_burst_stays_on_screen`.
+
 Every new fish knob is a first guess pending his eye; the effect ships
 tunable, not tuned. Proof: `scripts/check_fish.py`,
 `scripts/check_fish_avoidance.py`, `scripts/check_fish_lunge.py`,
 `scripts/check_fish_camera.py`, `scripts/check_fish_wake.py`,
-`scripts/check_fish_charge_spread.py`, `tests/test_fish.py`,
-`tests/test_fish_camera.py`.
+`scripts/check_fish_charge_spread.py`, `scripts/check_fish_burst_bounds.py`,
+`tests/test_fish.py`, `tests/test_fish_camera.py`,
+`tests/test_fish_disperse.py`.
 
 ## Radial (STAR) rotation is audio-lows-driven — a healthy `spin` can read as parked
 

@@ -1334,3 +1334,51 @@ def test_quiet_swimming_is_untouched_by_the_lunge(tmp_path):
             f"cruise moved at zero impulse: {speeds['off']} -> {speeds['on']}"
         )
     _run(main())
+
+
+# ── the swim burst, held on screen ──────────────────────────────────────
+def test_swim_burst_stays_on_screen(tmp_path):
+    """His live report (2026-09-16): "the fish do scatter, but the burst
+    seems a little wrong... they always fly off the screen, but they
+    should stay on the screen." scripts/check_fish_burst_bounds.py has the
+    full sweep and the root-cause writeup (a fixed-time-constant heading
+    correction lets a burst-speed fish outrun it); this pins the shape of
+    the fix on the real pipeline: a repeated burst must not carry a fish
+    much past the panel edge, and — the "not a soft no-op" half — a fish
+    clear of the edge must still reach well above cruise while bursting."""
+    async def main():
+        room = await _room(tmp_path, "burstbound",
+                           dict(HIS_CROWD, particle_count=6), seed=3)
+        eff = room.effect
+        room.step(120)
+        worst_off = -1e9
+        clear_speed = 0.0
+        period_frames = int(0.5 / DT)
+        burst_frames = int(0.3 / DT)
+        for i in range(int(15.0 / DT)):
+            eff.swim_burst = (i % period_frames) < burst_frames
+            room.step(1)
+            n = eff.n
+            if n:
+                sx = eff.cx + eff.p_x[:n] * eff.sx - eff.cam_px
+                sy = eff.cy + eff.p_y[:n] * eff.sy - eff.cam_py
+                off_x = np.maximum(-sx, sx - (COLS - 1))
+                off_y = np.maximum(-sy, sy - (ROWS - 1))
+                off = np.maximum(off_x, off_y)
+                worst_off = max(worst_off, float(np.max(off)))
+                if eff.swim_burst:
+                    clear = off < -8.0
+                    if clear.any():
+                        clear_speed = max(
+                            clear_speed, float(np.max(eff.p_spd[:n][clear]))
+                        )
+        await _close(room)
+        assert worst_off <= 5.0, (
+            f"a repeated burst carried a fish {worst_off:.1f}px past the "
+            "panel edge — the boundary brake did not hold"
+        )
+        assert clear_speed >= 40.0, (
+            f"the burst reads as a soft no-op away from the edge: fastest "
+            f"clear-of-edge speed seen was only {clear_speed:.1f} px/s"
+        )
+    _run(main())

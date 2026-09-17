@@ -22,7 +22,8 @@ _LOGGER = logging.getLogger(__name__)
 # can never starve the ordinary render (see MAX_* below and
 # tests/test_fish.py::test_buffer_headroom).
 MAX_PARTICLE_COUNT = 16   # `particle_count` schema max
-MAX_SCHOOL = 24           # `school_count` schema max ("up to 12" default)
+MAX_SCHOOL = 24           # `school_count` schema max (default 18, +50% from
+                          # his original 12, 2026-09-16, watching it live)
 MAX_RUSH = 24             # `rush_count` schema max ("up to 20" default)
 DROP_EJECTA_X = 2         # ejecta per kept fish (3x total spawn), from orbits
 CAP = (
@@ -223,6 +224,12 @@ WANDER_SWING_JIGGLE = 0.5  # ... heading, plus this much at jiggle 1
 TURN_CLEAR = 1.0        # turn diameters of clearance the steer needs
 BOUND_SOFT = 1.25       # ... and the multiple of that where it starts
 BOUND_W = 8.0           # inward steer weight relative to wander/home
+BOUND_BRAKE_AT = 0.7    # the boundary SPEED brake (see below, near the
+                        # inward steer) reaches its full effect once w_bound
+                        # is this fraction of BOUND_W, so extra speed (burst,
+                        # lunge, the drop boost) is already gone by the time
+                        # the steer itself is fully engaged, not merely
+                        # starting to fade at the same moment
 HOME_W = 0.35
 HOME_FREE = 0.5         # no home pull inside this fraction of the pond
 WANDER_W = 1.0
@@ -699,7 +706,7 @@ class Fish2d(Twod, GradientEffect):
             vol.Optional(
                 "school_count",
                 description="Fish that swim in for the charge's school (ignores the population cap)",
-                default=12,
+                default=18,
             ): vol.All(vol.Coerce(int), vol.Range(min=1, max=MAX_SCHOOL)),
             vol.Optional(
                 "school_variation",
@@ -1596,7 +1603,10 @@ class Fish2d(Twod, GradientEffect):
     def _charge_step(self, p):
         """His words: up to 12 fish come in, all moving in unison, then
         start changing directions on every beat, minimum 400ms apart, still
-        in unison — near-identical motion with minor variation."""
+        in unison — near-identical motion with minor variation. His own
+        `school_count` default has since moved to 18 (+50%, 2026-09-16),
+        watching it live — the quote above is the original ask, not the
+        current number; see `school_count`'s own schema default."""
         self._school_on = True
         want = int(min(self.school_count, MAX_SCHOOL))
         f = min(p / CHARGE_FILL_AT, 1.0) if CHARGE_FILL_AT > 0 else 1.0
@@ -2565,6 +2575,51 @@ class Fish2d(Twod, GradientEffect):
             0.0, 1.0,
         ) * BOUND_W
         w_bound = np.where(swimming, w_bound, 0.0)
+        # THE SWIM BURST'S OWN BOUNDARY BRAKE — scoped to the burst alone,
+        # not a general "any excess speed near the edge" mechanism. The
+        # steer above is completely unchanged (`need`/`ahead_px`/`w_bound`
+        # are exactly what they were, so a cruising fish is bit-for-bit
+        # what it always was — ordinary swimming, including whatever a
+        # lunge or plain jiggle variance does near the pond edge, is
+        # untouched by this block). What it fixes: the heading correction
+        # above converges on a fixed TIME constant (TURN_GAIN's own
+        # proportional gain — untouched, unread here), so a fish moving at
+        # several times cruise still travels several times as far during
+        # that same correction time before its heading has caught up, and
+        # it can carry the fish past the panel edge before the steer
+        # finishes turning it — measured live 2026-09-16, his report on
+        # the "Fish Swim Burst" flare: "they always fly off the screen".
+        # Braking the BURST'S OWN extra speed once boundary avoidance is
+        # genuinely near its full effect closes that gap without touching
+        # how fast the correction turns, where the turn radius comes from,
+        # or the boundary steer's own trigger distance. `BOUND_BRAKE_AT`
+        # sits WELL INTO the steer's own ramp (0.7 of BOUND_W, not from
+        # zero), so a fish only mildly influenced by the edge is left
+        # alone. `scripts/check_fish_burst_bounds.py` proves both sides:
+        # the excursion held AND the burst's own speed, measured away from
+        # an edge, untouched by this brake.
+        bursting = self._burst > 0.0 or self._burst_tail > 0.0
+        if bursting:
+            brake = np.clip(
+                (w_bound / BOUND_W - BOUND_BRAKE_AT)
+                / max(1.0 - BOUND_BRAKE_AT, 1e-3),
+                0.0, 1.0,
+            )
+            # SELECTED, not computed-then-discarded: `cruise +
+            # extra_spd*(1.0-brake)` at brake==0 is mathematically `p_spd`
+            # but not bit-identical to it (float subtraction-then-addition
+            # can lose a ULP) — irrelevant once gated on `bursting` above
+            # (a burst never coincides with the byte-identity proof's
+            # ordinary-swimming scenario), kept anyway as the cheap,
+            # correct way to leave every non-braked fish's own value
+            # untouched down to the bit.
+            braking = swimming & (brake > 0.0)
+            if braking.any():
+                extra_spd = np.maximum(self.p_spd[:n] - cruise, 0.0)
+                self.p_spd[:n] = np.where(
+                    braking, cruise + extra_spd * (1.0 - brake),
+                    self.p_spd[:n],
+                )
         inward = np.arctan2(-rel_y * self.sy, -rel_x * self.sx)
         desired_x += np.cos(inward) * w_bound
         desired_y += np.sin(inward) * w_bound
