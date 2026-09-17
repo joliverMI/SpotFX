@@ -47,6 +47,12 @@ export default function SearchSelect({
     return () => document.removeEventListener('mousedown', onDoc);
   }, []);
 
+  // The dropdown is `position: absolute` under the input, NOT a portal, so it
+  // adds no flow height to its container and is clipped by any ancestor with
+  // `overflow` set. Bound it to the room actually left below the input — the
+  // viewport, and the enclosing top-bar panel (the only container it knows
+  // about) — and let it scroll inside that shorter box. The floor keeps a few
+  // rows usable for an input near that edge, at the cost of overhanging it.
   useLayoutEffect(() => {
     if (!open) return;
     const measure = () => {

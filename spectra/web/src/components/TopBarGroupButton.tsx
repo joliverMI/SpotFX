@@ -67,6 +67,9 @@ export default function TopBarGroupButton({
     // the bottom of the viewport — his rule ("expansion goes down, never
     // off the side") reads as "never off the TOP either" here.
     const top = rect.bottom + 6;
+    // The CSS `max-height: calc(100vh - 96px)` is only a fallback: it ignores
+    // where the trigger sits, so a low trigger left the panel's bottom past
+    // the viewport where no scroll could reach it. Bound it from this top.
     const maxHeight = Math.max(PANEL_MIN_HEIGHT, window.innerHeight - top - VIEWPORT_MARGIN);
     setPos({ top, left, maxHeight });
   };

@@ -1756,51 +1756,20 @@ response — the passive-redirect trap immediately above is documented, so
 it is not repeated. Help topic `force-color`, linked from the top bar's
 own "Colour" group button. Spec: `tests/test_force_color.py`.
 
-**Force Scene/Force Colour's top-bar DIALOGS grow + gained a 6-recent row
-+ a toggle button (card force-colour-and-forced-trigger-dialogs-p99a, his
-ask: "choosers... have searchable lists, but when the dropdown expands to
-show results, it's already cut off... it should expand... to fill the
-empty space, add buttons for the 6 most recently used").** Root cause:
-`SearchSelect.tsx`'s own dropdown is `position: absolute` anchored to its
-own input, NOT a portal (unlike `TopBarGroupButton`'s panel or
-`ColorGradientPicker`'s popover) — so it renders inside
-`.top-bar-group-panel`, which has `overflow-y: auto` and sizes to its
-NORMAL-FLOW content only; the dropdown adds nothing to that flow height, so
-anything of it below the panel's natural bottom edge is cut off (reachable
-only by scrolling the panel, an affordance nobody finds). TWO halves fix it,
-and neither alone is enough: (1) `RecentChoiceButtons.tsx`'s block
-(`.top-bar-recent-choices`, tokens.css) has `min-height: 272px` — the
-dropdown's own 260px max height plus its margin and border — so on a normal
-viewport the unfiltered list opened on focus fits inside the panel; it
-renders even with zero recents (an honest "no recent picks yet" line) and
-the recent buttons sit at its TOP, so only empty space below them grows.
-(2) `SearchSelect` measures its room while open (and on resize/scroll): max
-height = the space between its input and the nearer of the viewport bottom
-and the enclosing `.top-bar-group-panel` bottom, minus 8px, clamped to
-[80, 260]. That makes the dropdown viewport-independent — it either fits or
-scrolls inside its own bounded box, and never needs the outer panel
-scrolled to be usable. The one residual: below an 80px floor (an input
-within 88px of the panel/viewport bottom) the list can still overhang that
-edge; the floor keeps a few rows visible rather than collapsing it. Outside
-a top-bar panel the viewport bound applies to every SearchSelect too, so a
-field near the bottom of a page gets a shorter, scrolling list instead of
-one running off-screen. The pin's result badges ("fired"/"not fired"/
-"applied"/…) render directly under the toggle, ABOVE the search field, so
-nothing growing below can push the only feedback the pin gives off-screen.
-And `TopBarGroupButton` bounds every panel's max-height from its OWN
-computed top (`innerHeight - top - 8px`, floor 160px, inline over the CSS
-`calc(100vh - 96px)` fallback) — the static cap ignored where the trigger
-sits, so a low trigger left the panel's lower edge past the viewport with
-no scroll able to reach it. The recents list is `useRecentChoices.ts` over
-`useSticky` (per-viewer localStorage, key prefixed `spotfx.builder.v1.`,
-capped at 6, newest-first — recorded whenever either picker's `onChange` OR
-a recent button is used, reusing the same `sceneOptions`/
-`colorTargetOptions` so a recent button and the search box can never name
-different labels or disagree on what's pinned). The checkbox for both pins
-is now `PowerButton` (green=on, the component every other enable/disable
-toggle in the app uses) with `ariaLabel="Force Scene pin"`/`"Force Colour
-pin"`, so a screen reader names the pin rather than PowerButton's default
-"this scene" — no other semantics changed.
+**Force Scene/Force Colour's top-bar panels** (card
+force-colour-and-forced-trigger-dialogs-p99a): each pin is a `PowerButton`
+(with `ariaLabel`, since it toggles a room pin, not an item) with its result
+badge directly under it; only while on, a `SearchSelect` plus
+`RecentChoiceButtons.tsx` (the 6 most-recent picks, per-viewer localStorage
+via `lib/useRecentChoices.ts`) — both write the same field, so they can
+never disagree. **`SearchSelect`'s dropdown is `position: absolute`, NOT a
+portal**: it adds no flow height and is clipped by any `overflow` ancestor.
+It bounds itself only to the viewport and an enclosing `.top-bar-group-panel`
+(its own measure effect), so inside any OTHER scrolling container it still
+clips. In the top bar, `.top-bar-recent-choices` reserves in-flow room below
+it (tokens.css carries the arithmetic) and `TopBarGroupButton` bounds each
+panel from its own computed top. User-facing behaviour: help topics
+`force-scene`/`force-color`.
 
 **Temporary scene disable** (2026-08-18, his ask: "add an ability to
 disable a scene temporarily") — `SceneV2.disabled: bool` (default False),
