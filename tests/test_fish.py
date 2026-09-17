@@ -1500,8 +1500,10 @@ def test_default_dial_preserves_the_old_mean_speed(tmp_path):
     PULSE_SHAPE_CYCLE_MEAN's own comment in fish.py) — so measured against
     the dial's neutral setting (min_drift_speed=1, stroke_speed_cap=0,
     already proven bit-for-bit the pre-thrust formula), the mean speed at
-    the SHIPPED DEFAULTS over several full stroke cycles must equal the
-    old smooth target, not merely be close to it."""
+    the SHIPPED DEFAULTS over several full stroke cycles must stay within
+    1% of the old smooth target. Close, not exact: that equation is
+    first-order — the flap phase runs faster through the surge (flap_freq
+    rises with speed), so the measured mean lands slightly low (0.16%)."""
     async def main():
         base_cfg = dict(
             HIS_MATRIX, particle_count=1, jiggle=0.0, speed_jump=0.0,
@@ -1525,7 +1527,8 @@ def test_default_dial_preserves_the_old_mean_speed(tmp_path):
         default = await mean_speed("default", 0.85, 0.4)
         rel_err = abs(default - old_smooth) / old_smooth
         assert rel_err < 0.01, (
-            f"the shipped default dial must keep the old mean speed: "
+            f"the shipped default dial must keep the old mean speed "
+            f"within 1%: "
             f"neutral (pre-thrust) mean {old_smooth:.3f} px/s, default "
             f"mean {default:.3f} px/s, {rel_err:.2%} off — a pulse must "
             f"redistribute speed in time, not reduce the average"
@@ -1719,7 +1722,11 @@ def test_wake_tail_point_follows_the_trail_not_the_rigid_heading(tmp_path):
     turn the wake sat off the actual drawn tail by the same facing-the-
     tangent amount the body itself was fixed for. `_trail_tail_point`
     fixes this by reusing the same recorded-path interpolation
-    `_draw_bodies` uses for its own rear nodes."""
+    `_draw_bodies` uses for its own rear nodes — and it is laid in the
+    SAME world->screen mapping the body is drawn with, so while the window
+    has moved (a charge or lull) the wake sits under its fish instead of
+    off to one side by the window's own displacement, as the pre-rework
+    deposit (`cx + p_x*sx - cos(hd)*len/2`, no window origin) laid it."""
     async def main():
         room = await _room(tmp_path, "wake-tail", dict(
             HIS_MATRIX, particle_count=1, flap_amount=0.0,
@@ -1790,6 +1797,29 @@ def test_wake_tail_point_follows_the_trail_not_the_rigid_heading(tmp_path):
             "the trail-based tail should still track where the body "
             f"actually came from, saw {dist_old:.3f}px off the old "
             "heading's own rigid point"
+        )
+
+        # the window has moved: the tail point is laid in screen space,
+        # under the fish as drawn, never in the unshifted world frame
+        eff.p_hd[0] = hd0
+        lay_straight_trail(hd0)
+        eff.cam_px, eff.cam_py = 17.0, -6.0
+        tx3, ty3 = eff._trail_tail_point(
+            np.array([0]), eff.p_x[:1].copy(), eff.p_y[:1].copy(),
+            np.array([length], dtype=np.float32),
+        )
+        rx3, ry3 = rigid_tail(hd0, length)
+        assert abs(float(tx3[0]) - rx3) < 1e-2 and abs(float(ty3[0]) - ry3) < 1e-2, (
+            "with the window moved the wake tail must sit under the drawn "
+            f"fish: trail=({tx3[0]:.3f},{ty3[0]:.3f}) "
+            f"screen=({rx3:.3f},{ry3:.3f})"
+        )
+        unshifted = float(np.hypot(
+            tx3[0] - (rx3 + eff.cam_px), ty3[0] - (ry3 + eff.cam_py)
+        ))
+        assert unshifted > 15.0, (
+            "the moved-window case must be able to tell screen space from "
+            f"the unshifted world frame, saw only {unshifted:.3f}px apart"
         )
         await _close(room)
     _run(main())

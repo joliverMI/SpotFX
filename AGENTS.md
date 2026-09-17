@@ -6964,15 +6964,22 @@ A new Matrix effect + a Fish scene that is a WHOLESALE COPY of his Orbits V2
    2026-08-28 thirds, unchanged — only the manner moved (school → swirl →
    rank-ordered leak, `LULL_LEAK_*`, with `LULL_EXIT_MIN_S` meant to make a
    lull too short to swirl in scatter straight out rather than be retired
-   on the panel by the backstop — a real gap opened here by fm/spotfx-fish-
-   body-trails-head-tail-thrust (its dynamics changes pushed an already-
-   thin margin over the edge for specific seeds at his tightest tested gap,
-   0.9s: 3 of 60 seed/gap combinations left one straggler still on the
-   panel the instant the hard backstop empties the population, which pops
-   at full brightness with no fade — exactly the visible defect this whole
-   mechanism exists to prevent) and closed by tightening `DISPERSE_TAU`
-   0.07 -> 0.05 (0 of 60 fail at 0.05; see that constant's own comment).
-   `scripts/check_fish_disperse.py` §1 keeps the check strict; (3) the crossfade scatter is SKIPPED when the
+   on the panel by the backstop. fm/spotfx-fish-body-trails-head-tail-
+   thrust found that margin thin: at his tightest tested gap, 0.9s, 3 of 60
+   seed/gap combinations left one straggler still on the panel the instant
+   the hard backstop empties the population, which pops at full brightness
+   with no fade — exactly the visible defect this whole mechanism exists to
+   prevent. `DISPERSE_TAU` 0.07 -> 0.05 (0 of 60 fail) is a MITIGATION, NOT
+   A STRUCTURAL FIX: it widens a sampled margin. At a 0.9s gap the ramp is
+   ~0.81s, the third lands at ~0.27s and the exit aim
+   (`LULL_GONE_AT * LULL_EXIT_BY`) at ~0.248s, leaving ~22ms (~1.3 frames,
+   shorter than the dispersal ease itself) before `_lull_step`'s
+   unconditional instant `_compact` — a pre-lull state the check does not
+   sample (another song, population, no charge first, real dt jitter) can
+   still leave a fish there. Known, accepted, follow-up-worthy: make the
+   backstop disperse rather than pop, or state the exit margin in absolute
+   time. `scripts/check_fish_disperse.py` §1 keeps the check strict over the
+   states it samples; (3) the crossfade scatter is SKIPPED when the
    incoming effect adopts the fish as its own particles
    (`TRANSITION_ADOPTERS`, keyed by module basename: blackhole, orbits,
    fireworks, squiggles, eye, dancer, fish — measured, each reads the live
@@ -7070,10 +7077,13 @@ A new Matrix effect + a Fish scene that is a WHOLESALE COPY of his Orbits V2
      `stroke_speed_cap=0.4`) are DERIVED, not tuned by eye: `pulse_shape`'s
      own cycle mean is `PULSE_SHAPE_CYCLE_MEAN=0.375` (an algebraic fact of
      the shaping curve, not a measurement), so `want`'s cycle mean is
-     `min_drift_speed + stroke_speed_cap*0.375`, solved for `==1.0`.
+     approximately `min_drift_speed + stroke_speed_cap*0.375`, solved for
+     `==1.0`. FIRST-ORDER, not exact: `flap_freq` rises with speed, so the
+     stroke runs faster through the surge and the measured mean lands
+     slightly low — a bias that grows with `stroke_speed_cap`.
      Measured on the real pipeline: mean speed at the new defaults is
      17.4681 px/s against 17.4960 px/s at the dial's neutral setting
-     (0.16% off, `tests/test_fish.py::
+     (0.16% low, held within 1% by `tests/test_fish.py::
      test_default_dial_preserves_the_old_mean_speed`), and #279's negative
      control passes again unmodified (unbraked overshoot ~3px both seeds,
      matching master's own 3-5px). **The two sliders stay fully
@@ -7101,6 +7111,17 @@ A new Matrix effect + a Fish scene that is a WHOLESALE COPY of his Orbits V2
      entries AND registered in `config/effect_params.json` (Sonic's param
      discovery reads type/range from the registry), so once deployed they
      are tunable without another deploy. Help: `fish-effect`.
+   * **THE WAKE NOW SITS UNDER THE SCHOOL DURING A CHARGE OR LULL — a
+     visible change he did not ask for, shipped with this branch.** The
+     wake buffer is SCREEN space, and the old deposit
+     (`cx + p_x*sx - cos(hd)*len/2`) never subtracted the window origin the
+     body is drawn with, so whenever the view had moved (every charge and
+     lull at `camera_follow` > 0) the whole wake was laid tens of px off to
+     one side of its fish. The deposit now reads `_trail_tail_point`, which
+     shares `_trail_points` with `_draw_bodies`' rear spine — one definition
+     of where the tail is, in the body's own world->screen mapping. What
+     `scripts/check_fish_wake.py` measures on this branch is the corrected,
+     window-relative deposit, not the old offset.
    Proof: `tests/test_fish.py` (both dial endpoints, the trail on straight
    and turning paths, the rear body holding its length on swimmers, ejecta
    and a clamped school, birth backfill, the shipped default's mean-speed
@@ -7112,8 +7133,9 @@ A new Matrix effect + a Fish scene that is a WHOLESALE COPY of his Orbits V2
    flap-bounds check carries a float32 tolerance for a real, legitimate
    boundary landing (see its own comment); `scripts/check_fish_disperse.py`'s
    lull check STAYS STRICT (`== 0`) — its one real violation was traced to
-   `DISPERSE_TAU` and fixed there, not by loosening the check (see the
-   dispersal item above and `DISPERSE_TAU`'s own comment in `fish.py`).
+   `DISPERSE_TAU` and mitigated there, not by loosening the check — the
+   ~22ms residual slack at a 0.9s gap remains (see the dispersal item above
+   and `DISPERSE_TAU`'s own comment in `fish.py`).
 
 **A GAINED BODY MUST NEVER BE DEPOSITED INTO THE TRAIL** (hotfix,
 2026-09-16, his live report the same night #274 shipped: trails "at least

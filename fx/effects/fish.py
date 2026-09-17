@@ -75,16 +75,26 @@ DISPERSE_MAX_PANELS_S = 5.0  # ceiling: panel long-axes per second. Past this
 DISPERSE_TAU = 0.05      # speed ease while dispersing — far quicker than
                          # SPEED_TAU, or the derived speed arrives too late.
                          # Tightened from 0.07 by fm/spotfx-fish-body-
-                         # trails-head-tail-thrust (his ruling): 0.07 could
-                         # not always close the gap to a demanding deadline
-                         # in time at his tightest tested lull gap (0.9s),
-                         # a real regression this PR's own dynamics changes
-                         # exposed (never a pre-existing failure — proven 0
-                         # of 60 seed/gap combinations on master, 3 of 60
-                         # on this PR at 0.07, 0 of 60 at 0.05). This is a
-                         # GENERAL tightening of the whole class of
-                         # "deadline-driven speed must actually arrive in
-                         # time" margin, not a special case for thrust.
+                         # trails-head-tail-thrust (his ruling): at his
+                         # tightest tested lull gap (0.9s) 0.07 left a
+                         # straggler on the panel in 3 of 60 seed/gap
+                         # combinations on that branch (0 of 60 on master,
+                         # 0 of 60 at 0.05). A MITIGATION, NOT A STRUCTURAL
+                         # FIX: it widens a sampled margin and removes every
+                         # failure we can currently reproduce. At a 0.9s gap
+                         # the ramp is ~0.81s, the third lands at ~0.27s and
+                         # the exit aim (LULL_GONE_AT * LULL_EXIT_BY) at
+                         # ~0.248s — ~22ms (~1.3 frames) of slack, shorter
+                         # than this ease, before `_lull_step`'s hard
+                         # backstop runs its unconditional instant
+                         # `_compact`, which removes any fish still on the
+                         # panel at full brightness in one frame. Other
+                         # pre-lull states (other songs, populations, a lull
+                         # with no charge before it, real render dt jitter)
+                         # can still land a fish there. KNOWN, ACCEPTED, and
+                         # follow-up-worthy: make the backstop disperse
+                         # rather than pop, or state the exit margin in
+                         # absolute time rather than a fraction.
 DISPERSE_MIN_LEFT_S = 0.05  # the "time left" a deadline is never read below,
                          # so a missed deadline asks for the ceiling, never
                          # for infinity
@@ -300,24 +310,29 @@ SPEED_TAU = 0.28        # speed ease time constant (real acceleration) —
 # VALUES together, not the sliders themselves; moving either one off its
 # default is still free to raise or lower the mean, same as it always was.
 #
-# The constraint, derived exactly (not tuned by eye): `pulse_shape`'s own
-# mean over a full 0..2*pi cycle is PULSE_SHAPE_CYCLE_MEAN = 3/8 = 0.375
-# (mean of ((1-cos)/2)^PULSE_SHAPE_POWER at POWER=2 — a fixed algebraic
-# fact of this shaping curve, not a measurement). `want`'s own cycle mean
-# is therefore `min_drift_speed + stroke_speed_cap * PULSE_SHAPE_CYCLE_MEAN`
-# (see the speed section in draw()), and a first-order exponential ease
-# (the `tau` blend just below) tracking a periodic input has unity DC
-# gain in steady state — its OWN mean equals the input's mean regardless
-# of tau — so `p_spd`'s measured mean matches `want`'s algebraic mean
-# exactly, not merely approximately (proven on the real render pipeline in
-# tests/test_fish.py::test_default_dial_preserves_the_old_mean_speed).
+# The constraint, derived (not tuned by eye), and FIRST-ORDER: `pulse_shape`'s
+# own mean over a full 0..2*pi cycle of PHASE is PULSE_SHAPE_CYCLE_MEAN =
+# 3/8 = 0.375 (mean of ((1-cos)/2)^PULSE_SHAPE_POWER at POWER=2 — a fixed
+# algebraic fact of this shaping curve, not a measurement). `want`'s cycle
+# mean is therefore approximately `min_drift_speed + stroke_speed_cap *
+# PULSE_SHAPE_CYCLE_MEAN` (see the speed section in draw()), and a
+# first-order exponential ease (the `tau` blend just below) has unity DC
+# gain, so `p_spd`'s mean tracks `want`'s. APPROXIMATELY, NOT EXACTLY: the
+# phase does not advance at a constant rate — `flap_freq` rises with
+# `speed_norm`, i.e. with `p_spd` itself — so the stroke runs faster through
+# the surge than through the coast, the time-averaged `pulse_shape` falls a
+# little below 0.375, and the measured mean lands slightly LOW (0.16% at the
+# shipped defaults; tests/test_fish.py::
+# test_default_dial_preserves_the_old_mean_speed holds it within 1% on the
+# real render pipeline). That bias grows with `stroke_speed_cap`.
 # Solving `min_drift_speed + stroke_speed_cap * 0.375 == 1.0` for the
 # shipped `stroke_speed_cap = 0.4` gives `min_drift_speed = 0.85` (trough
-# 0.85x / peak 1.25x of the old target) — subtle, visible, mean-neutral.
-# Changing either shipped default number requires re-solving this equation
-# for the other, or the defaults will silently reintroduce a mean-speed
-# drift exactly like this one.
-PULSE_SHAPE_CYCLE_MEAN = 0.375  # = 3/8 exactly; see the block above
+# 0.85x / peak 1.25x of the old target) — subtle, visible, mean-neutral to
+# within that tolerance. Changing either shipped default number requires
+# re-solving this equation for the other (and re-measuring against that
+# test, since a larger cap widens the first-order error), or the defaults
+# will silently reintroduce a mean-speed drift exactly like this one.
+PULSE_SHAPE_CYCLE_MEAN = 0.375  # = 3/8 over phase; see the block above
 PULSE_SHAPE_POWER = 2.0  # sharpens the hump so a stroke reads as a push,
                          # not a smooth sine wobble
 THRUST_TAU = 0.09        # speed-ease time constant once any stroke cap is
@@ -581,14 +596,20 @@ LULL_LEAK_FROM = 0.4     # the school breaks into the swirl at once; the
                          # scripts/check_fish_disperse.py) ...
 LULL_LEAK_TO = 0.72      # ... the last one here ...
 LULL_EXIT_BY = 0.92      # ... and every one is aimed to be off the panel by
-                         # here, so the backstop at the third retires nothing
-                         # visible (not proven for one straggler at a 0.9 s
-                         # gap — scripts/check_fish_disperse.py section 1)
+                         # here, ahead of the backstop at the third. AIMED,
+                         # not guaranteed: at a 0.9 s gap this leaves only
+                         # ~22ms before the backstop's instant full-brightness
+                         # `_compact`. scripts/check_fish_disperse.py section
+                         # 1 holds it strict (== 0) over its sampled seeds
+                         # and gaps, which passes only with the DISPERSE_TAU
+                         # mitigation — see that constant for the residual
+                         # slack, a known, accepted limitation.
 LULL_EXIT_MIN_S = 0.3    # ... but no fish leaks later than this many SECONDS
                          # before that exit moment. A lull too short to swirl
                          # in (his real gaps run from 900 ms to 6 s) scatters
-                         # straight out instead of being retired on the panel
-                         # by the backstop (same caveat).
+                         # straight out rather than waiting to be retired on
+                         # the panel by the backstop — subject to the same
+                         # ~22ms residual slack at a 0.9 s gap (DISPERSE_TAU).
 LULL_SWIRL_W = 10.0      # tangential steer around the centre of view
 LULL_SWIRL_RING = 0.45   # ... held near this fraction of the pond radius
 LULL_SWIRL_RING_W = 4.0  # ... by a radial correction this strong
@@ -2369,25 +2390,24 @@ class Fish2d(Twod, GradientEffect):
             np.clip(out, 0, 255).astype(np.uint8), "RGB"
         )
 
-    def _trail_tail_point(self, idx, x, y, length):
-        """The TRUE tail point (SCREEN space), walked back along the
-        recorded path exactly the way `_draw_bodies`'s rear spine nodes
-        are — a single-distance (`d = length/2`, the same as `SPINE_U=1.0`
-        there) instance of that same interpolation, factored out so the
-        wake deposit (below) lays its smear at the body's own curved tail
-        during a turn instead of the old rigid heading projection. No
-        heading needed — that is the whole point of a trail-based point.
-        See `_draw_bodies`'s own docstring for the chain/interpolation
-        shape; this must stay mathematically identical to it or the wake
-        and the drawn tail will disagree about where the tail is."""
-        px = self.cx + x * self.sx - self.cam_px
-        py = self.cy + y * self.sy - self.cam_py
-        d = length * 0.5
+    def _trail_points(self, idx, px, py, d):
+        """Points walked back along each fish's recorded path, in SCREEN
+        space. `px`/`py` are the fish's current screen centres (shape k);
+        `d` (shape k x m) is the path distance behind the centre of each
+        point wanted. The chain is [current point, trail[0], trail[1],
+        ...], lying at path distances [0, acc, acc + BODY_TRAIL_STEP_PX,
+        acc + 2x, ...] behind the centre — `acc` (`p_trail_acc`) being
+        exactly how far the fish has travelled since trail[0] was laid (see
+        the push in draw()). A point at distance d is linearly interpolated
+        between whichever two chain points bracket it. The ONE definition
+        both `_draw_bodies`'s rear spine nodes and `_trail_tail_point`'s
+        wake deposit read, so the wake and the drawn tail cannot disagree
+        about where the tail is."""
         trail_x = self.cx + self.p_trail_x[idx] * self.sx - self.cam_px
         trail_y = self.cy + self.p_trail_y[idx] * self.sy - self.cam_py
         chain_x = np.concatenate([px[:, None], trail_x], axis=1)
         chain_y = np.concatenate([py[:, None], trail_y], axis=1)
-        acc = self.p_trail_acc[idx]
+        acc = self.p_trail_acc[idx][:, None]
         first = d <= acc
         idx_f = np.clip(
             (d - acc) / BODY_TRAIL_STEP_PX, 0.0, BODY_TRAIL_LEN - 1 - 1e-4
@@ -2398,14 +2418,30 @@ class Fish2d(Twod, GradientEffect):
             np.where(first, d / np.maximum(acc, 1e-6), idx_f - floor_j),
             0.0, 1.0,
         )
-        rows = np.arange(len(idx))
+        rows = np.arange(len(idx))[:, None]
         near_x = chain_x[rows, near_j]
         far_x = chain_x[rows, near_j + 1]
         near_y = chain_y[rows, near_j]
         far_y = chain_y[rows, near_j + 1]
-        tail_x = near_x + (far_x - near_x) * frac
-        tail_y = near_y + (far_y - near_y) * frac
-        return tail_x, tail_y
+        return (
+            near_x + (far_x - near_x) * frac,
+            near_y + (far_y - near_y) * frac,
+        )
+
+    def _trail_tail_point(self, idx, x, y, length):
+        """The TRUE tail point (SCREEN space): the `SPINE_U=1.0` node of
+        `_draw_bodies`, i.e. `_trail_points` at `d = length/2`. The wake
+        deposit (below) lays its smear here, so it sits at the body's own
+        curved tail during a turn instead of the old rigid heading
+        projection, and in the same world->screen mapping the body is drawn
+        in, so it sits under its fish while the window moves. No heading
+        needed — that is the whole point of a trail-based point."""
+        px = self.cx + x * self.sx - self.cam_px
+        py = self.cy + y * self.sy - self.cam_py
+        tail_x, tail_y = self._trail_points(
+            idx, px, py, (length * 0.5)[:, None]
+        )
+        return tail_x[:, 0], tail_y[:, 0]
 
     def _draw_bodies(self, frame, idx, x, y, hd, bright, half_w, flap_amp,
                      grad, use_trail=True):
@@ -2442,37 +2478,12 @@ class Fish2d(Twod, GradientEffect):
         base_y[:, :n_front] = py[:, None] + along_front * sin_h[:, None]
         if n_front < SPINE_U.size:
             # walk the trailing nodes back along the recorded path instead
-            # of along the current heading: `chain` is [current point,
-            # trail[0], trail[1], ...], lying at path distances [0, acc,
-            # acc + BODY_TRAIL_STEP_PX, acc + 2x, ...] behind the CENTER —
-            # `acc` (`p_trail_acc`) being exactly how far the fish has
-            # travelled since trail[0] was laid (see the push in draw()).
-            # A rear node at distance d is linearly interpolated between
-            # whichever two chain points bracket it.
-            trail_x = self.cx + self.p_trail_x[idx] * self.sx - self.cam_px
-            trail_y = self.cy + self.p_trail_y[idx] * self.sy - self.cam_py
-            chain_x = np.concatenate([px[:, None], trail_x], axis=1)
-            chain_y = np.concatenate([py[:, None], trail_y], axis=1)
+            # of along the current heading (see _trail_points)
             rear_u = SPINE_U[n_front:]
             d = (rear_u[None, :] - 0.5) * length[:, None]
-            acc = self.p_trail_acc[idx][:, None]
-            first = d <= acc
-            idx_f = np.clip(
-                (d - acc) / BODY_TRAIL_STEP_PX, 0.0, BODY_TRAIL_LEN - 1 - 1e-4
+            base_x[:, n_front:], base_y[:, n_front:] = self._trail_points(
+                idx, px, py, d
             )
-            floor_j = np.floor(idx_f).astype(np.int32)
-            near_j = np.where(first, 0, floor_j + 1)
-            frac = np.clip(
-                np.where(first, d / np.maximum(acc, 1e-6), idx_f - floor_j),
-                0.0, 1.0,
-            )
-            rows = np.arange(k)[:, None]
-            near_x = chain_x[rows, near_j]
-            far_x = chain_x[rows, near_j + 1]
-            near_y = chain_y[rows, near_j]
-            far_y = chain_y[rows, near_j + 1]
-            base_x[:, n_front:] = near_x + (far_x - near_x) * frac
-            base_y[:, n_front:] = near_y + (far_y - near_y) * frac
 
         lat = (
             flap_amp[:, None]
@@ -3292,12 +3303,16 @@ class Fish2d(Twod, GradientEffect):
         if laying.size and self.ripple_amount > 0.0 and self.wake is not None:
             body_len = half_w[laying] * 2.0 * self.body_aspect
             # the deposit is laid at the TRUE tail (the same recorded-path
-            # point _draw_bodies draws, via _trail_tail_point — found by
-            # review: laying it at the old rigid heading projection put the
-            # wake ~2px outside the drawn tail during a real turn, the same
-            # facing-the-tangent effect the body-trail rework was built to
-            # remove), sized by the motion that made it: the body's own
-            # length and the tail's lateral throw
+            # point _draw_bodies draws, via _trail_tail_point), sized by the
+            # motion that made it: the body's own length and the tail's
+            # lateral throw. WHERE IT LANDS CHANGED in fm/spotfx-fish-body-
+            # trails-head-tail-thrust, and not only through a turn: the
+            # wake buffer is SCREEN space, but the old deposit
+            # (`cx + p_x*sx - cos(hd)*len/2`) never subtracted the window
+            # origin the body is drawn with — so whenever the view had
+            # moved (every charge and lull at camera_follow > 0) the whole
+            # wake was laid off to one side of its school by the window's
+            # own displacement, tens of px. It now sits under the school.
             tail_px, tail_py = self._trail_tail_point(
                 laying, self.p_x[:n][laying], self.p_y[:n][laying], body_len,
             )

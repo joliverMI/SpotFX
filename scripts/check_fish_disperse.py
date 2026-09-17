@@ -231,14 +231,15 @@ def section_lull(base):
             # fish at full brightness with no fade, so a straggler counted
             # here would vanish ON SCREEN, exactly the visible pop his
             # "never fade, disperse properly" ask exists to prevent.
-            # ROOT CAUSE, found and fixed: `DISPERSE_TAU` (0.07) could not
-            # always close the gap to a demanding deadline-driven speed in
-            # time at his tightest tested gap — tightened to 0.05 (0 of 60
-            # seed/gap combinations fail at 0.05 where 3 of 60 failed at
-            # 0.07; master itself is 0 of 60 at its own 0.07, since this PR's
-            # dynamics changes are what pushed a pre-existing, already-thin
-            # margin over the edge for specific seeds — see DISPERSE_TAU's
-            # own comment in fish.py).
+            # MITIGATED, NOT STRUCTURALLY FIXED: `DISPERSE_TAU` 0.07 -> 0.05
+            # (0 of 60 seed/gap combinations fail at 0.05 where 3 of 60
+            # failed at 0.07 on that branch; master is 0 of 60 at its own
+            # 0.07). It widens a sampled margin. At the 0.9s gap only ~22ms
+            # remains between the exit aim and the backstop's instant
+            # full-brightness `_compact`, so a pre-lull state this sweep
+            # does not sample can still leave a straggler there — a known,
+            # accepted limitation, see DISPERSE_TAU's own comment in
+            # fish.py.
             check(last_before == 0, f"gap {gap}s seed {seed}: every fish is "
                   "OFF the panel before the third's backstop runs")
             check(int(vis[f >= third].max(initial=0)) == 0,
