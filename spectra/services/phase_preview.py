@@ -217,7 +217,10 @@ class PhaseSequenceProgram(flare_preview_hold.PreviewProgram):
     make — so the effect-side choreography (blackhole's swallow, orbits'
     collapse, fireworks' rockets, the eye's lids) is the vendored code
     itself, exactly as in the show. The gap is threaded through, so the
-    ramp the room renders is the ramp the ruler drew.
+    ramp the room renders is the ramp the ruler drew. It fires as the
+    TRIGGER's relocated fire (anchor_relocated=True): each cue already sits
+    at its band's anchor, the same relocation tick() applies, so a band's
+    kinds land at their own moments here exactly as they do in the show.
 
     NO NEW RELEASE QUEUE. on_event can arm the momentary-release queue, the
     colour-rotate queue and a band's staggered kind batches (scene_response's
@@ -251,6 +254,7 @@ class PhaseSequenceProgram(flare_preview_hold.PreviewProgram):
         if step not in SEQUENCE:
             raise ValueError(f"unknown drop-sequence step: {step!r}")
         gap_ms = self.gaps.get(step) if step in PHASE_RAMP_STRETCH_CLASSES else None
-        record = await ctx.responder.on_event(step, ctx.intensity, gap_ms)
+        record = await ctx.responder.on_event(step, ctx.intensity, gap_ms,
+                                              anchor_relocated=True)
         return {"result": "phase_fired", "event_class": step,
                 "gap_ms": gap_ms, "record": record}

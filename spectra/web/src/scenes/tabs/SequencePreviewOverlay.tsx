@@ -187,9 +187,11 @@ export default function SequencePreviewOverlay({ scene, onClose }: {
                 </div>
               ))}
               <div style={{ marginTop: 6, color: 'var(--text-muted)' }}>
-                The marks here aren't draggable: a band's offset is shared by every flare kind
-                attached to it, so there's no single kind to write a drag to. Retime one from that
-                kind's own ▶ Preview on the Response tab and it shows up here.
+                The marks here aren't draggable: each mark is its band's anchor, the earliest offset
+                any of its flare kinds authored, while every kind keeps its own offset, so there's no
+                single kind to write a drag to. Retime one from that kind's own ▶ Preview on the
+                Response tab and it shows up here; kinds authored later than the anchor land that
+                much after the mark.
               </div>
             </div>
           </>

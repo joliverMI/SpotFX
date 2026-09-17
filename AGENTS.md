@@ -3013,21 +3013,32 @@ The fixed dice -> permanent -> momentary -> gain -> colour order still
 governs collisions WITHIN one batch (so the per-fire singletons — one dice
 roll, one colour jump — are now per batch); two kinds staggered into
 DIFFERENT batches are deliberately reordered in real time — that IS the
-feature. Four rules ride with it, all in `scene_response.py`'s module
-docstring: a batch is due at the fire's START + its delay, never after
+feature. ONLY A FIRE `tick()` ALREADY RELOCATED BY THE ANCHOR STAGGERS
+(`on_event(..., anchor_relocated=True)`, passed as `via_trigger` by
+`engine.fire_response_event`, and by the drop-sequence preview that draws
+that same relocation): a bridge-classified flare, `on_update` (dwell's
+deferral and the `fire_scene_update` action) and `POST /api/engine/event`
+run their band at their own un-moved moment, so they fire it ATOMICALLY
+exactly as before — measuring from the anchor there would hold 0-offset
+band-mates behind a mark nothing relocated. Four rules ride with it, all
+in `scene_response.py`'s module docstring: a batch is due at the fire's START + its delay, never after
 the inline burst; a batch is a fire in miniature (own `_fire_seq`,
 captured once and threaded to every release it pushes, and no other fire
 may arm or schedule its releases while it is still in flight —
 `_fires_in_flight`; `engine._schedule_fire_tail` schedules what it armed once
 it ends — the kind-batch
-queue is the FOURTH queue every drain point must schedule, including
+queue is the third queue every drain point must schedule, including
 `flare_preview_hold` and `POST /api/engine/event`); a woken batch re-checks
 the gate its fire passed and SKIPS (never fires) onto a changed scene;
 and every outcome lands in `responses.kind_batch_log` (landed / skipped_* /
 error). `fire_kind` (the isolated single-kind preview) is untouched: a
 lone kind's own anchor is itself, so its delay is always 0. Known,
 pre-existing, out of scope: in an all-positive-offset band a 0-kind is
-clamped and fires late while its preview draws it on the mark. Spec:
+clamped and fires late while its preview draws it on the mark; and the
+automatic lead (`_response_switch_lead_ms`) stays BAND-wide, subtracted
+once from the whole fire's start, so a kind sharing a band with a smooth
+glide or a colour rotate fires earlier than its own preview's per-kind
+head start shows. Spec:
 `tests/test_flare_per_kind_stagger.py`, `tests/
 test_flare_kind_batch_lifecycle.py`, `tests/
 test_flare_preview_shows_stagger.py`.

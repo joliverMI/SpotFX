@@ -10,7 +10,12 @@ scratch responder installed in place of the engine singleton (the
 tests/test_preview_holds_the_show.py precedent), never a copy of their
 scheduling shape. The show-side gate proof counts writes at fx_seam AND on
 the response engine's own executor, the standing "prove every hold from
-the show side" bar."""
+the show side" bar.
+
+A batch only exists on a fire tick() already relocated by the band's
+anchor — fire_response_event(via_trigger=True) and the drop-sequence
+preview; section 9 proves every other entry point fires the band
+atomically."""
 from __future__ import annotations
 
 import asyncio
@@ -177,7 +182,8 @@ def test_a_batch_is_due_from_the_fire_start_not_the_end_of_its_burst(event_class
                             _SlowExecutor(clock=clock))
     clock.advance_to(10.0)
 
-    record = asyncio.run(responder.on_event(event_class, 0.8))
+    record = asyncio.run(responder.on_event(event_class, 0.8,
+                                            anchor_relocated=True))
 
     batches = responder.take_kind_batch_schedule()
     assert len(batches) == 1
@@ -196,7 +202,7 @@ def test_a_staggered_momentary_kind_releases_on_schedule(monkeypatch):
     responder, executor = _install(monkeypatch, scene)
 
     async def main():
-        await engine.fire_response_event("flare", 0.8)
+        await engine.fire_response_event("flare", 0.8, via_trigger=True)
         assert _written(executor, "spin") == []
         await asyncio.sleep(0.6)
 
@@ -218,7 +224,7 @@ def test_a_preview_hold_opened_mid_stagger_stops_the_batch_at_the_seam(monkeypat
     held_kind = scene.flare_kinds[0]
 
     async def main():
-        await engine.fire_response_event("flare", 0.8)
+        await engine.fire_response_event("flare", 0.8, via_trigger=True)
         # The hold opens INSIDE the batch's 100ms delay window, exactly the
         # way spectra/api/flare_preview.py opens one.
         await fph.open_hold(scene, held_kind, 0.8, heartbeat_timeout_s=60.0)
@@ -236,7 +242,7 @@ def test_a_preview_hold_opened_mid_stagger_stops_the_batch_at_the_seam(monkeypat
         # Released, the same fire's batch lands — the corpus was live.
         preview_pause.clear()
         await fph.close_hold()
-        await engine.fire_response_event("flare", 0.8)
+        await engine.fire_response_event("flare", 0.8, via_trigger=True)
         await asyncio.sleep(0.3)
         assert _written(executor, "spin") == [pytest.approx(SPIN_SPIKE)]
         assert responder.kind_batch_log[-1]["outcome"] == "landed"
@@ -244,17 +250,13 @@ def test_a_preview_hold_opened_mid_stagger_stops_the_batch_at_the_seam(monkeypat
     asyncio.run(main())
 
 
-@pytest.mark.parametrize("path", ["response", "update"])
-def test_a_scene_change_mode_closed_mid_stagger_stops_the_batch(monkeypatch, path):
+def test_a_scene_change_mode_closed_mid_stagger_stops_the_batch(monkeypatch):
     from spectra.services import engine, room_controls
     scene = _scene()
     responder, executor = _install(monkeypatch, scene)
 
     async def main():
-        if path == "response":
-            await engine.fire_response_event("flare", 0.8)
-        else:
-            await engine.fire_scene_update_event(0.4)
+        await engine.fire_response_event("flare", 0.8, via_trigger=True)
         assert _written(executor, "star")
         room_controls.save_room_controls(
             room_controls.RoomControlState(scene_change_mode="transitions"))
@@ -280,7 +282,7 @@ def test_a_batch_is_skipped_when_the_scene_changed_before_it_woke(refire):
     _o, other_writes = _scratch(other, clock, RecordingExecutor(clock=clock))
 
     async def main():
-        await responder.on_event("flare", 0.8)
+        await responder.on_event("flare", 0.8, anchor_relocated=True)
         (batch,) = responder.take_kind_batch_schedule()
         if refire:
             responder.conductor.on_scene_fire(other, other_writes)
@@ -313,7 +315,7 @@ def test_a_batch_that_raises_is_logged_and_recorded(monkeypatch, caplog):
         monkeypatch, _scene(), _SpinFails(clock=time.monotonic))
 
     async def main():
-        await engine.fire_response_event("flare", 0.8)
+        await engine.fire_response_event("flare", 0.8, via_trigger=True)
         await asyncio.sleep(0.3)
 
     with caplog.at_level(logging.ERROR):
@@ -355,19 +357,23 @@ def test_the_drop_sequence_preview_lands_a_charge_bands_staggered_kind(seam):
     asyncio.run(main())
 
 
-# ── 7. the manual event injector settles batches immediately ───────────────
+# ── 7. the manual event injector is not relocated: its band is atomic ──────
 
-def test_the_engine_event_route_runs_staggered_batches_before_returning(monkeypatch):
+@pytest.mark.parametrize("event_class", ["flare", "update"])
+def test_the_engine_event_route_fires_the_band_atomically(monkeypatch, event_class):
     from spectra.api import engine as engine_api
     responder, executor = _install(monkeypatch, _scene())
 
     async def main():
         return await engine_api.post_event(
-            engine_api.EventRequest(**{"class": "flare", "intensity": 0.8}))
+            engine_api.EventRequest(**{"class": event_class, "intensity": 0.4}))
 
     body = asyncio.run(main())
-    assert [b["outcome"] for b in body["kind_batches"]] == ["landed"]
+    assert body["kind_batches"] == []
+    assert "deferred_kinds" not in body
+    assert {k["name"] for k in body["kinds"]} == {"Kind A", "Kind B"}
     assert responder.take_kind_batch_schedule() == []
+    assert _written(executor, "star") == [pytest.approx(STAR_TARGET)]
     assert _written(executor, "spin") == [pytest.approx(SPIN_SPIKE)]
 
 
@@ -434,11 +440,11 @@ def test_an_overlapping_fire_never_arms_a_staggered_batchs_release(monkeypatch):
     responder, executor = _install(monkeypatch, scene, _SlowFixture())
 
     async def main():
-        await engine.fire_response_event("flare", 0.2)
+        await engine.fire_response_event("flare", 0.2, via_trigger=True)
         await asyncio.sleep(0.2)
         # The batch's spin spike was issued ~100ms after the first fire and
         # is still on its way out; this second fire starts and ends inside it.
-        await engine.fire_response_event("flare", 0.9)
+        await engine.fire_response_event("flare", 0.9, via_trigger=True)
         assert _written(executor, "star") == [pytest.approx(0.5), pytest.approx(0.7)]
         assert _written(executor, "spin") == [], "the spike must still be in flight"
         await asyncio.sleep(1.4)
@@ -456,3 +462,38 @@ def test_an_overlapping_fire_never_arms_a_staggered_batchs_release(monkeypatch):
                                           pytest.approx(SPIN_BASE)]
     assert responder.pending_release_keys() == set()
     assert [e["outcome"] for e in responder.kind_batch_log] == ["landed"]
+
+
+# ── 9. every entry point tick() did not relocate fires its band atomically ─
+
+@pytest.mark.parametrize("path", ["bridge", "update"])
+def test_an_unrelocated_engine_fire_lands_every_kind_before_it_returns(monkeypatch, path):
+    """The bridge's classified flare (via_trigger=False) and the update
+    choke point (dwell's deferral, the fire_scene_update action) run their
+    band at their own moment with nothing moved, so the -100/0 band lands
+    BOTH kinds inside the fire, queues nothing, and nothing lands later.
+    The via_trigger=True run is the control: the same band staggers."""
+    from spectra.services import engine
+    scene = _scene()
+    responder, executor = _install(monkeypatch, scene)
+
+    async def main():
+        if path == "bridge":
+            await engine.fire_response_event("flare", 0.8)
+        else:
+            await engine.fire_scene_update_event(0.4)
+        assert _written(executor, "star") == [pytest.approx(STAR_TARGET)]
+        assert _written(executor, "spin") == [pytest.approx(SPIN_SPIKE)]
+        writes_after_fire = len(executor.writes)
+        await asyncio.sleep(0.3)
+        assert len(executor.writes) == writes_after_fire
+        assert list(responder.kind_batch_log) == []
+        assert all("deferred_kinds" not in r for r in responder.surges)
+
+        await engine.fire_response_event("flare", 0.8, via_trigger=True)
+        assert len(_written(executor, "spin")) == 1, "control: B must wait"
+        await asyncio.sleep(0.3)
+        assert len(_written(executor, "spin")) == 2
+        assert [e["outcome"] for e in responder.kind_batch_log] == ["landed"]
+
+    asyncio.run(main())

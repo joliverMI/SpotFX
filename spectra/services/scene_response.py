@@ -269,6 +269,22 @@ deliberately reordered in real time — that IS the feature, and it is also
 why the per-fire singletons (one dice roll, one colour-set jump, one
 rotation, one burst, one rush) are now one PER BATCH.
 
+ONLY A FIRE ALREADY RELOCATED BY THE ANCHOR STAGGERS (on_event's
+`anchor_relocated`, default False). Every delay above is measured FROM the
+anchor, so it is only honest on a fire whose start was already moved to
+that anchor: trigger_engine.tick()'s fire_response dispatch
+(engine.fire_response_event with via_trigger=True) and the drop-sequence
+preview that draws and fires exactly that relocation (phase_preview).
+Every other path runs the band at its own moment with nothing moved — a
+bridge-classified flare (via_trigger=False), on_update (dwell's deferral
+and the fire_scene_update trigger action alike), POST /api/engine/event —
+and there the band fires ATOMICALLY, exactly as before this feature
+existed: one _run_kinds over every attached kind, no anchor, no
+PendingKindBatch, whatever offsets its kinds carry. Measuring from the
+anchor on those paths would hold every 0-offset band-mate of a -100 kind
+100ms behind a mark nothing relocated, and would make paths that never
+honoured an authored offset start acting on one.
+
 A batch's `due_at` is measured from the fire's START (the clock read at
 the top of on_event/on_update, before _drive_phase and before the inline
 group's writes) — the RELEASE OWNERSHIP rule above, applied to the
@@ -941,7 +957,13 @@ class ResponseEngine:
     # ── the event ────────────────────────────────────────────────────────────
 
     async def on_event(self, event_class: ResponseClass,
-                       intensity: float, gap_ms: Optional[int] = None) -> dict:
+                       intensity: float, gap_ms: Optional[int] = None, *,
+                       anchor_relocated: bool = False) -> dict:
+        """`anchor_relocated` is True only for a fire whose start the caller
+        already moved to the band's anchor (module docstring, "ONLY A FIRE
+        ALREADY RELOCATED BY THE ANCHOR STAGGERS") — the one path whose
+        kinds each land at their own moment. False fires the band
+        atomically."""
         scene = self.conductor.scene
         started_at = self._clock()
         record: dict[str, Any] = {
@@ -969,14 +991,16 @@ class ResponseEngine:
         record["band"] = {"intensity_min": band.intensity_min,
                           "intensity_max": band.intensity_max}
         await self._execute_band(scene, band, intensity, record,
-                                 started_at=started_at)
+                                 started_at=started_at,
+                                 anchor_relocated=anchor_relocated)
         self.surges.append(record)
         await self._broadcast({"type": "surge", **record})
         return record
 
     async def _execute_band(self, scene: SceneV2, band: FlareBand,
                             intensity: float, record: dict[str, Any], *,
-                            started_at: Optional[float] = None) -> None:
+                            started_at: Optional[float] = None,
+                            anchor_relocated: bool = False) -> None:
         """Run every kind attached to an already-selected band at `intensity`
         and fold the results into `record` — the shared tail of on_event
         (a genuine flare/charge/lull/drop) and on_update's placeholder
@@ -990,13 +1014,16 @@ class ResponseEngine:
         behaviour, byte-identical for every band that predates the field).
 
         `started_at` is the fire's START on this engine's clock — what every
-        staggered batch's due_at is measured from (None = now)."""
+        staggered batch's due_at is measured from (None = now).
+        `anchor_relocated` decides whether the band staggers at all (see
+        _execute_band_locked)."""
         if started_at is None:
             started_at = self._clock()
         fire_seq = self._begin_fire()
         try:
             await self._execute_band_locked(scene, band, intensity, record,
-                                            started_at, fire_seq)
+                                            started_at, fire_seq,
+                                            anchor_relocated)
         finally:
             self._end_fire(fire_seq)
 
@@ -1014,9 +1041,15 @@ class ResponseEngine:
 
     async def _execute_band_locked(self, scene: SceneV2, band: FlareBand,
                                    intensity: float, record: dict[str, Any],
-                                   started_at: float, fire_seq: int) -> None:
+                                   started_at: float, fire_seq: int,
+                                   anchor_relocated: bool = False) -> None:
         """PER-FLARE TRIGGER MOMENT (module docstring, "PER-FLARE TRIGGER
-        MOMENT"): splits the band's already lane-picked, enabled kinds by
+        MOMENT"): on a fire NOT already relocated by the band's anchor
+        (`anchor_relocated` False — every path but trigger_engine.tick()'s
+        fire_response dispatch and its drop-sequence preview) the band
+        fires atomically, one _run_kinds over every attached kind, exactly
+        as before the stagger existed. On a relocated fire it splits the
+        band's already lane-picked, enabled kinds by
         each one's own delay relative to the band's anchor
         (_band_anchor_ms — the SAME value band_trigger_offset_ms already
         used to relocate the whole fire at tick() time, so the two never
@@ -1048,6 +1081,10 @@ class ResponseEngine:
         # (the "check each choke point individually, never by family" rule).
         attached = [(declared[n], band.kinds[n]) for n in picked_names
                     if declared[n].enabled]
+        if not anchor_relocated:
+            record.update(await self._run_kinds(scene, attached, intensity,
+                                                fire_seq))
+            return
         anchor_ms = _band_anchor_ms(band, declared)
         now_kinds: list[tuple[FlareKind, float]] = []
         deferred: dict[int, list[tuple[FlareKind, float]]] = {}

@@ -8,6 +8,12 @@ waits `its own offset - anchor` (always >= 0) before executing — see
 spectra/services/scene_response.py's module docstring, "PER-FLARE TRIGGER
 MOMENT", for the full mechanism.
 
+The stagger exists only on a fire already relocated by the band's anchor
+(`on_event(..., anchor_relocated=True)` — trigger_engine.tick()'s
+fire_response dispatch); every test that exercises it says so explicitly.
+Every other path fires the band atomically, proven byte-identical against
+the pinned pre-change module in section 1b.
+
 Real vendored pipeline (fx.headless + FacadeExecutor, audio silenced), a
 REAL asyncio clock wherever timing is the claim — same discipline as
 tests/test_reverse_flare_release.py, whose own scheduling-shape replicas
@@ -23,6 +29,8 @@ import sys
 import time
 from pathlib import Path
 from random import Random
+
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -122,10 +130,10 @@ async def _run_kind_batch(responder, batch) -> None:
 
 
 async def _fire_band(responder, event_class="flare", intensity=0.5) -> list:
-    """engine.py's fire_response_event shape: on_event, then one task per
-    take_kind_batch_schedule() batch, sleeping until its own absolute due
-    time."""
-    await responder.on_event(event_class, intensity)
+    """engine.py's fire_response_event(via_trigger=True) shape: the
+    relocated on_event, then one task per take_kind_batch_schedule()
+    batch, sleeping until its own absolute due time."""
+    await responder.on_event(event_class, intensity, anchor_relocated=True)
     return [asyncio.create_task(_run_kind_batch(responder, b))
             for b in responder.take_kind_batch_schedule()]
 
@@ -186,25 +194,28 @@ class _WriteCostClock:
         return self.t
 
 
-def _every_kind_scene():
+def _every_kind_scene(offsets: dict[str, int] | None = None):
     """One band, every kind family that needs no colour-set storage — dice,
     a smooth (glide) and a non-smooth (jump) permanent move, a momentary
-    spike with its own hold, a momentary gain and a colour rotate — all at
-    the untouched default offset 0."""
+    spike with its own hold, a momentary gain and a colour rotate — at the
+    untouched default offset 0 unless `offsets` names one."""
+    offsets = offsets or {}
     from spectra.models.binding import ValueBinding
     from spectra.models.scene import (FlareBand, FlareKind, ResponseSpec,
                                       SceneDeviceConfig, SceneV2)
-    kinds = [
-        FlareKind(name="Dice", type="drift_jump", jump="dice"),
-        FlareKind(name="Star Patch", type="permanent",
-                  params={"star": {"mode": "absolute", "value": 0.8}}),
-        FlareKind(name="Edges Patch", type="permanent",
-                  params={"edges": {"mode": "absolute", "value": 4}}),
-        FlareKind(name="Spin Spike", type="momentary", hold_ms=300,
-                  params={"spin": {"mode": "absolute", "value": 0.9}}),
-        FlareKind(name="Gain Pulse", type="momentary", hold_ms=200, gain=0.5),
-        FlareKind(name="Rotate", type="color_rotate"),
+    specs = [
+        dict(name="Dice", type="drift_jump", jump="dice"),
+        dict(name="Star Patch", type="permanent",
+             params={"star": {"mode": "absolute", "value": 0.8}}),
+        dict(name="Edges Patch", type="permanent",
+             params={"edges": {"mode": "absolute", "value": 4}}),
+        dict(name="Spin Spike", type="momentary", hold_ms=300,
+             params={"spin": {"mode": "absolute", "value": 0.9}}),
+        dict(name="Gain Pulse", type="momentary", hold_ms=200, gain=0.5),
+        dict(name="Rotate", type="color_rotate"),
     ]
+    kinds = [FlareKind(**spec, trigger_offset_ms=offsets.get(spec["name"], 0))
+             for spec in specs]
     return SceneV2(
         name="Byte Identity",
         devices=[SceneDeviceConfig(
@@ -220,9 +231,14 @@ def _every_kind_scene():
                              "Gain Pulse": 0.6, "Rotate": 1.0})])})
 
 
-async def _one_fire_and_its_releases(engine_cls, scene):
-    """The whole observable life of one fire: on_event, then every release
-    and colour rotate it armed, drained at their own due times."""
+async def _one_fire_and_its_releases(engine_cls, scene, fire=None):
+    """The whole observable life of one fire: `fire(responder)` (on_event by
+    default), then every release and colour rotate it armed, drained at
+    their own due times. `kind_batches` is every PendingKindBatch the fire
+    queued, checked after the fire and again once its releases drained
+    (always [] for the pinned module, which has no such queue)."""
+    if fire is None:
+        fire = lambda r: r.on_event("flare", 0.5)
     from spectra.services import room_controls as rc
     from spectra.services.drift_conductor import DriftConductor
     from spectra.services.fx_executor import RecordingExecutor
@@ -251,7 +267,12 @@ async def _one_fire_and_its_releases(engine_cls, scene):
         "virtual_id": VID, "effect_type": "radial", "config": dict(config),
         "entry_id": "dev1", "color_mode": "set"}])
 
-    record = await responder.on_event("flare", 0.5)
+    def _take_batches():
+        take = getattr(responder, "take_kind_batch_schedule", None)
+        return take() if take is not None else []
+
+    record = await fire(responder)
+    kind_batches = list(_take_batches())
     groups = responder.take_release_schedule()
     for group in groups:
         clock.t = max(clock.t, group.due_at)
@@ -260,6 +281,7 @@ async def _one_fire_and_its_releases(engine_cls, scene):
     for dwell_s in responder.pending_color_rotate_holds():
         clock.t = round(clock.t + dwell_s, 6)
         await responder.flush_color_rotates(dwell_s)
+    kind_batches += _take_batches()
 
     writes = [{k: w[k] for k in ("seq", "at", "kind", "virtual_id",
                                  "effect_type", "params", "duration_ms")}
@@ -268,7 +290,8 @@ async def _one_fire_and_its_releases(engine_cls, scene):
             "writes": writes,
             "groups": [tuple(g) for g in groups],
             "pending_releases": responder.pending_release_keys(),
-            "param_baseline": dict(conductor.virtuals[VID].param_baseline)}
+            "param_baseline": dict(conductor.virtuals[VID].param_baseline),
+            "kind_batches": kind_batches}
 
 
 def test_byte_identical_when_every_kind_is_at_the_default_offset():
@@ -283,8 +306,11 @@ def test_byte_identical_when_every_kind_is_at_the_default_offset():
     scene = _every_kind_scene()
 
     before = asyncio.run(_one_fire_and_its_releases(baseline.ResponseEngine, scene))
-    after = asyncio.run(_one_fire_and_its_releases(scene_response.ResponseEngine, scene))
+    after = asyncio.run(_one_fire_and_its_releases(
+        scene_response.ResponseEngine, scene,
+        fire=lambda r: r.on_event("flare", 0.5, anchor_relocated=True)))
 
+    assert after["kind_batches"] == []
     kinds_fired = {k["name"] for k in json.loads(after["record"])["kinds"]}
     assert kinds_fired == {"Dice", "Star Patch", "Edges Patch", "Spin Spike",
                            "Gain Pulse", "Rotate"}
@@ -295,6 +321,58 @@ def test_byte_identical_when_every_kind_is_at_the_default_offset():
     assert after["groups"] == before["groups"]
     assert after["pending_releases"] == before["pending_releases"] == set()
     assert after["param_baseline"] == before["param_baseline"]
+
+
+# ── 1b. a fire nothing relocated runs its band ATOMICALLY, whatever its  ────
+#       kinds' offsets — byte-identical to the pinned pre-change module ─────
+
+UNEQUAL_OFFSETS = {"Dice": -100, "Star Patch": 0, "Edges Patch": 50,
+                   "Spin Spike": -40, "Gain Pulse": 120, "Rotate": 0}
+
+UNRELOCATED_FIRES = {
+    # A bridge-classified flare / POST /api/engine/event: on_event with no
+    # relocation.
+    "on_event": lambda r: r.on_event("flare", 0.5),
+    # dwell's deferral and the fire_scene_update trigger action.
+    "on_update": lambda r: r.on_update(0.25),
+}
+
+
+@pytest.mark.parametrize("path", sorted(UNRELOCATED_FIRES))
+def test_an_unrelocated_fire_runs_its_band_atomically_whatever_the_offsets(path):
+    """Real, nonzero, UNEQUAL offsets on every kind in the band. A fire that
+    did not come through tick()'s anchor relocation must fire the band
+    exactly as the pinned pre-change module does — same writes in the same
+    order and timestamps, same record, same release schedule, same carried
+    state — and queue no PendingKindBatch at any point. The control run
+    proves the scene is not inert: the SAME band on the relocated path
+    staggers."""
+    from spectra.services import scene_response
+    baseline = _baseline_scene_response()
+    scene = _every_kind_scene(UNEQUAL_OFFSETS)
+    fire = UNRELOCATED_FIRES[path]
+
+    before = asyncio.run(_one_fire_and_its_releases(
+        baseline.ResponseEngine, scene, fire=fire))
+    after = asyncio.run(_one_fire_and_its_releases(
+        scene_response.ResponseEngine, scene, fire=fire))
+
+    kinds_fired = {k["name"] for k in json.loads(after["record"])["kinds"]}
+    assert kinds_fired == set(UNEQUAL_OFFSETS)
+    assert "deferred_kinds" not in json.loads(after["record"])
+    assert after["kind_batches"] == []
+    assert after["groups"], "the momentary kinds must have armed releases"
+    assert after["writes"] == before["writes"]
+    assert after["record"] == before["record"]
+    assert after["groups"] == before["groups"]
+    assert after["pending_releases"] == before["pending_releases"] == set()
+    assert after["param_baseline"] == before["param_baseline"]
+
+    relocated = asyncio.run(_one_fire_and_its_releases(
+        scene_response.ResponseEngine, scene,
+        fire=lambda r: r.on_event("flare", 0.5, anchor_relocated=True)))
+    assert relocated["kind_batches"], "control: the relocated fire must stagger"
+    assert relocated["writes"] != before["writes"]
 
 
 # ── 2. the swim-burst shape: a negative offset fires NOW, the band-mate  ────
@@ -382,7 +460,7 @@ async def _check_three_kind(scene):
             executor, conductor, responder = _engine(_Wall())
             _fire(conductor, scene, CFG)
             t0 = time.monotonic()
-            await responder.on_event("flare", 0.5)
+            await responder.on_event("flare", 0.5, anchor_relocated=True)
             assert _params_written(executor, "swirl")       # A ran now
             assert not _params_written(executor, "horizon_scale")  # B waits
             assert not _params_written(executor, "base_speed")    # C waits
@@ -414,7 +492,8 @@ def test_all_positive_offsets_never_produce_a_negative_delay(tmp_path):
             headless.attach_effect(host, virtual, "blackhole", CFG)
             executor, conductor, responder = _engine(_Wall())
             _fire(conductor, scene, CFG)
-            record = await responder.on_event("flare", 0.5)
+            record = await responder.on_event("flare", 0.5,
+                                              anchor_relocated=True)
             assert responder.take_kind_batch_schedule() == []
             names = {k["name"] for k in record["kinds"]}
             assert names == {"Kind A", "Kind B"}
@@ -460,7 +539,8 @@ def test_same_param_collision_within_one_batch_keeps_fixed_order(tmp_path):
             headless.attach_effect(host, virtual, "blackhole", CFG)
             executor, conductor, responder = _engine(_Wall())
             _fire(conductor, scene, CFG)
-            record = await responder.on_event("flare", 0.5)
+            record = await responder.on_event("flare", 0.5,
+                                              anchor_relocated=True)
             assert responder.take_kind_batch_schedule() == []
             writes = _params_written(executor, "swirl")
             assert writes, "same-delay batch should still run inline"

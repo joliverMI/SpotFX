@@ -43,7 +43,10 @@ task in spectra/app.py — PR #186) backstops a release that never lands.
 PER-FLARE TRIGGER MOMENT (2026-09-16): a THIRD schedule shares this same
 shape — responses.take_kind_batch_schedule() hands back the kinds a fire
 staggered to a later moment than the band's own anchor (scene_response.py's
-module docstring, "PER-FLARE TRIGGER MOMENT"); one task per batch, sleeping
+module docstring, "PER-FLARE TRIGGER MOMENT") — only ever a via_trigger
+fire_response_event, the one fire tick() already relocated by that anchor;
+the bridge's flare and on_update fire their band atomically and queue no
+batch. One task per batch, sleeping
 until its own absolute due_at, then responses.run_kind_batch(batch). All
 three schedules are spawned by ONE tail (_schedule_fire_tail), called after
 on_event/on_update AND after every batch runs, so whatever a batch arms is
@@ -135,11 +138,19 @@ async def fire_response_event(event_class: str, intensity: float,
     TriggerEngine._next_trigger_gap_ms) and passes it through; the
     bridge's own classified-event call (no SPECTRA trigger context) and a
     manual /api/engine/event test-fire both omit it, its documented
-    default — an honest "unknown," not a zero."""
+    default — an honest "unknown," not a zero.
+
+    via_trigger is also what tells scene_response whether this fire was
+    already relocated by its band's anchor: only trigger_engine.tick()
+    moves a fire_response trigger's target by band_trigger_offset_ms, so
+    only that caller's band staggers its kinds to their own moments; the
+    bridge's band fires atomically (scene_response's "ONLY A FIRE ALREADY
+    RELOCATED BY THE ANCHOR STAGGERS")."""
     from spectra.services import fire_history
     if _response_gate(via_trigger) is not None:
         return
-    await responses.on_event(event_class, intensity, gap_ms)
+    await responses.on_event(event_class, intensity, gap_ms,
+                             anchor_relocated=via_trigger)
     # The 2D drift gradient's DROP kick (owner ask 2026-08-24, order item 2):
     # a drop jumps X a full extra leg-step, pushes the Y TARGET up by the
     # drop's own energy, and lands the resulting colour immediately — see

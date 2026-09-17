@@ -10,9 +10,22 @@ was always `animation_anchor_s - kind.trigger_offset_ms/1000`, independent
 of any band-mate. What THIS proves is that the independence the preview
 already drew is the SAME independence the real per-kind stagger mechanism
 (scene_response._execute_band_locked) now honours when the two kinds share
-a real band — for every kind whose stagger delay is not clamped (its offset
-at or after the band's anchor). An all-positive band is the named exception
-(see the last test)."""
+a real band, on the one path that staggers at all (a fire tick() already
+relocated by the band's anchor) — for every kind whose stagger delay is not
+clamped (its offset at or after the band's anchor).
+
+The invariant covers the AUTHORED OFFSET component of a kind's moment ONLY.
+Two pre-existing, out-of-scope preview/production parity gaps sit outside
+it, both left for a later decision rather than fixed here:
+  * an all-positive band clamps a 0-offset kind to the band's later moment
+    while its preview draws it on the mark (the last test); and
+  * trigger_engine._response_switch_lead_ms's AUTOMATIC lead stays
+    band-wide — a max over every attached kind's smooth glide / colour
+    rotate ramp, subtracted once from the whole fire's start — where each
+    kind's isolated preview applies only its own kind_lead_ms. A kind that
+    shares a band with a gliding or rotating kind therefore fires earlier
+    than its preview's fire_at_s. Every band here carries permanent kinds
+    only, so both leads are 0 and that gap is deliberately not exercised."""
 from __future__ import annotations
 
 import asyncio
@@ -86,11 +99,13 @@ def test_two_kinds_on_one_band_preview_independently_staggered_marks():
 
 
 def _real_fire_moments_ms(scene, intensity=0.8) -> dict[str, int]:
-    """Each attached kind's REAL moment relative to the nominal trigger, as
-    the engine itself schedules it: tick() relocates the whole fire by the
-    band's anchor (band_trigger_offset_ms), then the fire runs a kind inline
-    (record["kinds"]) or queues it `delay_ms` later
-    (record["deferred_kinds"])."""
+    """Each attached kind's moment relative to the nominal trigger from its
+    AUTHORED OFFSET alone, as the engine itself schedules it: tick()
+    relocates the whole fire by the band's anchor (band_trigger_offset_ms),
+    then the relocated fire runs a kind inline (record["kinds"]) or queues
+    it `delay_ms` later (record["deferred_kinds"]). The band-wide automatic
+    lead tick() also subtracts is not part of this number (module
+    docstring)."""
     from spectra.services import flare_preview, scene_response
     from spectra.services.fx_executor import RecordingExecutor
 
@@ -98,7 +113,8 @@ def _real_fire_moments_ms(scene, intensity=0.8) -> dict[str, int]:
         clock = flare_preview._FakeClock()
         _c, responder, _w = flare_preview._scratch_engine(
             scene, intensity, clock, RecordingExecutor(clock=clock))
-        return await responder.on_event("flare", intensity)
+        return await responder.on_event("flare", intensity,
+                                        anchor_relocated=True)
 
     record = asyncio.run(main())
     anchor_ms = scene_response.band_trigger_offset_ms(scene, "flare", intensity)
@@ -115,11 +131,13 @@ def _preview_write_minus_mark_ms(scene, kind) -> int:
 
 def test_the_preview_reflects_the_same_real_fire_moment_the_stagger_computes():
     """For a kind whose stagger delay is NOT clamped by max(0, ...) — its
-    offset at or after the band's anchor — its real fire moment relative to
-    the nominal trigger, read off the engine's own schedule, equals its own
+    offset at or after the band's anchor — its fire moment from the authored
+    offset, read off the engine's own schedule, equals its own
     trigger_offset_ms, which is exactly what its single-kind preview draws
     (`write - mark == offset`). [-100, 0] is that case for both kinds: the
-    -100 kind IS the anchor, the 0 kind waits 100ms behind it."""
+    -100 kind IS the anchor, the 0 kind waits 100ms behind it. Neither kind
+    here carries an automatic lead; the band-wide lead gap is outside this
+    claim (module docstring)."""
     scene, kind_a, kind_b = _band_scene(offset_a=-100, offset_b=0)
     moments = _real_fire_moments_ms(scene)
     assert moments == {"Kind A": -100, "Kind B": 0}
