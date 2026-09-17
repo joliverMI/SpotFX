@@ -1667,7 +1667,7 @@
           "max": 4.0,
           "aspect": "shape",
           "note": "Seconds the wake trail takes to fade.",
-          "default": 0.9
+          "default": 0.675
         },
         "ripple_width": {
           "label": "Ripple Width",
@@ -1677,7 +1677,7 @@
           "max": 4.0,
           "aspect": "shape",
           "note": "Wake thickness: how wide each deposit laid at the tail is, relative to the fish.",
-          "default": 1.3
+          "default": 0.975
         },
         "avoid_strength": {
           "label": "Avoid Each Other",
@@ -1817,8 +1817,8 @@
         "stroke_speed_cap": 0.4,
         "ripple_amount": 0.35,
         "ripple_spread": 0.45,
-        "ripple_life": 0.9,
-        "ripple_width": 1.3,
+        "ripple_life": 0.675,
+        "ripple_width": 0.975,
         "avoid_strength": 0.45,
         "roam_scale": 0.95,
         "camera_follow": 0.8,
