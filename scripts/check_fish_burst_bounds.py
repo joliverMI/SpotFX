@@ -21,8 +21,9 @@ why (`BOUND_BRAKE_AT`'s block, just above the inward steer).
 This prints, for a repeated-burst scenario (worse than a single burst: his
 live scene has the burst pooled on three separate bands, each firing on
 its own trigger), the worst distance any fish's CENTRE lands past the
-panel edge — negative means still inside — with and without the fix, and
-confirms the burst is not reduced to a soft no-op away from the edge (a
+panel edge — negative means still inside — against the same runs with no
+burst at all (the soft steer's own resting overshoot), and confirms the
+burst is not reduced to a soft no-op away from the edge (a
 fish comfortably clear of the boundary still reaches several times cruise
 speed).
 
