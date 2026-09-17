@@ -1257,8 +1257,9 @@ tie-break when two same-type kinds (e.g. two permanent param moves) target
 the same param: the later one in that order wins (`scene_response.py`'s
 fixed dice→permanent→momentary→gain→colour execution order, generalized —
 see that module's own docstring before assuming "combine" means additive;
-dice re-rolls and colour jumps are each a SINGLETON pick per fire
-regardless of how many actually fire, only param moves/gains compose). The
+dice re-rolls and colour jumps are each a SINGLETON pick per batch —
+per fire unless PER-FLARE TRIGGER MOMENT below staggers it — regardless of
+how many actually fire, only param moves/gains compose). The
 lead/offset forward peeks (`band_trigger_offset_ms` etc.) aggregate over
 ALL pool members — the possibility-set bound, documented in each
 docstring, since the fire-time pick can't be known early. Rename/

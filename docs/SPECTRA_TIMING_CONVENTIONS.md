@@ -142,8 +142,10 @@ fire_at   = target_ms - lead_ms              # LEAD: opposite sign, applied last
 ```
 
 The content term is `SceneV2.trigger_offset_ms` for a `fire_scene` trigger
-and `scene_response.band_trigger_offset_ms` (the fired band's flare kinds)
-for a `fire_response` one; both default 0. **Adding two OFFSET-family
+and `scene_response.band_trigger_offset_ms` (the fired band's ANCHOR —
+where the fire begins; each kind then lands at its own offset relative to
+it, see that row of the master table) for a `fire_response` one; both
+default 0. **Adding two OFFSET-family
 terms is legal — same unit, same sign, same meaning of "later"; adding a
 LEAD to either is the thing that must never happen.** The trigger's own
 field is honoured on every action kind now, instruments included: an
