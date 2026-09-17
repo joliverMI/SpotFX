@@ -7017,7 +7017,12 @@ A new Matrix effect + a Fish scene that is a WHOLESALE COPY of his Orbits V2
      laid at the exact crossing point (several per frame when travel
      needs it), so `p_trail_acc` IS the path distance back to trail[0] —
      rear nodes are placed at `acc + (k-1)*STEP`, never a whole sample per
-     index, which made the tail collapse and regrow after every push.
+     index, which made the tail collapse and regrow after every push. The
+     path is recorded IN THE WATER: travel is the fish's UNCLAMPED swim
+     velocity, and whatever the charge's school clamp took out of its world
+     travel (`_flow_px`/`_flow_py`, the wake's own carry) moves its stored
+     samples too — recorded in the world alone, `camera_follow=0` folded a
+     schooling fish's tail forward over its head.
      `_draw_bodies(..., use_trail=False)` keeps the old all-heading layout
      for the one caller with no recorded path of its own (the outgoing
      radial collapse, which overwrites position/heading into a synthetic
@@ -7056,15 +7061,20 @@ A new Matrix effect + a Fish scene that is a WHOLESALE COPY of his Orbits V2
    Proof: `tests/test_fish.py` (the dial's both endpoints, the trail
    reducing to the rigid layout on a straight/controlled path and
    diverging on a real turn, the rear body holding its own length every
-   frame on real runs — swimmers, and ejecta past a sample per frame —
-   birth backfill, the slow/fast pulse resolvability), `scripts/check_fish.py` (its flap-bounds check gained a
+   frame on real runs — swimmers, ejecta past a sample per frame, and a
+   school clamped at `camera_follow=0` — birth backfill, the slow/fast
+   pulse resolvability), `scripts/check_fish.py` (its flap-bounds check gained a
    float32 tolerance — a real value can land exactly at `FLAP_MIN`/`MAX`
    now, which it rarely did under the old smooth speed),
    `scripts/check_fish_disperse.py` (genuinely pulsing ordinary swimmers
    shift its fine pixel/timing margins, never its qualitative "fish
    disperse, never fade" claims, all of which still hold; the hue bar
    stays 0.04 — a widening measured against the collapsing-tail layout
-   was undone once the layout was fixed; the
+   was undone once the layout was fixed — while its two other relaxations
+   were re-measured against the fixed layout and KEPT: the lone-fish window
+   is 240 frames because at 60 seed 5 reads no lone fish, and the
+   per-channel red control is asserted on at least one seed because seed
+   3's lone fish never saturate (both clips 0.012); the
    crossfade body-peak bar stays at the trail-gain hotfix's 0.65, worst
    0.75 with both changes in), `scripts/check_fish_camera.py` section 1b
    (restated: kinematics, not rendered pixels, match the pinned predecessor at the dial's neutral

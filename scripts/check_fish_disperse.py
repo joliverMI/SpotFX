@@ -444,8 +444,9 @@ async def hue_run(seed, per_channel_clip, seconds=0.5):
     # speed now pulses rather than staying smooth), so how often any given
     # fish happens to sit "lone" (isolated from every other fish) at a given
     # seed's exact frame shifts too — a real property of the new motion, not
-    # an instrument defect. 240 frames (4s) gives a seed several extra
-    # chances to be caught isolated, rather than tightening the isolation
+    # an instrument defect. Measured in this script's own run order: at the
+    # original 60 frames seed 5 catches no lone fish at all before the
+    # switch; 240 frames (4s) reads 17, rather than tightening the isolation
     # test itself.
     for _ in range(240):
         r.clock.advance(DT)
@@ -498,15 +499,15 @@ def section_crossfade_hue():
         reds.append(red)
     # The red control needs the sampled lone fish to actually SATURATE a
     # channel at some point — whether it does, for a given random seed's
-    # exact path, is circumstantial (fm/spotfx-fish-body-trails-head-tail-
-    # thrust's trail-based tail can, seed to seed, land a lone fish's body
-    # on a slightly different set of overlapping splats, so a seed that
-    # used to saturate sometimes now does not, or vice versa — worst==red
-    # exactly is the tell: clipping never engaged for either variant). So
-    # this asserts the instrument CAN see the defect at all (true if ANY
-    # seed's per-channel run saturates and washes), not that every single
-    # seed's random draw must — a per-seed requirement here would be
-    # asserting something about his RNG, not about the clip.
+    # exact path, is circumstantial: tail-stroke thrust moves each seed's
+    # fish to different places by the switch. Measured in this script's own
+    # run order, seed 3's lone fish never saturate (both clips read 0.012 —
+    # worst==red exactly is the tell: clipping never engaged for either
+    # variant) while seeds 5 and 11 wash to 0.20 and 0.18. So this asserts
+    # the instrument CAN see the defect at all (true if ANY seed's
+    # per-channel run saturates and washes), not that every single seed's
+    # random draw must — a per-seed requirement here would be asserting
+    # something about his RNG, not about the clip.
     check(max(reds) > HUE_TOLERANCE, "red control — the per-channel clip "
           "FAILS the same bar on at least one seed (the wash is visible)")
 

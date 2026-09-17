@@ -3005,6 +3005,8 @@ class Fish2d(Twod, GradientEffect):
         # ── integrate ───────────────────────────────────────────────────
         vx_px = np.cos(hd) * self.p_spd[:n]
         vy_px = np.sin(hd) * self.p_spd[:n]
+        swim_vx = vx_px
+        swim_vy = vy_px
         self._flow_px = 0.0
         self._flow_py = 0.0
         # THE CLAMP, and what `camera_follow` does to it. Before the window
@@ -3029,18 +3031,25 @@ class Fish2d(Twod, GradientEffect):
         self.p_y[:n] += vy_px * dt / self.sy
 
         # ── body trail push ────────────────────────────────────────────
-        # A new sample every BODY_TRAIL_STEP_PX of REAL travel (the
-        # already-clamped world velocity above), never every frame — see
-        # the BODY_TRAIL_* comment near the top of the module for why arc
-        # length, not time. Every moving fish records its path, whatever
-        # its mode. Each sample is laid at the exact point along this
-        # frame's own travel where the threshold was crossed (as many as
-        # the frame crossed, oldest first), so `p_trail_acc` is always
-        # exactly the path distance back to trail[0].
-        travelled = np.hypot(vx_px, vy_px) * dt
+        # A new sample every BODY_TRAIL_STEP_PX of the fish's own swimming
+        # travel (its UNCLAMPED velocity), never every frame — see the
+        # BODY_TRAIL_* comment near the top of the module for why arc
+        # length, not time. The path is recorded in the water the fish
+        # swims through: whatever the school clamp removed from a fish's
+        # world travel went into the water (`_flow_px`/`_flow_py`, the
+        # wake's own carry), so that fish's stored samples ride along with
+        # it. Every moving fish records its path, whatever its mode. Each
+        # sample is laid at the exact point along this frame's own travel
+        # where the threshold was crossed (as many as the frame crossed,
+        # oldest first), so `p_trail_acc` is always exactly the path
+        # distance back to trail[0].
+        if vx_px is not swim_vx:
+            self.p_trail_x[:n] += ((vx_px - swim_vx) * dt / self.sx)[:, None]
+            self.p_trail_y[:n] += ((vy_px - swim_vy) * dt / self.sy)[:, None]
+        travelled = np.hypot(swim_vx, swim_vy) * dt
         self.p_trail_acc[:n] += travelled
-        step_x = vx_px * dt / self.sx
-        step_y = vy_px * dt / self.sy
+        step_x = swim_vx * dt / self.sx
+        step_y = swim_vy * dt / self.sy
         for _ in range(BODY_TRAIL_LEN):
             push = self.p_trail_acc[:n] >= BODY_TRAIL_STEP_PX
             if not push.any():

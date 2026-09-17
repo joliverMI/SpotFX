@@ -1665,9 +1665,14 @@ def _record_rear_body(eff):
         length = np.asarray(half_w) * 2.0 * eff.body_aspect
         want = (FX.SPINE_U[n_front:][None, :] - 0.5) * length[:, None]
         got = np.hypot(nx - cx[:, None], ny - cy[:, None])
+        heading = np.asarray(hd)
+        behind = -(
+            (nx - cx[:, None]) * np.cos(heading)[:, None]
+            + (ny - cy[:, None]) * np.sin(heading)[:, None]
+        )
         records.append((
             np.asarray(idx).copy(), eff.p_mode[np.asarray(idx)].copy(),
-            got / want,
+            got / want, behind / want, bool(eff._school_on),
         ))
 
     eff._draw_bodies = draw_bodies
@@ -1689,7 +1694,7 @@ def test_rear_body_holds_its_length_every_frame_while_swimming(tmp_path):
         records = _record_rear_body(eff)
         room.step(int(4.0 / DT))
         await _close(room)
-        ratios = np.concatenate([r.ravel() for _i, _m, r in records])
+        ratios = np.concatenate([r.ravel() for _i, _m, r, _b, _s in records])
         assert ratios.size > 0
         assert ratios.min() >= 0.9, (
             "a swimming fish's tail must never collapse toward its centre: "
@@ -1722,12 +1727,43 @@ def test_drop_ejecta_keep_a_compact_body_even_past_a_sample_per_frame(
         room.step(20)
         await _close(room)
         ejecta = [
-            r[m == 2] for _i, m, r in records if np.any(m == 2)
+            r[m == 2] for _i, m, r, _b, _s in records if np.any(m == 2)
         ]
         assert ejecta, "no ejecta were drawn"
         ratios = np.concatenate([r.ravel() for r in ejecta])
         assert 0.97 <= ratios.min() and ratios.max() <= 1.001, (
             "an ejected fish must keep its own body length: rear nodes sat "
             f"between {ratios.min():.2f} and {ratios.max():.2f} of it"
+        )
+    _run(main())
+
+
+def test_rear_body_rides_the_water_while_the_school_is_clamped(tmp_path):
+    """With the window pinned to the shoal (camera_follow=0) the school
+    clamp takes a lined-up fish's whole travel out of the world and puts it
+    into the water. Its body must still trail the path it swam THROUGH that
+    water: recorded in the world alone, the path stops advancing, and the
+    samples laid while the fish turned onto the school heading sit in front
+    of it, folding the tail forward over the head."""
+    async def main():
+        room = await _room(tmp_path, "trail-school", dict(
+            HIS_MATRIX, flap_amount=0.0, camera_follow=0.0,
+        ), seed=3)
+        eff = room.effect
+        room.step(60)
+        records = _record_rear_body(eff)
+        room.ramp("charge", 4.0, beats_every=30)
+        schooled = eff._school_on
+        await _close(room)
+        assert schooled, "the charge must have formed a school"
+        behind = [
+            b[m < 2] for _i, m, _r, b, s in records if s and np.any(m < 2)
+        ]
+        assert behind, "no schooling fish were drawn"
+        behind = np.concatenate([b.ravel() for b in behind])
+        assert behind.min() >= 0.7, (
+            "a schooling fish's tail must lie behind its head along the "
+            f"path it swam: a rear node sat at {behind.min():.2f} of its "
+            "length behind the centre"
         )
     _run(main())

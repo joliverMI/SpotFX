@@ -59,11 +59,11 @@ def test_the_measured_dispersal_and_burst_proof_passes():
     # clip holds a lone fish's colour on every seed; the per-channel clip
     # it replaced fails the same bar on AT LEAST ONE seed (whether a given
     # seed's random draw ever saturates a channel at all is circumstantial
-    # — fm/spotfx-fish-body-trails-head-tail-thrust's trail-based tail can
+    # — fm/spotfx-fish-body-trails-head-tail-thrust's pulsing swimmers
     # shift that seed to seed — so the instrument only needs to prove it
     # CAN see the defect, not that every seed's draw reproduces it; see
     # scripts/check_fish_disperse.py's own section_crossfade_hue for the
-    # full reasoning).
+    # measured reasoning).
     hue = [
         dict(field.split("=") for field in line.split()[1:])
         for line in proc.stdout.splitlines() if line.strip().startswith("HUE ")
