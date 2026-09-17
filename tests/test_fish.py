@@ -1573,8 +1573,10 @@ def test_body_trails_the_recorded_path_through_a_turn(tmp_path):
             return frame
 
         def lay_straight_trail(heading):
+            eff.p_trail_acc[0] = 1.5
             steps = (
-                np.arange(1, FX.BODY_TRAIL_LEN + 1, dtype=np.float32)
+                eff.p_trail_acc[0]
+                + np.arange(FX.BODY_TRAIL_LEN, dtype=np.float32)
                 * FX.BODY_TRAIL_STEP_PX
             )
             eff.p_trail_x[0, :] = (
@@ -1625,4 +1627,107 @@ def test_body_trail_backfill_seeds_a_real_body_on_the_first_frame(tmp_path):
         )
         assert np.all(np.isfinite(eff.p_trail_y[:n]))
         await _close(room)
+    _run(main())
+
+
+def _record_rear_body(eff):
+    """Wrap the effect's real body layout and record, per drawn fish, how
+    far each trailing spine node sits from the fish's centre against how far
+    it should (its share of the body length). Read off the exact points the
+    effect splats (the zero-smear substep, lateral throw off)."""
+    records = []
+    orig_draw = eff._draw_bodies
+    m = FX.SPINE_U.size
+    n_front = int(np.count_nonzero(FX.SPINE_U <= 0.5))
+
+    def draw_bodies(frame, idx, x, y, hd, bright, half_w, flap_amp, grad,
+                    use_trail=True):
+        captured = {}
+        orig_splat = eff._splat_many
+
+        def splat(buf, xs, ys, rgb, sizes):
+            captured["xs"], captured["ys"] = xs, ys
+            return orig_splat(buf, xs, ys, rgb, sizes)
+
+        eff._splat_many = splat
+        try:
+            orig_draw(frame, idx, x, y, hd, bright, half_w, flap_amp, grad,
+                      use_trail=use_trail)
+        finally:
+            del eff._splat_many
+        k = len(idx)
+        if k == 0 or not use_trail:
+            return
+        nx = captured["xs"][-k * m:].reshape(k, m)[:, n_front:]
+        ny = captured["ys"][-k * m:].reshape(k, m)[:, n_front:]
+        cx = eff.cx + np.asarray(x) * eff.sx - eff.cam_px
+        cy = eff.cy + np.asarray(y) * eff.sy - eff.cam_py
+        length = np.asarray(half_w) * 2.0 * eff.body_aspect
+        want = (FX.SPINE_U[n_front:][None, :] - 0.5) * length[:, None]
+        got = np.hypot(nx - cx[:, None], ny - cy[:, None])
+        records.append((
+            np.asarray(idx).copy(), eff.p_mode[np.asarray(idx)].copy(),
+            got / want,
+        ))
+
+    eff._draw_bodies = draw_bodies
+    return records
+
+
+def test_rear_body_holds_its_length_every_frame_while_swimming(tmp_path):
+    """The trailing half of the spine walks back along the recorded path by
+    TRUE path distance: trail[0] lies `p_trail_acc` behind the fish, not a
+    whole sample. Laid out as if it were a whole sample, the tail collapsed
+    onto the centre after every push and regrew — a body pumping between
+    nothing and full length several times a second on a straight run."""
+    async def main():
+        room = await _room(tmp_path, "trail-length", dict(
+            HIS_MATRIX, flap_amount=0.0,
+        ), seed=3)
+        eff = room.effect
+        room.step(30)
+        records = _record_rear_body(eff)
+        room.step(int(4.0 / DT))
+        await _close(room)
+        ratios = np.concatenate([r.ravel() for _i, _m, r in records])
+        assert ratios.size > 0
+        assert ratios.min() >= 0.9, (
+            "a swimming fish's tail must never collapse toward its centre: "
+            f"worst rear node sat at {ratios.min():.2f} of its length"
+        )
+        assert ratios.max() <= 1.001, (
+            "a swimming fish's tail must never stretch past its own length: "
+            f"worst rear node sat at {ratios.max():.2f} of its length"
+        )
+    _run(main())
+
+
+def test_drop_ejecta_keep_a_compact_body_even_past_a_sample_per_frame(
+        tmp_path):
+    """Drop ejecta hold a fixed heading and speed but still travel, so their
+    path must be recorded like any other fish's — including one fast enough
+    to cross several samples in a single frame — or the tail strings back
+    toward where it was born."""
+    async def main():
+        room = await _room(tmp_path, "trail-ejecta", dict(
+            HIS_MATRIX, flap_amount=0.0,
+        ), seed=7)
+        eff = room.effect
+        room.step(30)
+        base = eff.n
+        eff._spawn_drop_ejecta(6)
+        assert eff.n > base
+        eff.p_spd[eff.n - 1] = 3.0 * FX.BODY_TRAIL_STEP_PX / DT
+        records = _record_rear_body(eff)
+        room.step(20)
+        await _close(room)
+        ejecta = [
+            r[m == 2] for _i, m, r in records if np.any(m == 2)
+        ]
+        assert ejecta, "no ejecta were drawn"
+        ratios = np.concatenate([r.ravel() for r in ejecta])
+        assert 0.97 <= ratios.min() and ratios.max() <= 1.001, (
+            "an ejected fish must keep its own body length: rear nodes sat "
+            f"between {ratios.min():.2f} and {ratios.max():.2f} of it"
+        )
     _run(main())

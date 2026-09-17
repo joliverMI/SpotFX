@@ -7013,6 +7013,11 @@ A new Matrix effect + a Fish scene that is a WHOLESALE COPY of his Orbits V2
      x `BODY_TRAIL_STEP_PX` of screen-px arc length, pushed by REAL travel
      distance every frame — never time-sampled, so the trail always covers
      roughly the same physical distance regardless of current speed).
+     EVERY moving fish records, drop ejecta included, and each sample is
+     laid at the exact crossing point (several per frame when travel
+     needs it), so `p_trail_acc` IS the path distance back to trail[0] —
+     rear nodes are placed at `acc + (k-1)*STEP`, never a whole sample per
+     index, which made the tail collapse and regrow after every push.
      `_draw_bodies(..., use_trail=False)` keeps the old all-heading layout
      for the one caller with no recorded path of its own (the outgoing
      radial collapse, which overwrites position/heading into a synthetic
@@ -7050,14 +7055,16 @@ A new Matrix effect + a Fish scene that is a WHOLESALE COPY of his Orbits V2
      entries (the `swim_burst` precedent), reachable without a deploy.
    Proof: `tests/test_fish.py` (the dial's both endpoints, the trail
    reducing to the rigid layout on a straight/controlled path and
-   diverging on a real turn, birth backfill, the slow/fast pulse
-   resolvability), `scripts/check_fish.py` (its flap-bounds check gained a
+   diverging on a real turn, the rear body holding its own length every
+   frame on real runs — swimmers, and ejecta past a sample per frame —
+   birth backfill, the slow/fast pulse resolvability), `scripts/check_fish.py` (its flap-bounds check gained a
    float32 tolerance — a real value can land exactly at `FLAP_MIN`/`MAX`
    now, which it rarely did under the old smooth speed),
-   `scripts/check_fish_disperse.py` (its thresholds were re-measured and
-   widened — a wider tail-render footprint and genuinely pulsing ordinary
-   swimmers shift its fine pixel/timing margins, never its qualitative
-   "fish disperse, never fade" claims, all of which still hold; the
+   `scripts/check_fish_disperse.py` (genuinely pulsing ordinary swimmers
+   shift its fine pixel/timing margins, never its qualitative "fish
+   disperse, never fade" claims, all of which still hold; the hue bar
+   stays 0.04 — a widening measured against the collapsing-tail layout
+   was undone once the layout was fixed; the
    crossfade body-peak bar stays at the trail-gain hotfix's 0.65, worst
    0.75 with both changes in), `scripts/check_fish_camera.py` section 1b
    (restated: kinematics, not rendered pixels, match the pinned predecessor at the dial's neutral

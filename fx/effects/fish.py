@@ -2331,30 +2331,34 @@ class Fish2d(Twod, GradientEffect):
         if n_front < SPINE_U.size:
             # walk the trailing nodes back along the recorded path instead
             # of along the current heading: `chain` is [current point,
-            # trail[0] (~BODY_TRAIL_STEP_PX back), trail[1] (~2x back),
-            # ...] and a rear node at distance d behind the CENTER is
-            # linearly interpolated between whichever two chain points
-            # bracket it — an approximation that treats consecutive trail
-            # samples as evenly spaced, true up to the per-frame travel
-            # that can overshoot the push threshold (see the push in
-            # draw()), which is not worth chasing for a body shape judged
-            # by eye.
+            # trail[0], trail[1], ...], lying at path distances [0, acc,
+            # acc + BODY_TRAIL_STEP_PX, acc + 2x, ...] behind the CENTER —
+            # `acc` (`p_trail_acc`) being exactly how far the fish has
+            # travelled since trail[0] was laid (see the push in draw()).
+            # A rear node at distance d is linearly interpolated between
+            # whichever two chain points bracket it.
             trail_x = self.cx + self.p_trail_x[idx] * self.sx - self.cam_px
             trail_y = self.cy + self.p_trail_y[idx] * self.sy - self.cam_py
             chain_x = np.concatenate([px[:, None], trail_x], axis=1)
             chain_y = np.concatenate([py[:, None], trail_y], axis=1)
             rear_u = SPINE_U[n_front:]
             d = (rear_u[None, :] - 0.5) * length[:, None]
+            acc = self.p_trail_acc[idx][:, None]
+            first = d <= acc
             idx_f = np.clip(
-                d / BODY_TRAIL_STEP_PX, 0.0, BODY_TRAIL_LEN - 1e-4
+                (d - acc) / BODY_TRAIL_STEP_PX, 0.0, BODY_TRAIL_LEN - 1 - 1e-4
             )
             floor_j = np.floor(idx_f).astype(np.int32)
-            frac = idx_f - floor_j
+            near_j = np.where(first, 0, floor_j + 1)
+            frac = np.clip(
+                np.where(first, d / np.maximum(acc, 1e-6), idx_f - floor_j),
+                0.0, 1.0,
+            )
             rows = np.arange(k)[:, None]
-            near_x = chain_x[rows, floor_j]
-            far_x = chain_x[rows, np.minimum(floor_j + 1, BODY_TRAIL_LEN)]
-            near_y = chain_y[rows, floor_j]
-            far_y = chain_y[rows, np.minimum(floor_j + 1, BODY_TRAIL_LEN)]
+            near_x = chain_x[rows, near_j]
+            far_x = chain_x[rows, near_j + 1]
+            near_y = chain_y[rows, near_j]
+            far_y = chain_y[rows, near_j + 1]
             base_x[:, n_front:] = near_x + (far_x - near_x) * frac
             base_y[:, n_front:] = near_y + (far_y - near_y) * frac
 
@@ -2584,7 +2588,7 @@ class Fish2d(Twod, GradientEffect):
         if need_trail.any():
             ni = np.flatnonzero(need_trail)
             steps = (
-                np.arange(1, BODY_TRAIL_LEN + 1, dtype=np.float32)
+                np.arange(BODY_TRAIL_LEN, dtype=np.float32)
                 * BODY_TRAIL_STEP_PX
             )
             back_x = np.cos(self.p_hd[ni])[:, None] * steps[None, :] / self.sx
@@ -3028,19 +3032,29 @@ class Fish2d(Twod, GradientEffect):
         # A new sample every BODY_TRAIL_STEP_PX of REAL travel (the
         # already-clamped world velocity above), never every frame — see
         # the BODY_TRAIL_* comment near the top of the module for why arc
-        # length, not time. `push` fires at most once per frame; a fish
-        # moving fast enough to need two in one frame just pushes again
-        # next frame, a fraction of a sample late — not worth the extra
-        # bookkeeping for a body-shape effect tuned by eye.
+        # length, not time. Every moving fish records its path, whatever
+        # its mode. Each sample is laid at the exact point along this
+        # frame's own travel where the threshold was crossed (as many as
+        # the frame crossed, oldest first), so `p_trail_acc` is always
+        # exactly the path distance back to trail[0].
         travelled = np.hypot(vx_px, vy_px) * dt
-        self.p_trail_acc[:n] += np.where(steered, travelled, 0.0)
-        push = self.p_trail_acc[:n] >= BODY_TRAIL_STEP_PX
-        if push.any():
+        self.p_trail_acc[:n] += travelled
+        step_x = vx_px * dt / self.sx
+        step_y = vy_px * dt / self.sy
+        for _ in range(BODY_TRAIL_LEN):
+            push = self.p_trail_acc[:n] >= BODY_TRAIL_STEP_PX
+            if not push.any():
+                break
             pidx = np.flatnonzero(push)
+            back = np.clip(
+                (self.p_trail_acc[pidx] - BODY_TRAIL_STEP_PX)
+                / np.maximum(travelled[pidx], 1e-6),
+                0.0, 1.0,
+            )
             self.p_trail_x[pidx, 1:] = self.p_trail_x[pidx, :-1]
             self.p_trail_y[pidx, 1:] = self.p_trail_y[pidx, :-1]
-            self.p_trail_x[pidx, 0] = self.p_x[pidx]
-            self.p_trail_y[pidx, 0] = self.p_y[pidx]
+            self.p_trail_x[pidx, 0] = self.p_x[pidx] - step_x[pidx] * back
+            self.p_trail_y[pidx, 0] = self.p_y[pidx] - step_y[pidx] * back
             self.p_trail_acc[pidx] -= BODY_TRAIL_STEP_PX
 
         entering = mode == 1

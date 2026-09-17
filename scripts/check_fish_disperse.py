@@ -394,17 +394,7 @@ def section_crossfade(base):
 # on one pixel saturate in ORDINARY swimming too, which this change leaves
 # exactly as it was.
 HUE_GRADIENT = "#ff8040"
-# Widened from 0.04 by fm/spotfx-fish-body-trails-head-tail-thrust: the
-# trailing half of the spine now bends along the fish's own recorded path
-# instead of a rigid heading projection, so during a fast scatter (rapid
-# heading changes as a fish turns to leave) the exact sub-pixel body layout
-# — and so which pixel is "brightest" and its precise channel ratios — can
-# differ a little from the old rigid layout. Measured worst case at his real
-# seeds is 0.080; 0.1 keeps real headroom under the red control's much
-# larger per-channel-clip departures (0.145-0.192), so the property this
-# check exists to protect (hue-preserving vs per-channel clip) still
-# discriminates cleanly.
-HUE_TOLERANCE = 0.1
+HUE_TOLERANCE = 0.04
 
 
 def body_chroma(frame, eff):
