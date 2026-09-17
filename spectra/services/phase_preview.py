@@ -33,13 +33,15 @@ does-not-explode):
                 that no drop band happens to carry a qualifying kind today.
 
 THE OFFSETS. Each class's band carries its kinds' own
-FlareKind.trigger_offset_ms, aggregated by scene_response.
-band_trigger_offset_ms (min over the nonzero values — a band fires
-atomically, so one offset speaks for it), and the firing path honours it
-for a DROP band too: that drop rule pins the automatic anchor-family LEAD,
-never his explicit hand on a marker. So each mark here sits at its
-class's authored offset and the ruler tells the truth about where the show
-will actually fire.
+FlareKind.trigger_offset_ms, and the mark drawn here is still the BAND
+ANCHOR — scene_response.band_trigger_offset_ms, min over the nonzero
+values, unchanged — which is where the firing path relocates the whole
+fire, for a DROP band too: that drop rule pins the automatic anchor-family
+LEAD, never his explicit hand on a marker. Kinds inside the fire no longer
+land together at that anchor: each lands at its own per-kind offset
+relative to it (scene_response's "PER-FLARE TRIGGER MOMENT"), so the mark
+tells the truth about where the fire begins, and a kind authored after the
+anchor lands that much after the mark.
 
 WHY THE MARKS ARE NOT DRAGGABLE HERE, stated rather than quietly omitted: a
 band's offset is an AGGREGATE over however many kinds it attaches, so a
@@ -215,14 +217,18 @@ class PhaseSequenceProgram(flare_preview_hold.PreviewProgram):
     make — so the effect-side choreography (blackhole's swallow, orbits'
     collapse, fireworks' rockets, the eye's lids) is the vendored code
     itself, exactly as in the show. The gap is threaded through, so the
-    ramp the room renders is the ramp the ruler drew.
+    ramp the room renders is the ramp the ruler drew. It fires as the
+    TRIGGER's relocated fire (anchor_relocated=True): each cue already sits
+    at its band's anchor, the same relocation tick() applies, so a band's
+    kinds land at their own moments here exactly as they do in the show.
 
-    NO NEW RELEASE QUEUE. on_event can arm the momentary-release queue and
-    the colour-rotate queue; both are already drained by the hold at every
-    one of the four drain points a queue must be scheduled at (a queue
-    missed at one of them has already shipped one real defect — see
+    NO NEW RELEASE QUEUE. on_event can arm the momentary-release queue, the
+    colour-rotate queue and a band's staggered kind batches (scene_response's
+    "PER-FLARE TRIGGER MOMENT"); the hold drains all three
+    (flare_preview_hold._schedule_responder_tail), as every drain point must
+    (a queue missed at one of them has already shipped one real defect — see
     scene_response's colour-rotate note). release_phases() is a direct
-    write, not a queue, so it adds no fifth thing to schedule."""
+    write, not a queue, so it adds nothing more to schedule."""
 
     steps = SEQUENCE + ("release",)
 
@@ -248,6 +254,7 @@ class PhaseSequenceProgram(flare_preview_hold.PreviewProgram):
         if step not in SEQUENCE:
             raise ValueError(f"unknown drop-sequence step: {step!r}")
         gap_ms = self.gaps.get(step) if step in PHASE_RAMP_STRETCH_CLASSES else None
-        record = await ctx.responder.on_event(step, ctx.intensity, gap_ms)
+        record = await ctx.responder.on_event(step, ctx.intensity, gap_ms,
+                                              anchor_relocated=True)
         return {"result": "phase_fired", "event_class": step,
                 "gap_ms": gap_ms, "record": record}

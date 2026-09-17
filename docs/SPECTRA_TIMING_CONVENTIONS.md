@@ -59,7 +59,7 @@ in root `spotfx` code and was never ported to `spectra/` at all.
 | `phase_preview.DEFAULT_GAP_MS` (charge 4444, lull 2778) | ms | Not signed — DERIVED, not tuned: `PHASE_RAMP_MS[cls] / (1 − PHASE_RAMP_HANG_FRACTION)`, i.e. the gap that reproduces the class's own unknown-gap fallback ramp exactly. A preview opens showing the shape the show falls back to. | SPECTRA drop-sequence preview | **Live** (2026-08-27) | `spectra/services/phase_preview.py` |
 | `flare_preview.trigger_mark_s(anchor, offset, duration)` | s | `T = anchor − offset_ms/1000` — same OFFSET convention, expressed as a draw position | SPECTRA flare scrubbing-preview | **Live** | `spectra/services/flare_preview.py:127-138` |
 | Flare-preview drag handler (`onTriggerOffsetChange`) | ms | `offset = round((animAnchorS − markS) × 1000)` — dragging the mark RIGHT → more negative | SPECTRA flare-preview UI | **Live** | `spectra/web/src/scenes/tabs/FlarePreviewOverlay.tsx:280-299` |
-| `band_trigger_offset_ms(scene, class, intensity)` | ms | Same OFFSET convention; aggregates a band's attached kinds as `min()` over the nonzero values (earliest ask wins, untouched-default kinds never veto) | SPECTRA response engine, read by `tick()` for `fire_response` | **Live** | `spectra/services/scene_response.py:460-504` |
+| `band_trigger_offset_ms(scene, class, intensity)` / `_band_anchor_ms(band, declared)` | ms | Same OFFSET convention; the band's ONE anchor is `min()` over the nonzero values (earliest ask wins, untouched-default kinds never veto) — still what `tick()` reads to relocate the whole fire. PER-FLARE TRIGGER MOMENT (2026-09-16): inside the fire, `_execute_band_locked` now splits attached kinds by `delay_ms = max(0, kind.trigger_offset_ms − anchor_ms)` (always >= 0, legacy `MorphLane` shape) — the delay-0 group runs inline, any other delay is a `PendingKindBatch` due at the fire's START (read before `_drive_phase` and the inline writes) + `delay_ms`, scheduled the same way a `PendingRelease` is — ONLY on a fire `tick()` already relocated by that anchor (`anchor_relocated`, i.e. `fire_response_event(via_trigger=True)` and the drop-sequence preview); a bridge flare, `on_update` and a manual test-fire run the band atomically, unmoved. A kind's real moment equals its own offset only when its delay is unclamped (offset at or after the anchor); in an all-positive band a 0-kind rides the band's later moment — pre-existing, out of scope | SPECTRA response engine, read by `tick()` for `fire_response`; per-kind split read by `ResponseEngine._execute_band_locked` | **Live** | `spectra/services/scene_response.py` (module docstring, "PER-FLARE TRIGGER MOMENT") |
 | `tick()`'s `target_ms = trig.timestamp_ms + trig.trigger_offset_ms` (fire_scene) / `+ self._response_offset_ms(...)` (fire_response) | ms | OFFSET family, applied first, before any lead | SPECTRA trigger engine | **Live** | `spectra/services/trigger_engine.py:630-696` |
 | `_lead_ms` / `_default_lead_ms` (dispatches by action kind) | ms | LEAD: positive=earlier | SPECTRA trigger engine | **Live** | `spectra/services/trigger_engine.py:1036-1055` |
 | `_scene_transition_lead_ms` / `_scene_transition_lead_ms_for` | ms | LEAD; `anchor_frac × crossfade_ms`, max across affected virtuals | SPECTRA trigger engine, scene transitions | **Live** | `spectra/services/trigger_engine.py:1058-1132` |
@@ -143,8 +143,10 @@ fire_at   = target_ms - lead_ms              # LEAD: opposite sign, applied last
 ```
 
 The content term is `SceneV2.trigger_offset_ms` for a `fire_scene` trigger
-and `scene_response.band_trigger_offset_ms` (the fired band's flare kinds)
-for a `fire_response` one; both default 0. **Adding two OFFSET-family
+and `scene_response.band_trigger_offset_ms` (the fired band's ANCHOR —
+where the fire begins; each kind then lands at its own offset relative to
+it, see that row of the master table) for a `fire_response` one; both
+default 0. **Adding two OFFSET-family
 terms is legal — same unit, same sign, same meaning of "later"; adding a
 LEAD to either is the thing that must never happen.** The trigger's own
 field is honoured on every action kind now, instruments included: an

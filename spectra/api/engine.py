@@ -14,7 +14,11 @@
       on_event. As of the 2026-08-20 placeholder (on_update's own
       docstring), this fires the "flare" class at 2x the given intensity —
       no longer a bypass of band selection, just a different intensity
-      input.
+      input. A test-fire is not relocated by any band anchor, so its band
+      fires atomically (scene_response's "ONLY A FIRE ALREADY RELOCATED BY
+      THE ANCHOR STAGGERS") and `kind_batches` stays empty; the queue is
+      still drained in due order before every pending release is flushed,
+      as at every drain point.
   POST /api/engine/baseline/{scene_id} — re-baseline the engine on a scene
       WITHOUT firing anything: resolve at the given intensity, hand the
       writes to the conductor. This is how the engine adopts a scene while
@@ -59,8 +63,12 @@ async def post_event(body: EventRequest):
         record = await engine.responses.on_update(body.intensity)
     else:
         record = await engine.responses.on_event(body.event_class, body.intensity)
+    batches = sorted(engine.responses.take_kind_batch_schedule(),
+                     key=lambda b: b.due_at)
+    kind_batches = [await engine.responses.run_kind_batch(b) for b in batches]
     released = await engine.responses.flush_releases()
-    return {**record, "releases_flushed": released}
+    return {**record, "kind_batches": kind_batches,
+            "releases_flushed": released}
 
 
 @router.post("/baseline/{scene_id}")

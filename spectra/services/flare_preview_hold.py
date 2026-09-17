@@ -552,6 +552,39 @@ async def _release_color_rotates_after_dwell(responder, dwell_s: float) -> None:
     await responder.flush_color_rotates(dwell_s)
 
 
+async def _run_kind_batch(responder, batch) -> None:
+    # engine._run_kind_batch mirrored onto the scratch responder: a
+    # staggered kind batch (scene_response's "PER-FLARE TRIGGER MOMENT")
+    # lands at its own due time and what it arms is scheduled like any
+    # step's. A hold that ended while the batch waited cancels this task
+    # (_revert_locked); one that lapsed without a sweep yet is checked here,
+    # so a batch never writes onto a room the preview has let go of.
+    try:
+        await asyncio.sleep(responder.seconds_until(batch.due_at))
+    except asyncio.CancelledError:
+        return
+    if not active():
+        responder.note_kind_batch(batch, "skipped_preview_ended")
+        return
+    entry = await responder.run_kind_batch(batch)
+    if not entry["outcome"].startswith("skipped_"):
+        _schedule_responder_tail(responder)
+
+
+def _schedule_responder_tail(responder) -> None:
+    """Every queue a scratch responder can arm, scheduled onto this
+    session's own _release_tasks (so a revert cancels them all)."""
+    for group in responder.take_release_schedule():
+        _release_tasks.append(asyncio.create_task(
+            _release_group(responder, group)))
+    for dwell_s in responder.pending_color_rotate_holds():
+        _release_tasks.append(asyncio.create_task(
+            _release_color_rotates_after_dwell(responder, dwell_s)))
+    for batch in responder.take_kind_batch_schedule():
+        _release_tasks.append(asyncio.create_task(
+            _run_kind_batch(responder, batch)))
+
+
 class PreviewContext:
     """What a preview program is handed for one step. Everything expensive
     or dangerous — the scratch conductor/responder pair, the compiled
@@ -656,13 +689,13 @@ async def open_program_hold(program: PreviewProgram, intensity: float, *,
     revert restores — never a mid-session state. Any release task still
     pending from a PRIOR call in this session is cancelled first, so an
     intensity change mid-hold can't race its own earlier momentary release
-    against the new fire. BOTH release queues are scheduled — the fixed
-    momentary one (take_release_schedule) and the colour rotate-and-back
-    flare's own intensity-scaled one (pending_color_rotate_holds),
-    mirroring engine.fire_response_event's pair of scheduling loops; the
-    rotate queue was missed here until 2026-08-21 (his report: a previewed
-    rotation never faded back, so every crossing after the first showed
-    nothing). Re-arms the release deadline (module docstring,
+    against the new fire. EVERY responder queue is scheduled — the fixed
+    momentary one (take_release_schedule), the colour rotate-and-back
+    flare's own intensity-scaled one (pending_color_rotate_holds) and the
+    staggered kind batches (take_kind_batch_schedule), mirroring
+    engine._schedule_fire_tail; the rotate queue was missed here until
+    2026-08-21 (his report: a previewed rotation never faded back, so every
+    crossing after the first showed nothing). Re-arms the release deadline (module docstring,
     "deadline-driven, not close-driven") either way — an /open call is at
     least as much a heartbeat as an explicit /heartbeat ping. Raises on a
     live-write failure (ownership refusal, an unreachable LedFX) — the
@@ -741,12 +774,7 @@ async def open_program_hold(program: PreviewProgram, intensity: float, *,
                              writes=writes, intensity=intensity,
                              entry_ramp_ms=entry_ramp_ms, first_open=first_open)
         fire_record = await program.execute(step, ctx)
-        for group in responder.take_release_schedule():
-            _release_tasks.append(asyncio.create_task(
-                _release_group(responder, group)))
-        for dwell_s in responder.pending_color_rotate_holds():
-            _release_tasks.append(asyncio.create_task(
-                _release_color_rotates_after_dwell(responder, dwell_s)))
+        _schedule_responder_tail(responder)
         _rearm(heartbeat_timeout_s)
         return {"held": True, "first_open": first_open, "step": step,
                 "fire_record": fire_record}

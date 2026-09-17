@@ -1257,8 +1257,9 @@ tie-break when two same-type kinds (e.g. two permanent param moves) target
 the same param: the later one in that order wins (`scene_response.py`'s
 fixed dice→permanent→momentary→gain→colour execution order, generalized —
 see that module's own docstring before assuming "combine" means additive;
-dice re-rolls and colour jumps are each a SINGLETON pick per fire
-regardless of how many actually fire, only param moves/gains compose). The
+dice re-rolls and colour jumps are each a SINGLETON pick per batch —
+per fire unless PER-FLARE TRIGGER MOMENT below staggers it — regardless of
+how many actually fire, only param moves/gains compose). The
 lead/offset forward peeks (`band_trigger_offset_ms` etc.) aggregate over
 ALL pool members — the possibility-set bound, documented in each
 docstring, since the fire-time pick can't be known early. Rename/
@@ -2967,8 +2968,10 @@ PATH READS IT TOO**: `trigger_engine.tick()` relocates a `fire_response`
 trigger's target by the fired band's authored kind offset
 (`scene_response.band_trigger_offset_ms` — its docstring carries the
 multi-kind aggregation rule: min over the NONZERO offsets, a kind at the
-untouched default 0 never vetoes a sibling's authored ask, because a band
-fires atomically), read LIVE off the ACTIVE scene at render intensity,
+untouched default 0 never vetoes a sibling's authored ask — this is the
+ONE band-wide relocation `tick()` still applies, unaffected by PER-FLARE
+TRIGGER MOMENT below, which only changed what happens once the fire
+lands), read LIVE off the ACTIVE scene at render intensity,
 composed with the automatic lead exactly as #172 composes the
 trigger-level sibling field (`target = timestamp + his_offset`, then
 `fire_at = target - lead` — never the same sign added/subtracted). All 61
@@ -2987,6 +2990,59 @@ playback advanced). Scoped like the lead system: stored triggers only —
 a bridge-classified flare has no forward notice, nothing to relocate.
 Specs: `scripts/check_triggers.py` §11,
 `tests/test_flare_kind_trigger_offset.py`.
+
+**PER-FLARE TRIGGER MOMENT (2026-09-16, his order: "build the offset
+independence for flares and implement it" — exactly the authorisation
+`band_trigger_offset_ms`'s own docstring said this needed).** Before this,
+a band fired ATOMICALLY (one `_execute_band_locked` burst), so ONE offset
+had to speak for every kind attached to it — the aggregate `min()` above
+is unchanged and still governs the band's own tick-level relocation, but
+INSIDE the fire every kind now honours its OWN `trigger_offset_ms`
+independently, ported verbatim from legacy `services/trigger_engine.py`'s
+`MorphLane` shape: `_band_anchor_ms` (the same value `band_trigger_offset_
+ms` always computed) stays the anchor; each attached kind then waits
+`max(0, kind.trigger_offset_ms - anchor_ms)` (always >= 0 — clamped
+because SPECTRA's anchor excludes untouched-0 kinds from its own min,
+unlike legacy's literal min-over-all) before executing. A delay of 0 runs
+INLINE (`ResponseEngine._run_kinds`, the extracted pipeline
+`_execute_band_locked` always ran); any other delay is a
+`PendingKindBatch`, scheduled by `services/engine.py` the SAME shape
+`take_release_schedule`/`_release_group` already established for
+momentary releases (`take_kind_batch_schedule`/`run_kind_batch`). A band
+whose kinds all sit at 0 is byte-identical (no batch is ever created).
+The fixed dice -> permanent -> momentary -> gain -> colour order still
+governs collisions WITHIN one batch (so the per-fire singletons — one dice
+roll, one colour jump — are now per batch); two kinds staggered into
+DIFFERENT batches are deliberately reordered in real time — that IS the
+feature. ONLY A FIRE `tick()` ALREADY RELOCATED BY THE ANCHOR STAGGERS
+(`on_event(..., anchor_relocated=True)`, passed as `via_trigger` by
+`engine.fire_response_event`, and by the drop-sequence preview that draws
+that same relocation): a bridge-classified flare, `on_update` (dwell's
+deferral and the `fire_scene_update` action) and `POST /api/engine/event`
+run their band at their own un-moved moment, so they fire it ATOMICALLY
+exactly as before — measuring from the anchor there would hold 0-offset
+band-mates behind a mark nothing relocated. Four rules ride with it, all
+in `scene_response.py`'s module docstring: a batch is due at the fire's START + its delay, never after
+the inline burst; a batch is a fire in miniature (own `_fire_seq`,
+captured once and threaded to every release it pushes, and no other fire
+may arm or schedule its releases while it is still in flight —
+`_fires_in_flight`; `engine._schedule_fire_tail` schedules what it armed once
+it ends — the kind-batch
+queue is the third queue every drain point must schedule, including
+`flare_preview_hold` and `POST /api/engine/event`); a woken batch re-checks
+the gate its fire passed and SKIPS (never fires) onto a changed scene;
+and every outcome lands in `responses.kind_batch_log` (landed / skipped_* /
+error). `fire_kind` (the isolated single-kind preview) is untouched: a
+lone kind's own anchor is itself, so its delay is always 0. Known,
+pre-existing, out of scope: in an all-positive-offset band a 0-kind is
+clamped and fires late while its preview draws it on the mark; and the
+automatic lead (`_response_switch_lead_ms`) stays BAND-wide, subtracted
+once from the whole fire's start, so a kind sharing a band with a smooth
+glide or a colour rotate fires earlier than its own preview's per-kind
+head start shows. Spec:
+`tests/test_flare_per_kind_stagger.py`, `tests/
+test_flare_kind_batch_lifecycle.py`, `tests/
+test_flare_preview_shows_stagger.py`.
 
 Help: `spectra/web/src/help/helpContent.ts` id `flare-preview-timeline`
 (under the `scenes-page` section, next to `flare-kind-edit-box`),

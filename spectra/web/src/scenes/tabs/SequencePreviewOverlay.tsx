@@ -14,14 +14,15 @@
  * sliders set the gaps those ramps stretch to fill. The DROP is never
  * stretched and BEGINS on its mark: the settled start anchor.
  *
- * THE MARKS ARE NOT DRAGGABLE HERE, deliberately. A band's authored offset
- * is an aggregate over however many flare kinds it attaches (min over the
- * nonzero values — a band fires atomically), so a drag would have to pick
- * one kind to write it to, and picking would be invention. The place a
- * kind's own offset is authored already exists and is per-kind by
- * construction: the flare preview's own marker. This preview SHOWS what
- * those authored offsets add up to per class, so the ruler still tells the
- * truth about where the show will fire.
+ * THE MARKS ARE NOT DRAGGABLE HERE, deliberately. Each mark is its band's
+ * ANCHOR, an aggregate over however many flare kinds it attaches (min over
+ * the nonzero values), while every kind keeps its own offset and lands at
+ * it relative to that anchor (scene_response's "PER-FLARE TRIGGER
+ * MOMENT") — so a drag would have to pick one kind to write it to, and
+ * picking would be invention. The place a kind's own offset is authored
+ * already exists and is per-kind by construction: the flare preview's own
+ * marker. This preview SHOWS where each class's fire begins, so the ruler
+ * still tells the truth about where the show will fire.
  *
  * Every time here is server-computed (marks[].mark_s / fire_at_s /
  * ramp_*_s, cues[].at_s); this file derives none of them. */
@@ -187,9 +188,11 @@ export default function SequencePreviewOverlay({ scene, onClose }: {
                 </div>
               ))}
               <div style={{ marginTop: 6, color: 'var(--text-muted)' }}>
-                The marks here aren't draggable: a band's offset is shared by every flare kind
-                attached to it, so there's no single kind to write a drag to. Retime one from that
-                kind's own ▶ Preview on the Response tab and it shows up here.
+                The marks here aren't draggable: each mark is its band's anchor, the earliest offset
+                any of its flare kinds authored, while every kind keeps its own offset, so there's no
+                single kind to write a drag to. Retime one from that kind's own ▶ Preview on the
+                Response tab and it shows up here; kinds authored later than the anchor land that
+                much after the mark.
               </div>
             </div>
           </>
