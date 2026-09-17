@@ -845,9 +845,10 @@ class Fish2d(Twod, GradientEffect):
                     "stroke, as a fraction of the ordinary continuous "
                     "swim target — his escape hatch: raise this to 1 "
                     "with Stroke speed cap at 0 to get back the old "
-                    "smooth, un-pulsed motion. Paired with the default "
-                    "Stroke speed cap so the shipped defaults keep the "
-                    "OLD MEAN SPEED — see PULSE_SHAPE_CYCLE_MEAN below"
+                    "smooth, un-pulsed motion. Paired with Stroke speed "
+                    "cap's own default so the shipped pair keeps the old "
+                    "MEAN speed (0.85 + 0.4*0.375 = 1.0) rather than just "
+                    "pulsing around a slower average"
                 ),
                 default=0.85,
             ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1.0)),
