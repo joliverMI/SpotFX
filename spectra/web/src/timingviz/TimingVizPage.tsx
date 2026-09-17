@@ -8,6 +8,7 @@ import { apiGet } from '../api/spotfx';
 import { useToast } from '../components/Toast';
 import HelpLink from '../help/HelpLink';
 import LockHistoryPanel from './LockHistoryPanel';
+import KnownBufferLine from './KnownBufferLine';
 
 interface Dump {
   uri?: string;
@@ -148,7 +149,13 @@ export default function TimingVizPage() {
   const h3 = { margin: '0 0 8px 0', fontSize: 13, color: 'var(--text-muted)', textTransform: 'uppercase' as const, letterSpacing: '0.5px' };
 
   const historyPanel = (
-    <LockHistoryPanel activeUri={uri} onPick={(u) => setParams({ uri: u })} />
+    <>
+      {/* How far his SOUND is running behind, beside the panel that says
+          where the SONG is. Read-only, and honest that nothing of it
+          reaches the show clock while the application gate is shut. */}
+      <KnownBufferLine />
+      <LockHistoryPanel activeUri={uri} onPick={(u) => setParams({ uri: u })} />
+    </>
   );
 
   if (!isLoading && d && !uri) {

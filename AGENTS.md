@@ -948,6 +948,75 @@ never using a `None` sentinel in the first place (it sets a concrete `t:
 0.0` directly), which is the simpler pattern to prefer in new code.
 Regression: `tests/test_blackhole_orphan_drop_none_crash.py`.
 
+## THE KNOWN AUDIO BUFFER — SPECTRA MIRRORS River's number, never shortens it
+
+**`spectra/services/known_buffer.py`'s module docstring is the binding
+statement** (card 1ylu, 2026-09-17; Admiral order 30). River publishes how
+far his sound is running behind on its own loopback surface and SPECTRA
+subscribes. Six things:
+
+- **THE NAME IS THE INSTRUCTION and is never shortened**:
+  `effects_fire_later_by_ms`, River's field name verbatim, everywhere —
+  the setting names, the status key, the help topic. A LARGER value means
+  the sound is FURTHER behind, so effects fire that many ms LATER. Applied
+  as published, never negated. **Order 30: the audio lag is HIS HEADROOM**
+  — nothing on this path touches audio, shortens a delay, or reads or
+  writes `av_sync_lead_ms`.
+- **TWO FEEDS, ONE RECORD, AND NO INBOUND ROUTE.** River pushes nothing
+  into SPECTRA: the slow ramp is POLLED (`GET {url}/offset`, every
+  `known_buffer_update_period_s`) and a STEP — a drain — arrives on ONE SSE
+  subscriber (`GET {url}/events`, current value on connect, reconnect with
+  backoff). Both call `record()`. A `POST` here was in the first plan and
+  was dropped once River's surface was known; a second way in is a second
+  thing that can disagree about the current reading, and
+  `tests/test_known_buffer_api.py` holds that structurally. **A step is
+  applied AT ONCE and never smoothed across an epoch change.**
+- **ZERO IS FORBIDDEN, AND SO IS EVERY SYNONYM FOR IT.** Zero asserts his
+  speakers are in sync with the source, the one thing known to be false;
+  "uncorrected" and "no correction" are the SAME forbidden thing. The
+  missing case falls back to `known_buffer_floor_ms` — a SETTING (500
+  default, he proposed it with a question mark), not a constant, and his
+  headroom rather than a tuning parameter. `known_buffer_ceiling_ms` is a
+  setting and **NOT a clamp**: over it is flagged and passes.
+- **STALE IS NOT A FAULT AND IS HALF OF NORMAL.** River re-measures on its
+  own 15 s period, so a reading is already up to a period old when
+  fetched (measured: `age_ms` 14591 straight off `/offset`), while our
+  FRESH window is one period. The ratified ladder is implemented as
+  ratified rather than widened; STALE holds the value, changes nothing,
+  and surfaces its age. Anything rendering it must say so. River's own
+  `stale`/`source` sit beside ours because they answer a different
+  question and can honestly disagree.
+- **THE APPLICATION GATE — nothing reaches the show while
+  `floor_clamped`.** With River's bounding half off it can only see the
+  parec buffer, so the number is the contractual FLOOR, not a delay;
+  applying it would push his lights 300-500 ms BEHIND the sound.
+  `compensation_ms` is reference-based (`effective - reference`, the
+  reference anchored on the first reading the GATE ACCEPTS and re-based
+  whenever `av_sync_lead_ms` is applied), so going live changes nothing in
+  his room.
+- **THE SEAM IS THE SHOW CLOCK, LOCK-GATED (ruled 2026-09-17).** MEASURED,
+  not inferred: his live `AUDIO_INPUT_DEVICE=pulse` resolves to default
+  source `snapcast.monitor`, and `pactl list sink-inputs` shows
+  `snapclient-0.35.0` writing INTO that sink — so both the root xcorr lock
+  and SPECTRA's own audio hub tap SPEAKER TIME, downstream of the
+  snapserver buffer, the network, the snapclient, and River's own
+  source-side segment. So `show_clock_ms = effective_position_ms +
+  av_sync_lead_ms − known_buffer_ms`, and `known_buffer.compensation()` is
+  the ONE definition of that last term, with three answers, two of them
+  zero: `gate` (the apply gate is shut), `lock` (`bridge.shape_offset_ms()`
+  is not None — the lock already tracks this buffer, and a delta on top
+  would correct the same milliseconds twice; an UNKNOWABLE lock counts as
+  present, the safe direction), `applied` (no lock, so the
+  reference-based delta is real). **IT SUBTRACTS because the families are
+  opposite** — `av_sync_lead_ms` is LEAD family (positive = earlier) and
+  this is positive = LATER; the two sit on ONE line in
+  `av_sync_lead.show_clock_ms`, still the single application point, and
+  the new argument defaults to 0 so every pre-existing caller is
+  byte-identical. No smoothing at either lock transition or across an
+  epoch change. **KNOWN FOLLOW-UP, not done:** on a LOCKED song a drain is
+  corrected only as fast as the lock's own chase (2 s × 3 confirms, max 2
+  recoveries/play) — see `docs/SPECTRA_TIMING_CONVENTIONS.md`'s own note.
+
 ## SPECTRA per-song intensity scale (genre-anchored port + headroom reserve)
 
 `spectra/services/intensity_scale.py` ports SpotFX's dropped-in-the-rebuild

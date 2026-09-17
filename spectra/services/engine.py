@@ -64,6 +64,12 @@ from typing import Callable, Optional
 from fx import light_ownership
 from spectra.models.scene import SceneV2
 from spectra.services import av_sync_lead
+# Safe at module scope: known_buffer constructs nothing at import time
+# and reaches room_controls/the bridge only lazily, inside functions
+# (AGENTS.md's light-mode cold-start rule). tests/
+# test_light_mode_cold_start.py proves the cold start in a fresh
+# interpreter, which is the only check that can speak to this.
+from spectra.services import known_buffer
 from spectra.services.bridge import SpotEffectsBridge
 from spectra.services.drift_conductor import DriftConductor
 from spectra.services.fx_executor import RecordingExecutor
@@ -372,8 +378,16 @@ async def _run_trigger_engine() -> None:
             # takes effect without a restart. The sign law and the reason
             # this term exists at all are in av_sync_lead.py's docstring —
             # do NOT add a second application point.
+            # The THIRD term, ruled 2026-09-17: River's published audio
+            # buffer, SUBTRACTED because it is the opposite family from
+            # the lead (positive = fire LATER). It is 0 unless the apply
+            # gate is open AND this song has no xcorr lock — the lock taps
+            # speaker time and already tracks the buffer, so a delta on
+            # top of it would correct the same milliseconds twice. Read
+            # fresh every tick, same as the lead; never raises.
             await trigger_engine.tick(av_sync_lead.show_clock_ms(
-                bridge.effective_position_ms(), av_sync_lead.current_lead_ms()))
+                bridge.effective_position_ms(), av_sync_lead.current_lead_ms(),
+                known_buffer.compensation_ms()))
         except Exception:
             logger.exception("trigger engine: tick failed")
         await asyncio.sleep(TICK_S)
@@ -458,6 +472,13 @@ def status() -> dict:
         "responses": {"recent_surges": list(responses.surges)[-10:],
                       "recent_kind_batches": list(responses.kind_batch_log)[-10:]},
         "bridge": bridge.status(),
+        # THE KNOWN AUDIO BUFFER (spectra/services/known_buffer.py), beside
+        # `bridge` because it is the same question one layer out: bridge
+        # says where the SONG is, this says how far the SOUND is running
+        # behind. Read-only here — nothing in this block reaches the show
+        # clock, and while the application gate is shut nothing does at
+        # all.
+        "known_buffer": known_buffer.state(),
         "triggers": trigger_engine.status(),
         "ambient": ambient_music_gate.status(),
         # The param orphan watchdog (spectra/services/param_watchdog.py):

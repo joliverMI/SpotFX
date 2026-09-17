@@ -547,6 +547,65 @@ class RoomControlState(BaseModel):
     # precedent: a measured calibration belongs to the instrument that
     # measured it, not to a spoken command.
     av_sync_lead_ms: Optional[int] = Field(default=None, ge=-2000, le=2000)
+
+    # THE KNOWN AUDIO BUFFER (card 1ylu, 2026-09-17; Admiral order 30) —
+    # River publishes how far his sound is running behind, and SPECTRA
+    # MIRRORS it. These five are the whole configuration surface; the
+    # mechanism, the staleness ladder, the forbidden-zero rule and the
+    # application gate live in spectra/services/known_buffer.py's module
+    # docstring — read that before touching any of them.
+    #
+    # The name is the instruction and is never shortened: a LARGER
+    # `effects_fire_later_by_ms` means the sound is FURTHER behind, so
+    # effects fire that many ms LATER. Order 30: the audio lag is HIS
+    # headroom — nothing here shortens a buffer, and none of this touches
+    # av_sync_lead_ms above.
+    #
+    # Deliberately settings and NOT environment variables: env in this app
+    # is for credentials and arming levers only (spectra/config.py's own
+    # rule), and every one of these is a room tunable he may want changed
+    # without a restart. Excluded from the settings-console registry on
+    # av_sync_lead_ms's own precedent: a timing calibration belongs to the
+    # instrument that measures it, and the URL is an opaque address.
+
+    # River's base address — loopback only, same host. "" means
+    # UNCONFIGURED, which the status reports as its own state: nobody has
+    # been asked, which is NOT the same as having asked and heard nothing.
+    # /offset (the 15 s ramp poll) and /events (the SSE step stream) are
+    # derived from it; nothing is ever pushed into SPECTRA.
+    known_buffer_source_url: str = "http://127.0.0.1:8097"
+
+    # THE FLOOR IS HIS HEADROOM, NOT A TUNING PARAMETER. He proposed 500
+    # with a question mark, so it is read from configuration from the
+    # first commit rather than frozen as a constant. A published value
+    # below it is never applied below it: the floor holds and below_floor
+    # is flagged. It is also what the MISSING state falls back to — zero
+    # is forbidden there, and so is every synonym for it.
+    known_buffer_floor_ms: int = Field(default=500, ge=0, le=10000)
+
+    # NOT A CLAMP. A variable buffer tracked accurately is allowed to pass
+    # this; going over is flagged above_ceiling and surfaced, never
+    # silently limited (the bounding that would hold it down is River's
+    # separate, not-yet-live half).
+    #
+    # THE DEPENDENCY, for whoever tunes this next: a LOWER ceiling means
+    # MORE FREQUENT DRAINS, which is only safe because the step is
+    # push-driven — SPECTRA learns of a drain the instant River emits it
+    # on /events. If those pushes ever become unreliable, the ceiling has
+    # to RISE, because the 15 s poll alone would leave a drain unnoticed
+    # for up to a whole period.
+    known_buffer_ceiling_ms: int = Field(default=1500, ge=0, le=10000)
+
+    # How often the slow ramp is polled. River publishes 15 s as its own
+    # update period; this is SPECTRA's side of the same cadence.
+    known_buffer_update_period_s: float = Field(default=15.0, gt=0.0, le=600.0)
+
+    # The staleness ladder's width, as a MULTIPLE of the period and never
+    # a number of seconds — so it survives the period ever changing.
+    # FRESH: age <= 1 period. STALE: age <= this many periods (the value
+    # is held AND its age surfaced). Past that it becomes MISSING and the
+    # floor applies.
+    known_buffer_stale_periods: float = Field(default=4.0, ge=1.0, le=100.0)
     force_scene_enabled: bool = False
     force_scene_scene_id: Optional[str] = None   # id of the scene held while enabled
 
