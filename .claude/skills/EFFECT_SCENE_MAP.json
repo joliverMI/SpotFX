@@ -1,0 +1,227 @@
+{
+  "_comment": "Hand-maintained manifest for scripts/check_effect_scene_skills_current.py. Do not auto-generate. See AGENTS.md 'Effect/scene skills must stay current' for the rule this backs.",
+
+  "effects": {
+    "blackhole-effect": {
+      "skill": ".claude/skills/blackhole-effect/SKILL.md",
+      "files": [
+        "fx/effects/blackhole.py",
+        "fx/effects/blackhole1d.py",
+        "scripts/check_blackhole_charge_lull.py",
+        "scripts/check_blackhole_charge_target.py",
+        "scripts/check_blackhole_explosion_and_gap.py",
+        "scripts/check_blackhole_explosion_speed.py",
+        "scripts/check_blackhole_hex_spawn.py",
+        "scripts/check_blackhole_reverse_fallback.py",
+        "tests/test_blackhole_charge_lull.py",
+        "tests/test_blackhole_charge_target.py",
+        "tests/test_blackhole_explosion_and_gap.py",
+        "tests/test_blackhole_explosion_speed.py",
+        "tests/test_blackhole_horizon_color.py",
+        "tests/test_blackhole_orphan_drop_none_crash.py",
+        "tests/test_blackhole_reverse_fallback.py",
+        "tests/test_blackhole_spawn_radius.py"
+      ]
+    },
+    "orbits-effect": {
+      "skill": ".claude/skills/orbits-effect/SKILL.md",
+      "files": [
+        "fx/effects/orbits.py",
+        "fx/effects/orbits1d.py",
+        "scripts/check_orbits_drop_burst_and_persistence.py",
+        "scripts/smoke_orbits_params.py",
+        "tests/test_orbits_drop_persistence.py"
+      ]
+    },
+    "radial-effect": {
+      "skill": ".claude/skills/radial-effect/SKILL.md",
+      "files": [
+        "fx/effects/radial.py",
+        "scripts/check_star_spin_motion.py",
+        "scripts/check_radial_base_rotation.py",
+        "tests/test_radial_base_rotation.py"
+      ]
+    },
+    "fireworks-effect": {
+      "skill": ".claude/skills/fireworks-effect/SKILL.md",
+      "files": [
+        "fx/effects/fireworks.py",
+        "fx/effects/fireworks1d.py",
+        "scripts/check_fireworks_drop_tail.py",
+        "scripts/add_fireworks_burst_flare.py",
+        "tests/test_fireworks_drop_tail.py",
+        "tests/test_fireworks_rocket_angles.py",
+        "tests/test_firework_burst.py"
+      ]
+    },
+    "squiggles-effect": {
+      "skill": ".claude/skills/squiggles-effect/SKILL.md",
+      "files": [
+        "fx/effects/squiggles.py",
+        "scripts/check_squiggles_drop_timing.py",
+        "scripts/widen_squiggles_colorset_accept.py",
+        "tests/test_squiggles_drop_timing.py",
+        "tests/test_squiggles_colorset_widen.py"
+      ]
+    },
+    "dancer-effect": {
+      "skill": ".claude/skills/dancer-effect/SKILL.md",
+      "files": [
+        "fx/effects/dancer.py",
+        "fx/effects/dancer_flames.py",
+        "fx/effects/dancer_moves.py",
+        "scripts/check_dancer_flames_off.py",
+        "scripts/smoke_dancer_params.py",
+        "tests/test_dancer_flames_off.py"
+      ]
+    },
+    "eye-effect": {
+      "skill": ".claude/skills/eye-effect/SKILL.md",
+      "files": [
+        "fx/effects/eye.py"
+      ]
+    },
+    "pacman-effect": {
+      "skill": ".claude/skills/pacman-effect/SKILL.md",
+      "files": [
+        "fx/effects/pacman.py"
+      ]
+    },
+    "fish-effect": {
+      "skill": ".claude/skills/fish-effect/SKILL.md",
+      "files": [
+        "fx/effects/fish.py",
+        "scripts/check_fish.py",
+        "scripts/check_fish_avoidance.py",
+        "scripts/check_fish_burst_bounds.py",
+        "scripts/check_fish_camera.py",
+        "scripts/check_fish_charge_spread.py",
+        "scripts/check_fish_disperse.py",
+        "scripts/check_fish_lunge.py",
+        "scripts/check_fish_wake.py",
+        "scripts/add_fish_swim_burst_flare.py",
+        "tests/test_fish.py",
+        "tests/test_fish_camera.py",
+        "tests/test_fish_disperse.py"
+      ]
+    },
+    "melt-effect": {
+      "skill": ".claude/skills/melt-effect/SKILL.md",
+      "files": [
+        "fx/effects/melt.py",
+        "scripts/star_strips_always_melt.py",
+        "tests/test_star_strips_always_melt.py"
+      ]
+    },
+    "power-effect": {
+      "skill": ".claude/skills/power-effect/SKILL.md",
+      "files": [
+        "fx/effects/power.py"
+      ]
+    }
+  },
+
+  "acknowledged_effect_gaps": {
+    "_reason": "Registered effects (a NAME = class attribute in fx/effects/*.py) that are NOT bound by any of his 10 live SPECTRA scenes today. Named here on purpose so the checker does not silently require skills nobody asked for; move an entry out of this list into 'effects' above (with a real skill) the day it gets bound into a live scene, per AGENTS.md's rule.",
+    "files": [
+      "fx/effects/blender.py",
+      "fx/effects/concentric.py",
+      "fx/effects/equalizer2d.py",
+      "fx/effects/gifplayer.py",
+      "fx/effects/gradient.py",
+      "fx/effects/keybeat2d.py",
+      "fx/effects/noise2d.py",
+      "fx/effects/pixelPattern.py",
+      "fx/effects/pixelRange.py",
+      "fx/effects/singleColor.py"
+    ]
+  },
+
+  "scenes": {
+    "black-hole-v2-scene": {
+      "skill": ".claude/skills/black-hole-v2-scene/SKILL.md",
+      "note": "No scene-specific seed/edit script exists for either Black Hole scene (they predate the seed_<scene>_scene.py convention) — both scenes bind the same blackhole/blackhole1d config shape, so the blackhole check/test corpus is attributed to BOTH scene skills rather than guessing which one a change targets. This is a known-imprecise trigger; see AGENTS.md's honest-gap note.",
+      "files": [
+        "scripts/check_blackhole_charge_lull.py",
+        "scripts/check_blackhole_charge_target.py",
+        "scripts/check_blackhole_explosion_and_gap.py",
+        "scripts/check_blackhole_explosion_speed.py",
+        "scripts/check_blackhole_hex_spawn.py",
+        "scripts/check_blackhole_reverse_fallback.py"
+      ]
+    },
+    "black-hole-v2-ui-scene": {
+      "skill": ".claude/skills/black-hole-v2-ui-scene/SKILL.md",
+      "note": "See black-hole-v2-scene's own note — same imprecise, duplicated trigger set.",
+      "files": [
+        "scripts/check_blackhole_charge_lull.py",
+        "scripts/check_blackhole_charge_target.py",
+        "scripts/check_blackhole_explosion_and_gap.py",
+        "scripts/check_blackhole_explosion_speed.py",
+        "scripts/check_blackhole_hex_spawn.py",
+        "scripts/check_blackhole_reverse_fallback.py"
+      ]
+    },
+    "orbits-v2-scene": {
+      "skill": ".claude/skills/orbits-v2-scene/SKILL.md",
+      "files": [
+        "scripts/seed_orbits_scene.py",
+        "scripts/seed_orbits_colorsets.py",
+        "scripts/smoke_orbits_params.py"
+      ]
+    },
+    "star-scene": {
+      "skill": ".claude/skills/star-scene/SKILL.md",
+      "files": [
+        "scripts/seed_star_strips.py",
+        "scripts/star_strips_always_melt.py",
+        "scripts/add_star_reverse_flares.py",
+        "scripts/switch_star_reverse_flares_to_flip.py",
+        "scripts/freeze_star_edges.py",
+        "scripts/check_star_spin_motion.py",
+        "tests/test_star_strips_always_melt.py"
+      ]
+    },
+    "fireworks-v2-scene": {
+      "skill": ".claude/skills/fireworks-v2-scene/SKILL.md",
+      "files": [
+        "scripts/seed_fireworks_scene.py",
+        "scripts/add_fireworks_burst_flare.py"
+      ]
+    },
+    "squiggles-v2-scene": {
+      "skill": ".claude/skills/squiggles-v2-scene/SKILL.md",
+      "files": [
+        "scripts/seed_squiggles_scene.py",
+        "scripts/widen_squiggles_colorset_accept.py"
+      ]
+    },
+    "dancers-v2-scene": {
+      "skill": ".claude/skills/dancers-v2-scene/SKILL.md",
+      "files": [
+        "scripts/seed_dancers_scene.py",
+        "scripts/seed_dancer_event.py",
+        "scripts/smoke_dancer_params.py"
+      ]
+    },
+    "eye-v2-scene": {
+      "skill": ".claude/skills/eye-v2-scene/SKILL.md",
+      "files": [
+        "scripts/seed_eye_scene.py"
+      ]
+    },
+    "pacman-v2-scene": {
+      "skill": ".claude/skills/pacman-v2-scene/SKILL.md",
+      "files": [
+        "scripts/seed_pacman_scene.py"
+      ]
+    },
+    "fish-scene": {
+      "skill": ".claude/skills/fish-scene/SKILL.md",
+      "files": [
+        "scripts/seed_fish_scene.py",
+        "scripts/add_fish_swim_burst_flare.py"
+      ]
+    }
+  }
+}
