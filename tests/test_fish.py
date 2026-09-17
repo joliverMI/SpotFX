@@ -571,7 +571,9 @@ def _lull_clock(room, eff, seconds=3.6):
         f = i / frames
         eff.update_config({"phase_progress": f})
         room.step(1)
-        alive = int(np.count_nonzero(eff.p_mode[: eff.n] < 2))
+        # every fish on the effect, dispersing ones included: a fish that is
+        # swirling out is still a fish in the lull
+        alive = int(eff.n)
         lit = float(np.asarray(eff.matrix, dtype=np.float32).max())
         wake = float(eff.wake.max())
         marks[i] = (f, alive, lit, wake)

@@ -398,7 +398,9 @@ async def section_lull(stack):
         room.step(1)
         marks.append((
             f,
-            int(np.count_nonzero(eff.p_mode[: eff.n] < 2)),
+            # every fish on the effect: a dispersing (swirling / leaking)
+            # fish is still a fish in the lull
+            int(eff.n),
             float(np.asarray(eff.matrix, dtype=np.float32).max()),
             float(eff.wake.max()),
         ))

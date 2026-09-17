@@ -111,34 +111,38 @@ Orbits' twin as a scene, but the charge and the lull are his own
 (2026-08-25, corr=6dd10a8c3c5bd72a) and are the reason the effect exists
 separately at all.
 
-- **Charge** — up to `school_count` (12) fish swim in and steer onto ONE
-  shared heading, each offset by a little `school_variation` so the school
-  is near-identical but never lockstep. The camera follows the school
-  perfectly: the fish hold station on screen and the WATER streams past
-  instead (the ripple wake is advected by minus the school's velocity).
-  Once the school has gathered (45% of the ramp, `CHARGE_FILL_AT`), every
-  beat picks a new shared heading, never closer together than
-  `turn_min_time` (his 400ms floor); the whole school banks onto it through
-  a real arc, because nothing can out-turn the turn radius.
-- **Lull** — the school disperses, furthest first, on a rank schedule so
-  everyone but ONE fish is gone by `LULL_DISPERSE_AT` (0.42). That fish —
-  the one nearest centre when the lull began — keeps swimming while a
-  ramping positional pull holds it in the middle of view, fully centred by
-  `LULL_CENTER_PROGRESS` (0.5; TIMING HONESTY: SpotFX ramps
-  `phase_progress` over ~90% of the real gap and then hangs at 1.0, so p=0.5
-  lands at ~45% of the lull's true wall clock — the same convention
-  `blackhole.py`'s `LULL_FILL_PROGRESS` records). At `LULL_RUSH_AT` (0.60)
-  a rush of `rush_count` (20) fish pours in FROM THE DIRECTION that fish is
-  heading and zooms past it with `rush_chaos` spread in heading and speed;
-  after `rush_time` (1.0s) exactly `particle_count` fish are kept (the lone
-  one counts) and the rest carry on off-panel.
-- **Drop** — Orbits' own payoff, unchanged in spirit: configured population
-  restored with a centre burst for the missing, plus 2x population of
-  ballistic ejecta that bolt straight off the panel; swim speed boosted and
-  decaying over `DROP_SETTLE_S`; the phase self-resets so an identical later
-  drop edges again.
+- **Charge** — up to `school_count` (12) fish swim in on an even spread and
+  steer onto ONE shared heading, each offset by a little `school_variation`
+  so the school is near-identical but never lockstep; a separation steer
+  (`SCHOOL_SPACING_W`) keeps them from clumping. The view travels with the
+  school by `camera_follow`. Once the school has gathered (45% of the ramp,
+  `CHARGE_FILL_AT`), every beat picks a new shared heading, never closer
+  together than `turn_min_time` (his 400ms floor); the whole school banks
+  onto it through a real arc, because nothing can out-turn the turn radius.
+- **Lull** — his clock, in thirds of `phase_progress` (TIMING HONESTY:
+  SpotFX ramps it over ~90% of the real gap and then hangs at 1.0, the same
+  convention `blackhole.py`'s `LULL_FILL_PROGRESS` records). 0 → 1/3: the
+  school breaks into a chaotic SWIRL round the centre of view, and the fish
+  leak out of it one by one, furthest first (between `LULL_LEAK_FROM` and
+  `LULL_LEAK_TO` of the third), swimming OFF the panel at full brightness
+  by `LULL_EXIT_BY`; a lull too short to swirl in scatters straight out
+  (`LULL_EXIT_MIN_S`), and a hard backstop at 1/3 guarantees nothing is
+  left. 1/3 → 2/3: ripples only. 2/3 → end: dark. No fish ever fades and
+  none survives.
+- **Drop** — Orbits' own payoff: 2x population of ballistic ejecta bolt
+  straight off the panel, swim speed boosted and decaying over
+  `DROP_SETTLE_S`. On top of it, a rush of `rush_count` (20) fish pours in
+  from every side (a centre burst stands in only when `rush_count` is 0),
+  swirls round the centre of view for the drop, and at the settle exactly
+  `particle_count` stay behind while the rest DISPERSE off the panel; the
+  phase self-resets so an identical later drop edges again.
 
-THE CAP: the charge's school and the lull's rush are the ONLY two moments a
+A fish leaving for any reason — the lull, the settle, the population
+shrinking, an outgoing crossfade into an effect with no blobs of its own —
+DISPERSES off the panel rather than fading; only the drop's ejecta fade.
+The mechanism is `fx/effects/fish.py`'s dispersal block (`fx/VENDOR.md` #39).
+
+THE CAP: the charge's school and the drop's rush are the ONLY two moments a
 fish scene exceeds `particle_count`, via the `p_nocap` tag. A cap-exempt
 fish never survives the moment it was granted for — the rush's own settle
 clears the tag on the keepers and departs the rest, the drop and a return to

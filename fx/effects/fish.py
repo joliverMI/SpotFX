@@ -39,10 +39,122 @@ SPLAT_KERNEL_R = 16  # the shared splat offset table's own span, in px:
                     # every soft dot (a body segment, a wake deposit) is
                     # stamped from it and filtered by its own radius
 
-LEAVE_FADE_S = 1.2   # fade-out horizon for departing fish
 HANDOFF_ENTER_S = 0.65
-HANDOFF_LEAVE_S = 0.55
 SLOT_EASE_S = 0.6    # home-anchor re-spacing ease time constant
+
+# ── dispersal: a fish NEVER fades out ───────────────────────────────────────
+# HIS WORDS (2026-09-16): "the fish shouldn't fade out, they should disperse
+# off the screen." Every way a fish used to leave by dimming — the ordinary
+# population trim (the old 1.2 s LEAVE_FADE_S horizon), the lull's paced
+# exodus, a phase abandoned, the drop's surplus rush fish, and an outgoing
+# scene crossfade into an effect with no blobs of its own to merge into — is
+# now ONE mode, DISPERSING (mode 4): the fish keeps its
+# full brightness, steers out of the window along the turn-radius-bounded
+# arc every other steer obeys, and is retired only once its whole body is
+# off the panel. There is no brightness term on a dispersing fish at all,
+# which is what makes "never fades" structural rather than tuned.
+#
+# A DEADLINE, NOT A SPEED: each dispersing fish carries the effect-clock time
+# it must be off the panel by (`p_dl`), and its swim speed is DERIVED every
+# frame from the distance still to cover and the time still left — so a long
+# lull disperses at a relaxed pace and a 0.5 s crossfade scatters them hard,
+# with no second number to keep in step with either. The only speed that is
+# a constant is the floor (a dispersing fish is never slower than it cruised)
+# and the ceiling (see DISPERSE_MAX_PANELS_S).
+DEPART_S = 1.2           # an ordinary departure's deadline: the SAME time
+                         # budget the old fade had, spent swimming out
+DISPERSE_MIN_X = 1.3     # never slower than this multiple of cruise
+DISPERSE_PATH_X = 1.25   # the path out is an arc, not the straight line the
+                         # distance is measured along; this is its allowance
+DISPERSE_MAX_PANELS_S = 5.0  # ceiling: panel long-axes per second. Past this
+                         # the smear reads as a streak rather than a fish, and
+                         # only a deadline far shorter than any real lull or
+                         # crossfade can ask for it (measured in
+                         # scripts/check_fish_disperse.py)
+DISPERSE_TAU = 0.07      # speed ease while dispersing — far quicker than
+                         # SPEED_TAU, or the derived speed arrives too late
+DISPERSE_MIN_LEFT_S = 0.05  # the "time left" a deadline is never read below,
+                         # so a missed deadline asks for the ceiling, never
+                         # for infinity
+DISPERSE_TURN_S = 0.35   # a leaking lull fish turns from its swirl to
+                         # outward across this long (a spiral, not a snap)
+DISPERSE_OFF_MARGIN = 2.0  # px past the panel edge, beyond a body length,
+                         # at which a dispersing fish counts as gone
+
+# ── the outgoing crossfade ──────────────────────────────────────────────────
+# A scene change away from Fish crossfades (his crystal-mapper is "Add",
+# 0.5 s), and "Add" multiplies the OUTGOING frame by (1 - weight): the fish
+# used to simply dim away underneath the incoming effect. HIS SPLIT: "merge
+# into blobs from the other effects that have them ... when there isnt a
+# blob, have them disperse to black, rather than fade". So which way a fish
+# leaves depends on the INCOMING effect:
+#   * an ADOPTER (TRANSITION_ADOPTERS) reads our live snapshot on its first
+#     draw and spawns its own particles at the fish positions — the fish ARE
+#     its blobs now, and the outgoing shoal is left exactly as it always was
+#     (scattering it too would show the shoal twice: once adopted, once
+#     swimming away);
+#   * radial keeps its own gather-into-the-bloom collapse, untouched;
+#   * anything else has no blob to merge into, so every fish disperses with
+#     a deadline inside the crossfade, and for an additive blend the bodies
+#     are drawn brighter by the inverse of that weight (floored). The body
+#     layer is what carries that gain — the smear it leaves in the trail
+#     decays from the gained value — and the wake is NOT compensated, so
+#     once the fish are gone the panel goes to black, which is the ask. A
+#     gained body clips HUE-PRESERVING (`_clip_body_layer`): a pixel past
+#     255 is scaled down as a whole, so an orange fish stays orange on its
+#     way out instead of washing toward yellow-white the way clipping each
+#     channel on its own would.
+TRANSITION_EXIT_BY = 0.6     # of the crossfade: every fish off by here
+TRANSITION_GAIN_FLOOR = 0.3  # the blend weight compensation never exceeds
+                             # 1 / this, so a body cannot blow out to white
+# A NAMED LIMIT, measured and accepted: the virtual clips the OUTGOING frame
+# at 255 before weighting it by (1 - weight), so no gain inside the effect
+# can lift a core that is already saturated — the compensation only helps
+# the parts of a fish below full. Rendered pixels through his Add 0.5 s
+# crossfade into black, four seeds: median on-panel body peak 0.90-0.96 of
+# its pre-switch value at weight 0.03, 0.80-0.89 at 0.23, ~0.6-0.75 on the
+# last fish still centred on the panel (weight 0.32-0.42), every centre off
+# by ~0.36-0.45 and every body by 0.48-0.55 (scripts/check_fish_disperse.py
+# section 2 prints it frame by frame). Lifting that needs a change to the
+# virtual's blend, not to this effect.
+#
+# Keyed by the incoming effect's MODULE basename. Measured on fx.headless:
+# each of these reads the live fish sibling's _handoff_snapshot() (or the
+# registry snapshot) in its own _adopt_handoff and spawns its own particles
+# at the fish positions — "fish" is the same-type native restore. Pacman is
+# the one of his named five with NO adopt path at all, so it still gets the
+# dispersal until it grows one (carded separately); concentric, equalizer2d,
+# blender, noise, keybeat2d, gifplayer, singleColor and everything else
+# likewise have no blob to merge into.
+TRANSITION_ADOPTERS = frozenset(
+    {"blackhole", "orbits", "fireworks", "squiggles", "eye", "dancer", "fish"}
+)
+
+# ── the swim burst flare ────────────────────────────────────────────────────
+# HIS WORDS: "a flare ... that makes the fish swim fast for a burst, and have
+# a dramatic change in the frequency of their fin strokes ... lasts 300ms
+# total, and make sure Sonic can adjust those numbers easily." (He also asked
+# for it to start 100 ms before the trigger, then corrected that himself —
+# "no, dont pull the band forward, just dont add the 100ms pre-fire" — so it
+# fires ON the trigger; an early start belongs to per-flare trigger-moment
+# work, not to this band.)
+#
+# The effect side is only a LEVEL, `swim_burst` (a toggle): while it is on,
+# every fish swims SWIM_BURST_SPEED_X faster and strokes FLAP_BURST_X faster.
+# The TIMING lives entirely in the flare kind that drives it — a momentary
+# kind (`hold_ms` = the 300 ms length, `trigger_offset_ms` = where it starts
+# relative to the trigger, OFFSET family, authored 0 = on the mark;
+# docs/SPECTRA_TIMING_CONVENTIONS.md) — so both numbers are ordinary
+# FlareKind fields Sonic already edits, and the effect has no duration of
+# its own to disagree with them. A toggle's momentary write and release are
+# both instant jumps, which is what makes the kind's hold the burst's real
+# length. The envelope below only rounds the edges.
+SWIM_BURST_SPEED_X = 2.2   # extra swim speed, as a multiple of cruise
+FLAP_BURST_X = 2.5         # extra fin-stroke frequency (x3.5 at full)
+BURST_ATTACK_S = 0.03      # envelope rise ...
+BURST_RELEASE_S = 0.05     # ... and fall, so the burst is ~its hold long
+BURST_SPEED_TAU = 0.04     # speed ease while the burst envelope is live, so
+                           # the dash lands inside 300 ms and ENDS with it
 SPIKE_COOL_S = 0.12  # min gap between beat turn-kicks
 
 # ── the lunge ───────────────────────────────────────────────────────────────
@@ -305,11 +417,30 @@ CHARGE_TURN_MIN = (np.pi / 3.0, 2.2)  # turn magnitude range, radians
 # where he asked for it: "I want the rush to be part of the drop."
 LULL_GONE_AT = 1.0 / 3.0
 LULL_DARK_AT = 2.0 / 3.0
-LULL_DEPART_SPAN = 0.55  # departures are scheduled across this fraction of
-                         # the first third, so the LAST one's own fade still
-                         # finishes inside it — "gone by 1/3" is about being
-                         # invisible, not about having been told to leave
-LULL_DEPART_FADE_S = 0.5  # ... and that fade is short for the same reason
+# HIS 2026-09-16 LULL, laid INSIDE that same first third (the clock is his
+# 2026-08-28 ruling and is not moved — "gone by 1/3" already satisfies "all
+# gone by half way"; this changes only HOW they go): "when we reach the lull,
+# have them go from their ordered school to a chaotic swirl, and as they
+# swirl, have them leak out and off the screen." Fractions of LULL_GONE_AT:
+LULL_LEAK_FROM = 0.4     # the school breaks into the swirl at once; the
+                         # first fish leaks out here (the swirl needs real
+                         # time to form — measured, see
+                         # scripts/check_fish_disperse.py) ...
+LULL_LEAK_TO = 0.72      # ... the last one here ...
+LULL_EXIT_BY = 0.92      # ... and every one is off the panel by here, so the
+                         # backstop at the third retires nothing visible
+LULL_EXIT_MIN_S = 0.3    # ... but no fish leaks later than this many SECONDS
+                         # before that exit moment. A lull too short to swirl
+                         # in (his real gaps run from 900 ms to 6 s) scatters
+                         # straight out instead of being retired on the panel
+                         # by the backstop.
+LULL_SWIRL_W = 10.0      # tangential steer around the centre of view
+LULL_SWIRL_RING = 0.45   # ... held near this fraction of the pond radius
+LULL_SWIRL_RING_W = 4.0  # ... by a radial correction this strong
+LULL_SWIRL_CHAOS = 1.1   # radians of per-fish heading noise — the chaos
+LULL_SWIRL_CHAOS_W = 0.35  # ... weighted against the swirl itself: more and
+                           # the school never actually wheels round
+LULL_SWIRL_SPEED_X = 1.7  # swirl speed, as a multiple of cruise
 LULL_DARK_FROM = 0.5     # the wake is ramped to nothing between here and
                          # LULL_DARK_AT, so the last third is genuinely dark
                          # rather than "decayed enough": a half-life alone
@@ -326,7 +457,7 @@ _SOA_NAMES = (
     "p_mode", "p_nocap", "p_disp", "p_slot", "p_slot_frac",
     "p_x", "p_y", "p_x0", "p_y0", "p_hd", "p_spd", "p_acc",
     "p_flap", "p_jog", "p_ro", "p_lun", "p_lun_t", "p_var",
-    "p_enter", "p_erate", "p_leave", "p_lfade",
+    "p_enter", "p_erate", "p_leave", "p_lfade", "p_dl", "p_lk",
     "p_nf1", "p_nf2", "p_np1", "p_np2", "p_wf", "p_wp", "p_gf", "p_gp",
     "p_grad", "p_grad_from", "p_scatter", "p_bright",
 )
@@ -595,6 +726,15 @@ class Fish2d(Twod, GradientEffect):
                 description="How disorderly the drop's rush is: 0 = a clean ring, 1 = scattered",
                 default=0.5,
             ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1.0)),
+            vol.Optional(
+                "swim_burst",
+                description=(
+                    "Swim burst (driven by SpotFX's swim-burst flare): while "
+                    "on, every fish dashes and strokes its fins much faster. "
+                    "The flare's own hold is the burst's length"
+                ),
+                default=False,
+            ): bool,
             # ── SpotFX-driven choreography ───────────────────────────────
             vol.Optional(
                 "phase",
@@ -613,7 +753,9 @@ class Fish2d(Twod, GradientEffect):
         super().__init__(ledfx, config)
         # SoA + accumulators live here (NOT do_once) so they survive config
         # patches — do_once re-runs on every config change.
-        self.p_mode = np.zeros(CAP, dtype=np.int8)   # 0 swim 1 enter 2 leave 3 rush
+        # 0 swim 1 enter 2 ejecta (the drop's explosion only) 3 rush
+        # 4 DISPERSING — see the dispersal block at the top of the module
+        self.p_mode = np.zeros(CAP, dtype=np.int8)
         self.p_nocap = np.zeros(CAP, dtype=np.int8)  # spawned past the cap
         # the lull's dispersal RANK (NaN = not scheduled). A rank, not an
         # index: _compact() reshuffles slots whenever a fish retires, so a
@@ -637,7 +779,12 @@ class Fish2d(Twod, GradientEffect):
         self.p_enter = np.zeros(CAP, dtype=np.float32)
         self.p_erate = np.ones(CAP, dtype=np.float32)
         self.p_leave = np.zeros(CAP, dtype=np.float32)
-        self.p_lfade = np.full(CAP, LEAVE_FADE_S, dtype=np.float32)
+        self.p_lfade = np.full(CAP, DROP_SETTLE_S, dtype=np.float32)
+        # dispersal: the effect-clock time a dispersing fish must be off the
+        # panel by, and the time it starts heading OUT (a lull fish swirls
+        # until then). inf = no deadline / not leaking yet.
+        self.p_dl = np.full(CAP, np.inf, dtype=np.float64)
+        self.p_lk = np.full(CAP, np.inf, dtype=np.float64)
         self.p_nf1 = np.zeros(CAP, dtype=np.float32)
         self.p_nf2 = np.zeros(CAP, dtype=np.float32)
         self.p_np1 = np.zeros(CAP, dtype=np.float32)
@@ -679,6 +826,9 @@ class Fish2d(Twod, GradientEffect):
         self._school_hd = 0.0
         self._school_on = False
         self._rush_swirl = 0.0   # the drop's swirl, 0..1
+        self._burst = 0.0        # the swim burst envelope, 0..1
+        self._burst_tail = 0.0   # s of fast speed-ease left after a burst
+        self._scatter = None     # outgoing-crossfade latch (see draw)
         self._school_turn_t = 0.0
         # the water's own current, world px/s: whatever fraction of the
         # school's travel the clamp still removes from the fish is expressed
@@ -746,6 +896,7 @@ class Fish2d(Twod, GradientEffect):
         self.rush_count = self._config["rush_count"]
         self.rush_time = self._config["rush_time"]
         self.rush_chaos = self._config["rush_chaos"]
+        self.swim_burst = bool(self._config.get("swim_burst", False))
 
         self.power_func = self.POWER_FUNCS_MAPPING[
             self._config["frequency_range"]
@@ -890,7 +1041,9 @@ class Fish2d(Twod, GradientEffect):
         self.p_enter[s] = 0.0 if mode == 1 else 1.0
         self.p_erate[s] = 1.0
         self.p_leave[s] = 0.0
-        self.p_lfade[s] = LEAVE_FADE_S
+        self.p_lfade[s] = DROP_SETTLE_S
+        self.p_dl[s] = np.inf
+        self.p_lk[s] = np.inf
         self.p_scatter[s] = rng.random(count, dtype=np.float32)
         self.p_bright[s] = 0.0
         self.p_grad_from[s] = np.nan
@@ -957,7 +1110,7 @@ class Fish2d(Twod, GradientEffect):
     def _manage_population(self):
         """Keep the ORDINARY (non-nocap) swimming population equal to
         `particle_count`, then (re)assign evenly spaced home anchors.
-        Fish tagged `p_nocap` are the charge school / lull rush and are
+        Fish tagged `p_nocap` are the charge school / drop rush and are
         deliberately outside this accounting — their own choreography
         retires them, so the parameter's limit is never permanently
         ignored."""
@@ -989,15 +1142,27 @@ class Fish2d(Twod, GradientEffect):
                 self.p_slot[fresh].astype(np.float32) / max(tracked.size, 1)
             )
 
-    def _depart(self, idx, fade=None):
-        """Send fish away: they keep their heading and swim off-panel."""
+    def _depart(self, idx, within=DEPART_S):
+        """Send fish away by DISPERSING them (mode 4): full brightness, off
+        the panel by `within` seconds from now, retired only once gone. A
+        fish already dispersing keeps whichever deadline is SOONER, so a
+        later, lazier departure can never slow one down."""
         if len(idx) == 0:
             return
-        self.p_mode[idx] = 2
-        self.p_leave[idx] = 0.0
+        idx = np.asarray(idx)
+        idx = idx[self.p_mode[idx] != 2]   # the drop's ejecta keep theirs
+        if idx.size == 0:
+            return
+        fresh = idx[self.p_mode[idx] != 4]
+        self.p_dl[fresh] = np.inf
+        # a fish not yet heading out (new, or a lull fish still swirling)
+        # starts now; one already on its way keeps its own turn clock
+        unleaked = idx[(self.p_mode[idx] != 4) | ~np.isfinite(self.p_lk[idx])]
+        self.p_lk[unleaked] = self.t
+        self.p_mode[idx] = 4
         self.p_nocap[idx] = 0
-        if fade is not None:
-            self.p_lfade[idx] = fade
+        self.p_disp[idx] = np.nan
+        self.p_dl[idx] = np.minimum(self.p_dl[idx], self.t + float(within))
 
     # ── particle handoff ────────────────────────────────────────────────
     def _handoff_snapshot(self):
@@ -1308,7 +1473,6 @@ class Fish2d(Twod, GradientEffect):
             2.2 + rng.uniform(-1.0, 1.0, k) * chaos * 1.1
         )
         self.p_enter[s] = 1.0
-        self.p_lfade[s] = HANDOFF_LEAVE_S
 
     def _enter_phase(self, phase):
         self._phase = phase
@@ -1339,18 +1503,28 @@ class Fish2d(Twod, GradientEffect):
             self._release_nocap()
 
     def _start_lull(self):
-        """Schedule EVERY fish to disperse across the lull's first third.
+        """Break the school into the SWIRL and schedule every fish to leak
+        out of it across the lull's first third.
 
-        His 2026-08-28 ruling replaced the old lull outright: there is no
-        lone fish and no survivor of any kind. The rank spread here is what
-        paces the exodus; `_lull_step`'s backstop is what guarantees it.
+        His 2026-08-28 ruling: no lone fish and no survivor of any kind. His
+        2026-09-16 one: they leave by swirling and leaking off the screen,
+        never by fading. Every live fish becomes a DISPERSING fish at once
+        (mode 4, full brightness) that is not heading out yet (`p_lk` inf);
+        the rank written here is what `_lull_step` releases them by, and its
+        backstop still guarantees the third.
         """
         n = self.n
         self.p_disp[:n] = np.nan
         self._lull_state = {"dark": 1.0}
-        live = np.flatnonzero(self.p_mode[:n] < 2)
+        live = np.flatnonzero(
+            (self.p_mode[:n] < 2) | (self.p_mode[:n] == 3)
+        )
         if live.size == 0:
             return
+        self.p_mode[live] = 4
+        self.p_nocap[live] = 0
+        self.p_lk[live] = np.inf
+        self.p_dl[live] = np.inf
         # furthest from the centre of view leaves first, so the panel
         # empties inward rather than in a random order
         d = np.hypot(
@@ -1374,6 +1548,17 @@ class Fish2d(Twod, GradientEffect):
         self._speed_scale = 1.0
         if self._phase != "drop":
             self._rush_swirl = 0.0
+        if self._phase != "lull":
+            # the lull's swirl belongs to the lull: whatever cut it short (the
+            # drop arriving early, a watchdog release, a reset) sends anything
+            # still circling out on an ordinary departure, never leaves it
+            # swirling forever with nothing to release it
+            n = self.n
+            circling = np.flatnonzero(
+                (self.p_mode[:n] == 4) & ~np.isfinite(self.p_lk[:n])
+            )
+            if circling.size:
+                self._depart(circling)
         if self._phase == "none":
             return
         self._phase_t += dt
@@ -1460,17 +1645,31 @@ class Fish2d(Twod, GradientEffect):
         f = p if p > 0.0 else min(self._phase_t / LULL_FALL_S, 1.0)
         n = self.n
 
-        # ── 0 -> 1/3: everybody disperses, paced ────────────────────────
-        span = max(LULL_GONE_AT * LULL_DEPART_SPAN, 1e-3)
-        frac = min(f / span, 1.0)
-        due = np.flatnonzero(
-            np.isfinite(self.p_disp[:n])
-            & (self.p_disp[:n] <= frac)
-            & (self.p_mode[:n] < 2)
-        )
-        if due.size:
-            self._depart(due, fade=LULL_DEPART_FADE_S)
-            self.p_disp[due] = np.nan
+        # ── 0 -> 1/3: swirl, leak out in rank order, off the panel ──────
+        # A leak's moment is a fraction of the lull; its DEADLINE is a time,
+        # and the lull never says how long it is — so the rate the progress
+        # is actually moving at is read back off the clock (a progress ramp
+        # is linear from the phase edge; the wall-clock fallback moves at
+        # exactly 1 / LULL_FALL_S) and turned into seconds left.
+        rate = f / max(self._phase_t, 1e-3) if f > 0.0 else 1.0 / LULL_FALL_S
+        exit_at = LULL_GONE_AT * LULL_EXIT_BY
+        disp = np.flatnonzero(self.p_mode[:n] == 4)
+        if disp.size:
+            rank = self.p_disp[disp]
+            ranked = np.isfinite(rank)
+            leak_f = np.minimum(
+                LULL_GONE_AT * (
+                    LULL_LEAK_FROM
+                    + np.where(ranked, rank, 0.0)
+                    * (LULL_LEAK_TO - LULL_LEAK_FROM)
+                ),
+                exit_at - LULL_EXIT_MIN_S * rate,
+            )
+            due = disp[ranked & (f >= leak_f)]
+            if due.size:
+                self.p_lk[due] = self.t
+                self.p_disp[due] = np.nan
+            self.p_dl[disp] = self.t + max(exit_at - f, 0.0) / max(rate, 1e-6)
         # ... and the backstop that makes "gone by 1/3" a guarantee rather
         # than a schedule: past the third, nothing is left alive at all.
         if f >= LULL_GONE_AT and n:
@@ -1525,18 +1724,17 @@ class Fish2d(Twod, GradientEffect):
             stay = rushing[np.argsort(d)][:keep]
             self.p_mode[stay] = 0
             self.p_nocap[stay] = 0
-            self.p_lfade[stay] = LEAVE_FADE_S
             leave = np.setdiff1d(rushing, stay)
         else:
             leave = rushing
-        self._depart(leave, fade=HANDOFF_LEAVE_S)
+        self._depart(leave)
 
     def _release_nocap(self):
         """Send every cap-exempt fish away — used when a phase is abandoned
         so ordinary swimming can never inherit a school or a rush."""
         n = self.n
         extra = np.flatnonzero((self.p_nocap[:n] == 1) & (self.p_mode[:n] < 2))
-        self._depart(extra, fade=HANDOFF_LEAVE_S)
+        self._depart(extra)
         self.p_disp[:n] = np.nan
 
     def _drop_step(self):
@@ -1602,6 +1800,51 @@ class Fish2d(Twod, GradientEffect):
                 fire_event=False,
             )
 
+    def _disperse_speed(self, n, cruise):
+        """The swim speed a leaking fish needs to be off the panel by its
+        own deadline: the SCREEN distance from where it is, straight out
+        from the centre of view, past the panel edge by a body length (the
+        same line `draw` retires it on), over the time it has left — with
+        the arc allowance, the cruise floor and the streak ceiling. Every
+        fish's own number, every frame, so it re-plans as it goes."""
+        px = self.cx + self.p_x[:n] * self.sx - self.cam_px
+        py = self.cy + self.p_y[:n] * self.sy - self.cam_py
+        ox = px - self.cx
+        oy = py - self.cy
+        d = np.hypot(ox, oy)
+        hd = self.p_hd[:n]
+        ux = np.where(d > 1e-3, ox / np.maximum(d, 1e-3), np.cos(hd))
+        uy = np.where(d > 1e-3, oy / np.maximum(d, 1e-3), np.sin(hd))
+        m = self._body_len_px() + DISPERSE_OFF_MARGIN
+        w1 = self.r_width - 1 + m
+        h1 = self.r_height - 1 + m
+        with np.errstate(divide="ignore", invalid="ignore"):
+            tx = np.where(ux > 1e-6, (w1 - px) / ux,
+                          np.where(ux < -1e-6, (-m - px) / ux, np.inf))
+            ty = np.where(uy > 1e-6, (h1 - py) / uy,
+                          np.where(uy < -1e-6, (-m - py) / uy, np.inf))
+        d_out = np.maximum(np.minimum(tx, ty), 0.0)
+        # ... but the fish travels along its HEADING, not along that line: a
+        # fish skimming an edge sideways is not "3 px from gone". Measure the
+        # way out along its heading too, and never credit it with less than
+        # the outward distance, nor charge it more than that plus the half
+        # turn that would line it up.
+        hx, hy = np.cos(hd), np.sin(hd)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            hx_t = np.where(hx > 1e-6, (w1 - px) / hx,
+                            np.where(hx < -1e-6, (-m - px) / hx, np.inf))
+            hy_t = np.where(hy > 1e-6, (h1 - py) / hy,
+                            np.where(hy < -1e-6, (-m - py) / hy, np.inf))
+        d_hd = np.maximum(np.minimum(hx_t, hy_t), 0.0)
+        dist = np.clip(d_hd, d_out, d_out + np.pi * self.turn_radius_px)
+        left = np.maximum(self.p_dl[:n] - self.t, DISPERSE_MIN_LEFT_S)
+        need = dist * DISPERSE_PATH_X / left
+        ceiling = max(self.r_width, self.r_height) * DISPERSE_MAX_PANELS_S
+        return np.clip(
+            np.maximum(need, cruise * DISPERSE_MIN_X), 0.0,
+            max(ceiling, cruise * DISPERSE_MIN_X),
+        ).astype(np.float32)
+
     # ── the window ──────────────────────────────────────────────────────
     def _step_camera(self, dt, cruise):
         """Move the window toward the school, or ease it back to rest.
@@ -1625,11 +1868,12 @@ class Fish2d(Twod, GradientEffect):
         if self.camera_follow <= 0.0:
             return
         # ONLY the charge and the lull move the window — and a lull only
-        # while there is still a school in it. Under his 2026-08-28 lull
-        # clock every fish is gone by the first third, so from there on
-        # there is nothing to follow and the window EASES HOME instead of
-        # holding wherever it had got to; the ripples then stream past a
-        # settling view for the rest of the lull.
+        # while there is still a school in it. Since the 2026-09-16
+        # dispersal the lull turns every fish into a DISPERSING one (mode 4)
+        # on its first frame, so there is nothing to follow from the moment
+        # the swirl starts and the window EASES HOME instead of holding
+        # wherever the charge left it; the swirl, the leak and the ripples
+        # all play out against a settling view.
         active = self._phase in ("charge", "lull")
         if active and self._phase == "lull" and not np.any(
             self.p_mode[: self.n] < 2
@@ -2094,6 +2338,41 @@ class Fish2d(Twod, GradientEffect):
             self._draw_collapse(dt)
             return
 
+        # scatter latch: we are the outgoing crossfade sibling and the
+        # incoming effect has no blobs to merge the fish into (neither radial
+        # nor an adopter) — every fish disperses off the panel inside the
+        # crossfade instead of dimming away under it (see the
+        # outgoing-crossfade block at the top of the module)
+        inc = particle_handoff.incoming_sibling(virtual, self)
+        if (
+            inc is not None
+            and inc is not self
+            and type(inc).__module__.rsplit(".", 1)[-1]
+            not in TRANSITION_ADOPTERS
+        ):
+            frames = float(getattr(virtual, "transition_frame_total", 0) or 0)
+            # the virtual advances its counter straight AFTER rendering us,
+            # so the weight this frame is blended at is one frame further on
+            frac = min(
+                (particle_handoff.transition_progress(virtual) or 0.0)
+                + 1.0 / max(frames, 1.0),
+                1.0,
+            )
+            total_s = frames / max(
+                float(getattr(virtual, "refresh_rate", 60) or 60), 1.0
+            )
+            additive = (
+                (getattr(virtual, "_config", None) or {}).get("transition_mode")
+                == "Add"
+            )
+            self._scatter = {
+                "left_s": max(TRANSITION_EXIT_BY - frac, 0.0) * total_s,
+                "gain": (1.0 / max(1.0 - frac, TRANSITION_GAIN_FLOOR)
+                         if additive else 1.0),
+            }
+        elif self._scatter is not None:
+            self._scatter = None
+
         rscale = self.reactivity_scale
         impulse = min(self.impulse, 1.0)
         direction = -1.0 if self.reverse else 1.0
@@ -2102,8 +2381,24 @@ class Fish2d(Twod, GradientEffect):
         spike = np.clip((self.impulse - self.slow) * 3.0, 0.0, 1.0)
         beat_now = self._beat_pending
 
-        self._phase_step(dt)
-        self._manage_population()
+        # the swim burst envelope — a level the flare holds, rounded at the
+        # edges only (the flare kind's own hold is the burst's length)
+        if self.swim_burst:
+            self._burst = min(self._burst + dt / BURST_ATTACK_S, 1.0)
+        else:
+            self._burst = max(self._burst - dt / BURST_RELEASE_S, 0.0)
+        if self._burst > 0.0:
+            self._burst_tail = 0.15
+        else:
+            self._burst_tail = max(self._burst_tail - dt, 0.0)
+
+        if self._scatter is None:
+            self._phase_step(dt)
+            self._manage_population()
+        else:
+            # an outgoing instance receives no more choreography and spawns
+            # no replacements: everything on it is leaving
+            self._depart(np.arange(self.n), within=self._scatter["left_s"])
         n = self.n
         if n == 0:
             self._fade_only(dt)
@@ -2118,7 +2413,11 @@ class Fish2d(Twod, GradientEffect):
         mode = self.p_mode[:n]
         swimming = mode < 2
         rushing = mode == 3
-        steered = swimming | rushing
+        dispersing = mode == 4
+        steered = swimming | rushing | dispersing
+        # a dispersing fish is SWIRLING until its leak time, then heading out
+        swirling = dispersing & (self.p_lk[:n] > self.t)
+        leaking = dispersing & ~swirling
         m = int(np.count_nonzero(swimming))
 
         # home-anchor re-spacing ease (wrapped shortest way around the ring)
@@ -2168,9 +2467,29 @@ class Fish2d(Twod, GradientEffect):
             * self._speed_scale
             * np.where(mode == 1, ENTER_SPEED_X, 1.0)
         )
-        # leaving/rushing fish hold whatever they left with
+        # A per-fish ease only when something needs one: with nothing
+        # dispersing and no burst the ease stays the plain scalar it always
+        # was, so ordinary swimming is bit-for-bit unchanged.
+        tau = SPEED_TAU
+        if dispersing.any():
+            want = np.where(
+                swirling,
+                cruise * LULL_SWIRL_SPEED_X * (1.0 + 0.3 * n_r),
+                want,
+            )
+            if leaking.any():
+                want = np.where(leaking, self._disperse_speed(n, cruise), want)
+            tau = np.where(dispersing, DISPERSE_TAU, tau)
+        if self._burst > 0.0:
+            want = want * (1.0 + SWIM_BURST_SPEED_X * self._burst)
+        if self._burst_tail > 0.0:
+            tau = np.minimum(tau, BURST_SPEED_TAU)
+        # ejecta hold whatever they left with
         prev = self.p_spd[:n].copy()
-        ease = min(1.0, dt / max(SPEED_TAU, 1e-3))
+        if np.ndim(tau):
+            ease = np.minimum(1.0, dt / np.maximum(tau, 1e-3))
+        else:
+            ease = min(1.0, dt / max(tau, 1e-3))
         self.p_spd[:n] = np.where(
             steered, prev + (want - prev) * ease, prev
         )
@@ -2265,7 +2584,7 @@ class Fish2d(Twod, GradientEffect):
         # SCOPE, deliberate: only ordinary swimming fish (mode < 2) steer
         # here AND only they count as neighbours, and the whole term is off
         # while a school is formed. The charge's school moves "almost
-        # identically" and the lull's rush is deliberately chaotic — both are
+        # identically" and the drop's rush is deliberately chaotic — both are
         # authored choreography, not crowds to fix — so avoidance is never
         # allowed to argue with either.
         if self.avoid_strength > 0.0 and n > 1 and not self._school_on:
@@ -2343,6 +2662,49 @@ class Fish2d(Twod, GradientEffect):
                 desired_x += np.cos(tangent) * w_swirl
                 desired_y += np.sin(tangent) * w_swirl
 
+        # DISPERSAL (mode 4). A swirling lull fish circles the centre of
+        # view on a loose ring with its own chaotic heading noise; a leaking
+        # fish turns from whatever it was doing to straight OUT of the
+        # window across DISPERSE_TURN_S. Both are summed like every other
+        # steer and bounded by the same turn-rate clamp below — a spiral out,
+        # never a flip.
+        if dispersing.any():
+            outward = inward + np.pi
+            if swirling.any():
+                ring_px = LULL_SWIRL_RING * pond_px
+                r_px = np.hypot(rel_x * self.sx, rel_y * self.sy)
+                radial = np.clip((r_px - ring_px) / max(ring_px, 1e-3),
+                                 -1.0, 1.0)
+                chaos = hd + n_w * LULL_SWIRL_CHAOS
+                tangent = inward + direction * np.pi / 2.0
+                sw = np.where(swirling, 1.0, 0.0)
+                desired_x += sw * (
+                    np.cos(tangent) * LULL_SWIRL_W
+                    + np.cos(inward) * LULL_SWIRL_RING_W * radial
+                    + np.cos(chaos) * LULL_SWIRL_W * LULL_SWIRL_CHAOS_W
+                )
+                desired_y += sw * (
+                    np.sin(tangent) * LULL_SWIRL_W
+                    + np.sin(inward) * LULL_SWIRL_RING_W * radial
+                    + np.sin(chaos) * LULL_SWIRL_W * LULL_SWIRL_CHAOS_W
+                )
+            if leaking.any():
+                # the swirl-to-outward turn never spends more than a third of
+                # the time the fish has left to be gone
+                with np.errstate(invalid="ignore"):   # inf - inf, unused
+                    span = np.where(
+                        leaking, self.p_dl[:n] - self.p_lk[:n],
+                        DISPERSE_TURN_S,
+                    )
+                span = np.where(np.isfinite(span), span, DISPERSE_TURN_S * 3)
+                turn_s = np.clip(
+                    span / 3.0, DISPERSE_MIN_LEFT_S, DISPERSE_TURN_S,
+                )
+                age = np.clip((self.t - self.p_lk[:n]) / turn_s, 0.0, 1.0)
+                w_out = np.where(leaking, LULL_SWIRL_W * (0.25 + age), 0.0)
+                desired_x += np.cos(outward) * w_out
+                desired_y += np.sin(outward) * w_out
+
         desired = np.arctan2(desired_y, desired_x)
         d_hd = _wrap_pi(desired - hd)
 
@@ -2403,9 +2765,9 @@ class Fish2d(Twod, GradientEffect):
         self.p_y[:n] += vy_px * dt / self.sy
 
         entering = mode == 1
-        if entering.any():
+        if (entering | dispersing).any():
             self.p_enter[:n] = np.where(
-                entering,
+                entering | (dispersing & (self.p_enter[:n] < 1.0)),
                 self.p_enter[:n]
                 + dt * self.p_erate[:n] / max(self.enter_time, 0.05),
                 self.p_enter[:n],
@@ -2453,7 +2815,9 @@ class Fish2d(Twod, GradientEffect):
                     + self._half_width_px(self._size_from) * (1.0 - w)
                 )
         flap_amp = self.flap_amount * half_w * self.body_aspect * flap_scale
-        flap_freq = self.flap_rate * (0.4 + 0.6 * speed_norm)
+        flap_freq = self.flap_rate * (0.4 + 0.6 * speed_norm) * (
+            1.0 + FLAP_BURST_X * self._burst
+        )
         self.p_flap[:n] = (
             self.p_flap[:n] + 2 * np.pi * flap_freq * dt
         ) % (2 * np.pi * 64)
@@ -2480,8 +2844,11 @@ class Fish2d(Twod, GradientEffect):
             * (1.0 + 1.2 * br_eff * impulse * gain),
             0.0, 1.0,
         )
+        # a fish caught mid-arrival by a dispersal keeps the fade-in it had
+        # reached (and keeps rising): nothing about leaving ever dims it
         fade_in = np.where(
-            entering, np.clip(self.p_enter[:n] * 3.3, 0.0, 1.0), 1.0
+            entering | dispersing,
+            np.clip(self.p_enter[:n] * 3.3, 0.0, 1.0), 1.0,
         )
         fade_out = np.where(
             leaving,
@@ -2552,19 +2919,24 @@ class Fish2d(Twod, GradientEffect):
         frame = np.zeros_like(self.trail)
         visible = np.flatnonzero(bright > 0.0)
         if visible.size:
+            drawn = bright
+            if self._scatter is not None:
+                drawn = bright * np.float32(self._scatter["gain"])
             self._draw_bodies(
                 frame, visible,
                 self.p_x[:n][visible], self.p_y[:n][visible],
-                hd[visible], bright[visible], half_w[visible],
+                hd[visible], drawn[visible], half_w[visible],
                 flap_amp[visible], self.p_grad[:n][visible],
             )
-        np.maximum(self.trail, np.minimum(frame, 255.0), out=self.trail)
+        np.maximum(self.trail, self._clip_body_layer(frame), out=self.trail)
 
         self.p_x0[:n] = self.p_x[:n]
         self.p_y0[:n] = self.p_y[:n]
 
-        # retire departed fish once fully off-panel or faded
-        gone = leaving | rushing
+        # retire departed fish once fully off-panel (or, ejecta only, faded).
+        # A dispersing fish is retired the moment its WHOLE body is past the
+        # panel edge — never by brightness, and never before it is gone.
+        gone = leaving | rushing | dispersing
         if gone.any():
             px = self.cx + self.p_x[:n] * self.sx - self.cam_px
             py = self.cy + self.p_y[:n] * self.sy - self.cam_py
@@ -2574,6 +2946,16 @@ class Fish2d(Twod, GradientEffect):
             )
             dead = (leaving & ((self.p_leave[:n] >= self.p_lfade[:n]) | off))
             dead = dead | (rushing & off)
+            if dispersing.any():
+                m = (
+                    float(np.max(half_w)) * 2.0 * self.body_aspect
+                    + DISPERSE_OFF_MARGIN
+                )
+                gone_vis = (
+                    (px < -m) | (px > self.r_width - 1 + m)
+                    | (py < -m) | (py > self.r_height - 1 + m)
+                )
+                dead = dead | (dispersing & gone_vis)
             if dead.any():
                 self._compact(~dead)
 
@@ -2582,6 +2964,19 @@ class Fish2d(Twod, GradientEffect):
             out = out + self.wake
         self.matrix = Image.fromarray(
             np.clip(out, 0, 255).astype(np.uint8), "RGB"
+        )
+
+    def _clip_body_layer(self, frame):
+        """The body layer's 255 ceiling. Ordinary swimming clips each channel
+        on its own; a scatter's gained bodies are scaled down as a whole
+        wherever the brightest channel passes 255, keeping the colour."""
+        if self._scatter is None:
+            return np.minimum(frame, 255.0)
+        peak = frame.max(axis=2, keepdims=True)
+        return np.where(
+            peak > 255.0,
+            frame * (np.float32(255.0) / np.maximum(peak, np.float32(1.0))),
+            frame,
         )
 
     def _apply_lull_dark(self):

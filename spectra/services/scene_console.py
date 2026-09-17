@@ -623,10 +623,41 @@ def _validate_set_flare_kind(scene_id: str, **kind_fields: Any) -> tuple[SceneV2
     # kind must round-trip intact through an unrelated edit — re-enabling
     # his room's flares as a side effect of retuning a gain would be a
     # silent, invisible behaviour change), and True on a CREATE.
+    existing = next((k for k in scene.flare_kinds
+                     if k.name == kind_fields.get("name")), None)
     if kind_fields.get("enabled") is None:
-        existing = next((k for k in scene.flare_kinds
-                         if k.name == kind_fields.get("name")), None)
         kind_fields["enabled"] = True if existing is None else existing.enabled
+    # `trigger_offset_ms` follows the SAME omit-means-keep rule, for the same
+    # reason: his authored timing (OFFSET family, signed ms, NEGATIVE =
+    # EARLIER — docs/SPECTRA_TIMING_CONVENTIONS.md) must survive a retune of
+    # anything else on the kind. 0 on a create, the model's own default.
+    if kind_fields.get("trigger_offset_ms") is None:
+        kind_fields["trigger_offset_ms"] = (
+            0 if existing is None else existing.trigger_offset_ms)
+    # ... and so does `hold_ms`, so nudging a kind's offset (or anything
+    # else) never silently resets its authored hold back to PULSE_HOLD_S.
+    # Only a momentary kind carries a hold at all, so it is kept only when
+    # the edit is still momentary: re-typing a kind to permanent must not
+    # inherit a hold its new type refuses (and that an omitted value could
+    # then never clear).
+    if (kind_fields.get("hold_ms") is None and existing is not None
+            and kind_fields.get("type") == "momentary"):
+        kind_fields["hold_ms"] = existing.hold_ms
+    # `params`, `gain` and `jump` follow the same rule, each kept only where
+    # the requested type accepts it (params/gain on momentary/permanent, jump
+    # on drift_jump): "make the burst 400ms" is hold_ms alone, and must not
+    # wipe the params it moves or reset a tuned gain to 1.0.
+    stored = existing.model_dump(mode="json") if existing is not None else None
+    carries_moves = kind_fields.get("type") in ("momentary", "permanent")
+    if kind_fields.get("params") is None:
+        kind_fields["params"] = (
+            stored["params"] if stored is not None and carries_moves else {})
+    if kind_fields.get("gain") is None:
+        kind_fields["gain"] = (
+            stored["gain"] if stored is not None and carries_moves else 1.0)
+    if (kind_fields.get("jump") is None and stored is not None
+            and kind_fields.get("type") == "drift_jump"):
+        kind_fields["jump"] = stored["jump"]
     try:
         kind = FlareKind.model_validate(kind_fields)
     except ValidationError as exc:
@@ -652,12 +683,14 @@ def _validate_set_flare_kind(scene_id: str, **kind_fields: Any) -> tuple[SceneV2
 
 async def apply_flare_kind(scene_id: str, *, name: str, type: str,  # noqa: A002 (mirrors FlareKind.type)
                            jump: Optional[str] = None, params: Optional[dict] = None,
-                           gain: float = 1.0, hold_ms: Optional[int] = None,
+                           gain: Optional[float] = None, hold_ms: Optional[int] = None,
                            enabled: Optional[bool] = None,
+                           trigger_offset_ms: Optional[int] = None,
                            source: str = "agent") -> dict:
     scene, candidate, op = _validate_set_flare_kind(
-        scene_id, name=name, type=type, jump=jump, params=params or {},
-        gain=gain, hold_ms=hold_ms, enabled=enabled)
+        scene_id, name=name, type=type, jump=jump, params=params,
+        gain=gain, hold_ms=hold_ms, enabled=enabled,
+        trigger_offset_ms=trigger_offset_ms)
     backup = _write_and_verify_backup(scene_id, scene, op=f"flare_kind_{op}")
     scene_store.save(candidate)
     entry = {"id": str(uuid.uuid4()), "ts_ms": int(time.time() * 1000),
@@ -887,12 +920,13 @@ async def _op_set_scene_setting(scene_id: str, key: str, value: Any) -> dict:
 
 async def _op_set_flare_kind(scene_id: str, name: str, type: str,  # noqa: A002
                              jump: Optional[str] = None, params: Optional[dict] = None,
-                             gain: float = 1.0, hold_ms: Optional[int] = None,
-                             enabled: Optional[bool] = None) -> dict:
+                             gain: Optional[float] = None, hold_ms: Optional[int] = None,
+                             enabled: Optional[bool] = None,
+                             trigger_offset_ms: Optional[int] = None) -> dict:
     try:
         return await apply_flare_kind(
             scene_id, name=name, type=type, jump=jump, params=params, gain=gain,
-            hold_ms=hold_ms, enabled=enabled)
+            hold_ms=hold_ms, enabled=enabled, trigger_offset_ms=trigger_offset_ms)
     except SceneOpError as exc:
         return exc.payload()
 
@@ -1085,7 +1119,24 @@ OPERATIONS: dict[str, SonicOperation] = {
             "temporarily disables the kind (it stays declared and attached "
             "but never fires automatically; an explicit preview still "
             "works and says so) — OMIT it to leave the current setting "
-            "alone, which is what you want for any unrelated edit."),
+            "alone, which is what you want for any unrelated edit. "
+            "trigger_offset_ms moves WHEN the kind fires relative to its "
+            "trigger mark: signed milliseconds, NEGATIVE = EARLIER, "
+            "positive = later, 0 = on the mark (-60000..60000). A band "
+            "fires all its kinds together, so a band holding several kinds "
+            "moves by the most-negative nonzero offset among them. Like "
+            "enabled, OMIT it to keep the stored value. For a momentary "
+            "kind, hold_ms is how long the spike lasts. On an UPDATE, "
+            "params, gain, jump and hold_ms are also omit-means-keep: send "
+            "only what you are changing and the rest of the stored kind "
+            "stays as it was (a value is only kept where the new type "
+            "accepts it — re-typing a momentary kind to permanent drops its "
+            "hold). On a CREATE, an omitted params is empty, gain 1.0, "
+            "hold_ms the 250ms default and trigger_offset_ms 0. params, "
+            "when sent, replaces the stored params as a whole. e.g. Fish's "
+            "swim burst is hold_ms=300, trigger_offset_ms=0 (300ms, "
+            "starting on the trigger): 'make it 400ms' is hold_ms=400 "
+            "alone."),
         input_schema={
             "type": "object",
             "properties": {
@@ -1097,6 +1148,8 @@ OPERATIONS: dict[str, SonicOperation] = {
                 "gain": {"type": "number"},
                 "hold_ms": {"type": "integer"},
                 "enabled": {"type": "boolean"},
+                "trigger_offset_ms": {"type": "integer",
+                                      "minimum": -60000, "maximum": 60000},
             },
             "required": ["scene_id", "name", "type"], "additionalProperties": False},
         handler=_op_set_flare_kind),

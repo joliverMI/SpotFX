@@ -6763,7 +6763,7 @@ A new Matrix effect + a Fish scene that is a WHOLESALE COPY of his Orbits V2
    FORWARD arc count and the answer is a lateral swerve (a point-away
    vector asks for a 180 and measurably made crossings WORSE); the
    separation radius is DERIVED from body length, never a second knob; and
-   it is off during the charge's school and the lull's rush, which are
+   it is off during the charge's school and the drop's rush, which are
    authored choreography, not crowds to fix. Sweep + tuned default:
    `scripts/check_fish_avoidance.py`.
 
@@ -6839,7 +6839,9 @@ A new Matrix effect + a Fish scene that is a WHOLESALE COPY of his Orbits V2
      fish gone by 1/3 — no lone fish, no survivor, with a hard backstop, not
      just a schedule; ripples only to 2/3; fully dark after (the wake is
      RAMPED to zero, because a half-life never reaches it). The window eases
-     home once there is nothing left to follow. **The lull's rush MOVED INTO
+     home once there is nothing left to follow — since 7 below, from the
+     lull's first frame, because every fish is dispersing from the moment
+     the swirl starts. **The lull's rush MOVED INTO
      THE DROP** (his addendum): it rushes in at the drop instant, swirls for
      the drop's duration (`RUSH_SWIRL_W`), and `particle_count` of them stay
      behind — read ONCE at the settle, after which the ordinary
@@ -6854,6 +6856,58 @@ A new Matrix effect + a Fish scene that is a WHOLESALE COPY of his Orbits V2
      and ordinary swimming with the wake off is byte-identical to the
      merge-base. If you change ordinary swimming, that second one goes red —
      which is the point.
+
+7. **A FISH NEVER FADES OUT — IT DISPERSES (2026-09-16,
+   `fm/spotfx-fish-disperse-and-speed-flare`, his words: "the fish shouldn't
+   fade out, they should disperse off the screen").** Every exit — the
+   population trim, the lull, `_settle_rush`/`_release_nocap`, and an
+   OUTGOING crossfade into an effect with no blobs of its own — is ONE mode, DISPERSING
+   (`p_mode == 4`): full brightness, steered out of the window under the
+   same turn clamp, retired only once the whole body is off the panel. Mode
+   2 (a linear fade) now belongs to the drop's ejecta ALONE. Three things
+   not to undo: (1) a dispersing fish carries a DEADLINE (`p_dl`, effect
+   clock), and its speed is DERIVED every frame from the distance still to
+   cover (`_disperse_speed`, measured along its heading, bounded by the
+   outward line plus a half turn) — never a tuned speed, which is what lets
+   a 900 ms lull and a 6 s one both land; (2) the lull CLOCK is his
+   2026-08-28 thirds, unchanged — only the manner moved (school → swirl →
+   rank-ordered leak, `LULL_LEAK_*`, with `LULL_EXIT_MIN_S` making a lull too
+   short to swirl in scatter straight out rather than be retired on the
+   panel by the backstop); (3) the crossfade scatter is SKIPPED when the
+   incoming effect adopts the fish as its own particles
+   (`TRANSITION_ADOPTERS`, keyed by module basename: blackhole, orbits,
+   fireworks, squiggles, eye, dancer, fish — measured, each reads the live
+   fish snapshot and spawns from it; scattering too would show the shoal
+   twice), radial keeps its collapse, and everything else (pacman included —
+   it has no adopt path) scatters. The scatter's body gain (`1 / (1 -
+   weight)`, floored) compensates only an ADDITIVE blend and only the
+   bodies, and reads the weight ONE FRAME AHEAD (the virtual advances its
+   counter right after rendering the outgoing effect) — but it CANNOT keep a
+   fish at full brightness: the virtual clips the outgoing frame at 255
+   before weighting it by `(1 - weight)`, so a saturated core dims anyway.
+   A named, accepted limit, measured on rendered pixels in
+   `check_fish_disperse.py` section 2 (the numbers are in the comment beside
+   `TRANSITION_GAIN_FLOOR`); lifting it needs a change to the virtual's
+   blend, not to the effect. A gained body clips HUE-PRESERVING
+   (`_clip_body_layer`, scatter only — ordinary swimming keeps its exact
+   per-channel clip), or a saturated colour washes toward yellow-white on its
+   way out; section 2b reads the rendered chromaticity of lone fish and puts
+   the per-channel clip back as its red control. Scope: `fish.py` only — the Fish scene's Strips
+   entry is still `orbits1d`, which still fades.
+   **The swim burst is an ordinary momentary TOGGLE flare** (`swim_burst`,
+   registry-declared so `_compute_param_moves` lands a real bool): the
+   effect owns only a level, the flare kind owns ALL the timing (`hold_ms`
+   = length, 300; `trigger_offset_ms` = start, authored 0 — it fires ON the
+   trigger, by his own correction; an early start is deferred to per-flare
+   trigger-moment work, because a kind's offset moves its whole band).
+   Sonic's `set_flare_kind` carries `trigger_offset_ms` for it, and on an
+   update `trigger_offset_ms`, `hold_ms`, `params`, `gain` and `jump` are all
+   omit-means-keep like `enabled` — "make it 400ms" is `hold_ms` alone — each
+   carried only where the requested type accepts it. `scripts/add_fish_swim_burst_flare.py`
+   pools it in a pick-one "Shape" lane with the band's MOMENTARY shape
+   flares (so Reverse fires half as often) and refuses a band where a
+   "Shape" lane already exists. Proof + red controls:
+   `scripts/check_fish_disperse.py`, `tests/test_fish_disperse.py`.
 
 Every new fish knob is a first guess pending his eye; the effect ships
 tunable, not tuned. Proof: `scripts/check_fish.py`,
