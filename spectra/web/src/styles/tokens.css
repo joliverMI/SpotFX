@@ -344,14 +344,18 @@ button.danger:hover { border-color: var(--danger); color: var(--danger); }
 }
 
 /* The 6-most-recent row under Force Scene/Force Colour's search box
- * (RecentChoiceButtons.tsx). `min-height` reserves real flow space below
- * the search field even with zero recents yet — that's what keeps the
- * search dropdown (position: absolute, anchored to the field, NOT a
- * portal) from popping past the panel's own `overflow-y: auto` boundary
- * and being clipped, the exact defect this whole block exists to fix. */
+ * (RecentChoiceButtons.tsx). The search dropdown is position: absolute
+ * under the field (not a portal), so it adds nothing to the panel's flow
+ * height and is cut off at the panel's `overflow-y: auto` edge unless the
+ * content below the field is at least as tall as the dropdown itself:
+ * SearchSelect's 260px max height + its 2px margin-top + border/shadow
+ * slop, rounded up to 272px. The recent buttons render at the TOP of this block,
+ * so only the empty space under them grows. Where even this is not enough
+ * (a short viewport, a panel at its max-height), SearchSelect measures the
+ * room left and scrolls inside its own shorter box instead. */
 .top-bar-recent-choices {
   width: 100%;
-  min-height: 128px;
+  min-height: 272px;
   display: flex;
   flex-direction: column;
   gap: 6px;

@@ -32,7 +32,7 @@
 import { fixedSizeToggleStyle } from './fixedSizeToggleStyle';
 
 export default function PowerButton({
-  on, onChange, itemLabel = 'scene', size = 26, title,
+  on, onChange, itemLabel = 'scene', size = 26, title, ariaLabel,
 }: {
   /** true = ON (green, plays). Callers storing a `disabled` flag pass `!disabled`. */
   on: boolean;
@@ -42,13 +42,16 @@ export default function PowerButton({
   size?: number;
   /** Overrides the whole tooltip when a caller has something more specific to say. */
   title?: string;
+  /** Names what is toggled in the accessible name ("Disable <ariaLabel>") when it
+   * is not "this <itemLabel>" — e.g. a room-level pin rather than an item. */
+  ariaLabel?: string;
 }) {
   return (
     <button
       type="button"
       role="switch"
       aria-checked={on}
-      aria-label={`${on ? 'Disable' : 'Enable'} this ${itemLabel}`}
+      aria-label={`${on ? 'Disable' : 'Enable'} ${ariaLabel ?? `this ${itemLabel}`}`}
       style={{
         ...fixedSizeToggleStyle(size),
         height: size,

@@ -1765,29 +1765,35 @@ empty space, add buttons for the 6 most recently used").** Root cause:
 own input, NOT a portal (unlike `TopBarGroupButton`'s panel or
 `ColorGradientPicker`'s popover) — so it renders inside
 `.top-bar-group-panel`, which has `overflow-y: auto` and sizes to its
-NORMAL-FLOW content only; the dropdown doesn't contribute to that flow
-height, so it visually pops out past the panel's short natural box and
-reads as cut off (technically reachable by scrolling the tiny panel, which
-is not an affordance anyone finds). Fixed by giving both pickers real
-in-flow content to grow the panel BEFORE the dropdown ever opens:
-`RecentChoiceButtons.tsx` (a "Recent" row of up to 6 most-recently-picked
-scenes/colour sets, reusing the same `sceneOptions`/`colorTargetOptions`
-so a recent button and the search box can never name different labels for
-one id) + `useRecentChoices.ts` (a per-viewer localStorage list, capped at
-6, newest-first — recorded whenever either picker's `onChange` OR a recent
-button itself is used, never a second idea of "what's pinned"). The row's
-own CSS `min-height` (`.top-bar-recent-choices`, tokens.css) is what
-reserves the space — it renders even with zero recents (an honest "no
-recent picks yet" line) so the growth doesn't depend on there being
-history yet. This narrows, not eliminates, the clipping: an exceptionally
-long search result (dozens of matches) can still exceed the panel's
-existing `max-height: calc(100vh - 96px)` cap, in which case the panel's
-pre-existing scroll is the fallback, same as before this change — verified
-this is a real improvement, not just parity, with an isolated-component
-harness at real phone widths (392x844) before/after. The checkbox for both
-pins is now `PowerButton` (green=on, same component every other
-enable/disable toggle in the app already uses) instead of a bare
-`<input type="checkbox">` — no other semantics changed.
+NORMAL-FLOW content only; the dropdown adds nothing to that flow height, so
+anything of it below the panel's natural bottom edge is cut off (reachable
+only by scrolling the panel, an affordance nobody finds). TWO halves fix it,
+and neither alone is enough: (1) `RecentChoiceButtons.tsx`'s block
+(`.top-bar-recent-choices`, tokens.css) has `min-height: 272px` — the
+dropdown's own 260px max height plus its margin and border — so on a normal
+viewport the unfiltered list opened on focus fits inside the panel; it
+renders even with zero recents (an honest "no recent picks yet" line) and
+the recent buttons sit at its TOP, so only empty space below them grows.
+(2) `SearchSelect` measures its room while open (and on resize/scroll): max
+height = the space between its input and the nearer of the viewport bottom
+and the enclosing `.top-bar-group-panel` bottom, minus 8px, clamped to
+[80, 260]. That makes the dropdown viewport-independent — it either fits or
+scrolls inside its own bounded box, and never needs the outer panel
+scrolled to be usable. The one residual: below an 80px floor (an input
+within 88px of the panel/viewport bottom) the list can still overhang that
+edge; the floor keeps a few rows visible rather than collapsing it. Outside
+a top-bar panel the viewport bound applies to every SearchSelect too, so a
+field near the bottom of a page gets a shorter, scrolling list instead of
+one running off-screen. The recents list is `useRecentChoices.ts` over
+`useSticky` (per-viewer localStorage, key prefixed `spotfx.builder.v1.`,
+capped at 6, newest-first — recorded whenever either picker's `onChange` OR
+a recent button is used, reusing the same `sceneOptions`/
+`colorTargetOptions` so a recent button and the search box can never name
+different labels or disagree on what's pinned). The checkbox for both pins
+is now `PowerButton` (green=on, the component every other enable/disable
+toggle in the app uses) with `ariaLabel="Force Scene pin"`/`"Force Colour
+pin"`, so a screen reader names the pin rather than PowerButton's default
+"this scene" — no other semantics changed.
 
 **Temporary scene disable** (2026-08-18, his ask: "add an ability to
 disable a scene temporarily") — `SceneV2.disabled: bool` (default False),

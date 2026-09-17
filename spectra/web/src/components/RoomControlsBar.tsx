@@ -550,6 +550,7 @@ export default function RoomControlsBar() {
                   on={local.force_scene_enabled}
                   onChange={(on) => commit({ ...local, force_scene_enabled: on })}
                   size={22}
+                  ariaLabel="Force Scene pin"
                   title={local.force_scene_enabled
                     ? 'Force Scene is on — every automatic pick fires the pinned scene instead. Tap to release it.'
                     : 'Force Scene is off — the room picks scenes freely. Tap to pin one.'}
@@ -636,6 +637,7 @@ export default function RoomControlsBar() {
                   on={local.force_color_enabled}
                   onChange={(on) => commit({ ...local, force_color_enabled: on })}
                   size={22}
+                  ariaLabel="Force Colour pin"
                   title={local.force_color_enabled
                     ? 'Force Colour is on — every automatic colour change wears the pinned one instead. Tap to release it.'
                     : 'Force Colour is off — the room picks colours freely. Tap to pin one.'}
