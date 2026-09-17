@@ -6833,9 +6833,9 @@ A new Matrix effect + a Fish scene that is a WHOLESALE COPY of his Orbits V2
 §94). Three things to know before touching it:
 
 1. **It reuses Orbits' patterns, not its motion.** Each fish has its own
-   position, speed and SCREEN-space heading; the thin oval is laid out along
-   that heading (never in normalized space — that would shear it by the
-   panel's aspect). A real turn RADIUS (`orbit_radius`, re-read) caps the
+   position, speed and SCREEN-space heading; the thin oval's head is laid
+   out along that heading (never in normalized space — that would shear it
+   by the panel's aspect; the rear half follows the recorded path, see 8). A real turn RADIUS (`orbit_radius`, re-read) caps the
    turn rate, so an about-face is structurally an arc. Several shared param
    keys keep their names but mean something else on a fish (`orbit_radius` →
    turn radius, `spin` → current swirl, `horizon_scale` → home ring,
@@ -6943,10 +6943,9 @@ A new Matrix effect + a Fish scene that is a WHOLESALE COPY of his Orbits V2
      PR's merge-base, because the old "camera_follow=0 IS the pre-camera
      commit, bit for bit" claim needs a reference differing ONLY by the
      camera, and the wake changes the render at knob zero. What it asserts
-     now: the window origin is EXACTLY zero at knob 0 across the whole arc,
-     and ordinary swimming with the wake off is byte-identical to the
-     merge-base. If you change ordinary swimming, that second one goes red —
-     which is the point.
+     now: the window origin is EXACTLY zero at knob 0 across the whole arc.
+     Its ordinary-swimming comparison (1b) has since moved to its own pin,
+     `THRUST_BASELINE_REF` — see 8.
 
 7. **A FISH NEVER FADES OUT — IT DISPERSES (2026-09-16,
    `fm/spotfx-fish-disperse-and-speed-flare`, his words: "the fish shouldn't
@@ -7057,29 +7056,19 @@ A new Matrix effect + a Fish scene that is a WHOLESALE COPY of his Orbits V2
      future ask revives thicker/rounder fish bodies, it is a fresh ask, not
      something this PR quietly shipped and someone forgot to mention.
    * **Sonic-adjustable**: both dial fields are ordinary `CONFIG_SCHEMA`
-     entries (the `swim_burst` precedent), reachable without a deploy.
-   Proof: `tests/test_fish.py` (the dial's both endpoints, the trail
-   reducing to the rigid layout on a straight/controlled path and
-   diverging on a real turn, the rear body holding its own length every
-   frame on real runs — swimmers, ejecta past a sample per frame, and a
-   school clamped at `camera_follow=0` — birth backfill, the slow/fast
-   pulse resolvability), `scripts/check_fish.py` (its flap-bounds check gained a
-   float32 tolerance — a real value can land exactly at `FLAP_MIN`/`MAX`
-   now, which it rarely did under the old smooth speed),
-   `scripts/check_fish_disperse.py` (genuinely pulsing ordinary swimmers
-   shift its fine pixel/timing margins, never its qualitative "fish
-   disperse, never fade" claims, all of which still hold; the hue bar
-   stays 0.04 — a widening measured against the collapsing-tail layout
-   was undone once the layout was fixed — while its two other relaxations
-   were re-measured against the fixed layout and KEPT: the lone-fish window
-   is 240 frames because at 60 seed 5 reads no lone fish, and the
-   per-channel red control is asserted on at least one seed because seed
-   3's lone fish never saturate (both clips 0.012); the
-   crossfade body-peak bar stays at the trail-gain hotfix's 0.65, worst
-   0.75 with both changes in), `scripts/check_fish_camera.py` section 1b
-   (restated: kinematics, not rendered pixels, match the pinned predecessor at the dial's neutral
-   setting — the body trail is always live, so rendered frames never go
-   back to bit-identical even there).
+     entries AND registered in `config/effect_params.json` (Sonic's param
+     discovery reads type/range from the registry), so once deployed they
+     are tunable without another deploy. Help: `fish-effect`.
+   Proof: `tests/test_fish.py` (both dial endpoints, the trail on straight
+   and turning paths, the rear body holding its length on swimmers, ejecta
+   and a clamped school, birth backfill), `scripts/check_fish_camera.py`
+   section 1b + `tests/test_fish_camera.py` (KINEMATICS, not rendered
+   pixels, match `THRUST_BASELINE_REF` at the dial's neutral setting, with
+   the shipped default as the negative control — the trail is always live,
+   so rendered frames never return to bit-identical). The thresholds this
+   change relaxed in `scripts/check_fish.py` and
+   `scripts/check_fish_disperse.py` carry their measured reasons in a
+   comment beside each check.
 
 **A GAINED BODY MUST NEVER BE DEPOSITED INTO THE TRAIL** (hotfix,
 2026-09-16, his live report the same night #274 shipped: trails "at least

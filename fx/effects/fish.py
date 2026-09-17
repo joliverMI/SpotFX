@@ -753,8 +753,8 @@ class Fish2d(Twod, GradientEffect):
                     "Minimum swim speed kept independent of the tail "
                     "stroke, as a fraction of the ordinary continuous "
                     "swim target — his escape hatch: raise this to 1 "
-                    "with Stroke speed cap at 0 to get back tonight's "
-                    "smooth motion"
+                    "with Stroke speed cap at 0 to get back the old "
+                    "smooth, un-pulsed motion"
                 ),
                 default=0.6,
             ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1.0)),
@@ -2684,11 +2684,11 @@ class Fish2d(Twod, GradientEffect):
             want_full * self.stroke_speed_cap * pulse_shape
         )
         want = np.where(pulse_eligible, pulsed_want, want_full)
-        # A per-fish ease only when something needs one: with nothing
-        # dispersing and no burst the ease stays the plain scalar it always
-        # was. At stroke_speed_cap=0 (with min_drift_speed at its max of 1)
-        # `want` above is `want_full` exactly and `tau` below is SPEED_TAU
-        # exactly — his stated escape hatch back to the pre-pulse motion.
+        # The ease is per fish (the pulse split makes `tau` an array even
+        # for ordinary swimming). At stroke_speed_cap=0 (with
+        # min_drift_speed at its max of 1) `want` above is `want_full`
+        # exactly and every `tau` below is SPEED_TAU exactly — his stated
+        # escape hatch back to the pre-pulse motion.
         pulse_engage = min(max(self.stroke_speed_cap, 0.0), 1.0)
         fast_tau = SPEED_TAU * (1.0 - pulse_engage) + THRUST_TAU * pulse_engage
         tau = np.where(pulse_eligible, fast_tau, SPEED_TAU)
