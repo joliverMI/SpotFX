@@ -5608,6 +5608,23 @@ writes nothing, every prerequisite refused BY NAME with its fix (ffmpeg,
 is `pipefail`-strict** — a `grep` that legitimately finds nothing needs
 `|| true` or the script dies silently mid-check (a real bug found here).
 
+**ONE OWNER OF THE CAMERA PIPE, and the kiosk HOLDS its size** (2026-09-18,
+PR fm/spotfx-capture-client-size-switch-race). A size switch reopened
+ffmpeg while `newest_of`'s drain probe was still reading, and asyncio
+refused the second `readexactly` mid-calibration. In `camera.V4L2Camera`
+every `readexactly` now runs under `_pipe_lock` (`_require_owner` fails
+loudly otherwise); `frame()` holds it per frame, and open/switch/close go
+through `_exclusive()`, which CANCELS the in-flight read (the read re-queues
+and returns a frame of the new pipe) — never add a pipe read outside that.
+`--frame-size WxH` / `SPECTRA_CAPTURE_FRAME_SIZE` holds ffmpeg at that size
+for the client's whole life and serves smaller asks by an exact stdlib area
+average (`downscale_grey`), so `set_frame_size` never reopens; the kiosk's
+env file sets 1920x1080 (`docs/CAPTURE_CLIENT_HOST.md`). The blocking read
+bound is `frame_read_timeout_s` (device fps, pinned integration time,
+capture size; 2 s floor), not a constant. Spec:
+`tests/test_capture_client_size_switch.py`, whose control test proves the
+race reproduces with ownership removed.
+
 ### A MACHINE MUST BE ABLE TO SAY WHAT IS WRONG WITH IT
 
 2026-09-02, PR fm/instrument-visibility, after eight successive failures on

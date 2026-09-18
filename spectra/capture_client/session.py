@@ -420,7 +420,11 @@ class CaptureClient:
                 await self.camera.read_lock()
                 self._last_lock_read = self._clock()
                 self.state.lock = self.camera.lock.as_wire()
-            fw, fh = self.camera.frame_size
+            # THE SIZE THIS FRAME WAS READ AT, not the size now: a switch can
+            # land in the awaits above, and one size's label on another
+            # size's bytes is a frame the server would misread.
+            fw, fh = (getattr(self.camera, "last_frame_size", None)
+                      or self.camera.frame_size)
             cw, ch = self.camera.capture_size
             await ws.send(json.dumps({
                 "type": "frame", "mime": GREY_MIME,

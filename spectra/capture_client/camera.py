@@ -94,11 +94,13 @@ structurally cannot survive one.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 import re
 import shutil
 import subprocess
+import sys
 import uuid
 from dataclasses import dataclass, field
 from typing import Callable, Optional
@@ -138,6 +140,11 @@ def choose_frame_size(want: tuple[int, int], source_w: int,
 #: which is a worse reference than a settled one — the browser page waits
 #: for the same reason and roughly as long.
 SETTLE_BEFORE_LOCK_S = 1.5
+#: How long a freshly started pipe may take to deliver its FIRST frame —
+#: ffmpeg starting, the device negotiating, the first exposure. An open
+#: budget, not a per-frame one; raised to the stream's own read timeout if
+#: that is ever longer.
+OPEN_FIRST_FRAME_S = 15.0
 
 
 # ── FRESH FRAMES: the stream must not hand back what it saw a second ago ───
@@ -215,6 +222,126 @@ async def newest_of(try_read, *, max_frames: int = DRAIN_MAX_FRAMES
             break
         data, dropped = nxt, dropped + 1
     return data, dropped
+
+
+# ── THE READ TIMEOUT: derived from the stream, never a 5 fps assumption ────
+#
+# 2026-09-18, the kiosk Brio under a commissioning regime: a manual
+# integration time long enough to hold the sensor at ~4.5 fps, streaming
+# full size. A blocking read's bound has to be about THIS stream — how long
+# one frame interval really is, and how long a full-size frame takes to come
+# through ffmpeg — not a number chosen when the wire ran at 5 fps and 320x180.
+#
+#: Never give up on a frame sooner than this. It is the bound for a healthy
+#: fast stream, where a few frame intervals are a few tens of milliseconds
+#: and a blocking `v4l2-ctl` on the event loop could otherwise outlast them.
+READ_TIMEOUT_FLOOR_S = 2.0
+#: How many whole frame intervals a blocking read waits before it calls the
+#: stream stopped: one for the frame in flight, one for a frame dropped by
+#: the driver, and one of margin.
+READ_TIMEOUT_INTERVALS = 3
+#: A CONSERVATIVE per-megapixel allowance for decoding + scaling one capture
+#: frame inside ffmpeg (MJPEG at 1920x1080 on a small board). An allowance,
+#: not a measurement: it only ever LENGTHENS the wait, and a stream that has
+#: genuinely stopped is still named as stopped a moment later.
+DECODE_ALLOWANCE_S_PER_MPX = 0.25
+
+
+def frame_read_timeout_s(fps: Optional[float],
+                         capture_size: tuple[int, int] = (0, 0),
+                         exposure_s: Optional[float] = None) -> float:
+    """How long ONE blocking frame read may wait before the stream is called
+    stopped: at least READ_TIMEOUT_INTERVALS frame intervals (the interval
+    being the slower of the reported frame rate and the commanded
+    integration time — a sensor cannot deliver faster than it integrates),
+    plus a decode allowance for the capture size, and never under
+    READ_TIMEOUT_FLOOR_S.
+
+    At 4.5 fps a frame interval is ~222 ms, so three are ~0.67 s and the
+    floor governs; at 30 fps it is the floor again. A camera held to one
+    frame every two seconds gets six seconds plus the decode allowance."""
+    interval = 1.0 / fps if fps and fps > 0 else 0.0
+    if exposure_s and exposure_s > interval:
+        interval = exposure_s
+    decode = (max(0, capture_size[0]) * max(0, capture_size[1]) / 1e6
+              * DECODE_ALLOWANCE_S_PER_MPX)
+    return max(READ_TIMEOUT_FLOOR_S, READ_TIMEOUT_INTERVALS * interval) + decode
+
+
+# ── THE HELD SIZE: a software downscale instead of a camera reopen ─────────
+#
+# `--frame-size WxH` makes ffmpeg emit that size for the life of the client,
+# so a run asking for it (a calibration's 1920x1080) is already being served
+# and no size switch ever happens under a take. A SMALLER request is met
+# here, from the held frame, by an exact AREA AVERAGE — never by reopening
+# the camera. Pure stdlib, because this package ships without numpy
+# (`scripts/check_capture_client_deps.py`): rows are summed as 16-bit lanes
+# packed into one Python int, so the arithmetic runs in C. Measured ~10 ms
+# for 1920x1080 -> 320x180 on the build machine.
+
+
+def _ratio(src: int, dst: int) -> tuple[int, int]:
+    """src/dst as a reduced fraction p/q: each output pixel covers p input
+    pixels of an input nearest-upsampled by q — exact area averaging."""
+    from math import gcd
+    g = gcd(src, dst)
+    return src // g, dst // g
+
+
+def downscale_grey(data: bytes, src: tuple[int, int],
+                   dst: tuple[int, int]) -> bytes:
+    """AREA-AVERAGE a grey8 frame from `src` to `dst` (each no larger than
+    `src`). A rational ratio p/q is handled exactly by upsampling q times
+    (nearest) and box-averaging p x p — 1920 -> 1280 is 3/2 — so every
+    output byte is the mean light over exactly the input area it covers,
+    rounded half up."""
+    sw, sh = src
+    dw, dh = dst
+    if (sw, sh) == (dw, dh):
+        return bytes(data)
+    if dw > sw or dh > sh or dw <= 0 or dh <= 0:
+        raise ValueError(f"cannot downscale {sw}x{sh} to {dw}x{dh}")
+    pw, qw = _ratio(sw, dw)
+    ph, qh = _ratio(sh, dh)
+    n = pw * ph
+    # Lanes are 16-bit: the largest sum a lane holds is 255 * pw * ph.
+    if 255 * n >= 1 << 16:
+        raise ValueError(f"{sw}x{sh} -> {dw}x{dh} is too steep a downscale")
+    lut = [(s + n // 2) // n for s in range(255 * n + 1)]
+    lane_w = sw * qw                     # upsampled row width, in lanes
+    lane = bytearray(2 * lane_w)
+    mask = (1 << (16 * lane_w)) - 1
+    import array
+    out = bytearray()
+    view = memoryview(data)
+    for r in range(dh):
+        acc = 0
+        for vy in range(r * ph, (r + 1) * ph):
+            row = (vy // qh) * sw
+            src_row = view[row:row + sw]
+            for j in range(qw):
+                lane[2 * j::2 * qw] = src_row
+            acc += int.from_bytes(lane, "little")
+        col = acc
+        for dx in range(1, pw):
+            col += acc >> (16 * dx)
+        col &= mask
+        sums = array.array("H", col.to_bytes(2 * lane_w, "little"))
+        if sys.byteorder != "little":
+            sums.byteswap()
+        out += bytes(map(lut.__getitem__, sums[0::pw]))
+    return bytes(out)
+
+
+def held_wire_size(want: tuple[int, int],
+                   held: tuple[int, int]) -> tuple[int, int]:
+    """The wire size a HELD camera sends for this request: the rung asked
+    for when it is no larger than the held frame, else the held frame
+    itself ("the held size or larger, nothing changes"). Never larger than
+    what is held, so never an upscale."""
+    if want[0] >= held[0] and want[1] >= held[1]:
+        return tuple(held)
+    return choose_frame_size(tuple(want), *held)
 
 #: The control names, modern first then the legacy UVC spelling. Both are
 #: tried and whichever the device actually has is the one reported.
@@ -527,7 +654,8 @@ class V4L2Camera(BaseCamera):
                  capture_size: tuple[int, int] = (1920, 1080),
                  input_format: str = "",
                  fallback_sizes: tuple[tuple[int, int], ...] =
-                 ((1280, 720), (640, 480))) -> None:
+                 ((1280, 720), (640, 480)),
+                 hold_size: Optional[tuple[int, int]] = None) -> None:
         super().__init__()
         self.device = device
         self.fps = fps
@@ -545,6 +673,32 @@ class V4L2Camera(BaseCamera):
         self.frame_size: tuple[int, int] = (FRAME_W, FRAME_H)
         self._proc: Optional[subprocess.Popen] = None
         self._reader: Optional[asyncio.StreamReader] = None
+        #: THE HELD SIZE (`--frame-size`), as asked, and as clamped to what
+        #: the camera actually opened at. While held, ffmpeg emits exactly
+        #: `_held` for the life of the client and every smaller wire size is
+        #: an in-process downscale (`downscale_grey`) — `set_frame_size`
+        #: then NEVER reopens the camera. None (the default) is the shipped
+        #: behaviour: ffmpeg scales to the wire size and a switch reopens.
+        self.hold_size: Optional[tuple[int, int]] = (
+            tuple(hold_size) if hold_size else None)
+        self._held: Optional[tuple[int, int]] = None
+        #: ONE OWNER OF THE PIXEL PIPE AT A TIME (2026-09-18, the kiosk: a
+        #: size switch reopened the pipe while `newest_of`'s drain probe was
+        #: reading it, and asyncio refused the second `readexactly`). Every
+        #: `readexactly` on `_reader` happens while `_pipe_lock` is held —
+        #: `frame()` holds it for one whole frame, and an open / switch /
+        #: close takes it after PREEMPTING the in-flight frame read, whose
+        #: `frame()` then waits its turn and reads from the new pipe. The
+        #: lock is created per event loop (`_lock`), since a lock bound to
+        #: one loop cannot be waited on from another.
+        self._pipe_lock: Optional[asyncio.Lock] = None
+        self._pipe_lock_loop = None
+        self._inflight: Optional[asyncio.Task] = None
+        self._preempted: set = set()
+        #: The size of the frame `frame()` last returned — what the session
+        #: labels THAT frame with, so a switch landing between a read and its
+        #: send can never put one size's label on another size's bytes.
+        self.last_frame_size: Optional[tuple[int, int]] = None
         #: Levers a run asked for that this device would not take, carried
         #: from `apply_lock` into every subsequent `read_lock` so a paced
         #: re-read does not silently drop the refusal.
@@ -572,11 +726,32 @@ class V4L2Camera(BaseCamera):
     def frame_bytes(self) -> int:
         return self.frame_size[0] * self.frame_size[1]
 
+    @property
+    def pipe_size(self) -> tuple[int, int]:
+        """What ffmpeg emits: the held size while held, else the wire size
+        itself (ffmpeg's own scaler does the downscale, as it always has)."""
+        return self._held or self.frame_size
+
+    @property
+    def _pipe_bytes(self) -> int:
+        return self.pipe_size[0] * self.pipe_size[1]
+
+    def read_timeout_s(self) -> float:
+        """This stream's blocking-read bound — `frame_read_timeout_s` over the
+        rate the DEVICE reported (else the rate asked for), the pinned
+        integration time, and the capture size."""
+        exposure = self._wanted.get("exposure_time")
+        return frame_read_timeout_s(
+            self.sensor_fps or self.fps, self.capture_size,
+            exposure * 1e-4 if exposure else None)
+
     def describe(self) -> dict:
         return {"kind": "v4l2", "device": self.device,
                 "fresh_frames": self.fresh_frames,
                 "capture_size": list(self.capture_size), "fps": self.fps,
                 "frame_size": list(self.frame_size),
+                "held_frame_size": (list(self._held or self.hold_size)
+                                    if self.hold_size else None),
                 "max_frame_size": list(choose_frame_size(
                     FRAME_SIZES[-1], *self.capture_size)),
                 "open_note": self.open_note}
@@ -892,7 +1067,7 @@ class V4L2Camera(BaseCamera):
                  # with no lossy stage anywhere in the path. The size is
                  # never larger than `capture_size` (see
                  # `choose_frame_size`), so this only ever downsamples.
-                 "-vf", f"scale={self.frame_size[0]}:{self.frame_size[1]}",
+                 "-vf", f"scale={self.pipe_size[0]}:{self.pipe_size[1]}",
                  "-pix_fmt", "gray", "-f", "rawvideo", "-"]
         return args
 
@@ -916,7 +1091,8 @@ class V4L2Camera(BaseCamera):
         wanted = self.capture_size
         ladder = [wanted] + [s for s in self.fallback_sizes if s != wanted]
         for size in ladder:
-            problem = await self._open_at(ffmpeg, size)
+            async with self._exclusive():
+                problem = await self._open_at(ffmpeg, size)
             if problem is None:
                 if size != wanted:
                     self.open_note = (
@@ -942,6 +1118,48 @@ class V4L2Camera(BaseCamera):
         # pinned regime survive with no stored state anywhere but here.
         await self.apply_lock(**self._wanted)
 
+    async def _start_pipe(self, ffmpeg: str, capture_size: tuple[int, int],
+                          frame_bytes: int) -> asyncio.StreamReader:
+        """Start ffmpeg and hand back a reader over its stdout. The one seam
+        a test replaces to feed the real read path without a camera."""
+        self._proc = subprocess.Popen(
+            self._ffmpeg_args(ffmpeg, capture_size), stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, bufsize=0)
+        loop = asyncio.get_running_loop()
+        reader = asyncio.StreamReader(limit=frame_bytes * 8)
+        await loop.connect_read_pipe(
+            lambda: asyncio.StreamReaderProtocol(reader), self._proc.stdout)
+        return reader
+
+    # ── one owner of the pipe ─────────────────────────────────────────────
+    def _lock(self) -> asyncio.Lock:
+        loop = asyncio.get_running_loop()
+        if self._pipe_lock is None or self._pipe_lock_loop is not loop:
+            self._pipe_lock = asyncio.Lock()
+            self._pipe_lock_loop = loop
+        return self._pipe_lock
+
+    def _require_owner(self) -> None:
+        """Every `readexactly` on the pipe is behind this check: a second
+        reader is a bug to fail on HERE, not an asyncio RuntimeError from
+        inside the drain."""
+        if not self._lock().locked():
+            raise RuntimeError("the camera pipe was read without owning it")
+
+    @contextlib.asynccontextmanager
+    async def _exclusive(self):
+        """Take the pipe away from any in-flight `frame()` read — cancel it,
+        not wait out its timeout — and hold it for the duration. The frame
+        read that was cancelled re-queues behind this and reads again from
+        whatever pipe is there when it gets its turn."""
+        task = self._inflight
+        if (task is not None and not task.done()
+                and task is not asyncio.current_task()):
+            self._preempted.add(task)
+            task.cancel()
+        async with self._lock():
+            yield
+
     async def _open_at(self, ffmpeg: str,
                        capture_size: tuple[int, int]) -> Optional[str]:
         """Start the pixel pipe at this capture size. Returns ffmpeg's own
@@ -951,24 +1169,25 @@ class V4L2Camera(BaseCamera):
         rung this capture size can fill, capped at whatever was last
         requested. That is "never upscale", enforced at the only place that
         knows both numbers."""
-        self.frame_size = choose_frame_size(self.frame_size, *capture_size)
-        want = self.frame_bytes
-        self._proc = subprocess.Popen(
-            self._ffmpeg_args(ffmpeg, capture_size), stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE, bufsize=0)
-        loop = asyncio.get_running_loop()
-        reader = asyncio.StreamReader(limit=want * 8)
-        await loop.connect_read_pipe(
-            lambda: asyncio.StreamReaderProtocol(reader), self._proc.stdout)
+        self._require_owner()
+        if self.hold_size:
+            self._held = choose_frame_size(self.hold_size, *capture_size)
+            self.frame_size = held_wire_size(self.frame_size, self._held)
+        else:
+            self.frame_size = choose_frame_size(self.frame_size, *capture_size)
+        want = self._pipe_bytes
+        reader = await self._start_pipe(ffmpeg, capture_size, want)
         self._reader = reader
         try:
-            await asyncio.wait_for(reader.readexactly(want), timeout=15.0)
+            await asyncio.wait_for(
+                reader.readexactly(want),
+                timeout=max(OPEN_FIRST_FRAME_S, self.read_timeout_s()))
         except (asyncio.TimeoutError, asyncio.IncompleteReadError) as exc:
             # STOP IT FIRST, then read its complaint: ffmpeg's stderr is a
             # blocking pipe, so reading it while the process is still alive
             # is a hang, not a diagnostic.
             err = self._drain_stderr()
-            await self.close()
+            self._close_now()
             return (f"{self.device} produced no frames at "
                     f"{capture_size[0]}x{capture_size[1]}"
                     + (f" ({err})" if err else f" ({exc!r})"))
@@ -996,6 +1215,12 @@ class V4L2Camera(BaseCamera):
         that did not mints a new one and the queue names the change
         (`mapping_refusals.pose_changed_note`). Measured, never assumed —
         which is the same rule the lock itself lives by."""
+        if self._held is not None:
+            # HELD: the pipe already carries the held frame, so any request
+            # is served from it — the held size itself, or a smaller rung by
+            # downscale. Nothing reopens, nothing re-locks, the pose stands.
+            self.frame_size = held_wire_size(tuple(size), self._held)
+            return self.frame_size
         want = choose_frame_size(tuple(size), *self.capture_size)
         if want == self.frame_size:
             return self.frame_size
@@ -1005,9 +1230,10 @@ class V4L2Camera(BaseCamera):
         ffmpeg = _tool("ffmpeg")
         if not ffmpeg:
             return self.frame_size
-        await self.close()
-        self.frame_size = want
-        problem = await self._open_at(ffmpeg, self.capture_size)
+        async with self._exclusive():
+            self._close_now()
+            self.frame_size = want
+            problem = await self._open_at(ffmpeg, self.capture_size)
         if problem is not None:
             raise CameraUnavailable(problem)
         self.opened = True
@@ -1039,11 +1265,12 @@ class V4L2Camera(BaseCamera):
         answers that question and cannot answer any other."""
         if self._reader is None:
             return None
-        timeout = 10.0 if blocking else min(
+        self._require_owner()
+        timeout = self.read_timeout_s() if blocking else min(
             DRAIN_PROBE_S, 0.5 / max(0.5, float(self.fps)))
         try:
             return await asyncio.wait_for(
-                self._reader.readexactly(self.frame_bytes), timeout=timeout)
+                self._reader.readexactly(self._pipe_bytes), timeout=timeout)
         except (asyncio.TimeoutError, asyncio.IncompleteReadError):
             return None
 
@@ -1056,7 +1283,30 @@ class V4L2Camera(BaseCamera):
         (SENSOR_APPLY_FRAMES); the DRAIN throws away everything the
         transport has queued behind the newest (DRAIN_PROBE_S). Neither is
         an optimisation: a frame from before the lamp went on measures the
-        dark room and says nothing about it."""
+        dark room and says nothing about it.
+
+        THE READ OWNS THE PIPE (see `_pipe_lock`). A size switch or reopen
+        arriving mid-read CANCELS this read rather than racing it; this call
+        then waits for the switch to finish and reads the new pipe, so the
+        caller sees one frame of the new stream and never an error."""
+        while True:
+            async with self._lock():
+                task = asyncio.ensure_future(self._frame_owned())
+                self._inflight = task
+                try:
+                    return await task
+                except asyncio.CancelledError:
+                    preempted = task in self._preempted
+                    self._preempted.discard(task)
+                    current = asyncio.current_task()
+                    if (not preempted or (current is not None
+                                          and current.cancelling())):
+                        raise
+                finally:
+                    self._inflight = None
+            # Preempted by a switch: queue behind it and read again.
+
+    async def _frame_owned(self) -> Optional[bytes]:
         while self._apply_owed > 0:
             if await self._read(True) is None:
                 return None
@@ -1064,9 +1314,19 @@ class V4L2Camera(BaseCamera):
             self.regime_discards += 1
         data, dropped = await newest_of(self._read)
         self.stale_dropped += dropped
+        if data is None:
+            return None
+        size = self.frame_size
+        if self._held is not None and size != self._held:
+            data = downscale_grey(data, self._held, size)
+        self.last_frame_size = size
         return data
 
     async def close(self) -> None:
+        async with self._exclusive():
+            self._close_now()
+
+    def _close_now(self) -> None:
         self.opened = False
         proc, self._proc = self._proc, None
         self._reader = None

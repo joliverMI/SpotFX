@@ -55,6 +55,12 @@ ENV_VARS: tuple[tuple[str, str, str], ...] = (
     ("SPECTRA_CAPTURE_FPS", "fps", "frames per second on the wire"),
     ("SPECTRA_CAPTURE_SIZE", "capture_size",
      "what to ask the camera for, e.g. 1920x1080"),
+    ("SPECTRA_CAPTURE_FRAME_SIZE", "frame_size",
+     "HOLD the camera at this wire size for the whole life of the client, "
+     "e.g. 1920x1080: a smaller request is downscaled in software from the "
+     "held frame and the camera is never reopened, so a calibration's size "
+     "switch never happens under a take. Unset = the shipped behaviour "
+     "(each size change reopens the camera's scaler)"),
     ("SPECTRA_CAPTURE_INPUT_FORMAT", "input_format",
      "ffmpeg -input_format, e.g. mjpeg"),
     ("SPECTRA_CAPTURE_QUEUE", "queue", "a declared queue file to run"),

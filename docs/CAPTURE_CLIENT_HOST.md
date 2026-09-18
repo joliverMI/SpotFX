@@ -301,6 +301,41 @@ machine that is working.
 | `~/.local/bin/spectra-capture-client` | the launcher. The one thing that genuinely differs between machines (the checkout and the interpreter) lives here, so the unit can ship verbatim and be verified as the bytes that get installed. |
 | `~/.config/systemd/user/spectra-capture-client.service` | `deploy/spectra-capture-client.service`, copied unchanged and then verified. |
 
+### The kiosk: hold the commission size from launch (`--frame-size`)
+
+*(2026-09-18)* **The kiosk unit runs with the camera HELD at 1920x1080.** Add
+this one line to its environment file,
+`~/.config/spectra-capture/client.env` on the kiosk (the unit's `ExecStart`
+takes no arguments by design, so the environment is where it goes):
+
+```bash
+SPECTRA_CAPTURE_FRAME_SIZE=1920x1080
+```
+
+— the same as `python -m spectra.capture_client --frame-size 1920x1080` on a
+command line — then `systemctl restart spectra-capture-client`.
+
+**Why.** Without it the client streams the MAP size (320x180) at idle and
+REOPENS the camera's pixel pipe when a calibration asks for its commission
+size. On kiosk-0 that switch happened under a take (Calibration One,
+2026-09-18 01:04): the frame loop crashed on a second `readexactly` racing
+the reopen, and the Brio then refused to reopen at every size for a minute
+while the kernel logged the start/stop churn. The race itself is fixed in
+the client (one owner of the pipe at a time), but a switch under a take is
+still a reopen the run did not need. **Held, ffmpeg emits 1920x1080 for the
+whole life of the client**: a run asking for 1920x1080 is already being
+served, and a run asking for less (a map's 320x180) is given an exact area
+average of the held frame in software (`camera.downscale_grey`, ~10 ms a
+frame, stdlib only). The camera is never reopened for a size, so the pose
+never changes because of one. Unset, the client behaves exactly as it
+always did.
+
+**The trade, named.** A held client decodes a full-size frame at the wire
+rate even at idle (1920x1080 greyscale is ~2 MB a frame through the pipe),
+where an unheld one only did that during a commissioning read. That is the
+price of never switching; a host that never commissions has no reason to
+set it.
+
 ### Dependencies: install the CLIENT's, not the server's
 
 ```bash
