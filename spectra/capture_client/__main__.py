@@ -53,7 +53,7 @@ from typing import Optional
 import httpx
 
 from spectra.capture_client import doctor
-from spectra.capture_client.camera import (CameraLock, SyntheticCamera,
+from spectra.capture_client.camera import (FRAME_SIZES, CameraLock, SyntheticCamera,
                                            V4L2Camera)
 from spectra.capture_client.config import (ConfigError, env_help,
                                            from_environment)
@@ -288,6 +288,15 @@ def main(argv: Optional[list[str]] = None) -> int:
                         "so; the wire size is never larger than this, "
                         "because a bigger picture of a smaller image is not "
                         "more detail")
+    p.add_argument("--frame-size", dest="frame_size",
+                   default=env.get("frame_size", ""),
+                   help="HOLD the camera at this wire size (e.g. 1920x1080) "
+                        "from launch: the camera opens at it and is never "
+                        "reopened for a size change; a run asking for a "
+                        "smaller size gets it downscaled in software from "
+                        "the held frame. The kiosk runs with 1920x1080 so a "
+                        "calibration never switches size under a take. "
+                        "Unset keeps the shipped behaviour")
     p.add_argument("--input-format", default=env.get("input_format", ""),
                    help="ffmpeg -input_format, e.g. mjpeg, when the camera "
                         "will not give raw at this size")
@@ -402,6 +411,19 @@ def main(argv: Optional[list[str]] = None) -> int:
               file=sys.stderr)
         return 2
 
+    hold = None
+    if args.frame_size:
+        try:
+            w, _, h = args.frame_size.lower().partition("x")
+            hold = (int(w), int(h))
+        except ValueError:
+            hold = None
+        if hold not in FRAME_SIZES:
+            print(f"--frame-size / SPECTRA_CAPTURE_FRAME_SIZE must be one of "
+                  f"{', '.join(f'{fw}x{fh}' for fw, fh in FRAME_SIZES)}, "
+                  f"not {args.frame_size!r}", file=sys.stderr)
+            return 2
+
     if args.avsync:
         # A DIFFERENT INSTRUMENT, and it takes the branch before the
         # mapping camera is even constructed — nothing below this line runs
@@ -424,7 +446,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                                  capture_size=size)
     else:
         camera = V4L2Camera(args.device, fps=args.fps, capture_size=size,
-                            input_format=args.input_format)
+                            input_format=args.input_format, hold_size=hold)
 
     return asyncio.run(_run(args, base, ws_url, camera))
 
