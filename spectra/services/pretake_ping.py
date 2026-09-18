@@ -215,7 +215,11 @@ STATUS_UNCONFIGURED = "unconfigured"
 #: own settle. Worst case ~5s of connect+read, inside the grace every take
 #: already spends releasing the Hue session.
 CONNECT_TIMEOUT_S = 2.0
-READ_TIMEOUT_S = 3.0
+#: 2026-09-17: 15 s so a slow capture completes before we give up on her
+#: answer - River measured 2.4-4.2 s on 17 Hue bulbs; a 3 s read timeout
+#: recorded a snapshot that HAD happened as failed and broke her response
+#: write (firstmate corr eb74532e5495a0b1).
+READ_TIMEOUT_S = 15.0
 WRITE_TIMEOUT_S = 2.0
 POOL_TIMEOUT_S = 1.0
 
