@@ -1299,7 +1299,7 @@ def test_run_turn_surfaces_rejections_structurally_not_only_applied(monkeypatch)
     assert "no scene with id" in result["rejected"][0]["reason"]
 
 
-# ═══ 11. copy_scene_device_entry — his ask, 2026-09-22: "copy the strips
+# ═══ 12. copy_scene_device_entry — his ask, 2026-09-22: "copy the strips
 # initial set from Fireworks V2 to Fish." One device entry's copyable
 # fields move; the destination entry's own id (or lack of one) decides
 # whether it's an update or a create; nothing else on either scene moves. ═

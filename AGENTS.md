@@ -2691,7 +2691,7 @@ specifically so this write path and the human HTTP upsert can never
 silently diverge on what a legal scene save requires. The editor itself
 (a "copy from scene..." control on the Initial Set tab) was NOT built —
 judged more than the small addition the ask called for; the Sonic path is
-what he asked for. Spec: `tests/test_scene_console.py` §11.
+what he asked for. Spec: `tests/test_scene_console.py` §12.
 
 **Subscription (CLI) backend — built, default OFF, not yet authorised
 against his real account** (`data/spectra-console-subscription-backend/`:
