@@ -24,6 +24,7 @@ song this build hasn't been pinned/precomputed for.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -83,7 +84,13 @@ async def list_songs():
 @router.get("/marks")
 async def get_marks(uri: str = Query(...)):
     """One song's marks + provenance: a full triggers.json parse plus the
-    profile-directory scan its caveat needs, so it runs off the loop."""
+    profile-directory scan its caveat needs, so it runs off the loop.
+
+    `tempo_bpm` rides along here (one extra .librosa.json read) rather than
+    a dedicated route: the page already fetches /marks for every song it
+    shows and needs the tempo for exactly one thing — the beat/downbeat
+    lanes' per-lane tolerance default (docs/AGENTS.md's own "below half a
+    beat" requirement)."""
     def _read() -> dict:
         marks = testbed_marks.marks_for_song(uri)
         return {
@@ -95,6 +102,7 @@ async def get_marks(uri: str = Query(...)):
             "n_generated": marks.n_generated,
             "n_promoted": marks.n_promoted,
             "provenance": marks.provenance.__dict__,
+            "tempo_bpm": analysis_reader.tempo_bpm_for_uri(uri),
         }
     return await asyncio.to_thread(_read)
 
@@ -135,10 +143,27 @@ async def get_engines(uri: str = Query(...)):
 def _estimate_for(engine: str, uri: str, mark_kind: str):
     """One engine's marks of one kind, or None when the engine has nothing
     for this song — the ONLY read the page's per-lane fetch needs. Never
-    touches triggers.json or the profile directory."""
+    touches triggers.json or the profile directory.
+
+    Every engine (librosa's live derivation AND beat_this's offline
+    precompute) stores its marks in WAV time — the time axis of the file it
+    actually analyzed. A production capture starts mid-song (URI detection
+    lags 5-10s), so the pinned WAV's sample 0 is not song-time 0
+    (testbed_audio.capture_offset_ms's own docstring). His reference marks
+    are song time. Shifting here — the ONE choke point both /compare and
+    the page's own /engine-marks fetch (and therefore its metrics.ts port)
+    go through — means every consumer of an engine mark sees song time and
+    the matcher (testbed_metrics.match_marks) never has to know about the
+    offset at all. `None` = unknown offset (no captured audio, an aged-out
+    npz sidecar) and is treated as 0 — the pre-fix behaviour, since there
+    is nothing here to correct."""
     engine_marks = testbed_engines.marks_for(engine, uri)
     if engine_marks is None:
         return None
+    offset_ms = testbed_audio.capture_offset_ms(uri) or 0
+    if offset_ms:
+        engine_marks = [dataclasses.replace(m, time_ms=m.time_ms + offset_ms)
+                        for m in engine_marks]
     return [m for m in engine_marks if m.kind == mark_kind]
 
 

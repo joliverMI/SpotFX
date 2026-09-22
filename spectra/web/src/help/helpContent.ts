@@ -1421,6 +1421,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
         body: [
           'Drag the tolerance slider on the Metrics card to see precision/recall/F1 and every tint recompute for the currently selected tolerance — there is no one "correct" tolerance; how close counts as close enough is your call, not this page\'s.',
+          'The slider opens on a default sized to what you are comparing, shown next to it: 500ms for section-boundary lanes, but below half a beat — at most 200ms, tighter on a fast song — for a beat or downbeat lane. At a flat 500ms a beat lane can barely lose on any song above 120 BPM, and a downbeat lane cannot tell a downbeat from the beat next to it, so a loose default there was flattering every engine equally rather than telling them apart. It still moves freely to any value, 500ms included, and a "Reset to default" button reappears once you have moved it away.',
           'The waveform lane shows the real retained WAV when one is pinned; otherwise it falls back to the coarser RMS-energy shape production already keeps for every played song, labeled honestly as coarse rather than silently showing nothing.',
           'Every lane shares one timebase, so a spot on the waveform sits directly under the marks at that moment in the song. Where a capture is shorter than the song\'s last mark or beat, the waveform simply stops where the audio does instead of being stretched to fill the lane.',
           'A capture usually starts a few seconds into the song (that is how long it takes to work out which song is playing), so the waveform is drawn starting at the moment its own recording began rather than at the far left. If that start time cannot be worked out for a particular capture, the lane says "start time unknown" and greys itself out — it is still worth looking at, but do not read alignment into it.',
@@ -1442,6 +1443,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         body: [
           'Current (librosa) is the production pipeline\'s own already-computed analysis — always available once a song has been analysed, and it\'s exactly what generates today\'s automatic scene-change triggers.',
           'beat_this (CPJKU 2024) is a modern neural beat/downbeat tracker, measurably tighter on beat/downbeat timing than the current pipeline. It has to be precomputed offline first (scripts/testbed_precompute.py) — an engine lane reads "not computed" until that\'s been run for this song; nothing here ever runs a slow engine live while you\'re looking at the page.',
+          'Every engine analyses the captured WAV, which usually starts a few seconds into the song — so an engine\'s marks are shifted by that same start-time correction before they are drawn or scored, and always agree with the waveform lane\'s own alignment. On a song where that start time is unknown, marks are left exactly as the engine reported them.',
         ],
       },
       {

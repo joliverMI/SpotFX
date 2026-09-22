@@ -9,7 +9,7 @@
  * The ONLY write this page can make is push-to-real, and only through
  * PromotionReviewDialog's own explicit confirm step (see that component
  * and spectra/services/testbed_promote.py). */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import HelpLink from '../help/HelpLink';
 import {
   useTestbedAudioPin, useTestbedAudioUnpin, useTestbedEngineMarks, useTestbedMarks,
@@ -37,6 +37,33 @@ const MARK_KIND_LABEL: Record<string, string> = {
 };
 
 const markKindLabel = (kind: string) => MARK_KIND_LABEL[kind] ?? kind;
+
+const TOLERANCE_MIN_MS = 100;
+const TOLERANCE_MAX_MS = 3000;
+/** Below half a beat, for beat/downbeat lanes — at 500ms (the old flat
+ * default) the beat lane cannot lose on any song above 120 BPM and the
+ * downbeat lane cannot tell a downbeat from the beat next to it
+ * (data/music-analysis-octave-scout/report.md, "Work that should ship" #2:
+ * El Apagón librosa downbeat F1 0.46 at 500ms vs 0.07 at 150ms, median
+ * signed offset +470ms on a 499ms beat). Section boundaries are not a
+ * beat-level phenomenon and keep the flat default. */
+function laneDefaultToleranceMs(kind: string, tempoBpm: number | null): number {
+  if (kind !== 'beat' && kind !== 'downbeat') return 500;
+  if (!tempoBpm || tempoBpm <= 0) return 200;
+  const beatMs = 60000 / tempoBpm;
+  const raw = Math.min(200, Math.round(0.4 * beatMs));
+  return Math.min(TOLERANCE_MAX_MS, Math.max(TOLERANCE_MIN_MS, raw));
+}
+
+/** The page has one shared tolerance slider across both A/B lanes (not a
+ * control per lane), so its default is the TIGHTEST of the active lanes'
+ * own defaults — a beat/downbeat lane picked for either slot must never
+ * be scored at a default too loose to tell its phase, even when the other
+ * slot is a section-boundary lane. */
+function effectiveDefaultToleranceMs(kinds: string[], tempoBpm: number | null): number {
+  if (kinds.length === 0) return 500;
+  return Math.min(...kinds.map((k) => laneDefaultToleranceMs(k, tempoBpm)));
+}
 
 /** Labels come off the /songs listing itself (title/artist read from the
  * editor-copy profile in the same one-pass scan that reads provenance) —
@@ -81,6 +108,13 @@ export default function TestbedPage() {
     { engine: 'beat_this', kind: 'downbeat' },
   );
   const [toleranceMs, setToleranceMs] = useState(500);
+  // True once he has touched the slider himself for the CURRENT song — the
+  // default below stops re-asserting itself over his own choice, but a new
+  // song (or a mark-kind change on either lane) still gets its own honest
+  // default rather than carrying over a value tuned for a different beat
+  // length.
+  const [toleranceTouched, setToleranceTouched] = useState(false);
+  const lastUriRef = useRef<string | null>(null);
   const [promoteTarget, setPromoteTarget] = useState<
     { timestampMs: number; sourceEngine: string; sourceMarkKind: string } | null
   >(null);
@@ -101,6 +135,28 @@ export default function TestbedPage() {
 
   const pin = useTestbedAudioPin();
   const unpin = useTestbedAudioUnpin();
+
+  // A new song resets to ITS OWN honest default rather than carrying over
+  // one tuned for a different beat length.
+  useEffect(() => {
+    if (lastUriRef.current === uri) return;
+    lastUriRef.current = uri;
+    setToleranceTouched(false);
+  }, [uri]);
+
+  const activeMarkKinds = useMemo(
+    () => (engineB ? [engineA.kind, engineB.kind] : [engineA.kind]),
+    [engineA.kind, engineB],
+  );
+  const defaultToleranceMs = useMemo(
+    () => effectiveDefaultToleranceMs(activeMarkKinds, marks?.tempo_bpm ?? null),
+    [activeMarkKinds, marks?.tempo_bpm],
+  );
+  // Keep tracking the default (a new engine/kind pick, a song's tempo
+  // arriving) until he actually moves the slider for this song.
+  useEffect(() => {
+    if (!toleranceTouched) setToleranceMs(defaultToleranceMs);
+  }, [defaultToleranceMs, toleranceTouched]);
 
   const referenceMarks = marks?.transitions ?? [];
   const flareMarks = marks?.flares ?? [];
@@ -305,7 +361,9 @@ export default function TestbedPage() {
                 ...(engineB ? [{ key: 'b', label: engineLanes[1]?.label ?? 'Engine B', metrics: metricsB, available: !!engineMarksB?.available }] : []),
               ]}
               toleranceMs={toleranceMs}
-              onToleranceChange={setToleranceMs}
+              onToleranceChange={(ms) => { setToleranceTouched(true); setToleranceMs(ms); }}
+              defaultToleranceMs={defaultToleranceMs}
+              onResetToDefault={() => { setToleranceTouched(false); setToleranceMs(defaultToleranceMs); }}
               emptyNote={referenceEmptyNote}
             />
           </div>

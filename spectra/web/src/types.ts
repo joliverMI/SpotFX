@@ -1483,6 +1483,9 @@ export interface TestbedMarks {
   n_generated: number;
   n_promoted: number;
   provenance: TestbedProvenance;
+  /** The song's librosa tempo — drives the beat/downbeat lanes' per-lane
+   * tolerance default (below half a beat). null = no librosa analysis. */
+  tempo_bpm: number | null;
 }
 
 export interface TestbedWaveform {

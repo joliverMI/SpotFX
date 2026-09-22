@@ -8073,6 +8073,38 @@ registry, the guarded beat_this call, the promotion gate, and a full
 `TestClient(create_app())` route-shape pass) + `scripts/
 check_testbed_metrics.mjs` (TS/Python parity).
 
+**Every engine mark is stored in WAV time; his reference marks are song
+time — shifted at `spectra/api/testbed.py::_estimate_for`, the one choke
+point both `/compare` and `/engine-marks` (and therefore the page's
+`metrics.ts` port) go through** (`data/music-analysis-octave-scout/
+report.md`, "Work that should ship" #1). A production capture starts
+mid-song (URI detection lags 5-10s), so `librosa_marks_for_stem`'s raw
+`beats[].ms` and `testbed_beatthis.compute_marks_ms`'s raw
+`s * 1000` are both WAV-relative, not song-relative — on a song whose
+capture started ~4s in, every engine mark was scored ~4s early before this
+fix, which happened to read as a coincidental win on the one song (Soy
+Peor) whose bar length made the phase land close anyway. The shift is
+`testbed_audio.capture_offset_ms(uri)`, applied once here (never inside
+`testbed_metrics.match_marks`/`metrics.ts` — the inputs move, not the
+matcher); `None` (unknown offset) is treated as 0, the pre-fix behaviour.
+
+**Tolerance has a PER-LANE default, not one flat number** (same report,
+"Work that should ship" #2): at a flat 500ms a beat lane cannot lose on
+any song above 120 BPM and a downbeat lane cannot tell a downbeat from the
+beat next to it (El Apagón: librosa downbeat F1 0.46 at 500ms vs 0.07 at
+150ms, median signed offset +470ms on a 499ms beat). `TestbedPage.tsx`'s
+`laneDefaultToleranceMs`/`effectiveDefaultToleranceMs` compute
+`min(200ms, 0.4 × the song's beat length)` for a beat/downbeat lane and
+500ms for section boundaries, using the TIGHTEST default across whichever
+lane(s) are active (the page has one shared slider, not one per lane); the
+slider still moves freely to any value, including 500ms, and a "Reset to
+default" control appears once he has moved it. The song's beat length
+comes from `analysis_reader.tempo_bpm_for_uri` (librosa's own `tempo_bpm`
+field), carried on `GET /api/testbed/marks`'s `tempo_bpm` key — the one
+extra `.librosa.json` read the page already pays for via `/engine-marks`.
+Help: `analysis-testbed` §`testbed-lanes-and-tolerance` and
+§`testbed-engines`, updated in the same change (both already linked).
+
 ## Maintaining this file
 
 Keep this file for knowledge useful to almost every future agent session in this project.

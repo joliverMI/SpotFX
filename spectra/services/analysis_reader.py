@@ -130,6 +130,23 @@ def beats_for_uri(uri: str) -> Optional[list]:
     return (doc or {}).get("beats") or None
 
 
+def tempo_bpm_for_uri(uri: str) -> Optional[float]:
+    """The song's librosa `tempo_bpm` (LibrosaAnalysis's own field,
+    services/librosa_service.py), for anything that needs a beat-length
+    estimate — the music-analysis test bed's per-lane tolerance default
+    reads this, since a beat/downbeat lane's tolerance has to shrink with
+    the song's tempo. None when there is no analysis or the field is
+    missing/malformed."""
+    doc = librosa_analysis_for_stem(stem_for_uri(uri))
+    if not doc:
+        return None
+    try:
+        bpm = float(doc.get("tempo_bpm"))
+    except (TypeError, ValueError):
+        return None
+    return bpm if bpm > 0 else None
+
+
 def section_energy_at(uri: str, now_ms: int) -> Optional[float]:
     """Librosa section energy at a playback position (RAW ms), 0–1."""
     sections = sections_for_uri(uri)

@@ -9,16 +9,22 @@ function pct(v: number) {
 }
 
 export default function TestbedMetricsPanel({
-  rows, toleranceMs, onToleranceChange, emptyNote,
+  rows, toleranceMs, onToleranceChange, defaultToleranceMs, onResetToDefault, emptyNote,
 }: {
   rows: { key: string; label: string; metrics: TestbedMetrics | null | undefined; available: boolean }[];
   toleranceMs: number;
   onToleranceChange: (ms: number) => void;
+  /** The default this song's active lanes would get — below half a beat
+   * for a beat/downbeat lane, 500ms for section boundaries (data/
+   * music-analysis-octave-scout/report.md, "Work that should ship" #2). */
+  defaultToleranceMs: number;
+  onResetToDefault: () => void;
   emptyNote?: string;
 }) {
+  const atDefault = toleranceMs === defaultToleranceMs;
   return (
     <div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
         <label htmlFor="testbed-tolerance" style={{ fontSize: 12, color: 'var(--text-muted)' }}>
           Tolerance: {toleranceMs}ms
         </label>
@@ -32,7 +38,17 @@ export default function TestbedMetricsPanel({
           onChange={(e) => onToleranceChange(Number(e.target.value))}
           style={{ flex: 1, maxWidth: 240 }}
         />
+        {!atDefault && (
+          <button onClick={onResetToDefault} style={{ fontSize: 11 }}>
+            Reset to default ({defaultToleranceMs}ms)
+          </button>
+        )}
       </div>
+      <p style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 0, marginBottom: 8 }}>
+        Default for these lanes: {defaultToleranceMs}ms — below half a beat
+        for a beat/downbeat lane, 500ms for section boundaries. The slider
+        can still be set to any value, including 500ms.
+      </p>
       {emptyNote ? (
         <p className="empty-note" style={{ fontSize: 12 }}>
           {emptyNote} — precision/recall need at least one of your own marks to score against.
