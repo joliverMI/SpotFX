@@ -27,19 +27,23 @@ missing precompute simply falls back to librosa (scout Q4's own
 "defensible minimum" — beat_this is a request-path-forbidden ~100s/song
 model, testbed_beatthis.py's own docstring).
 
-WAV TIME -> SONG TIME: both grids are stored in WAV time — the file each
-engine actually analyzed (testbed_audio.capture_offset_ms's own
-docstring; the scout report's Q2, the very offset bug PR 286 fixed for
-the test bed's own /compare and /engine-marks routes). This module shifts
-each grid's downbeat times by testbed_audio.capture_offset_ms_or_zero
-(uri) — the SAME shared helper spectra/api/testbed.py::_estimate_for
-calls — so the grid a cue snaps against agrees with the grid the test bed
-renders and scores; there is no second definition of this shift anywhere
-in the codebase. A generated cue's own UNSNAPPED time (a librosa section
-boundary) is left exactly as midsong_generator has always placed it —
-already treated as song time by every existing consumer
-(trigger_engine.tick()) — this module never touches that number, only
-compares against it.
+ONE FRAME, NO SHIFT: a section boundary (analysis_reader.sections_for_uri)
+and both downbeat grids (librosa's own beats, beat_this's marks) are all
+computed by an analysis pass over the SAME captured WAV
+(services/librosa_service.py: start_ms/beat ms are both int(t * 1000) off
+the same `y` array, no offset applied to either) — so they already share
+one coordinate frame, and this module compares them RAW, with no shift.
+testbed_audio.capture_offset_ms_or_zero(uri) — the WAV-time -> song-time
+shift spectra/api/testbed.py::_estimate_for applies — belongs only to a
+CROSS-frame comparison (a WAV-relative engine mark against genuinely
+song-time authored ground truth); applying it on just one side of this
+module's same-frame comparison would introduce a constant bias equal to
+the capture offset into every snap decision. A generated cue's own
+UNSNAPPED time (a librosa section boundary) is left exactly as
+midsong_generator has always placed it — already treated as song time by
+every existing consumer (trigger_engine.tick(), the AGENTS.md "raw
+convention" for librosa_offset_ms) — this module never touches that
+number, only compares against it in its own native frame.
 
 SNAP CAP: a nearest downbeat farther than ONE BEAT LENGTH
 (60000 / librosa's own tempo_bpm) from the cue's unsnapped time is NOT
@@ -56,7 +60,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal, Optional
 
-from spectra.services import analysis_reader, testbed_audio, testbed_cache
+from spectra.services import analysis_reader, testbed_cache
 
 GRID_LIBROSA: Literal["librosa"] = "librosa"
 GRID_BEAT_THIS: Literal["beat_this"] = "beat_this"
@@ -108,41 +112,45 @@ def beat_this_bpm_for_uri(uri: str) -> Optional[float]:
     return 60000.0 / interval
 
 
-def _librosa_downbeats_song_ms(uri: str) -> Optional[list[int]]:
+def _librosa_downbeats_ms(uri: str) -> Optional[list[int]]:
+    """Librosa's own downbeat times, RAW — the same coordinate frame as
+    analysis_reader.sections_for_uri's start_ms (see the module
+    docstring's ONE FRAME, NO SHIFT); no capture-offset shift here."""
     beats = analysis_reader.beats_for_uri(uri)
     if not beats:
         return None
-    offset = testbed_audio.capture_offset_ms_or_zero(uri)
-    out = sorted(int(b.get("ms", 0)) + offset for b in beats
-                if b.get("is_downbeat"))
+    out = sorted(int(b.get("ms", 0)) for b in beats if b.get("is_downbeat"))
     return out or None
 
 
-def _beat_this_downbeats_song_ms(uri: str) -> Optional[list[int]]:
+def _beat_this_downbeats_ms(uri: str) -> Optional[list[int]]:
+    """beat_this's own downbeat times, RAW — beat_this analyzes the same
+    captured WAV librosa does, so its marks share the same frame as a
+    section boundary too; no shift here either."""
     marks = _beat_this_cache(uri)
     if not marks:
         return None
-    offset = testbed_audio.capture_offset_ms_or_zero(uri)
-    out = sorted(int(round(float(m["time_ms"]))) + offset
+    out = sorted(int(round(float(m["time_ms"])))
                 for m in marks if m.get("kind") == "downbeat")
     return out or None
 
 
 def choose_grid(uri: str) -> Optional[tuple[str, list[int]]]:
-    """(grid_name, sorted downbeat times in SONG ms) for this song, or
-    None when neither engine has anything usable. beat_this wins only
-    when BOTH its precompute exists AND its tempo reads at roughly half
-    librosa's own — never a preference on its own; librosa is the
-    fallback whenever that condition doesn't hold or beat_this's own
-    downbeat list turns out empty."""
+    """(grid_name, sorted RAW downbeat times — the same frame as a
+    section boundary's own start_ms) for this song, or None when neither
+    engine has anything usable. beat_this wins only when BOTH its
+    precompute exists AND its tempo reads at roughly half librosa's own —
+    never a preference on its own; librosa is the fallback whenever that
+    condition doesn't hold or beat_this's own downbeat list turns out
+    empty."""
     librosa_bpm = analysis_reader.tempo_bpm_for_uri(uri)
     beat_this_bpm = beat_this_bpm_for_uri(uri)
     if (librosa_bpm and beat_this_bpm
             and (beat_this_bpm / librosa_bpm) < HALF_TIME_RATIO):
-        downbeats = _beat_this_downbeats_song_ms(uri)
+        downbeats = _beat_this_downbeats_ms(uri)
         if downbeats:
             return GRID_BEAT_THIS, downbeats
-    downbeats = _librosa_downbeats_song_ms(uri)
+    downbeats = _librosa_downbeats_ms(uri)
     if downbeats:
         return GRID_LIBROSA, downbeats
     return None
@@ -174,10 +182,10 @@ def resolve_song_grid(uri: str) -> Optional[SongGrid]:
     out so a caller snapping many cues for the SAME song (e.g.
     midsong_generator.candidate_moments's per-section loop) can resolve
     it ONCE and reuse it via snap_with_grid — choose_grid alone re-reads
-    and re-parses the song's librosa analysis, its beat_this cache and its
-    capture-offset sidecar on every call, all producing an identical
-    answer for one song. None when there's no usable grid or no
-    measurable tempo, matching snap()'s own unsnapped fallback."""
+    and re-parses the song's librosa analysis and its beat_this cache on
+    every call, all producing an identical answer for one song. None when
+    there's no usable grid or no measurable tempo, matching snap()'s own
+    unsnapped fallback."""
     choice = choose_grid(uri)
     if choice is None:
         return None

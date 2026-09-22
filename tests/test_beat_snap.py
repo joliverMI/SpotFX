@@ -1,7 +1,7 @@
 """spectra/services/beat_snap.py — Phase 2 of the music-analysis plan
 (the Admiral's 2026-09-22 decision): grid choice (librosa vs beat_this's
-half-time phrase grid), the shared WAV-time -> song-time offset, and the
-one-beat snap cap."""
+half-time phrase grid), that a song's capture offset never leaks into this
+module's own same-frame comparison, and the one-beat snap cap."""
 from __future__ import annotations
 
 import json
@@ -125,10 +125,15 @@ def test_beat_this_cache_present_but_no_downbeats_falls_back_to_librosa():
     assert grid[0] == "librosa"
 
 
-def test_capture_offset_shifts_both_grids_the_same_way():
-    """The scout report's Q2 fix (PR 286): a WAV-time grid is shifted by
-    the song's own capture_offset_ms before anything compares against it
-    — the same shared helper spectra/api/testbed.py::_estimate_for uses."""
+def test_a_capture_offset_sidecar_never_shifts_the_grid_or_the_snap():
+    """Section boundaries and downbeat times are both computed by the same
+    librosa pass over the same captured WAV, so they already share one
+    frame (the module docstring's ONE FRAME, NO SHIFT) — the WAV-time ->
+    song-time shift testbed_audio.capture_offset_ms_or_zero provides for
+    spectra/api/testbed.py::_estimate_for's CROSS-frame comparison must
+    never leak into this module's own same-frame one. Proven by comparing
+    the grid AND a real snap decision with and without a capture-offset
+    npz sidecar present: identical either way."""
     from spectra import config as scfg
     from spectra.services import beat_snap, testbed_audio
     import numpy as np
@@ -136,13 +141,22 @@ def test_capture_offset_shifts_both_grids_the_same_way():
     _seed_librosa(scfg, tempo_bpm=120.0, beats=[
         {"ms": 0, "is_downbeat": True}, {"ms": 1000, "is_downbeat": True},
     ])
-    npz_path = scfg.AUDIO_SHAPES_DIR / f"{STEM}.npz"
-    np.savez(npz_path, timestamps_ms=np.array([3000, 3100, 3200]),
-             rms_total=np.array([0.1, 0.2, 0.1]))
+    grid_no_offset = beat_snap.choose_grid(URI)
+    snap_no_offset = beat_snap.snap(URI, 950)
+    assert testbed_audio.capture_offset_ms_or_zero(URI) == 0
 
-    assert testbed_audio.capture_offset_ms_or_zero(URI) == 3000
-    grid = beat_snap.choose_grid(URI)
-    assert grid == ("librosa", [3000, 4000])
+    npz_path = scfg.AUDIO_SHAPES_DIR / f"{STEM}.npz"
+    np.savez(npz_path, timestamps_ms=np.array([3692, 3800, 3900]),
+             rms_total=np.array([0.1, 0.2, 0.1]))
+    assert testbed_audio.capture_offset_ms_or_zero(URI) == 3692
+
+    grid_with_offset = beat_snap.choose_grid(URI)
+    snap_with_offset = beat_snap.snap(URI, 950)
+
+    assert grid_no_offset == grid_with_offset == ("librosa", [0, 1000])
+    assert snap_no_offset == snap_with_offset
+    assert snap_with_offset.timestamp_ms == 1000
+    assert snap_with_offset.moved_ms == 50
 
 
 def test_snap_lands_on_the_nearest_downbeat_within_one_beat():
