@@ -1408,6 +1408,16 @@ export const HELP_SECTIONS: HelpSection[] = [
       'A read-only comparison surface: your real marks, the waveform (or a coarser fallback), and every candidate analysis engine\'s own detected marks, all on one shared timeline — with precision/recall/F1 computed the same way for every engine, so you can judge them by eye and by number instead of by argument. Nothing here fires anything in your real show except through the reviewed "push to real" button.',
     entries: [
       {
+        id: 'testbed-song-search',
+        title: 'Searching the song list',
+        keywords: 'search filter song list count pinned precomputed sort order phone',
+        body: [
+          'The box above the song list filters as you type, matching against both artist and title — case doesn\'t matter, and neither do accents (typing "apagon" finds "El Apagón"). The ✕ button clears it. The count line below the box ("N of M") always shows how many of your songs currently match.',
+          'With the box empty, songs you can actually compare right now — a pinned WAV, or at least one precomputed engine — are listed first, then everything else alphabetically by title. The same ordering applies to a filtered list. Your search is remembered only while the page stays open; it resets on reload.',
+          'For speed with 900+ songs, the list only ever renders the first 150 matches — narrow your search further if what you\'re after isn\'t showing.',
+        ],
+      },
+      {
         id: 'testbed-lanes-and-tolerance',
         title: 'Lanes, tinting, and the tolerance slider',
         keywords: 'lane waveform green yellow amber red matched unmatched extra over-segmentation offset',
