@@ -49,6 +49,11 @@ async def upsert_trigger(trigger: SpectraTrigger, uri: str = Query(...)):
     "authored" (generator_key cleared) regardless of what the caller sent —
     the ownership-transfer rule front 3 depends on: dragging or editing a
     generated trigger claims it, so a later regenerate leaves it alone.
+    snap_grid/snap_moved_ms (beat_snap.py's provenance of a GENERATED cue's
+    pre-edit position) are cleared the same way — a human edit moves the
+    trigger to wherever they placed it, which has nothing to do with that
+    stale snap, and both fields are documented as None for every
+    hand-placed trigger (spectra/models/trigger.py's own field comment).
 
     The store call runs off the event loop (asyncio.to_thread, the
     sync-from-profile precedent below). It is a full read+rewrite of a
@@ -57,7 +62,10 @@ async def upsert_trigger(trigger: SpectraTrigger, uri: str = Query(...)):
     generator, a test-bed promotion — may already be holding across its own
     read+write. Waiting for either on the loop stalls this process's bridge
     poll, the 200ms trigger tick and every WS broadcast behind one save."""
-    trigger = trigger.model_copy(update={"source": "authored", "generator_key": None})
+    trigger = trigger.model_copy(update={
+        "source": "authored", "generator_key": None,
+        "snap_grid": None, "snap_moved_ms": None,
+    })
     _validate_action(trigger)
     await asyncio.to_thread(trigger_store.upsert, uri, trigger)
     return {"status": "saved", "id": trigger.id}

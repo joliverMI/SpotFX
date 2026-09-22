@@ -1147,6 +1147,11 @@ export interface SpectraTrigger {
   generator_key: string | null;
   action: TriggerAction;
   trigger_offset_ms: number;
+  /** spectra/services/beat_snap.py provenance — which downbeat grid a
+   * GENERATED cue was snapped to, and how far (song ms, signed). Both
+   * null for every hand-placed trigger. */
+  snap_grid: 'librosa' | 'beat_this' | null;
+  snap_moved_ms: number | null;
 }
 
 export const newTrigger = (timestampMs: number): SpectraTrigger => ({
@@ -1157,6 +1162,8 @@ export const newTrigger = (timestampMs: number): SpectraTrigger => ({
   generator_key: null,
   action: { kind: 'fire_scene', scene_id: '', intensity: 0.5, color_set_id: null },
   trigger_offset_ms: 0,
+  snap_grid: null,
+  snap_moved_ms: null,
 });
 
 /** Feedback-session mark-then-nudge queue (Stage 2, GET /api/feedback/mark,
