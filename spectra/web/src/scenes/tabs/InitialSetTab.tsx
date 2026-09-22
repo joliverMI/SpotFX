@@ -19,6 +19,7 @@ import { uuid } from '../../lib/uid';
 import { useGradients } from '../../queries';
 import type { EffectParamMeta, Registry, SceneDeviceConfig, SceneV2 } from '../../types';
 import { emptyColor, emptyDevice, isBinding } from '../../types';
+import { selectableEffectOptions } from '../effectOptions';
 
 const HIDDEN_TYPES = new Set(['color', 'gradient', 'polar', 'move_xy', 'move_polar']);
 const ASPECT_ORDER = ['shape', 'reactivity', 'brightness', 'blur', 'color', 'bg_color', 'other'];
@@ -131,29 +132,6 @@ function EntryPanel({ dev, setDev, registry, onRemove }: {
     () => [...new Set(categories.flatMap((c) => registry?.categories[c]?.virtuals ?? []))],
     [registry, categories],
   );
-  const allEffects = Object.keys(registry?.effects ?? {});
-  // A category target fires its whole subtree, so its effect options are the
-  // subtree's union of curated lists.
-  const subtreeEffects = useMemo(() => {
-    if (dev.target_kind !== 'category') return [];
-    const cats = Object.values(registry?.categories ?? {});
-    const root = registry?.categories[dev.target];
-    if (!root) return [];
-    const ids = new Set([root.id]);
-    let grew = true;
-    while (grew) {
-      grew = false;
-      for (const c of cats) {
-        if (c.parent_id && ids.has(c.parent_id) && !ids.has(c.id)) {
-          ids.add(c.id);
-          grew = true;
-        }
-      }
-    }
-    return [...new Set(cats.filter((c) => ids.has(c.id)).flatMap((c) => c.effects))];
-  }, [registry, dev.target_kind, dev.target]);
-  const effectOptions =
-    dev.target_kind === 'category' && subtreeEffects.length ? subtreeEffects : allEffects;
 
   const params = registry?.effects[effEffect]?.params ?? {};
   const visible = Object.entries(params).filter(([, m]) => !HIDDEN_TYPES.has(m.type ?? ''));
@@ -210,7 +188,11 @@ function EntryPanel({ dev, setDev, registry, onRemove }: {
             else set({ effect_type: e.target.value, params: {}, drift: {} });
           }}>
           <option value="">— effect —</option>
-          {effectOptions.map((t) => <option key={t} value={t}>{t}</option>)}
+          {/* Keep a stored/stepped effect visible even when the options
+            * list doesn't name it — never blank it and never silently
+            * drop the scene's value (selectableEffectOptions's own job). */}
+          {selectableEffectOptions(registry, dev.target_kind, dev.target, effEffect)
+            .map((t) => <option key={t} value={t}>{t}</option>)}
         </select>
         {effEffect === 'fish' && <HelpLink topic="fish-effect" />}
         {effEffect === 'fish' && <HelpLink topic="fish-camera-window" />}

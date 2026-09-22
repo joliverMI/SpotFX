@@ -130,6 +130,73 @@ def get_effects_for_category(category: str) -> list[str]:
     return out
 
 
+# The one category whose subtree is Matrix-shaped (a real rows x cols
+# panel, e.g. crystal-mapper) — every other category (Strips/Singles/Hue
+# style) is a plain pixel strip. Mirrors the binary fx.effects.twod.Twod
+# itself splits effect classes on (see effect_dimension() below), so the
+# two compose into "does the engine even support this effect here".
+_MATRIX_DIMENSION_ROOT = "Matrix"
+
+
+def category_dimension(category: str) -> str:
+    """'2d' for the Matrix category and its descendants, '1d' for every
+    other category — walks parent_id up from `category`. An unknown name
+    or a cycle defaults to '1d' (the common case) rather than raising."""
+    cat = get_category_by_name(category)
+    if cat is None:
+        return "1d"
+    by_id = {c["id"]: c for c in list_categories()}
+    seen: set[str] = set()
+    while cat is not None:
+        if cat.get("name") == _MATRIX_DIMENSION_ROOT:
+            return "2d"
+        cid = cat.get("id")
+        if cid is None or cid in seen:
+            break
+        seen.add(cid)
+        pid = cat.get("parent_id")
+        cat = by_id.get(pid) if pid else None
+    return "1d"
+
+
+def category_effect_options(category: str) -> list[str]:
+    """This ONE category's own curated effects, plus every registered
+    effect (config/effect_params.json) whose own device dimension
+    (effect_dimension()) matches this category's (category_dimension())
+    and that the curated list doesn't already name.
+
+    The curated per-category `effects` array in storage/device_categories.
+    json is a hand-maintained shortlist and has drifted behind the
+    registry more than once — found 2026-09-22 (a-scene-cant-select-an-
+    effect-its-own-category-doesn't-curate): `eye`, `fireworks1d` and
+    `fish` were all registered, working effects that NO category curated
+    at all, so a category-target scene entry (the Initial Set tab's
+    effect dropdown, sourced from this) could never even OFFER them —
+    the Admiral's own Fireworks-strips-into-Fish copy hit this on
+    `fireworks1d`/Strips; `eye`/Matrix (Eye V2's own stored entry) has
+    the identical gap. Curated names are listed first, in their curated
+    order, so this never reorders what was already correct.
+
+    Deliberately per-category, not subtree-unioned like
+    get_effects_for_category() — callers that need the subtree union
+    (spectra/web/src/scenes/effectOptions.ts's subtreeEffects) already
+    walk the subtree themselves and union each category's own list; doing
+    it twice here would just add redundant work with no different
+    result."""
+    cat = get_category_by_name(category)
+    curated = list(cat.get("effects", [])) if cat else []
+    seen = set(curated)
+    out = list(curated)
+    want_dim = category_dimension(category)
+    for etype in effect_types():
+        if etype in seen:
+            continue
+        if effect_dimension(etype) == want_dim:
+            seen.add(etype)
+            out.append(etype)
+    return out
+
+
 def get_all_virtual_ids() -> list[str]:
     return [v for cat in list_categories() for v in cat.get("virtuals", [])]
 
@@ -238,6 +305,19 @@ def _effect_class(effect_type: str):
         if cls.__module__ == mod.__name__ and hasattr(cls, "CONFIG_SCHEMA"):
             return cls
     return None
+
+
+def effect_dimension(effect_type: str) -> Optional[str]:
+    """'2d' when the vendored class subclasses fx.effects.twod.Twod (it
+    renders into a real rows x cols matrix, a Matrix-shaped panel), '1d'
+    otherwise (a plain pixel-strip effect); None if the effect's module/
+    class can't be resolved. The same binary category_dimension() names
+    against the device category tree — see category_effect_options()'s
+    own docstring for why the two are meant to compose."""
+    cls = _effect_class(effect_type)
+    if cls is None:
+        return None
+    return "2d" if any(c.__name__ == "Twod" for c in cls.__mro__) else "1d"
 
 
 def schema_default(effect_type: str, param_name: str) -> Any:
