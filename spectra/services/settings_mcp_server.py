@@ -102,6 +102,7 @@ _KeyEnum = Literal[tuple(sorted(settings_console.SETTINGS_REGISTRY))]
 _SceneKeyEnum = Literal[tuple(sorted(scene_console.SCENE_SETTINGS_REGISTRY))]
 _FlareTypeEnum = Literal["drift_jump", "momentary", "permanent"]
 _JumpEnum = Literal["color_set", "dice"]
+_CopyFieldEnum = Literal[tuple(scene_console.COPYABLE_DEVICE_ENTRY_FIELDS)]
 _DeviceTypeEnum = Literal[tuple(device_schema.device_types())]
 _RoomEffectKeyEnum = Literal[tuple(list(room_effect_console.KNOBS)
                                    + ["name", "carrier_ids"])]
@@ -245,6 +246,20 @@ async def overwrite_scene(scene_id: str, name: Optional[str] = None,
     before anything is written; refuses if the backup can't be confirmed."""
     return await _call("overwrite_scene", scene_id=scene_id, name=name, labels=labels,
                        settings=settings, flare_kinds=flare_kinds)
+
+
+@mcp.tool()
+async def copy_scene_device_entry(source: str, destination: str, target: str,
+                                  fields: Optional[list[_CopyFieldEnum]] = None,
+                                  dry_run: bool = True) -> dict:
+    """Copy one device entry (a category's or virtual's initial effect/
+    params/color/brightness/drift) from one scene to another. source/
+    destination are a scene id or name; target is the category or virtual
+    name shown on the Initial Set tab. dry_run defaults true -- it returns
+    a before/after diff and saves nothing; call again with dry_run=false
+    only once he confirms."""
+    return await _call("copy_scene_device_entry", source=source, destination=destination,
+                       target=target, fields=fields, dry_run=dry_run)
 
 
 @mcp.tool()

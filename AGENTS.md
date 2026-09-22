@@ -2685,6 +2685,29 @@ diffs wholesale on any edit (`_diff_scenes`'s documented whole-field
 behaviour), so a naive stringify is a real, previously-shipped path for
 dumping a JSON blob into his chat; summarize (count/names) instead.
 
+**Sonic can copy one device entry between scenes** (`copy_scene_device_
+entry`, 2026-09-22, his ask: "copy the strips initial set from Fireworks
+V2 to Fish"). The first crack in "device/effect editing is not in scope
+for Sonic" — deliberately narrow: it copies exactly ONE `SceneDeviceConfig`
+entry's effect_type/params/effect_steps/color/brightness/
+background_brightness/drift (never `devices` wholesale, never a second
+entry) from a source scene to a destination scene's entry for the SAME
+target (a category name or virtual name, matched case-insensitively —
+`scene_console._find_target_entries`), preserving the DESTINATION entry's
+own `id` (or minting a fresh one via the model's own default_factory if it
+had none for that target) so nothing that references the entry breaks.
+`dry_run` defaults `True` and returns a per-field before/after diff with
+nothing saved — Sonic's own instructions require showing him that diff and
+getting his confirmation before ever calling it with `dry_run=False`. The
+actual save goes through `scene_store.validate_for_save()` — the two
+integrity guards (`accepted_set_ids`/dangling drift-profile refs) factored
+OUT of `spectra/api/scenes.py::upsert_scene` into that one function
+specifically so this write path and the human HTTP upsert can never
+silently diverge on what a legal scene save requires. The editor itself
+(a "copy from scene..." control on the Initial Set tab) was NOT built —
+judged more than the small addition the ask called for; the Sonic path is
+what he asked for. Spec: `tests/test_scene_console.py` §12.
+
 **Subscription (CLI) backend — built, default OFF, not yet authorised
 against his real account** (`data/spectra-console-subscription-backend/`:
 scout report + the captain's ruling that provisioning an `ANTHROPIC_API_KEY`

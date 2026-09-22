@@ -88,10 +88,14 @@ works by loading everything"): list_scenes_index() returns only
 id/name/labels; get_scene_settings()/list_flare_kinds() return only the
 enumerated scalar settings / flare-kind summaries for ONE named scene;
 get_flare_kind() returns full detail for exactly one named kind. Nothing
-here ever returns a scene's full `devices` list — device/effect editing is
-NOT in this registry (out of scope for tonight's ask; a future, deliberate
-extension, not a silent omission — the exact "manage flares, settings
-within scenes, and create scenes" surface he asked for is what's built).
+here ever returns a scene's full `devices` list — general device/effect
+editing is still NOT in this registry (out of scope for tonight's ask; a
+future, deliberate extension, not a silent omission — the exact "manage
+flares, settings within scenes, and create scenes" surface he asked for is
+what's built). copy_scene_device_entry (below) is the one narrow exception:
+it copies exactly one existing device entry's fields between two scenes —
+never a general read or edit of `devices` — see its own comment block for
+why that's a different, safer shape.
 
 SCENE_SETTINGS_REGISTRY mirrors settings_console.SETTINGS_REGISTRY's own
 discipline: bounds are READ off the real pydantic Field(ge=, le=)
@@ -127,7 +131,7 @@ from pydantic import BaseModel, ValidationError
 from fx import device_model
 from spectra import config
 from spectra.models.scene import (FlareKind, PhaseChoreography,
-                                  SceneColorJourney, SceneV2)
+                                  SceneColorJourney, SceneDeviceConfig, SceneV2)
 from spectra.services import scene_store
 from spectra.services.sonic_ops import SonicOperation
 
@@ -800,6 +804,199 @@ async def apply_overwrite_scene(scene_id: str, name: Optional[str] = None,
     return {"status": "applied", **entry}
 
 
+# ═══ copy_scene_device_entry — copy ONE device entry (a category's or
+# virtual's initial effect/params/color/brightness/drift) from one scene to
+# another, keeping the destination entry's own id (his own ask, 2026-09-22:
+# "I want Sonic to be able to copy the strips initial set from Fireworks V2
+# to Fish, so that the strips do the fireworks effect 1d instead of orbits
+# 1d ... make it possible for Sonic to copy things like this."). Two rules
+# make this safe: the id is NEVER copied (an existing destination entry
+# keeps the id everything else still references; a brand-new one gets a
+# fresh id from the model itself, same guarantee create_scene relies on),
+# and no other entry on either scene is ever touched — this is a targeted
+# field-level copy onto exactly one entry, not overwrite_scene's wholesale
+# replace. `dry_run` defaults True: the model must show him the diff and
+# get his confirmation before ever calling this with dry_run=False (see
+# the operation's own `instructions` below) — a dry run computes and
+# returns the same candidate scene this would save, but never calls
+# scene_store.save() or takes a backup. The actual save goes through the
+# SAME two integrity guards the HTTP upsert route enforces
+# (scene_store.validate_for_save) — a device entry can carry drift refs by
+# named profile, so a copy that names a profile the destination's room
+# doesn't have must be refused exactly as a human's editor save would be. ═
+
+COPYABLE_DEVICE_ENTRY_FIELDS = [
+    "effect_type", "params", "effect_steps", "color", "brightness",
+    "background_brightness", "drift",
+]
+
+
+def _resolve_scene_ref(ref: str) -> SceneV2:
+    """id first (exact), then name (case-insensitive) — refuses, naming
+    every match, on zero or more than one hit. Lets Sonic (and him) say
+    'Fireworks V2' rather than needing an id for either side of a copy."""
+    scene = scene_store.get_by_id(ref)
+    if scene is not None:
+        return scene
+    norm = ref.strip().lower()
+    matches = [s for s in scene_store.list_all() if s.name.strip().lower() == norm]
+    if not matches:
+        raise SceneOpError(f"no scene found matching {ref!r} — call list_scenes to see what's there")
+    if len(matches) > 1:
+        raise SceneOpError(
+            f"{ref!r} matches more than one scene: "
+            f"{', '.join(f'{m.name!r} ({m.id})' for m in matches)} — use the scene id instead",
+            matches=[{"id": m.id, "name": m.name} for m in matches])
+    return matches[0]
+
+
+def _find_target_entries(scene: SceneV2, target: str) -> list[SceneDeviceConfig]:
+    """Entries on `scene` whose own `target` string matches (case-
+    insensitive) — a category name (Strips/Matrix/Singles/...) or a
+    virtual's own name, exactly the two kinds the Initial Set tab's target
+    picker offers. 'All Devices' entries (target_kind='all', target='')
+    are deliberately excluded — a bare target string can never mean 'all',
+    and this operation's whole point is copying ONE named entry."""
+    norm = target.strip().lower()
+    return [d for d in scene.devices
+            if d.target_kind in ("category", "virtual") and d.target.strip().lower() == norm]
+
+
+def _build_copied_entry(existing: Optional[SceneDeviceConfig], src_entry: SceneDeviceConfig,
+                        fields: list[str], target_kind: str, target: str) -> SceneDeviceConfig:
+    """The destination entry after the copy: `existing`'s own id/target_kind/
+    target are kept when it exists (so nothing that references this entry's
+    id breaks); when it doesn't, a fresh entry is built at the SOURCE
+    entry's target_kind/target (the id the model itself assigns via
+    default_factory — never src_entry's id, never hand-picked here). Only
+    the requested `fields` move; every other field keeps whatever the
+    destination entry already had (or the model's own defaults on a new
+    entry) — a narrower `fields` list must not also reset unrelated ones."""
+    base = (existing.model_dump(mode="json") if existing is not None
+           else SceneDeviceConfig(target_kind=target_kind, target=target).model_dump(mode="json"))
+    src_dump = src_entry.model_dump(mode="json")
+    for field in fields:
+        base[field] = src_dump[field]
+    if existing is not None:
+        base["id"] = existing.id
+    try:
+        return SceneDeviceConfig.model_validate(base)
+    except ValidationError as exc:
+        raise SceneOpError(
+            f"copying {', '.join(fields)} onto the {target!r} device entry would make it "
+            f"invalid: {_errs(exc)}", pydantic_errors=_errs(exc)) from exc
+
+
+def _entry_field_diff(existing: Optional[SceneDeviceConfig], new_entry: SceneDeviceConfig,
+                      fields: list[str]) -> dict[str, dict]:
+    """Per-copied-field before/after — deliberately finer-grained than
+    _diff_scenes (which would only ever show 'devices changed' wholesale,
+    since `devices` is one top-level SceneV2 field): the whole point of a
+    dry run is a diff Sonic can relay verbatim and he can actually judge
+    field by field."""
+    existing_dump = existing.model_dump(mode="json") if existing is not None else None
+    new_dump = new_entry.model_dump(mode="json")
+    return {field: {"before": existing_dump[field] if existing_dump is not None else None,
+                    "after": new_dump[field]} for field in fields}
+
+
+def _validate_copy_scene_device_entry(source: str, destination: str, target: str,
+                                      fields: Optional[list[str]] = None) -> dict:
+    """Pure — never writes. Resolves both scenes, finds the one matching
+    device entry on each, builds the would-be destination scene, and
+    validates it exactly as a real save would (SceneV2 + scene_store.
+    validate_for_save) — so a dry run can never claim success on a copy
+    that would actually be refused at save time."""
+    src_scene = _resolve_scene_ref(source)
+    dst_scene = _resolve_scene_ref(destination)
+    if src_scene.id == dst_scene.id:
+        raise SceneOpError(
+            f"source and destination are the same scene ({src_scene.name!r}) — nothing to copy")
+
+    copy_fields = list(COPYABLE_DEVICE_ENTRY_FIELDS) if fields is None else list(fields)
+    unknown = sorted(f for f in copy_fields if f not in COPYABLE_DEVICE_ENTRY_FIELDS)
+    if unknown:
+        raise SceneOpError(f"not a copyable device-entry field: {unknown}",
+                           allowed_fields=COPYABLE_DEVICE_ENTRY_FIELDS)
+
+    src_matches = _find_target_entries(src_scene, target)
+    if not src_matches:
+        raise SceneOpError(
+            f"scene {src_scene.name!r} has no device entry for {target!r}",
+            known_targets=sorted({d.target for d in src_scene.devices if d.target}))
+    if len(src_matches) > 1:
+        raise SceneOpError(
+            f"{target!r} matches more than one device entry on {src_scene.name!r}",
+            matches=[{"target_kind": d.target_kind, "target": d.target} for d in src_matches])
+    src_entry = src_matches[0]
+
+    dst_matches = _find_target_entries(dst_scene, src_entry.target)
+    if len(dst_matches) > 1:
+        raise SceneOpError(
+            f"{target!r} matches more than one device entry on {dst_scene.name!r}",
+            matches=[{"target_kind": d.target_kind, "target": d.target} for d in dst_matches])
+    dst_entry = dst_matches[0] if dst_matches else None
+
+    new_entry = _build_copied_entry(dst_entry, src_entry, copy_fields,
+                                    src_entry.target_kind, src_entry.target)
+    candidate = dst_scene.model_copy(deep=True)
+    if dst_entry is not None:
+        idx = next(i for i, d in enumerate(candidate.devices) if d.id == dst_entry.id)
+        candidate.devices[idx] = new_entry
+    else:
+        candidate.devices.append(new_entry)
+
+    try:
+        candidate = SceneV2.model_validate(candidate.model_dump(mode="json"))
+    except ValidationError as exc:
+        raise SceneOpError(
+            f"copying {target!r} from {src_scene.name!r} to {dst_scene.name!r} would make "
+            f"{dst_scene.name!r} invalid: {_errs(exc)}", pydantic_errors=_errs(exc)) from exc
+    try:
+        scene_store.validate_for_save(candidate)
+    except ValueError as exc:
+        raise SceneOpError(str(exc)) from exc
+
+    return {
+        "src_scene": src_scene, "dst_scene": dst_scene, "candidate": candidate,
+        "existing_entry": dst_entry, "fields": copy_fields,
+        "entry_diff": _entry_field_diff(dst_entry, new_entry, copy_fields),
+    }
+
+
+async def apply_copy_scene_device_entry(source: str, destination: str, target: str,
+                                        fields: Optional[list[str]] = None,
+                                        dry_run: bool = True) -> dict:
+    plan = _validate_copy_scene_device_entry(source, destination, target, fields)
+    src_scene, dst_scene, candidate = plan["src_scene"], plan["dst_scene"], plan["candidate"]
+    copy_fields, entry_diff = plan["fields"], plan["entry_diff"]
+    created = plan["existing_entry"] is None
+    what = (f'the "{target}" device entry from "{src_scene.name}" to "{dst_scene.name}" '
+           f'({", ".join(copy_fields)})' + (" — creates a new entry" if created else ""))
+
+    base = {
+        "source_scene": {"id": src_scene.id, "name": src_scene.name},
+        "destination_scene": {"id": dst_scene.id, "name": dst_scene.name},
+        "target": target, "fields_copied": copy_fields,
+        "creates_new_entry": created, "preview": entry_diff,
+    }
+    if dry_run:
+        base["status"] = "previewed"
+        base["summary"] = f"DRY RUN — would copy {what}. Nothing has been saved yet."
+        return base
+
+    backup = _write_and_verify_backup(dst_scene.id, dst_scene, op="copy_scene_device_entry")
+    scene_store.save(candidate)
+    entry = {"id": str(uuid.uuid4()), "ts_ms": int(time.time() * 1000),
+             "op": "copy_scene_device_entry", "scene_id": dst_scene.id,
+             "scene_name": candidate.name, "summary": f"Copied {what}.",
+             "backup_id": backup["id"], "preview": entry_diff, "source": "agent"}
+    _append_log(entry)
+    base["status"] = "applied"
+    base.update(entry)
+    return base
+
+
 # ═══ restore_scene_backup — pick-a-point restore; itself an edit, itself
 # backed up (this is what makes "undo of an undo" work — see docstring) ═══
 
@@ -945,6 +1142,16 @@ async def _op_overwrite_scene(scene_id: str, name: Optional[str] = None,
     try:
         return await apply_overwrite_scene(
             scene_id, name=name, labels=labels, settings=settings, flare_kinds=flare_kinds)
+    except SceneOpError as exc:
+        return exc.payload()
+
+
+async def _op_copy_scene_device_entry(source: str, destination: str, target: str,
+                                      fields: Optional[list[str]] = None,
+                                      dry_run: bool = True) -> dict:
+    try:
+        return await apply_copy_scene_device_entry(
+            source, destination, target, fields=fields, dry_run=dry_run)
     except SceneOpError as exc:
         return exc.payload()
 
@@ -1203,6 +1410,46 @@ OPERATIONS: dict[str, SonicOperation] = {
             },
             "required": ["scene_id"], "additionalProperties": False},
         handler=_op_overwrite_scene),
+    "copy_scene_device_entry": SonicOperation(
+        name="copy_scene_device_entry", domain="scene", kind="write",
+        summary="Copy one device entry — a category's or virtual's "
+                "initial effect/params/color/brightness/drift — from one "
+                "scene to another. E.g. 'copy the Strips entry from "
+                "Fireworks V2 to Fish.'",
+        instructions=(
+            "source/destination are a scene id OR NAME (case-insensitive; "
+            "a name matching more than one scene is refused and lists "
+            "every match — use list_scenes to disambiguate, or pass the "
+            "id). target is the category name (Strips/Matrix/Singles/...) "
+            "or virtual name shown on that entry in the Scenes page's "
+            "Initial Set tab, matched case-insensitively — refused if it "
+            "matches more than one entry on either scene, or none on the "
+            "source. Copies effect_type, params, effect_steps, color, "
+            "brightness, background_brightness and drift by default — "
+            "pass `fields` to copy only a subset. The destination entry's "
+            "own id is always kept (or a fresh entry is created, at the "
+            "source entry's own target, if the destination has none for "
+            "that target) so nothing that references the entry breaks; "
+            "no OTHER entry on either scene is ever touched. Refused "
+            "(nothing changes) when source and destination are the same "
+            "scene. ALWAYS call with dry_run=true first (the default) — "
+            "it computes and returns the exact before/after diff of the "
+            "copied fields without saving anything. Show him that diff "
+            "verbatim and only call again with dry_run=false once he "
+            "confirms — never skip straight to dry_run=false."),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "source": {"type": "string"},
+                "destination": {"type": "string"},
+                "target": {"type": "string"},
+                "fields": {"type": "array", "items": {
+                    "type": "string", "enum": COPYABLE_DEVICE_ENTRY_FIELDS}},
+                "dry_run": {"type": "boolean", "default": True},
+            },
+            "required": ["source", "destination", "target"],
+            "additionalProperties": False},
+        handler=_op_copy_scene_device_entry),
     "list_scene_backups": SonicOperation(
         name="list_scene_backups", domain="scene", kind="read",
         summary="List one scene's available restore points: the last 10 "

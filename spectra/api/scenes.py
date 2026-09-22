@@ -20,8 +20,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from spectra.models.scene import SceneV2
-from spectra.services import (color_sets, color_wheel, drift_profiles,
-                              scene_compiler, scene_store)
+from spectra.services import color_sets, color_wheel, scene_compiler, scene_store
 
 logger = logging.getLogger(__name__)
 
@@ -54,22 +53,13 @@ async def get_scene(scene_id: str):
 
 @router.post("")
 async def upsert_scene(scene: SceneV2):
-    # Per-set-only filter: group cards never enter a scene's set filter.
-    group_ids = scene_store.group_ids_in_filter(scene)
-    if group_ids:
-        names = {c.id: c.name for c in color_sets.list_all()}
-        offenders = ", ".join(f"'{names.get(i, i)}' ({i})" for i in group_ids)
-        raise HTTPException(422, (
-            f"accepted_set_ids may only reference kind='set' Colour Sets; "
-            f"{offenders} is a group — list its member sets instead"))
-    # Named drift refs must exist — a dangling profile would silently drift
-    # nothing; the store only guards hand-edited files.
-    known = set(drift_profiles.load_all())
-    dangling = sorted({ref.profile for dev in scene.devices
-                       for ref in dev.drift.values()
-                       if ref.profile is not None and ref.profile not in known})
-    if dangling:
-        raise HTTPException(422, f"unknown drift profile id(s): {', '.join(dangling)}")
+    # Per-set-only filter + named drift refs must exist — the two guards
+    # every write path shares (scene_store.validate_for_save's own
+    # docstring); a dangling drift profile would silently drift nothing.
+    try:
+        scene_store.validate_for_save(scene)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
     scene_store.save(scene)
     return {"status": "saved", "id": scene.id}
 

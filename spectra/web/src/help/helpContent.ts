@@ -1488,12 +1488,13 @@ export const HELP_SECTIONS: HelpSection[] = [
       },
       {
         id: 'sonic-scenes',
-        title: 'Sonic on the Scenes page: flares, scene settings, new scenes, and overwrite',
-        keywords: 'sonic scenes page flare kind flares chat popup pop-up create scene entry ramp phase blend choreography colour journey pace overwrite edit',
+        title: 'Sonic on the Scenes page: flares, scene settings, new scenes, overwrite, and copying a device entry',
+        keywords: 'sonic scenes page flare kind flares chat popup pop-up create scene entry ramp phase blend choreography colour journey pace overwrite edit copy device entry initial set strips matrix singles',
         body: [
           'The Scenes page has its own floating 💬 button (bottom-right) that opens the same Sonic chat, scoped to a second domain: flares and scenes. It can create a new, empty scene by name (always a brand-new scene — it can never overwrite one of your existing scenes just by creating, even given the exact same name); change a scene\'s own scalar settings (entry blend time, charge/lull phase ramps, phase-choreography timing, colour-journey pace, whether it accepts every colour set); create, update, or remove a scene\'s NAMED flare kinds (the drift-jump / momentary / permanent building blocks a scene\'s charge/lull/flare/drop bands select and scale); and — the newer, more powerful one — wholesale OVERWRITE an existing scene\'s name/labels/settings/flare kinds in one shot.',
           'Say which scene you mean by name — Sonic looks it up rather than needing an id. Every change is re-validated server-side exactly like the settings-only chat: an illegal value, an unknown flare-kind field, or removing a flare kind still referenced by a band is rejected with the legal range or the reason, never silently guessed at.',
-          "Device/effect editing (the Initial Set tab) isn't in scope for Sonic — that stays a deliberately visual, drag-and-tune editor, even for overwrite.",
+          'One targeted exception to "device/effect editing isn\'t in scope": ask it to copy a whole device entry — a category\'s or virtual\'s effect, params, colour, brightness and drift — from one scene to another, e.g. "copy the Strips entry from Fireworks V2 to Fish, so Fish\'s strips run Fireworks 1D instead of Orbits 1D." Sonic always shows you a before/after diff first and copies nothing until you say to go ahead; the destination entry keeps its own id (or a new one is created if it had none for that target), and no other entry on either scene is touched.',
+          "Beyond that one copy operation, device/effect editing (the Initial Set tab) isn't in scope for Sonic — that stays a deliberately visual, drag-and-tune editor, even for overwrite.",
         ],
       },
       {

@@ -5,6 +5,7 @@
   "cwd": "/tmp/spectra-settings-agent-cli-overwrite-widening/neutral_cwd",
   "session_id": "synthetic-restore-hallucinated-0001",
   "tools": [
+   "mcp__settings-console__copy_scene_device_entry",
    "mcp__settings-console__create_device",
    "mcp__settings-console__create_room_effect",
    "mcp__settings-console__create_scene",
