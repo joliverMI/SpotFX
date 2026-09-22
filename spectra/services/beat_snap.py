@@ -159,23 +159,56 @@ class SnapResult:
     moved_ms: Optional[int] = None
 
 
+@dataclass(frozen=True)
+class SongGrid:
+    """A song's chosen downbeat grid plus the beat length used for the
+    snap cap — everything snap_with_grid needs, resolved once per song
+    rather than once per cue (see resolve_song_grid)."""
+    grid_name: str
+    downbeats: list[int]
+    beat_length_ms: float
+
+
+def resolve_song_grid(uri: str) -> Optional[SongGrid]:
+    """The per-song grid resolution snap() does on every call, factored
+    out so a caller snapping many cues for the SAME song (e.g.
+    midsong_generator.candidate_moments's per-section loop) can resolve
+    it ONCE and reuse it via snap_with_grid — choose_grid alone re-reads
+    and re-parses the song's librosa analysis, its beat_this cache and its
+    capture-offset sidecar on every call, all producing an identical
+    answer for one song. None when there's no usable grid or no
+    measurable tempo, matching snap()'s own unsnapped fallback."""
+    choice = choose_grid(uri)
+    if choice is None:
+        return None
+    grid_name, downbeats = choice
+    librosa_bpm = analysis_reader.tempo_bpm_for_uri(uri)
+    if not librosa_bpm or librosa_bpm <= 0:
+        return None
+    return SongGrid(grid_name, downbeats, 60000.0 / librosa_bpm)
+
+
+def snap_with_grid(section_ms: int, grid: Optional[SongGrid]) -> SnapResult:
+    """Snap one moment (song ms) against an already-resolved SongGrid —
+    the pure, I/O-free half of snap(), capped at one beat length exactly
+    as that module docstring's SNAP CAP describes. `grid=None` (no usable
+    grid for this song) always returns the moment unsnapped."""
+    if grid is None:
+        return SnapResult(section_ms)
+    nearest = _nearest(grid.downbeats, section_ms)
+    moved = nearest - section_ms
+    if abs(moved) > grid.beat_length_ms:
+        return SnapResult(section_ms)
+    return SnapResult(nearest, grid.grid_name, moved)
+
+
 def snap(uri: str, section_ms: int) -> SnapResult:
     """Snap one generated cue's section-boundary time (song ms) to the
     nearest downbeat of this song's chosen grid, capped at one beat
     length. Never raises: a song with no usable grid, no measurable
     tempo, or a nearest downbeat farther than a beat away returns the
     section's own time UNSNAPPED (grid=None, moved_ms=None) — the module
-    docstring's SNAP CAP."""
-    choice = choose_grid(uri)
-    if choice is None:
-        return SnapResult(section_ms)
-    grid_name, downbeats = choice
-    librosa_bpm = analysis_reader.tempo_bpm_for_uri(uri)
-    if not librosa_bpm or librosa_bpm <= 0:
-        return SnapResult(section_ms)
-    beat_length_ms = 60000.0 / librosa_bpm
-    nearest = _nearest(downbeats, section_ms)
-    moved = nearest - section_ms
-    if abs(moved) > beat_length_ms:
-        return SnapResult(section_ms)
-    return SnapResult(nearest, grid_name, moved)
+    docstring's SNAP CAP. Resolves the grid fresh on every call; a caller
+    snapping several moments for one song should use resolve_song_grid +
+    snap_with_grid instead to resolve it once."""
+    return snap_with_grid(section_ms, resolve_song_grid(uri))

@@ -164,6 +164,10 @@ def candidate_moments(uri: str, *, snap_enabled: Optional[bool] = None) -> list[
         snap_enabled = room_controls.load_room_controls().midsong_snap_to_beat
     ordered = sorted(sections, key=lambda s: int(s.get("start_ms", 0)))
     intensities = _normalized_intensities(ordered)
+    # Resolved once per song (not once per section) — beat_snap.snap
+    # would otherwise re-read/re-parse the song's librosa analysis, its
+    # beat_this cache and its capture-offset sidecar for every section.
+    song_grid = beat_snap.resolve_song_grid(uri) if snap_enabled else None
     out: list[CandidateMoment] = []
     for sec, intensity in zip(ordered, intensities):
         raw_ms = int(sec.get("start_ms", 0))
@@ -171,7 +175,7 @@ def candidate_moments(uri: str, *, snap_enabled: Optional[bool] = None) -> list[
             continue  # the song's own start, not a mid-song moment
         ms, grid, moved = raw_ms, None, None
         if snap_enabled:
-            result = beat_snap.snap(uri, raw_ms)
+            result = beat_snap.snap_with_grid(raw_ms, song_grid)
             ms, grid, moved = result.timestamp_ms, result.grid, result.moved_ms
         # generator_key is keyed on the section's own RAW start_ms — the
         # analysis moment, unaffected by snapping — so toggling the
