@@ -580,3 +580,78 @@ def test_waveform_route_says_unknown_rather_than_claiming_zero():
     resp = _client().get(f"/api/testbed/waveform?uri={URI}").json()
     assert resp["source"] == "wav_peaks"
     assert resp["capture_offset_ms"] is None
+
+
+def _seed_beat_this_cache(uri, marks):
+    from spectra.services import testbed_cache, testbed_engines
+    testbed_cache.save(testbed_engines.ENGINE_BEAT_THIS, uri,
+                       "beat_this-checkpoint=final0-dbn=false", marks)
+
+
+def test_engine_marks_and_compare_shift_by_the_captures_offset():
+    """data/music-analysis-octave-scout/report.md, 'Work that should ship'
+    #1: every engine stores marks in WAV time; his reference marks are song
+    time. A capture starting 3988ms into the song (Soy Peor's own measured
+    offset) must shift every engine mark forward by that much before it is
+    scored or drawn — both the librosa live derivation and beat_this's
+    offline cache."""
+    from spectra import config as scfg
+    _seed_librosa(scfg)  # a downbeat at WAV-time 10050ms; also writes the
+                        # capture sidecar _seed_pinned_wav_with_offset below
+                        # rewrites with the same content
+    _seed_beat_this_cache(URI, [
+        {"time_ms": 500.0, "kind": "downbeat", "label": None, "score": None},
+    ])
+    _seed_pinned_wav_with_offset(scfg, 3988)  # pins a WAV + npz sidecar
+                        # whose first sample is song-time 3988ms
+
+    client = _client()
+
+    librosa_marks = client.get(
+        f"/api/testbed/engine-marks?uri={URI}&engine=librosa&mark_kind=downbeat",
+    ).json()
+    assert librosa_marks["estimate"][0]["time_ms"] == 10050.0 + 3988
+
+    beatthis_marks = client.get(
+        f"/api/testbed/engine-marks?uri={URI}&engine=beat_this&mark_kind=downbeat",
+    ).json()
+    assert beatthis_marks["estimate"][0]["time_ms"] == 500.0 + 3988
+
+    _write_trigger(URI, 500 + 3988, "fire_scene")  # his mark, in song time
+    compare = client.get(
+        f"/api/testbed/compare?uri={URI}&engine=beat_this&mark_kind=downbeat"
+        "&reference=transitions&tolerance_ms=50",
+    ).json()
+    assert compare["metrics"]["n_matched"] == 1
+    assert compare["metrics"]["mean_abs_offset_ms"] == 0.0
+
+
+def test_engine_marks_unshifted_when_capture_offset_is_unknown():
+    """No pinned WAV / no npz sidecar = no known offset — marks stay
+    exactly as the engine reported them, the pre-fix behaviour, rather than
+    guessing a shift."""
+    from spectra import config as scfg
+    _seed_librosa(scfg)
+
+    resp = _client().get(
+        f"/api/testbed/engine-marks?uri={URI}&engine=librosa&mark_kind=downbeat",
+    ).json()
+    assert resp["estimate"][0]["time_ms"] == 10050.0
+
+
+def test_marks_route_carries_the_songs_tempo():
+    from spectra import config as scfg
+    _seed_librosa(scfg)
+    stem = "Artist - Song"
+    doc = json.loads((scfg.AUDIO_SHAPES_DIR / f"{stem}.librosa.json").read_text())
+    doc["tempo_bpm"] = 120.2
+    (scfg.AUDIO_SHAPES_DIR / f"{stem}.librosa.json").write_text(
+        json.dumps(doc), encoding="utf-8")
+
+    resp = _client().get(f"/api/testbed/marks?uri={URI}").json()
+    assert resp["tempo_bpm"] == 120.2
+
+
+def test_marks_route_tempo_is_none_without_analysis():
+    resp = _client().get(f"/api/testbed/marks?uri={URI}").json()
+    assert resp["tempo_bpm"] is None
