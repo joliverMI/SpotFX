@@ -1481,6 +1481,9 @@ kbd {
 
 /* ── Music-analysis test bed (/testbed) — stacked read-only lanes, the
  * ReviewLaneBar family (.review-lane-* above) generalized to N lanes. */
+.testbed-song-search-row { display: flex; gap: 6px; align-items: center; margin-bottom: 4px; }
+.testbed-song-search-input { flex: 1; min-width: 0; width: 100%; }
+.testbed-song-search-count { font-size: 12px; color: var(--text-muted); margin-bottom: 8px; }
 .testbed-lane-stack { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
 .testbed-lane-row { display: flex; align-items: center; gap: 8px; }
 .testbed-lane-label {

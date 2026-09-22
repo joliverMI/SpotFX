@@ -22,6 +22,14 @@ import PromotionReviewDialog from './components/PromotionReviewDialog';
 import TestbedLaneBar from './components/TestbedLaneBar';
 import TestbedMetricsPanel from './components/TestbedMetricsPanel';
 import { matchMarks } from './metrics';
+import { filterAndSortSongs } from './songSearch';
+
+/** Render cap for the song-picker list — a search narrows ~920 songs down
+ * to a handful almost every time, but the box starts empty, so the
+ * unfiltered list still needs a hard ceiling to stay fast. Not true
+ * virtualization (this app carries no such dependency, and it doesn't
+ * need one at this cap) — the count line says when the list is truncated. */
+const SONG_LIST_CAP = 150;
 
 /** Pretty labels for the mark kinds the registry emits — a DISPLAY lookup
  * only. Which engines exist, what they are called and which kinds each one
@@ -101,6 +109,8 @@ function localMetrics(
 
 export default function TestbedPage() {
   const { data: songs } = useTestbedSongs();
+  // Page-local only, per his ask ("no server change") — resets on reload.
+  const [songQuery, setSongQuery] = useState('');
   const [uri, setUri] = useState<string | null>(null);
   const [reference, setReference] = useState<'transitions' | 'flares'>('transitions');
   const [engineA, setEngineA] = useState<{ engine: string; kind: string }>({ engine: 'librosa', kind: 'section_boundary' });
@@ -125,6 +135,11 @@ export default function TestbedPage() {
   }, [songs, uri]);
 
   const song = songs?.find((s) => s.uri === uri) ?? null;
+  const visibleSongs = useMemo(
+    () => filterAndSortSongs(songs ?? [], songQuery),
+    [songs, songQuery],
+  );
+  const shownSongs = useMemo(() => visibleSongs.slice(0, SONG_LIST_CAP), [visibleSongs]);
   const { data: marks } = useTestbedMarks(uri);
   const { data: waveform } = useTestbedWaveform(uri);
   const { data: engineMarksA } = useTestbedEngineMarks(uri, engineA.engine, engineA.kind);
@@ -247,11 +262,46 @@ export default function TestbedPage() {
             </div>
           </div>
         ) : (
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            {songs.map((s) => (
-              <SongPickerButton key={s.uri} song={s} active={s.uri === uri} onClick={() => setUri(s.uri)} />
-            ))}
-          </div>
+          <>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+              Search <HelpLink topic="testbed-song-search" title="Searching the song list" />
+            </div>
+            <div className="testbed-song-search-row">
+              <input
+                type="search"
+                className="testbed-song-search-input"
+                value={songQuery}
+                onChange={(e) => setSongQuery(e.target.value)}
+                placeholder="Search by artist or title…"
+                aria-label="Search songs"
+              />
+              {songQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSongQuery('')}
+                  title="Clear search"
+                  aria-label="Clear search"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+            <div className="testbed-song-search-count">
+              {visibleSongs.length} of {songs.length}
+              {shownSongs.length < visibleSongs.length
+                ? ` — showing first ${shownSongs.length}, narrow your search to see the rest`
+                : ''}
+            </div>
+            {visibleSongs.length === 0 ? (
+              <p className="empty-note">No songs match “{songQuery}”.</p>
+            ) : (
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {shownSongs.map((s) => (
+                  <SongPickerButton key={s.uri} song={s} active={s.uri === uri} onClick={() => setUri(s.uri)} />
+                ))}
+              </div>
+            )}
+          </>
         )}
       </div>
 
