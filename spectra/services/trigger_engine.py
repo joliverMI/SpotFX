@@ -884,9 +884,15 @@ class TriggerEngine:
         logger.info("trigger %s fired: %s @ %dms", trig.id, a.kind, trig.timestamp_ms)
         self.last_fire = {"id": trig.id, "kind": a.kind, "ok": True}
         from spectra.services import fire_history
+        detail = {"trigger_id": trig.id, "action_kind": a.kind, "source": trig.source}
+        if trig.snap_grid is not None:
+            # Phase 2 (spectra/services/beat_snap.py) — which grid this
+            # generated cue was snapped to and how far, so the Review
+            # page can show WHY it landed here (describeEvent.ts).
+            detail["snap_grid"] = trig.snap_grid
+            detail["snap_moved_ms"] = trig.snap_moved_ms
         fire_history.record_fire(
-            "triggers", f"{trig.source}:{a.kind}",
-            {"trigger_id": trig.id, "action_kind": a.kind, "source": trig.source},
+            "triggers", f"{trig.source}:{a.kind}", detail,
             uri=self._uri, position_ms=self._last_position_ms)
 
     def _next_trigger_gap_ms(self, trig: SpectraTrigger) -> Optional[int]:

@@ -780,6 +780,19 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        id: 'midsong-snap-to-beat',
+        title: 'Snap generated cues to beat',
+        keywords: 'snap beat downbeat generate generated cue mid-song section boundary grid librosa beat_this phase 2 precision align alignment',
+        body: [
+          'A power-button toggle in the Scenes panel (room controls bar), on by default. It governs "⟳ Generate" — the mid-song cue seeding on the Timeline\'s Trigger bar — not hand-placed triggers, which are never moved by this.',
+          'On (the default): after a section boundary decides WHERE a cue roughly belongs, its stored timestamp is nudged onto the nearest downbeat of a beat grid for that song — the same beat/downbeat grids the music-analysis test bed compares against your marks. This is the Admiral\'s Phase 2 decision: keep the existing section-boundary detector for WHICH moments get a cue, but land each one precisely on a beat instead of wherever the section detector happened to draw the line.',
+          'Off: a generated cue keeps exactly its raw section-boundary time, unsnapped — the pre-Phase-2 behaviour.',
+          'Which grid: librosa\'s own beat grid (already computed for every analyzed song) is the default. If the song has been precomputed with beat_this (the test bed\'s second engine) AND beat_this reads its tempo at roughly half of librosa\'s — the phrase-length grid some genres are actually marked to — that phrase grid is used instead. Nothing here ever runs beat_this live; a song without a precompute just uses librosa.',
+          'A nearest downbeat farther than one beat away is left unsnapped rather than dragged that far — a big jump usually means the grid lost the thread for that moment (a tempo change, a quiet passage), not that the beat is genuinely that far off.',
+          'Re-run "⟳ Generate" after flipping this to re-place already-generated cues under the new setting — it updates the same cues in place, it never duplicates them, and a cue you\'ve since edited by hand is never touched either way.',
+        ],
+      },
+      {
         id: 'live-energy',
         title: 'Live Energy — the number driving scene picks and flares',
         keywords: 'energy intensity section bar top always visible live meter bridge librosa quiet loud',

@@ -8105,6 +8105,63 @@ extra `.librosa.json` read the page already pays for via `/engine-marks`.
 Help: `analysis-testbed` §`testbed-lanes-and-tolerance` and
 §`testbed-engines`, updated in the same change (both already linked).
 
+## Phase 2 of the music-analysis plan — snapping generated cues to a beat
+
+2026-09-22, the Admiral's decision on `data/music-analysis-octave-scout/
+report.md`'s open questions: "we are still using the old transition
+detection, but we are pinning it to a beat for better precision... go for
+it." `spectra/services/beat_snap.py` is the binding statement. Section
+detection (`midsong_generator.py`) is UNCHANGED — it still decides which
+moments get a generated cue and roughly when. This module only nudges
+WHERE, within one beat, a generated cue's stored `timestamp_ms` actually
+lands: onto the nearest downbeat of a per-song grid.
+
+**Grid choice is the scout's own measured discriminator (Q1), not a
+preference**: beat_this's downbeats only win when its precompute exists
+for the song AND its tempo reads at roughly HALF of librosa's own
+(`beat_snap.HALF_TIME_RATIO=0.6`) — the phrase-length grid his Soy Peor
+marks actually sit on (his own separate ruling, "every 8 is good").
+Otherwise librosa's own downbeat grid is used; NO LIVE beat_this
+execution is ever attempted from this path. Both grids are stored in WAV
+time and shifted to song time by `testbed_audio.
+capture_offset_ms_or_zero(uri)` — the ONE shared helper both this module
+and `spectra/api/testbed.py::_estimate_for` call (the scout's own Q2 fix,
+PR 286), so the grid a cue snaps against is identical to the grid the
+test bed renders and scores. A nearest downbeat farther than one beat
+length (`60000/tempo_bpm`) away is left UNSNAPPED — the section's own raw
+time survives untouched rather than being dragged that far.
+
+**Provenance, not a second trigger schema**: `SpectraTrigger.snap_grid`/
+`snap_moved_ms` (`spectra/models/trigger.py`) record which grid a
+generated cue snapped to and how far, both `None` for a hand-placed
+trigger or an unsnapped cue. `midsong_generator.candidate_moments`'s
+`generator_key` stays keyed on the section's own RAW (unsnapped) start_ms
+— the analysis moment, never the snapped position — so toggling the
+setting between runs UPDATES the same generated trigger in place rather
+than deleting and re-adding it under a new key.
+
+**`RoomControlState.midsong_snap_to_beat`** (default `True`, his own "go
+for it") gates the whole thing, read live by `candidate_moments` on every
+generation pass — no restart needed. UI: a power-button toggle in the
+Scenes panel (`RoomControlsBar.tsx`), next to the scene-change tier, help
+topic `midsong-snap-to-beat`. Surfaced two more places, additively: the
+Review page (`trigger_engine.py`'s `fire_history.record_fire` call for a
+trigger fire carries `snap_grid`/`snap_moved_ms` in its `detail` when set,
+rendered by `describeEvent.ts`'s `triggers` case) and the test bed
+(`testbed_marks.SongMarks.n_snapped`/`snap_grid_counts`, a per-song
+GENERATED-cue summary — never a scored reference mark, since only
+`source=="authored"` rows are ever scoring marks).
+
+Acceptance measurement (offline, read-only against the live checkout,
+never against this worktree's own `storage/`):
+`scripts/check_midsong_beat_snap.py` — runs `generate_for_song` twice per
+reference song (snap off, snap on) against fresh throwaway trigger stores,
+then scores the generated cue timestamps against his REAL authored marks
+(read separately, never copied into the temp store) with the test bed's
+own `testbed_metrics.match_marks`, at 150ms/500ms, against both
+transitions and flares. El Apagón is reported but never weighted in a
+verdict (his own word).
+
 ## Maintaining this file
 
 Keep this file for knowledge useful to almost every future agent session in this project.

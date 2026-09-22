@@ -526,6 +526,17 @@ class RoomControlState(BaseModel):
     scene_transition_ms_gentle: int = Field(default=300, ge=0, le=20000)
     scene_transition_ms_hard: int = Field(default=200, ge=0, le=20000)
     scene_change_mode: SceneChangeMode = "full"
+    # PHASE 2 of the music-analysis plan (2026-09-22, spectra/services/
+    # beat_snap.py) — the Admiral's decision: "we are still using the old
+    # transition detection, but we are pinning it to a beat for better
+    # precision... go for it." Gates whether midsong_generator snaps a
+    # generated cue's timestamp onto the nearest downbeat of a per-song
+    # grid before storing it; default True per his own "go for it". Off
+    # leaves generation at its pre-Phase-2 behaviour (a section's own raw
+    # boundary time, unsnapped) — read live by candidate_moments on every
+    # generation pass, so flipping it and regenerating takes effect
+    # immediately, no restart.
+    midsong_snap_to_beat: bool = True
 
     # THE A/V-SYNC LEAD (owner ask 2026-08-28) — LEAD family: positive =
     # fire EARLIER, negative = fire LATER. The value the /avsync

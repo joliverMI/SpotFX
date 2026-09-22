@@ -240,6 +240,17 @@ def capture_offset_ms(uri: str) -> Optional[int]:
         return None
 
 
+def capture_offset_ms_or_zero(uri: str) -> int:
+    """capture_offset_ms(uri), with an unknown offset treated as 0 — the
+    WAV-time -> song-time shift every consumer of a WAV-time mark applies
+    identically: spectra/api/testbed.py::_estimate_for (both engine
+    lanes) and spectra/services/beat_snap.py (the Phase 2 generation
+    grid). ONE definition so a future fix to the offset itself never has
+    to be remembered in two places (data/music-analysis-octave-scout/
+    report.md's own "Work that should ship" #1)."""
+    return capture_offset_ms(uri) or 0
+
+
 def load_npz_shape(uri: str) -> Optional[dict]:
     """The coarse RMS-envelope fallback the report's own Methodology names
     ("the test bed should visibly say 'coarse energy view only, no

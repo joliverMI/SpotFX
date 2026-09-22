@@ -547,6 +547,21 @@ export default function RoomControlsBar() {
             <div className="top-bar-group-field">
               <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
                 <PowerButton
+                  on={local.midsong_snap_to_beat}
+                  onChange={(on) => commit({ ...local, midsong_snap_to_beat: on })}
+                  size={22}
+                  ariaLabel="Snap generated cues to beat"
+                  title={local.midsong_snap_to_beat
+                    ? 'On — a generated mid-song cue snaps to the nearest downbeat of its beat grid (within one beat). Tap to turn off.'
+                    : 'Off — a generated mid-song cue keeps its raw section-boundary time, unsnapped. Tap to turn on.'}
+                />
+                Snap generated cues to beat
+              </label>
+              <HelpLink topic="midsong-snap-to-beat" />
+            </div>
+            <div className="top-bar-group-field">
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                <PowerButton
                   on={local.force_scene_enabled}
                   onChange={(on) => commit({ ...local, force_scene_enabled: on })}
                   size={22}

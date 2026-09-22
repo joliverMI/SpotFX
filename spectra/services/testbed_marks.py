@@ -99,6 +99,16 @@ class SongMarks:
     artist: Optional[str] = None
     n_generated: int = 0
     n_promoted: int = 0
+    # Phase 2 beat-snap provenance (spectra/services/beat_snap.py) over
+    # this song's GENERATED triggers — never its scored reference marks
+    # (those are always source=="authored"; see the module docstring's
+    # exclusion rule). Which grid each snapped cue used, and how many of
+    # the song's generated cues went unsnapped (no usable grid, or past
+    # the one-beat cap) — so the test bed can show why generation landed
+    # where it did without exposing generated cues as scoreable marks.
+    n_snapped: int = 0
+    n_unsnapped_generated: int = 0
+    snap_grid_counts: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -107,6 +117,9 @@ class _SplitMarks:
     flares: list[ReferenceMark]
     n_generated: int
     n_promoted: int
+    n_snapped: int
+    n_unsnapped_generated: int
+    snap_grid_counts: dict
 
 
 def _split(triggers: list[SpectraTrigger],
@@ -115,9 +128,17 @@ def _split(triggers: list[SpectraTrigger],
     flares: list[ReferenceMark] = []
     n_generated = 0
     n_promoted = 0
+    n_snapped = 0
+    n_unsnapped_generated = 0
+    snap_grid_counts: dict = {}
     for t in triggers:
         if t.source != "authored":
             n_generated += 1
+            if t.snap_grid is not None:
+                n_snapped += 1
+                snap_grid_counts[t.snap_grid] = snap_grid_counts.get(t.snap_grid, 0) + 1
+            else:
+                n_unsnapped_generated += 1
             continue
         promoted = t.id in promoted_ids
         mark = ReferenceMark(id=t.id, timestamp_ms=t.timestamp_ms,
@@ -131,7 +152,8 @@ def _split(triggers: list[SpectraTrigger],
             continue
         if promoted:
             n_promoted += 1
-    return _SplitMarks(transitions, flares, n_generated, n_promoted)
+    return _SplitMarks(transitions, flares, n_generated, n_promoted,
+                       n_snapped, n_unsnapped_generated, snap_grid_counts)
 
 
 def scoring_marks(marks: list[ReferenceMark]) -> list[ReferenceMark]:
@@ -212,7 +234,10 @@ def _song_marks(uri: str, triggers: list[SpectraTrigger],
     return SongMarks(uri=uri, transitions=split.transitions, flares=split.flares,
                      provenance=summary.provenance,
                      title=summary.title, artist=summary.artist,
-                     n_generated=split.n_generated, n_promoted=split.n_promoted)
+                     n_generated=split.n_generated, n_promoted=split.n_promoted,
+                     n_snapped=split.n_snapped,
+                     n_unsnapped_generated=split.n_unsnapped_generated,
+                     snap_grid_counts=split.snap_grid_counts)
 
 
 def reference_marks_for_song(uri: str) -> tuple[list[ReferenceMark], list[ReferenceMark]]:

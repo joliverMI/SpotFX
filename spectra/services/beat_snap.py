@@ -1,0 +1,181 @@
+"""Phase 2 of the music-analysis plan (data/spotfx-music-analysis-plan/
+report.md Part 5, sharpened by data/music-analysis-octave-scout/report.md)
+— the Admiral's decision, 2026-09-22, verbatim: "we are still using the
+old transition detection, but we are pinning it to a beat for better
+precision... go for it."
+
+Section detection (spectra/services/midsong_generator.py) stays the sole
+source of a generated cue's EXISTENCE and its approximate time — this
+module only nudges WHERE, within one beat, that cue actually lands, onto
+the nearest downbeat of a per-song grid.
+
+GRID CHOICE, per song (the scout report's own measured discriminator,
+Q1/Q4): if a beat_this precompute exists for this song AND its tempo
+reads at roughly HALF of librosa's own tempo_bpm
+(ratio < HALF_TIME_RATIO), use beat_this's downbeats — its 8-beat PHRASE
+grid is the one his Soy Peor marks actually sit on (25 of 45 flares land
+on beat_this's own downbeat, the scout's Q1 bar-position histogram),
+matching the Admiral's separate, earlier answer for that song ("every 8
+is good"). Otherwise use librosa's downbeats — the scout's Q4 conclusion
+is that beat_this is not a consistent win (a wash on Contra/Dopamine, a
+loss on El Apagón), so it only earns a place where it demonstrably
+matches his convention; librosa is always the fallback, never a second
+tier to reach for.
+
+NO LIVE beat_this EXECUTION, ever, from this module or from generation: a
+missing precompute simply falls back to librosa (scout Q4's own
+"defensible minimum" — beat_this is a request-path-forbidden ~100s/song
+model, testbed_beatthis.py's own docstring).
+
+WAV TIME -> SONG TIME: both grids are stored in WAV time — the file each
+engine actually analyzed (testbed_audio.capture_offset_ms's own
+docstring; the scout report's Q2, the very offset bug PR 286 fixed for
+the test bed's own /compare and /engine-marks routes). This module shifts
+each grid's downbeat times by testbed_audio.capture_offset_ms_or_zero
+(uri) — the SAME shared helper spectra/api/testbed.py::_estimate_for
+calls — so the grid a cue snaps against agrees with the grid the test bed
+renders and scores; there is no second definition of this shift anywhere
+in the codebase. A generated cue's own UNSNAPPED time (a librosa section
+boundary) is left exactly as midsong_generator has always placed it —
+already treated as song time by every existing consumer
+(trigger_engine.tick()) — this module never touches that number, only
+compares against it.
+
+SNAP CAP: a nearest downbeat farther than ONE BEAT LENGTH
+(60000 / librosa's own tempo_bpm) from the cue's unsnapped time is NOT
+snapped — past that distance the grid has lost the plot for this cue (a
+tempo change, a silent passage, a real grid gap), and an over-eager snap
+would move the cue by more than the beat-alignment problem this exists to
+fix. An unsnapped cue keeps exactly its section-boundary time and its
+provenance records no grid (SpectraTrigger.snap_grid stays None).
+
+Executable spec: scripts/check_midsong_beat_snap.py.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Literal, Optional
+
+from spectra.services import analysis_reader, testbed_audio, testbed_cache
+
+GRID_LIBROSA: Literal["librosa"] = "librosa"
+GRID_BEAT_THIS: Literal["beat_this"] = "beat_this"
+
+# The scout report's own measured discriminator (Q1): beat_this reads Soy
+# Peor and Dopamine at ~0.50x librosa's tempo (a real half-time phrase
+# grid); Contra and El Apagón read at ~0.99x (the same octave). 0.6 sits
+# cleanly between the two clusters with margin either side.
+HALF_TIME_RATIO = 0.6
+
+
+def _median_interval_ms(times: list[float]) -> Optional[float]:
+    """Median of the successive gaps in a sorted time list — the scout
+    report's own "median inter-beat interval of the full grid" method
+    (Q1), robust to a few missed/extra beats at either end of a song."""
+    if len(times) < 2:
+        return None
+    diffs = sorted(b - a for a, b in zip(times, times[1:]) if b > a)
+    if not diffs:
+        return None
+    n = len(diffs)
+    mid = n // 2
+    return diffs[mid] if n % 2 else (diffs[mid - 1] + diffs[mid]) / 2.0
+
+
+def _beat_this_cache(uri: str) -> Optional[list[dict]]:
+    cached = testbed_cache.load(GRID_BEAT_THIS, uri)
+    if cached is None:
+        return None
+    marks = cached.get("marks") or []
+    return marks or None
+
+
+def beat_this_bpm_for_uri(uri: str) -> Optional[float]:
+    """beat_this's own tempo for this song, from the median inter-beat
+    interval of its FULL grid (beat + downbeat marks together — a
+    downbeat is a labelled subset of beats, not a disjoint stream, per
+    testbed_beatthis.compute_marks_ms's own convention). None when
+    nothing has been precomputed for this song, or too few marks to
+    measure an interval."""
+    marks = _beat_this_cache(uri)
+    if not marks:
+        return None
+    times = sorted(float(m["time_ms"]) for m in marks
+                   if m.get("kind") in ("beat", "downbeat"))
+    interval = _median_interval_ms(times)
+    if not interval or interval <= 0:
+        return None
+    return 60000.0 / interval
+
+
+def _librosa_downbeats_song_ms(uri: str) -> Optional[list[int]]:
+    beats = analysis_reader.beats_for_uri(uri)
+    if not beats:
+        return None
+    offset = testbed_audio.capture_offset_ms_or_zero(uri)
+    out = sorted(int(b.get("ms", 0)) + offset for b in beats
+                if b.get("is_downbeat"))
+    return out or None
+
+
+def _beat_this_downbeats_song_ms(uri: str) -> Optional[list[int]]:
+    marks = _beat_this_cache(uri)
+    if not marks:
+        return None
+    offset = testbed_audio.capture_offset_ms_or_zero(uri)
+    out = sorted(int(round(float(m["time_ms"]))) + offset
+                for m in marks if m.get("kind") == "downbeat")
+    return out or None
+
+
+def choose_grid(uri: str) -> Optional[tuple[str, list[int]]]:
+    """(grid_name, sorted downbeat times in SONG ms) for this song, or
+    None when neither engine has anything usable. beat_this wins only
+    when BOTH its precompute exists AND its tempo reads at roughly half
+    librosa's own — never a preference on its own; librosa is the
+    fallback whenever that condition doesn't hold or beat_this's own
+    downbeat list turns out empty."""
+    librosa_bpm = analysis_reader.tempo_bpm_for_uri(uri)
+    beat_this_bpm = beat_this_bpm_for_uri(uri)
+    if (librosa_bpm and beat_this_bpm
+            and (beat_this_bpm / librosa_bpm) < HALF_TIME_RATIO):
+        downbeats = _beat_this_downbeats_song_ms(uri)
+        if downbeats:
+            return GRID_BEAT_THIS, downbeats
+    downbeats = _librosa_downbeats_song_ms(uri)
+    if downbeats:
+        return GRID_LIBROSA, downbeats
+    return None
+
+
+def _nearest(times: list[int], target: int) -> int:
+    return min(times, key=lambda t: abs(t - target))
+
+
+@dataclass(frozen=True)
+class SnapResult:
+    timestamp_ms: int
+    grid: Optional[str] = None
+    moved_ms: Optional[int] = None
+
+
+def snap(uri: str, section_ms: int) -> SnapResult:
+    """Snap one generated cue's section-boundary time (song ms) to the
+    nearest downbeat of this song's chosen grid, capped at one beat
+    length. Never raises: a song with no usable grid, no measurable
+    tempo, or a nearest downbeat farther than a beat away returns the
+    section's own time UNSNAPPED (grid=None, moved_ms=None) — the module
+    docstring's SNAP CAP."""
+    choice = choose_grid(uri)
+    if choice is None:
+        return SnapResult(section_ms)
+    grid_name, downbeats = choice
+    librosa_bpm = analysis_reader.tempo_bpm_for_uri(uri)
+    if not librosa_bpm or librosa_bpm <= 0:
+        return SnapResult(section_ms)
+    beat_length_ms = 60000.0 / librosa_bpm
+    nearest = _nearest(downbeats, section_ms)
+    moved = nearest - section_ms
+    if abs(moved) > beat_length_ms:
+        return SnapResult(section_ms)
+    return SnapResult(nearest, grid_name, moved)

@@ -905,14 +905,14 @@ sections_v1 = [
 (shapes_dir / "gensong.librosa.json").write_text(json.dumps({"sections": sections_v1}))
 
 moments = midsong_generator.candidate_moments(GEN_URI)
-check([m[0] for m in moments] == [10000, 30000],
+check([m.timestamp_ms for m in moments] == [10000, 30000],
       "candidate_moments skips ms<=0 (the song's own start) and returns the "
       "remaining section boundaries in analysis order")
-check(moments[0][1] < moments[1][1],
+check(moments[0].intensity < moments[1].intensity,
       "the quieter (verse) boundary seeds a lower intensity than the louder "
       "(drop) boundary — per-song minmax renormalization keeps relative "
       "magnitude, same convention as scripts/backfill_trigger_intensity.py")
-check(all(0.0 <= m[1] <= 1.0 for m in moments), "seeded intensities stay in [0,1]")
+check(all(0.0 <= m.intensity <= 1.0 for m in moments), "seeded intensities stay in [0,1]")
 
 summary1 = midsong_generator.generate_for_song(GEN_URI)
 check(summary1 == {"moments": 2, "added": 2, "updated": 0, "deleted": 0,
@@ -993,7 +993,7 @@ FLAT_URI = "spotify:track:flat-energy"
     {"start_ms": 5000, "end_ms": 10000, "energy_rms": 0.5},
 ]}))
 flat_moments = midsong_generator.candidate_moments(FLAT_URI)
-check(len(flat_moments) == 1 and flat_moments[0][1] == 0.5,
+check(len(flat_moments) == 1 and flat_moments[0].intensity == 0.5,
       "equal-energy sections (zero span) fall back to a flat 0.5 intensity")
 
 # ═══ 7. auto-generation on first-time-seeing-this-URI (Admiral ask, order 12) ═══
