@@ -66,6 +66,34 @@ def group_ids_in_filter(scene: SceneV2) -> list[str]:
             if i in cards and cards[i].kind == "group"]
 
 
+def validate_for_save(scene: SceneV2) -> None:
+    """The two integrity guards a scene must pass before it may be
+    written — the exact checks spectra/api/scenes.py::upsert_scene has
+    always applied, factored out here so ANY write path (the HTTP route,
+    Sonic's scene_console.py) shares one definition instead of a second
+    copy that could silently drift from it. Raises ValueError naming
+    what's wrong; callers translate that into their own error shape
+    (HTTPException, SceneOpError, ...) — this function never raises
+    HTTPException itself, so it stays reachable from non-HTTP callers."""
+    group_ids = group_ids_in_filter(scene)
+    if group_ids:
+        names = {c.id: c.name for c in color_sets.list_all()}
+        offenders = ", ".join(f"'{names.get(i, i)}' ({i})" for i in group_ids)
+        raise ValueError(
+            f"accepted_set_ids may only reference kind='set' Colour Sets; "
+            f"{offenders} is a group — list its member sets instead")
+    # Local import: drift_profiles doesn't import scene_store, but keeping
+    # the import here (rather than at module scope) matches how narrowly
+    # this store otherwise depends on the rest of the scene/-color world.
+    from spectra.services import drift_profiles
+    known = set(drift_profiles.load_all())
+    dangling = sorted({ref.profile for dev in scene.devices
+                       for ref in dev.drift.values()
+                       if ref.profile is not None and ref.profile not in known})
+    if dangling:
+        raise ValueError(f"unknown drift profile id(s): {', '.join(dangling)}")
+
+
 def _load_raw() -> dict:
     if config.SCENES_FILE.exists():
         try:

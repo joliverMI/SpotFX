@@ -1297,3 +1297,245 @@ def test_run_turn_surfaces_rejections_structurally_not_only_applied(monkeypatch)
     assert result["changes"] == []
     assert len(result["rejected"]) == 1
     assert "no scene with id" in result["rejected"][0]["reason"]
+
+
+# ═══ 11. copy_scene_device_entry — his ask, 2026-09-22: "copy the strips
+# initial set from Fireworks V2 to Fish." One device entry's copyable
+# fields move; the destination entry's own id (or lack of one) decides
+# whether it's an update or a create; nothing else on either scene moves. ═
+
+def _seed_scene_with_entry(name, target_kind="category", target="Strips", **entry_kwargs):
+    from spectra.models.scene import SceneDeviceConfig
+    entry = SceneDeviceConfig(target_kind=target_kind, target=target, **entry_kwargs)
+    return _seed_scene(name, devices=[entry]), entry
+
+
+def test_copy_device_entry_dry_run_does_not_save_and_shows_the_diff():
+    from spectra.services import scene_console as sc
+    from spectra.services import scene_store
+
+    src, src_entry = _seed_scene_with_entry(
+        "Fireworks V2", effect_type="fireworks1d", params={"spawn_rate": 3.0})
+    dst, dst_entry = _seed_scene_with_entry(
+        "Fish", effect_type="orbits1d", params={"blob_size": 1.0})
+
+    result = _run(sc.apply_copy_scene_device_entry("Fireworks V2", "Fish", "Strips"))
+
+    assert result["status"] == "previewed"
+    assert result["creates_new_entry"] is False
+    assert result["preview"]["effect_type"] == {"before": "orbits1d", "after": "fireworks1d"}
+    assert result["preview"]["params"] == {
+        "before": {"blob_size": 1.0}, "after": {"spawn_rate": 3.0}}
+
+    # nothing saved
+    reread = scene_store.get_by_id(dst.id)
+    assert reread.devices[0].effect_type == "orbits1d"
+    assert sc._load_backups() == {}
+
+
+def test_copy_device_entry_applies_and_preserves_destination_id():
+    from spectra.services import scene_console as sc
+    from spectra.services import scene_store
+
+    src, src_entry = _seed_scene_with_entry(
+        "Fireworks V2", effect_type="fireworks1d", params={"spawn_rate": 3.0})
+    dst, dst_entry = _seed_scene_with_entry(
+        "Fish", effect_type="orbits1d", params={"blob_size": 1.0})
+
+    result = _run(sc.apply_copy_scene_device_entry(
+        "Fireworks V2", "Fish", "Strips", dry_run=False))
+
+    assert result["status"] == "applied"
+    assert result["op"] == "copy_scene_device_entry"
+
+    reread = scene_store.get_by_id(dst.id)
+    assert len(reread.devices) == 1
+    entry = reread.devices[0]
+    assert entry.effect_type == "fireworks1d"
+    assert entry.params == {"spawn_rate": 3.0}
+    assert entry.id == dst_entry.id, "the destination entry's own id must be kept"
+    assert entry.target_kind == "category" and entry.target == "Strips"
+
+    # the source scene is untouched
+    assert scene_store.get_by_id(src.id).devices[0].effect_type == "fireworks1d"
+
+    # backed up before the write, like every other existing-scene edit
+    backups = sc._load_backups()[dst.id]
+    assert len(backups) == 1
+    assert backups[0]["scene"]["devices"][0]["effect_type"] == "orbits1d"
+
+
+def test_copy_device_entry_creates_a_new_entry_when_destination_has_none():
+    from spectra.services import scene_console as sc
+    from spectra.services import scene_store
+
+    src, _ = _seed_scene_with_entry(
+        "Fireworks V2", effect_type="fireworks1d", params={"spawn_rate": 3.0})
+    dst = _seed_scene("Fish")  # no device entries at all
+
+    result = _run(sc.apply_copy_scene_device_entry(
+        "Fireworks V2", "Fish", "Strips", dry_run=False))
+
+    assert result["creates_new_entry"] is True
+    reread = scene_store.get_by_id(dst.id)
+    assert len(reread.devices) == 1
+    entry = reread.devices[0]
+    assert entry.effect_type == "fireworks1d"
+    assert entry.target_kind == "category" and entry.target == "Strips"
+
+
+def test_copy_device_entry_only_touches_the_requested_fields():
+    from spectra.services import scene_console as sc
+    from spectra.services import scene_store
+
+    src, _ = _seed_scene_with_entry(
+        "Fireworks V2", effect_type="fireworks1d", params={"spawn_rate": 3.0},
+        brightness=0.9)
+    dst, dst_entry = _seed_scene_with_entry(
+        "Fish", effect_type="orbits1d", params={"blob_size": 1.0}, brightness=0.4)
+
+    _run(sc.apply_copy_scene_device_entry(
+        "Fireworks V2", "Fish", "Strips", fields=["effect_type", "params"], dry_run=False))
+
+    entry = scene_store.get_by_id(dst.id).devices[0]
+    assert entry.effect_type == "fireworks1d"
+    assert entry.params == {"spawn_rate": 3.0}
+    assert entry.brightness == 0.4, "brightness was not in `fields` — must be left alone"
+
+
+def test_copy_device_entry_never_touches_a_third_entry_on_either_scene():
+    from spectra.services import scene_console as sc
+    from spectra.services import scene_store
+    from spectra.models.scene import SceneDeviceConfig
+
+    src = _seed_scene("Fireworks V2", devices=[
+        SceneDeviceConfig(target_kind="category", target="Strips", effect_type="fireworks1d"),
+        SceneDeviceConfig(target_kind="category", target="Singles", effect_type="power"),
+    ])
+    dst = _seed_scene("Fish", devices=[
+        SceneDeviceConfig(target_kind="category", target="Strips", effect_type="orbits1d"),
+        SceneDeviceConfig(target_kind="category", target="Matrix", effect_type="fish"),
+    ])
+
+    _run(sc.apply_copy_scene_device_entry("Fireworks V2", "Fish", "Strips", dry_run=False))
+
+    reread = scene_store.get_by_id(dst.id)
+    matrix_entry = next(d for d in reread.devices if d.target == "Matrix")
+    assert matrix_entry.effect_type == "fish", "an untouched entry must survive verbatim"
+
+
+def test_copy_device_entry_matches_target_case_insensitively():
+    from spectra.services import scene_console as sc
+    from spectra.services import scene_store
+
+    src, _ = _seed_scene_with_entry(
+        "Fireworks V2", target="Strips", effect_type="fireworks1d")
+    dst, _ = _seed_scene_with_entry("Fish", target="Strips", effect_type="orbits1d")
+
+    result = _run(sc.apply_copy_scene_device_entry(
+        "fireworks v2", "FISH", "strips", dry_run=False))
+    assert result["status"] == "applied"
+    assert scene_store.get_by_id(dst.id).devices[0].effect_type == "fireworks1d"
+
+
+def test_copy_device_entry_refuses_same_scene():
+    from spectra.services import scene_console as sc
+
+    scene, _ = _seed_scene_with_entry("Fireworks V2", effect_type="fireworks1d")
+    with pytest.raises(sc.SceneOpError, match="same scene"):
+        _run(sc.apply_copy_scene_device_entry("Fireworks V2", "Fireworks V2", "Strips"))
+
+
+def test_copy_device_entry_refuses_when_source_has_no_such_target():
+    from spectra.services import scene_console as sc
+
+    _seed_scene_with_entry("Fireworks V2", target="Strips", effect_type="fireworks1d")
+    _seed_scene("Fish")
+    with pytest.raises(sc.SceneOpError, match="no device entry for 'Matrix'"):
+        _run(sc.apply_copy_scene_device_entry("Fireworks V2", "Fish", "Matrix"))
+
+
+def test_copy_device_entry_refuses_an_ambiguous_scene_name():
+    from spectra.services import scene_console as sc
+
+    _seed_scene_with_entry("Fireworks V2", effect_type="fireworks1d")
+    _seed_scene("Fish")
+    _seed_scene("Fish")  # a second scene sharing the name
+
+    with pytest.raises(sc.SceneOpError, match="matches more than one scene"):
+        _run(sc.apply_copy_scene_device_entry("Fireworks V2", "Fish", "Strips"))
+
+
+def test_copy_device_entry_refuses_an_ambiguous_target_on_either_scene():
+    from spectra.services import scene_console as sc
+    from spectra.models.scene import SceneDeviceConfig
+
+    # two entries whose target string happens to collide (category vs. a
+    # virtual sharing the same name) -- an edge case the validator allows
+    # since (target_kind, target) is the real uniqueness key.
+    src = _seed_scene("Fireworks V2", devices=[
+        SceneDeviceConfig(target_kind="category", target="Strips", effect_type="fireworks1d"),
+        SceneDeviceConfig(target_kind="virtual", target="Strips", effect_type="fireworks1d"),
+    ])
+    _seed_scene("Fish")
+
+    with pytest.raises(sc.SceneOpError, match="matches more than one device entry"):
+        _run(sc.apply_copy_scene_device_entry("Fireworks V2", "Fish", "Strips"))
+
+
+def test_copy_device_entry_refuses_an_unknown_field():
+    from spectra.services import scene_console as sc
+
+    _seed_scene_with_entry("Fireworks V2", effect_type="fireworks1d")
+    _seed_scene_with_entry("Fish", effect_type="orbits1d")
+
+    with pytest.raises(sc.SceneOpError, match="not a copyable device-entry field"):
+        _run(sc.apply_copy_scene_device_entry(
+            "Fireworks V2", "Fish", "Strips", fields=["id"]))
+
+
+def test_copy_device_entry_refuses_a_dangling_drift_profile_reference():
+    """The copy goes through the SAME integrity guard the HTTP upsert
+    route enforces -- a source entry that drifts a param by a named
+    profile the destination's room doesn't have must be refused exactly
+    as a human's editor save would be."""
+    from spectra.services import scene_console as sc
+    from spectra.models.scene import DriftRef
+
+    _seed_scene_with_entry(
+        "Fireworks V2", effect_type="fireworks1d", params={"spawn_rate": 3.0},
+        drift={"spawn_rate": DriftRef(profile="nonexistent-profile-id")})
+    _seed_scene_with_entry("Fish", effect_type="orbits1d")
+
+    with pytest.raises(sc.SceneOpError, match="unknown drift profile"):
+        _run(sc.apply_copy_scene_device_entry(
+            "Fireworks V2", "Fish", "Strips", dry_run=False))
+
+
+def test_op_copy_scene_device_entry_returns_rejected_payload_not_raise():
+    from spectra.services import scene_console as sc
+
+    result = _run(sc._op_copy_scene_device_entry("nonexistent-1", "nonexistent-2", "Strips"))
+    assert result["status"] == "rejected"
+
+
+def test_copy_scene_device_entry_is_declared_in_all_operations():
+    from spectra.services import settings_agent as sa
+
+    assert "copy_scene_device_entry" in sa.ALL_OPERATIONS
+    op = sa.ALL_OPERATIONS["copy_scene_device_entry"]
+    schema = op.tool_schema()
+    assert schema["name"] == "copy_scene_device_entry"
+    assert set(schema["input_schema"]["required"]) == {"source", "destination", "target"}
+
+    entry = op.catalogue_entry(detail=True)
+    assert entry["domain"] == "scene" and entry["kind"] == "write"
+    assert "dry_run" in entry["instructions"]
+
+
+def test_copy_scene_device_entry_discoverable_via_list_operations():
+    from spectra.services import settings_agent as sa
+
+    idx = _run(sa._dispatch("list_operations", {"domain": "scene"}))
+    names = {o["name"] for o in idx["operations"]}
+    assert "copy_scene_device_entry" in names
