@@ -875,9 +875,12 @@ def _build_copied_entry(existing: Optional[SceneDeviceConfig], src_entry: SceneD
         base[field] = src_dump[field]
     if existing is not None:
         base["id"] = existing.id
-    base["target_kind"] = target_kind
-    base["target"] = target
-    return SceneDeviceConfig.model_validate(base)
+    try:
+        return SceneDeviceConfig.model_validate(base)
+    except ValidationError as exc:
+        raise SceneOpError(
+            f"copying {', '.join(fields)} onto the {target!r} device entry would make it "
+            f"invalid: {_errs(exc)}", pydantic_errors=_errs(exc)) from exc
 
 
 def _entry_field_diff(existing: Optional[SceneDeviceConfig], new_entry: SceneDeviceConfig,
