@@ -25,7 +25,11 @@ async def get_registry():
             "id": c["id"],
             "parent_id": c.get("parent_id"),
             "virtuals": c.get("virtuals", []),
-            "effects": c.get("effects", []),
+            # curated names first, then every registered effect whose own
+            # device dimension matches this category's — the curated list
+            # alone is a hand-maintained shortlist that drifts behind the
+            # registry (device_model.category_effect_options's docstring).
+            "effects": device_model.category_effect_options(c["name"]),
         }
         for c in device_model.list_categories()
     }

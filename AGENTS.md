@@ -32,6 +32,21 @@ at the end of the Help page section below;
 `scripts/check_effect_scene_skills_current.py` refuses to let a new effect
 land silently unclassified.**
 
+`storage/device_categories.json`'s per-category `effects` array (curated,
+hand-maintained, ordering matters) is NOT the whole story any more — found
+2026-09-22 when a category-target scene entry's effect dropdown couldn't
+offer `fireworks1d`/`eye`/`fish`, none of which any category had ever
+curated. `fx.device_model.category_effect_options()` (consumed by
+`GET /api/registry`, `spectra/api/registry.py`) widens a category's served
+list past the curated names to every registered effect whose device
+dimension (`effect_dimension()`, via `fx.effects.twod.Twod` class
+inheritance) matches the category's own (`category_dimension()`, Matrix
+subtree = 2D, everything else = 1D) — so a new effect is reachable from
+the editor the moment it's registered in `config/effect_params.json`,
+without waiting on someone to also remember the curation step. Curating a
+new effect into `storage/device_categories.json` is still worth doing (it
+controls ordering and intent), but is no longer what makes it *selectable*.
+
 ## In-app Help page (KEEP IT CURRENT)
 
 The React app has a searchable help page at `/help`, rendered from
