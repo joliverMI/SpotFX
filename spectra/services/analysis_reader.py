@@ -14,11 +14,17 @@ one-directional, read-only, no spot-effects imports):
   storage/training_profiles.json            — genre buckets
 
 Section and beat times are read RAW — the standing librosa_offset_ms
-rule: the stored offset is noise, and runtime values must agree with the
-live bindings, which read raw. section_energy_at() is the ported
-signal_resolver._section_energy: containing section, else nearest, clamped
-0–1. Missing files degrade to None — the callers' stated fallbacks apply
-(intensity 0.5 neutral, no genre bucket).
+rule: the stored `LibrosaAnalysis.librosa_offset_ms` field is noise (see
+AGENTS.md), and sections_for_uri/beats_for_uri never apply it. That rule
+is unrelated to and unchanged by section_energy_at()'s own capture-offset
+shift below (data/transition-alignment-plan/report.md §2.1): a section's
+start_ms/end_ms is in the CAPTURED-WAV frame, but a caller's own now_ms is
+song-relative, so section_energy_at() shifts the comparison by the
+capture offset (testbed_audio.capture_offset_ms, a measured, reliable
+quantity — not librosa_offset_ms) before matching. section_energy_at() is
+the ported signal_resolver._section_energy: containing section, else
+nearest, clamped 0–1. Missing files degrade to None — the callers' stated
+fallbacks apply (intensity 0.5 neutral, no genre bucket).
 """
 from __future__ import annotations
 
@@ -147,20 +153,64 @@ def tempo_bpm_for_uri(uri: str) -> Optional[float]:
     return bpm if bpm > 0 else None
 
 
+_capture_offset_cache: dict[str, int] = {}
+
+
+def _capture_offset_for(uri: str) -> int:
+    """testbed_audio.capture_offset_ms_or_zero(uri), cached per URI for the
+    life of the process — section_energy_at is read on the event-loop
+    thread every ~200ms tick (bridge.intensity(), TICK_S in
+    trigger_engine.py), and the offset's own source (an .npz read,
+    testbed_audio.load_npz_shape) is a real file parse with no caching of
+    its own; re-reading it every tick would put synchronous file I/O on
+    the hot tick path. A stable per-URI value, same "built lazily, cached
+    forever" shape as this module's own _shape_index — a value that
+    changes underneath (a recapture mid-session) is no worse than that
+    cache's own staleness tolerance.
+
+    Imports testbed_audio LAZILY (inside this function, not at module
+    scope): testbed_audio imports analysis_reader for stem_for_uri, so a
+    module-level import here would be a circular import."""
+    if uri in _capture_offset_cache:
+        return _capture_offset_cache[uri]
+    from spectra.services import testbed_audio
+    offset = testbed_audio.capture_offset_ms_or_zero(uri)
+    _capture_offset_cache[uri] = offset
+    return offset
+
+
 def section_energy_at(uri: str, now_ms: int) -> Optional[float]:
-    """Librosa section energy at a playback position (RAW ms), 0–1."""
+    """Librosa section energy at a playback position (song-relative ms —
+    the position callers such as bridge.intensity() pass, from
+    track_position_ms()).
+
+    Sections carry start_ms/end_ms in the CAPTURED-WAV frame
+    (services/librosa_service.py places every boundary on a beat of the
+    WAV, not the song); a nonzero capture offset (the WAV's own sample 0,
+    song-relative — testbed_audio.capture_offset_ms) means a raw
+    start_ms/end_ms comparison against a song-relative now_ms looks up the
+    WRONG section on any song whose capture didn't start at song time 0 —
+    the same frame mismatch data/transition-alignment-plan/report.md
+    §2.1 found in the generator's own cue placement. Shifted here by
+    adding the offset to each section's own bound before comparing, so
+    both sides of the comparison share the song-time frame; offset 0 (no
+    capture-offset data, or a capture that started at song time 0) leaves
+    every comparison exactly as before."""
     sections = sections_for_uri(uri)
     if not sections:
         return None
+    offset_ms = _capture_offset_for(uri)
     best = None
     for sec in sections:
-        if int(sec.get("start_ms", 0)) <= now_ms < int(sec.get("end_ms", 0)):
+        start = int(sec.get("start_ms", 0)) + offset_ms
+        end = int(sec.get("end_ms", 0)) + offset_ms
+        if start <= now_ms < end:
             best = sec
             break
     if best is None:
         best = min(sections, key=lambda s: min(
-            abs(int(s.get("start_ms", 0)) - now_ms),
-            abs(int(s.get("end_ms", 0)) - now_ms)))
+            abs(int(s.get("start_ms", 0)) + offset_ms - now_ms),
+            abs(int(s.get("end_ms", 0)) + offset_ms - now_ms)))
     try:
         return max(0.0, min(1.0, float(best.get("energy_rms"))))
     except (TypeError, ValueError):

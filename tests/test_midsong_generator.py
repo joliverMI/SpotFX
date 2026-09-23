@@ -113,6 +113,7 @@ def _isolated_snap_env(tmp_path, monkeypatch):
     scfg.AUDIO_SHAPES_DIR.mkdir(parents=True)
     analysis_reader._shape_index.clear()
     analysis_reader._index_built = False
+    analysis_reader._capture_offset_cache.clear()
 
 
 GEN_URI = "spotify:track:midsong-beat-snap"
@@ -224,3 +225,99 @@ def test_snap_cap_leaves_a_far_boundary_at_its_raw_section_time():
     [m] = midsong_generator.candidate_moments(GEN_URI)
     assert m.timestamp_ms == 2600
     assert m.snap_grid is None
+
+
+# ═══ FRAME FIX (2026-09-23, data/transition-alignment-plan/report.md) ═════
+
+
+def _seed_npz_offset(scfg, stem: str, offset_ms: int) -> None:
+    """A capture-offset sidecar whose WAV sample 0 sits `offset_ms` into
+    song time — testbed_audio.capture_offset_ms's own source."""
+    import numpy as np
+    np.savez(scfg.AUDIO_SHAPES_DIR / f"{stem}.npz",
+              timestamps_ms=np.array([offset_ms, offset_ms + 100, offset_ms + 200]),
+              rms_total=np.array([0.1, 0.2, 0.1]))
+
+
+def test_frame_fix_moves_a_cue_later_by_exactly_the_capture_offset():
+    """The report's own §2.1 formula: a section boundary at WAV time
+    raw_ms fires `raw_ms + capture_offset_ms` in song time — snap
+    disabled here so the frame effect is isolated (matching the report's
+    own "Frame fixed" column, which is measured with Phase 2's separate
+    beat-snap feature turned off)."""
+    from spectra import config as scfg
+    from spectra.services import midsong_generator, room_controls
+    _seed_song(scfg)
+    room_controls.save_room_controls(
+        room_controls.RoomControlState(midsong_snap_to_beat=False))
+    _seed_npz_offset(scfg, STEM, 3000)
+
+    [m] = midsong_generator.candidate_moments(GEN_URI, snap_enabled=False)
+    assert m.timestamp_ms == 2150 + 3000, (
+        "the cue fires 3000ms LATER in song time than its raw, WAV-time "
+        "section boundary (2150ms)")
+    assert m.generator_key == "section:2150", (
+        "generator_key stays keyed on the RAW, unshifted WAV-time "
+        "start_ms — a recapture changing the offset must UPDATE this "
+        "same trigger in place, never orphan it under a new key")
+    assert m.snap_grid is None and m.snap_moved_ms is None
+
+
+def test_zero_capture_offset_is_a_no_op():
+    """No npz sidecar at all (an unanalyzed capture, or a song whose
+    recording genuinely started at song time 0) must reproduce EXACTLY
+    the pre-fix placement — capture_offset_ms_or_zero returns 0."""
+    from spectra import config as scfg
+    from spectra.services import midsong_generator, testbed_audio
+    _seed_song(scfg)
+    assert testbed_audio.capture_offset_ms_or_zero(GEN_URI) == 0
+
+    [m] = midsong_generator.candidate_moments(GEN_URI)
+    # Byte-identical to test_generation_snaps_onto_the_nearest_downbeat_by_default
+    # above (default snap ON, offset 0): unaffected by this fix.
+    assert m.timestamp_ms == 2000
+    assert m.snap_grid == "librosa"
+    assert m.snap_moved_ms == -150
+    assert m.generator_key == "section:2150"
+
+
+def test_frame_fix_shifts_the_snap_grid_identically_so_the_snap_still_lands():
+    """beat_snap's own comparison stays single-frame (its "ONE FRAME, NO
+    SHIFT" docstring) — the grid this caller hands it has been shifted by
+    the identical offset, so a cue that would have snapped in WAV time
+    still snaps by the same relative distance in song time, just `offset`
+    ms later than an unshifted snap would have landed."""
+    from spectra import config as scfg
+    from spectra.services import midsong_generator, room_controls
+    _seed_song(scfg)  # raw boundary 2150ms, nearest librosa downbeat 2000ms
+    room_controls.save_room_controls(
+        room_controls.RoomControlState(midsong_snap_to_beat=True))
+    _seed_npz_offset(scfg, STEM, 5000)
+
+    [m] = midsong_generator.candidate_moments(GEN_URI)
+    assert m.timestamp_ms == 2000 + 5000, (
+        "the snapped downbeat (2000ms in the WAV/analysis frame) shifted "
+        "into song time by the same 5000ms offset")
+    assert m.snap_grid == "librosa"
+    assert m.snap_moved_ms == -150, (
+        "the relative distance moved by snapping is unaffected by the "
+        "frame shift — only the absolute placement moved")
+    assert m.generator_key == "section:2150"
+
+
+def test_shift_song_grid_helper_is_identity_at_zero_offset():
+    from spectra.services import beat_snap
+    from spectra.services.midsong_generator import _shift_song_grid
+    grid = beat_snap.SongGrid("librosa", [0, 1000, 2000], 500.0)
+    assert _shift_song_grid(grid, 0) is grid
+    assert _shift_song_grid(None, 1234) is None
+
+
+def test_shift_song_grid_helper_shifts_every_downbeat():
+    from spectra.services import beat_snap
+    from spectra.services.midsong_generator import _shift_song_grid
+    grid = beat_snap.SongGrid("librosa", [0, 1000, 2000], 500.0)
+    shifted = _shift_song_grid(grid, 3692)
+    assert shifted.downbeats == [3692, 4692, 5692]
+    assert shifted.grid_name == "librosa"
+    assert shifted.beat_length_ms == 500.0
