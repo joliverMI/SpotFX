@@ -4522,7 +4522,7 @@ two checks both run and neither substitutes for the other. Seven things:
   throwaway room with no `save_room`, `exposure_test.py`'s own precedent.
   Never a second idea of "how much light".
 - **`unprovable`/`unproven` NEVER REFUSE** (`mapping_refusals.
-  LEVER_REFUSING` is the list of the three that do, and every one of them is
+  LEVER_REFUSING` is the list that do, and every one of them is
   a MEASUREMENT). "We could not check" is not "we checked and it is
   broken" — the same distinction `night_exit` draws between DARK and
   UNKNOWN and `witness` between contaminated and witness_unavailable.

@@ -904,7 +904,7 @@ def _grid_mean(grids: list) -> float:
 
 async def _measure_stream_lag(program, emitter, live: list,
                               deps: "room_mapping.RunDeps"
-                              ) -> tuple[Optional[float], bool]:
+                              ) -> tuple[Optional[float], bool, bool]:
     """WITH THE ROOM ALREADY DARK — this call's own "dark" step is what
     makes it so, the same first-open-of-the-hold moment every capture run
     has always had — step the ONE driven emitter's lamp black->lit ONCE and
