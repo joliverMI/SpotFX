@@ -242,16 +242,30 @@ class Trace:
     ladders: list = field(default_factory=list)
     meta: Optional[SimpleNamespace] = None
 
+    # Fields added to lock_history.record()'s call args by later features,
+    # verified in their OWN tests (never here — this module proves the
+    # KeepSearching refactor byte-identical against a PINNED baseline that
+    # predates them, so it cannot know about them). Ship 2's frame-mismatch
+    # advisory (services/frame_advisory.py, data/false-lock-continued-search/
+    # report.md §4) is the first: tests/test_false_lock_frame_mismatch.py +
+    # tests/test_frame_advisory.py cover it directly.
+    _HISTORY_FIELDS_ADDED_AFTER_BASELINE = (
+        "frame_suspect", "frame_suspect_room_band_ms", "frame_suspect_distance_ms",
+    )
+
     def comparable(self) -> dict:
         """The trace with wall-clock stamps removed — everything else must
         match byte for byte between two runs of the same world."""
         def strip(d):
             return None if d is None else {k: v for k, v in d.items() if k != "at_ms"}
+        def strip_history(entry):
+            return {k: v for k, v in entry.items()
+                    if k not in self._HISTORY_FIELDS_ADDED_AFTER_BASELINE}
         return {
             "kernel": self.kernel,
             "engine": self.engine.calls,
             "saves": self.saves,
-            "history": self.history,
+            "history": [strip_history(e) for e in self.history],
             "ws": [strip(m) for m in self.ws.sent],
             "logs": self.logs,
             "last_frame_ms": self.last_frame_ms,

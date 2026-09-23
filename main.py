@@ -79,7 +79,11 @@ async def _on_state_update(app_state) -> None:
         elif not profile.artist_genre and track.genres:
             profile.artist_genre = track.genres
             save_profile(profile)
-        engine.load_profile(profile)
+        # track.spotify_uri (not profile.spotify_uri) is the engine's
+        # identity — a title/artist-fallback match can load a profile whose
+        # own spotify_uri is a stale ledfx:artist:title pseudo-URI. See
+        # TriggerEngine.load_profile's own docstring.
+        engine.load_profile(profile, track_uri=track.spotify_uri)
 
     # SPECTRA scene sequencer: observes song transitions (its only shipped
     # change-moment source). Dark unless sequencer.json config.enabled — the

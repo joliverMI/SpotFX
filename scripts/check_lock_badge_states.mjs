@@ -297,6 +297,36 @@ console.log('\nNINE — keep searching: "Searching…" while it works past the p
      'an immediate no_time_left says its planned windows ran out');
 }
 
+console.log('\nTEN — Ship 2 frame-mismatch advisory: tints "Lock idle", never replaces it');
+{
+  // services/frame_advisory.py, data/false-lock-continued-search/report.md §4.
+  const suspectLock = rec('locked', {
+    offset_ms: 4274, quality: 0.79,
+    frame_suspect: true, frame_suspect_room_band_ms: -1100, frame_suspect_distance_ms: 5374,
+  });
+  const quietLock = rec('locked', { offset_ms: -475, quality: 0.98, frame_suspect: false });
+
+  eq(badge(suspectLock).label, 'Lock idle',
+     'a frame-suspect lock is STILL "Lock idle" — the advisory never invents a new phase');
+  ok(badge(suspectLock).color !== badge(quietLock).color,
+     'but it is tinted differently from an ordinary idle lock');
+  ok(badge(suspectLock).title.includes('may not share a timing frame'),
+     'and the tooltip explains what that means, in words');
+  ok(badge(suspectLock).title.includes('5374ms'), 'carrying the measured distance');
+  ok(badge(suspectLock).title.includes('-1100ms'), 'and the band it was judged against');
+
+  eq(badge(quietLock).label, 'Lock idle', 'an ordinary lock reads exactly as before');
+  ok(!badge(quietLock).title.includes('timing frame'),
+     'and says nothing about frames when nothing is suspect');
+
+  const noAdvisoryRecorded = rec('locked', { offset_ms: -475, quality: 0.98 });
+  eq(badge(noAdvisoryRecorded).label, 'Lock idle',
+     'a play recorded before this field existed reads exactly as before (additive field)');
+  eq(badge(noAdvisoryRecorded).color, badge(quietLock).color,
+     'and its colour is identical to an explicit frame_suspect=false lock');
+  ok(!badge(noAdvisoryRecorded).title.includes('timing frame'), 'no stray advisory text');
+}
+
 rmSync(tmp, { recursive: true, force: true });
 console.log(failures === 0 ? '\nALL PASS\n' : `\n${failures} FAILURE(S)\n`);
 process.exit(failures === 0 ? 0 : 1);

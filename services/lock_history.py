@@ -21,6 +21,16 @@ Each entry:
     quality          best Q of the play (pearson_r × difficulty, 0–1)
     n_windows        number of window measurements
     grade            A–F, see compute_grade()
+    frame_suspect    True when this hard lock landed far from the room's own
+                     current band on a song with hand-authored triggers —
+                     an ADVISORY (services/frame_advisory.py), never a gate;
+                     always False for a play that didn't hard-lock or had no
+                     band to compare against. False on every pre-existing
+                     entry (the field is additive).
+    frame_suspect_room_band_ms   the band this play's offset was compared
+                     against, when frame_suspect could be evaluated (else None)
+    frame_suspect_distance_ms    abs(offset_ms − frame_suspect_room_band_ms),
+                     when computed (else None)
 
 Storage: storage/lock_history.json, most-recent first, capped. Same
 single-process threading.Lock pattern as services/systemic_offset.py.
@@ -242,6 +252,9 @@ def record(
     prev_offset_ms: Optional[int] = None,
     quality: float = 0.0,
     n_windows: int = 0,
+    frame_suspect: bool = False,
+    frame_suspect_room_band_ms: Optional[int] = None,
+    frame_suspect_distance_ms: Optional[int] = None,
 ) -> None:
     """Append one play's lock outcome and persist. Never raises."""
     try:
@@ -261,6 +274,13 @@ def record(
             "quality": round(float(quality), 3),
             "n_windows": int(n_windows),
             "grade": compute_grade(quality, locked, time_to_lock_ms),
+            "frame_suspect": bool(frame_suspect),
+            "frame_suspect_room_band_ms": (
+                int(frame_suspect_room_band_ms) if frame_suspect_room_band_ms is not None else None
+            ),
+            "frame_suspect_distance_ms": (
+                int(frame_suspect_distance_ms) if frame_suspect_distance_ms is not None else None
+            ),
         }
         with _lock:
             entries = _load()
@@ -269,10 +289,13 @@ def record(
             del entries[_CAP:]
             _persist()
         logger.info(
-            "lock_history: %s grade=%s ttl=%s offset=%+dms Q=%.2f (%s — %s)",
+            "lock_history: %s grade=%s ttl=%s offset=%+dms Q=%.2f%s (%s — %s)",
             "locked" if locked else "no hard lock", entry["grade"],
             f"{time_to_lock_ms}ms" if time_to_lock_ms is not None else "—",
-            int(offset_ms), float(quality), artist, title,
+            int(offset_ms), float(quality),
+            f" FRAME_SUSPECT (band={frame_suspect_room_band_ms:+d}ms dist={frame_suspect_distance_ms}ms)"
+            if frame_suspect else "",
+            artist, title,
         )
     except Exception as exc:   # history must never break the xcorr loop
         logger.warning("lock_history: record failed: %s", exc)

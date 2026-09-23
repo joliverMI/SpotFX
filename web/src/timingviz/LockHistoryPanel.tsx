@@ -30,6 +30,14 @@ export interface LockEntry {
   quality?: number;
   n_windows?: number;
   grade?: string;
+  /** Ship 2 frame-mismatch advisory (services/frame_advisory.py) — a hard
+   * lock that landed far from the room's own band on a song with
+   * hand-authored triggers. An ADVISORY: the lock stands, this only names
+   * the possibility the shape and the marks on it don't share a frame.
+   * See data/false-lock-continued-search/report.md. */
+  frame_suspect?: boolean;
+  frame_suspect_room_band_ms?: number | null;
+  frame_suspect_distance_ms?: number | null;
 }
 
 const GRADE_COLORS: Record<string, string> = {
@@ -302,6 +310,15 @@ export default function LockHistoryPanel({ activeUri, onPick }: {
                         title="First recorded play — no offset history; graded from a cold start"
                         style={{ marginLeft: 4, fontSize: 9, color: 'var(--text-muted)', border: '1px solid var(--border)', borderRadius: 3, padding: '0px 3px', verticalAlign: 'middle' }}>
                         1st
+                      </span>
+                    )}
+                    {e.frame_suspect && (
+                      <span
+                        title={`Frame-mismatch advisory: this lock landed ${
+                          e.frame_suspect_distance_ms ?? '?'
+                        }ms from the room's own band (${fmtOffset(e.frame_suspect_room_band_ms)}) on a song with hand-placed marks. The shape and the marks may not share a timing frame — worth checking by ear. The lock itself is unaffected.`}
+                        style={{ marginLeft: 4, fontSize: 9, color: '#ffb300', border: '1px solid #ffb300', borderRadius: 3, padding: '0px 3px', verticalAlign: 'middle' }}>
+                        frame?
                       </span>
                     )}
                   </td>

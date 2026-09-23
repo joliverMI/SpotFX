@@ -1168,11 +1168,12 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         id: 'timing-lock-history',
         title: 'Lock history',
-        keywords: 'last 10 songs grade time to lock offset delta search recent plays first play repeat 1st',
+        keywords: 'last 10 songs grade time to lock offset delta search recent plays first play repeat 1st frame suspect mismatch',
         body: [
           'The panel at the top of the Timing page lists the last 10 distinct songs\' lock outcomes: how long into the song the hard lock landed ("time to lock"), the final offset, how far it had to move from the previous baseline (Δ needed), the lock quality Q, and a letter grade. Click any row to load that song\'s full timing dump below; type in the search box to switch to a full-history search (every stored play matching title, artist, or uri).',
           'Grades: the base comes from the play\'s best Q (A ≥ 0.9, B ≥ 0.8, C ≥ 0.7, D ≥ 0.6, F below). A play that finished its windows without a hard lock drops one notch, and so does a hard lock that landed more than 30 s into the song (the song ran that long on the cold-start baseline).',
           'First plays are graded separately: a "1st" chip marks a song\'s first-ever recorded play, and the summary line above the table splits the grade counts into repeats vs first plays. A first play starts cold — no offset history — so its grade says how hard the song was to lock from nothing, not how well the room is doing; an album of brand-new songs will grade low without anything being wrong.',
+          'An amber "frame?" chip is a frame-mismatch ADVISORY: this hard lock landed far (more than 2s) from the room\'s own recent band, on a song with hand-placed marks. It never refuses or changes the lock — the offset that fires is exactly the one the sweep measured — it only flags that the song\'s captured audio shape and the marks placed on it may have been authored in two different timelines, so the marks could be firing early or late even though the lock is a correct, confident measurement of the shape itself. Worth checking that song by ear; the hover text gives the measured distance and the band it was judged against.',
         ],
       },
       {
@@ -1204,9 +1205,10 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         id: 'debug-lock',
         title: 'Lock badge & live nudge',
-        keywords: 'locked suspect recovering pearson confidence buffer nudge',
+        keywords: 'locked suspect recovering pearson confidence buffer nudge frame suspect mismatch',
         body: [
           'The lock badge shows the matcher\'s state (LOCKED / SUSPECT / RECOVERING / IDLE / NO LOCK) with the rolling Pearson r — its live confidence in the current alignment.',
+          'A "Lock idle" badge tinted amber instead of grey is a frame-mismatch advisory: this song hard-locked far from the room\'s own recent band, and it has hand-placed marks. The lock itself is unaffected — the offset firing is exactly what was measured — the tint and its tooltip just flag that this song\'s captured audio shape and the marks on it may not share a timing frame. Same as the "frame?" chip on the Timing page\'s lock history.',
         ],
         table: [
           ['[ / ]', 'Nudge the LedFX trigger buffer −50 / +50 ms live.'],
