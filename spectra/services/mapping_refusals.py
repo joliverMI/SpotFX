@@ -332,6 +332,12 @@ LEVER_OK = "ok"
 LEVER_NO_SIGNAL = "no_signal"
 LEVER_NO_RESPONSE = "no_response"
 LEVER_DRIFT = "drift"
+#: THE STREAM'S OWN LAG measured longer than this protocol's settles can
+#: absorb (`capture_settings.STREAM_LAG_REFUSAL_S`) — 2026-09-23,
+#: `data/kiosk-exposure-lever-no-response/report.md`. A MEASUREMENT, exactly
+#: like the three above: the delivered stream itself was watched and timed,
+#: not merely read back.
+LEVER_STREAM_LAG = "stream_lag"
 LEVER_UNPROVABLE = "unprovable"
 LEVER_UNPROVEN = "unproven"
 #: The verdicts that stop a calibration-grade run, and every one of them is
@@ -345,7 +351,8 @@ LEVER_UNPROVEN = "unproven"
 #: not a refusal, and deliberately so: the run may not have asked for that
 #: lever at all, and its own `camera_refusal` gate still stops it by name
 #: if it did.
-LEVER_REFUSING = (LEVER_NO_SIGNAL, LEVER_NO_RESPONSE, LEVER_DRIFT)
+LEVER_REFUSING = (LEVER_NO_SIGNAL, LEVER_NO_RESPONSE, LEVER_DRIFT,
+                  LEVER_STREAM_LAG)
 
 
 #: THE NAMED FIRST CHECK for a lever verdict whose readings disagree, when
@@ -465,6 +472,43 @@ def _no_signal_words(verdict: dict) -> str:
         f"moving the camera closer, or giving that emitter more of the "
         f"frame, is what would change the answer. Nothing was written, and "
         f"the floor was not lowered to make it pass.")
+
+
+def stream_lag_too_high(lag_s: Optional[float], bound_s: Optional[float] = None
+                        ) -> str:
+    """THE DELIVERED STREAM ITSELF IS TOO SLOW FOR THIS PROTOCOL, found
+    2026-09-23 (`data/kiosk-exposure-lever-no-response/report.md`): a kiosk
+    camera held at 1920x1080/5fps took 1.4-2.1s to show ANY change — a
+    control write or a scene change alike — which is longer than the
+    self-test's own dark/lit settles, so its "dark" reference still showed
+    the previous lit lamp and its "lit" capture was mostly the dark room.
+    Both that night's refusals (`no_response`, twice) were measurements of
+    that gap, not of the lever.
+
+    Distinct from `lever_not_connected`'s own three verdicts: those compare
+    two commanded regimes and find the SENSOR did not respond; this compares
+    a single change against the CLOCK and finds the delivered stream itself
+    took too long to show it — a property of the transport/frame-size mode,
+    not of the exposure control."""
+    from spectra.services import capture_settings
+    bound = (bound_s if bound_s is not None
+             else capture_settings.STREAM_LAG_REFUSAL_S)
+    if lag_s is None:
+        measured = (f"never showed the change inside a "
+                    f"{capture_settings.STREAM_LAG_SAMPLE_WINDOW_S:g}s window "
+                    f"— at least that long")
+    else:
+        measured = f"took {lag_s:g}s"
+    return (
+        f"this camera's delivered stream {measured} to show a lamp stepping "
+        f"from black to lit, longer than the {bound:g}s this protocol's "
+        f"settles can absorb. A dark reference taken on this schedule would "
+        f"still show the previous lamp, and a lit capture would be mostly "
+        f"the dark room, so nothing further was measured. This is a "
+        f"property of the HELD STREAM (a slow frame size, or a UVC mode "
+        f"with a long frame interval), not of the exposure lever itself — "
+        f"see `spectra/services/capture_settings.stream_lag_crossing`. "
+        f"Nothing was written.")
 
 
 def _lever_pair(verdict: dict) -> tuple[str, str]:
@@ -824,6 +868,24 @@ def pose_regime_changed(differences: list) -> str:
             "camera's own brightness scale, so a changed regime is a "
             "changed scale: they are not claimed to be comparable with the "
             "earlier runs.")
+
+
+def calibration_engine_live() -> str:
+    """THE SHOW ENGINE IS ANIMATING HIS ROOM — a calibration cannot run
+    under it. Found 2026-09-23 (`data/kiosk-exposure-lever-no-response/
+    report.md`, finding #2): the night window's ORDINARY handover called
+    `engine.go_live()`, and ten seconds later the drift conductor's own leg
+    lit the crystal and 17 Hue bulbs in the middle of the lever self-test's
+    own dark/lit windows — a moving effect landing inside the exact
+    difference this instrument computes."""
+    return (
+        "the show engine is live — it is animating this room right now, "
+        "and a calibration's dark/lit windows would land in the middle of "
+        "whatever it does next. Nothing was measured and nothing was "
+        "written. Take the room quietly first — `night_take.take_room` / "
+        "`POST /ownership/handover` with `{\"quiet\": true}` — which brings "
+        "the stack up dark and never calls `engine.go_live()`, then run "
+        "this calibration again.")
 
 
 def calibration_no_room(room_id: str) -> str:

@@ -75,6 +75,7 @@ import json
 import logging
 import platform
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
@@ -86,13 +87,27 @@ from spectra.capture_client.camera import (LEVERS, SWITCHES, BaseCamera, CameraL
 logger = logging.getLogger(__name__)
 
 CLIENT_NAME = "spectra-capture-client"
+#: 1.2 (2026-09-23, `data/kiosk-exposure-lever-no-response/report.md`): the
+#: wire gained `pipe_drained` (the same value `fresh_frames` always carried,
+#: under a name that says what it actually claims — see `camera.BaseCamera.
+#: fresh_frames`'s docstring; `fresh_frames` itself is kept, unrenamed) and
+#: `delivered_fps` — this client's OWN measured send rate, beside the
+#: device's declared `sensor_fps` (already on `hello["lock"]`), so a server
+#: pricing a frame period has both the claimed rate and the one this client
+#: has actually observed itself deliver rather than a hardcoded guess.
+#:
 #: 1.1 (2026-09-02): the wire gained `fresh_frames`, and this client's
 #: transport gained the drain behind it. The number moves when what a
 #: SERVER can rely on this client for moves — `capture_health` keeps the
 #: last one per machine, so "which build is on the camera host" stays a
 #: read rather than a guess. `fresh_frames` itself is still the signal
 #: anything branches on; a version is for a human reading the record.
-CLIENT_VERSION = "1.1"
+CLIENT_VERSION = "1.2"
+#: HOW MANY RECENT SENDS `delivered_fps` AVERAGES OVER — the same window
+#: size the server's own `capture_settings.CameraNegotiation.observed_fps`
+#: uses, for the same reason: enough to smooth one slow frame, short enough
+#: to track a rate that just changed.
+DELIVERED_FPS_WINDOW = 16
 
 #: Reconnect backoff. Short at first (a service restart is seconds) and
 #: capped low: this client's whole job is to BE there when the queue looks,
@@ -165,6 +180,13 @@ class CaptureClient:
         self._stop = asyncio.Event()
         self._ws = None
         self._last_lock_read = 0.0
+        #: TIMESTAMPS OF THE MOST RECENT FRAMES ACTUALLY SENT, newest last —
+        #: this client's OWN measured delivery rate, reported in `hello`
+        #: beside the device's declared `sensor_fps` so a server pricing a
+        #: frame period has both. Survives a reconnect (this object does),
+        #: so a re-hello after a drop still carries the real recent history
+        #: rather than resetting to empty.
+        self._sent_at: deque = deque(maxlen=DELIVERED_FPS_WINDOW)
         #: THE SESSION'S PINNED REGIME — the last thing the server asked
         #: this camera for, kept so it can be RE-ASSERTED on every
         #: reconnect. The camera keeps its own copy for a reopen
@@ -297,6 +319,21 @@ class CaptureClient:
             # and the server names that rather than producing a reading it
             # cannot account for.
             "fresh_frames": bool(getattr(self.camera, "fresh_frames", False)),
+            # THE SAME VALUE, THE HONEST NAME — see `camera.BaseCamera.
+            # fresh_frames`'s docstring: this is a claim about the
+            # TRANSPORT only ("my pipe is drained"), never about whatever
+            # sits upstream of it (a UVC camera's own firmware/USB
+            # pipeline, which can still be seconds behind — see
+            # `capture_settings.stream_lag_crossing`, the measurement that
+            # actually answers that question).
+            "pipe_drained": bool(getattr(self.camera, "pipe_drained", False)),
+            # THIS CLIENT'S OWN MEASURED DELIVERY RATE, beside the device's
+            # DECLARED one (`lock.sensor_fps`, from `--get-parm`, already
+            # below) — so a server pricing a frame period before any frame
+            # has arrived through THIS connection has something better than
+            # a hardcoded guess. None until at least two frames have been
+            # sent (an empty history is not a claim of zero).
+            "delivered_fps": self._delivered_fps(),
             "secure_context": True,
             "frame_size": {"width": self.camera.frame_size[0],
                            "height": self.camera.frame_size[1]},
@@ -306,6 +343,18 @@ class CaptureClient:
             # server's own account of why this is safe.
             "pose_hint": self.camera.pose_token or None,
             "lock": self.camera.lock.as_wire()}))
+
+    def _delivered_fps(self) -> Optional[float]:
+        """This client's own recently-observed send rate, from the
+        timestamps of the frames it actually sent — the SAME algorithm the
+        server's own `capture_settings.CameraNegotiation.observed_fps` uses,
+        so the two numbers mean the same thing when they are compared.
+        `None` — never 0.0 — until there are at least two sends to time."""
+        times = list(self._sent_at)
+        if len(times) < 2:
+            return None
+        span = times[-1] - times[0]
+        return round((len(times) - 1) / span, 3) if span > 0 else None
 
     async def _reassert(self) -> None:
         """Write the pinned levers to the driver again and read every
@@ -438,6 +487,7 @@ class CaptureClient:
                 "data": base64.b64encode(data).decode("ascii"),
                 "lock": self.camera.lock.as_wire()}))
             self.state.frames_sent += 1
+            self._sent_at.append(self._clock())
             self.state.stale_dropped = getattr(self.camera, "stale_dropped", 0)
             self.state.regime_discards = getattr(
                 self.camera, "regime_discards", 0)

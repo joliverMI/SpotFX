@@ -202,3 +202,27 @@ def test_the_session_persists_no_pixels(tmp_path, monkeypatch):
     }, "no pixels, no grids, no image — only who and what"
     assert not sess.grids and not sess.frames._frames, (
         "every ring is dropped on close")
+
+
+def test_hello_carries_pipe_drained_and_delivered_fps():
+    """`data/kiosk-exposure-lever-no-response/report.md`, 2026-09-23: both
+    new fields must reach `self.hello` — `pipe_drained` (the honestly-named
+    twin of `fresh_frames`) and `delivered_fps` (the client's own measured
+    send rate) — alongside the field they arrived beside, unchanged."""
+    sess, _ = _session()
+    asyncio.run(sess.handle({"type": "hello", "lock": LOCKED,
+                             "fresh_frames": True, "pipe_drained": True,
+                             "delivered_fps": 4.38}))
+    assert sess.hello["fresh_frames"] is True
+    assert sess.hello["pipe_drained"] is True
+    assert sess.hello["delivered_fps"] == 4.38
+
+
+def test_hello_without_the_new_fields_is_unchanged():
+    """A build that predates this — or a test double throughout this
+    codebase that never sends them — leaves `self.hello` exactly as it
+    always was: the keys are simply absent, never a fabricated default."""
+    sess, _ = _session()
+    asyncio.run(sess.handle({"type": "hello", "lock": LOCKED}))
+    assert "pipe_drained" not in sess.hello
+    assert "delivered_fps" not in sess.hello

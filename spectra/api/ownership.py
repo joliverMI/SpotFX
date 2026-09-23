@@ -4,8 +4,19 @@
       owner, in-flight handover (step/from/to/age), armed latch, whether the
       live stack is up, history trail.
   POST /api/ownership/handover — the owner's switch: {"to": "spectra" |
-      "spot-effects"}. REFUSED (403) unless the SPECTRA_HANDOVER_ARMED
-      latch is set on the process; 409 when the record refuses (already
+      "spot-effects", "quiet": false}. `quiet: true` (spectra only — see
+      `handover.run_handover`'s own `quiet` parameter and `night_take.py`'s
+      module docstring for the full mechanism) brings the stack up BLACK
+      and never calls `engine.go_live()`, so nothing is animating the room
+      afterward; every other gate, failure mode and release semantic is
+      identical to an ordinary take. This is the HTTP surface for the same
+      quiet take the self-taking night uses — added 2026-09-23
+      (`data/kiosk-exposure-lever-no-response/report.md`) so a calibration
+      can be run under a genuinely dark, non-animating room without the
+      SPECTRA_NIGHT_SELF_TAKE arming lever or the released-room-only
+      restriction that lever carries. REFUSED (403) unless the
+      SPECTRA_HANDOVER_ARMED latch is set on the process; 409 when the
+      record refuses (already
       owner / already in flight); 412 when the to-side's go-day preparation
       is missing (the readiness gate — refused BEFORE quiesce, room
       untouched, the error names the preparation and its command); on a
@@ -145,6 +156,16 @@ class HandoverRequest(BaseModel):
     #: to spot-effects, which has no scope concept.
     room_id: Optional[str] = None
     carrier_ids: Optional[list[str]] = None
+    #: THE QUIET TAKE, exposed on the button — 2026-09-23,
+    #: `data/kiosk-exposure-lever-no-response/report.md`. `False` (the
+    #: default, and every caller before this field existed) is an ordinary
+    #: take: the stack restores each virtual's stored effect and the engine
+    #: goes live. `True` — spectra only, per `handover.run_handover`'s own
+    #: `quiet` parameter — brings the stack up BLACK and never calls
+    #: `engine.go_live()`, so a calibration run underneath it is never
+    #: corrupted by the show animating mid-capture. IGNORED for a handover
+    #: to spot-effects, which owns no such mode.
+    quiet: bool = False
 
 
 def _record_json() -> dict:
@@ -288,15 +309,20 @@ async def post_handover(body: HandoverRequest, request: Request = None):
         return JSONResponse(
             {"result": "refused-scope-unresolved", "error": scope.reason,
              "record": _record_json()}, status_code=422)
+    # QUIET IS SPECTRA-ONLY — spot-effects owns no such mode, and passing
+    # it there would be a silent no-op wearing a name that implies it did
+    # something (see the field's own docstring).
+    quiet = bool(body.quiet) and body.to == light_ownership.SPECTRA
     try:
-        # UNSCOPED CALLS THE SAME WAY IT ALWAYS DID — no keyword at all —
-        # so the default press, and every test double built for it, is
-        # byte-identical to before this parameter existed.
-        sides = (handover_svc.production_sides()
-                 if scope is None else
-                 handover_svc.production_sides(
-                     scope=scope.scope.virtual_ids))
-        record = await handover_svc.run_handover(body.to, sides)
+        # AN UNSCOPED, NOT-QUIET CALL IS THE EXACT OLD SHAPE — no keyword at
+        # all — so the default press, and every test double built for it
+        # before 2026-09-23, is byte-identical. `quiet` is only ever passed
+        # when it is actually True, for the same reason.
+        kwargs: dict = {"quiet": True} if quiet else {}
+        if scope is not None:
+            kwargs["scope"] = scope.scope.virtual_ids
+        sides = handover_svc.production_sides(**kwargs)
+        record = await handover_svc.run_handover(body.to, sides, quiet=quiet)
     except light_ownership.OwnershipError as exc:
         raise HTTPException(409, str(exc))
     except handover_svc.HandoverRefused as exc:

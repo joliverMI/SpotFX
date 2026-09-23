@@ -90,6 +90,27 @@ def test_a_calibration_needs_a_name():
         assert r.status_code == 400
 
 
+def test_lever_scope_round_trips_and_defaults_empty():
+    """`data/kiosk-exposure-lever-no-response/report.md`: a calibration may
+    name which emitter its own lever self-test drives — empty/omitted is
+    the whole-room default every calibration had before this field
+    existed."""
+    with _client() as client:
+        room = _room(client)
+        made = _create(client, room)
+        assert made.json()["lever_scope"] == {}
+
+        edited = client.put(
+            f"/api/calibrations/{made.json()['id']}",
+            json={"lever_scope": {"carrier_ids": ["east"]}})
+        assert edited.status_code == 200, edited.text
+        assert edited.json()["lever_scope"] == {"carrier_ids": ["east"]}
+        assert any("lever self-test scope" in c
+                  for c in edited.json()["changed"])
+        got = client.get(f"/api/calibrations/{made.json()['id']}").json()
+        assert got["lever_scope"] == {"carrier_ids": ["east"]}
+
+
 # ── 2. ONE VALIDATOR, NEVER A SECOND ───────────────────────────────────────
 
 @pytest.mark.parametrize("bad,says", [

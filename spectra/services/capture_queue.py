@@ -65,7 +65,8 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
 from spectra import config as scfg
-from spectra.services import capture_runs, capture_source, mapping_refusals
+from spectra.services import (capture_runs, capture_source, lever_selftest,
+                              mapping_refusals)
 
 logger = logging.getLogger(__name__)
 
@@ -379,7 +380,9 @@ def _attempt_row(n: int, outcome: capture_runs.RunOutcome) -> dict:
     return row
 
 
-async def _execute(item: QueueItem) -> capture_runs.RunOutcome:
+async def _execute(item: QueueItem,
+                   lever_scope: "lever_selftest.Scope | None" = None
+                   ) -> capture_runs.RunOutcome:
     if item.kind == capture_runs.KIND_MAP:
         return await capture_runs.run_map(
             item.room_id, granularity=item.granularity,
@@ -392,7 +395,7 @@ async def _execute(item: QueueItem) -> capture_runs.RunOutcome:
             white_balance=item.white_balance, focus=item.focus,
             # An overnight sweep must not redecorate his page's granularity
             # control with whichever item happened to run last.
-            remember=False)
+            remember=False, lever_scope=lever_scope)
     from spectra.services import commissioning
     targets = (list(item.targets) if item.targets
                else ([commissioning.TARGET_FIXTURES] if item.per_fixture
@@ -400,7 +403,8 @@ async def _execute(item: QueueItem) -> capture_runs.RunOutcome:
     return await capture_runs.run_commission(
         item.room_id, mapper_id=item.mapper_id, repeat=item.repeat,
         targets=targets, exposure_time=item.exposure_time, gain=item.gain,
-        white_balance=item.white_balance, focus=item.focus)
+        white_balance=item.white_balance, focus=item.focus,
+        lever_scope=lever_scope)
 
 
 def new_run(items: list[QueueItem], label: str = "") -> QueueRun:
@@ -422,7 +426,8 @@ async def run_queue(items: list[QueueItem], *, label: str = "",
                     clock: Callable[[], float] = time.monotonic,
                     save: Optional[Callable[[QueueRun], Any]] = None,
                     run: Optional[QueueRun] = None,
-                    guard: Optional[Callable[[QueueItem], Optional[str]]] = None
+                    guard: Optional[Callable[[QueueItem], Optional[str]]] = None,
+                    lever_scope: "lever_selftest.Scope | None" = None
                     ) -> QueueRun:
     """Walk the declared list. Never raises for an expected condition — an
     unattended caller gets a record, and the record says what happened.
@@ -440,10 +445,22 @@ async def run_queue(items: list[QueueItem], *, label: str = "",
     planned-end bound: his morning routine (spectra/services/night_run.py).
     A run that could not finish before his morning must not be started —
     "never schedule capture work past it" — and a bound checked only once,
-    at the top of a queue, would still let item six start at 05:28."""
+    at the top of a queue, would still let item six start at 05:28.
+
+    `lever_scope`, default None: the calibration this queue belongs to may
+    name which emitter its lever self-test measures (`Calibration.
+    lever_scope`), overriding the run's own default (`plan.emitters[0]`)
+    for a pose where that emitter is a poor one to measure with —
+    `data/kiosk-exposure-lever-no-response/report.md`. Handed straight
+    through to every item's own `capture_runs` call; the self-test's own
+    cache means only the FIRST calibration-grade item actually spends it."""
     if run is None:
         run = new_run(items, label)
     persist = save if save is not None else save_queue
+    # ONLY PASSED WHEN NAMED — an unscoped call (every caller before this
+    # parameter existed, and every test double built for `_execute`) is
+    # byte-identical: `_execute(item)`, exactly as it always was.
+    execute_kwargs = {"lever_scope": lever_scope} if lever_scope is not None else {}
 
     for index, item in enumerate(items):
         refusal = guard(item) if guard is not None else None
@@ -497,7 +514,7 @@ async def run_queue(items: list[QueueItem], *, label: str = "",
             run.first_pose = view["pose_id"]
         pose_changed = bool(run.first_pose and view["pose_id"] != run.first_pose)
 
-        outcome = await _execute(item)
+        outcome = await _execute(item, **execute_kwargs)
         attempts = 1
         attempt_log = [_attempt_row(1, outcome)]
         while (outcome.status == capture_runs.STATUS_PARTIAL
@@ -516,7 +533,7 @@ async def run_queue(items: list[QueueItem], *, label: str = "",
                                     "refusal": "session", "detail": why})
                 break
             attempts += 1
-            outcome = await _execute(item)
+            outcome = await _execute(item, **execute_kwargs)
             attempt_log.append(_attempt_row(attempts, outcome))
 
         record = ItemOutcome(

@@ -507,7 +507,9 @@ async def run_map(room_id: str, *, granularity: Optional[str] = None,
                   gain: Optional[int] = None,
                   white_balance: Optional[int] = None,
                   focus: Optional[int] = None,
-                  remember: bool = True) -> RunOutcome:
+                  remember: bool = True,
+                  lever_scope: "lever_selftest.Scope | None" = None
+                  ) -> RunOutcome:
     """THE mapping run. Every caller — the button, the queue — comes here.
 
     `remember` writes this run's granularity back onto the room so the
@@ -529,7 +531,15 @@ async def run_map(room_id: str, *, granularity: Optional[str] = None,
     in a whole-granularity plan. Unscoped, or scoped by carrier alone, the
     self-test enumerates at whole and drives a whole carrier, exactly as it
     did before the scope existed; `Scope.plan_granularity` decides, not this
-    call site."""
+    call site.
+
+    `lever_scope`, default None: a CALIBRATION'S OWN scope for the
+    self-test specifically (`Calibration.lever_scope`), which OVERRIDES the
+    scope this run would otherwise build from its own `emitter_ids`/
+    `carrier_ids` — a run's own scope is about which fixtures THIS RUN maps,
+    the lever scope is about which one is legible to PROVE THE CAMERA with,
+    and a calibration may reasonably want a different answer to each
+    (`data/kiosk-exposure-lever-no-response/report.md`)."""
     room = light_field.get_room(room_id)
     if room is None:
         return RunOutcome(kind=KIND_MAP, status=STATUS_NOT_FOUND,
@@ -547,7 +557,7 @@ async def run_map(room_id: str, *, granularity: Optional[str] = None,
         try:
             lever = await _preflight(
                 KIND_MAP, room, sess, exposure_time,
-                scope=lever_selftest.Scope.of(
+                scope=lever_scope or lever_selftest.Scope.of(
                     emitter_ids=emitter_ids, carrier_ids=carrier_ids,
                     granularity=g, block_pixels=block))
             refused = _lever_refusal(KIND_MAP, lever, room_id,
@@ -603,12 +613,19 @@ async def run_commission(room_id: str, *, mapper_id: Optional[str] = None,
                          exposure_time: Optional[int] = None,
                          gain: Optional[int] = None,
                          white_balance: Optional[int] = None,
-                         focus: Optional[int] = None) -> RunOutcome:
+                         focus: Optional[int] = None,
+                         lever_scope: "lever_selftest.Scope | None" = None
+                         ) -> RunOutcome:
     """THE commissioning pass. Same lock, same session gate, same shape.
 
     The result is STORED either way (`commissioning.save_result`) — a
     refused run is a fact about the evening too, and an unattended queue is
-    read afterwards or not at all."""
+    read afterwards or not at all.
+
+    `lever_scope`, default None (the whole room, `plan.emitters[0]` — every
+    caller before this existed): a calibration's own scope for the self-test
+    (`Calibration.lever_scope`), for a pose whose default emitter is a poor
+    one to prove the camera with — see `run_map`'s own docstring."""
     room = light_field.get_room(room_id)
     if room is None:
         return RunOutcome(kind=KIND_COMMISSION, status=STATUS_NOT_FOUND,
@@ -633,7 +650,7 @@ async def run_commission(room_id: str, *, mapper_id: Optional[str] = None,
         _begin(KIND_COMMISSION, target_id, room_id, f"{room_id}/commission")
         try:
             lever = await _preflight(KIND_COMMISSION, room, sess,
-                                     exposure_time)
+                                     exposure_time, scope=lever_scope)
             refused = _lever_refusal(KIND_COMMISSION, lever, room_id,
                                      target_id)
             if refused is not None:
@@ -739,7 +756,9 @@ async def run_pose_fingerprint(room_id: str, *,
                                exposure_time: Optional[int] = None,
                                gain: Optional[int] = None,
                                white_balance: Optional[int] = None,
-                               focus: Optional[int] = None):
+                               focus: Optional[int] = None,
+                               lever_scope: "lever_selftest.Scope | None" = None
+                               ) -> "RunOutcome":
     """THE POSE FINGERPRINT PASS, through the same seam as the other three.
 
     It drives lights and reads the same camera session's frames, so it takes
@@ -754,6 +773,15 @@ async def run_pose_fingerprint(room_id: str, *,
     room). What the caller does with the readings — establish a pose,
     check one, discard both — is the calibration's business, not this
     seam's.
+
+    `lever_scope`, default None (the whole room): a calibration's own scope
+    for the self-test (`Calibration.lever_scope`) — THIS is where it
+    actually has to reach, not only the declared map/commission items: a
+    fresh calibration establishes its pose here, FIRST, and
+    `lever_selftest.ensure`'s own cache means whichever call earns the
+    verdict first is the one every later item inherits for the rest of the
+    session. A calibration's named scope that reached only its declared
+    items would be silently overridden by this call's own unscoped default.
 
     `RunOutcome.result` carries the measurement; `RunOutcome.status` is
     `ok` when readings were taken (even if some anchors were dark, which is
@@ -776,7 +804,7 @@ async def run_pose_fingerprint(room_id: str, *,
                f"{room_id}/fingerprint")
         try:
             lever = await _preflight(KIND_FINGERPRINT, room, sess,
-                                     exposure_time)
+                                     exposure_time, scope=lever_scope)
             refused = _lever_refusal(KIND_FINGERPRINT, lever, room_id,
                                      room.name or room_id)
             if refused is not None:

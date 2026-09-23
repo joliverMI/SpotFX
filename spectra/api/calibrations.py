@@ -96,6 +96,11 @@ class CalibrationBody(BaseModel):
     #: measurement — and two entries for one tag id are refused by name
     #: below, because one physical tag has one size.
     tags: Optional[list[TagRegistration]] = None
+    #: WHICH EMITTER THE LEVER SELF-TEST DRIVES, overriding this
+    #: calibration's own declared items' default (`plan.emitters[0]`) — see
+    #: `Calibration.lever_scope`'s own docstring. `{}`/omitted is the whole
+    #: room, unchanged.
+    lever_scope: Optional[dict] = None
 
 
 class RunBody(BaseModel):
@@ -183,7 +188,8 @@ async def create_calibration(body: CalibrationBody):
                       camera=body.camera or PinnedCamera(),
                       envelope=body.envelope or Envelope(),
                       items=list(body.items or []),
-                      tags=list(body.tags or []))
+                      tags=list(body.tags or []),
+                      lever_scope=dict(body.lever_scope or {}))
     if body.placement is not None:
         cal.pose.placement = body.placement
     calibration_store.save(cal)
@@ -252,6 +258,10 @@ async def update_declaration(cal_id: str, body: CalibrationBody):
     if body.tags is not None and body.tags != cal.tags:
         changes.append(_tag_change(cal.tags, body.tags))
         cal.tags = list(body.tags)
+    if body.lever_scope is not None and body.lever_scope != cal.lever_scope:
+        changes.append(f"lever self-test scope: {cal.lever_scope!r} -> "
+                       f"{body.lever_scope!r}")
+        cal.lever_scope = dict(body.lever_scope)
 
     if changes:
         calibration_runs.record_declaration_change(cal, changes,

@@ -477,6 +477,25 @@ class Calibration(BaseModel):
     #: Storage only in this step: nothing reads it, and there is no
     #: tag-detection code anywhere in this build. See `TagRegistration`.
     tags: list[TagRegistration] = Field(default_factory=list)
+    #: WHICH EMITTER THE LEVER SELF-TEST MAY DRIVE ON THIS CALIBRATION,
+    #: overriding the declared item(s)' own scope for the self-test alone
+    #: (`spectra/services/lever_selftest.Scope`) — `{"emitter_ids": [...]}`
+    #: or `{"carrier_ids": [...]}`. EMPTY by default (whole room,
+    #: `plan.emitters[0]`), the byte-identical behaviour every calibration
+    #: had before this field existed.
+    #:
+    #: `data/kiosk-exposure-lever-no-response/report.md` is why this
+    #: exists: his kitchen kiosk's own pose sees the Living Room's
+    #: `tv-mapper` TV-backlight emitter (the plan's first, and every
+    #: pre-existing calibration's default) as a near-invisible 0.2-0.7 grey
+    #: levels per cell, where a kitchen sconce is in frame and legible. A
+    #: calibration whose pose cannot see its own default emitter names a
+    #: better one here rather than the self-test earning its verdict at
+    #: the instrument's noise floor. Setting this for a real calibration
+    #: (which emitter id to name) is an operator/deploy step, the same as
+    #: `scripts/set_scene_colorset_preference.py`'s own convention — not
+    #: guessed here from live storage this build never read.
+    lever_scope: dict = Field(default_factory=dict)
     #: APPEND-ONLY. `append_run` is the only thing that writes it.
     runs: list[CalibrationRun] = Field(default_factory=list)
 

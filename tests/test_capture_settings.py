@@ -314,3 +314,131 @@ def test_an_answered_request_returns_at_once():
     d = _double()
     asyncio.run(d.apply_camera(cs.request(exposure_time=2000, gain=8)))
     assert asyncio.run(d.await_camera(0.05)) is True
+
+
+# ── EIGHT: the stream's own lag ─────────────────────────────────────────
+#
+# `data/kiosk-exposure-lever-no-response/report.md`, 2026-09-23: a kiosk
+# camera held at 1920x1080/5fps took 1.4-2.1s to show ANY change, longer
+# than the self-test's own dark/lit settles — so its "dark" reference still
+# showed the previous lit lamp. `stream_lag_crossing` is the pure half of
+# the fix that measures this; `spectra/services/lever_selftest.py::
+# _measure_stream_lag` is the live half.
+
+def test_stream_lag_crossing_finds_the_known_lag():
+    """A dark room (value 0) until 1.5s after the write, then a lit
+    plateau (value 100) — the crossing is 1.5s, not the moment the write
+    happened nor the moment the plateau settles."""
+    write_at = 10.0
+    samples = [(write_at - 0.2, 0.0), (write_at, 0.0),
+              (write_at + 1.4, 5.0), (write_at + 1.5, 90.0),
+              (write_at + 1.6, 98.0), (write_at + 1.7, 100.0),
+              (write_at + 1.8, 100.0)]
+    lag = cs.stream_lag_crossing(samples, write_at, baseline=0.0)
+    assert lag == pytest.approx(1.5, abs=0.05)
+
+
+def test_stream_lag_crossing_ignores_sample_order():
+    """PURE, and its own docstring says so: `samples` are any order. The
+    live measurement appends them in time order, but nothing about the
+    function should depend on that."""
+    write_at = 0.0
+    samples = [(1.5, 100.0), (0.1, 1.0), (0.6, 90.0), (0.0, 0.0)]
+    lag = cs.stream_lag_crossing(samples, write_at, baseline=0.0)
+    assert lag == pytest.approx(0.6, abs=0.01)
+
+
+def test_stream_lag_crossing_is_none_when_it_never_crosses():
+    """A stream that stays dark the whole window — a genuinely dead
+    lever, or a window shorter than the real lag — reports `None`: could
+    not measure, never a lag of zero."""
+    write_at = 0.0
+    samples = [(t, 0.0) for t in (0.0, 1.0, 2.0, 3.0, 4.0, 5.0)]
+    assert cs.stream_lag_crossing(samples, write_at, baseline=0.0) is None
+
+
+def test_stream_lag_crossing_is_none_with_no_real_transition():
+    """The plateau never clears the baseline — no light appeared at all —
+    so there is nothing here to call a lag."""
+    write_at = 0.0
+    samples = [(t, 5.0) for t in (0.0, 1.0, 2.0)]
+    assert cs.stream_lag_crossing(samples, write_at, baseline=5.0) is None
+
+
+def test_stream_lag_crossing_needs_at_least_two_post_write_samples():
+    write_at = 0.0
+    assert cs.stream_lag_crossing([(0.0, 90.0)], write_at, baseline=0.0) is None
+    assert cs.stream_lag_crossing([], write_at, baseline=0.0) is None
+
+
+def test_widen_settle_widens_by_the_measured_margin():
+    widened = cs.widen_settle(0.7, 1.5)
+    assert widened == pytest.approx(1.5 * cs.STREAM_LAG_SETTLE_MARGIN)
+    assert widened > 0.7
+
+
+def test_widen_settle_never_narrows_an_already_wider_settle():
+    """A tiny measured lag must not SHRINK a settle a caller already had
+    wider for its own reasons."""
+    assert cs.widen_settle(5.0, 0.1) == 5.0
+
+
+def test_widen_settle_is_a_no_op_with_no_measured_lag():
+    """No lag (None, or non-positive) is byte-identical to the settle
+    every run had before this measurement existed."""
+    assert cs.widen_settle(0.7, None) == 0.7
+    assert cs.widen_settle(0.7, 0.0) == 0.7
+    assert cs.widen_settle(0.7, -1.0) == 0.7
+
+
+def test_the_refusal_bound_is_comfortably_inside_the_sample_window():
+    """The sample window has to be able to actually SEE a lag right at the
+    refusal bound rather than timing out and reporting `None` for it —
+    see `STREAM_LAG_SAMPLE_WINDOW_S`'s own docstring."""
+    assert cs.STREAM_LAG_SAMPLE_WINDOW_S > cs.STREAM_LAG_REFUSAL_S
+
+
+class _FakeLock:
+    def __init__(self, sensor_fps=None):
+        self.sensor_fps = sensor_fps
+
+
+class _FakeFpsSession:
+    """A session shaped like `MappingSession` for `declared_fps`'s own
+    reads — never a real one, so this proves the function's fallback order
+    without a camera."""
+
+    def __init__(self, *, hello=None, sensor_fps=None):
+        self.hello = hello or {}
+        self.lock = _FakeLock(sensor_fps=sensor_fps)
+
+
+def test_declared_fps_prefers_the_clients_own_delivered_rate():
+    sess = _FakeFpsSession(hello={"delivered_fps": 4.38}, sensor_fps=5.0)
+    assert cs.declared_fps(sess) == 4.38
+
+
+def test_declared_fps_falls_back_to_the_devices_declared_rate():
+    sess = _FakeFpsSession(hello={}, sensor_fps=30.0)
+    assert cs.declared_fps(sess) == 30.0
+
+
+def test_declared_fps_falls_back_to_the_bare_default_last():
+    sess = _FakeFpsSession(hello={}, sensor_fps=None)
+    assert cs.declared_fps(sess) == 5.0
+    assert cs.declared_fps(sess, default=7.5) == 7.5
+
+
+def test_declared_fps_ignores_a_zero_or_negative_delivered_rate():
+    """A hello that answered with garbage must not win over a real
+    declared rate."""
+    sess = _FakeFpsSession(hello={"delivered_fps": 0.0}, sensor_fps=30.0)
+    assert cs.declared_fps(sess) == 30.0
+
+
+def test_declared_fps_never_raises_on_a_session_with_no_shape_at_all():
+    """A session that answers none of this — the oldest test doubles in
+    this codebase — degrades to the default rather than an AttributeError."""
+    class _Bare:
+        pass
+    assert cs.declared_fps(_Bare()) == 5.0

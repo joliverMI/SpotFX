@@ -660,8 +660,10 @@ class SpectraSide:
 def production_sides(*, quiet: bool = False,
                      scope: Optional[set] = None) -> dict[str, WriterSide]:
     """The two real writer sides. `quiet` builds the SPECTRA side in its
-    quiet mode — the self-taking night's take, and nothing else; every other
-    caller gets exactly what it always got.
+    quiet mode — the self-taking night's take, and, since 2026-09-23, the
+    same quiet take exposed on `POST /ownership/handover` with
+    `{"quiet": true}` (`spectra/api/ownership.py`); every other caller gets
+    exactly what it always got.
 
     `scope` narrows WHICH FIXTURES that take brings up at all
     (spectra/services/take_scope.py). None — every other caller — is the
