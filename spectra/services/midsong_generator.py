@@ -73,14 +73,37 @@ allows it only on a song with ZERO authored triggers of its own — see
 trigger_engine._effective_mode_for_song), checked by trigger_engine at
 fire time — generation and storage happen regardless of the setting, so
 seeded triggers are always visible/editable on the timeline.
+
+BEAT SNAP (Phase 2, 2026-09-22, spectra/services/beat_snap.py): once a
+section boundary names a cue's EXISTENCE and approximate time (unchanged
+by this), the cue's placed timestamp_ms is nudged onto the nearest
+downbeat of a per-song grid — gated by RoomControlState.
+midsong_snap_to_beat (default True; room_controls.py's own docstring).
+generator_key stays keyed on the section's own RAW (unsnapped) start_ms
+— the analysis moment that produced the cue never moves, so toggling the
+setting or a grid becoming available/unavailable between runs UPDATES the
+same trigger's timestamp_ms in place rather than deleting and re-adding
+under a new key.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
+from typing import Optional
+
 from spectra.models.trigger import FireSceneAction, SpectraTrigger
-from spectra.services import analysis_reader, trigger_store
+from spectra.services import analysis_reader, beat_snap, room_controls, trigger_store
 
 INTENSITY_FLOOR = 0.05
 EDGE_TRIM_MS = 15_000
+
+
+@dataclass(frozen=True)
+class CandidateMoment:
+    timestamp_ms: int
+    intensity: float
+    generator_key: str
+    snap_grid: Optional[str] = None
+    snap_moved_ms: Optional[int] = None
 
 
 def _normalized_intensities(sections: list[dict]) -> list[float]:
@@ -124,21 +147,42 @@ def _normalized_intensities(sections: list[dict]) -> list[float]:
     return out
 
 
-def candidate_moments(uri: str) -> list[tuple[int, float, str]]:
-    """(timestamp_ms, intensity, generator_key) for every section boundary
-    past the song's own start. Empty when no analysis is available yet —
-    generation is a no-op, not an error, for an unanalyzed song."""
+def candidate_moments(uri: str, *, snap_enabled: Optional[bool] = None) -> list[CandidateMoment]:
+    """One CandidateMoment per section boundary past the song's own start.
+    Empty when no analysis is available yet — generation is a no-op, not
+    an error, for an unanalyzed song.
+
+    `snap_enabled`: pass explicitly to avoid a room_controls read (a
+    caller that already has the current RoomControlState, or an offline
+    measurement script comparing snap on vs off for the SAME analysis).
+    None (the default) reads RoomControlState.midsong_snap_to_beat live —
+    generate_for_song's own production call shape."""
     sections = analysis_reader.sections_for_uri(uri)
     if not sections:
         return []
+    if snap_enabled is None:
+        snap_enabled = room_controls.load_room_controls().midsong_snap_to_beat
     ordered = sorted(sections, key=lambda s: int(s.get("start_ms", 0)))
     intensities = _normalized_intensities(ordered)
-    out: list[tuple[int, float, str]] = []
+    # Resolved once per song (not once per section) — beat_snap.snap
+    # would otherwise re-read/re-parse the song's librosa analysis, its
+    # beat_this cache and its capture-offset sidecar for every section.
+    song_grid = beat_snap.resolve_song_grid(uri) if snap_enabled else None
+    out: list[CandidateMoment] = []
     for sec, intensity in zip(ordered, intensities):
-        ms = int(sec.get("start_ms", 0))
-        if ms <= 0:
+        raw_ms = int(sec.get("start_ms", 0))
+        if raw_ms <= 0:
             continue  # the song's own start, not a mid-song moment
-        out.append((ms, intensity, f"section:{ms}"))
+        ms, grid, moved = raw_ms, None, None
+        if snap_enabled:
+            result = beat_snap.snap_with_grid(raw_ms, song_grid)
+            ms, grid, moved = result.timestamp_ms, result.grid, result.moved_ms
+        # generator_key is keyed on the section's own RAW start_ms — the
+        # analysis moment, unaffected by snapping — so toggling the
+        # setting (or a grid appearing/disappearing between runs) UPDATES
+        # this same trigger's timestamp_ms rather than orphaning it under
+        # a stale key and adding a new one (see the module docstring).
+        out.append(CandidateMoment(ms, intensity, f"section:{raw_ms}", grid, moved))
     return out
 
 
@@ -152,22 +196,28 @@ def generate_for_song(uri: str) -> dict:
     seen_keys: set[str] = set()
 
     added = updated = 0
-    for ms, intensity, key in moments:
-        seen_keys.add(key)
-        current = by_key.get(key)
+    for m in moments:
+        seen_keys.add(m.generator_key)
+        current = by_key.get(m.generator_key)
         if current is None:
             trigger_store.upsert(uri, SpectraTrigger(
-                timestamp_ms=ms, source="generated", generator_key=key,
-                action=FireSceneAction(scene_id=None, intensity=intensity)))
+                timestamp_ms=m.timestamp_ms, source="generated",
+                generator_key=m.generator_key,
+                snap_grid=m.snap_grid, snap_moved_ms=m.snap_moved_ms,
+                action=FireSceneAction(scene_id=None, intensity=m.intensity)))
             added += 1
-        elif (current.timestamp_ms != ms
+        elif (current.timestamp_ms != m.timestamp_ms
               or current.action.kind != "fire_scene"
               or current.action.scene_id is not None
-              or current.action.intensity != intensity):
+              or current.action.intensity != m.intensity
+              or current.snap_grid != m.snap_grid
+              or current.snap_moved_ms != m.snap_moved_ms):
             trigger_store.upsert(uri, current.model_copy(update={
-                "timestamp_ms": ms,
+                "timestamp_ms": m.timestamp_ms,
+                "snap_grid": m.snap_grid,
+                "snap_moved_ms": m.snap_moved_ms,
                 "action": FireSceneAction(
-                    scene_id=None, intensity=intensity,
+                    scene_id=None, intensity=m.intensity,
                     color_set_id=getattr(current.action, "color_set_id", None)),
             }))
             updated += 1

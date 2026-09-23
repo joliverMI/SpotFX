@@ -354,6 +354,26 @@ export default function TestbedPage() {
                   <option value="flares">Flares ({song.n_flares})</option>
                 </select>
               </div>
+              {song.n_generated > 0 && (
+                <div>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    Generated cues (beat-snap) <HelpLink topic="midsong-snap-to-beat" title="Snap generated cues to beat" />
+                  </div>
+                  <div style={{ fontSize: 13 }}>
+                    {song.n_snapped} of {song.n_generated} snapped
+                    {Object.keys(song.snap_grid_counts).length > 0 && (
+                      <span style={{ color: 'var(--text-muted)', marginLeft: 6 }}>
+                        ({Object.entries(song.snap_grid_counts).map(([g, n]) => `${g}: ${n}`).join(', ')})
+                      </span>
+                    )}
+                    {song.n_unsnapped_generated > 0 && (
+                      <span style={{ color: 'var(--text-muted)', marginLeft: 6 }}>
+                        · {song.n_unsnapped_generated} unsnapped
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 

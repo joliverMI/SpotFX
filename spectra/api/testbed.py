@@ -63,6 +63,9 @@ def _song_list() -> list[dict]:
             "n_flares": len(marks.flares),
             "n_generated": marks.n_generated,
             "n_promoted": marks.n_promoted,
+            "n_snapped": marks.n_snapped,
+            "n_unsnapped_generated": marks.n_unsnapped_generated,
+            "snap_grid_counts": marks.snap_grid_counts,
             "provenance": marks.provenance.__dict__,
             "audio": testbed_audio.status(uri, stem_index=stems, registry=pinned),
             "engines": testbed_engines.availability_for(
@@ -101,6 +104,9 @@ async def get_marks(uri: str = Query(...)):
             "flares": [m.__dict__ for m in marks.flares],
             "n_generated": marks.n_generated,
             "n_promoted": marks.n_promoted,
+            "n_snapped": marks.n_snapped,
+            "n_unsnapped_generated": marks.n_unsnapped_generated,
+            "snap_grid_counts": marks.snap_grid_counts,
             "provenance": marks.provenance.__dict__,
             "tempo_bpm": analysis_reader.tempo_bpm_for_uri(uri),
         }
@@ -160,7 +166,7 @@ def _estimate_for(engine: str, uri: str, mark_kind: str):
     engine_marks = testbed_engines.marks_for(engine, uri)
     if engine_marks is None:
         return None
-    offset_ms = testbed_audio.capture_offset_ms(uri) or 0
+    offset_ms = testbed_audio.capture_offset_ms_or_zero(uri)
     if offset_ms:
         engine_marks = [dataclasses.replace(m, time_ms=m.time_ms + offset_ms)
                         for m in engine_marks]

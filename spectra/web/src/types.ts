@@ -435,6 +435,10 @@ export interface RoomControlState {
   scene_transition_ms_gentle: number;
   scene_transition_ms_hard: number;
   scene_change_mode: SceneChangeMode;
+  /** Phase 2 of the music-analysis plan (2026-09-22) — snap a generated
+   * cue's timestamp onto the nearest downbeat of a per-song grid before
+   * storing it (spectra/services/beat_snap.py). Default true. */
+  midsong_snap_to_beat: boolean;
   /** Legacy Now Playing "Force Scene" control, ported verbatim: while
    * enabled, every scene the system would otherwise pick automatically
    * (sequencer roll, trigger fire, or the automatic transition fire) fires
@@ -1143,6 +1147,11 @@ export interface SpectraTrigger {
   generator_key: string | null;
   action: TriggerAction;
   trigger_offset_ms: number;
+  /** spectra/services/beat_snap.py provenance — which downbeat grid a
+   * GENERATED cue was snapped to, and how far (song ms, signed). Both
+   * null for every hand-placed trigger. */
+  snap_grid: 'librosa' | 'beat_this' | null;
+  snap_moved_ms: number | null;
 }
 
 export const newTrigger = (timestampMs: number): SpectraTrigger => ({
@@ -1153,6 +1162,8 @@ export const newTrigger = (timestampMs: number): SpectraTrigger => ({
   generator_key: null,
   action: { kind: 'fire_scene', scene_id: '', intensity: 0.5, color_set_id: null },
   trigger_offset_ms: 0,
+  snap_grid: null,
+  snap_moved_ms: null,
 });
 
 /** Feedback-session mark-then-nudge queue (Stage 2, GET /api/feedback/mark,
@@ -1458,6 +1469,11 @@ export interface TestbedSong {
   n_flares: number;
   n_generated: number;
   n_promoted: number;
+  /** Phase 2 beat-snap (spectra/services/beat_snap.py) over this song's
+   * GENERATED cues — never its scored reference marks. */
+  n_snapped: number;
+  n_unsnapped_generated: number;
+  snap_grid_counts: Record<string, number>;
   provenance: TestbedProvenance;
   audio: TestbedAudioStatus;
   engines: Record<string, TestbedEngineAvailability>;
@@ -1482,6 +1498,9 @@ export interface TestbedMarks {
   flares: TestbedReferenceMark[];
   n_generated: number;
   n_promoted: number;
+  n_snapped: number;
+  n_unsnapped_generated: number;
+  snap_grid_counts: Record<string, number>;
   provenance: TestbedProvenance;
   /** The song's librosa tempo — drives the beat/downbeat lanes' per-lane
    * tolerance default (below half a beat). null = no librosa analysis. */

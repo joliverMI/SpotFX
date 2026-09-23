@@ -196,3 +196,14 @@ class SpectraTrigger(BaseModel):
     # other. Default 0 keeps every existing trigger (all ~22k of his real
     # fire_scene triggers) unaffected.
     trigger_offset_ms: int = Field(default=0, ge=-60_000, le=60_000)
+    # Phase 2 of the music-analysis plan (2026-09-22, spectra/services/
+    # beat_snap.py): which downbeat grid a GENERATED cue was snapped to,
+    # and how far (song ms, signed — negative = snapped earlier) it moved
+    # from its own section-boundary time. Both None for every hand-placed
+    # trigger and for a generated cue that snapping left unsnapped (no
+    # usable grid, or the nearest downbeat exceeded the one-beat cap) —
+    # see beat_snap.snap's own docstring. Provenance only: nothing reads
+    # these fields to decide anything, they exist so the test bed and the
+    # Review page can show WHY a generated cue landed where it did.
+    snap_grid: Optional[Literal["librosa", "beat_this"]] = None
+    snap_moved_ms: Optional[int] = None
