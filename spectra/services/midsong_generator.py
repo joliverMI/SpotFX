@@ -79,11 +79,34 @@ section boundary names a cue's EXISTENCE and approximate time (unchanged
 by this), the cue's placed timestamp_ms is nudged onto the nearest
 downbeat of a per-song grid — gated by RoomControlState.
 midsong_snap_to_beat (default True; room_controls.py's own docstring).
-generator_key stays keyed on the section's own RAW (unsnapped) start_ms
-— the analysis moment that produced the cue never moves, so toggling the
-setting or a grid becoming available/unavailable between runs UPDATES the
-same trigger's timestamp_ms in place rather than deleting and re-adding
-under a new key.
+generator_key stays keyed on the section's own RAW (unsnapped, WAV-time)
+start_ms — the analysis moment that produced the cue never moves, so
+toggling the setting or a grid becoming available/unavailable between
+runs UPDATES the same trigger's timestamp_ms in place rather than
+deleting and re-adding under a new key.
+
+FRAME FIX (2026-09-23, data/transition-alignment-plan/report.md §2.1/§5
+task 1): a section's own start_ms is in the CAPTURED-WAV's own frame
+(services/librosa_service.py places every boundary on a beat of the WAV,
+not the song), but the room's fire clock and a human's own authored
+triggers both run in SONG time (spectra/services/bridge.py's
+effective_position_ms, capture_alignment.py's own binding statement) —
+and most captures start several seconds into the song (the time it takes
+to detect what's playing). So every generated cue used to fire early by
+exactly that gap; on 601 of his real songs where generated cues actually
+fire, 17,226 of 19,490 cues sat on a song with a 2s-or-more gap (the
+report's own corpus count). The fix: `frame_ms = raw_ms +
+testbed_audio.capture_offset_ms_or_zero(uri)` — the WAV's own sample 0,
+expressed in song time — is the moment actually placed and snapped;
+`raw_ms` itself (the analysis moment / generator_key basis) never moves.
+beat_snap's own downbeat grid is in the SAME WAV-time frame raw_ms was
+in, so it is shifted by the identical offset before the nearest-downbeat
+search — this is what beat_snap.py's own "ONE FRAME, NO SHIFT" docstring
+still describes accurately: the comparison it performs is unshifted and
+single-frame; only the frame itself (chosen by this caller, once per
+song) has moved from WAV time to song time. A capture with no measurable
+offset (testbed_audio.capture_offset_ms returns None, e.g. no npz sidecar
+yet) shifts by exactly 0 — byte-identical to before this fix.
 """
 from __future__ import annotations
 
@@ -91,7 +114,9 @@ from dataclasses import dataclass
 from typing import Optional
 
 from spectra.models.trigger import FireSceneAction, SpectraTrigger
-from spectra.services import analysis_reader, beat_snap, room_controls, trigger_store
+from spectra.services import (
+    analysis_reader, beat_snap, room_controls, testbed_audio, trigger_store,
+)
 
 INTENSITY_FLOOR = 0.05
 EDGE_TRIM_MS = 15_000
@@ -147,6 +172,23 @@ def _normalized_intensities(sections: list[dict]) -> list[float]:
     return out
 
 
+def _shift_song_grid(grid: Optional[beat_snap.SongGrid], offset_ms: int) -> Optional[beat_snap.SongGrid]:
+    """Shift a WAV-time downbeat grid into song time by `offset_ms` — the
+    identical shift applied to a section's own raw_ms (see the module
+    docstring's FRAME FIX) — so a later beat_snap.snap_with_grid call
+    compares two song-time values, keeping that function's own "ONE
+    FRAME" comparison true of the frame this caller has chosen.
+    `offset_ms == 0` (no measurable capture offset) returns `grid`
+    unchanged, `None` included — byte-identical to before this fix."""
+    if grid is None or offset_ms == 0:
+        return grid
+    return beat_snap.SongGrid(
+        grid.grid_name,
+        [d + offset_ms for d in grid.downbeats],
+        grid.beat_length_ms,
+    )
+
+
 def candidate_moments(uri: str, *, snap_enabled: Optional[bool] = None) -> list[CandidateMoment]:
     """One CandidateMoment per section boundary past the song's own start.
     Empty when no analysis is available yet — generation is a no-op, not
@@ -164,24 +206,30 @@ def candidate_moments(uri: str, *, snap_enabled: Optional[bool] = None) -> list[
         snap_enabled = room_controls.load_room_controls().midsong_snap_to_beat
     ordered = sorted(sections, key=lambda s: int(s.get("start_ms", 0)))
     intensities = _normalized_intensities(ordered)
+    # The WAV-time -> song-time shift (see the module docstring's FRAME
+    # FIX) — resolved once per song, not once per section.
+    offset_ms = testbed_audio.capture_offset_ms_or_zero(uri)
     # Resolved once per song (not once per section) — beat_snap.snap
     # would otherwise re-read/re-parse the song's librosa analysis, its
     # beat_this cache and its capture-offset sidecar for every section.
     song_grid = beat_snap.resolve_song_grid(uri) if snap_enabled else None
+    shifted_grid = _shift_song_grid(song_grid, offset_ms)
     out: list[CandidateMoment] = []
     for sec, intensity in zip(ordered, intensities):
         raw_ms = int(sec.get("start_ms", 0))
         if raw_ms <= 0:
             continue  # the song's own start, not a mid-song moment
-        ms, grid, moved = raw_ms, None, None
+        frame_ms = raw_ms + offset_ms
+        ms, grid, moved = frame_ms, None, None
         if snap_enabled:
-            result = beat_snap.snap_with_grid(raw_ms, song_grid)
+            result = beat_snap.snap_with_grid(frame_ms, shifted_grid)
             ms, grid, moved = result.timestamp_ms, result.grid, result.moved_ms
-        # generator_key is keyed on the section's own RAW start_ms — the
-        # analysis moment, unaffected by snapping — so toggling the
-        # setting (or a grid appearing/disappearing between runs) UPDATES
-        # this same trigger's timestamp_ms rather than orphaning it under
-        # a stale key and adding a new one (see the module docstring).
+        # generator_key is keyed on the section's own RAW (WAV-time)
+        # start_ms — the analysis moment, unaffected by the frame shift or
+        # by snapping — so toggling either the capture offset (a
+        # recapture) or the snap setting UPDATES this same trigger's
+        # timestamp_ms rather than orphaning it under a stale key and
+        # adding a new one (see the module docstring).
         out.append(CandidateMoment(ms, intensity, f"section:{raw_ms}", grid, moved))
     return out
 

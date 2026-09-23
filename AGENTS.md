@@ -8445,6 +8445,64 @@ own `testbed_metrics.match_marks`, at 150ms/500ms, against both
 transitions and flares. El Apagón is reported but never weighted in a
 verdict (his own word).
 
+### The frame fix — a generated cue was placed in the WRONG TIME FRAME
+
+2026-09-23 (`data/transition-alignment-plan/report.md` §2.1, his own
+report: "the song transitions are not well aligned... a few beats off").
+A section boundary's `start_ms` is in the CAPTURED-WAV's own frame
+(`services/librosa_service.py` places every boundary on a beat of the
+WAV, not the song), but the room's fire clock and his own authored
+triggers both run in SONG time — and most captures start several seconds
+into the song (URI-detection lag). So every generated cue used to fire
+that many ms EARLY, together, on every song whose capture didn't happen
+to start at song time 0 (17,226 of 19,490 real generated cues sat on a
+song with a 2s-or-more gap). `midsong_generator.candidate_moments` now
+shifts a section's raw boundary by
+`testbed_audio.capture_offset_ms_or_zero(uri)` (the WAV's own sample 0,
+expressed in song time) before placing OR snapping it — `_shift_song_grid`
+shifts `beat_snap`'s own downbeat grid by the identical amount first, so
+`beat_snap.py`'s own "ONE FRAME, NO SHIFT" comparison stays true of the
+frame this caller chose (WAV time for its raw grid, song time once
+shifted) rather than beat_snap.py itself needing to know about capture
+offsets. `generator_key` is unaffected — still keyed on the section's own
+unshifted, WAV-time `start_ms` — so a recapture that changes the offset
+UPDATES the same stored trigger in place. Zero measured offset (no npz
+sidecar yet, or a capture that genuinely started at song time 0) shifts
+by exactly 0 — byte-identical to before this fix.
+
+The same frame mismatch existed one line over: `analysis_reader.
+section_energy_at` (the intensity `bridge.intensity()` reads for every
+automatic, non-authored fire — the drift conductor, the sequencer's
+default pick, automatic transition fires) compared a caller's song-time
+position against sections' own WAV-time bounds. Fixed the same way,
+inside `section_energy_at` itself (shifts each section's bounds by the
+same `capture_offset_ms_or_zero`), with the offset CACHED per URI
+(`analysis_reader._capture_offset_for`, a lazy import of `testbed_audio`
+to avoid the circular import — `testbed_audio` already imports
+`analysis_reader` for `stem_for_uri`) — this function is read on the
+event-loop thread every ~200ms trigger-engine tick, and the offset's own
+source (an `.npz` file read) has no caching of its own, so an uncached
+call would put synchronous file I/O on that hot path. **The cache entry
+is keyed on the sidecar `.npz`'s own `(mtime_ns, size)`, not just the
+URI** — a cheap `stat()`, not the file parse itself — so it SELF-HEALS on
+a live recapture: a plain per-URI-forever cache was tried first and shipped
+briefly, then caught by review before it went further (a recapture mid-
+session would have kept reading the old offset for the rest of the
+process life). Missing stem or missing `.npz` both key on signature
+`None`, so a song with no audio yet caches its 0 offset the same way
+until a capture actually lands.
+
+Acceptance: `scripts/check_transition_alignment.py` extends
+`check_midsong_beat_snap.py` with a "Today" vs "Frame fixed" vs "+ Snap"
+three-way comparison (offline, read-only against the live checkout, on
+copies) — reproduces the report's own one-beat recall numbers exactly
+(Soy Peor 7%→14%, Contra/Dopamine/El Apagón unaffected since their real
+capture offset is 0). Unit tests: `tests/test_midsong_generator.py` (a
+synthetic nonzero offset moves a cue later by exactly that amount, and
+shifts the snap grid identically so a snap still lands; zero offset is a
+no-op), `tests/test_analysis_reader_section_energy.py` (the same shift on
+`section_energy_at`, plus the per-URI cache actually caching).
+
 ## Maintaining this file
 
 Keep this file for knowledge useful to almost every future agent session in this project.
