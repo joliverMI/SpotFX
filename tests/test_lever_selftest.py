@@ -928,3 +928,135 @@ def test_an_unscoped_self_test_on_two_carriers_brings_up_nothing():
     assert verdict.proven, verdict.reason
     assert verdict.emitter_id == "mapper-a"
     assert brought_up == [] and put_back == []
+
+
+# ── 9. the stream's own lag, measured live ─────────────────────────────────
+#
+# `data/kiosk-exposure-lever-no-response/report.md`, 2026-09-23: a settle
+# tuned for a fast stream reads as noise on a slow one. `_measure_stream_lag`
+# (the live half of `capture_settings.stream_lag_crossing`) reads
+# `session.grids` directly — a plain read, never a call to `gather()` — so
+# it can never disturb the alternating dark/lit toggle every OTHER test in
+# this file depends on. Proven here by handing a session `.grids` ON TOP of
+# the ordinary fixture, and proven NOT to interfere by every test above
+# still passing unchanged (none of them sets `.grids` at all).
+
+class _TimedGrid:
+    """A frame shaped enough for `lever_selftest._grid_mean` to read: a
+    timestamp and something `np.asarray(...).mean()` can reduce."""
+
+    def __init__(self, at_s: float, value: float):
+        self.at_s = at_s
+        self.grid = np.full((1, 1), float(value))
+
+
+class _FakeClock:
+    """An ADVANCING clock/sleep pair, coupled — `_measure_stream_lag`'s own
+    poll loop needs both to move together, unlike the rest of this file's
+    fixed `clock=lambda: 0.0`."""
+
+    def __init__(self):
+        self.t = 0.0
+
+    def now(self) -> float:
+        return self.t
+
+    async def sleep(self, seconds: float) -> None:
+        self.t += float(seconds)
+
+
+def _lag_deps(session, grids: list) -> "room_mapping.RunDeps":
+    """`_deps()`'s own body, minus its fixed `clock`/`sleep` — those two
+    are the one thing that helper does not let a caller override (it passes
+    them positionally ahead of `**kw`), and this measurement needs an
+    advancing pair."""
+    session.grids = grids
+    clock = _FakeClock()
+
+    async def get_virtuals():
+        return {"strip": _virtual("strip-fixture")}
+
+    async def chains():
+        return {"strip": [{"id": "strip-fixture", "type": "wled"}]}
+
+    async def open_hold(*_a, **_k):
+        return {"held": True}
+
+    async def close_hold():
+        return None
+
+    return room_mapping.RunDeps(
+        session=session, get_virtuals=get_virtuals, carrier_devices=chains,
+        open_hold=open_hold, close_hold=close_hold, sleep=clock.sleep,
+        clock=clock.now, spectra_owns=lambda: True)
+
+
+def test_stream_lag_is_measured_and_widens_the_settles():
+    """A dark room until ~1.0s (through the dark settle + baseline window),
+    then a real lag before the lit plateau — comfortably inside the refusal
+    bound, so the run proceeds with WIDER settles than the shipped default."""
+    sess = _Session(_Camera(honest))
+    grids = ([_TimedGrid(t, 0.0) for t in (0.0, 0.5, 0.9, 1.0)]
+            + [_TimedGrid(t, 0.0) for t in (1.5, 2.5)]
+            + [_TimedGrid(t, 90.0) for t in (3.0, 3.2, 3.4)])
+    deps = _lag_deps(sess, grids)
+    verdict = asyncio.run(lever_selftest.run_selftest(_room(), deps))
+    assert verdict.proven, verdict.reason
+    assert verdict.stream_lag_s is not None
+    assert verdict.stream_lag_s == pytest.approx(2.0, abs=0.2)
+    assert verdict.stream_lag_s <= cs.STREAM_LAG_REFUSAL_S
+    assert any("dark/lit settles were widened" in n for n in verdict.notes)
+    assert f"{verdict.stream_lag_s:g}s" in verdict.reason, (
+        "the stream lag is quoted on the verdict text too")
+
+
+def test_a_stream_that_never_delivers_a_second_sample_refuses():
+    """The one case `stream_lag_crossing` can genuinely never resolve: real
+    light DID appear (one sample clears the baseline — `had_signal`) but
+    fewer than two post-write frames ever arrived, for the WHOLE sample
+    window, so no crossing can be confirmed — frames have essentially
+    stopped, not merely slowed. Nothing further was measured."""
+    sess = _Session(_Camera(honest))
+    # NONE of the dark/baseline samples sit AT `write_at` (1.0 = the dark
+    # settle 0.7 plus the baseline window 0.3) — an edge sample there would
+    # double as the first POST-write sample too and manufacture a second
+    # one this scenario deliberately does not have.
+    grids = ([_TimedGrid(t, 0.0) for t in (0.0, 0.4, 0.8)]
+            + [_TimedGrid(1.4, 40.0)])
+    deps = _lag_deps(sess, grids)
+    verdict = asyncio.run(lever_selftest.run_selftest(_room(), deps))
+    assert verdict.verdict == mapping_refusals.LEVER_STREAM_LAG
+    assert verdict.refuses and not verdict.proven
+    assert verdict.readings == []
+    assert "delivered stream" in verdict.reason
+    assert "Nothing was written" in verdict.reason
+
+
+def test_no_real_signal_is_not_misdiagnosed_as_a_slow_stream():
+    """A lamp that never shows ANY light above its own dark baseline —
+    tonight's shape, generalised — is indistinguishable from a dead lever
+    by this measurement alone, and refusing here would send whoever reads
+    it to fix the wrong thing (a slow stream) instead of the real one (no
+    signal). So this falls through UNWIDENED to the ordinary three
+    regimes, which are what actually judge it — here, a camera whose
+    light genuinely does follow its command, so the run still proves it."""
+    sess = _Session(_Camera(honest))
+    grids = [_TimedGrid(t, 0.0) for t in (0.0, 0.5, 1.0, 1.5, 2.0, 2.5)]
+    deps = _lag_deps(sess, grids)
+    verdict = asyncio.run(lever_selftest.run_selftest(_room(), deps))
+    assert verdict.verdict != mapping_refusals.LEVER_STREAM_LAG
+    assert verdict.stream_lag_s is None
+    assert verdict.proven, verdict.reason
+    assert not any("dark/lit settles were widened" in n for n in verdict.notes)
+
+
+def test_a_session_with_no_grids_is_byte_identical_to_before():
+    """Every OTHER fake session in this file has no `.grids` at all — this
+    proves that explicitly, rather than only by inference from every other
+    test still passing: no measurement is attempted, nothing is widened,
+    and nothing refuses on it."""
+    sess = _Session(_Camera(honest))
+    assert getattr(sess, "grids", None) is None
+    verdict = asyncio.run(lever_selftest.run_selftest(_room(), _deps(sess)))
+    assert verdict.proven
+    assert verdict.stream_lag_s is None

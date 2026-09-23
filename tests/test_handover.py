@@ -638,3 +638,97 @@ def test_no_audio_hardware_was_touched():
     from fx.compat_sounddevice import _LazySounddevice
 
     assert _LazySounddevice._module is None
+
+
+# ── proof 8: the QUIET TAKE, exposed on the ownership route ─────────────────
+#
+# `data/kiosk-exposure-lever-no-response/report.md`, 2026-09-23: the HTTP
+# surface for the same quiet take the self-taking night uses, so a
+# calibration can run under a genuinely dark, non-animating room without
+# `SPECTRA_NIGHT_SELF_TAKE` or the released-room-only restriction that
+# lever carries. `HandoverRequest.quiet` -> `production_sides(quiet=...)` +
+# `run_handover(..., quiet=...)`.
+
+def test_quiet_true_reaches_both_production_sides_and_run_handover(
+        tmp_path, monkeypatch):
+    from spectra.api.ownership import HandoverRequest, post_handover
+    from spectra.services import handover as handover_svc
+
+    _own_file(tmp_path)
+    monkeypatch.setenv("SPECTRA_HANDOVER_ARMED", "1")
+    calls = {}
+
+    def fake_production_sides(**kw):
+        calls["production_sides"] = kw
+        return {}
+
+    async def fake_run_handover(to, sides, **kw):
+        calls["run_handover"] = kw
+        return lo.load()
+
+    monkeypatch.setattr(handover_svc, "production_sides",
+                        fake_production_sides)
+    monkeypatch.setattr(handover_svc, "run_handover", fake_run_handover)
+
+    _run(post_handover(HandoverRequest(to=lo.SPECTRA, quiet=True)))
+    assert calls["production_sides"] == {"quiet": True}
+    assert calls["run_handover"] == {"quiet": True}
+
+
+def test_quiet_defaults_to_the_old_byte_identical_call(tmp_path, monkeypatch):
+    """`quiet` omitted (every caller before 2026-09-23) must not even NAME
+    the keyword — a test double built for the old shape (a zero-arg
+    `production_sides`) must keep working."""
+    from spectra.api.ownership import HandoverRequest, post_handover
+    from spectra.services import handover as handover_svc
+
+    _own_file(tmp_path)
+    monkeypatch.setenv("SPECTRA_HANDOVER_ARMED", "1")
+    calls = {}
+
+    def fake_production_sides():
+        calls["production_sides_called"] = True
+        return {}
+
+    async def fake_run_handover(to, sides, **kw):
+        calls["run_handover"] = kw
+        return lo.load()
+
+    monkeypatch.setattr(handover_svc, "production_sides",
+                        fake_production_sides)
+    monkeypatch.setattr(handover_svc, "run_handover", fake_run_handover)
+
+    _run(post_handover(HandoverRequest(to=lo.SPECTRA)))
+    assert calls["production_sides_called"]
+    assert calls["run_handover"] == {"quiet": False}
+
+
+def test_quiet_is_ignored_for_a_handover_to_spot_effects(tmp_path, monkeypatch):
+    """Spot-effects owns no quiet mode — asking for one there must not read
+    as though it did something."""
+    from spectra.api.ownership import HandoverRequest, post_handover
+    from spectra.services import handover as handover_svc
+
+    _own_file(tmp_path)
+    monkeypatch.setenv("SPECTRA_HANDOVER_ARMED", "1")
+    # OWNER MUST BE SPECTRA FIRST, or "to spot-effects" 409s on "already
+    # owner" before ever reaching production_sides/run_handover.
+    token = lo.begin_handover(lo.SPECTRA).token
+    lo.mark_quiesced(token)
+    lo.commit(token)
+    calls = {}
+
+    def fake_production_sides(**kw):
+        calls["production_sides"] = kw
+        return {}
+
+    async def fake_run_handover(to, sides, **kw):
+        calls["run_handover"] = kw
+        return lo.load()
+
+    monkeypatch.setattr(handover_svc, "production_sides",
+                        fake_production_sides)
+    monkeypatch.setattr(handover_svc, "run_handover", fake_run_handover)
+
+    _run(post_handover(HandoverRequest(to=lo.SPOT_EFFECTS, quiet=True)))
+    assert calls["run_handover"] == {"quiet": False}

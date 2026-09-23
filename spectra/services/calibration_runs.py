@@ -23,11 +23,16 @@ like every capture run today, and when it does not the run is REFUSED with
 this design needed an exception to that, which is worth saying explicitly
 because the brief asked to be told if one did.
 
-WHAT STOPS A RUN, and it is exactly one thing: a MEASURED CAMERA MOVE
-(`mapping_refusals.POSE_REFUSING`). The plan is explicit that a moved camera
-must be a named refusal rather than silently incomparable data. Everything
-else — a changed room, an inconclusive fingerprint, a pose with too few
-anchors to discriminate — RUNS, and what is withheld is the COMPARABILITY
+WHAT STOPS A RUN: a MEASURED CAMERA MOVE (`mapping_refusals.POSE_REFUSING`)
+and, since 2026-09-23, THE SHOW ENGINE BEING LIVE (`_engine_live()`,
+`data/kiosk-exposure-lever-no-response/report.md` finding #2 — an ordinary
+handover's drift conductor lighting the room in the middle of a self-test's
+dark/lit windows). The plan is explicit that a moved camera must be a named
+refusal rather than silently incomparable data; the engine-live gate is the
+same discipline applied to a second, independently-found contamination
+source. Everything else — a changed room, an inconclusive fingerprint, a
+pose with too few anchors to discriminate — RUNS, and what is withheld is
+the COMPARABILITY
 CLAIM, recorded on the entry as `comparable=False` with the reason. The
 captain's requirement is the reason for that split, verbatim: "a calibration
 refusing because he moved a chair is a system that expires for reasons he
@@ -86,8 +91,8 @@ from spectra.models.calibration import (Calibration, CalibrationRun,
                                         declaration_snapshot)
 from spectra.models import calibration as cal_model
 from spectra.services import (amendment, calibration_store, capture_queue,
-                              capture_runs, light_field, mapping_refusals,
-                              pose_fingerprint)
+                              capture_runs, lever_selftest, light_field,
+                              mapping_refusals, pose_fingerprint)
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +110,51 @@ KIND_DECLARATION = cal_model.KIND_DECLARATION
 #: line has the same "start the queue, then start the client" shape a plain
 #: queue does and must not be the one path with a different answer.
 SESSION_WAIT_S = capture_queue.DEFAULT_SESSION_WAIT_S
+
+
+def _engine_live() -> bool:
+    """IS THE SHOW ENGINE ANIMATING HIS ROOM RIGHT NOW? A calibration must
+    not run underneath it — `data/kiosk-exposure-lever-no-response/
+    report.md`'s finding #2: the ORDINARY handover the 2026-09-23 night
+    window used called `engine.go_live()`, and ten seconds later the drift
+    conductor's own leg lit the crystal (Fish) and 17 Hue bulbs in the
+    middle of the lever self-test's third regime — a moving effect landing
+    inside the dark/lit windows this instrument subtracts, corrupting
+    exactly the measurement it was trying to take.
+
+    Reads `engine.status()`, imported lazily (the local-import convention
+    every other caller of `spectra.services.engine` in this codebase
+    already follows — that module builds real singletons at import time
+    and this one runs at ordinary module scope, not inside a request
+    handler). `"dark"` is `executor.mode == "recording"` — false means the
+    facade executor is live and writing to real hardware.
+
+    Unable to ask is NOT the same as live: a status call that fails is
+    carried as `False` (never checked, never a fault) rather than refusing
+    a calibration over a condition this function could not itself confirm —
+    the same "we could not check" discipline `lever_selftest`'s own
+    UNPROVABLE/UNPROVEN verdicts stand on."""
+    try:
+        from spectra.services import engine
+        return not bool(engine.status().get("dark", True))
+    except Exception:                                      # noqa: BLE001
+        logger.debug("calibration run: could not read engine.status()",
+                     exc_info=True)
+        return False
+
+
+def _lever_scope(cal: Calibration) -> "lever_selftest.Scope | None":
+    """This calibration's own lever-self-test scope (`Calibration.
+    lever_scope`), or None (whole room, unchanged) when it declares
+    nothing — the byte-identical default every calibration had before this
+    field existed."""
+    scope = cal.lever_scope or {}
+    emitter_ids = scope.get("emitter_ids") or None
+    carrier_ids = scope.get("carrier_ids") or None
+    if not emitter_ids and not carrier_ids:
+        return None
+    return lever_selftest.Scope.of(emitter_ids=emitter_ids,
+                                   carrier_ids=carrier_ids)
 
 
 # ── the pose ───────────────────────────────────────────────────────────────
@@ -139,7 +189,7 @@ async def establish_pose(cal: Calibration, *, placement: Optional[str] = None,
     outcome = await capture_runs.run_pose_fingerprint(
         cal.room_id, exposure_time=cal.camera.exposure_time,
         gain=cal.camera.gain, white_balance=cal.camera.white_balance,
-        focus=cal.camera.focus)
+        focus=cal.camera.focus, lever_scope=_lever_scope(cal))
     entry.session_id = outcome.session_id
     entry.pose_id = outcome.pose_id
     entry.seconds = outcome.seconds
@@ -226,7 +276,8 @@ async def check_pose(cal: Calibration) -> tuple[pose_fingerprint.Judgement,
         cal.room_id,
         emitter_ids=[r.emitter_id for r in cal.pose.references],
         exposure_time=cal.camera.exposure_time, gain=cal.camera.gain,
-        white_balance=cal.camera.white_balance, focus=cal.camera.focus)
+        white_balance=cal.camera.white_balance, focus=cal.camera.focus,
+        lever_scope=_lever_scope(cal))
     if outcome.status != capture_runs.STATUS_OK:
         # THE CHECK ITSELF COULD NOT BE MADE. That is not a finding about the
         # camera or the room — the same distinction `lever_selftest` draws
@@ -341,6 +392,9 @@ async def _run_declared(cal: Calibration, entry: CalibrationRun,
         return _refuse(cal, entry,
                        mapping_refusals.calibration_nothing_declared(),
                        "nothing_declared")
+    if _engine_live():
+        return _refuse(cal, entry, mapping_refusals.calibration_engine_live(),
+                       "engine_live")
     try:
         items = capture_queue.parse_items(declared)
     except ValueError as exc:
@@ -424,7 +478,8 @@ async def _run_declared(cal: Calibration, entry: CalibrationRun,
     queue_run = capture_queue.new_run(items, label=label or cal.name)
     entry.queue_run_id = queue_run.id
     await capture_queue.run_queue(items, label=label or cal.name,
-                                  run=queue_run, guard=guard, save=save)
+                                  run=queue_run, guard=guard, save=save,
+                                  lever_scope=_lever_scope(cal))
     entry.seconds = time.time() - started
     entry.items = [_item_record(o) for o in queue_run.outcomes]
     entry.status = _run_status(queue_run)

@@ -4522,7 +4522,7 @@ two checks both run and neither substitutes for the other. Seven things:
   throwaway room with no `save_room`, `exposure_test.py`'s own precedent.
   Never a second idea of "how much light".
 - **`unprovable`/`unproven` NEVER REFUSE** (`mapping_refusals.
-  LEVER_REFUSING` is the list of the three that do, and every one of them is
+  LEVER_REFUSING` is the list that do, and every one of them is
   a MEASUREMENT). "We could not check" is not "we checked and it is
   broken" — the same distinction `night_exit` draws between DARK and
   UNKNOWN and `witness` between contaminated and witness_unavailable.
@@ -4735,6 +4735,167 @@ computed from his own numbers, the pin's round trip through the real client
 and the real `V4L2Camera`) — the check script's LAST LINE is that
 unverified statement, asserted by `tests/test_light_field_checks.py` so the
 claim cannot quietly go missing.
+
+### THE STREAM'S OWN LAG — a settle tuned for a fast stream is noise on a slow one
+
+**`spectra/services/capture_settings.py`'s SIX section and `lever_selftest.
+_measure_stream_lag` are the binding statement.** 2026-09-23, the kiosk's
+own follow-on defect after the short-exposure fix above:
+`data/kiosk-exposure-lever-no-response/report.md`. His kiosk camera had been
+raised to a held 1920x1080/5fps stream (PR #285, correctly — commissioning
+needs it) and the SAME 21/83/83 self-test sequence that passed on the old
+320x180/30fps stream now refused `no_response`. Daylight measurement through
+the real client path proved the sensor DOES obey its exposure control
+(10/10 steps); what changed was TIME — every control write or scene change
+took 1.4-2.1s to reach the frames the client delivers (six to eight frames
+at 4.4 fps, upstream of everything the client's own transport drain can
+reach), longer than the self-test's fixed 0.7s dark/lit settles, so its
+"dark" reference still showed the previous lit lamp. Four things, matching
+the report's own Q5:
+
+- **THE LAG IS MEASURED, not assumed, once per run, before the self-test's
+  three regimes.** With the room already dark (this measurement's own
+  "dark" step is what makes it so), the ONE driven emitter's lamp steps
+  black→lit once and the delivered stream is watched until it crosses
+  halfway to its plateau — the same measurement the field report's own
+  "run 3" made with `brightness`, made here with a lamp.
+  `capture_settings.stream_lag_crossing` is the PURE half (samples in,
+  seconds out, or `None` for "could not measure" — never a guessed zero);
+  `lever_selftest._measure_stream_lag` is the live half, reading
+  `session.grids` (the same timestamped ring `observed_fps` already reads)
+  directly rather than calling `gather()` repeatedly — a plain read has no
+  side effect on anything else watching the session, where a poll loop
+  built on `gather()` would fight the regime loop that runs right after it
+  for the same frames.
+- **THE SETTLES ARE WIDENED, NEVER NARROWED**: `capture_settings.
+  widen_settle(base, lag) = max(base, 1.5 x lag)`, applied to
+  `DARK_SETTLE_S`/`LIT_SETTLE_S` for the three regime captures only — never
+  to `regime_settle_s` (a DIFFERENT thing, the sensor's own apply delay,
+  already priced). A lag past `STREAM_LAG_REFUSAL_S` (4.0s) REFUSES BY NAME
+  (`mapping_refusals.stream_lag_too_high`, verdict word
+  `LEVER_STREAM_LAG`, added to `LEVER_REFUSING`) rather than measuring
+  through it — a MEASUREMENT, exactly like `no_signal`/`no_response`/
+  `drift`, never `unprovable`/`unproven`. `stream_lag_s` rides on
+  `Verdict.as_dict()` and therefore on `CalibrationRun.lever` for free —
+  no separate persistence plumbing needed.
+- **A SESSION WITHOUT `.grids` IS NEVER MEASURED AND NEVER REFUSED ON IT** —
+  `_measure_stream_lag` returns `(None, False, False)` (its full shape is
+  `(lag_s, supported, had_signal)`), and `run_selftest` reads the middle
+  `supported` value to tell "could not measure" (skip, old behaviour) from
+  "measured, found nothing" (refuse). Every real production session has
+  `.grids`; only a test double built before this existed does not — the
+  same "did not say" discipline `capture_source.serves_fresh_frames`
+  already draws, applied so this measurement can never retroactively
+  refuse a fixture whose fake was never asked to model it.
+- **THE CLIENT NOW SAYS TWO MORE THINGS ABOUT ITSELF, additively.**
+  `hello.fresh_frames` only ever meant "my transport pipe is drained" —
+  never "the frame is fresh" (a UVC camera's own firmware/USB pipeline can
+  still be seconds behind while this flag is `True` the whole time, which
+  is exactly what cost the evening here). `hello.pipe_drained` carries the
+  SAME value under its honest name (`BaseCamera.pipe_drained` property);
+  `fresh_frames` is kept, unrenamed, for every existing reader —
+  `CLIENT_VERSION` bumped to "1.2" for the addition. `hello.delivered_fps`
+  is the client's own measured send rate (a bounded 16-sample window,
+  mirroring the server's own `observed_fps` algorithm), beside the
+  device's DECLARED `sensor_fps` already on `lock` — read server-side via
+  `capture_settings.declared_fps(session)`, used only inside
+  `lever_selftest._one_regime`'s own fallback (`sess.observed_fps() or
+  capture_settings.declared_fps(sess)`) rather than a hardcoded `5.0` —
+  deliberately NOT threaded into `room_mapping.py`/`commissioning.py`/
+  `exposure_test.py`'s own fallbacks in this pass, to keep the change
+  contained to the path the report's field evidence is actually about.
+
+Acceptance (offline, development check): stream_lag_s comes out ≈1.5s on
+the held-1080p/5fps stream shape (`tests/test_capture_settings.py`'s own
+synthetic-sample tests; `tests/test_lever_selftest.py`'s live-measurement
+tests with a `.grids`-bearing fake session prove the full widen/refuse
+wiring through `run_selftest`). **Unverified against the real kiosk camera
+by this build** — the acceptance bar in the field report (2.5-3x response
+ratio through the real client on the held stream) is a live check for
+whoever deploys this.
+
+### A CALIBRATION MUST NOT RUN UNDER A LIVE SHOW ENGINE, and a QUIET TAKE IS NOW ONE HTTP CALL AWAY
+
+Second finding of the same 2026-09-23 report: the night window took the
+room through the ORDINARY handover (`engine.go_live()`), and ten seconds
+into the self-test the drift conductor's own ~20s leg lit the crystal
+(Fish) and 17 Hue bulbs — a moving effect landing inside the exact dark/lit
+windows the instrument was subtracting, corrupting the "repeat" regime's
+own reading (though the refusal that night actually fell on the two
+readings taken before that, so the sequence was already doomed by the
+stream lag above). Two independent fixes:
+
+- **`calibration_runs._engine_live()`** (a lazy `from spectra.services
+  import engine; engine.status()["dark"]` read, the same local-import
+  convention every other caller of that module already follows — see the
+  room_controls import-time trap elsewhere in this file for why nothing
+  built at import time may touch a singleton-adjacent module eagerly) is
+  now checked at the top of `_run_declared` — the ONE body `run_calibration`
+  and `run_amendment` share — right after the "nothing declared" check and
+  before pricing/parsing the queue. A status call that cannot answer is
+  `False` (not live), never a refusal on a check that could not be
+  made — the same discipline `lever_selftest`'s own UNPROVABLE/UNPROVEN
+  verdicts stand on. Refuses with `mapping_refusals.calibration_engine_
+  live()`, which names the way out. **This is a real, deliberate new
+  constraint on DAYTIME calibration runs too**, not only night ones — the
+  contamination mechanism is a property of the engine being live during a
+  capture, not of the hour.
+- **THE QUIET TAKE, exposed on `POST /ownership/handover`** — until this it
+  existed only inside `night_take.take_room` (arming-gated,
+  released-room-only). `HandoverRequest.quiet: bool = False` threads
+  straight to `handover.production_sides(quiet=...)` +
+  `handover.run_handover(..., quiet=...)` — SPECTRA-only (silently ignored
+  for a handover to spot-effects, which owns no such mode); the exact API:
+  `POST /api/ownership/handover {"to": "spectra", "quiet": true}` (armed by
+  `SPECTRA_HANDOVER_ARMED` as always). It brings the stack up BLACK and
+  never calls `engine.go_live()` — see the night-self-take section's own
+  "THE STACK COMES UP BLACK" / "THE ENGINE STAYS ON PAPER" bullets for the
+  mechanism, unchanged; this is the same quiet take, reached from a second
+  caller. **Only pass `quiet=True` on the kwarg when it is actually True**
+  (`spectra/api/ownership.py::post_handover`) — an unscoped, non-quiet call
+  must stay the exact old call shape (`production_sides()`, no keyword at
+  all) or a test double built for the old signature breaks.
+- **`Calibration.lever_scope`** (`{"emitter_ids": [...]}` or
+  `{"carrier_ids": [...]}`, empty default) lets a calibration NAME which
+  emitter its own lever self-test drives, overriding the run's own default
+  (`plan.emitters[0]`) — found necessary because his kitchen kiosk's pose
+  sees the Living Room's `tv-mapper` TV-backlight (every pre-existing
+  calibration's default emitter) as a near-invisible 0.2-0.7 grey levels
+  per cell, where a kitchen sconce is in frame and legible.
+  `calibration_runs._lever_scope(cal)` builds the `lever_selftest.Scope`;
+  it reaches BOTH `establish_pose`/`check_pose` (`capture_runs.
+  run_pose_fingerprint`'s new `lever_scope` param) AND the declared queue
+  (`capture_queue.run_queue`'s new `lever_scope` param, threaded through
+  `_execute` and into `capture_runs.run_map`/`run_commission`) — **it has
+  to reach BOTH**, found by a failing test: `lever_selftest.ensure`'s own
+  cache means whichever calibration-grade call earns the verdict FIRST is
+  the one every later item in the session inherits, and a fresh
+  calibration establishes its pose before it ever reaches its declared
+  items. A `lever_scope` that only reached the queue would be silently
+  overridden by the pose-establishment step's own unscoped default. The
+  scope decides only which emitter PROVES the camera — it never narrows
+  which emitters the run itself measures. `PUT /api/calibrations/{id}`
+  accepts `lever_scope` on `CalibrationBody` like any other declared
+  field, recorded as an ordinary lineage change — but KNOWING which
+  emitter id names the sconce for a real calibration is still an
+  operator/deploy call, the same convention `scripts/
+  set_scene_colorset_preference.py` already uses — not guessed here from
+  live storage this build never read. **`emitter_ids` NAMES WHOLE
+  CARRIERS ONLY** — this scope carries no `granularity`/`block_pixels` of
+  its own the way a run's `lever_selftest.Scope` does, so a block/segment
+  id (`carrier:blk3[90-119]`) could never resolve through it; naming one
+  is refused BY NAME (`calibration.lever_scope_rejection`, checked at the
+  model's own field validator AND again in `spectra/api/calibrations.py`'s
+  `_validate_lever_scope`, since `PUT`'s edit assigns the field directly
+  and never re-runs the model's validators) rather than silently earning
+  `lever_scope_unresolved` at run time.
+
+Spec: `tests/test_calibration_engine_and_lever_scope.py`,
+`tests/test_calibration_api.py`,
+`tests/test_handover.py` (proof 8, the quiet-take route),
+`tests/test_capture_settings.py`/`tests/test_lever_selftest.py`/
+`tests/test_capture_client.py`/`tests/test_mapping_session.py` (the stream
+lag + hello-field halves above).
 
 ## THE BROWSER IS A VIEWFINDER — a calibration-grade run refuses it BY NAME
 

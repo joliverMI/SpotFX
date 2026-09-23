@@ -108,7 +108,7 @@ ownership state — is CARRIED and never refuses: "we could not check" is not
 "we checked and it is broken", the same distinction `night_exit` draws
 between DARK and UNKNOWN and `witness` between contaminated and
 witness_unavailable. Refusing on a check that could not be made would
-invent a fault. The three verdicts in `mapping_refusals.LEVER_REFUSING` are
+invent a fault. The verdicts in `mapping_refusals.LEVER_REFUSING` are
 the ones that stop a run, and each of them is a MEASUREMENT.
 
 WHERE IT RUNS. `spectra/services/capture_runs.py` — the one seam every
@@ -149,6 +149,8 @@ import logging
 import time
 from dataclasses import dataclass, field, replace
 from typing import Any, Optional
+
+import numpy as np
 
 from spectra.models.room_map import RoomMap
 from spectra.services import (capture_settings, capture_source,
@@ -325,6 +327,15 @@ class Verdict:
     #: refusal sentence, which names a stale transport as the FIRST thing
     #: to check when the readings disagree and this is False.
     fresh_frames: Optional[bool] = None
+    #: THE DELIVERED STREAM'S OWN LAG, MEASURED — seconds from a black->lit
+    #: lamp write to the delivered stream crossing halfway to its plateau
+    #: (`capture_settings.stream_lag_crossing`; the live half is
+    #: `_measure_stream_lag`, below). `None` means it could not be measured
+    #: at all (no hold, or the camera never delivered a usable baseline).
+    #: PERSISTED: `as_dict()` carries it onto the CalibrationRun record that
+    #: quotes this verdict, so "how slow was the stream this camera was
+    #: proven on" outlives the session.
+    stream_lag_s: Optional[float] = None
     readings: list = field(default_factory=list)
     problems: list = field(default_factory=list)
     notes: list = field(default_factory=list)
@@ -356,6 +367,7 @@ class Verdict:
                 "signal_floor": self.signal_floor,
                 "ceiling": dict(self.ceiling),
                 "fresh_frames": self.fresh_frames,
+                "stream_lag_s": self.stream_lag_s,
                 "min_response_ratio": min_response_ratio(),
                 "repeat_band": REPEAT_BAND,
                 "readings": [r.as_dict() for r in self.readings],
@@ -664,6 +676,7 @@ async def run_selftest(room: RoomMap, deps: "room_mapping.RunDeps", *,
     program = room_mapping.MappingProgram(live)
     sess.run_abort = None
     before = sess.camera_request
+    stream_lag_refused = False
     try:
         # TAKE THE ONE DRIVEN FIXTURE TO FULL FOR THE THREE CAPTURES and put
         # his own level back — `fixture_brightness.owned`, the same guard
@@ -683,13 +696,50 @@ async def run_selftest(room: RoomMap, deps: "room_mapping.RunDeps", *,
             one, await room_mapping._chains(quiet), quiet)   # noqa: SLF001
         async with fixture_brightness.owned(
                 fixtures, brightness_readings) as owned:
-            for label, exposure in (("dim", dim), ("bright", bright),
-                                    ("repeat", bright)):
-                out.readings.append(await _one_regime(
-                    label, exposure, scratch, program, emitter, live, quiet,
-                    out))
-                if not out.readings[-1].ok and label != "repeat":
-                    break
+            # THE STREAM'S OWN LAG, MEASURED, BEFORE ANY REGIME IS COMMANDED
+            # — the 2026-09-23 kiosk fix
+            # (`data/kiosk-exposure-lever-no-response/report.md`). This is
+            # also what puts the room dark for the first time in this
+            # run, on a session that supports it — its own "dark" step
+            # opens the hold. See `_measure_stream_lag`.
+            out.stream_lag_s, lag_supported, lag_had_signal = (
+                await _measure_stream_lag(program, emitter, live, quiet))
+            dark_settle, lit_settle = room_mapping.DARK_SETTLE_S, room_mapping.LIT_SETTLE_S
+            if lag_supported and out.stream_lag_s is None and not lag_had_signal:
+                # NO REAL SIGNAL AT ALL — not evidence the STREAM is slow,
+                # only that this measurement cannot tell a slow stream from
+                # a dead lever. Never refuse on a diagnosis this could not
+                # support: proceed unwidened, exactly as before this
+                # measurement existed, and let the ordinary three regimes
+                # below judge it (most likely `no_signal`).
+                out.stream_lag_s = None
+            elif lag_supported and (
+                    out.stream_lag_s is None
+                    or out.stream_lag_s > capture_settings.STREAM_LAG_REFUSAL_S):
+                out.verdict = mapping_refusals.LEVER_STREAM_LAG
+                out.reason = mapping_refusals.stream_lag_too_high(
+                    out.stream_lag_s)
+                stream_lag_refused = True
+            elif lag_supported:
+                dark_settle = capture_settings.widen_settle(
+                    room_mapping.DARK_SETTLE_S, out.stream_lag_s)
+                lit_settle = capture_settings.widen_settle(
+                    room_mapping.LIT_SETTLE_S, out.stream_lag_s)
+                if (dark_settle, lit_settle) != (
+                        room_mapping.DARK_SETTLE_S, room_mapping.LIT_SETTLE_S):
+                    out.notes.append(
+                        f"stream lag measured at {out.stream_lag_s:g}s "
+                        f"— the dark/lit settles were widened to "
+                        f"{dark_settle:g}s/{lit_settle:g}s to absorb it")
+            if not stream_lag_refused:
+                for label, exposure in (("dim", dim), ("bright", bright),
+                                        ("repeat", bright)):
+                    out.readings.append(await _one_regime(
+                        label, exposure, scratch, program, emitter, live,
+                        quiet, out, dark_settle=dark_settle,
+                        lit_settle=lit_settle))
+                    if not out.readings[-1].ok and label != "repeat":
+                        break
         if owned.note:
             out.notes.append(owned.note)
         out.problems.extend(owned.problems)
@@ -716,6 +766,14 @@ async def run_selftest(room: RoomMap, deps: "room_mapping.RunDeps", *,
                 mapping_refusals.carrier_not_restored(restore.not_restored))
 
     out.seconds = deps.clock() - started
+    if stream_lag_refused:
+        # THE STREAM ITSELF REFUSED — no regime was commanded, because
+        # commanding one at this lag would only have re-measured tonight's
+        # `no_response` shape: the settles this test can widen a run TO are
+        # what `judge()` needs, and a lag past the bound is longer than the
+        # protocol can absorb at all. `out.verdict`/`out.reason` are already
+        # set (the stream-lag branch above).
+        return out
     # A CAMERA THAT WOULD NOT TAKE THE TEST'S OWN COMMANDS proves nothing
     # either way, so it is UNPROVABLE and never a refusal: the run may not
     # have asked for that lever at all, and if it did, its own
@@ -747,15 +805,27 @@ async def run_selftest(room: RoomMap, deps: "room_mapping.RunDeps", *,
                if response is not None else "from nothing to a real reading")
             + (f", and a repeat of the same command landed within "
                f"{repeat:g}x" if repeat is not None else "")
-            + ". This camera's exposure control reaches its sensor.")
+            + ". This camera's exposure control reaches its sensor."
+            + (f" (stream lag {out.stream_lag_s:g}s)"
+               if out.stream_lag_s else ""))
     return out
 
 
 async def _one_regime(label: str, exposure: int, scratch: RoomMap, program,
                       emitter, live: list, deps: "room_mapping.RunDeps",
-                      out: Verdict) -> Reading:
+                      out: Verdict, *,
+                      dark_settle: float = room_mapping.DARK_SETTLE_S,
+                      lit_settle: float = room_mapping.LIT_SETTLE_S
+                      ) -> Reading:
     """Command this integration time, GATE ON THE READ-BACK, then take the
-    map's own single-emitter measurement in it."""
+    map's own single-emitter measurement in it.
+
+    `dark_settle`/`lit_settle` default to the map's own constants — every
+    caller before the stream-lag measurement existed passes nothing and
+    gets byte-identical behaviour. `run_selftest` widens both by the
+    session's own measured `stream_lag_s` (`capture_settings.
+    widen_settle`) before calling this, so a slow stream's "dark" reference
+    is not taken while the frames still show the previous lit lamp."""
     sess = deps.session
     reading = Reading(label=label, exposure_time=exposure)
     # PIN THE FRAME-RATE CONTROL OFF FOR EVERY REGIME THIS TEST COMMANDS.
@@ -791,7 +861,7 @@ async def _one_regime(label: str, exposure: int, scratch: RoomMap, program,
     # `capture_settings.regime_settle_s` for the arithmetic — it is paid
     # once per commanded regime, so an ordinary map, whose exposure never
     # moves mid-run, pays nothing.
-    fps = sess.observed_fps() or 5.0
+    fps = sess.observed_fps() or capture_settings.declared_fps(sess)
     reading.regime_settle_s = capture_settings.regime_settle_s(exposure, fps)
     await deps.sleep(reading.regime_settle_s)
     dark_c, lit_c, too_long, note = room_mapping.capture_windows(
@@ -805,7 +875,7 @@ async def _one_regime(label: str, exposure: int, scratch: RoomMap, program,
     outcome = await room_mapping._map_one(                     # noqa: SLF001
         scratch, program, emitter,
         [v for v in emitter.virtual_ids if v in set(live)], deps,
-        room_mapping.DARK_SETTLE_S, room_mapping.LIT_SETTLE_S, dark_c, lit_c,
+        dark_settle, lit_settle, dark_c, lit_c,
         room_mapping.RUN_CEILING_FLOOR_S)
     reading.dark_frames, reading.lit_frames = outcome.dark_frames, outcome.lit_frames
     reading.saturated_fraction = outcome.saturated_fraction
@@ -817,6 +887,106 @@ async def _one_regime(label: str, exposure: int, scratch: RoomMap, program,
     if not reading.ok:
         reading.reason = outcome.reason
     return reading
+
+
+def _grid_mean(grids: list) -> float:
+    """One scalar out of however many grids a moment delivered — the mean
+    pixel value across all of them. Pure arithmetic; `0.0` for nothing at
+    all, which is a real value a dark room can legitimately produce and is
+    never mistaken for "could not measure" here (that judgement belongs to
+    `capture_settings.stream_lag_crossing`, which reasons about the whole
+    SERIES, not one moment)."""
+    if not grids:
+        return 0.0
+    return float(np.mean([np.asarray(g, dtype=np.float64).mean()
+                          for g in grids]))
+
+
+async def _measure_stream_lag(program, emitter, live: list,
+                              deps: "room_mapping.RunDeps"
+                              ) -> tuple[Optional[float], bool, bool]:
+    """WITH THE ROOM ALREADY DARK — this call's own "dark" step is what
+    makes it so, the same first-open-of-the-hold moment every capture run
+    has always had — step the ONE driven emitter's lamp black->lit ONCE and
+    measure how long the delivered stream takes to show it.
+
+    THE ACTUAL FIX for the 2026-09-23 kiosk `no_response` refusal
+    (`data/kiosk-exposure-lever-no-response/report.md`): a settle tuned for
+    a fast stream reads as noise on a slow one, and no read-back — the
+    lock's own exposure/gain/white-balance confirmation — can ever tell the
+    two apart, because the lag lives entirely upstream of every control this
+    test can read. This is the one thing that CAN: it watches the delivered
+    stream itself, the same instrument `capture_settings.stream_lag_crossing`
+    is written to judge (that function is the pure half; this is only the
+    live measurement feeding it).
+
+    Runs BEFORE any regime is commanded — at whatever exposure the session
+    already holds — because the lag this measures is a property of the
+    STREAM (its frame size, its own frame-rate mode), not of a particular
+    integration time; the field report's own daylight runs found the same
+    1.4-2.2 s lag across exposure, gain, brightness and contrast writes
+    alike.
+
+    READS `session.grids` DIRECTLY (the same timestamped ring
+    `CameraNegotiation.observed_fps` and `MappingSession.gather` already
+    read from) rather than calling `gather()` repeatedly: a plain read has
+    no side effect on anything else watching this session, where a poll
+    loop built on `gather()` would compete with the regime loop that runs
+    right after it for the same frames. Returns `(lag_s, supported,
+    had_signal)`:
+
+      * `supported=False` means this session exposes no such ring (every
+        real production session does; only a test double built before this
+        existed would not) and NOTHING was measured or asked of the
+        camera — the caller must not refuse on that, the same "did not
+        say" distinction `capture_source.serves_fresh_frames` already
+        draws.
+      * `supported=True, lag_s=None, had_signal=True` is a REAL
+        measurement of a real transition that never finished crossing
+        inside the window — the caller refuses on it.
+      * `supported=True, lag_s=None, had_signal=False` means the lamp
+        NEVER showed any light above its own dark baseline in this
+        session's own exposure state, at all — which is indistinguishable
+        from a dead lever, not evidence the STREAM is slow. Refusing here
+        would misattribute a no-signal camera to a transport problem, so
+        the caller does not: it proceeds unwidened and lets the ordinary
+        three-regime judgement name what this actually is (most likely
+        `no_signal`)."""
+    sess = deps.session
+    grids = getattr(sess, "grids", None)
+    if grids is None:
+        return None, False, False
+    lit_vids = [v for v in emitter.virtual_ids if v in set(live)]
+    ranges = [r for r in emitter.ranges if r.virtual_id in set(lit_vids)]
+    program.select(lit_vids, ranges)
+    held = await deps.open_hold(
+        program, 1.0, step="dark", heartbeat_timeout_s=room_mapping.HOLD_HEARTBEAT_S,
+        max_duration_s=room_mapping.RUN_CEILING_FLOOR_S)
+    if not (held or {}).get("held"):
+        return None, True, False
+    await deps.sleep(room_mapping.DARK_SETTLE_S)
+    await deps.sleep(capture_settings.STREAM_LAG_BASELINE_S)
+    write_at = deps.clock()
+    baseline_from = write_at - capture_settings.STREAM_LAG_BASELINE_S
+    baseline = _grid_mean([g.grid for g in list(grids)
+                          if getattr(g, "at_s", None) is not None
+                          and baseline_from <= g.at_s <= write_at])
+    await deps.open_hold(
+        program, 1.0, step="lit", heartbeat_timeout_s=room_mapping.HOLD_HEARTBEAT_S,
+        max_duration_s=room_mapping.RUN_CEILING_FLOOR_S)
+    deadline = write_at + capture_settings.STREAM_LAG_SAMPLE_WINDOW_S
+    lag: Optional[float] = None
+    had_signal = False
+    while deps.clock() < deadline:
+        await deps.sleep(capture_settings.STREAM_LAG_POLL_S)
+        samples = [(g.at_s, _grid_mean([g.grid])) for g in list(grids)
+                  if getattr(g, "at_s", None) is not None]
+        after = [v for t, v in samples if t >= write_at]
+        had_signal = bool(after) and max(after) > baseline
+        lag = capture_settings.stream_lag_crossing(samples, write_at, baseline)
+        if lag is not None:
+            break
+    return lag, True, had_signal
 
 
 # ── the preflight ──────────────────────────────────────────────────────────

@@ -534,7 +534,14 @@ class MappingSession(capture_settings.CameraNegotiation):
             self.hello = {k: msg.get(k) for k in
                           ("user_agent", "video", "secure_context", "origin",
                            "client", "client_version", "host", "pose_name",
-                           "platform", "camera", "fresh_frames")
+                           "platform", "camera", "fresh_frames",
+                           # `pipe_drained` — the SAME claim as
+                           # `fresh_frames`, under its honest name (see
+                           # `capture_client.camera.BaseCamera.fresh_frames`).
+                           # `delivered_fps` — this client's own measured
+                           # send rate, beside the device's declared
+                           # `sensor_fps` on `lock` — see `declared_fps()`.
+                           "pipe_drained", "delivered_fps")
                           if k in msg}
             self._adopt_pose(msg.get("pose_hint"))
             if isinstance(msg.get("lock"), dict):

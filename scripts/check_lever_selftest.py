@@ -190,8 +190,13 @@ def tonight(exposure, _n):
 
 def wanders(exposure, n):
     """The re-clamping camera: it obeys, and then its sensitivity moves
-    under a command that did not. 0.23 -> 0.01 is the pair he actually saw."""
-    return honest(exposure, n) / (23.0 if n >= 3 else 1.0)
+    under a command that did not. 0.23 -> 0.01 is the pair he actually saw.
+
+    `n >= 4`, not 3: since 2026-09-23 the self-test flashes this lamp ONCE
+    more before its own three regimes, to measure the delivered stream's
+    own lag (`lever_selftest._measure_stream_lag`) — so the repeat capture
+    is this camera's FOURTH lit transition now, not its third."""
+    return honest(exposure, n) / (23.0 if n >= 4 else 1.0)
 
 
 # ── the room's write seam ──────────────────────────────────────────────────

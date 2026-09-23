@@ -90,6 +90,27 @@ def test_a_calibration_needs_a_name():
         assert r.status_code == 400
 
 
+def test_lever_scope_round_trips_and_defaults_empty():
+    """`data/kiosk-exposure-lever-no-response/report.md`: a calibration may
+    name which emitter its own lever self-test drives — empty/omitted is
+    the whole-room default every calibration had before this field
+    existed."""
+    with _client() as client:
+        room = _room(client)
+        made = _create(client, room)
+        assert made.json()["lever_scope"] == {}
+
+        edited = client.put(
+            f"/api/calibrations/{made.json()['id']}",
+            json={"lever_scope": {"carrier_ids": ["east"]}})
+        assert edited.status_code == 200, edited.text
+        assert edited.json()["lever_scope"] == {"carrier_ids": ["east"]}
+        assert any("lever self-test scope" in c
+                  for c in edited.json()["changed"])
+        got = client.get(f"/api/calibrations/{made.json()['id']}").json()
+        assert got["lever_scope"] == {"carrier_ids": ["east"]}
+
+
 # ── 2. ONE VALIDATOR, NEVER A SECOND ───────────────────────────────────────
 
 @pytest.mark.parametrize("bad,says", [
@@ -228,6 +249,43 @@ def test_re_measuring_a_tag_is_recorded_in_the_lineage():
         note = " ".join(entry["notes"])
         assert "tag 7 re-measured 100 -> 97.4 mm" in note
         assert "tag 9 added at 50.1 mm on the door" in note
+
+
+# ── 3c. lever_scope names WHOLE carriers only ───────────────────────────────
+
+def test_a_whole_carrier_lever_scope_emitter_id_is_accepted():
+    with _client() as client:
+        room = _room(client)
+        made = _create(client, room,
+                      lever_scope={"emitter_ids": ["north"]})
+        assert made.status_code == 200, made.text
+        assert made.json()["lever_scope"] == {"emitter_ids": ["north"]}
+
+
+def test_a_block_or_segment_lever_scope_emitter_id_is_refused_on_create():
+    """A sub-carrier id only exists at the granularity the RUN that
+    produced it chose; `Calibration.lever_scope` carries no granularity of
+    its own to resolve one against, so naming one is refused by name here
+    rather than silently unresolved by the self-test later."""
+    with _client() as client:
+        room = _room(client)
+        r = _create(client, room, lever_scope={
+            "emitter_ids": ["tv-mapper:blk3[90-119]"]})
+        assert r.status_code == 400
+        assert "block or segment" in r.json()["detail"]
+        assert calibration_store.load_all() == []
+
+
+def test_a_block_or_segment_lever_scope_emitter_id_is_refused_on_edit():
+    with _client() as client:
+        room = _room(client)
+        made = _create(client, room).json()
+        r = client.put(f"/api/calibrations/{made['id']}", json={
+            "lever_scope": {"emitter_ids": ["tv-mapper:seg0[0-9]"]}})
+        assert r.status_code == 400
+        assert "block or segment" in r.json()["detail"]
+        back = client.get(f"/api/calibrations/{made['id']}").json()
+        assert back["lever_scope"] == {}
 
 
 # ── 4. the routes that touch a light refuse honestly with no camera ────────

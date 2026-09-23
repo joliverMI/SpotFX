@@ -520,7 +520,30 @@ class BaseCamera:
     #: which claim it is measuring under instead of discovering it in a
     #: reading that disagrees with its own repeat. False here on purpose:
     #: a new backend claims freshness by implementing it.
+    #:
+    #: THE NAME IS NARROWER THAN IT SOUNDS, and the 2026-09-23 kiosk
+    #: `no_response` refusal is exactly what that gap costs
+    #: (`data/kiosk-exposure-lever-no-response/report.md`). This attribute
+    #: means ONLY "my TRANSPORT is drained" — the pipe from ffmpeg's own
+    #: buffer to `frame()` holds no stale backlog. It says NOTHING about
+    #: whatever is UPSTREAM of that pipe: a UVC camera's own firmware/USB
+    #: pipeline can still sit several SECONDS behind reality (measured: a
+    #: kiosk held at 1920x1080 5 fps took 1.4-2.1 s to show a control
+    #: change, with this flag `True` the whole time — its pipe genuinely
+    #: never queued a stale frame, and the frame it handed back was still
+    #: old). `hello["pipe_drained"]` carries this SAME value under its
+    #: honest name; `hello["fresh_frames"]` is kept, unrenamed, for every
+    #: existing reader. Neither one measures the upstream lag —
+    #: `spectra/services/capture_settings.stream_lag_crossing` is what does,
+    #: by watching the delivered stream itself rather than trusting a
+    #: transport-level promise.
     fresh_frames = False
+
+    @property
+    def pipe_drained(self) -> bool:
+        """The honestly-named twin of `fresh_frames` — see its docstring.
+        Not a second claim, the same one, so the two can never disagree."""
+        return bool(self.fresh_frames)
 
     def __init__(self) -> None:
         self.pose_token = ""

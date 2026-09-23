@@ -176,7 +176,7 @@ a delay before succeeding. A working camera pays none of it.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Any, Optional
 
 from spectra.models.room_map import GRID_H, GRID_W
 from spectra.services import capture_source
@@ -674,6 +674,141 @@ def frames_in(capture_s: float, fps: float) -> int:
     other direction, for pricing and for saying what a run is about to
     average."""
     return int(max(0.0, float(capture_s)) * max(0.0, float(fps)))
+
+
+# ── SIX: THE STREAM'S OWN LAG — a settle tuned for a fast stream is noise
+#         on a slow one, and no read-back can tell the two apart ──────────
+#
+# `regime_settle_s` (FOUR, above) prices the SENSOR's own delay before a
+# commanded regime lands. It says nothing about a stage further upstream: a
+# UVC camera held in a slow frame-rate mode can take multiple SECONDS to
+# deliver a change at all — measured on a kiosk camera held at 1920x1080
+# 5 fps, 1.4-2.1 s per control write or scene change (six to eight frames),
+# upstream of everything the client's own transport drain can reach
+# (`data/kiosk-exposure-lever-no-response/report.md`, 2026-09-23). A run
+# that settles for less than that measures noise: its "dark" reference still
+# shows the previous lit lamp, and its "lit" capture is mostly frames of the
+# dark room — the exact shape of that night's `no_response` refusal.
+#
+# So this is MEASURED, once per run, before the lever self-test's own three
+# captures: step the one driven emitter black->lit and watch how long the
+# delivered stream takes to show it (`stream_lag_crossing`, pure — the live
+# half is `lever_selftest._measure_stream_lag`). `widen_settle` folds the
+# answer into the two capture settles; a lag past `STREAM_LAG_REFUSAL_S` is
+# longer than the protocol can absorb, and the run refuses BY NAME rather
+# than measuring through it.
+
+#: How long a delivered-stream lag may be before a run refuses rather than
+#: widening its settles to absorb it. 4 s — a bound the protocol can still
+#: afford (see `STREAM_LAG_SAMPLE_WINDOW_S`), well past the kiosk's own
+#: measured 1.4-2.1 s and well short of turning every capture into a
+#: multi-minute wait.
+STREAM_LAG_REFUSAL_S = 4.0
+#: `widen_settle`'s own margin over the measured lag — the same 1.5x margin
+#: `room_mapping.RUN_CEILING_MARGIN` uses for the same reason: a measurement
+#: is not a guarantee, and a settle that only just outlasts the lag it was
+#: measured against is one slow frame from measuring noise again.
+STREAM_LAG_SETTLE_MARGIN = 1.5
+#: How long the live measurement watches for the crossing before giving up
+#: — past `STREAM_LAG_REFUSAL_S` x the margin, with room to spare, so a lag
+#: right at the refusal bound is still actually SEEN rather than timed out
+#: and reported as "never crossed".
+STREAM_LAG_SAMPLE_WINDOW_S = 6.0
+#: The baseline window taken just before the black->lit step — long enough
+#: to average a couple of frames of the dark room, short enough that it is
+#: not itself a second settle.
+STREAM_LAG_BASELINE_S = 0.3
+#: How often the live measurement polls for new frames while watching for
+#: the crossing.
+STREAM_LAG_POLL_S = 0.1
+
+
+def widen_settle(base_s: float, stream_lag_s: Optional[float]) -> float:
+    """A dark/lit settle, widened by a MEASURED stream lag:
+    `max(existing, STREAM_LAG_SETTLE_MARGIN x stream_lag_s)`.
+
+    No lag measured (`None`, or non-positive) leaves the settle untouched —
+    the byte-identical behaviour every run had before this measurement
+    existed, and the correct one for a stream this was never asked about."""
+    if not stream_lag_s or stream_lag_s <= 0:
+        return base_s
+    return max(base_s, STREAM_LAG_SETTLE_MARGIN * float(stream_lag_s))
+
+
+def declared_fps(session: Any, default: float = 5.0) -> float:
+    """A frame rate to price BEFORE `CameraNegotiation.observed_fps()` has
+    two arrivals to measure from — its own callers' fallback used to be a
+    bare hardcoded number (5.0, or `mapping_session.FRAME_FPS`), pricing a
+    session that had already told us its declared rate (`sensor_fps`, off
+    `--get-parm`) and, since 2026-09-23, its own recently DELIVERED one
+    (`hello["delivered_fps"]`, the client's own measurement) as if it had
+    told us neither — the `sensor_fps: 5.0 (declared) vs 4.38 (real)`
+    field report finding this closes.
+
+    DELIVERED FIRST, because it is a measurement of what THIS client
+    actually sent, where the declared rate is only what the device claims
+    for itself; then the declared rate; then `default`, unchanged, for a
+    session that answered neither. Reads defensively (`getattr`/dict
+    access, never an attribute a fake session might not define) so every
+    session shape already in this codebase — the real `MappingSession`,
+    and every `SessionCameraDouble`-based test double — answers it without
+    having to grow a new method.
+
+    NEVER THE AUTHORITY: `observed_fps()` — the SERVER's own count of
+    frames that actually arrived — always wins once it has two to time;
+    this is only what a caller prices BEFORE that, or when a session never
+    delivers enough frames to have one."""
+    hello = getattr(session, "hello", None) or {}
+    delivered = hello.get("delivered_fps")
+    if isinstance(delivered, (int, float)) and delivered > 0:
+        return float(delivered)
+    sensor = None
+    lock = getattr(session, "lock", None)
+    if lock is not None:
+        sensor = getattr(lock, "sensor_fps", None)
+    if sensor is None:
+        try:
+            sensor = session.camera_lock_view().get("sensor_fps")
+        except Exception:                                # noqa: BLE001
+            sensor = None
+    if isinstance(sensor, (int, float)) and sensor > 0:
+        return float(sensor)
+    return default
+
+
+def stream_lag_crossing(samples: list[tuple[float, float]], write_at: float,
+                        baseline: float) -> Optional[float]:
+    """PURE: seconds from `write_at` (a black->lit lamp write, on the same
+    clock as `samples`) until the delivered stream's own signal crosses
+    HALFWAY from `baseline` to its plateau — the same measurement the field
+    report's "run 3" made with `brightness`, made here with a lamp.
+
+    `samples` are (stamp, value) pairs, any order — `value` is some scalar
+    that rises when the lamp lights (a mean grid brightness, in production).
+    Only samples stamped AT OR AFTER `write_at` are candidates for the
+    crossing; the PLATEAU is the mean of the LAST THIRD of those (never the
+    single maximum, which one saturated or noisy frame could inflate).
+
+    Returns `None` — "could not measure", never "zero lag" — when there are
+    too few post-write samples to find a plateau, or when the plateau never
+    clears `baseline` (no real transition to measure), or when nothing in
+    the window crosses halfway (the stream never showed the change inside
+    it — at least as long as the window itself, i.e. definitely past any
+    sane refusal bound)."""
+    after = sorted((s for s in samples
+                    if s[0] is not None and float(s[0]) >= float(write_at)),
+                   key=lambda s: s[0])
+    if len(after) < 2:
+        return None
+    tail_n = max(1, len(after) // 3)
+    plateau = sum(v for _, v in after[-tail_n:]) / tail_n
+    if plateau <= baseline:
+        return None
+    half = baseline + (plateau - baseline) / 2.0
+    for stamp, value in after:
+        if value >= half:
+            return round(max(0.0, float(stamp) - float(write_at)), 3)
+    return None
 
 
 # ── THE NEGOTIATION ITSELF, written once ───────────────────────────────────

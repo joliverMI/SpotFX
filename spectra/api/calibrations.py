@@ -62,7 +62,8 @@ from pydantic import BaseModel
 
 from spectra.models.calibration import (Calibration, Envelope, PinnedCamera,
                                         TagRegistration,
-                                        declaration_snapshot)
+                                        declaration_snapshot,
+                                        lever_scope_rejection)
 from spectra.services import (amendment, calibration_diff, calibration_runs,
                               calibration_store, capture_queue, capture_runs,
                               light_field, pose_fingerprint)
@@ -96,6 +97,13 @@ class CalibrationBody(BaseModel):
     #: measurement — and two entries for one tag id are refused by name
     #: below, because one physical tag has one size.
     tags: Optional[list[TagRegistration]] = None
+    #: WHICH EMITTER THE LEVER SELF-TEST DRIVES, overriding this
+    #: calibration's own declared items' default (`plan.emitters[0]`) — see
+    #: `Calibration.lever_scope`'s own docstring. `{}`/omitted is the whole
+    #: room, unchanged. WHOLE-CARRIER emitter ids or carrier ids only — a
+    #: block/segment id is refused by name below, never silently
+    #: unresolved.
+    lever_scope: Optional[dict] = None
 
 
 class RunBody(BaseModel):
@@ -176,14 +184,16 @@ async def create_calibration(body: CalibrationBody):
         return JSONResponse(status_code=400, content={
             "detail": f"no room {body.room_id} — a calibration is a pose in a "
                       f"room, so it needs one that exists"})
-    problem = _validate_items(body.items or []) or _validate_tags(body.tags)
+    problem = (_validate_items(body.items or []) or _validate_tags(body.tags)
+              or _validate_lever_scope(body.lever_scope))
     if problem is not None:
         return problem
     cal = Calibration(name=body.name.strip(), room_id=body.room_id,
                       camera=body.camera or PinnedCamera(),
                       envelope=body.envelope or Envelope(),
                       items=list(body.items or []),
-                      tags=list(body.tags or []))
+                      tags=list(body.tags or []),
+                      lever_scope=dict(body.lever_scope or {}))
     if body.placement is not None:
         cal.pose.placement = body.placement
     calibration_store.save(cal)
@@ -228,6 +238,10 @@ async def update_declaration(cal_id: str, body: CalibrationBody):
         problem = _validate_tags(body.tags)
         if problem is not None:
             return problem
+    if body.lever_scope is not None:
+        problem = _validate_lever_scope(body.lever_scope)
+        if problem is not None:
+            return problem
 
     changes: list[str] = []
     if body.name and body.name.strip() != cal.name:
@@ -252,6 +266,10 @@ async def update_declaration(cal_id: str, body: CalibrationBody):
     if body.tags is not None and body.tags != cal.tags:
         changes.append(_tag_change(cal.tags, body.tags))
         cal.tags = list(body.tags)
+    if body.lever_scope is not None and body.lever_scope != cal.lever_scope:
+        changes.append(f"lever self-test scope: {cal.lever_scope!r} -> "
+                       f"{body.lever_scope!r}")
+        cal.lever_scope = dict(body.lever_scope)
 
     if changes:
         calibration_runs.record_declaration_change(cal, changes,
@@ -411,4 +429,16 @@ def _validate_items(items: list[dict]) -> Optional[JSONResponse]:
         capture_queue.parse_items(items)
     except ValueError as exc:
         return JSONResponse(status_code=400, content={"detail": str(exc)})
+    return None
+
+
+def _validate_lever_scope(scope: Optional[dict]) -> Optional[JSONResponse]:
+    """SAME RULE AS THE MODEL'S OWN `lever_scope_rejection`, checked here
+    too: `PUT`'s own edit assigns `cal.lever_scope` directly rather than
+    reconstructing the model, so the field's own validator never runs for
+    it — this is what makes a bad scope refused at BOTH the `POST` that
+    constructs a `Calibration` and the `PUT` that mutates one in place."""
+    problem = lever_scope_rejection(scope)
+    if problem is not None:
+        return JSONResponse(status_code=400, content={"detail": problem})
     return None

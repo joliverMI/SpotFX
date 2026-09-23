@@ -337,3 +337,103 @@ def test_the_server_only_adopts_a_sane_pose_hint():
         assert sess.pose_id == minted and not sess.pose_asserted
     sess._adopt_pose("a" * 200)                    # noqa: SLF001
     assert len(sess.pose_id) == 32 and sess.pose_asserted
+
+
+# ── 4. THE STREAM'S OWN LAG — what the client says about itself ───────────
+#
+# `data/kiosk-exposure-lever-no-response/report.md`, 2026-09-23:
+# `fresh_frames` only ever meant "my pipe is drained", never "the frame is
+# fresh" — a UVC camera's own firmware/USB pipeline can still be seconds
+# behind while this flag is `True` the whole time. `pipe_drained` carries
+# the SAME value under its honest name; `delivered_fps` is the client's own
+# measured send rate, beside whatever the device declares for itself.
+
+def test_hello_carries_pipe_drained_as_the_same_value_as_fresh_frames():
+    hellos: list[dict] = []
+
+    async def handler(ws):
+        async for raw in ws:
+            msg = json.loads(raw)
+            if msg.get("type") == "hello":
+                hellos.append(msg)
+                await ws.send(json.dumps({"type": "hello_ack",
+                                          "session_id": "s",
+                                          "pose_id": msg.get("pose_hint")}))
+
+    async def go():
+        async with websockets.serve(handler, "127.0.0.1", 0) as server:
+            port = server.sockets[0].getsockname()[1]
+            camera = SyntheticCamera(lambda: bytes(cam.FRAME_BYTES),
+                                     lock=LOCKED, fps=50.0)
+            client = CaptureClient(f"ws://127.0.0.1:{port}", camera,
+                                   host="t", fps=50.0)
+            assert await client.start_camera() is None
+            task = asyncio.create_task(client.run())
+            for _ in range(200):
+                if hellos:
+                    break
+                await asyncio.sleep(0.02)
+            client.stop()
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):   # noqa: BLE001
+                pass
+
+    asyncio.run(go())
+    assert hellos, "the client said hello"
+    hello = hellos[0]
+    assert hello["fresh_frames"] is True
+    assert hello["pipe_drained"] == hello["fresh_frames"], (
+        "the same claim, under its honest name")
+    # NONE until at least two frames have been SENT — an empty history is
+    # not a claim of zero. The first hello of a fresh connection sends
+    # before any frame has gone out at all.
+    assert hello["delivered_fps"] is None
+
+
+def test_delivered_fps_reflects_frames_actually_sent():
+    """A re-hello (a reconnect) carries the client's real recent send rate
+    — this is what lets a server price a frame period honestly the moment
+    it hears from a client for the second time, rather than only once
+    `observed_fps()` itself has arrived at two frames."""
+    hellos: list[dict] = []
+
+    async def handler(ws):
+        async for raw in ws:
+            msg = json.loads(raw)
+            if msg.get("type") == "hello":
+                hellos.append(msg)
+                await ws.send(json.dumps({"type": "hello_ack",
+                                          "session_id": "s",
+                                          "pose_id": msg.get("pose_hint")}))
+
+    async def go():
+        async with websockets.serve(handler, "127.0.0.1", 0) as server:
+            port = server.sockets[0].getsockname()[1]
+            camera = SyntheticCamera(lambda: bytes(cam.FRAME_BYTES),
+                                     lock=LOCKED, fps=50.0)
+            client = CaptureClient(f"ws://127.0.0.1:{port}", camera,
+                                   host="t", fps=50.0)
+            assert await client.start_camera() is None
+            task = asyncio.create_task(client.run())
+            for _ in range(300):
+                if client.state.frames_sent > 3:
+                    break
+                await asyncio.sleep(0.02)
+            await client._ws.close()               # noqa: SLF001
+            for _ in range(300):
+                if len(hellos) > 1:
+                    break
+                await asyncio.sleep(0.02)
+            client.stop()
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):   # noqa: BLE001
+                pass
+
+    asyncio.run(go())
+    assert len(hellos) > 1, "it reconnected"
+    assert hellos[1]["delivered_fps"] is not None
+    assert hellos[1]["delivered_fps"] > 0
