@@ -46,6 +46,9 @@ from services.audio_analyzer import load_audio_shape_meta
 # Badge-only lifecycle reporting. Observation, never a decision — see that
 # module's docstring before adding a call.
 from services import lock_state
+# Ship 2 frame-mismatch advisory (data/false-lock-continued-search/report.md
+# §4). Pure/stdlib-only, safe to import eagerly.
+from services import frame_advisory
 # Math kernel extracted to services/xcorr_core.py so the offline bench harness
 # can drive the exact production math. Aliased to the historical private names
 # so the rest of this module reads unchanged.
@@ -84,6 +87,9 @@ _OFFSET_HISTORY_CAP   = 5       # rolling window of saved offsets per (track, Se
 _SETLIST_DELTA_CAP    = 10      # rolling deltas per Set List for cross-track bias hint
 _PRE_FLIGHT_INTRO_MS  = 8_000   # how much of the intro we sample for the pre-flight scan
 _PRE_FLIGHT_MIN_R     = 0.55    # acceptance threshold for pre-flight displacement
+_SESSION_BAND_HISTORY_CAP = 40  # rolling window of this session's own locked
+                                 # offsets — the frame-mismatch advisory's
+                                 # room-band fallback (services/frame_advisory.py)
 
 
 @dataclass(frozen=True)
@@ -233,6 +239,12 @@ class AutoOffsetService:
         # currently working with without locking the live frames list.
         self._frames_snapshot_uri: Optional[str] = None
         self._frames_snapshot: list[tuple[int, float, float, float, float]] = []
+        # Ship 2 frame-mismatch advisory (data/false-lock-continued-search/
+        # report.md §4): this session's own hard-locked offsets, the
+        # plausibility-band fallback when the systemic learner isn't
+        # confident yet. In-memory only, by design — "this session" means
+        # since the process started, not the persisted lock_history log.
+        self._session_locked_offsets_ms: list[int] = []
 
     def get_status(self, uri: str) -> dict:
         """Return whether xcorr calibration is currently active for a URI."""
@@ -1606,6 +1618,50 @@ class AutoOffsetService:
         except Exception as exc:
             logger.warning("Auto-offset xcorr: failed to save offset history: %s", exc)
 
+        # Frame-mismatch advisory (Ship 2, data/false-lock-continued-search/
+        # report.md §4) — a fact recorded on this play's lock_history entry,
+        # never a gate: no lock is refused and no fire time changes here.
+        # Reads the profile the trigger engine already has loaded for this
+        # exact uri (never a fresh disk load — profile_manager's own module-
+        # level index build is a one-time, logged side effect this finalize
+        # path has no business triggering).
+        try:
+            from main import engine as _engine_for_advisory
+            from services import systemic_offset
+            _adv_profile = getattr(_engine_for_advisory, "_profile", None)
+            if getattr(_engine_for_advisory, "_last_uri", None) != uri:
+                _adv_profile = None
+            _has_authored = bool(
+                _adv_profile
+                and any(not t.ai_generated for t in _adv_profile.triggers)
+            )
+            _sys_pred = systemic_offset.predict()
+            _band_ms = frame_advisory.room_band_ms(
+                _sys_pred.center_ms, _sys_pred.confidence,
+                self._session_locked_offsets_ms,
+            )
+            _advisory = frame_advisory.evaluate(
+                locked=_locked_via_stop,
+                lock_offset_ms=int(final.best_offset),
+                has_authored_triggers=_has_authored,
+                band_ms=_band_ms,
+            )
+        except Exception as exc:
+            logger.warning("frame_advisory: evaluation failed: %s", exc)
+            _advisory = frame_advisory.FrameAdvisory(suspect=False, room_band_ms=None, distance_ms=None)
+        if _locked_via_stop:
+            self._session_locked_offsets_ms.append(int(final.best_offset))
+            del self._session_locked_offsets_ms[:-_SESSION_BAND_HISTORY_CAP]
+        if _advisory.suspect:
+            # Lands on the badge's tooltip — an amendment to the record
+            # note_outcome() already published for this hard lock, not a
+            # new phase (services/lock_state.py's own note_frame_advisory).
+            lock_state.note_frame_advisory(
+                uri, suspect=_advisory.suspect,
+                room_band_ms=_advisory.room_band_ms,
+                distance_ms=_advisory.distance_ms,
+            )
+
         # Timing-page lock history: one entry per completed play. Uses the
         # shape's title/artist (current_track may already be the next song).
         from services import lock_history
@@ -1621,6 +1677,9 @@ class AutoOffsetService:
             prev_offset_ms=prev_offset_ms,
             quality=float(final.best_quality),
             n_windows=int(final.n_measurements),
+            frame_suspect=_advisory.suspect,
+            frame_suspect_room_band_ms=_advisory.room_band_ms,
+            frame_suspect_distance_ms=_advisory.distance_ms,
         )
 
         try:

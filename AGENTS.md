@@ -7801,6 +7801,47 @@ before touching it:
   `spectra/web` twin) never files it under "Mismatch spikes (recovery
   windows)" (`node scripts/check_debug_spike_lines.mjs`).
 
+## The root xcorr engine's identity is the TRACK actually playing, never `profile.spotify_uri`
+
+`TriggerEngine._last_uri` (`services/trigger_engine.py`) is what `apply_save`/
+`reload_shape_offset`/`systemic_residual_for` and the sweep (`services/
+auto_offset_service.py`) key on to decide whether a measurement belongs to
+the song currently loaded. `load_profile(profile, track_uri=...)` sets it
+from `track_uri` (i.e. `state.current_track.spotify_uri`), **not**
+`profile.spotify_uri` — the two diverge for the ~24 profiles main.py's
+title/artist fallback (no `spotify:track:` match found, matched by
+title+artist instead) loads, whose own stored `spotify_uri` is a stale
+`ledfx:artist:title` pseudo-URI from before the song ever got a real match.
+Before this fix (`data/false-lock-continued-search/report.md`, 2026-09-22),
+every sweep snap for those songs was silently dropped in `apply_save` (no
+log line either) and the song ran the whole play at the un-corrected `+0ms`
+loaded-baseline offset — a real defect independent of any individual lock
+being right or wrong. `main.py`'s call site passes `track_uri=
+track.spotify_uri` explicitly; any other caller of `load_profile` (e.g.
+`services/guest_source.py`) that has no separate track identity omits it
+and falls back to `profile.spotify_uri`, which already equals the track
+for it. `apply_save` now logs every dropped snap instead of returning
+silently.
+
+**A hard lock can be a correct MEASUREMENT of a wrong SHAPE** — the same
+report's root finding. Two captures of the same recording can land in two
+different timing frames (a stale Spotify poll poisoning `song_start` at
+capture time, `services/audio_shape_service.py`), and a lock that
+perfectly, unanimously matches the wrong one is indistinguishable from a
+correct lock by "keep searching longer" or the post-lock mismatch monitor
+— both only re-measure the shape's own internal alignment, which is
+self-consistent either way. `services/frame_advisory.py` is an ADVISORY,
+not a gate: when a hard lock lands more than 2s from the room's current
+band (the systemic learner's centre at confidence ≥ 0.25, else the median
+of this session's own locked plays) on a song with hand-authored (not
+`ai_generated`) triggers, `frame_suspect` is recorded on the
+`lock_history` entry and shown on the lock badge tooltip / Timing page row
+— never refusing the lock or changing when triggers fire. Regression
+fixture: `tests/test_false_lock_frame_mismatch.py`, driven against his real
+captured audio for MIA (`tests/fixtures/`, the two captures that sit
+~5375ms apart in their own timelines) through the real production kernel
+(`xcorr_window_full`/`EvidenceAccumulator`/`SweepEvaluator.lock_and_stop`).
+
 ## `librosa_offset_ms` is unreliable — don't shift section/beat times by it
 
 `LibrosaAnalysis.librosa_offset_ms` is meant to convert WAV-capture time to

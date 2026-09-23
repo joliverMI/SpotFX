@@ -420,14 +420,32 @@ class TriggerEngine:
             if cfg is not None and patch:
                 cfg.update(patch)
 
-    def load_profile(self, profile: SongProfile) -> None:
+    def load_profile(self, profile: SongProfile, track_uri: Optional[str] = None) -> None:
+        """track_uri: the Spotify URI of the track actually playing
+        (state.current_track.spotify_uri), when the caller has one.
+
+        The engine's own identity — everything the sweep, apply_save and
+        reload_shape_offset key on, and what the lock badge/history report
+        against — tracks THIS, never profile.spotify_uri. main.py's
+        title/artist fallback can load a profile whose own spotify_uri is
+        a stale `ledfx:artist:title` pseudo-URI (an older profile authored
+        before the song had a spotify_uri match) while the real track is
+        playing under `spotify:track:...`. Before this, every sweep snap
+        for that song was silently dropped in apply_save (uri !=
+        self._last_uri, no log line) and the song ran at the un-corrected
+        +0ms offset all play — see data/false-lock-continued-search/
+        report.md. Callers with no separate track identity (guest_source,
+        offline tools/tests) omit this and fall back to profile.spotify_uri,
+        which already equals
+        the track for them.
+        """
+        uri = track_uri or profile.spotify_uri
         self._profile = profile
         logger.info(
             "load_profile: uri=%s last_uri=%s (change=%s)",
-            profile.spotify_uri, self._last_uri,
-            profile.spotify_uri != self._last_uri,
+            uri, self._last_uri, uri != self._last_uri,
         )
-        if profile.spotify_uri != self._last_uri:
+        if uri != self._last_uri:
             for task in list(self._ramp_tasks):
                 task.cancel()
             self._ramp_tasks.clear()
@@ -452,7 +470,7 @@ class TriggerEngine:
             # every other song).
             self._triggerless_triggers = None
             self._last_preview_id = None
-            self._last_uri = profile.spotify_uri
+            self._last_uri = uri
             # A charge/lull from the previous song must not linger into this
             # one — clear it if no drop resolved it (the LedFX-side orphan
             # watchdog is the backstop when this write is lost too).
@@ -480,7 +498,7 @@ class TriggerEngine:
             # New song — clear the play-best floor so any anchor or sweep
             # save this play can override the median-derived starting baseline.
             self._play_best_quality = 0.0
-            meta = load_audio_shape_meta(profile.spotify_uri)
+            meta = load_audio_shape_meta(uri)
             # Resolve the offset from whichever slot fits the current context
             # (Set List override or default), then layer the user's perception
             # trim on top so subjective alignment persists across plays.
@@ -492,12 +510,12 @@ class TriggerEngine:
             )
             # Pre-load librosa beats/tempo once so beat-sequence fires don't
             # each re-parse the JSON file from disk.
-            self._beats_cache = load_beats_for_uri(profile.spotify_uri)
+            self._beats_cache = load_beats_for_uri(uri)
             from services.audio_analyzer import load_sections_for_uri
-            self._sections_cache = load_sections_for_uri(profile.spotify_uri)
-            self._tempo_cache = load_tempo_for_uri(profile.spotify_uri)
+            self._sections_cache = load_sections_for_uri(uri)
+            self._tempo_cache = load_tempo_for_uri(uri)
             # Generate analyzed triggers from embedded pipeline (if librosa data exists)
-            self._analyzed_triggers = self._generate_analyzed_triggers(profile.spotify_uri)
+            self._analyzed_triggers = self._generate_analyzed_triggers(uri)
             # Generate synthetic triggerless triggers if needed.
             # Dinner Party mode always wins — its synthetic triggers come from the
             # "Dinner Party" profile regardless of whether analyzed triggers exist.
@@ -845,7 +863,7 @@ class TriggerEngine:
         from services.signal_resolver import _section_energy
         if self._sections_cache is None and self._profile:
             from services.audio_analyzer import load_sections_for_uri
-            self._sections_cache = load_sections_for_uri(self._profile.spotify_uri)
+            self._sections_cache = load_sections_for_uri(self._last_uri or self._profile.spotify_uri)
         v = _section_energy(self._sections_cache, ms)
         return 0.5 if v is None else v
 
@@ -989,6 +1007,11 @@ class TriggerEngine:
         Returns True if applied. False = ignored (lower quality than current).
         """
         if uri != self._last_uri:
+            logger.info(
+                "Engine: skip snap — uri=%s does not match loaded song (last_uri=%s, "
+                "source=%s, %+dms Q=%.2f) — dropped, not applied",
+                uri, self._last_uri, source, raw_offset_ms, quality,
+            )
             return False
         if quality <= self._play_best_quality:
             logger.info(

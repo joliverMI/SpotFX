@@ -224,6 +224,29 @@ def note_outcome(uri: str, *, locked: bool, offset_ms: Optional[int] = None,
     ))
 
 
+def note_frame_advisory(uri: str, *, suspect: bool,
+                        room_band_ms: Optional[int] = None,
+                        distance_ms: Optional[int] = None) -> None:
+    """Ship 2 frame-mismatch advisory (services/frame_advisory.py,
+    data/false-lock-continued-search/report.md §4), folded onto the record
+    `note_outcome()` already published for this hard lock. An amendment to
+    the existing record's tooltip fields, the same shape
+    `note_continued_search()`/`note_window_done()` already use — never a
+    phase change and never a lock decision. A no-op if the record has moved
+    on (a different uri, or this play never reached `locked`): the advisory
+    is only ever a fact ABOUT a hard lock, never about a search still in
+    progress or one that gave up."""
+    rec = _record
+    if rec is None or rec.get("uri") != uri or rec.get("phase") != PHASE_LOCKED:
+        return
+    nxt = dict(rec)
+    nxt["frame_suspect"] = bool(suspect)
+    nxt["frame_suspect_room_band_ms"] = None if room_band_ms is None else int(room_band_ms)
+    nxt["frame_suspect_distance_ms"] = None if distance_ms is None else int(distance_ms)
+    nxt["at_ms"] = int(time.time() * 1000)
+    _publish(nxt)
+
+
 def note_search_ended(uri: str, reason: Optional[str] = None) -> None:
     """The engine has FINISHED searching `uri`. A record still reading
     `searching` becomes `unlocked` — it looked and did not find a lock.

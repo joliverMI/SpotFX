@@ -51,6 +51,7 @@ export const MONITOR_COLOR: Record<string, string> = {
 const NEUTRAL = '#888';
 const SEARCHING_COLOR = '#4da3ff';
 const FAILED_COLOR = '#ff5252';
+const FRAME_SUSPECT_COLOR = '#ffb300';
 
 /** Mirrors `services/lock_state.py`'s record, which arrives BOTH as a
  * `lock_state` websocket push and on every `state` broadcast. */
@@ -67,6 +68,14 @@ export interface LockStateRecord {
    * the engine kept searching the rest of the song. */
   continued?: boolean;
   continued_windows?: number;
+  /** Ship 2 frame-mismatch advisory (services/frame_advisory.py) — present
+   * only once this play hard-locked far from the room's own band on a song
+   * with hand-authored triggers. An ADVISORY, never a refusal: the lock
+   * still stands, this only says the shape and the marks on it may not
+   * share a timing frame. See data/false-lock-continued-search/report.md. */
+  frame_suspect?: boolean;
+  frame_suspect_room_band_ms?: number | null;
+  frame_suspect_distance_ms?: number | null;
 }
 
 export interface LockBadge {
@@ -194,14 +203,26 @@ export function lockBadge(input: LockBadgeInput): LockBadge {
   }
 
   // 4 — the ONLY idle: a search that ended in a hard lock, monitor now quiet.
+  // A frame-mismatch advisory (services/frame_advisory.py) never changes
+  // this from "idle" — the lock stands — it only tints the badge and adds
+  // a sentence: the shape and this song's marks may not share a frame.
   if (lock && phase === 'locked') {
+    const suspectNote = lock.frame_suspect
+      ? ` This lock landed far from the room's own band (${
+          lock.frame_suspect_distance_ms ?? '?'
+        }ms from ${
+          lock.frame_suspect_room_band_ms != null
+            ? `${lock.frame_suspect_room_band_ms > 0 ? '+' : ''}${lock.frame_suspect_room_band_ms}ms`
+            : 'it'
+        }) on a song with hand-placed marks — the captured shape and the marks may not share a timing frame. Worth checking by ear.`
+      : '';
     return {
       label: 'Lock idle',
-      color: NEUTRAL,
+      color: lock.frame_suspect ? FRAME_SUSPECT_COLOR : NEUTRAL,
       title:
         `Audio sync lock — this song locked and the matcher has stopped checking, so nothing is being reported right now.${offsetPhrase(
           lock,
-        )}`,
+        )}${suspectNote}`,
     };
   }
 
