@@ -1164,13 +1164,20 @@ export function useTestbedWaveform(uri: string | null) {
  * /engine-marks, which reads only the engine's own output — never the
  * trigger store or the profile directory — since the server-side match
  * /compare would carry is computed and discarded here anyway. */
+/** `windowBeats`/`sensitivity` are the `edges` engine's own two knobs
+ * (spectra/services/rhythmic_edges.py) — every other engine ignores them,
+ * so they are always included in the key/query rather than only when the
+ * `edges` engine is selected; harmless, and it means switching an A/B
+ * slot INTO `edges` never needs a separate refetch trigger. */
 export function useTestbedEngineMarks(
   uri: string | null, engine: string | null, markKind: string | null,
+  windowBeats = 8, sensitivity = 0.5,
 ) {
   return useQuery({
-    queryKey: ['testbed-engine-marks', uri, engine, markKind],
+    queryKey: ['testbed-engine-marks', uri, engine, markKind, windowBeats, sensitivity],
     queryFn: () => apiGet<TestbedEngineMarks>(
-      `/testbed/engine-marks?uri=${enc(uri!)}&engine=${enc(engine!)}&mark_kind=${enc(markKind!)}`),
+      `/testbed/engine-marks?uri=${enc(uri!)}&engine=${enc(engine!)}&mark_kind=${enc(markKind!)}`
+      + `&window_beats=${windowBeats}&sensitivity=${sensitivity}`),
     enabled: !!uri && !!engine && !!markKind,
   });
 }

@@ -1,7 +1,20 @@
 /** P/R/F1 per engine, computed the same way as the spec report's own
  * methodology (spectra/services/testbed_metrics.py) — a live A/B table so
  * two engines can be visually compared on the same song without leaving
- * the page (report Part 3 item 5/6). */
+ * the page (report Part 3 item 5/6).
+ *
+ * Also carries the `edges` engine's own two knobs (window/sensitivity,
+ * spectra/services/rhythmic_edges.py, data/transition-alignment-plan/
+ * report.md section 4) — shown next to the tolerance slider only while an
+ * `edges` lane is active in either A/B slot, and re-scoring the exact way
+ * the tolerance slider does: dragging one refetches /engine-marks (a
+ * cheap single .librosa.json parse), the page recomputes P/R/F1 locally
+ * with the same matcher tolerance already uses. */
+import HelpLink from '../../help/HelpLink';
+import {
+  DEFAULT_SENSITIVITY, DEFAULT_WINDOW_BEATS, MAX_SENSITIVITY, MAX_WINDOW_BEATS,
+  MIN_SENSITIVITY, MIN_WINDOW_BEATS,
+} from '../edgeKnobs';
 import type { TestbedMetrics } from '../../types';
 
 function pct(v: number) {
@@ -10,6 +23,7 @@ function pct(v: number) {
 
 export default function TestbedMetricsPanel({
   rows, toleranceMs, onToleranceChange, defaultToleranceMs, onResetToDefault, emptyNote,
+  windowBeats, sensitivity, onWindowBeatsChange, onSensitivityChange, showEdgeKnobs,
 }: {
   rows: { key: string; label: string; metrics: TestbedMetrics | null | undefined; available: boolean }[];
   toleranceMs: number;
@@ -20,6 +34,14 @@ export default function TestbedMetricsPanel({
   defaultToleranceMs: number;
   onResetToDefault: () => void;
   emptyNote?: string;
+  windowBeats: number;
+  sensitivity: number;
+  onWindowBeatsChange: (v: number) => void;
+  onSensitivityChange: (v: number) => void;
+  /** Only true while an `edges` lane is selected in either A/B slot — a
+   * knob shown for an engine it does not touch would imply a control that
+   * does nothing (spectra/web/src/testbed/edgeKnobs.ts::knobsRelevant). */
+  showEdgeKnobs: boolean;
 }) {
   const atDefault = toleranceMs === defaultToleranceMs;
   return (
@@ -49,6 +71,51 @@ export default function TestbedMetricsPanel({
         for a beat/downbeat lane, 500ms for section boundaries. The slider
         can still be set to any value, including 500ms.
       </p>
+      {showEdgeKnobs && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginBottom: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <label htmlFor="testbed-window-beats" style={{ fontSize: 12, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
+              Window: {windowBeats} beat{windowBeats === 1 ? '' : 's'}
+              <HelpLink topic="testbed-generator-and-edges" title="Window and sensitivity" />
+            </label>
+            <input
+              id="testbed-window-beats"
+              type="range"
+              min={MIN_WINDOW_BEATS}
+              max={MAX_WINDOW_BEATS}
+              step={1}
+              value={windowBeats}
+              onChange={(e) => onWindowBeatsChange(Number(e.target.value))}
+              style={{ flex: 1, maxWidth: 180 }}
+            />
+            {windowBeats !== DEFAULT_WINDOW_BEATS && (
+              <button onClick={() => onWindowBeatsChange(DEFAULT_WINDOW_BEATS)} style={{ fontSize: 11 }}>
+                Reset ({DEFAULT_WINDOW_BEATS})
+              </button>
+            )}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <label htmlFor="testbed-sensitivity" style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+              Sensitivity: {sensitivity.toFixed(2)}
+            </label>
+            <input
+              id="testbed-sensitivity"
+              type="range"
+              min={MIN_SENSITIVITY}
+              max={MAX_SENSITIVITY}
+              step={0.05}
+              value={sensitivity}
+              onChange={(e) => onSensitivityChange(Number(e.target.value))}
+              style={{ flex: 1, maxWidth: 180 }}
+            />
+            {sensitivity !== DEFAULT_SENSITIVITY && (
+              <button onClick={() => onSensitivityChange(DEFAULT_SENSITIVITY)} style={{ fontSize: 11 }}>
+                Reset ({DEFAULT_SENSITIVITY})
+              </button>
+            )}
+          </div>
+        </div>
+      )}
       {emptyNote ? (
         <p className="empty-note" style={{ fontSize: 12 }}>
           {emptyNote} — precision/recall need at least one of your own marks to score against.

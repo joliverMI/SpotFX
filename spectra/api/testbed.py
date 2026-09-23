@@ -7,9 +7,9 @@ reviewed push-to-real button.
   GET    /api/testbed/marks?uri=                      his real marks (split)
   GET    /api/testbed/waveform?uri=                    waveform/energy lane
   GET    /api/testbed/engines?uri=                    per-engine availability
-  GET    /api/testbed/engine-marks?uri=&engine=&mark_kind=
+  GET    /api/testbed/engine-marks?uri=&engine=&mark_kind=&window_beats=&sensitivity=
                                                        one engine's marks, nothing else
-  GET    /api/testbed/compare?uri=&engine=&mark_kind=&reference=&tolerance_ms=
+  GET    /api/testbed/compare?uri=&engine=&mark_kind=&reference=&tolerance_ms=&window_beats=&sensitivity=
                                                        one engine's marks + P/R/F1
   GET    /api/testbed/audio/status?uri=                pin/WAV status
   POST   /api/testbed/audio/pin?uri=                    pin (copy + peaks)
@@ -30,9 +30,9 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from spectra.models.trigger import TriggerAction
-from spectra.services import (analysis_reader, testbed_audio, testbed_engines,
-                              testbed_marks, testbed_metrics, testbed_promote,
-                              trigger_store)
+from spectra.services import (analysis_reader, rhythmic_edges, testbed_audio,
+                              testbed_engines, testbed_marks, testbed_metrics,
+                              testbed_promote, trigger_store)
 
 router = APIRouter(prefix="/api/testbed", tags=["spectra-testbed"])
 
@@ -146,30 +146,46 @@ async def get_engines(uri: str = Query(...)):
     return {"uri": uri, "engines": engines}
 
 
-def _estimate_for(engine: str, uri: str, mark_kind: str):
+def _estimate_for(
+    engine: str, uri: str, mark_kind: str, *,
+    window_beats: int = rhythmic_edges.DEFAULT_WINDOW_BEATS,
+    sensitivity: float = rhythmic_edges.DEFAULT_SENSITIVITY,
+):
     """One engine's marks of one kind, or None when the engine has nothing
     for this song — the ONLY read the page's per-lane fetch needs. Never
-    touches triggers.json or the profile directory.
+    touches triggers.json or the profile directory (except through the
+    `generator` engine, whose own module docstring covers what it reads).
 
-    Every engine (librosa's live derivation AND beat_this's offline
-    precompute) stores its marks in WAV time — the time axis of the file it
-    actually analyzed. A production capture starts mid-song (URI detection
-    lags 5-10s), so the pinned WAV's sample 0 is not song-time 0
-    (testbed_audio.capture_offset_ms's own docstring). His reference marks
-    are song time. Shifting here — the ONE choke point both /compare and
-    the page's own /engine-marks fetch (and therefore its metrics.ts port)
-    go through — means every consumer of an engine mark sees song time and
-    the matcher (testbed_metrics.match_marks) never has to know about the
-    offset at all. `None` = unknown offset (no captured audio, an aged-out
-    npz sidecar) and is treated as 0 — the pre-fix behaviour, since there
-    is nothing here to correct."""
-    engine_marks = testbed_engines.marks_for(engine, uri)
+    Every analysis-derived engine (librosa's live derivation, beat_this's
+    offline precompute, and `edges`) stores its marks in WAV time — the
+    time axis of the file it actually analyzed. A production capture
+    starts mid-song (URI detection lags 5-10s), so the pinned WAV's sample
+    0 is not song-time 0 (testbed_audio.capture_offset_ms's own
+    docstring). His reference marks are song time. Shifting here — the ONE
+    choke point both /compare and the page's own /engine-marks fetch (and
+    therefore its metrics.ts port) go through — means every consumer of an
+    engine mark sees song time and the matcher (testbed_metrics.
+    match_marks) never has to know about the offset at all. `None` =
+    unknown offset (no captured audio, an aged-out npz sidecar) and is
+    treated as 0 — the pre-fix behaviour, since there is nothing here to
+    correct.
+
+    The `generator` engine is the ONE exception: its marks (triggers.json's
+    own stored cues, and the offline preview of the current placement
+    rule) are already in whatever frame the room's own engine currently
+    fires from — shifting them again here would hide, not show, a
+    generator frame defect like data/transition-alignment-plan/report.md's
+    own Finding 1 (see spectra/services/testbed_engines.py's module
+    docstring, "generator" entry)."""
+    engine_marks = testbed_engines.marks_for(
+        engine, uri, window_beats=window_beats, sensitivity=sensitivity)
     if engine_marks is None:
         return None
-    offset_ms = testbed_audio.capture_offset_ms_or_zero(uri)
-    if offset_ms:
-        engine_marks = [dataclasses.replace(m, time_ms=m.time_ms + offset_ms)
-                        for m in engine_marks]
+    if engine != testbed_engines.ENGINE_GENERATOR:
+        offset_ms = testbed_audio.capture_offset_ms_or_zero(uri)
+        if offset_ms:
+            engine_marks = [dataclasses.replace(m, time_ms=m.time_ms + offset_ms)
+                            for m in engine_marks]
     return [m for m in engine_marks if m.kind == mark_kind]
 
 
@@ -183,15 +199,28 @@ async def engine_marks(
     uri: str = Query(...),
     engine: str = Query(...),
     mark_kind: str = Query(...),
+    window_beats: int = Query(rhythmic_edges.DEFAULT_WINDOW_BEATS,
+                              ge=rhythmic_edges.MIN_WINDOW_BEATS,
+                              le=rhythmic_edges.MAX_WINDOW_BEATS),
+    sensitivity: float = Query(rhythmic_edges.DEFAULT_SENSITIVITY,
+                               ge=rhythmic_edges.MIN_SENSITIVITY,
+                               le=rhythmic_edges.MAX_SENSITIVITY),
 ):
     """The page's per-lane fetch: it recomputes P/R/F1 locally against the
     marks it already holds (spectra/web/src/testbed/metrics.ts), so the
     server-side match and the reference marks /compare carries would be
     computed and discarded — and the trigger-store parse + profile scan
-    they cost is what this route exists to skip."""
+    they cost is what this route exists to skip.
+
+    `window_beats`/`sensitivity` are read only by the `edges` engine
+    (spectra/services/rhythmic_edges.py's own two knobs); every other
+    engine ignores them, so a caller may always pass them without
+    checking which engine is selected."""
     if engine not in testbed_engines.ENGINES:
         raise HTTPException(404, f"unknown engine '{engine}'")
-    estimate = await asyncio.to_thread(_estimate_for, engine, uri, mark_kind)
+    estimate = await asyncio.to_thread(
+        _estimate_for, engine, uri, mark_kind,
+        window_beats=window_beats, sensitivity=sensitivity)
     return {
         "uri": uri, "engine": engine, "mark_kind": mark_kind,
         "available": estimate is not None,
@@ -206,6 +235,12 @@ async def compare(
     mark_kind: str = Query(...),
     reference: str = Query("transitions", pattern="^(transitions|flares)$"),
     tolerance_ms: float = Query(500.0, gt=0),
+    window_beats: int = Query(rhythmic_edges.DEFAULT_WINDOW_BEATS,
+                              ge=rhythmic_edges.MIN_WINDOW_BEATS,
+                              le=rhythmic_edges.MAX_WINDOW_BEATS),
+    sensitivity: float = Query(rhythmic_edges.DEFAULT_SENSITIVITY,
+                               ge=rhythmic_edges.MIN_SENSITIVITY,
+                               le=rhythmic_edges.MAX_SENSITIVITY),
 ):
     """Server-computed P/R/F1 at a fixed tolerance — for any caller that
     wants the number from the reference matcher itself rather than the
@@ -216,7 +251,8 @@ async def compare(
         raise HTTPException(404, f"unknown engine '{engine}'")
 
     def _read() -> dict:
-        estimate = _estimate_for(engine, uri, mark_kind)
+        estimate = _estimate_for(engine, uri, mark_kind,
+                                 window_beats=window_beats, sensitivity=sensitivity)
         if estimate is None:
             return {"uri": uri, "engine": engine, "mark_kind": mark_kind,
                     "reference": reference, "tolerance_ms": tolerance_ms,

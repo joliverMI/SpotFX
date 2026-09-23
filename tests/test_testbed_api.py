@@ -255,9 +255,9 @@ def test_songs_listing_and_pin_run_off_the_event_loop(monkeypatch):
         on_loop["compare"] = _ran_on_loop()
         return real_reference(uri)
 
-    def _engine(engine, uri):
+    def _engine(engine, uri, **kw):
         on_loop.setdefault("engine_reads", []).append(_ran_on_loop())
-        return real_engine(engine, uri)
+        return real_engine(engine, uri, **kw)
 
     def _availability(uri, **kw):
         on_loop.setdefault("availability_reads", []).append(_ran_on_loop())
