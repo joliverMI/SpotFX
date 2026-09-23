@@ -8122,23 +8122,34 @@ for the song AND its tempo reads at roughly HALF of librosa's own
 (`beat_snap.HALF_TIME_RATIO=0.6`) — the phrase-length grid his Soy Peor
 marks actually sit on (his own separate ruling, "every 8 is good").
 Otherwise librosa's own downbeat grid is used; NO LIVE beat_this
-execution is ever attempted from this path. Both grids are stored in WAV
-time and shifted to song time by `testbed_audio.
-capture_offset_ms_or_zero(uri)` — the ONE shared helper both this module
-and `spectra/api/testbed.py::_estimate_for` call (the scout's own Q2 fix,
-PR 286), so the grid a cue snaps against is identical to the grid the
-test bed renders and scores. A nearest downbeat farther than one beat
+execution is ever attempted from this path. A section boundary and both
+downbeat grids are all computed by analyzing the SAME captured WAV (the
+same librosa `y` array for librosa's own beats, beat_this's own offline
+precompute over that same file for the other), so they already share one
+coordinate frame — this module compares them RAW and applies NO
+capture-offset shift (a same-frame comparison;
+`testbed_audio.capture_offset_ms_or_zero(uri)`'s WAV-time -> song-time
+shift belongs only to `spectra/api/testbed.py::_estimate_for`'s own
+CROSS-frame comparison against genuinely song-time authored marks, and
+shifting a same-frame grid by it would have introduced a constant bias
+into every snap decision). A nearest downbeat farther than one beat
 length (`60000/tempo_bpm`) away is left UNSNAPPED — the section's own raw
 time survives untouched rather than being dragged that far.
 
 **Provenance, not a second trigger schema**: `SpectraTrigger.snap_grid`/
 `snap_moved_ms` (`spectra/models/trigger.py`) record which grid a
 generated cue snapped to and how far, both `None` for a hand-placed
-trigger or an unsnapped cue. `midsong_generator.candidate_moments`'s
-`generator_key` stays keyed on the section's own RAW (unsnapped) start_ms
-— the analysis moment, never the snapped position — so toggling the
-setting between runs UPDATES the same generated trigger in place rather
-than deleting and re-adding it under a new key.
+trigger or an unsnapped cue. Editing a generated, snapped trigger clears
+both fields too: `spectra/api/triggers.py`'s `upsert_trigger` already
+stamps every human-facing write `source="authored"` (front 3's
+ownership-transfer rule, above) and now resets `snap_grid`/
+`snap_moved_ms` to `None` in that same stamp, so a hand edit never
+carries forward a stale snap that no longer describes where he placed it.
+`midsong_generator.candidate_moments`'s `generator_key` stays keyed on
+the section's own RAW (unsnapped) start_ms — the analysis moment, never
+the snapped position — so toggling the setting between runs UPDATES the
+same generated trigger in place rather than deleting and re-adding it
+under a new key.
 
 **`RoomControlState.midsong_snap_to_beat`** (default `True`, his own "go
 for it") gates the whole thing, read live by `candidate_moments` on every
