@@ -1470,6 +1470,17 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        id: 'testbed-generator-and-edges',
+        title: 'Tuning the room\'s automatic transitions: Generator and Rhythmic edges',
+        keywords: 'generator stored preview rhythmic edges bass up down gap stop resume window sensitivity direction tuning loop transition alignment beat',
+        body: [
+          'Two more lanes, for tuning WHERE an automatic scene change lands rather than just judging an engine: "Generator" shows what the room actually does — Stored is exactly what is currently written to your real trigger corpus for this song (unchanged, so a placement bug shows up here before it\'s fixed); Preview is the CURRENT placement rule run fresh, read-only, with nothing written — what regenerating this song right now would produce. "Rhythmic edges" marks moments where the song\'s own bass energy changes: Bass in / Bass out (a jump up or down), and Beat stops / Beat resumes (a real pause of several beats, and its end).',
+          'Three controls appear next to the tolerance slider whenever a Rhythmic-edges lane is selected in either engine slot: Window (how many consecutive quiet beats count as a real pause, 1–16, default 8), Sensitivity (how big a bass jump has to be to count, 0.2–1.5, default 0.5), and a Direction toggle (Both / Up / Down) that restricts the lane to bass-in-and-resume ("Up") or bass-out-and-stop ("Down") edges only. Dragging or toggling any of them recomputes the edges lane and its score live, the same way the tolerance slider does — nothing is written until you push a mark to your real triggers.',
+          'All three knobs currently affect only the Rhythmic-edges lane. Turning the edge rule into what the room actually generates — and a "use these as the room\'s own default" button — is separate, later work; for now this page is for tuning by eye and by number before that lands.',
+          'A mark in the Generator: Preview lane reviews and pushes to your real triggers exactly like any other engine\'s mark — the same confirm dialog, the same exclusion from scoring once pushed.',
+        ],
+      },
+      {
         id: 'testbed-promotion',
         title: 'Push to real',
         keywords: 'promote push real trigger confirm review gate safety authored source engine offset',

@@ -21,6 +21,8 @@ import type {
 import PromotionReviewDialog from './components/PromotionReviewDialog';
 import TestbedLaneBar from './components/TestbedLaneBar';
 import TestbedMetricsPanel from './components/TestbedMetricsPanel';
+import { DEFAULT_DIRECTION, DEFAULT_SENSITIVITY, DEFAULT_WINDOW_BEATS, knobsRelevant } from './edgeKnobs';
+import type { Direction } from './edgeKnobs';
 import { matchMarks } from './metrics';
 import { filterAndSortSongs } from './songSearch';
 
@@ -42,6 +44,12 @@ const MARK_KIND_LABEL: Record<string, string> = {
   section_boundary: 'Section boundaries',
   beat: 'Beats',
   downbeat: 'Downbeats',
+  stored: 'Stored (what fires today)',
+  preview: 'Preview (current placement rule)',
+  bass_up: 'Bass in',
+  bass_down: 'Bass out',
+  gap_stop: 'Beat stops',
+  gap_resume: 'Beat resumes',
 };
 
 const markKindLabel = (kind: string) => MARK_KIND_LABEL[kind] ?? kind;
@@ -118,6 +126,13 @@ export default function TestbedPage() {
     { engine: 'beat_this', kind: 'downbeat' },
   );
   const [toleranceMs, setToleranceMs] = useState(500);
+  // spectra/services/rhythmic_edges.py's own three knobs — live only for an
+  // `edges` lane (see edgeKnobs.knobsRelevant), but held regardless of
+  // which engine is currently selected so switching a slot INTO `edges`
+  // never needs a separate reset.
+  const [windowBeats, setWindowBeats] = useState(DEFAULT_WINDOW_BEATS);
+  const [sensitivity, setSensitivity] = useState(DEFAULT_SENSITIVITY);
+  const [direction, setDirection] = useState<Direction>(DEFAULT_DIRECTION);
   // True once he has touched the slider himself for the CURRENT song — the
   // default below stops re-asserting itself over his own choice, but a new
   // song (or a mark-kind change on either lane) still gets its own honest
@@ -142,9 +157,11 @@ export default function TestbedPage() {
   const shownSongs = useMemo(() => visibleSongs.slice(0, SONG_LIST_CAP), [visibleSongs]);
   const { data: marks } = useTestbedMarks(uri);
   const { data: waveform } = useTestbedWaveform(uri);
-  const { data: engineMarksA } = useTestbedEngineMarks(uri, engineA.engine, engineA.kind);
+  const { data: engineMarksA } = useTestbedEngineMarks(
+    uri, engineA.engine, engineA.kind, windowBeats, sensitivity, direction,
+  );
   const { data: engineMarksB } = useTestbedEngineMarks(
-    uri, engineB?.engine ?? null, engineB?.kind ?? null,
+    uri, engineB?.engine ?? null, engineB?.kind ?? null, windowBeats, sensitivity, direction,
   );
   const { data: promotions } = useTestbedPromotions(uri);
 
@@ -435,6 +452,13 @@ export default function TestbedPage() {
               defaultToleranceMs={defaultToleranceMs}
               onResetToDefault={() => { setToleranceTouched(false); setToleranceMs(defaultToleranceMs); }}
               emptyNote={referenceEmptyNote}
+              windowBeats={windowBeats}
+              sensitivity={sensitivity}
+              direction={direction}
+              onWindowBeatsChange={setWindowBeats}
+              onSensitivityChange={setSensitivity}
+              onDirectionChange={setDirection}
+              showEdgeKnobs={knobsRelevant([engineA.engine, engineB?.engine])}
             />
           </div>
 

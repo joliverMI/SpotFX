@@ -8503,6 +8503,72 @@ shifts the snap grid identically so a snap still lands; zero offset is a
 no-op), `tests/test_analysis_reader_section_energy.py` (the same shift on
 `section_energy_at`, plus the per-URI cache actually caching).
 
+## Transition-alignment tuning loop — `rhythmic_edges.py` + the test bed's Generator/Rhythmic-edges lanes
+
+`data/transition-alignment-plan/report.md` (firstmate home) is the plan;
+ship task 2 of its section 5 built the TUNING side only — a rule that
+turns edges into placement (report R3) and a "use these as room defaults"
+button are separate, later tasks (plan items 3-4), not built here.
+
+`spectra/services/rhythmic_edges.py` computes bass-energy edges from the
+per-beat `rms_bass` already stored in `.librosa.json` — never a WAV
+re-analysis (the plan's own §2.3 finding: a kick-band re-analysis of the
+raw audio was tried and was not better). Four kinds: `bass_up`/`bass_down`
+(a beat's `rms_bass` jumping past `sensitivity` × a local median) and
+`gap_stop`/`gap_resume` (a run of `window_beats`+ consecutive quiet beats,
+and its end). **The three knobs are NOT interchangeable and window_beats is
+NOT what it sounds like**: `sensitivity` (default 0.5) is the ONLY thing
+governing `bass_up`/`bass_down` — the local-median lookback they compare
+against is FIXED at 16 beats (`MEDIAN_LOOKBACK_BEATS`, matching the plan
+evidence script's own `rolling_median` default), so the plan's own §2.3
+"Bass energy jumps up/down" reproduction holds at the default knobs
+regardless of `window_beats`. `window_beats` (default 8) is the gap
+run-length threshold (`gap_beats` in the plan's evidence script, there
+fixed at 2 — the different default here is deliberate: the plan's own
+reproduction acceptance is scoped to the up/down rows only, never the gap
+rows). `direction` (`both`/`up`/`down`, default `both`, the plan's own
+"third, coarser knob") filters which half of the four kinds is returned —
+`up` keeps `bass_up`/`gap_resume`, `down` keeps `bass_down`/`gap_stop`,
+matching the plan's own "gaps are a special case of down then up" framing
+(§2.3) rather than being gap-exempt. Read the module's own "THREE KNOBS"
+docstring section before touching any default or before assuming
+`window_beats`/`direction` move a bass_up/bass_down mark on their own —
+only `sensitivity` moves the up/down threshold, and `direction` only ever
+removes marks the other two already produced, never adds any.
+
+Registered as a THIRD and FOURTH `testbed_engines.py` engine:
+**`edges`** (the four kinds above, `window_beats`/`sensitivity`/`direction`
+as new query params on `GET /api/testbed/engine-marks` and `/compare`,
+ignored by every other engine) and **`generator`** ("what the room will do"
+— kind `stored` is `trigger_store.list_for_song`'s own `source != "authored"`
+rows exactly as written, never recomputed, so a generator frame defect
+shows up on this lane before it's fixed; kind `preview` is
+`midsong_generator.candidate_moments(uri)` run fresh, read-only, no
+trigger-store write — the CURRENT placement rule, i.e. today's plain
+section-boundary + Phase-2 beat-snap, NOT the plan's own R3 edge rule,
+which doesn't exist yet). **`generator`'s marks are the ONE exception to
+`_estimate_for`'s capture-offset shift** (`spectra/api/testbed.py`) —
+every other engine's marks are a raw WAV-time analysis pass and get
+shifted into song time for comparison; the generator engine's marks are
+already in whatever frame the room's own engine currently fires from
+(bug included), so shifting them again would hide, not show, exactly the
+kind of generator frame defect this lane exists to surface. Push-to-real
+(`testbed_promote.py`) needed no changes — it's already generic over
+`source_engine`/`source_mark_kind` strings, so a `generator:preview` mark
+reviews and pushes exactly like any other engine's.
+
+Frontend: two sliders plus a three-way Direction toggle
+(`spectra/web/src/testbed/edgeKnobs.ts`, the pure clamp/relevance module —
+`knobsRelevant()` shows all three only while an `edges` lane is selected
+in either A/B slot, since `window_beats`/`sensitivity`/`direction` don't
+yet affect `generator` or anything else) on `TestbedMetricsPanel.tsx`,
+next to the tolerance slider, re-scoring the way it does.
+`useTestbedEngineMarks` always sends all three knobs regardless of which
+engine is active — harmless, and means switching a slot INTO `edges`
+needs no extra plumbing. Proof: `scripts/check_testbed_edge_knobs.mjs`
+(this repo's no-DOM/no-jsdom convention for this page, same as
+`scripts/check_testbed_song_search.mjs`).
+
 ## Maintaining this file
 
 Keep this file for knowledge useful to almost every future agent session in this project.
