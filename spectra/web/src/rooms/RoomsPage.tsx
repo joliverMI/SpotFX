@@ -323,43 +323,52 @@ export default function RoomsPage() {
    * Two quick taps on two device chips used to lose the first: both handlers
    * closed over the same pre-save `room`, and the second POST overwrote the
    * first with a device list that never had it. Found by walking this page
-   * in a real browser, not by reading it. */
+   * in a real browser, not by reading it.
+   *
+   * The two per-carrier endpoints below (remove / deselect) join this SAME
+   * chain — not a chain of their own — because `saveRoom`'s POST sends the
+   * WHOLE `carrier_ids` list from whatever `roomsRef.current` held at its
+   * turn. A remove/deselect call that ran outside the chain could still
+   * land between a save's read and its write, so a stale rename or chip
+   * toggle would resurrect a carrier `removeCarrier` had just dropped. */
   const roomsRef = useRef<Room[]>([]);
   roomsRef.current = rooms;
   const saveChain = useRef<Promise<unknown>>(Promise.resolve());
 
+  const enqueue = useCallback(<T,>(run: () => Promise<T>): Promise<T> => {
+    const next = saveChain.current.then(run);
+    saveChain.current = next.catch(() => undefined);
+    return next;
+  }, []);
+
   const saveRoom = useCallback((
     build: (current: Room | null) => (Partial<Room> & { name: string }) | null,
     roomId?: string | null,
-  ): Promise<Room | null> => {
-    const next = saveChain.current.then(async () => {
-      const current = roomId ? roomsRef.current.find((r) => r.id === roomId) ?? null : null;
-      const patch = build(current);
-      if (!patch) return null;
-      setBusy(true);
-      try {
-        const saved = await apiPost<Room>('/rooms', {
-          id: patch.id ?? roomId ?? null, name: patch.name,
-          carrier_ids: patch.carrier_ids ?? [], axis: patch.axis ?? EMPTY_AXIS,
-          granularity: patch.granularity ?? null,
-          block_pixels: patch.block_pixels ?? null,
-          deselected_carrier_ids: patch.deselected_carrier_ids ?? null,
-        });
-        const body = await apiGet<{ rooms: Room[] }>('/rooms');
-        roomsRef.current = body.rooms;
-        setRooms(body.rooms);
-        setSelected(saved.id);
-        return saved;
-      } catch (err) {
-        toast(String(err), 'error');
-        return null;
-      } finally {
-        setBusy(false);
-      }
-    });
-    saveChain.current = next.catch(() => undefined);
-    return next as Promise<Room | null>;
-  }, [toast]);
+  ): Promise<Room | null> => enqueue(async () => {
+    const current = roomId ? roomsRef.current.find((r) => r.id === roomId) ?? null : null;
+    const patch = build(current);
+    if (!patch) return null;
+    setBusy(true);
+    try {
+      const saved = await apiPost<Room>('/rooms', {
+        id: patch.id ?? roomId ?? null, name: patch.name,
+        carrier_ids: patch.carrier_ids ?? [], axis: patch.axis ?? EMPTY_AXIS,
+        granularity: patch.granularity ?? null,
+        block_pixels: patch.block_pixels ?? null,
+        deselected_carrier_ids: patch.deselected_carrier_ids ?? null,
+      });
+      const body = await apiGet<{ rooms: Room[] }>('/rooms');
+      roomsRef.current = body.rooms;
+      setRooms(body.rooms);
+      setSelected(saved.id);
+      return saved;
+    } catch (err) {
+      toast(String(err), 'error');
+      return null;
+    } finally {
+      setBusy(false);
+    }
+  }), [enqueue, toast]);
 
   const toggleCarrier = useCallback((carrierId: string) => {
     const id = selected;
@@ -398,26 +407,36 @@ export default function RoomsPage() {
   const removeCarrier = useCallback((carrierId: string) => {
     const id = selected;
     if (!id) return;
-    setBusy(true);
-    void apiDel(`/rooms/${id}/carriers/${encodeURIComponent(carrierId)}`)
-      .then(async () => {
+    void enqueue(async () => {
+      setBusy(true);
+      try {
+        await apiDel(`/rooms/${id}/carriers/${encodeURIComponent(carrierId)}`);
         await refreshRooms();
         toast(`${carrierId} removed from this room`, 'success');
-      })
-      .catch((err) => toast(String(err), 'error'))
-      .finally(() => setBusy(false));
-  }, [selected, refreshRooms, toast]);
+      } catch (err) {
+        toast(String(err), 'error');
+      } finally {
+        setBusy(false);
+      }
+    });
+  }, [selected, enqueue, refreshRooms, toast]);
 
   const setCarrierSelected = useCallback((carrierId: string, next: boolean) => {
     const id = selected;
     if (!id) return;
-    setBusy(true);
-    void apiPost(`/rooms/${id}/carriers/${encodeURIComponent(carrierId)}/selected`,
-      { selected: next })
-      .then(() => refreshRooms())
-      .catch((err) => toast(String(err), 'error'))
-      .finally(() => setBusy(false));
-  }, [selected, refreshRooms, toast]);
+    void enqueue(async () => {
+      setBusy(true);
+      try {
+        await apiPost(`/rooms/${id}/carriers/${encodeURIComponent(carrierId)}/selected`,
+          { selected: next });
+        await refreshRooms();
+      } catch (err) {
+        toast(String(err), 'error');
+      } finally {
+        setBusy(false);
+      }
+    });
+  }, [selected, enqueue, refreshRooms, toast]);
 
   /** The axis calibration: two taps on the live preview. Stored in
    * NORMALIZED frame coordinates, which is all the map ever wants — a
