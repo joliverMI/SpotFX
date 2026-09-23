@@ -8482,7 +8482,15 @@ to avoid the circular import — `testbed_audio` already imports
 `analysis_reader` for `stem_for_uri`) — this function is read on the
 event-loop thread every ~200ms trigger-engine tick, and the offset's own
 source (an `.npz` file read) has no caching of its own, so an uncached
-call would put synchronous file I/O on that hot path.
+call would put synchronous file I/O on that hot path. **The cache entry
+is keyed on the sidecar `.npz`'s own `(mtime_ns, size)`, not just the
+URI** — a cheap `stat()`, not the file parse itself — so it SELF-HEALS on
+a live recapture: a plain per-URI-forever cache was tried first and shipped
+briefly, then caught by review before it went further (a recapture mid-
+session would have kept reading the old offset for the rest of the
+process life). Missing stem or missing `.npz` both key on signature
+`None`, so a song with no audio yet caches its 0 offset the same way
+until a capture actually lands.
 
 Acceptance: `scripts/check_transition_alignment.py` extends
 `check_midsong_beat_snap.py` with a "Today" vs "Frame fixed" vs "+ Snap"
