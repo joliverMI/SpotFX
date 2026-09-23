@@ -108,7 +108,7 @@ ownership state — is CARRIED and never refuses: "we could not check" is not
 "we checked and it is broken", the same distinction `night_exit` draws
 between DARK and UNKNOWN and `witness` between contaminated and
 witness_unavailable. Refusing on a check that could not be made would
-invent a fault. The three verdicts in `mapping_refusals.LEVER_REFUSING` are
+invent a fault. The verdicts in `mapping_refusals.LEVER_REFUSING` are
 the ones that stop a run, and each of them is a MEASUREMENT.
 
 WHERE IT RUNS. `spectra/services/capture_runs.py` — the one seam every
@@ -957,7 +957,8 @@ async def _measure_stream_lag(program, emitter, live: list,
     if grids is None:
         return None, False, False
     lit_vids = [v for v in emitter.virtual_ids if v in set(live)]
-    program.select(lit_vids, [])
+    ranges = [r for r in emitter.ranges if r.virtual_id in set(lit_vids)]
+    program.select(lit_vids, ranges)
     held = await deps.open_hold(
         program, 1.0, step="dark", heartbeat_timeout_s=room_mapping.HOLD_HEARTBEAT_S,
         max_duration_s=room_mapping.RUN_CEILING_FLOOR_S)

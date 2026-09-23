@@ -4779,8 +4779,9 @@ the report's own Q5:
   `Verdict.as_dict()` and therefore on `CalibrationRun.lever` for free —
   no separate persistence plumbing needed.
 - **A SESSION WITHOUT `.grids` IS NEVER MEASURED AND NEVER REFUSED ON IT** —
-  `_measure_stream_lag` returns `(None, False)`, and `run_selftest` reads
-  the second value to tell "could not measure" (skip, old behaviour) from
+  `_measure_stream_lag` returns `(None, False, False)` (its full shape is
+  `(lag_s, supported, had_signal)`), and `run_selftest` reads the middle
+  `supported` value to tell "could not measure" (skip, old behaviour) from
   "measured, found nothing" (refuse). Every real production session has
   `.grids`; only a test double built before this existed does not — the
   same "did not say" discipline `capture_source.serves_fresh_frames`
