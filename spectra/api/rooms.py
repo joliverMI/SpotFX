@@ -8,6 +8,18 @@
   DELETE /api/rooms/{room_id}             remove a room (its footprints go
                                           with it — a map belongs to a pose,
                                           and a deleted room has no pose)
+  DELETE /api/rooms/{room_id}/carriers/{carrier_id}
+                                          REMOVE FROM ROOM — membership only.
+                                          The carrier itself, its config and
+                                          its place in other rooms are
+                                          untouched; there is no device
+                                          delete in this app and this is not
+                                          one.
+  POST   /api/rooms/{room_id}/carriers/{carrier_id}/selected
+                                          DESELECT / re-select — the carrier
+                                          STAYS in the room and stops taking
+                                          part: skipped by mapping runs and
+                                          not offered to room effects.
   GET    /api/rooms/carriers              what the Room Builder picks from:
                                           the genuinely-driven carriers whose
                                           chain reaches a light-emitting
@@ -94,6 +106,14 @@ class RoomBody(BaseModel):
     axis: Optional[AxisCalibration] = None
     granularity: Optional[str] = None
     block_pixels: Optional[int] = None
+    #: Omitted means "leave participation exactly as it is" — the page saves
+    #: a room for a dozen unrelated reasons (a rename, an axis tap) and none
+    #: of them should quietly re-select a carrier he sat out.
+    deselected_carrier_ids: Optional[list[str]] = None
+
+
+class SelectedBody(BaseModel):
+    selected: bool
 
 
 class MapBody(BaseModel):
@@ -260,6 +280,7 @@ def _room_view(room: RoomMap) -> dict:
         })
     return {**room.model_dump(exclude={"footprints"}),
             "footprints": fps,
+            "selected_carrier_ids": room.selected_carrier_ids(),
             "mapped_ids": room.mapped_ids(),
             "mapped_carriers": room.mapped_carriers(),
             "unmapped_ids": room.unmapped_ids(),
@@ -289,7 +310,15 @@ async def upsert_room(body: RoomBody):
         room.granularity = _run_granularity(room, body.granularity, None)[0]
     if body.block_pixels is not None:
         room.block_pixels = _run_granularity(room, None, body.block_pixels)[1]
+    if body.deselected_carrier_ids is not None:
+        room.deselected_carrier_ids = list(dict.fromkeys(
+            body.deselected_carrier_ids))
     keep = set(room.carrier_ids)
+    # The deselect list is always a SUBSET of membership: a carrier unpicked
+    # here is gone from the room, and a stale "sitting out" entry would come
+    # back to life the moment it was re-added.
+    room.deselected_carrier_ids = [c for c in room.deselected_carrier_ids
+                                   if c in keep]
     # Matched on the footprint's CARRIER, not its emitter id: a carrier
     # mapped per segment carries several emitter ids and none of them is the
     # carrier id, so an emitter-id match would silently discard every
@@ -303,6 +332,45 @@ async def remove_room(room_id: str):
     if not light_field.delete_room(room_id):
         return JSONResponse(status_code=404, content={"detail": "no such room"})
     return {"deleted": room_id}
+
+
+@router.delete("/rooms/{room_id}/carriers/{carrier_id}")
+async def remove_room_carrier(room_id: str, carrier_id: str):
+    """REMOVE FROM ROOM — this room's membership and nothing else.
+
+    Deliberately NOT a device delete: the carrier, its configuration and its
+    membership of any other room are untouched, and the Devices page has no
+    delete at all. Its footprints go with it, exactly as they already did
+    when a carrier was unpicked from the room's chips — a footprint measures
+    what this carrier does in THIS room. Reversible from the picker, so no
+    confirmation."""
+    room = light_field.get_room(room_id)
+    if room is None:
+        return JSONResponse(status_code=404, content={"detail": "no such room"})
+    if not room.remove_carrier(carrier_id):
+        return JSONResponse(status_code=404, content={
+            "detail": f"{carrier_id} is not in this room"})
+    return {"removed": carrier_id, "room": _room_view(light_field.put_room(room))}
+
+
+@router.post("/rooms/{room_id}/carriers/{carrier_id}/selected")
+async def set_room_carrier_selected(room_id: str, carrier_id: str,
+                                    body: SelectedBody):
+    """DESELECT / re-select one member — participation, not membership.
+
+    A deselected carrier keeps everything: its place in the room, its
+    footprints, its granularity. It is simply skipped by mapping runs and
+    not offered to room effects, and re-selecting restores it with nothing
+    to re-measure."""
+    room = light_field.get_room(room_id)
+    if room is None:
+        return JSONResponse(status_code=404, content={"detail": "no such room"})
+    if carrier_id not in room.carrier_ids:
+        return JSONResponse(status_code=404, content={
+            "detail": f"{carrier_id} is not in this room"})
+    room.set_selected(carrier_id, body.selected)
+    return {"carrier_id": carrier_id, "selected": room.is_selected(carrier_id),
+            "room": _room_view(light_field.put_room(room))}
 
 
 @router.get("/rooms/carriers")

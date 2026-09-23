@@ -77,10 +77,13 @@ proven the expensive way (see that module's own docstring).
 WHY THE DARK STEP DARKENS EVERY LIVE VIRTUAL, not only the room's own
 carriers: a footprint is what a CAMERA sees, so any other fixture still
 playing the show lands in the frame and in the difference. The room's
-`carrier_ids` decide which emitters get MAPPED; the dark step covers the
-whole live room because that is what "with the room dark" means to a
-camera. Everything it darkens is in the same snapshot and comes back with
-it — the same scope av_sync_pattern.py's own default flash already takes.
+`carrier_ids` decide which emitters get MAPPED (minus anything DESELECTED —
+a member sitting out is skipped by the enumeration, so it is never lit and
+never re-measured, while every other member's capture is unchanged); the
+dark step covers the whole live room because that is what "with the room
+dark" means to a camera. Everything it darkens is in the same snapshot and
+comes back with it — the same scope av_sync_pattern.py's own default flash
+already takes.
 
 GRANULARITY IS A PER-CAPTURE CHOICE, and step 4 is the only thing that
 changes with it. A whole-device emitter is lit exactly as before —
@@ -909,7 +912,10 @@ async def resolve_plan(room: RoomMap, deps: RunDeps, scope: list[str],
     back (ACTIVATION, in run_mapping)."""
     live = await deps.get_virtuals() or {}
     in_scope = set(scope)
-    virtuals = {c: live[c] for c in room.carrier_ids
+    # Participation, not membership: a DESELECTED member is not enumerated,
+    # so a run never lights it and never overwrites what it already measured.
+    members = room.selected_carrier_ids()
+    virtuals = {c: live[c] for c in members
                 if c in live and c in in_scope}
     chain_failure = ""
     try:
@@ -929,8 +935,8 @@ async def resolve_plan(room: RoomMap, deps: RunDeps, scope: list[str],
                                              chains.get(carrier_id) or [], live)
         if found:
             substitutes[carrier_id] = found
-    plan = emitters_mod.plan_run(room.carrier_ids, virtuals,
-                                 {c: chains.get(c, []) for c in room.carrier_ids
+    plan = emitters_mod.plan_run(members, virtuals,
+                                 {c: chains.get(c, []) for c in members
                                   if c in chains},
                                  substitutes=substitutes,
                                  granularity=granularity,
@@ -1353,6 +1359,10 @@ async def run_mapping(room: RoomMap, deps: RunDeps, *,
         return result
     if not room.carrier_ids:
         result.reason = "this room has no carriers assigned yet"
+        return result
+    if not room.selected_carrier_ids():
+        result.reason = ("every carrier in this room is deselected — select "
+                         "at least one to map")
         return result
     sess.run_abort = None
 

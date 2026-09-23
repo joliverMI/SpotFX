@@ -90,6 +90,11 @@ type Room = {
   id: string;
   name: string;
   carrier_ids: string[];
+  /** Members that are SITTING OUT: still in the room, skipped by runs and
+   * not offered to room effects. `selected_carrier_ids` is the server's own
+   * resolution of the two, so the page never re-derives it. */
+  deselected_carrier_ids: string[];
+  selected_carrier_ids: string[];
   axis: { kind: string; floor: { x: number; y: number } | null; ceiling: { x: number; y: number } | null };
   granularity: string;
   block_pixels: number;
@@ -338,6 +343,7 @@ export default function RoomsPage() {
           carrier_ids: patch.carrier_ids ?? [], axis: patch.axis ?? EMPTY_AXIS,
           granularity: patch.granularity ?? null,
           block_pixels: patch.block_pixels ?? null,
+          deselected_carrier_ids: patch.deselected_carrier_ids ?? null,
         });
         const body = await apiGet<{ rooms: Room[] }>('/rooms');
         roomsRef.current = body.rooms;
@@ -366,6 +372,52 @@ export default function RoomsPage() {
       return { ...current, carrier_ids: next };
     }, id);
   }, [selected, saveRoom]);
+
+  /** THE TWO PER-MEMBER CONTROLS, and why they are not one button.
+   *
+   * "Remove from room" edits MEMBERSHIP: the carrier leaves this room and
+   * its footprints go with it. It is never a device delete — the carrier,
+   * its settings and its place in every other room are untouched, and the
+   * Devices page has no delete at all. It is reversible from the picker
+   * above, so it asks nothing before doing it.
+   *
+   * "Deselect" edits PARTICIPATION: the carrier stays in the room with
+   * everything it has measured, and simply sits out — skipped by mapping
+   * runs, not offered to room effects. Re-selecting restores it with
+   * nothing to re-measure.
+   *
+   * They are deliberately not adjacent lookalikes: the remove button is
+   * labelled in full and separated from the toggle. */
+  const refreshRooms = useCallback(async (): Promise<Room[]> => {
+    const body = await apiGet<{ rooms: Room[] }>('/rooms');
+    roomsRef.current = body.rooms;
+    setRooms(body.rooms);
+    return body.rooms;
+  }, []);
+
+  const removeCarrier = useCallback((carrierId: string) => {
+    const id = selected;
+    if (!id) return;
+    setBusy(true);
+    void apiDel(`/rooms/${id}/carriers/${encodeURIComponent(carrierId)}`)
+      .then(async () => {
+        await refreshRooms();
+        toast(`${carrierId} removed from this room`, 'success');
+      })
+      .catch((err) => toast(String(err), 'error'))
+      .finally(() => setBusy(false));
+  }, [selected, refreshRooms, toast]);
+
+  const setCarrierSelected = useCallback((carrierId: string, next: boolean) => {
+    const id = selected;
+    if (!id) return;
+    setBusy(true);
+    void apiPost(`/rooms/${id}/carriers/${encodeURIComponent(carrierId)}/selected`,
+      { selected: next })
+      .then(() => refreshRooms())
+      .catch((err) => toast(String(err), 'error'))
+      .finally(() => setBusy(false));
+  }, [selected, refreshRooms, toast]);
 
   /** The axis calibration: two taps on the live preview. Stored in
    * NORMALIZED frame coordinates, which is all the map ever wants — a
@@ -404,7 +456,11 @@ export default function RoomsPage() {
   useEffect(() => {
     if (!room) { setPlan(null); return; }
     void refreshPlan(room.id, granularity, blockPixels);
-  }, [room?.id, room?.carrier_ids.join(','), granularity, blockPixels, refreshPlan]);
+    // Deselecting a member changes what the run WOULD light, so the plan
+    // (emitter count and dark seconds) has to be re-read for it too.
+  }, [room?.id, room?.carrier_ids.join(','),
+      room?.deselected_carrier_ids?.join(','), granularity, blockPixels,
+      refreshPlan]);
 
   const setGranularity = useCallback((value: string) => {
     const id = selected;
@@ -496,6 +552,8 @@ export default function RoomsPage() {
                 {/* DEVICES, not emitters: a strip mapped per segment carries
                   * several emitter ids, and "3/1 mapped" would read as a bug. */}
                 {(r.mapped_carriers ?? r.mapped_ids).length}/{r.carrier_ids.length} mapped
+                {(r.deselected_carrier_ids?.length ?? 0) > 0
+                  && ` · ${r.deselected_carrier_ids.length} sitting out`}
                 {r.mapped_ids.length > (r.mapped_carriers ?? r.mapped_ids).length
                   ? ` · ${r.mapped_ids.length} emitters` : ''}
               </span>
@@ -578,6 +636,11 @@ export default function RoomsPage() {
               <h4>
                 Emitters <HelpLink topic="room-builder-what" />
               </h4>
+              <p className="muted small">
+                Each carrier can sit out of runs and effects while staying in the room, or be
+                removed from the room entirely — two different things.{' '}
+                <HelpLink topic="room-members" />
+              </p>
               {/* One card per EMITTER, grouped under the carrier it belongs to.
                 * A carrier mapped whole has one; a strip mapped per segment has
                 * one for each pixel range, and the range is shown because it
@@ -586,13 +649,50 @@ export default function RoomsPage() {
               {room.carrier_ids.map((carrierId) => {
                 const fps = room.footprints.filter(
                   (f) => (f.carrier_id || f.emitter_id) === carrierId);
+                const sitting = (room.deselected_carrier_ids ?? []).includes(carrierId);
+                const names = carriers.find((c) => c.id === carrierId)?.device_names ?? [];
                 return (
-                  <div key={carrierId} className="emitter-device">
-                    {fps.length > 1 && (
-                      <p className="muted small emitter-device-name">
-                        {carrierId} — {fps.length} emitters
-                      </p>
-                    )}
+                  <div key={carrierId} className={`emitter-device${sitting ? ' sitting-out' : ''}`}>
+                    {/* The member row. Two DIFFERENT controls, and they read
+                      * as different at the moment of pressing: a toggle that
+                      * sits the carrier out of runs, and a spelled-out
+                      * "Remove from room" that edits this room's membership
+                      * and nothing else. Never a bare "Delete" next to a
+                      * carrier — there is no device delete in this app. */}
+                    <div className="emitter-device-row">
+                      <span className="emitter-device-name">
+                        {carrierId}
+                        {fps.length > 1 && (
+                          <span className="muted small"> — {fps.length} emitters</span>
+                        )}
+                        {names.length > 0 && (
+                          <span className="muted small"> · lights: {names.join(', ')}</span>
+                        )}
+                        {sitting && (
+                          <span className="warn small"> · sitting out</span>
+                        )}
+                      </span>
+                      <span className="emitter-device-actions">
+                        <button
+                          className={`chip ${sitting ? '' : 'on'}`}
+                          disabled={busy}
+                          onClick={() => setCarrierSelected(carrierId, sitting)}
+                          title={sitting
+                            ? 'Sitting out: skipped by mapping runs and not offered to room effects. Press to take part again.'
+                            : 'Taking part in mapping runs and room effects. Press to sit this carrier out, keeping it in the room.'}
+                        >
+                          {sitting ? 'Deselected' : 'Selected'}
+                        </button>
+                        <button
+                          className="link-button danger"
+                          disabled={busy}
+                          onClick={() => removeCarrier(carrierId)}
+                          title="Take this carrier out of THIS room. It is not deleted; add it back from the picker above."
+                        >
+                          Remove from room
+                        </button>
+                      </span>
+                    </div>
                     <div className="emitter-grid">
                       {(fps.length ? fps : [null]).map((fp, i) => {
                         const range = fp?.ranges?.[0];
@@ -819,7 +919,7 @@ export default function RoomsPage() {
             </div>
           ) : (
             <p className="muted small">
-              The room goes dark for about {Math.max(1, (room?.carrier_ids.length ?? 1) * 4)} seconds,
+              The room goes dark for about {Math.max(1, ((room?.selected_carrier_ids ?? room?.carrier_ids)?.length ?? 1) * 4)} seconds,
               and stays dark until the run finishes.
               Hold the phone still: every footprint in a map is only comparable to the others taken
               from the same position.
@@ -834,7 +934,8 @@ export default function RoomsPage() {
             * disables only while THIS browser is the one holding it. */}
           <button
             className="primary"
-            disabled={!room || busy || !room.carrier_ids.length || !!plan?.too_long
+            disabled={!room || busy || !(room.selected_carrier_ids ?? room.carrier_ids).length
+                      || !!plan?.too_long
                       || !(source?.present || cameraOn)
                       || (!!refusal && source?.source !== 'native')}
             onClick={() => void mapRoom()}
