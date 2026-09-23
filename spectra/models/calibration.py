@@ -80,11 +80,12 @@ implying they exist — the same "absence is a read" rule
 """
 from __future__ import annotations
 
+import re
 import time
 import uuid
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 #: How many references a fingerprint may carry. Each one costs a capture of
 #: a dark room every time the fingerprint is checked, so this is a real
@@ -106,6 +107,38 @@ KIND_DECLARATION = "declaration"
 #: report his newest measurement as belonging to nobody. Every provenance,
 #: origin and comparability read uses this tuple.
 RUN_KINDS = (KIND_RUN, KIND_AMENDMENT)
+
+#: THE SHAPE OF A SUB-CARRIER EMITTER ID — `spectra/services/emitters.py`'s
+#: own `f"{carrier_id}:{kind}{i}[{start}-{end}]"`, `kind` in `("blk",
+#: "seg")` — matched here as a plain string pattern rather than an import,
+#: because this module may not depend on `spectra.services` (services import
+#: models, never the reverse). `Calibration.lever_scope` names WHICH
+#: emitter proves the camera and carries no `granularity`/`block_pixels` of
+#: its own (unlike a run's own `lever_selftest.Scope`), so a block/segment
+#: id can never resolve through it — see `lever_scope_rejection`.
+_SUB_CARRIER_EMITTER_ID = re.compile(r":(?:blk|seg)\d+\[\d+-\d+\]$")
+
+
+def lever_scope_rejection(scope: Optional[dict]) -> Optional[str]:
+    """`None`, or the sentence naming why `scope` (a `Calibration.
+    lever_scope` value) is not a legal one.
+
+    WHOLE-CARRIER IDS AND CARRIER IDS ONLY. A block/segment-granularity
+    emitter id only exists at the granularity the RUN that produced it
+    chose, and this scope names a fixed emitter with no granularity of its
+    own to resolve one against — naming one here would silently refuse
+    every time (`lever_selftest.Scope`'s own `plan_granularity` defaults to
+    "whole" unless told otherwise), which is indistinguishable from a typo.
+    Refused BY NAME instead, at construction, rather than a run discovering
+    it later as an unexplained `lever_scope_unresolved`."""
+    for eid in (scope or {}).get("emitter_ids") or []:
+        if _SUB_CARRIER_EMITTER_ID.search(str(eid)):
+            return (f"lever_scope.emitter_ids: {eid!r} names a block or "
+                    f"segment of a carrier, not a whole carrier — "
+                    f"Calibration.lever_scope only resolves WHOLE-carrier "
+                    f"emitter ids (or carrier_ids); name the carrier id "
+                    f"itself instead")
+    return None
 
 
 class TagRegistration(BaseModel):
@@ -480,7 +513,9 @@ class Calibration(BaseModel):
     #: WHICH EMITTER THE LEVER SELF-TEST MAY DRIVE ON THIS CALIBRATION,
     #: overriding the declared item(s)' own scope for the self-test alone
     #: (`spectra/services/lever_selftest.Scope`) — `{"emitter_ids": [...]}`
-    #: or `{"carrier_ids": [...]}`. EMPTY by default (whole room,
+    #: or `{"carrier_ids": [...]}`, WHOLE-CARRIER ids only (see
+    #: `lever_scope_rejection` — a block/segment id is refused, never
+    #: silently unresolved). EMPTY by default (whole room,
     #: `plan.emitters[0]`), the byte-identical behaviour every calibration
     #: had before this field existed.
     #:
@@ -498,6 +533,14 @@ class Calibration(BaseModel):
     lever_scope: dict = Field(default_factory=dict)
     #: APPEND-ONLY. `append_run` is the only thing that writes it.
     runs: list[CalibrationRun] = Field(default_factory=list)
+
+    @field_validator("lever_scope")
+    @classmethod
+    def _lever_scope_whole_carriers_only(cls, v: dict) -> dict:
+        problem = lever_scope_rejection(v)
+        if problem is not None:
+            raise ValueError(problem)
+        return v
 
     @property
     def ran(self) -> bool:

@@ -4880,7 +4880,15 @@ stream lag above). Two independent fixes:
   emitter id names the sconce for a real calibration is still an
   operator/deploy call, the same convention `scripts/
   set_scene_colorset_preference.py` already uses — not guessed here from
-  live storage this build never read.
+  live storage this build never read. **`emitter_ids` NAMES WHOLE
+  CARRIERS ONLY** — this scope carries no `granularity`/`block_pixels` of
+  its own the way a run's `lever_selftest.Scope` does, so a block/segment
+  id (`carrier:blk3[90-119]`) could never resolve through it; naming one
+  is refused BY NAME (`calibration.lever_scope_rejection`, checked at the
+  model's own field validator AND again in `spectra/api/calibrations.py`'s
+  `_validate_lever_scope`, since `PUT`'s edit assigns the field directly
+  and never re-runs the model's validators) rather than silently earning
+  `lever_scope_unresolved` at run time.
 
 Spec: `tests/test_calibration_engine_and_lever_scope.py`,
 `tests/test_calibration_api.py`,

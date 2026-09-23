@@ -251,6 +251,43 @@ def test_re_measuring_a_tag_is_recorded_in_the_lineage():
         assert "tag 9 added at 50.1 mm on the door" in note
 
 
+# ── 3c. lever_scope names WHOLE carriers only ───────────────────────────────
+
+def test_a_whole_carrier_lever_scope_emitter_id_is_accepted():
+    with _client() as client:
+        room = _room(client)
+        made = _create(client, room,
+                      lever_scope={"emitter_ids": ["north"]})
+        assert made.status_code == 200, made.text
+        assert made.json()["lever_scope"] == {"emitter_ids": ["north"]}
+
+
+def test_a_block_or_segment_lever_scope_emitter_id_is_refused_on_create():
+    """A sub-carrier id only exists at the granularity the RUN that
+    produced it chose; `Calibration.lever_scope` carries no granularity of
+    its own to resolve one against, so naming one is refused by name here
+    rather than silently unresolved by the self-test later."""
+    with _client() as client:
+        room = _room(client)
+        r = _create(client, room, lever_scope={
+            "emitter_ids": ["tv-mapper:blk3[90-119]"]})
+        assert r.status_code == 400
+        assert "block or segment" in r.json()["detail"]
+        assert calibration_store.load_all() == []
+
+
+def test_a_block_or_segment_lever_scope_emitter_id_is_refused_on_edit():
+    with _client() as client:
+        room = _room(client)
+        made = _create(client, room).json()
+        r = client.put(f"/api/calibrations/{made['id']}", json={
+            "lever_scope": {"emitter_ids": ["tv-mapper:seg0[0-9]"]}})
+        assert r.status_code == 400
+        assert "block or segment" in r.json()["detail"]
+        back = client.get(f"/api/calibrations/{made['id']}").json()
+        assert back["lever_scope"] == {}
+
+
 # ── 4. the routes that touch a light refuse honestly with no camera ────────
 
 def test_a_run_with_no_camera_is_a_409_carrying_the_recorded_refusal(monkeypatch):

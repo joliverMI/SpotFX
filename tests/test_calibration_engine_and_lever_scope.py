@@ -13,6 +13,8 @@ import asyncio
 
 import pytest
 
+from pydantic import ValidationError
+
 from spectra.models.calibration import Calibration, PinnedCamera
 from spectra.models.room_map import RoomMap
 from spectra.services import (calibration_runs, calibration_store,
@@ -153,3 +155,23 @@ def test_lever_scope_helper_builds_a_real_scope_from_the_field():
     scope = calibration_runs._lever_scope(cal)           # noqa: SLF001
     assert isinstance(scope, lever_selftest.Scope)
     assert scope.emitter_ids == ("sconce-left",)
+
+
+# ── the scope's own shape restriction: whole carriers only ──────────────
+
+def test_a_block_or_segment_emitter_id_in_lever_scope_is_refused():
+    """A sub-carrier id only exists at the granularity the RUN that
+    produced it chose (`emitters.py`'s own `carrier:blk3[90-119]` shape),
+    and this scope carries no granularity of its own to resolve one
+    against — naming one must be refused by name at construction, not
+    silently unresolved at run time as `lever_scope_unresolved`."""
+    with pytest.raises(ValidationError) as excinfo:
+        Calibration(name="x", room_id="r",
+                    lever_scope={"emitter_ids": ["tv-mapper:blk3[90-119]"]})
+    assert "block or segment" in str(excinfo.value)
+
+
+def test_a_whole_carrier_emitter_id_in_lever_scope_is_accepted():
+    cal = Calibration(name="x", room_id="r",
+                      lever_scope={"emitter_ids": ["tv-mapper"]})
+    assert cal.lever_scope == {"emitter_ids": ["tv-mapper"]}
