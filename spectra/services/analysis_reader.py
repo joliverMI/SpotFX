@@ -153,29 +153,45 @@ def tempo_bpm_for_uri(uri: str) -> Optional[float]:
     return bpm if bpm > 0 else None
 
 
-_capture_offset_cache: dict[str, int] = {}
+_CaptureOffsetSignature = Optional[tuple]
+_capture_offset_cache: dict[str, tuple[_CaptureOffsetSignature, int]] = {}
 
 
 def _capture_offset_for(uri: str) -> int:
-    """testbed_audio.capture_offset_ms_or_zero(uri), cached per URI for the
-    life of the process — section_energy_at is read on the event-loop
-    thread every ~200ms tick (bridge.intensity(), TICK_S in
-    trigger_engine.py), and the offset's own source (an .npz read,
-    testbed_audio.load_npz_shape) is a real file parse with no caching of
-    its own; re-reading it every tick would put synchronous file I/O on
-    the hot tick path. A stable per-URI value, same "built lazily, cached
-    forever" shape as this module's own _shape_index — a value that
-    changes underneath (a recapture mid-session) is no worse than that
-    cache's own staleness tolerance.
+    """testbed_audio.capture_offset_ms_or_zero(uri), cached per URI —
+    section_energy_at is read on the event-loop thread every ~200ms tick
+    (bridge.intensity(), TICK_S in trigger_engine.py), and the offset's own
+    source (an .npz read, testbed_audio.load_npz_shape) is a real file
+    parse with no caching of its own; re-reading it every tick would put
+    synchronous file I/O on the hot tick path.
+
+    SELF-HEALS on a live recapture, unlike a plain forever-cache: the entry
+    is keyed on the sidecar .npz's own (mtime_ns, size) — a cheap stat()
+    call, not the file parse itself — so a recapture that rewrites the
+    .npz (a new mtime/size) invalidates the cached value on its very next
+    read, the same "don't trust a value that changed underneath you"
+    property _shape_index gets from rebuilding on a miss. Missing stem or
+    missing .npz both key on signature None, so a song with no audio yet
+    caches its 0 offset the same way until a capture actually lands.
 
     Imports testbed_audio LAZILY (inside this function, not at module
     scope): testbed_audio imports analysis_reader for stem_for_uri, so a
     module-level import here would be a circular import."""
-    if uri in _capture_offset_cache:
-        return _capture_offset_cache[uri]
+    stem = stem_for_uri(uri)
+    signature: _CaptureOffsetSignature = None
+    if stem is not None:
+        npz_path = config.AUDIO_SHAPES_DIR / f"{stem}.npz"
+        try:
+            st = npz_path.stat()
+            signature = (st.st_mtime_ns, st.st_size)
+        except OSError:
+            signature = None
+    cached = _capture_offset_cache.get(uri)
+    if cached is not None and cached[0] == signature:
+        return cached[1]
     from spectra.services import testbed_audio
     offset = testbed_audio.capture_offset_ms_or_zero(uri)
-    _capture_offset_cache[uri] = offset
+    _capture_offset_cache[uri] = (signature, offset)
     return offset
 
 

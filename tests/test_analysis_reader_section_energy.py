@@ -8,6 +8,7 @@ applies to a generated cue's own placement."""
 from __future__ import annotations
 
 import json
+import os
 
 import pytest
 
@@ -104,3 +105,36 @@ def test_missing_npz_treats_offset_as_zero_and_still_answers():
 def test_no_sections_returns_none_regardless_of_offset():
     from spectra.services import analysis_reader
     assert analysis_reader.section_energy_at("spotify:track:unknown", 500) is None
+
+
+def test_a_live_recapture_with_a_new_offset_is_picked_up_without_a_restart():
+    """_capture_offset_for used to cache the offset per URI forever (a
+    plain dict keyed only on the URI) — a live recapture that rewrites the
+    .npz sidecar with a different measured offset would keep reading the
+    OLD offset for the rest of the process life. It now keys the cache
+    entry on the .npz's own (mtime_ns, size) signature, so a recapture
+    (a new mtime) invalidates the stale entry on its very next read."""
+    from spectra import config as scfg
+    from spectra.services import analysis_reader
+    _seed(scfg)
+    _seed_npz_offset(scfg, 1000)
+    npz_path = scfg.AUDIO_SHAPES_DIR / f"{STEM}.npz"
+
+    # Shifted sections at offset=1000: [1000,3000) energy 0.1, [3000,6000)
+    # energy 0.9. Prime the cache at this offset.
+    assert analysis_reader.section_energy_at(URI, 1500) == pytest.approx(0.1)
+    assert analysis_reader.section_energy_at(URI, 4000) == pytest.approx(0.9)
+
+    # Recapture: same song, a different measured capture offset. Force a
+    # distinct mtime signature even if both writes landed within the same
+    # filesystem-clock tick, so this test can't pass by timing luck.
+    _seed_npz_offset(scfg, 4000)
+    st = npz_path.stat()
+    os.utime(npz_path, ns=(st.st_atime_ns, st.st_mtime_ns + 1_000_000))
+
+    # Shifted sections at the NEW offset=4000: [4000,6000) energy 0.1,
+    # [6000,9000) energy 0.9 — 5000 fell in the OLD offset's [3000,6000)
+    # window (energy 0.9), so this only passes if the cache actually
+    # noticed the recapture rather than replaying the stale offset.
+    assert analysis_reader.section_energy_at(URI, 5000) == pytest.approx(0.1)
+    assert analysis_reader.section_energy_at(URI, 7000) == pytest.approx(0.9)
