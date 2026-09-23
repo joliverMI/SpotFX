@@ -248,6 +248,20 @@ class RoomMap(BaseModel):
     id: str = Field(default_factory=lambda: uuid.uuid4().hex[:12])
     name: str
     carrier_ids: list[str] = Field(default_factory=list)
+    #: CARRIERS OF THIS ROOM THAT ARE SITTING OUT (2026-09-23, the
+    #: carrier-keyed rebuild of PR fm/room-member-removal — his ask stands
+    #: unchanged: "the ability to deselect a device", now read as "a
+    #: carrier"). A carrier stays a member — its footprints, its
+    #: granularity, its place in the list are all untouched — but nothing
+    #: automatic reaches for it. Removing a carrier from `carrier_ids` is
+    #: the OTHER control (see `remove_carrier`); a reader must never
+    #: conflate "not in this room" with "in this room, sitting out".
+    #:
+    #: Additive with an empty default, so every room already on disk means
+    #: exactly what it meant before this field existed. Always a SUBSET of
+    #: `carrier_ids` — `remove_carrier` and the room upsert both prune it,
+    #: so nothing downstream has to guess what a stale entry meant.
+    deselected_carrier_ids: list[str] = Field(default_factory=list)
     axis: AxisCalibration = Field(default_factory=AxisCalibration)
     #: The granularity the page last ran a capture at, remembered so the
     #: control comes back where he left it. NOT a global setting and NOT
@@ -331,3 +345,51 @@ class RoomMap(BaseModel):
         self.footprints = [f for f in self.footprints
                            if f.emitter_id != fp.emitter_id] + [fp]
         self.updated_at = time.time()
+
+    # ── membership vs participation: two different acts ────────────────
+
+    def is_selected(self, carrier_id: str) -> bool:
+        return carrier_id not in self.deselected_carrier_ids
+
+    def selected_carrier_ids(self) -> list[str]:
+        """The room's members that are actually PARTICIPATING — the list
+        every automatic consumer reads (a mapping run's emitter enumeration,
+        a room effect's default pool). Order is `carrier_ids`' own."""
+        out = set(self.deselected_carrier_ids)
+        return [c for c in self.carrier_ids if c not in out]
+
+    def set_selected(self, carrier_id: str, selected: bool) -> bool:
+        """Toggle one member's participation. Returns whether anything
+        changed. A carrier that is not a member is never recorded as
+        deselected — the list stays a subset of `carrier_ids`."""
+        was = self.is_selected(carrier_id)
+        if selected:
+            self.deselected_carrier_ids = [
+                c for c in self.deselected_carrier_ids if c != carrier_id]
+        elif carrier_id in self.carrier_ids and was:
+            self.deselected_carrier_ids = [*self.deselected_carrier_ids,
+                                           carrier_id]
+        changed = self.is_selected(carrier_id) != was
+        if changed:
+            self.updated_at = time.time()
+        return changed
+
+    def remove_carrier(self, carrier_id: str) -> bool:
+        """Remove a carrier from THIS ROOM only.
+
+        This edits membership and nothing else: the carrier itself, its
+        configuration and its place in every other room are untouched —
+        there is no device delete anywhere in this app and this is not one.
+        Its FOOTPRINTS go, because a footprint is a measurement of what this
+        carrier does in THIS room and a room it is no longer in has no
+        place to keep it (the same rule the room upsert has always applied
+        when a carrier is unpicked). Re-adding it from the picker and
+        mapping again is the whole way back."""
+        if carrier_id not in self.carrier_ids:
+            return False
+        self.carrier_ids = [c for c in self.carrier_ids if c != carrier_id]
+        self.deselected_carrier_ids = [
+            c for c in self.deselected_carrier_ids if c != carrier_id]
+        self.drop_carrier_footprints(carrier_id)
+        self.updated_at = time.time()
+        return True

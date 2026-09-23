@@ -1776,6 +1776,17 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        id: 'room-members',
+        title: 'Removing a carrier, and sitting one out',
+        keywords: 'remove from room delete carrier device deselect select sitting out membership participation skip exclude pool re-add picker',
+        body: [
+          'Each carrier in the room has two controls, and they do different things. "Remove from room" takes it out of THIS room: it leaves the list, and what was measured for it in this room goes with it, because a footprint is a picture of what that carrier does in this room. Nothing else about it changes — its settings, its timing, and its membership of any other room are untouched. It is not a device delete; there is no device delete anywhere in this app. Add it back from the picker above and map it again.',
+          'The Selected / Deselected toggle sits a carrier OUT while keeping it in the room. A deselected carrier keeps everything it has measured; it is simply skipped when you map the room — so a run neither lights it nor overwrites its footprint — and it is not offered to room effects. Press it again and it takes part exactly as before, with nothing to re-measure.',
+          'Room effects have their own per-effect fixture chips, and the two layers stack in one direction: the room decides what is OFFERED, and the effect chips choose among what the room offers. A carrier deselected in the room is not driven even by an effect that names it, so "sitting out" means one thing everywhere rather than something a forgotten effect can quietly override.',
+          'Neither control asks before acting, because both are reversible: re-add from the picker, or press the toggle back.',
+        ],
+      },
+      {
         id: 'unattended-capture',
         title: 'Capture runs that do not need you: the queue and the capture client',
         keywords: 'unattended overnight queue automatic capture client headless laptop webcam v4l2 cron batch declared list runs no human remote start scope scoped take which lights fixtures room carriers other rooms bathroom left alone whole house widen',
@@ -1944,6 +1955,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         keywords: 'per pixel mask strip tv television wrap along vertical segment granularity gradient single device spans',
         body: [
           'A fixture mapped in PARTS is driven per pixel: each measured range takes its own place in the wave, so a strip wrapped round a television dims from the bottom up rather than all at once. That is the difference the "Map in" control on the Rooms page makes — nothing here needs setting.',
+          'A carrier deselected on the Rooms page is never driven here, even by an effect that names it: the room decides what is offered, the chips choose among it. See "Removing a carrier, and sitting one out".',
           'A fixture mapped as a WHOLE still takes one gain, exactly as before. Both can run in the same wave; the Run panel says which fixtures are per-pixel and over how many pixels.',
           'Per-pixel costs less, not more. A fixture driven per pixel needs no write to the light at all — its gain rides the frame that was already being drawn — so a television split nineteen ways makes fewer writes a second than one sconce does. The Run panel reports the measured figures either way.',
           'It needs SPECTRA to be driving the lights, because the gain is applied inside SPECTRA\'s own render loop. If the room has been handed over, a wave over a part-mapped fixture is refused with that reason rather than running invisibly.',

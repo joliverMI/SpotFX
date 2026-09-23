@@ -429,11 +429,21 @@ def resolve_driven(room: RoomMap, spec: RoomEffectSpec) -> list[_Driven]:
 
     The selection is by carrier because that is what the page offers and
     what he addresses; a carrier mapped per segment contributes several
-    emitters and every one of them is driven or none is."""
+    emitters and every one of them is driven or none is.
+
+    TWO LAYERS, AND WHICH ONE WINS. The room's own deselect is
+    PARTICIPATION — it decides what the room OFFERS — and it wins outright:
+    a carrier sitting out is not driven even by an effect that names it, so
+    "sitting out" means one thing everywhere rather than something a
+    forgotten effect can quietly override. The spec's own `carrier_ids` are
+    the per-effect chips and choose AMONG what the room offers."""
+    offered = set(room.selected_carrier_ids())
     wanted = set(spec.carrier_ids) if spec.carrier_ids else None
     out: list[_Driven] = []
     for fp in room.footprints:
         if not fp.mapped:
+            continue
+        if fp.carrier not in offered:
             continue
         if wanted is not None and fp.carrier not in wanted:
             continue
@@ -514,13 +524,16 @@ async def start(room: RoomMap, spec: RoomEffectSpec,
     await stop(deps)
     driven = resolve_driven(room, spec)
     mapped_carriers = set(room.mapped_carriers())
-    unmapped = [c for c in (spec.carrier_ids or room.carrier_ids)
-                if c not in mapped_carriers]
+    offered = room.selected_carrier_ids()
+    unmapped = [c for c in (spec.carrier_ids or offered)
+                if c in offered and c not in mapped_carriers]
     if not driven:
-        return {"running": False,
-                "reason": ("none of the selected carriers has a measured "
-                           "footprint yet — map the room first"),
-                "unmapped": unmapped}
+        reason = ("none of the selected carriers has a measured footprint "
+                  "yet — map the room first")
+        if room.carrier_ids and not offered:
+            reason = ("every carrier in this room is deselected, so the "
+                      "room offers this effect nothing to drive")
+        return {"running": False, "reason": reason, "unmapped": unmapped}
     virtual_ids = sorted({v for d in driven for v in d.virtual_ids})
     ranged = [d for d in driven if not d.whole_carrier]
     if ranged and not deps.spectra_owns():
