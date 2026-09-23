@@ -35,7 +35,7 @@ data/transition-alignment-plan/report.md section 4's tuning-loop lanes):
   edges     — bass-energy rhythmic edges (spectra.services.rhythmic_edges,
               data/transition-alignment-plan/report.md section 2.3/4) —
               bass_up, bass_down, gap_stop, gap_resume, tunable via
-              window_beats/sensitivity. Derived from the same
+              window_beats/sensitivity/direction. Derived from the same
               `.librosa.json` beats librosa's own engine reads, so it
               shares that engine's raw (WAV-time) frame and IS shifted by
               _estimate_for like every analysis-derived engine.
@@ -158,9 +158,10 @@ def _generator_marks(uri: str) -> Optional[list[EngineMark]]:
     return sorted(marks, key=lambda m: m.time_ms) if marks else None
 
 
-def _edges_marks(uri: str, *, window_beats: int, sensitivity: float) -> Optional[list[EngineMark]]:
+def _edges_marks(uri: str, *, window_beats: int, sensitivity: float,
+                 direction: str = rhythmic_edges.DEFAULT_DIRECTION) -> Optional[list[EngineMark]]:
     edges = rhythmic_edges.edges_for_uri(uri, window_beats=window_beats,
-                                        sensitivity=sensitivity)
+                                        sensitivity=sensitivity, direction=direction)
     if edges is None:
         return None
     out = [EngineMark(time_ms=m.time_ms, kind=m.kind)
@@ -172,17 +173,19 @@ def marks_for(
     engine: str, uri: str, *,
     window_beats: int = rhythmic_edges.DEFAULT_WINDOW_BEATS,
     sensitivity: float = rhythmic_edges.DEFAULT_SENSITIVITY,
+    direction: str = rhythmic_edges.DEFAULT_DIRECTION,
 ) -> Optional[list[EngineMark]]:
     """None = not available for this song (either the engine hasn't been
     precomputed for it, or — for librosa/generator/edges — no analysis
-    exists yet). `window_beats`/`sensitivity` are read only by the `edges`
-    engine; every other engine ignores them."""
+    exists yet). `window_beats`/`sensitivity`/`direction` are read only by
+    the `edges` engine; every other engine ignores them."""
     if engine == ENGINE_LIBROSA:
         return _librosa_marks(uri)
     if engine == ENGINE_GENERATOR:
         return _generator_marks(uri)
     if engine == ENGINE_EDGES:
-        return _edges_marks(uri, window_beats=window_beats, sensitivity=sensitivity)
+        return _edges_marks(uri, window_beats=window_beats, sensitivity=sensitivity,
+                            direction=direction)
     cached = testbed_cache.load(engine, uri)
     if cached is None:
         return None

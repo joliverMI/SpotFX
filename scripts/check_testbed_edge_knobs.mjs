@@ -37,8 +37,11 @@ console.log('§1 default knobs match the backend defaults (spectra/services/rhyt
 {
   ok(fe.DEFAULT_WINDOW_BEATS === 8, 'DEFAULT_WINDOW_BEATS is 8');
   ok(fe.DEFAULT_SENSITIVITY === 0.5, 'DEFAULT_SENSITIVITY is 0.5');
+  ok(fe.DEFAULT_DIRECTION === 'both', 'DEFAULT_DIRECTION is "both"');
   ok(fe.MIN_WINDOW_BEATS === 1 && fe.MAX_WINDOW_BEATS === 16, 'window_beats bounds are 1-16');
   ok(fe.MIN_SENSITIVITY === 0.2 && fe.MAX_SENSITIVITY === 1.5, 'sensitivity bounds are 0.2-1.5');
+  ok(JSON.stringify(fe.DIRECTIONS) === JSON.stringify(['both', 'up', 'down']),
+    'DIRECTIONS is the three-way toggle\'s own option list, in order');
 }
 
 console.log('§2 clampWindowBeats — the slider can never drag a value outside its bounds');
@@ -60,14 +63,24 @@ console.log('§3 clampSensitivity');
   ok(fe.clampSensitivity(NaN) === fe.DEFAULT_SENSITIVITY, 'NaN falls back to the default');
 }
 
-console.log('§4 knobsRelevant — the sliders show only while an `edges` lane is selected');
+console.log('§4 clampDirection — the toggle can never resolve to a value outside its three options');
+{
+  ok(fe.clampDirection('both') === 'both', 'a valid value passes through unchanged');
+  ok(fe.clampDirection('up') === 'up', "'up' passes through unchanged");
+  ok(fe.clampDirection('down') === 'down', "'down' passes through unchanged");
+  ok(fe.clampDirection('sideways') === fe.DEFAULT_DIRECTION,
+    'an unrecognized value falls back to the default, never a raw pass-through');
+  ok(fe.clampDirection('') === fe.DEFAULT_DIRECTION, 'an empty value falls back to the default');
+}
+
+console.log('§5 knobsRelevant — the sliders show only while an `edges` lane is selected');
 {
   ok(fe.knobsRelevant(['edges']) === true, "engine A alone set to 'edges' is relevant");
   ok(fe.knobsRelevant(['librosa', 'edges']) === true, "engine B set to 'edges' is relevant too");
   ok(fe.knobsRelevant(['librosa', 'beat_this']) === false, 'neither slot on edges is not relevant');
   ok(fe.knobsRelevant(['generator']) === false,
-    "generator alone is NOT relevant yet — window_beats/sensitivity are edges-only "
-    + 'until a future task wires the R3 placement rule (report section 5 items 3-4)');
+    "generator alone is NOT relevant yet — window_beats/sensitivity/direction are "
+    + 'edges-only until a future task wires the R3 placement rule (report section 5 items 3-4)');
   ok(fe.knobsRelevant([null, undefined]) === false, 'an empty A/B selection is not relevant');
 }
 

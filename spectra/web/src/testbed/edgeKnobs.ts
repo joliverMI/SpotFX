@@ -1,14 +1,18 @@
-/** The `edges` engine's two knobs (spectra/services/rhythmic_edges.py) —
+/** The `edges` engine's three knobs (spectra/services/rhythmic_edges.py) —
  * kept as a pure module (report/AGENTS.md convention: the frontend recomputes
  * locally on every drag, so a `.mjs` proof can transpile and drive this
  * directly, same as testbed/metrics.ts and testbed/songSearch.ts). */
 
 export const DEFAULT_WINDOW_BEATS = 8;
 export const DEFAULT_SENSITIVITY = 0.5;
+export const DEFAULT_DIRECTION: Direction = 'both';
 export const MIN_WINDOW_BEATS = 1;
 export const MAX_WINDOW_BEATS = 16;
 export const MIN_SENSITIVITY = 0.2;
 export const MAX_SENSITIVITY = 1.5;
+
+export type Direction = 'both' | 'up' | 'down';
+export const DIRECTIONS: Direction[] = ['both', 'up', 'down'];
 
 export function clampWindowBeats(v: number): number {
   if (!Number.isFinite(v)) return DEFAULT_WINDOW_BEATS;
@@ -18,6 +22,14 @@ export function clampWindowBeats(v: number): number {
 export function clampSensitivity(v: number): number {
   if (!Number.isFinite(v)) return DEFAULT_SENSITIVITY;
   return Math.max(MIN_SENSITIVITY, Math.min(MAX_SENSITIVITY, v));
+}
+
+/** Report section 3's "third, coarser knob" (up / down / both) — an
+ * out-of-range value (never reachable from the toggle itself, but a
+ * defensive default for any other caller) falls back to `both`, matching
+ * the backend's own `clamp_direction`. */
+export function clampDirection(v: string): Direction {
+  return (DIRECTIONS as string[]).includes(v) ? (v as Direction) : DEFAULT_DIRECTION;
 }
 
 /** Whether the window/sensitivity knobs have any live effect on the

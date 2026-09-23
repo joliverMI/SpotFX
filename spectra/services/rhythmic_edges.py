@@ -19,7 +19,7 @@ score_rules.py`, cleaned up and parameterized here):
   gap_resume — the first beat at/above a fixed "loud" fraction of the
                local median after such a run (the beat resumes).
 
-TWO KNOBS, ONE EACH — do not conflate them:
+THREE KNOBS — do not conflate them:
 
   sensitivity  — "how big a jump counts" (report's own words). Maps
                  directly to the up/down step threshold (`step` in
@@ -49,6 +49,18 @@ TWO KNOBS, ONE EACH — do not conflate them:
                  the module docstring above and report §2.3's own table:
                  "Beat resumes"/"Beat stops" are reported but not part of
                  any ship-task acceptance number).
+  direction    — the report's own "third, coarser knob" (section 3's R3
+                 rule text: "Direction is a third, coarser knob (up / down
+                 / both)"): which half of the detected edges to keep.
+                 R3's placement algorithm itself is a later ship task (not
+                 built here — see beat_snap.py), but the report's own
+                 characterization treats a gap as "a special case of down
+                 then up, not a separate detector" (§2.3), so the same
+                 up/down split applies uniformly across all four kinds:
+                 "up" keeps bass_up and gap_resume (bass coming in /
+                 resuming); "down" keeps bass_down and gap_stop (bass
+                 going out / stopping); "both" (default) keeps every kind,
+                 byte-identical to this knob not existing at all.
 
 Deliberately does NOT do capture-offset shifting — this module works in
 the SAME raw analysis-file frame `beats_for_uri`/`sections_for_uri` already
@@ -67,11 +79,17 @@ from spectra.services import analysis_reader
 
 DEFAULT_WINDOW_BEATS = 8
 DEFAULT_SENSITIVITY = 0.5
+DEFAULT_DIRECTION = "both"
 
 MIN_WINDOW_BEATS = 1
 MAX_WINDOW_BEATS = 16
 MIN_SENSITIVITY = 0.2
 MAX_SENSITIVITY = 1.5
+
+DIRECTION_BOTH = "both"
+DIRECTION_UP = "up"
+DIRECTION_DOWN = "down"
+DIRECTIONS = (DIRECTION_BOTH, DIRECTION_UP, DIRECTION_DOWN)
 
 # The report evidence script's own fixed "how quiet is quiet" / "how loud
 # counts as resumed" fractions of the local median (score_rules.py's
@@ -83,7 +101,7 @@ RESUME_FRACTION = 0.8
 
 # The local-median lookback the up/down step threshold compares against —
 # FIXED at the report evidence script's own rolling_median(x, w=16)
-# default. See the module docstring's "TWO KNOBS" section for why this is
+# default. See the module docstring's "THREE KNOBS" section for why this is
 # not window_beats.
 MEDIAN_LOOKBACK_BEATS = 16
 
@@ -92,6 +110,12 @@ KIND_BASS_DOWN = "bass_down"
 KIND_GAP_STOP = "gap_stop"
 KIND_GAP_RESUME = "gap_resume"
 KINDS = (KIND_BASS_UP, KIND_BASS_DOWN, KIND_GAP_STOP, KIND_GAP_RESUME)
+
+# The direction knob's own up/down split — see the module docstring's
+# "THREE KNOBS" section for why gap_resume/gap_stop join bass_up/bass_down
+# rather than being direction-exempt.
+_UP_KINDS = (KIND_BASS_UP, KIND_GAP_RESUME)
+_DOWN_KINDS = (KIND_BASS_DOWN, KIND_GAP_STOP)
 
 
 @dataclass(frozen=True)
@@ -116,6 +140,10 @@ def clamp_sensitivity(value) -> float:
     return max(MIN_SENSITIVITY, min(MAX_SENSITIVITY, v))
 
 
+def clamp_direction(value) -> str:
+    return value if value in DIRECTIONS else DEFAULT_DIRECTION
+
+
 def _rolling_median(values: list[float], lookback: int) -> list[float]:
     """Local median over a `±lookback`-beat window around each index —
     score_rules.py's own rolling_median, floored at a small epsilon so a
@@ -138,19 +166,21 @@ def edges_for_beats(
     *,
     window_beats: int = DEFAULT_WINDOW_BEATS,
     sensitivity: float = DEFAULT_SENSITIVITY,
+    direction: str = DEFAULT_DIRECTION,
 ) -> dict[str, list[float]]:
     """Pure function: `beat_ms`/`rms_bass` are parallel per-beat arrays,
     sorted ascending by `beat_ms` (the caller's responsibility — a song's
     own `beats` list from `.librosa.json` is already beat-ordered). Returns
     `{kind: sorted ms list}` for every kind in KINDS, every list possibly
     empty. Never raises: fewer than 2 beats, or mismatched array lengths,
-    returns every kind empty."""
+    returns every kind empty (regardless of `direction`)."""
     n = len(beat_ms)
     if n < 2 or len(rms_bass) != n:
         return {kind: [] for kind in KINDS}
 
     step = clamp_sensitivity(sensitivity)
     gap_run = clamp_window_beats(window_beats)
+    dirn = clamp_direction(direction)
     med = _rolling_median(rms_bass, MEDIAN_LOOKBACK_BEATS)
 
     ups = [beat_ms[i] for i in range(1, n)
@@ -178,12 +208,19 @@ def edges_for_beats(
         else:
             i += 1
 
-    return {
+    result = {
         KIND_BASS_UP: sorted(ups),
         KIND_BASS_DOWN: sorted(downs),
         KIND_GAP_STOP: sorted(stops),
         KIND_GAP_RESUME: sorted(resumes),
     }
+    if dirn == DIRECTION_UP:
+        for kind in _DOWN_KINDS:
+            result[kind] = []
+    elif dirn == DIRECTION_DOWN:
+        for kind in _UP_KINDS:
+            result[kind] = []
+    return result
 
 
 def edges_for_uri(
@@ -191,6 +228,7 @@ def edges_for_uri(
     *,
     window_beats: int = DEFAULT_WINDOW_BEATS,
     sensitivity: float = DEFAULT_SENSITIVITY,
+    direction: str = DEFAULT_DIRECTION,
 ) -> Optional[dict[str, list[EdgeMark]]]:
     """`{kind: [EdgeMark, ...]}` for a song's own stored beats, or None
     when there is no usable beat analysis at all (no `.librosa.json`, or
@@ -204,6 +242,6 @@ def edges_for_uri(
     beat_ms = [float(b.get("ms", 0)) for b in ordered]
     rms_bass = [float(b.get("rms_bass", 0.0)) for b in ordered]
     raw = edges_for_beats(beat_ms, rms_bass, window_beats=window_beats,
-                         sensitivity=sensitivity)
+                         sensitivity=sensitivity, direction=direction)
     return {kind: [EdgeMark(time_ms=t, kind=kind) for t in times]
            for kind, times in raw.items()}

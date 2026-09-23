@@ -102,6 +102,74 @@ def test_sensitivity_is_the_up_down_jump_threshold_and_does_not_move_gap_kinds()
     assert loose[re.KIND_GAP_STOP] == strict[re.KIND_GAP_STOP] == [beats[10]]
 
 
+def _updown_beats_and_rms():
+    """A clean sustained step up at beat 20 (10000ms) and a clean sustained
+    step down at beat 60 (30000ms), no quiet stretch anywhere — isolates
+    the direction knob's effect on bass_up/bass_down alone (empirically
+    verified: this fixture produces no gap_stop/gap_resume marks)."""
+    beats = _beats(120)
+    rms = [0.1] * 20 + [1.0] * 40 + [0.1] * 60
+    return beats, rms
+
+
+def _gap_beats_and_rms():
+    """A single quiet run (beats 30-39) inside a steady baseline — its
+    onset/resume are themselves sharp steps, so they ALSO register as
+    bass_down/bass_up at the same two timestamps (empirically verified) —
+    exactly the "gap is a special case of down then up" shape the report
+    itself describes (§2.3)."""
+    beats = _beats(80)
+    rms = [0.5] * 30 + [0.001] * 10 + [0.5] * 40
+    return beats, rms
+
+
+def test_direction_both_is_the_default_and_returns_every_kind_unfiltered():
+    beats, rms = _updown_beats_and_rms()
+    default = re.edges_for_beats(beats, rms)
+    explicit_both = re.edges_for_beats(beats, rms, direction=re.DIRECTION_BOTH)
+    assert default == explicit_both
+    assert default[re.KIND_BASS_UP] == [beats[20]]
+    assert default[re.KIND_BASS_DOWN] == [beats[60]]
+
+    gbeats, grms = _gap_beats_and_rms()
+    gap_both = re.edges_for_beats(gbeats, grms, window_beats=8)
+    assert gap_both[re.KIND_GAP_STOP] == [gbeats[30]]
+    assert gap_both[re.KIND_GAP_RESUME] == [gbeats[40]]
+
+
+def test_direction_up_keeps_only_bass_up_and_gap_resume():
+    beats, rms = _updown_beats_and_rms()
+    up = re.edges_for_beats(beats, rms, direction=re.DIRECTION_UP)
+    assert up[re.KIND_BASS_UP] == [beats[20]]
+    assert up[re.KIND_BASS_DOWN] == []
+
+    gbeats, grms = _gap_beats_and_rms()
+    gap_up = re.edges_for_beats(gbeats, grms, window_beats=8, direction=re.DIRECTION_UP)
+    assert gap_up[re.KIND_GAP_RESUME] == [gbeats[40]]
+    assert gap_up[re.KIND_GAP_STOP] == []
+
+
+def test_direction_down_keeps_only_bass_down_and_gap_stop():
+    beats, rms = _updown_beats_and_rms()
+    down = re.edges_for_beats(beats, rms, direction=re.DIRECTION_DOWN)
+    assert down[re.KIND_BASS_DOWN] == [beats[60]]
+    assert down[re.KIND_BASS_UP] == []
+
+    gbeats, grms = _gap_beats_and_rms()
+    gap_down = re.edges_for_beats(gbeats, grms, window_beats=8, direction=re.DIRECTION_DOWN)
+    assert gap_down[re.KIND_GAP_STOP] == [gbeats[30]]
+    assert gap_down[re.KIND_GAP_RESUME] == []
+
+
+@pytest.mark.parametrize("value,expected", [
+    ("both", "both"), ("up", "up"), ("down", "down"),
+    ("sideways", re.DEFAULT_DIRECTION), (None, re.DEFAULT_DIRECTION),
+    ("", re.DEFAULT_DIRECTION),
+])
+def test_clamp_direction(value, expected):
+    assert re.clamp_direction(value) == expected
+
+
 @pytest.mark.parametrize("value,expected", [
     (0, re.MIN_WINDOW_BEATS), (-5, re.MIN_WINDOW_BEATS),
     (100, re.MAX_WINDOW_BEATS), (8, 8), (8.6, 9),
@@ -123,6 +191,7 @@ def test_clamp_sensitivity(value, expected):
 def test_default_knobs_are_inside_the_documented_bounds():
     assert re.MIN_WINDOW_BEATS <= re.DEFAULT_WINDOW_BEATS <= re.MAX_WINDOW_BEATS
     assert re.MIN_SENSITIVITY <= re.DEFAULT_SENSITIVITY <= re.MAX_SENSITIVITY
+    assert re.DEFAULT_DIRECTION in re.DIRECTIONS
 
 
 @pytest.fixture()
@@ -182,3 +251,17 @@ def test_edges_for_uri_forwards_the_knobs(_isolated):
     strict = re.edges_for_uri(URI, window_beats=8)
     assert len(loose[re.KIND_GAP_STOP]) == 1
     assert len(strict[re.KIND_GAP_STOP]) == 0
+
+
+def test_edges_for_uri_forwards_direction(_isolated):
+    from spectra import config as scfg
+    beats = [{"ms": i * 500.0, "rms_bass": 0.1} for i in range(40)]
+    for i in range(20, 40):
+        beats[i]["rms_bass"] = 1.0  # a sustained up step at beat 20
+    _seed(scfg, beats)
+    both = re.edges_for_uri(URI, direction=re.DIRECTION_BOTH)
+    up = re.edges_for_uri(URI, direction=re.DIRECTION_UP)
+    down = re.edges_for_uri(URI, direction=re.DIRECTION_DOWN)
+    assert {m.time_ms for m in both[re.KIND_BASS_UP]} == {10000.0}
+    assert {m.time_ms for m in up[re.KIND_BASS_UP]} == {10000.0}
+    assert down[re.KIND_BASS_UP] == []

@@ -149,6 +149,18 @@ def test_edges_engine_forwards_window_and_sensitivity_knobs():
     assert len(loose_up) >= len(strict_up)
 
 
+def test_edges_engine_forwards_direction_knob():
+    from spectra import config as scfg
+    from spectra.services import testbed_engines
+    _seed_librosa(scfg, rms_bass_spike_at=20)
+    both = testbed_engines.marks_for(testbed_engines.ENGINE_EDGES, URI, direction="both")
+    up = testbed_engines.marks_for(testbed_engines.ENGINE_EDGES, URI, direction="up")
+    down = testbed_engines.marks_for(testbed_engines.ENGINE_EDGES, URI, direction="down")
+    assert any(m.kind == "bass_up" for m in both)
+    assert any(m.kind == "bass_up" for m in up)
+    assert not any(m.kind == "bass_up" for m in down)
+
+
 def test_edges_engine_none_when_no_beat_analysis():
     from spectra.services import testbed_engines
     assert testbed_engines.marks_for(
@@ -199,6 +211,26 @@ def test_engine_marks_route_rejects_out_of_bounds_knobs():
     assert resp2.status_code == 422
 
 
+def test_engine_marks_route_accepts_and_uses_direction():
+    from spectra import config as scfg
+    _seed_librosa(scfg, rms_bass_spike_at=20)
+    client = _client()
+    both = client.get(f"/api/testbed/engine-marks?uri={URI}&engine=edges"
+                      f"&mark_kind=bass_up&direction=both").json()
+    down = client.get(f"/api/testbed/engine-marks?uri={URI}&engine=edges"
+                      f"&mark_kind=bass_up&direction=down").json()
+    assert both["available"] is True
+    assert len(both["estimate"]) > 0
+    assert down["estimate"] == []
+
+
+def test_engine_marks_route_rejects_invalid_direction():
+    client = _client()
+    resp = client.get(f"/api/testbed/engine-marks?uri={URI}&engine=edges"
+                      f"&mark_kind=bass_up&direction=sideways")
+    assert resp.status_code == 422
+
+
 def test_compare_route_forwards_the_knobs_too():
     from spectra import config as scfg
     _seed_librosa(scfg, rms_bass_spike_at=20)
@@ -210,6 +242,20 @@ def test_compare_route_forwards_the_knobs_too():
     body = resp.json()
     assert body["available"] is True
     assert body["metrics"] is not None
+
+
+def test_compare_route_forwards_direction_too():
+    from spectra import config as scfg
+    _seed_librosa(scfg, rms_bass_spike_at=20)
+    _write_trigger(URI, 10000, source="authored", kind="fire_scene")
+    client = _client()
+    down = client.get(f"/api/testbed/compare?uri={URI}&engine=edges"
+                      f"&mark_kind=bass_up&direction=down&tolerance_ms=500")
+    assert down.status_code == 200
+    body = down.json()
+    assert body["available"] is True
+    assert body["estimate"] == []
+    assert body["metrics"]["n_matched"] == 0
 
 
 def test_generator_lane_reachable_through_the_route_and_unshifted():

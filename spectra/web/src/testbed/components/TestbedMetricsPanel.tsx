@@ -3,18 +3,19 @@
  * two engines can be visually compared on the same song without leaving
  * the page (report Part 3 item 5/6).
  *
- * Also carries the `edges` engine's own two knobs (window/sensitivity,
- * spectra/services/rhythmic_edges.py, data/transition-alignment-plan/
+ * Also carries the `edges` engine's own three knobs (window/sensitivity/
+ * direction, spectra/services/rhythmic_edges.py, data/transition-alignment-plan/
  * report.md section 4) — shown next to the tolerance slider only while an
  * `edges` lane is active in either A/B slot, and re-scoring the exact way
- * the tolerance slider does: dragging one refetches /engine-marks (a
- * cheap single .librosa.json parse), the page recomputes P/R/F1 locally
+ * the tolerance slider does: dragging/toggling one refetches /engine-marks
+ * (a cheap single .librosa.json parse), the page recomputes P/R/F1 locally
  * with the same matcher tolerance already uses. */
 import HelpLink from '../../help/HelpLink';
 import {
-  DEFAULT_SENSITIVITY, DEFAULT_WINDOW_BEATS, MAX_SENSITIVITY, MAX_WINDOW_BEATS,
-  MIN_SENSITIVITY, MIN_WINDOW_BEATS,
+  DEFAULT_DIRECTION, DEFAULT_SENSITIVITY, DEFAULT_WINDOW_BEATS, DIRECTIONS,
+  MAX_SENSITIVITY, MAX_WINDOW_BEATS, MIN_SENSITIVITY, MIN_WINDOW_BEATS,
 } from '../edgeKnobs';
+import type { Direction } from '../edgeKnobs';
 import type { TestbedMetrics } from '../../types';
 
 function pct(v: number) {
@@ -23,7 +24,8 @@ function pct(v: number) {
 
 export default function TestbedMetricsPanel({
   rows, toleranceMs, onToleranceChange, defaultToleranceMs, onResetToDefault, emptyNote,
-  windowBeats, sensitivity, onWindowBeatsChange, onSensitivityChange, showEdgeKnobs,
+  windowBeats, sensitivity, direction, onWindowBeatsChange, onSensitivityChange,
+  onDirectionChange, showEdgeKnobs,
 }: {
   rows: { key: string; label: string; metrics: TestbedMetrics | null | undefined; available: boolean }[];
   toleranceMs: number;
@@ -36,8 +38,10 @@ export default function TestbedMetricsPanel({
   emptyNote?: string;
   windowBeats: number;
   sensitivity: number;
+  direction: Direction;
   onWindowBeatsChange: (v: number) => void;
   onSensitivityChange: (v: number) => void;
+  onDirectionChange: (v: Direction) => void;
   /** Only true while an `edges` lane is selected in either A/B slot — a
    * knob shown for an engine it does not touch would imply a control that
    * does nothing (spectra/web/src/testbed/edgeKnobs.ts::knobsRelevant). */
@@ -111,6 +115,28 @@ export default function TestbedMetricsPanel({
             {sensitivity !== DEFAULT_SENSITIVITY && (
               <button onClick={() => onSensitivityChange(DEFAULT_SENSITIVITY)} style={{ fontSize: 11 }}>
                 Reset ({DEFAULT_SENSITIVITY})
+              </button>
+            )}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Direction:</span>
+            <div role="group" aria-label="Direction" style={{ display: 'flex', gap: 4 }}>
+              {DIRECTIONS.map((d) => (
+                <button
+                  key={d}
+                  type="button"
+                  aria-pressed={direction === d}
+                  className={direction === d ? 'primary' : ''}
+                  onClick={() => onDirectionChange(d)}
+                  style={{ fontSize: 11, textTransform: 'capitalize' }}
+                >
+                  {d}
+                </button>
+              ))}
+            </div>
+            {direction !== DEFAULT_DIRECTION && (
+              <button onClick={() => onDirectionChange(DEFAULT_DIRECTION)} style={{ fontSize: 11 }}>
+                Reset ({DEFAULT_DIRECTION})
               </button>
             )}
           </div>

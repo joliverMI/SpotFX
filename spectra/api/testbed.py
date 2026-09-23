@@ -7,9 +7,9 @@ reviewed push-to-real button.
   GET    /api/testbed/marks?uri=                      his real marks (split)
   GET    /api/testbed/waveform?uri=                    waveform/energy lane
   GET    /api/testbed/engines?uri=                    per-engine availability
-  GET    /api/testbed/engine-marks?uri=&engine=&mark_kind=&window_beats=&sensitivity=
+  GET    /api/testbed/engine-marks?uri=&engine=&mark_kind=&window_beats=&sensitivity=&direction=
                                                        one engine's marks, nothing else
-  GET    /api/testbed/compare?uri=&engine=&mark_kind=&reference=&tolerance_ms=&window_beats=&sensitivity=
+  GET    /api/testbed/compare?uri=&engine=&mark_kind=&reference=&tolerance_ms=&window_beats=&sensitivity=&direction=
                                                        one engine's marks + P/R/F1
   GET    /api/testbed/audio/status?uri=                pin/WAV status
   POST   /api/testbed/audio/pin?uri=                    pin (copy + peaks)
@@ -150,6 +150,7 @@ def _estimate_for(
     engine: str, uri: str, mark_kind: str, *,
     window_beats: int = rhythmic_edges.DEFAULT_WINDOW_BEATS,
     sensitivity: float = rhythmic_edges.DEFAULT_SENSITIVITY,
+    direction: str = rhythmic_edges.DEFAULT_DIRECTION,
 ):
     """One engine's marks of one kind, or None when the engine has nothing
     for this song — the ONLY read the page's per-lane fetch needs. Never
@@ -178,7 +179,8 @@ def _estimate_for(
     own Finding 1 (see spectra/services/testbed_engines.py's module
     docstring, "generator" entry)."""
     engine_marks = testbed_engines.marks_for(
-        engine, uri, window_beats=window_beats, sensitivity=sensitivity)
+        engine, uri, window_beats=window_beats, sensitivity=sensitivity,
+        direction=direction)
     if engine_marks is None:
         return None
     if engine != testbed_engines.ENGINE_GENERATOR:
@@ -205,6 +207,8 @@ async def engine_marks(
     sensitivity: float = Query(rhythmic_edges.DEFAULT_SENSITIVITY,
                                ge=rhythmic_edges.MIN_SENSITIVITY,
                                le=rhythmic_edges.MAX_SENSITIVITY),
+    direction: str = Query(rhythmic_edges.DEFAULT_DIRECTION,
+                           pattern="^(both|up|down)$"),
 ):
     """The page's per-lane fetch: it recomputes P/R/F1 locally against the
     marks it already holds (spectra/web/src/testbed/metrics.ts), so the
@@ -212,15 +216,15 @@ async def engine_marks(
     computed and discarded — and the trigger-store parse + profile scan
     they cost is what this route exists to skip.
 
-    `window_beats`/`sensitivity` are read only by the `edges` engine
-    (spectra/services/rhythmic_edges.py's own two knobs); every other
-    engine ignores them, so a caller may always pass them without
+    `window_beats`/`sensitivity`/`direction` are read only by the `edges`
+    engine (spectra/services/rhythmic_edges.py's own three knobs); every
+    other engine ignores them, so a caller may always pass them without
     checking which engine is selected."""
     if engine not in testbed_engines.ENGINES:
         raise HTTPException(404, f"unknown engine '{engine}'")
     estimate = await asyncio.to_thread(
         _estimate_for, engine, uri, mark_kind,
-        window_beats=window_beats, sensitivity=sensitivity)
+        window_beats=window_beats, sensitivity=sensitivity, direction=direction)
     return {
         "uri": uri, "engine": engine, "mark_kind": mark_kind,
         "available": estimate is not None,
@@ -241,6 +245,8 @@ async def compare(
     sensitivity: float = Query(rhythmic_edges.DEFAULT_SENSITIVITY,
                                ge=rhythmic_edges.MIN_SENSITIVITY,
                                le=rhythmic_edges.MAX_SENSITIVITY),
+    direction: str = Query(rhythmic_edges.DEFAULT_DIRECTION,
+                           pattern="^(both|up|down)$"),
 ):
     """Server-computed P/R/F1 at a fixed tolerance — for any caller that
     wants the number from the reference matcher itself rather than the
@@ -252,7 +258,8 @@ async def compare(
 
     def _read() -> dict:
         estimate = _estimate_for(engine, uri, mark_kind,
-                                 window_beats=window_beats, sensitivity=sensitivity)
+                                 window_beats=window_beats, sensitivity=sensitivity,
+                                 direction=direction)
         if estimate is None:
             return {"uri": uri, "engine": engine, "mark_kind": mark_kind,
                     "reference": reference, "tolerance_ms": tolerance_ms,
