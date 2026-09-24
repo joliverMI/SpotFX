@@ -1,11 +1,14 @@
-/** Component-level proof for the music-analysis test bed's two new sliders
- * (Window/Sensitivity, data/transition-alignment-plan/report.md section 4,
- * ship task 2) — spectra/web/src/testbed/edgeKnobs.ts is the pure module
- * both TestbedMetricsPanel.tsx's sliders and TestbedPage.tsx's fetch wiring
- * are built on (clamping, defaults, and which A/B engine selection makes
- * the knobs relevant at all). This repo carries no DOM/component-rendering
- * test harness (no jsdom, no testing-library — see AGENTS.md's own "Tests"
- * section), so this follows the established precedent for this exact page
+/** Component-level proof for the music-analysis test bed's sliders
+ * (Window/Sensitivity/Direction, data/transition-alignment-plan/report.md
+ * section 4 ship task 2; the "strongest N" density knob and "Use as room
+ * default" button, section 5 ship task 4) — spectra/web/src/testbed/
+ * edgeKnobs.ts is the pure module both TestbedMetricsPanel.tsx's sliders/
+ * button and TestbedPage.tsx's fetch wiring are built on (clamping,
+ * defaults, which A/B engine selection makes each knob relevant, the
+ * confirm text and exact PUT payload the "Use as room default" button
+ * sends). This repo carries no DOM/component-rendering test harness (no
+ * jsdom, no testing-library — see AGENTS.md's own "Tests" section), so
+ * this follows the established precedent for this exact page
  * (scripts/check_testbed_song_search.mjs, scripts/check_testbed_metrics.mjs):
  * transpile the REAL module with esbuild and drive it directly, no DOM.
  *
@@ -89,6 +92,72 @@ console.log('§5 knobsRelevant — the sliders show while an `edges` lane, or th
     "generator's 'stored' kind is NOT relevant — it is exactly what is currently "
     + 'written, never recomputed with these knobs');
   ok(fe.knobsRelevant([null, undefined]) === false, 'an empty A/B selection is not relevant');
+}
+
+console.log('§6 the "strongest N" density knob (default/bounds match '
+  + 'RoomControlState.transition_max_per_song\'s own Field(ge=6, le=40, default=12))');
+{
+  ok(fe.DEFAULT_MAX_PER_SONG === 12, 'DEFAULT_MAX_PER_SONG is 12');
+  ok(fe.MIN_MAX_PER_SONG === 6 && fe.MAX_MAX_PER_SONG === 40, 'max_per_song bounds are 6-40');
+  ok(fe.clampMaxPerSong(12) === 12, 'a value already in range is unchanged');
+  ok(fe.clampMaxPerSong(0) === fe.MIN_MAX_PER_SONG, 'below the floor clamps to the floor');
+  ok(fe.clampMaxPerSong(999) === fe.MAX_MAX_PER_SONG, 'above the ceiling clamps to the ceiling');
+  ok(fe.clampMaxPerSong(12.6) === 13, 'a fractional value rounds to the nearest whole count');
+  ok(fe.clampMaxPerSong(NaN) === fe.DEFAULT_MAX_PER_SONG, 'NaN falls back to the default');
+}
+
+console.log('§7 maxPerSongRelevant — narrower than knobsRelevant: only the '
+  + "generator's own preview kind ranks/trims candidates, `edges` never does");
+{
+  ok(fe.maxPerSongRelevant([{ engine: 'generator', kind: 'preview' }]) === true,
+    "generator's 'preview' kind is relevant");
+  ok(fe.maxPerSongRelevant([{ engine: 'generator', kind: 'stored' }]) === false,
+    "generator's 'stored' kind is NOT relevant — it is exactly what is currently written");
+  ok(fe.maxPerSongRelevant([{ engine: 'edges', kind: 'bass_up' }]) === false,
+    "an `edges` lane is NOT relevant — density has no meaning for edge detection");
+  ok(fe.maxPerSongRelevant([{ engine: 'librosa', kind: 'beat' },
+    { engine: 'generator', kind: 'preview' }]) === true, 'engine B alone on generator:preview is relevant too');
+  ok(fe.maxPerSongRelevant([null, undefined]) === false, 'an empty A/B selection is not relevant');
+}
+
+console.log('§8 transitionDefaultsDiffer — the "differs from room default" highlight '
+  + '(section 5 task 4 item (c))');
+{
+  const current = { windowBeats: 8, sensitivity: 0.5, maxPerSong: 12 };
+  ok(fe.transitionDefaultsDiffer(current, { windowBeats: 8, sensitivity: 0.5, maxPerSong: 12 }) === false,
+    'identical to the room default is not a difference');
+  ok(fe.transitionDefaultsDiffer(current, { windowBeats: 2, sensitivity: 0.5, maxPerSong: 12 }) === true,
+    'a different windowBeats is a difference');
+  ok(fe.transitionDefaultsDiffer(current, { windowBeats: 8, sensitivity: 0.8, maxPerSong: 12 }) === true,
+    'a different sensitivity is a difference');
+  ok(fe.transitionDefaultsDiffer(current, { windowBeats: 8, sensitivity: 0.5, maxPerSong: 6 }) === true,
+    'a different maxPerSong is a difference');
+  ok(fe.transitionDefaultsDiffer(current, null) === false,
+    'a not-yet-loaded room default (null) reads as no difference, never a false highlight');
+  ok(fe.transitionDefaultsDiffer(current, undefined) === false,
+    'undefined room default reads as no difference too');
+}
+
+console.log('§9 "Use as room default" — the confirm message and the exact PUT payload '
+  + '(section 5 task 4 item (a)); nothing is written until the caller actually PUTs this)');
+{
+  const knobs = { windowBeats: 4, sensitivity: 0.35, maxPerSong: 14 };
+  const msg = fe.useAsRoomDefaultConfirmMessage(knobs);
+  ok(typeof msg === 'string' && msg.length > 0, 'the confirm message is a real sentence');
+  ok(msg.includes('4 beat'), 'the confirm message names the window value');
+  ok(msg.includes('0.35'), 'the confirm message names the sensitivity value');
+  ok(msg.includes('14'), 'the confirm message names the max-per-song value');
+
+  const singular = fe.useAsRoomDefaultConfirmMessage({ windowBeats: 1, sensitivity: 0.5, maxPerSong: 12 });
+  ok(singular.includes('1 beat') && !singular.includes('1 beats'),
+    'a single beat is grammatically singular');
+
+  const patch = fe.roomControlsPatchForUseAsDefault(knobs);
+  ok(JSON.stringify(patch) === JSON.stringify({
+    transition_window_beats: 4, transition_edge_sensitivity: 0.35, transition_max_per_song: 14,
+  }), 'the PUT patch carries exactly the three room-control fields, at exactly these values');
+  ok(!('direction' in patch) && Object.keys(patch).length === 3,
+    'direction is deliberately excluded — it has no room-level setting');
 }
 
 console.log(failures === 0 ? '\nAll checks passed.' : `\n${failures} check(s) FAILED.`);

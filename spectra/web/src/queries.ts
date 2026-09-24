@@ -12,7 +12,7 @@ import type {
   SceneV2, SettingChangeEntry, SettingsMessageResult, SettingsRegistry, SonicAppliedChange,
   Liveness, SonicUsageSummary, SpectraTrigger, SpotColorSetCard, TestSessionStatus,
   TestbedEngineMarks, TestbedMarks, TestbedPromoteRequest, TestbedPromoteResult,
-  TestbedPromotionLogEntry, TestbedSong, TestbedWaveform,
+  TestbedPromotionLogEntry, TestbedReferenceSet, TestbedSong, TestbedWaveform,
   TranscribeResult, UndoResult,
 } from './types';
 
@@ -1169,17 +1169,38 @@ export function useTestbedWaveform(uri: string | null) {
  * ignores them, so they are always included in the key/query rather than
  * only when the `edges` engine is selected; harmless, and it means
  * switching an A/B slot INTO `edges` never needs a separate refetch
- * trigger. */
+ * trigger. `maxPerSong` is the "strongest N" density knob — read only by
+ * the `generator` engine's own `preview` kind; `null`/`undefined` omits
+ * it from the query entirely, which the server reads as "use the room's
+ * own setting" (spectra/api/testbed.py's `_estimate_for`). */
 export function useTestbedEngineMarks(
   uri: string | null, engine: string | null, markKind: string | null,
-  windowBeats = 8, sensitivity = 0.5, direction = 'both',
+  windowBeats = 8, sensitivity = 0.5, direction = 'both', maxPerSong?: number | null,
 ) {
   return useQuery({
-    queryKey: ['testbed-engine-marks', uri, engine, markKind, windowBeats, sensitivity, direction],
+    queryKey: ['testbed-engine-marks', uri, engine, markKind, windowBeats, sensitivity, direction, maxPerSong ?? null],
     queryFn: () => apiGet<TestbedEngineMarks>(
       `/testbed/engine-marks?uri=${enc(uri!)}&engine=${enc(engine!)}&mark_kind=${enc(markKind!)}`
-      + `&window_beats=${windowBeats}&sensitivity=${sensitivity}&direction=${enc(direction)}`),
+      + `&window_beats=${windowBeats}&sensitivity=${sensitivity}&direction=${enc(direction)}`
+      + (maxPerSong != null ? `&max_per_song=${maxPerSong}` : '')),
     enabled: !!uri && !!engine && !!markKind,
+  });
+}
+
+/** The plan's own four-song acceptance table, live (data/transition-
+ * alignment-plan/report.md section 4/5 task 4) — the `generator:preview`
+ * lane's one-beat recall/precision/F1 for the four pinned reference songs
+ * at the page's current knobs, recomputed server-side on every drag so
+ * the whole set moves together rather than one song at a time. */
+export function useTestbedReferenceSet(
+  windowBeats: number, sensitivity: number, direction: string, maxPerSong?: number | null,
+) {
+  return useQuery({
+    queryKey: ['testbed-reference-set', windowBeats, sensitivity, direction, maxPerSong ?? null],
+    queryFn: () => apiGet<TestbedReferenceSet>(
+      `/testbed/reference-set?window_beats=${windowBeats}&sensitivity=${sensitivity}`
+      + `&direction=${enc(direction)}`
+      + (maxPerSong != null ? `&max_per_song=${maxPerSong}` : '')),
   });
 }
 

@@ -1599,3 +1599,19 @@ export interface TestbedPromotionLogEntry {
   trigger_id?: string;
   action_kind?: string;
 }
+
+export interface TestbedReferenceSetRow {
+  name: string;
+  uri: string;
+  available: boolean;
+  tolerance_ms: number | null;
+  metrics: TestbedMetrics | null;
+}
+
+export interface TestbedReferenceSet {
+  window_beats: number;
+  sensitivity: number;
+  direction: string;
+  max_per_song: number | null;
+  songs: TestbedReferenceSetRow[];
+}
