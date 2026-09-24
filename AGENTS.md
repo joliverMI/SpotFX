@@ -8506,9 +8506,10 @@ no-op), `tests/test_analysis_reader_section_energy.py` (the same shift on
 ## Transition-alignment tuning loop — `rhythmic_edges.py` + the test bed's Generator/Rhythmic-edges lanes
 
 `data/transition-alignment-plan/report.md` (firstmate home) is the plan;
-ship task 2 of its section 5 built the TUNING side only — a rule that
-turns edges into placement (report R3) and a "use these as room defaults"
-button are separate, later tasks (plan items 3-4), not built here.
+ship task 2 of its section 5 built the TUNING side only (the `edges`
+lane, the two knobs). The rule that turns edges into placement (report
+R3) is task 3, built — see the PLACEMENT RULE R3 section below. A "use
+these as room defaults" button is task 4, still not built here.
 
 `spectra/services/rhythmic_edges.py` computes bass-energy edges from the
 per-beat `rms_bass` already stored in `.librosa.json` — never a WAV
@@ -8544,9 +8545,9 @@ ignored by every other engine) and **`generator`** ("what the room will do"
 rows exactly as written, never recomputed, so a generator frame defect
 shows up on this lane before it's fixed; kind `preview` is
 `midsong_generator.candidate_moments(uri)` run fresh, read-only, no
-trigger-store write — the CURRENT placement rule, i.e. today's plain
-section-boundary + Phase-2 beat-snap, NOT the plan's own R3 edge rule,
-which doesn't exist yet). **`generator`'s marks are the ONE exception to
+trigger-store write — the CURRENT placement rule, which since the
+PLACEMENT RULE R3 section below is R3-then-R1, not just Phase 2's plain
+downbeat snap). **`generator`'s marks are the ONE exception to
 `_estimate_for`'s capture-offset shift** (`spectra/api/testbed.py`) —
 every other engine's marks are a raw WAV-time analysis pass and get
 shifted into song time for comparison; the generator engine's marks are
@@ -8559,15 +8560,116 @@ reviews and pushes exactly like any other engine's.
 
 Frontend: two sliders plus a three-way Direction toggle
 (`spectra/web/src/testbed/edgeKnobs.ts`, the pure clamp/relevance module —
-`knobsRelevant()` shows all three only while an `edges` lane is selected
-in either A/B slot, since `window_beats`/`sensitivity`/`direction` don't
-yet affect `generator` or anything else) on `TestbedMetricsPanel.tsx`,
-next to the tolerance slider, re-scoring the way it does.
-`useTestbedEngineMarks` always sends all three knobs regardless of which
-engine is active — harmless, and means switching a slot INTO `edges`
-needs no extra plumbing. Proof: `scripts/check_testbed_edge_knobs.mjs`
-(this repo's no-DOM/no-jsdom convention for this page, same as
-`scripts/check_testbed_song_search.mjs`).
+`knobsRelevant()` shows all three while an `edges` lane, OR the
+`generator` engine's own `preview` kind, is selected in either A/B slot —
+see the R3 section immediately below, `stored` still ignores them) on
+`TestbedMetricsPanel.tsx`, next to the tolerance slider, re-scoring the
+way it does. `useTestbedEngineMarks` always sends all three knobs
+regardless of which engine is active — harmless, and means switching a
+slot INTO `edges` needs no extra plumbing. Proof:
+`scripts/check_testbed_edge_knobs.mjs` (this repo's no-DOM/no-jsdom
+convention for this page, same as `scripts/check_testbed_song_search.mjs`).
+
+## PLACEMENT RULE R3 — the edge-then-downbeat rule is now the generator's own placement rule
+
+2026-09-23, `data/transition-alignment-plan/report.md` §3/§5 task 3, the
+Admiral's rollout approval (`decision-rollout.md`, verbatim: "make the
+edge-then-downbeat rule the generator's placement rule with Window and
+Sensitivity as room settings you set from the test bed, then regenerate
+the whole library in one pass"). `beat_snap.place_cue`/
+`place_with_resolved` supersede Phase 2's plain downbeat-only snap above —
+Phase 2's own module (grid choice, "ONE FRAME, NO SHIFT", the one-beat
+snap cap) is UNCHANGED and IS stage 2 of this rule, not replaced.
+
+**The rule, exactly**: stage 1 — move a candidate to the nearest
+`bass_up`/`bass_down` rhythmic edge (`rhythmic_edges.py`, above) within
+`window_beats * beat_length_ms`, PROVIDED the move is NONZERO (an edge
+sitting exactly at the candidate's own raw time does not count as a
+stage-1 match — this replicates the report's own reference measurement
+script's `x if x != t else <R1 fallback>` shape exactly, which is what
+the acceptance numbers below were measured against; read
+`place_with_resolved`'s own comment before "simplifying" this away).
+Stage 2 — Phase 2's downbeat snap, gated on `RoomControlState.
+midsong_snap_to_beat` exactly as before (that switch "becomes stage 2 of
+place_cue" — nothing else about it changed). Neither stage — the
+boundary's own raw time survives. **Stage 1 runs UNCONDITIONALLY**,
+regardless of `midsong_snap_to_beat` — only stage 2 is gated by that
+switch. `gap_stop`/`gap_resume` are deliberately EXCLUDED from stage 1's
+edge candidates (only `bass_up`/`bass_down`), matching the report's own
+reference implementation precisely — its own methodology never folds gap
+events into R3, even though the SAME two kinds join `bass_up`/`bass_down`
+under `rhythmic_edges.py`'s own `direction` knob for the `edges` test-bed
+lane's DIFFERENT purpose (exploration, not placement) — don't conflate
+the two.
+
+**Three new `RoomControlState` fields** (`transition_window_beats`
+default 8, `transition_edge_sensitivity` default 0.5,
+`transition_max_per_song` default 12 — bounds mirror
+`rhythmic_edges.py`'s own MIN/MAX for the first two;
+`transition_max_per_song` is 6-40), all Sonic-editable
+(`settings_console.SETTINGS_REGISTRY`) and exposed on the Scenes panel
+(`RoomControlsBar.tsx`, next to "Snap generated cues to beat"; help topic
+`transition-placement-rule`). `direction` has NO room setting — production
+generation always uses `rhythmic_edges.DEFAULT_DIRECTION` ("both"); it
+stays a test-bed-only exploration knob.
+
+**DENSITY** (the same rollout decision, item 1: "emit about as many
+transitions as you mark by hand ... instead of 2-3x that"): before
+placement, `midsong_generator.candidate_moments` keeps only each song's
+strongest `transition_max_per_song` candidates by ABSOLUTE bass-energy
+step size (`rhythmic_edges.bass_step_at`, a raw `|Δrms_bass|` at a
+candidate's own raw beat — comparable whether or not that step actually
+crosses the sensitivity threshold as a named edge), ranked BEFORE
+placement moves anything, ties broken by chronological order (stable
+sort). A song with fewer raw candidates than the cap is unaffected.
+**Density is a separate concern from the placement rule and is NOT part
+of `scripts/check_transition_alignment.py`'s four-song acceptance
+table** — that script measures the placement rule alone (uncapped), same
+as the report's own reference measurement; density's own effect is
+proven by `tests/test_midsong_generator.py`'s own density tests.
+
+**Provenance**: `SpectraTrigger.snap_grid` gained two new values,
+`"edge:up"`/`"edge:down"` (`rhythmic_edges.UP_KINDS`/`DOWN_KINDS`'s own
+vocabulary), alongside Phase 2's `"librosa"`/`"beat_this"` — visible on
+the Review page (`describeEvent.ts`, reworded from "snapped to X beat" to
+"moved to X" since an edge match isn't a beat-grid snap) and the test
+bed exactly as Phase 2's provenance already was.
+
+**The test bed's `generator:preview` lane now reflects R3** (item (f)):
+`testbed_engines.marks_for`/`_generator_preview_marks` thread the page's
+own `window_beats`/`sensitivity`/`direction` knobs into
+`candidate_moments` — the SAME three knobs the `edges` lane already
+exposed (`knobsRelevant` in `edgeKnobs.ts` now shows them for
+`generator:preview` too, not `stored`, which is exactly what's currently
+written and ignores them). `snap_enabled`/the density cap stay at the
+live room default — there is no test-bed-only copy of either; a "use
+these as room defaults" button is the plan's own later task 4, not built
+here.
+
+**The opening scene change is untouched** — `trigger_engine._fire_
+transition` still fires on song detection, not a stored cue; this build
+never touches it (the report's own recommendation, ratified in the
+rollout decision).
+
+Acceptance: `scripts/check_transition_alignment.py`'s fourth column,
+"+ Edge rule" (the shipped default knobs, `RoomControlState()`'s own
+defaults, density uncapped to isolate the placement rule) — the four-song
+one-beat recall is 21/73/45/29% (Soy Peor/Contra/Dopamine/El Apagón),
+reproducing the report's own §3 table exactly, floor-compared with
+whole-percent rounding (the report's own "73%"/"29%" are themselves
+rounded fractions — 8/11 = 72.7...%, 4/14 = 28.6...% — comparing the raw
+float against the rounded floor would fail a song that landed EXACTLY on
+target). Unit tests: `tests/test_beat_snap.py` (edge-within-window,
+no-edge fallback, window clamped to its one-beat floor, the
+zero-move-still-falls-through quirk, `snap_enabled=False` disabling only
+stage 2, direction filtering), `tests/test_midsong_generator.py`
+(density keeps the strongest N and restores chronological order, knob
+plumbing reads the room default when unset, an explicit override wins,
+edge provenance on a real placed cue).
+
+**His library is NOT regenerated by this build** — task 5
+(`scripts/import_analysed_triggers.py --apply`) is a separate,
+captain-gated step per the rollout decision, unchanged by this work.
 
 ## Maintaining this file
 

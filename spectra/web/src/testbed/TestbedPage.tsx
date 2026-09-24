@@ -458,7 +458,7 @@ export default function TestbedPage() {
               onWindowBeatsChange={setWindowBeats}
               onSensitivityChange={setSensitivity}
               onDirectionChange={setDirection}
-              showEdgeKnobs={knobsRelevant([engineA.engine, engineB?.engine])}
+              showEdgeKnobs={knobsRelevant([engineA, engineB])}
             />
           </div>
 

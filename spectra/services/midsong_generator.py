@@ -85,6 +85,33 @@ toggling the setting or a grid becoming available/unavailable between
 runs UPDATES the same trigger's timestamp_ms in place rather than
 deleting and re-adding under a new key.
 
+PLACEMENT RULE R3 (2026-09-23, data/transition-alignment-plan/report.md
+sections 3/5 task 3; the Admiral's rollout approval on decision-
+rollout.md): superseded Phase 2's plain downbeat snap above with
+beat_snap.place_cue — R3 (nearest rhythmic edge within
+RoomControlState.transition_window_beats of RoomControlState.
+transition_edge_sensitivity) THEN R1 (this same downbeat snap, still
+gated by midsong_snap_to_beat) THEN the raw boundary. See beat_snap.py's
+own PLACEMENT RULE R3 docstring section for the exact composition and
+room_controls.py's transition_window_beats/_edge_sensitivity docstrings
+for the two knobs. Direction is fixed at rhythmic_edges.DEFAULT_DIRECTION
+("both") for production generation — it is a test-bed-only exploration
+knob (spectra/services/testbed_engines.py's generator:preview lane),
+never promoted to a room setting.
+
+DENSITY (the Admiral's rollout decision, decision-rollout.md item 1):
+before placement, only each song's strongest RoomControlState.
+transition_max_per_song (default 12) mid-song candidates survive, ranked
+by the ABSOLUTE bass-energy step (rhythmic_edges.bass_step_at) at each
+candidate's own RAW section-boundary time — a comparable strength score
+whether or not that moment actually crosses the sensitivity threshold as
+a named edge. Ties (equal step magnitude, or no beat analysis at all —
+every candidate scores 0.0) keep chronological order, since Python's sort
+is stable. A song with `transition_max_per_song` or fewer candidates is
+unaffected. Ranking happens BEFORE placement, on the boundary's own raw
+time, so density and placement never fight over which moment "moved
+first."
+
 FRAME FIX (2026-09-23, data/transition-alignment-plan/report.md §2.1/§5
 task 1): a section's own start_ms is in the CAPTURED-WAV's own frame
 (services/librosa_service.py places every boundary on a beat of the WAV,
@@ -99,23 +126,26 @@ report's own corpus count). The fix: `frame_ms = raw_ms +
 testbed_audio.capture_offset_ms_or_zero(uri)` — the WAV's own sample 0,
 expressed in song time — is the moment actually placed and snapped;
 `raw_ms` itself (the analysis moment / generator_key basis) never moves.
-beat_snap's own downbeat grid is in the SAME WAV-time frame raw_ms was
-in, so it is shifted by the identical offset before the nearest-downbeat
-search — this is what beat_snap.py's own "ONE FRAME, NO SHIFT" docstring
-still describes accurately: the comparison it performs is unshifted and
-single-frame; only the frame itself (chosen by this caller, once per
-song) has moved from WAV time to song time. A capture with no measurable
-offset (testbed_audio.capture_offset_ms returns None, e.g. no npz sidecar
-yet) shifts by exactly 0 — byte-identical to before this fix.
+beat_snap's own downbeat grid — and, since PLACEMENT RULE R3 above,
+its rhythmic-edge candidates too — are in the SAME WAV-time frame raw_ms
+was in, so BOTH are shifted by the identical offset before the placement
+search (`_shift_song_placement`, the SongPlacement analogue of
+`_shift_song_grid`) — this is what beat_snap.py's own "ONE FRAME, NO
+SHIFT" docstring still describes accurately: the comparison it performs is
+unshifted and single-frame; only the frame itself (chosen by this caller,
+once per song) has moved from WAV time to song time. A capture with no
+measurable offset (testbed_audio.capture_offset_ms returns None, e.g. no
+npz sidecar yet) shifts by exactly 0 — byte-identical to before this fix.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Optional
 
 from spectra.models.trigger import FireSceneAction, SpectraTrigger
 from spectra.services import (
-    analysis_reader, beat_snap, room_controls, testbed_audio, trigger_store,
+    analysis_reader, beat_snap, rhythmic_edges, room_controls, testbed_audio,
+    trigger_store,
 )
 
 INTENSITY_FLOOR = 0.05
@@ -189,48 +219,112 @@ def _shift_song_grid(grid: Optional[beat_snap.SongGrid], offset_ms: int) -> Opti
     )
 
 
-def candidate_moments(uri: str, *, snap_enabled: Optional[bool] = None) -> list[CandidateMoment]:
-    """One CandidateMoment per section boundary past the song's own start.
-    Empty when no analysis is available yet — generation is a no-op, not
-    an error, for an unanalyzed song.
+def _shift_song_placement(
+    placement: Optional[beat_snap.SongPlacement], offset_ms: int,
+) -> Optional[beat_snap.SongPlacement]:
+    """The SongPlacement analogue of `_shift_song_grid` — shifts BOTH the
+    rhythmic-edge candidates and the downbeat grid into song time by the
+    identical `offset_ms` (see the module docstring's FRAME FIX section).
+    `offset_ms == 0` or `placement is None` returns `placement` unchanged
+    — byte-identical to before the frame fix / R3 existed."""
+    if placement is None or offset_ms == 0:
+        return placement
+    return beat_snap.SongPlacement(
+        [beat_snap.EdgeCandidate(e.time_ms + offset_ms, e.label) for e in placement.edges],
+        _shift_song_grid(placement.grid, offset_ms),
+        placement.beat_length_ms,
+    )
 
-    `snap_enabled`: pass explicitly to avoid a room_controls read (a
-    caller that already has the current RoomControlState, or an offline
-    measurement script comparing snap on vs off for the SAME analysis).
-    None (the default) reads RoomControlState.midsong_snap_to_beat live —
-    generate_for_song's own production call shape."""
+
+def candidate_moments(
+    uri: str, *,
+    snap_enabled: Optional[bool] = None,
+    window_beats: Optional[int] = None,
+    sensitivity: Optional[float] = None,
+    direction: Optional[str] = None,
+    max_per_song: Optional[int] = None,
+) -> list[CandidateMoment]:
+    """One CandidateMoment per surviving section boundary past the song's
+    own start (see the module docstring's DENSITY section for what
+    "surviving" means). Empty when no analysis is available yet —
+    generation is a no-op, not an error, for an unanalyzed song.
+
+    Every keyword defaults to the live RoomControlState — pass one
+    explicitly to avoid that read (a caller that already has the current
+    state, or an offline measurement script comparing settings for the
+    SAME analysis) without needing to override every other knob too.
+    `direction` is the one exception: it has no room-level setting (see
+    the module docstring's PLACEMENT RULE R3 section), so its default is
+    always rhythmic_edges.DEFAULT_DIRECTION ("both") — a caller (the test
+    bed's generator:preview lane) passes it explicitly to explore the
+    other two."""
     sections = analysis_reader.sections_for_uri(uri)
     if not sections:
         return []
-    if snap_enabled is None:
-        snap_enabled = room_controls.load_room_controls().midsong_snap_to_beat
+    if (snap_enabled is None or window_beats is None or sensitivity is None
+            or max_per_song is None):
+        controls = room_controls.load_room_controls()
+        if snap_enabled is None:
+            snap_enabled = controls.midsong_snap_to_beat
+        if window_beats is None:
+            window_beats = controls.transition_window_beats
+        if sensitivity is None:
+            sensitivity = controls.transition_edge_sensitivity
+        if max_per_song is None:
+            max_per_song = controls.transition_max_per_song
+    if direction is None:
+        direction = rhythmic_edges.DEFAULT_DIRECTION
+
     ordered = sorted(sections, key=lambda s: int(s.get("start_ms", 0)))
     intensities = _normalized_intensities(ordered)
+    mid = [(sec, intensity) for sec, intensity in zip(ordered, intensities)
+          if int(sec.get("start_ms", 0)) > 0]  # exclude the song's own opening
+
+    # DENSITY — keep the strongest max_per_song candidates by bass-energy
+    # step size, ranked at each candidate's own RAW boundary time, BEFORE
+    # placement (see the module docstring's DENSITY section). Resolved
+    # once per song, not once per candidate.
+    beat_series = rhythmic_edges.bass_step_series_for_uri(uri)
+    scored = [
+        (sec, intensity, int(sec.get("start_ms", 0)),
+         rhythmic_edges.bass_step_at(beat_series[0], beat_series[1], int(sec.get("start_ms", 0)))
+         if beat_series is not None else 0.0)
+        for sec, intensity in mid
+    ]
+    if max_per_song and len(scored) > max_per_song:
+        kept = sorted(range(len(scored)), key=lambda i: scored[i][3], reverse=True)[:max_per_song]
+        kept.sort()  # restore chronological order
+        scored = [scored[i] for i in kept]
+
     # The WAV-time -> song-time shift (see the module docstring's FRAME
     # FIX) — resolved once per song, not once per section.
     offset_ms = testbed_audio.capture_offset_ms_or_zero(uri)
-    # Resolved once per song (not once per section) — beat_snap.snap
-    # would otherwise re-read/re-parse the song's librosa analysis, its
-    # beat_this cache and its capture-offset sidecar for every section.
-    song_grid = beat_snap.resolve_song_grid(uri) if snap_enabled else None
-    shifted_grid = _shift_song_grid(song_grid, offset_ms)
+    # Resolved once per song (not once per section) — place_cue would
+    # otherwise re-read/re-parse the song's librosa analysis, its beat_this
+    # cache and its capture-offset sidecar for every section.
+    placement = beat_snap.resolve_song_placement(
+        uri, window_beats=window_beats, sensitivity=sensitivity, direction=direction)
+    if placement is not None and not snap_enabled:
+        # Stage 2 (R1's downbeat fallback) only — stage 1 (the edge
+        # search) always runs, per the module docstring's PLACEMENT RULE
+        # R3 section.
+        placement = replace(placement, grid=None)
+    shifted_placement = _shift_song_placement(placement, offset_ms)
+
     out: list[CandidateMoment] = []
-    for sec, intensity in zip(ordered, intensities):
-        raw_ms = int(sec.get("start_ms", 0))
-        if raw_ms <= 0:
-            continue  # the song's own start, not a mid-song moment
+    for sec, intensity, raw_ms, _strength in scored:
         frame_ms = raw_ms + offset_ms
-        ms, grid, moved = frame_ms, None, None
-        if snap_enabled:
-            result = beat_snap.snap_with_grid(frame_ms, shifted_grid)
-            ms, grid, moved = result.timestamp_ms, result.grid, result.moved_ms
+        result = beat_snap.place_with_resolved(
+            frame_ms, placement=shifted_placement, window_beats=window_beats)
         # generator_key is keyed on the section's own RAW (WAV-time)
-        # start_ms — the analysis moment, unaffected by the frame shift or
-        # by snapping — so toggling either the capture offset (a
-        # recapture) or the snap setting UPDATES this same trigger's
-        # timestamp_ms rather than orphaning it under a stale key and
-        # adding a new one (see the module docstring).
-        out.append(CandidateMoment(ms, intensity, f"section:{raw_ms}", grid, moved))
+        # start_ms — the analysis moment, unaffected by the frame shift,
+        # the density ranking, or placement — so toggling any of these
+        # settings (or a recapture moving the capture offset) UPDATES the
+        # same trigger's timestamp_ms rather than orphaning it under a
+        # stale key and adding a new one (see the module docstring).
+        out.append(CandidateMoment(
+            result.timestamp_ms, intensity, f"section:{raw_ms}",
+            result.snap_grid, result.snap_moved_ms))
     return out
 
 

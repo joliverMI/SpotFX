@@ -49,7 +49,7 @@ export function describeEvent(item: ReviewEventItem): string {
       const snapGrid = d.snap_grid as string | undefined;
       const snapMoved = d.snap_moved_ms as number | undefined;
       const snapNote = snapGrid
-        ? ` · snapped to ${snapGrid} beat (${snapMoved != null && snapMoved >= 0 ? '+' : ''}${snapMoved ?? 0}ms)`
+        ? ` · moved to ${snapGrid} (${snapMoved != null && snapMoved >= 0 ? '+' : ''}${snapMoved ?? 0}ms)`
         : '';
       return `Trigger fired: ${kind}${source ? ` (${source})` : ''}${snapNote}`;
     }

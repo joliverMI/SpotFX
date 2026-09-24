@@ -122,7 +122,10 @@ STEM = "Snap Artist - Snap Song"
 
 def _seed_song(scfg, *, tempo_bpm=120.0):
     """A section boundary at 2150ms, 150ms from a 500ms-spaced downbeat
-    grid's 2000ms downbeat — well inside the one-beat cap."""
+    grid's 2000ms downbeat — well inside the one-beat cap. A FLAT
+    rms_bass (no jumps, never quiet) so R3's rhythmic-edge search (2026-
+    09-23) finds nothing and these Phase-2-focused fixtures still exercise
+    only the R1 downbeat-snap fallback they were written for."""
     (scfg.AUDIO_SHAPES_DIR / f"{STEM}.json").write_text(
         json.dumps({"spotify_uri": GEN_URI}), encoding="utf-8")
     (scfg.AUDIO_SHAPES_DIR / f"{STEM}.librosa.json").write_text(json.dumps({
@@ -132,7 +135,8 @@ def _seed_song(scfg, *, tempo_bpm=120.0):
             {"start_ms": 0, "end_ms": 2150, "label": "intro", "energy_rms": 0.1},
             {"start_ms": 2150, "end_ms": 20000, "label": "drop", "energy_rms": 0.9},
         ],
-        "beats": [{"ms": i * 500, "is_downbeat": (i % 4 == 0)} for i in range(10)],
+        "beats": [{"ms": i * 500, "is_downbeat": (i % 4 == 0), "rms_bass": 0.5}
+                 for i in range(10)],
     }), encoding="utf-8")
 
 
@@ -321,3 +325,134 @@ def test_shift_song_grid_helper_shifts_every_downbeat():
     assert shifted.downbeats == [3692, 4692, 5692]
     assert shifted.grid_name == "librosa"
     assert shifted.beat_length_ms == 500.0
+
+
+# ═══ DENSITY + KNOB PLUMBING (2026-09-23, PLACEMENT RULE R3) ══════════════
+
+
+def _seed_density_song(scfg, *, n_boundaries=20, tempo_bpm=120.0):
+    """`n_boundaries` mid-song sections at 1000ms spacing (1000, 2000, ...,
+    n*1000), plus the song's own opening at 0. Beats are spaced 500ms
+    apart so each boundary lands exactly on an even beat index; each
+    boundary's own beat carries a DISTINCT, ISOLATED bass-energy step
+    (rms_bass[2i] = i, its odd neighbours 0) so
+    rhythmic_edges.bass_step_at(boundary_ms) == i for the i-th boundary
+    (1-indexed) — the density ranking's own strength score. Returns the
+    list of (raw_ms, strength) pairs in chronological order."""
+    n_beats = n_boundaries * 2 + 2
+    rms_bass = [0.0] * n_beats
+    pairs = []
+    for i in range(1, n_boundaries + 1):
+        beat_idx = i * 2
+        rms_bass[beat_idx] = float(i)
+        pairs.append((i * 1000, float(i)))
+    beats = [{"ms": j * 500, "is_downbeat": False, "rms_bass": rms_bass[j]}
+            for j in range(n_beats)]
+    sections = [{"start_ms": 0, "end_ms": 1000, "label": "intro", "energy_rms": 0.1}]
+    for i in range(1, n_boundaries + 1):
+        sections.append({"start_ms": i * 1000, "end_ms": (i + 1) * 1000,
+                         "label": "section", "energy_rms": 0.5})
+    (scfg.AUDIO_SHAPES_DIR / f"{STEM}.json").write_text(
+        json.dumps({"spotify_uri": GEN_URI}), encoding="utf-8")
+    (scfg.AUDIO_SHAPES_DIR / f"{STEM}.librosa.json").write_text(json.dumps({
+        "spotify_uri": GEN_URI, "tempo_bpm": tempo_bpm, "sections": sections, "beats": beats,
+    }), encoding="utf-8")
+    return pairs
+
+
+def test_density_cap_keeps_the_strongest_n_candidates():
+    from spectra import config as scfg
+    from spectra.services import midsong_generator
+    pairs = _seed_density_song(scfg, n_boundaries=20)  # strengths 1..20
+
+    moments = midsong_generator.candidate_moments(
+        GEN_URI, snap_enabled=False, window_beats=1, sensitivity=1.5,
+        direction="both", max_per_song=5)
+
+    assert len(moments) == 5, "only the 5 strongest candidates survive"
+    kept_raw_ms = sorted(int(m.generator_key.split(":")[1]) for m in moments)
+    expected = sorted(raw_ms for raw_ms, strength in pairs if strength > 15)  # top 5: 16..20
+    assert kept_raw_ms == expected, (
+        "the survivors are exactly the 5 boundaries with the largest "
+        "bass-energy step size, not an arbitrary 5")
+
+
+def test_density_cap_output_stays_chronologically_ordered():
+    from spectra import config as scfg
+    from spectra.services import midsong_generator
+    _seed_density_song(scfg, n_boundaries=20)
+    moments = midsong_generator.candidate_moments(
+        GEN_URI, snap_enabled=False, window_beats=1, sensitivity=1.5,
+        direction="both", max_per_song=5)
+    timestamps = [m.timestamp_ms for m in moments]
+    assert timestamps == sorted(timestamps), (
+        "kept candidates are restored to chronological order after ranking")
+
+
+def test_density_cap_is_a_no_op_when_fewer_candidates_exist_than_the_cap():
+    from spectra import config as scfg
+    from spectra.services import midsong_generator
+    _seed_density_song(scfg, n_boundaries=3)
+    moments = midsong_generator.candidate_moments(
+        GEN_URI, snap_enabled=False, window_beats=1, sensitivity=1.5,
+        direction="both", max_per_song=12)
+    assert len(moments) == 3
+
+
+def test_candidate_moments_reads_the_three_room_control_knobs_when_unset():
+    """Passing no window_beats/sensitivity/max_per_song explicitly reads
+    the live RoomControlState — proven by setting a room default that
+    caps density well below the raw candidate count and confirming it
+    actually takes effect."""
+    from spectra import config as scfg
+    from spectra.services import midsong_generator, room_controls
+    _seed_density_song(scfg, n_boundaries=20)
+    room_controls.save_room_controls(room_controls.RoomControlState(
+        midsong_snap_to_beat=False, transition_window_beats=1,
+        transition_edge_sensitivity=1.5, transition_max_per_song=6))
+    moments = midsong_generator.candidate_moments(GEN_URI)
+    assert len(moments) == 6, "the room's own transition_max_per_song took effect"
+
+
+def test_explicit_max_per_song_overrides_the_room_default():
+    from spectra import config as scfg
+    from spectra.services import midsong_generator, room_controls
+    _seed_density_song(scfg, n_boundaries=20)
+    room_controls.save_room_controls(room_controls.RoomControlState(
+        transition_max_per_song=6))
+    moments = midsong_generator.candidate_moments(
+        GEN_URI, snap_enabled=False, window_beats=1, sensitivity=1.5, max_per_song=10)
+    assert len(moments) == 10, "an explicit override wins over the room default"
+
+
+def test_generated_cue_provenance_records_an_edge_label():
+    """A candidate placed onto a rhythmic edge carries "edge:up"/"edge:down"
+    provenance, distinct from the downbeat grids' "librosa"/"beat_this" —
+    visible on the Review page exactly like Phase 2's own snap_grid."""
+    from spectra import config as scfg
+    from spectra.services import midsong_generator
+    tempo_bpm = 120.0
+    step_ms = 60000.0 / tempo_bpm
+    # a real bass_up step at beat 20 (10000ms); a section boundary 2 beats
+    # (1000ms) away should move onto it under a generous window.
+    half = 40
+    rms_bass = [0.1] * 20 + [1.0] * 20
+    beats = [{"ms": i * step_ms, "is_downbeat": False, "rms_bass": rms_bass[i]}
+            for i in range(half)]
+    boundary_ms = int(20 * step_ms - 2 * step_ms)
+    (scfg.AUDIO_SHAPES_DIR / f"{STEM}.json").write_text(
+        json.dumps({"spotify_uri": GEN_URI}), encoding="utf-8")
+    (scfg.AUDIO_SHAPES_DIR / f"{STEM}.librosa.json").write_text(json.dumps({
+        "spotify_uri": GEN_URI, "tempo_bpm": tempo_bpm,
+        "sections": [
+            {"start_ms": 0, "end_ms": boundary_ms, "label": "intro", "energy_rms": 0.1},
+            {"start_ms": boundary_ms, "end_ms": 20000, "label": "drop", "energy_rms": 0.9},
+        ],
+        "beats": beats,
+    }), encoding="utf-8")
+
+    [m] = midsong_generator.candidate_moments(
+        GEN_URI, window_beats=8, sensitivity=0.5, direction="both", max_per_song=12)
+    assert m.snap_grid == "edge:up"
+    assert m.timestamp_ms == int(round(20 * step_ms))
+    assert m.snap_moved_ms == int(round(20 * step_ms)) - boundary_ms

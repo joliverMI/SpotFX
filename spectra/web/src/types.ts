@@ -437,8 +437,24 @@ export interface RoomControlState {
   scene_change_mode: SceneChangeMode;
   /** Phase 2 of the music-analysis plan (2026-09-22) — snap a generated
    * cue's timestamp onto the nearest downbeat of a per-song grid before
-   * storing it (spectra/services/beat_snap.py). Default true. */
+   * storing it (spectra/services/beat_snap.py). Default true. Since
+   * 2026-09-23 this gates only STAGE 2 (the downbeat fallback) of the
+   * placement rule below — stage 1 (the rhythmic-edge search) always
+   * runs. */
   midsong_snap_to_beat: boolean;
+  /** PLACEMENT RULE R3 (2026-09-23, data/transition-alignment-plan/
+   * report.md) — how far a generated cue may move (in beats) to reach a
+   * rhythmic edge before falling back to midsong_snap_to_beat's downbeat
+   * snap. Same knob rhythmic_edges.py's own gap-run-length threshold
+   * reads. Default 8. */
+  transition_window_beats: number;
+  /** How big a bass-energy jump counts as a rhythmic edge — the same
+   * knob rhythmic_edges.py's own sensitivity param. Default 0.5. */
+  transition_edge_sensitivity: number;
+  /** DENSITY — the strongest N candidate cues by bass-energy step size
+   * are kept, before placement (the Admiral's rollout decision: "emit
+   * about as many transitions as you mark by hand"). Default 12. */
+  transition_max_per_song: number;
   /** Legacy Now Playing "Force Scene" control, ported verbatim: while
    * enabled, every scene the system would otherwise pick automatically
    * (sequencer roll, trigger fire, or the automatic transition fire) fires
@@ -1147,10 +1163,11 @@ export interface SpectraTrigger {
   generator_key: string | null;
   action: TriggerAction;
   trigger_offset_ms: number;
-  /** spectra/services/beat_snap.py provenance — which downbeat grid a
-   * GENERATED cue was snapped to, and how far (song ms, signed). Both
-   * null for every hand-placed trigger. */
-  snap_grid: 'librosa' | 'beat_this' | null;
+  /** spectra/services/beat_snap.py provenance — which grid or rhythmic
+   * edge a GENERATED cue was placed onto (R3 then R1 since 2026-09-23),
+   * and how far (song ms, signed). Both null for every hand-placed
+   * trigger. */
+  snap_grid: 'librosa' | 'beat_this' | 'edge:up' | 'edge:down' | null;
   snap_moved_ms: number | null;
 }
 

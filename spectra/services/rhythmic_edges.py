@@ -113,9 +113,14 @@ KINDS = (KIND_BASS_UP, KIND_BASS_DOWN, KIND_GAP_STOP, KIND_GAP_RESUME)
 
 # The direction knob's own up/down split — see the module docstring's
 # "THREE KNOBS" section for why gap_resume/gap_stop join bass_up/bass_down
-# rather than being direction-exempt.
-_UP_KINDS = (KIND_BASS_UP, KIND_GAP_RESUME)
-_DOWN_KINDS = (KIND_BASS_DOWN, KIND_GAP_STOP)
+# rather than being direction-exempt. Public (not underscore-prefixed) so
+# a caller outside this module — beat_snap.place_cue's own "edge:up"/
+# "edge:down" provenance label, data/transition-alignment-plan/report.md
+# section 3 — can classify a kind without re-deriving this same split.
+UP_KINDS = (KIND_BASS_UP, KIND_GAP_RESUME)
+DOWN_KINDS = (KIND_BASS_DOWN, KIND_GAP_STOP)
+_UP_KINDS = UP_KINDS
+_DOWN_KINDS = DOWN_KINDS
 
 
 @dataclass(frozen=True)
@@ -223,6 +228,23 @@ def edges_for_beats(
     return result
 
 
+def _beat_series(uri: str) -> Optional[tuple[list[float], list[float]]]:
+    """(beat_ms, rms_bass) parallel arrays, ordered by beat_ms, for a
+    song's own stored beats — the one read `edges_for_uri` and
+    `bass_step_series_for_uri` both need, factored out so a caller wanting
+    the RAW series (e.g. midsong_generator's own density ranking, which
+    needs the step magnitude at an arbitrary target moment, not just the
+    thresholded edge events) doesn't force a second `.librosa.json` parse.
+    None when there is no usable beat analysis at all."""
+    beats = analysis_reader.beats_for_uri(uri)
+    if not beats:
+        return None
+    ordered = sorted(beats, key=lambda b: float(b.get("ms", 0)))
+    beat_ms = [float(b.get("ms", 0)) for b in ordered]
+    rms_bass = [float(b.get("rms_bass", 0.0)) for b in ordered]
+    return beat_ms, rms_bass
+
+
 def edges_for_uri(
     uri: str,
     *,
@@ -235,13 +257,44 @@ def edges_for_uri(
     one with no beats) — matching every other engine's "not available"
     convention. A song WITH beats but no detected edges of some kind
     returns that kind as an empty list, not None."""
-    beats = analysis_reader.beats_for_uri(uri)
-    if not beats:
+    series = _beat_series(uri)
+    if series is None:
         return None
-    ordered = sorted(beats, key=lambda b: float(b.get("ms", 0)))
-    beat_ms = [float(b.get("ms", 0)) for b in ordered]
-    rms_bass = [float(b.get("rms_bass", 0.0)) for b in ordered]
+    beat_ms, rms_bass = series
     raw = edges_for_beats(beat_ms, rms_bass, window_beats=window_beats,
                          sensitivity=sensitivity, direction=direction)
     return {kind: [EdgeMark(time_ms=t, kind=kind) for t in times]
            for kind, times in raw.items()}
+
+
+def bass_step_series_for_uri(uri: str) -> Optional[tuple[list[float], list[float]]]:
+    """Public alias of `_beat_series` for a caller that needs the raw
+    (beat_ms, rms_bass) series itself rather than thresholded edge events
+    — the generator's density ranking (data/transition-alignment-plan/
+    report.md section 5 task 3, "keep each song's strongest N cues by
+    bass-energy step size") computes `bass_step_at` against this same
+    series for every candidate cue, so it resolves it ONCE per song
+    rather than once per cue."""
+    return _beat_series(uri)
+
+
+def bass_step_at(beat_ms: list[float], rms_bass: list[float], target_ms: float) -> float:
+    """The absolute bass-energy step (`|rms_bass[i] - rms_bass[i-1]|`) at
+    the beat nearest `target_ms` — the SAME quantity `edges_for_beats`'
+    own up/down detection thresholds, but returned as a raw magnitude
+    regardless of whether it actually crosses `sensitivity`. This is what
+    lets the density ranking score EVERY candidate cue on one comparable
+    scale, including one that never became a bass_up/bass_down edge (a
+    plain section-boundary or downbeat-snapped candidate still gets a
+    real, non-zero score whenever the music genuinely moves there).
+
+    0.0 for fewer than 2 beats, mismatched array lengths, or a target at
+    or before the very first beat (no preceding beat to step from) —
+    never raises."""
+    n = len(beat_ms)
+    if n < 2 or len(rms_bass) != n:
+        return 0.0
+    idx = min(range(n), key=lambda i: abs(beat_ms[i] - target_ms))
+    if idx == 0:
+        return 0.0
+    return abs(rms_bass[idx] - rms_bass[idx - 1])

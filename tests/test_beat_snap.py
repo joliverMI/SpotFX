@@ -197,3 +197,138 @@ def test_snap_cap_boundary_is_inclusive_of_exactly_one_beat():
     assert result.grid == "librosa"
     assert result.timestamp_ms == 2000
     assert result.moved_ms == -500
+
+
+# ═══ PLACEMENT RULE R3 (2026-09-23, data/transition-alignment-plan/report.md) ═
+
+def _seed_edges_song(scfg, *, tempo_bpm=120.0, rms_bass=None, beats_n=40, downbeat_every=4):
+    """A song with a real bass_up step around beat index `beats_n // 2` (a
+    sustained step so it clears the sensitivity threshold), a librosa
+    downbeat grid every `downbeat_every` beats, and no sections (place_cue
+    tests drive the pure functions directly, not candidate_moments)."""
+    step_ms = 60000.0 / tempo_bpm
+    if rms_bass is None:
+        half = beats_n // 2
+        rms_bass = [0.1] * half + [1.0] * (beats_n - half)
+    beats = [{"ms": i * step_ms, "is_downbeat": (i % downbeat_every == 0),
+             "rms_bass": rms_bass[i]} for i in range(beats_n)]
+    (scfg.AUDIO_SHAPES_DIR / f"{STEM}.json").write_text(
+        json.dumps({"spotify_uri": URI}), encoding="utf-8")
+    (scfg.AUDIO_SHAPES_DIR / f"{STEM}.librosa.json").write_text(json.dumps({
+        "spotify_uri": URI, "tempo_bpm": tempo_bpm, "sections": [], "beats": beats,
+    }), encoding="utf-8")
+    return step_ms
+
+
+def test_place_cue_moves_to_a_rhythmic_edge_within_the_window():
+    from spectra import config as scfg
+    from spectra.services import beat_snap
+    step_ms = _seed_edges_song(scfg)  # bass_up step at beat 20 (index 20 -> ms 20*step)
+    edge_ms = 20 * step_ms
+    # a candidate a couple of beats away from the edge, and far from any
+    # downbeat (downbeats are every 4th beat, i.e. every 4*step ms)
+    candidate_ms = edge_ms - 2 * step_ms
+    result = beat_snap.place_cue(URI, int(candidate_ms), window_beats=8)
+    assert result.snap_grid == "edge:up"
+    assert result.timestamp_ms == int(round(edge_ms))
+    assert result.snap_moved_ms == int(round(edge_ms - candidate_ms))
+
+
+def test_place_cue_falls_back_to_the_downbeat_when_no_edge_is_in_range():
+    """A flat bass signal (no edge anywhere) still falls back to R1's
+    downbeat snap, exactly like beat_snap.snap on its own."""
+    from spectra import config as scfg
+    from spectra.services import beat_snap
+    step_ms = _seed_edges_song(scfg, rms_bass=[0.5] * 40)  # flat: no edges
+    # 150ms from a downbeat (every 4*step=2000ms), well inside the 1-beat cap
+    downbeat_ms = 4 * step_ms
+    candidate_ms = downbeat_ms + 150
+    result = beat_snap.place_cue(URI, int(candidate_ms), window_beats=8)
+    assert result.snap_grid == "librosa"
+    assert result.timestamp_ms == int(downbeat_ms)
+
+
+def test_place_cue_leaves_the_cue_unmoved_when_neither_stage_finds_anything():
+    from spectra import config as scfg
+    from spectra.services import beat_snap
+    step_ms = _seed_edges_song(scfg, rms_bass=[0.5] * 40)  # flat: no edges
+    far_ms = 4 * step_ms + step_ms + 1  # more than one beat from any downbeat
+    result = beat_snap.place_cue(URI, int(far_ms), window_beats=8)
+    assert result.timestamp_ms == int(far_ms)
+    assert result.snap_grid is None
+    assert result.snap_moved_ms is None
+
+
+def test_place_cue_window_zero_clamps_to_one_beat_and_still_finds_a_close_edge():
+    """window_beats below rhythmic_edges.MIN_WINDOW_BEATS clamps to 1 (the
+    smallest legal window) rather than disabling the edge search — an edge
+    within that one-beat floor still wins."""
+    from spectra import config as scfg
+    from spectra.services import beat_snap
+    step_ms = _seed_edges_song(scfg)  # bass_up step at beat 20
+    edge_ms = 20 * step_ms
+    candidate_ms = edge_ms - (step_ms * 0.5)  # half a beat from the edge
+    result = beat_snap.place_cue(URI, int(candidate_ms), window_beats=0)
+    assert result.snap_grid == "edge:up"
+    assert result.timestamp_ms == int(round(edge_ms))
+
+
+def test_place_cue_window_zero_still_refuses_a_farther_edge():
+    from spectra import config as scfg
+    from spectra.services import beat_snap
+    step_ms = _seed_edges_song(scfg)  # bass_up step at beat 20
+    edge_ms = 20 * step_ms
+    candidate_ms = edge_ms - (step_ms * 3)  # 3 beats from the edge
+    result = beat_snap.place_cue(URI, int(candidate_ms), window_beats=0)
+    assert result.snap_grid != "edge:up", (
+        "a 1-beat-clamped window must not reach an edge 3 beats away")
+
+
+def test_place_cue_snap_enabled_false_disables_only_the_downbeat_fallback():
+    """snap_enabled=False disables R1 (the downbeat fallback) but never
+    the edge search itself — a genuine edge still wins."""
+    from spectra import config as scfg
+    from spectra.services import beat_snap
+    step_ms = _seed_edges_song(scfg)  # bass_up step at beat 20
+    edge_ms = 20 * step_ms
+    candidate_ms = edge_ms - 2 * step_ms
+    result = beat_snap.place_cue(URI, int(candidate_ms), window_beats=8, snap_enabled=False)
+    assert result.snap_grid == "edge:up"
+    assert result.timestamp_ms == int(round(edge_ms))
+
+
+def test_place_cue_snap_enabled_false_and_no_edge_leaves_cue_unmoved():
+    from spectra import config as scfg
+    from spectra.services import beat_snap
+    step_ms = _seed_edges_song(scfg, rms_bass=[0.5] * 40)  # flat: no edges
+    downbeat_ms = 4 * step_ms
+    candidate_ms = downbeat_ms + 150  # would have snapped to the downbeat
+    result = beat_snap.place_cue(URI, int(candidate_ms), window_beats=8, snap_enabled=False)
+    assert result.timestamp_ms == int(candidate_ms)
+    assert result.snap_grid is None
+
+
+def test_place_cue_no_tempo_at_all_leaves_cue_unmoved():
+    from spectra.services import beat_snap
+    result = beat_snap.place_cue(URI, 12_345)
+    assert result.timestamp_ms == 12_345
+    assert result.snap_grid is None
+    assert result.snap_moved_ms is None
+
+
+def test_place_with_resolved_none_placement_is_unmoved():
+    from spectra.services import beat_snap
+    result = beat_snap.place_with_resolved(999, placement=None)
+    assert result == beat_snap.PlaceResult(999)
+
+
+def test_resolve_song_placement_direction_filters_edges():
+    """direction="down" excludes the bass_up edge, so a candidate that
+    would have moved to it instead falls through to R1 (or stays put)."""
+    from spectra import config as scfg
+    from spectra.services import beat_snap
+    step_ms = _seed_edges_song(scfg)  # bass_up step at beat 20
+    edge_ms = 20 * step_ms
+    candidate_ms = edge_ms - 2 * step_ms
+    result = beat_snap.place_cue(URI, int(candidate_ms), window_beats=8, direction="down")
+    assert result.snap_grid != "edge:up", "an 'up' edge must be excluded under direction='down'"

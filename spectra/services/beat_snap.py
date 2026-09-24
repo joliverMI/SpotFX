@@ -53,14 +53,62 @@ would move the cue by more than the beat-alignment problem this exists to
 fix. An unsnapped cue keeps exactly its section-boundary time and its
 provenance records no grid (SpectraTrigger.snap_grid stays None).
 
-Executable spec: scripts/check_midsong_beat_snap.py.
+PLACEMENT RULE R3 (2026-09-23, data/transition-alignment-plan/report.md
+section 3, the Admiral's rollout approval on
+data/transition-alignment-plan/decision-rollout.md): `place_cue`/
+`place_with_resolved` are the composed rule — "for each section-boundary
+cue, in song time, move it to the nearest bass-energy edge within W beats;
+if none, apply [this module's own downbeat snap] (<= 1 beat); if that also
+fails, leave the boundary where it is." Two stages:
+
+  Stage 1 (R3 proper) — the nearest rhythmic edge within
+  `window_beats * beat_length_ms` of the cue's own time, considering ONLY
+  spectra/services/rhythmic_edges.py's `bass_up`/`bass_down` kinds —
+  `gap_stop`/`gap_resume` are deliberately EXCLUDED from this search, even
+  though the SAME two kinds join `bass_up`/`bass_down` under
+  rhythmic_edges.py's own `direction` knob for the `edges` test-bed lane's
+  DIFFERENT purpose (exploration). This matches the report's own reference
+  implementation for its section 3 acceptance table exactly (data/
+  transition-alignment-plan/evidence/score_rules.py: `steps = sorted(set(
+  ev["up"] + ev["down"]))`), never folding gaps into R3 — see
+  resolve_song_placement's own comment. `window_beats` is the SAME knob
+  rhythmic_edges.edges_for_uri's own `window_beats` param reads for its
+  gap-run-length threshold — see that module's own "THREE KNOBS" docstring
+  section for why one knob governs both, even though this stage never
+  reads the gap kinds it also gates. A found edge's provenance label is
+  "edge:up"/"edge:down" — the report's own vocabulary (section 3:
+  `snap_grid="edge:up"|"edge:down"|"librosa"|"beat_this"`).
+
+  Stage 2 (R1, this module's own pre-existing downbeat snap, unchanged) —
+  tried only when stage 1 finds nothing within the window. UNCONDITIONAL
+  on `window_beats`/`sensitivity`/`direction` (edge detection always runs
+  at whatever knobs are given); GATED on the caller's own
+  `RoomControlState.midsong_snap_to_beat` — midsong_generator passes
+  `grid=None` into `SongPlacement` when that setting is off, so stage 2 is
+  the ONE part of place_cue the switch actually composes with (the field's
+  own room_controls.py docstring: "the existing midsong_snap_to_beat
+  switch composing (snap-to-beat becomes stage 2 of place_cue)").
+
+  Neither stage fires — the section boundary's own raw time survives,
+  `snap_grid=None`, `snap_moved_ms=None`, exactly like an unsnapped cue
+  under the pre-R3 rule.
+
+Frame handling is IDENTICAL to the grid-only rule above: `place_with_
+resolved`/`SongPlacement` compare in whatever single frame the caller has
+already put both operands into (this module still never shifts anything
+itself — "ONE FRAME, NO SHIFT" is unchanged) — midsong_generator.py is the
+one caller, and it shifts a SongPlacement's edges AND downbeat grid by the
+identical capture offset it already shifts a bare SongGrid by.
+
+Executable spec: scripts/check_midsong_beat_snap.py,
+scripts/check_transition_alignment.py.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Literal, Optional
 
-from spectra.services import analysis_reader, testbed_cache
+from spectra.services import analysis_reader, rhythmic_edges, testbed_cache
 
 GRID_LIBROSA: Literal["librosa"] = "librosa"
 GRID_BEAT_THIS: Literal["beat_this"] = "beat_this"
@@ -220,3 +268,135 @@ def snap(uri: str, section_ms: int) -> SnapResult:
     snapping several moments for one song should use resolve_song_grid +
     snap_with_grid instead to resolve it once."""
     return snap_with_grid(section_ms, resolve_song_grid(uri))
+
+
+# ═══ PLACEMENT RULE R3 (module docstring's PLACEMENT RULE R3 section) ═════
+
+
+@dataclass(frozen=True)
+class EdgeCandidate:
+    """One rhythmic-edge time, already collapsed to the report's own
+    up/down provenance vocabulary — see rhythmic_edges.UP_KINDS/DOWN_KINDS."""
+    time_ms: int
+    label: Literal["edge:up", "edge:down"]
+
+
+@dataclass(frozen=True)
+class PlaceResult:
+    timestamp_ms: int
+    snap_grid: Optional[str] = None
+    snap_moved_ms: Optional[int] = None
+
+
+@dataclass(frozen=True)
+class SongPlacement:
+    """Everything place_with_resolved needs for ONE song, resolved once
+    (the R3 analogue of SongGrid) — the rhythmic-edge candidates (always a
+    list, possibly empty, once a song has usable beats; None only when the
+    song has no measurable tempo at all — see resolve_song_placement) plus
+    the R1 fallback SongGrid (None when snap-to-beat is off, or the song
+    has no usable downbeat grid) and the beat length in ms, needed for the
+    edge-window search even when `grid` is None."""
+    edges: list[EdgeCandidate]
+    grid: Optional[SongGrid]
+    beat_length_ms: float
+
+
+def resolve_song_placement(
+    uri: str, *,
+    window_beats: int = rhythmic_edges.DEFAULT_WINDOW_BEATS,
+    sensitivity: float = rhythmic_edges.DEFAULT_SENSITIVITY,
+    direction: str = rhythmic_edges.DEFAULT_DIRECTION,
+) -> Optional[SongPlacement]:
+    """None when there's no measurable tempo for this song at all (no
+    usable beat analysis) — matching resolve_song_grid's own unsnapped-
+    fallback convention. `grid` inside the returned SongPlacement is R1's
+    ordinary downbeat-grid resolution (may itself be None on a song with a
+    tempo but no downbeat grid) — a caller wanting stage 2 disabled
+    (RoomControlState.midsong_snap_to_beat off) replaces it with
+    `dataclasses.replace(placement, grid=None)` rather than this function
+    growing a second "should I even look" parameter."""
+    librosa_bpm = analysis_reader.tempo_bpm_for_uri(uri)
+    if not librosa_bpm or librosa_bpm <= 0:
+        return None
+    beat_length_ms = 60000.0 / librosa_bpm
+    raw_edges = rhythmic_edges.edges_for_uri(
+        uri, window_beats=window_beats, sensitivity=sensitivity, direction=direction)
+    edges: list[EdgeCandidate] = []
+    if raw_edges:
+        # R3's own edge candidates are bass_up/bass_down ONLY — the
+        # report's own reference implementation for its section 3
+        # acceptance table (data/transition-alignment-plan/evidence/
+        # score_rules.py: `steps = sorted(set(ev["up"] + ev["down"]))`)
+        # never folds gap_stop/gap_resume into R3's placement search, even
+        # though the SAME two kinds join bass_up/bass_down under the
+        # `edges` engine's own direction knob for a DIFFERENT purpose (the
+        # test bed's "Rhythmic edges" lane — rhythmic_edges.py's own
+        # "THREE KNOBS" docstring section). Keep the two uses separate:
+        # this is placement, that is exploration.
+        for kind in (rhythmic_edges.KIND_BASS_UP, rhythmic_edges.KIND_BASS_DOWN):
+            label = "edge:up" if kind == rhythmic_edges.KIND_BASS_UP else "edge:down"
+            edges.extend(EdgeCandidate(int(round(m.time_ms)), label)
+                        for m in raw_edges.get(kind, []))
+    return SongPlacement(edges, resolve_song_grid(uri), beat_length_ms)
+
+
+def place_with_resolved(
+    section_ms: int, *, placement: Optional[SongPlacement],
+    window_beats: int = rhythmic_edges.DEFAULT_WINDOW_BEATS,
+) -> PlaceResult:
+    """The pure, I/O-free half of place_cue — R3 (nearest rhythmic edge
+    within `window_beats` of `placement.beat_length_ms`) then R1 (this
+    module's own downbeat snap, via placement.grid) then the section's own
+    unmoved time. `placement=None` (no measurable tempo for this song at
+    all) always returns `section_ms` unplaced, matching
+    snap_with_grid(section_ms, grid=None)'s own convention.
+
+    `window_beats` is clamped exactly as rhythmic_edges.edges_for_uri
+    clamps its own copy of the same knob (rhythmic_edges.
+    clamp_window_beats) — a caller passing 0 (below MIN_WINDOW_BEATS)
+    gets the same one-beat-length floor a fresh edges_for_uri call would
+    have used to build `placement.edges` in the first place, so the two
+    never silently disagree on how wide the window actually is."""
+    if placement is None:
+        return PlaceResult(section_ms)
+    window_ms = rhythmic_edges.clamp_window_beats(window_beats) * placement.beat_length_ms
+    if placement.edges:
+        nearest_edge = min(placement.edges, key=lambda e: abs(e.time_ms - section_ms))
+        moved = nearest_edge.time_ms - section_ms
+        # A NONZERO move only — an edge landing exactly AT the cue's own
+        # raw time (moved == 0) still falls through to R1, matching the
+        # report's own reference implementation for its section 3
+        # acceptance table (data/transition-alignment-plan/evidence/
+        # score_rules.py's `x if x != t else <R1 fallback>` — an
+        # unmoved R3 result is indistinguishable there from "no edge
+        # found," and R1 is what the acceptance numbers were measured
+        # against in that exact case).
+        if moved != 0 and abs(moved) <= window_ms:
+            return PlaceResult(nearest_edge.time_ms, nearest_edge.label, moved)
+    fallback = snap_with_grid(section_ms, placement.grid)
+    return PlaceResult(fallback.timestamp_ms, fallback.grid, fallback.moved_ms)
+
+
+def place_cue(
+    uri: str, section_ms: int, *,
+    window_beats: int = rhythmic_edges.DEFAULT_WINDOW_BEATS,
+    sensitivity: float = rhythmic_edges.DEFAULT_SENSITIVITY,
+    direction: str = rhythmic_edges.DEFAULT_DIRECTION,
+    snap_enabled: bool = True,
+) -> PlaceResult:
+    """Place one generated cue's section-boundary time (song ms) by R3
+    then R1, resolving the song's placement fresh on every call — a caller
+    placing several moments for one song should use resolve_song_placement
+    + place_with_resolved instead (midsong_generator.candidate_moments's
+    own shape), same convention as snap()/resolve_song_grid+snap_with_grid
+    above.
+
+    `snap_enabled=False` disables stage 2 ONLY (R1's downbeat fallback) —
+    stage 1 (the rhythmic-edge search) always runs at the given knobs,
+    per the module docstring's PLACEMENT RULE R3 section."""
+    placement = resolve_song_placement(
+        uri, window_beats=window_beats, sensitivity=sensitivity, direction=direction)
+    if placement is not None and not snap_enabled:
+        placement = SongPlacement(placement.edges, None, placement.beat_length_ms)
+    return place_with_resolved(section_ms, placement=placement, window_beats=window_beats)

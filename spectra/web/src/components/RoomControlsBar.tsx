@@ -552,12 +552,43 @@ export default function RoomControlsBar() {
                   size={22}
                   ariaLabel="Snap generated cues to beat"
                   title={local.midsong_snap_to_beat
-                    ? 'On — a generated mid-song cue snaps to the nearest downbeat of its beat grid (within one beat). Tap to turn off.'
-                    : 'Off — a generated mid-song cue keeps its raw section-boundary time, unsnapped. Tap to turn on.'}
+                    ? 'On — a generated mid-song cue that finds no rhythmic edge falls back to the nearest downbeat of its beat grid (within one beat). Tap to turn off.'
+                    : 'Off — a generated mid-song cue that finds no rhythmic edge keeps its raw section-boundary time, unsnapped. Tap to turn on.'}
                 />
                 Snap generated cues to beat
               </label>
-              <HelpLink topic="midsong-snap-to-beat" />
+              <HelpLink topic="transition-placement-rule" />
+            </div>
+            <div className="top-bar-group-field">
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                Transition edge window
+                <HelpLink topic="transition-placement-rule" />
+              </label>
+              <input
+                type="number" min={1} max={16} step={1}
+                value={local.transition_window_beats}
+                onChange={(e) => setLocal({ ...local, transition_window_beats: Number(e.target.value) })}
+                onBlur={() => commit(local)}
+              />
+              <span style={{ fontSize: '0.85em', opacity: 0.75 }}>beats</span>
+            </div>
+            <div className="top-bar-group-field">
+              <label>Transition edge sensitivity</label>
+              <input
+                type="number" min={0.2} max={1.5} step={0.05}
+                value={local.transition_edge_sensitivity}
+                onChange={(e) => setLocal({ ...local, transition_edge_sensitivity: Number(e.target.value) })}
+                onBlur={() => commit(local)}
+              />
+            </div>
+            <div className="top-bar-group-field">
+              <label>Transitions per song</label>
+              <input
+                type="number" min={6} max={40} step={1}
+                value={local.transition_max_per_song}
+                onChange={(e) => setLocal({ ...local, transition_max_per_song: Number(e.target.value) })}
+                onBlur={() => commit(local)}
+              />
             </div>
             <div className="top-bar-group-field">
               <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
