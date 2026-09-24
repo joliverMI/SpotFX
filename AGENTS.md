@@ -8588,16 +8588,29 @@ hand-copied range).
 
 **"Use as room default" makes exactly ONE write, through the EXISTING
 `PUT /api/room-controls` partial merge — there is no new write route.**
+The three sliders SYNC ONCE from the room's own live values the first
+time they resolve (`TestbedPage.tsx`'s `knobsSyncedFromRoomRef`, never
+re-synced after — a later room-controls change, e.g. a Sonic voice edit
+or this same button's own write, must not silently overwrite a slider
+mid-drag). Starting them at the hardcoded module defaults instead was the
+original shape and read every knob as "differs" the instant the page
+opened on a room already tuned away from 8/0.5/12 — fixed in review.
 `edgeKnobs.ts`'s `roomControlsPatchForUseAsDefault`/
-`useAsRoomDefaultConfirmMessage`/`transitionDefaultsDiffer` are the pure
-functions this button is built on (confirm text, the exact three-field
-payload, and the "differs from room default" highlight) — kept pure so
-`scripts/check_testbed_edge_knobs.mjs` §6-9 can prove them without a DOM.
-`direction` is deliberately excluded from the payload — it has no
+`useAsRoomDefaultConfirmMessage`/`transitionDefaultsDiffer` all key off one
+shared `changedTransitionFields(current, room)` so they can never disagree
+about which knob moved: the PUT patch and the confirm text each carry
+ONLY the knob(s) that actually diverge from the room's current values,
+never all three unconditionally — a slider never touched must not be
+re-asserted, let alone claimed as "changing," back at the room's own
+value. Kept pure so `scripts/check_testbed_edge_knobs.mjs` §9 can prove
+both the sync-from-non-default-room shape and the partial payload without
+a DOM. `direction` is deliberately excluded from the payload — it has no
 room-level setting (see `RoomControlState.transition_window_beats`'s own
-docstring). Nothing is written until the button is pressed and confirmed;
-`TestbedPage.tsx` shows the room's own current three values next to the
-sliders (`useRoomControls`) and highlights them when they diverge.
+docstring). Nothing is written until the button is pressed and confirmed,
+and an unchanged set of knobs reports "nothing to change" rather than
+confirming or writing a no-op. `TestbedPage.tsx` shows the room's own
+current three values next to the sliders (`useRoomControls`) and
+highlights them when they diverge.
 
 **The reference-set row (`GET /api/testbed/reference-set`,
 `spectra/services/testbed_reference_set.py`) is the report's own four-song
