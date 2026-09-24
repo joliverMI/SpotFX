@@ -7,10 +7,13 @@ exactly one (key, value) pair, and every key/value is validated against
 declared, server-owned data BEFORE anything is persisted. There is no
 shell, file, HTTP, or service-control primitive reachable from here.
 
-SCOPE (first build): the five RoomControlState fields (spectra/services/
+SCOPE (first build): the RoomControlState fields (spectra/services/
 room_controls.py) already labelled "agent-tellable room-wide switches" in
 that module's own docstring — brightness, ambient mode/colour, the
-global transition default, and the scene-change tier. force_scene_* is
+global transition default, and the scene-change tier. Widened 2026-09-23
+with the PLACEMENT RULE R3 knobs (transition_window_beats/_edge_
+sensitivity/_max_per_song — see room_controls.py's own docstring on
+those fields and AGENTS.md's PLACEMENT RULE R3 section). force_scene_* is
 deliberately excluded: it targets a scene by opaque id, which is a poor
 fit for "set this setting to this value" (a picker action, not a voice
 setting) — left for a later, deliberate registry extension, not silently
@@ -110,7 +113,9 @@ def _spec(key: str, label: str, description: str) -> SettingSpec:
     unit = {"brightness_multiplier": "fraction 0.0-1.0",
             "global_transition_ms": "ms",
             "scene_transition_ms_gentle": "ms",
-            "scene_transition_ms_hard": "ms"}.get(key)
+            "scene_transition_ms_hard": "ms",
+            "transition_window_beats": "beats",
+            "transition_edge_sensitivity": "fraction of local median step"}.get(key)
     return SettingSpec(key=key, label=label, kind=kind, description=description,
                        unit=unit, min=ge, max=le, choices=choices)
 
@@ -169,6 +174,24 @@ SETTINGS_REGISTRY: dict[str, SettingSpec] = {
         "song he's placed one on; a song with none falls back to "
         "'analysed' for that song), 'full' (+ hand-authored triggers "
         "and response flares, on every song)."),
+    "transition_window_beats": _spec(
+        "transition_window_beats", "Transition edge window",
+        "How many beats a generated mid-song cue may move to reach a "
+        "rhythmic bass-energy edge before falling back to a plain "
+        "downbeat snap. Bigger reaches further; convert a spoken "
+        "'beats' number directly (no unit conversion needed)."),
+    "transition_edge_sensitivity": _spec(
+        "transition_edge_sensitivity", "Transition edge sensitivity",
+        "How big a bass-energy jump has to be, as a fraction of the "
+        "local median step, before a generated cue treats it as an edge "
+        "to move onto. Lower catches smaller jumps; higher only the "
+        "biggest ones."),
+    "transition_max_per_song": _spec(
+        "transition_max_per_song", "Transitions per song",
+        "How many mid-song scene-change cues generation keeps per song, "
+        "picking the strongest by bass-energy step size before placing "
+        "them. Lower means the room changes scene less often on a song "
+        "he hasn't hand-marked himself."),
 }
 
 

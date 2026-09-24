@@ -27,11 +27,15 @@ data/transition-alignment-plan/report.md section 4's tuning-loop lanes):
               like the report's own Finding 1, the capture-offset frame
               bug, becomes visible on the lane before it's fixed), preview
               (spectra.services.midsong_generator.candidate_moments run
-              fresh, read-only, against the CURRENT placement rule — no
-              trigger store write). See _generator_marks's own docstring
-              for why neither kind is capture-offset shifted by
-              spectra/api/testbed.py::_estimate_for the way every other
-              engine's marks are.
+              fresh, read-only, against the CURRENT placement rule — R3
+              then R1 since 2026-09-23, data/transition-alignment-plan/
+              report.md section 5 task 3 — no trigger store write). Preview
+              takes window_beats/sensitivity/direction from the page's own
+              knobs (the same three the `edges` engine reads); snap_enabled
+              and the density cap stay at the live room default. See
+              _generator_marks's own docstring for why neither kind is
+              capture-offset shifted by spectra/api/testbed.py::
+              _estimate_for the way every other engine's marks are.
   edges     — bass-energy rhythmic edges (spectra.services.rhythmic_edges,
               data/transition-alignment-plan/report.md section 2.3/4) —
               bass_up, bass_down, gap_stop, gap_resume, tunable via
@@ -135,26 +139,40 @@ def _generator_stored_marks(uri: str) -> list[EngineMark]:
     return sorted(out, key=lambda m: m.time_ms)
 
 
-def _generator_preview_marks(uri: str) -> list[EngineMark]:
+def _generator_preview_marks(
+    uri: str, *, window_beats: int, sensitivity: float, direction: str,
+) -> list[EngineMark]:
     """spectra.services.midsong_generator.candidate_moments(uri), run
-    read-only against the CURRENT placement rule (today: a section
-    boundary, Phase-2 beat-snapped) — what generation would produce right
-    now, without writing anything to the trigger store."""
+    read-only against the CURRENT placement rule (R3 then R1, 2026-09-23)
+    at the page's own window/sensitivity/direction knob values — what
+    generation would produce right now, without writing anything to the
+    trigger store. `snap_enabled`/`max_per_song` are deliberately NOT
+    threaded from here — they stay at the live room default, so this lane
+    also reflects the room's own snap-to-beat toggle and density cap, not
+    a third, test-bed-only copy of either (data/transition-alignment-plan/
+    report.md section 5 task 3 item (f): only place_cue's own knobs are
+    the page's to explore here — the density "use as room default" knob
+    is a later, separate task)."""
     out = [
         EngineMark(time_ms=float(m.timestamp_ms), kind=GENERATOR_KIND_PREVIEW,
                    label=m.snap_grid, score=m.intensity)
-        for m in midsong_generator.candidate_moments(uri)
+        for m in midsong_generator.candidate_moments(
+            uri, window_beats=window_beats, sensitivity=sensitivity, direction=direction)
     ]
     return sorted(out, key=lambda m: m.time_ms)
 
 
-def _generator_marks(uri: str) -> Optional[list[EngineMark]]:
+def _generator_marks(
+    uri: str, *, window_beats: int, sensitivity: float, direction: str,
+) -> Optional[list[EngineMark]]:
     """Both generator kinds, combined — the caller (marks_for's own
     consumer, spectra/api/testbed.py::_estimate_for) filters by mark_kind
     the same way it does for every other multi-kind engine. None only when
     there is genuinely nothing to show either way (no stored generated
     cues AND no analysis to preview from)."""
-    marks = _generator_stored_marks(uri) + _generator_preview_marks(uri)
+    marks = (_generator_stored_marks(uri)
+            + _generator_preview_marks(uri, window_beats=window_beats,
+                                       sensitivity=sensitivity, direction=direction))
     return sorted(marks, key=lambda m: m.time_ms) if marks else None
 
 
@@ -177,12 +195,14 @@ def marks_for(
 ) -> Optional[list[EngineMark]]:
     """None = not available for this song (either the engine hasn't been
     precomputed for it, or — for librosa/generator/edges — no analysis
-    exists yet). `window_beats`/`sensitivity`/`direction` are read only by
-    the `edges` engine; every other engine ignores them."""
+    exists yet). `window_beats`/`sensitivity`/`direction` are read by both
+    the `edges` engine and the `generator` engine's own preview kind
+    (2026-09-23, the R3 placement rule); every other engine ignores them."""
     if engine == ENGINE_LIBROSA:
         return _librosa_marks(uri)
     if engine == ENGINE_GENERATOR:
-        return _generator_marks(uri)
+        return _generator_marks(uri, window_beats=window_beats,
+                                sensitivity=sensitivity, direction=direction)
     if engine == ENGINE_EDGES:
         return _edges_marks(uri, window_beats=window_beats, sensitivity=sensitivity,
                             direction=direction)
@@ -254,7 +274,11 @@ def availability_for(uri: str, *,
             # time (the property test_availability_with_a_stem_index_
             # snapshot_matches_the_lookup_path holds this function to).
             marks = _generator_stored_marks(uri) + (
-                _generator_preview_marks(uri) if stem is not None else [])
+                _generator_preview_marks(
+                    uri, window_beats=rhythmic_edges.DEFAULT_WINDOW_BEATS,
+                    sensitivity=rhythmic_edges.DEFAULT_SENSITIVITY,
+                    direction=rhythmic_edges.DEFAULT_DIRECTION)
+                if stem is not None else [])
             out[key] = {
                 "label": meta["label"], "kinds": meta["kinds"],
                 "available": bool(marks),

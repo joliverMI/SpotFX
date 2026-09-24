@@ -536,7 +536,41 @@ class RoomControlState(BaseModel):
     # boundary time, unsnapped) — read live by candidate_moments on every
     # generation pass, so flipping it and regenerating takes effect
     # immediately, no restart.
+    #
+    # SUPERSEDED, NOT REPLACED, 2026-09-23: since the placement rule R3
+    # fields immediately below shipped, this switch gates only STAGE 2 of
+    # beat_snap.place_cue (the downbeat fallback) — stage 1, the rhythmic-
+    # edge search, runs unconditionally. See transition_window_beats'
+    # own docstring and beat_snap.py's PLACEMENT RULE R3 section.
     midsong_snap_to_beat: bool = True
+
+    # THE PLACEMENT RULE R3 (2026-09-23, data/transition-alignment-plan/
+    # report.md sections 3/5 task 3; the Admiral's rollout approval on
+    # decision-rollout.md) — three knobs for spectra/services/beat_snap.py's
+    # place_cue, the generator's own placement rule since this build. Read
+    # live by midsong_generator.candidate_moments on every generation pass
+    # (the same "no restart needed" shape midsong_snap_to_beat already
+    # has), which composes with it as stage 2 (see beat_snap.py's own
+    # PLACEMENT RULE R3 docstring section for the exact composition).
+    #
+    # Window (beats): how far a cue may move to reach a rhythmic edge —
+    # the SAME knob rhythmic_edges.py's own window_beats param reads for
+    # its gap-run-length threshold (that module's "THREE KNOBS" docstring
+    # section explains why one knob governs both). Bounds match
+    # rhythmic_edges.MIN_WINDOW_BEATS/MAX_WINDOW_BEATS.
+    transition_window_beats: int = Field(default=8, ge=1, le=16)
+    # Sensitivity: how big a bass-energy jump counts as an edge — the same
+    # knob rhythmic_edges.py's own sensitivity param. Bounds match
+    # rhythmic_edges.MIN_SENSITIVITY/MAX_SENSITIVITY.
+    transition_edge_sensitivity: float = Field(default=0.5, ge=0.2, le=1.5)
+    # Density (the Admiral's rollout decision, decision-rollout.md item 1:
+    # "emit about as many transitions as you mark by hand (11-14 a song)
+    # ... instead of 2-3x that"): the strongest N candidate cues by
+    # bass-energy step size are kept, BEFORE placement — see
+    # midsong_generator.py's own DENSITY docstring section for the ranking.
+    # Default 12 (his own number); range ~6-40 per the report's own
+    # "strongest N" proposal (section 6).
+    transition_max_per_song: int = Field(default=12, ge=6, le=40)
 
     # THE A/V-SYNC LEAD (owner ask 2026-08-28) — LEAD family: positive =
     # fire EARLIER, negative = fire LATER. The value the /avsync

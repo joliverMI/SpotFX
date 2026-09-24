@@ -32,13 +32,16 @@ export function clampDirection(v: string): Direction {
   return (DIRECTIONS as string[]).includes(v) ? (v as Direction) : DEFAULT_DIRECTION;
 }
 
-/** Whether the window/sensitivity knobs have any live effect on the
- * currently active A/B engines — shown only while an `edges` lane is
- * selected in either slot (report section 4: "only shown while a
- * generator:rule or edges:* lane is active" — generator:rule is a
- * future task, so today this reduces to `edges` alone). Showing the
- * knobs for an engine they don't touch would imply a control that does
- * nothing. */
-export function knobsRelevant(engines: (string | null | undefined)[]): boolean {
-  return engines.includes('edges');
+/** Whether the window/sensitivity/direction knobs have any live effect on
+ * the currently active A/B lanes — shown while an `edges` lane, or the
+ * `generator` engine's own `preview` kind (2026-09-23: the R3 placement
+ * rule reads these same three knobs — spectra/services/midsong_generator.py
+ * candidate_moments), is selected in either slot. The `generator` engine's
+ * OTHER kind, `stored`, ignores them entirely (it is exactly what is
+ * currently written, not recomputed), so a bare engine-name check is not
+ * enough here — showing the knobs for a lane they don't touch would imply
+ * a control that does nothing. */
+export function knobsRelevant(lanes: ({ engine: string; kind?: string } | null | undefined)[]): boolean {
+  return lanes.some((l) => l && (l.engine === 'edges'
+    || (l.engine === 'generator' && l.kind === 'preview')));
 }

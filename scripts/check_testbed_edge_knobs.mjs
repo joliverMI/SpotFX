@@ -73,14 +73,21 @@ console.log('§4 clampDirection — the toggle can never resolve to a value outs
   ok(fe.clampDirection('') === fe.DEFAULT_DIRECTION, 'an empty value falls back to the default');
 }
 
-console.log('§5 knobsRelevant — the sliders show only while an `edges` lane is selected');
+console.log('§5 knobsRelevant — the sliders show while an `edges` lane, or the '
+  + '`generator` engine\'s own `preview` kind, is selected (2026-09-23: the R3 '
+  + 'placement rule reads the same three knobs)');
 {
-  ok(fe.knobsRelevant(['edges']) === true, "engine A alone set to 'edges' is relevant");
-  ok(fe.knobsRelevant(['librosa', 'edges']) === true, "engine B set to 'edges' is relevant too");
-  ok(fe.knobsRelevant(['librosa', 'beat_this']) === false, 'neither slot on edges is not relevant');
-  ok(fe.knobsRelevant(['generator']) === false,
-    "generator alone is NOT relevant yet — window_beats/sensitivity/direction are "
-    + 'edges-only until a future task wires the R3 placement rule (report section 5 items 3-4)');
+  ok(fe.knobsRelevant([{ engine: 'edges', kind: 'bass_up' }]) === true,
+    "engine A alone set to 'edges' is relevant");
+  ok(fe.knobsRelevant([{ engine: 'librosa', kind: 'beat' },
+    { engine: 'edges', kind: 'gap_stop' }]) === true, "engine B set to 'edges' is relevant too");
+  ok(fe.knobsRelevant([{ engine: 'librosa', kind: 'beat' },
+    { engine: 'beat_this', kind: 'downbeat' }]) === false, 'neither slot on edges/generator:preview is not relevant');
+  ok(fe.knobsRelevant([{ engine: 'generator', kind: 'preview' }]) === true,
+    "generator's own 'preview' kind IS relevant — it now reflects the R3 placement rule");
+  ok(fe.knobsRelevant([{ engine: 'generator', kind: 'stored' }]) === false,
+    "generator's 'stored' kind is NOT relevant — it is exactly what is currently "
+    + 'written, never recomputed with these knobs');
   ok(fe.knobsRelevant([null, undefined]) === false, 'an empty A/B selection is not relevant');
 }
 
