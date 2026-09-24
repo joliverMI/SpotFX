@@ -138,26 +138,62 @@ console.log('§8 transitionDefaultsDiffer — the "differs from room default" hi
     'undefined room default reads as no difference too');
 }
 
-console.log('§9 "Use as room default" — the confirm message and the exact PUT payload '
-  + '(section 5 task 4 item (a)); nothing is written until the caller actually PUTs this)');
+console.log('§9 "Use as room default" — the confirm message and the exact PUT payload, '
+  + 'both against a NON-DEFAULT room (section 5 task 4 item (a) + the partial-write fix); '
+  + 'nothing is written until the caller actually PUTs this)');
 {
-  const knobs = { windowBeats: 4, sensitivity: 0.35, maxPerSong: 14 };
-  const msg = fe.useAsRoomDefaultConfirmMessage(knobs);
-  ok(typeof msg === 'string' && msg.length > 0, 'the confirm message is a real sentence');
-  ok(msg.includes('4 beat'), 'the confirm message names the window value');
-  ok(msg.includes('0.35'), 'the confirm message names the sensitivity value');
-  ok(msg.includes('14'), 'the confirm message names the max-per-song value');
+  // A room already tuned away from the module defaults — the shape that
+  // exposed the original bug: a page opening at the hardcoded 8/0.5/12
+  // defaults would have read every one of these three as "differs" the
+  // instant it loaded, with nothing dragged.
+  const room = { windowBeats: 6, sensitivity: 0.7, maxPerSong: 20 };
 
-  const singular = fe.useAsRoomDefaultConfirmMessage({ windowBeats: 1, sensitivity: 0.5, maxPerSong: 12 });
+  const allThreeDiffer = { windowBeats: 4, sensitivity: 0.35, maxPerSong: 14 };
+  const msg = fe.useAsRoomDefaultConfirmMessage(allThreeDiffer, room);
+  ok(typeof msg === 'string' && msg.length > 0, 'the confirm message is a real sentence');
+  ok(msg.includes('4 beat'), 'the confirm message names the window value when it differs');
+  ok(msg.includes('0.35'), 'the confirm message names the sensitivity value when it differs');
+  ok(msg.includes('14'), 'the confirm message names the max-per-song value when it differs');
+
+  const singular = fe.useAsRoomDefaultConfirmMessage(
+    { windowBeats: 1, sensitivity: room.sensitivity, maxPerSong: room.maxPerSong }, room,
+  );
   ok(singular.includes('1 beat') && !singular.includes('1 beats'),
     'a single beat is grammatically singular');
 
-  const patch = fe.roomControlsPatchForUseAsDefault(knobs);
-  ok(JSON.stringify(patch) === JSON.stringify({
+  const patchAllThree = fe.roomControlsPatchForUseAsDefault(allThreeDiffer, room);
+  ok(JSON.stringify(patchAllThree) === JSON.stringify({
     transition_window_beats: 4, transition_edge_sensitivity: 0.35, transition_max_per_song: 14,
-  }), 'the PUT patch carries exactly the three room-control fields, at exactly these values');
-  ok(!('direction' in patch) && Object.keys(patch).length === 3,
+  }), 'the PUT patch carries all three room-control fields when all three differ');
+  ok(!('direction' in patchAllThree),
     'direction is deliberately excluded — it has no room-level setting');
+
+  // The exact scenario the finding named: opens with non-default room
+  // values, changes ONLY Window, confirms — the PUT must carry ONLY
+  // transition_window_beats, and the confirm text must not claim the
+  // other two are changing too.
+  const onlyWindowDiffers = { windowBeats: 9, sensitivity: room.sensitivity, maxPerSong: room.maxPerSong };
+  const windowOnlyMsg = fe.useAsRoomDefaultConfirmMessage(onlyWindowDiffers, room);
+  ok(windowOnlyMsg.includes('9 beat'), 'the confirm message names the changed Window value');
+  ok(!windowOnlyMsg.includes(room.sensitivity.toFixed(2)),
+    'the confirm message does not claim sensitivity is changing when it is untouched');
+  ok(!/\btransitions per song\b/i.test(windowOnlyMsg) && !windowOnlyMsg.includes(String(room.maxPerSong)),
+    'the confirm message does not claim transitions-per-song is changing when it is untouched');
+
+  const patchWindowOnly = fe.roomControlsPatchForUseAsDefault(onlyWindowDiffers, room);
+  ok(JSON.stringify(patchWindowOnly) === JSON.stringify({ transition_window_beats: 9 }),
+    'the PUT patch carries ONLY transition_window_beats when only Window was changed');
+
+  // Nothing changed at all — the button is disabled in this state, but the
+  // pure functions themselves must still say so honestly rather than
+  // silently writing/confirming a no-op.
+  const noneDiffer = { ...room };
+  const noneMsg = fe.useAsRoomDefaultConfirmMessage(noneDiffer, room);
+  ok(noneMsg.toLowerCase().includes('nothing to change'),
+    'an unchanged set of knobs reports nothing to change, rather than confirming a no-op write');
+  const patchNone = fe.roomControlsPatchForUseAsDefault(noneDiffer, room);
+  ok(Object.keys(patchNone).length === 0,
+    'the PUT patch is empty when every knob already matches the room');
 }
 
 console.log(failures === 0 ? '\nAll checks passed.' : `\n${failures} check(s) FAILED.`);

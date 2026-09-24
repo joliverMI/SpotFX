@@ -83,6 +83,21 @@ export interface TransitionKnobValues {
   maxPerSong: number;
 }
 
+/** Which of the three fields actually diverge — the ONE definition both
+ * `transitionDefaultsDiffer` (the "differs from room default" highlight)
+ * and the confirm-message/patch builders below key off, so they can never
+ * disagree about which knob changed. */
+function changedTransitionFields(
+  current: TransitionKnobValues,
+  room: TransitionKnobValues,
+): { windowBeats: boolean; sensitivity: boolean; maxPerSong: boolean } {
+  return {
+    windowBeats: current.windowBeats !== room.windowBeats,
+    sensitivity: Math.abs(current.sensitivity - room.sensitivity) > 1e-9,
+    maxPerSong: current.maxPerSong !== room.maxPerSong,
+  };
+}
+
 /** `null`/`undefined` room defaults (still loading, or never fetched) read
  * as "no difference" — there is nothing yet to diverge from. */
 export function transitionDefaultsDiffer(
@@ -90,27 +105,58 @@ export function transitionDefaultsDiffer(
   room: TransitionKnobValues | null | undefined,
 ): boolean {
   if (!room) return false;
-  return current.windowBeats !== room.windowBeats
-    || Math.abs(current.sensitivity - room.sensitivity) > 1e-9
-    || current.maxPerSong !== room.maxPerSong;
+  const changed = changedTransitionFields(current, room);
+  return changed.windowBeats || changed.sensitivity || changed.maxPerSong;
 }
 
-export function useAsRoomDefaultConfirmMessage(current: TransitionKnobValues): string {
-  return `Set the room's own transition placement defaults to Window `
-    + `${current.windowBeats} beat${current.windowBeats === 1 ? '' : 's'}, `
-    + `Sensitivity ${current.sensitivity.toFixed(2)}, and up to `
-    + `${current.maxPerSong} transitions per song? This changes what `
-    + '"⟳ Generate" produces for every song from now on.';
+/** Lists only the knob(s) that actually diverge from the room's current
+ * values — a user who only ever touched Window must never be told (or
+ * have the PUT claim) that Sensitivity or Transitions-per-song are also
+ * changing, since those two still hold whatever the room already had. */
+export function useAsRoomDefaultConfirmMessage(
+  current: TransitionKnobValues,
+  room: TransitionKnobValues,
+): string {
+  const changed = changedTransitionFields(current, room);
+  const parts: string[] = [];
+  if (changed.windowBeats) {
+    parts.push(`Window to ${current.windowBeats} beat${current.windowBeats === 1 ? '' : 's'}`);
+  }
+  if (changed.sensitivity) parts.push(`Sensitivity to ${current.sensitivity.toFixed(2)}`);
+  if (changed.maxPerSong) parts.push(`up to ${current.maxPerSong} transitions per song`);
+  if (parts.length === 0) {
+    return 'The sliders already match the room\'s current defaults — nothing to change.';
+  }
+  return `Set the room's own transition placement default${parts.length === 1 ? '' : 's'} — `
+    + `${parts.join('; ')}? This changes what "⟳ Generate" produces for every song from now on.`;
 }
 
 /** The exact PUT /api/room-controls partial-merge fields this button
- * writes — direction is deliberately excluded, it has no room-level
- * setting (see RoomControlState.transition_window_beats's own docstring
- * in spectra/services/room_controls.py). */
-export function roomControlsPatchForUseAsDefault(current: TransitionKnobValues) {
-  return {
-    transition_window_beats: current.windowBeats,
-    transition_edge_sensitivity: current.sensitivity,
-    transition_max_per_song: current.maxPerSong,
-  };
+ * writes — ONLY the knob(s) that actually diverge from the room's current
+ * values, never all three unconditionally (a slider the page synced from
+ * the room at load and he never touched must not be re-asserted back at
+ * whatever it happens to read, which is always the room's own value
+ * anyway, but re-sending it invites exactly the "wrote three, meant one"
+ * confusion this function exists to avoid). `direction` is deliberately
+ * excluded regardless — it has no room-level setting (see
+ * RoomControlState.transition_window_beats's own docstring in
+ * spectra/services/room_controls.py). */
+export function roomControlsPatchForUseAsDefault(
+  current: TransitionKnobValues,
+  room: TransitionKnobValues,
+): Partial<{
+  transition_window_beats: number;
+  transition_edge_sensitivity: number;
+  transition_max_per_song: number;
+}> {
+  const changed = changedTransitionFields(current, room);
+  const patch: Partial<{
+    transition_window_beats: number;
+    transition_edge_sensitivity: number;
+    transition_max_per_song: number;
+  }> = {};
+  if (changed.windowBeats) patch.transition_window_beats = current.windowBeats;
+  if (changed.sensitivity) patch.transition_edge_sensitivity = current.sensitivity;
+  if (changed.maxPerSong) patch.transition_max_per_song = current.maxPerSong;
+  return patch;
 }
