@@ -216,10 +216,13 @@ async def engine_marks(
     computed and discarded — and the trigger-store parse + profile scan
     they cost is what this route exists to skip.
 
-    `window_beats`/`sensitivity`/`direction` are read only by the `edges`
-    engine (spectra/services/rhythmic_edges.py's own three knobs); every
-    other engine ignores them, so a caller may always pass them without
-    checking which engine is selected."""
+    `window_beats`/`sensitivity`/`direction` are read by the `edges` engine
+    (spectra/services/rhythmic_edges.py's own three knobs) and by the
+    `generator` engine's `preview` kind (2026-09-23, PLACEMENT RULE R3 —
+    they're the same knobs `midsong_generator.candidate_moments` uses to
+    resolve stage 1's edge search); every other engine and mark kind
+    ignores them, so a caller may always pass them without checking which
+    engine/kind is selected."""
     if engine not in testbed_engines.ENGINES:
         raise HTTPException(404, f"unknown engine '{engine}'")
     estimate = await asyncio.to_thread(

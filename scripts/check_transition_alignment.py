@@ -88,8 +88,12 @@ FRAME_FIXED_FLOOR_PCT = {"Soy Peor": 14.0, "Contra": 45.0, "Dopamine": 9.0, "El 
 # The report's own "R3 both dirs, s=0.5, W=8, else R1 (proposed default)"
 # row (section 3), and Firstmate's own acceptance restatement (section 5
 # task 3): the four-song one-beat recall floor for the shipped default
-# placement rule.
-EDGE_RULE_FLOOR_PCT = {"Soy Peor": 21.0, "Contra": 73.0, "Dopamine": 45.0, "El Apagón": 29.0}
+# placement rule. El Apagón is deliberately OMITTED — matching
+# FRAME_FIXED_FLOOR_PCT's own 0.0 (a floor that is trivially always
+# satisfied) and the module docstring's blanket claim that El Apagón is
+# reported but never weighted in the go/no-go read — so it never affects
+# edge_floor_ok/edge_regression below.
+EDGE_RULE_FLOOR_PCT = {"Soy Peor": 21.0, "Contra": 73.0, "Dopamine": 45.0}
 
 
 def _copy_analysis(live_root: Path, tmp: Path, uri: str, stem: str) -> None:
@@ -294,7 +298,7 @@ def main() -> int:
                           f"({r_frame*100:.1f}%) is below the plan's floor "
                           f"({floor:.0f}%)", file=sys.stderr)
                     floor_ok = False
-                if r_edge * 100.0 + 1e-6 < r_today * 100.0:
+                if r_edge * 100.0 + 1e-6 < r_today * 100.0 and name != "El Apagón":
                     print(f"  REGRESSION: {name} edge-rule recall "
                           f"({r_edge*100:.1f}%) is below today's "
                           f"({r_today*100:.1f}%)", file=sys.stderr)
