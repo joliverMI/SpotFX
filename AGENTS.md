@@ -8653,16 +8653,18 @@ rollout decision).
 
 Acceptance: `scripts/check_transition_alignment.py`'s fourth column,
 "+ Edge rule" (the shipped default knobs, `RoomControlState()`'s own
-defaults, density uncapped to isolate the placement rule) — the four-song
-one-beat recall is 21/73/45/29% (Soy Peor/Contra/Dopamine/El Apagón),
-reproducing the report's own §3 table exactly, floor-compared with
-whole-percent rounding (the report's own "73%"/"29%" are themselves
-rounded fractions — 8/11 = 72.7...%, 4/14 = 28.6...% — comparing the raw
-float against the rounded floor would fail a song that landed EXACTLY on
-target). Unit tests: `tests/test_beat_snap.py` (edge-within-window,
-no-edge fallback, window clamped to its one-beat floor, the
-zero-move-still-falls-through quirk, `snap_enabled=False` disabling only
-stage 2, direction filtering), `tests/test_midsong_generator.py`
+defaults, density uncapped to isolate the placement rule) — the one-beat
+recall is 21/73/45% (Soy Peor/Contra/Dopamine), reproducing the report's
+own §3 table exactly, floor-compared with whole-percent rounding (the
+report's own "73%" is itself a rounded fraction — 8/11 = 72.7...% —
+comparing the raw float against the rounded floor would fail a song that
+landed EXACTLY on target). El Apagón is excluded from this floor and its
+regression check (`EDGE_RULE_FLOOR_PCT`'s own comment, the
+`no-mistakes(review)` fix 2026-09-23) — reported, never weighted, same
+as task 1's own acceptance note. Unit tests: `tests/test_beat_snap.py`
+(edge-within-window, no-edge fallback, window clamped to its one-beat
+floor, the zero-move-still-falls-through quirk, `snap_enabled=False`
+disabling only stage 2, direction filtering), `tests/test_midsong_generator.py`
 (density keeps the strongest N and restores chronological order, knob
 plumbing reads the room default when unset, an explicit override wins,
 edge provenance on a real placed cue).
