@@ -1,11 +1,14 @@
-/** Component-level proof for the music-analysis test bed's two new sliders
- * (Window/Sensitivity, data/transition-alignment-plan/report.md section 4,
- * ship task 2) — spectra/web/src/testbed/edgeKnobs.ts is the pure module
- * both TestbedMetricsPanel.tsx's sliders and TestbedPage.tsx's fetch wiring
- * are built on (clamping, defaults, and which A/B engine selection makes
- * the knobs relevant at all). This repo carries no DOM/component-rendering
- * test harness (no jsdom, no testing-library — see AGENTS.md's own "Tests"
- * section), so this follows the established precedent for this exact page
+/** Component-level proof for the music-analysis test bed's sliders
+ * (Window/Sensitivity/Direction, data/transition-alignment-plan/report.md
+ * section 4 ship task 2; the "strongest N" density knob and "Use as room
+ * default" button, section 5 ship task 4) — spectra/web/src/testbed/
+ * edgeKnobs.ts is the pure module both TestbedMetricsPanel.tsx's sliders/
+ * button and TestbedPage.tsx's fetch wiring are built on (clamping,
+ * defaults, which A/B engine selection makes each knob relevant, the
+ * confirm text and exact PUT payload the "Use as room default" button
+ * sends). This repo carries no DOM/component-rendering test harness (no
+ * jsdom, no testing-library — see AGENTS.md's own "Tests" section), so
+ * this follows the established precedent for this exact page
  * (scripts/check_testbed_song_search.mjs, scripts/check_testbed_metrics.mjs):
  * transpile the REAL module with esbuild and drive it directly, no DOM.
  *
@@ -89,6 +92,108 @@ console.log('§5 knobsRelevant — the sliders show while an `edges` lane, or th
     "generator's 'stored' kind is NOT relevant — it is exactly what is currently "
     + 'written, never recomputed with these knobs');
   ok(fe.knobsRelevant([null, undefined]) === false, 'an empty A/B selection is not relevant');
+}
+
+console.log('§6 the "strongest N" density knob (default/bounds match '
+  + 'RoomControlState.transition_max_per_song\'s own Field(ge=6, le=40, default=12))');
+{
+  ok(fe.DEFAULT_MAX_PER_SONG === 12, 'DEFAULT_MAX_PER_SONG is 12');
+  ok(fe.MIN_MAX_PER_SONG === 6 && fe.MAX_MAX_PER_SONG === 40, 'max_per_song bounds are 6-40');
+  ok(fe.clampMaxPerSong(12) === 12, 'a value already in range is unchanged');
+  ok(fe.clampMaxPerSong(0) === fe.MIN_MAX_PER_SONG, 'below the floor clamps to the floor');
+  ok(fe.clampMaxPerSong(999) === fe.MAX_MAX_PER_SONG, 'above the ceiling clamps to the ceiling');
+  ok(fe.clampMaxPerSong(12.6) === 13, 'a fractional value rounds to the nearest whole count');
+  ok(fe.clampMaxPerSong(NaN) === fe.DEFAULT_MAX_PER_SONG, 'NaN falls back to the default');
+}
+
+console.log('§7 maxPerSongRelevant — narrower than knobsRelevant: only the '
+  + "generator's own preview kind ranks/trims candidates, `edges` never does");
+{
+  ok(fe.maxPerSongRelevant([{ engine: 'generator', kind: 'preview' }]) === true,
+    "generator's 'preview' kind is relevant");
+  ok(fe.maxPerSongRelevant([{ engine: 'generator', kind: 'stored' }]) === false,
+    "generator's 'stored' kind is NOT relevant — it is exactly what is currently written");
+  ok(fe.maxPerSongRelevant([{ engine: 'edges', kind: 'bass_up' }]) === false,
+    "an `edges` lane is NOT relevant — density has no meaning for edge detection");
+  ok(fe.maxPerSongRelevant([{ engine: 'librosa', kind: 'beat' },
+    { engine: 'generator', kind: 'preview' }]) === true, 'engine B alone on generator:preview is relevant too');
+  ok(fe.maxPerSongRelevant([null, undefined]) === false, 'an empty A/B selection is not relevant');
+}
+
+console.log('§8 transitionDefaultsDiffer — the "differs from room default" highlight '
+  + '(section 5 task 4 item (c))');
+{
+  const current = { windowBeats: 8, sensitivity: 0.5, maxPerSong: 12 };
+  ok(fe.transitionDefaultsDiffer(current, { windowBeats: 8, sensitivity: 0.5, maxPerSong: 12 }) === false,
+    'identical to the room default is not a difference');
+  ok(fe.transitionDefaultsDiffer(current, { windowBeats: 2, sensitivity: 0.5, maxPerSong: 12 }) === true,
+    'a different windowBeats is a difference');
+  ok(fe.transitionDefaultsDiffer(current, { windowBeats: 8, sensitivity: 0.8, maxPerSong: 12 }) === true,
+    'a different sensitivity is a difference');
+  ok(fe.transitionDefaultsDiffer(current, { windowBeats: 8, sensitivity: 0.5, maxPerSong: 6 }) === true,
+    'a different maxPerSong is a difference');
+  ok(fe.transitionDefaultsDiffer(current, null) === false,
+    'a not-yet-loaded room default (null) reads as no difference, never a false highlight');
+  ok(fe.transitionDefaultsDiffer(current, undefined) === false,
+    'undefined room default reads as no difference too');
+}
+
+console.log('§9 "Use as room default" — the confirm message and the exact PUT payload, '
+  + 'both against a NON-DEFAULT room (section 5 task 4 item (a) + the partial-write fix); '
+  + 'nothing is written until the caller actually PUTs this)');
+{
+  // A room already tuned away from the module defaults — the shape that
+  // exposed the original bug: a page opening at the hardcoded 8/0.5/12
+  // defaults would have read every one of these three as "differs" the
+  // instant it loaded, with nothing dragged.
+  const room = { windowBeats: 6, sensitivity: 0.7, maxPerSong: 20 };
+
+  const allThreeDiffer = { windowBeats: 4, sensitivity: 0.35, maxPerSong: 14 };
+  const msg = fe.useAsRoomDefaultConfirmMessage(allThreeDiffer, room);
+  ok(typeof msg === 'string' && msg.length > 0, 'the confirm message is a real sentence');
+  ok(msg.includes('4 beat'), 'the confirm message names the window value when it differs');
+  ok(msg.includes('0.35'), 'the confirm message names the sensitivity value when it differs');
+  ok(msg.includes('14'), 'the confirm message names the max-per-song value when it differs');
+
+  const singular = fe.useAsRoomDefaultConfirmMessage(
+    { windowBeats: 1, sensitivity: room.sensitivity, maxPerSong: room.maxPerSong }, room,
+  );
+  ok(singular.includes('1 beat') && !singular.includes('1 beats'),
+    'a single beat is grammatically singular');
+
+  const patchAllThree = fe.roomControlsPatchForUseAsDefault(allThreeDiffer, room);
+  ok(JSON.stringify(patchAllThree) === JSON.stringify({
+    transition_window_beats: 4, transition_edge_sensitivity: 0.35, transition_max_per_song: 14,
+  }), 'the PUT patch carries all three room-control fields when all three differ');
+  ok(!('direction' in patchAllThree),
+    'direction is deliberately excluded — it has no room-level setting');
+
+  // The exact scenario the finding named: opens with non-default room
+  // values, changes ONLY Window, confirms — the PUT must carry ONLY
+  // transition_window_beats, and the confirm text must not claim the
+  // other two are changing too.
+  const onlyWindowDiffers = { windowBeats: 9, sensitivity: room.sensitivity, maxPerSong: room.maxPerSong };
+  const windowOnlyMsg = fe.useAsRoomDefaultConfirmMessage(onlyWindowDiffers, room);
+  ok(windowOnlyMsg.includes('9 beat'), 'the confirm message names the changed Window value');
+  ok(!windowOnlyMsg.includes(room.sensitivity.toFixed(2)),
+    'the confirm message does not claim sensitivity is changing when it is untouched');
+  ok(!/\btransitions per song\b/i.test(windowOnlyMsg) && !windowOnlyMsg.includes(String(room.maxPerSong)),
+    'the confirm message does not claim transitions-per-song is changing when it is untouched');
+
+  const patchWindowOnly = fe.roomControlsPatchForUseAsDefault(onlyWindowDiffers, room);
+  ok(JSON.stringify(patchWindowOnly) === JSON.stringify({ transition_window_beats: 9 }),
+    'the PUT patch carries ONLY transition_window_beats when only Window was changed');
+
+  // Nothing changed at all — the button is disabled in this state, but the
+  // pure functions themselves must still say so honestly rather than
+  // silently writing/confirming a no-op.
+  const noneDiffer = { ...room };
+  const noneMsg = fe.useAsRoomDefaultConfirmMessage(noneDiffer, room);
+  ok(noneMsg.toLowerCase().includes('nothing to change'),
+    'an unchanged set of knobs reports nothing to change, rather than confirming a no-op write');
+  const patchNone = fe.roomControlsPatchForUseAsDefault(noneDiffer, room);
+  ok(Object.keys(patchNone).length === 0,
+    'the PUT patch is empty when every knob already matches the room');
 }
 
 console.log(failures === 0 ? '\nAll checks passed.' : `\n${failures} check(s) FAILED.`);

@@ -5,18 +5,21 @@
  *
  * Also carries the `edges` engine's own three knobs (window/sensitivity/
  * direction, spectra/services/rhythmic_edges.py, data/transition-alignment-plan/
- * report.md section 4) — shown next to the tolerance slider only while an
- * `edges` lane is active in either A/B slot, and re-scoring the exact way
- * the tolerance slider does: dragging/toggling one refetches /engine-marks
- * (a cheap single .librosa.json parse), the page recomputes P/R/F1 locally
- * with the same matcher tolerance already uses. */
+ * report.md section 4) plus the "strongest N" density knob and the "Use
+ * as room default" button (section 5 task 4) — shown next to the
+ * tolerance slider only while an `edges` lane (or the generator's own
+ * preview kind) is active in either A/B slot, and re-scoring the exact
+ * way the tolerance slider does: dragging/toggling one refetches
+ * /engine-marks (a cheap single .librosa.json parse), the page recomputes
+ * P/R/F1 locally with the same matcher tolerance already uses. */
 import HelpLink from '../../help/HelpLink';
 import {
-  DEFAULT_DIRECTION, DEFAULT_SENSITIVITY, DEFAULT_WINDOW_BEATS, DIRECTIONS,
-  MAX_SENSITIVITY, MAX_WINDOW_BEATS, MIN_SENSITIVITY, MIN_WINDOW_BEATS,
+  DEFAULT_DIRECTION, DEFAULT_MAX_PER_SONG, DEFAULT_SENSITIVITY, DEFAULT_WINDOW_BEATS, DIRECTIONS,
+  MAX_MAX_PER_SONG, MAX_SENSITIVITY, MAX_WINDOW_BEATS, MIN_MAX_PER_SONG, MIN_SENSITIVITY,
+  MIN_WINDOW_BEATS, transitionDefaultsDiffer,
 } from '../edgeKnobs';
-import type { Direction } from '../edgeKnobs';
-import type { TestbedMetrics } from '../../types';
+import type { Direction, TransitionKnobValues } from '../edgeKnobs';
+import type { TestbedMetrics, TestbedReferenceSet } from '../../types';
 
 function pct(v: number) {
   return `${(v * 100).toFixed(1)}%`;
@@ -24,8 +27,10 @@ function pct(v: number) {
 
 export default function TestbedMetricsPanel({
   rows, toleranceMs, onToleranceChange, defaultToleranceMs, onResetToDefault, emptyNote,
-  windowBeats, sensitivity, direction, onWindowBeatsChange, onSensitivityChange,
-  onDirectionChange, showEdgeKnobs,
+  windowBeats, sensitivity, direction, maxPerSong,
+  onWindowBeatsChange, onSensitivityChange, onDirectionChange, onMaxPerSongChange,
+  showEdgeKnobs, showMaxPerSong, roomDefaults, onUseAsRoomDefault, useAsRoomDefaultPending,
+  referenceSet, referenceSetLoading,
 }: {
   rows: { key: string; label: string; metrics: TestbedMetrics | null | undefined; available: boolean }[];
   toleranceMs: number;
@@ -39,14 +44,31 @@ export default function TestbedMetricsPanel({
   windowBeats: number;
   sensitivity: number;
   direction: Direction;
+  maxPerSong: number;
   onWindowBeatsChange: (v: number) => void;
   onSensitivityChange: (v: number) => void;
   onDirectionChange: (v: Direction) => void;
+  onMaxPerSongChange: (v: number) => void;
   /** Only true while an `edges` lane is selected in either A/B slot — a
    * knob shown for an engine it does not touch would imply a control that
    * does nothing (spectra/web/src/testbed/edgeKnobs.ts::knobsRelevant). */
   showEdgeKnobs: boolean;
+  /** Narrower than showEdgeKnobs — the density knob only means anything
+   * for the generator's own preview kind (edgeKnobs.ts::maxPerSongRelevant). */
+  showMaxPerSong: boolean;
+  /** The room's CURRENT transition_window_beats/_edge_sensitivity/
+   * _max_per_song, for the "differs from room default" highlight. `null`/
+   * undefined while GET /room-controls hasn't resolved yet. */
+  roomDefaults: TransitionKnobValues | null | undefined;
+  onUseAsRoomDefault: () => void;
+  useAsRoomDefaultPending: boolean;
+  /** The plan's own four-song acceptance table, recomputed at the current
+   * knobs on every drag (report section 4/5 task 4). */
+  referenceSet: TestbedReferenceSet | undefined;
+  referenceSetLoading: boolean;
 }) {
+  const currentKnobs: TransitionKnobValues = { windowBeats, sensitivity, maxPerSong };
+  const differsFromRoom = transitionDefaultsDiffer(currentKnobs, roomDefaults);
   const atDefault = toleranceMs === defaultToleranceMs;
   return (
     <div>
@@ -140,6 +162,94 @@ export default function TestbedMetricsPanel({
               </button>
             )}
           </div>
+          {showMaxPerSong && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <label htmlFor="testbed-max-per-song" style={{ fontSize: 12, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                Transitions per song: {maxPerSong}
+                <HelpLink topic="testbed-generator-and-edges" title="Strongest N and Use as room default" />
+              </label>
+              <input
+                id="testbed-max-per-song"
+                type="range"
+                min={MIN_MAX_PER_SONG}
+                max={MAX_MAX_PER_SONG}
+                step={1}
+                value={maxPerSong}
+                onChange={(e) => onMaxPerSongChange(Number(e.target.value))}
+                style={{ flex: 1, maxWidth: 180 }}
+              />
+              {maxPerSong !== DEFAULT_MAX_PER_SONG && (
+                <button onClick={() => onMaxPerSongChange(DEFAULT_MAX_PER_SONG)} style={{ fontSize: 11 }}>
+                  Reset ({DEFAULT_MAX_PER_SONG})
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+      {showEdgeKnobs && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 8 }}>
+          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+            Room's current default:{' '}
+            {roomDefaults ? (
+              <span style={differsFromRoom ? { color: 'var(--warn, #b45309)', fontWeight: 600 } : undefined}>
+                Window {roomDefaults.windowBeats} · Sensitivity {roomDefaults.sensitivity.toFixed(2)}{' '}
+                · N {roomDefaults.maxPerSong}
+              </span>
+            ) : 'loading…'}
+            {differsFromRoom && ' — differs from the sliders above'}
+          </span>
+          <button
+            onClick={onUseAsRoomDefault}
+            disabled={useAsRoomDefaultPending || !differsFromRoom}
+            title={differsFromRoom
+              ? 'Write Window/Sensitivity/Transitions-per-song as the room\'s own defaults'
+              : 'The sliders above already match the room\'s current defaults'}
+            style={{ fontSize: 11 }}
+          >
+            {useAsRoomDefaultPending ? 'Saving…' : 'Use as room default'}
+          </button>
+        </div>
+      )}
+      {showEdgeKnobs && (
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>
+            Reference set (Soy Peor / Contra / Dopamine / El Apagón) at these knobs — one-beat recall
+          </div>
+          {referenceSetLoading || !referenceSet ? (
+            <p className="empty-note" style={{ fontSize: 12 }}>Loading…</p>
+          ) : (
+            <table className="testbed-metrics-table">
+              <thead>
+                <tr>
+                  <th>Song</th>
+                  <th>His marks</th>
+                  <th>Matched</th>
+                  <th>Recall</th>
+                  <th>F1</th>
+                </tr>
+              </thead>
+              <tbody>
+                {referenceSet.songs.map((s) => (
+                  <tr key={s.uri}>
+                    <td>{s.name}</td>
+                    {!s.available || !s.metrics ? (
+                      <td colSpan={4} style={{ color: 'var(--text-muted)', textAlign: 'center' }}>
+                        no analysis yet
+                      </td>
+                    ) : (
+                      <>
+                        <td>{s.metrics.n_reference}</td>
+                        <td>{s.metrics.n_matched}</td>
+                        <td>{pct(s.metrics.recall)}</td>
+                        <td style={{ fontWeight: 600 }}>{pct(s.metrics.f1)}</td>
+                      </>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
       )}
       {emptyNote ? (

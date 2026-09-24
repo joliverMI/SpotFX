@@ -11,6 +11,18 @@ export const MAX_WINDOW_BEATS = 16;
 export const MIN_SENSITIVITY = 0.2;
 export const MAX_SENSITIVITY = 1.5;
 
+/** The "strongest N" density knob (data/transition-alignment-plan/
+ * report.md section 5 task 4) — same bounds/default as
+ * RoomControlState.transition_max_per_song's own Field(ge=6, le=40,
+ * default=12) in spectra/services/room_controls.py; kept as a hand-typed
+ * copy here rather than fetched, the same way DEFAULT_WINDOW_BEATS/
+ * DEFAULT_SENSITIVITY above already mirror rhythmic_edges.py's own
+ * constants — the backend's own field validation is the enforced source
+ * of truth, this is only what the slider's own bounds show. */
+export const DEFAULT_MAX_PER_SONG = 12;
+export const MIN_MAX_PER_SONG = 6;
+export const MAX_MAX_PER_SONG = 40;
+
 export type Direction = 'both' | 'up' | 'down';
 export const DIRECTIONS: Direction[] = ['both', 'up', 'down'];
 
@@ -22,6 +34,11 @@ export function clampWindowBeats(v: number): number {
 export function clampSensitivity(v: number): number {
   if (!Number.isFinite(v)) return DEFAULT_SENSITIVITY;
   return Math.max(MIN_SENSITIVITY, Math.min(MAX_SENSITIVITY, v));
+}
+
+export function clampMaxPerSong(v: number): number {
+  if (!Number.isFinite(v)) return DEFAULT_MAX_PER_SONG;
+  return Math.max(MIN_MAX_PER_SONG, Math.min(MAX_MAX_PER_SONG, Math.round(v)));
 }
 
 /** Report section 3's "third, coarser knob" (up / down / both) — an
@@ -44,4 +61,102 @@ export function clampDirection(v: string): Direction {
 export function knobsRelevant(lanes: ({ engine: string; kind?: string } | null | undefined)[]): boolean {
   return lanes.some((l) => l && (l.engine === 'edges'
     || (l.engine === 'generator' && l.kind === 'preview')));
+}
+
+/** The density ("strongest N") knob is narrower than the three above — it
+ * only has meaning for the generator's own preview kind (rhythmic edges
+ * are just detected, never ranked or trimmed, so showing this slider next
+ * to an `edges` lane would be a control that does nothing there). */
+export function maxPerSongRelevant(lanes: ({ engine: string; kind?: string } | null | undefined)[]): boolean {
+  return lanes.some((l) => l && l.engine === 'generator' && l.kind === 'preview');
+}
+
+/** "Use as room default" (report section 5 task 4) — the ONE write these
+ * three sliders can make, through the existing `PUT /api/room-controls`
+ * partial merge. Kept pure so the confirm text and the exact payload can
+ * be proven without rendering React (this repo carries no DOM/component
+ * test harness — see edgeKnobs.ts's own header comment and AGENTS.md's
+ * "Tests" section). */
+export interface TransitionKnobValues {
+  windowBeats: number;
+  sensitivity: number;
+  maxPerSong: number;
+}
+
+/** Which of the three fields actually diverge — the ONE definition both
+ * `transitionDefaultsDiffer` (the "differs from room default" highlight)
+ * and the confirm-message/patch builders below key off, so they can never
+ * disagree about which knob changed. */
+function changedTransitionFields(
+  current: TransitionKnobValues,
+  room: TransitionKnobValues,
+): { windowBeats: boolean; sensitivity: boolean; maxPerSong: boolean } {
+  return {
+    windowBeats: current.windowBeats !== room.windowBeats,
+    sensitivity: Math.abs(current.sensitivity - room.sensitivity) > 1e-9,
+    maxPerSong: current.maxPerSong !== room.maxPerSong,
+  };
+}
+
+/** `null`/`undefined` room defaults (still loading, or never fetched) read
+ * as "no difference" — there is nothing yet to diverge from. */
+export function transitionDefaultsDiffer(
+  current: TransitionKnobValues,
+  room: TransitionKnobValues | null | undefined,
+): boolean {
+  if (!room) return false;
+  const changed = changedTransitionFields(current, room);
+  return changed.windowBeats || changed.sensitivity || changed.maxPerSong;
+}
+
+/** Lists only the knob(s) that actually diverge from the room's current
+ * values — a user who only ever touched Window must never be told (or
+ * have the PUT claim) that Sensitivity or Transitions-per-song are also
+ * changing, since those two still hold whatever the room already had. */
+export function useAsRoomDefaultConfirmMessage(
+  current: TransitionKnobValues,
+  room: TransitionKnobValues,
+): string {
+  const changed = changedTransitionFields(current, room);
+  const parts: string[] = [];
+  if (changed.windowBeats) {
+    parts.push(`Window to ${current.windowBeats} beat${current.windowBeats === 1 ? '' : 's'}`);
+  }
+  if (changed.sensitivity) parts.push(`Sensitivity to ${current.sensitivity.toFixed(2)}`);
+  if (changed.maxPerSong) parts.push(`up to ${current.maxPerSong} transitions per song`);
+  if (parts.length === 0) {
+    return 'The sliders already match the room\'s current defaults — nothing to change.';
+  }
+  return `Set the room's own transition placement default${parts.length === 1 ? '' : 's'} — `
+    + `${parts.join('; ')}? This changes what "⟳ Generate" produces for every song from now on.`;
+}
+
+/** The exact PUT /api/room-controls partial-merge fields this button
+ * writes — ONLY the knob(s) that actually diverge from the room's current
+ * values, never all three unconditionally (a slider the page synced from
+ * the room at load and he never touched must not be re-asserted back at
+ * whatever it happens to read, which is always the room's own value
+ * anyway, but re-sending it invites exactly the "wrote three, meant one"
+ * confusion this function exists to avoid). `direction` is deliberately
+ * excluded regardless — it has no room-level setting (see
+ * RoomControlState.transition_window_beats's own docstring in
+ * spectra/services/room_controls.py). */
+export function roomControlsPatchForUseAsDefault(
+  current: TransitionKnobValues,
+  room: TransitionKnobValues,
+): Partial<{
+  transition_window_beats: number;
+  transition_edge_sensitivity: number;
+  transition_max_per_song: number;
+}> {
+  const changed = changedTransitionFields(current, room);
+  const patch: Partial<{
+    transition_window_beats: number;
+    transition_edge_sensitivity: number;
+    transition_max_per_song: number;
+  }> = {};
+  if (changed.windowBeats) patch.transition_window_beats = current.windowBeats;
+  if (changed.sensitivity) patch.transition_edge_sensitivity = current.sensitivity;
+  if (changed.maxPerSong) patch.transition_max_per_song = current.maxPerSong;
+  return patch;
 }

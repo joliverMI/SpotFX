@@ -8508,8 +8508,9 @@ no-op), `tests/test_analysis_reader_section_energy.py` (the same shift on
 `data/transition-alignment-plan/report.md` (firstmate home) is the plan;
 ship task 2 of its section 5 built the TUNING side only (the `edges`
 lane, the two knobs). The rule that turns edges into placement (report
-R3) is task 3, built — see the PLACEMENT RULE R3 section below. A "use
-these as room defaults" button is task 4, still not built here.
+R3) is task 3, built — see the PLACEMENT RULE R3 section below. Task 4
+(the "Use as room default" button + the four-song reference-set row) is
+also built — see its own subsection at the end of this section.
 
 `spectra/services/rhythmic_edges.py` computes bass-energy edges from the
 per-beat `rms_bass` already stored in `.librosa.json` — never a WAV
@@ -8569,6 +8570,61 @@ regardless of which engine is active — harmless, and means switching a
 slot INTO `edges` needs no extra plumbing. Proof:
 `scripts/check_testbed_edge_knobs.mjs` (this repo's no-DOM/no-jsdom
 convention for this page, same as `scripts/check_testbed_song_search.mjs`).
+
+**Ship task 4 — the "strongest N" slider, "Use as room default", and the
+four-song reference-set row (2026-09-23).** A fourth slider, "Transitions
+per song" (`edgeKnobs.ts`'s `DEFAULT_MAX_PER_SONG`/`MIN_MAX_PER_SONG`/
+`MAX_MAX_PER_SONG` = 12/6/40, matching `RoomControlState.
+transition_max_per_song`'s own `Field(ge=6, le=40)`), shown only for the
+generator's own `preview` kind (`edgeKnobs.maxPerSongRelevant` — narrower
+than `knobsRelevant`, since `edges` never ranks or trims candidates).
+Threaded the same "explicit overrides, `None` falls back to the live room
+setting" way `midsong_generator.candidate_moments` already resolves it,
+all the way through `testbed_engines.marks_for`/`_generator_marks`/
+`_generator_preview_marks`, `spectra/api/testbed.py`'s `_estimate_for` and
+the `/engine-marks`/`/compare` query params (bound read live via
+`room_controls.field_bounds("transition_max_per_song")`, never a
+hand-copied range).
+
+**"Use as room default" makes exactly ONE write, through the EXISTING
+`PUT /api/room-controls` partial merge — there is no new write route.**
+The three sliders SYNC ONCE from the room's own live values the first
+time they resolve (`TestbedPage.tsx`'s `knobsSyncedFromRoomRef`, never
+re-synced after — a later room-controls change, e.g. a Sonic voice edit
+or this same button's own write, must not silently overwrite a slider
+mid-drag). Starting them at the hardcoded module defaults instead was the
+original shape and read every knob as "differs" the instant the page
+opened on a room already tuned away from 8/0.5/12 — fixed in review.
+`edgeKnobs.ts`'s `roomControlsPatchForUseAsDefault`/
+`useAsRoomDefaultConfirmMessage`/`transitionDefaultsDiffer` all key off one
+shared `changedTransitionFields(current, room)` so they can never disagree
+about which knob moved: the PUT patch and the confirm text each carry
+ONLY the knob(s) that actually diverge from the room's current values,
+never all three unconditionally — a slider never touched must not be
+re-asserted, let alone claimed as "changing," back at the room's own
+value. Kept pure so `scripts/check_testbed_edge_knobs.mjs` §9 can prove
+both the sync-from-non-default-room shape and the partial payload without
+a DOM. `direction` is deliberately excluded from the payload — it has no
+room-level setting (see `RoomControlState.transition_window_beats`'s own
+docstring). Nothing is written until the button is pressed and confirmed,
+and an unchanged set of knobs reports "nothing to change" rather than
+confirming or writing a no-op. `TestbedPage.tsx` shows the room's own
+current three values next to the sliders (`useRoomControls`) and
+highlights them when they diverge.
+
+**The reference-set row (`GET /api/testbed/reference-set`,
+`spectra/services/testbed_reference_set.py`) is the report's own four-song
+acceptance table, live**: Soy Peor / Contra / Dopamine / El Apagón (the
+SAME hardcoded URIs `scripts/check_transition_alignment.py` uses — a
+deliberate duplication, not a shared import, since that script repoints
+storage under a throwaway temp root and must never be imported by a live
+request handler) scored on the `generator:preview` lane at ONE-BEAT
+tolerance (60000 / that song's own `tempo_bpm`) — never the page's own
+tolerance slider, which scores a different lane at a possibly non-beat
+tolerance. Recomputed on every drag of Window/Sensitivity/Direction/
+Transitions-per-song, so the whole set moves together rather than judging
+one song at a time — exactly the acceptance shape ("dragging Window 8→2
+on Contra moves recall 73%→55%").
 
 ## PLACEMENT RULE R3 — the edge-then-downbeat rule is now the generator's own placement rule
 
