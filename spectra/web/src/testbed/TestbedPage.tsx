@@ -24,9 +24,9 @@ import PromotionReviewDialog from './components/PromotionReviewDialog';
 import TestbedLaneBar from './components/TestbedLaneBar';
 import TestbedMetricsPanel from './components/TestbedMetricsPanel';
 import {
-  clampMaxPerSong, clampSensitivity, clampWindowBeats,
-  DEFAULT_DIRECTION, DEFAULT_MAX_PER_SONG, DEFAULT_SENSITIVITY, DEFAULT_WINDOW_BEATS,
-  knobsRelevant, maxPerSongRelevant, roomControlsPatchForUseAsDefault, useAsRoomDefaultConfirmMessage,
+  clampSensitivity, clampTransitionsPerMinute, clampWindowBeats,
+  DEFAULT_DIRECTION, DEFAULT_SENSITIVITY, DEFAULT_TRANSITIONS_PER_MINUTE, DEFAULT_WINDOW_BEATS,
+  knobsRelevant, roomControlsPatchForUseAsDefault, transitionsPerMinuteRelevant, useAsRoomDefaultConfirmMessage,
 } from './edgeKnobs';
 import type { Direction, TransitionKnobValues } from './edgeKnobs';
 import { matchMarks } from './metrics';
@@ -139,9 +139,10 @@ export default function TestbedPage() {
   const [windowBeats, setWindowBeats] = useState(DEFAULT_WINDOW_BEATS);
   const [sensitivity, setSensitivity] = useState(DEFAULT_SENSITIVITY);
   const [direction, setDirection] = useState<Direction>(DEFAULT_DIRECTION);
-  // The "strongest N" density knob (report section 5 task 4) — same
-  // held-regardless-of-active-engine shape as the three above.
-  const [maxPerSong, setMaxPerSong] = useState(DEFAULT_MAX_PER_SONG);
+  // The density RATE knob (transitions per minute, 2026-09-25 — see
+  // edgeKnobs.ts's own header comment) — same held-regardless-of-active-
+  // engine shape as the three above.
+  const [transitionsPerMinute, setTransitionsPerMinute] = useState(DEFAULT_TRANSITIONS_PER_MINUTE);
   // True once he has touched the slider himself for the CURRENT song — the
   // default below stops re-asserting itself over his own choice, but a new
   // song (or a mark-kind change on either lane) still gets its own honest
@@ -173,10 +174,10 @@ export default function TestbedPage() {
   const { data: marks } = useTestbedMarks(uri);
   const { data: waveform } = useTestbedWaveform(uri);
   const { data: engineMarksA } = useTestbedEngineMarks(
-    uri, engineA.engine, engineA.kind, windowBeats, sensitivity, direction, maxPerSong,
+    uri, engineA.engine, engineA.kind, windowBeats, sensitivity, direction, transitionsPerMinute,
   );
   const { data: engineMarksB } = useTestbedEngineMarks(
-    uri, engineB?.engine ?? null, engineB?.kind ?? null, windowBeats, sensitivity, direction, maxPerSong,
+    uri, engineB?.engine ?? null, engineB?.kind ?? null, windowBeats, sensitivity, direction, transitionsPerMinute,
   );
   const { data: promotions } = useTestbedPromotions(uri);
 
@@ -193,7 +194,7 @@ export default function TestbedPage() {
   const roomTransitionDefaults: TransitionKnobValues | null = roomControls ? {
     windowBeats: roomControls.transition_window_beats,
     sensitivity: roomControls.transition_edge_sensitivity,
-    maxPerSong: roomControls.transition_max_per_song,
+    transitionsPerMinute: roomControls.transitions_per_minute,
   } : null;
 
   // The sliders start at the module defaults (declared with useState above)
@@ -209,10 +210,10 @@ export default function TestbedPage() {
     knobsSyncedFromRoomRef.current = true;
     setWindowBeats(clampWindowBeats(roomControls.transition_window_beats));
     setSensitivity(clampSensitivity(roomControls.transition_edge_sensitivity));
-    setMaxPerSong(clampMaxPerSong(roomControls.transition_max_per_song));
+    setTransitionsPerMinute(clampTransitionsPerMinute(roomControls.transitions_per_minute));
   }, [roomControls]);
 
-  const currentTransitionKnobs: TransitionKnobValues = { windowBeats, sensitivity, maxPerSong };
+  const currentTransitionKnobs: TransitionKnobValues = { windowBeats, sensitivity, transitionsPerMinute };
   const useAsRoomDefault = () => {
     if (!roomControls || !roomTransitionDefaults) return;
     const patch = roomControlsPatchForUseAsDefault(currentTransitionKnobs, roomTransitionDefaults);
@@ -222,7 +223,7 @@ export default function TestbedPage() {
       { ...roomControls, ...patch },
       {
         onSuccess: () => toast('Room defaults updated — Window '
-          + `${windowBeats}, Sensitivity ${sensitivity.toFixed(2)}, N ${maxPerSong}.`, 'success'),
+          + `${windowBeats}, Sensitivity ${sensitivity.toFixed(2)}, ${transitionsPerMinute}/min.`, 'success'),
         onError: () => toast('Could not update the room defaults.', 'error'),
       },
     );
@@ -231,7 +232,7 @@ export default function TestbedPage() {
   // every drag — shown regardless of which song is currently selected,
   // since it judges the four PINNED reference songs, not this one.
   const { data: referenceSet, isLoading: referenceSetLoading } = useTestbedReferenceSet(
-    windowBeats, sensitivity, direction, maxPerSong,
+    windowBeats, sensitivity, direction, transitionsPerMinute,
   );
 
   // A new song resets to ITS OWN honest default rather than carrying over
@@ -521,13 +522,13 @@ export default function TestbedPage() {
               windowBeats={windowBeats}
               sensitivity={sensitivity}
               direction={direction}
-              maxPerSong={maxPerSong}
+              transitionsPerMinute={transitionsPerMinute}
               onWindowBeatsChange={setWindowBeats}
               onSensitivityChange={setSensitivity}
               onDirectionChange={setDirection}
-              onMaxPerSongChange={setMaxPerSong}
+              onTransitionsPerMinuteChange={setTransitionsPerMinute}
               showEdgeKnobs={knobsRelevant([engineA, engineB])}
-              showMaxPerSong={maxPerSongRelevant([engineA, engineB])}
+              showTransitionsPerMinute={transitionsPerMinuteRelevant([engineA, engineB])}
               roomDefaults={roomTransitionDefaults}
               onUseAsRoomDefault={useAsRoomDefault}
               useAsRoomDefaultPending={saveRoomControls.isPending}

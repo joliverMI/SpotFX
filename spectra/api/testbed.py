@@ -7,11 +7,11 @@ reviewed push-to-real button.
   GET    /api/testbed/marks?uri=                      his real marks (split)
   GET    /api/testbed/waveform?uri=                    waveform/energy lane
   GET    /api/testbed/engines?uri=                    per-engine availability
-  GET    /api/testbed/engine-marks?uri=&engine=&mark_kind=&window_beats=&sensitivity=&direction=&max_per_song=
+  GET    /api/testbed/engine-marks?uri=&engine=&mark_kind=&window_beats=&sensitivity=&direction=&transitions_per_minute=
                                                        one engine's marks, nothing else
-  GET    /api/testbed/compare?uri=&engine=&mark_kind=&reference=&tolerance_ms=&window_beats=&sensitivity=&direction=&max_per_song=
+  GET    /api/testbed/compare?uri=&engine=&mark_kind=&reference=&tolerance_ms=&window_beats=&sensitivity=&direction=&transitions_per_minute=
                                                        one engine's marks + P/R/F1
-  GET    /api/testbed/reference-set?window_beats=&sensitivity=&direction=&max_per_song=
+  GET    /api/testbed/reference-set?window_beats=&sensitivity=&direction=&transitions_per_minute=
                                                        generator:preview one-beat recall/F1 for the
                                                        four pinned reference songs, at these knobs
                                                        (data/transition-alignment-plan/report.md
@@ -41,11 +41,11 @@ from spectra.services import (analysis_reader, rhythmic_edges, room_controls,
                               testbed_metrics, testbed_promote,
                               testbed_reference_set, trigger_store)
 
-# transition_max_per_song's own Field(ge=, le=) on RoomControlState —
-# read live rather than hand-copied, so the API's bound can never drift
-# from the room setting the "strongest N" knob and "Use as room default"
-# button actually write.
-_MAX_PER_SONG_GE, _MAX_PER_SONG_LE = room_controls.field_bounds("transition_max_per_song")
+# transitions_per_minute's own Field(ge=, le=) on RoomControlState — read
+# live rather than hand-copied, so the API's bound can never drift from
+# the room setting the "Transitions per minute" knob and "Use as room
+# default" button actually write.
+_RATE_GE, _RATE_LE = room_controls.field_bounds("transitions_per_minute")
 
 router = APIRouter(prefix="/api/testbed", tags=["spectra-testbed"])
 
@@ -164,7 +164,7 @@ def _estimate_for(
     window_beats: int = rhythmic_edges.DEFAULT_WINDOW_BEATS,
     sensitivity: float = rhythmic_edges.DEFAULT_SENSITIVITY,
     direction: str = rhythmic_edges.DEFAULT_DIRECTION,
-    max_per_song: Optional[int] = None,
+    transitions_per_minute: Optional[float] = None,
 ):
     """One engine's marks of one kind, or None when the engine has nothing
     for this song — the ONLY read the page's per-lane fetch needs. Never
@@ -194,7 +194,7 @@ def _estimate_for(
     docstring, "generator" entry)."""
     engine_marks = testbed_engines.marks_for(
         engine, uri, window_beats=window_beats, sensitivity=sensitivity,
-        direction=direction, max_per_song=max_per_song)
+        direction=direction, transitions_per_minute=transitions_per_minute)
     if engine_marks is None:
         return None
     if engine != testbed_engines.ENGINE_GENERATOR:
@@ -223,7 +223,7 @@ async def engine_marks(
                                le=rhythmic_edges.MAX_SENSITIVITY),
     direction: str = Query(rhythmic_edges.DEFAULT_DIRECTION,
                            pattern="^(both|up|down)$"),
-    max_per_song: Optional[int] = Query(None, ge=_MAX_PER_SONG_GE, le=_MAX_PER_SONG_LE),
+    transitions_per_minute: Optional[float] = Query(None, ge=_RATE_GE, le=_RATE_LE),
 ):
     """The page's per-lane fetch: it recomputes P/R/F1 locally against the
     marks it already holds (spectra/web/src/testbed/metrics.ts), so the
@@ -235,9 +235,9 @@ async def engine_marks(
     (spectra/services/rhythmic_edges.py's own three knobs) and by the
     `generator` engine's `preview` kind (2026-09-23, PLACEMENT RULE R3 —
     they're the same knobs `midsong_generator.candidate_moments` uses to
-    resolve stage 1's edge search); `max_per_song` (the "strongest N"
-    density cap, section 5 task 4) is read only by `generator`'s `preview`
-    kind, omitted/None falling back to the live room setting. Every other
+    resolve stage 1's edge search); `transitions_per_minute` (the density
+    RATE, 2026-09-25) is read only by `generator`'s `preview` kind,
+    omitted/None falling back to the live room setting. Every other
     engine and mark kind ignores whichever of these it doesn't use, so a
     caller may always pass them without checking which engine/kind is
     selected."""
@@ -246,7 +246,7 @@ async def engine_marks(
     estimate = await asyncio.to_thread(
         _estimate_for, engine, uri, mark_kind,
         window_beats=window_beats, sensitivity=sensitivity, direction=direction,
-        max_per_song=max_per_song)
+        transitions_per_minute=transitions_per_minute)
     return {
         "uri": uri, "engine": engine, "mark_kind": mark_kind,
         "available": estimate is not None,
@@ -269,7 +269,7 @@ async def compare(
                                le=rhythmic_edges.MAX_SENSITIVITY),
     direction: str = Query(rhythmic_edges.DEFAULT_DIRECTION,
                            pattern="^(both|up|down)$"),
-    max_per_song: Optional[int] = Query(None, ge=_MAX_PER_SONG_GE, le=_MAX_PER_SONG_LE),
+    transitions_per_minute: Optional[float] = Query(None, ge=_RATE_GE, le=_RATE_LE),
 ):
     """Server-computed P/R/F1 at a fixed tolerance — for any caller that
     wants the number from the reference matcher itself rather than the
@@ -282,7 +282,7 @@ async def compare(
     def _read() -> dict:
         estimate = _estimate_for(engine, uri, mark_kind,
                                  window_beats=window_beats, sensitivity=sensitivity,
-                                 direction=direction, max_per_song=max_per_song)
+                                 direction=direction, transitions_per_minute=transitions_per_minute)
         if estimate is None:
             return {"uri": uri, "engine": engine, "mark_kind": mark_kind,
                     "reference": reference, "tolerance_ms": tolerance_ms,
@@ -322,7 +322,7 @@ async def reference_set(
                                le=rhythmic_edges.MAX_SENSITIVITY),
     direction: str = Query(rhythmic_edges.DEFAULT_DIRECTION,
                            pattern="^(both|up|down)$"),
-    max_per_song: Optional[int] = Query(None, ge=_MAX_PER_SONG_GE, le=_MAX_PER_SONG_LE),
+    transitions_per_minute: Optional[float] = Query(None, ge=_RATE_GE, le=_RATE_LE),
 ):
     """The report's own four-song acceptance table (section 1/4), live: the
     `generator:preview` lane's one-beat recall/precision/F1 for Soy Peor /
@@ -335,11 +335,11 @@ async def reference_set(
     rows = await asyncio.to_thread(
         testbed_reference_set.compute_dicts,
         window_beats=window_beats, sensitivity=sensitivity,
-        direction=direction, max_per_song=max_per_song,
+        direction=direction, transitions_per_minute=transitions_per_minute,
     )
     return {
         "window_beats": window_beats, "sensitivity": sensitivity,
-        "direction": direction, "max_per_song": max_per_song,
+        "direction": direction, "transitions_per_minute": transitions_per_minute,
         "songs": rows,
     }
 

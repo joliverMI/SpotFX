@@ -12,8 +12,9 @@ room_controls.py) already labelled "agent-tellable room-wide switches" in
 that module's own docstring — brightness, ambient mode/colour, the
 global transition default, and the scene-change tier. Widened 2026-09-23
 with the PLACEMENT RULE R3 knobs (transition_window_beats/_edge_
-sensitivity/_max_per_song — see room_controls.py's own docstring on
-those fields and AGENTS.md's PLACEMENT RULE R3 section). force_scene_* is
+sensitivity/transitions_per_minute — see room_controls.py's own
+docstring on those fields and AGENTS.md's PLACEMENT RULE R3 section).
+force_scene_* is
 deliberately excluded: it targets a scene by opaque id, which is a poor
 fit for "set this setting to this value" (a picker action, not a voice
 setting) — left for a later, deliberate registry extension, not silently
@@ -186,12 +187,17 @@ SETTINGS_REGISTRY: dict[str, SettingSpec] = {
         "local median step, before a generated cue treats it as an edge "
         "to move onto. Lower catches smaller jumps; higher only the "
         "biggest ones."),
-    "transition_max_per_song": _spec(
-        "transition_max_per_song", "Transitions per song",
-        "How many mid-song scene-change cues generation keeps per song, "
-        "picking the strongest by bass-energy step size before placing "
-        "them. Lower means the room changes scene less often on a song "
-        "he hasn't hand-marked himself."),
+    "transitions_per_minute": _spec(
+        "transitions_per_minute", "Transitions per minute",
+        "How many mid-song scene-change cues generation targets per "
+        "minute of song, picking the strongest by bass-energy step size "
+        "before placing them. The per-song total is this rate times the "
+        "song's own length, then scaled by that song's intensity-scale "
+        "factor (automatic up to 125%, or a manual mark up to 200%) — a "
+        "hyped-up track earns more transitions, a dialed-down one fewer. "
+        "Lower means the room changes scene less often on a song he "
+        "hasn't hand-marked himself. Takes effect the next time a song's "
+        "cues are (re)generated, not on already-stored ones."),
 }
 
 

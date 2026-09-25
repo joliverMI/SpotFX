@@ -177,19 +177,21 @@ def _disabled_rhythmic_edges():
 
 def _run_generation(
     tmp_root: Path, uri: str, *, label: str,
-    snap: bool = True, edges_enabled: bool = True, max_per_song: int = 40,
+    snap: bool = True, edges_enabled: bool = True,
 ) -> list[int]:
     """Fresh, isolated trigger + room-controls store per call — returns the
     resulting GENERATED cue timestamps. `edges_enabled=False` disables
     PLACEMENT RULE R3's edge search entirely (see
     _disabled_rhythmic_edges), reproducing the "Today"/"Frame fixed"/
-    "+ Snap" columns' pre-R3 shape. `max_per_song` defaults to
-    RoomControlState's own field ceiling (40) — well above the report's
-    own observed 19-37 raw candidates per song — so the DENSITY cap (task
-    3's own "strongest N", default 12) does not shrink those three
-    baseline columns; "+ Edge rule" passes the shipped default (12)
-    explicitly so its own reported recall is the generator's ACTUAL
-    production behaviour, not an artificially uncapped one."""
+    "+ Snap" columns' pre-R3 shape.
+
+    DENSITY (transitions_per_minute, the rate that replaced the old flat
+    transition_max_per_song count, 2026-09-25) is monkeypatched to an
+    effectively unlimited resolved count for every column here, well
+    above the report's own observed 19-37 raw candidates per song — this
+    script measures the PLACEMENT rule alone, never the density knob (see
+    tests/test_midsong_generator.py's own density/rate-arithmetic tests
+    for that, separately)."""
     from spectra import config as scfg
     from spectra.services import midsong_generator, room_controls, trigger_store
     from spectra.services import analysis_reader
@@ -199,16 +201,21 @@ def _run_generation(
     scfg.ROOM_CONTROLS_FILE = run_dir / "room_controls.json"
     run_dir.mkdir(parents=True, exist_ok=True)
     room_controls.save_room_controls(room_controls.RoomControlState(
-        midsong_snap_to_beat=snap, transition_max_per_song=max_per_song))
+        midsong_snap_to_beat=snap))
     # section_energy_at's own per-URI capture-offset cache (analysis_reader
     # ._capture_offset_cache) must not leak the "Today" monkeypatch's
     # forced-0 answer into a later, real-offset run for the same URI.
     analysis_reader._capture_offset_cache.pop(uri, None)
-    if edges_enabled:
-        midsong_generator.generate_for_song(uri)
-    else:
-        with _disabled_rhythmic_edges():
+    original_resolve = midsong_generator.resolve_transition_count
+    midsong_generator.resolve_transition_count = lambda uri, sections, rate: 9999
+    try:
+        if edges_enabled:
             midsong_generator.generate_for_song(uri)
+        else:
+            with _disabled_rhythmic_edges():
+                midsong_generator.generate_for_song(uri)
+    finally:
+        midsong_generator.resolve_transition_count = original_resolve
     return [t.timestamp_ms for t in trigger_store.list_for_song(uri)]
 
 
@@ -255,17 +262,18 @@ def main() -> int:
             today = _run_generation(tmp, uri, snap=False, edges_enabled=False, label="today")
         frame_fixed = _run_generation(tmp, uri, snap=False, edges_enabled=False, label="frame_fixed")
         plus_snap = _run_generation(tmp, uri, snap=True, edges_enabled=False, label="plus_snap")
-        # The shipped default knobs — RoomControlState()'s own
-        # window=8/sensitivity=0.5/both directions/max_per_song=12,
-        # snap-to-beat on — the generator's ACTUAL production placement
-        # rule as of this build (report §5 task 3).
-        # DENSITY (transition_max_per_song, task 3's own "strongest N") is
-        # deliberately NOT applied here — the report's own §3 recall table
-        # (and this column's acceptance floor) measures the PLACEMENT rule
-        # alone, same as the report's own methodology; density's effect on
-        # precision/recall is a separate, already-unit-tested concern (see
-        # tests/test_midsong_generator.py's own density tests), not part
-        # of this four-song reproduction.
+        # The shipped default placement knobs — RoomControlState()'s own
+        # window=8/sensitivity=0.5/both directions, snap-to-beat on — the
+        # generator's ACTUAL production placement rule as of this build
+        # (report §5 task 3).
+        # DENSITY (transitions_per_minute, the rate replacing the old
+        # task 3 "strongest N" count) is deliberately NOT applied here —
+        # the report's own §3 recall table (and this column's acceptance
+        # floor) measures the PLACEMENT rule alone, same as the report's
+        # own methodology; density's effect on precision/recall is a
+        # separate, already-unit-tested concern (see
+        # tests/test_midsong_generator.py's own density/rate tests),
+        # not part of this four-song reproduction.
         edge_rule = _run_generation(tmp, uri, snap=True, edges_enabled=True, label="edge_rule")
 
         for ref_name, ref_marks in (("transitions", transitions_ref), ("flares", flares_ref)):

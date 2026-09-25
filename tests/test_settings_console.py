@@ -65,7 +65,7 @@ def test_registry_is_an_explicit_allowlist_matching_room_control_bounds():
         "scene_transition_ms_gentle", "scene_transition_ms_hard",
         "ambient_enabled", "ambient_on_music_pause", "ambient_color",
         "scene_change_mode", "transition_window_beats",
-        "transition_edge_sensitivity", "transition_max_per_song",
+        "transition_edge_sensitivity", "transitions_per_minute",
     }
     # force_scene_* deliberately excluded — see settings_console.py docstring
     assert "force_scene_enabled" not in sc.SETTINGS_REGISTRY
