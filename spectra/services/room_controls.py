@@ -563,14 +563,26 @@ class RoomControlState(BaseModel):
     # knob rhythmic_edges.py's own sensitivity param. Bounds match
     # rhythmic_edges.MIN_SENSITIVITY/MAX_SENSITIVITY.
     transition_edge_sensitivity: float = Field(default=0.5, ge=0.2, le=1.5)
-    # Density (the Admiral's rollout decision, decision-rollout.md item 1:
-    # "emit about as many transitions as you mark by hand (11-14 a song)
-    # ... instead of 2-3x that"): the strongest N candidate cues by
-    # bass-energy step size are kept, BEFORE placement — see
-    # midsong_generator.py's own DENSITY docstring section for the ranking.
-    # Default 12 (his own number); range ~6-40 per the report's own
-    # "strongest N" proposal (section 6).
-    transition_max_per_song: int = Field(default=12, ge=6, le=40)
+    # Density, AS A RATE (2026-09-25, the Admiral's order: "instead of a
+    # fixed transition count per song, do per minute. then calculate total
+    # per song and use that number instead" — plus, same day, "and scale
+    # the value with the mark percentage for that song"). REPLACES the
+    # retired flat transition_max_per_song knob (6-40, default 12,
+    # decision-rollout.md item 1's "emit about as many transitions as you
+    # mark by hand"): the strongest candidate cues by bass-energy step
+    # size are kept, BEFORE placement, up to `round(transitions_per_minute
+    # * duration_minutes * effective_intensity_scale_factor(uri))` — see
+    # midsong_generator.py's own DENSITY docstring section and
+    # resolve_transition_count()/effective_intensity_scale_factor() for
+    # the exact formula, the per-song intensity_scale factor it scales by
+    # (automatic up to 125%, or a manual mark up to 200%), and
+    # RESULT_CAP_PER_SONG's sanity ceiling. Default 8 (his own number);
+    # bounds are on the RATE, not the resolved per-song total — a bare
+    # per-song cap here would be exactly the fixed count this field
+    # retires. Effect only lands the next time a song's cues are
+    # (re)generated (⟳ Generate, or the auto-generate-on-first-play path)
+    # — an already-stored generated cue doesn't move on its own.
+    transitions_per_minute: float = Field(default=8.0, ge=1.0, le=30.0)
 
     # THE A/V-SYNC LEAD (owner ask 2026-08-28) — LEAD family: positive =
     # fire EARLIER, negative = fire LATER. The value the /avsync
@@ -857,6 +869,15 @@ def load_room_controls() -> RoomControlState:
             raw["display_mode"] = "dark" if raw.pop("dark_mode_enabled") else "default"
         else:
             raw.pop("dark_mode_enabled", None)
+        # One-way drop of the retired flat transition_max_per_song knob
+        # (2026-09-25) — transitions_per_minute replaces it outright, not
+        # a converted value: the two are different units (a per-song
+        # count vs. a rate) with no faithful conversion between them, so
+        # a stored file just falls through to the new field's own
+        # default (8/min) the same way any other never-before-seen field
+        # would. Never keep both — see the module docstring's own
+        # transitions_per_minute entry.
+        raw.pop("transition_max_per_song", None)
         try:
             return RoomControlState(**raw)
         except Exception:

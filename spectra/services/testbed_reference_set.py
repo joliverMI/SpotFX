@@ -50,7 +50,7 @@ class ReferenceSongResult:
 
 
 def compute(*, window_beats: int, sensitivity: float, direction: str,
-            max_per_song: Optional[int] = None) -> list[ReferenceSongResult]:
+            transitions_per_minute: Optional[float] = None) -> list[ReferenceSongResult]:
     """One row per REFERENCE_SONGS entry, at the caller's own knob values.
     Runs the generator's preview kind fresh (read-only, nothing written) —
     the exact function generator:preview's own lane calls."""
@@ -64,7 +64,7 @@ def compute(*, window_beats: int, sensitivity: float, direction: str,
         marks = testbed_engines.marks_for(
             testbed_engines.ENGINE_GENERATOR, uri,
             window_beats=window_beats, sensitivity=sensitivity,
-            direction=direction, max_per_song=max_per_song,
+            direction=direction, transitions_per_minute=transitions_per_minute,
         ) or []
         preview = [m.time_ms for m in marks
                   if m.kind == testbed_engines.GENERATOR_KIND_PREVIEW]

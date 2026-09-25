@@ -8729,6 +8729,46 @@ edge provenance on a real placed cue).
 (`scripts/import_analysed_triggers.py --apply`) is a separate,
 captain-gated step per the rollout decision, unchanged by this work.
 
+## DENSITY is now a RATE, not a flat count (2026-09-25, supersedes the `transition_max_per_song` paragraphs above)
+
+The Admiral: "instead of a fixed transition count per song, do per
+minute. then calculate total per song and use that number instead...
+and scale the value with the mark percentage for that song."
+`RoomControlState.transition_max_per_song` (6-40, default 12) is
+RETIRED — every mention of it above (ship task 4, the DENSITY section,
+the test-bed slider) describes the mechanism it replaced; the field no
+longer exists and a stored file carrying it drops the key on load
+(`room_controls.load_room_controls`'s own migration, no value carried
+over — the two are different units with no faithful conversion).
+`RoomControlState.transitions_per_minute` (`Field(ge=1, le=30,
+default=8)`) is the new knob, and `midsong_generator.
+resolve_transition_count(uri, sections, transitions_per_minute)` is the
+one place it resolves to a per-song total: `round(transitions_per_minute
+* duration_minutes * effective_intensity_scale_factor(uri))`, clamped to
+`[1, RESULT_CAP_PER_SONG]` (200 — a sanity ceiling only, never reached by
+an ordinary song at the default rate).
+`effective_intensity_scale_factor` (`midsong_generator.py`) is
+`intensity_scale.song_scaling_factor(uri, genres)` — the SAME per-song
+factor the show applies to render intensity (automatic up to 125%, or a
+manual "Mark" up to 200%) — with genres read from the live bridge only
+when `uri` is the currently-playing track (genres aren't stored per-song
+anywhere offline), lazily imported to avoid the `engine` -> `trigger_
+engine` -> `midsong_generator` import cycle. `candidate_moments` now
+takes `transitions_per_minute` (not `max_per_song`) and every downstream
+surface followed: `RoomControlsBar.tsx` ("Transitions per minute"),
+the test bed's density slider/query param/`edgeKnobs.ts` constants
+(`DEFAULT_TRANSITIONS_PER_MINUTE` etc.), `spectra/api/testbed.py`'s
+`_RATE_GE/_LE`, `settings_console.py`'s registry entry, and `types.ts`.
+`scripts/check_transition_alignment.py`'s columns all monkeypatch
+`resolve_transition_count` to an unlimited constant, unchanged in intent
+from the old script's `max_per_song=40` default — this script still
+measures the PLACEMENT rule alone, never density. Spec:
+`tests/test_midsong_generator.py`'s own rate-arithmetic tests
+(`resolve_transition_count`'s formula, the factor scaling, the >=1 floor,
+the sanity ceiling) alongside the pre-existing density-ranking tests
+(now driven through a patched, count-returning `resolve_transition_count`
+for exact control, matching the old flat-count semantics).
+
 ## Maintaining this file
 
 Keep this file for knowledge useful to almost every future agent session in this project.

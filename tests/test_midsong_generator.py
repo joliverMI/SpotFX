@@ -360,14 +360,20 @@ def _seed_density_song(scfg, *, n_boundaries=20, tempo_bpm=120.0):
     return pairs
 
 
-def test_density_cap_keeps_the_strongest_n_candidates():
+def test_density_cap_keeps_the_strongest_n_candidates(monkeypatch):
+    """The RANKING itself — with the rate->count resolution patched out to
+    a fixed N, matching the old flat transition_max_per_song semantics —
+    see resolve_transition_count's own arithmetic tests below for the
+    rate/duration/factor formula itself."""
     from spectra import config as scfg
     from spectra.services import midsong_generator
+    monkeypatch.setattr(midsong_generator, "resolve_transition_count",
+                        lambda uri, sections, rate: 5)
     pairs = _seed_density_song(scfg, n_boundaries=20)  # strengths 1..20
 
     moments = midsong_generator.candidate_moments(
         GEN_URI, snap_enabled=False, window_beats=1, sensitivity=1.5,
-        direction="both", max_per_song=5)
+        direction="both", transitions_per_minute=1)
 
     assert len(moments) == 5, "only the 5 strongest candidates survive"
     kept_raw_ms = sorted(int(m.generator_key.split(":")[1]) for m in moments)
@@ -377,52 +383,119 @@ def test_density_cap_keeps_the_strongest_n_candidates():
         "bass-energy step size, not an arbitrary 5")
 
 
-def test_density_cap_output_stays_chronologically_ordered():
+def test_density_cap_output_stays_chronologically_ordered(monkeypatch):
     from spectra import config as scfg
     from spectra.services import midsong_generator
+    monkeypatch.setattr(midsong_generator, "resolve_transition_count",
+                        lambda uri, sections, rate: 5)
     _seed_density_song(scfg, n_boundaries=20)
     moments = midsong_generator.candidate_moments(
         GEN_URI, snap_enabled=False, window_beats=1, sensitivity=1.5,
-        direction="both", max_per_song=5)
+        direction="both", transitions_per_minute=1)
     timestamps = [m.timestamp_ms for m in moments]
     assert timestamps == sorted(timestamps), (
         "kept candidates are restored to chronological order after ranking")
 
 
-def test_density_cap_is_a_no_op_when_fewer_candidates_exist_than_the_cap():
+def test_density_cap_is_a_no_op_when_fewer_candidates_exist_than_the_cap(monkeypatch):
     from spectra import config as scfg
     from spectra.services import midsong_generator
+    monkeypatch.setattr(midsong_generator, "resolve_transition_count",
+                        lambda uri, sections, rate: 12)
     _seed_density_song(scfg, n_boundaries=3)
     moments = midsong_generator.candidate_moments(
         GEN_URI, snap_enabled=False, window_beats=1, sensitivity=1.5,
-        direction="both", max_per_song=12)
+        direction="both", transitions_per_minute=1)
     assert len(moments) == 3
 
 
-def test_candidate_moments_reads_the_three_room_control_knobs_when_unset():
-    """Passing no window_beats/sensitivity/max_per_song explicitly reads
-    the live RoomControlState — proven by setting a room default that
-    caps density well below the raw candidate count and confirming it
-    actually takes effect."""
+def test_candidate_moments_reads_the_three_room_control_knobs_when_unset(monkeypatch):
+    """Passing no window_beats/sensitivity/transitions_per_minute
+    explicitly reads the live RoomControlState — proven by setting a room
+    default rate that (through the patched identity resolver below) caps
+    density well below the raw candidate count and confirming it actually
+    takes effect."""
     from spectra import config as scfg
     from spectra.services import midsong_generator, room_controls
+    monkeypatch.setattr(midsong_generator, "resolve_transition_count",
+                        lambda uri, sections, rate: int(rate))
     _seed_density_song(scfg, n_boundaries=20)
     room_controls.save_room_controls(room_controls.RoomControlState(
         midsong_snap_to_beat=False, transition_window_beats=1,
-        transition_edge_sensitivity=1.5, transition_max_per_song=6))
+        transition_edge_sensitivity=1.5, transitions_per_minute=6))
     moments = midsong_generator.candidate_moments(GEN_URI)
-    assert len(moments) == 6, "the room's own transition_max_per_song took effect"
+    assert len(moments) == 6, "the room's own transitions_per_minute took effect"
 
 
-def test_explicit_max_per_song_overrides_the_room_default():
+def test_explicit_transitions_per_minute_overrides_the_room_default(monkeypatch):
     from spectra import config as scfg
     from spectra.services import midsong_generator, room_controls
+    monkeypatch.setattr(midsong_generator, "resolve_transition_count",
+                        lambda uri, sections, rate: int(rate))
     _seed_density_song(scfg, n_boundaries=20)
     room_controls.save_room_controls(room_controls.RoomControlState(
-        transition_max_per_song=6))
+        transitions_per_minute=6))
     moments = midsong_generator.candidate_moments(
-        GEN_URI, snap_enabled=False, window_beats=1, sensitivity=1.5, max_per_song=10)
+        GEN_URI, snap_enabled=False, window_beats=1, sensitivity=1.5,
+        transitions_per_minute=10)
     assert len(moments) == 10, "an explicit override wins over the room default"
+
+
+def test_resolve_transition_count_is_rate_times_duration_times_factor(monkeypatch):
+    """The actual arithmetic (2026-09-25, the Admiral's order): total =
+    round(rate * duration_minutes * effective_intensity_scale_factor),
+    clamped to [1, RESULT_CAP_PER_SONG]. effective_intensity_scale_factor
+    is patched to an exact 1.0 here so the formula is checked on its own,
+    without intensity_scale's own genre/bass-rank resolution (covered by
+    that module's own tests) folded in."""
+    from spectra.services import midsong_generator
+    monkeypatch.setattr(midsong_generator, "effective_intensity_scale_factor",
+                        lambda uri: 1.0)
+    sections = [{"start_ms": 0, "end_ms": 180_000}]  # exactly 3 minutes
+    assert midsong_generator.resolve_transition_count(
+        GEN_URI, sections, transitions_per_minute=8.0) == 24
+    assert midsong_generator.resolve_transition_count(
+        GEN_URI, sections, transitions_per_minute=10.0) == 30
+
+
+def test_resolve_transition_count_scales_with_the_intensity_scale_factor(monkeypatch):
+    """His own addendum: "scale the value with the mark percentage for
+    that song" — a hyped (higher-factor) song earns proportionally more
+    transitions at the same rate and duration."""
+    from spectra.services import midsong_generator
+    sections = [{"start_ms": 0, "end_ms": 120_000}]  # 2 minutes
+    monkeypatch.setattr(midsong_generator, "effective_intensity_scale_factor",
+                        lambda uri: 0.5)
+    half = midsong_generator.resolve_transition_count(
+        GEN_URI, sections, transitions_per_minute=8.0)
+    monkeypatch.setattr(midsong_generator, "effective_intensity_scale_factor",
+                        lambda uri: 2.0)
+    quadruple = midsong_generator.resolve_transition_count(
+        GEN_URI, sections, transitions_per_minute=8.0)
+    assert half == 8   # round(8 * 2 * 0.5)
+    assert quadruple == 32  # round(8 * 2 * 2.0)
+
+
+def test_resolve_transition_count_never_goes_below_one(monkeypatch):
+    """Even a near-silent rate on a very short song still keeps one cue —
+    his own requirement, unconditional."""
+    from spectra.services import midsong_generator
+    monkeypatch.setattr(midsong_generator, "effective_intensity_scale_factor",
+                        lambda uri: 0.3)
+    sections = [{"start_ms": 0, "end_ms": 3_000}]  # 3 seconds
+    assert midsong_generator.resolve_transition_count(
+        GEN_URI, sections, transitions_per_minute=1.0) == 1
+
+
+def test_resolve_transition_count_is_capped_at_the_sanity_ceiling(monkeypatch):
+    """An absurdly long track at a maxed-out rate is clamped, never left
+    to silently blow past a usable density."""
+    from spectra.services import midsong_generator
+    monkeypatch.setattr(midsong_generator, "effective_intensity_scale_factor",
+                        lambda uri: 2.0)
+    sections = [{"start_ms": 0, "end_ms": 3_600_000}]  # 60 minutes
+    assert midsong_generator.resolve_transition_count(
+        GEN_URI, sections, transitions_per_minute=30.0) == midsong_generator.RESULT_CAP_PER_SONG
 
 
 def test_generated_cue_provenance_records_an_edge_label():
@@ -452,7 +525,7 @@ def test_generated_cue_provenance_records_an_edge_label():
     }), encoding="utf-8")
 
     [m] = midsong_generator.candidate_moments(
-        GEN_URI, window_beats=8, sensitivity=0.5, direction="both", max_per_song=12)
+        GEN_URI, window_beats=8, sensitivity=0.5, direction="both", transitions_per_minute=8)
     assert m.snap_grid == "edge:up"
     assert m.timestamp_ms == int(round(20 * step_ms))
     assert m.snap_moved_ms == int(round(20 * step_ms)) - boundary_ms

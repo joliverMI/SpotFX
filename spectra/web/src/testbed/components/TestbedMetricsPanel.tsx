@@ -5,8 +5,9 @@
  *
  * Also carries the `edges` engine's own three knobs (window/sensitivity/
  * direction, spectra/services/rhythmic_edges.py, data/transition-alignment-plan/
- * report.md section 4) plus the "strongest N" density knob and the "Use
- * as room default" button (section 5 task 4) — shown next to the
+ * report.md section 4) plus the "transitions per minute" density RATE
+ * knob (2026-09-25) and the "Use as room default" button (section 5 task
+ * 4) — shown next to the
  * tolerance slider only while an `edges` lane (or the generator's own
  * preview kind) is active in either A/B slot, and re-scoring the exact
  * way the tolerance slider does: dragging/toggling one refetches
@@ -14,9 +15,9 @@
  * P/R/F1 locally with the same matcher tolerance already uses. */
 import HelpLink from '../../help/HelpLink';
 import {
-  DEFAULT_DIRECTION, DEFAULT_MAX_PER_SONG, DEFAULT_SENSITIVITY, DEFAULT_WINDOW_BEATS, DIRECTIONS,
-  MAX_MAX_PER_SONG, MAX_SENSITIVITY, MAX_WINDOW_BEATS, MIN_MAX_PER_SONG, MIN_SENSITIVITY,
-  MIN_WINDOW_BEATS, transitionDefaultsDiffer,
+  DEFAULT_DIRECTION, DEFAULT_SENSITIVITY, DEFAULT_TRANSITIONS_PER_MINUTE, DEFAULT_WINDOW_BEATS, DIRECTIONS,
+  MAX_SENSITIVITY, MAX_TRANSITIONS_PER_MINUTE, MAX_WINDOW_BEATS, MIN_SENSITIVITY,
+  MIN_TRANSITIONS_PER_MINUTE, MIN_WINDOW_BEATS, transitionDefaultsDiffer,
 } from '../edgeKnobs';
 import type { Direction, TransitionKnobValues } from '../edgeKnobs';
 import type { TestbedMetrics, TestbedReferenceSet } from '../../types';
@@ -27,9 +28,9 @@ function pct(v: number) {
 
 export default function TestbedMetricsPanel({
   rows, toleranceMs, onToleranceChange, defaultToleranceMs, onResetToDefault, emptyNote,
-  windowBeats, sensitivity, direction, maxPerSong,
-  onWindowBeatsChange, onSensitivityChange, onDirectionChange, onMaxPerSongChange,
-  showEdgeKnobs, showMaxPerSong, roomDefaults, onUseAsRoomDefault, useAsRoomDefaultPending,
+  windowBeats, sensitivity, direction, transitionsPerMinute,
+  onWindowBeatsChange, onSensitivityChange, onDirectionChange, onTransitionsPerMinuteChange,
+  showEdgeKnobs, showTransitionsPerMinute, roomDefaults, onUseAsRoomDefault, useAsRoomDefaultPending,
   referenceSet, referenceSetLoading,
 }: {
   rows: { key: string; label: string; metrics: TestbedMetrics | null | undefined; available: boolean }[];
@@ -44,21 +45,21 @@ export default function TestbedMetricsPanel({
   windowBeats: number;
   sensitivity: number;
   direction: Direction;
-  maxPerSong: number;
+  transitionsPerMinute: number;
   onWindowBeatsChange: (v: number) => void;
   onSensitivityChange: (v: number) => void;
   onDirectionChange: (v: Direction) => void;
-  onMaxPerSongChange: (v: number) => void;
+  onTransitionsPerMinuteChange: (v: number) => void;
   /** Only true while an `edges` lane is selected in either A/B slot — a
    * knob shown for an engine it does not touch would imply a control that
    * does nothing (spectra/web/src/testbed/edgeKnobs.ts::knobsRelevant). */
   showEdgeKnobs: boolean;
   /** Narrower than showEdgeKnobs — the density knob only means anything
-   * for the generator's own preview kind (edgeKnobs.ts::maxPerSongRelevant). */
-  showMaxPerSong: boolean;
+   * for the generator's own preview kind (edgeKnobs.ts::transitionsPerMinuteRelevant). */
+  showTransitionsPerMinute: boolean;
   /** The room's CURRENT transition_window_beats/_edge_sensitivity/
-   * _max_per_song, for the "differs from room default" highlight. `null`/
-   * undefined while GET /room-controls hasn't resolved yet. */
+   * transitions_per_minute, for the "differs from room default" highlight.
+   * `null`/undefined while GET /room-controls hasn't resolved yet. */
   roomDefaults: TransitionKnobValues | null | undefined;
   onUseAsRoomDefault: () => void;
   useAsRoomDefaultPending: boolean;
@@ -67,7 +68,7 @@ export default function TestbedMetricsPanel({
   referenceSet: TestbedReferenceSet | undefined;
   referenceSetLoading: boolean;
 }) {
-  const currentKnobs: TransitionKnobValues = { windowBeats, sensitivity, maxPerSong };
+  const currentKnobs: TransitionKnobValues = { windowBeats, sensitivity, transitionsPerMinute };
   const differsFromRoom = transitionDefaultsDiffer(currentKnobs, roomDefaults);
   const atDefault = toleranceMs === defaultToleranceMs;
   return (
@@ -162,25 +163,25 @@ export default function TestbedMetricsPanel({
               </button>
             )}
           </div>
-          {showMaxPerSong && (
+          {showTransitionsPerMinute && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <label htmlFor="testbed-max-per-song" style={{ fontSize: 12, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
-                Transitions per song: {maxPerSong}
-                <HelpLink topic="testbed-generator-and-edges" title="Strongest N and Use as room default" />
+              <label htmlFor="testbed-transitions-per-minute" style={{ fontSize: 12, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                Transitions per minute: {transitionsPerMinute}
+                <HelpLink topic="testbed-generator-and-edges" title="Transitions per minute and Use as room default" />
               </label>
               <input
-                id="testbed-max-per-song"
+                id="testbed-transitions-per-minute"
                 type="range"
-                min={MIN_MAX_PER_SONG}
-                max={MAX_MAX_PER_SONG}
-                step={1}
-                value={maxPerSong}
-                onChange={(e) => onMaxPerSongChange(Number(e.target.value))}
+                min={MIN_TRANSITIONS_PER_MINUTE}
+                max={MAX_TRANSITIONS_PER_MINUTE}
+                step={0.5}
+                value={transitionsPerMinute}
+                onChange={(e) => onTransitionsPerMinuteChange(Number(e.target.value))}
                 style={{ flex: 1, maxWidth: 180 }}
               />
-              {maxPerSong !== DEFAULT_MAX_PER_SONG && (
-                <button onClick={() => onMaxPerSongChange(DEFAULT_MAX_PER_SONG)} style={{ fontSize: 11 }}>
-                  Reset ({DEFAULT_MAX_PER_SONG})
+              {transitionsPerMinute !== DEFAULT_TRANSITIONS_PER_MINUTE && (
+                <button onClick={() => onTransitionsPerMinuteChange(DEFAULT_TRANSITIONS_PER_MINUTE)} style={{ fontSize: 11 }}>
+                  Reset ({DEFAULT_TRANSITIONS_PER_MINUTE})
                 </button>
               )}
             </div>
@@ -194,7 +195,7 @@ export default function TestbedMetricsPanel({
             {roomDefaults ? (
               <span style={differsFromRoom ? { color: 'var(--warn, #b45309)', fontWeight: 600 } : undefined}>
                 Window {roomDefaults.windowBeats} · Sensitivity {roomDefaults.sensitivity.toFixed(2)}{' '}
-                · N {roomDefaults.maxPerSong}
+                · {roomDefaults.transitionsPerMinute}/min
               </span>
             ) : 'loading…'}
             {differsFromRoom && ' — differs from the sliders above'}

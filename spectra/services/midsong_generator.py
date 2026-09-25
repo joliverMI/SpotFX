@@ -99,18 +99,40 @@ for the two knobs. Direction is fixed at rhythmic_edges.DEFAULT_DIRECTION
 knob (spectra/services/testbed_engines.py's generator:preview lane),
 never promoted to a room setting.
 
-DENSITY (the Admiral's rollout decision, decision-rollout.md item 1):
-before placement, only each song's strongest RoomControlState.
-transition_max_per_song (default 12) mid-song candidates survive, ranked
-by the ABSOLUTE bass-energy step (rhythmic_edges.bass_step_at) at each
-candidate's own RAW section-boundary time — a comparable strength score
-whether or not that moment actually crosses the sensitivity threshold as
-a named edge. Ties (equal step magnitude, or no beat analysis at all —
-every candidate scores 0.0) keep chronological order, since Python's sort
-is stable. A song with `transition_max_per_song` or fewer candidates is
-unaffected. Ranking happens BEFORE placement, on the boundary's own raw
-time, so density and placement never fight over which moment "moved
-first."
+DENSITY — A RATE, NOT A FLAT COUNT (2026-09-25, the Admiral's order:
+"instead of a fixed transition count per song, do per minute. then
+calculate total per song and use that number instead... and scale the
+value with the mark percentage for that song"). RoomControlState.
+transitions_per_minute (default 8) REPLACES the old flat
+transition_max_per_song knob — resolve_transition_count() turns it into
+a per-song total: `round(transitions_per_minute * duration_minutes *
+effective_intensity_scale_factor(uri))`, clamped to
+[1, RESULT_CAP_PER_SONG]. duration_minutes is the song's own analysed
+length (max section end_ms — the same convention
+_normalized_intensities already uses for edge trimming), never a stored
+Spotify duration, since this function only ever has the analysis to work
+from. effective_intensity_scale_factor is the SAME per-song factor the
+show applies to render intensity — spectra.services.intensity_scale.
+song_scaling_factor, automatic up to 125% or a manual mark up to 200%
+(see effective_intensity_scale_factor's own docstring) — so a track he's
+marked or that scores hot on genre+bass earns proportionally more
+transitions, a dialed-down one fewer. The lower clamp (>= 1) is
+unconditional: a song that generates at all always keeps at least one
+cue, regardless of how short it is or how low the rate. The upper clamp
+(RESULT_CAP_PER_SONG, its own docstring) is a sanity ceiling only — never
+reached by an ordinary song at the default rate, so it is never what
+"his rate" silently means in practice.
+
+Before placement, only the song's strongest resolve_transition_count()
+candidates survive, ranked by the ABSOLUTE bass-energy step
+(rhythmic_edges.bass_step_at) at each candidate's own RAW
+section-boundary time — a comparable strength score whether or not that
+moment actually crosses the sensitivity threshold as a named edge. Ties
+(equal step magnitude, or no beat analysis at all — every candidate
+scores 0.0) keep chronological order, since Python's sort is stable. A
+song with fewer raw candidates than the resolved count is unaffected.
+Ranking happens BEFORE placement, on the boundary's own raw time, so
+density and placement never fight over which moment "moved first."
 
 FRAME FIX (2026-09-23, data/transition-alignment-plan/report.md §2.1/§5
 task 1): a section's own start_ms is in the CAPTURED-WAV's own frame
@@ -150,6 +172,66 @@ from spectra.services import (
 
 INTENSITY_FLOOR = 0.05
 EDGE_TRIM_MS = 15_000
+
+RESULT_CAP_PER_SONG = 200
+"""Sanity ceiling on the per-song transition total transitions_per_minute
+resolves to — NOT the density knob itself, which is the rate alone. At
+the default rate (8/min) an ordinary song never gets close (a 25-minute
+track would be needed to reach it), so this is never what "his rate"
+silently means in practice; it exists only to stop a maxed-out rate on
+an unusually long analysed file from producing an unusable density of
+scene changes. Documented on the room bar's own help topic
+('transitions-per-minute') rather than left as an invisible surprise."""
+
+
+def effective_intensity_scale_factor(uri: str) -> float:
+    """The per-song intensity_scale factor the show itself applies to
+    this song's render intensity (2026-09-25, the Admiral's addendum:
+    "scale the value with the mark percentage for that song") —
+    spectra.services.intensity_scale.song_scaling_factor(uri, genres):
+    automatic (genre + bass rank) up to 125%, or a manual per-track mark
+    (intensity_scale_marks.py) up to 200% — the SAME resolution
+    resolve_transition_count() below feeds into its rate x duration
+    formula. Genres are only ever known while the exact song named by
+    `uri` is the one currently loaded on the live bridge (Spotify's own
+    track metadata, never stored per-song in SPECTRA's own storage) —
+    read here from spectra.services.engine's bridge singleton, imported
+    LAZILY (that module imports trigger_engine, which imports this one at
+    module scope — a top-level import here would be circular). When this
+    song isn't the one currently playing (the common case for a batch
+    regeneration pass), genres fall back to an empty list — the exact
+    same fallback intensity_scale.song_scaling_factor already uses for
+    any song whose genres are unknown, so this is not a degraded case
+    invented for this caller, only the ordinary "genre unknown" path."""
+    from spectra.services import intensity_scale
+    genres: list[str] = []
+    try:
+        from spectra.services import engine as engine_module
+        bridge = getattr(engine_module, "bridge", None)
+        if bridge is not None and bridge.track_uri() == uri:
+            genres = bridge.track_genres()
+    except Exception:
+        genres = []
+    return intensity_scale.song_scaling_factor(uri, genres)
+
+
+def resolve_transition_count(
+    uri: str, sections: list[dict], transitions_per_minute: float,
+) -> int:
+    """The per-song transition COUNT `transitions_per_minute` resolves to
+    (see the module docstring's DENSITY section): `round(
+    transitions_per_minute * duration_minutes *
+    effective_intensity_scale_factor(uri))`, clamped to
+    [1, RESULT_CAP_PER_SONG]. `duration_minutes` is the song's own
+    analysed length (max section end_ms across ALL sections, including
+    the excluded opening one — the same convention
+    _normalized_intensities already uses to find the track's own edges),
+    never a stored Spotify duration."""
+    duration_ms = max((int(sec.get("end_ms", 0)) for sec in sections), default=0)
+    minutes = duration_ms / 60000.0
+    factor = effective_intensity_scale_factor(uri)
+    total = round(transitions_per_minute * minutes * factor)
+    return max(1, min(RESULT_CAP_PER_SONG, total))
 
 
 @dataclass(frozen=True)
@@ -242,7 +324,7 @@ def candidate_moments(
     window_beats: Optional[int] = None,
     sensitivity: Optional[float] = None,
     direction: Optional[str] = None,
-    max_per_song: Optional[int] = None,
+    transitions_per_minute: Optional[float] = None,
 ) -> list[CandidateMoment]:
     """One CandidateMoment per surviving section boundary past the song's
     own start (see the module docstring's DENSITY section for what
@@ -262,7 +344,7 @@ def candidate_moments(
     if not sections:
         return []
     if (snap_enabled is None or window_beats is None or sensitivity is None
-            or max_per_song is None):
+            or transitions_per_minute is None):
         controls = room_controls.load_room_controls()
         if snap_enabled is None:
             snap_enabled = controls.midsong_snap_to_beat
@@ -270,8 +352,8 @@ def candidate_moments(
             window_beats = controls.transition_window_beats
         if sensitivity is None:
             sensitivity = controls.transition_edge_sensitivity
-        if max_per_song is None:
-            max_per_song = controls.transition_max_per_song
+        if transitions_per_minute is None:
+            transitions_per_minute = controls.transitions_per_minute
     if direction is None:
         direction = rhythmic_edges.DEFAULT_DIRECTION
 
@@ -280,10 +362,10 @@ def candidate_moments(
     mid = [(sec, intensity) for sec, intensity in zip(ordered, intensities)
           if int(sec.get("start_ms", 0)) > 0]  # exclude the song's own opening
 
-    # DENSITY — keep the strongest max_per_song candidates by bass-energy
-    # step size, ranked at each candidate's own RAW boundary time, BEFORE
-    # placement (see the module docstring's DENSITY section). Resolved
-    # once per song, not once per candidate.
+    # DENSITY — keep the strongest resolve_transition_count() candidates by
+    # bass-energy step size, ranked at each candidate's own RAW boundary
+    # time, BEFORE placement (see the module docstring's DENSITY section).
+    # Resolved once per song, not once per candidate.
     beat_series = rhythmic_edges.bass_step_series_for_uri(uri)
     scored = [
         (sec, intensity, int(sec.get("start_ms", 0)),
@@ -291,8 +373,10 @@ def candidate_moments(
          if beat_series is not None else 0.0)
         for sec, intensity in mid
     ]
-    if max_per_song and len(scored) > max_per_song:
-        kept = sorted(range(len(scored)), key=lambda i: scored[i][3], reverse=True)[:max_per_song]
+    resolved_count = resolve_transition_count(uri, ordered, transitions_per_minute)
+    if len(scored) > resolved_count:
+        kept = sorted(range(len(scored)), key=lambda i: scored[i][3],
+                      reverse=True)[:resolved_count]
         kept.sort()  # restore chronological order
         scored = [scored[i] for i in kept]
 

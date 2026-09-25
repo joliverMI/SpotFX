@@ -582,11 +582,14 @@ export default function RoomControlsBar() {
               />
             </div>
             <div className="top-bar-group-field">
-              <label>Transitions per song</label>
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                Transitions per minute
+                <HelpLink topic="transition-placement-rule" />
+              </label>
               <input
-                type="number" min={6} max={40} step={1}
-                value={local.transition_max_per_song}
-                onChange={(e) => setLocal({ ...local, transition_max_per_song: Number(e.target.value) })}
+                type="number" min={1} max={30} step={0.5}
+                value={local.transitions_per_minute}
+                onChange={(e) => setLocal({ ...local, transitions_per_minute: Number(e.target.value) })}
                 onBlur={() => commit(local)}
               />
             </div>

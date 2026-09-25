@@ -15,7 +15,7 @@ import pytest
 @pytest.fixture(autouse=True)
 def _isolated(tmp_path, monkeypatch):
     from spectra import config as scfg
-    from spectra.services import analysis_reader
+    from spectra.services import analysis_reader, midsong_generator
     monkeypatch.setattr(scfg, "TRIGGERS_FILE", tmp_path / "triggers.json")
     monkeypatch.setattr(scfg, "PROFILES_DIR", tmp_path / "profiles")
     monkeypatch.setattr(scfg, "AUDIO_SHAPES_DIR", tmp_path / "audio_shapes")
@@ -27,12 +27,23 @@ def _isolated(tmp_path, monkeypatch):
     scfg.AUDIO_SHAPES_DIR.mkdir(parents=True)
     analysis_reader._shape_index.clear()
     analysis_reader._index_built = False
+    # The old tests here were all written against a flat per-song COUNT
+    # knob (transition_max_per_song); the rate replacing it
+    # (transitions_per_minute, 2026-09-25) multiplies by duration and the
+    # song's own intensity-scale factor — see
+    # tests/test_midsong_generator.py for THAT arithmetic on its own.
+    # Patching the rate->count resolution to a plain identity keeps this
+    # file's density/knob-plumbing tests meaningful with a minimal rename
+    # (transitions_per_minute=N behaves exactly like the old
+    # transitions_per_minute=N did).
+    monkeypatch.setattr(midsong_generator, "resolve_transition_count",
+                        lambda uri, sections, rate: max(1, int(round(rate))))
 
 
 def _seed_song(scfg, uri, stem, *, n_boundaries, tempo_bpm=120.0):
     """Same deterministic-strength density shape used throughout this
     build's other tuning-loop tests: the i-th of `n_boundaries` mid-song
-    boundaries carries bass-energy step size i, so a lower max_per_song/
+    boundaries carries bass-energy step size i, so a lower transitions_per_minute/
     window_beats visibly moves which (and how many) candidates survive."""
     n_beats = n_boundaries * 2 + 2
     rms_bass = [0.0] * n_beats
@@ -63,7 +74,7 @@ def _write_authored_transition(uri, timestamp_ms):
 def test_compute_returns_one_row_per_reference_song_in_order():
     from spectra.services import testbed_reference_set
     rows = testbed_reference_set.compute(
-        window_beats=8, sensitivity=0.5, direction="both", max_per_song=None)
+        window_beats=8, sensitivity=0.5, direction="both", transitions_per_minute=None)
     assert [r.name for r in rows] == [name for name, _uri in testbed_reference_set.REFERENCE_SONGS]
     assert [r.uri for r in rows] == [uri for _name, uri in testbed_reference_set.REFERENCE_SONGS]
 
@@ -71,7 +82,7 @@ def test_compute_returns_one_row_per_reference_song_in_order():
 def test_a_song_with_no_analysis_reports_unavailable_not_a_crash():
     from spectra.services import testbed_reference_set
     rows = testbed_reference_set.compute(
-        window_beats=8, sensitivity=0.5, direction="both", max_per_song=None)
+        window_beats=8, sensitivity=0.5, direction="both", transitions_per_minute=None)
     for row in rows:
         assert row.available is False
         assert row.metrics is None
@@ -86,7 +97,7 @@ def test_a_seeded_reference_song_scores_against_its_authored_transitions():
     _write_authored_transition(uri, 5000)  # lands exactly on boundary #5
 
     rows = testbed_reference_set.compute(
-        window_beats=1, sensitivity=1.5, direction="both", max_per_song=40)
+        window_beats=1, sensitivity=1.5, direction="both", transitions_per_minute=40)
     row = next(r for r in rows if r.uri == uri)
     assert row.available is True
     assert row.tolerance_ms == pytest.approx(500.0)  # one beat at 120bpm
@@ -95,7 +106,7 @@ def test_a_seeded_reference_song_scores_against_its_authored_transitions():
     assert row.metrics["recall"] == pytest.approx(1.0)
 
 
-def test_lowering_max_per_song_can_only_reduce_or_hold_recall():
+def test_lowering_transitions_per_minute_can_only_reduce_or_hold_recall():
     """The acceptance shape from the report itself (Contra 73% -> 55% when
     Window moves 8 -> 2): tightening a knob narrows the candidate set, so
     recall against a fixed reference set never goes UP."""
@@ -107,16 +118,16 @@ def test_lowering_max_per_song_can_only_reduce_or_hold_recall():
         _write_authored_transition(uri, i * 1000)
 
     wide = testbed_reference_set.compute(
-        window_beats=1, sensitivity=1.5, direction="both", max_per_song=20)
+        window_beats=1, sensitivity=1.5, direction="both", transitions_per_minute=20)
     narrow = testbed_reference_set.compute(
-        window_beats=1, sensitivity=1.5, direction="both", max_per_song=6)
+        window_beats=1, sensitivity=1.5, direction="both", transitions_per_minute=6)
     wide_row = next(r for r in wide if r.uri == uri)
     narrow_row = next(r for r in narrow if r.uri == uri)
     assert narrow_row.metrics["recall"] <= wide_row.metrics["recall"]
     assert narrow_row.metrics["n_matched"] < wide_row.metrics["n_matched"]
 
 
-def test_max_per_song_omitted_falls_back_to_the_room_default():
+def test_transitions_per_minute_omitted_falls_back_to_the_room_default():
     from spectra import config as scfg
     from spectra.services import room_controls, testbed_reference_set
     name, uri = testbed_reference_set.REFERENCE_SONGS[2]
@@ -125,10 +136,10 @@ def test_max_per_song_omitted_falls_back_to_the_room_default():
         _write_authored_transition(uri, i * 1000)
     room_controls.save_room_controls(room_controls.RoomControlState(
         midsong_snap_to_beat=False, transition_window_beats=1,
-        transition_edge_sensitivity=1.5, transition_max_per_song=6))
+        transition_edge_sensitivity=1.5, transitions_per_minute=6))
 
     explicit = testbed_reference_set.compute(
-        window_beats=1, sensitivity=1.5, direction="both", max_per_song=6)
+        window_beats=1, sensitivity=1.5, direction="both", transitions_per_minute=6)
     omitted = testbed_reference_set.compute(
         window_beats=1, sensitivity=1.5, direction="both")
     explicit_row = next(r for r in explicit if r.uri == uri)
@@ -149,7 +160,7 @@ def test_promoted_marks_are_excluded_from_scoring_here_too():
         source_engine="generator", source_mark_kind="preview", confirmed=True)
 
     rows = testbed_reference_set.compute(
-        window_beats=1, sensitivity=1.5, direction="both", max_per_song=40)
+        window_beats=1, sensitivity=1.5, direction="both", transitions_per_minute=40)
     row = next(r for r in rows if r.uri == uri)
     assert row.metrics["n_reference"] == 0
 
@@ -162,13 +173,13 @@ def _client():
 
 def test_reference_set_route_returns_all_four_songs_and_the_knobs_used():
     client = _client()
-    resp = client.get("/api/testbed/reference-set?window_beats=4&sensitivity=0.3&direction=up&max_per_song=10")
+    resp = client.get("/api/testbed/reference-set?window_beats=4&sensitivity=0.3&direction=up&transitions_per_minute=10")
     assert resp.status_code == 200
     body = resp.json()
     assert body["window_beats"] == 4
     assert body["sensitivity"] == pytest.approx(0.3)
     assert body["direction"] == "up"
-    assert body["max_per_song"] == 10
+    assert body["transitions_per_minute"] == 10
     assert len(body["songs"]) == 4
     assert {s["uri"] for s in body["songs"]} == {
         "spotify:track:1JxhrUWZjuI8AOjDJ1JpMN", "spotify:track:2zVg53xdC6RMpthWju6LRT",
@@ -181,14 +192,16 @@ def test_reference_set_route_rejects_out_of_bounds_knobs():
     assert client.get("/api/testbed/reference-set?window_beats=999").status_code == 422
     assert client.get("/api/testbed/reference-set?sensitivity=99").status_code == 422
     assert client.get("/api/testbed/reference-set?direction=sideways").status_code == 422
-    assert client.get("/api/testbed/reference-set?max_per_song=1").status_code == 422
+    assert client.get("/api/testbed/reference-set?transitions_per_minute=0").status_code == 422
+    assert client.get("/api/testbed/reference-set?transitions_per_minute=999").status_code == 422
 
 
-def test_reference_set_route_defaults_max_per_song_to_none_not_a_literal():
-    """Omitting max_per_song from the URL must mean 'use the room's own
-    setting', matching testbed_engines.marks_for's own semantics — never a
-    hardcoded literal that would silently disagree with a room default."""
+def test_reference_set_route_defaults_transitions_per_minute_to_none_not_a_literal():
+    """Omitting transitions_per_minute from the URL must mean 'use the
+    room's own setting', matching testbed_engines.marks_for's own
+    semantics — never a hardcoded literal that would silently disagree
+    with a room default."""
     client = _client()
     resp = client.get("/api/testbed/reference-set")
     assert resp.status_code == 200
-    assert resp.json()["max_per_song"] is None
+    assert resp.json()["transitions_per_minute"] is None

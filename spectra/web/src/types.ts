@@ -451,10 +451,12 @@ export interface RoomControlState {
   /** How big a bass-energy jump counts as a rhythmic edge — the same
    * knob rhythmic_edges.py's own sensitivity param. Default 0.5. */
   transition_edge_sensitivity: number;
-  /** DENSITY — the strongest N candidate cues by bass-energy step size
-   * are kept, before placement (the Admiral's rollout decision: "emit
-   * about as many transitions as you mark by hand"). Default 12. */
-  transition_max_per_song: number;
+  /** DENSITY, as a RATE (2026-09-25, replaces the old flat
+   * transition_max_per_song count): the strongest candidate cues by
+   * bass-energy step size are kept, before placement, up to this many
+   * per minute of song, scaled by that song's own intensity-scale
+   * factor. Default 8. */
+  transitions_per_minute: number;
   /** Legacy Now Playing "Force Scene" control, ported verbatim: while
    * enabled, every scene the system would otherwise pick automatically
    * (sequencer roll, trigger fire, or the automatic transition fire) fires
@@ -1612,6 +1614,6 @@ export interface TestbedReferenceSet {
   window_beats: number;
   sensitivity: number;
   direction: string;
-  max_per_song: number | null;
+  transitions_per_minute: number | null;
   songs: TestbedReferenceSetRow[];
 }

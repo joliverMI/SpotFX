@@ -14,7 +14,7 @@ import pytest
 @pytest.fixture(autouse=True)
 def _isolated(tmp_path, monkeypatch):
     from spectra import config as scfg
-    from spectra.services import analysis_reader
+    from spectra.services import analysis_reader, midsong_generator
     monkeypatch.setattr(scfg, "TRIGGERS_FILE", tmp_path / "triggers.json")
     monkeypatch.setattr(scfg, "PROFILES_DIR", tmp_path / "profiles")
     monkeypatch.setattr(scfg, "AUDIO_SHAPES_DIR", tmp_path / "audio_shapes")
@@ -24,6 +24,10 @@ def _isolated(tmp_path, monkeypatch):
     scfg.AUDIO_SHAPES_DIR.mkdir(parents=True)
     analysis_reader._shape_index.clear()
     analysis_reader._index_built = False
+    # Rate->count resolution patched to a plain identity — see
+    # tests/test_testbed_reference_set.py's own fixture comment for why.
+    monkeypatch.setattr(midsong_generator, "resolve_transition_count",
+                        lambda uri, sections, rate: max(1, int(round(rate))))
 
 
 URI = "spotify:track:testbedgenedge1"
@@ -270,13 +274,14 @@ def test_generator_lane_reachable_through_the_route_and_unshifted():
     assert body["estimate"] == [{"time_ms": 7777.0, "label": "fire_scene", "score": None}]
 
 
-# ── max_per_song ("strongest N" density knob, report section 5 task 4) ──
+# ── transitions_per_minute (the density RATE knob, 2026-09-25) ──
 
 def _seed_density(scfg, n_boundaries=20, tempo_bpm=120.0):
     """`n_boundaries` mid-song section boundaries at 1000ms spacing, each
     carrying a distinct, isolated bass-energy step (i-th boundary's own
-    strength == i) so max_per_song's ranking is deterministic — the same
-    shape tests/test_midsong_generator.py's own density tests use."""
+    strength == i) so transitions_per_minute's ranking is deterministic —
+    the same shape tests/test_midsong_generator.py's own density tests
+    use."""
     stem = "Artist - GenEdgeDensitySong"
     n_beats = n_boundaries * 2 + 2
     rms_bass = [0.0] * n_beats
@@ -295,37 +300,37 @@ def _seed_density(scfg, n_boundaries=20, tempo_bpm=120.0):
     }), encoding="utf-8")
 
 
-def test_generator_preview_forwards_max_per_song_knob():
+def test_generator_preview_forwards_transitions_per_minute_knob():
     from spectra import config as scfg
     from spectra.services import testbed_engines
     _seed_density(scfg, n_boundaries=20)
     uncapped = testbed_engines.marks_for(
         testbed_engines.ENGINE_GENERATOR, URI, window_beats=1, sensitivity=1.5,
-        direction="both", max_per_song=20)
+        direction="both", transitions_per_minute=20)
     capped = testbed_engines.marks_for(
         testbed_engines.ENGINE_GENERATOR, URI, window_beats=1, sensitivity=1.5,
-        direction="both", max_per_song=5)
+        direction="both", transitions_per_minute=5)
     uncapped_preview = [m for m in uncapped if m.kind == "preview"]
     capped_preview = [m for m in capped if m.kind == "preview"]
     assert len(uncapped_preview) == 20
     assert len(capped_preview) == 5
 
 
-def test_generator_preview_omits_max_per_song_falls_back_to_room_default():
+def test_generator_preview_omits_transitions_per_minute_falls_back_to_room_default():
     from spectra import config as scfg
     from spectra.services import room_controls, testbed_engines
     _seed_density(scfg, n_boundaries=20)
     room_controls.save_room_controls(room_controls.RoomControlState(
         midsong_snap_to_beat=False, transition_window_beats=1,
-        transition_edge_sensitivity=1.5, transition_max_per_song=6))
+        transition_edge_sensitivity=1.5, transitions_per_minute=6))
     marks = testbed_engines.marks_for(
         testbed_engines.ENGINE_GENERATOR, URI, window_beats=1, sensitivity=1.5,
-        direction="both")  # max_per_song omitted entirely
+        direction="both")  # transitions_per_minute omitted entirely
     preview = [m for m in marks if m.kind == "preview"]
-    assert len(preview) == 6, "an omitted max_per_song reads the live room setting"
+    assert len(preview) == 6, "an omitted transitions_per_minute reads the live room setting"
 
 
-def test_edges_engine_ignores_max_per_song():
+def test_edges_engine_ignores_transitions_per_minute():
     """The density cap is a generator-only concept — edges just detects
     edges, it never ranks or trims candidates."""
     from spectra import config as scfg
@@ -333,42 +338,42 @@ def test_edges_engine_ignores_max_per_song():
     _seed_density(scfg, n_boundaries=20)
     with_cap = testbed_engines.marks_for(
         testbed_engines.ENGINE_EDGES, URI, window_beats=1, sensitivity=0.2,
-        direction="both", max_per_song=1)
+        direction="both", transitions_per_minute=1)
     without_cap = testbed_engines.marks_for(
         testbed_engines.ENGINE_EDGES, URI, window_beats=1, sensitivity=0.2, direction="both")
     assert with_cap == without_cap
 
 
-def test_engine_marks_route_accepts_and_uses_max_per_song():
+def test_engine_marks_route_accepts_and_uses_transitions_per_minute():
     from spectra import config as scfg
     _seed_density(scfg, n_boundaries=20)
     client = _client()
     uncapped = client.get(f"/api/testbed/engine-marks?uri={URI}&engine=generator"
-                          f"&mark_kind=preview&window_beats=1&sensitivity=1.5&max_per_song=20").json()
+                          f"&mark_kind=preview&window_beats=1&sensitivity=1.5&transitions_per_minute=20").json()
     capped = client.get(f"/api/testbed/engine-marks?uri={URI}&engine=generator"
-                        f"&mark_kind=preview&window_beats=1&sensitivity=1.5&max_per_song=6").json()
+                        f"&mark_kind=preview&window_beats=1&sensitivity=1.5&transitions_per_minute=6").json()
     assert len(uncapped["estimate"]) == 20
     assert len(capped["estimate"]) == 6
 
 
-def test_engine_marks_route_rejects_out_of_bounds_max_per_song():
-    """Bounds read live off RoomControlState.transition_max_per_song's own
-    Field(ge=6, le=40) — spectra/api/testbed.py's _MAX_PER_SONG_GE/_LE."""
+def test_engine_marks_route_rejects_out_of_bounds_transitions_per_minute():
+    """Bounds read live off RoomControlState.transitions_per_minute's own
+    Field(ge=1, le=30) — spectra/api/testbed.py's _RATE_GE/_LE."""
     client = _client()
     resp = client.get(f"/api/testbed/engine-marks?uri={URI}&engine=generator"
-                      f"&mark_kind=preview&max_per_song=999")
+                      f"&mark_kind=preview&transitions_per_minute=999")
     assert resp.status_code == 422
     resp2 = client.get(f"/api/testbed/engine-marks?uri={URI}&engine=generator"
-                       f"&mark_kind=preview&max_per_song=1")
+                       f"&mark_kind=preview&transitions_per_minute=0")
     assert resp2.status_code == 422
 
 
-def test_compare_route_forwards_max_per_song_too():
+def test_compare_route_forwards_transitions_per_minute_too():
     from spectra import config as scfg
     _seed_density(scfg, n_boundaries=20)
     _write_trigger(URI, 1000, source="authored", kind="fire_scene")
     client = _client()
     resp = client.get(f"/api/testbed/compare?uri={URI}&engine=generator&mark_kind=preview"
-                      f"&window_beats=1&sensitivity=1.5&max_per_song=6&tolerance_ms=500")
+                      f"&window_beats=1&sensitivity=1.5&transitions_per_minute=6&tolerance_ms=500")
     assert resp.status_code == 200
     assert len(resp.json()["estimate"]) == 6

@@ -30,12 +30,12 @@ data/transition-alignment-plan/report.md section 4's tuning-loop lanes):
               fresh, read-only, against the CURRENT placement rule — R3
               then R1 since 2026-09-23, data/transition-alignment-plan/
               report.md section 5 task 3 — no trigger store write). Preview
-              takes window_beats/sensitivity/direction/max_per_song from
-              the page's own knobs (the first three shared with the
-              `edges` engine; max_per_song is the "strongest N" density
-              cap, section 5 task 4 — omitted/None falls back to the live
-              room setting exactly as candidate_moments itself resolves
-              it). snap_enabled stays at the live room default (no
+              takes window_beats/sensitivity/direction/transitions_per_minute
+              from the page's own knobs (the first three shared with the
+              `edges` engine; transitions_per_minute is the density RATE,
+              2026-09-25 — omitted/None falls back to the live room
+              setting exactly as candidate_moments itself resolves it).
+              snap_enabled stays at the live room default (no
               test-bed-only copy). See
               _generator_marks's own docstring for why neither kind is
               capture-offset shifted by spectra/api/testbed.py::
@@ -145,33 +145,35 @@ def _generator_stored_marks(uri: str) -> list[EngineMark]:
 
 def _generator_preview_marks(
     uri: str, *, window_beats: int, sensitivity: float, direction: str,
-    max_per_song: Optional[int] = None,
+    transitions_per_minute: Optional[float] = None,
 ) -> list[EngineMark]:
     """spectra.services.midsong_generator.candidate_moments(uri), run
     read-only against the CURRENT placement rule (R3 then R1, 2026-09-23)
-    at the page's own window/sensitivity/direction/max_per_song knob
-    values — what generation would produce right now, without writing
-    anything to the trigger store. `max_per_song` defaults to `None`,
-    which `candidate_moments` itself resolves to the live room setting —
-    the same "explicit value overrides, omitted tracks the room" shape
-    every other knob here already has (data/transition-alignment-plan/
-    report.md section 5 task 4: the "strongest N" slider and the "Use as
-    room default" button). `snap_enabled` is NOT threaded from here — it
-    stays at the live room default, so this lane also reflects the room's
-    own snap-to-beat toggle, which has no test-bed-only copy."""
+    at the page's own window/sensitivity/direction/transitions_per_minute
+    knob values — what generation would produce right now, without
+    writing anything to the trigger store. `transitions_per_minute`
+    defaults to `None`, which `candidate_moments` itself resolves to the
+    live room setting — the same "explicit value overrides, omitted
+    tracks the room" shape every other knob here already has
+    (data/transition-alignment-plan/report.md section 5 task 4, the
+    knob's own rate form since 2026-09-25: the "Transitions per minute"
+    slider and the "Use as room default" button). `snap_enabled` is NOT
+    threaded from here — it stays at the live room default, so this lane
+    also reflects the room's own snap-to-beat toggle, which has no
+    test-bed-only copy."""
     out = [
         EngineMark(time_ms=float(m.timestamp_ms), kind=GENERATOR_KIND_PREVIEW,
                    label=m.snap_grid, score=m.intensity)
         for m in midsong_generator.candidate_moments(
             uri, window_beats=window_beats, sensitivity=sensitivity,
-            direction=direction, max_per_song=max_per_song)
+            direction=direction, transitions_per_minute=transitions_per_minute)
     ]
     return sorted(out, key=lambda m: m.time_ms)
 
 
 def _generator_marks(
     uri: str, *, window_beats: int, sensitivity: float, direction: str,
-    max_per_song: Optional[int] = None,
+    transitions_per_minute: Optional[float] = None,
 ) -> Optional[list[EngineMark]]:
     """Both generator kinds, combined — the caller (marks_for's own
     consumer, spectra/api/testbed.py::_estimate_for) filters by mark_kind
@@ -181,7 +183,7 @@ def _generator_marks(
     marks = (_generator_stored_marks(uri)
             + _generator_preview_marks(uri, window_beats=window_beats,
                                        sensitivity=sensitivity, direction=direction,
-                                       max_per_song=max_per_song))
+                                       transitions_per_minute=transitions_per_minute))
     return sorted(marks, key=lambda m: m.time_ms) if marks else None
 
 
@@ -201,22 +203,22 @@ def marks_for(
     window_beats: int = rhythmic_edges.DEFAULT_WINDOW_BEATS,
     sensitivity: float = rhythmic_edges.DEFAULT_SENSITIVITY,
     direction: str = rhythmic_edges.DEFAULT_DIRECTION,
-    max_per_song: Optional[int] = None,
+    transitions_per_minute: Optional[float] = None,
 ) -> Optional[list[EngineMark]]:
     """None = not available for this song (either the engine hasn't been
     precomputed for it, or — for librosa/generator/edges — no analysis
     exists yet). `window_beats`/`sensitivity`/`direction` are read by both
     the `edges` engine and the `generator` engine's own preview kind
-    (2026-09-23, the R3 placement rule); `max_per_song` is read only by the
-    `generator` engine's preview kind (the density cap has no meaning for
-    `edges`, which only detects edges, never ranks candidates); every
-    other engine ignores all four."""
+    (2026-09-23, the R3 placement rule); `transitions_per_minute` is read
+    only by the `generator` engine's preview kind (the density rate has
+    no meaning for `edges`, which only detects edges, never ranks
+    candidates); every other engine ignores all four."""
     if engine == ENGINE_LIBROSA:
         return _librosa_marks(uri)
     if engine == ENGINE_GENERATOR:
         return _generator_marks(uri, window_beats=window_beats,
                                 sensitivity=sensitivity, direction=direction,
-                                max_per_song=max_per_song)
+                                transitions_per_minute=transitions_per_minute)
     if engine == ENGINE_EDGES:
         return _edges_marks(uri, window_beats=window_beats, sensitivity=sensitivity,
                             direction=direction)
