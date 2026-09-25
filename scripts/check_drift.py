@@ -363,7 +363,12 @@ check(min(hue_diff, 360.0 - hue_diff) < 3.0,
       "(100° → 130°)")
 
 # ── no eligible destination → the walk HOLDS (never aimless creep) ───────────
-fire(scene, blue_set, "set-blue")           # bearing cleared
+kept = room_box[0].destination
+fire(scene, blue_set, "set-blue")           # the SAME scene on the SAME set
+check(room_box[0].destination == kept and kept is not None,
+      "a same-scene re-fire on the same set keeps the bearing — the walk "
+      "carries on (owner ask 2026-09-25)")
+room_box[0] = room_box[0].model_copy(update={"destination": None})
 cards_box[0] = [blue_set]                    # only the active set remains
 held = room_box[0].wheel_position_deg
 executor.writes.clear()

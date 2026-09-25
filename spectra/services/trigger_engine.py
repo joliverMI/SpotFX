@@ -427,6 +427,7 @@ class TriggerEngine:
         lead_ms: Callable[[SpectraTrigger], int] | None = None,
         response_offset_ms: Callable[[Any], int] | None = None,
         intensity_event: Callable[[], None] | None = None,
+        analysed_color: Callable[[float, float, Optional[str]], Awaitable[Any]] | None = None,
         rng: Random | None = None,
     ) -> None:
         self._list_triggers = list_triggers or trigger_store.list_for_song
@@ -456,6 +457,19 @@ class TriggerEngine:
         # conductor.on_intensity_event`), the same place that module
         # already owns the conductor/responses singletons.
         self._intensity_event = intensity_event or (lambda: None)
+        # ANALYSED COLOUR (owner ask 2026-09-25): the colour moment every
+        # generated cue on an untriggered song carries — see
+        # _fire_analysed_color. A safe no-op default, wired to the
+        # production engine explicitly in services/engine.py — the same
+        # reasoning as _intensity_event above: a side call on every
+        # generated fire_scene is easy to forget to stub, and a forgotten
+        # stub must not reach real storage.
+        self._analysed_color = analysed_color or self._no_analysed_color
+        # (uri, has_authored) from the latest read of this song's trigger
+        # list — tick() already parses it every TICK_S, so readers
+        # (song_untriggered, _fire) reuse that answer instead of a second
+        # ~9.5MB parse.
+        self._authored_cache: Optional[tuple[str, bool]] = None
         self._generating: set[str] = set()
         self._rng = rng or Random()
 
@@ -548,6 +562,20 @@ class TriggerEngine:
         logger.info("song transition: fired scene %s", scene_id)
         self.last_fire = {"id": None, "kind": "transition", "ok": True}
 
+    def song_untriggered(self) -> Optional[bool]:
+        """True when the song playing carries NO authored trigger, False
+        when it carries one, None when no song is known. Reuses tick()'s
+        own read (_authored_cache) when it is for this song; one fresh read
+        otherwise."""
+        uri = self._uri
+        if uri is None:
+            return None
+        cached = self._authored_cache
+        if cached is None or cached[0] != uri:
+            cached = (uri, self._song_has_authored_triggers(uri))
+            self._authored_cache = cached
+        return not cached[1]
+
     def _song_has_authored_triggers(self, uri: Optional[str]) -> bool:
         """The PER-SONG FALLBACK's own precondition (room_controls.py's
         scene_change_mode docstring, PER-SONG FALLBACK entry): True the
@@ -621,6 +649,8 @@ class TriggerEngine:
             self._fired.clear()
             return []  # rewind/seek back: silently rearmed via the line above
         triggers = self._list_triggers(self._uri)
+        self._authored_cache = (self._uri,
+                                any(t.source == "authored" for t in triggers))
         mode = self._effective_mode_for_song(self._scene_change_mode(), triggers)
         fired: list[SpectraTrigger] = []
         for trig in triggers:
@@ -858,9 +888,11 @@ class TriggerEngine:
                                     trig.id)
                         self.last_fire = {"id": trig.id, "kind": a.kind,
                                           "ok": True, "picked": None}
+                        await self._fire_analysed_color(trig, None)
                         return
                 await self._fire_scene(scene_id, a.color_set_id,
                                        self._render_intensity(a.intensity))
+                await self._fire_analysed_color(trig, scene_id)
             elif a.kind == "fire_response":
                 # OVERRIDE BLEND's dynamic half (2026-08-20, "fix the lull
                 # ramp"): only charge/lull stretch a ramp to the real gap
@@ -894,6 +926,32 @@ class TriggerEngine:
         fire_history.record_fire(
             "triggers", f"{trig.source}:{a.kind}", detail,
             uri=self._uri, position_ms=self._last_position_ms)
+
+    async def _fire_analysed_color(self, trig: SpectraTrigger,
+                                   scene_id: Optional[str]) -> None:
+        """ANALYSED COLOUR (owner ask 2026-09-25, "colour jump on every
+        analysed moment"): a GENERATED fire_scene cue on a song with NO
+        authored trigger also lands a colour moment — whether its scene
+        fired, re-fired, was deferred by minimum dwell, or the kernel
+        picked nothing. Runs AFTER the scene fire, in the same _fire call,
+        so it shares the scene fire's show clock (tick() already fired this
+        cue `lead` early so the crossfade's middle lands on the mark; the
+        jump rides the same crossfade length, so its middle lands there
+        too) and glides over the scene the fire just installed. Selection
+        is at the cue's RAW section energy (a.intensity), the same value
+        the scene pick used; the ramp at render intensity, like the fire.
+        What lands — a colour-set jump, the gradient's own kick, or a named
+        hold — is scene_response.ResponseEngine.analysed_color_jump's
+        precedence. Best-effort: a failure never undoes the scene fire."""
+        if trig.source == "authored" or self.song_untriggered() is not True:
+            return
+        a = trig.action
+        try:
+            await self._analysed_color(a.intensity,
+                                       self._render_intensity(a.intensity),
+                                       scene_id)
+        except Exception:
+            logger.exception("trigger %s: analysed colour jump failed", trig.id)
 
     def _next_trigger_gap_ms(self, trig: SpectraTrigger) -> Optional[int]:
         """OVERRIDE BLEND's dynamic half (ported from legacy trigger_engine.
@@ -944,6 +1002,12 @@ class TriggerEngine:
                                   intensity: float) -> None:
         from spectra.services.scene_sequencer import fire_scene_by_id
         await fire_scene_by_id(scene_id, color_set_id, intensity)
+
+    @staticmethod
+    async def _no_analysed_color(selection_intensity: float,
+                                 render_intensity: float,
+                                 scene_id: Optional[str]) -> None:
+        return None
 
     def _default_select_scene(self, intensity: float) -> Optional[str]:
         """A generated trigger's scene_id=None resolution: the SAME

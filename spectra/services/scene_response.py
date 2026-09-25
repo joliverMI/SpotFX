@@ -2314,8 +2314,66 @@ class ResponseEngine:
             count += 1
         return count
 
+    async def analysed_color_jump(self, intensity: float,
+                                  ramp_ms: int) -> dict:
+        """ANALYSED COLOUR (owner ask 2026-09-25, "colour jump on every
+        analysed moment"): the colour moment a generated cue on a song with
+        no authored trigger carries — trigger_engine._fire_analysed_color is
+        the only caller, through engine.fire_analysed_color_event. It is the
+        EXISTING flare Colour Jump (_color_jump: the shipped selector, curve
+        x genre x wheel-travel, current set excluded, at `intensity` — the
+        cue's section energy) landed over `ramp_ms`, the cue's own scene
+        crossfade, so the change sits on the mark with the scene fire.
+
+        PRECEDENCE, first match wins, each one NAMED in the record:
+          1. conductor deferral (preview / pause / dinner party / ambient)
+             — nothing moves, the same holds that stop the drift leg;
+          2. FORCE COLOUR — a pin holds; this jump never rolls a pinned
+             group's next member (unlike a flare's jump, which does);
+          3. an ACTIVE GRADIENT (active_gradient_id or the untriggered
+             gradient) — the gradient's own kick (X one leg-step, colour at
+             the Y target trigger_engine just retargeted) REPLACES the set
+             jump: a set jump would be overwritten on the next leg anyway;
+          4. a RAINBOW palette live (the active set has no wheel position)
+             — held, the journey's own rainbow hold: rainbow sets are the
+             sequencer's high-energy pick and already move every hue;
+          5. otherwise the set jump."""
+        from spectra.services import force_color
+        record: dict[str, Any] = {"at": self._clock(), "kind": "analysed_cue",
+                                  "intensity": round(intensity, 4),
+                                  "ramp_ms": ramp_ms}
+        deferred_by = self.conductor._deferral()
+        if deferred_by is not None:
+            record["held_for"] = deferred_by
+            return record
+        controls = self._room_controls()
+        if force_color.active(controls):
+            record["held_for"] = force_color.HELD_FOR
+            return record
+        if self.conductor.effective_gradient_id(controls) is not None:
+            record["held_for"] = "gradient_drift"
+            record["gradient"] = await self.conductor.on_analysed_cue(
+                intensity, ramp_ms)
+            return record
+        room = self._room_load()
+        if (room.active_set_id is not None
+                and self.conductor._set_position(room.active_set_id) is None):
+            record["held_for"] = "rainbow_palette"
+            return record
+        scene = self.conductor.scene
+        if scene is None:
+            record["result"] = "no_active_scene"
+            return record
+        carry: dict[tuple[str, str], Any] = {}
+        record["color_jump"] = await self._color_jump(scene, intensity, carry,
+                                                      ramp_ms=ramp_ms)
+        self.conductor.on_surge(carry)
+        record["result"] = record["color_jump"].get("result")
+        return record
+
     async def _color_jump(self, scene: SceneV2, intensity: float,
-                          carry: dict) -> dict:
+                          carry: dict, *,
+                          ramp_ms: Optional[int] = None) -> dict:
         """The flare colour jump: the shipped selector picks (curve × genre
         × wheel-travel, terminal KEEP), the pick lands on set-mode virtuals
         with the intensity-scaled RAMP-IN (color_jump_ramp_ms — a hue-arc
@@ -2323,7 +2381,9 @@ class ResponseEngine:
         pick moves the room's wheel AT SELECTION — and the journey resumes
         from the new point on the conductor's next leg. The carry records
         the landed targets, so releases and palette rotation measure from
-        where the ramp finishes, never a mid-blend snapshot."""
+        where the ramp finishes, never a mid-blend snapshot. ramp_ms
+        overrides the intensity-scaled ramp (analysed_color_jump's cue
+        crossfade); None keeps it."""
         config = self._sequencer_config()
         room = self._room_load()
         # FORCE COLOUR (owner ask 2026-08-27, spectra/services/
@@ -2379,7 +2439,8 @@ class ResponseEngine:
         from spectra.services.room_controls import resolve_authored_bg_color
         by_vid = scene_compiler._set_entry_by_virtual(card)
         controls = self._room_controls()
-        ramp_ms = color_jump_ramp_ms(intensity)
+        if ramp_ms is None:
+            ramp_ms = color_jump_ramp_ms(intensity)
         landed = 0
         for vid, state in self.conductor.virtuals.items():
             if not state.set_mode:
@@ -2418,6 +2479,7 @@ class ResponseEngine:
             update["destination"] = None
         self._room_save(room.model_copy(update=update))
         result = {"result": "jumped", "picked_id": picked_id,
+                  "set_name": getattr(card, "name", picked_id),
                   "rung": rung, "virtuals": landed,
                   "ramp_ms": ramp_ms, "wheel_position_deg": position}
         if forced is not None:

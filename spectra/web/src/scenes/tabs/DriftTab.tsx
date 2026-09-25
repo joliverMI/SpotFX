@@ -130,6 +130,7 @@ export default function DriftTab({ scene, setScene }: {
       {/* ── Colour journey ── */}
       <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         Colour journey <HelpLink topic="color-journey" />
+        <HelpLink topic="journey-refire" title="Re-firing the same scene keeps the drift walking" />
       </div>
       <div style={{ background: 'var(--surface2)', padding: 12, borderRadius: 'var(--radius)', fontSize: 13, lineHeight: 1.6, marginBottom: 14 }}>
         {journey.mode === 'inherit' ? (

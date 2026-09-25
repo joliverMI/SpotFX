@@ -482,6 +482,12 @@ export interface RoomControlState {
    * means off, the wheel-based colour journey drives the room's colour
    * exactly as before this feature. See DriftGradientBar.tsx. */
   active_gradient_id: string | null;
+  /** On: a song with NO authored trigger drifts through
+   * untriggered_gradient_id (null = his saved gradient named "Normal");
+   * a song with one keeps active_gradient_id. Off (default) = no change.
+   * Resolved server-side in DriftConductor.effective_gradient_id. */
+  untriggered_gradient_enabled: boolean;
+  untriggered_gradient_id: string | null;
   gradient_x_period_s: number;
   gradient_y_slew_s: number;
 }

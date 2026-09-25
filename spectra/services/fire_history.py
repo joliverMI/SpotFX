@@ -24,7 +24,8 @@ fired" — the same key is used for both the count and the show-log entry:
                since they all route through this one choke point).
   responses    engine.fire_response_event, keyed by event_class.
   color_sets   drift_conductor.apply_set_directly, keyed by the applied
-               set's id.
+               set's id; also engine.fire_analysed_color_event (an analysed
+               cue's colour jump, detail via="analysed_cue").
   triggers     trigger_engine's OWN fires, keyed by "{source}:{action_kind}"
                (source: authored/generated) — a narrower, second view of
                "what did THE KEYSTONE itself fire", distinct from the

@@ -41,7 +41,9 @@ export function describeEvent(item: ReviewEventItem): string {
     }
     case 'color_sets': {
       const name = (d.set_name as string | undefined) ?? item.key;
-      return `Colour set: ${name}`;
+      // via "analysed_cue": engine.fire_analysed_color_event — a generated
+      // cue's colour jump on a song with no authored trigger.
+      return `Colour set: ${name}${d.via === 'analysed_cue' ? ' (analysed moment)' : ''}`;
     }
     case 'triggers': {
       const kind = (d.action_kind as string | undefined) ?? item.key;

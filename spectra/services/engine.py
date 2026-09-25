@@ -87,6 +87,7 @@ conductor = DriftConductor(
     deferral=lambda: bridge.conductor_deferral(),
     broadcast=ws_manager.broadcast,
     genre_bucket=lambda: bridge.genre_bucket(),
+    song_untriggered=lambda: trigger_engine.song_untriggered(),
 )
 
 responses = ResponseEngine(
@@ -103,6 +104,35 @@ responses = ResponseEngine(
 # owns wiring the one other thing trigger_engine.py's real fires need to
 # reach on this process's conductor.
 trigger_engine._intensity_event = conductor.on_intensity_event
+
+
+async def fire_analysed_color_event(selection_intensity: float,
+                                    render_intensity: float,
+                                    scene_id: Optional[str]) -> dict:
+    """The ANALYSED COLOUR choke point (owner ask 2026-09-25):
+    trigger_engine._fire_analysed_color calls this on every generated cue of
+    a song with no authored trigger, after the cue's scene fire (or its
+    deferral). The ramp is the requested scene's crossfade at render
+    intensity — scene_transition_lead.crossfade_ms_for, the SAME length
+    tick() aimed the cue's lead at — so the colour change's middle lands on
+    the mark. Precedence and holds: responses.analysed_color_jump."""
+    from spectra.services import (fire_history, room_controls, scene_store,
+                                  scene_transition_lead)
+    scene = (scene_store.get_by_id(scene_id) if scene_id is not None
+             else None) or conductor.scene
+    ramp_ms = scene_transition_lead.crossfade_ms_for(
+        scene, room_controls.load_room_controls(), render_intensity)
+    record = await responses.analysed_color_jump(selection_intensity,
+                                                 int(ramp_ms))
+    jump = record.get("color_jump") or {}
+    if jump.get("result") == "jumped":
+        fire_history.record_fire("color_sets", jump["picked_id"], {
+            "set_name": jump.get("set_name"), "via": "analysed_cue",
+            "ramp_ms": ramp_ms})
+    return record
+
+
+trigger_engine._analysed_color = fire_analysed_color_event
 
 
 async def fire_response_event(event_class: str, intensity: float,
