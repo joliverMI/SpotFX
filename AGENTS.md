@@ -6542,6 +6542,39 @@ it); the `Deps` dataclass is the injection seam. Spec:
 `tests/test_param_watchdog.py`; timing constants recorded in
 `docs/SPECTRA_TIMING_CONVENTIONS.md`; `docs/SPECTRA_SPEC.md` §90.
 
+## SPECTRA dynamic colour on songs with no authored trigger (2026-09-25)
+
+His report: colour barely drifts on analysed-only songs. Three changes:
+
+- **A same-scene re-fire keeps colour custody** (`DriftConductor.is_refire`/
+  `refire_palette`, called from `scene_compiler.fire_scene`'s live branch):
+  same scene id AND same colour set (`None` = the room's active set) keeps
+  the journey's destination and wears the palette the room is SHOWING, not
+  the set's unrotated hues. Mechanisms still re-baseline; a different scene
+  or set clears the bearing as before. Trigger-driven picks never exclude
+  the current scene, so this is common.
+- **Every GENERATED `fire_scene` cue on a song with no authored trigger
+  lands a colour moment** (`trigger_engine._fire_analysed_color` →
+  `engine.fire_analysed_color_event` → `ResponseEngine.analysed_color_jump`)
+  whether the scene fired, re-fired, was dwell-deferred or picked nothing.
+  It runs AFTER the scene fire in the same `_fire` call and glides over the
+  scene's own crossfade (`scene_transition_lead.crossfade_ms_for`), so its
+  middle lands on the mark like the scene's. Precedence is in
+  `analysed_color_jump`'s docstring (deferral > force colour > gradient kick
+  > live rainbow > the existing `_color_jump`). The trigger-engine hook
+  defaults to a NO-OP and is wired in `engine.py`, like `_intensity_event`.
+  "Untriggered" is `TriggerEngine.song_untriggered()` (reuses `tick()`'s own
+  read; `None` when unknown, which never counts as untriggered).
+- **`untriggered_gradient_enabled`/`_id`** (room controls, default off; id
+  `None` = the saved gradient named "Normal"): `DriftConductor.
+  effective_gradient_id()` is the ONE resolution — every gradient reader
+  (tick, drop kick, analysed-cue kick, status) goes through it, never
+  `active_gradient_id` directly. UI: `DriftGradientBar.tsx`.
+
+Spec: `tests/test_dynamic_colour_untriggered.py` (includes his real Wonder
+cue list), `scripts/check_drift.py`. Help: `journey-refire`,
+`untriggered-gradient`, `analysed-colour-jump`.
+
 ## SPECTRA two-dimensional drift gradient + Rainbow select
 
 Owner ask 2026-08-20 (`data/two-dimensional-drift-gradient-and-rainb-imfg/

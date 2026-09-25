@@ -471,6 +471,15 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        id: 'journey-refire',
+        title: 'Re-firing the scene already showing keeps the drift walking',
+        keywords: 're-fire refire same scene reset restart drift journey destination bearing snap back analysed cue',
+        body: [
+          'An analysed cue often picks the scene that is already showing. When the SAME scene fires again on the SAME colour set, the colour journey carries on: its destination and progress are kept, and the fire wears the colours the room is actually showing right now instead of snapping back to the set\'s starting hues. The scene\'s other parameters still re-start and the fire still crossfades.',
+          'A real scene change — a different scene, or a different colour set — clears the destination exactly as before, and the journey picks a fresh one from where the wheel is.',
+        ],
+      },
+      {
         id: 'journey-inherit',
         title: 'Inherit (default) and pace',
         body: ['An inheriting scene rides the room\'s destination journey, its pace factor scaling the travel speed — 0 holds the walk while that scene shows (no destinations picked). Adjusted by telling the agent.'],
@@ -765,6 +774,27 @@ export const HELP_SECTIONS: HelpSection[] = [
           'While a gradient is active, the room\'s picker moves steadily along the TOP-TO-BOTTOM square as time passes (looping or bouncing per the gradient\'s own setting) and along top-to-bottom as the song\'s intensity changes — drifting toward the new position rather than snapping, re-aiming only when a trigger fires or the song transitions (not continuously chasing every fluctuation). Flares still jump the colour exactly as they always have — this is in addition to that, not instead of it.',
           'Drops kick it. On a drop — on every effect, wherever a gradient is active — the room does three things at once instead of waiting for its next slow step: the colour changes right there on the drop, the drift jumps a full extra step along time (looping or bouncing exactly as an ordinary step does), and the drift TARGET is pushed UP the square by how big the drop was — never down, never past the top. Where the colour actually IS still drifts up toward that target at its normal pace over the following steps: the drop moves the destination, not the room in one jump. With no gradient active, a drop does none of this and the wheel-based colour journey is untouched.',
           'Rainbow select limit — the numeric field at the bottom of the same panel. Above this intensity, automatic colour-set selection is restricted to sets marked "Rainbow" (Colours page); at or below it, only "Single" (non-rainbow) sets are chosen. Default 0.9.',
+        ],
+      },
+      {
+        id: 'untriggered-gradient',
+        title: 'Gradient on songs without triggers',
+        keywords: 'untriggered no triggers analysed analysis only gradient 2d drift automatic normal songs without my triggers fallback',
+        body: [
+          'The "Songs without triggers" row in the Drift gradient panel. Switch it on and pick a saved gradient, and every song where you have NOT placed a trigger of your own drifts through that gradient: colour follows time along the square and the song\'s intensity up and down it, re-aiming at every analysed moment. It picks your gradient named "Normal" until you choose another.',
+          'A song where you HAVE placed a trigger keeps whatever the main gradient tile above says — normally Off, so the wheel colour journey. Off (the default) changes nothing on any song.',
+          'Force Colour still wins over it, exactly as it wins over the main gradient.',
+        ],
+      },
+      {
+        id: 'analysed-colour-jump',
+        title: 'Analysed moments jump the colour',
+        keywords: 'analysed moment cue colour color jump set change untriggered no triggers generated bass edge downbeat dwell deferred held rainbow force colour gradient',
+        body: [
+          'On a song where you have not placed a trigger of your own, every analysed moment (the mid-song cues placed on bass edges and downbeats) also jumps the room to a new colour set — the same Colour Jump a flare uses, picked by the colour selector at that moment\'s energy, never the set already showing. It happens whether the scene changes, the same scene fires again, or the scene is held back by its minimum time — so a held-back moment still shows something.',
+          'The change rides the moment\'s own scene crossfade, so its middle lands on the beat.',
+          'What holds it instead, in order: a Preview, pause, Dinner Party or Ambient hold; Force Colour (a pin holds its colours); an active drift gradient (the gradient takes a step along time instead and re-aims at the moment\'s energy); and a rainbow palette that is live (it already moves every hue).',
+          'Songs where you have placed a trigger are untouched — your own marks decide their colour.',
         ],
       },
       {

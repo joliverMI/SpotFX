@@ -306,6 +306,14 @@ async def fire_scene(scene: SceneV2, *, intensity: float = 0.5,
                            display_mode=room.display_mode,
                            light_bg_color=room.display_light_bg_color)
     if not dry_run:
+        # SAME-SCENE RE-FIRE keeps colour custody (owner ask 2026-09-25,
+        # drift_conductor.refire_palette): the scene already showing, fired
+        # again on the same set, wears the palette the room is actually
+        # showing rather than snapping back to the set's unrotated hues.
+        # Live only — a dry run is not a fire and reads no room state.
+        from spectra.services import engine
+        writes = engine.conductor.refire_palette(
+            scene.id, color_set.id if color_set else None, writes)
         # The brightness-multiplier room control scales the ACTUAL bytes
         # sent to hardware only — never the returned/baselined writes, so
         # dry-run and live previews stay byte-identical (the honest-window
@@ -324,7 +332,6 @@ async def fire_scene(scene: SceneV2, *, intensity: float = 0.5,
         # Re-baseline the evolution engine: drift's declared life restarts
         # from these initial conditions. The ORIGINAL scene rides along —
         # the response engine re-rolls its intact 🎲 bindings.
-        from spectra.services import engine
         engine.on_scene_fired(scene, writes,
                               color_set.id if color_set else None)
     return {"dry_run": dry_run, "intensity": intensity, "writes": writes,
