@@ -94,7 +94,12 @@ class PCMRingBuffer:
     def _callback(self, indata: np.ndarray, frames: int, cb_time, status) -> None:
         """sounddevice audio thread — must be thread-safe and fast."""
         if status:
-            logger.debug("PCM ring buffer callback status: %s", status)
+            # WARNING, matching AudioCaptureStream's own callback
+            # (api/audio_capture.py) — an overflow/underrun here can starve
+            # both the pre-roll splice AND the pre-roll/live seam backfill
+            # (services/audio_shape_service.py) of real audio, so it's worth
+            # the same visibility as the per-song capture's own callback.
+            logger.warning("PCM ring buffer callback status: %s", status)
         # Stamp with the time the chunk was received. Coarse — adequate for
         # song-start backfill where we're aligning to ±100ms.
         ts = time.monotonic()

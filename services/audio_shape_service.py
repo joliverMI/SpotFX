@@ -69,6 +69,13 @@ class AudioShapeService:
         # Detached finalize pipelines (trim/save/WAV/librosa/realign) — strong
         # refs so the tasks aren't garbage-collected mid-run.
         self._finalize_tasks: set[asyncio.Task] = set()
+        # Pre-roll/live seam tracking (see _seal_preroll_seam). Set in
+        # _start() when the ring-buffer pre-roll actually produced PCM;
+        # consumed once by _ingest_loop on the new capture's first live
+        # frame, then cleared. None means "no pre-roll was spliced in this
+        # song, so there's no seam to close."
+        self._preroll_end_monotonic: Optional[float] = None
+        self._preroll_pcm_chunk_count: int = 0
 
     # How far into a song (ms) counts as "restarted from the beginning"
     _RESTART_THRESHOLD_MS = 10000
@@ -439,6 +446,12 @@ class AudioShapeService:
         # a no-op when the ring buffer has nothing to offer.
         pre_roll_pcm: list = []
         pre_roll_allowed = at_track_boundary or bool(force_recapture)
+        # Reset seam-tracking for this song — see _seal_preroll_seam. Only
+        # set to a real value below when pre-roll actually produced PCM;
+        # otherwise there's no seam (no pre-roll splice to close a hole
+        # after) and the first live frame must not try to close one.
+        self._preroll_end_monotonic = None
+        self._preroll_pcm_chunk_count = 0
         if not pre_roll_allowed:
             logger.info(
                 "Pre-roll skipped for %s — capture starts mid-song (no track "
@@ -471,6 +484,11 @@ class AudioShapeService:
                 for f in frames:
                     self._recorder.ingest(f)
                 pre_roll_pcm = [pcm.copy()]  # for WAV concatenation later
+                # The ring buffer covers up through `got_monotonic +
+                # pre_roll_seconds` — the pre-roll/live seam is whatever
+                # arrives between there and the new live stream's own first
+                # sample. Recorded so _seal_preroll_seam can close it.
+                self._preroll_end_monotonic = got_monotonic + pre_roll_seconds
                 logger.info(
                     "Pre-roll: %.1fs of PCM (%d frames synthesized) for %s%s",
                     pre_roll_seconds, len(frames), track.title,
@@ -489,6 +507,12 @@ class AudioShapeService:
         if pre_roll_pcm:
             self._capture._pcm_chunks.extend(pre_roll_pcm)
             self._capture.set_pcm_start_ms(pre_roll_start_ms)
+            # Remember how many chunks came from pre-roll so the seam-close
+            # backfill (below) can splice its own chunk in right after them
+            # and before whatever live audio has already arrived by the
+            # time it runs — never at index 0, which would put it ahead of
+            # the pre-roll itself.
+            self._preroll_pcm_chunk_count = len(pre_roll_pcm)
         self._capture.start()
         self._task = asyncio.create_task(self._ingest_loop(), name="audio-capture")
         logger.info(
@@ -503,11 +527,92 @@ class AudioShapeService:
 
     async def _ingest_loop(self) -> None:
         """Consume frames from the capture stream into the recorder."""
+        first_frame = True
         try:
             async for frame in self._capture:
+                if first_frame:
+                    first_frame = False
+                    self._seal_preroll_seam(frame)
                 self._recorder.ingest(frame)
         except Exception as exc:
             logger.warning("Audio ingest loop error: %s", exc)
+
+    def _seal_preroll_seam(self, first_live_frame) -> None:
+        """Close the pre-roll/live handover hole (data/dream-on-capture-loop
+        /report.md, recommendation 1): audio that played between the
+        pre-roll ring-buffer snapshot's end and the NEW AudioCaptureStream's
+        own first delivered sample was silently lost — a 160-370ms hole
+        that, library-wide, exceeded the 200ms gap-discard limit on about
+        half of all track-boundary captures.
+
+        The always-on ring buffer keeps recording the whole time the new
+        stream is starting up, so the fix is to re-snapshot it — from
+        exactly where the pre-roll splice left off, through exactly where
+        the live stream's own first sample begins — and synthesize the gap
+        as ordinary frames, the same way pre-roll itself is synthesized.
+        Runs once, on the first frame the new live stream ever delivers,
+        because that's the earliest point both boundaries (pre-roll end,
+        live start) are known.
+        """
+        preroll_end_monotonic = self._preroll_end_monotonic
+        self._preroll_end_monotonic = None  # one-shot regardless of outcome
+        if preroll_end_monotonic is None or self._capture is None:
+            return
+        try:
+            from api.pcm_ring_buffer import pcm_ring_buffer
+            from api.audio_capture import synthesize_frames_from_pcm
+            from config import settings as _cfg
+            song_start = self._capture._song_start
+            # Same song_ms(monotonic) = (monotonic - song_start)*1000 -
+            # audio_latency_ms convention _start() uses for pre-roll, run
+            # in reverse to find the monotonic instant the live frame's own
+            # (already latency-adjusted) timestamp corresponds to.
+            live_start_monotonic = song_start + (
+                first_live_frame.timestamp_ms + _cfg.audio_latency_ms
+            ) / 1000.0
+            if live_start_monotonic <= preroll_end_monotonic:
+                return  # no hole (or the two already overlap)
+            pcm, got_monotonic = pcm_ring_buffer.snapshot_since_with_start(
+                preroll_end_monotonic
+            )
+            if pcm.size == 0:
+                logger.warning(
+                    "Pre-roll/live seam: %.0fms hole for %s but ring buffer "
+                    "has nothing to fill it with",
+                    (live_start_monotonic - preroll_end_monotonic) * 1000,
+                    self._recording_uri,
+                )
+                return
+            # The ring buffer keeps filling after the request instant too,
+            # so trim to end exactly at the live stream's own first sample
+            # — otherwise this would re-ingest audio the live stream is
+            # about to deliver on its own, doubling it.
+            max_samples = int(
+                (live_start_monotonic - got_monotonic) * _cfg.audio_sample_rate
+            )
+            if max_samples <= 0:
+                return
+            pcm = pcm[:max_samples]
+            gap_start_ms = max(
+                0, int((got_monotonic - song_start) * 1000) - _cfg.audio_latency_ms
+            )
+            frames = synthesize_frames_from_pcm(pcm, gap_start_ms)
+            for f in frames:
+                self._recorder.ingest(f)
+            if frames and self._capture is not None:
+                # Splice the seam's raw PCM into the WAV buffer right after
+                # the pre-roll chunk(s) seeded before start() and before any
+                # live chunks the callback has already appended by now —
+                # never at index 0, which would place it ahead of pre-roll.
+                idx = min(self._preroll_pcm_chunk_count, len(self._capture._pcm_chunks))
+                self._capture._pcm_chunks.insert(idx, pcm.copy())
+            logger.info(
+                "Pre-roll/live seam closed: %.0fms backfilled (%d frames) for %s",
+                (live_start_monotonic - preroll_end_monotonic) * 1000,
+                len(frames), self._recording_uri,
+            )
+        except Exception as exc:
+            logger.warning("Pre-roll/live seam close failed: %s", exc)
 
     async def _stop_and_save(self, boundary: Optional[float] = None) -> None:
         """Stop the active capture and finalize it in the background.
@@ -587,7 +692,25 @@ class AudioShapeService:
         .bak files are deleted (commit). If any fail, the new files are
         deleted and the .bak files are restored (rollback) — original shape
         is preserved intact.
+
+        INSTRUMENTATION (data/dream-on-capture-loop/report.md, recommendation
+        2): this task's own start/end is logged so it can be correlated
+        against a next-song capture's callback gaps. The report found a
+        ~25-40s multi-second stall correlated with — but never proven
+        against — the previous song's finalize; the WAV write and the
+        librosa launch already run off the event loop (a ThreadPoolExecutor
+        and a dedicated single-use ProcessPoolExecutor respectively, see
+        `_save_wav_and_analyze`), so there is nothing in this pipeline that
+        obviously starves the capture thread by code inspection alone.
+        Timing this task plus its WAV/librosa sub-phases (logged inside
+        `_save_wav_and_analyze`) is deliberately instrument-only, not a
+        speculative move-off-thread — see that function's own docstring.
         """
+        finalize_started_at = time.monotonic()
+        logger.info(
+            "Finalize started for %s (force_recapture=%s)",
+            recording_uri, force_recapture,
+        )
         # Acoustic-boundary trim: if a boundary was computed in
         # on_track_change, drop frames + WAV PCM whose timestamp is past
         # the actual track boundary so the previous song's saved shape
@@ -916,6 +1039,16 @@ class AudioShapeService:
                     logger.info("Audio analysis disabled: reached max_songs=%d", _s.audio_analysis_max_songs)
             except Exception as exc:
                 logger.error("Failed to save audio shape: %s", exc)
+            finally:
+                logger.info(
+                    "Finalize finished for %s in %.2fs",
+                    recording_uri, time.monotonic() - finalize_started_at,
+                )
+        else:
+            logger.info(
+                "Finalize skipped for %s (no frames captured) after %.2fs",
+                recording_uri, time.monotonic() - finalize_started_at,
+            )
 
     def get_live_data(self, uri: str) -> dict | None:
         """Return in-progress frame data if currently recording this URI."""
@@ -1054,6 +1187,21 @@ async def _save_wav_and_analyze(meta, raw_pcm, sample_rate: int) -> bool:
     librosa. Returns True on full success (WAV written + librosa produced an
     analysis), False on any failure. Force-recapture mode awaits the boolean
     to gate the atomic-save commit; legacy first-time captures fire-and-forget.
+
+    INSTRUMENTATION (data/dream-on-capture-loop/report.md, recommendation
+    2): the WAV write already runs off the event loop's own thread (a
+    ThreadPoolExecutor via run_in_executor) and librosa already runs in a
+    dedicated single-use ProcessPoolExecutor (services/librosa_service.py's
+    analyze_async) — neither blocks the event loop directly, so nothing in
+    THIS pipeline's own code obviously starves the concurrent audio capture
+    thread by inspection alone. The report's stall theory is a correlation,
+    not a proof (its own words). Timed here, alongside the callback status/
+    overflow logging already in api/audio_capture.py's _callback and the
+    finalize-task start/end logging in _finalize_capture, so a future stall
+    can be correlated against exact wall-clock windows instead of guessed
+    at. Deliberately NOT moved further off-thread speculatively — that
+    would be a change made without evidence, which the brief calls out
+    explicitly to avoid.
     """
     import soundfile as sf
     from services.librosa_service import wav_path, manage_wav_retention, analyze_async
@@ -1084,16 +1232,25 @@ async def _save_wav_and_analyze(meta, raw_pcm, sample_rate: int) -> bool:
                 pass
             raise
 
+    wav_started_at = time.monotonic()
     try:
         await asyncio.get_event_loop().run_in_executor(None, _write_wav_atomic)
-        logger.info("WAV saved: %s (%.1f MB)", wpath.name, wpath.stat().st_size / 1e6)
+        logger.info(
+            "WAV saved: %s (%.1f MB, %.2fs)",
+            wpath.name, wpath.stat().st_size / 1e6, time.monotonic() - wav_started_at,
+        )
         manage_wav_retention()
     except Exception as exc:
         logger.error("Failed to write WAV for %s: %s", meta.title, exc)
         return False
 
+    librosa_started_at = time.monotonic()
     librosa_result = await analyze_async(meta)
     librosa_ok = librosa_result is not None
+    logger.info(
+        "Librosa finalize step for %s: %.2fs (ok=%s)",
+        meta.title, time.monotonic() - librosa_started_at, librosa_ok,
+    )
 
     # Any cached analyzed triggers were generated from the previous capture's
     # librosa beats — stale for this fresh analysis. (Force-recapture also
