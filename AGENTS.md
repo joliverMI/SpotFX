@@ -3082,6 +3082,21 @@ promised. `dwell.py` and `_phase_ramp_ms`'s own docstrings both spell out
 why these are genuinely different gaps (not a shared formula that could
 drift) and why predicting the other side isn't attempted — see either.
 
+**`engine._update_gate` widened again, 2026-09-26 (Admiral order,
+`data/scene-flare-flow-explainer/report.md` candidate 2), to
+`("full", "triggers_only", "analysed")`** — a deferred scene-change
+attempt under "Transitions + analysed" used to draw nothing, while the
+identical deferral under "triggers_only" already drew the flare; the two
+are meant to behave the same on a song with no authored triggers of its
+own (`trigger_engine._effective_mode_for_song`'s per-song fallback
+collapses "triggers_only" to exactly "analysed" there), so the asymmetry
+was a bug, not a design line. "transitions" is still excluded — no
+generated (non-authored) trigger, and therefore no deferral of one, ever
+reaches this gate under "transitions" (`trigger_engine._trigger_allowed`
+never lets a non-authored trigger fire there). See `_update_gate`'s own
+docstring in `spectra/services/engine.py` for the full reasoning. Spec:
+`tests/test_dwell.py`.
+
 ## SPECTRA scrubbing previews — flares, TRANSITIONS and the DROP SEQUENCE
 
 Owner ask 2026-08-20, `data/timeline-preview-scrub-flares-and-drop-

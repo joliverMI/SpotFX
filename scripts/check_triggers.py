@@ -846,13 +846,26 @@ check(len(spectra_engine.responses.surges) == before_update_full + 1,
       "fire_scene_update_event reaches the real on_update in "
       "scene_change_mode=full — surges grew by exactly one")
 
-rc.save_room_controls(rc.RoomControlState(scene_change_mode="analysed"))
+rc.save_room_controls(rc.RoomControlState(scene_change_mode="transitions"))
 before_update_gated = len(spectra_engine.responses.surges)
 asyncio.run(spectra_engine.fire_scene_update_event(0.8))
 check(len(spectra_engine.responses.surges) == before_update_gated,
-      "fire_scene_update_event is a no-op outside scene_change_mode=full — "
-      "same gate as fire_response_event, same reason (an authored "
-      "trigger's own action)")
+      "fire_scene_update_event is a no-op under scene_change_mode=transitions — "
+      "no generated (or authored) trigger ever reaches this seam there")
+rc.save_room_controls(rc.RoomControlState(scene_change_mode="full"))  # restore
+
+# "analysed" ("Transitions + analysed") joined the allow list 2026-09-26
+# (Admiral order, data/scene-flare-flow-explainer/report.md candidate 2):
+# a scene-change request deferred by dwell used to draw nothing here,
+# the one asymmetry against "triggers_only" (already unconditional below)
+# — see engine._update_gate's own docstring for the full reasoning.
+rc.save_room_controls(rc.RoomControlState(scene_change_mode="analysed"))
+before_update_analysed = len(spectra_engine.responses.surges)
+asyncio.run(spectra_engine.fire_scene_update_event(0.8))
+check(len(spectra_engine.responses.surges) == before_update_analysed + 1,
+      "fire_scene_update_event also reaches the real on_update under "
+      "analysed — a deferred cue now flares under 'Transitions + "
+      "analysed' too, not just 'triggers_only'")
 rc.save_room_controls(rc.RoomControlState(scene_change_mode="full"))  # restore
 
 rc.save_room_controls(rc.RoomControlState(scene_change_mode="triggers_only"))

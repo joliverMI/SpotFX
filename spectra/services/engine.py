@@ -192,12 +192,36 @@ def _response_gate(via_trigger: bool) -> Optional[str]:
 
 
 def _update_gate() -> Optional[str]:
-    """fire_scene_update_event's gate, same shape as _response_gate."""
+    """fire_scene_update_event's gate, same shape as _response_gate.
+
+    "analysed" ("Transitions + analysed") is allowed here too (Admiral
+    order, 2026-09-26, data/scene-flare-flow-explainer/report.md candidate
+    2): before this, a scene-change attempt (a stored fire_scene trigger,
+    the automatic transition fire, or a live sequencer roll — every one of
+    them funnels through scene_sequencer.fire_scene_by_id, the single
+    caller of fire_scene_update_event's dwell branch) that landed inside
+    the current scene's minimum dwell drew NOTHING under "analysed",
+    while the SAME deferral under "triggers_only" already drew the
+    current scene's flare band at double intensity. That asymmetry was a
+    bug, not a design choice: "triggers_only" and "analysed" are MEANT to
+    behave the same on a song with no authored triggers of its own (see
+    trigger_engine._effective_mode_for_song's own docstring — a
+    "triggers_only" song with none falls back to exactly "analysed"), and
+    "triggers_only" was already unconditionally allowed here regardless of
+    that per-song fallback — so widening this tuple is the only change
+    needed; there is no separate per-song check to add on top of it,
+    since nothing here differentiates "analysed" reached directly from
+    "analysed" reached via the "triggers_only" fallback. "transitions"
+    stays excluded — no generated trigger (or its own on_update deferral)
+    ever reaches this gate under "transitions" at all, since
+    trigger_engine._trigger_allowed never lets a non-authored trigger fire
+    there, and this function's own docstring/behaviour for that mode is
+    otherwise unchanged."""
     from spectra.services import preview_pause
     from spectra.services.room_controls import load_room_controls
     if preview_pause.active():
         return "preview"
-    if load_room_controls().scene_change_mode not in ("full", "triggers_only"):
+    if load_room_controls().scene_change_mode not in ("full", "triggers_only", "analysed"):
         return "scene_change_mode"
     return None
 
@@ -298,12 +322,21 @@ async def fire_scene_update_event(intensity: float) -> Optional[dict]:
     anything of its own — the dwell gate itself already applies
     uniformly regardless of scene_change_mode (his own decision C) — it
     just happens to reach the SAME tier check below as the trigger-driven
-    caller; on a tighter tier (e.g. "analysed"/"transitions") the update
-    simply doesn't run and the deferral still degrades to fire_scene_by_id's
-    own recorded hold, never raises. Returns the on_update() record (None
-    on an early gate-out above) so a caller that needs to know what
-    happened — dwell's own fire_history "deferred" record — can log it;
-    the trigger-driven caller still discards it, unchanged."""
+    caller; on "transitions" (the one remaining tier _update_gate excludes)
+    the update simply doesn't run and the deferral still degrades to
+    fire_scene_by_id's own recorded hold, never raises. Since 2026-09-26
+    (Admiral order, data/scene-flare-flow-explainer/report.md candidate 2)
+    _update_gate also allows "analysed" — every deferred scene-change
+    attempt (a mid-song generated trigger, the automatic song-start
+    transition fire, or a live sequencer roll, ALL of which fire through
+    fire_scene_by_id) now draws this flare under "Transitions + analysed"
+    too, not just "triggers_only" — see _update_gate's own docstring for
+    why the two are meant to behave the same on a song with no authored
+    triggers and why widening that one tuple is sufficient. Returns the
+    on_update() record (None on an early gate-out above) so a caller that
+    needs to know what happened — dwell's own fire_history "deferred"
+    record — can log it; the trigger-driven caller still discards it,
+    unchanged."""
     if _update_gate() is not None:
         return None
     record = await responses.on_update(intensity)
