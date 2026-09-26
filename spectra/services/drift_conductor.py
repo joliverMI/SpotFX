@@ -96,7 +96,22 @@ test doubles) is untouched — this is a floor, not a new restriction.
 
 Re-baseline: any scene fire drops every leg and restarts mechanisms from
 the new resolved initial conditions (on_scene_fire, hooked into
-scene_compiler.fire_scene). Carry (the owner's words): surges move the
+scene_compiler.fire_scene). A SAME-SCENE RE-FIRE (owner ask 2026-09-25 —
+trigger-driven picks never exclude the scene already showing, so a
+"scene change" often re-fires it) keeps COLOUR CUSTODY: when the scene id
+and the colour set are both unchanged, the journey's destination survives
+and refire_palette() hands scene_compiler the palette the room is actually
+showing, so the fire neither snaps the colour back to the set's unrotated
+hues nor restarts the walk. Mechanisms still re-baseline (the fire really
+re-writes those params) and the fire still crossfades. A genuine scene
+change, or a different colour set, clears the destination exactly as
+before.
+
+Untriggered-song gradient (owner ask 2026-09-25): room_controls'
+untriggered_gradient_enabled/untriggered_gradient_id make a gradient drive
+the room on a song with NO authored trigger; a song with one falls back to
+active_gradient_id. effective_gradient_id() is the ONE resolution every
+reader here uses (tick, the drop kick, the analysed-cue kick, status). Carry (the owner's words): surges move the
 baseline drift resumes from — on_surge() moves a creep's wander position
 (clamped into bounds) and updates colour/brightness baselines; a surge on a
 followed param needs no bookkeeping, because the next leg re-asserts the
@@ -137,6 +152,9 @@ NEUTRAL_INTENSITY = 0.5  # follow's stated degradation when no feed exists
 # the drop energy to move the drift target 'up' on the 2D graph"). Both are
 # HIS tuning knobs, named here rather than inlined:
 DROP_Y_KICK = 0.5          # target_y += drop intensity * this (clamped to 1.0)
+# The saved gradient untriggered_gradient_id=None resolves to — his own
+# existing gradient, by name (ids are per-install uuids).
+UNTRIGGERED_GRADIENT_DEFAULT_NAME = "Normal"
 DROP_COLOR_GLIDE_MS = 150  # the drop's own colour change — fast, but not a
                            # hard snap (a drop is a moment, not a strobe)
 
@@ -274,6 +292,7 @@ class DriftConductor:
         genre_bucket: Callable[[], Optional[str]] | None = None,
         gradient_profiles: Callable[[], dict] | None = None,
         room_controls: Callable[[], Any] | None = None,
+        song_untriggered: Callable[[], Optional[bool]] | None = None,
         rng: Random | None = None,
     ) -> None:
         self.executor = executor
@@ -294,6 +313,10 @@ class DriftConductor:
         self._gradient_profiles = gradient_profiles \
             or self._default_gradient_profiles
         self._room_controls = room_controls or self._default_room_controls
+        # None = unknown (no song / not yet read) — never counts as
+        # untriggered, so the untriggered gradient only engages on a song
+        # positively known to carry no authored trigger.
+        self._song_untriggered = song_untriggered or (lambda: None)
         self._rng = rng or Random()
 
         self.scene: SceneV2 | None = None
@@ -315,6 +338,39 @@ class DriftConductor:
             return None
         return profile.spec
 
+    def is_refire(self, scene_id: str, color_set_id: str | None) -> bool:
+        """The scene showing is fired again wearing the same colour set.
+        color_set_id None means "the room's active set" (every trigger
+        fire's terminal fallback), which is the same set by definition."""
+        if self.scene is None or self.scene.id != scene_id:
+            return False
+        return (color_set_id is None
+                or color_set_id == self._room_load().active_set_id)
+
+    def refire_palette(self, scene_id: str, color_set_id: str | None,
+                       writes: list[dict]) -> list[dict]:
+        """On a same-scene re-fire, return `writes` with every set-mode
+        virtual's gradient/background_color replaced by the palette the
+        room is showing right now (the journey's rotated hues, a flare
+        jump's landed set, the gradient's sample) — only on keys the write
+        already carries. Anything else returns `writes` untouched."""
+        if not self.is_refire(scene_id, color_set_id):
+            return writes
+        out = []
+        for w in writes:
+            state = self.virtuals.get(w["virtual_id"])
+            if (state is None or not state.set_mode
+                    or w.get("color_mode", "set") != "set"):
+                out.append(w)
+                continue
+            config = dict(w["config"])
+            if state.gradient and "gradient" in config:
+                config["gradient"] = state.gradient
+            if state.background_color and "background_color" in config:
+                config["background_color"] = state.background_color
+            out.append({**w, "config": config})
+        return out
+
     def on_scene_fire(self, scene: SceneV2, writes: list[dict],
                       color_set_id: str | None = None) -> None:
         """Drop all legs; restart every mechanism from the fire's resolved
@@ -322,7 +378,10 @@ class DriftConductor:
         transfer (color_journey semantics), the story never snaps — but the
         journey's DESTINATION clears: the fire changed the palette (and
         possibly custody/pace), so the new steering picks a fresh bearing
-        on the next leg."""
+        on the next leg. A same-scene re-fire on the same set (is_refire)
+        KEEPS the destination: nothing about custody, pace or palette
+        changed, so the walk carries on."""
+        refire = self.is_refire(scene.id, color_set_id)
         entries = {dev.id: dev for dev in scene.devices}
         self.scene = scene
         self.virtuals = {}
@@ -361,13 +420,15 @@ class DriftConductor:
                 self.mechanisms.append(Mechanism(vid, param, spec, baseline,
                                                  effect_type=state.effect_type))
         room = self._room_load()
-        update: dict[str, Any] = {"destination": None}
+        update: dict[str, Any] = {} if refire else {"destination": None}
         if color_set_id is not None:
             update["active_set_id"] = color_set_id
-        self._room_save(room.model_copy(update=update))
+        if update:
+            self._room_save(room.model_copy(update=update))
         journey = color_journey.active_journey(self._room_load(), scene)
         self._last_rebaseline = {
             "at": self._clock(), "scene_id": scene.id, "scene_name": scene.name,
+            "refire": refire,
             "mechanisms": len(self.mechanisms),
             "journey_custody": journey.custody,
             "journey_degrees_per_min": journey.degrees_per_min,
@@ -425,7 +486,7 @@ class DriftConductor:
                 color_journey.active_journey(self._room_load(), self.scene))
 
         controls = self._room_controls()
-        active_gradient_id = controls.active_gradient_id
+        active_gradient_id = self.effective_gradient_id(controls)
         # FORCE COLOUR (owner ask 2026-08-27, spectra/services/
         # force_color.py) WINS OVER BOTH the wheel journey and an active 2D
         # gradient — the precedence ruling is stated in that module's
@@ -842,6 +903,29 @@ class DriftConductor:
 
     # ── the two-dimensional drift gradient ───────────────────────────────────
 
+    def effective_gradient_id(self, controls=None) -> Optional[str]:
+        """Which saved gradient drives the room right now, or None for the
+        wheel journey. With untriggered_gradient_enabled, a song positively
+        known to carry NO authored trigger uses untriggered_gradient_id (None
+        there = the saved gradient named UNTRIGGERED_GRADIENT_DEFAULT_NAME);
+        every other song — authored, or unknown — uses active_gradient_id.
+        An untriggered id naming nothing saved falls back the same way."""
+        if controls is None:
+            controls = self._room_controls()
+        if (getattr(controls, "untriggered_gradient_enabled", False)
+                and self._song_untriggered() is True):
+            profiles = self._gradient_profiles()
+            gid = getattr(controls, "untriggered_gradient_id", None)
+            if gid is not None and gid in profiles:
+                return gid
+            if gid is None:
+                for profile in profiles.values():
+                    if profile.name == UNTRIGGERED_GRADIENT_DEFAULT_NAME:
+                        return profile.id
+            logger.warning("untriggered gradient '%s' names no saved "
+                           "gradient — using active_gradient_id", gid)
+        return controls.active_gradient_id
+
     def on_intensity_event(self) -> None:
         """A trigger fired, or an analysed (song) transition fired — his own
         adopted proposal for the gradient's Y-axis "chosen well ahead of
@@ -910,21 +994,45 @@ class DriftConductor:
         path a real drop drives, never a second route. Honours the
         conductor's own deferral (ambient/dinner-party/preview/force-scene)
         like every other write this class makes."""
+        return await self._gradient_kick("drop", intensity,
+                                         y_kick=DROP_Y_KICK,
+                                         glide_ms=DROP_COLOR_GLIDE_MS)
+
+    async def on_analysed_cue(self, intensity: float | None,
+                              glide_ms: int) -> dict | None:
+        """An analysed (generated) cue on a song with no authored trigger
+        while a gradient drives the room (owner ask 2026-09-25): the
+        gradient's own answer to "jump to new colours here", REPLACING the
+        colour-set jump scene_response.analysed_color_jump would otherwise
+        make. X jumps one full leg-step (the drop's own X kick); Y is NOT
+        kicked — trigger_engine already retargeted it via
+        on_intensity_event at this cue — and the colour sampled at the new
+        (x, y) lands over glide_ms, the cue's own crossfade, so its middle
+        sits on the mark exactly like the scene fire's. Same gates and
+        None-when-no-gradient contract as on_drop_event."""
+        return await self._gradient_kick("analysed_cue", intensity,
+                                         y_kick=0.0, glide_ms=glide_ms)
+
+    async def _gradient_kick(self, kick: str, intensity: float | None, *,
+                             y_kick: float, glide_ms: int) -> dict | None:
+        """Shared out-of-band gradient step: X one extra leg-step, the Y
+        TARGET up by intensity * y_kick (never down, clamped), the colour at
+        (new x, current y) landed now over glide_ms."""
         room_controls = self._room_controls()
         # FORCE COLOUR outranks the gradient (see force_color.py's
         # precedence ruling and tick() above) — while the pin is on, the
-        # gradient is not driving the room's colour at all, so its drop
-        # kick has nothing to kick. Named, not a silent no-op.
+        # gradient is not driving the room's colour at all, so its kick
+        # has nothing to kick. Named, not a silent no-op.
         from spectra.services import force_color
         if force_color.active(room_controls):
             return {"active": False, "held_for": force_color.HELD_FOR}
-        gradient_id = room_controls.active_gradient_id
+        gradient_id = self.effective_gradient_id(room_controls)
         if gradient_id is None:
             return None
         profile = self._gradient_profiles().get(gradient_id)
         if profile is None:
-            logger.warning("drop kick: active_gradient_id '%s' names no saved "
-                           "gradient — skipped", gradient_id)
+            logger.warning("%s kick: gradient '%s' names no saved gradient "
+                           "— skipped", kick, gradient_id)
             return None
         deferred_by = self._deferral()
         if deferred_by is not None:
@@ -939,11 +1047,11 @@ class DriftConductor:
         x_delta = self.leg_s / max(room_controls.gradient_x_period_s, 1e-6)
         new_x, new_dir = gradient2d.advance_x(
             room.gradient_x, room.gradient_x_direction, x_delta, profile.x_mode)
-        new_target_y = min(1.0, room.gradient_target_y + intensity * DROP_Y_KICK)
+        new_target_y = min(1.0, room.gradient_target_y + intensity * y_kick)
         color = gradient2d.sample(profile.top, profile.bottom, new_x,
                                   room.gradient_y)
         rec: dict[str, Any] = {
-            "active": True, "kick": "drop", "gradient_id": profile.id,
+            "active": True, "kick": kick, "gradient_id": profile.id,
             "gradient_name": profile.name, "intensity": round(intensity, 4),
             "x": round(new_x, 4), "y": round(room.gradient_y, 4),
             "target_y": round(new_target_y, 4), "color": color, "legs": [],
@@ -952,14 +1060,14 @@ class DriftConductor:
             for vid, params in self._gradient_color_params(color):
                 state = self.virtuals[vid]
                 await self.executor.glide(vid, state.effect_type, params,
-                                          DROP_COLOR_GLIDE_MS)
+                                          glide_ms)
                 rec["legs"].append({"virtual_id": vid, "param": "gradient2d",
                                     "kind": "gradient", "target": color,
-                                    "duration_ms": DROP_COLOR_GLIDE_MS})
+                                    "duration_ms": glide_ms})
         self._room_save(room.model_copy(update={
             "gradient_x": new_x, "gradient_x_direction": new_dir,
             "gradient_target_y": new_target_y}))
-        await self._broadcast({"type": "drift_gradient_drop", **rec})
+        await self._broadcast({"type": f"drift_gradient_{kick}", **rec})
         return rec
 
     def _gradient_leg(self, gradient_id: str, batches: dict, leg_ms: int,
@@ -1038,6 +1146,8 @@ class DriftConductor:
             "mechanisms": [m.as_status() for m in self.mechanisms],
             "gradient": {
                 "active_gradient_id": self._room_controls().active_gradient_id,
+                "effective_gradient_id": self.effective_gradient_id(),
+                "song_untriggered": self._song_untriggered(),
                 # FORCE COLOUR (spectra/services/force_color.py) — the pin
                 # holds this journey while it's on, so the status that
                 # reports the journey must say so; a held walk with no

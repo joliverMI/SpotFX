@@ -15,10 +15,13 @@
  * Sits in the same grouped-button row as Mode/Ambient/Scenes
  * (RoomControlsBar.tsx), tap-to-open like Scenes (no cycle behaviour to
  * protect). Also carries the Rainbow select intensity limit — a small,
- * closely related setting with no other natural home in the top bar. */
+ * closely related setting with no other natural home in the top bar — and
+ * the "Songs without triggers" gradient switch (untriggered_gradient_*,
+ * resolved server-side in DriftConductor.effective_gradient_id). */
 import { useEffect, useState } from 'react';
 import GradientEditor2D, { type XMode } from './GradientEditor2D';
 import GradientSquarePreview from './GradientSquarePreview';
+import PowerButton from './PowerButton';
 import TopBarGroupButton from './TopBarGroupButton';
 import { useToast } from './Toast';
 import HelpLink from '../help/HelpLink';
@@ -27,6 +30,7 @@ import {
   useGradient2dProfiles, useRoomControls, useSaveGradient2dProfiles, useSaveRoomControls,
 } from '../queries';
 import type { DriftGradientProfile } from '../queries';
+import type { RoomControlState } from '../types';
 
 const newProfile = (): DriftGradientProfile => ({
   id: uuid(), name: 'New Gradient', top: '#ffff00', bottom: '#0000ff', x_mode: 'loop',
@@ -65,6 +69,21 @@ export default function DriftGradientBar() {
       ? prev
       : (activeProfile ? { ...activeProfile } : null)));
   }, [activeId, activeProfile]);
+
+  const sortedProfiles = Object.values(profiles).sort((a, b) => a.name.localeCompare(b.name));
+  // null = the server's default, the saved gradient named "Normal"
+  // (drift_conductor.UNTRIGGERED_GRADIENT_DEFAULT_NAME).
+  const untriggeredId = room?.untriggered_gradient_id ?? null;
+  const normalProfile = sortedProfiles.find((p) => p.name === 'Normal');
+
+  const saveRoomField = async (patch: Partial<RoomControlState>) => {
+    if (!room) return;
+    try {
+      await saveRoom.mutateAsync({ ...room, ...patch });
+    } catch (e) {
+      toast(`Failed to save: ${e}`, 'error');
+    }
+  };
 
   const setActive = async (id: string | null) => {
     if (!room) return;
@@ -137,7 +156,7 @@ export default function DriftGradientBar() {
                            justifyContent: 'center', color: 'var(--text-muted)', fontSize: 16 }}>—</div>
               <span style={{ fontSize: 10 }}>Off</span>
             </button>
-            {Object.values(profiles).sort((a, b) => a.name.localeCompare(b.name)).map((p) => (
+            {sortedProfiles.map((p) => (
               <button key={p.id} type="button" title={p.name}
                 onClick={() => void setActive(p.id)}
                 style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
@@ -184,6 +203,34 @@ export default function DriftGradientBar() {
               </div>
             </div>
           )}
+
+          <div style={{ borderTop: '1px solid var(--border)', paddingTop: 8,
+                       display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <PowerButton
+                on={room?.untriggered_gradient_enabled ?? false}
+                onChange={(on) => void saveRoomField({ untriggered_gradient_enabled: on })}
+                size={22}
+                ariaLabel="the gradient on songs without triggers"
+                title="On: songs without a trigger of your own drift through the gradient chosen here"
+              />
+              <span style={{ fontSize: 11, color: 'var(--text-muted)', flex: 1 }}>
+                Songs without triggers <HelpLink topic="untriggered-gradient" />
+              </span>
+              <select
+                style={{ fontSize: 11, maxWidth: 120 }}
+                value={untriggeredId ?? ''}
+                disabled={!room}
+                onChange={(e) => void saveRoomField({ untriggered_gradient_id: e.target.value || null })}
+              >
+                {!untriggeredId && <option value="">{normalProfile ? 'Normal' : '— none saved —'}</option>}
+                {sortedProfiles.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            </div>
+            <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+              Analysed moments on those songs also jump the colour <HelpLink topic="analysed-colour-jump" />
+            </span>
+          </div>
 
           <div style={{ borderTop: '1px solid var(--border)', paddingTop: 8,
                        display: 'flex', alignItems: 'center', gap: 8 }}>
