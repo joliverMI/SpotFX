@@ -395,15 +395,17 @@ _conductor_task: asyncio.Task | None = None
 _trigger_task: asyncio.Task | None = None
 
 
+_last_show_clock_shift_ms = 0
+
+
 def show_clock_shift_ms() -> int:
-    """How far the trigger clock (the show clock _run_trigger_engine ticks
-    on) currently reads AHEAD of bridge.effective_position_ms(): the A/V
-    lead minus River's buffer compensation, read fresh the same way the
-    tick reads them. DISPLAY ONLY — GET /api/analysed-plan hands it to the
-    debug page so a planned-event marker lands where the event will fire;
-    nothing here reaches the show."""
-    return av_sync_lead.show_clock_ms(
-        0, av_sync_lead.current_lead_ms(), known_buffer.compensation_ms()) or 0
+    """How far the trigger clock read AHEAD of bridge.effective_position_ms()
+    on the last tick (the A/V lead minus River's buffer compensation, as
+    _run_trigger_engine actually applied them — recorded there, never
+    recomputed, so the one application point stays the only one). DISPLAY
+    ONLY — GET /api/analysed-plan hands it to the debug page so a planned-
+    event marker lands where the event will fire. 0 before the first tick."""
+    return _last_show_clock_shift_ms
 
 
 async def _run_trigger_engine() -> None:
@@ -421,6 +423,7 @@ async def _run_trigger_engine() -> None:
     is layered on top of that here — this is its single application point.
     Errors are logged and swallowed per tick — one bad trigger must never
     stop the clock."""
+    global _last_show_clock_shift_ms
     from spectra.services.trigger_engine import TICK_S
     while True:
         try:
@@ -439,9 +442,13 @@ async def _run_trigger_engine() -> None:
             # speaker time and already tracks the buffer, so a delta on
             # top of it would correct the same milliseconds twice. Read
             # fresh every tick, same as the lead; never raises.
-            await trigger_engine.tick(av_sync_lead.show_clock_ms(
-                bridge.effective_position_ms(), av_sync_lead.current_lead_ms(),
-                known_buffer.compensation_ms()))
+            effective = bridge.effective_position_ms()
+            show = av_sync_lead.show_clock_ms(
+                effective, av_sync_lead.current_lead_ms(),
+                known_buffer.compensation_ms())
+            if effective is not None and show is not None:
+                _last_show_clock_shift_ms = show - effective
+            await trigger_engine.tick(show)
         except Exception:
             logger.exception("trigger engine: tick failed")
         await asyncio.sleep(TICK_S)
