@@ -300,12 +300,19 @@ def test_deferred_fires_are_recorded_never_silent(monkeypatch):
 
 # ── 3b. the update seam's own gate, post-#148 (his room's live mode) ────
 
-def test_fire_scene_update_event_runs_under_triggers_only(monkeypatch):
+def test_fire_scene_update_event_runs_under_triggers_only_and_analysed(monkeypatch):
     """engine.fire_scene_update_event gained a second caller here (dwell's
     deferral) the same week #148 widened its own internal gate from
     literal "full" to ("full", "triggers_only") for the pre-existing
     trigger-driven caller. His room runs "triggers_only" live — dwell's
-    deferral must still reach on_update there, not just under "full"."""
+    deferral must still reach on_update there, not just under "full".
+
+    "analysed" joined the allow list 2026-09-26 (Admiral order,
+    data/scene-flare-flow-explainer/report.md candidate 2): a deferred
+    scene-change attempt under "Transitions + analysed" used to draw
+    nothing, the one asymmetry against "triggers_only" (which already ran
+    this unconditionally, per-song fallback or not). "transitions" stays
+    excluded — see engine._update_gate's own docstring."""
     from spectra.services import engine, room_controls as rc
 
     calls: list = []
@@ -318,19 +325,124 @@ def test_fire_scene_update_event_runs_under_triggers_only(monkeypatch):
     # attribute accessed through the instance.
     monkeypatch.setattr(engine.responses, "on_update", fake_on_update)
 
-    for mode in ("full", "triggers_only"):
+    for mode in ("full", "triggers_only", "analysed"):
         calls.clear()
         rc.save_room_controls(rc.RoomControlState(scene_change_mode=mode))
         result = _run(engine.fire_scene_update_event(0.6))
         assert calls == [0.6], f"on_update must run under {mode!r}"
         assert result == {"result": "updated", "intensity": 0.6}
 
-    for mode in ("analysed", "transitions"):
+    for mode in ("transitions",):
         calls.clear()
         rc.save_room_controls(rc.RoomControlState(scene_change_mode=mode))
         result = _run(engine.fire_scene_update_event(0.6))
         assert calls == [], f"on_update must NOT run under {mode!r}"
         assert result is None
+
+
+# ── 3c. end-to-end: a real deferred scene-change draws the flare (or
+#    doesn't) through the REAL fire_scene_by_id -> fire_scene_update_event
+#    -> _update_gate composition — only responses.on_update is faked, the
+#    deepest layer, so the gate itself is genuinely exercised. Admiral
+#    order 2026-09-26, data/scene-flare-flow-explainer/report.md. ────────
+
+def _fake_on_update(monkeypatch, calls: list):
+    from spectra.services import engine
+
+    async def fake(intensity):
+        calls.append(intensity)
+        return {"result": "updated", "intensity": intensity}
+    monkeypatch.setattr(engine.responses, "on_update", fake)
+
+
+def test_analysed_mode_deferred_scene_change_draws_the_flare(monkeypatch):
+    """Case (a): the room is on "Transitions + analysed" — a scene-change
+    request landing inside dwell must now flare the current scene, not
+    draw nothing (the old bug: _update_gate checked the raw mode, which
+    excluded "analysed" alone, even though "triggers_only" — meant to
+    behave the same on a song with no authored triggers — already fired
+    this unconditionally)."""
+    from spectra.services import room_controls as rc
+    from spectra.services.scene_sequencer import fire_scene_by_id
+    scene_store.save(_scene("a"))
+    scene_store.save(_scene("b"))
+    fired: list = []
+    _fake_scene_compiler(monkeypatch, fired)
+    calls: list = []
+    _fake_on_update(monkeypatch, calls)
+    rc.save_room_controls(rc.RoomControlState(scene_change_mode="analysed"))
+
+    _run(fire_scene_by_id("a", intensity=0.0))
+    result = _run(fire_scene_by_id("b", intensity=0.4))
+
+    assert fired == [("a", 0.0)], "the deferred scene must never actually fire"
+    assert result["skipped"] == "dwell"
+    assert calls == [0.4], "the flare must draw under analysed now"
+    assert result["update_result"] == {"result": "updated", "intensity": 0.4}
+
+
+def test_untriggered_song_deferred_generated_trigger_draws_the_flare(tmp_path, monkeypatch):
+    """Case (b): the song has no authored triggers of its own, so under
+    "triggers_only" its generated (analysed) cue fires exactly like
+    "analysed" would (trigger_engine._effective_mode_for_song's per-song
+    fallback) — a cue of THAT shape landing inside dwell must draw the
+    flare too, end to end through the real TriggerEngine._fire ->
+    scene_sequencer.fire_scene_by_id -> engine.fire_scene_update_event
+    chain (the default fire_scene, not an injected stub)."""
+    from spectra.models.trigger import FireSceneAction, SpectraTrigger
+    from spectra.services import room_controls as rc
+    from spectra.services.trigger_engine import TriggerEngine
+    scene_store.save(_scene("a"))
+    scene_store.save(_scene("b"))
+    fired: list = []
+    _fake_scene_compiler(monkeypatch, fired)
+    calls: list = []
+    _fake_on_update(monkeypatch, calls)
+    rc.save_room_controls(rc.RoomControlState(scene_change_mode="triggers_only"))
+
+    # Dwell already latched to scene "a" (a prior real fire) — the
+    # generated trigger below picks "b" via the injected select_scene.
+    dwell.note_fired(scene_store.get_by_id("a"), 0.0, now_ms=1_000_000)
+
+    generated_trig = SpectraTrigger(timestamp_ms=1_000, source="generated",
+                                    action=FireSceneAction(scene_id=None))
+    engine = TriggerEngine(
+        list_triggers=lambda uri: [generated_trig],
+        select_scene=lambda intensity: "b",
+        render_intensity=lambda raw: raw,
+        scene_change_mode=lambda: "triggers_only")
+    _run(engine.on_track_state("unauthored-song"))
+    import time as time_mod
+    monkeypatch.setattr(time_mod, "time", lambda: 1_000_000 / 1000.0)
+
+    fired_triggers = _run(engine.tick(1_000))
+
+    assert [t.id for t in fired_triggers] == [generated_trig.id]
+    assert fired == [], "scene b's dwell-deferred fire must never actually land"
+    assert calls == [pytest.approx(generated_trig.action.intensity)], \
+        "the flare must draw for an untriggered song's deferred analysed cue"
+
+
+def test_transitions_mode_deferred_scene_change_stays_silent(monkeypatch):
+    """Unchanged case: "transitions" mode is untouched by this change — a
+    scene-change request deferred by dwell must still draw nothing there,
+    exactly as before."""
+    from spectra.services import room_controls as rc
+    from spectra.services.scene_sequencer import fire_scene_by_id
+    scene_store.save(_scene("a"))
+    scene_store.save(_scene("b"))
+    fired: list = []
+    _fake_scene_compiler(monkeypatch, fired)
+    calls: list = []
+    _fake_on_update(monkeypatch, calls)
+    rc.save_room_controls(rc.RoomControlState(scene_change_mode="transitions"))
+
+    _run(fire_scene_by_id("a", intensity=0.0))
+    result = _run(fire_scene_by_id("b", intensity=0.4))
+
+    assert result["skipped"] == "dwell"
+    assert calls == [], "transitions mode must draw no flare on a deferred cue"
+    assert result["update_result"] is None
 
 
 def test_dwell_defers_correctly_regardless_of_scene_change_mode(monkeypatch):
