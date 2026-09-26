@@ -2,6 +2,7 @@
  * rolling-R confidence trace, xcorr window brackets, mismatch spikes.
  * Ports of the shape_canvas.js debug overlays onto the builder's layer stack. */
 import type { CanvasLayer } from '../timeline/canvas/frame';
+import { FLARE_MARKER_COLOR, SCENE_MARKER_COLOR } from './plannedEvents';
 
 const SPIKE_COLOR = '#ff2d95';
 const NEW_COLOR = '#00ff88';
@@ -261,6 +262,43 @@ export const spikes: CanvasLayer = {
         ctx.fillStyle = SPIKE_COLOR;
         ctx.font = '10px monospace';
         ctx.fillText(`spike s=${sp.strength.toFixed(2)}`, x + 3, 22);
+      }
+    }
+    ctx.restore();
+  },
+};
+
+// ── Planned analysed events: SCENE CHANGE (solid cyan, full height, ▼ tab)
+// and FLARE (dashed amber, lower half, ● dot). Positions arrive pre-placed
+// on this canvas's clock (plannedEvents.ts). ──────────────────────────────
+export const plannedEvents: CanvasLayer = {
+  id: 'plannedEvents',
+  z: 40,
+  visible: (f) => !!f.data.plannedEvents?.length,
+  draw(f) {
+    const { ctx } = f;
+    ctx.save();
+    for (const ev of f.data.plannedEvents!) {
+      if (ev.ms < f.win.startMs || ev.ms > f.win.endMs) continue;
+      const x = f.timeToX(ev.ms);
+      if (ev.kind === 'scene') {
+        ctx.globalAlpha = 0.9;
+        ctx.strokeStyle = SCENE_MARKER_COLOR;
+        ctx.lineWidth = 2;
+        ctx.setLineDash([]);
+        ctx.beginPath(); ctx.moveTo(x, 8); ctx.lineTo(x, f.mainH); ctx.stroke();
+        ctx.fillStyle = SCENE_MARKER_COLOR;
+        ctx.beginPath(); ctx.moveTo(x - 5, 0); ctx.lineTo(x + 5, 0); ctx.lineTo(x, 8); ctx.closePath(); ctx.fill();
+      } else {
+        const top = f.mainH * 0.45;
+        ctx.globalAlpha = 0.85;
+        ctx.strokeStyle = FLARE_MARKER_COLOR;
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([3, 3]);
+        ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x, f.mainH); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = FLARE_MARKER_COLOR;
+        ctx.beginPath(); ctx.arc(x, top, 3.5, 0, Math.PI * 2); ctx.fill();
       }
     }
     ctx.restore();

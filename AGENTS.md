@@ -8804,6 +8804,16 @@ applied in `tick()`. Spacing: `SCENE_CUE_CLEARANCE_MS`/`FLARE_MIN_SPACING_MS`
 (2 s each, named in help topic `analysed-flares`). A settings change takes
 effect from the next play of a song. Spec: `tests/test_analysed_flares.py`.
 
+**The debug page's shape canvas marks them** (and the scene cues):
+`GET /api/analysed-plan?uri=` (`spectra/api/analysed_plan.py`) serves the
+trigger engine's own cached plan when the song is playing (else the same
+`plan_for_song`), stored generated scene cues (else the planned kept ones),
+and `show_clock_shift_ms` (`engine.show_clock_shift_ms`, display only).
+`spectra/web/src/debug/plannedEvents.ts` places each marker where the canvas
+playhead will be when the trigger clock reaches it — proven by
+`node scripts/check_planned_event_markers.mjs`; spec
+`tests/test_analysed_plan_api.py`.
+
 ## Maintaining this file
 
 Keep this file for knowledge useful to almost every future agent session in this project.

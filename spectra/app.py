@@ -31,6 +31,7 @@ from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from spectra import config
+from spectra.api import analysed_plan as analysed_plan_api
 from spectra.api import calibrations as calibrations_api
 from spectra.api import capture_queue as capture_queue_api
 from spectra.api import engine as engine_api
@@ -93,6 +94,7 @@ def create_app() -> FastAPI:
     app.include_router(settings_console.router)
     app.include_router(triggers.router)
     app.include_router(fire_history.router)
+    app.include_router(analysed_plan_api.router)
     app.include_router(feedback.router)
     app.include_router(show_review.router)
     app.include_router(intensity_scale.router)
