@@ -585,6 +585,7 @@ export default function RoomControlsBar() {
               <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
                 Transitions per minute
                 <HelpLink topic="transition-placement-rule" />
+                <HelpLink topic="analysed-flares" />
               </label>
               <input
                 type="number" min={1} max={30} step={0.5}

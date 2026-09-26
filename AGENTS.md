@@ -8784,6 +8784,26 @@ the sanity ceiling) alongside the pre-existing density-ranking tests
 (now driven through a patched, count-returning `resolve_transition_count`
 for exact control, matching the old flat-count semantics).
 
+## ANALYSED FLARES — the transitions that did not make the cut fire as flares
+
+2026-09-26, the Admiral: "all of the transitions that didn't get selected
+because they didn't rank high enough to be treated like flares."
+**`spectra/services/analysed_flares.py`'s docstring is the binding
+statement.** `midsong_generator.plan_moments` now returns BOTH halves of the
+density cut (`kept`, stored as generated fire_scene triggers as before, and
+`unselected`, placed by the identical rule); `candidate_moments` is its kept
+half, unchanged. The unselected ones are DERIVED AT PLAY TIME, never stored:
+`TriggerEngine` plans them once per song in a worker thread
+(`plan_analysed_flares`, cached for the current URI only) and feeds them to
+`tick()` as synthetic `fire_response` triggers (ids `analysed-flare:…`), so
+they get the same crossing logic, offsets and lead as a stored flare, then
+fires them via `engine.fire_response_event(..., analysed=True)` — the one
+extra tier the gate admits. Scope is `analysed_flares.analysed_flares_allowed`
+(effective mode "analysed", or "full" on a song with no authored trigger),
+applied in `tick()`. Spacing: `SCENE_CUE_CLEARANCE_MS`/`FLARE_MIN_SPACING_MS`
+(2 s each, named in help topic `analysed-flares`). A settings change takes
+effect from the next play of a song. Spec: `tests/test_analysed_flares.py`.
+
 ## Maintaining this file
 
 Keep this file for knowledge useful to almost every future agent session in this project.

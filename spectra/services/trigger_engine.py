@@ -333,8 +333,8 @@ from dataclasses import dataclass
 from random import Random
 from typing import Any, Awaitable, Callable, Optional
 
-from spectra.models.trigger import SpectraTrigger
-from spectra.services import transition_phases, trigger_store
+from spectra.models.trigger import FireResponseAction, SpectraTrigger
+from spectra.services import analysed_flares, transition_phases, trigger_store
 
 logger = logging.getLogger(__name__)
 
@@ -427,6 +427,8 @@ class TriggerEngine:
         lead_ms: Callable[[SpectraTrigger], int] | None = None,
         response_offset_ms: Callable[[Any], int] | None = None,
         intensity_event: Callable[[], None] | None = None,
+        analysed_plan: Callable[[str, list], Any] | None = None,
+        fire_analysed_flare: Callable[[float], Awaitable[Any]] | None = None,
         rng: Random | None = None,
     ) -> None:
         self._list_triggers = list_triggers or trigger_store.list_for_song
@@ -458,6 +460,20 @@ class TriggerEngine:
         self._intensity_event = intensity_event or (lambda: None)
         self._generating: set[str] = set()
         self._rng = rng or Random()
+
+        # ANALYSED FLARES (2026-09-26, spectra/services/analysed_flares.py):
+        # the transitions that did not make the density cut, fired as the
+        # current scene's flare band. Planned ONCE per song in a worker
+        # thread (the analysis read is disk I/O and tick() runs on the
+        # event loop), cached for the current URI only, and fed into tick()
+        # as synthetic fire_response triggers — never stored.
+        self._analysed_plan = analysed_plan or self._default_analysed_plan
+        self._fire_analysed_flare = (fire_analysed_flare
+                                     or self._default_fire_analysed_flare)
+        self._flare_plan_uri: Optional[str] = None
+        self._flare_triggers: list[SpectraTrigger] = []
+        self._flare_ids: set[str] = set()
+        self._flare_planning: Optional[str] = None
 
         # LOOKAHEAD (2026-08-19): trigger_id -> _PinnedPick, or trigger_id ->
         # None for "already attempted once, the draw came back empty" (the
@@ -512,6 +528,9 @@ class TriggerEngine:
             # rearms with it.
             self._pins.clear()
             self._fired.clear()
+            self._flare_plan_uri = None
+            self._flare_triggers = []
+            self._flare_ids = set()
         if uri is None or uri == self._last_transition_uri:
             return
         armed = self._last_transition_uri is not None
@@ -622,11 +641,15 @@ class TriggerEngine:
             return []  # rewind/seek back: silently rearmed via the line above
         triggers = self._list_triggers(self._uri)
         mode = self._effective_mode_for_song(self._scene_change_mode(), triggers)
+        candidates = triggers
+        if analysed_flares.analysed_flares_allowed(
+                mode, any(t.source == "authored" for t in triggers)):
+            candidates = triggers + self._analysed_flare_triggers(self._uri, triggers)
         fired: list[SpectraTrigger] = []
-        for trig in triggers:
+        for trig in candidates:
             if not trig.enabled:
                 continue
-            if not self._trigger_allowed(trig, mode):
+            if trig.id not in self._flare_ids and not self._trigger_allowed(trig, mode):
                 continue
             # EXACTLY-ONCE per approach (see self._fired's own comment in
             # __init__): a trigger that already fired since the last rearm
@@ -792,6 +815,50 @@ class TriggerEngine:
                 fired.append(trig)
         return fired
 
+    def _analysed_flare_triggers(self, uri: str,
+                                 stored: list[SpectraTrigger]) -> list[SpectraTrigger]:
+        """This song's analysed flare moments as synthetic fire_response
+        triggers, or [] while the plan is still being computed (the first
+        tick(s) of a song — a flare in the song's first moments is never
+        lost to this, since the opening section is never a candidate)."""
+        if self._flare_plan_uri == uri:
+            return self._flare_triggers
+        if self._flare_planning != uri:
+            self._flare_planning = uri
+            asyncio.create_task(self.plan_analysed_flares(uri, stored))
+        return []
+
+    async def plan_analysed_flares(self, uri: str,
+                                   stored: Optional[list[SpectraTrigger]] = None) -> None:
+        """Compute and cache `uri`'s analysed flare plan (tick() schedules
+        this itself; the spec awaits it directly). A result for a song that
+        is no longer current is discarded. A failure is logged and caches
+        an EMPTY plan — the song plays without analysed flares rather than
+        re-planning (and re-failing) every tick."""
+        if stored is None:
+            stored = self._list_triggers(uri)
+        try:
+            plan = await asyncio.to_thread(self._analysed_plan, uri, list(stored))
+            flares = list(plan.flares)
+        except Exception:
+            logger.exception("analysed flares: planning failed for %s", uri)
+            flares = []
+        finally:
+            if self._flare_planning == uri:
+                self._flare_planning = None
+        if uri != self._uri:
+            return
+        self._flare_triggers = [
+            SpectraTrigger(
+                id=m.trigger_id, timestamp_ms=m.timestamp_ms, source="generated",
+                generator_key=m.generator_key, snap_grid=m.snap_grid,
+                snap_moved_ms=m.snap_moved_ms,
+                action=FireResponseAction(event_class="flare", intensity=m.intensity))
+            for m in flares]
+        self._flare_ids = {t.id for t in self._flare_triggers}
+        self._flare_plan_uri = uri
+        logger.info("analysed flares: %d planned for %s", len(flares), uri)
+
     @staticmethod
     def _trigger_allowed(trig: SpectraTrigger, mode: str) -> bool:
         """The settings model's gate (room_controls.RoomControlState.
@@ -861,6 +928,8 @@ class TriggerEngine:
                         return
                 await self._fire_scene(scene_id, a.color_set_id,
                                        self._render_intensity(a.intensity))
+            elif a.kind == "fire_response" and trig.id in self._flare_ids:
+                await self._fire_analysed_flare(self._render_intensity(a.intensity))
             elif a.kind == "fire_response":
                 # OVERRIDE BLEND's dynamic half (2026-08-20, "fix the lull
                 # ramp"): only charge/lull stretch a ramp to the real gap
@@ -885,6 +954,10 @@ class TriggerEngine:
         self.last_fire = {"id": trig.id, "kind": a.kind, "ok": True}
         from spectra.services import fire_history
         detail = {"trigger_id": trig.id, "action_kind": a.kind, "source": trig.source}
+        key = f"{trig.source}:{a.kind}"
+        if trig.id in self._flare_ids:
+            detail["analysed_flare"] = True
+            key = "analysed:flare"
         if trig.snap_grid is not None:
             # Phase 2 (spectra/services/beat_snap.py) — which grid this
             # generated cue was snapped to and how far, so the Review
@@ -892,7 +965,7 @@ class TriggerEngine:
             detail["snap_grid"] = trig.snap_grid
             detail["snap_moved_ms"] = trig.snap_moved_ms
         fire_history.record_fire(
-            "triggers", f"{trig.source}:{a.kind}", detail,
+            "triggers", key, detail,
             uri=self._uri, position_ms=self._last_position_ms)
 
     def _next_trigger_gap_ms(self, trig: SpectraTrigger) -> Optional[int]:
@@ -1034,6 +1107,19 @@ class TriggerEngine:
         # as always).
         await engine.fire_response_event(event_class, intensity,
                                          gap_ms=gap_ms, via_trigger=True)
+
+    async def _default_fire_analysed_flare(self, intensity: float) -> None:
+        from spectra.services import engine
+        # via_trigger=True: tick() relocated this fire by its band's anchor
+        # exactly as it does a stored fire_response trigger. analysed=True
+        # widens the tier gate to "analysed" — tick() has already applied
+        # the per-song rule (analysed_flares.analysed_flares_allowed).
+        await engine.fire_response_event("flare", intensity, via_trigger=True,
+                                         analysed=True)
+
+    @staticmethod
+    def _default_analysed_plan(uri: str, stored: list):
+        return analysed_flares.plan_for_song(uri, stored)
 
     async def _default_fire_scene_update(self, intensity: float) -> None:
         from spectra.services import engine

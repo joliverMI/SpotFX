@@ -44,6 +44,11 @@ export function describeEvent(item: ReviewEventItem): string {
       return `Colour set: ${name}`;
     }
     case 'triggers': {
+      if (d.analysed_flare) {
+        // An unselected analysed transition fired as a flare
+        // (spectra/services/analysed_flares.py) — not a stored trigger.
+        return 'Analysed flare (a transition that did not make the cut)';
+      }
       const kind = (d.action_kind as string | undefined) ?? item.key;
       const source = d.source as string | undefined;
       const snapGrid = d.snap_grid as string | undefined;

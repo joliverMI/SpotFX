@@ -326,6 +326,35 @@ def candidate_moments(
     direction: Optional[str] = None,
     transitions_per_minute: Optional[float] = None,
 ) -> list[CandidateMoment]:
+    """The KEPT half of plan_moments() — see that function's docstring
+    (its keywords are this function's, unchanged)."""
+    return plan_moments(
+        uri, snap_enabled=snap_enabled, window_beats=window_beats,
+        sensitivity=sensitivity, direction=direction,
+        transitions_per_minute=transitions_per_minute).kept
+
+
+@dataclass(frozen=True)
+class MomentPlan:
+    """Both halves of one song's density cut. `kept` is what
+    generate_for_song stores as fire_scene triggers; `unselected` is every
+    OTHER candidate — the ones that did not rank high enough — placed by
+    the IDENTICAL rule on the IDENTICAL clock, which spectra.services.
+    analysed_flares turns into play-time flares (the Admiral, 2026-09-26:
+    "all of the transitions that didn't get selected because they didn't
+    rank high enough to be treated like flares"). Both chronological."""
+    kept: list[CandidateMoment]
+    unselected: list[CandidateMoment]
+
+
+def plan_moments(
+    uri: str, *,
+    snap_enabled: Optional[bool] = None,
+    window_beats: Optional[int] = None,
+    sensitivity: Optional[float] = None,
+    direction: Optional[str] = None,
+    transitions_per_minute: Optional[float] = None,
+) -> MomentPlan:
     """One CandidateMoment per surviving section boundary past the song's
     own start (see the module docstring's DENSITY section for what
     "surviving" means). Empty when no analysis is available yet —
@@ -342,7 +371,7 @@ def candidate_moments(
     other two."""
     sections = analysis_reader.sections_for_uri(uri)
     if not sections:
-        return []
+        return MomentPlan([], [])
     if (snap_enabled is None or window_beats is None or sensitivity is None
             or transitions_per_minute is None):
         controls = room_controls.load_room_controls()
@@ -374,10 +403,13 @@ def candidate_moments(
         for sec, intensity in mid
     ]
     resolved_count = resolve_transition_count(uri, ordered, transitions_per_minute)
+    dropped: list = []
     if len(scored) > resolved_count:
         kept = sorted(range(len(scored)), key=lambda i: scored[i][3],
                       reverse=True)[:resolved_count]
         kept.sort()  # restore chronological order
+        kept_set = set(kept)
+        dropped = [scored[i] for i in range(len(scored)) if i not in kept_set]
         scored = [scored[i] for i in kept]
 
     # The WAV-time -> song-time shift (see the module docstring's FRAME
@@ -395,21 +427,24 @@ def candidate_moments(
         placement = replace(placement, grid=None)
     shifted_placement = _shift_song_placement(placement, offset_ms)
 
-    out: list[CandidateMoment] = []
-    for sec, intensity, raw_ms, _strength in scored:
-        frame_ms = raw_ms + offset_ms
-        result = beat_snap.place_with_resolved(
-            frame_ms, placement=shifted_placement, window_beats=window_beats)
-        # generator_key is keyed on the section's own RAW (WAV-time)
-        # start_ms — the analysis moment, unaffected by the frame shift,
-        # the density ranking, or placement — so toggling any of these
-        # settings (or a recapture moving the capture offset) UPDATES the
-        # same trigger's timestamp_ms rather than orphaning it under a
-        # stale key and adding a new one (see the module docstring).
-        out.append(CandidateMoment(
-            result.timestamp_ms, intensity, f"section:{raw_ms}",
-            result.snap_grid, result.snap_moved_ms))
-    return out
+    def _place(rows: list) -> list[CandidateMoment]:
+        out: list[CandidateMoment] = []
+        for sec, intensity, raw_ms, _strength in rows:
+            frame_ms = raw_ms + offset_ms
+            result = beat_snap.place_with_resolved(
+                frame_ms, placement=shifted_placement, window_beats=window_beats)
+            # generator_key is keyed on the section's own RAW (WAV-time)
+            # start_ms — the analysis moment, unaffected by the frame shift,
+            # the density ranking, or placement — so toggling any of these
+            # settings (or a recapture moving the capture offset) UPDATES the
+            # same trigger's timestamp_ms rather than orphaning it under a
+            # stale key and adding a new one (see the module docstring).
+            out.append(CandidateMoment(
+                result.timestamp_ms, intensity, f"section:{raw_ms}",
+                result.snap_grid, result.snap_moved_ms))
+        return out
+
+    return MomentPlan(_place(scored), _place(dropped))
 
 
 def generate_for_song(uri: str) -> dict:

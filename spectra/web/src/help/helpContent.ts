@@ -806,6 +806,19 @@ export const HELP_SECTIONS: HelpSection[] = [
           '"Transitions per minute" (1–30, default 8): a RATE, not a flat per-song count. Before placement, generation multiplies this by the song\'s own analysed length in minutes, then scales that by the song\'s own intensity-scale factor — the same factor "Mark" (next to ⚡ Energy on the top-bar strip) shows and edits: automatic (genre + bass) up to 125%, or a manual mark up to 200%. A song he\'s marked hype earns proportionally more transitions than one he hasn\'t; a longer song gets more than a short one at the same rate. The result is rounded and always kept to at least 1, however short the song or low the rate — with a generous sanity ceiling (200 per song) that only an unusually long track at a maxed-out rate would ever reach. A worked example: at the default 8/minute, a 3:17 song with no manual mark and an ordinary genre factor comes out to roughly 26 transitions. Generation then keeps only that many candidates, the strongest by bass-energy step size.',
           'The music-analysis test bed\'s "Generator: Preview" lane (Test Bed page) reflects this same rule live at whatever Window/Sensitivity/Direction/rate you drag there, before you touch the room settings — see "Tuning the room\'s automatic transitions" for that page.',
           'Re-run "⟳ Generate" after changing any of these to re-place already-generated cues under the new settings — it updates the same cues in place. Nothing already stored moves on its own; the new rate only takes effect the next time a song\'s cues are (re)generated.',
+          'The candidates that do NOT make the cut are no longer thrown away — they fire as flares instead. See "Analysed flares".',
+        ],
+      },
+      {
+        id: 'analysed-flares',
+        title: 'Analysed flares — the transitions that didn\'t make the cut',
+        keywords: 'analysed analyzed flare flares unselected transition candidate strongest rank density spacing clearance generated mid-song no triggers',
+        body: [
+          'Generation keeps only a song\'s strongest transitions as scene changes ("Transitions per minute"). Every other transition it found — the ones that did not rank high enough — now fires as a FLARE on whatever scene is playing: the scene\'s ordinary flare band, at an intensity taken from that transition\'s own section energy and scaled exactly like any other fire.',
+          'They are placed by the same rule as the scene changes (nearest rhythmic edge, else nearest downbeat) and fire on the same show clock, including any flare-kind offset and the automatic lead a flare trigger gets.',
+          'When they fire: only while "Scene changes" is "Transitions + analysed", or on a song that has none of your own triggers (under "Everything" or "My triggers only"). Never under "Transitions only", and never on a song carrying your own triggers under "My triggers only" or "Everything".',
+          'Spacing: a flare within 2 seconds of a planned scene change is dropped, so a flare never lands on top of a transition; and flares closer than 2 seconds to each other are thinned, keeping the stronger one.',
+          'They are worked out from the song\'s analysis when it starts playing — nothing is written to your triggers, and they never appear on the Timeline as triggers. Changing "Transitions per minute" or the edge settings moves the split between scene changes and flares from the next play of a song. The Review page lists each one as "Analysed flare".',
         ],
       },
       {
