@@ -828,6 +828,15 @@ class TriggerEngine:
             asyncio.create_task(self.plan_analysed_flares(uri, stored))
         return []
 
+    def cached_flare_triggers(self, uri: str) -> Optional[list[SpectraTrigger]]:
+        """The analysed flare moments tick() is firing from for `uri`, or
+        None when no plan for `uri` is cached (not the current song, or
+        still planning). GET /api/analysed-plan reads this first so the
+        markers it serves are the SAME list the engine fires."""
+        if self._flare_plan_uri == uri:
+            return list(self._flare_triggers)
+        return None
+
     async def plan_analysed_flares(self, uri: str,
                                    stored: Optional[list[SpectraTrigger]] = None) -> None:
         """Compute and cache `uri`'s analysed flare plan (tick() schedules

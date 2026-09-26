@@ -17,7 +17,9 @@ import HelpLink from '../help/HelpLink';
 import { useToast } from '../components/Toast';
 import { ensureLiveState, getLiveProgressMs, useLiveStore } from './liveTiming';
 import { DIFF_MIN_SPAN_MS } from './diff';
-import { diffBands, rollingR, savedVsLive, spikes as spikesLayer, xcorrWins } from './layers';
+import { diffBands, plannedEvents as plannedEventsLayer, rollingR, savedVsLive, spikes as spikesLayer, xcorrWins } from './layers';
+import { apiGet as spectraGet } from '../api/client';
+import { FLARE_MARKER_COLOR, SCENE_MARKER_COLOR, plannedMarkers, type AnalysedPlan } from './plannedEvents';
 import LockBadge from './LockBadge';
 import { useDebugFeeds } from './useDebugFeeds';
 
@@ -30,7 +32,7 @@ const NO_LIBROSA = {
   bass: false, snare: false, mfcc: false,
 };
 
-const SHAPE_LAYERS = [savedVsLive, diamonds, xcorrWins, spikesLayer, playhead];
+const SHAPE_LAYERS = [savedVsLive, diamonds, plannedEventsLayer, xcorrWins, spikesLayer, playhead];
 const DIFF_LAYERS = [diffBands, rollingR, spikesLayer, playhead];
 
 const LIVE_EDGE_STALE_MS = 5000;
@@ -160,15 +162,6 @@ export default function DebugPage() {
     draggingIntensity: null, selectedIds: [], hoverTriggerId: null,
   };
 
-  const shapeData: LayerDataBag = useMemo(() => ({
-    ...emptyBag,
-    shape: shape ?? null,
-    live: feeds.live,
-    spikes: feeds.spikes,
-    xcorrWindows: feeds.xcorrWindows,
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [shape, feeds.live, feeds.spikes, feeds.xcorrWindows]);
-
   const diffData: LayerDataBag = useMemo(() => ({
     ...emptyBag,
     shape: null,
@@ -194,6 +187,31 @@ export default function DebugPage() {
         ? Number(timing.shape_offset_ms)
         : Number(meta?.timestamp_offset_ms ?? 0))
     - Number(trim?.perception_trim_ms ?? 0);
+
+  // ── Planned analysed events (scene changes + analysed flares) ─────────────
+  const { data: analysedPlan } = useQuery({
+    queryKey: ['analysed-plan', uri],
+    queryFn: () => spectraGet<AnalysedPlan>(`/analysed-plan?uri=${encodeURIComponent(uri!)}`),
+    enabled: !!uri,
+    refetchInterval: 15_000,
+    retry: false,
+  });
+  const canvasShiftMs = playheadShiftRef.current;
+  const bridgeShapeOffsetMs = timing.shape_offset_ms != null ? Number(timing.shape_offset_ms) : 0;
+  const plannedEventMarkers = useMemo(
+    () => plannedMarkers(analysedPlan, canvasShiftMs, bridgeShapeOffsetMs),
+    [analysedPlan, canvasShiftMs, bridgeShapeOffsetMs]);
+
+  const shapeData: LayerDataBag = useMemo(() => ({
+    ...emptyBag,
+    shape: shape ?? null,
+    live: feeds.live,
+    spikes: feeds.spikes,
+    xcorrWindows: feeds.xcorrWindows,
+    plannedEvents: plannedEventMarkers,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [shape, feeds.live, feeds.spikes, feeds.xcorrWindows, plannedEventMarkers]);
+
   const bumpTrim = async (deltaMs: number, reset = false) => {
     if (!uri) return;
     const params = new URLSearchParams({ uri });
@@ -402,6 +420,29 @@ export default function DebugPage() {
             },
           }}
         />
+        <div
+          data-testid="planned-events-legend"
+          style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 12, marginTop: 6, fontSize: 11, color: 'var(--text-muted)' }}
+        >
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            <span style={{ display: 'inline-block', width: 0, height: 0, borderLeft: '5px solid transparent', borderRight: '5px solid transparent', borderTop: `8px solid ${SCENE_MARKER_COLOR}` }} />
+            <span style={{ display: 'inline-block', width: 2, height: 12, background: SCENE_MARKER_COLOR }} />
+            Scene change
+          </span>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            <span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: FLARE_MARKER_COLOR }} />
+            <span style={{ display: 'inline-block', width: 0, height: 12, borderLeft: `2px dashed ${FLARE_MARKER_COLOR}` }} />
+            Analysed flare
+          </span>
+          <span style={{ minWidth: 0 }}>
+            {!analysedPlan
+              ? 'planned events: —'
+              : analysedPlan.applies
+                ? `${analysedPlan.scene_changes.length} scene changes${analysedPlan.scene_source === 'planned' ? ' (planned — not generated yet)' : ''}, ${analysedPlan.flares.length} analysed flares planned`
+                : `no analysed events: ${analysedPlan.reason}`}
+          </span>
+          <HelpLink topic="debug-shape-canvas" />
+        </div>
         <div style={{ marginTop: 8 }}>
           <TimelineBar
             durationMs={dur}

@@ -61,6 +61,14 @@ export interface LayerDataBag {
   monitorHistory?: MonitorPoint[];
   /** AI-triggers suggestion markers (draggable; index = suggestion index) */
   aiMarkers?: AiMarker[];
+  /** planned analysed events (debug page): scene changes + analysed flares,
+   *  already placed where they will fire against this canvas's playhead */
+  plannedEvents?: PlannedEventMarker[];
+}
+
+export interface PlannedEventMarker {
+  ms: number;
+  kind: 'scene' | 'flare';
 }
 
 export interface AiMarker {

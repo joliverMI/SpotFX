@@ -395,6 +395,17 @@ _conductor_task: asyncio.Task | None = None
 _trigger_task: asyncio.Task | None = None
 
 
+def show_clock_shift_ms() -> int:
+    """How far the trigger clock (the show clock _run_trigger_engine ticks
+    on) currently reads AHEAD of bridge.effective_position_ms(): the A/V
+    lead minus River's buffer compensation, read fresh the same way the
+    tick reads them. DISPLAY ONLY — GET /api/analysed-plan hands it to the
+    debug page so a planned-event marker lands where the event will fire;
+    nothing here reaches the show."""
+    return av_sync_lead.show_clock_ms(
+        0, av_sync_lead.current_lead_ms(), known_buffer.compensation_ms()) or 0
+
+
 async def _run_trigger_engine() -> None:
     """The trigger clock — SPECTRA's own poll of the bridge's streamed
     track position (bridge already interpolates between broadcasts;

@@ -818,7 +818,7 @@ export const HELP_SECTIONS: HelpSection[] = [
           'They are placed by the same rule as the scene changes (nearest rhythmic edge, else nearest downbeat) and fire on the same show clock, including any flare-kind offset and the automatic lead a flare trigger gets.',
           'When they fire: only while "Scene changes" is "Transitions + analysed", or on a song that has none of your own triggers (under "Everything" or "My triggers only"). Never under "Transitions only", and never on a song carrying your own triggers under "My triggers only" or "Everything".',
           'Spacing: a flare within 2 seconds of a planned scene change is dropped, so a flare never lands on top of a transition; and flares closer than 2 seconds to each other are thinned, keeping the stronger one.',
-          'They are worked out from the song\'s analysis when it starts playing — nothing is written to your triggers, and they never appear on the Timeline as triggers. Changing "Transitions per minute" or the edge settings moves the split between scene changes and flares from the next play of a song. The Review page lists each one as "Analysed flare".',
+          'They are worked out from the song\'s analysis when it starts playing — nothing is written to your triggers, and they never appear on the Timeline as triggers. Changing "Transitions per minute" or the edge settings moves the split between scene changes and flares from the next play of a song. The Review page lists each one as "Analysed flare", and the debug page\'s audio-shape graph marks where the upcoming ones will land (dashed amber).',
         ],
       },
       {
@@ -1253,10 +1253,11 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         id: 'debug-shape-canvas',
         title: 'Reading the shape canvas',
-        keywords: 'saved live capture mismatch magenta centerline legend',
+        keywords: 'saved live capture mismatch magenta centerline legend planned analysed scene change flare marker upcoming',
         body: [
           'The saved shape draws upward from the centerline; live capture (25 ms bins) draws downward, so a good lock looks like a mirror image. Brackets mark the xcorr windows; magenta spikes are confirmed mismatches — or, on a song that never locked, the windows the matcher placed while it kept searching (the spike list names which). Middle-drag pans; the timeline handles zoom. Follow resumes automatically when the page opens or the song changes.',
           'Perception trim is a per-track manual offset layered on top of the xcorr result — negative fires lighting earlier, positive later.',
+          'Planned analysed events: while the playing song\'s analysed events are live (Scene changes set to "Transitions + analysed", or a song with none of your own triggers), the graph marks what is coming. A solid cyan line with a ▼ tab is a SCENE CHANGE (a generated transition cue); a dashed amber line with a ● dot is an ANALYSED FLARE (a transition that did not make the cut — see "Analysed flares"). They are drawn on the show clock — including your A/V-sync lead, the audio-buffer compensation and this page\'s own latency and trim — so the playhead crosses each marker at the moment it fires. The line under the graph says how many are planned, notes when the scene changes are only planned because the song has not been generated yet, or says why nothing is drawn (Transitions only, or a song carrying your own triggers).',
         ],
       },
       {
