@@ -8151,6 +8151,40 @@ file's own "no live access from tests, ever" rule; it carries BOTH the
 track-change case that must splice and the mid-song-resume case that must
 not).
 
+**A second hole opened right after that fix, AT THE SEAM ITSELF — fixed
+2026-09-26** (`data/dream-on-capture-loop/report.md`). Splicing pre-roll in
+closed the head-truncation gap, but `_start()` then opens a brand-new
+`AudioCaptureStream` — and any audio that played between the pre-roll
+snapshot's own end and that new stream's first delivered callback was still
+lost. Measured 160-370ms, comfortably over the 200ms gap-discard limit, on
+roughly half of all real track-boundary captures library-wide (his "Dream
+On"/"Money for Nothing" capture-loop reports were this, not duration or a
+fixed cap — nothing in the pipeline caps capture length).
+`AudioShapeService._seal_preroll_seam` closes it: on the new stream's very
+first live frame, it re-snapshots the still-continuously-running PCM ring
+buffer from exactly where the pre-roll splice ended through exactly where
+the live sample begins, and synthesizes the hole the same way pre-roll
+itself is synthesized (`synthesize_frames_from_pcm`). One-shot per capture
+(`_preroll_end_monotonic`, cleared regardless of outcome the moment it's
+consulted); a no-op when there was no pre-roll to begin with (mid-song
+start). Spec: `tests/test_audio_capture_seam.py`.
+
+A second, unproven cause in the same report — a 4-10s callback stall
+roughly 25-40s into some captures, correlated (not proven) with the
+*previous* song's detached finalize pipeline (npz save, WAV write, librosa
+launch) — is INSTRUMENTED ONLY, not fixed: the WAV write already runs on a
+`ThreadPoolExecutor` and librosa already launches in its own single-use
+`ProcessPoolExecutor` (`_save_wav_and_analyze`), so nothing in that
+pipeline's own code obviously starves the concurrent capture thread by
+inspection. `_finalize_capture` now logs its own start/end wall-clock
+window, `_save_wav_and_analyze` logs its WAV-write and librosa sub-phase
+durations, and both audio callbacks (`api/audio_capture.py`'s per-song
+stream, `api/pcm_ring_buffer.py`'s always-on stream) log sounddevice
+status/overflow flags at WARNING — enough to correlate a future stall
+against an exact window without guessing. Do not move the WAV write or
+librosa off-thread further on the strength of this report alone; the
+report's own words are "correlation, not proven."
+
 ## The music-analysis test bed (`/testbed`)
 
 Capability state and honest deployment status: `docs/SPECTRA_SPEC.md` §109.
