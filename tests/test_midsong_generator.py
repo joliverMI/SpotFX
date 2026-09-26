@@ -529,3 +529,29 @@ def test_generated_cue_provenance_records_an_edge_label():
     assert m.snap_grid == "edge:up"
     assert m.timestamp_ms == int(round(20 * step_ms))
     assert m.snap_moved_ms == int(round(20 * step_ms)) - boundary_ms
+
+
+def test_plan_moments_returns_the_unselected_candidates_placed_by_the_same_rule(monkeypatch):
+    """ANALYSED FLARES (2026-09-26): the candidates the density cut drops
+    are no longer discarded — plan_moments returns them as `unselected`,
+    disjoint from `kept`, together covering every candidate, and placed by
+    the identical rule (here: no snap, no edges, so each lands on its own
+    raw boundary)."""
+    from spectra import config as scfg
+    from spectra.services import midsong_generator
+    monkeypatch.setattr(midsong_generator, "resolve_transition_count",
+                        lambda uri, sections, rate: 5)
+    pairs = _seed_density_song(scfg, n_boundaries=20)
+    plan = midsong_generator.plan_moments(
+        GEN_URI, snap_enabled=False, window_beats=1, sensitivity=1.5,
+        direction="both", transitions_per_minute=1)
+    kept = {m.generator_key for m in plan.kept}
+    unselected = {m.generator_key for m in plan.unselected}
+    assert len(kept) == 5 and len(unselected) == 15
+    assert not kept & unselected
+    assert kept | unselected == {f"section:{raw}" for raw, _s in pairs}
+    assert [m.timestamp_ms for m in plan.unselected] == sorted(
+        raw for raw, s in pairs if s <= 15)
+    assert midsong_generator.candidate_moments(
+        GEN_URI, snap_enabled=False, window_beats=1, sensitivity=1.5,
+        direction="both", transitions_per_minute=1) == plan.kept

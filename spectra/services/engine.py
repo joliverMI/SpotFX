@@ -107,7 +107,8 @@ trigger_engine._intensity_event = conductor.on_intensity_event
 
 async def fire_response_event(event_class: str, intensity: float,
                               gap_ms: int | None = None,
-                              via_trigger: bool = False) -> None:
+                              via_trigger: bool = False,
+                              analysed: bool = False) -> None:
     """The ONE response-fire choke point: the bridge's classified legacy
     trigger_fired events and SPECTRA-native fire_response triggers
     (spectra.services.trigger_engine) both call this — and, since
@@ -151,9 +152,15 @@ async def fire_response_event(event_class: str, intensity: float,
     moves a fire_response trigger's target by band_trigger_offset_ms, so
     only that caller's band staggers its kinds to their own moments; the
     bridge's band fires atomically (scene_response's "ONLY A FIRE ALREADY
-    RELOCATED BY THE ANCHOR STAGGERS")."""
+    RELOCATED BY THE ANCHOR STAGGERS").
+
+    analysed=True is the ANALYSED FLARE caller (2026-09-26,
+    spectra/services/analysed_flares.py — a transition that did not make
+    the density cut, fired as a flare): its tier is the analysed one, so
+    "analysed" is admitted beside "full"/"triggers_only". trigger_engine
+    has already applied the per-song rule before calling."""
     from spectra.services import fire_history
-    if _response_gate(via_trigger) is not None:
+    if _response_gate(via_trigger, analysed) is not None:
         return
     await responses.on_event(event_class, intensity, gap_ms,
                              anchor_relocated=via_trigger)
@@ -173,10 +180,10 @@ async def fire_response_event(event_class: str, intensity: float,
             logger.exception("gradient drift: on_drop_event failed")
     fire_history.record_fire("responses", event_class,
                              {"event_class": event_class, "intensity": intensity})
-    _schedule_fire_tail(lambda: _response_gate(via_trigger))
+    _schedule_fire_tail(lambda: _response_gate(via_trigger, analysed))
 
 
-def _response_gate(via_trigger: bool) -> Optional[str]:
+def _response_gate(via_trigger: bool, analysed: bool = False) -> Optional[str]:
     """fire_response_event's gate, as a reason: "preview" (a live Preview
     holds the room), "scene_change_mode" (this caller's tier is closed —
     see fire_response_event's docstring for the via_trigger split), or
@@ -187,7 +194,10 @@ def _response_gate(via_trigger: bool) -> Optional[str]:
     if preview_pause.active():
         return "preview"
     mode = load_room_controls().scene_change_mode
-    allowed = mode in ("full", "triggers_only") if via_trigger else mode == "full"
+    if analysed:
+        allowed = mode in ("full", "triggers_only", "analysed")
+    else:
+        allowed = mode in ("full", "triggers_only") if via_trigger else mode == "full"
     return None if allowed else "scene_change_mode"
 
 
