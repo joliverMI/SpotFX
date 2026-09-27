@@ -695,14 +695,9 @@ class RoomControlState(BaseModel):
     # (agent-tellable) rather than hardcoded so the pace can be retuned
     # without a redeploy.
     active_gradient_id: Optional[str] = None
-    # Untriggered-song gradient (owner ask 2026-09-25, "switch on the
-    # two-axis drift gradient for songs without triggers"): on, a song with
-    # NO authored trigger is driven by untriggered_gradient_id (None = his
-    # saved gradient named "Normal"); a song with one keeps
-    # active_gradient_id. Off (default) = today's behaviour on every song.
-    # Resolved in ONE place, DriftConductor.effective_gradient_id.
-    untriggered_gradient_enabled: bool = False
-    untriggered_gradient_id: Optional[str] = None
+    # (untriggered_gradient_enabled/_id, 2026-09-25, RETIRED 2026-09-26:
+    # the trigger-timed colour journey replaces the gradient on songs
+    # without his triggers — dropped on load below.)
     gradient_x_period_s: float = Field(default=300.0, gt=0.0)
     gradient_y_slew_s: float = Field(default=45.0, gt=0.0)
 
@@ -886,6 +881,13 @@ def load_room_controls() -> RoomControlState:
         # would. Never keep both — see the module docstring's own
         # transitions_per_minute entry.
         raw.pop("transition_max_per_song", None)
+        # One-way drop of the retired untriggered-song gradient (2026-09-26,
+        # the Admiral: the trigger-timed colour journey REPLACES it on songs
+        # without his triggers). Nothing to convert: the journey needs no
+        # setting, and a manually activated gradient (active_gradient_id)
+        # is untouched.
+        raw.pop("untriggered_gradient_enabled", None)
+        raw.pop("untriggered_gradient_id", None)
         try:
             return RoomControlState(**raw)
         except Exception:

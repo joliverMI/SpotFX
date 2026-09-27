@@ -44,6 +44,23 @@ Consequence, stated plainly: an override MOVES the room's colour story;
 inherit-mode scenes that follow continue from the override's endpoint. One
 continuous journey, custody changing hands, zero discontinuities.
 
+TRIGGER-TIMED (2026-09-26, the Admiral: "Shouldn't [the journey] have a
+destination based on when the next trigger is going to hit"): when the
+trigger engine knows the NEXT cue that will change colour or scene on the
+show clock (trigger_engine.next_colour_cue — his next authored scene/colour
+trigger, or on a song without his triggers the next analysed scene change),
+the destination is picked FOR THAT CUE — the same selector, at the cue's
+own intensity (or the very set the cue names, when it names one) — and its
+pace is set so the wheel ARRIVES ON THE CUE: timed_pace(), the remaining
+travel over the time remaining, bounded by TIMED_PACE_MIN/MAX_DEG_PER_MIN.
+The pace is recomputed every leg from where the wheel actually is, and the
+final leg glides over exactly the time left, so arrival lands on the cue.
+On arrival the destination becomes the room's ACTIVE set, so the scene the
+cue fires wears the colours the walk arrived at (no snap back). When the
+cue fires, the next horizon is picked at once (drift_conductor.
+on_colour_cue). No known cue (end of song, no analysis, a stale show clock)
+falls back to the distance-paced walk above, unchanged.
+
 Also binding here: rainbow/achromatic palettes have no wheel position, so
 the walk PAUSES while one is live (travel holds, destination kept);
 pace_factor 0 on an inherit scene holds the room walk while that scene
@@ -85,6 +102,14 @@ PACE_SCALE_MAX = 2.0
 # on the destination position, then reselects).
 ARRIVAL_EPSILON_DEG = 0.5
 
+# The trigger-timed walk's pace bounds (help topic 'journey-destination'
+# names both). MAX keeps a near cue from whipping the wheel round (180° in
+# 15 s at most — a cue closer than that arrives only part-way, and the cue
+# itself lands the rest); MIN keeps a far cue's walk visibly moving (a walk
+# that would be slower arrives early and holds there until the cue).
+TIMED_PACE_MIN_DEG_PER_MIN = 2.0
+TIMED_PACE_MAX_DEG_PER_MIN = 720.0
+
 
 class JourneyDestination(BaseModel):
     """The journey's current bearing: which set the room is heading toward,
@@ -96,6 +121,12 @@ class JourneyDestination(BaseModel):
     pace_deg_per_min: float
     from_deg: float
     rung: str = ""           # the selector rung that picked it (observability)
+    # TRIGGER-TIMED: the cue this destination is timed to arrive on (None =
+    # a distance-paced destination). cue_at_ms is show-clock song ms.
+    cue_key: Optional[str] = None
+    cue_at_ms: Optional[int] = None
+    cue_kind: Optional[str] = None
+    cue_source: Optional[str] = None
 
 
 class RoomColorState(BaseModel):
@@ -155,6 +186,15 @@ def destination_pace(reference_deg_per_min: float, travel_deg: float) -> float:
     scale = min(max(travel_deg / REFERENCE_TRAVEL_DEG, PACE_SCALE_MIN),
                 PACE_SCALE_MAX)
     return abs(reference_deg_per_min) * scale
+
+
+def timed_pace(travel_deg: float, remaining_s: float) -> float:
+    """The pace that arrives on a cue: the remaining travel over the time
+    remaining, bounded by TIMED_PACE_MIN/MAX_DEG_PER_MIN."""
+    if remaining_s <= 0.0:
+        return TIMED_PACE_MAX_DEG_PER_MIN
+    pace = abs(travel_deg) / (remaining_s / 60.0)
+    return min(max(pace, TIMED_PACE_MIN_DEG_PER_MIN), TIMED_PACE_MAX_DEG_PER_MIN)
 
 
 def step_toward(wheel_deg: Optional[float], dest_deg: float,

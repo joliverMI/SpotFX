@@ -11,6 +11,28 @@ const DEFER_LABEL: Record<string, string> = {
   ambient: 'Ambient Mode',
 };
 
+const HELD_LABEL: Record<string, string> = {
+  gradient_drift: 'drift gradient',
+  force_color: 'Force Colour',
+};
+
+const HELD_TITLE: Record<string, string> = {
+  gradient_drift: 'A drift gradient is switched on (top bar → Gradient), so it drives the colour and the journey waits — switch the gradient off to hand colour back to the journey',
+  force_color: 'Force Colour pins the room\'s colours, so the journey waits until the pin is released',
+};
+
+/** Song time as m:ss.t. */
+function fmtSongTime(ms: number | null | undefined): string {
+  if (ms == null) return '?';
+  const s = ms / 1000;
+  return `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, '0')}`;
+}
+
+function cueLabel(kind?: string | null, source?: string | null): string {
+  const what = kind === 'select_color_set' ? 'colour cue' : 'scene change';
+  return source === 'authored' ? `${what} (your trigger)` : `analysed ${what}`;
+}
+
 export default function EngineStatusStrip() {
   const { data: st } = useEngineStatus();
   if (!st) return null;
@@ -40,12 +62,26 @@ export default function EngineStatusStrip() {
         {j.wheel_position_deg != null && ` @ ${j.wheel_position_deg.toFixed(0)}°`}
         {j.rainbow_paused && ' · 🌈 paused'}
       </span>
-      {j.destination ? (
+      {j.held_for ? (
+        <span style={{ color: 'var(--text-muted)' }}
+          title={HELD_TITLE[j.held_for] ?? `The walk is held by ${j.held_for}`}>
+          held — {HELD_LABEL[j.held_for] ?? j.held_for}
+        </span>
+      ) : j.destination ? (
         <span
-          title={`Current destination: ${j.destination.set_name} at ${j.destination.position_deg.toFixed(0)}° — travelling at ${j.destination.pace_deg_per_min.toFixed(1)}°/min (picked via ${j.destination.rung}). On arrival the next destination is selected.`}>
+          title={j.destination.timed
+            ? `Timed destination: ${j.destination.set_name} at ${j.destination.position_deg.toFixed(0)}°, paced at ${j.destination.pace_deg_per_min.toFixed(1)}°/min to ARRIVE on the next ${cueLabel(j.destination.cue_kind, j.destination.cue_source)} at ${fmtSongTime(j.destination.cue_at_ms)} (picked via ${j.destination.rung}). When that cue fires the next one is picked.`
+            : `Current destination: ${j.destination.set_name} at ${j.destination.position_deg.toFixed(0)}° — travelling at ${j.destination.pace_deg_per_min.toFixed(1)}°/min (picked via ${j.destination.rung}). No next cue is known, so the pace comes from the distance; on arrival the next destination is selected.`}>
           → {j.destination.set_name}
           {' '}{Math.round(j.destination.progress * 100)}%
           {' '}@ {j.destination.pace_deg_per_min.toFixed(1)}°/min
+          {j.destination.timed && j.destination.cue_at_ms != null && (
+            <>
+              {' '}· ⏱ {fmtSongTime(j.destination.cue_at_ms)}
+              {j.destination.cue_in_s != null && ` (in ${Math.round(j.destination.cue_in_s)}s)`}
+            </>
+          )}
+          <HelpLink topic="journey-destination" title="Trigger-timed destinations" />
         </span>
       ) : (
         j.wheel_position_deg != null && !j.rainbow_paused && (

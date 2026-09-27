@@ -50,7 +50,7 @@ scope as a deferred scene cue's double-intensity flare.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, Optional
+from typing import Callable, Iterable, Optional
 
 from spectra.models.trigger import SpectraTrigger
 from spectra.services import midsong_generator
@@ -119,3 +119,40 @@ def plan_for_song(uri: str, stored: Iterable[SpectraTrigger] = ()) -> SongPlan:
                           m.snap_grid, m.snap_moved_ms)
               for m in plan.unselected]
     return SongPlan(list(plan.kept), _space(flares, blocked))
+
+
+@dataclass(frozen=True)
+class SceneCueMoment:
+    """One analysed SCENE CHANGE moment, in song time with the trigger's own
+    offset applied. `key` is the stored trigger's id, or "planned:" + the
+    generator key for a planned (not yet stored) cue."""
+    timestamp_ms: int
+    intensity: float
+    key: str
+
+
+def scene_change_moments(
+    stored: Iterable[SpectraTrigger],
+    planned: Callable[[], Iterable[midsong_generator.CandidateMoment]],
+) -> tuple[list[SceneCueMoment], Optional[str]]:
+    """THE scene-change list for a song's analysed events: its enabled
+    stored GENERATED fire_scene triggers (what actually fires), else — the
+    first play, before auto-generation lands — the plan's kept cues, read
+    through `planned` (called only in that case: it may read the analysis
+    from disk). Returns (chronological moments, "stored" | "planned" |
+    None). Read by GET /api/analysed-plan's markers and by
+    trigger_engine.next_colour_cue (the trigger-timed colour journey), so
+    the two can never disagree about when the next scene change is."""
+    cues = [SceneCueMoment(t.timestamp_ms + t.trigger_offset_ms,
+                           t.action.intensity, t.id)
+            for t in stored
+            if t.enabled and t.source == "generated"
+            and t.action.kind == "fire_scene"]
+    source: Optional[str] = "stored"
+    if not cues:
+        cues = [SceneCueMoment(m.timestamp_ms, m.intensity,
+                               "planned:" + m.generator_key)
+                for m in planned()]
+        source = "planned" if cues else None
+    cues.sort(key=lambda c: c.timestamp_ms)
+    return cues, source

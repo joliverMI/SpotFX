@@ -464,8 +464,9 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         id: 'journey-destination',
         title: 'Destinations and per-destination pace',
-        keywords: 'target speed travel reference arrive reselect',
+        keywords: 'target speed travel reference arrive reselect trigger timed next cue horizon arrival scene change analysed min max pace no destination',
         body: [
+          'TIMED TO THE NEXT CUE: whenever the engine knows the next moment that will change colour or scene — on a song with your own triggers, your next scene or colour trigger; on a song without, the next analysed scene change — the destination is picked FOR that moment (at its own energy, or the exact set a colour trigger names) and the walk is paced to ARRIVE ON IT: the remaining travel over the time remaining, re-checked every leg, and the last stretch glides over exactly the time left. On arrival that set becomes the room\'s set, so the scene the moment fires wears the colours the walk arrived at, and the walk waits there until the moment passes; when it fires, the next moment is picked at once. The timed pace is bounded: at least 2°/min (a walk that would be slower arrives early and waits) and at most 720°/min (180° in 15 s — a moment too close to reach arrives part-way, and on a song without your triggers that moment\'s colour jump lands the same set the walk was heading for, so the two never disagree). The Scenes page\'s Engine strip shows the destination, the cue time and the pace (⏱). With no next moment known — the end of the song, no analysis, playback paused — the walk falls back to the distance-paced walk described next.',
           'The destination determines BOTH where the journey is heading and how fast: the room has a reference pace (°/min, agent-adjusted), and a destination 90° away travels at exactly that pace — nearer destinations stroll (down to ×0.5), farther ones hurry (up to ×2). Travel follows the shortest arc; the active palette\'s hues rotate with the wheel. On arrival the wheel lands exactly on the destination position and the next destination is picked (the arrived set excluded). The status strip shows the current destination and progress toward it.',
           'The destination is a bearing, not an applied palette — sets are still applied by scene fires and flare jumps. When a jump teleports the wheel, the bearing clears and the journey re-orients from the new point. If no eligible chromatic set exists, the walk holds (never forced churn).',
           'A room is NEVER set-less: with no active set the journey immediately selects a first set and applies it (engine start included), scene fires always wear the room\'s active set instead of effect defaults, and the owner or fleet can apply a specific set directly — tell the agent, which uses POST /spectra/api/room-color/apply.',
@@ -779,16 +780,6 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
-        id: 'untriggered-gradient',
-        title: 'Gradient on songs without triggers',
-        keywords: 'untriggered no triggers analysed analysis only gradient 2d drift automatic normal songs without my triggers fallback',
-        body: [
-          'The "Songs without triggers" row in the Drift gradient panel. Switch it on and pick a saved gradient, and every song where you have NOT placed a trigger of your own drifts through that gradient: colour follows time along the square and the song\'s intensity up and down it, re-aiming at every analysed moment. It picks your gradient named "Normal" until you choose another.',
-          'A song where you HAVE placed a trigger keeps whatever the main gradient tile above says — normally Off, so the wheel colour journey. Off (the default) changes nothing on any song.',
-          'Force Colour still wins over it, exactly as it wins over the main gradient.',
-        ],
-      },
-      {
         id: 'analysed-colour-jump',
         title: 'Analysed moments jump the colour',
         keywords: 'analysed moment cue colour color jump set change untriggered no triggers generated bass edge downbeat dwell deferred held rainbow force colour gradient',
@@ -796,6 +787,7 @@ export const HELP_SECTIONS: HelpSection[] = [
           'On a song where you have not placed a trigger of your own, every analysed moment (the mid-song cues placed on bass edges and downbeats) also jumps the room to a new colour set — the same Colour Jump a flare uses, picked by the colour selector at that moment\'s energy, never the set already showing. It happens whether the scene changes, the same scene fires again, or the scene is held back by its minimum time — so a held-back moment still shows something.',
           'The change rides the moment\'s own scene crossfade, so its middle lands on the beat.',
           'What holds it instead, in order: a Preview, pause, Dinner Party or Ambient hold; Force Colour (a pin holds its colours); an active drift gradient (the gradient takes a step along time instead and re-aims at the moment\'s energy); and a rainbow palette that is live (it already moves every hue).',
+          'It agrees with the colour journey, which times itself to arrive on these same moments: if the walk arrived, its set is already showing and nothing jumps — the arrival IS the moment\'s colour change; if the moment came too soon for the walk to reach, the jump lands the set the walk was heading for instead of drawing a different one.',
           'Songs where you have placed a trigger are untouched — your own marks decide their colour.',
         ],
       },

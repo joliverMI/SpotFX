@@ -26,6 +26,11 @@ Mechanisms per leg:
            or wheel teleport clears the bearing so the new custody/position
            reselects; the wheel + bearing persist to shared room state
            every leg, so custody transfers never move the position.
+           TRIGGER-TIMED (2026-09-26): when trigger_engine.next_colour_cue
+           knows the next colour/scene cue on the show clock, the
+           destination is picked for that cue and paced to ARRIVE ON IT
+           (color_journey's TRIGGER-TIMED section; _journey_leg here). No
+           known cue → the distance-paced walk, unchanged.
 
   FORCE COLOUR — while room_controls.force_color_enabled pins a colour SET
            or GROUP (owner ask 2026-08-27, spectra/services/force_color.py),
@@ -107,11 +112,13 @@ re-writes those params) and the fire still crossfades. A genuine scene
 change, or a different colour set, clears the destination exactly as
 before.
 
-Untriggered-song gradient (owner ask 2026-09-25): room_controls'
-untriggered_gradient_enabled/untriggered_gradient_id make a gradient drive
-the room on a song with NO authored trigger; a song with one falls back to
-active_gradient_id. effective_gradient_id() is the ONE resolution every
-reader here uses (tick, the drop kick, the analysed-cue kick, status). Carry (the owner's words): surges move the
+The untriggered-song gradient (2026-09-25) is RETIRED (2026-09-26, the
+Admiral: "yes, replace"): on a song without his triggers the trigger-timed
+journey drives colour. effective_gradient_id() stays the ONE resolution
+every gradient reader uses (tick, the drop kick, the analysed-cue kick,
+status) and is now just the manual active_gradient_id.
+
+Carry (the owner's words): surges move the
 baseline drift resumes from — on_surge() moves a creep's wander position
 (clamped into bounds) and updates colour/brightness baselines; a surge on a
 followed param needs no bookkeeping, because the next leg re-asserts the
@@ -152,11 +159,12 @@ NEUTRAL_INTENSITY = 0.5  # follow's stated degradation when no feed exists
 # the drop energy to move the drift target 'up' on the 2D graph"). Both are
 # HIS tuning knobs, named here rather than inlined:
 DROP_Y_KICK = 0.5          # target_y += drop intensity * this (clamped to 1.0)
-# The saved gradient untriggered_gradient_id=None resolves to — his own
-# existing gradient, by name (ids are per-install uuids).
-UNTRIGGERED_GRADIENT_DEFAULT_NAME = "Normal"
 DROP_COLOR_GLIDE_MS = 150  # the drop's own colour change — fast, but not a
                            # hard snap (a drop is a moment, not a strobe)
+# After a colour/scene cue fires, the journey picks its next horizon this
+# long later (on_colour_cue) — past the cue's own crossfade (a few hundred
+# ms), so the new walk's first glide never cuts the scene change short.
+CUE_SETTLE_S = 0.5
 
 
 class VirtualState:
@@ -292,7 +300,7 @@ class DriftConductor:
         genre_bucket: Callable[[], Optional[str]] | None = None,
         gradient_profiles: Callable[[], dict] | None = None,
         room_controls: Callable[[], Any] | None = None,
-        song_untriggered: Callable[[], Optional[bool]] | None = None,
+        next_cue: Callable[[], Any] | None = None,
         rng: Random | None = None,
     ) -> None:
         self.executor = executor
@@ -313,10 +321,10 @@ class DriftConductor:
         self._gradient_profiles = gradient_profiles \
             or self._default_gradient_profiles
         self._room_controls = room_controls or self._default_room_controls
-        # None = unknown (no song / not yet read) — never counts as
-        # untriggered, so the untriggered gradient only engages on a song
-        # positively known to carry no authored trigger.
-        self._song_untriggered = song_untriggered or (lambda: None)
+        # The TRIGGER-TIMED horizon: trigger_engine.next_colour_cue in
+        # production (services/engine.py wires it); None (no cue known)
+        # everywhere else, which is exactly the distance-paced walk.
+        self._next_cue = next_cue or (lambda: None)
         self._rng = rng or Random()
 
         self.scene: SceneV2 | None = None
@@ -325,6 +333,13 @@ class DriftConductor:
         self._last_leg: dict | None = None
         self._last_rebaseline: dict | None = None
         self._deferred_by: str | None = None
+        # A cue-timed destination a scene fire just cleared — kept so the
+        # analysed colour jump at that same cue can land the set the walk
+        # was heading for (cue_destination). Dropped at the next horizon.
+        self._cue_dest: color_journey.JourneyDestination | None = None
+        # Clock time the current timed destination's cue is due (status).
+        self._cue_due_at: float | None = None
+        self._last_cue_step: dict | None = None
 
     # ── re-baseline (any scene fire) ─────────────────────────────────────────
 
@@ -420,6 +435,11 @@ class DriftConductor:
                 self.mechanisms.append(Mechanism(vid, param, spec, baseline,
                                                  effect_type=state.effect_type))
         room = self._room_load()
+        if not refire:
+            self._cue_dest = (room.destination
+                              if room.destination is not None
+                              and room.destination.cue_key is not None
+                              else None)
         update: dict[str, Any] = {} if refire else {"destination": None}
         if color_set_id is not None:
             update["active_set_id"] = color_set_id
@@ -485,6 +505,48 @@ class DriftConductor:
             bootstrap = await self._bootstrap_room_color(
                 color_journey.active_journey(self._room_load(), self.scene))
 
+        journey_rec, gradient_rec = self._colour_leg(batches, leg_ms, legs)
+        if bootstrap is not None:
+            journey_rec["bootstrap"] = bootstrap
+
+        intensity = self._intensity()
+        if intensity is None:
+            intensity = NEUTRAL_INTENSITY
+        for mech in self.mechanisms:
+            if mech.kind == "creep":
+                target = _creep_step(mech, self.leg_s)
+                duration = leg_ms
+            else:
+                target = curve_eval(self._follow_points(mech.spec), intensity)
+                reg = _registry_range(mech.effect_type, mech.param)
+                if reg is not None:
+                    target = min(max(target, reg[0]), reg[1])
+                duration = int(mech.spec.slew_s * 1000)
+            batches.setdefault((mech.vid, duration), {})[mech.param] = target
+            legs.append({"virtual_id": mech.vid, "param": mech.param,
+                         "kind": mech.kind, "target": round(float(target), 4),
+                         "duration_ms": duration})
+
+        await self._write_batches(batches)
+
+        record = {"at": self._clock(), "journey": journey_rec,
+                  "gradient": gradient_rec, "legs": legs,
+                  "intensity": round(intensity, 4)}
+        self._last_leg = record
+        await self._broadcast({"type": "drift_leg", **record})
+        return record
+
+    async def _write_batches(self, batches: dict) -> None:
+        for (vid, duration), params in batches.items():
+            state = self.virtuals.get(vid)
+            if state is None:
+                continue
+            await self.executor.glide(vid, state.effect_type, params, duration)
+
+    def _colour_leg(self, batches: dict, leg_ms: int,
+                    legs: list[dict]) -> tuple[dict, dict]:
+        """Which colour source moves this leg — force colour (held), an
+        active gradient, else the journey — and its record pair."""
         controls = self._room_controls()
         active_gradient_id = self.effective_gradient_id(controls)
         # FORCE COLOUR (owner ask 2026-08-27, spectra/services/
@@ -525,39 +587,7 @@ class DriftConductor:
         else:
             journey_rec = self._journey_leg(batches, leg_ms, legs)
             gradient_rec = {"active": False}
-        if bootstrap is not None:
-            journey_rec["bootstrap"] = bootstrap
-
-        intensity = self._intensity()
-        if intensity is None:
-            intensity = NEUTRAL_INTENSITY
-        for mech in self.mechanisms:
-            if mech.kind == "creep":
-                target = _creep_step(mech, self.leg_s)
-                duration = leg_ms
-            else:
-                target = curve_eval(self._follow_points(mech.spec), intensity)
-                reg = _registry_range(mech.effect_type, mech.param)
-                if reg is not None:
-                    target = min(max(target, reg[0]), reg[1])
-                duration = int(mech.spec.slew_s * 1000)
-            batches.setdefault((mech.vid, duration), {})[mech.param] = target
-            legs.append({"virtual_id": mech.vid, "param": mech.param,
-                         "kind": mech.kind, "target": round(float(target), 4),
-                         "duration_ms": duration})
-
-        for (vid, duration), params in batches.items():
-            state = self.virtuals.get(vid)
-            if state is None:
-                continue
-            await self.executor.glide(vid, state.effect_type, params, duration)
-
-        record = {"at": self._clock(), "journey": journey_rec,
-                  "gradient": gradient_rec, "legs": legs,
-                  "intensity": round(intensity, 4)}
-        self._last_leg = record
-        await self._broadcast({"type": "drift_leg", **record})
-        return record
+        return journey_rec, gradient_rec
 
     def _follow_points(self, spec: DriftSpec):
         if spec.inline_points is not None:
@@ -607,7 +637,8 @@ class DriftConductor:
 
     def _select_destination(
         self, journey: color_journey.EffectiveJourney, from_deg: float,
-        exclude_id: Optional[str],
+        exclude_id: Optional[str], *,
+        intensity: Optional[float] = None,
     ) -> Optional[color_journey.JourneyDestination]:
         """Pick the next destination with the SHIPPED selector (curve ×
         genre × wheel-travel, decision-3 ladder). Selector entries narrow
@@ -615,7 +646,9 @@ class DriftConductor:
         back to neutral entries over every eligible set, so the journey
         keeps moving (uniform-among-eligible is the ladder's own rung, not
         an invention). Terminal keep → None → the walk holds (never forced
-        churn). The pick fixes its own pace from its distance."""
+        churn). The pick fixes its own pace from its distance (a timed walk
+        re-paces it). `intensity` is the selection intensity — a timed
+        walk passes its cue's own; None reads the live feed."""
         pool = self._destination_pool()
         if not pool:
             return None
@@ -636,7 +669,8 @@ class DriftConductor:
             set_positions=positions,
             wheel_points=(wheel_profile.points if wheel_profile
                           else [CurvePoint(x=0.0, y=1.0)]))
-        intensity = self._intensity()
+        if intensity is None:
+            intensity = self._intensity()
         if intensity is None:
             intensity = NEUTRAL_INTENSITY
         pick = kernel.select_color_set(candidates, intensity=intensity,
@@ -806,11 +840,46 @@ class DriftConductor:
                          wheel_deg: Optional[float]) -> Optional[dict]:
         if dest is None:
             return None
-        return {"set_id": dest.set_id, "set_name": dest.set_name,
-                "position_deg": round(dest.position_deg, 2),
-                "pace_deg_per_min": round(dest.pace_deg_per_min, 3),
-                "progress": round(color_journey.progress(dest, wheel_deg), 3),
-                "rung": dest.rung}
+        rec = {"set_id": dest.set_id, "set_name": dest.set_name,
+               "position_deg": round(dest.position_deg, 2),
+               "pace_deg_per_min": round(dest.pace_deg_per_min, 3),
+               "progress": round(color_journey.progress(dest, wheel_deg), 3),
+               "rung": dest.rung, "timed": dest.cue_key is not None,
+               "cue_at_ms": dest.cue_at_ms, "cue_kind": dest.cue_kind,
+               "cue_source": dest.cue_source, "cue_in_s": None}
+        if dest.cue_key is not None and self._cue_due_at is not None:
+            rec["cue_in_s"] = round(max(0.0, self._cue_due_at - self._clock()), 1)
+        return rec
+
+    def _timed_destination(
+        self, journey: color_journey.EffectiveJourney, from_deg: float,
+        exclude_id: Optional[str], cue,
+    ) -> Optional[color_journey.JourneyDestination]:
+        """The destination FOR a cue: the very set the cue names when it
+        names one with a wheel position (select_color_set, or a fire_scene
+        carrying its own colour set) — walking toward anything else would
+        be undone at the cue — else the shipped selector at the cue's own
+        intensity. Stamped with the cue it is timed to."""
+        dest = None
+        if cue.set_id is not None:
+            position = self._set_position(cue.set_id)
+            if position is not None:
+                card = next((c for c in self._set_cards()
+                             if c.id == cue.set_id), None)
+                dest = color_journey.JourneyDestination(
+                    set_id=cue.set_id,
+                    set_name=getattr(card, "name", cue.set_id),
+                    position_deg=position, pace_deg_per_min=0.0,
+                    from_deg=from_deg, rung="cue_set")
+        if dest is None:
+            dest = self._select_destination(journey, from_deg, exclude_id,
+                                            intensity=cue.intensity)
+        if dest is None:
+            return None
+        return dest.model_copy(update={
+            "cue_key": cue.key, "cue_at_ms": cue.at_ms,
+            "cue_kind": cue.kind, "cue_source": cue.source,
+            "from_deg": from_deg})
 
     def _journey_leg(self, batches: dict, leg_ms: int,
                      legs: list[dict]) -> dict:
@@ -819,7 +888,16 @@ class DriftConductor:
         shortest arc at ITS pace, rotate the active palette with the wheel
         on set-mode virtuals, land exactly on arrival and reselect. Persists
         wheel + bearing to room state so restarts and custody transfers
-        read one truth."""
+        read one truth.
+
+        TRIGGER-TIMED (color_journey's section of the same name): with a
+        next cue known, the bearing is the destination FOR that cue, paced
+        by timed_pace() from where the wheel is NOW (recomputed every leg,
+        so it tracks), and this leg travels min(leg, time left) — the last
+        leg glides over exactly the time left, so the wheel lands on the
+        cue. Arrival makes the destination the room's active set and HOLDS
+        (no reselect) until the cue passes; the next horizon is picked when
+        the cue fires (on_colour_cue) or on the next leg."""
         room = self._room_load()
         journey = color_journey.active_journey(room, self.scene)
         rainbow = False
@@ -841,21 +919,46 @@ class DriftConductor:
                 or journey.degrees_per_min <= 0.0):
             return rec
 
+        wheel = room.wheel_position_deg
+        cue = self._next_cue()
         dest = room.destination
-        if dest is None:
-            dest = self._select_destination(journey, room.wheel_position_deg,
-                                            room.active_set_id)
+        dt_s = self.leg_s
+        if cue is not None:
+            remaining_s = max(0.0, (cue.at_ms - cue.position_ms) / 1000.0)
+            if dest is None or dest.cue_key != cue.key:
+                dest = self._timed_destination(journey, wheel,
+                                               room.active_set_id, cue)
+                if dest is None:
+                    self._cue_due_at = None
+                    return rec   # no eligible destination — the walk holds
+            travel = abs(color_journey.signed_travel(wheel, dest.position_deg))
+            dest = dest.model_copy(update={
+                "pace_deg_per_min": color_journey.timed_pace(travel,
+                                                             remaining_s)})
+            dt_s = min(self.leg_s, remaining_s)
+            self._cue_due_at = self._clock() + remaining_s
+            rec["cue"] = {"key": cue.key, "at_ms": cue.at_ms,
+                          "kind": cue.kind, "source": cue.source,
+                          "in_s": round(remaining_s, 3)}
+        else:
+            self._cue_due_at = None
+            if dest is not None and dest.cue_key is not None:
+                # Its cue has passed (or can no longer be timed): the walk
+                # carries on distance-paced from here.
+                dest = None
             if dest is None:
-                return rec   # no eligible destination — the walk holds
-            rec["destination"] = self._destination_rec(
-                dest, room.wheel_position_deg)
+                dest = self._select_destination(journey, wheel,
+                                                room.active_set_id)
+                if dest is None:
+                    return rec   # no eligible destination — the walk holds
+        rec["destination"] = self._destination_rec(dest, wheel)
 
+        dur_ms = max(1, int(round(dt_s * 1000)))
         new_deg, arrived = color_journey.step_toward(
-            room.wheel_position_deg, dest.position_deg,
-            dest.pace_deg_per_min, self.leg_s)
-        delta = color_journey.signed_travel(room.wheel_position_deg, new_deg)
+            wheel, dest.position_deg, dest.pace_deg_per_min, dt_s)
+        delta = color_journey.signed_travel(wheel, new_deg)
         rec.update(paused=False, arrived=arrived,
-                   wheel_position_deg=round(new_deg, 2))
+                   wheel_position_deg=round(new_deg, 2), duration_ms=dur_ms)
         if delta != 0.0:
             from spectra.services.room_controls import resolve_authored_bg_color
             controls = self._room_controls()
@@ -885,45 +988,87 @@ class DriftConductor:
                     state.background_color = bg_color
                     params["background_color"] = bg_color
                 if params:
-                    batches.setdefault((vid, leg_ms), {}).update(params)
+                    batches.setdefault((vid, dur_ms), {}).update(params)
                     legs.append({"virtual_id": vid, "param": "palette",
                                  "kind": "journey",
                                  "target": round(delta, 3),
-                                 "duration_ms": leg_ms})
-        if arrived:
+                                 "duration_ms": dur_ms})
+        update: dict[str, Any] = {"wheel_position_deg": new_deg}
+        if arrived and dest.cue_key is not None:
+            # Timed arrival: the destination IS the room's set now, so the
+            # cue's scene fire wears it (never snaps back to the old set's
+            # unrotated hues). Hold here until the cue passes.
+            update["active_set_id"] = dest.set_id
+            rec["committed_set_id"] = dest.set_id
+        elif arrived:
             # ON ARRIVAL: select the next destination (arrived set
             # excluded) and set off again next leg.
             dest = self._select_destination(journey, new_deg, dest.set_id)
-            rec["destination"] = self._destination_rec(dest, new_deg)
-        else:
-            rec["destination"] = self._destination_rec(dest, new_deg)
-        self._room_save(room.model_copy(
-            update={"wheel_position_deg": new_deg, "destination": dest}))
+        rec["destination"] = self._destination_rec(dest, new_deg)
+        update["destination"] = dest
+        self._room_save(room.model_copy(update=update))
+        return rec
+
+    def cue_destination(self) -> Optional[color_journey.JourneyDestination]:
+        """The destination the timed walk was heading for at the cue firing
+        now — the room's bearing if it is still timed, else the one a scene
+        fire just cleared. None when no walk was timed to this cue. Read by
+        the analysed colour jump so the jump and the arrival agree."""
+        dest = self._room_load().destination
+        if dest is not None and dest.cue_key is not None:
+            return dest
+        return self._cue_dest
+
+    def on_colour_cue(self) -> None:
+        """A cue that changes colour or scene just fired (trigger_engine's
+        hook): after CUE_SETTLE_S, pick the next horizon and set off toward
+        it (cue_step) — cues can sit seconds apart, far closer than a leg.
+        A no-op outside a running event loop."""
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+
+        async def settle_then_step() -> None:
+            await asyncio.sleep(CUE_SETTLE_S)
+            try:
+                await self.cue_step()
+            except Exception:
+                logger.exception("drift conductor: cue step failed")
+
+        loop.create_task(settle_then_step())
+
+    async def cue_step(self) -> dict | None:
+        """A journey-only leg run right after a cue: the next horizon is
+        picked and the walk toward it starts now. Same holds as a leg —
+        deferral, force colour, an active gradient, no live scene."""
+        self._cue_dest = None
+        if self.scene is None or self._deferral() is not None:
+            return None
+        from spectra.services import force_color
+        controls = self._room_controls()
+        if (force_color.active(controls)
+                or self.effective_gradient_id(controls) is not None):
+            return None
+        batches: dict[tuple[str, int], dict[str, Any]] = {}
+        legs: list[dict] = []
+        rec = self._journey_leg(batches, int(self.leg_s * 1000), legs)
+        await self._write_batches(batches)
+        self._last_cue_step = {"at": self._clock(), "journey": rec,
+                               "legs": legs}
+        await self._broadcast({"type": "drift_cue_step",
+                               **self._last_cue_step})
         return rec
 
     # ── the two-dimensional drift gradient ───────────────────────────────────
 
     def effective_gradient_id(self, controls=None) -> Optional[str]:
         """Which saved gradient drives the room right now, or None for the
-        wheel journey. With untriggered_gradient_enabled, a song positively
-        known to carry NO authored trigger uses untriggered_gradient_id (None
-        there = the saved gradient named UNTRIGGERED_GRADIENT_DEFAULT_NAME);
-        every other song — authored, or unknown — uses active_gradient_id.
-        An untriggered id naming nothing saved falls back the same way."""
+        wheel journey: the manually activated active_gradient_id. (The
+        untriggered-song gradient that also resolved here is retired — the
+        trigger-timed journey replaces it.)"""
         if controls is None:
             controls = self._room_controls()
-        if (getattr(controls, "untriggered_gradient_enabled", False)
-                and self._song_untriggered() is True):
-            profiles = self._gradient_profiles()
-            gid = getattr(controls, "untriggered_gradient_id", None)
-            if gid is not None and gid in profiles:
-                return gid
-            if gid is None:
-                for profile in profiles.values():
-                    if profile.name == UNTRIGGERED_GRADIENT_DEFAULT_NAME:
-                        return profile.id
-            logger.warning("untriggered gradient '%s' names no saved "
-                           "gradient — using active_gradient_id", gid)
         return controls.active_gradient_id
 
     def on_intensity_event(self) -> None:
@@ -1127,6 +1272,14 @@ class DriftConductor:
         journey = color_journey.active_journey(room, self.scene)
         rainbow = (room.active_set_id is not None
                    and self._set_position(room.active_set_id) is None)
+        controls = self._room_controls()
+        # WHY the walk is not moving, when it is held by another colour
+        # source — so the Scenes page never shows a bare "no destination".
+        held_for = None
+        if force_color.active(controls):
+            held_for = force_color.HELD_FOR
+        elif self.effective_gradient_id(controls) is not None:
+            held_for = "gradient_drift"
         return {
             "executor_mode": self.executor.mode,
             "leg_s": self.leg_s,
@@ -1140,6 +1293,7 @@ class DriftConductor:
                 "wheel_position_deg": room.wheel_position_deg,
                 "active_set_id": room.active_set_id,
                 "rainbow_paused": rainbow,
+                "held_for": held_for,
                 "destination": self._destination_rec(
                     room.destination, room.wheel_position_deg),
             },
@@ -1147,7 +1301,6 @@ class DriftConductor:
             "gradient": {
                 "active_gradient_id": self._room_controls().active_gradient_id,
                 "effective_gradient_id": self.effective_gradient_id(),
-                "song_untriggered": self._song_untriggered(),
                 # FORCE COLOUR (spectra/services/force_color.py) — the pin
                 # holds this journey while it's on, so the status that
                 # reports the journey must say so; a held walk with no
@@ -1159,6 +1312,7 @@ class DriftConductor:
             },
             "last_leg": self._last_leg,
             "last_rebaseline": self._last_rebaseline,
+            "last_cue_step": self._last_cue_step,
         }
 
     # ── production defaults (lazy imports; specs inject fakes) ───────────────

@@ -2330,14 +2330,22 @@ class ResponseEngine:
              — nothing moves, the same holds that stop the drift leg;
           2. FORCE COLOUR — a pin holds; this jump never rolls a pinned
              group's next member (unlike a flare's jump, which does);
-          3. an ACTIVE GRADIENT (active_gradient_id or the untriggered
-             gradient) — the gradient's own kick (X one leg-step, colour at
-             the Y target trigger_engine just retargeted) REPLACES the set
-             jump: a set jump would be overwritten on the next leg anyway;
+          3. an ACTIVE GRADIENT (active_gradient_id) — the gradient's own
+             kick (X one leg-step, colour at the Y target trigger_engine
+             just retargeted) REPLACES the set jump: a set jump would be
+             overwritten on the next leg anyway;
           4. a RAINBOW palette live (the active set has no wheel position)
              — held, the journey's own rainbow hold: rainbow sets are the
              sequencer's high-energy pick and already move every hue;
-          5. otherwise the set jump."""
+          5. the TRIGGER-TIMED JOURNEY was heading for this cue
+             (conductor.cue_destination) — the jump and the arrival AGREE,
+             never two different sets at one moment: if the walk arrived
+             (its set is already the room's, so the scene fire just wore
+             it) nothing jumps — the arrival IS this cue's colour moment,
+             the least jarring option; if it could not arrive in time (the
+             pace bound), the jump lands THAT set, completing the walk over
+             the cue's crossfade instead of drawing a different one;
+          6. otherwise the set jump (a fresh selector draw)."""
         from spectra.services import force_color
         record: dict[str, Any] = {"at": self._clock(), "kind": "analysed_cue",
                                   "intensity": round(intensity, 4),
@@ -2364,16 +2372,23 @@ class ResponseEngine:
         if scene is None:
             record["result"] = "no_active_scene"
             return record
+        timed = self.conductor.cue_destination()
+        if timed is not None and room.active_set_id == timed.set_id:
+            record["held_for"] = "journey_arrived"
+            record["set_id"] = timed.set_id
+            return record
         carry: dict[tuple[str, str], Any] = {}
-        record["color_jump"] = await self._color_jump(scene, intensity, carry,
-                                                      ramp_ms=ramp_ms)
+        record["color_jump"] = await self._color_jump(
+            scene, intensity, carry, ramp_ms=ramp_ms,
+            picked_id=timed.set_id if timed is not None else None)
         self.conductor.on_surge(carry)
         record["result"] = record["color_jump"].get("result")
         return record
 
     async def _color_jump(self, scene: SceneV2, intensity: float,
                           carry: dict, *,
-                          ramp_ms: Optional[int] = None) -> dict:
+                          ramp_ms: Optional[int] = None,
+                          picked_id: Optional[str] = None) -> dict:
         """The flare colour jump: the shipped selector picks (curve × genre
         × wheel-travel, terminal KEEP), the pick lands on set-mode virtuals
         with the intensity-scaled RAMP-IN (color_jump_ramp_ms — a hue-arc
@@ -2383,7 +2398,9 @@ class ResponseEngine:
         the landed targets, so releases and palette rotation measure from
         where the ramp finishes, never a mid-blend snapshot. ramp_ms
         overrides the intensity-scaled ramp (analysed_color_jump's cue
-        crossfade); None keeps it."""
+        crossfade); None keeps it. picked_id lands THAT set instead of a
+        selector draw (analysed_color_jump: the set the trigger-timed walk
+        was heading for); force colour still wins over it."""
         config = self._sequencer_config()
         room = self._room_load()
         # FORCE COLOUR (owner ask 2026-08-27, spectra/services/
@@ -2405,9 +2422,15 @@ class ResponseEngine:
         forced_id = force_color.pinned_id(self._room_controls())
         if forced_id is not None:
             forced = force_color.pinned_card(self._room_controls())
-        if forced is None and not config.color_set_entries:
+        timed_card = (self._set_card(picked_id)
+                      if forced is None and picked_id is not None else None)
+        if forced is None and timed_card is None and not config.color_set_entries:
             return {"result": "selector_unconfigured"}
-        if forced is not None:
+        if timed_card is not None:
+            card = timed_card
+            rung = "journey_destination"
+            eligible = {picked_id: self.conductor._set_position(picked_id)}
+        elif forced is not None:
             card = forced
             picked_id = forced.id
             rung = force_color.HELD_FOR

@@ -54,18 +54,15 @@ def _plan(uri: str) -> dict:
         flares = [{"timestamp_ms": m.timestamp_ms, "intensity": m.intensity}
                   for m in plan.flares]
 
-    scene = [{"timestamp_ms": t.timestamp_ms + t.trigger_offset_ms,
-              "intensity": t.action.intensity}
-             for t in stored
-             if t.enabled and t.source == "generated" and t.action.kind == "fire_scene"]
-    scene_source = "stored"
-    if not scene:
+    def planned():
+        nonlocal plan
         if plan is None:
             plan = analysed_flares.plan_for_song(uri, stored)
-        scene = [{"timestamp_ms": m.timestamp_ms, "intensity": m.intensity}
-                 for m in plan.scene_cues]
-        scene_source = "planned"
-    scene.sort(key=lambda e: e["timestamp_ms"])
+        return plan.scene_cues
+
+    moments, scene_source = analysed_flares.scene_change_moments(stored, planned)
+    scene = [{"timestamp_ms": m.timestamp_ms, "intensity": m.intensity}
+             for m in moments]
     return {**base, "applies": True, "reason": None, "scene_source": scene_source,
             "scene_changes": scene, "flares": flares}
 

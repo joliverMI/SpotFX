@@ -329,6 +329,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from dataclasses import dataclass
 from random import Random
 from typing import Any, Awaitable, Callable, Optional
@@ -406,6 +407,26 @@ def _get_generation_lock() -> asyncio.Lock:
     return _generation_lock
 
 
+# next_colour_cue refuses a show clock not fed for this long (tick() runs
+# every TICK_S while a song plays).
+POSITION_STALE_S = 3.0
+
+
+@dataclass(frozen=True)
+class NextCue:
+    """The next colour/scene cue on the show clock (next_colour_cue).
+    at_ms and position_ms are both show-clock song ms; set_id is the colour
+    set the cue itself names, when it names one."""
+    uri: str
+    key: str
+    at_ms: int
+    position_ms: int
+    kind: str
+    source: str
+    intensity: Optional[float] = None
+    set_id: Optional[str] = None
+
+
 class TriggerEngine:
     """One instance per process (singleton below). Constructor injectables
     exist for the executable spec only — production uses the defaults."""
@@ -430,6 +451,8 @@ class TriggerEngine:
         analysed_plan: Callable[[str, list], Any] | None = None,
         fire_analysed_flare: Callable[[float], Awaitable[Any]] | None = None,
         analysed_color: Callable[[float, float, Optional[str]], Awaitable[Any]] | None = None,
+        colour_cue: Callable[[], None] | None = None,
+        clock: Callable[[], float] | None = None,
         rng: Random | None = None,
     ) -> None:
         self._list_triggers = list_triggers or trigger_store.list_for_song
@@ -467,6 +490,16 @@ class TriggerEngine:
         # generated fire_scene is easy to forget to stub, and a forgotten
         # stub must not reach real storage.
         self._analysed_color = analysed_color or self._no_analysed_color
+        # TRIGGER-TIMED COLOUR JOURNEY (2026-09-26): called after a cue that
+        # changes colour or scene fires, so the drift conductor picks the
+        # NEXT horizon at once instead of up to a leg later. Safe no-op
+        # default, wired in services/engine.py — same reasoning as the two
+        # hooks above.
+        self._colour_cue = colour_cue or (lambda: None)
+        self._clock = clock or time.monotonic
+        # When _last_position_ms was last fed (clock time) — next_colour_cue
+        # refuses a stale show clock rather than time a walk against it.
+        self._position_at: Optional[float] = None
         # (uri, has_authored) from the latest read of this song's trigger
         # list — tick() already parses it every TICK_S, so readers
         # (song_untriggered, _fire) reuse that answer instead of a second
@@ -488,6 +521,10 @@ class TriggerEngine:
         self._flare_triggers: list[SpectraTrigger] = []
         self._flare_ids: set[str] = set()
         self._flare_planning: Optional[str] = None
+        # The same plan's KEPT cues — the planned scene changes the colour
+        # journey times itself against before auto-generation has stored
+        # them (next_colour_cue; never fired from here).
+        self._scene_cue_plan: list = []
 
         # LOOKAHEAD (2026-08-19): trigger_id -> _PinnedPick, or trigger_id ->
         # None for "already attempted once, the draw came back empty" (the
@@ -545,6 +582,7 @@ class TriggerEngine:
             self._flare_plan_uri = None
             self._flare_triggers = []
             self._flare_ids = set()
+            self._scene_cue_plan = []
         if uri is None or uri == self._last_transition_uri:
             return
         armed = self._last_transition_uri is not None
@@ -656,6 +694,7 @@ class TriggerEngine:
             self._last_position_ms = position_ms - 1
         last = self._last_position_ms
         self._last_position_ms = position_ms
+        self._position_at = self._clock()
         if position_ms < last:
             # A rewind can re-approach an already-pinned trigger with a now-
             # stale commitment — arbitrary time may have passed off-screen
@@ -879,9 +918,11 @@ class TriggerEngine:
         try:
             plan = await asyncio.to_thread(self._analysed_plan, uri, list(stored))
             flares = list(plan.flares)
+            scene_cues = list(plan.scene_cues)
         except Exception:
             logger.exception("analysed flares: planning failed for %s", uri)
             flares = []
+            scene_cues = []
         finally:
             if self._flare_planning == uri:
                 self._flare_planning = None
@@ -895,6 +936,7 @@ class TriggerEngine:
                 action=FireResponseAction(event_class="flare", intensity=m.intensity))
             for m in flares]
         self._flare_ids = {t.id for t in self._flare_triggers}
+        self._scene_cue_plan = scene_cues
         self._flare_plan_uri = uri
         logger.info("analysed flares: %d planned for %s", len(flares), uri)
 
@@ -913,6 +955,82 @@ class TriggerEngine:
         if trig.source == "authored":
             return mode in ("full", "triggers_only")
         return mode in ("analysed", "full")
+
+    def _notify_colour_cue(self) -> None:
+        """A cue that changes colour or scene just fired: tell the colour
+        journey, which picks its next horizon (next_colour_cue). Best-effort
+        like _notify_intensity_event — never breaks the fire itself."""
+        try:
+            self._colour_cue()
+        except Exception:
+            logger.exception("colour journey: on_colour_cue failed")
+
+    def next_colour_cue(self) -> Optional[NextCue]:
+        """THE NEXT-CUE HORIZON for the trigger-timed colour journey
+        (drift_conductor's _journey_leg): the next cue that will change
+        colour or scene on the SHOW CLOCK for the song playing, or None.
+
+        The candidates are exactly what tick() would fire — the enabled
+        stored triggers the per-song effective mode allows
+        (_effective_mode_for_song + _trigger_allowed, the same two calls) —
+        narrowed to the two action kinds that change colour or scene:
+        fire_scene and select_color_set. On a song with his triggers under
+        "triggers_only" that is his next authored scene/colour trigger; on
+        a song without, the next analysed scene change. When no generated
+        cue is stored yet (first play, before auto-generation lands) the
+        analysed plan's own kept cues stand in — read through
+        analysed_flares.scene_change_moments, the ONE list GET
+        /api/analysed-plan's markers also use, never a second computation.
+        Analysed FLARES are not colour cues (a flare fires the scene's own
+        band, not a colour change) and never count.
+
+        Times are target times — timestamp + the trigger's own offset, the
+        same relocation tick() makes first. The scene/flare-kind offsets
+        and the automatic lead are not added: the lead is what makes a
+        crossfade's MIDDLE land on this mark, which is exactly where the
+        journey aims to arrive.
+
+        None when no song is known, the show clock has not been fed for
+        POSITION_STALE_S (paused / bridge down — a walk timed against a
+        frozen clock would arrive at the wrong moment), or nothing is
+        ahead. The caller then falls back to the distance-paced walk."""
+        uri, pos = self._uri, self._last_position_ms
+        if uri is None or pos is None or self._position_at is None:
+            return None
+        if self._clock() - self._position_at > POSITION_STALE_S:
+            return None
+        triggers = self._list_triggers(uri)
+        has_authored = any(t.source == "authored" for t in triggers)
+        mode = self._effective_mode_for_song(self._scene_change_mode(), triggers)
+        best: Optional[NextCue] = None
+
+        def consider(cue: NextCue) -> None:
+            nonlocal best
+            if cue.at_ms > pos and (best is None or cue.at_ms < best.at_ms):
+                best = cue
+
+        for t in triggers:
+            a = t.action
+            if (not t.enabled or not self._trigger_allowed(t, mode)
+                    or a.kind not in ("fire_scene", "select_color_set")):
+                continue
+            consider(NextCue(
+                uri=uri, key=t.id, at_ms=t.timestamp_ms + t.trigger_offset_ms,
+                position_ms=pos, kind=a.kind, source=t.source,
+                intensity=getattr(a, "intensity", None),
+                set_id=(a.set_id if a.kind == "select_color_set"
+                        else a.color_set_id)))
+        if analysed_flares.analysed_flares_allowed(mode, has_authored):
+            planned = (self._scene_cue_plan
+                       if self._flare_plan_uri == uri else [])
+            moments, source = analysed_flares.scene_change_moments(
+                triggers, lambda: planned)
+            if source == "planned":
+                for m in moments:
+                    consider(NextCue(uri=uri, key=m.key, at_ms=m.timestamp_ms,
+                                     position_ms=pos, kind="fire_scene",
+                                     source="planned", intensity=m.intensity))
+        return best
 
     def _notify_intensity_event(self) -> None:
         """The two-dimensional drift gradient's retarget hook (owner ask
@@ -965,10 +1083,12 @@ class TriggerEngine:
                         self.last_fire = {"id": trig.id, "kind": a.kind,
                                           "ok": True, "picked": None}
                         await self._fire_analysed_color(trig, None)
+                        self._notify_colour_cue()
                         return
                 await self._fire_scene(scene_id, a.color_set_id,
                                        self._render_intensity(a.intensity))
                 await self._fire_analysed_color(trig, scene_id)
+                self._notify_colour_cue()
             elif a.kind == "fire_response" and trig.id in self._flare_ids:
                 await self._fire_analysed_flare(self._render_intensity(a.intensity))
             elif a.kind == "fire_response":
@@ -986,6 +1106,7 @@ class TriggerEngine:
                 await self._fire_scene_update(self._render_intensity(a.intensity))
             else:
                 await self._select_color_set(a.set_id)
+                self._notify_colour_cue()
         except Exception:
             logger.exception("trigger %s (%s @ %dms) failed to fire",
                              trig.id, a.kind, trig.timestamp_ms)
