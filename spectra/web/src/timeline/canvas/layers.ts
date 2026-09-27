@@ -5,6 +5,11 @@
 import type { CanvasFrame, CanvasLayer, Hit } from './frame';
 import { AVG_COLORS, MARK_ABBR, MARK_COLOR, computeBlendSpans } from './data';
 import type { MarkType } from '../types';
+// Reused verbatim from the debug page (PR fm/planned-event-markers) — the
+// draw code only ever reads pre-placed f.data.plannedEvents, so it's the
+// same layer here as there; each page supplies its own placement (see
+// ../../debug/plannedEvents.ts's module docstring for why they differ).
+import { plannedEvents as analysedEvents } from '../../debug/layers';
 
 const TRI_H = 8;
 const TRI_W = 7;
@@ -622,5 +627,5 @@ export const beatStrips: CanvasLayer = {
 
 export const BUILDER_LAYERS: CanvasLayer[] = [
   intensityBackground, blendSpans, rmsBands, avgLines, diamonds, librosaOverlays,
-  musicMarks, triggers, calibration, playhead, beatStrips,
+  analysedEvents, musicMarks, triggers, calibration, playhead, beatStrips,
 ];

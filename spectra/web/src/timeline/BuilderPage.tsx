@@ -5,7 +5,8 @@ import { useSticky } from '../lib/useSticky';
 import { fmtMs } from '../lib/time';
 import { useEvents, useSettings } from '../api/queries';
 import { useBuilderStore } from './store';
-import { useAudioShapeData, useAudioShapeMeta, useCalibrationStatus, useLibrosa, useLiveShape, useProfileByUri, useSetlists } from './queries';
+import { useAnalysedPlan, useAudioShapeData, useAudioShapeMeta, useCalibrationStatus, useLibrosa, useLiveShape, useProfileByUri, useSetlists } from './queries';
+import { FLARE_MARKER_COLOR, SCENE_MARKER_COLOR, songPositionMarkers } from '../debug/plannedEvents';
 import { usePlayhead } from './hooks/usePlayhead';
 import { useFollowWindow } from './hooks/useFollowWindow';
 import TimelineCanvas from './canvas/TimelineCanvas';
@@ -66,6 +67,7 @@ export default function BuilderPage() {
   const { data: librosa } = useLibrosa(uri);
   const { data: events } = useEvents();
   const { data: setlists } = useSetlists();
+  const { data: analysedPlan } = useAnalysedPlan(uri);
 
   // While capturing (analysis on, no completed shape yet) poll the live buffer.
   const analysisOn = useBuilderStore((s) => s.modes.analysis);
@@ -100,6 +102,7 @@ export default function BuilderPage() {
   const [markFilters] = useSticky<Record<MarkType, boolean>>('markFilters', ALL_MARKS);
   const [intensityMode, setIntensityMode] = useSticky<IntensityBgMode>('intensityMode', 'off');
   const [canvasHeight, setCanvasHeight] = useSticky('canvasHeight', 260);
+  const [showAnalysedEvents, setShowAnalysedEvents] = useSticky('showAnalysedEvents', true);
 
   const durationMs = profile?.duration_ms || meta?.duration_ms || track?.duration_ms || 1;
 
@@ -195,6 +198,13 @@ export default function BuilderPage() {
     onHover: setHoverTriggerId,
   });
 
+  // Analysed events (scene changes + analysed flares) at their SONG position —
+  // see ../debug/plannedEvents.ts's module docstring for why the Timeline
+  // canvas needs a different placement than the debug page's own clock-shifted one.
+  const analysedMarkers = useMemo(
+    () => (showAnalysedEvents ? songPositionMarkers(analysedPlan) : []),
+    [showAnalysedEvents, analysedPlan]);
+
   const data: LayerDataBag = useMemo(() => ({
     shape: shape ?? null,
     averages,
@@ -207,8 +217,9 @@ export default function BuilderPage() {
     draggingIntensity,
     selectedIds,
     hoverTriggerId,
+    plannedEvents: analysedMarkers,
   }), [shape, averages, meta, librosa, mfccDistances, workingTriggers, events,
-       calibrationTargetsMs, draggingIntensity, selectedIds, hoverTriggerId]);
+       calibrationTargetsMs, draggingIntensity, selectedIds, hoverTriggerId, analysedMarkers]);
 
   const stripCount = stripCountFor(data, librosaFilters);
   const totalCanvasHeight = canvasHeight + stripCount * BEAT_STRIP_H;
@@ -311,6 +322,14 @@ export default function BuilderPage() {
             <HelpLink topic="builder-misc" title="Other timeline controls" />
             <button
               style={{ fontSize: 12 }}
+              className={`chip filter ${showAnalysedEvents ? 'active' : ''}`}
+              title="Show/hide SPECTRA's planned scene changes and analysed flares for this song"
+              onClick={() => setShowAnalysedEvents((v) => !v)}
+            >
+              Analysed events
+            </button>
+            <button
+              style={{ fontSize: 12 }}
               className={shiftOpen || triggerPreviewOffsetMs !== 0 ? 'primary' : ''}
               disabled={!profile}
               title="Shift every trigger by a fixed offset (preview + commit)"
@@ -368,6 +387,33 @@ export default function BuilderPage() {
           }}
         >
           ⣀⣀⣀
+        </div>
+        <div
+          data-testid="analysed-events-legend"
+          style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 12, marginTop: 6, fontSize: 11, color: 'var(--text-muted)' }}
+        >
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            <span style={{ display: 'inline-block', width: 0, height: 0, borderLeft: '5px solid transparent', borderRight: '5px solid transparent', borderTop: `8px solid ${SCENE_MARKER_COLOR}` }} />
+            <span style={{ display: 'inline-block', width: 2, height: 12, background: SCENE_MARKER_COLOR }} />
+            Scene change
+          </span>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            <span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: FLARE_MARKER_COLOR }} />
+            <span style={{ display: 'inline-block', width: 0, height: 12, borderLeft: `2px dashed ${FLARE_MARKER_COLOR}` }} />
+            Analysed flare
+          </span>
+          <span style={{ minWidth: 0 }}>
+            {!showAnalysedEvents
+              ? 'analysed events hidden — click "Analysed events" above to show them'
+              : !uri
+                ? 'analysed events: —'
+                : !analysedPlan
+                  ? 'analysed events: —'
+                  : analysedPlan.applies
+                    ? `${analysedPlan.scene_changes.length} scene changes${analysedPlan.scene_source === 'planned' ? ' (planned — not generated yet)' : ''}, ${analysedPlan.flares.length} analysed flares planned`
+                    : `no analysed events: ${analysedPlan.reason}`}
+          </span>
+          <HelpLink topic="builder-analysed-events" />
         </div>
         <ShiftAllControl open={shiftOpen} setOpen={setShiftOpen} durationMs={durationMs} />
         <HelpLink topic="builder-navigation" title="Navigation & view" />
