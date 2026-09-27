@@ -87,7 +87,7 @@ conductor = DriftConductor(
     deferral=lambda: bridge.conductor_deferral(),
     broadcast=ws_manager.broadcast,
     genre_bucket=lambda: bridge.genre_bucket(),
-    song_untriggered=lambda: trigger_engine.song_untriggered(),
+    next_cue=lambda: trigger_engine.next_colour_cue(),
 )
 
 responses = ResponseEngine(
@@ -104,6 +104,9 @@ responses = ResponseEngine(
 # owns wiring the one other thing trigger_engine.py's real fires need to
 # reach on this process's conductor.
 trigger_engine._intensity_event = conductor.on_intensity_event
+# The trigger-timed colour journey's "a cue just fired, pick the next
+# horizon" hook — wired here for the same reason as the line above.
+trigger_engine._colour_cue = conductor.on_colour_cue
 
 
 async def fire_analysed_color_event(selection_intensity: float,

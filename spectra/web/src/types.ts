@@ -484,12 +484,6 @@ export interface RoomControlState {
    * means off, the wheel-based colour journey drives the room's colour
    * exactly as before this feature. See DriftGradientBar.tsx. */
   active_gradient_id: string | null;
-  /** On: a song with NO authored trigger drifts through
-   * untriggered_gradient_id (null = his saved gradient named "Normal");
-   * a song with one keeps active_gradient_id. Off (default) = no change.
-   * Resolved server-side in DriftConductor.effective_gradient_id. */
-  untriggered_gradient_enabled: boolean;
-  untriggered_gradient_id: string | null;
   gradient_x_period_s: number;
   gradient_y_slew_s: number;
 }
@@ -1014,6 +1008,12 @@ export interface JourneyDestination {
   pace_deg_per_min: number;
   progress: number;         // 0..1 of the walk completed
   rung: string;             // selector rung that picked it
+  /** Trigger-timed: paced to ARRIVE on the next colour/scene cue. */
+  timed?: boolean;
+  cue_at_ms?: number | null;   // show-clock song ms of that cue
+  cue_kind?: string | null;    // fire_scene | select_color_set
+  cue_source?: string | null;  // authored | generated | planned
+  cue_in_s?: number | null;    // seconds until it, as of the status read
 }
 
 export interface DriftLegRecord {
@@ -1056,6 +1056,9 @@ export interface EngineStatus {
       wheel_position_deg: number | null;
       active_set_id: string | null;
       rainbow_paused: boolean;
+      /** Why the walk is held by another colour source (force_color /
+       * gradient_drift), else null. */
+      held_for?: string | null;
       destination: JourneyDestination | null;
     };
     mechanisms: DriftMechanismStatus[];

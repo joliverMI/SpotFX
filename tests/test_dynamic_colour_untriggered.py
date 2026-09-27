@@ -6,7 +6,9 @@
   3. every analysed (generated) cue on an untriggered song lands a colour
      moment through the existing Colour Jump, with an explicit precedence
      (deferral > force colour > gradient > rainbow > set jump);
-  4. a room setting drives a 2D gradient on untriggered songs only.
+  4. (retired 2026-09-26) the untriggered-song gradient — the
+     trigger-timed colour journey replaces it; tests/
+     test_timed_colour_journey.py proves the replacement.
 
 Every injectable is passed explicitly; nothing reads or writes real storage.
 """
@@ -61,12 +63,12 @@ CARDS = {sid: ColorSetCard(id=sid, name=sid.title(), entries=[ColorSetEntry(
 
 class Rig:
     def __init__(self, *, controls: RoomControlState | None = None,
-                 untriggered: bool | None = True, deferral=None,
-                 room: cj.RoomColorState | None = None):
+                 deferral=None, room: cj.RoomColorState | None = None,
+                 next_cue=None):
         self.room = [room or cj.RoomColorState(
             wheel_position_deg=0.0, active_set_id="red")]
         self.controls = controls or RoomControlState()
-        self.untriggered = untriggered
+        self.cue = [next_cue]
         self.profiles = {"n1": GradientProfile(
             id="n1", name="Normal", top="#ffff00", bottom="#0000ff",
             x_mode="loop"), "t1": GradientProfile(
@@ -87,7 +89,7 @@ class Rig:
             sequencer_config=lambda: config,
             gradient_profiles=lambda: self.profiles,
             room_controls=lambda: self.controls,
-            song_untriggered=lambda: self.untriggered,
+            next_cue=lambda: self.cue[0],
             rng=Random(3))
         self.responses = ResponseEngine(
             conductor=self.conductor, executor=self.executor, rng=Random(5),
@@ -342,50 +344,33 @@ def test_analysed_jump_across_wonder_lands_distinct_sets():
     assert all(a != b for a, b in zip(shown, shown[1:]))
 
 
-# ── 4. the untriggered-song gradient ────────────────────────────────────────
+# ── 4. the untriggered-song gradient is retired ─────────────────────────────
 
-def test_untriggered_gradient_off_by_default():
+def test_a_stored_untriggered_gradient_setting_is_dropped_on_load(tmp_path, monkeypatch):
+    import json
+    from spectra import config as scfg
+    from spectra.services import room_controls
+    path = tmp_path / "room_controls.json"
+    path.write_text(json.dumps({"untriggered_gradient_enabled": True,
+                                "untriggered_gradient_id": "n1",
+                                "active_gradient_id": "t1"}))
+    monkeypatch.setattr(scfg, "ROOM_CONTROLS_FILE", path)
+    loaded = room_controls.load_room_controls()
+    dumped = loaded.model_dump()
+    assert "untriggered_gradient_enabled" not in dumped
+    assert "untriggered_gradient_id" not in dumped
+    assert loaded.active_gradient_id == "t1", "the manual gradient survives"
+
+
+def test_only_the_manual_gradient_drives_the_room():
     rig = Rig()
     assert rig.conductor.effective_gradient_id() is None
-
-
-def test_untriggered_gradient_defaults_to_normal_on_an_untriggered_song():
-    rig = Rig(controls=RoomControlState(untriggered_gradient_enabled=True))
-    assert rig.conductor.effective_gradient_id() == "n1"
-    rig.fire(_scene())
-    record = _run(rig.conductor.tick())
-    assert record["gradient"]["gradient_name"] == "Normal"
-    assert record["journey"]["held_for"] == "gradient_drift"
-
-
-def test_untriggered_gradient_uses_the_chosen_id():
-    rig = Rig(controls=RoomControlState(untriggered_gradient_enabled=True,
-                                        untriggered_gradient_id="t1"))
+    rig.controls = RoomControlState(active_gradient_id="t1")
     assert rig.conductor.effective_gradient_id() == "t1"
 
 
-@pytest.mark.parametrize("untriggered", [False, None])
-def test_an_authored_or_unknown_song_falls_back_to_active_gradient(untriggered):
-    rig = Rig(controls=RoomControlState(untriggered_gradient_enabled=True),
-              untriggered=untriggered)
-    assert rig.conductor.effective_gradient_id() is None
-    rig.controls = RoomControlState(untriggered_gradient_enabled=True,
-                                    active_gradient_id="t1")
-    assert rig.conductor.effective_gradient_id() == "t1"
-
-
-def test_the_untriggered_gradient_y_still_follows_analysed_transitions():
-    rig = Rig(controls=RoomControlState(untriggered_gradient_enabled=True))
-    rig.fire(_scene())
-    rig.conductor._intensity = lambda: 0.9
-    rig.conductor.on_intensity_event()
-    assert rig.room[0].gradient_target_y == 0.9
-    record = _run(rig.conductor.tick())
-    assert record["gradient"]["y"] > 0.5, "Y drifts toward the new target"
-
-
-def test_the_drop_kick_follows_the_untriggered_gradient():
-    rig = Rig(controls=RoomControlState(untriggered_gradient_enabled=True))
+def test_the_drop_kick_follows_the_manual_gradient():
+    rig = Rig(controls=RoomControlState(active_gradient_id="n1"))
     rig.fire(_scene())
     rec = _run(rig.conductor.on_drop_event(1.0))
     assert rec["active"] is True and rec["kick"] == "drop"
@@ -394,11 +379,12 @@ def test_the_drop_kick_follows_the_untriggered_gradient():
 
 # ── production wiring ───────────────────────────────────────────────────────
 
-def test_engine_wires_the_analysed_colour_hook_and_the_song_feed():
+def test_engine_wires_the_analysed_colour_hook_and_the_cue_feed():
     from spectra.services import engine
     assert engine.trigger_engine._analysed_color is engine.fire_analysed_color_event
+    assert engine.trigger_engine._colour_cue == engine.conductor.on_colour_cue
     engine.trigger_engine._uri = None
-    assert engine.conductor._song_untriggered() is None
+    assert engine.conductor._next_cue() is None
 
 
 def test_fire_analysed_color_event_rides_the_scene_crossfade(monkeypatch):

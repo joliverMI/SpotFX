@@ -6580,15 +6580,30 @@ His report: colour barely drifts on analysed-only songs. Three changes:
   defaults to a NO-OP and is wired in `engine.py`, like `_intensity_event`.
   "Untriggered" is `TriggerEngine.song_untriggered()` (reuses `tick()`'s own
   read; `None` when unknown, which never counts as untriggered).
-- **`untriggered_gradient_enabled`/`_id`** (room controls, default off; id
-  `None` = the saved gradient named "Normal"): `DriftConductor.
-  effective_gradient_id()` is the ONE resolution — every gradient reader
-  (tick, drop kick, analysed-cue kick, status) goes through it, never
-  `active_gradient_id` directly. UI: `DriftGradientBar.tsx`.
+- **The trigger-timed colour journey REPLACES the untriggered-song gradient**
+  (2026-09-26, the Admiral: "Shouldn't [the journey] have a destination
+  based on when the next trigger is going to hit" / "yes, replace").
+  `untriggered_gradient_enabled`/`_id` are RETIRED (dropped on load);
+  `effective_gradient_id()` is now just the manual `active_gradient_id`.
+  `color_journey.py`'s TRIGGER-TIMED section is the binding statement. The
+  horizon is `TriggerEngine.next_colour_cue()` — exactly what `tick()`
+  would fire (same effective mode + `_trigger_allowed`), narrowed to
+  `fire_scene`/`select_color_set`, with the analysed plan's kept cues
+  standing in before auto-generation (`analysed_flares.
+  scene_change_moments`, the ONE list `GET /api/analysed-plan` also
+  uses); `None` on a stale show clock (`POSITION_STALE_S`). The conductor
+  paces to ARRIVE on it (`color_journey.timed_pace`, 2-720°/min), the last
+  leg glides over exactly the time left, arrival commits the destination
+  as `active_set_id` (so the cue's scene fire wears it) and holds until the
+  cue passes; a fired cue calls `conductor.on_colour_cue` (wired in
+  `engine.py`), which re-plans after `CUE_SETTLE_S`. The analysed colour
+  jump AGREES with it (`conductor.cue_destination`): arrived → no jump,
+  not arrived → it lands the walk's set. Spec:
+  `tests/test_timed_colour_journey.py`.
 
 Spec: `tests/test_dynamic_colour_untriggered.py` (includes his real Wonder
 cue list), `scripts/check_drift.py`. Help: `journey-refire`,
-`untriggered-gradient`, `analysed-colour-jump`.
+`journey-destination`, `analysed-colour-jump`.
 
 ## SPECTRA two-dimensional drift gradient + Rainbow select
 
