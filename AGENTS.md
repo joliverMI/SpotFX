@@ -6616,7 +6616,11 @@ wording, not a detach/revert dance. UI: `DriftGradientBar.tsx`, mounted in
 `RoomControlsBar.tsx`'s top-bar group-button row.
 
 X is time, Y is intensity, vertices only at top (y=1) and bottom (y=0),
-linear between — explicitly **not** rotation (he pre-empted the
+linear between — **along the hue wheel, never in RGB** (`gradient2d.
+_lerp_hex`, mirrored by `lib/gradient2dSample.ts` for the square preview,
+parity: `node scripts/check_gradient2d_hue_blend.mjs`): an RGB mix of two
+distant hues lands near grey, and a Hue bulb renders grey as WHITE — his
+2026-09-26 "blending through white" report. Explicitly **not** rotation (he pre-empted the
 misreading himself). Wired into `drift_conductor.py`'s `tick()`: an active
 gradient **replaces** the wheel-based colour journey for that leg (held
 exactly like a live rainbow palette already holds it — a different colour

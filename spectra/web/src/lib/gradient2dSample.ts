@@ -37,12 +37,49 @@ export function parseStops(value: string | null | undefined): [number, string][]
   return stops;
 }
 
-function lerpHex(a: string, b: string, t: number): string {
-  const ar = parseInt(a.slice(1, 3), 16), ag = parseInt(a.slice(3, 5), 16), ab = parseInt(a.slice(5, 7), 16);
-  const br = parseInt(b.slice(1, 3), 16), bg = parseInt(b.slice(3, 5), 16), bb = parseInt(b.slice(5, 7), 16);
-  const clamp = (v: number) => Math.max(0, Math.min(255, Math.round(v)));
-  const r = clamp(ar + (br - ar) * t), g = clamp(ag + (bg - ag) * t), b_ = clamp(ab + (bb - ab) * t);
-  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b_.toString(16).padStart(2, '0')}`;
+const ACHROMATIC = 0.05;
+
+function rgbToHsv(r: number, g: number, b: number): [number, number, number] {
+  const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
+  let h = 0;
+  if (d > 0) {
+    if (max === r) h = ((g - b) / d) % 6;
+    else if (max === g) h = (b - r) / d + 2;
+    else h = (r - g) / d + 4;
+    h = ((h / 6) % 1 + 1) % 1;
+  }
+  return [h, max === 0 ? 0 : d / max, max];
+}
+
+function hsvToRgb(h: number, s: number, v: number): [number, number, number] {
+  const i = Math.floor(h * 6), f = h * 6 - i;
+  const p = v * (1 - s), q = v * (1 - f * s), t = v * (1 - (1 - f) * s);
+  switch (((i % 6) + 6) % 6) {
+    case 0: return [v, t, p];
+    case 1: return [q, v, p];
+    case 2: return [p, v, t];
+    case 3: return [p, q, v];
+    case 4: return [t, p, v];
+    default: return [v, p, q];
+  }
+}
+
+/** Blend along the HUE WHEEL, never through RGB — mirrors gradient2d.py's
+ * _lerp_hex exactly (shortest-arc hue, linear saturation/value, an
+ * achromatic end adopts the other end's hue and saturation). An RGB mix of
+ * two distant hues lands near grey, which a Hue bulb shows as white. */
+export function lerpHex(a: string, b: string, t: number): string {
+  const ch = (h: string, i: number) => parseInt(h.slice(i, i + 2), 16) / 255;
+  let [ha, sa, va] = rgbToHsv(ch(a, 1), ch(a, 3), ch(a, 5));
+  let [hb, sb, vb] = rgbToHsv(ch(b, 1), ch(b, 3), ch(b, 5));
+  const greyA = sa < ACHROMATIC || va < ACHROMATIC;
+  const greyB = sb < ACHROMATIC || vb < ACHROMATIC;
+  if (greyA && !greyB) { ha = hb; sa = sb; } else if (greyB && !greyA) { hb = ha; sb = sa; }
+  const dh = ((((hb - ha + 0.5) % 1) + 1) % 1) - 0.5;
+  const h = (((ha + dh * t) % 1) + 1) % 1;
+  const rgb = hsvToRgb(h, sa + (sb - sa) * t, va + (vb - va) * t);
+  const hex = (v: number) => Math.max(0, Math.min(255, Math.round(v * 255))).toString(16).padStart(2, '0');
+  return `#${hex(rgb[0])}${hex(rgb[1])}${hex(rgb[2])}`;
 }
 
 export function sampleEdge(value: string | null | undefined, x: number): string | null {
