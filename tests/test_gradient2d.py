@@ -8,7 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from spectra.models.gradient2d import (GradientProfile, advance_x,
+from spectra.models.gradient2d import (_lerp_hex, GradientProfile, advance_x,
                                        parse_stops, sample, sample_edge)
 
 
@@ -82,6 +82,43 @@ def test_sample_respects_x_within_each_edge_independently():
     assert sample(top, bottom, 1.0, 1.0) == "#ffff00"
     assert sample(top, bottom, 0.0, 0.0) == "#0000ff"
     assert sample(top, bottom, 1.0, 0.0) == "#00ffff"
+
+
+def _hsv(hex_):
+    import colorsys
+    return colorsys.rgb_to_hsv(*(int(hex_[i:i + 2], 16) / 255 for i in (1, 3, 5)))
+
+
+def test_distant_hues_blend_round_the_wheel_never_through_white():
+    """The Admiral, 2026-09-26: "the colors seem to be blending through white
+    instead of rotating Hue only". His live "Normal" gradient: yellow top,
+    blue bottom at x≈0.12 — the RGB mix was a pale grey-green (sat ~0.2),
+    which a Hue bulb shows as white. Every step across must stay vivid."""
+    for top, bottom in (("#ffff00", "#0000ff"), ("#ffe300", "#146aff"),
+                        ("#ff0000", "#00ffff"), ("#0cff00", "#9100ff")):
+        for i in range(1, 20):
+            h, s, v = _hsv(sample(top, bottom, 0.5, i / 20))
+            assert s > 0.9 and v > 0.9, (top, bottom, i, s, v)
+
+
+def test_hue_takes_the_shortest_arc():
+    # red (0°) → blue (240°): the short way is through magenta, not green.
+    for i in range(1, 10):
+        h, _s, _v = _hsv(_lerp_hex("#ff0000", "#0000ff", i / 10))
+        assert h == 0 or h > 2 / 3 - 1e-6, h
+
+
+def test_an_achromatic_end_only_ramps_brightness():
+    h, s, v = _hsv(_lerp_hex("#000000", "#ff0000", 0.5))
+    assert (round(h, 3), round(s, 3)) == (0.0, 1.0)
+    assert 0.45 < v < 0.55
+
+
+def test_edge_stops_blend_round_the_wheel_too():
+    edge = "linear-gradient(90deg, #ffff00 0%, #0000ff 100%)"
+    for i in range(1, 10):
+        _h, s, _v = _hsv(sample_edge(edge, i / 10))
+        assert s > 0.9
 
 
 # ── advance_x (loop / bounce) ────────────────────────────────────────────────

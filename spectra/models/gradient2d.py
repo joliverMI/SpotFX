@@ -15,7 +15,9 @@ linear-gradient(...)" string every colour value in this app already uses
 reuses the existing ColorGradientPicker widget verbatim ("the UI should be
 very similar to the current gradient picker, just make it a square"): the
 square's top edge IS a ColorGradientPicker strip, its bottom edge is a
-second one, and the interior is the bilinear fill between them. A CSS
+second one, and the interior is the bilinear fill between them — blended
+along the HUE WHEEL, never in RGB (_lerp_hex; an RGB mix washes through
+grey, which Hue bulbs show as white). A CSS
 gradient stop's position (0-100%) IS one of his "vertices" along that edge.
 
 Parsing/sampling is a local reimplementation, not an import of spot-effects'
@@ -26,6 +28,7 @@ string grammar.
 """
 from __future__ import annotations
 
+import colorsys
 import re
 import uuid
 from typing import Literal, Optional
@@ -62,10 +65,34 @@ def _normalize_stop_color(color_str: str) -> Optional[str]:
     return None
 
 
+# Below this saturation or value a stop has no meaningful hue (grey / white /
+# black) — the same threshold fx/effects/__init__.hue_tween_fields uses.
+ACHROMATIC = 0.05
+
+
 def _lerp_hex(a: str, b: str, t: float) -> str:
-    ar, ag, ab = _hex_to_rgb(a)
-    br, bg, bb = _hex_to_rgb(b)
-    return _rgb_to_hex(ar + (br - ar) * t, ag + (bg - ag) * t, ab + (bb - ab) * t)
+    """Blend two colours along the HUE WHEEL, never through RGB (2026-09-26,
+    the Admiral: "the colors seem to be blending through white instead of
+    rotating Hue only like I prefer"). A straight RGB mix of two distant
+    hues lands near grey — yellow and blue meet at (128,128,128) — and a
+    Hue bulb renders any desaturated RGB as WHITE light. Hue takes the
+    shortest arc; saturation and value interpolate linearly, so two equally
+    vivid stops stay exactly that vivid all the way across. An achromatic
+    end adopts the other end's hue AND saturation (only brightness ramps),
+    the same rule the render-side tween (fx/effects/__init__.
+    hue_tween_fields) applies to every glide."""
+    ha, sa, va = colorsys.rgb_to_hsv(*_hex_to_rgb(a))
+    hb, sb, vb = colorsys.rgb_to_hsv(*_hex_to_rgb(b))
+    grey_a = sa < ACHROMATIC or va < ACHROMATIC
+    grey_b = sb < ACHROMATIC or vb < ACHROMATIC
+    if grey_a and not grey_b:
+        ha, sa = hb, sb
+    elif grey_b and not grey_a:
+        hb, sb = ha, sa
+    dh = ((hb - ha + 0.5) % 1.0) - 0.5
+    h = (ha + dh * t) % 1.0
+    return _rgb_to_hex(*colorsys.hsv_to_rgb(h, sa + (sb - sa) * t,
+                                            va + (vb - va) * t))
 
 
 def parse_stops(value: Optional[str]) -> list[tuple[float, str]]:
