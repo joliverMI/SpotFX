@@ -1180,6 +1180,17 @@ export const HELP_SECTIONS: HelpSection[] = [
             kbd: false,
           },
           {
+            id: 'builder-analysed-events',
+            title: 'Analysed events on the shape canvas',
+            keywords: 'analysed plan scene change flare marker upcoming toggle legend count planned my triggers only transitions only',
+            body: [
+              'The "Analysed events" toggle (Audio Shape header) shows what SPECTRA\'s trigger clock will do to the currently-shown song, drawn where it actually lands in the SONG (not shifted by any live-playhead clock the way the debug page\'s copy of these markers is — the Timeline canvas already draws everything at raw song position, and so does this).',
+              'A solid cyan line with a ▼ tab is a SCENE CHANGE (a generated transition cue); a dashed amber line with a ● dot is an ANALYSED FLARE (a transition that did not make the density cut and fires as a flare instead — see "Analysed flares" under SPECTRA Triggers). The line under the canvas counts both and says when the scene changes are only planned because the song has not been generated yet.',
+              'This works for whatever song is currently shown on the Timeline — playing or manually selected — not only the one playing right now.',
+              'Nothing is drawn, and the line says why, whenever the room\'s per-song mode does not let analysed events fire for this song: "Transitions only" (analysed events never fire, room-wide), or a song carrying your own authored triggers under "My triggers only" (its own triggers fire instead of the analysed plan).',
+            ],
+          },
+          {
             id: 'builder-misc',
             title: 'Other timeline controls',
             keywords: 'shift all offset resize canvas height live capture import setlist mode manual verify calibrating badge',

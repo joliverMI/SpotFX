@@ -8900,6 +8900,25 @@ playhead will be when the trigger clock reaches it — proven by
 `node scripts/check_planned_event_markers.mjs`; spec
 `tests/test_analysed_plan_api.py`.
 
+**The Timeline (Builder) page's own audio-shape canvas shows the same
+markers too (2026-09-27, his ask: "i still don't see markers ... for the
+Spectra analyzed actions")** — reused, not copied: the same `AnalysedPlan`
+type, marker colours, and the debug-authored `CanvasLayer` (draw code only
+ever reads pre-placed `f.data.plannedEvents`, so one layer serves both
+pages) live in `spectra/web/src/debug/plannedEvents.ts`/`layers.ts`, folded
+into `spectra/web/src/timeline/canvas/layers.ts`'s `BUILDER_LAYERS`. The
+Timeline's own placement (`songPositionMarkers`, same module) is
+deliberately simpler than debug's clock-shifted `plannedMarkers` — the
+Timeline canvas already draws everything (RMS bands, triggers, librosa) at
+raw song-time timestamps, and `analysed-plan`'s own `timestamp_ms` already
+IS song time, so it needs no shift at all; `show_clock_shift_ms` only
+matters to a canvas whose axis is the live playhead, which the Timeline's
+isn't. Wired via `useAnalysedPlan(uri)` (`spectra/web/src/timeline/
+queries.ts`) so it tracks whichever song is shown, not just the one
+playing. Toggle + count/reason legend: `BuilderPage.tsx`'s "Analysed
+events" chip and its legend row, help topic `builder-analysed-events`.
+Proven by `node scripts/check_timeline_analysed_markers.mjs`.
+
 ## Maintaining this file
 
 Keep this file for knowledge useful to almost every future agent session in this project.

@@ -1,8 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiGet, apiPost, apiDel, api } from '../api/spotfx';
+// SPECTRA's own API (not spot-effects') — see ../api/client.ts's own docstring.
+import { apiGet as spectraGet } from '../api/client';
 import type {
   AudioShapeData, AudioShapeMeta, LibrosaAnalysis, Palette, Setlist, SongProfile,
 } from './types';
+import type { AnalysedPlan } from '../debug/plannedEvents';
 
 const enc = encodeURIComponent;
 
@@ -111,6 +114,19 @@ export function usePaletteMutations() {
       onSuccess: invalidate,
     }),
   };
+}
+
+/** The song's planned analysed events (scene changes + analysed flares) —
+ * spectra/api/analysed_plan.py, shared with the debug page. Works for any
+ * selected song, not just the one currently playing. */
+export function useAnalysedPlan(uri: string | null) {
+  return useQuery({
+    queryKey: ['analysed-plan', uri],
+    queryFn: () => spectraGet<AnalysedPlan>(`/analysed-plan?uri=${enc(uri!)}`),
+    enabled: !!uri,
+    refetchInterval: 15_000,
+    retry: false,
+  });
 }
 
 export function useSetlists() {
