@@ -9018,7 +9018,19 @@ fixture boundaries must zero the holds** (`planning_hold_s` → 0, as
 `tests/test_midsong_generator.py`'s `no_holds`, `scripts/check_triggers.py`
 §6-7 and the two placement acceptance scripts do) — a boundary inside the
 song-start pick's ~16 s hold is a flare, not a stored cue. Spec:
-`tests/test_scene_change_planner.py`.
+`tests/test_scene_change_planner.py`. Acceptance against his live analysis
+(read-only, temp copy): `scripts/check_scene_change_ranking.py`.
+
+**Rank on the markers (2026-10-04, report §4).** `GET /api/analysed-plan`
+gives every event `rank`/`rank_of` (a stored cue is ranked by its
+generator_key against the same plan; the engine's cached ranks while it
+plays — `TriggerEngine.cached_plan_ranks`; a cue the current plan does not
+contain is `rank: null`, never guessed). The shared `plannedEvents` layer
+draws the tab/dot size by rank third and opacity by rank (pure helpers in
+`spectra/web/src/debug/plannedEvents.ts`), and names the rank on hover via
+`CanvasLayer.tooltipAt` — a hover-only hook in `TimelineCanvas`, so a marker
+never steals a click from a trigger. Specs: `node scripts/
+check_planned_event_markers.mjs` (FOUR), `tests/test_analysed_plan_api.py`.
 
 ## Maintaining this file
 

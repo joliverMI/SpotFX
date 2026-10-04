@@ -402,6 +402,9 @@ export default function BuilderPage() {
             <span style={{ display: 'inline-block', width: 0, height: 12, borderLeft: `2px dashed ${FLARE_MARKER_COLOR}` }} />
             Analysed flare
           </span>
+          <span style={{ minWidth: 0 }} title="Each marker's size and brightness follow its rank among the song's transitions (by section-energy change); hover a marker for its rank">
+            bigger · brighter = stronger
+          </span>
           <span style={{ minWidth: 0 }}>
             {!showAnalysedEvents
               ? 'analysed events hidden — click "Analysed events" above to show them'

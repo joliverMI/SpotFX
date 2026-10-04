@@ -130,6 +130,29 @@ export default function TimelineCanvas({
     return null;
   };
 
+  // A hover name for a spot no layer hit-tests (layer.tooltipAt — e.g. the
+  // planned-event markers' rank), shown as the canvas's own title.
+  const tooltipAt = (x: number, y: number): string | null => {
+    const s = stateRef.current;
+    const g = geom();
+    if (!g) return null;
+    const frame = {
+      ...g,
+      ctx: null as unknown as CanvasRenderingContext2D,
+      stripH: BEAT_STRIP_H,
+      stripCount: stripCountFor(s.data, s.view.librosaFilters),
+      nowMs: s.getNowMs(),
+      data: s.data,
+      view: s.view,
+    } as CanvasFrame;
+    for (const layer of [...s.layers].sort((a, b) => b.z - a.z)) {
+      if (!layer.tooltipAt || !layer.visible(frame)) continue;
+      const text = layer.tooltipAt(x, y, frame);
+      if (text) return text;
+    }
+    return null;
+  };
+
   // Pointer plumbing — semantic interpretation lives in the page (interactions.ts).
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -192,7 +215,10 @@ export default function TimelineCanvas({
       // idle hover (no buttons) — trigger name labels
       if (ev.buttons === 0) {
         const { x, y } = rel(ev);
-        s.pointer?.onHoverMove?.(hitTest(x, y));
+        const hit = hitTest(x, y);
+        s.pointer?.onHoverMove?.(hit);
+        const tip = hit ? null : tooltipAt(x, y);
+        if ((canvas.title || null) !== tip) canvas.title = tip ?? '';
       }
     };
     const up = (ev: PointerEvent) => {

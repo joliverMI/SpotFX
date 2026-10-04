@@ -2,7 +2,10 @@
  * rolling-R confidence trace, xcorr window brackets, mismatch spikes.
  * Ports of the shape_canvas.js debug overlays onto the builder's layer stack. */
 import type { CanvasLayer } from '../timeline/canvas/frame';
-import { FLARE_MARKER_COLOR, SCENE_MARKER_COLOR } from './plannedEvents';
+import {
+  FLARE_DOT_RADIUS, FLARE_MARKER_COLOR, SCENE_MARKER_COLOR, SCENE_TAB_HALF_WIDTH,
+  markerTooltip, rankOpacity, rankTier,
+} from './plannedEvents';
 
 const SPIKE_COLOR = '#ff2d95';
 const NEW_COLOR = '#00ff88';
@@ -270,7 +273,14 @@ export const spikes: CanvasLayer = {
 
 // ── Planned analysed events: SCENE CHANGE (solid cyan, full height, ▼ tab)
 // and FLARE (dashed amber, lower half, ● dot). Positions arrive pre-placed
-// on this canvas's clock (plannedEvents.ts). ──────────────────────────────
+// on this canvas's clock (plannedEvents.ts). RANK (2026-10-04) is drawn
+// subtly and twice over: the tab's width / the dot's radius by rank third,
+// and the marker's opacity by rank (plannedEvents.ts's rank helpers); an
+// unranked marker keeps the original 10 px tab / 3.5 px dot and opacity.
+// Hovering a marker names its rank (tooltipAt — never a click target, so a
+// trigger under it still drags). ─────────────────────────────────────────
+const MARKER_HOVER_PX = 5;
+
 export const plannedEvents: CanvasLayer = {
   id: 'plannedEvents',
   z: 40,
@@ -281,26 +291,38 @@ export const plannedEvents: CanvasLayer = {
     for (const ev of f.data.plannedEvents!) {
       if (ev.ms < f.win.startMs || ev.ms > f.win.endMs) continue;
       const x = f.timeToX(ev.ms);
+      const tier = rankTier(ev.rank, ev.rankOf);
       if (ev.kind === 'scene') {
-        ctx.globalAlpha = 0.9;
+        const half = tier == null ? 5 : SCENE_TAB_HALF_WIDTH[tier];
+        ctx.globalAlpha = rankOpacity(ev.rank, ev.rankOf, 0.9);
         ctx.strokeStyle = SCENE_MARKER_COLOR;
         ctx.lineWidth = 2;
         ctx.setLineDash([]);
         ctx.beginPath(); ctx.moveTo(x, 8); ctx.lineTo(x, f.mainH); ctx.stroke();
         ctx.fillStyle = SCENE_MARKER_COLOR;
-        ctx.beginPath(); ctx.moveTo(x - 5, 0); ctx.lineTo(x + 5, 0); ctx.lineTo(x, 8); ctx.closePath(); ctx.fill();
+        ctx.beginPath(); ctx.moveTo(x - half, 0); ctx.lineTo(x + half, 0); ctx.lineTo(x, 8); ctx.closePath(); ctx.fill();
       } else {
         const top = f.mainH * 0.45;
-        ctx.globalAlpha = 0.85;
+        const r = tier == null ? 3.5 : FLARE_DOT_RADIUS[tier];
+        ctx.globalAlpha = rankOpacity(ev.rank, ev.rankOf, 0.85);
         ctx.strokeStyle = FLARE_MARKER_COLOR;
         ctx.lineWidth = 1.5;
         ctx.setLineDash([3, 3]);
         ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x, f.mainH); ctx.stroke();
         ctx.setLineDash([]);
         ctx.fillStyle = FLARE_MARKER_COLOR;
-        ctx.beginPath(); ctx.arc(x, top, 3.5, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(x, top, r, 0, Math.PI * 2); ctx.fill();
       }
     }
     ctx.restore();
+  },
+  tooltipAt(x, _y, f) {
+    let best: { d: number; text: string } | null = null;
+    for (const ev of f.data.plannedEvents ?? []) {
+      if (ev.ms < f.win.startMs || ev.ms > f.win.endMs) continue;
+      const d = Math.abs(f.timeToX(ev.ms) - x);
+      if (d <= MARKER_HOVER_PX && (!best || d < best.d)) best = { d, text: markerTooltip(ev) };
+    }
+    return best ? best.text : null;
   },
 };

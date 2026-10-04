@@ -100,3 +100,59 @@ def test_engine_cache_is_the_list_tick_fires():
     asyncio.run(run())
     assert [t.timestamp_ms for t in te.cached_flare_triggers(URI)] == [40_000]
     assert te.cached_flare_triggers("spotify:track:other") is None
+
+
+# ── RANK (2026-10-04, data/scene-change-ranking-plan/report.md §4) ─────────
+
+def _ranked_plan(monkeypatch):
+    kept = [midsong_generator.CandidateMoment(10_000, 0.6, "section:10000", rank=1, rank_of=3)]
+    unselected = [midsong_generator.CandidateMoment(40_000, 0.3, "section:40000",
+                                                    rank=3, rank_of=3)]
+    monkeypatch.setattr(midsong_generator, "plan_moments",
+                        lambda uri: midsong_generator.MomentPlan(kept, unselected, rank_of=3))
+
+
+def test_every_event_carries_its_rank(monkeypatch):
+    _mode("analysed")
+    _ranked_plan(monkeypatch)
+    body = _client().get("/api/analysed-plan", params={"uri": URI}).json()
+    assert [(e["rank"], e["rank_of"]) for e in body["scene_changes"]] == [(1, 3)]
+    assert [(e["rank"], e["rank_of"]) for e in body["flares"]] == [(3, 3)]
+    assert body["rank_of"] == 3
+
+
+def test_a_stored_cue_is_ranked_by_its_key_and_a_stale_one_is_unranked(monkeypatch):
+    _mode("analysed")
+    _ranked_plan(monkeypatch)
+    trigger_store.upsert(URI, SpectraTrigger(
+        timestamp_ms=10_250, source="generated", generator_key="section:10000",
+        action=FireSceneAction(scene_id=None, intensity=0.6)))
+    trigger_store.upsert(URI, SpectraTrigger(
+        timestamp_ms=70_000, source="generated", generator_key="section:70000",
+        action=FireSceneAction(scene_id=None, intensity=0.6)))
+    body = _client().get("/api/analysed-plan", params={"uri": URI}).json()
+    assert body["scene_source"] == "stored"
+    assert [(e["timestamp_ms"], e["rank"]) for e in body["scene_changes"]] == [
+        (10_250, 1), (70_000, None)], "planned under older settings: no invented rank"
+
+
+def test_the_playing_songs_ranks_come_from_the_engines_own_plan(monkeypatch):
+    import asyncio
+    from spectra.services import trigger_engine as te_module
+    from spectra.services.analysed_flares import FlareMoment, SongPlan
+    _mode("analysed")
+    engine = te_module.TriggerEngine(
+        list_triggers=lambda uri: [],
+        analysed_plan=lambda uri, st: SongPlan(
+            [midsong_generator.CandidateMoment(10_000, 0.6, "section:10000", rank=1, rank_of=2)],
+            [FlareMoment(40_000, 0.3, "section:40000", rank=2, rank_of=2)], rank_of=2))
+
+    async def run():
+        await engine.on_track_state(URI)
+        await engine.plan_analysed_flares(URI)
+    asyncio.run(run())
+    from spectra.api import analysed_plan
+    monkeypatch.setattr(analysed_plan, "trigger_engine", engine)
+    body = _client().get("/api/analysed-plan", params={"uri": URI}).json()
+    assert [(e["timestamp_ms"], e["rank"]) for e in body["flares"]] == [(40_000, 2)]
+    assert [(e["timestamp_ms"], e["rank"]) for e in body["scene_changes"]] == [(10_000, 1)]

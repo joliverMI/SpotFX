@@ -72,6 +72,11 @@ class FlareMoment:
     generator_key: str
     snap_grid: Optional[str] = None
     snap_moved_ms: Optional[int] = None
+    # The moment's rank among the song's analysed transitions (1 = the
+    # strongest section-energy change) — what the markers draw (§4 of
+    # data/scene-change-ranking-plan/report.md).
+    rank: Optional[int] = None
+    rank_of: Optional[int] = None
 
     @property
     def trigger_id(self) -> str:
@@ -86,6 +91,13 @@ class SongPlan:
     stored-trigger timestamp_ms convention."""
     scene_cues: list[midsong_generator.CandidateMoment]
     flares: list[FlareMoment]
+    rank_of: int = 0
+
+    def ranks(self) -> dict[str, tuple[Optional[int], Optional[int]]]:
+        """generator_key -> (rank, rank_of) for every planned action — how
+        GET /api/analysed-plan ranks a STORED scene cue, by its key."""
+        return {m.generator_key: (m.rank, m.rank_of)
+                for m in [*self.scene_cues, *self.flares]}
 
 
 def analysed_flares_allowed(effective_mode: str, song_has_authored: bool) -> bool:
@@ -120,9 +132,9 @@ def plan_for_song(uri: str, stored: Iterable[SpectraTrigger] = ()) -> SongPlan:
     blocked += [t.timestamp_ms + t.trigger_offset_ms for t in stored
                 if t.enabled and t.action.kind == "fire_scene"]
     flares = [FlareMoment(m.timestamp_ms, m.intensity, m.generator_key,
-                          m.snap_grid, m.snap_moved_ms)
+                          m.snap_grid, m.snap_moved_ms, m.rank, m.rank_of)
               for m in plan.unselected]
-    return SongPlan(list(plan.kept), _space(flares, blocked))
+    return SongPlan(list(plan.kept), _space(flares, blocked), plan.rank_of)
 
 
 @dataclass(frozen=True)
@@ -133,6 +145,7 @@ class SceneCueMoment:
     timestamp_ms: int
     intensity: float
     key: str
+    generator_key: Optional[str] = None
 
 
 def scene_change_moments(
@@ -148,14 +161,14 @@ def scene_change_moments(
     trigger_engine.next_colour_cue (the trigger-timed colour journey), so
     the two can never disagree about when the next scene change is."""
     cues = [SceneCueMoment(t.timestamp_ms + t.trigger_offset_ms,
-                           t.action.intensity, t.id)
+                           t.action.intensity, t.id, t.generator_key)
             for t in stored
             if t.enabled and t.source == "generated"
             and t.action.kind == "fire_scene"]
     source: Optional[str] = "stored"
     if not cues:
         cues = [SceneCueMoment(m.timestamp_ms, m.intensity,
-                               "planned:" + m.generator_key)
+                               "planned:" + m.generator_key, m.generator_key)
                 for m in planned()]
         source = "planned" if cues else None
     cues.sort(key=lambda c: c.timestamp_ms)

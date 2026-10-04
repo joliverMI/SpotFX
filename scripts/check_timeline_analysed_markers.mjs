@@ -37,6 +37,10 @@ execFileSync('npx', ['esbuild', TS, '--format=esm', `--outfile=${js}`], {
 });
 const { songPositionMarkers } = await import(js);
 
+// An event the API did not rank (or an API from before ranks) — the
+// markers carry explicit nulls and draw at the original size.
+const UNRANKED = { rank: null, rankOf: null };
+
 console.log('ONE — markers land at the raw song-time timestamp, no clock shift');
 {
   const plan = {
@@ -50,7 +54,7 @@ console.log('ONE — markers land at the raw song-time timestamp, no clock shift
   };
   const m = songPositionMarkers(plan);
   ok(JSON.stringify(m) === JSON.stringify([
-    { ms: 20_000, kind: 'flare' }, { ms: 30_000, kind: 'scene' },
+    { ms: 20_000, kind: 'flare', ...UNRANKED }, { ms: 30_000, kind: 'scene', ...UNRANKED },
   ]), `markers ${JSON.stringify(m)} == raw song-time positions`);
 }
 
@@ -64,8 +68,14 @@ console.log('TWO — both kinds, sorted by time regardless of input order');
   };
   const m = songPositionMarkers(plan);
   ok(JSON.stringify(m) === JSON.stringify([
-    { ms: 10_000, kind: 'scene' }, { ms: 20_000, kind: 'flare' }, { ms: 30_000, kind: 'scene' },
+    { ms: 10_000, kind: 'scene', ...UNRANKED }, { ms: 20_000, kind: 'flare', ...UNRANKED },
+    { ms: 30_000, kind: 'scene', ...UNRANKED },
   ]), `markers ${JSON.stringify(m)}`);
+  const ranked = songPositionMarkers({
+    ...plan, flares: [{ timestamp_ms: 20_000, intensity: 0.3, rank: 3, rank_of: 9 }],
+  });
+  ok(ranked[1].rank === 3 && ranked[1].rankOf === 9,
+    'a ranked event carries its rank onto the Timeline marker (2026-10-04)');
 }
 
 console.log('THREE — nothing drawn when analysed events do not apply');

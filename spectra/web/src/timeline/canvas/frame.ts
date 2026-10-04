@@ -69,6 +69,10 @@ export interface LayerDataBag {
 export interface PlannedEventMarker {
   ms: number;
   kind: 'scene' | 'flare';
+  /** rank among the song's analysed transitions (1 = strongest) of rankOf;
+   *  null/absent = unranked, drawn exactly as before ranks existed */
+  rank?: number | null;
+  rankOf?: number | null;
 }
 
 export interface AiMarker {
@@ -107,6 +111,9 @@ export interface CanvasLayer {
   visible(frame: CanvasFrame): boolean;
   draw(frame: CanvasFrame): void;
   hitTest?(x: number, y: number, frame: CanvasFrame): Hit;
+  /** Hover text for a spot no layer hit-tests — read-only markers name
+   *  themselves this way without ever stealing a click from a trigger. */
+  tooltipAt?(x: number, y: number, frame: CanvasFrame): string | null;
 }
 
 export const BEAT_STRIP_H = 21;
