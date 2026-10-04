@@ -30,6 +30,11 @@ TRIGGERS_FILE = SPECTRA_STORAGE / "triggers.json"
 # not a field on SpectraTrigger.
 PROFILE_SYNC_LEDGER_FILE = SPECTRA_STORAGE / "profile_sync_ledger.json"
 FIRE_HISTORY_FILE = SPECTRA_STORAGE / "fire_history.json"
+# The Light Show (spectra/services/show_sets.py + show_output.py): his
+# authored library and the runtime state are TWO files on purpose, so
+# runtime churn (holds, baselines, later arms) can never damage his sets.
+LIGHT_SHOW_SETS_FILE = SPECTRA_STORAGE / "light_show_sets.json"
+LIGHT_SHOW_STATE_FILE = SPECTRA_STORAGE / "light_show_state.json"
 SHOW_LOG_FILE = SPECTRA_STORAGE / "show_log.json"
 FEEDBACK_FILE = SPECTRA_STORAGE / "feedback.json"
 SETTINGS_LOG_FILE = SPECTRA_STORAGE / "settings_log.json"

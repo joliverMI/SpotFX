@@ -12,6 +12,7 @@ import serial.tools.list_ports
 import voluptuous as vol
 from sacn.sending.sender_socket_base import DEFAULT_PORT
 
+from fx import device_output
 from fx.config import save_config
 from fx.events import (
     DeviceCreatedEvent,
@@ -208,6 +209,10 @@ class Device(BaseRegistry):
             if virtual_id == self.priority_virtual.id:
                 # Priority virtual flushes after all virtuals have updated their pixels
                 frame = self.assemble_frame()
+                # SpotFX deviation #41: per-device output control (the Light
+                # Show's Dark/Steady/Freeze/Level/Flash). With no target set
+                # anywhere this returns `frame` itself — one dict check.
+                frame = device_output.apply(self.id, frame)
                 # SpotFX deviation: the ONE per-device timing-equalization
                 # seam. With no offsets set (the shipped default) this is
                 # the two lines it replaced, in the same order — see

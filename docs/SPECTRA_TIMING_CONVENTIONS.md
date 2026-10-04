@@ -49,6 +49,8 @@ in root `spotfx` code and was never ported to `spectra/` at all.
 
 | Quantity | Unit | Sign convention | Owning engine | Status | Source |
 |---|---|---|---|---|---|
+| Light Show device `fade_ms` (Device state), `fade_in_ms`/`fade_out_ms` (Level) | ms | DURATION, not a moment: how long a state/level change ramps, starting the instant the step runs. Neither LEAD nor OFFSET | SPECTRA Light Show (`fx/device_output.py`, evaluated per rendered frame against its own monotonic clock) | **Live** (phase 1, fired NOW only) | `spectra/services/show_actions.py`, `spectra/services/show_output.py` |
+| Light Show Level `duration_s`, Flash `attack_ms`/`hold_ms`/`decay_ms`, Pause `seconds` | s / ms | DURATION from the moment the step runs. A Level's end is stored as wall-clock `ends_at_ms` so it survives a restart (an already-passed end is dropped, never resurrected) | SPECTRA Light Show | **Live** | same |
 | `SpectraTrigger.trigger_offset_ms` | ms | OFFSET: negative=earlier, positive=later, 0=unchanged | SPECTRA trigger engine — **every action kind** since 2026-08-27 (was `fire_scene` only) | **Live** | `spectra/models/trigger.py` (the field), `spectra/services/trigger_engine.py::tick()` |
 | `FlareKind.trigger_offset_ms` | ms | OFFSET: negative=earlier, positive=later, 0=coincident with the trigger mark | SPECTRA response engine / flare preview | **Live** | `spectra/models/scene.py:307-338,345` |
 | `SceneV2.trigger_offset_ms` | ms | OFFSET: negative=earlier, positive=later, 0=on the mark | SPECTRA trigger engine (`fire_scene`) / transition preview | **Live** (2026-08-27) | `spectra/models/scene.py` (`SceneV2.trigger_offset_ms`), read by `spectra/services/trigger_engine.py::_scene_offset_ms` |

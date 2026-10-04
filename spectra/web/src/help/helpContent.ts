@@ -2013,6 +2013,95 @@ export const HELP_SECTIONS: HelpSection[] = [
     ],
   },
   {
+    id: 'light-show',
+    title: 'Light Show — named sets of actions, fired on your word',
+    keywords: 'light show show actions sets fire end show blackout intermission arm',
+    intro:
+      'The Light Show (nav "Light Show", /show) groups changes to the room into named SETS you fire with one press. A set is an ordered list of steps: room settings (Ambient, Dark/Light/Hybrid, forced scene or colour, scene and colour-set on/off, the drift gradient, the scene-change setting), firing a scene or applying a colour set now, per-fixture DEVICE steps (Dark, Steady, Freeze, back to Show, a timed Level, a Flash), room effects, and pauses. Arming a set for the next scene change or a High/Low Trigger comes in the next phase.',
+    entries: [
+      {
+        id: 'light-show-page',
+        title: 'The Light Show page (Build view)',
+        keywords: 'build view editor sets list fire now preview save',
+        body: [
+          'Left: your sets. Right: the chosen set\'s steps, in order — drag order with ↑ ↓, switch a step off with its tick box without deleting it, and add steps from "+ Add a step". Every step\'s form comes from the server\'s own catalogue, so a new kind of action appears here by itself.',
+          '▶ Fire now saves the set if it has unsaved changes and runs it immediately. Underneath, a report lists EVERY step with what happened — applied, skipped, refused or failed, each with its reason — so a set that only partly ran tells you which step did not.',
+          'Preview changes shows what each step would change against the room as it is right now, and writes nothing.',
+          'The Light Show never takes or releases the room. When SPECTRA does not own the lights, or a preview, a camera run or a night run is holding the room, a banner says so and a fire is refused with that reason — nothing half-runs.',
+        ],
+      },
+      {
+        id: 'show-sets',
+        title: 'Sets: names, order, pauses, conflicts',
+        keywords: 'set name unique order pause wait conflict later wins',
+        body: [
+          'Names are yours and unique ignoring case. Steps run in list order. Consecutive room-setting steps are saved as ONE room-controls save, so a set behaves like a single change.',
+          'A Pause step waits before the next one ("then two seconds later"). Fire returns as soon as the first pause is reached; the rest keeps running and shows under "Right now" until it finishes.',
+          'If two steps change the same setting the later one wins; the editor names the collision but still saves the set. A step with a problem (a scene that no longer exists, a missing choice) is marked ⚠ and fails by name when it runs, without stopping the others.',
+        ],
+      },
+      {
+        id: 'show-actions',
+        title: 'What each action does, and how it is put back',
+        keywords: 'ambient display mode forced scene forced colour drift gradient scene changes fire scene apply colour set baseline restore',
+        body: [
+          'Settings go through the same save the room bar uses, so every side effect (Ambient\'s transition, Dark/Light\'s repaint, a forced scene firing its pin) happens exactly as if you had pressed it there. Scene and colour-set on/off flip the same switch as their power buttons.',
+          'Ambient is Hue only and physically slow: Eased takes ~15-22 s across the bulbs, Snap drops the ramps (~5 s — the 300 ms gap per bulb is zigbee physics). For an instant change, use Device state → Steady on the Hue areas instead.',
+          'The first time the show changes a setting, it remembers what it was. End show puts it back — unless you changed it yourself since, in which case it is left as you have it and named in the report.',
+          'Fire a scene now and Apply a colour set now are presses, like their own buttons; there is nothing to put back.',
+        ],
+      },
+      {
+        id: 'show-device-states',
+        title: 'Device states: Show, Steady, Freeze, Dark, and Flash',
+        keywords: 'device fixture category everything dark steady freeze non reactive music reactive flash sconce tv crystal hue',
+        body: [
+          'A device step targets ONE fixture (a sconce, the TV backlight, a Hue area), a category (Strips, Matrix…), or Everything — resolved when it fires, so a regrouped category follows.',
+          'Dark = off. Steady = one still colour (your Ambient colour unless the step names another), still scaled by the room dimmer and any running room effect. Freeze = hold the picture exactly as it is. Show = music reactive again. Each can fade over a time you set (0 = instant).',
+          'The show keeps playing underneath every one of these, so returning a fixture to Show fades straight into a picture that is already in step with the music.',
+          'Flash mixes a fixture toward a colour (white by default) for a moment — the visible form of "brighten" on a light that is already at full.',
+          'A Hue area held by Ambient is not streaming, so a device step cannot change it until Ambient lets go; the page says "held by Ambient". The device preview strip shows the picture before this layer, so a held fixture can still look lit there.',
+        ],
+      },
+      {
+        id: 'show-level',
+        title: 'Level: temporarily darken or brighten',
+        keywords: 'level dim brighten percent fade in fade out duration until scene change released stack',
+        body: [
+          'Level multiplies a fixture\'s light: 50% halves it, 150% brightens it (clipped at full). It fades in, lasts for a number of seconds, until the next scene change, or until released, then fades out by itself.',
+          'Levels stack — two 50% levels on one fixture give 25% — and they multiply on top of the room dimmer and any room effect rather than fighting them.',
+        ],
+      },
+      {
+        id: 'show-room-effects',
+        title: 'Room effects as a Light Show step',
+        keywords: 'room effect dim wave run stop overrides duration held room',
+        body: [
+          'Run a room effect starts one of your room effects (Room FX page) through its own held-room program, optionally overriding its parameters for this run only, and stops it after the time you set (at most the held room\'s 3-minute ceiling). Stop room effect ends it early; End show stops it too.',
+          'Any room effect you author later appears in this step\'s list by itself.',
+        ],
+      },
+      {
+        id: 'show-end-restore',
+        title: 'End show: putting the room back',
+        keywords: 'end show restore put back release holds cancel',
+        body: [
+          'End show cancels any set still running, stops a room effect the show started, fades every held fixture back to the show, ends every Level, and puts back every setting the show changed (except ones you have changed since — those are named and left alone).',
+          'Each fixture can also be let go on its own from "Right now" (Release / End).',
+          'Releasing the room drops every Light Show hold before the lights are let go, so the room is never handed back dark because of the show.',
+        ],
+      },
+      {
+        id: 'show-strip',
+        title: 'The Show line in the top bar',
+        keywords: 'top bar strip show holding levels running',
+        body: [
+          'While the Light Show is holding anything — a fixture, a level, a changed setting, a running set or room effect — a "◈ Show: …" line appears in the top bar on every page. Tap it to open the Light Show. It disappears when the show holds nothing.',
+        ],
+      },
+    ],
+  },
+  {
     id: 'room-effects',
     title: 'Room effects — the Dim Wave',
     keywords: 'room effect dim wave wavelength speed depth travelling sine brightness gain compose dimmer fixtures chips',

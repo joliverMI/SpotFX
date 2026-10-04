@@ -294,6 +294,15 @@ async def release_room(reason: str = "owner panic release") -> ReleaseResult:
     hue_still_on: list[str] = []
     release_ping: dict = {}
     if from_world != light_ownership.RELEASED:
+        # THE LIGHT SHOW LETS GO FIRST (spectra/services/show_output.py):
+        # every per-fixture hold is dropped before the fade, so the room
+        # lets go of its TRUE state — never a fixture the show was holding
+        # dark or steady. Best-effort and synchronous: it is a dict clear.
+        try:
+            from spectra.services import show_output
+            show_output.on_release()
+        except Exception:                                  # noqa: BLE001
+            logger.exception("release: light show could not drop its holds")
         fade_result = await _best_effort(
             _fade_hue_before_release, "spectra hue release fade")
         if fade_result:

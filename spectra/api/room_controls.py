@@ -103,37 +103,7 @@ async def put_room_controls(body: Any = Body(...)):
     services/room_controls.AMBIENT_MODE_ALIAS); when a body carries both it
     and a new key, the NEW key wins and the response says so in
     `ambient_mode_alias`."""
-    previous = room_controls.load_room_controls()
     try:
-        state, alias_note = room_controls.merge_room_controls(previous, body)
+        return await room_controls.apply_patch(body)
     except room_controls.RoomControlsPatchError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    room_controls.save_room_controls(state)
-    response: dict = {"status": "saved", **state.model_dump()}
-    if alias_note is not None:
-        response["ambient_mode_alias"] = alias_note
-    ambient_result = await room_controls.reconcile_ambient_if_changed(previous, state)
-    if ambient_result is not None:
-        response["ambient_result"] = ambient_result
-    dark_light_result = await room_controls.reconcile_dark_light_if_changed(previous, state)
-    if dark_light_result is not None:
-        response["dark_light_result"] = dark_light_result
-    force_scene_result = await room_controls.reconcile_force_scene_if_changed(previous, state)
-    if force_scene_result is not None:
-        response["force_scene_result"] = force_scene_result
-    force_color_result = await room_controls.reconcile_force_color_if_changed(previous, state)
-    if force_color_result is not None:
-        response["force_color_result"] = force_color_result
-    # THE A/V LEAD APPLY RE-BASES THE KNOWN BUFFER's reference (spectra/
-    # services/known_buffer.py). That measurement was taken with the
-    # buffer AS IT STOOD, so it already absorbed whatever the buffer was
-    # at that moment; leaving the old reference in place would make the
-    # next compensation count the same milliseconds twice. Imported here
-    # rather than in services/room_controls.py, which must stay a leaf its
-    # callers can import at any scope. Never touches av_sync_lead_ms —
-    # this reads that it changed and re-anchors its OWN delta.
-    if previous.av_sync_lead_ms != state.av_sync_lead_ms:
-        from spectra.services import known_buffer
-        rebased = known_buffer.rebase_reference()
-        response["known_buffer_reference_ms"] = rebased
-    return response

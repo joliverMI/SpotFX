@@ -492,6 +492,14 @@ def on_scene_fired(scene: SceneV2, writes: list[dict],
     """Any real scene fire re-baselines the engine (drift's declared life
     restarts from the new initial conditions)."""
     conductor.on_scene_fire(scene, writes, color_set_id)
+    # THE LIGHT SHOW: a Level authored to last "until the next scene change"
+    # ends here (spectra/services/show_output.py). Never allowed to break a
+    # scene fire.
+    try:
+        from spectra.services import show_output
+        show_output.on_scene_change()
+    except Exception:                                    # noqa: BLE001
+        logger.exception("light show: scene-change hook failed")
     if conductor._last_rebaseline is not None:
         asyncio.ensure_future(ws_manager.broadcast(
             {"type": "drift_rebaseline", **conductor._last_rebaseline}))
@@ -589,4 +597,16 @@ def status() -> dict:
         # the surface Home Assistant already reads. Small on purpose — the
         # whole record is one route away at GET /api/night-run/fixtures.
         "night_run": night_run.status_brief(),
+        # THE LIGHT SHOW (spectra/services/show_actions.py): how many
+        # fixtures it holds, whether it changed settings, and why it is
+        # standing down if it is.
+        "light_show": _light_show_brief(),
     }
+
+
+def _light_show_brief() -> dict:
+    try:
+        from spectra.services import show_actions
+        return show_actions.brief()
+    except Exception as exc:                             # noqa: BLE001
+        return {"error": str(exc)}

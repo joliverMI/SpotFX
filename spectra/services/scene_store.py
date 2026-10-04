@@ -138,6 +138,23 @@ def save(scene: SceneV2) -> None:
                 scene.name, len(scene.devices))
 
 
+def set_disabled(scene_id: str, disabled: bool) -> Optional[bool]:
+    """Flip ONE scene's `disabled` flag by patching the raw JSON, and return
+    the value it had (None = no such scene). Deliberately NOT a load-model-
+    save round trip: that re-serialises every field and runs the legacy
+    flare migration (AGENTS.md: "Editing an existing SceneV2 by script").
+    The Light Show's Scene on/off action and its End-show restore use it."""
+    raw = _load_raw()
+    entry = raw.get(scene_id)
+    if not isinstance(entry, dict):
+        return None
+    before = bool(entry.get("disabled", False))
+    if before != bool(disabled):
+        entry["disabled"] = bool(disabled)
+        _save_raw(raw)
+    return before
+
+
 def delete(scene_id: str) -> bool:
     raw = _load_raw()
     if scene_id not in raw:
