@@ -10,12 +10,14 @@
 import DevicePreviewStrip from './DevicePreviewStrip';
 import IntensityMarkControl from './IntensityMarkControl';
 import LiveEnergyReadout from './LiveEnergyReadout';
+import LightShowStrip from './LightShowStrip';
 
 export default function TopBarStrip() {
   return (
     <div className="top-bar-strip">
       <LiveEnergyReadout />
       <IntensityMarkControl />
+      <LightShowStrip />
       <DevicePreviewStrip />
     </div>
   );

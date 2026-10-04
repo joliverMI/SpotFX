@@ -257,6 +257,29 @@ def _isolated_known_buffer(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolated_light_show(tmp_path, monkeypatch):
+    """The Light Show's two stores (spectra/services/show_store.py) plus the
+    process-global per-device output layer (fx/device_output.py) and the
+    show's in-memory runs. Reached from production surfaces with no DI seam
+    — engine.on_scene_fired ends scene-change Levels, release_room drops
+    holds, engine.status() reads the brief — so every test gets its own
+    empty show and an idle output layer."""
+    from fx import device_output
+    from spectra import config as scfg
+    from spectra.services import show_actions, show_output, show_store
+    monkeypatch.setattr(scfg, "LIGHT_SHOW_SETS_FILE", tmp_path / "light_show_sets.json")
+    monkeypatch.setattr(scfg, "LIGHT_SHOW_STATE_FILE", tmp_path / "light_show_state.json")
+    show_store.reset_memory()
+    show_output.reset()
+    show_actions.reset()
+    yield
+    show_store.reset_memory()
+    show_output.reset()
+    show_actions.reset()
+    device_output.reset_clock()
+
+
+@pytest.fixture(autouse=True)
 def _isolated_fire_history(tmp_path, monkeypatch):
     """SPECTRA's fire-history counter/show-log (spectra/services/
     fire_history.py) is written from inside production choke points

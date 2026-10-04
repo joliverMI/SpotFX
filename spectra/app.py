@@ -37,6 +37,7 @@ from spectra.api import capture_queue as capture_queue_api
 from spectra.api import engine as engine_api
 from spectra.api import night_run as night_run_api
 from spectra.api import timing as timing_api
+from spectra.api import light_show as light_show_api
 from spectra.api import (av_sync, device_preview, devices as devices_api,
                          feedback, fire_history,
                          flare_preview, gradient2d, intensity_scale, journey,
@@ -112,6 +113,7 @@ def create_app() -> FastAPI:
     app.include_router(night_run_api.router)
     app.include_router(rooms.router)
     app.include_router(room_effects_api.router)
+    app.include_router(light_show_api.router)
 
     @app.websocket("/api/ws")
     async def ws_endpoint(ws: WebSocket):
@@ -292,12 +294,21 @@ async def _standalone_lifespan(app):
         known_buffer.run_poll_supervised(), name="spectra-known-buffer-poll")
     known_buffer_sse_task = asyncio.create_task(
         known_buffer.run_sse_supervised(), name="spectra-known-buffer-events")
+    # THE LIGHT SHOW's output supervisor (spectra/services/show_output.py):
+    # ends timed Levels, prunes settled fixtures, suspends the per-device
+    # output layer while a preview / camera run / night run has the room,
+    # and re-pushes saved holds whenever the live stack comes up. Never
+    # takes or releases the room.
+    from spectra.services import show_output
+    light_show_task = asyncio.create_task(
+        show_output.run_supervised(), name="spectra-light-show-output")
     logger.info("SPECTRA started — own process, pid %d", os.getpid())
     yield
     all_tasks = (watchdog_task, reconciler_task, ambient_verify_task,
                 flare_preview_sweep_task, param_watchdog_task,
                 activation_recheck_task, dark_fixture_task,
-                known_buffer_poll_task, known_buffer_sse_task)
+                known_buffer_poll_task, known_buffer_sse_task,
+                light_show_task)
     for task in all_tasks:
         task.cancel()
     for task in all_tasks:

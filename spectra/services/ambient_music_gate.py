@@ -326,13 +326,15 @@ async def _broadcast_status() -> None:
                          "itself is unaffected)")
 
 
-def _start_transition(target: tuple) -> _Transition:
+def _start_transition(target: tuple, *, snap: bool = False) -> _Transition:
     """Cancel whatever is in flight and start the one transition toward
     `target`. Called under `_apply_lock` — the decision is short and never
     does I/O, so an interrupting press is never queued behind one."""
     global _transition, _generation
     prev = _transition
-    snap = False
+    # `snap` may arrive True from the caller: a Light Show Ambient action
+    # authored "snap" asks for the ramps to be dropped on THIS press, not
+    # only on an interrupting one. The 300ms write stagger stays either way.
     if prev is not None and prev.in_flight:
         # THE INTERRUPT. Cancelling is cooperative: services.ambient stops
         # at its next write boundary, never mid-write to one bulb.
@@ -468,7 +470,8 @@ def reset_state() -> None:
 
 # ── the decision ────────────────────────────────────────────────────────────
 
-async def reconcile(is_playing: Optional[bool], *, wait: bool = True) -> dict:
+async def reconcile(is_playing: Optional[bool], *, wait: bool = True,
+                    snap: bool = False) -> dict:
     """The core decision point — reconcile the live hold against the room's
     CURRENT ambient_enabled/ambient_on_music_pause/colour preference and the
     given playback read (playback only matters while ambient_on_music_pause
@@ -486,10 +489,11 @@ async def reconcile(is_playing: Optional[bool], *, wait: bool = True) -> dict:
     desired = _desired_hold(controls.ambient_enabled, controls.ambient_on_music_pause,
                             is_playing, _held)
     return await _apply(controls, desired, effective_ambient_color(controls),
-                        frozenset(controls.ambient_hue_group_ids), wait=wait)
+                        frozenset(controls.ambient_hue_group_ids), wait=wait,
+                        snap=snap)
 
 
-async def reconcile_now(*, wait: bool = True) -> dict:
+async def reconcile_now(*, wait: bool = True, snap: bool = False) -> dict:
     """Convenience wrapper for callers with no playback read of their own —
     a human PUT save (room_controls.reconcile_ambient_if_changed), process
     startup/resume (app.py), and a take-back commit (handover.py) — reads
@@ -498,11 +502,12 @@ async def reconcile_now(*, wait: bool = True) -> dict:
     folded into engine.status()), so a module-level import here would
     cycle."""
     from spectra.services.engine import bridge
-    return await reconcile(bridge.is_playing(), wait=wait)
+    return await reconcile(bridge.is_playing(), wait=wait, snap=snap)
 
 
 async def _apply(controls: RoomControlState, desired: bool, color: Optional[str],
-                 group_ids: frozenset = frozenset(), *, wait: bool = True) -> dict:
+                 group_ids: frozenset = frozenset(), *, wait: bool = True,
+                 snap: bool = False) -> dict:
     target = _current_target(desired, color, group_ids)
     if not ambient.room_available():
         # THE RELEASED ROOM (module docstring). Nothing physical can move,
@@ -534,7 +539,7 @@ async def _apply(controls: RoomControlState, desired: bool, color: Optional[str]
             return _in_flight_result(tr)
         if (tr is None or not tr.in_flight) and _target_landed(target):
             return _settled_result(controls, desired)
-        tr = _start_transition(target)
+        tr = _start_transition(target, snap=snap)
     if wait:
         return await _await_transition(tr)
     return _in_flight_result(tr)

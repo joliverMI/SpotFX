@@ -3674,6 +3674,56 @@ observation must reset it the way a song change would — otherwise the
 second fire in one process is legitimately deferred by the first one's
 dwell floor and renders nothing at all.**
 
+## THE LIGHT SHOW (`/show`) — named sets of actions, fired now (phase 1 of 3)
+
+Plan: `/home/javi/fleet-spotfx/data/light-show-plan/report.md` (his spec in
+its `brief.md`; his answers: ONE High + ONE Low trigger per song, "non-
+reactive" = a steady colour). Phase 1 shipped the catalogue, sets, End show
+and the per-fixture output layer; arming (next scene change, High/Low) is
+phase 2, the phone Run view + Sonic phase 3. Read the module docstrings
+before touching any of it — `spectra/services/show_actions.py` (catalogue,
+executor, baselines, End show), `show_output.py` (targets, holds, levels,
+the gate), `fx/device_output.py` (the frame-level layer, `fx/VENDOR.md`
+#41), `spectra/models/light_show.py` (why two stores, and the phase-2/4
+slots already in the schema). Six things:
+
+- **THE REGISTRY IS THE EXTENSION POINT.** One `show_actions.register()`
+  per action kind declares params, apply and put-back; the Build view
+  renders the SERVED catalogue, so a new kind needs no frontend change.
+  Room-setting kinds supply `room_patch` and go through
+  `room_controls.apply_patch` — **the ONE room-controls writer**, factored
+  out of `PUT /api/room-controls` so the show and the room bar run the
+  identical reconcilers (consecutive setting steps coalesce into one save).
+- **ROOM EFFECTS ARE A FIRST-CLASS ACTION** through `room_effects.start()`
+  and its held-room program (`show_actions.RoomEffectRunner` is the seam);
+  the show only heartbeats the hold for the step's duration. A future room
+  effect authored in the Room FX store is armable/triggerable with no
+  Light Show change — `tests/test_light_show.py` proves it with a stub kind.
+- **THE OUTPUT LAYER SITS AT THE DEVICE FLUSH and composes, never fights**:
+  Level/Dark multiply a frame that already carries the dimmer and any
+  room-effect gain; Steady is scaled by `show_output.steady_scale` (dimmer
+  × room-effect gain). The show keeps rendering underneath every hold, so
+  "back to Show" lands in step. Idle path is one dict check, byte-identical
+  (`tests/test_device_output_landing.py`, real pipeline, neighbour-on-the-
+  same-virtual untouched, red with the seam bypassed).
+- **THE GATE (`show_output.refusal()`)**: acts only while SPECTRA owns,
+  the stack is up and the engine is live; stands down (output layer
+  suspended, fires refused by name) while a preview, colour preview,
+  camera run or night run holds the room. A room effect's OWN preview hold
+  does NOT count as a preview. It never takes or releases the room;
+  `release.release_room` calls `show_output.on_release()` BEFORE the fade.
+- **PUT BACK**: device holds structurally (let go = fade into the live
+  show); settings from a BASELINE — End show restores only while the value
+  still equals what the show wrote, otherwise leaves it and NAMES it.
+  Scene on/off is a raw single-key patch (`scene_store.set_disabled`);
+  colour-set on/off goes through SpotFX's `/api/color-sets`
+  (`show_actions.color_set_writer`, faked in tests).
+- **Ambient's per-press snap** (`ambient_music_gate.reconcile_now(snap=)`)
+  is passed only when asked, so every existing caller/test double keeps
+  the old call shape. Stores are isolated per test by conftest's
+  `_isolated_light_show`. Help: section `light-show` (topics linked from
+  the page, the strip and the served catalogue's `help_topic`s).
+
 ## The room LIGHT-FIELD map (`/rooms`) + room effects (`/room-effects`)
 
 **THE ONE IDEA, his own sentence, and the thing this whole area exists to

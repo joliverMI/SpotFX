@@ -1362,3 +1362,21 @@ against that commit.
     compare KINEMATICS at the neutral dial against `THRUST_BASELINE_REF`.
     Proof: `tests/test_fish.py` (both dial endpoints, the mean-speed
     default, the trail and wake-tail tests), `scripts/check_fish_disperse.py`.
+41. `devices/__init__.py` + new `device_output.py` (SpotFX-authored, not
+    fork code): PER-DEVICE OUTPUT CONTROL — the Light Show's Dark / Steady /
+    Freeze / Show states, timed Levels and Flash (PR fm/light-show-phase1,
+    2026-10-04). ONE line in `Device.update_pixels`, between
+    `assemble_frame()` and `_flush_timed()`: `frame =
+    device_output.apply(self.id, frame)`. It is the first point where ONE
+    fixture's frame exists on its own — scenes address categories and three
+    of his four driven virtuals fan out to several fixtures, so nothing
+    upstream can darken one sconce. With no target set anywhere `apply()`
+    returns the SAME frame object (one dict check): byte-identical at the
+    transport, asserted in `tests/test_device_output_landing.py`, which also
+    proves a neighbour on the same virtual is untouched and goes red with
+    the seam bypassed. Never in place (`assemble_frame` can return the
+    device's own buffer). It composes: Level/Dark multiply a frame that
+    already carries the room dimmer and any room-effect gain; Steady is
+    scaled by a pushed provider (`set_scale_provider`). SPECTRA pushes
+    targets in (`spectra/services/show_output.py`); `fx/` never imports
+    `spectra/`. The module docstring is the binding statement.

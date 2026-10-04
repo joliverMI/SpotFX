@@ -1022,7 +1022,8 @@ def merge_room_controls(previous: RoomControlState, body: object
 
 
 async def reconcile_ambient_if_changed(previous: RoomControlState,
-                                       new_state: RoomControlState) -> Optional[dict]:
+                                       new_state: RoomControlState,
+                                       *, snap: bool = False) -> Optional[dict]:
     """The ambient-takeover half of a room-controls save, factored out so
     both the human PUT /api/room-controls handler (spectra/api/
     room_controls.py) and the settings-console agent's apply path
@@ -1084,6 +1085,11 @@ async def reconcile_ambient_if_changed(previous: RoomControlState,
     if not changed:
         return None
     from spectra.services import ambient_music_gate
+    if snap:
+        # A Light Show Ambient action authored "snap": ramps dropped on this
+        # press. Passed only when asked, so every existing caller (and every
+        # test double of reconcile_now) keeps the exact old call shape.
+        return await ambient_music_gate.reconcile_now(wait=False, snap=True)
     return await ambient_music_gate.reconcile_now(wait=False)
 
 
@@ -1265,3 +1271,46 @@ async def reconcile_force_color_if_changed(previous: RoomControlState,
         # he means it — but the override is NAMED, never silent.
         result["overrode_disabled"] = True
     return result
+
+
+async def apply_patch(body: object, *, ambient_snap: bool = False) -> dict:
+    """THE ONE ROOM-CONTROLS WRITER: merge a partial body onto the stored
+    state, save it, and run every reconciler a save owes — the body of
+    PUT /api/room-controls, factored out so the human handler and the Light
+    Show (spectra/services/show_actions.py) are the same write and can never
+    diverge on which reconcilers a change runs. Raises RoomControlsPatchError
+    on a body that does not validate (the handler maps it to 422).
+
+    Returns the response dict the PUT handler has always returned:
+    {"status": "saved", **state, plus any *_result keys that fired}."""
+    previous = load_room_controls()
+    state, alias_note = merge_room_controls(previous, body)
+    save_room_controls(state)
+    response: dict = {"status": "saved", **state.model_dump()}
+    if alias_note is not None:
+        response["ambient_mode_alias"] = alias_note
+    ambient_result = await reconcile_ambient_if_changed(previous, state,
+                                                        snap=ambient_snap)
+    if ambient_result is not None:
+        response["ambient_result"] = ambient_result
+    dark_light_result = await reconcile_dark_light_if_changed(previous, state)
+    if dark_light_result is not None:
+        response["dark_light_result"] = dark_light_result
+    force_scene_result = await reconcile_force_scene_if_changed(previous, state)
+    if force_scene_result is not None:
+        response["force_scene_result"] = force_scene_result
+    force_color_result = await reconcile_force_color_if_changed(previous, state)
+    if force_color_result is not None:
+        response["force_color_result"] = force_color_result
+    # THE A/V LEAD APPLY RE-BASES THE KNOWN BUFFER's reference (spectra/
+    # services/known_buffer.py). That measurement was taken with the buffer
+    # AS IT STOOD, so it already absorbed whatever the buffer was at that
+    # moment; leaving the old reference in place would make the next
+    # compensation count the same milliseconds twice. Imported locally:
+    # this module must stay a leaf its callers can import at any scope.
+    # Never touches av_sync_lead_ms — this reads that it changed and
+    # re-anchors its OWN delta.
+    if previous.av_sync_lead_ms != state.av_sync_lead_ms:
+        from spectra.services import known_buffer
+        response["known_buffer_reference_ms"] = known_buffer.rebase_reference()
+    return response
