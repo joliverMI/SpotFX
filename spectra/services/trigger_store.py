@@ -140,32 +140,57 @@ def list_all() -> dict[str, list[SpectraTrigger]]:
             if isinstance(rows, list) and rows}
 
 
-def upsert(uri: str, trigger: SpectraTrigger) -> None:
-    """Add or replace by id."""
+def upsert(uri: str, trigger: SpectraTrigger) -> Optional[dict]:
+    """Add or replace by id. Returns the raw stored row this write REPLACED
+    (None for a new id) — the trigger API reads it to tell an edit of a
+    GENERATED cue from any other save (spectra/services/analysed_claims.py),
+    without a second whole-file parse."""
     with write_lock:
         data = _load_raw()
         song = data.setdefault(uri, [])
+        previous = next((t for t in song if t.get("id") == trigger.id), None)
         song[:] = [t for t in song if t.get("id") != trigger.id]
         song.append(json.loads(trigger.model_dump_json()))
         _save_raw(data)
     logger.info("Saved SPECTRA trigger %s for %s @ %dms (%s)",
                 trigger.id, uri, trigger.timestamp_ms, trigger.action.kind)
+    return previous
 
 
-def delete(uri: str, trigger_id: str) -> bool:
+def delete_returning(uri: str, trigger_id: str) -> Optional[dict]:
+    """delete(), returning the raw row it removed (None when nothing was
+    there) — see upsert's return value for why."""
     with write_lock:
         data = _load_raw()
         song = data.get(uri)
         if song is None:
-            return False
-        before = len(song)
+            return None
+        removed = next((t for t in song if t.get("id") == trigger_id), None)
+        if removed is None:
+            return None
         song[:] = [t for t in song if t.get("id") != trigger_id]
-        if len(song) == before:
-            return False
         if not song:
             del data[uri]
         _save_raw(data)
-    return True
+    return removed
+
+
+def delete(uri: str, trigger_id: str) -> bool:
+    return delete_returning(uri, trigger_id) is not None
+
+
+def load_raw() -> dict:
+    """The whole store as stored — {uri: [raw row dicts]} — for a caller
+    that must rewrite part of it while leaving every other row exactly as
+    it sits on disk (spectra/services/analysed_refresh.py's library
+    refresh). Pair with save_raw while holding write_lock."""
+    return _load_raw()
+
+
+def save_raw(data: dict) -> None:
+    """Write the whole store. The caller HOLDS write_lock across its own
+    load_raw -> edit -> save_raw, or it races every other writer."""
+    _save_raw(data)
 
 
 def get(uri: str, trigger_id: str) -> Optional[SpectraTrigger]:

@@ -579,9 +579,12 @@ class RoomControlState(BaseModel):
     # RESULT_CAP_PER_SONG's sanity ceiling. Default 8 (his own number);
     # bounds are on the RATE, not the resolved per-song total — a bare
     # per-song cap here would be exactly the fixed count this field
-    # retires. Effect only lands the next time a song's cues are
-    # (re)generated (⟳ Generate, or the auto-generate-on-first-play path)
-    # — an already-stored generated cue doesn't move on its own.
+    # retires. Since 2026-10-04 the label he sees is "TOTAL ACTIONS PER
+    # MINUTE" (the Admiral's rename; the key and his stored value are
+    # unchanged — every reader and the wire keep `transitions_per_minute`).
+    # A change reaches a song's stored cues the next time it plays (its
+    # generator_stamp goes stale — midsong_generator's RE-ANALYSIS section)
+    # or at once through Sonic's "refresh analysed triggers".
     transitions_per_minute: float = Field(default=8.0, ge=1.0, le=30.0)
 
     # THE A/V-SYNC LEAD (owner ask 2026-08-28) — LEAD family: positive =

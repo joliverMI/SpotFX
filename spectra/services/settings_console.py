@@ -188,16 +188,18 @@ SETTINGS_REGISTRY: dict[str, SettingSpec] = {
         "to move onto. Lower catches smaller jumps; higher only the "
         "biggest ones."),
     "transitions_per_minute": _spec(
-        "transitions_per_minute", "Transitions per minute",
-        "How many mid-song scene-change cues generation targets per "
-        "minute of song, picking the strongest by bass-energy step size "
-        "before placing them. The per-song total is this rate times the "
-        "song's own length, then scaled by that song's intensity-scale "
-        "factor (automatic up to 125%, or a manual mark up to 200%) — a "
-        "hyped-up track earns more transitions, a dialed-down one fewer. "
-        "Lower means the room changes scene less often on a song he "
-        "hasn't hand-marked himself. Takes effect the next time a song's "
-        "cues are (re)generated, not on already-stored ones."),
+        "transitions_per_minute", "Total actions per minute",
+        "TOTAL ACTIONS PER MINUTE (called 'Transitions per minute' until "
+        "2026-10-04 — same setting, same value): how many of a song's "
+        "analysed moments per minute the room plans an action for, "
+        "strongest first. Each planned moment changes the scene, or — while "
+        "the current scene is still inside its minimum hold — fires a "
+        "flare. The per-song total is this rate times the song's own "
+        "length, scaled by that song's intensity-scale factor (automatic "
+        "up to 125%, or a manual mark up to 200%). Analysed moments past "
+        "that budget fire as analysed flares. A change re-plans each song "
+        "the next time it plays; ask for 'refresh analysed triggers' to "
+        "re-plan every song at once."),
 }
 
 

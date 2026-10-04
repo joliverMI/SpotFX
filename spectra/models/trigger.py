@@ -211,3 +211,14 @@ class SpectraTrigger(BaseModel):
     # Review page can show WHY a generated cue landed where it did.
     snap_grid: Optional[Literal["librosa", "beat_this", "edge:up", "edge:down"]] = None
     snap_moved_ms: Optional[int] = None
+    # RE-ANALYSIS STAMP (2026-10-04, data/scene-change-ranking-plan/
+    # report.md §5): a short digest of everything that decided a GENERATED
+    # cue — the analysed settings, the generator's own code version and the
+    # song's own analysis inputs (spectra/services/midsong_generator.py's
+    # generator_stamp). A generated row whose stamp no longer matches is
+    # STALE: the song is re-planned in the background the next time it
+    # plays (TriggerEngine.maybe_auto_generate), or the whole library at
+    # once through Sonic (spectra/services/analysed_refresh.py). None on
+    # every hand-placed trigger and on every generated row written before
+    # the stamp existed (which therefore reads as stale).
+    generator_stamp: Optional[str] = None

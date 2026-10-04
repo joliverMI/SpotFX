@@ -1180,6 +1180,10 @@ export interface SpectraTrigger {
    * trigger. */
   snap_grid: 'librosa' | 'beat_this' | 'edge:up' | 'edge:down' | null;
   snap_moved_ms: number | null;
+  /** midsong_generator.generator_stamp — the settings + analysis digest a
+   * GENERATED cue was planned under; a stale one is re-planned on the
+   * song's next play. Absent/null on every hand-placed trigger. */
+  generator_stamp?: string | null;
 }
 
 export const newTrigger = (timestampMs: number): SpectraTrigger => ({
