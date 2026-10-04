@@ -234,8 +234,12 @@ def _refresh_scale_inputs() -> None:
     host = _host()
     mapping: dict[str, list[str]] = {}
     if host is not None:
-        for vid, v in host.virtuals.items():
-            if not getattr(v, "active", False):
+        # The real fx `Virtuals` registry is iterable (ids) with `.get()` —
+        # it has no `.items()`. A dict-shaped fake hid that once and the
+        # supervisor crashed every tick on the live host (2026-10-04 proof).
+        for vid in list(host.virtuals):
+            v = host.virtuals.get(vid)
+            if v is None or not getattr(v, "active", False):
                 continue
             for did in _virtual_devices(host, vid):
                 mapping.setdefault(did, []).append(vid)
@@ -412,10 +416,14 @@ def repush() -> dict:
     t = now_ms()
     dropped = [lv.id for lv in st.levels
                if lv.until == "time" and lv.ends_at_ms is not None and lv.ends_at_ms <= t]
+    expired = [lv for lv in st.levels if lv.id in dropped]
     st.levels = [lv for lv in st.levels if lv.id not in dropped]
     for h in st.holds.values():
         _push_hold(h.model_copy(update={"fade_ms": 0}))
     devices = {d for lv in st.levels for d in lv.device_ids}
+    # A dropped level's devices are reset too: within one process (a stack
+    # that came back without a restart) the layer may still carry it.
+    devices |= {d for lv in expired for d in lv.device_ids}
     for did in devices:
         device_output.set_level(did, _combined_level(did, st.levels))
     if dropped:
@@ -424,6 +432,24 @@ def repush() -> dict:
 
 
 # ── the supervisor ─────────────────────────────────────────────────────────
+
+_refresh_failed = False
+
+
+def _safe_refresh() -> None:
+    """The steady-scale inputs are a nicety; a failure there must never stop
+    a timed Level ending or a re-push landing (it did, live, 2026-10-04: one
+    AttributeError every 250 ms and a 20% Level that never let go). Logged
+    once per failure streak, not four times a second."""
+    global _refresh_failed
+    try:
+        _refresh_scale_inputs()
+        _refresh_failed = False
+    except Exception:                                    # noqa: BLE001
+        if not _refresh_failed:
+            logger.exception("light show: steady-scale refresh failed")
+        _refresh_failed = True
+
 
 def tick() -> None:
     """One supervisor pass (also callable directly from tests)."""
@@ -436,7 +462,7 @@ def tick() -> None:
     # `refusal()` covers both an engine on paper and every stand-down.
     device_output.suspend(refusal() is not None)
     if is_live and not _was_live:
-        _refresh_scale_inputs()
+        _safe_refresh()
         try:
             repush()
         except Exception:                                # noqa: BLE001
@@ -446,7 +472,7 @@ def tick() -> None:
     _was_live = is_live
     if not is_live:
         return
-    _refresh_scale_inputs()
+    _safe_refresh()
     st = show_store.state()
     t = now_ms()
     for lv in list(st.levels):

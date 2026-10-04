@@ -20,6 +20,24 @@ from spectra.services import (room_controls, scene_store, show_actions,
                               show_output, show_store)
 
 
+class Registry:
+    """The SHAPE of fx's real `Virtuals`/`Devices` registries: iterable ids,
+    `.get()`, `.values()` — and deliberately NO `.items()`/`[]`. A plain dict
+    here is how a supervisor crash on the live host once passed every test."""
+
+    def __init__(self, objs):
+        self._o = dict(objs)
+
+    def __iter__(self):
+        return iter(self._o)
+
+    def get(self, *a):
+        return self._o.get(*a)
+
+    def values(self):
+        return self._o.values()
+
+
 @pytest.fixture
 def room(tmp_path, monkeypatch):
     """A scratch room: stores repointed, reconcilers inert, SPECTRA "owns",
@@ -41,11 +59,11 @@ def room(tmp_path, monkeypatch):
 
     dev = lambda did, name: SimpleNamespace(id=did, name=name, type="dummy", frozen=False)
     host = SimpleNamespace(
-        devices={"tv": dev("tv", "TV backlight"), "sl": dev("sl", "Sconce left"),
-                 "cr": dev("cr", "Crystal")},
-        virtuals={"tv-mapper": SimpleNamespace(active=True, _segments=[
+        devices=Registry({"tv": dev("tv", "TV backlight"), "sl": dev("sl", "Sconce left"),
+                          "cr": dev("cr", "Crystal")}),
+        virtuals=Registry({"tv-mapper": SimpleNamespace(active=True, _segments=[
             ["tv", 0, 9, False], ["sl", 0, 9, False]]),
-            "crystal-mapper": SimpleNamespace(active=True, _segments=[["cr", 0, 9, False]])})
+            "crystal-mapper": SimpleNamespace(active=True, _segments=[["cr", 0, 9, False]])}))
     from spectra.services import live_host
     monkeypatch.setattr(live_host.live, "host", host)
     from fx import device_model
