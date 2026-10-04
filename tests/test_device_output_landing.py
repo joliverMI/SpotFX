@@ -262,3 +262,45 @@ def test_the_harness_fails_when_the_seam_is_bypassed(tmp_path):
     finally:
         device_output.apply = real_apply
     assert _peak(log.frames[D1][-1]) > 200
+
+
+# ── the supervisor against the REAL registries ─────────────────────────────
+
+def test_supervisor_runs_against_a_real_fx_host(tmp_path, monkeypatch):
+    """Phase 1 shipped a supervisor that called `host.virtuals.items()`; the
+    real `Virtuals` registry has none, so on his live host every tick raised
+    and a timed Level never let go (measured 2026-10-04: a 20% level on the
+    TV backlight still applied 12 s past its 8 s end). This drives the
+    supervisor's own tick against a real FxHost and proves the Level ends."""
+    from spectra import config as scfg
+    from spectra.services import live_host, show_output, show_store
+    monkeypatch.setattr(scfg, "LIGHT_SHOW_STATE_FILE", tmp_path / "state.json")
+    show_store.reset_memory()
+
+    async def go():
+        config_dir = str(tmp_path / "fx-sup")
+        _config(config_dir)
+        headless.silence_audio()
+        host = FxHost(config_dir)
+        await host.start()
+        try:
+            monkeypatch.setattr(live_host.live, "host", host)
+            monkeypatch.setattr(type(live_host.live), "active",
+                                property(lambda self: True))
+            monkeypatch.setattr(show_output, "refusal", lambda: None)
+            headless.attach_effect(host, host.virtuals.get(VID), "singleColor",
+                                   {"color": "#ff8000", "brightness": 1.0})
+            show_output._refresh_scale_inputs()           # must not raise
+            assert set(show_output._device_virtuals) == {D1, D2}
+            lv = show_output.add_level([D1], 0.2, until="time", duration_s=0.01)
+            await asyncio.sleep(0.05)
+            show_output.tick()
+            assert all(x.id != lv.id for x in show_store.state().levels)
+            # settled back to 100% and pruned: the layer no longer alters D1
+            assert device_output.snapshot().get(D1, {"level_target": 1.0})["level_target"] == 1.0
+        finally:
+            await host.shutdown()
+            show_output.reset()
+            show_store.reset_memory()
+
+    asyncio.run(go())
