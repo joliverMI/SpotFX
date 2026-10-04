@@ -7071,6 +7071,16 @@ group drives every bulb in it (the unwritten ones to black). Every bulb in
 a streamed group is therefore holding a frame of ours and is owed the fade.
 Splitting finer is a bridge-side grouping decision this code cannot invent.
 
+**AMBIENT AND DARK/LIGHT STAY INSIDE THE TAKE TOO (2026-10-04).** Ambient
+drives Hue over bridge REST, outside the render path, so the virtual scope
+above never reached it: a take scoped to the Living Room held all seventeen
+Hue bulbs because his stored Ambient was on, and it landed three seconds
+BEFORE the commit (a bridge broadcast's reconcile saw a live stack).
+`live.scope_device_ids()` is the scope as devices; `ambient._hue_devices`
+filters by it, `ambient.room_available()` refuses while a handover is in
+flight, and `dark_light` writes only in-scope virtuals. Spec:
+`tests/test_ambient_take_scope.py`.
+
 `night_exit`'s own `release_fade.read_hue_light_states` is deliberately NOT
 scoped: it is READ-ONLY and its attribution (`outside_run`) is what makes
 an out-of-scope lit bulb legible rather than blamed.

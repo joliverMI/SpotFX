@@ -292,6 +292,8 @@ from typing import Any, Optional
 
 import httpx
 
+from fx import light_ownership
+
 logger = logging.getLogger(__name__)
 
 # Legacy defaults (services/ambient_mode.py's settings.ambient_transition_s /
@@ -447,7 +449,18 @@ def room_available() -> bool:
     the gate's `held`/`mode` keys already say so honestly."""
     from spectra.services.live_host import live
 
-    return bool(live.active and live.host is not None)
+    if not (live.active and live.host is not None):
+        return False
+    # NOT MID-HANDOVER. The stack is up a few seconds before a take commits,
+    # and a bridge broadcast in that window (engine._on_track_uri's
+    # reconcile) used to land the stored hold before the room was even ours
+    # — 2026-10-04, Ambient ON 3 s before the commit. The commit's own
+    # reconcile (handover.run_handover) is where a take-back applies it.
+    try:
+        rec = light_ownership.load()
+    except Exception:                                    # noqa: BLE001
+        return True                     # unreadable: the stack's word stands
+    return rec.handover is None
 
 
 _lock: Optional[asyncio.Lock] = None
@@ -948,8 +961,18 @@ async def verify_held(color: Optional[str],
 # ── device discovery ─────────────────────────────────────────────────────────
 
 def _hue_devices(host: Any) -> dict[str, Any]:
+    """Every live Hue device Ambient may touch — INSIDE THE TAKE'S SCOPE.
+    A scoped take (a capture run, a Light Show proof) brings up only some
+    fixtures; Ambient drives Hue over bridge REST, outside the render path,
+    so nothing structural stopped it holding Hue the take never brought up.
+    On 2026-10-04 a take scoped to the Living Room (the TV backlight) lit
+    all seventeen of his Hue bulbs at the ambient colour. An ordinary
+    whole-room take has no scope and this is every Hue device, unchanged."""
+    from spectra.services.live_host import live
+    scope = live.scope_device_ids() if host is live.host else None
     return {did: host.devices.get(did) for did in host.devices
-            if getattr(host.devices.get(did), "type", None) == "hue"}
+            if getattr(host.devices.get(did), "type", None) == "hue"
+            and (scope is None or did in scope)}
 
 
 async def list_groups() -> list[dict]:
