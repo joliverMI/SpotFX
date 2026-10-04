@@ -123,16 +123,42 @@ cue, regardless of how short it is or how low the rate. The upper clamp
 reached by an ordinary song at the default rate, so it is never what
 "his rate" silently means in practice.
 
-Before placement, only the song's strongest resolve_transition_count()
-candidates survive, ranked by the ABSOLUTE bass-energy step
-(rhythmic_edges.bass_step_at) at each candidate's own RAW
-section-boundary time — a comparable strength score whether or not that
-moment actually crosses the sensitivity threshold as a named edge. Ties
-(equal step magnitude, or no beat analysis at all — every candidate
-scores 0.0) keep chronological order, since Python's sort is stable. A
-song with fewer raw candidates than the resolved count is unaffected.
-Ranking happens BEFORE placement, on the boundary's own raw time, so
-density and placement never fight over which moment "moved first."
+THE SCENE-CHANGE PLANNER (2026-10-04, data/scene-change-ranking-plan/
+report.md; the Admiral's "use all recommendations"). His model: rank every
+transition by how much the music changes, make the strongest ones the real
+scene changes, fill the rest with flares. Measured before this, rank had no
+effect at all — the minimum dwell gate decided first-come-first-served at
+play time, so the top 10% of transitions became scene changes 38% of the
+time, the same as the bottom. plan_moments() now plans it, in order:
+
+  RANKING — each boundary's SECTION-ENERGY CHANGE, |energy_rms - the
+    previous section's energy_rms| (section_energy_change). It replaced the
+    one-beat bass jump (rhythmic_edges.bass_step_at), which did no better
+    than chance at finding his own hand-placed marks (AUC 0.51 vs 0.58).
+  PLACEMENT — unchanged: every boundary is placed by the frame shift and R3
+    then R1 (below) before anything is chosen.
+  DEDUPE — two boundaries placed on the same instant are one moment; the
+    stronger keeps it (11.5% of candidates collided at window 16).
+  TOTAL ACTIONS — the strongest resolve_transition_count() moments (the
+    room bar's "Total actions per minute") are the song's actions; the rest
+    are no action at all (MomentPlan.dropped).
+  STRONGEST-FIRST FILL — walking the actions strongest first, each becomes
+    a scene change if it fits the hold IN BOTH DIRECTIONS around the scene
+    changes already chosen and the song-start pick at PLAN_START_MS: the
+    hold is the dwell the show will latch for it (the longest enabled
+    scene's dwell curve at its RENDER intensity, planning_hold_s, plus
+    PLAN_HOLD_MARGIN_S), so a quiet cue blocks the timeline longer than a
+    loud one. RoomControlState.scene_changes_per_minute (0 = off) is an
+    optional ceiling on the count. Those become MomentPlan.kept — the
+    stored scene-change cues. Every other action is MomentPlan.unselected,
+    fired at play time as an ordinary flare (spectra.services.
+    analysed_flares) — not the double-intensity deferral flare.
+At play time a planned cue fires with dwell.PLANNED_CUE_TOLERANCE_S of
+hold still allowed (trigger_engine's planned-scene path), and never picks
+the scene already showing. Measured with the plan's validated simulator on
+his 763 un-authored songs: the top 10% of transitions now become scene
+changes 85% of the time (top 3 per song: 87%), ~2.8 changes a minute, and
+0.0% of planned changes are deferred.
 
 FRAME FIX (2026-09-23, data/transition-alignment-plan/report.md §2.1/§5
 task 1): a section's own start_ms is in the CAPTURED-WAV's own frame
@@ -207,7 +233,7 @@ logger = logging.getLogger(__name__)
 INTENSITY_FLOOR = 0.05
 EDGE_TRIM_MS = 15_000
 
-GENERATOR_VERSION = "1"
+GENERATOR_VERSION = "2"
 """Bumped whenever this module's own planning changes what it would store
 for an unchanged song and unchanged settings — part of every generated
 cue's generator_stamp, so a bump marks every stored analysed cue stale and
@@ -281,6 +307,127 @@ class CandidateMoment:
     generator_key: str
     snap_grid: Optional[str] = None
     snap_moved_ms: Optional[int] = None
+    # THE RANK (see the module docstring's RANKING section): strength is the
+    # section-energy change at this boundary; rank 1 is the song's strongest
+    # moment of rank_of. None on a placement duplicate (it was never ranked).
+    strength: float = 0.0
+    rank: Optional[int] = None
+    rank_of: Optional[int] = None
+
+
+PLAN_START_MS = 1000
+"""Where the planner assumes the song-start scene pick lands: the transition
+fire happens on the URI-change edge, ~1s into the song (the plan's own
+simulator, validated against his real show log at 62.1% vs 62.3%)."""
+
+PLAN_HOLD_MARGIN_S = 0.5
+"""Added to every planned hold — together with the 1.5s play-time tolerance
+(dwell.PLANNED_CUE_TOLERANCE_S) it absorbs the difference between the
+factor planned with (no genres offline) and the one the show plays with."""
+
+
+def section_energy_change(ordered: list[dict]) -> list[float]:
+    """THE RANK (2026-10-04): each section's |energy_rms - previous
+    section's energy_rms|, raw, the song's own opening section scoring 0.
+    His own model of the ranking ("by magnitude of change of intensity"),
+    measured on his hand-placed marks at AUC 0.58 against the one-beat bass
+    jump's 0.51 — see the module docstring's RANKING section."""
+    out: list[float] = []
+    prev: Optional[float] = None
+    for sec in ordered:
+        try:
+            e = max(0.0, min(1.0, float(sec.get("energy_rms", 0.0))))
+        except (TypeError, ValueError):
+            e = 0.0
+        out.append(0.0 if prev is None else abs(e - prev))
+        prev = e
+    return out
+
+
+_hold_curves_cache: Optional[tuple[Any, list[list]]] = None
+
+
+def planning_hold_curves() -> list[list]:
+    """Every enabled scene's own minimum-dwell curve (dwell.
+    resolve_dwell_curve_points) — the planner holds each cue for the
+    LONGEST of them, since which scene a cue fires is only decided at play
+    time. Today every scene uses the default 16s -> 4s. Cached on the scene
+    and curve-profile files' own (mtime, size), so a library walk parses
+    them once and an edit is seen at once."""
+    global _hold_curves_cache
+    from spectra import config
+    sig = []
+    for path in (config.SCENES_FILE, config.SEQUENCER_FILE):
+        try:
+            st = path.stat()
+            sig.append((str(path), st.st_mtime_ns, st.st_size))
+        except OSError:
+            sig.append((str(path), None, None))
+    if _hold_curves_cache is not None and _hold_curves_cache[0] == sig:
+        return _hold_curves_cache[1]
+    curves = _resolve_hold_curves()
+    _hold_curves_cache = (sig, curves)
+    return curves
+
+
+def _resolve_hold_curves() -> list[list]:
+    from spectra.services import dwell, scene_store
+    curves: list[list] = []
+    try:
+        scenes = scene_store.list_all()
+    except Exception:
+        scenes = []
+    for scene in scenes:
+        if getattr(scene, "disabled", False):
+            continue
+        points = dwell.resolve_dwell_curve_points(scene)
+        if points not in curves:
+            curves.append(points)
+    return curves or [dwell.DEFAULT_DWELL_CURVE]
+
+
+def planning_hold_s(raw_intensity: float, factor: float, curves: list[list]) -> float:
+    """Seconds a scene change at this cue's intensity holds the room before
+    the next may fire, as the show will latch it: the dwell curve read at
+    the RENDER intensity (raw x headroom x the song's factor), plus the
+    planning margin."""
+    from spectra.services import intensity_scale, selection_kernel
+    render = intensity_scale.combine_measured_and_scale(raw_intensity, factor)
+    return max(selection_kernel.curve_eval(points, render) for points in curves) + PLAN_HOLD_MARGIN_S
+
+
+def _strongest_first_fill(
+    by_strength: list[CandidateMoment], ordered: list[dict], factor: float,
+    ceiling: Optional[int], hold_curves: list[list],
+) -> list[CandidateMoment]:
+    """THE STRONGEST-FIRST FILL (the module docstring's SCENE-CHANGE PLANNER):
+    walk the actions strongest first; each becomes a scene change when it
+    fits the hold IN BOTH DIRECTIONS around every scene change already
+    chosen and the song-start pick — after an earlier change's hold has run
+    out, and early enough that its own hold runs out before a later one —
+    until `ceiling` (None = no ceiling) is reached. Returns the chosen, in
+    strength order. Pure: no I/O."""
+    try:
+        start_raw = max(0.0, min(1.0, float(ordered[0].get("energy_rms", 0.5))))
+    except (IndexError, TypeError, ValueError):
+        start_raw = 0.5
+    start_hold = planning_hold_s(start_raw, factor, hold_curves)
+    chosen: list[tuple[int, float, CandidateMoment]] = []
+    for c in by_strength:
+        if ceiling is not None and len(chosen) >= ceiling:
+            break
+        t = c.timestamp_ms
+        if (t - PLAN_START_MS) / 1000.0 < start_hold:
+            continue
+        hold = planning_hold_s(c.intensity, factor, hold_curves)
+        fits = all(
+            t != ta
+            and not (ta < t and (t - ta) / 1000.0 < hold_a)
+            and not (t < ta and (ta - t) / 1000.0 < hold)
+            for ta, hold_a, _ in chosen)
+        if fits:
+            chosen.append((t, hold, c))
+    return [c for _, _, c in chosen]
 
 
 def _normalized_intensities(sections: list[dict]) -> list[float]:
@@ -366,25 +513,36 @@ def candidate_moments(
     direction: Optional[str] = None,
     transitions_per_minute: Optional[float] = None,
 ) -> list[CandidateMoment]:
-    """The KEPT half of plan_moments() — see that function's docstring
-    (its keywords are this function's, unchanged)."""
-    return plan_moments(
+    """Every analysed moment the plan ACTS on — its scene changes and its
+    flares together, chronological, each placed and ranked (a placement
+    duplicate or a moment past the total-actions budget is no action and is
+    not here). This is the placement-and-density view the test bed's
+    Generator: Preview lane and the transition-alignment measurement read;
+    which of these become stored scene changes is plan_moments().kept, and
+    generate_for_song stores exactly that. Keywords as plan_moments()."""
+    plan = plan_moments(
         uri, snap_enabled=snap_enabled, window_beats=window_beats,
         sensitivity=sensitivity, direction=direction,
-        transitions_per_minute=transitions_per_minute).kept
+        transitions_per_minute=transitions_per_minute)
+    return sorted(plan.kept + plan.unselected, key=lambda m: m.timestamp_ms)
 
 
 @dataclass(frozen=True)
 class MomentPlan:
-    """Both halves of one song's density cut. `kept` is what
-    generate_for_song stores as fire_scene triggers; `unselected` is every
-    OTHER candidate — the ones that did not rank high enough — placed by
-    the IDENTICAL rule on the IDENTICAL clock, which spectra.services.
-    analysed_flares turns into play-time flares (the Admiral, 2026-09-26:
-    "all of the transitions that didn't get selected because they didn't
-    rank high enough to be treated like flares"). Both chronological."""
+    """One song's plan (the module docstring's SCENE-CHANGE PLANNER).
+    `kept` — the SCENE CHANGES the strongest-first fill chose, which
+    generate_for_song stores as fire_scene triggers. `unselected` — every
+    other action in the song's total-actions budget, placed by the
+    IDENTICAL rule on the IDENTICAL clock, which spectra.services.
+    analysed_flares fires at play time as ordinary flares (the Admiral,
+    2026-10-04: "everything left becomes a flare"). `dropped` — moments
+    that are no action at all: placement duplicates of a stronger moment,
+    and moments past the budget. All chronological. `rank_of` — how many
+    distinct moments were ranked."""
     kept: list[CandidateMoment]
     unselected: list[CandidateMoment]
+    dropped: list[CandidateMoment] = field(default_factory=list)
+    rank_of: int = 0
 
 
 def plan_moments(
@@ -395,11 +553,17 @@ def plan_moments(
     direction: Optional[str] = None,
     transitions_per_minute: Optional[float] = None,
     claimed: Optional[set[str]] = None,
+    scene_changes_per_minute: Optional[float] = None,
+    hold_curves: Optional[list[list]] = None,
 ) -> MomentPlan:
-    """One CandidateMoment per surviving section boundary past the song's
-    own start (see the module docstring's DENSITY section for what
-    "surviving" means). Empty when no analysis is available yet —
-    generation is a no-op, not an error, for an unanalyzed song.
+    """The song's MomentPlan — its scene changes, its flares and the
+    moments that are no action, each placed and ranked (the module
+    docstring's SCENE-CHANGE PLANNER). Empty when no analysis is available
+    yet — generation is a no-op, not an error, for an unanalyzed song.
+
+    `scene_changes_per_minute` (the optional ceiling, 0 = off) reads the
+    room like the others; `hold_curves` (the dwell curves the fill holds
+    each scene change for) defaults to planning_hold_curves().
 
     Every keyword defaults to the live RoomControlState — pass one
     explicitly to avoid that read (a caller that already has the current
@@ -418,7 +582,7 @@ def plan_moments(
     if not sections:
         return MomentPlan([], [])
     if (snap_enabled is None or window_beats is None or sensitivity is None
-            or transitions_per_minute is None):
+            or transitions_per_minute is None or scene_changes_per_minute is None):
         controls = room_controls.load_room_controls()
         if snap_enabled is None:
             snap_enabled = controls.midsong_snap_to_beat
@@ -428,6 +592,8 @@ def plan_moments(
             sensitivity = controls.transition_edge_sensitivity
         if transitions_per_minute is None:
             transitions_per_minute = controls.transitions_per_minute
+        if scene_changes_per_minute is None:
+            scene_changes_per_minute = controls.scene_changes_per_minute
     if direction is None:
         direction = rhythmic_edges.DEFAULT_DIRECTION
 
@@ -435,64 +601,68 @@ def plan_moments(
     intensities = _normalized_intensities(ordered)
     if claimed is None:
         claimed = analysed_claims.claimed_keys(uri)
-    mid = [(sec, intensity) for sec, intensity in zip(ordered, intensities)
-          if int(sec.get("start_ms", 0)) > 0  # exclude the song's own opening
-          and f"section:{int(sec.get('start_ms', 0))}" not in claimed]
+    strengths = section_energy_change(ordered)
+    mid = [(sec, intensity, int(sec.get("start_ms", 0)), strength)
+           for sec, intensity, strength in zip(ordered, intensities, strengths)
+           if int(sec.get("start_ms", 0)) > 0  # exclude the song's own opening
+           and f"section:{int(sec.get('start_ms', 0))}" not in claimed]
 
-    # DENSITY — keep the strongest resolve_transition_count() candidates by
-    # bass-energy step size, ranked at each candidate's own RAW boundary
-    # time, BEFORE placement (see the module docstring's DENSITY section).
-    # Resolved once per song, not once per candidate.
-    beat_series = rhythmic_edges.bass_step_series_for_uri(uri)
-    scored = [
-        (sec, intensity, int(sec.get("start_ms", 0)),
-         rhythmic_edges.bass_step_at(beat_series[0], beat_series[1], int(sec.get("start_ms", 0)))
-         if beat_series is not None else 0.0)
-        for sec, intensity in mid
-    ]
-    resolved_count = resolve_transition_count(uri, ordered, transitions_per_minute)
-    dropped: list = []
-    if len(scored) > resolved_count:
-        kept = sorted(range(len(scored)), key=lambda i: scored[i][3],
-                      reverse=True)[:resolved_count]
-        kept.sort()  # restore chronological order
-        kept_set = set(kept)
-        dropped = [scored[i] for i in range(len(scored)) if i not in kept_set]
-        scored = [scored[i] for i in kept]
+    total = resolve_transition_count(uri, ordered, transitions_per_minute)
+    factor = effective_intensity_scale_factor(uri)
+    duration_ms = max((int(sec.get("end_ms", 0)) for sec in ordered), default=0)
+    ceiling = (max(1, round(scene_changes_per_minute * duration_ms / 60000.0 * factor))
+               if scene_changes_per_minute and scene_changes_per_minute > 0 else None)
 
     # The WAV-time -> song-time shift (see the module docstring's FRAME
     # FIX) — resolved once per song, not once per section.
     offset_ms = testbed_audio.capture_offset_ms_or_zero(uri)
-    # Resolved once per song (not once per section) — place_cue would
-    # otherwise re-read/re-parse the song's librosa analysis, its beat_this
-    # cache and its capture-offset sidecar for every section.
     placement = beat_snap.resolve_song_placement(
         uri, window_beats=window_beats, sensitivity=sensitivity, direction=direction)
     if placement is not None and not snap_enabled:
-        # Stage 2 (R1's downbeat fallback) only — stage 1 (the edge
-        # search) always runs, per the module docstring's PLACEMENT RULE
-        # R3 section.
         placement = replace(placement, grid=None)
     shifted_placement = _shift_song_placement(placement, offset_ms)
 
-    def _place(rows: list) -> list[CandidateMoment]:
-        out: list[CandidateMoment] = []
-        for sec, intensity, raw_ms, _strength in rows:
-            frame_ms = raw_ms + offset_ms
-            result = beat_snap.place_with_resolved(
-                frame_ms, placement=shifted_placement, window_beats=window_beats)
-            # generator_key is keyed on the section's own RAW (WAV-time)
-            # start_ms — the analysis moment, unaffected by the frame shift,
-            # the density ranking, or placement — so toggling any of these
-            # settings (or a recapture moving the capture offset) UPDATES the
-            # same trigger's timestamp_ms rather than orphaning it under a
-            # stale key and adding a new one (see the module docstring).
-            out.append(CandidateMoment(
-                result.timestamp_ms, intensity, f"section:{raw_ms}",
-                result.snap_grid, result.snap_moved_ms))
-        return out
+    placed: list[CandidateMoment] = []
+    for sec, intensity, raw_ms, strength in mid:
+        result = beat_snap.place_with_resolved(
+            raw_ms + offset_ms, placement=shifted_placement, window_beats=window_beats)
+        placed.append(CandidateMoment(
+            result.timestamp_ms, intensity, f"section:{raw_ms}",
+            result.snap_grid, result.snap_moved_ms, strength=strength))
 
-    return MomentPlan(_place(scored), _place(dropped))
+    # 1. DEDUPE — two transitions placed onto the same moment are one
+    #    moment: the stronger keeps it (the earlier on a tie).
+    by_moment: dict[int, CandidateMoment] = {}
+    for c in placed:
+        held = by_moment.get(c.timestamp_ms)
+        if held is None or c.strength > held.strength:
+            by_moment[c.timestamp_ms] = c
+    unique = [c for c in placed if by_moment[c.timestamp_ms] is c]
+    duplicates = [c for c in placed if by_moment[c.timestamp_ms] is not c]
+
+    # 2. RANK — strongest section-energy change first; ties stay
+    #    chronological (a stable sort over the chronological list).
+    by_strength = sorted(unique, key=lambda c: -c.strength)
+    rank_of = len(by_strength)
+    ranked = {c.generator_key: replace(c, rank=i + 1, rank_of=rank_of)
+              for i, c in enumerate(by_strength)}
+    by_strength = [ranked[c.generator_key] for c in by_strength]
+
+    # 3. TOTAL ACTIONS — the strongest `total` moments are the actions;
+    #    the rest do nothing at all.
+    pool, below = by_strength[:total], by_strength[total:]
+
+    # 4. STRONGEST-FIRST FILL — see the module docstring.
+    if hold_curves is None:
+        hold_curves = planning_hold_curves()
+    chosen = _strongest_first_fill(pool, ordered, factor, ceiling, hold_curves)
+    chosen_keys = {c.generator_key for c in chosen}
+    kept = sorted(chosen, key=lambda c: c.timestamp_ms)
+    flares = sorted((c for c in pool if c.generator_key not in chosen_keys),
+                    key=lambda c: c.timestamp_ms)
+    dropped = sorted([ranked.get(c.generator_key, c) for c in duplicates] + below,
+                     key=lambda c: c.timestamp_ms)
+    return MomentPlan(kept, flares, dropped=dropped, rank_of=rank_of)
 
 
 def _settings_part(controls: Any) -> dict:
@@ -501,6 +671,11 @@ def _settings_part(controls: Any) -> dict:
         "window": int(controls.transition_window_beats),
         "sensitivity": float(controls.transition_edge_sensitivity),
         "snap": bool(controls.midsong_snap_to_beat),
+        "ceiling": float(controls.scene_changes_per_minute),
+        # the planner holds each scene change for the scenes' own dwell
+        # curves — editing one changes which moments fit
+        "holds": [[(float(p.x), float(p.y)) for p in points]
+                  for points in planning_hold_curves()],
     }
 
 
@@ -654,6 +829,7 @@ def _planning_kwargs(controls: Any) -> dict:
         "window_beats": controls.transition_window_beats,
         "sensitivity": controls.transition_edge_sensitivity,
         "transitions_per_minute": controls.transitions_per_minute,
+        "scene_changes_per_minute": controls.scene_changes_per_minute,
     }
 
 

@@ -457,6 +457,8 @@ export interface RoomControlState {
    * per minute of song, scaled by that song's own intensity-scale
    * factor. Default 8. */
   transitions_per_minute: number;
+  /** Optional ceiling on analysed scene changes per minute; 0 = off. */
+  scene_changes_per_minute: number;
   /** Legacy Now Playing "Force Scene" control, ported verbatim: while
    * enabled, every scene the system would otherwise pick automatically
    * (sequencer roll, trigger fire, or the automatic transition fire) fires

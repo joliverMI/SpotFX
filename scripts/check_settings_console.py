@@ -123,7 +123,9 @@ check(set(sc.SETTINGS_REGISTRY) == {
     # rate 2026-09-25 — shown to him as "Total actions per minute")
     "transition_window_beats", "transition_edge_sensitivity",
     "transitions_per_minute",
-}, "registry is the deliberate allowlist (eight room keys + the three "
+    # the scene-change planner's optional ceiling (2026-10-04)
+    "scene_changes_per_minute",
+}, "registry is the deliberate allowlist (eight room keys + the four "
    "analysed-transition knobs)")
 check(sc.SETTINGS_REGISTRY["ambient_enabled"].kind == "bool"
       and sc.SETTINGS_REGISTRY["ambient_on_music_pause"].kind == "bool",

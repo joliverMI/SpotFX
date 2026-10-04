@@ -150,8 +150,10 @@ def _generator_preview_marks(
     """spectra.services.midsong_generator.candidate_moments(uri), run
     read-only against the CURRENT placement rule (R3 then R1, 2026-09-23)
     at the page's own window/sensitivity/direction/transitions_per_minute
-    knob values — what generation would produce right now, without
-    writing anything to the trigger store. `transitions_per_minute`
+    knob values — every analysed moment the room would act on right now
+    (since the scene-change planner, 2026-10-04: its scene changes AND its
+    flares, i.e. the placement and density view, not just the stored
+    scene-change cues), without writing anything to the trigger store. `transitions_per_minute`
     defaults to `None`, which `candidate_moments` itself resolves to the
     live room setting — the same "explicit value overrides, omitted
     tracks the room" shape every other knob here already has

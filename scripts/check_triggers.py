@@ -906,6 +906,14 @@ spectra_engine.bridge._track = None   # restore for whatever runs next
 
 from spectra.services import midsong_generator
 
+# Sections 6 and 7 prove generation's STORAGE semantics (keys, ids, edits,
+# re-analysis of a changed song, auto-generation). The scene-change planner's holds would make
+# its 10s boundary a flare (it sits inside the song-start pick's hold); they
+# are neutralised here and proven on their own in
+# tests/test_scene_change_planner.py.
+_real_planning_hold_s = midsong_generator.planning_hold_s
+midsong_generator.planning_hold_s = lambda raw, factor, curves: 0.0
+
 GEN_URI = "spotify:track:midsong-gen"
 shapes_dir = scfg.AUDIO_SHAPES_DIR
 shapes_dir.mkdir(parents=True, exist_ok=True)
@@ -1153,6 +1161,8 @@ check(trigger_store.list_for_song(NO_ANALYSIS_AUTO_URI) == [],
       "a song with no stored analysis degrades honestly through the "
       "auto-generate path too — generate_for_song's clean zero-moment "
       "no-op is preserved, never a fabricated trigger")
+
+midsong_generator.planning_hold_s = _real_planning_hold_s   # sections 6-7 done
 
 # ═══ 8. lead-time alignment (his ask, 2026-08-19) ════════════════════════
 # "This is how it worked in the old SpotFX" — services/transition_phases.py

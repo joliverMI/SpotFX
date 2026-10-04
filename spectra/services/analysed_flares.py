@@ -3,11 +3,15 @@
 that didn't get selected because they didn't rank high enough to be treated
 like flares").
 
-midsong_generator keeps each song's strongest N section transitions
-(N = transitions_per_minute x duration x the song's intensity mark) and
-stores them as generated fire_scene triggers. Every OTHER candidate used to
-be discarded. This module is the ONE computation of what those discarded
-candidates become — `plan_for_song` — and it is read by two callers, never
+midsong_generator's SCENE-CHANGE PLANNER (2026-10-04) takes each song's
+strongest N moments as its ACTIONS (N = "total actions per minute" x
+duration x the song's intensity mark), makes the strongest that fit the
+minimum hold its SCENE CHANGES (stored as generated fire_scene triggers),
+and leaves every other action to fire as a flare — at the scene's ordinary
+flare intensity, never the double-intensity flare a deferred scene change
+fires (the Admiral, 2026-10-04: "leftover transitions fire as normal-
+intensity flares"). This module is the ONE computation of what those
+leftovers become — `plan_for_song` — and it is read by two callers, never
 copied into a third:
 
   - spectra.services.trigger_engine, which fires each flare moment at play

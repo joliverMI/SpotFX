@@ -586,6 +586,15 @@ class RoomControlState(BaseModel):
     # generator_stamp goes stale — midsong_generator's RE-ANALYSIS section)
     # or at once through Sonic's "refresh analysed triggers".
     transitions_per_minute: float = Field(default=8.0, ge=1.0, le=30.0)
+    # SCENE CHANGES PER MINUTE — an optional CEILING on how many of those
+    # actions the planner makes scene changes (2026-10-04, the Admiral's
+    # "use all recommendations": "an optional scene-changes-per-minute
+    # ceiling is a setting, OFF by default"). 0 = off: the strongest-first
+    # fill (midsong_generator's SCENE-CHANGE PLANNER) then takes every
+    # action the minimum dwell lets it. Resolved per song exactly like the
+    # total: rate x minutes x the song's intensity-scale factor, at least 1.
+    # It only ever lowers the count — the dwell already caps it near 3/min.
+    scene_changes_per_minute: float = Field(default=0.0, ge=0.0, le=30.0)
 
     # THE A/V-SYNC LEAD (owner ask 2026-08-28) — LEAD family: positive =
     # fire EARLIER, negative = fire LATER. The value the /avsync

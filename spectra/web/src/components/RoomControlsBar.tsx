@@ -594,6 +594,22 @@ export default function RoomControlsBar() {
                 onBlur={() => commit(local)}
               />
             </div>
+            <div className="top-bar-group-field">
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}
+                title="An optional ceiling on how many analysed actions become real scene changes. 0 = off: the strongest moments change the scene wherever the minimum hold allows.">
+                Scene changes per minute
+                <HelpLink topic="scene-change-planner" />
+              </label>
+              <input
+                type="number" min={0} max={30} step={0.5}
+                value={local.scene_changes_per_minute}
+                onChange={(e) => setLocal({ ...local, scene_changes_per_minute: Number(e.target.value) })}
+                onBlur={() => commit(local)}
+              />
+              <span style={{ fontSize: '0.85em', opacity: 0.75 }}>
+                {local.scene_changes_per_minute > 0 ? 'ceiling' : 'off'}
+              </span>
+            </div>
             <div className="top-bar-group-field" style={{ fontSize: '0.85em', opacity: 0.75 }}>
               <span>Changes here re-plan each song's analysed cues the next time it plays — or ask Sonic to refresh them all.</span>
               <HelpLink topic="analysed-refresh" title="Re-analysing songs after a settings change" />

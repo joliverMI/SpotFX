@@ -109,7 +109,14 @@ def _run_generation(tmp_root: Path, uri: str, *, snap: bool) -> list[int]:
     run_dir.mkdir(parents=True, exist_ok=True)
     room_controls.save_room_controls(
         room_controls.RoomControlState(midsong_snap_to_beat=snap))
-    midsong_generator.generate_for_song(uri)
+    # This measures WHERE cues are placed: every placed moment is stored
+    # (the scene-change planner's holds, 2026-10-04, zeroed here).
+    original_hold = midsong_generator.planning_hold_s
+    midsong_generator.planning_hold_s = lambda raw, factor, curves: 0.0
+    try:
+        midsong_generator.generate_for_song(uri)
+    finally:
+        midsong_generator.planning_hold_s = original_hold
     return [t.timestamp_ms for t in trigger_store.list_for_song(uri)]
 
 

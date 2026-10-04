@@ -435,6 +435,7 @@ class TriggerEngine:
         self, *,
         list_triggers: Callable[[str], list[SpectraTrigger]] | None = None,
         fire_scene: Callable[..., Awaitable[Any]] | None = None,
+        fire_planned_scene: Callable[..., Awaitable[Any]] | None = None,
         fire_response: Callable[[str, float, Optional[int]], Awaitable[Any]] | None = None,
         select_color_set: Callable[[str], Awaitable[Any]] | None = None,
         fire_scene_update: Callable[[float], Awaitable[Any]] | None = None,
@@ -458,6 +459,13 @@ class TriggerEngine:
     ) -> None:
         self._list_triggers = list_triggers or trigger_store.list_for_song
         self._fire_scene = fire_scene or self._default_fire_scene
+        # PLANNED SCENE CHANGES (2026-10-04): a generated cue the scene-change
+        # planner placed fires with dwell.PLANNED_CUE_TOLERANCE_S of the hold
+        # allowed to remain. A spec that injects fire_scene alone keeps
+        # receiving every fire through it, unchanged.
+        self._fire_planned_scene = (fire_planned_scene
+                                    or (self._default_fire_planned_scene
+                                        if fire_scene is None else fire_scene))
         self._fire_response = fire_response or self._default_fire_response
         self._select_color_set = select_color_set or self._default_select_color_set
         self._fire_scene_update = fire_scene_update or self._default_fire_scene_update
@@ -1133,8 +1141,10 @@ class TriggerEngine:
                         await self._fire_analysed_color(trig, None)
                         self._notify_colour_cue()
                         return
-                await self._fire_scene(scene_id, a.color_set_id,
-                                       self._render_intensity(a.intensity))
+                fire = (self._fire_planned_scene if trig.source == "generated"
+                        else self._fire_scene)
+                await fire(scene_id, a.color_set_id,
+                           self._render_intensity(a.intensity))
                 await self._fire_analysed_color(trig, scene_id)
                 self._notify_colour_cue()
             elif a.kind == "fire_response" and trig.id in self._flare_ids:
@@ -1254,6 +1264,14 @@ class TriggerEngine:
         from spectra.services.scene_sequencer import fire_scene_by_id
         await fire_scene_by_id(scene_id, color_set_id, intensity)
 
+    async def _default_fire_planned_scene(self, scene_id: str,
+                                          color_set_id: Optional[str],
+                                          intensity: float) -> None:
+        from spectra.services import dwell
+        from spectra.services.scene_sequencer import fire_scene_by_id
+        await fire_scene_by_id(scene_id, color_set_id, intensity,
+                               dwell_tolerance_s=dwell.PLANNED_CUE_TOLERANCE_S)
+
     @staticmethod
     async def _no_analysed_color(selection_intensity: float,
                                  render_intensity: float,
@@ -1268,7 +1286,14 @@ class TriggerEngine:
         trigger fires (deliberately simpler than the sequencer's continuous
         state machine; a mid-song trigger names one moment, not a stream of
         them). picked_id None (the terminal STAY rung, or no configured
-        sequencer entries at all) means nothing fires this crossing."""
+        sequencer entries at all) means nothing fires this crossing.
+
+        NEVER THE SCENE ALREADY SHOWING (2026-10-04): the room's active
+        scene (dwell.active_scene_id — the one every real fire latches) is
+        passed as the kernel's current_id, so it is drawn only when nothing
+        else can be (the kernel's re-admit rung). Before this every draw
+        passed None and 17.5% of his real "scene changes" re-fired the
+        scene already showing."""
         from spectra.services import mode_availability, scene_store, selection_kernel as kernel
         from spectra.services import sequencer_store
         from spectra.services.engine import bridge
@@ -1284,8 +1309,10 @@ class TriggerEngine:
             config.entries, curves, config.affinity,
             genre_bucket=bridge.genre_bucket(), prev_id=None,
             restrict_ids=existing)
+        from spectra.services import dwell
         pick = kernel.select(candidates, intensity=intensity, rng=self._rng,
-                             current_id=None, terminal=kernel.TERMINAL_STAY)
+                             current_id=dwell.active_scene_id(),
+                             terminal=kernel.TERMINAL_STAY)
         return pick.picked_id
 
     def _default_select_scene_from_pool(self, pool: list) -> Optional[str]:
@@ -1575,7 +1602,12 @@ class TriggerEngine:
         pin was made — LOOKAHEAD gets out of the way entirely (0 lead,
         _fire() re-resolves fresh) rather than firing, or timing, a stale
         pick."""
-        from spectra.services import mode_availability, room_controls, scene_store
+        from spectra.services import dwell, mode_availability, room_controls, scene_store
+        if pin.scene_id == dwell.active_scene_id():
+            # Pinned while another scene showed, but something has fired the
+            # pinned one since: firing it again would change nothing — draw
+            # fresh (excluding it) at the trigger's own moment instead.
+            return False
         scene = scene_store.get_by_id(pin.scene_id)
         if scene is None or getattr(scene, "disabled", False):
             return False

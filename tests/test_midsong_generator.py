@@ -120,6 +120,16 @@ GEN_URI = "spotify:track:midsong-beat-snap"
 STEM = "Snap Artist - Snap Song"
 
 
+@pytest.fixture
+def no_holds(monkeypatch):
+    """These tests are about PLACEMENT and storage, not the scene-change
+    planner's holds: with every hold at 0 every placed moment is a scene
+    change, so an early fixture boundary is still stored."""
+    from spectra.services import midsong_generator
+    monkeypatch.setattr(midsong_generator, "planning_hold_s",
+                        lambda raw, factor, curves: 0.0)
+
+
 def _seed_song(scfg, *, tempo_bpm=120.0):
     """A section boundary at 2150ms, 150ms from a 500ms-spaced downbeat
     grid's 2000ms downbeat — well inside the one-beat cap. A FLAT
@@ -140,7 +150,7 @@ def _seed_song(scfg, *, tempo_bpm=120.0):
     }), encoding="utf-8")
 
 
-def test_generation_snaps_onto_the_nearest_downbeat_by_default():
+def test_generation_snaps_onto_the_nearest_downbeat_by_default(no_holds):
     from spectra import config as scfg
     from spectra.services import midsong_generator, trigger_store
     _seed_song(scfg)
@@ -174,7 +184,7 @@ def test_snap_setting_off_leaves_the_raw_section_time():
     assert m.snap_moved_ms is None
 
 
-def test_toggling_the_setting_updates_the_same_trigger_in_place():
+def test_toggling_the_setting_updates_the_same_trigger_in_place(no_holds):
     """The setting flip is a regular regeneration UPDATE, never a
     delete+re-add under a different key — the generator_key stays tied to
     the section's own raw boundary regardless of snapping."""
@@ -201,7 +211,7 @@ def test_toggling_the_setting_updates_the_same_trigger_in_place():
     assert trig_after.snap_grid is None
 
 
-def test_regenerating_unchanged_is_still_a_pure_no_op_with_snapping_on():
+def test_regenerating_unchanged_is_still_a_pure_no_op_with_snapping_on(no_holds):
     from spectra import config as scfg
     from spectra.services import midsong_generator
     _seed_song(scfg)
@@ -332,13 +342,13 @@ def test_shift_song_grid_helper_shifts_every_downbeat():
 
 def _seed_density_song(scfg, *, n_boundaries=20, tempo_bpm=120.0):
     """`n_boundaries` mid-song sections at 1000ms spacing (1000, 2000, ...,
-    n*1000), plus the song's own opening at 0. Beats are spaced 500ms
-    apart so each boundary lands exactly on an even beat index; each
-    boundary's own beat carries a DISTINCT, ISOLATED bass-energy step
-    (rms_bass[2i] = i, its odd neighbours 0) so
-    rhythmic_edges.bass_step_at(boundary_ms) == i for the i-th boundary
-    (1-indexed) — the density ranking's own strength score. Returns the
-    list of (raw_ms, strength) pairs in chronological order."""
+    n*1000), plus the song's own opening at 0. The i-th boundary's
+    SECTION-ENERGY CHANGE (|energy_rms[i] - energy_rms[i-1]|, the ranking's
+    own strength since 2026-10-04) is i * 0.004 — distinct and increasing,
+    alternating up and down so every energy stays inside [0.4, 0.6]. Beats
+    are spaced 500ms apart (an isolated bass step on each boundary's beat,
+    which no longer ranks anything). Returns the list of (raw_ms, i) pairs
+    in chronological order — i is the boundary's strength order."""
     n_beats = n_boundaries * 2 + 2
     rms_bass = [0.0] * n_beats
     pairs = []
@@ -348,10 +358,12 @@ def _seed_density_song(scfg, *, n_boundaries=20, tempo_bpm=120.0):
         pairs.append((i * 1000, float(i)))
     beats = [{"ms": j * 500, "is_downbeat": False, "rms_bass": rms_bass[j]}
             for j in range(n_beats)]
-    sections = [{"start_ms": 0, "end_ms": 1000, "label": "intro", "energy_rms": 0.1}]
+    sections = [{"start_ms": 0, "end_ms": 1000, "label": "intro", "energy_rms": 0.5}]
+    energy = 0.5
     for i in range(1, n_boundaries + 1):
+        energy += (1 if i % 2 else -1) * i * 0.004
         sections.append({"start_ms": i * 1000, "end_ms": (i + 1) * 1000,
-                         "label": "section", "energy_rms": 0.5})
+                         "label": "section", "energy_rms": round(energy, 6)})
     (scfg.AUDIO_SHAPES_DIR / f"{STEM}.json").write_text(
         json.dumps({"spotify_uri": GEN_URI}), encoding="utf-8")
     (scfg.AUDIO_SHAPES_DIR / f"{STEM}.librosa.json").write_text(json.dumps({
@@ -375,12 +387,14 @@ def test_density_cap_keeps_the_strongest_n_candidates(monkeypatch):
         GEN_URI, snap_enabled=False, window_beats=1, sensitivity=1.5,
         direction="both", transitions_per_minute=1)
 
-    assert len(moments) == 5, "only the 5 strongest candidates survive"
+    assert len(moments) == 5, "only the 5 strongest candidates are actions"
     kept_raw_ms = sorted(int(m.generator_key.split(":")[1]) for m in moments)
     expected = sorted(raw_ms for raw_ms, strength in pairs if strength > 15)  # top 5: 16..20
     assert kept_raw_ms == expected, (
-        "the survivors are exactly the 5 boundaries with the largest "
-        "bass-energy step size, not an arbitrary 5")
+        "the actions are exactly the 5 boundaries with the largest "
+        "section-energy change, not an arbitrary 5")
+    assert [m.rank for m in sorted(moments, key=lambda m: m.rank)] == [1, 2, 3, 4, 5]
+    assert {m.rank_of for m in moments} == {20}
 
 
 def test_density_cap_output_stays_chronologically_ordered(monkeypatch):
@@ -531,12 +545,12 @@ def test_generated_cue_provenance_records_an_edge_label():
     assert m.snap_moved_ms == int(round(20 * step_ms)) - boundary_ms
 
 
-def test_plan_moments_returns_the_unselected_candidates_placed_by_the_same_rule(monkeypatch):
-    """ANALYSED FLARES (2026-09-26): the candidates the density cut drops
-    are no longer discarded — plan_moments returns them as `unselected`,
-    disjoint from `kept`, together covering every candidate, and placed by
-    the identical rule (here: no snap, no edges, so each lands on its own
-    raw boundary)."""
+def test_plan_moments_splits_the_budget_into_scene_changes_and_flares(monkeypatch):
+    """THE SCENE-CHANGE PLANNER (2026-10-04): the strongest `total` moments
+    are the actions — the strongest-first fill makes the ones that fit the
+    hold scene changes (`kept`), every other action a flare (`unselected`),
+    and the rest are no action (`dropped`). Here the five actions sit one
+    second apart, so only the strongest fits; the four others are flares."""
     from spectra import config as scfg
     from spectra.services import midsong_generator
     monkeypatch.setattr(midsong_generator, "resolve_transition_count",
@@ -546,12 +560,13 @@ def test_plan_moments_returns_the_unselected_candidates_placed_by_the_same_rule(
         GEN_URI, snap_enabled=False, window_beats=1, sensitivity=1.5,
         direction="both", transitions_per_minute=1)
     kept = {m.generator_key for m in plan.kept}
-    unselected = {m.generator_key for m in plan.unselected}
-    assert len(kept) == 5 and len(unselected) == 15
-    assert not kept & unselected
-    assert kept | unselected == {f"section:{raw}" for raw, _s in pairs}
-    assert [m.timestamp_ms for m in plan.unselected] == sorted(
-        raw for raw, s in pairs if s <= 15)
+    flares = {m.generator_key for m in plan.unselected}
+    dropped = {m.generator_key for m in plan.dropped}
+    assert kept == {"section:20000"}, "the strongest moment is the scene change"
+    assert flares == {f"section:{raw}" for raw, s in pairs if 16 <= s <= 19}
+    assert dropped == {f"section:{raw}" for raw, s in pairs if s <= 15}
+    assert plan.rank_of == 20
     assert midsong_generator.candidate_moments(
         GEN_URI, snap_enabled=False, window_beats=1, sensitivity=1.5,
-        direction="both", transitions_per_minute=1) == plan.kept
+        direction="both", transitions_per_minute=1) == sorted(
+            plan.kept + plan.unselected, key=lambda m: m.timestamp_ms)
