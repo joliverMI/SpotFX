@@ -103,6 +103,18 @@ DEFAULT_DWELL_CURVE: list[CurvePoint] = [
     CurvePoint(x=1.0, y=4.0),
 ]
 
+PLANNED_CUE_TOLERANCE_S = 1.5
+"""How much of the current scene's hold a PLANNED scene change (a generated
+cue the scene-change planner placed — midsong_generator's SCENE-CHANGE
+PLANNER) may still owe and fire anyway (2026-10-04, the Admiral's "use all
+recommendations": "planned scene changes fire with a 1.5 s tolerance"). The
+planner placed it a full hold after the previous planned change, but it
+plans with the song's factor as known offline (no genres) and the room plays
+with the live one; this absorbs that difference so a planned change is
+almost never deferred (measured in the plan: 0.0-7.2% deferred without it,
+0.0-0.1% with it). Hand-placed triggers and every other caller get no
+tolerance."""
+
 _active_scene_id: Optional[str] = None
 _active_scene_name: Optional[str] = None
 _entered_at_ms: Optional[int] = None

@@ -191,7 +191,9 @@ def _run_generation(
     above the report's own observed 19-37 raw candidates per song — this
     script measures the PLACEMENT rule alone, never the density knob (see
     tests/test_midsong_generator.py's own density/rate-arithmetic tests
-    for that, separately)."""
+    for that, separately). The scene-change planner's holds are zeroed for
+    the same reason. Its placement-duplicate dedupe (two moments placed on
+    one instant are one) stays on — it is part of what gets stored."""
     from spectra import config as scfg
     from spectra.services import midsong_generator, room_controls, trigger_store
     from spectra.services import analysis_reader
@@ -207,7 +209,12 @@ def _run_generation(
     # forced-0 answer into a later, real-offset run for the same URI.
     analysis_reader._capture_offset_cache.pop(uri, None)
     original_resolve = midsong_generator.resolve_transition_count
+    original_hold = midsong_generator.planning_hold_s
     midsong_generator.resolve_transition_count = lambda uri, sections, rate: 9999
+    # The scene-change planner (2026-10-04) stores only the moments its
+    # holds let become scene changes; this script measures WHERE moments
+    # are placed, so every placed moment is stored here (holds at 0).
+    midsong_generator.planning_hold_s = lambda raw, factor, curves: 0.0
     try:
         if edges_enabled:
             midsong_generator.generate_for_song(uri)
@@ -216,6 +223,7 @@ def _run_generation(
                 midsong_generator.generate_for_song(uri)
     finally:
         midsong_generator.resolve_transition_count = original_resolve
+        midsong_generator.planning_hold_s = original_hold
     return [t.timestamp_ms for t in trigger_store.list_for_song(uri)]
 
 

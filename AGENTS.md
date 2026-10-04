@@ -8947,10 +8947,13 @@ for exact control, matching the old flat-count semantics).
 2026-09-26, the Admiral: "all of the transitions that didn't get selected
 because they didn't rank high enough to be treated like flares."
 **`spectra/services/analysed_flares.py`'s docstring is the binding
-statement.** `midsong_generator.plan_moments` now returns BOTH halves of the
-density cut (`kept`, stored as generated fire_scene triggers as before, and
-`unselected`, placed by the identical rule); `candidate_moments` is its kept
-half, unchanged. The unselected ones are DERIVED AT PLAY TIME, never stored:
+statement.** `midsong_generator.plan_moments` returns the song's
+`MomentPlan` (`kept` = the planner's scene changes, stored as generated
+fire_scene triggers; `unselected` = every other action, placed by the
+identical rule; `dropped` = no action). Since the SCENE-CHANGE PLANNER below,
+`candidate_moments` is `kept + unselected` (every action — the placement
+and density view), NOT what is stored. The unselected ones are DERIVED AT
+PLAY TIME, never stored:
 `TriggerEngine` plans them once per song in a worker thread
 (`plan_analysed_flares`, cached for the current URI only) and feeds them to
 `tick()` as synthetic `fire_response` triggers (ids `analysed-flare:…`), so
@@ -8990,6 +8993,32 @@ queries.ts`) so it tracks whichever song is shown, not just the one
 playing. Toggle + count/reason legend: `BuilderPage.tsx`'s "Analysed
 events" chip and its legend row, help topic `builder-analysed-events`.
 Proven by `node scripts/check_timeline_analysed_markers.mjs`.
+
+## THE SCENE-CHANGE PLANNER — the strongest transitions are the scene changes
+
+2026-10-04 (data/scene-change-ranking-plan/report.md, the Admiral's "use all
+recommendations"). **`midsong_generator`'s SCENE-CHANGE PLANNER docstring
+section is the binding statement.** Before it, rank had NO effect: the
+dwell gate chose first-come-first-served at play time (top-10% of
+transitions → scene change 38%, flat by rank). Now `plan_moments` ranks
+every boundary by SECTION-ENERGY CHANGE (not the one-beat bass step), places
+all of them (placement unchanged), dedupes moments placed on one instant,
+keeps the strongest "total actions" (`transitions_per_minute`), and a
+STRONGEST-FIRST FILL makes the ones that fit the hold in both directions the
+scene changes (`planning_hold_s` = the longest enabled scene's dwell curve
+at RENDER intensity + 0.5 s; `scene_changes_per_minute`, 0 = off, is an
+optional ceiling); the rest are ordinary analysed flares. At play time a
+generated cue fires through `TriggerEngine._fire_planned_scene` with
+`dwell.PLANNED_CUE_TOLERANCE_S` (1.5 s) of hold allowed, and every
+trigger-engine kernel draw passes the showing scene as `current_id`.
+Measured with the plan's validated simulator against the built code (763
+un-authored songs): top-10% → 85%, top-3 → 87%, ~2.8 changes/min, 0.0% of
+planned changes deferred. **A test about placement or storage with early
+fixture boundaries must zero the holds** (`planning_hold_s` → 0, as
+`tests/test_midsong_generator.py`'s `no_holds`, `scripts/check_triggers.py`
+§6-7 and the two placement acceptance scripts do) — a boundary inside the
+song-start pick's ~16 s hold is a flare, not a stored cue. Spec:
+`tests/test_scene_change_planner.py`.
 
 ## Maintaining this file
 

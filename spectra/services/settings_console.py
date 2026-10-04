@@ -116,7 +116,9 @@ def _spec(key: str, label: str, description: str) -> SettingSpec:
             "scene_transition_ms_gentle": "ms",
             "scene_transition_ms_hard": "ms",
             "transition_window_beats": "beats",
-            "transition_edge_sensitivity": "fraction of local median step"}.get(key)
+            "transition_edge_sensitivity": "fraction of local median step",
+            "transitions_per_minute": "per minute of song",
+            "scene_changes_per_minute": "per minute of song, 0 = off"}.get(key)
     return SettingSpec(key=key, label=label, kind=kind, description=description,
                        unit=unit, min=ge, max=le, choices=choices)
 
@@ -200,6 +202,16 @@ SETTINGS_REGISTRY: dict[str, SettingSpec] = {
         "that budget fire as analysed flares. A change re-plans each song "
         "the next time it plays; ask for 'refresh analysed triggers' to "
         "re-plan every song at once."),
+    "scene_changes_per_minute": _spec(
+        "scene_changes_per_minute", "Scene changes per minute (ceiling)",
+        "An optional CEILING on how many of the analysed actions become real "
+        "scene changes, per minute of song (scaled by the song's "
+        "intensity-scale factor like the total). 0 = off, the default: the "
+        "strongest moments become scene changes wherever the minimum scene "
+        "hold lets them (about 3 a minute). Set above 0 to have fewer; it "
+        "can never add more than the hold allows — for more, the dwell "
+        "curve is the dial. Every other action fires as a flare. Reaches a "
+        "song the next time it plays."),
 }
 
 

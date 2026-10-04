@@ -73,7 +73,8 @@ FORCED_COLOR = "forced_color"
 
 async def fire_scene_by_id(scene_id: str,
                            color_set_id: Optional[str] = None,
-                           intensity: float = 0.5) -> dict:
+                           intensity: float = 0.5,
+                           dwell_tolerance_s: float = 0.0) -> dict:
     """The ONE scene-fire choke point for anything that picks a scene by id
     outside the editor's own test-fire — the sequencer's own rolls and
     SPECTRA-native triggers (spectra.services.trigger_engine) both call
@@ -143,6 +144,11 @@ async def fire_scene_by_id(scene_id: str,
     scene" state updates, which is what keeps it from going stale the way
     the old sequencer-local dwell bookkeeping did on a trigger fire.
 
+    dwell_tolerance_s (2026-10-04) lets a caller fire with that much of the
+    hold still owed — only trigger_engine's PLANNED scene changes pass one
+    (dwell.PLANNED_CUE_TOLERANCE_S); a fire inside it records
+    dwell_tolerance_used_s rather than passing silently.
+
     PREVIEW HOLD (2026-08-21, fm/preview-must-hold-scene-changes) is gated
     FIRST, ahead of every other check including Force Scene — the one gate
     in this function Force Scene does NOT override, matching preview_pause's
@@ -188,7 +194,8 @@ async def fire_scene_by_id(scene_id: str,
                "scene_name": scene.name}
     remaining_dwell = dwell.remaining_s()
     overrode_dwell = forced and remaining_dwell > 0
-    if not forced and remaining_dwell > 0:
+    tolerated = (not forced and 0 < remaining_dwell <= max(0.0, dwell_tolerance_s))
+    if not forced and remaining_dwell > 0 and not tolerated:
         from spectra.services.engine import fire_scene_update_event
         update_result = await fire_scene_update_event(intensity)
         fire_history.record_fire("deferred", scene_id, {
@@ -225,16 +232,21 @@ async def fire_scene_by_id(scene_id: str,
         result["overrode_disabled"] = True
     if overrode_dwell:
         result["overrode_dwell"] = True
+    if tolerated:
+        result["dwell_tolerance_used_s"] = round(remaining_dwell, 2)
     if forced_color is not None:
         # NAMED, not silent: this fire wore the pinned colours, not the
         # ones its caller resolved.
         result["forced_color"] = forced_color.id
     dwell.note_fired(scene, intensity)
-    fire_history.record_fire("scenes", scene_id, {
+    detail = {
         "scene_name": getattr(scene, "name", scene_id),
         "color_set_id": color_set_id,
         "intensity": intensity,
-    })
+    }
+    if tolerated:
+        detail["dwell_tolerance_used_s"] = round(remaining_dwell, 2)
+    fire_history.record_fire("scenes", scene_id, detail)
     return result
 
 
