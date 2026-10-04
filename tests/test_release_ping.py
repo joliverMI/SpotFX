@@ -287,6 +287,30 @@ def test_a_non_200_is_reported_and_the_release_still_stands(monkeypatch, code):
     assert "release" in result.release_ping["detail"]
 
 
+def test_a_202_async_accept_counts_as_told_on_the_release(monkeypatch):
+    """River answers a release 202 Accepted — her restore runs on her side,
+    asynchronously (2026-10-04: her witness showed every house light back
+    off within 5 s of a 202). That is TOLD, not a failure."""
+    log: list[str] = []
+    _configured(monkeypatch)
+    _fake_release_steps(monkeypatch, log)
+    _river(monkeypatch, log, lambda request: httpx.Response(202))
+    lo._save(lo.OwnershipRecord(owner=lo.SPECTRA))
+
+    result = _run(release_svc.release_room("spec: she accepted"))
+
+    assert result.release_ping["status"] == pretake_ping.STATUS_SENT
+    assert result.release_ping["http_status"] == 202
+    assert "accepted" in result.release_ping["detail"]
+
+
+def test_a_202_is_still_not_told_on_the_pre_take():
+    """The pre-take keeps 200 only: there she must have CAPTURED before the
+    take moves anything, which an async accept does not say."""
+    ans = pretake_ping.read_answer(202, None, pretake_ping.EVENT_PRE_TAKE)
+    assert ans.status == pretake_ping.STATUS_FAILED
+
+
 @pytest.mark.parametrize("exc", [
     httpx.ConnectError("connection refused"),
     httpx.ReadTimeout("she did not answer in time"),

@@ -5540,7 +5540,9 @@ Six things:
   "released" | "window_open" | "window_close", room_id, at_ms}` — ONE
   endpoint, ONE bearer, ONE wire shape, the `event` word the only field
   that differs, which is why this is one module and not four — and **SUCCESS IS HTTP 200, her word, never "any 2xx"** —
-  answering `{captured, elapsed_s, result}`. Her `captured`/`elapsed_s` are
+  answering `{captured, elapsed_s, result}`. **One exception (2026-10-04): a RELEASE answered
+  202** — her async accept — is told too (`RELEASE_ACCEPTED_STATUS`); the
+  pre-take stays 200-only, because there she must already have captured. Her `captured`/`elapsed_s` are
   SURFACED on the take's own record rather than reduced to a boolean: a 200
   saying `captured: false` is still `sent` (inventing a verdict she has not
   defined would be renegotiating her contract) and is still LOUD, in the

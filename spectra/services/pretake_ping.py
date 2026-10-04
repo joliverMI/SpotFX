@@ -85,7 +85,10 @@ URL, so the route is hers to name and this side never appends a path of its
 own; the address it carries at deploy is hers to move, which is exactly why
 it is an environment value here and NOT a default in this repository.
 
-**SUCCESS IS HTTP 200, HER WORD, NOT "any 2xx"** — on both events; the two
+**SUCCESS IS HTTP 200, HER WORD, NOT "any 2xx"** — with ONE exception: a
+RELEASE answered 202 (her async accept, `RELEASE_ACCEPTED_STATUS`) is told,
+since 2026-10-04 when her witness proved the restore ran behind one. On both
+events the two
 share one reading of her answer (`read_answer`) so a release can never be
 judged by a second, drifted copy of it. Anything else — another status, a
 transport error, a timeout — is `failed`, fail-soft. Her answer's `captured`
@@ -325,6 +328,13 @@ def reset() -> None:
 #: redirect or a 204 from something that is not her endpoint must not read
 #: as a captured snapshot.
 SUCCESS_STATUS = 200
+#: THE RELEASE PING ALSO TAKES 202 (firstmate, 2026-10-04): River answers a
+#: release with "202 Accepted" — her restore runs asynchronously — and her
+#: own witness proved it ran (25 house lights back off within 5 s of the
+#: ping, starting 0.35 s after it). The pre-take keeps 200 only: there she
+#: must have CAPTURED before SPECTRA moves anything, which an async accept
+#: does not say.
+RELEASE_ACCEPTED_STATUS = 202
 
 
 @dataclass(frozen=True)
@@ -752,6 +762,10 @@ def read_answer(status_code: int, body: Any,
     simply carries no `captured`: `None` means SHE DID NOT SAY, which this
     module is careful never to render as "she said no"."""
     w = words(event)
+    if event == EVENT_RELEASED and status_code == RELEASE_ACCEPTED_STATUS:
+        return _Answer(STATUS_SENT, status_code,
+                       "River accepted the release (202) — her restore runs "
+                       "on her side, asynchronously")
     if status_code != SUCCESS_STATUS:
         return _Answer(
             STATUS_FAILED, status_code,
