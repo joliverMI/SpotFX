@@ -117,7 +117,10 @@ def test_authoring_routes_never_touch_the_store_on_the_event_loop(monkeypatch):
     it — with the trigger engine's 200ms tick stalled behind it."""
     from spectra.services import trigger_store
     where: dict[str, bool] = {}
-    real_upsert, real_delete = trigger_store.upsert, trigger_store.delete
+    # The DELETE route removes through delete_returning (it needs the
+    # removed row to tell a deleted analysed cue from his own —
+    # spectra/services/analysed_claims.py); delete() is its thin wrapper.
+    real_upsert, real_delete = trigger_store.upsert, trigger_store.delete_returning
 
     def _upsert(uri, trigger):
         where["upsert"] = _ran_on_loop()
@@ -128,7 +131,7 @@ def test_authoring_routes_never_touch_the_store_on_the_event_loop(monkeypatch):
         return real_delete(uri, trigger_id)
 
     monkeypatch.setattr(trigger_store, "upsert", _upsert)
-    monkeypatch.setattr(trigger_store, "delete", _delete)
+    monkeypatch.setattr(trigger_store, "delete_returning", _delete)
 
     client = _client()
     placed = client.post(f"/api/triggers?uri={URI}", json=json.loads(

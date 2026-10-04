@@ -90,6 +90,7 @@ if str(_REPO_ROOT) not in sys.path:
 from mcp.server import MCPServer  # noqa: E402
 
 from spectra.services import (  # noqa: E402
+    analysis_console,  # noqa: F401 — its operation is wrapped below
     device_console,
     room_effect_console,
     scene_console,
@@ -384,6 +385,24 @@ async def set_room_effect(effect_id: str, key: _RoomEffectKeyEnum, value: Any) -
     carrier_ids (only carriers that room has MAPPED; empty means all of
     them)."""
     return await _call("set_room_effect", effect_id=effect_id, key=key, value=value)
+
+
+# The analysis domain: refreshing the analysed cues — see
+# spectra/services/analysis_console.py. Dry run first is enforced by the
+# mechanism (the apply needs the dry run's plan_id).
+
+
+@mcp.tool()
+async def refresh_analysed_triggers(uri: Optional[str] = None, dry_run: bool = True,
+                                    plan_id: Optional[str] = None) -> dict:
+    """Refresh analysed triggers -- re-plan the stored analysed scene changes
+    for every song (or one song, by spotify:track: URI) under the current
+    settings. ALWAYS call with dry_run=true first, tell him the counts, and
+    only after he agrees call again with dry_run=false and the dry run's
+    plan_id. Only analysed cues are touched; his own triggers and any cue he
+    edited or deleted by hand are left alone."""
+    return await _call("refresh_analysed_triggers", uri=uri, dry_run=dry_run,
+                       plan_id=plan_id)
 
 
 if __name__ == "__main__":

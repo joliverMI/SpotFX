@@ -964,10 +964,13 @@ edited_after = trigger_store.get(GEN_URI, edited_id)
 check(edited_after.timestamp_ms == gen_triggers[0].timestamp_ms + 500
       and edited_after.action.scene_id == kernel_scene.id,
       "regeneration left the edited (now-authored) trigger completely alone")
-check(summary3["skipped_authored"] == 1 and summary3["added"] == 1,
-      "the edited trigger's generator_key is no longer claimed by a generated "
-      "trigger, so regeneration seeds a FRESH generated trigger for that same "
-      "analysis moment — the owner's edit and the reseed coexist")
+check(summary3["skipped_authored"] == 1 and summary3["added"] == 0
+      and summary3["moments"] == 1,
+      "editing a generated trigger CLAIMS its analysis moment "
+      "(spectra/services/analysed_claims.py, 2026-10-04): regeneration never "
+      "seeds a second trigger beside the owner's edit — before re-analysis "
+      "existed it did, and a song re-planned on every settings change would "
+      "have doubled his edited cue")
 
 # a changed analysis deletes stale generated triggers, spares authored ones
 sections_v2 = [
@@ -977,7 +980,7 @@ sections_v2 = [
 ]
 (shapes_dir / "gensong.librosa.json").write_text(json.dumps({"sections": sections_v2}))
 summary4 = midsong_generator.generate_for_song(GEN_URI)
-check(summary4 == {"moments": 2, "added": 2, "updated": 0, "deleted": 2,
+check(summary4 == {"moments": 2, "added": 2, "updated": 0, "deleted": 1,
                    "skipped_authored": 1},
       "a changed analysis deletes generated triggers tied to boundaries that "
       "no longer exist and seeds fresh ones for the new boundaries")

@@ -119,7 +119,12 @@ check(set(sc.SETTINGS_REGISTRY) == {
     "scene_transition_ms_gentle", "scene_transition_ms_hard",
     "ambient_enabled", "ambient_on_music_pause", "ambient_color",
     "scene_change_mode",
-}, "registry is the deliberate eight-key allowlist")
+    # the analysed-transition knobs (PLACEMENT RULE R3 2026-09-23, the
+    # rate 2026-09-25 — shown to him as "Total actions per minute")
+    "transition_window_beats", "transition_edge_sensitivity",
+    "transitions_per_minute",
+}, "registry is the deliberate allowlist (eight room keys + the three "
+   "analysed-transition knobs)")
 check(sc.SETTINGS_REGISTRY["ambient_enabled"].kind == "bool"
       and sc.SETTINGS_REGISTRY["ambient_on_music_pause"].kind == "bool",
       "the ambient toggle is binary to Sonic too — no mode string to mis-say")
@@ -312,7 +317,8 @@ from spectra.app import create_app
 client = TestClient(create_app())
 
 r = client.get("/api/settings-console/registry")
-check(r.status_code == 200 and len(r.json()["settings"]) == 8, "GET /registry responds")
+check(r.status_code == 200 and len(r.json()["settings"]) == len(sc.SETTINGS_REGISTRY),
+      "GET /registry responds with every allowlisted setting")
 
 scfg.SETTINGS_LOG_FILE.unlink(missing_ok=True)  # back to a clean, empty log for this check
 r = client.post("/api/settings-console/undo")

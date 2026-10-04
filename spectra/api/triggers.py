@@ -7,6 +7,12 @@
   DELETE /api/triggers/{trigger_id}?uri=...
   POST   /api/triggers/generate?uri=<spotify_uri> — front 3's mid-song
       generation pass (spectra.services.midsong_generator), idempotent.
+  POST   /api/triggers/refresh-analysed — refresh the stored ANALYSED cues
+      of the whole library (or one song) under the current settings: a dry
+      run first ({"dry_run": true}, the default), then the apply with the
+      dry run's plan_id (spectra.services.analysed_refresh; the same entry
+      point Sonic's refresh_analysed_triggers uses).
+  GET    /api/triggers/refresh-analysed/log — the bounded refresh log.
   POST   /api/triggers/sync-from-profile — land ONE song's legacy profile
       triggers in the fired copy (spectra.services.profile_trigger_sync).
       Called by the spot-effects process on every profile save so his
@@ -19,10 +25,13 @@ from __future__ import annotations
 import asyncio
 
 from fastapi import APIRouter, HTTPException, Query
+from typing import Optional
+
 from pydantic import BaseModel, Field
 
 from spectra.models.trigger import SpectraTrigger
-from spectra.services import midsong_generator, profile_sync_ledger, profile_trigger_sync, trigger_store
+from spectra.services import (analysed_claims, analysed_refresh, midsong_generator,
+                              profile_sync_ledger, profile_trigger_sync, trigger_store)
 
 router = APIRouter(prefix="/api/triggers", tags=["spectra-triggers"])
 
@@ -64,10 +73,18 @@ async def upsert_trigger(trigger: SpectraTrigger, uri: str = Query(...)):
     poll, the 200ms trigger tick and every WS broadcast behind one save."""
     trigger = trigger.model_copy(update={
         "source": "authored", "generator_key": None,
-        "snap_grid": None, "snap_moved_ms": None,
+        "snap_grid": None, "snap_moved_ms": None, "generator_stamp": None,
     })
     _validate_action(trigger)
-    await asyncio.to_thread(trigger_store.upsert, uri, trigger)
+
+    def _save() -> None:
+        previous = trigger_store.upsert(uri, trigger)
+        # Editing a GENERATED cue claims its analysis moment for good, so a
+        # later re-analysis never seeds a second cue beside his edited one
+        # (spectra/services/analysed_claims.py).
+        analysed_claims.record_from_row(uri, previous, "edited")
+
+    await asyncio.to_thread(_save)
     return {"status": "saved", "id": trigger.id}
 
 
@@ -82,9 +99,40 @@ async def generate_triggers(uri: str = Query(...)):
 async def delete_trigger(trigger_id: str, uri: str = Query(...)):
     """Off the loop for the same reason as the upsert above — same whole-file
     rewrite, same write_lock."""
-    if not await asyncio.to_thread(trigger_store.delete, uri, trigger_id):
+    def _delete() -> bool:
+        removed = trigger_store.delete_returning(uri, trigger_id)
+        # Deleting a GENERATED cue is his decision about that analysis
+        # moment — re-analysis must never put it back.
+        analysed_claims.record_from_row(uri, removed, "deleted")
+        return removed is not None
+
+    if not await asyncio.to_thread(_delete):
         raise HTTPException(404, "trigger not found")
     return {"status": "deleted"}
+
+
+class AnalysedRefreshRequest(BaseModel):
+    """uri: one song, or None for the whole library. dry_run (default) plans
+    and reports without writing; the apply needs that dry run's plan_id."""
+    uri: Optional[str] = None
+    dry_run: bool = True
+    plan_id: Optional[str] = None
+
+
+@router.post("/refresh-analysed")
+async def refresh_analysed(body: AnalysedRefreshRequest):
+    """Planning walks every song's analysis (~20s for his library) and the
+    apply is one whole-file rewrite — both run off the event loop inside
+    analysed_refresh.refresh. A refusal (no dry run, a stale plan, a song
+    holding only his own triggers) is a 200 with status="refused" and the
+    reason, the same shape Sonic reads."""
+    return await analysed_refresh.refresh(uri=body.uri, dry_run=body.dry_run,
+                                          plan_id=body.plan_id)
+
+
+@router.get("/refresh-analysed/log")
+async def refresh_analysed_log():
+    return {"entries": await asyncio.to_thread(analysed_refresh.load_log)}
 
 
 class ProfileTriggerSyncRequest(BaseModel):

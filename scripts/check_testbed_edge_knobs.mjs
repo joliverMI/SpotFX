@@ -180,7 +180,7 @@ console.log('§9 "Use as room default" — the confirm message and the exact PUT
   ok(windowOnlyMsg.includes('9 beat'), 'the confirm message names the changed Window value');
   ok(!windowOnlyMsg.includes(room.sensitivity.toFixed(2)),
     'the confirm message does not claim sensitivity is changing when it is untouched');
-  ok(!/\btransitions per minute\b/i.test(windowOnlyMsg)
+  ok(!/\b(transitions|total actions) per minute\b/i.test(windowOnlyMsg)
     && !windowOnlyMsg.includes(String(room.transitionsPerMinute)),
     'the confirm message does not claim the rate is changing when it is untouched');
 

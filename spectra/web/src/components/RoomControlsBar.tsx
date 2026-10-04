@@ -583,7 +583,7 @@ export default function RoomControlsBar() {
             </div>
             <div className="top-bar-group-field">
               <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-                Transitions per minute
+                Total actions per minute
                 <HelpLink topic="transition-placement-rule" />
                 <HelpLink topic="analysed-flares" />
               </label>
@@ -593,6 +593,10 @@ export default function RoomControlsBar() {
                 onChange={(e) => setLocal({ ...local, transitions_per_minute: Number(e.target.value) })}
                 onBlur={() => commit(local)}
               />
+            </div>
+            <div className="top-bar-group-field" style={{ fontSize: '0.85em', opacity: 0.75 }}>
+              <span>Changes here re-plan each song's analysed cues the next time it plays — or ask Sonic to refresh them all.</span>
+              <HelpLink topic="analysed-refresh" title="Re-analysing songs after a settings change" />
             </div>
             <div className="top-bar-group-field">
               <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>

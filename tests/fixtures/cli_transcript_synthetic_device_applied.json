@@ -24,6 +24,7 @@
    "mcp__settings-console__list_scene_params",
    "mcp__settings-console__list_scenes",
    "mcp__settings-console__overwrite_scene",
+   "mcp__settings-console__refresh_analysed_triggers",
    "mcp__settings-console__remove_flare_kind",
    "mcp__settings-console__rename_device",
    "mcp__settings-console__restore_scene_backup",

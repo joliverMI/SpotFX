@@ -158,20 +158,60 @@ unshifted and single-frame; only the frame itself (chosen by this caller,
 once per song) has moved from WAV time to song time. A capture with no
 measurable offset (testbed_audio.capture_offset_ms returns None, e.g. no
 npz sidecar yet) shifts by exactly 0 — byte-identical to before this fix.
+
+RE-ANALYSIS (2026-10-04, data/scene-change-ranking-plan/report.md §5, the
+Admiral's "background refresh of a song on its next play when the stamp is
+stale" plus a Sonic "refresh analysed triggers" command). Stored generated
+cues used to be planned exactly once — auto-generation only ever runs for a
+song with ZERO triggers — so a settings change, a generator fix (the frame
+fix, R3) or a re-analysis never reached a song that already had cues: 554
+of his songs still fired cues planned before the frame fix, ~9s early.
+
+Every generated row now carries generator_stamp (generator_stamp() below):
+a short digest of the analysed settings, GENERATOR_VERSION and the song's
+own analysis inputs (its librosa analyzed_at, its capture offset, its
+beat_this precompute, his manual intensity mark, and the moments he has
+claimed by hand). A row without one, or with a different one, is STALE.
+refresh_song_if_stale() re-plans ONE song in one batched write
+(TriggerEngine.maybe_auto_generate runs it in a worker thread on the
+song's first play edge); spectra/services/analysed_refresh.py walks the
+whole library behind a dry run. Both share merge_song(), and both obey
+the same safety rules, each of which is a test:
+  - only source="generated" rows are ever written or deleted;
+  - a song holding no generated row is never seeded (a song carrying only
+    his own triggers stays exactly his);
+  - a moment he edited or deleted by hand is never put back
+    (spectra/services/analysed_claims.py);
+  - a song whose analysis cannot be read keeps its stored cues — an
+    unreadable file is never taken as "this song has no moments";
+  - a song whose capture offset cannot be right (it would put the captured
+    audio past the song's own end) keeps its stored cues — re-placing them
+    by that offset would put them after the song is over.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
-from typing import Optional
+import hashlib
+import json
+import logging
+from dataclasses import dataclass, field, replace
+from typing import Any, Optional
 
 from spectra.models.trigger import FireSceneAction, SpectraTrigger
 from spectra.services import (
-    analysis_reader, beat_snap, rhythmic_edges, room_controls, testbed_audio,
-    trigger_store,
+    analysed_claims, analysis_reader, beat_snap, rhythmic_edges, room_controls,
+    testbed_audio, trigger_store,
 )
+
+logger = logging.getLogger(__name__)
 
 INTENSITY_FLOOR = 0.05
 EDGE_TRIM_MS = 15_000
+
+GENERATOR_VERSION = "1"
+"""Bumped whenever this module's own planning changes what it would store
+for an unchanged song and unchanged settings — part of every generated
+cue's generator_stamp, so a bump marks every stored analysed cue stale and
+each song is re-planned on its next play (see RE-ANALYSIS below)."""
 
 RESULT_CAP_PER_SONG = 200
 """Sanity ceiling on the per-song transition total transitions_per_minute
@@ -354,6 +394,7 @@ def plan_moments(
     sensitivity: Optional[float] = None,
     direction: Optional[str] = None,
     transitions_per_minute: Optional[float] = None,
+    claimed: Optional[set[str]] = None,
 ) -> MomentPlan:
     """One CandidateMoment per surviving section boundary past the song's
     own start (see the module docstring's DENSITY section for what
@@ -368,7 +409,11 @@ def plan_moments(
     the module docstring's PLACEMENT RULE R3 section), so its default is
     always rhythmic_edges.DEFAULT_DIRECTION ("both") — a caller (the test
     bed's generator:preview lane) passes it explicitly to explore the
-    other two."""
+    other two.
+
+    `claimed` is the set of generator keys he has edited or deleted by hand
+    (spectra/services/analysed_claims.py), read fresh when not given: those
+    moments are his and never become a cue or a flare again."""
     sections = analysis_reader.sections_for_uri(uri)
     if not sections:
         return MomentPlan([], [])
@@ -388,8 +433,11 @@ def plan_moments(
 
     ordered = sorted(sections, key=lambda s: int(s.get("start_ms", 0)))
     intensities = _normalized_intensities(ordered)
+    if claimed is None:
+        claimed = analysed_claims.claimed_keys(uri)
     mid = [(sec, intensity) for sec, intensity in zip(ordered, intensities)
-          if int(sec.get("start_ms", 0)) > 0]  # exclude the song's own opening
+          if int(sec.get("start_ms", 0)) > 0  # exclude the song's own opening
+          and f"section:{int(sec.get('start_ms', 0))}" not in claimed]
 
     # DENSITY — keep the strongest resolve_transition_count() candidates by
     # bass-energy step size, ranked at each candidate's own RAW boundary
@@ -447,53 +495,276 @@ def plan_moments(
     return MomentPlan(_place(scored), _place(dropped))
 
 
-def generate_for_song(uri: str) -> dict:
-    """Deterministic, idempotent regeneration for one song. No RNG, no
-    scene pick — see the module docstring. Returns a summary dict."""
-    moments = candidate_moments(uri)
-    existing = trigger_store.list_for_song(uri)
-    by_key = {t.generator_key: t for t in existing
-              if t.source == "generated" and t.generator_key}
-    seen_keys: set[str] = set()
+def _settings_part(controls: Any) -> dict:
+    return {
+        "rate": float(controls.transitions_per_minute),
+        "window": int(controls.transition_window_beats),
+        "sensitivity": float(controls.transition_edge_sensitivity),
+        "snap": bool(controls.midsong_snap_to_beat),
+    }
 
-    added = updated = 0
+
+def song_inputs(uri: str, *, claimed: Optional[set[str]] = None) -> dict:
+    """The song-specific half of generator_stamp: what this song's plan is
+    read from, beyond the room settings. Content values, never file times —
+    a capture sidecar rewritten with the same numbers must not mark a song
+    stale. The automatic intensity factor is deliberately NOT here: its
+    genre half is only known while the song plays and its bass half drifts
+    as the library grows, so stamping it would re-plan songs for reasons
+    nobody chose. His manual mark is a choice, so it is here."""
+    from spectra.services import intensity_scale_marks, testbed_cache
+    doc = analysis_reader.librosa_analysis_for_stem(analysis_reader.stem_for_uri(uri))
+    beat_this = testbed_cache.load(beat_snap.GRID_BEAT_THIS, uri)
+    if claimed is None:
+        claimed = analysed_claims.claimed_keys(uri)
+    return {
+        "analyzed_at": (doc or {}).get("analyzed_at"),
+        "offset_ms": testbed_audio.capture_offset_ms_or_zero(uri),
+        "beat_this": (beat_this or {}).get("computed_at"),
+        "mark": intensity_scale_marks.get_mark(uri),
+        "claimed": sorted(claimed),
+    }
+
+
+def generator_stamp(uri: str, controls: Any = None, *,
+                    inputs: Optional[dict] = None) -> str:
+    """THE stamp a generated cue planned for `uri` right now carries — see
+    the module docstring's RE-ANALYSIS section. 16 hex chars of a SHA-1 over
+    GENERATOR_VERSION, the analysed room settings and song_inputs()."""
+    if controls is None:
+        controls = room_controls.load_room_controls()
+    payload = {
+        "version": GENERATOR_VERSION,
+        "settings": _settings_part(controls),
+        "song": inputs if inputs is not None else song_inputs(uri),
+    }
+    blob = json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
+    return hashlib.sha1(blob).hexdigest()[:16]
+
+
+def is_stale(rows: list[SpectraTrigger], stamp: str) -> bool:
+    """True when any keyed generated row was planned under a different
+    stamp (or none). Rows he owns never count."""
+    return any(t.source == "generated" and t.generator_key
+               and t.generator_stamp != stamp for t in rows)
+
+
+@dataclass
+class SongMerge:
+    """What one song's stored generated cues must become to match a fresh
+    plan — the ONE reconciliation both generation and re-analysis use."""
+    upserts: list[SpectraTrigger] = field(default_factory=list)
+    delete_ids: list[str] = field(default_factory=list)
+    added: int = 0
+    updated: int = 0      # placement, intensity or action changed
+    restamped: int = 0    # only the stamp changed
+    deleted: int = 0
+    unchanged: int = 0
+    moved_ms: list[int] = field(default_factory=list)   # |Δt| per moved cue
+    skipped_authored: int = 0
+    unkeyed_generated: int = 0
+
+    @property
+    def changed(self) -> bool:
+        return bool(self.upserts or self.delete_ids)
+
+    def summary(self) -> dict:
+        return {"added": self.added, "updated": self.updated,
+                "restamped": self.restamped, "deleted": self.deleted,
+                "unchanged": self.unchanged, "moved": len(self.moved_ms),
+                "skipped_authored": self.skipped_authored}
+
+
+def _desired_action(current: Optional[SpectraTrigger], m: CandidateMoment) -> FireSceneAction:
+    return FireSceneAction(
+        scene_id=None, intensity=m.intensity,
+        color_set_id=getattr(current.action, "color_set_id", None) if current else None)
+
+
+def merge_song(existing: list[SpectraTrigger], moments: list[CandidateMoment],
+               stamp: Optional[str]) -> SongMerge:
+    """Reconcile a song's stored rows with `moments` (pure — no I/O).
+
+    Only source="generated" rows with a generator_key are ever in reach:
+    one per key is updated in place (same id, so a pinned or already-fired
+    cue keeps its identity), a key no longer planned is deleted, a planned
+    key with no row is added, and a second row sharing a key is deleted.
+    Every surviving generated row ends up carrying `stamp`. Authored rows
+    and keyless generated rows are counted and left exactly as they are."""
+    merge = SongMerge()
+    by_key: dict[str, SpectraTrigger] = {}
+    for t in existing:
+        if t.source != "generated":
+            merge.skipped_authored += 1
+        elif not t.generator_key:
+            merge.unkeyed_generated += 1
+        elif t.generator_key in by_key:
+            merge.delete_ids.append(t.id)
+            merge.deleted += 1
+        else:
+            by_key[t.generator_key] = t
+
+    seen: set[str] = set()
     for m in moments:
-        seen_keys.add(m.generator_key)
+        seen.add(m.generator_key)
         current = by_key.get(m.generator_key)
         if current is None:
-            trigger_store.upsert(uri, SpectraTrigger(
+            merge.upserts.append(SpectraTrigger(
                 timestamp_ms=m.timestamp_ms, source="generated",
                 generator_key=m.generator_key,
                 snap_grid=m.snap_grid, snap_moved_ms=m.snap_moved_ms,
-                action=FireSceneAction(scene_id=None, intensity=m.intensity)))
-            added += 1
-        elif (current.timestamp_ms != m.timestamp_ms
-              or current.action.kind != "fire_scene"
-              or current.action.scene_id is not None
-              or current.action.intensity != m.intensity
-              or current.snap_grid != m.snap_grid
-              or current.snap_moved_ms != m.snap_moved_ms):
-            trigger_store.upsert(uri, current.model_copy(update={
+                generator_stamp=stamp,
+                action=_desired_action(None, m)))
+            merge.added += 1
+            continue
+        content_differs = (
+            current.timestamp_ms != m.timestamp_ms
+            or current.action.kind != "fire_scene"
+            or current.action.scene_id is not None
+            or current.action.intensity != m.intensity
+            or current.snap_grid != m.snap_grid
+            or current.snap_moved_ms != m.snap_moved_ms)
+        if content_differs:
+            merge.upserts.append(current.model_copy(update={
                 "timestamp_ms": m.timestamp_ms,
                 "snap_grid": m.snap_grid,
                 "snap_moved_ms": m.snap_moved_ms,
-                "action": FireSceneAction(
-                    scene_id=None, intensity=m.intensity,
-                    color_set_id=getattr(current.action, "color_set_id", None)),
+                "generator_stamp": stamp,
+                "action": _desired_action(current, m),
             }))
-            updated += 1
+            merge.updated += 1
+            if current.timestamp_ms != m.timestamp_ms:
+                merge.moved_ms.append(abs(m.timestamp_ms - current.timestamp_ms))
+        elif current.generator_stamp != stamp:
+            merge.upserts.append(current.model_copy(update={"generator_stamp": stamp}))
+            merge.restamped += 1
+        else:
+            merge.unchanged += 1
 
-    deleted = 0
     for key, stale in by_key.items():
-        if key not in seen_keys:
-            trigger_store.delete(uri, stale.id)
-            deleted += 1
+        if key not in seen:
+            merge.delete_ids.append(stale.id)
+            merge.deleted += 1
+    return merge
 
-    skipped_authored = sum(1 for t in existing if t.source == "authored")
+
+def _planning_kwargs(controls: Any) -> dict:
     return {
-        "moments": len(moments),
-        "added": added,
-        "updated": updated,
-        "deleted": deleted,
-        "skipped_authored": skipped_authored,
+        "snap_enabled": controls.midsong_snap_to_beat,
+        "window_beats": controls.transition_window_beats,
+        "sensitivity": controls.transition_edge_sensitivity,
+        "transitions_per_minute": controls.transitions_per_minute,
     }
+
+
+@dataclass
+class SongPlanResult:
+    """One song's fresh plan plus its stamp — or why there is none."""
+    uri: str
+    moments: Optional[list[CandidateMoment]]
+    stamp: Optional[str]
+    reason: Optional[str] = None
+
+
+OFFSET_SLACK_MS = 10_000
+OFFSET_PAST_END_REASON = ("its capture offset cannot be right — it would put the "
+                          "captured audio past the song's own end — so its stored "
+                          "cues are kept until it is recaptured")
+
+
+def capture_offset_past_end(uri: str) -> bool:
+    """True when the song's measured capture offset (the song time of its
+    WAV's first sample — the FRAME FIX's shift) cannot be right: it is at or
+    past the track's own Spotify length, or the WAV starting that far in
+    would run more than OFFSET_SLACK_MS past the song's end. Ten of his
+    captures are like this (most flagged needs_recapture=offset_past_end by
+    the capture service); shifting their sections by such an offset would
+    place most or all cues after the song has ended, so a refresh would
+    silently take the scene changes away from the song. A small offset
+    (under the slack) is never doubted — that is ordinary detection lag."""
+    sidecar = analysis_reader.capture_sidecar(uri) or {}
+    duration = sidecar.get("duration_ms")
+    if not isinstance(duration, (int, float)) or duration <= 0:
+        return False
+    offset = testbed_audio.capture_offset_ms_or_zero(uri)
+    if offset >= duration:
+        return True
+    if offset <= OFFSET_SLACK_MS:
+        return False
+    sections = analysis_reader.sections_for_uri(uri) or []
+    length = max((int(sec.get("end_ms", 0)) for sec in sections), default=0)
+    return offset + length > duration + OFFSET_SLACK_MS
+
+
+def plan_song(uri: str, controls: Any = None) -> SongPlanResult:
+    """Plan one song the way re-analysis stores it. moments is None (with
+    a reason) when the song's analysis cannot be read — the caller then
+    keeps whatever is stored rather than treating it as momentless."""
+    if controls is None:
+        controls = room_controls.load_room_controls()
+    with analysis_reader.memoized_reads():
+        if not analysis_reader.sections_for_uri(uri):
+            return SongPlanResult(uri, None, None, "analysis unavailable")
+        if capture_offset_past_end(uri):
+            return SongPlanResult(uri, None, None, OFFSET_PAST_END_REASON)
+        claimed = analysed_claims.claimed_keys(uri)
+        inputs = song_inputs(uri, claimed=claimed)
+        moments = plan_moments(uri, claimed=claimed, **_planning_kwargs(controls)).kept
+    return SongPlanResult(uri, moments, generator_stamp(uri, controls, inputs=inputs))
+
+
+def generate_for_song(uri: str) -> dict:
+    """Deterministic, idempotent regeneration for one song — "⟳ Generate"
+    and auto-generation on first play. No RNG, no scene pick — see the
+    module docstring. One batched write (trigger_store.apply_batch), every
+    generated row stamped. Unlike re-analysis this MAY seed a song that
+    holds only his own triggers: it is only ever reached by his own press
+    or for a song with no triggers at all. Returns a summary dict."""
+    plan = plan_song(uri)
+    if plan.moments is None:
+        # No readable analysis: keep whatever is stored (an unreadable file
+        # is never "this song has no moments").
+        skipped = sum(1 for t in trigger_store.list_for_song(uri)
+                      if t.source == "authored")
+        return {"moments": 0, "added": 0, "updated": 0, "deleted": 0,
+                "skipped_authored": skipped}
+    with trigger_store.write_lock:
+        existing = trigger_store.list_for_song(uri)
+        merge = merge_song(existing, plan.moments, plan.stamp)
+        if merge.changed:
+            trigger_store.apply_batch(uri, merge.upserts, merge.delete_ids)
+    return {"moments": len(plan.moments), "added": merge.added,
+            "updated": merge.updated, "deleted": merge.deleted,
+            "skipped_authored": merge.skipped_authored}
+
+
+def refresh_song_if_stale(uri: str, controls: Any = None) -> dict:
+    """RE-ANALYSIS of one song on its next play (the module docstring's
+    RE-ANALYSIS section): re-plan and re-store this song's generated cues
+    when any of them carries a stale stamp, in ONE batched write. A song
+    holding no generated cue is never touched — that is what keeps a song
+    of only his own triggers his. Returns {"status": "fresh" | "refreshed"
+    | "skipped", ...counts}."""
+    if controls is None:
+        controls = room_controls.load_room_controls()
+    rows = trigger_store.list_for_song(uri)
+    if not any(t.source == "generated" for t in rows):
+        return {"uri": uri, "status": "skipped", "reason": "no analysed cues stored"}
+    with analysis_reader.memoized_reads():
+        current = generator_stamp(uri, controls)
+        if not is_stale(rows, current):
+            return {"uri": uri, "status": "fresh", "stamp": current}
+        plan = plan_song(uri, controls)
+    if plan.moments is None:
+        return {"uri": uri, "status": "skipped", "reason": plan.reason}
+    with trigger_store.write_lock:
+        rows = trigger_store.list_for_song(uri)
+        if not any(t.source == "generated" for t in rows):
+            return {"uri": uri, "status": "skipped", "reason": "no analysed cues stored"}
+        merge = merge_song(rows, plan.moments, plan.stamp)
+        if merge.changed:
+            trigger_store.apply_batch(uri, merge.upserts, merge.delete_ids)
+    logger.info("re-analysis: %s re-planned under stamp %s — %s", uri,
+                plan.stamp, merge.summary())
+    return {"uri": uri, "status": "refreshed", "stamp": plan.stamp,
+            **merge.summary()}

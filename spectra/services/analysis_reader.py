@@ -30,11 +30,34 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Optional
+import threading
+from contextlib import contextmanager
+from typing import Iterator, Optional
 
 from spectra import config
 
 logger = logging.getLogger(__name__)
+
+# memoized_reads(): a per-THREAD, bounded parse cache for a caller that
+# reads the same song's analysis several times in a row (planning one song
+# reads its .librosa.json for sections, beats, tempo, placement and the
+# re-analysis stamp — five parses of ~400KB without it). Thread-local so
+# the event loop's own per-tick readers never see it, bounded so a library
+# walk inside one context holds a couple of songs, never the corpus.
+_memo = threading.local()
+_MEMO_MAX = 4
+
+
+@contextmanager
+def memoized_reads() -> Iterator[None]:
+    outer = getattr(_memo, "cache", None)
+    if outer is None:
+        _memo.cache = {}
+    try:
+        yield
+    finally:
+        if outer is None:
+            _memo.cache = None
 
 # uri → audio-shape file stem. Built lazily, rebuilt on miss so freshly
 # captured songs appear without a restart (the spot-effects index pattern).
@@ -113,9 +136,31 @@ def librosa_analysis_for_stem(stem: Optional[str]) -> Optional[dict]:
     (sections, beats, ...) rather than one parse per key."""
     if stem is None:
         return None
+    cache = getattr(_memo, "cache", None)
+    if cache is not None and stem in cache:
+        return cache[stem]
     path = config.AUDIO_SHAPES_DIR / f"{stem}.librosa.json"
     try:
         doc = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        doc = None
+    if not isinstance(doc, dict):
+        doc = None
+    if cache is not None:
+        while len(cache) >= _MEMO_MAX:
+            cache.pop(next(iter(cache)))
+        cache[stem] = doc
+    return doc
+
+
+def capture_sidecar(uri: str) -> Optional[dict]:
+    """The capture sidecar (<stem>.json) itself — spotify duration_ms,
+    recapture flags — or None when there is none / it does not parse."""
+    stem = stem_for_uri(uri)
+    if stem is None:
+        return None
+    try:
+        doc = json.loads((config.AUDIO_SHAPES_DIR / f"{stem}.json").read_text(encoding="utf-8"))
     except Exception:
         return None
     return doc if isinstance(doc, dict) else None

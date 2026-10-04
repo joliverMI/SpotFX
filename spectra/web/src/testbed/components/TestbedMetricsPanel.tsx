@@ -166,8 +166,8 @@ export default function TestbedMetricsPanel({
           {showTransitionsPerMinute && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <label htmlFor="testbed-transitions-per-minute" style={{ fontSize: 12, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
-                Transitions per minute: {transitionsPerMinute}
-                <HelpLink topic="testbed-generator-and-edges" title="Transitions per minute and Use as room default" />
+                Total actions per minute: {transitionsPerMinute}
+                <HelpLink topic="testbed-generator-and-edges" title="Total actions per minute and Use as room default" />
               </label>
               <input
                 id="testbed-transitions-per-minute"

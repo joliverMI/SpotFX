@@ -130,7 +130,7 @@ export function useAsRoomDefaultConfirmMessage(
   }
   if (changed.sensitivity) parts.push(`Sensitivity to ${current.sensitivity.toFixed(2)}`);
   if (changed.transitionsPerMinute) {
-    parts.push(`${current.transitionsPerMinute} transitions per minute`);
+    parts.push(`${current.transitionsPerMinute} total actions per minute`);
   }
   if (parts.length === 0) {
     return 'The sliders already match the room\'s current defaults — nothing to change.';

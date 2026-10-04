@@ -445,6 +445,7 @@ class TriggerEngine:
         render_intensity: Callable[[float], float] | None = None,
         sequencer_enabled: Callable[[], bool] | None = None,
         auto_generate: Callable[[str], Awaitable[Any]] | None = None,
+        auto_refresh: Callable[[str], Awaitable[Any]] | None = None,
         lead_ms: Callable[[SpectraTrigger], int] | None = None,
         response_offset_ms: Callable[[Any], int] | None = None,
         intensity_event: Callable[[], None] | None = None,
@@ -469,6 +470,8 @@ class TriggerEngine:
         self._render_intensity = render_intensity or self._default_render_intensity
         self._sequencer_enabled = sequencer_enabled or self._default_sequencer_enabled
         self._auto_generate = auto_generate or self._default_auto_generate
+        self._auto_refresh = auto_refresh or self._default_auto_refresh
+        self._refreshing: set[str] = set()
         self._lead_ms = lead_ms or self._default_lead_ms
         self._response_offset_ms = response_offset_ms or self._default_response_offset_ms
         # Two-dimensional drift gradient retarget hook (owner ask
@@ -521,6 +524,10 @@ class TriggerEngine:
         self._flare_triggers: list[SpectraTrigger] = []
         self._flare_ids: set[str] = set()
         self._flare_planning: Optional[str] = None
+        # Bumped by invalidate_analysed_plan: a plan computed before a
+        # re-analysis rewrote this song's stored cues is discarded on
+        # arrival rather than cached over the fresher state.
+        self._flare_epoch = 0
         # The same plan's KEPT cues — the planned scene changes the colour
         # journey times itself against before auto-generation has stored
         # them (next_colour_cue; never fired from here).
@@ -667,11 +674,51 @@ class TriggerEngine:
         song with zero stored triggers (of either source) gets generated
         for automatically. Fire-and-forget by design: the caller is never
         made to wait on this (see the module docstring's AUTO-GENERATION
-        section)."""
-        if not uri or uri in self._generating or self._list_triggers(uri):
+        section).
+
+        RE-ANALYSIS (2026-10-04, midsong_generator's RE-ANALYSIS section):
+        a song that already holds GENERATED cues gets a background check on
+        the same edge — if any of them was planned under a stale stamp, the
+        song is re-planned and re-stored in one batched write. A song
+        holding only his own triggers is never scheduled at all."""
+        if not uri:
             return
-        self._generating.add(uri)
-        asyncio.create_task(self._run_auto_generate(uri))
+        triggers = self._list_triggers(uri)
+        if not triggers:
+            if uri in self._generating:
+                return
+            self._generating.add(uri)
+            asyncio.create_task(self._run_auto_generate(uri))
+            return
+        if uri in self._refreshing or not any(
+                t.source == "generated" for t in triggers):
+            return
+        self._refreshing.add(uri)
+        asyncio.create_task(self._run_auto_refresh(uri))
+
+    async def _run_auto_refresh(self, uri: str) -> None:
+        try:
+            result = await self._auto_refresh(uri)
+        except Exception:
+            logger.exception("re-analysis: refreshing analysed cues failed for %s", uri)
+            result = None
+        finally:
+            self._refreshing.discard(uri)
+        if isinstance(result, dict) and result.get("status") == "refreshed":
+            self.invalidate_analysed_plan(uri)
+
+    def invalidate_analysed_plan(self, uri: Optional[str] = None) -> None:
+        """Forget the cached analysed plan (flares + planned scene cues) for
+        `uri` (None = whatever is cached), so the next tick re-plans it
+        against the stored cues a re-analysis just rewrote."""
+        if uri is not None and uri != self._flare_plan_uri and uri != self._flare_planning:
+            return
+        self._flare_epoch += 1
+        self._flare_plan_uri = None
+        self._flare_planning = None
+        self._flare_triggers = []
+        self._flare_ids = set()
+        self._scene_cue_plan = []
 
     async def _run_auto_generate(self, uri: str) -> None:
         try:
@@ -915,6 +962,7 @@ class TriggerEngine:
         re-planning (and re-failing) every tick."""
         if stored is None:
             stored = self._list_triggers(uri)
+        epoch = self._flare_epoch
         try:
             plan = await asyncio.to_thread(self._analysed_plan, uri, list(stored))
             flares = list(plan.flares)
@@ -924,9 +972,9 @@ class TriggerEngine:
             flares = []
             scene_cues = []
         finally:
-            if self._flare_planning == uri:
+            if self._flare_planning == uri and epoch == self._flare_epoch:
                 self._flare_planning = None
-        if uri != self._uri:
+        if uri != self._uri or epoch != self._flare_epoch:
             return
         self._flare_triggers = [
             SpectraTrigger(
@@ -1373,6 +1421,19 @@ class TriggerEngine:
         if result.get("added"):
             logger.info("auto-generate: seeded %d mid-song trigger(s) for %s "
                         "(no timeline visit)", result["added"], uri)
+
+    async def _default_auto_refresh(self, uri: str) -> dict:
+        # Same off-loop + serialized shape as _default_auto_generate: the
+        # stamp check reads the song's analysis, and the write is one
+        # whole-file rewrite under trigger_store.write_lock.
+        from spectra.services import midsong_generator
+        async with _get_generation_lock():
+            result = await asyncio.to_thread(midsong_generator.refresh_song_if_stale, uri)
+        if result.get("status") == "refreshed":
+            logger.info("re-analysis: %s re-planned on play (%s)", uri, {
+                k: result.get(k) for k in ("added", "updated", "deleted",
+                                           "restamped", "moved")})
+        return result
 
     # ── lead-time alignment (his ask, 2026-08-19) ─────────────────────────
 

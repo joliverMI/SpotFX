@@ -590,6 +590,28 @@ directly, the same shape
 `migrate_legacy_triggers.py` already used for the authored corpus, never
 through the live HTTP endpoint in a loop.
 
+**RE-ANALYSIS — stored analysed cues are stamped and re-planned
+(2026-10-04, data/scene-change-ranking-plan/report.md §5).** Every
+generated row carries `generator_stamp` (`midsong_generator.
+generator_stamp`: GENERATOR_VERSION + the analysed room settings + the
+song's own analysis inputs — read its RE-ANALYSIS docstring section). A
+stale song is re-planned in one batched write on its next play
+(`TriggerEngine.maybe_auto_generate` → `refresh_song_if_stale`); the whole
+library is `spectra/services/analysed_refresh.py`, reached by Sonic's
+`refresh_analysed_triggers` and `POST /api/triggers/refresh-analysed` —
+dry run first STRUCTURALLY (the apply needs the dry run's `plan_id` and
+applies exactly what it reported), backup, one write under `write_lock`,
+before/after diff that restores anything outside the planned generated
+rows. **Bump GENERATOR_VERSION whenever planning changes what an unchanged
+song would store**, or nothing re-plans. Three rules every path obeys:
+only `source="generated"` rows are touched; a song holding no generated
+row is never seeded; a cue he edited or deleted through the trigger API is
+CLAIMED (`spectra/services/analysed_claims.py`, a sidecar beside
+triggers.json) and its moment is never planned again — before the claims
+existed, regeneration seeded a duplicate beside his edit. The room bar
+label "Total actions per minute" is the `transitions_per_minute` key
+(renamed for him, not on the wire).
+
 **Scene-change settings model** (the Admiral's binding control,
 corr=c14a9bcee40e6df9, superseding front 3's plain `midsong_triggers_enabled`
 bool): `RoomControlState.scene_change_mode` (`spectra/services/
