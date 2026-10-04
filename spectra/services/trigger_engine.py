@@ -540,6 +540,9 @@ class TriggerEngine:
         # journey times itself against before auto-generation has stored
         # them (next_colour_cue; never fired from here).
         self._scene_cue_plan: list = []
+        # generator_key -> (rank, rank_of) for the cached plan's actions —
+        # read by GET /api/analysed-plan's rank markers (cached_plan_ranks).
+        self._plan_ranks: dict = {}
 
         # LOOKAHEAD (2026-08-19): trigger_id -> _PinnedPick, or trigger_id ->
         # None for "already attempted once, the draw came back empty" (the
@@ -598,6 +601,7 @@ class TriggerEngine:
             self._flare_triggers = []
             self._flare_ids = set()
             self._scene_cue_plan = []
+            self._plan_ranks = {}
         if uri is None or uri == self._last_transition_uri:
             return
         armed = self._last_transition_uri is not None
@@ -727,6 +731,7 @@ class TriggerEngine:
         self._flare_triggers = []
         self._flare_ids = set()
         self._scene_cue_plan = []
+        self._plan_ranks = {}
 
     async def _run_auto_generate(self, uri: str) -> None:
         try:
@@ -961,6 +966,13 @@ class TriggerEngine:
             return list(self._flare_triggers)
         return None
 
+    def cached_plan_ranks(self, uri: str) -> Optional[dict]:
+        """generator_key -> (rank, rank_of) for `uri`'s cached plan, or None
+        when no plan for `uri` is cached (cached_flare_triggers' rule)."""
+        if self._flare_plan_uri == uri:
+            return dict(self._plan_ranks)
+        return None
+
     async def plan_analysed_flares(self, uri: str,
                                    stored: Optional[list[SpectraTrigger]] = None) -> None:
         """Compute and cache `uri`'s analysed flare plan (tick() schedules
@@ -993,6 +1005,9 @@ class TriggerEngine:
             for m in flares]
         self._flare_ids = {t.id for t in self._flare_triggers}
         self._scene_cue_plan = scene_cues
+        self._plan_ranks = {
+            m.generator_key: (getattr(m, "rank", None), getattr(m, "rank_of", None))
+            for m in [*scene_cues, *flares] if getattr(m, "generator_key", None)}
         self._flare_plan_uri = uri
         logger.info("analysed flares: %d planned for %s", len(flares), uri)
 

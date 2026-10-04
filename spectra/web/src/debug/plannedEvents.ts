@@ -39,6 +39,10 @@ import type { PlannedEventMarker } from '../timeline/canvas/frame';
 export interface AnalysedPlanEvent {
   timestamp_ms: number;
   intensity: number;
+  /** 1 = the song's strongest section-energy change; null when unranked
+   * (a stored cue planned under older settings). Absent from an older API. */
+  rank?: number | null;
+  rank_of?: number | null;
 }
 
 export interface AnalysedPlan {
@@ -51,6 +55,7 @@ export interface AnalysedPlan {
   scene_changes: AnalysedPlanEvent[];
   flares: AnalysedPlanEvent[];
   show_clock_shift_ms: number;
+  rank_of?: number | null;
 }
 
 export function plannedMarkerMs(
@@ -66,20 +71,64 @@ export function plannedMarkers(
   const at = (e: AnalysedPlanEvent) =>
     plannedMarkerMs(e.timestamp_ms, plan.show_clock_shift_ms ?? 0, canvasShiftMs, bridgeShapeOffsetMs);
   return [
-    ...plan.scene_changes.map((e) => ({ ms: at(e), kind: 'scene' as const })),
-    ...plan.flares.map((e) => ({ ms: at(e), kind: 'flare' as const })),
+    ...plan.scene_changes.map((e) => ({ ms: at(e), kind: 'scene' as const, ...rankFields(e) })),
+    ...plan.flares.map((e) => ({ ms: at(e), kind: 'flare' as const, ...rankFields(e) })),
   ].sort((a, b) => a.ms - b.ms);
 }
+
+const rankFields = (e: AnalysedPlanEvent) => ({ rank: e.rank ?? null, rankOf: e.rank_of ?? null });
 
 /** Timeline (Builder) page placement — raw song time, no clock shift.
  * See the module docstring above for why this differs from `plannedMarkers`. */
 export function songPositionMarkers(plan: AnalysedPlan | null | undefined): PlannedEventMarker[] {
   if (!plan || !plan.applies) return [];
   return [
-    ...plan.scene_changes.map((e) => ({ ms: e.timestamp_ms, kind: 'scene' as const })),
-    ...plan.flares.map((e) => ({ ms: e.timestamp_ms, kind: 'flare' as const })),
+    ...plan.scene_changes.map((e) => ({ ms: e.timestamp_ms, kind: 'scene' as const, ...rankFields(e) })),
+    ...plan.flares.map((e) => ({ ms: e.timestamp_ms, kind: 'flare' as const, ...rankFields(e) })),
   ].sort((a, b) => a.ms - b.ms);
 }
 
 export const SCENE_MARKER_COLOR = '#22d3ee';
 export const FLARE_MARKER_COLOR = '#fbbf24';
+
+/** RANK — how strong a planned moment is among the song's analysed
+ * transitions (2026-10-04, data/scene-change-ranking-plan/report.md §4, the
+ * Admiral's "subtle rank on the Timeline and debug markers"). `rank` 1 is
+ * the song's strongest section-energy change, of `rankOf` ranked moments;
+ * null when the API could not rank it (a stored cue planned under settings
+ * the current plan no longer produces) — such a marker draws exactly as it
+ * did before ranks existed.
+ *
+ * Two redundant cues, both subtle: the SIZE tier (bottom / middle / top
+ * third → the scene tab 6 / 10 / 14 px wide, the flare dot 2.5 / 3.5 /
+ * 4.5 px) and the OPACITY (0.45 for the weakest → 0.95 for the strongest,
+ * linear in rank). A tooltip names it in words. */
+export type RankTier = 0 | 1 | 2;
+
+export function rankFraction(rank: number | null | undefined, rankOf: number | null | undefined): number | null {
+  if (!rank || !rankOf || rankOf < 1 || rank < 1) return null;
+  if (rankOf === 1) return 1;
+  return 1 - (Math.min(rank, rankOf) - 1) / (rankOf - 1);
+}
+
+export function rankTier(rank: number | null | undefined, rankOf: number | null | undefined): RankTier | null {
+  if (!rank || !rankOf || rankOf < 1 || rank < 1) return null;
+  const third = (Math.min(rank, rankOf) - 1) / rankOf; // 0 = strongest
+  return third < 1 / 3 ? 2 : third < 2 / 3 ? 1 : 0;
+}
+
+export const SCENE_TAB_HALF_WIDTH: Record<RankTier, number> = { 0: 3, 1: 5, 2: 7 };
+export const FLARE_DOT_RADIUS: Record<RankTier, number> = { 0: 2.5, 1: 3.5, 2: 4.5 };
+export const RANK_OPACITY_MIN = 0.45;
+export const RANK_OPACITY_MAX = 0.95;
+
+export function rankOpacity(rank: number | null | undefined, rankOf: number | null | undefined, unranked: number): number {
+  const f = rankFraction(rank, rankOf);
+  return f == null ? unranked : RANK_OPACITY_MIN + (RANK_OPACITY_MAX - RANK_OPACITY_MIN) * f;
+}
+
+export function markerTooltip(m: PlannedEventMarker): string {
+  const what = m.kind === 'scene' ? 'scene change' : 'flare';
+  if (!m.rank || !m.rankOf) return `${what} · not ranked (planned under older settings)`;
+  return `#${m.rank} of ${m.rankOf} · section-energy change · ${what}`;
+}

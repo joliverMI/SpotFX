@@ -13,6 +13,14 @@ lands). Both lists are empty, with `applies: false` and the reason, when
 the room's per-song mode does not let analysed events fire
 (analysed_flares.analysed_flares_allowed — the same rule tick() applies).
 
+RANK (2026-10-04, data/scene-change-ranking-plan/report.md §4): every
+event carries `rank` (1 = the song's strongest section-energy change) and
+`rank_of` (how many moments were ranked), for the markers' subtle size and
+brightness. A stored scene cue is ranked by its generator_key against the
+same plan the flares come from (the engine's cached one while it plays); a
+stored cue the current plan does not contain (planned under older settings,
+not yet refreshed) carries rank null.
+
 Every time is SONG time, the stored-trigger convention (timestamp + the
 trigger's own offset). `show_clock_shift_ms` is how far the trigger clock
 reads ahead of the bridge's effective position right now, so a client
@@ -42,17 +50,20 @@ def _plan(uri: str) -> dict:
                   if mode == "transitions"
                   else "this song has your own triggers — analysed events are off for it")
         return {**base, "applies": False, "reason": reason,
-                "scene_changes": [], "flares": [], "scene_source": None}
+                "scene_changes": [], "flares": [], "scene_source": None,
+                "rank_of": None}
 
     cached = trigger_engine.cached_flare_triggers(uri)
+    ranks = trigger_engine.cached_plan_ranks(uri) if cached is not None else None
     plan = None
     if cached is not None:
-        flares = [{"timestamp_ms": t.timestamp_ms, "intensity": t.action.intensity}
-                  for t in cached]
+        flares = [{"timestamp_ms": t.timestamp_ms, "intensity": t.action.intensity,
+                   "key": t.generator_key} for t in cached]
     else:
         plan = analysed_flares.plan_for_song(uri, stored)
-        flares = [{"timestamp_ms": m.timestamp_ms, "intensity": m.intensity}
-                  for m in plan.flares]
+        ranks = plan.ranks()
+        flares = [{"timestamp_ms": m.timestamp_ms, "intensity": m.intensity,
+                   "key": m.generator_key} for m in plan.flares]
 
     def planned():
         nonlocal plan
@@ -61,10 +72,19 @@ def _plan(uri: str) -> dict:
         return plan.scene_cues
 
     moments, scene_source = analysed_flares.scene_change_moments(stored, planned)
-    scene = [{"timestamp_ms": m.timestamp_ms, "intensity": m.intensity}
-             for m in moments]
+    ranks = ranks or {}
+
+    def ranked(event: dict, key) -> dict:
+        rank, rank_of = ranks.get(key, (None, None)) if key else (None, None)
+        return {**event, "rank": rank, "rank_of": rank_of}
+
+    scene = [ranked({"timestamp_ms": m.timestamp_ms, "intensity": m.intensity},
+                    m.generator_key) for m in moments]
+    flares = [ranked({k: v for k, v in f.items() if k != "key"}, f["key"])
+              for f in flares]
+    rank_of = next((r[1] for r in ranks.values() if r[1]), None)
     return {**base, "applies": True, "reason": None, "scene_source": scene_source,
-            "scene_changes": scene, "flares": flares}
+            "scene_changes": scene, "flares": flares, "rank_of": rank_of}
 
 
 @router.get("/analysed-plan")
