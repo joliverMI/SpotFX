@@ -84,6 +84,12 @@ class Device(BaseRegistry):
     # construction and needs no clearing. See the read-only `ever_activated`
     # property below for the one question it answers.
     _ever_activated = False
+    # SpotFX deviation #45: HOLD THE LAST PICTURE. Set by FxHost.shutdown(
+    # release_realtime=False) — a planned restart while house lighting
+    # drives the room — so a driver's teardown does not tell the fixture to
+    # let go (WLED's {"live": false}). The fixture keeps its last frame for
+    # its own realtime timeout, and the restarted stack picks it back up.
+    _hold_last_frame = False
 
     def __init__(self, ledfx, config):
         self._ledfx = ledfx
@@ -207,6 +213,15 @@ class Device(BaseRegistry):
         # from fighting over the device buffer
         if self.priority_virtual:
             if virtual_id == self.priority_virtual.id:
+                # SpotFX deviation #44: a WITHHELD fixture (lent to another
+                # controller, or switched off) gets NO frame — no transport
+                # write, no update event. One truthiness check when nothing
+                # is withheld. Frames already held for timing are dropped so
+                # a stale picture cannot leak out on the way back.
+                if device_output.is_withheld(self.id):
+                    if self._timing_buffer:
+                        self._timing_buffer.clear()
+                    return
                 # Priority virtual flushes after all virtuals have updated their pixels
                 frame = self.assemble_frame()
                 # SpotFX deviation #41: per-device output control (the Light

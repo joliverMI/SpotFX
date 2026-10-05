@@ -1412,3 +1412,37 @@ against that commit.
     lowest cap among them (the sibling trade; per-device pacing is PR #58's
     idea). Proof: `tests/test_device_rate.py` (real FxHost render thread,
     frames counted at the transport, capped vs uncapped).
+44. `device_output.py` + `devices/__init__.py` (SpotFX-authored, not fork
+    code): WITHHELD — NO STREAM AT ALL (2026-10-05, house lighting phase 2).
+    Dark still SENDS black; a fixture LENT to another controller (his TV
+    strip while Hyperion drives it) or switched OFF must get no packet.
+    `device_output.set_withheld({device: reason})` names them;
+    `Device.update_pixels` asks `is_withheld()` before assembling the
+    priority virtual's flush and returns without a transport write or a
+    DeviceUpdateEvent (held timing frames are dropped so a stale picture
+    cannot leak out on the way back). The virtual keeps rendering, so a
+    sibling fixture is untouched and the fixture comes back in step. False
+    while the layer is suspended (a capture must see every fixture). Idle:
+    one truthiness check. Proof: `tests/test_house_withhold_landing.py`
+    (real FxHost, frames counted at the transport, a red control with the
+    seam bypassed).
+45. `devices/__init__.py` + `devices/wled.py` + `host.py` (SpotFX-authored):
+    HOLD THE LAST PICTURE. `FxHost.shutdown(release_realtime=False)` marks
+    every device `_hold_last_frame` before the teardown, and
+    `WLEDDevice.deactivate` then skips its `{"live": false}` release — the
+    fixture keeps its last frame for its own realtime timeout and the
+    restarted stack picks it back up. Used ONLY by SPECTRA's planned stop
+    while a house mode drives the room (`spectra/app.py`,
+    `spectra/services/house_restart.py`); the default (every release,
+    rollback and failed take) is byte-identical. The E1.31 subdevice's own
+    teardown blackout is not covered (his WLEDs stream DDP). Proof:
+    `tests/test_house_restart_hold.py`.
+46. new `hue_freeze.py` + `devices/hue.py` (SpotFX-authored): A HUE AREA
+    COMES UP FROZEN. SPECTRA names the areas it held over the bridge when it
+    last stopped (`hue_freeze.set_pending`) before the stack comes up;
+    `HueDevice.activate` consumes the name (one-shot) and comes up frozen —
+    no entertainment session, the bulbs keep their held look — instead of
+    streaming the show until the Hue Hold gate re-freezes them. SPECTRA
+    unfreezes any consumed area its gate does not hold after its startup
+    pass (`house_restart.after_resume`). Proof:
+    `tests/test_house_restart_hold.py`.

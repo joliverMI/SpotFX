@@ -18,6 +18,7 @@ try:
 except ImportError:
     MBEDTLS_AVAILABLE = False
 
+from fx import hue_freeze
 from fx.devices import NetworkedDevice
 from fx.utils import async_fire_and_forget
 
@@ -237,6 +238,13 @@ class HueDevice(NetworkedDevice):
         # freeze LedFX's web server. Actual socket sends are gated on
         # _stream_ready, which only flips true once the handshake succeeds.
         super().activate()
+        # SpotFX deviation #46: an area SPECTRA held over the bridge when it
+        # last stopped comes back up FROZEN — no entertainment session, the
+        # bulbs keep their held look (fx/hue_freeze.py). One-shot.
+        if not self._frozen and hue_freeze.consume(getattr(self, "id", "")):
+            self._frozen = True
+            _LOGGER.info("Hue %s: came up frozen — holding its REST look "
+                         "across the restart", self.name)
         self._trigger_reconnect()
 
     def _trigger_reconnect(self):

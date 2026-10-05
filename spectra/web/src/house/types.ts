@@ -16,6 +16,7 @@ export interface FixtureHook {
   motion: number | null;     // 0..1 position in the effect's motion range
   fps: number | null;        // a cap — only ever lowers
   off: boolean;
+  music_level?: number | null; // percent while the music show has the room
 }
 
 export interface HueLook {
@@ -84,6 +85,43 @@ export interface LightingStatus {
   motion?: { virtual: string; param: string; value: number }[];
   hue?: { looks: { area: string; look: string; mirek: number | null; color: string | null; brightness: number }[] } | null;
   error?: string;
+  // ── phase 2: the Home Assistant seam (spectra/services/house_fixtures.py,
+  //    house_voice.py, house.py MEDIA) ──
+  clock_mode?: { id: string; name: string } | null;
+  media?: SeamMedia;
+  tv_music?: boolean | null;
+  seam_active?: boolean;
+  seam_reason?: string | null;
+  tv_strip?: SeamTvStrip;
+  fixtures_seam?: SeamFixtures;
+  voice?: SeamVoice;
+}
+
+export interface SeamMedia {
+  source: string | null; state: string | null; since_ms: number | null;
+  active: boolean; mode: string | null; words: string[];
+}
+
+export interface SeamTvStrip { devices: string[]; owner: string; why: string | null; streaming: string[] }
+
+export interface SeamFixture {
+  device: string; name: string; target: 'on' | 'off' | 'lent' | null; why: string | null;
+  in_flight: boolean;
+  override: { power: 'on' | 'off' | null; lent_to: string | null; source: string; since_ms: number | null } | null;
+  applied: { target: string; outcome: string; detail: string; at_ms: number } | null;
+}
+
+export interface SeamFixtures {
+  acting: boolean; reason: string | null; own_brightness: boolean; owned_brightness: number;
+  tv_music: boolean | null; fixtures: SeamFixture[]; withheld: Record<string, string>;
+  corrections: { at_ms: number; device: string; target: string; found: { on: boolean | null; bri: number | null };
+    set: Record<string, unknown>; outcome: string; detail: string }[];
+  rechecks: Record<string, { state: string; attempts?: number; after_s?: number; reason?: string; moved?: boolean }>;
+}
+
+export interface SeamVoice {
+  state: string; since_ms: number | null; fixtures: string[];
+  skipped: { fixture: string; reason: string }[];
 }
 
 export interface SetModeResponse {

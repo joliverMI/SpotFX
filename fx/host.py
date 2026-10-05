@@ -184,8 +184,15 @@ class FxHost:
             self.config_dir,
         )
 
-    async def shutdown(self) -> None:
+    async def shutdown(self, release_realtime: bool = True) -> None:
         """Deactivate every virtual (joins render threads) and device.
+
+        `release_realtime=False` HOLDS THE LAST PICTURE (SpotFX #45): every
+        device is marked `_hold_last_frame` first, so a WLED is not sent
+        {"live": false} and keeps its last frame for its own realtime
+        timeout — a planned restart while house lighting drives the room
+        must not blink the house. True (every other caller: release,
+        handover rollback, a failed take) is byte-identical to before.
         Does NOT cancel unrelated loop tasks — unlike LedFxCore.async_stop,
         which kills every task on the loop and can never run inside SpotFX.
 
@@ -208,6 +215,9 @@ class FxHost:
         way). Devices are idempotent once deactivated (fx/VENDOR.md
         deviation 8), so a redundant listener-triggered deactivate() firing
         after this point is a safe no-op."""
+        if not release_realtime:
+            for device in list(self.devices.values()):
+                device._hold_last_frame = True
         for virtual in list(self.virtuals.values()):
             try:
                 virtual.deactivate()

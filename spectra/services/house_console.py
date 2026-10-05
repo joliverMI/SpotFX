@@ -163,7 +163,9 @@ def _op_create_house_mode(name: str, ha_aliases: Optional[list[str]] = None) -> 
 
 
 async def _after_edit(saved: HouseMode) -> None:
-    if saved.id == house_store.state().mode_id:
+    live_mode = house.current_mode()     # the media centre's, when one is on
+    if saved.id in (house_store.state().mode_id,
+                    live_mode.id if live_mode is not None else None):
         await house.tick()
 
 
@@ -214,6 +216,7 @@ async def _op_set_house_fixture(mode: str, target_kind: str = "everything",
                                 level: Optional[float] = None,
                                 motion: Optional[float] = None,
                                 fps: Optional[int] = None, off: Optional[bool] = None,
+                                music_level: Optional[float] = None,
                                 remove: bool = False) -> dict:
     m, err = _resolve_mode(mode)
     if err:
@@ -232,14 +235,16 @@ async def _op_set_house_fixture(mode: str, target_kind: str = "everything",
         summary = f"{m.name}: removed the fixture setting for {label}"
     else:
         hook = hooks[idx] if idx is not None else FixtureHook(target=target).model_dump()
-        for field_name, v in (("level", level), ("motion", motion), ("fps", fps), ("off", off)):
+        for field_name, v in (("level", level), ("motion", motion), ("fps", fps),
+                              ("off", off), ("music_level", music_level)):
             if v is not None:
                 hook[field_name] = v
         if idx is None:
             hooks.append(hook)
         else:
             hooks[idx] = hook
-        bits = [f"{k} {hook[k]}" for k in ("level", "motion", "fps") if hook.get(k) is not None]
+        bits = [f"{k} {hook[k]}" for k in ("level", "motion", "fps", "music_level")
+                if hook.get(k) is not None]
         if hook.get("off"):
             bits.append("off")
         summary = f"{m.name}: {label} — " + (", ".join(bits) or "nothing set")
@@ -387,9 +392,11 @@ OPERATIONS: dict[str, SonicOperation] = {
     "set_house_fixture": SonicOperation(
         name="set_house_fixture", domain="house", kind="write",
         summary="Set a mode's per-fixture setting — brightness level (%), "
-                "resting motion (0..1), frame-rate cap (fps) or off — for "
+                "resting motion (0..1), frame-rate cap (fps), off, or music "
+                "level (% while the music show has the room) — for "
                 "everything, a category, or one fixture. 'Make Evening's "
-                "crystal 10%' is level 10 on the crystal's category or fixture.",
+                "crystal 10%' is level 10 on the crystal's category or fixture; "
+                "'the crystal at 40% during music in Evening' is music_level 40.",
         instructions="Only the fields you pass change; remove=true deletes "
                     "that target's setting. motion 0 is the effect's slowest, "
                     "1 its fastest. A fixture target needs the live room "
@@ -402,6 +409,7 @@ OPERATIONS: dict[str, SonicOperation] = {
                                      "motion": {"type": "number", "minimum": 0, "maximum": 1},
                                      "fps": {"type": "integer", "minimum": 1, "maximum": 60},
                                      "off": {"type": "boolean"},
+                                     "music_level": {"type": "number", "minimum": 0, "maximum": 200},
                                      "remove": {"type": "boolean"}},
                       "required": ["mode"], "additionalProperties": False},
         handler=_op_set_house_fixture),

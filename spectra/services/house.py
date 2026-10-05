@@ -69,9 +69,13 @@ picture.
 `mode.music` decides what music does on top of the mode:
 
   show    the music show takes the room: on the first confirmed playing
-          read the layer HANDS IN (levels back to 100%, caps lifted, motion
+          read the layer HANDS IN (levels go to each fixture's
+          `music_level` — 100% where none is set — caps lifted, motion
           restored to what the scene authored, over HAND_IN_FADE_S) and the
-          engine runs exactly as it always has. When music has stayed
+          engine runs exactly as it always has. Phase 2: Spectra owns each
+          WLED's master brightness, so `music_level` is where the music
+          brightness Home Assistant's scripts used to write now lives.
+          When music has stayed
           stopped for transitions.music_debounce_s the room HANDS OUT —
           the mode is re-entered over music_return_glide_s.
   calm    the mode keeps its scene, levels and colours; the music's scene
@@ -93,6 +97,20 @@ button_glide_s (5 s). An effect-type switch still crossfades in at most the
 virtual's own cap (fx/virtuals.py); everything else — levels, colour,
 motion, Hue `dynamics.duration` — takes the whole glide.
 
+═══ MEDIA — THE TV MODE (phase 2) ═══
+
+Home Assistant reports the media centre (`set_media`: the Roku, the Switch,
+the Blu-ray player; playing / paused / idle / stopped). While a source is on
+and a clock mode is set, the EFFECTIVE mode is the one answering to the
+media word — "TV" while playing, "TV paused" while paused or idle (a
+source-specific alias such as "TV (switch)" wins over the plain one) — and
+`current_mode()` returns it. It is an OVERLAY: the clock's (or his manual)
+pick stays recorded underneath and is what returns when the source stops,
+so a clock change during a film lands quietly and shows after it. A media
+word no mode answers to changes nothing about the mode (the status says
+so). Media changes glide over the target mode's button glide. Lending the
+TV strip to Hyperion while a source is on is house_fixtures.py's half.
+
 ═══ WHO SET IT ═══
 
 `set_mode` takes a mode by id/name or Home Assistant's own lighting_mode
@@ -110,7 +128,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Optional
 
-from spectra.models.house_mode import HouseMode, now_ms
+from spectra.models.house_mode import (MEDIA_ACTIVE_STATES, MEDIA_STATES,
+                                       HouseMode, now_ms)
 from spectra.services import house_store
 
 logger = logging.getLogger(__name__)
@@ -243,6 +262,10 @@ class _Runtime:
     motion_key: Any = None
     recent: list = field(default_factory=list)
     last_problems: list = field(default_factory=list)
+    #: the base pushed while the music show has the room (music_level hooks)
+    music_levels: dict = field(default_factory=dict)
+    music_mode_id: Optional[str] = None
+    music_mode_updated_ms: Optional[int] = None
 
 
 _rt = _Runtime()
@@ -267,8 +290,76 @@ def reset() -> None:
 
 # ── the gate ───────────────────────────────────────────────────────────────
 
-def current_mode() -> Optional[HouseMode]:
+def clock_mode() -> Optional[HouseMode]:
+    """The mode Home Assistant's clock (or his manual pick) set — what the
+    room returns to when a media source stops."""
     return house_store.get_mode(house_store.state().mode_id)
+
+
+def media_active(st=None) -> bool:
+    st = st or house_store.state()
+    return bool(st.media_source) and (st.media_state or "") in MEDIA_ACTIVE_STATES
+
+
+def media_words(source: Optional[str], state: Optional[str]) -> list[str]:
+    """The Home Assistant words a media state answers to, most specific
+    first: "TV (roku)" then "TV" while playing; "TV paused (roku)" then "TV
+    paused" while paused or idle."""
+    if state not in MEDIA_ACTIVE_STATES:
+        return []
+    base = "TV" if state == "playing" else "TV paused"
+    out = []
+    if source:
+        out.append(f"{base} ({source})")
+    out.append(base)
+    return out
+
+
+def media_mode(st=None) -> Optional[HouseMode]:
+    """The mode the media centre selects right now, or None (no source on,
+    no clock mode set, or no mode answers to the media word)."""
+    st = st or house_store.state()
+    if st.mode_id is None or not media_active(st):
+        return None
+    for word in media_words(st.media_source, st.media_state):
+        hit = house_store.mode_for_ha(word)
+        if hit is not None:
+            return hit
+    return None
+
+
+def current_mode() -> Optional[HouseMode]:
+    """The EFFECTIVE mode: the media centre's while a source is on (and a
+    mode answers to it), else the clock's / his manual pick."""
+    st = house_store.state()
+    return media_mode(st) or house_store.get_mode(st.mode_id)
+
+
+def layer_active() -> bool:
+    """Is a mode driving the room RIGHT NOW (set, SPECTRA holds the room,
+    nothing on standby)? The phase-2 seam's own gate: lend / power /
+    brightness / voice act only while this is True."""
+    try:
+        if current_mode() is None:
+            return False
+        kind, _reason = gate()
+        return kind is None
+    except Exception:                                    # noqa: BLE001
+        return False
+
+
+def inactive_reason() -> Optional[str]:
+    """Why the seam is not acting right now, or None when it is."""
+    if current_mode() is None:
+        st = house_store.state()
+        return ("no house mode is set" if st.mode_id is None
+                else "the set house mode no longer exists")
+    kind, reason = gate()
+    if kind == "refused":
+        return reason or "the room is not SPECTRA's"
+    if kind == "standby":
+        return f"standing by — {reason}"
+    return None
 
 
 def gate() -> tuple[Optional[str], Optional[str]]:
@@ -512,6 +603,56 @@ async def set_mode(*, mode: Optional[str] = None, ha_mode: Optional[str] = None,
     return {"status": status, "lighting": status_dict()}
 
 
+async def set_media(*, source: Optional[str], state: str,
+                    source_from: str = "ha") -> dict:
+    """Record what the media centre is doing (Home Assistant's word, kept as
+    given) and move the room if that changes the effective mode. Idempotent.
+    Returns {"status", "lighting"} — status: applied / unchanged / recorded
+    (a media word no mode answers to, or no clock mode set) / invalid."""
+    state = (state or "").strip().lower()
+    if state not in MEDIA_STATES:
+        return {"status": "invalid",
+                "reason": f"media state must be one of {list(MEDIA_STATES)}",
+                "lighting": status_dict()}
+    src = (source or "").strip().lower() or None
+    st = house_store.state()
+    before = current_mode()
+    if state == "stopped":
+        changed = st.media_source is not None or st.media_state not in (None, "stopped")
+        new_source, new_state = None, "stopped"
+    else:
+        changed = (st.media_source != src) or (st.media_state != state)
+        new_source, new_state = src, state
+    if not changed:
+        return {"status": "unchanged", "lighting": status_dict()}
+    st.media_source = new_source
+    st.media_state = new_state
+    st.media_since_ms = now_ms()
+    after = current_mode()
+    status = "recorded"
+    if (before.id if before else None) != (after.id if after else None):
+        # The room changes mode on a person's act (a film starting): the
+        # target mode's button glide, like a press.
+        st.glide_s = after.transitions.button_glide_s if after is not None else 5.0
+        status = "applied"
+    house_store.save_state()
+    _record("media", {"source": src, "state": state, "from": source_from,
+                      "mode": after.name if after else None,
+                      "previous_mode": before.name if before else None})
+    try:
+        from spectra.services import house_fixtures
+        house_fixtures.kick()
+    except Exception:                                    # noqa: BLE001
+        logger.exception("house: fixture kick after media failed")
+    await tick()
+    out = {"status": status, "lighting": status_dict()}
+    if state != "stopped" and media_mode(st) is None and st.mode_id is not None:
+        out["note"] = (f"no house mode answers to "
+                       f"{' or '.join(repr(w) for w in media_words(src, state))} "
+                       f"— the clock's mode stays")
+    return out
+
+
 # ── the supervisor ─────────────────────────────────────────────────────────
 
 async def tick() -> None:
@@ -564,6 +705,12 @@ async def _tick_locked() -> None:
                 await _enter(mode, mode.transitions.music_return_glide_s,
                              why="music stopped", refire=True,
                              prefer_remembered=True)
+            elif (_rt.music_mode_id != mode.id
+                  or _rt.music_mode_updated_ms != mode.updated_ms):
+                # The mode changed (or was edited) while the show has the
+                # room: its music levels follow; the rest waits for the
+                # hand-out.
+                _push_music_levels(mode)
             await _sync_hue()
             return
 
@@ -634,6 +781,9 @@ async def _let_go(*, fade_s: float, write_motion: bool) -> None:
             or show_output.base_snapshot()["states"]:
         show_output.set_base({}, {}, fade_s=fade_s)
         _rt.base_pushed = False
+    _rt.music_levels = {}
+    _rt.music_mode_id = None
+    _rt.music_mode_updated_ms = None
     if _rt.caps_pushed:
         device_rate.clear()
         _rt.caps_pushed = False
@@ -643,12 +793,41 @@ async def _let_go(*, fade_s: float, write_motion: bool) -> None:
         _rt.motion_applied = {}
 
 
+def music_levels(mode: HouseMode) -> dict:
+    """device -> 0..2 while the music show has the room (the hooks'
+    `music_level`). Later hooks win; take scope respected by
+    resolve_target."""
+    from spectra.services import show_output
+    out: dict = {}
+    for hook in mode.fixtures:
+        if hook.music_level is None:
+            continue
+        devices, _problems = show_output.resolve_target(hook.target.model_dump())
+        for did in devices:
+            out[did] = hook.music_level / 100.0
+    return out
+
+
 async def _hand_in(mode: HouseMode) -> None:
     await _let_go(fade_s=HAND_IN_FADE_S, write_motion=True)
+    _push_music_levels(mode)
     _rt.phase = PHASE_MUSIC
     _rt.reason = "music is playing — the show has the room"
     _rt.hue_ramp_ms = int(HAND_IN_FADE_S * 1000)
-    _record("music_in", {"mode": mode.name})
+    _record("music_in", {"mode": mode.name,
+                         "music_levels": len(_rt.music_levels)})
+
+
+def _push_music_levels(mode: HouseMode) -> None:
+    from spectra.services import show_output
+    levels = music_levels(mode)
+    _rt.music_mode_id = mode.id
+    _rt.music_mode_updated_ms = mode.updated_ms
+    if levels == _rt.music_levels and _rt.base_pushed == bool(levels):
+        return
+    show_output.set_base(levels, {}, fade_s=HAND_IN_FADE_S)
+    _rt.music_levels = levels
+    _rt.base_pushed = bool(levels)
 
 
 async def _enter(mode: HouseMode, glide_s: float, *, why: str,
@@ -659,6 +838,9 @@ async def _enter(mode: HouseMode, glide_s: float, *, why: str,
     from spectra.services import show_output
     show_output.set_base(plan.levels, plan.states, fade_s=glide_s)
     _rt.base_pushed = bool(plan.levels or plan.states)
+    _rt.music_levels = {}
+    _rt.music_mode_id = None
+    _rt.music_mode_updated_ms = None
     device_rate.set_caps(plan.caps)
     _rt.caps_pushed = bool(plan.caps)
     _rt.hue_ramp_ms = int(glide_s * 1000)
@@ -1028,6 +1210,32 @@ def status_dict() -> dict:
     }
     if st.manual and st.ha_value:
         out["manual_until"] = (f"Home Assistant's value changes from {st.ha_value!r}")
+    # ── phase 2: the Home Assistant seam ──
+    clock = clock_mode()
+    out["clock_mode"] = ({"id": clock.id, "name": clock.name}
+                         if clock is not None else None)
+    media_on = media_active(st)
+    mm = media_mode(st)
+    out["media"] = {
+        "source": st.media_source, "state": st.media_state,
+        "since_ms": st.media_since_ms, "active": media_on,
+        "mode": mm.name if mm is not None else None,
+        "words": media_words(st.media_source, st.media_state) if media_on else [],
+    }
+    out["tv_music"] = st.tv_music
+    out["seam_active"] = layer_active()
+    out["seam_reason"] = inactive_reason()
+    try:
+        from spectra.services import house_fixtures
+        out["fixtures_seam"] = house_fixtures.status()
+        out["tv_strip"] = house_fixtures.tv_strip_status()
+    except Exception:                                    # noqa: BLE001
+        logger.exception("house: fixture status failed")
+    try:
+        from spectra.services import house_voice
+        out["voice"] = house_voice.status()
+    except Exception:                                    # noqa: BLE001
+        logger.exception("house: voice status failed")
     if mode is not None:
         playing = _rt.playing
         returns_in = None
@@ -1078,3 +1286,76 @@ def status_dict() -> dict:
 
 def status() -> dict:
     return status_dict()
+
+
+_STARTED_AT = time.monotonic()
+
+HEARTBEAT_DRIVING = "driving"
+
+
+def heartbeat() -> dict:
+    """The cheap read Home Assistant's fallback polls (GET
+    /api/house/heartbeat). `state` is ONE word:
+
+      driving    a mode drives the room — HA leaves every Spectra fixture alone
+      standby    a preview / camera run / night run holds the room for now
+      idle       SPECTRA holds the room but no mode is set
+      on_paper   SPECTRA holds the room with its engine not live (a quiet take)
+      down       the record says SPECTRA owns but its light stack is not up
+      released   nobody drives the room (his panic release, or not taken)
+      not_owner  the older SpotFX process owns, or a handover is in flight
+
+    `lighting_ok` is True exactly when the house is lit by Spectra (driving
+    or standby). Never raises — an unreadable fact reads as down."""
+    out: dict = {"at_ms": now_ms(), "uptime_s": round(time.monotonic() - _STARTED_AT, 1)}
+    try:
+        import os
+
+        from fx import device_output, light_ownership
+        from spectra.services.live_host import live
+        out["pid"] = os.getpid()
+        owner = light_ownership.load().owner
+        out["owner"] = owner
+        if owner == light_ownership.RELEASED:
+            state = "released"
+        elif owner != light_ownership.SPECTRA:
+            state = "not_owner"
+        elif live.host is None:
+            state = "down"
+        else:
+            from spectra.services import engine
+            if getattr(engine.executor, "mode", "recording") == "recording":
+                state = "on_paper"
+            else:
+                mode = current_mode()
+                kind, _reason = gate()
+                if mode is None:
+                    state = "idle"
+                elif kind == "standby":
+                    state = "standby"
+                else:
+                    state = HEARTBEAT_DRIVING
+        out["state"] = state
+        out["lighting_ok"] = state in (HEARTBEAT_DRIVING, "standby")
+        mode = current_mode()
+        st = house_store.state()
+        out["mode"] = mode.name if mode is not None else None
+        clock = clock_mode()
+        out["clock_mode"] = clock.name if clock is not None else None
+        out["ha_value"] = st.ha_value
+        out["phase"] = _rt.phase
+        out["media"] = ({"source": st.media_source, "state": st.media_state}
+                        if media_active(st) else None)
+        out["tv_music"] = st.tv_music
+        out["withheld"] = device_output.withheld()
+        try:
+            from spectra.services import house_fixtures, house_voice
+            out["tv_strip"] = house_fixtures.tv_strip_status()["owner"]
+            out["voice"] = house_voice.status()["state"]
+        except Exception:                                # noqa: BLE001
+            pass
+    except Exception as exc:                             # noqa: BLE001
+        out["state"] = "down"
+        out["lighting_ok"] = False
+        out["error"] = f"{type(exc).__name__}: {exc}"
+    return out

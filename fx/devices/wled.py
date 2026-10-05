@@ -210,7 +210,10 @@ class WLEDDevice(NetworkedDevice):
             return
         if self.subdevice is not None:
             self.subdevice.deactivate()
-        if self.wled is not None:
+        if self.wled is not None and not self._hold_last_frame:
+            # (SpotFX #45: a planned restart holding the last picture skips
+            # the release — the fixture keeps its last frame for its own
+            # realtime timeout and the restarted stack picks it back up.)
             # Explicit release (panic-release path), not just "stop sending
             # and let the device's own timeout lapse" — see WLED.
             # release_realtime. Fire-and-forget like the Hue driver's stream

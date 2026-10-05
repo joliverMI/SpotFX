@@ -580,12 +580,14 @@ async def set_house_fixture(mode: str, target_kind: _HouseTargetEnum = "everythi
                             target_name: Optional[str] = None,
                             level: Optional[float] = None, motion: Optional[float] = None,
                             fps: Optional[int] = None, off: Optional[bool] = None,
+                            music_level: Optional[float] = None,
                             remove: bool = False) -> dict:
     """Set a mode's per-fixture level (%), resting motion (0..1), frame-rate
-    cap or off, for everything, a category or one fixture."""
+    cap, off, or music level (% while the music show has the room), for
+    everything, a category or one fixture."""
     return await _call("set_house_fixture", mode=mode, target_kind=target_kind,
                        target_name=target_name, level=level, motion=motion,
-                       fps=fps, off=off, remove=remove)
+                       fps=fps, off=off, music_level=music_level, remove=remove)
 
 
 @mcp.tool()

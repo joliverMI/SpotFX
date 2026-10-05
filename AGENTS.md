@@ -3856,7 +3856,7 @@ room-effect compatibility proof), `tests/test_light_show_arms.py`'s own
 dwell-floor test, `tests/test_scene_console.py`'s widened operation-set
 proof.
 
-## HOUSE LIGHTING (`/house`) — the room's always-on resting look (phase 1)
+## HOUSE LIGHTING (`/house`) — the room's always-on resting look (phases 1–2)
 
 Plan: `/home/javi/fleet-spotfx/data/standard-lighting-plan/report.md` (his
 ask: Spectra as the standard lighting engine, not only music; HA keeps its
@@ -3908,6 +3908,50 @@ split). Six things:
   CHANGES. Sonic domain `house` (`house_console.py`; no delete). Tests:
   `tests/test_house_*.py`, `tests/test_device_rate.py`,
   `scripts/check_house_summary.mjs`. Help section `house`.
+
+**PHASE 2 — the rest of the Home Assistant seam (2026-10-05).**
+`docs/HOUSE_HA_SEAM.md` is the wire (every route, for River);
+`spectra/services/house_fixtures.py`, `house_voice.py` and
+`house_restart.py` are the binding statements. Six things:
+
+- **RECORDED ALWAYS, ACTED ON ONLY WHILE `house.layer_active()`** (a mode
+  set, SPECTRA holds the room, no standby). HA's facts (TV Music, the media
+  centre, fixture overrides) live in `house_state.json`; the seam's settings
+  (TV strip ids, voice fixtures/colours, owned brightness) in the library
+  file. No mode → nothing withheld, no WLED written.
+- **WITHHELD ≠ DARK.** A lent or switched-off fixture gets NO packet
+  (`fx/device_output.set_withheld`, VENDOR #44), checked in
+  `Device.update_pixels`; suspension streams it anyway. `streaming_device_ids`
+  and `device_gaps` leave withheld fixtures out, or the dark-fixture watch and
+  the activation gate would call a switched-off fixture a fault. Off = no
+  stream, `{"live": false}`, `{"on": false}`; on = `{"on": true, "bri": 255}`
+  WHILE STILL WITHHELD, then the stream (`pending_on`).
+- **SPECTRA OWNS EVERY STREAMED WLED's MASTER BRIGHTNESS while a mode drives
+  the room** (255 + on, read back every `DRIFT_CHECK_S`, a drift re-asserted
+  and NAMED as a correction). So a mode's per-fixture `level` is the only
+  dimmer and the music show's brightness is `FixtureHook.music_level` (pushed
+  as the base on hand-in) — a mode without levels puts the crystal at FULL.
+  Every WLED write runs on a worker thread (the transport is blocking).
+- **MEDIA IS AN OVERLAY**: `house.current_mode()` is the EFFECTIVE mode —
+  the one answering to "TV" / "TV paused" (source-specific first) while a
+  source is on AND a clock mode is set — with the clock's pick kept
+  underneath (`clock_mode()`). Anything that needs "which mode" calls
+  `current_mode()`; only `set_mode` compares against `st.mode_id`.
+- **THE VOICE NEVER WAITS** (`house_voice.set_voice` is sync, no I/O —
+  asserted structurally) and is an OVERLAY in `show_output` (`overlay_set`/
+  `overlay_clear`): precedence voice > show hold > base, except a show hold
+  landing mid-utterance takes the fixture outright. Base pushes and every
+  release path consult `_overlay`; a new show_output writer must too.
+- **A RESTART KEEPS THE LAST PICTURE** while a mode drives the room: the
+  shutdown decides `hold_on_shutdown()` BEFORE `go_dark()` and tears down
+  with `live.deactivate(hold_last_frame=True)` (no WLED release, VENDOR #45);
+  `prepare_for_resume()` re-installs the base/caps/withheld/Hue-held snapshot
+  (`house_restart.json`) BEFORE `resume_own_room()`, so the first frame
+  carries it; Hue areas come up frozen (VENDOR #46) and `after_resume()`
+  unfreezes any the gate no longer holds. The take scope (PR 317) holds
+  throughout: everything resolves through `show_output._real_devices` /
+  `resolve_target`. Tests: `tests/test_house_{fixtures,voice,restart_hold,
+  withhold_landing,seam_api}.py`; help topic `house-ha-seam`.
 
 ## The room LIGHT-FIELD map (`/rooms`) + room effects (`/room-effects`)
 

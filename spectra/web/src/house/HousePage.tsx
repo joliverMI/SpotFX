@@ -18,7 +18,7 @@ import SonicChatPopover from '../components/SonicChatPopover';
 import { useToast } from '../components/Toast';
 import { useEngineStatus, useScenes, useSpotColorSets } from '../queries';
 import {
-  blankMode, kelvinToHex, manualLine, MUSIC_HUE_WORDS, MUSIC_WORDS, phaseLine, sourceWord,
+  blankMode, kelvinToHex, manualLine, MUSIC_HUE_WORDS, MUSIC_WORDS, phaseLine, seamLines, sourceWord,
 } from './houseSummary';
 import type {
   FixtureHook, HouseMode, HouseModesResponse, HouseTargets, HueLook, LightingStatus,
@@ -228,8 +228,27 @@ function NowPanel({ lighting, busy, areas, onClear }: {
             <li className="muted">Hue Hold: {lighting.hue.looks.map((l) => `${areaName(l.area)} ${l.look}${l.mirek ? ` ${Math.round(1e6 / l.mirek)} K` : l.color ? ` ${l.color}` : ''}`).join(' · ')}</li>
           )}
           {lighting.problems.map((p) => <li key={p} className="house-problem">⚠ {p}</li>)}
+          {lighting.clock_mode && lighting.mode && lighting.clock_mode.id !== lighting.mode.id && (
+            <li className="muted">Underneath: {lighting.clock_mode.name} — it returns when the media centre stops.</li>
+          )}
         </ul>
       )}
+      {lighting && <SeamLines lighting={lighting} />}
+    </div>
+  );
+}
+
+/** What Home Assistant has told Spectra about the fixtures (phase 2): the
+ * TV strip lent to Hyperion, the media centre, Serenity's voice, a fixture
+ * switched off, a brightness Spectra had to put back. Read-only — Home
+ * Assistant and its buttons are the controls. */
+function SeamLines({ lighting }: { lighting: LightingStatus }) {
+  const lines = seamLines(lighting);
+  if (!lines.length) return null;
+  return (
+    <div className="house-seam">
+      <strong>From Home Assistant</strong> <HelpLink topic="house-ha-seam" />
+      <ul>{lines.map((l) => <li key={l} className="muted">{l}</li>)}</ul>
     </div>
   );
 }
@@ -335,7 +354,7 @@ function ModeEditor({ draft, edit, targets, dirty, busy, warnings, onSave, onDel
             onRemove={() => edit((d) => { d.fixtures.splice(i, 1); })} />
         ))}
         <button onClick={() => edit((d) => {
-          d.fixtures.push({ target: { kind: 'everything', id: null }, level: null, motion: null, fps: null, off: false });
+          d.fixtures.push({ target: { kind: 'everything', id: null }, level: null, motion: null, fps: null, off: false, music_level: null });
         })}>+ Add a fixture setting</button>
         {targets && !targets.live && <p className="muted">The live room is down — fixture names are unknown until SPECTRA holds the room.</p>}
       </section>
@@ -441,6 +460,10 @@ function FixtureRow({ hook, targets, onChange, onRemove }: {
       <label className="house-inline" title="Frame-rate cap — only ever lowers the fixture's own rate">cap
         <input type="number" min={1} max={60} placeholder="—" value={hook.fps ?? ''}
           onChange={(e) => set({ fps: num(e.target.value) })} />fps
+      </label>
+      <label className="house-inline" title="Brightness while the music show has the room; empty = the picture's own (100%). Spectra holds each WLED's own brightness at full, so this is the music level.">music
+        <input type="number" min={0} max={200} placeholder="—" value={hook.music_level ?? ''}
+          onChange={(e) => set({ music_level: num(e.target.value) })} />%
       </label>
       <label className="house-inline"><input type="checkbox" checked={hook.off}
         onChange={(e) => set({ off: e.target.checked })} />off</label>

@@ -2087,7 +2087,8 @@ export const HELP_SECTIONS: HelpSection[] = [
         body: [
           'Each row targets everything, a category or one fixture; a later row wins a setting an earlier one also sets. LEVEL is a percent of the picture\'s own brightness (100 = unchanged). MOTION is the resting speed with no music — 0 is the effect\'s slowest, 100 its fastest — written to the effect\'s own speed setting (Fish and Orbits base speed, Melt and Noise speed, Star\'s base rotation…). An effect with no speed setting of its own is left as it is.',
           'CAP limits how often the fixture is drawn and sent — it only ever lowers the fixture\'s own rate, which saves network packets and computer time. A cap acts on the whole effect, so fixtures sharing one effect (the TV strip and both sconces) run at the lowest cap among them. OFF shows nothing on that fixture.',
-          'Settings apply only while the mode is resting. When music takes the room they let go (levels back to 100%, caps lifted, speed back to what the scene authored) and come back when the music has stopped.',
+          'Settings apply only while the mode is resting. When music takes the room they let go (levels go to each row\'s MUSIC level — 100% where none is set — caps lifted, speed back to what the scene authored) and come back when the music has stopped.',
+          'MUSIC is the fixture\'s brightness while the music show has the room. Spectra holds every WLED\'s own master brightness at full while a mode drives the room, so the brightness Home Assistant\'s music scripts used to write (the crystal at 11–100%, the strips at 100%) is set here instead.',
         ],
       },
       {
@@ -2124,6 +2125,20 @@ export const HELP_SECTIONS: HelpSection[] = [
         keywords: 'mode chip top bar house green purple amber not applied paused music',
         body: [
           '"⌂ Mode: Evening · HA" on every page: green while the mode is on the room, purple (♪) while music has it, amber when it is paused or not applied, grey when no mode is set. "HA" means Home Assistant set it; "manual" means a person did. Tap it to open the House page.',
+        ],
+      },
+      {
+        id: 'house-ha-seam',
+        title: 'What Home Assistant tells Spectra: the TV strip, buttons, the voice, restarts',
+        keywords: 'home assistant hyperion tv music lend tv strip roku switch bluray blu-ray media playing paused stopped tv mode button crystal porch on off serenity voice listening processing responding sconce mains recheck brightness bri owned restart blink heartbeat fallback 8010',
+        body: [
+          'Everything on this card is something Home Assistant reported. Each report is RECORDED whatever the room is doing, and ACTED ON only while a mode drives the room — with no mode set, or the room released, the card says "recorded, not acted on" and nothing is touched.',
+          'TV STRIP: while TV Music is off, or the Roku / Switch / Blu-ray player is on, Hyperion drives the TV strip, so Spectra stops sending it anything (not even black) and tells it to leave Spectra\'s stream. The sconces on the same effect keep going. When TV Music is back on and the media centre is off, Spectra switches the strip on and picks it back up, in step with the show.',
+          'TV MODE: while a media source is playing, the mode that answers to "TV" takes over (or "TV (switch)" for one source only); paused or at a menu, the one answering to "TV paused". When the source stops, the room goes back to the clock\'s mode — including a clock change that happened during the film. A media word no mode answers to changes nothing and is named here.',
+          'BUTTONS: a button can switch a WLED off (no stream, then off) and back on (on and full brightness first, then the stream). While a mode drives the room Spectra holds every WLED on and at full master brightness — the mode\'s levels are the only dimmer — and reads them back every minute: if something else wrote a brightness or switched one off, Spectra puts it back and names it here as a correction.',
+          'VOICE: when Serenity is listening, thinking or answering, the crystal and both kitchen sconces show its colour (blue, green, purple — the colours Home Assistant used), and go back to exactly what they should show now when it is done. A fixture the Light Show is holding, a lent or switched-off one, or a room on standby is skipped; the voice never waits on Spectra. A colour nobody cleared lets go by itself after two minutes.',
+          'SCONCE MAINS: when Home Assistant switches the sconces\' mains back on it asks Spectra to look for them; Spectra finds them (even at a new address), and puts their power and brightness back the moment they answer — seconds instead of half a minute.',
+          'RESTARTS: while a mode drives the room, a Spectra restart keeps the last picture: the WLEDs are not told to let go, the first frame after the restart already carries the mode\'s levels, and a Hue area held over the bridge comes back held instead of flashing the show. Home Assistant can read GET /spectra/api/house/heartbeat for a one-word state ("driving", "standby", "idle", "released", "down"…) to decide when to light the house itself.',
         ],
       },
       {

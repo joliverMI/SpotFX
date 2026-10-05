@@ -84,6 +84,35 @@ console.log('§4 the colour-temperature swatch is warm at 2000 K and neutral at 
   ok(parseInt(cool.slice(5, 7), 16) > 230, `6500 K → ${cool}`);
 }
 
+console.log('§5 the Home Assistant card says what the seam is doing, and only that');
+{
+  ok(hs.seamLines(base).length === 0, 'nothing reported: no lines');
+  const strip = { devices: ['tv-backlight'], owner: 'hyperion', why: 'TV Music is off — Hyperion drives the strip', streaming: [] };
+  const lent = hs.seamLines({ ...base, seam_active: true, tv_music: false, tv_strip: strip });
+  ok(lent.some((x) => x.startsWith('TV strip: hyperion — TV Music is off')), `lent: ${lent[0]}`);
+  const ours = hs.seamLines({ ...base, seam_active: true, tv_music: true,
+    tv_strip: { ...strip, owner: 'spectra', why: null, streaming: ['tv-backlight'] } });
+  ok(ours[0] === 'TV strip: Spectra drives it (TV Music on).', `ours: ${ours[0]}`);
+  const recorded = hs.seamLines({ ...base, seam_active: false, seam_reason: 'no house mode is set' });
+  ok(recorded[0] === 'Recorded, not acted on — no house mode is set.', 'inert: says so first');
+  const media = hs.seamLines({ ...base, clock_mode: { id: 'c', name: 'Evening' },
+    media: { source: 'roku', state: 'playing', since_ms: 1, active: true, mode: null, words: ['TV (roku)', 'TV'] } });
+  ok(media[0].includes('no mode answers to "TV (roku)" or "TV"') && media[0].includes('Evening stays'),
+    `media with no TV mode names it: ${media[0]}`);
+  const fx = (o) => ({ device: 'crystal', name: 'Crystal', target: null, why: null, in_flight: false,
+    override: null, applied: null, ...o });
+  ok(hs.fixtureLine(fx({ target: 'on', applied: { target: 'on', outcome: 'landed', detail: '', at_ms: 1 } })) === null,
+    'a fixture held on as asked is the quiet normal case');
+  ok(hs.fixtureLine(fx({ target: 'off' })) === 'Crystal: switched off — no stream', 'off');
+  ok(hs.fixtureLine(fx({ target: 'on', applied: { target: 'on', outcome: 'failed', detail: 'no answer', at_ms: 1 } }))
+    === 'Crystal: on — failed: no answer', 'a failed write is named');
+  ok(hs.fixtureLine(fx({ override: { power: 'off', lent_to: null, source: 'ha', since_ms: 1 } }))
+    === 'Crystal: switched off (recorded, not acted on)', 'recorded but inert');
+  const voice = hs.seamLines({ ...base, voice: { state: 'listening', since_ms: 1, fixtures: ['crystal'],
+    skipped: [{ fixture: 'sconce-kitchen-left', reason: 'busy — the Light Show holds it' }] } });
+  ok(voice[0].startsWith('Voice: listening on crystal (skipped sconce-kitchen-left: busy'), `voice: ${voice[0]}`);
+}
+
 if (failures) {
   console.log(`\n${failures} failure(s)`);
   process.exit(1);

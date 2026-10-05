@@ -36,6 +36,18 @@ to the BASE, not to an undimmed picture — "End show returns to the current
 mode" (plan §3.3). The base is in-memory: the house layer re-pushes it on
 every tick it is active and clears it the moment it stands aside.
 
+THE VOICE OVERLAY (HOUSE LIGHTING phase 2, spectra/services/house_voice.py).
+Serenity's listening / processing / responding colours sit ABOVE everything
+else on the fixtures they light: a steady colour at the voice's own level.
+Like a hold, it is a state on the output layer and the picture keeps
+rendering underneath, so clearing it fades back to whatever the fixture
+should show NOW — its show hold if the Light Show put one on it meanwhile,
+else the house mode's base — never to a snapshot taken before the voice
+started (Home Assistant's scene.create/restore race, retired). The base
+layer and a show hold landing mid-utterance respect it: a base change moves
+nothing on a voice-held fixture, and a show hold takes the fixture over
+outright (the show wins; the voice simply ends there).
+
 THE STEADY SCALE (fx/device_output.set_scale_provider). A steady colour
 REPLACES the picture, so on its own it would ignore the room dimmer and a
 running room effect. This module hands the output layer a callable that
@@ -69,6 +81,8 @@ _device_virtuals: dict[str, list[str]] = {}
 _base_levels: dict[str, float] = {}
 #: house lighting's resting layer — device id -> state (only "dark" today)
 _base_states: dict[str, str] = {}
+#: the voice overlay — device id -> (rgb colour, level 0..MAX_LEVEL)
+_overlay: dict[str, tuple] = {}
 _was_live = False
 _task: Optional[asyncio.Task] = None
 
@@ -316,7 +330,7 @@ def set_state(device_ids: Iterable[str], state: str, *,
             if held_by_ambient(did) else None
         if state == device_output.STATE_SHOW:
             had = st.holds.pop(did, None)
-            device_output.set_state(did, base_state(did), fade_s=_fade_s(fade_ms))
+            _push_rest(did, fade_ms)
             out.append({"device": did, "name": device_label(did), "state": state,
                         "was": had.state if had else "show", "note": note})
             continue
@@ -324,6 +338,11 @@ def set_state(device_ids: Iterable[str], state: str, *,
                           color=list(color) if color is not None else None,
                           fade_ms=int(fade_ms or 0), source=source)
         st.holds[did] = hold
+        if _overlay.pop(did, None) is not None:
+            # The show takes the fixture over: the voice ends here, and its
+            # level gives way to the show's own.
+            device_output.set_level(did, _combined_level(did, st.levels),
+                                    fade_s=_fade_s(fade_ms))
         _push_hold(hold)
         out.append({"device": did, "name": device_label(did), "state": state,
                     "note": note})
@@ -333,6 +352,9 @@ def set_state(device_ids: Iterable[str], state: str, *,
 
 
 def _combined_level(device_id: str, levels: list[LevelHold]) -> float:
+    ov = _overlay.get(device_id)
+    if ov is not None:
+        return max(0.0, min(device_output.MAX_LEVEL, float(ov[1])))
     v = _base_levels.get(device_id, 1.0)
     for lv in levels:
         if device_id in lv.device_ids:
@@ -383,6 +405,74 @@ def base_state(device_id: str) -> str:
     return _base_states.get(device_id, device_output.STATE_SHOW)
 
 
+def _push_rest(did: str, fade_ms) -> None:
+    """Put a device in what it should show with NO show hold on it: the
+    voice overlay if one is up, else the house base."""
+    ov = _overlay.get(did)
+    if ov is not None:
+        device_output.set_state(did, device_output.STATE_STEADY, color=ov[0],
+                                fade_s=_fade_s(fade_ms))
+    else:
+        device_output.set_state(did, base_state(did), fade_s=_fade_s(fade_ms))
+
+
+# ── the voice overlay (house lighting phase 2) ─────────────────────────────
+
+def overlay_snapshot() -> dict:
+    return {d: {"color": list(c), "level": lv} for d, (c, lv) in _overlay.items()}
+
+
+def overlay_set(device_ids: Iterable[str], color: tuple, level: float, *,
+                fade_s: float = 0.0) -> list[str]:
+    """Put the voice colour on these fixtures (a steady colour at `level`).
+    Returns the devices it landed on. The caller (house_voice) has already
+    skipped fixtures the Light Show holds."""
+    color = tuple(float(max(0, min(255, c))) for c in color)
+    level = max(0.0, min(device_output.MAX_LEVEL, float(level)))
+    out = []
+    for did in device_ids:
+        _overlay[did] = (color, level)
+        device_output.set_state(did, device_output.STATE_STEADY, color=color,
+                                fade_s=max(0.0, float(fade_s)))
+        device_output.set_level(did, level, fade_s=max(0.0, float(fade_s)))
+        out.append(did)
+    return out
+
+
+def overlay_clear(device_ids: Optional[Iterable[str]] = None, *,
+                  fade_s: float = 0.0) -> list[str]:
+    """Take the voice colour off (every voice-held fixture when `device_ids`
+    is None) and fade back to what the fixture should show NOW: its show
+    hold if the Light Show put one on it, else the house base."""
+    st = show_store.state()
+    ids = list(_overlay) if device_ids is None else [d for d in device_ids
+                                                     if d in _overlay]
+    fade_ms = int(max(0.0, float(fade_s)) * 1000)
+    for did in ids:
+        _overlay.pop(did, None)
+        if did in st.holds:
+            _push_hold(st.holds[did].model_copy(update={"fade_ms": fade_ms}))
+        else:
+            device_output.set_state(did, base_state(did), fade_s=_fade_s(fade_ms))
+        device_output.set_level(did, _combined_level(did, st.levels),
+                                fade_s=_fade_s(fade_ms))
+    return ids
+
+
+def busy_reason(device_id: str) -> Optional[str]:
+    """Why a momentary overlay (the voice) must leave this fixture alone, or
+    None: the Light Show holds it, dims it with a Level, or is flashing it."""
+    st = show_store.state()
+    if device_id in st.holds:
+        return "the Light Show holds it"
+    if any(device_id in lv.device_ids for lv in st.levels):
+        return "a Light Show Level is on it"
+    tg = device_output.target(device_id)
+    if tg is not None and tg.flash is not None and not tg.flash.done(device_output.now()):
+        return "the Light Show is flashing it"
+    return None
+
+
 def base_snapshot() -> dict:
     return {"levels": dict(_base_levels), "states": dict(_base_states)}
 
@@ -412,7 +502,7 @@ def set_base(levels: dict[str, float], states: dict[str, str], *,
             moved = True
         if old_states.get(did) != new_states.get(did):
             moved = True
-            if did not in st.holds:
+            if did not in st.holds and did not in _overlay:
                 device_output.set_state(did, base_state(did), fade_s=fade)
         if moved:
             changed.append(did)
@@ -437,7 +527,7 @@ def release_device(device_id: str, fade_ms: int = DEFAULT_RELEASE_FADE_MS) -> di
     for lv in touched:
         lv.device_ids = [d for d in lv.device_ids if d != device_id]
     st.levels = [lv for lv in st.levels if lv.device_ids]
-    device_output.set_state(device_id, base_state(device_id), fade_s=_fade_s(fade_ms))
+    _push_rest(device_id, fade_ms)
     device_output.set_level(device_id, _combined_level(device_id, st.levels),
                             fade_s=_fade_s(fade_ms))
     show_store.save_state()
@@ -449,13 +539,14 @@ def release_all(fade_ms: int = DEFAULT_RELEASE_FADE_MS) -> list[str]:
     st = show_store.state()
     devices = set(st.holds) | {d for lv in st.levels for d in lv.device_ids}
     based = set(_base_levels) | set(_base_states)
-    devices |= set(device_output.snapshot()) - based
+    devices |= set(device_output.snapshot()) - based - set(_overlay)
     st.holds.clear()
     st.levels.clear()
     for did in devices:
         # Back to the house mode's resting look, not to an undimmed picture.
-        device_output.set_state(did, base_state(did), fade_s=_fade_s(fade_ms))
-        device_output.set_level(did, _base_levels.get(did, 1.0), fade_s=_fade_s(fade_ms))
+        _push_rest(did, fade_ms)
+        device_output.set_level(did, _combined_level(did, []),
+                                fade_s=_fade_s(fade_ms))
     show_store.save_state()
     return sorted(devices)
 
@@ -465,8 +556,10 @@ def on_release() -> None:
     release fade, so the room lets go of its TRUE state. The house layer's
     base goes too — it is re-pushed when the house is active again."""
     device_output.clear_all()
+    device_output.clear_withheld()
     _base_levels.clear()
     _base_states.clear()
+    _overlay.clear()
     try:
         from spectra.services import show_arms
         show_arms.on_release()
@@ -505,11 +598,15 @@ def repush() -> dict:
     expired = [lv for lv in st.levels if lv.id in dropped]
     st.levels = [lv for lv in st.levels if lv.id not in dropped]
     for did, state in _base_states.items():
-        if did not in st.holds:
+        if did not in st.holds and did not in _overlay:
             device_output.set_state(did, state)
     for h in st.holds.values():
         _push_hold(h.model_copy(update={"fade_ms": 0}))
-    devices = {d for lv in st.levels for d in lv.device_ids} | set(_base_levels)
+    for did, (color, _lv) in _overlay.items():
+        if did not in st.holds:
+            device_output.set_state(did, device_output.STATE_STEADY, color=color)
+    devices = ({d for lv in st.levels for d in lv.device_ids} | set(_base_levels)
+               | set(_overlay))
     # A dropped level's devices are reset too: within one process (a stack
     # that came back without a restart) the layer may still carry it.
     devices |= {d for lv in expired for d in lv.device_ids}
@@ -593,7 +690,9 @@ def reset() -> None:
     _device_virtuals = {}
     _base_levels.clear()
     _base_states.clear()
+    _overlay.clear()
     device_output.clear_all()
+    device_output.clear_withheld()
     device_output.suspend(False)
 
 
@@ -619,4 +718,6 @@ def status() -> dict:
             "standdown": standdown_reason(),
             "refusal": ownership_refusal(),
             "base": {"levels": dict(_base_levels), "states": dict(_base_states)},
+            "voice": overlay_snapshot(),
+            "withheld": device_output.withheld(),
             "output": device_output.snapshot()}
