@@ -2435,6 +2435,17 @@ filesystem, never the network — 127.0.0.1:8010/:8000 reach the same live
 instances from inside any worktree on the host; a verification script that
 defaults to them is a trap, learned live 2026-08-15).
 
+**LEAVING LIGHT HANDS THE BACKGROUND BACK (2026-10-04, Light Show proof
+D3).** Light paints `background_color`/`_brightness` and nothing used to
+undo it: End show restored the display-mode setting while the TV kept
+Light's colour. `dark_light` now records each virtual's own two background
+fields before the FIRST Light paint (from the pre-dark snapshot when coming
+from Dark, since the live config is clamped there) in
+`dark_light_snapshot_pre_light.json`, and the transition to "default" puts
+just those two fields back onto the CURRENT live config — only where the
+background still equals what Light painted (a scene repaint since wins), and
+not playback-gated (never a stale frame). Spec: `tests/test_dark_light.py`.
+
 **An authored black `bg_color` on a colour set is LOAD-BEARING in Hybrid
 mode — do not remove it as "redundant" next to a black effect colour.**
 `storage/color_sets.json` has 30 such entries across 22 colour sets (Black
