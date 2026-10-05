@@ -50,7 +50,9 @@ longer than a 10-minute foreground limit.
 
 `--pass-drawn-fps N` is the Live view's gate and applies to every `:live` row:
 at least N animation frames a second in which the page really drew (59 = the
-display's 60 less measurement rounding).
+display's 60 less measurement rounding). It is not applied to `poor`, where
+frames can arrive further apart than smoothing should bridge; `--poor-drawn-fps`
+sets that link's own limit.
 
 Every limit has its own flag. `--pass-p95-ms` and `--pass-latency-ms` take one
 number or per-link values (`lan=50,ts-direct=56,ts-relay=69`).

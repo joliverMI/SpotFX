@@ -528,7 +528,9 @@ def gate(rows: list[dict], systems: list[str], args) -> list[str] | None:
             if "error" in r:
                 failed.append(f"{name} {r['error']}")
             else:
-                under(f"{name} drawn", r["drawn_fps"], args.pass_drawn_fps, " fps")
+                under(f"{name} drawn", r["drawn_fps"],
+                      args.poor_drawn_fps if r["profile"] == "poor" else args.pass_drawn_fps,
+                      " fps")
             if r["system"] != subject:
                 continue
         if r["system"] == subject + ":collapsed":
@@ -603,6 +605,9 @@ if __name__ == "__main__":
     ap.add_argument("--gpu", choices=("auto", "on", "off"), default="auto",
                     help="auto: the machine's GPU when a ':live' system is listed, "
                          "software rendering otherwise (as the stream gate was measured)")
+    ap.add_argument("--poor-drawn-fps", type=float, default=0,
+                    help="the drawn-fps limit on the 'poor' link, where frames can "
+                         "arrive further apart than any ease should bridge (0 = none)")
     ap.add_argument("--phone-cpu", type=float, default=4.0,
                     help="CPU slowdown for ':phone' rows (Chromium's own throttle)")
     ap.add_argument("--collapsed-kbps", type=float, default=0,

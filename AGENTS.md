@@ -2401,7 +2401,10 @@ statement. Five things:
   preallocated arrays and draws every point in ONE instanced WebGL2 call
   (MAX blend, so overlapping strip dots do not add up); 2D canvas fallback.
   Smoothing EASES each device from what is on screen to its newest frame
-  over its own measured arrival interval — one frame of delay, switchable.
+  over its measured arrival interval PLUS twice the arrivals' spread: an
+  ease of exactly one interval ends before a late frame lands and the
+  picture stands still (58.5 drawn fps on the relay profile, 59.8 after).
+  About one frame of delay on an even link; switchable.
 - **SCOPE**: the Live view asks the stream for `in_use` (every drawable
   virtual), the strip for `favorites`; the relay reads the extra virtuals
   only while a viewer asks (`device_preview.refresh_scope`). Pause is the

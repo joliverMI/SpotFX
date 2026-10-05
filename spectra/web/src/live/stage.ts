@@ -18,8 +18,16 @@
  * EASES from what is on screen to its newest frame over one frame interval
  * (its own measured arrival spacing): with even arrivals that is exactly
  * "interpolate between the last two frames, one frame behind", and an early
- * or late frame bends the ease instead of jumping. It costs about one frame
- * (33 ms) of delay and can be switched off (`setSmooth(false)`), which shows
+ * or late frame bends the ease instead of jumping.
+ *
+ * THE EASE IS AS LONG AS THE LINK IS UNEVEN: the interval plus twice the
+ * measured spread of the arrivals around it. An ease of exactly one interval
+ * finishes before a late frame lands, and the picture stands still until it
+ * does — measured on the relayed-Tailscale profile as 58.5 drawn frames a
+ * second instead of 60, each missing one a visible hitch. On an even link
+ * the spread is near zero and the cost stays about one frame (33 ms); on an
+ * uneven one it grows to what hiding the unevenness takes. It can be
+ * switched off (`setSmooth(false)`), which shows
  * each frame the moment it arrives.
  *
  * `draw` returns false, and touches nothing, when the picture has not
@@ -60,7 +68,7 @@ void main() {
 }`;
 
 const MIN_EASE_MS = 14;
-const MAX_EASE_MS = 120;
+const MAX_EASE_MS = 160;
 const SOLO_DIM = 40;      // of 256: what a fixture that is not soloed keeps
 
 interface GroupState {
@@ -72,7 +80,13 @@ interface GroupState {
   dur: number;
   settled: boolean;
   lastArrival: number;
+  /** Smoothed gap between arrivals, and smoothed distance of a gap from it. */
   interval: number;
+  spread: number;
+}
+
+function easeMs(group: GroupState): number {
+  return Math.max(MIN_EASE_MS, Math.min(MAX_EASE_MS, group.interval + 2 * group.spread));
 }
 
 export class LiveStage {
@@ -171,6 +185,7 @@ export class LiveStage {
         first: group.first, count: group.count, cells: group.cells,
         t0: 0, dur: 0, settled: true,
         lastArrival: old?.lastArrival ?? 0, interval: old?.interval ?? 33,
+        spread: old?.spread ?? 0,
       });
     }
     this.gain = null;
@@ -259,11 +274,13 @@ export class LiveStage {
       }
     }
     const gap = now - group.lastArrival;
-    if (group.lastArrival && gap < 400) group.interval += (gap - group.interval) * 0.2;
+    if (group.lastArrival && gap < 400) {
+      group.spread += (Math.abs(gap - group.interval) - group.spread) * 0.2;
+      group.interval += (gap - group.interval) * 0.2;
+    }
     group.lastArrival = now;
     group.t0 = now;
-    group.dur = this.smooth
-      ? Math.max(MIN_EASE_MS, Math.min(MAX_EASE_MS, group.interval)) : 0;
+    group.dur = this.smooth ? easeMs(group) : 0;
     group.settled = false;
   }
 
@@ -272,9 +289,11 @@ export class LiveStage {
     if (!this.smooth) return 0;
     let fastest = 0;
     this.groups.forEach((g) => {
-      if (g.lastArrival && (!fastest || g.interval < fastest)) fastest = g.interval;
+      if (!g.lastArrival) return;
+      const ease = easeMs(g);
+      if (!fastest || ease < fastest) fastest = ease;
     });
-    return Math.max(0, Math.min(MAX_EASE_MS, fastest));
+    return fastest;
   }
 
   /** Everything to black (the preview stopped: nothing here is live). */
