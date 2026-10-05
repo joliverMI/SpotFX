@@ -171,6 +171,15 @@ def _stub_release_bridge():
             base_url=f"https://{cfg['ip_address']}",
             transport=httpx.MockTransport(_bridge_handler(cfg["ip_address"])))
     release_fade._bridge_client = client
+    # fx/hue_scope.py ships closed (no allow-list file = no Hue write); this
+    # driver proves the TAKE's scope, so every one of its bulbs is allowed —
+    # tests/conftest.py's _permissive_hue_scope, for a fresh interpreter.
+    from fx import hue_scope
+
+    class _Every(dict):
+        def __contains__(self, key):
+            return True
+    hue_scope.load_allowed = lambda: _Every()
     release_fade.RELEASE_FADE_MS = 0
     release_fade.RELEASE_OFF_SETTLE_MS = 0
     release_fade.RELEASE_OFF_RETRY_SPACING_MS = 0

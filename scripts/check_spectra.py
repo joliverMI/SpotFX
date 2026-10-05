@@ -1202,6 +1202,18 @@ _orig_write_stagger = ambient.AMBIENT_WRITE_STAGGER_MS
 _orig_retry_spacing = ambient.AMBIENT_RETRY_SPACING_MS
 live_stack.host = _FakeHost({"hue-lights": hue_dev, "strip": _FakeWledDevice()})
 ambient._bridge_client = _mock_bridge_client(bridge_calls)
+# fx/hue_scope.py ships closed (no allow-list file = no Hue write); this
+# spec's mock bulbs are all Spectra's, so every one is allowed here.
+from fx import hue_scope as _hue_scope  # noqa: E402
+
+
+class _EveryLight(dict):
+    def __contains__(self, key):
+        return True
+
+
+_orig_hue_scope_reader = _hue_scope.load_allowed
+_hue_scope.load_allowed = lambda: _EveryLight()
 # Skip the real hold-confirmation pacing sleeps for the spec run (module
 # docstring: spaced-not-hammered pacing is proven properly in
 # tests/test_ambient.py, not here).
@@ -1263,6 +1275,7 @@ try:
 finally:
     live_stack.host = _orig_host
     ambient._bridge_client = _orig_bridge_client
+    _hue_scope.load_allowed = _orig_hue_scope_reader
     ambient.AMBIENT_TRANSITION_MS = _orig_transition_ms
     ambient.AMBIENT_CONFIRM_SETTLE_MS = _orig_confirm_settle
     ambient.AMBIENT_WRITE_STAGGER_MS = _orig_write_stagger

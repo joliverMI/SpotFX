@@ -2070,6 +2070,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         body: [
           'Some bulbs sit in Spectra\'s Hue entertainment areas but belong to the rest of the house — the Loft Ceiling Uplight and the three Ledge lights. A house mode never writes them: not held at its look, not switched off, not reported. They stay Home Assistant\'s outside music shows; during a music show they follow the show like every other bulb in the area.',
           'The list is part of house lighting\'s settings (hue_excluded_lights: the bridge\'s own bulb names). The Now panel shows them as "left to Home Assistant".',
+          'Underneath that, SPECTRA has a hard boundary for every Hue write it makes (house modes, the Hue Hold switch, a release): an explicit allow-list of its own bulbs — the living-room and dining bulbs only. A bulb not on it is never written, and SPECTRA never writes a Hue group, room or "all lights". During a music show the Hue entertainment stream still drives every bulb in its area, as before.',
         ],
       },
       {

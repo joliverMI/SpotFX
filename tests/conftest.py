@@ -286,6 +286,23 @@ def _isolated_light_show(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _permissive_hue_scope(tmp_path_factory, monkeypatch):
+    """fx/hue_scope.py's allow-list ships CLOSED (no file = no Hue write).
+    Suites that are not about the scope run as they did before it existed:
+    every light allowed, and the scope file pointed at a temp dir so no
+    test ever reads his. tests/test_hue_scope.py swaps the real reader back
+    (`hue_scope.read_allowed_file`)."""
+    from fx import hue_scope
+
+    class _Every(dict):
+        def __contains__(self, key):
+            return True
+    monkeypatch.setattr(hue_scope, "SCOPE_FILE",
+                        tmp_path_factory.mktemp("hue-scope") / "hue_scope.json")
+    monkeypatch.setattr(hue_scope, "load_allowed", lambda: _Every())
+
+
+@pytest.fixture(autouse=True)
 def _isolated_house(tmp_path_factory, monkeypatch):
     """House lighting's two stores (spectra/services/house_store.py), its
     in-memory runtime and the process-global frame-rate caps (fx/
