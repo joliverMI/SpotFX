@@ -219,6 +219,35 @@ async def _dispatch(name: str, tool_input: dict) -> dict:
         return {"status": "rejected", "reason": f"internal error running {name!r}: {exc}"}
 
 
+# ── THE MAIN-PROCESS DISPATCH (Light Show room proof D1, 2026-10-04) ────────
+#
+# With SPECTRA_SETTINGS_AGENT_BACKEND=cli, Sonic's tools run inside
+# settings_mcp_server.py — a stdio subprocess of the `claude` CLI, its own
+# interpreter. There `live_host.live.host` is None (every Light Show fire
+# refused "live stack is not up"), and in-process caches (show_store's arm
+# board) were written to disk only to be overwritten by the main process:
+# Sonic said "Armed" for an arm that never existed. So the subprocess does
+# not execute anything: it POSTs each call to POST
+# /api/settings-console/dispatch on THIS process, which runs the SAME
+# _dispatch() below. One authority, one process. A dispatch that cannot
+# reach this process is a stated rejection, never a local fallback.
+
+import secrets as _secrets
+
+#: Per-process secret the subprocess must present. It gates nothing a local
+#: caller could not already do through the ordinary routes; it exists so the
+#: dispatch route is not an anonymous RPC surface.
+DISPATCH_TOKEN = _secrets.token_urlsafe(32)
+DISPATCH_URL_ENV = "SPECTRA_SONIC_DISPATCH_URL"
+DISPATCH_TOKEN_ENV = "SPECTRA_SONIC_DISPATCH_TOKEN"
+
+
+def dispatch_url() -> str:
+    import os
+    port = int(os.getenv("SPECTRA_PORT", "8010"))
+    return f"http://127.0.0.1:{port}/spectra/api/settings-console/dispatch"
+
+
 def _trim(history: list[dict]) -> None:
     while len(history) > MAX_HISTORY_MESSAGES:
         history.pop(0)
