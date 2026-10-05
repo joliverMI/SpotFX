@@ -7,7 +7,13 @@ FIXTURES, and what Spectra then does to them:
              source (Roku, Switch, Blu-ray) is on: Spectra stops streaming to
              it (fx/device_output WITHHELD — no packet leaves) and tells the
              WLED to leave realtime once ({"live": false}), and keeps driving
-             the sconces on the same virtual. Back on return, in step.
+             the sconces on the same virtual. Back on return, in step. If the
+             CURRENT MODE's own plan also wants the strip powered off, the
+             lend is honoured only while Hyperion is confirmed actually
+             streaming to it (`_hyperion_streaming`/`_refresh_hyperion`) —
+             otherwise the strip is switched off like any other MODE OFF
+             fixture, never left lit on nobody's signal (found 2026-10-05,
+             the TV backlight incident).
   ON / OFF   a button (the crystal's paddle, the porch button) switches a
              WLED off: no stream, then {"on": false}. On: {"on": true} (and
              the owned brightness), THEN the stream — the order a powered-off
