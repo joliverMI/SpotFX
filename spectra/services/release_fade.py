@@ -160,7 +160,12 @@ async def _hue_get(client: httpx.AsyncClient, endpoint: str) -> dict:
 
 
 async def _hue_put(client: httpx.AsyncClient, endpoint: str, body: dict) -> None:
-    resp = await client.put(endpoint, json=body)
+    """Every Hue write this module makes goes through fx/hue_scope.py: ONE
+    allow-listed light, never a group, never a bulb that is Home
+    Assistant's (his loft and ledge lights sit in the same entertainment
+    area — 2026-10-05 this fade lit them at 1%)."""
+    from fx import hue_scope
+    resp = await hue_scope.put(client, endpoint, body)
     resp.raise_for_status()
 
 
@@ -203,21 +208,34 @@ async def _resolve_lights_named(client: httpx.AsyncClient, cfg: dict) -> list[tu
     return rids
 
 
+async def _resolve_scoped(client: httpx.AsyncClient, cfg: dict) -> list[tuple[str, str]]:
+    """The allow-listed (rid, name) pairs of this entertainment area —
+    every WRITE path reads this; only the read-only report
+    (read_hue_light_states) sees the whole area."""
+    from fx import hue_scope
+    return hue_scope.allowed_pairs(await _resolve_lights_named(client, cfg))
+
+
 async def _resolve_lights(client: httpx.AsyncClient, cfg: dict) -> list[str]:
     """Light resource ids only — the dim/off PUTs don't need names, only
     the read-back confirmation below (which reports failures by name)
     does."""
-    return [rid for rid, _name in await _resolve_lights_named(client, cfg)]
+    return [rid for rid, _name in await _resolve_scoped(client, cfg)]
 
 
-async def _apply_hue(dev: Any, body: dict) -> int:
-    """PUT `body` to every light this device's entertainment stream covers,
-    over one connection to its bridge. Best-effort per light — a rejected
-    write (raise_for_status) does not count toward the returned total."""
+async def _apply_hue(dev: Any, body: dict,
+                     only: Optional[Iterable[str]] = None) -> int:
+    """PUT `body` to every allow-listed light this device's entertainment
+    stream covers (or just `only`), over one connection to its bridge.
+    Best-effort per light — a rejected write (raise_for_status) does not
+    count toward the returned total."""
     cfg = dev.config
     count = 0
+    wanted = None if only is None else set(only)
     async with _bridge_client(cfg) as client:
         for rid in await _resolve_lights(client, cfg):
+            if wanted is not None and rid not in wanted:
+                continue
             try:
                 await _hue_put(client, f"/clip/v2/resource/light/{rid}", body)
                 count += 1
@@ -225,6 +243,31 @@ async def _apply_hue(dev: Any, body: dict) -> int:
                 logger.exception("release fade: failed to set light %s on %s",
                                  rid, cfg.get("ip_address"))
     return count
+
+
+async def _lit_and_unknown(dev: Any) -> tuple[list[str], list[str]]:
+    """(rids reading ON, rids that could not be read) among the
+    allow-listed lights, read AFTER the freeze. The fade's dim write
+    carries on:true — sent to a bulb that reads OFF it would light a dark
+    bulb, which is the opposite of letting go (2026-10-05: a Night-light
+    hold's bulbs, his loft and ledge lights). A bulb reading off is left
+    alone; one that could not be read gets the plain off write only."""
+    cfg = dev.config
+    lit: list[str] = []
+    unknown: list[str] = []
+    async with _bridge_client(cfg) as client:
+        for rid, name in await _resolve_scoped(client, cfg):
+            try:
+                state = (await _hue_get(
+                    client, f"/clip/v2/resource/light/{rid}"))["data"][0]
+            except Exception:
+                logger.warning("release fade: could not read %s (%s) — it gets "
+                               "the off write only, never the dim", name, rid)
+                unknown.append(rid)
+                continue
+            if (state.get("on") or {}).get("on"):
+                lit.append(rid)
+    return lit, unknown
 
 
 def _dim_payload(ramp_ms: int) -> dict:
@@ -307,28 +350,35 @@ async def fade_and_release_hue(
 
     faded: list[str] = []
     failed: list[str] = []
+    targets: dict[str, list[str]] = {}
     for did, dev in sorted(hue_devices.items()):
         try:
             await dev.set_frozen(True)   # must land before any REST write
-            await _apply_hue(dev, _dim_payload(RELEASE_FADE_MS))
+            lit, unknown = await _lit_and_unknown(dev)
+            if lit:
+                await _apply_hue(dev, _dim_payload(RELEASE_FADE_MS), only=lit)
         except Exception:
             logger.exception("release fade: failed to dim %s before release", did)
             failed.append(did)
             continue
+        targets[did] = lit + unknown
         faded.append(did)
 
-    if faded and RELEASE_FADE_MS > 0:
+    if any(targets.values()) and RELEASE_FADE_MS > 0:
         await asyncio.sleep(RELEASE_FADE_MS / 1000)
 
     still_on: list[str] = []
     for did in faded:
+        if not targets.get(did):
+            continue                    # nothing of ours was lit there
         try:
-            await _apply_hue(hue_devices[did], _OFF_PAYLOAD)
+            await _apply_hue(hue_devices[did], _OFF_PAYLOAD, only=targets[did])
         except Exception:
             logger.exception("release fade: failed to power off %s after fade", did)
             continue
         try:
-            still_on.extend(await _confirm_off(hue_devices[did].config))
+            still_on.extend(await _confirm_off(hue_devices[did].config,
+                                               only=targets[did]))
         except Exception:
             logger.exception("release fade: could not confirm %s powered off", did)
 
@@ -417,14 +467,17 @@ async def _read_still_on(client: httpx.AsyncClient,
     return still_on
 
 
-async def _confirm_off(cfg: dict) -> list[str]:
+async def _confirm_off(cfg: dict, only: Optional[Iterable[str]] = None) -> list[str]:
     """Read every light this bridge/entertainment-id covers back after the
     off write above (module docstring, "Off-write read-back confirmation")
     and return the friendly names of any still reading on. One paced
     retry (a snap PUT, no ramp) before giving up on a light — a stubborn
     bulb should not get another 1.5s to maybe land."""
     async with _bridge_client(cfg) as client:
-        named = await _resolve_lights_named(client, cfg)
+        named = await _resolve_scoped(client, cfg)
+        if only is not None:
+            wanted = set(only)
+            named = [(rid, name) for rid, name in named if rid in wanted]
         if not named:
             return []
         if RELEASE_OFF_SETTLE_MS > 0:

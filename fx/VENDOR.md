@@ -1492,3 +1492,14 @@ against that commit.
     breath count in different units). Proof:
     `tests/test_gradient_breathing.py` (the real pipeline, a numeric
     tween running throughout).
+50. new `hue_scope.py` (SpotFX-authored, not fork code): THE ONE HUE REST
+    WRITE AND ITS PER-BULB ALLOW-LIST (2026-10-05). Every Hue light write
+    either process makes — SPECTRA's ambient.py and release_fade.py,
+    spot-effects' legacy services/ambient_mode.py — goes through
+    `hue_scope.put`, which refuses any endpoint that is not exactly one
+    light (never grouped_light, a room, a zone or the v1 "all lights"
+    group) and any light not on `storage/spectra/hue_scope.json` (his
+    living-room and dining bulbs; `scripts/seed_hue_scope.py` writes it
+    from the bridges). A missing file allows nothing. The entertainment
+    STREAM (devices/hue.py) is not a REST light write and is unchanged.
+    Proof: `tests/test_hue_scope.py`.

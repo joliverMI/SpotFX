@@ -318,12 +318,20 @@ async def _apply_hue(cfg: dict, body: dict | None = None) -> int:
     leave stream lifecycle entirely to LedFX."""
     if body is None:
         body = _light_payload()
+    from fx import hue_scope
     try:
         async with _bridge_client(cfg) as client:
-            lights = await _resolve_lights(cfg)
+            # fx/hue_scope.py: only allow-listed bulbs, one at a time — never
+            # the Hue bulbs in the entertainment group that are Home
+            # Assistant's (his loft and ledge lights), never a group.
+            lights = [rid for rid in await _resolve_lights(cfg) if hue_scope.allowed(rid)]
             count = 0
             for rid in lights:
-                resp = await client.put(f"/clip/v2/resource/light/{rid}", json=body)
+                try:
+                    resp = await hue_scope.put(client, f"/clip/v2/resource/light/{rid}", body)
+                except hue_scope.HueScopeRefused as exc:
+                    logger.error("Ambient: %s", exc)
+                    continue
                 if resp.status_code < 400:
                     count += 1
             return count

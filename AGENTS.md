@@ -4007,6 +4007,26 @@ Five things:
   `test_house_fixtures.py`, `test_activation_report.py`,
   `test_house_seam_api.py`; help topic `house-energy`.
 
+**THE HUE SCOPE — ONE REST WRITE POINT, A PER-BULB ALLOW-LIST (2026-10-05,
+after a 02:31 proof take lit his Loft Ceiling Uplight and Ledge lights).**
+`fx/hue_scope.py` is the binding statement. Every Hue light write in either
+process goes through `hue_scope.put`: one light at a time, only ids on
+`storage/spectra/hue_scope.json` (his 13 living-room + dining bulbs;
+`scripts/seed_hue_scope.py` writes it, GET-only, from the bridges), never a
+group/room/zone/"all lights"; a missing file allows NOTHING. Resolvers filter
+with `allowed_pairs` so out-of-scope bulbs are never attempted or reported.
+`tests/conftest.py` makes it permissive for suites not about it (and so must
+any subprocess test driver — see `tests/scoped_take_driver.py`); a new Hue
+writer must use `hue_scope.put` (`tests/test_hue_scope.py` checks by AST).
+Two more rules from the same night: `ambient.room_available()` refuses a
+RELEASED record (a release moves the record first and keeps the stack up for
+seconds — the stored Hue Hold landed on all 17 bulbs after River's restore),
+and `ambient._hue_put` re-checks it per bulb so a hold in flight stops; the
+release fade dims only bulbs that READ ON (its dim write carries on:true) and
+sends an unreadable bulb the off write only. The DTLS entertainment stream
+(`fx/devices/hue.py`) still drives every bulb in its area during a music
+show — by the Admiral's design; it is not a REST write.
+
 **PHASE 4 — his starting content, and the CUTOVER SWITCH (2026-10-05).**
 `scripts/seed_house_lighting.py`'s docstring and `.claude/skills/
 house-scenes/SKILL.md` are the binding statements for the content (seven

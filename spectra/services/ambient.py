@@ -460,7 +460,16 @@ def room_available() -> bool:
         rec = light_ownership.load()
     except Exception:                                    # noqa: BLE001
         return True                     # unreadable: the stack's word stands
-    return rec.handover is None
+    # NOT MID-RELEASE, NOT AFTER IT (2026-10-05). A release moves the record
+    # to "released" FIRST and tears the stack down seconds later (the Hue
+    # fade, the WLED hand-back); in that window the stack still read "up",
+    # so the Hue Hold the house layer handed back to landed the stored
+    # ambient hold on every bulb AFTER River's restore. A released record
+    # refuses (during the release and after it), exactly as a handover in
+    # flight does. (A record naming spot-effects never coexists with
+    # SPECTRA's stack: a handover away tears the stack down BEFORE it
+    # commits, inside the handover window refused above.)
+    return rec.handover is None and rec.owner != light_ownership.RELEASED
 
 
 _lock: Optional[asyncio.Lock] = None
@@ -597,8 +606,25 @@ async def _hue_get(client: httpx.AsyncClient, endpoint: str) -> dict:
     return resp.json()
 
 
+class RoomNotOurs(AmbientCancelled):
+    """A write reached the bridge boundary while the room was mid-release,
+    mid-handover or released — refused, never sent. An AmbientCancelled, so
+    a transition in flight is abandoned whole (the gate records it as
+    superseded) instead of retrying bulb after bulb."""
+
+
 async def _hue_put(client: httpx.AsyncClient, endpoint: str, body: dict) -> None:
-    resp = await client.put(endpoint, json=body)
+    """EVERY Hue REST write this module makes. Two refusals before a byte
+    leaves: the room must still be SPECTRA's (a transition already in
+    flight when a release lands stops at its next bulb — 2026-10-05 it
+    finished lighting all seventeen after River's restore), and the target
+    must be ONE allow-listed light (fx/hue_scope.py — never his loft or
+    ledge bulbs, never a group)."""
+    if not room_available():
+        raise RoomNotOurs(f"refused a Hue write to {endpoint}: the room is "
+                          "being released, handed over, or no longer SPECTRA's")
+    from fx import hue_scope
+    resp = await hue_scope.put(client, endpoint, body)
     resp.raise_for_status()
 
 
@@ -610,9 +636,10 @@ async def _resolve_lights_named(client: httpx.AsyncClient, cfg: dict) -> list[tu
     directly over REST — cached per bridge, same as legacy (topology is
     stable). A light with no metadata.name (shouldn't happen on a real
     bridge) falls back to its resource id rather than dropping it."""
+    from fx import hue_scope
     cache_key = (cfg["ip_address"], cfg["entertainment_id"])
     if cache_key in _light_cache:
-        return _light_cache[cache_key]
+        return hue_scope.allowed_pairs(_light_cache[cache_key])
     try:
         ent = (await _hue_get(client, "/clip/v2/resource/entertainment"))["data"]
         ent_owner = {e["id"]: e["owner"]["rid"] for e in ent}
@@ -639,7 +666,10 @@ async def _resolve_lights_named(client: httpx.AsyncClient, cfg: dict) -> list[tu
                          cfg.get("ip_address"))
         return []
     _light_cache[cache_key] = rids
-    return rids
+    # SPECTRA's Hue scope (fx/hue_scope.py): a bulb in the entertainment
+    # area that is not on the allow-list is never written, held, verified
+    # or reported — it is Home Assistant's.
+    return hue_scope.allowed_pairs(rids)
 
 
 async def _resolve_lights(client: httpx.AsyncClient, cfg: dict) -> list[str]:
@@ -708,6 +738,8 @@ async def _apply_hue(dev: Any, body: dict,
             try:
                 await _hue_put(client, f"/clip/v2/resource/light/{rid}", body)
                 count += 1
+            except RoomNotOurs:
+                raise
             except Exception:
                 logger.exception("Ambient: failed to set light %s on %s",
                                  rid, cfg.get("ip_address"))
@@ -766,6 +798,8 @@ async def _write_and_confirm(client: httpx.AsyncClient, cfg: dict,
             _check(token)   # between lights only — never mid-PUT
             try:
                 await _hue_put(client, f"/clip/v2/resource/light/{rid}", write_body)
+            except RoomNotOurs:
+                raise
             except Exception:
                 logger.exception("Ambient: failed to write %s (%s) on %s",
                                  name, rid, cfg.get("ip_address"))
@@ -841,7 +875,7 @@ async def repair_stragglers(names: list[str], color: Optional[str]) -> dict:
     from spectra.services.live_host import live
 
     empty = {"repaired": [], "left_off": [], "unconfirmed": []}
-    if not names or not live.active or live.host is None:
+    if not names or not live.active or live.host is None or not room_available():
         return empty
     hue_devices = _hue_devices(live.host)
     if not hue_devices:
@@ -1165,7 +1199,9 @@ async def _reconcile_impl(enabled: bool, color: Optional[str],
                           snap: bool = False) -> dict:
     from spectra.services.live_host import live
 
-    if not live.active or live.host is None:
+    if not live.active or live.host is None or not room_available():
+        # (room_available: a transition queued while a release or handover
+        # landed finds the room gone — 2026-10-05.)
         logger.warning("Ambient: SPECTRA does not own the live stack — "
                        "state saved, no lights touched")
         return {"status": "dark"}
@@ -1377,7 +1413,7 @@ async def _reconcile_looks_impl(looks: tuple, ramp_ms: Optional[int],
                                 token: Optional[CancelToken], snap: bool) -> dict:
     from spectra.services.live_host import live
 
-    if not live.active or live.host is None:
+    if not live.active or live.host is None or not room_available():
         logger.warning("Hue Hold (house): SPECTRA does not own the live stack — "
                        "no lights touched")
         return {"status": "dark"}
