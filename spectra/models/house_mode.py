@@ -49,6 +49,11 @@ KELVIN_MAX = 6500
 #: "*" in a Hue look means every Hue area the room drives.
 EVERY_AREA = "*"
 
+#: The Hue directive's internal look kind for one bulb a house mode leaves
+#: alone (HouseSettings.hue_excluded_lights); its area is "<area>/<bulb>".
+#: Never authored on a mode — house.hue_directive adds it.
+SKIP_LOOK = "skip"
+
 
 def _id() -> str:
     return uuid.uuid4().hex[:12]
@@ -321,8 +326,25 @@ class HouseSettings(BaseModel):
                      switch where the mode says, re-asserting a drift it
                      reads back (house_fixtures.py). Off = leave both alone.
     owned_brightness the master brightness Spectra holds (0-255). 255 makes
-                     the per-fixture Levels the only dimmer."""
+                     the per-fixture Levels the only dimmer.
+
+    PHASE 4:
+    enabled          THE CUTOVER SWITCH. Off (the default) = house lighting
+                     applies NOTHING: Home Assistant's lighting_mode is still
+                     recorded and mapped (the status says which mode it would
+                     be), but no look, level, Hue hold, brightness or lend
+                     reaches a fixture, so a music take runs exactly as it did
+                     before house lighting existed. On = a set mode drives the
+                     room whenever SPECTRA holds it. Flipped on purpose — the
+                     House tab's power button, or PUT /api/house/settings.
+    hue_excluded_lights  Hue BULB names (his bridge's own names, any case)
+                     a house mode never writes — not held, not switched off,
+                     not reported. The bulbs in Spectra's entertainment areas
+                     that stay Home Assistant's outside music shows (his
+                     Loft Ceiling Uplight and the three Ledge lights)."""
     model_config = ConfigDict(extra="ignore")
+    enabled: bool = False
+    hue_excluded_lights: list[str] = Field(default_factory=list)
     tv_strips: list[str] = Field(default_factory=lambda: ["tv-backlight"])
     voice_fixtures: list[str] = Field(default_factory=lambda: [
         "crystal", "sconce-kitchen-left", "sconce-kitchen-right"])
@@ -332,6 +354,16 @@ class HouseSettings(BaseModel):
     owned_brightness: int = Field(default=255, ge=1, le=255)
     #: phase 3: energy and network (HouseEnergy above)
     energy: HouseEnergy = Field(default_factory=HouseEnergy)
+
+    @field_validator("hue_excluded_lights")
+    @classmethod
+    def _light_names(cls, v: list[str]) -> list[str]:
+        out: list[str] = []
+        for name in v or []:
+            name = (name or "").strip()
+            if name and name.lower() not in {x.lower() for x in out}:
+                out.append(name)
+        return out
 
     @field_validator("voice_looks")
     @classmethod

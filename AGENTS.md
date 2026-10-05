@@ -3999,6 +3999,41 @@ Five things:
   `test_house_fixtures.py`, `test_activation_report.py`,
   `test_house_seam_api.py`; help topic `house-energy`.
 
+**PHASE 4 — his starting content, and the CUTOVER SWITCH (2026-10-05).**
+`scripts/seed_house_lighting.py`'s docstring and `.claude/skills/
+house-scenes/SKILL.md` are the binding statements for the content (seven
+modes, two house scenes, Calm - Evening, Night Light, every HA word mapped).
+Four things:
+
+- **`HouseSettings.enabled` SHIPS OFF and `house.gate()` answers ("off",
+  ...) first.** Once modes exist HA's 5-minute POST maps to one, so without
+  it the next music take would run under a mode (Hue held, master brightness
+  owned, Away silencing music) before River cut a writer over. Off = recorded
+  and mapped, nothing applied; the heartbeat reads `idle` with
+  `house_enabled: false`. `tests/conftest.py` writes it ON for every test (the
+  suites prove a mode acting); `tests/test_house_phase4.py` proves the OFF
+  default.
+- **A second group over the SAME sets is a trap**: a set fired by its own id
+  wears every enclosing group's overrides, alphabetically-last winning, so
+  "Calm - Evening" over Calm's members would turn Standard and every music
+  show red. Evening is a group of COPIES. Same reason the new sets are
+  `scene_v2_opt_out` and the house scenes have NO sequencer entry (which is
+  all that keeps the music engine from drawing a scene).
+- **Hue bulbs a mode leaves alone** (`hue_excluded_lights`) ride the
+  directive as `"skip"` looks, area `"*/<bulb>"` (`ambient.skipped_lights`) —
+  never held, switched off or reported. A new consumer of house looks must
+  ignore `skip` the way `look_for` does.
+- **An ordinary take pre-freezes the Hue areas the mode will hold**
+  (`house.take_frozen_areas` → `fx/hue_freeze` in `SpectraSide.activate`,
+  added to a restart's names; `house_restart.after_take` unfreezes any the
+  gate does not end up holding). Before, a take streamed the scene to every
+  bulb in the area for the seconds before the gate froze it.
+- **The house journey travels opted-out sets the mode names**
+  (`drift_conductor._destination_pool`); before, every Calm member's opt-out
+  held Standard's walk forever. The breathing effect (`gradient`) is
+  registered with `no_background_color` and its breath survives a glide
+  (VENDOR #49, `.claude/skills/gradient-effect`).
+
 ## The room LIGHT-FIELD map (`/rooms`) + room effects (`/room-effects`)
 
 **THE ONE IDEA, his own sentence, and the thing this whole area exists to

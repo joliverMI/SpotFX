@@ -301,10 +301,15 @@ def _effect_class(effect_type: str):
         mod = importlib.import_module(f"fx.effects.{module_name}")
     except ImportError:
         return None
-    for _, cls in inspect.getmembers(mod, inspect.isclass):
-        if cls.__module__ == mod.__name__ and hasattr(cls, "CONFIG_SCHEMA"):
-            return cls
-    return None
+    candidates = [cls for _, cls in inspect.getmembers(mod, inspect.isclass)
+                  if cls.__module__ == mod.__name__ and hasattr(cls, "CONFIG_SCHEMA")]
+    # The REGISTERED effect (the class naming itself) wins over a mixin
+    # defined in the same module: gradient.py defines GradientEffect (no
+    # NAME, alphabetically first) beside TemporalGradientEffect — the
+    # effect the registry actually builds, whose schema carries the
+    # breathing params.
+    named = [cls for cls in candidates if "NAME" in cls.__dict__]
+    return (named or candidates or [None])[0]
 
 
 def effect_dimension(effect_type: str) -> Optional[str]:

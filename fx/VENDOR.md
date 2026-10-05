@@ -1481,3 +1481,14 @@ against that commit.
     statements plus a counter. Proof: `tests/test_send_on_change_landing.py`
     (real FxHost, frames counted at the transport, a red control with the
     comparison removed).
+49. `effects/modulate.py`: THE BREATH KEEPS ITS PHASE THROUGH A GLIDE.
+    `ModulateEffect.config_updated` reset the breathing counter, and
+    `Effect._apply_config` runs every base's `config_updated` on EVERY
+    write and on EVERY frame of a numeric/colour param tween. So a
+    breathing `gradient` (house lighting's singles, the porch rail and the
+    dining table) froze at one level for as long as any glide ran — a
+    house mode's 90 s clock change, a colour landing, a motion hook. The
+    counter is now reset only when `modulation_effect` changes (sine and
+    breath count in different units). Proof:
+    `tests/test_gradient_breathing.py` (the real pipeline, a numeric
+    tween running throughout).

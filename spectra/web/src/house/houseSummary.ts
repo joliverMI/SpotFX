@@ -28,6 +28,7 @@ export function chipLine(l: LightingStatus | undefined): { text: string; tone: C
   const who = l.source === 'ha' ? ' · HA' : l.manual ? ' · manual' : '';
   const base = `Mode: ${l.mode.name}${who}`;
   const title = `${l.mode.name}, set by ${sourceWord(l.source)}. ${phaseLine(l)}`;
+  if (l.enabled === false) return { text: `${base} · off`, tone: 'off', title };
   switch (l.phase) {
     case 'resting': return { text: base, tone: 'on', title };
     case 'music': return { text: `${base} · ♪`, tone: 'music', title };
@@ -39,6 +40,11 @@ export function chipLine(l: LightingStatus | undefined): { text: string; tone: C
 /** One plain sentence: what the house layer is doing right now. */
 export function phaseLine(l: LightingStatus | undefined): string {
   if (!l) return '';
+  if (l.enabled === false) {
+    return l.mode
+      ? `House lighting is switched off — ${l.mode.name} is recorded but nothing is applied; the room behaves as it always has.`
+      : 'House lighting is switched off — the room behaves as it always has.';
+  }
   if (!l.mode) return 'No house mode is set — the room behaves as it always has.';
   switch (l.phase) {
     case 'resting':
@@ -83,6 +89,21 @@ export function kelvinToHex(kelvin: number): string {
     : 288.1221695283 * Math.pow(t - 60, -0.0755148492);
   const b = t >= 66 ? 255 : t <= 19 ? 0 : 138.5177312231 * Math.log(t - 10) - 305.0447927307;
   return `#${[r, g, b].map((v) => clamp(v).toString(16).padStart(2, '0')).join('')}`;
+}
+
+type HueLookWire = { area: string; look: string; mirek: number | null; color: string | null; brightness: number };
+
+/** The Now panel's Hue line. A "skip" look (area "every-area/bulb") is a bulb the house
+ * leaves alone — named as Home Assistant's, never as a look. */
+export function hueLookLine(looks: HueLookWire[], areaName: (id: string) => string): string {
+  const held = looks.filter((l) => l.look !== 'skip').map((l) => {
+    const what = l.look === 'hold'
+      ? (l.mirek ? `${Math.round(1e6 / l.mirek)} K` : l.color ?? '') + ` ${Math.round(l.brightness)}%`
+      : l.look;
+    return `${areaName(l.area)} ${what}`.trim();
+  });
+  const left = looks.filter((l) => l.look === 'skip').map((l) => l.area.split('/').slice(1).join('/'));
+  return held.join(' · ') + (left.length ? ` · left to Home Assistant: ${left.join(', ')}` : '');
 }
 
 export const MUSIC_WORDS: Record<string, string> = {

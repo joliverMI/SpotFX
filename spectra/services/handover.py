@@ -198,6 +198,11 @@ async def _best_effort(step, label: str) -> None:
         logger.exception("handover: best-effort %s failed", label)
 
 
+#: Fire-and-forget tasks a take starts after its commit, referenced so the
+#: loop cannot drop them half-run.
+_BACKGROUND: set = set()
+
+
 async def run_handover(
     to_world: str,
     sides: dict[str, WriterSide],
@@ -384,6 +389,16 @@ async def run_handover(
         except Exception:
             logger.exception("handover: could not start the ambient take-back "
                              "reconcile (the take-back itself is committed)")
+        try:
+            # A Hue area that came up frozen for a house mode and that the
+            # gate does NOT end up holding streams again (one-shot).
+            from spectra.services import house_restart
+            task = asyncio.get_running_loop().create_task(
+                house_restart.after_take(), name="house-after-take")
+            _BACKGROUND.add(task)
+            task.add_done_callback(_BACKGROUND.discard)
+        except Exception:
+            logger.exception("handover: could not schedule the after-take Hue check")
     return record
 
 
@@ -537,6 +552,24 @@ class SpectraSide:
         # the previous stack left dark is no longer a fact about this one.
         activation_report.clear()
         grant = light_ownership.mint_activation_grant(light_ownership.SPECTRA)
+        if not self.quiet:
+            # HOUSE LIGHTING (phase 4): a Hue area the set mode is about to
+            # hold comes up FROZEN (fx/hue_freeze.py, VENDOR #46) instead of
+            # streaming the scene until the Hue Hold gate re-freezes it — a
+            # stream lights every bulb in the area, including the ones a
+            # mode leaves alone. Added to (never replacing) a restart's own
+            # names; house_restart.after_take unfreezes any nothing holds.
+            try:
+                from fx import hue_freeze
+                from spectra.services import house
+                areas = house.take_frozen_areas(self.config_dir)
+                if areas:
+                    hue_freeze.set_pending(hue_freeze.pending() | set(areas))
+                    logger.warning("handover: house mode holds %s — they come "
+                                   "up frozen (never streamed)", areas)
+            except Exception:
+                logger.exception("handover: could not name the Hue areas to "
+                                 "come up frozen (the take goes ahead)")
         await live.activate(grant, self.config_dir,
                             open_audio=self.open_audio,
                             audio_source_factory=self.audio_source_factory,
