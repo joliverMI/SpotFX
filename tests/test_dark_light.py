@@ -272,10 +272,60 @@ def test_reconcile_light_then_default_does_not_replay_stale_predark_snapshot(tmp
 
         _set_playing(monkeypatch, False)
         result = await dark_light.reconcile("default", [], [])
-        assert result["restored"] == []
         assert "repaint_skipped" not in result
-        # nothing to restore — Light's own write is left standing
+        # The stale pre-DARK still frame is not replayed, but what LIGHT
+        # painted over is put back (Light Show room proof D3): only the two
+        # background fields, onto the current live config.
+        assert result["restored"] == [VID]
+        assert virtual.active_effect.config["background_color"] == "#ff0000"
+
+        await host.shutdown()
+
+    _run(main())
+
+
+def test_leaving_light_puts_back_the_background_light_painted_over(tmp_path, monkeypatch):
+    """D3 (Light Show room proof, 2026-10-04): End show restored the
+    display-mode SETTING to Hybrid, but the TV carrier kept Light's
+    #cd78db @ 0.3. Hybrid -> Light -> Hybrid must hand the background back,
+    even while music plays (two fields onto the live config, never a stale
+    frame), and must leave a background a scene fire repainted since."""
+    from spectra.services import dark_light
+
+    _own(monkeypatch, tmp_path, "spectra")
+    _categories(monkeypatch, tmp_path, {
+        "c1": {"id": "c1", "name": "Main", "parent_id": None,
+               "virtuals": [VID], "effects": ["concentric"]}})
+
+    async def main():
+        host = await headless.start_headless_host(str(tmp_path / "host"))
+        facade.set_host(host)
+        virtual = host.virtuals.get(VID)
+        headless.attach_effect(host, virtual, "concentric",
+                               {"background_color": "#00ff00",
+                                "background_brightness": 0.7})
+        _set_playing(monkeypatch, True)
+
+        await dark_light.reconcile("light", [], [], LIGHT_BG, LIGHT_BRIGHTNESS)
         assert virtual.active_effect.config["background_color"] == LIGHT_BG
+        # a second Light write must not make Light's paint the "before"
+        await dark_light.reconcile("light", [], [], "#cd78db", LIGHT_BRIGHTNESS)
+        result = await dark_light.reconcile("default", [], [])
+        cfg = virtual.active_effect.config
+        assert cfg["background_color"] == "#00ff00", (
+            "Light's paint stayed after leaving Light")
+        assert cfg["background_brightness"] == pytest.approx(0.7)
+        assert result["restored"] == [VID]
+
+        # a scene repainted the background while Light was on: it wins
+        await dark_light.reconcile("light", [], [], LIGHT_BG, LIGHT_BRIGHTNESS)
+        from spectra.services import fx_seam
+        await fx_seam.apply_writes([{"virtual_id": VID,
+                                     "effect_type": "concentric",
+                                     "config": {"background_color": "#0000ff",
+                                                "background_brightness": 0.5}}])
+        await dark_light.reconcile("default", [], [])
+        assert virtual.active_effect.config["background_color"] == "#0000ff"
 
         await host.shutdown()
 

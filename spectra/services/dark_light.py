@@ -207,6 +207,91 @@ def _clear_snapshot() -> None:
         pass
 
 
+# ── THE PRE-LIGHT BACKGROUND (Light Show room proof D3, 2026-10-04) ─────────
+#
+# Light paints its forced background onto each virtual's live effect, and
+# the pre-dark snapshot above never covered it — so leaving Light restored
+# the SETTING and left the paint (End show reported "display mode
+# restored" while the TV carrier still held #cd78db @ 0.3). Before the first
+# Light write we remember each virtual's own background_color/
+# background_brightness, and on the way back to "default" we put those two
+# fields back onto the CURRENT live config — only where the background is
+# still exactly what Light wrote (a scene fire since then authored its own,
+# and that one wins). Two fields, never the whole config, so the restore is
+# never a stale still frame and needs no playback gate.
+
+_BG_KEYS = ("background_color", "background_brightness")
+_BG_FALLBACK = {"background_color": "#000000", "background_brightness": 1.0}
+
+
+def _light_snapshot_path():
+    p = config.DARK_LIGHT_SNAPSHOT_FILE
+    return p.with_name(p.stem + "_pre_light.json")
+
+
+def _load_light_snapshot() -> dict:
+    path = _light_snapshot_path()
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        logger.exception("dark/light: unreadable pre-light snapshot %s", path)
+        return {}
+
+
+def _save_light_snapshot(snap: dict) -> None:
+    path = _light_snapshot_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(snap, indent=2), encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def _clear_light_snapshot() -> None:
+    try:
+        _light_snapshot_path().unlink()
+    except FileNotFoundError:
+        pass
+
+
+async def _restore_pre_light(virtual_ids: list[str], shielded: set[str]) -> list[str]:
+    snap = _load_light_snapshot()
+    if not snap:
+        return []
+    try:
+        live = await fx_seam.get_virtuals()
+    except Exception:
+        logger.exception("dark/light: could not read live virtuals to undo Light")
+        return []
+    writes = []
+    for vid, entry in snap.items():
+        if vid not in virtual_ids or vid in shielded:
+            continue
+        effect = (live.get(vid) or {}).get("effect") or {}
+        if not effect.get("type"):
+            continue
+        cfg = dict(effect.get("config") or {})
+        painted = entry.get("painted") or {}
+        if any(cfg.get(k) != painted.get(k) for k in _BG_KEYS):
+            continue            # repainted since Light — that paint wins
+        before = entry.get("before") or {}
+        for k in _BG_KEYS:
+            cfg[k] = before.get(k, _BG_FALLBACK[k])
+        writes.append({"virtual_id": vid, "effect_type": effect["type"],
+                       "config": cfg})
+    restored: list[str] = []
+    if writes:
+        try:
+            await fx_seam.apply_writes(writes, transition_ms=0)
+            restored = [w["virtual_id"] for w in writes]
+        except Exception:
+            logger.exception("dark/light: putting back the pre-Light background failed")
+            return []
+    _clear_light_snapshot()
+    return restored
+
+
 def _shielded_set(shield_categories: list[str], shield_virtuals: list[str]) -> set[str]:
     from fx import device_model
     out = {str(v) for v in shield_virtuals}
@@ -296,6 +381,7 @@ async def _reconcile_impl(mode: str, shield_categories: list[str],
             logger.exception("dark/light: could not read live virtuals for the light write")
             live = {}
         writes = []
+        pre_light = _load_light_snapshot()
         for vid in virtual_ids:
             if vid in shielded:
                 continue
@@ -304,10 +390,22 @@ async def _reconcile_impl(mode: str, shield_categories: list[str],
             if not effect_type:
                 continue
             cfg = dict(effect.get("config") or {})
+            # Remember what was there BEFORE the first Light paint (a second
+            # Light write keeps the original "before", never Light's own).
+            # Coming from Dark, the live config is CLAMPED black — the true
+            # "before" is the pre-dark snapshot's.
+            entry = pre_light.get(vid)
+            source = ((snapshot.get(vid) or {}).get("config")
+                      if snapshot.get(vid) else cfg)
+            before = (entry or {}).get("before") if entry else \
+                {k: source[k] for k in _BG_KEYS if k in source}
             cfg["background_color"] = light_bg_color
             cfg["background_brightness"] = light_bg_brightness
+            pre_light[vid] = {"before": before,
+                              "painted": {k: cfg[k] for k in _BG_KEYS}}
             writes.append({"virtual_id": vid, "effect_type": effect_type, "config": cfg})
         if writes:
+            _save_light_snapshot(pre_light)
             try:
                 await fx_seam.apply_writes(writes, transition_ms=0)
                 lit = [w["virtual_id"] for w in writes]
@@ -342,6 +440,9 @@ async def _reconcile_impl(mode: str, shield_categories: list[str],
                     except Exception:
                         logger.exception("dark/light: repaint after unlock failed")
             _clear_snapshot()
+        # AFTER the pre-dark replay, which may itself carry Light's paint.
+        restored_pre_light = await _restore_pre_light(virtual_ids, shielded)
+        restored = sorted(set(restored) | set(restored_pre_light))
 
     # Verify at the bridge — read the ACTUAL resulting state back rather
     # than trusting the POSTs above landed.
