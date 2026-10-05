@@ -9,7 +9,12 @@
                                        device_preview.py's module docstring
                                        for why "genuinely")
   POST /api/device-preview/resume    — reopens it
-  WS   /api/device-preview/ws        — live frames + status pushes; a fresh
+  WS   /api/device-preview/ws        — live frames + status pushes. A viewer
+                                       that sends {"type": "hello",
+                                       "protocol": 2} gets the binary,
+                                       ack-paced stream (services/
+                                       preview_stream.py); one that says
+                                       nothing gets the old JSON frames. A fresh
                                        connection gets one status message
                                        immediately so a newly-opened tab
                                        doesn't wait for the next mutation
@@ -79,10 +84,11 @@ async def device_preview_ws(ws: WebSocket):
     try:
         await ws.send_json({"type": "device_preview_status", **device_preview.relay.status()})
         while True:
-            await ws.receive_text()
+            await device_preview.handle_client_message(ws, await ws.receive_text())
     except WebSocketDisconnect:
         pass
     finally:
         device_preview.preview_ws_manager.disconnect(ws)
         await device_preview.frame_hub.disconnect(ws)
+        await device_preview.stream_hub.disconnect(ws)
         device_preview.relay.viewers_changed()

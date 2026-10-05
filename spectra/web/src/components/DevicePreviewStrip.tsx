@@ -132,15 +132,27 @@
  * with his own explicit ask three months earlier ("I don't see any Matrix
  * for The Matrix previews" — the phone-matrix fix above): downsampling to
  * ~81 points would make Expand show a blur instead of his actual matrix
- * shape. Named incompatibility, not a silent omission. */
+ * shape. Named incompatibility, not a silent omission.
+ *
+ * THE STRIP ASKS ONLY FOR WHAT IT DRAWS (2026-10-05, the protocol-2 stream —
+ * api/devicePreviewWs.ts). Collapsed, it subscribes at "summary" and each
+ * frame is the device's mean colour, three bytes, computed on the server
+ * over the device's REAL cells; expanded, it subscribes at "full". Before
+ * this the server sent every viewer every favourite's whole frame (10.8 kB
+ * for the crystal) on every page, to paint one swatch. A full frame carries
+ * real cells only: `cellIndex` says where each one sits, and the rest of the
+ * rectangle stays black — the crystal draws as the hexagon it is. One
+ * ImageData per canvas is kept and rewritten; nothing is allocated per
+ * frame. */
 import { useEffect, useRef, useState } from 'react';
 import {
-  averageRgb, decodePixels, onDevicePreviewFrame, onDevicePreviewStatus,
-  onDevicePreviewTabHiddenPause,
+  frameColor, onDevicePreviewFrame, onDevicePreviewStatus,
+  onDevicePreviewTabHiddenPause, setDevicePreviewLevel,
 } from '../api/devicePreviewWs';
+import type { PreviewFrame } from '../api/devicePreviewWs';
 import HelpLink from '../help/HelpLink';
 import { pauseDevicePreview, resumeDevicePreview, useDevicePreviewFavorites } from '../queries';
-import type { DevicePreviewFrame, DevicePreviewStatus } from '../types';
+import type { DevicePreviewStatus } from '../types';
 import FavoritesPicker from './FavoritesPicker';
 import { useToast } from './Toast';
 
@@ -159,7 +171,9 @@ export default function DevicePreviewStrip() {
 
   const canvasRefs = useRef<Record<string, HTMLCanvasElement | null>>({});
   const swatchRefs = useRef<Record<string, HTMLSpanElement | null>>({});
-  const latestFrames = useRef<Record<string, DevicePreviewFrame>>({});
+  const latestFrames = useRef<Record<string, PreviewFrame>>({});
+  const imageCache = useRef<Record<string, ImageData>>({});
+  const maskedCache = useRef<Record<string, boolean>>({});
   const liveRef = useRef(false);
 
   useEffect(() => onDevicePreviewStatus(setStatus), []);
@@ -169,9 +183,10 @@ export default function DevicePreviewStrip() {
    * costs a re-render (see the module docstring's CANVAS PIXEL PAINT
    * section). Each reads only ref containers, so it stays correct even
    * though it's captured once by the frame-subscription effect below. */
-  const paintCanvas = (id: string, triples: [number, number, number][], rows: number, cols: number) => {
+  const paintCanvas = (id: string, frame: PreviewFrame) => {
     const canvas = canvasRefs.current[id];
     if (!canvas) return;
+    const { rows, cols, rgb, cellIndex } = frame;
     if (canvas.width !== cols || canvas.height !== rows) {
       canvas.width = cols;
       canvas.height = rows;
@@ -179,15 +194,28 @@ export default function DevicePreviewStrip() {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     ctx.imageSmoothingEnabled = false;
-    const imageData = ctx.createImageData(cols, rows);
-    for (let i = 0; i < triples.length; i++) {
-      const [r, g, b] = triples[i];
-      imageData.data[i * 4] = r;
-      imageData.data[i * 4 + 1] = g;
-      imageData.data[i * 4 + 2] = b;
-      imageData.data[i * 4 + 3] = 255;
+    let image = imageCache.current[id];
+    // A masked frame after a whole-rectangle one (the first old-format frame
+    // can land before the hello takes effect) starts from black again, or
+    // the cells that are not real light would keep that stale picture.
+    const masked = cellIndex !== null;
+    if (!image || image.width !== cols || image.height !== rows
+        || maskedCache.current[id] !== masked) {
+      image = ctx.createImageData(cols, rows);
+      for (let i = 3; i < image.data.length; i += 4) image.data[i] = 255;
+      imageCache.current[id] = image;
+      maskedCache.current[id] = masked;
     }
-    ctx.putImageData(imageData, 0, 0);
+    const out = image.data;
+    const cells = Math.min(Math.floor(rgb.length / 3),
+      cellIndex ? cellIndex.length : rows * cols);
+    for (let i = 0; i < cells; i++) {
+      const o = (cellIndex ? cellIndex[i] : i) * 4;
+      out[o] = rgb[i * 3];
+      out[o + 1] = rgb[i * 3 + 1];
+      out[o + 2] = rgb[i * 3 + 2];
+    }
+    ctx.putImageData(image, 0, 0);
   };
   const blankCanvas = (id: string) => {
     const canvas = canvasRefs.current[id];
@@ -201,12 +229,10 @@ export default function DevicePreviewStrip() {
     const el = swatchRefs.current[id];
     if (el) el.style.backgroundColor = color;
   };
-  const paintDevice = (id: string, frame: DevicePreviewFrame) => {
+  const paintDevice = (id: string, frame: PreviewFrame) => {
     if (!liveRef.current) return;
-    const triples = decodePixels(frame.pixels);
-    const [rows, cols] = frame.shape;
-    paintCanvas(id, triples, rows, cols);
-    paintSwatch(id, averageRgb(triples));
+    if (frame.kind === 'full') paintCanvas(id, frame);
+    if (swatchRefs.current[id]) paintSwatch(id, frameColor(frame));
   };
 
   // The single per-frame hot path: no setState, so a frame never triggers a
@@ -214,15 +240,22 @@ export default function DevicePreviewStrip() {
   // because one of them got a new frame — the exact cross-device
   // amplification the old shared `frames` state object caused).
   useEffect(() => onDevicePreviewFrame((frame) => {
-    latestFrames.current[frame.vis_id] = frame;
-    const [rows, cols] = frame.shape;
+    const id = frame.visId;
+    latestFrames.current[id] = frame;
+    const { rows, cols } = frame;
     setShapes((prev) => {
-      const existing = prev[frame.vis_id];
+      const existing = prev[id];
       if (existing && existing[0] === rows && existing[1] === cols) return prev;
-      return { ...prev, [frame.vis_id]: [rows, cols] };
+      return { ...prev, [id]: [rows, cols] };
     });
-    paintDevice(frame.vis_id, frame);
+    paintDevice(id, frame);
   }), []);
+
+  // Full frames only while this strip draws them (module docstring).
+  useEffect(() => {
+    setDevicePreviewLevel('top-strip', expanded ? 'full' : 'summary');
+    return () => setDevicePreviewLevel('top-strip', null);
+  }, [expanded]);
 
   const toggleExpanded = () => setExpanded((prev) => {
     const next = !prev;
@@ -301,7 +334,7 @@ export default function DevicePreviewStrip() {
                       canvasRefs.current[id] = el;
                       if (!el) return;
                       const frame = latestFrames.current[id];
-                      if (frame && liveRef.current) paintDevice(id, frame);
+                      if (frame && frame.kind === 'full' && liveRef.current) paintDevice(id, frame);
                       else blankCanvas(id);
                     }}
                     className={isMatrix ? 'device-preview-matrix' : 'device-preview-pixel-strip'}
@@ -314,7 +347,7 @@ export default function DevicePreviewStrip() {
                       if (!el) return;
                       const frame = latestFrames.current[id];
                       if (frame && liveRef.current) {
-                        paintSwatch(id, averageRgb(decodePixels(frame.pixels)));
+                        paintSwatch(id, frameColor(frame));
                       } else {
                         paintSwatch(id, DARK_PLACEHOLDER);
                       }
