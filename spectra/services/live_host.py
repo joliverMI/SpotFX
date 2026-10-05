@@ -273,6 +273,10 @@ class LiveLights:
         the host holds" instead (spectra/services/ambient.py)."""
         if self.scope is None or self.host is None:
             return None
+        fn = getattr(self.host, "scope_device_ids", None)
+        if fn is not None and getattr(self.host, "scope_virtual_ids",
+                                      None) is not None:
+            return fn()          # ONE definition: fx/host.py (VENDOR #42)
         out: set[str] = set()
         for vid in self.scope:
             v = self.host.virtuals.get(vid)

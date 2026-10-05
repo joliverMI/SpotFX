@@ -54,11 +54,14 @@ _slots = asyncio.Semaphore(MAX_IN_FLIGHT)
 # to notice a virtual that's switching types unusually often.
 _type_switches_landed = 0
 _last_type_switch: dict | None = None
+#: Scene writes skipped because their virtual lies outside a scoped take.
+_out_of_scope_skipped = 0
 
 
 def stats() -> dict:
     return {"type_switches_landed": _type_switches_landed,
-            "last_type_switch": _last_type_switch}
+            "last_type_switch": _last_type_switch,
+            "out_of_scope_skipped": _out_of_scope_skipped}
 
 
 class HandoverInProgress(RuntimeError):
@@ -301,8 +304,20 @@ def _carry_forward_brightness(config: dict, current_effect: dict | None) -> dict
 
 
 async def _apply_via_facade(writes: list[dict], transition_ms: int = 0) -> None:
-    global _type_switches_landed, _last_type_switch
+    global _type_switches_landed, _last_type_switch, _out_of_scope_skipped
     from fx import facade
+    # THE TAKE SCOPE IS A WRITE BOUNDARY (fx/VENDOR.md #42): a scene names
+    # every virtual it targets, and during a scoped take most of them were
+    # held back. Writing one would activate it (the facade now refuses), so
+    # they are SKIPPED here — the in-scope writes still land, and the scene
+    # fire is not failed over fixtures this take was never handed.
+    skipped = [w["virtual_id"] for w in writes
+               if facade.out_of_scope(w["virtual_id"])]
+    if skipped:
+        _out_of_scope_skipped += len(skipped)
+        logger.info("fx seam: skipped %d write(s) outside the take scope: %s",
+                    len(skipped), sorted(set(skipped)))
+        writes = [w for w in writes if w["virtual_id"] not in skipped]
     for w in writes:
         vid = w["virtual_id"]
         current = await _current_effect(facade, vid) if transition_ms > 0 else None

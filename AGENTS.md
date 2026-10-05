@@ -7171,6 +7171,16 @@ filters by it, `ambient.room_available()` refuses while a handover is in
 flight, and `dark_light` writes only in-scope virtuals. Spec:
 `tests/test_ambient_take_scope.py`.
 
+**AND A LATER WRITE STAYS INSIDE IT (2026-10-04, D4).** The scope at START
+said nothing about what a later write may bring up: a scene fire wrote the
+held-back house `hues` virtual and the facade's activate-on-write repair
+(#29) brought it — and both Hue areas — up for four minutes.
+`FxHost.virtual_in_scope` is now the write boundary (`fx/VENDOR.md` #42):
+the facade refuses effect writes/activations outside it, `fx_seam` and the
+engine's `FacadeExecutor` skip them, and the Light Show's targets list only
+`scope_device_ids()`. A new writer that bypasses those two seams must ask
+`facade.out_of_scope()` itself. Spec: `tests/test_scene_fire_scope.py`.
+
 `night_exit`'s own `release_fade.read_hue_light_states` is deliberately NOT
 scoped: it is READ-ONLY and its attribution (`outside_run`) is what makes
 an out-of-scope lit bulb legible rather than blamed.

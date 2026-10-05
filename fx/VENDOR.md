@@ -1380,3 +1380,21 @@ against that commit.
     scaled by a pushed provider (`set_scale_provider`). SPECTRA pushes
     targets in (`spectra/services/show_output.py`); `fx/` never imports
     `spectra/`. The module docstring is the binding statement.
+42. `host.py` + `facade.py`: THE TAKE SCOPE IS A WRITE BOUNDARY, not only a
+    load-time one (2026-10-04, the Light Show room proof's defect D4). #36
+    decided what a scoped take brings UP; nothing stopped a later write
+    bringing the rest up: a scene fire during a take scoped to the TV
+    backlight wrote the house `hues` virtual, #29's activate-on-write repair
+    ACTIVATED it, both Hue entertainment areas streamed the show for ~4
+    minutes and the release fade flashed 25 house lights. `FxHost.start`
+    now records `scope_virtual_ids` (= `only_active`, None for a whole-room
+    host); `FxHost.virtual_in_scope(vid)` is True for a whole-room host, a
+    scope member, or a virtual whose segments touch only the take's own
+    devices (`scope_device_ids()`); `facade.handle` refuses (403,
+    `out_of_scope`) any effects PUT/POST or `active: true` PUT on a virtual
+    outside it, and `_verify_effect_took` never repairs one into life.
+    Deactivating and reading stay allowed. SPECTRA's two write seams
+    (`fx_seam._apply_via_facade`, `fx_executor.FacadeExecutor._put`) SKIP
+    such writes via `facade.out_of_scope()` so a scene fire still lands its
+    in-scope writes. Proof: `tests/test_scene_fire_scope.py` (real FxHost,
+    red control with the gate removed).
