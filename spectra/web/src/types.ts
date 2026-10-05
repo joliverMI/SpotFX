@@ -729,21 +729,8 @@ export interface DevicePreviewStatus {
   target_fps: number;
   frames_relayed: number;
   source: 'facade' | 'ledfx' | 'none';
-}
-
-/** One relayed frame off /api/device-preview/ws. When `source: "ledfx"`
- * this is LedFX's own VisualisationUpdateEvent shape passed through
- * unchanged; when `source: "facade"` it's SPECTRA's own independent
- * encoding of the same real per-virtual pixel buffer (module docstring,
- * spectra/services/device_preview.py) — deliberately built to the SAME
- * wire shape so this type and decodePixels() need no source-aware branch
- * (pixels stay base64-or-list; decoded client-side either way). */
-export interface DevicePreviewFrame {
-  type: 'device_preview_frame';
-  vis_id: string;
-  pixels: string | number[][];
-  shape: [number, number];
-  is_device: boolean;
+  /** Top rate of the protocol-2 stream (absent on an older server). */
+  stream_fps?: number;
 }
 
 /* ── settings console (standing order 5: talk to the software) ──

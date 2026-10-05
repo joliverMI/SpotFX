@@ -172,6 +172,20 @@ tests/test_device_preview.py proves this against a real fake-LedFX
 WebSocket server (LedFX path) and a real headless FxHost with a genuine
 render thread (facade path).
 
+TWO FORMATS, ONE SOURCE (2026-10-05, data/preview-perf-plan/report.md).
+Everything above about frame delivery describes the OLD JSON format, which
+a viewer still gets if it never says hello. A viewer that sends
+{"type": "hello", "protocol": 2} is moved to `stream_hub`
+(spectra/services/preview_stream.py — its docstring is the binding
+statement): binary frames of real cells only, on a steady 30 fps clock,
+paced by the viewer's acknowledgements, at the level it subscribed to.
+This module still owns the source for both — `_consume_facade` /
+`_handle_frame` hand EVERY source frame to `on_source_frame` before the old
+format's throttle, and skip the JSON encode entirely when no old-format
+viewer is connected. Pause, favourites, ownership routing and the
+zero-viewer auto-pause are unchanged and apply to both: with no source
+frames there is nothing for either hub to send.
+
 Favourites default (report §4): when the store is empty, auto-populate
 from spectra.services.room_topology.genuinely_driven_virtual_ids() — the
 same ground truth the S3 activation gate validates fx-live/config.json's
@@ -218,11 +232,15 @@ from typing import Awaitable, Callable, Optional
 from pydantic import BaseModel, Field
 
 from spectra import config
+from spectra.services.preview_stream import STREAM_RATES, PreviewStreamHub
 from spectra.services.ws import WSManager
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_FAVORITES_CAP = 4
+# The OLD JSON format's rate only. The protocol-2 stream (preview_stream.py)
+# takes every source frame and paces each viewer itself; this constant is
+# what kept the preview at 7.7 fps against LedFX's 20.7.
 RELAY_TARGET_FPS = 8.0
 RECONNECT_MIN_S = 1.0
 RECONNECT_MAX_S = 30.0
@@ -362,6 +380,25 @@ def _facade_frame_payload(vis_id: str, pixels, host) -> dict:
     }
 
 
+def _decode_ledfx_pixels(pixels):
+    """A relayed LedFX frame's pixels as an (N, 3) array for the protocol-2
+    stream: base64 of interleaved r,g,b ("compressed", LedFX's default) or
+    three per-channel lists. None when there is nothing usable."""
+    import base64
+
+    import numpy as np
+
+    try:
+        if isinstance(pixels, str):
+            raw = base64.b64decode(pixels)
+            return np.frombuffer(raw[:len(raw) - len(raw) % 3], dtype=np.uint8).reshape(-1, 3)
+        if isinstance(pixels, list) and len(pixels) == 3:
+            return np.asarray(pixels).T
+    except Exception:
+        return None
+    return None
+
+
 class DevicePreviewRelay:
     """One live connection to whichever source is actually driving the
     lights (`_source_mode()` — LedFX's own websocket, or an in-process
@@ -380,6 +417,9 @@ class DevicePreviewRelay:
         on_status_change: Optional[Callable[[], Awaitable[None]]] = None,
         clock: Callable[[], float] = time.monotonic,
         has_viewers: Callable[[], bool] = lambda: True,
+        on_source_frame: Optional[Callable[[str, object, int], None]] = None,
+        on_source_reset: Optional[Callable[[], None]] = None,
+        wants_legacy: Callable[[], bool] = lambda: True,
     ) -> None:
         self.ws_url = ws_url or config.ledfx_ws_url()
         self._favorite_ids: list[str] = list(favorite_ids or [])
@@ -390,6 +430,13 @@ class DevicePreviewRelay:
         self._on_status_change = on_status_change
         self._clock = clock
         self._has_viewers = has_viewers
+        # The protocol-2 stream (preview_stream.py) takes EVERY source frame,
+        # unthrottled, and paces each viewer itself. `wants_legacy` says
+        # whether any old-format viewer is connected, so the JSON encode and
+        # its throttle are skipped when nobody reads them.
+        self._on_source_frame = on_source_frame
+        self._on_source_reset = on_source_reset
+        self._wants_legacy = wants_legacy
 
         self.connected = False
         self.connect_count = 0
@@ -412,6 +459,8 @@ class DevicePreviewRelay:
     def set_favorites(self, ids: list[str]) -> None:
         self._favorite_ids = list(ids)
         self._last_relayed_at.clear()
+        if self._on_source_reset is not None:
+            self._on_source_reset()
         self._sync()
 
     def viewers_changed(self) -> None:
@@ -441,6 +490,8 @@ class DevicePreviewRelay:
         being fine (caught live in the smoke test, 2026-08-15)."""
         if self.connected != value:
             self.connected = value
+            if not value and self._on_source_reset is not None:
+                self._on_source_reset()
             if self._on_status_change is not None:
                 await self._on_status_change()
 
@@ -452,6 +503,7 @@ class DevicePreviewRelay:
             "target_fps": self.target_fps,
             "frames_relayed": self.frames_relayed,
             "source": _source_mode(),
+            "stream_fps": STREAM_RATES[0],
         }
 
     def _throttle_ok(self, vis_id: str) -> bool:
@@ -484,6 +536,14 @@ class DevicePreviewRelay:
         if msg.get("event_type") != "visualisation_update":
             return
         vis_id = msg.get("vis_id")
+        if self._on_source_frame is not None:
+            decoded = _decode_ledfx_pixels(msg.get("pixels"))
+            if decoded is not None:
+                shape = msg.get("shape") or [1, len(decoded)]
+                self._on_source_frame(vis_id, decoded, int(shape[0] or 1))
+        if not self._wants_legacy():
+            self.frames_received += 1
+            return
         if not self._throttle_ok(vis_id):
             return
         if self._on_frame is not None:
@@ -572,6 +632,13 @@ class DevicePreviewRelay:
 
         def on_update(event) -> None:
             if event.virtual_id not in self._favorite_ids:
+                return
+            if self._on_source_frame is not None:
+                virtual = host.virtuals.get(event.virtual_id)
+                self._on_source_frame(event.virtual_id, event.pixels,
+                                      virtual.rows if virtual is not None else 1)
+            if not self._wants_legacy():
+                self.frames_received += 1
                 return
             if not self._throttle_ok(event.virtual_id):
                 return
@@ -696,6 +763,9 @@ class PreviewFrameHub:
 
 
 frame_hub = PreviewFrameHub()
+# Protocol-2 viewers (preview_stream.py). A connection is in exactly one of
+# the two hubs: it starts in `frame_hub` and moves here when it says hello.
+stream_hub = PreviewStreamHub()
 
 
 async def _broadcast_frame(payload: dict) -> None:
@@ -708,7 +778,35 @@ async def _broadcast_status() -> None:
 
 relay = DevicePreviewRelay(
     on_frame=_broadcast_frame, on_status_change=_broadcast_status,
-    has_viewers=lambda: preview_ws_manager.client_count() > 0)
+    has_viewers=lambda: preview_ws_manager.client_count() > 0,
+    on_source_frame=stream_hub.publish, on_source_reset=stream_hub.reset,
+    wants_legacy=lambda: frame_hub.client_count() > 0)
+
+
+async def handle_client_message(ws, text: str) -> None:
+    """One text message from a viewer (module docstring of preview_stream.py
+    lists them). Anything unrecognised is ignored: a viewer that says
+    nothing keeps the old JSON frames."""
+    try:
+        msg = json.loads(text)
+    except ValueError:
+        return
+    if not isinstance(msg, dict):
+        return
+    kind = msg.get("type")
+    viewer = stream_hub.viewer(ws)
+    if kind == "hello" and msg.get("protocol") == 2 and viewer is None:
+        await frame_hub.disconnect(ws)
+        stream_hub.connect(ws, level=str(msg.get("level") or "summary"))
+    elif viewer is None:
+        return
+    elif kind == "ack":
+        try:
+            viewer.ack(int(msg.get("seq")))
+        except (TypeError, ValueError):
+            pass
+    elif kind == "subscribe":
+        viewer.set_level(str(msg.get("level")))
 
 
 def init_from_storage() -> None:

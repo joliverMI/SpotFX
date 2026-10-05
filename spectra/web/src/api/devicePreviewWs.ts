@@ -23,10 +23,62 @@
  * closed this socket on purpose — so DevicePreviewStrip can show a
  * distinct "idle — tab hidden" state instead of the ordinary
  * "reconnecting…" (which means something different: the live upstream
- * connection is unexpectedly unreachable). */
-import type { DevicePreviewFrame, DevicePreviewStatus } from '../types';
+ * connection is unexpectedly unreachable).
+ *
+ * PROTOCOL 2 (2026-10-05, spectra/services/preview_stream.py is the binding
+ * statement of the wire format). On open this client says hello; the server
+ * then sends ONE binary message per tick instead of one JSON frame per
+ * device, and this client ACKNOWLEDGES every message the moment it arrives.
+ * Those acks are what pace the server: it stops when too many are
+ * outstanding, so a slow link gets fewer, current frames, never a growing
+ * backlog. Three things to keep true:
+ *   - the ack is sent on RECEIPT, before any listener paints — a busy page
+ *     then delays its own acks, which is exactly the signal the server needs;
+ *   - a record's pixels are a VIEW into the message's own buffer (no copy);
+ *     a listener that keeps one keeps that buffer alive, which is fine for
+ *     "the last frame per device" and wrong for a history;
+ *   - the LEVEL is the most any current consumer needs. The collapsed strip
+ *     asks for "summary" (three bytes per device); only a view that draws
+ *     pixels asks for "full".
+ * A server that predates protocol 2 ignores the hello and keeps sending JSON
+ * frames; those are decoded into the same PreviewFrame shape, so consumers
+ * have one paint path. localStorage `spectra-device-preview-legacy` = '1'
+ * skips the hello on purpose (the old format, for comparison). */
+import type { DevicePreviewStatus } from '../types';
 
-type FrameListener = (frame: DevicePreviewFrame) => void;
+export type PreviewLevel = 'summary' | 'full';
+
+/** One device's picture, from either wire format. `rgb` holds r,g,b per
+ * REAL cell; `cellIndex[i]` is the position (row-major in rows x cols) of
+ * cell i, or null when every cell of the rectangle is real. A summary frame
+ * is one cell: the device's mean colour. */
+export interface PreviewFrame {
+  visId: string;
+  kind: PreviewLevel;
+  rows: number;
+  cols: number;
+  rgb: Uint8Array;
+  cellIndex: Uint32Array | null;
+  frameSeq: number;
+  ageMs: number;
+}
+
+/** What the last message's header said about the link (protocol 2 only). */
+export interface PreviewLinkStats {
+  rateFps: number;
+  srttMs: number;
+  sentMs: number;
+  seq: number;
+}
+
+interface DeviceLayout {
+  visId: string;
+  rows: number;
+  cols: number;
+  cellIndex: Uint32Array | null;
+}
+
+type FrameListener = (frame: PreviewFrame) => void;
 type StatusListener = (status: DevicePreviewStatus) => void;
 type TabHiddenPauseListener = (paused: boolean) => void;
 
@@ -45,6 +97,117 @@ let tabHiddenPause = false;
 // True only for the close WE initiate for a hidden tab — tells onclose
 // apart a deliberate pause from a genuinely unexpected drop.
 let intentionalClose = false;
+let layouts: DeviceLayout[] = [];
+let linkStats: PreviewLinkStats | null = null;
+const levelRequests = new Map<string, PreviewLevel>();
+let sentLevel: PreviewLevel | null = null;
+
+const MAGIC = 0xd7;
+const HEADER_BYTES = 20;
+const RECORD_BYTES = 12;
+
+function wantedLevel(): PreviewLevel {
+  for (const level of levelRequests.values()) if (level === 'full') return 'full';
+  return 'summary';
+}
+
+function legacyForced(): boolean {
+  try {
+    return localStorage.getItem('spectra-device-preview-legacy') === '1';
+  } catch {
+    return false;
+  }
+}
+
+function sendLevel() {
+  if (!ws || ws.readyState !== WebSocket.OPEN || sentLevel === null) return;
+  const level = wantedLevel();
+  if (level !== sentLevel) {
+    sentLevel = level;
+    ws.send(JSON.stringify({ type: 'subscribe', level }));
+  }
+}
+
+function base64Bytes(text: string): Uint8Array {
+  const bin = atob(text);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+function readLayout(devices: Array<Record<string, unknown>>) {
+  layouts = [];
+  for (const d of devices) {
+    let cellIndex: Uint32Array | null = null;
+    if (typeof d.mask === 'string') {
+      const bits = base64Bytes(d.mask);
+      cellIndex = new Uint32Array(Number(d.cells));
+      let n = 0;
+      const total = Number(d.rows) * Number(d.cols);
+      for (let i = 0; i < total && n < cellIndex.length; i++) {
+        if (bits[i >> 3] & (0x80 >> (i & 7))) cellIndex[n++] = i;
+      }
+    }
+    layouts[Number(d.index)] = {
+      visId: String(d.vis_id), rows: Number(d.rows), cols: Number(d.cols), cellIndex,
+    };
+  }
+}
+
+function readBinary(buffer: ArrayBuffer, socket: WebSocket) {
+  if (buffer.byteLength < HEADER_BYTES) return;
+  const view = new DataView(buffer);
+  if (view.getUint8(0) !== MAGIC) return;
+  const count = view.getUint8(2);
+  const seq = view.getUint32(4, true);
+  // Ack FIRST: the server paces itself on this.
+  if (socket.readyState === WebSocket.OPEN) socket.send(`{"type":"ack","seq":${seq}}`);
+  linkStats = {
+    rateFps: view.getUint8(3), seq, sentMs: view.getFloat64(8, true),
+    srttMs: view.getUint16(16, true),
+  };
+  let offset = HEADER_BYTES;
+  for (let i = 0; i < count && offset + RECORD_BYTES <= buffer.byteLength; i++) {
+    const layout = layouts[view.getUint8(offset)];
+    const kind: PreviewLevel = view.getUint8(offset + 1) === 1 ? 'full' : 'summary';
+    const ageMs = view.getUint16(offset + 2, true);
+    const frameSeq = view.getUint32(offset + 4, true);
+    const length = view.getUint32(offset + 8, true);
+    offset += RECORD_BYTES;
+    if (layout && offset + length <= buffer.byteLength) {
+      const frame: PreviewFrame = {
+        visId: layout.visId, kind, rows: layout.rows, cols: layout.cols,
+        rgb: new Uint8Array(buffer, offset, length),
+        cellIndex: kind === 'full' ? layout.cellIndex : null, frameSeq, ageMs,
+      };
+      frameListeners.forEach((fn) => fn(frame));
+    }
+    offset += length;
+  }
+}
+
+/** The old JSON frame (and LedFX's own two transmission modes) as a
+ * PreviewFrame: base64 of interleaved r,g,b, or [[r...],[g...],[b...]]. */
+function legacyFrame(msg: Record<string, unknown>): PreviewFrame | null {
+  const pixels = msg.pixels as string | number[][] | undefined;
+  const shape = (msg.shape as [number, number] | undefined) ?? [1, 1];
+  let rgb: Uint8Array;
+  if (typeof pixels === 'string') {
+    rgb = base64Bytes(pixels);
+  } else if (Array.isArray(pixels) && pixels[0]) {
+    const [rs, gs, bs] = pixels;
+    rgb = new Uint8Array(rs.length * 3);
+    for (let i = 0; i < rs.length; i++) {
+      rgb[i * 3] = rs[i]; rgb[i * 3 + 1] = gs?.[i] ?? 0; rgb[i * 3 + 2] = bs?.[i] ?? 0;
+    }
+  } else {
+    return null;
+  }
+  return {
+    visId: String(msg.vis_id), kind: 'full', rows: shape[0], cols: shape[1], rgb,
+    cellIndex: null, frameSeq: 0, ageMs: 0,
+  };
+}
 
 function wsUrl(): string {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -59,16 +222,33 @@ function setTabHiddenPause(v: boolean) {
 }
 
 function connect() {
-  ws = new WebSocket(wsUrl());
+  const socket = new WebSocket(wsUrl());
+  ws = socket;
+  socket.binaryType = 'arraybuffer';
+  layouts = [];
+  linkStats = null;
+  sentLevel = null;
+  socket.onopen = () => {
+    if (legacyForced()) return;
+    sentLevel = wantedLevel();
+    socket.send(JSON.stringify({ type: 'hello', protocol: 2, level: sentLevel }));
+  };
   ws.onmessage = (e) => {
+    if (typeof e.data !== 'string') {
+      readBinary(e.data as ArrayBuffer, socket);
+      return;
+    }
     let msg: Record<string, unknown>;
     try {
-      msg = JSON.parse(e.data as string);
+      msg = JSON.parse(e.data);
     } catch {
       return;
     }
-    if (msg.type === 'device_preview_frame') {
-      frameListeners.forEach((fn) => fn(msg as unknown as DevicePreviewFrame));
+    if (msg.type === 'device_preview_layout') {
+      readLayout(msg.devices as Array<Record<string, unknown>>);
+    } else if (msg.type === 'device_preview_frame') {
+      const frame = legacyFrame(msg);
+      if (frame) frameListeners.forEach((fn) => fn(frame));
     } else if (msg.type === 'device_preview_status') {
       lastStatus = msg as unknown as DevicePreviewStatus;
       statusListeners.forEach((fn) => fn(lastStatus!));
@@ -139,36 +319,27 @@ export function onDevicePreviewTabHiddenPause(fn: TabHiddenPauseListener): () =>
   return () => tabHiddenPauseListeners.delete(fn);
 }
 
-/** Decode a device-preview pixel payload (report §1, behaviour read from
- * LedFx-Frontend-v2's PixelGraphBase.tsx/hexColor.ts — reimplemented here,
- * not copied; that frontend is AGPL-3.0 and this repo is public).
- * Compressed mode (LedFX's default) is a base64 string of interleaved
- * r,g,b bytes; uncompressed mode is [[r...],[g...],[b...]] — SPECTRA never
- * changes LedFX's own transmission_mode config, so both shapes have to be
- * handled here. Also the wire shape `spectra/services/device_preview.py`
- * emits for its OWN in-process facade source (2026-08-16) — deliberately
- * matched to LedFX's uncompressed list form so this decoder needs no
- * source-aware branch; that backend encoding is independently written,
- * not derived from LedFX's own core.py (see that module's docstring). */
-export function decodePixels(pixels: string | number[][]): [number, number, number][] {
-  if (typeof pixels === 'string') {
-    if (!pixels) return [];
-    const bytes = Uint8Array.from(atob(pixels), (c) => c.charCodeAt(0));
-    const out: [number, number, number][] = [];
-    for (let i = 0; i + 2 < bytes.length; i += 3) {
-      out.push([bytes[i], bytes[i + 1], bytes[i + 2]]);
-    }
-    return out;
-  }
-  const [rs, gs, bs] = pixels;
-  if (!rs || !rs.length) return [];
-  return rs.map((r, i) => [r, gs?.[i] ?? 0, bs?.[i] ?? 0]);
+/** Say what a consumer needs: 'full' while it draws pixels, 'summary' (or
+ * null, on unmount) otherwise. The socket carries the most any consumer
+ * asked for. */
+export function setDevicePreviewLevel(consumer: string, level: PreviewLevel | null) {
+  if (level === null) levelRequests.delete(consumer);
+  else levelRequests.set(consumer, level);
+  sendLevel();
 }
 
-export function averageRgb(triples: [number, number, number][]): string {
-  if (!triples.length) return 'rgb(40,40,40)';
+/** Rate, round trip and send time from the newest message header, or null
+ * before the first protocol-2 message. */
+export function devicePreviewLinkStats(): PreviewLinkStats | null {
+  return linkStats;
+}
+
+/** Mean colour of a frame's cells, as a CSS colour. */
+export function frameColor(frame: PreviewFrame): string {
+  const { rgb } = frame;
+  const n = Math.floor(rgb.length / 3);
+  if (!n) return 'rgb(40,40,40)';
   let r = 0, g = 0, b = 0;
-  for (const [rr, gg, bb] of triples) { r += rr; g += gg; b += bb; }
-  const n = triples.length;
+  for (let i = 0; i < n * 3; i += 3) { r += rgb[i]; g += rgb[i + 1]; b += rgb[i + 2]; }
   return `rgb(${Math.round(r / n)},${Math.round(g / n)},${Math.round(b / n)})`;
 }
