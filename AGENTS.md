@@ -3696,13 +3696,15 @@ observation must reset it the way a song change would — otherwise the
 second fire in one process is legitimately deferred by the first one's
 dwell floor and renders nothing at all.**
 
-## THE LIGHT SHOW (`/show`) — named sets of actions, fired now or ARMED (phases 1-2 of 3)
+## THE LIGHT SHOW (`/show`) — named sets of actions, fired now or ARMED (all three phases shipped)
 
 Plan: `/home/javi/fleet-spotfx/data/light-show-plan/report.md` (his spec in
 its `brief.md`; his answers: ONE High + ONE Low trigger per song, "non-
 reactive" = a steady colour). Phase 1 shipped the catalogue, sets, End show
-and the per-fixture output layer; arming (next scene change, High/Low) is
-phase 2, the phone Run view + Sonic phase 3. Read the module docstrings
+and the per-fixture output layer; phase 2 added arming (next scene change,
+High/Low); phase 3 (below, this section's own tail) added the phone-first
+Run view, drag reorder on the Build view, Sonic, and the expected-scene-
+change countdown. Read the module docstrings
 before touching any of it — `spectra/services/show_actions.py` (catalogue,
 executor, baselines, End show), `show_output.py` (targets, holds, levels,
 the gate), `fx/device_output.py` (the frame-level layer, `fx/VENDOR.md`
@@ -3776,6 +3778,61 @@ first. Five things:
   `.items()` — the test fakes now have the real registry shape), and
   `fire_history` had no `show` bucket, so the show log never recorded.
   Spec: `tests/test_light_show_arms.py`, `scripts/check_show_cue_flags.mjs`.
+
+**PHASE 3 — THE RUN VIEW, DRAG REORDER, SONIC, AND THE SCENE-CHANGE
+COUNTDOWN (2026-10-04).** Read `spectra/services/show_console.py`'s module
+docstring first (Sonic's authority boundary here, the same shape
+`room_effect_console.py` draws). Four things:
+
+- **A NEW SONIC DOMAIN, `"show"`** (`spectra/services/show_console.py`,
+  merged into `settings_agent.ALL_OPERATIONS` alongside the other domain
+  modules — same discipline, same trap: a new operation needs its wrapper
+  in `settings_mcp_server.py` AND the CLI's own `TOOL_NAMES` manifest, or
+  `_verify_tool_manifest()`/`test_settings_mcp_server_starts_from_a_clean_
+  cwd` refuse it). Covers exactly his ask: fire/arm/disarm/disarm-all/
+  show_status/hold_device/dim_device/create_show_set/move_high_low/
+  end_show. `hold_device`/`dim_device` build an ad-hoc `device_state`/
+  `level` `ShowAction` and run it through the SAME `show_actions.fire()`
+  the Build view's buttons call — no second write path. Every name (a set,
+  an arm, a fixture, a category) is resolved by `show_console._resolve_*`:
+  an exact id/case-insensitive-name match succeeds, anything else is
+  REJECTED with `difflib.get_close_matches` candidates — never guessed.
+  `create_show_set` mints a fresh id but set NAMES are unique
+  (`show_store.put_set`'s `SetNameTaken`), so a name clash is rejected,
+  not silently overwritten — the one place this domain's "never overwrite"
+  rule differs from `scene_console.create_scene`'s pure fresh-id version.
+  Editing an EXISTING set's steps and starting/stopping a room effect
+  directly are deliberately excluded (authoring stays the Build view's
+  job; a room-effect step still fires/arms through the ordinary set
+  operations with no special case). Reachable from the Light Show page's
+  own floating 💬 (`SonicChatPopover`, now taking an optional `helpTopic`
+  prop so each mount points its "?" at its own domain's help topic rather
+  than always `sonic-scenes`).
+- **THE RUN VIEW IS A SEPARATE COMPONENT OVER THE SAME POLLED STATE**
+  (`spectra/web/src/lightshow/RunView.tsx`) — a Build/Run tap toggle in the
+  page head (`useIsPhone()` defaults the initial tab, never force-switches
+  later). Run reuses `ArmBoard` and the exported `ShowNowPanel` verbatim
+  (one countdown source, one Holding-list source — never a second copy
+  that could disagree), adds a tap-to-open-sheet per set (Fire now / Arm:
+  scene change / Arm: High / Arm: Low), and big Disarm all / End show
+  buttons. Run never edits a set.
+- **DRAG REORDER ON THE BUILD VIEW** — native HTML5 DnD on each step's
+  `⠿` handle (`dataTransfer` carries the source index as plain text; drop
+  splices). The ↑/↓ buttons stay, for keyboard/no-pointer use — drag is
+  additive, not a replacement.
+- **THE EXPECTED-SCENE-CHANGE COUNTDOWN IS A FLOOR, NAMED AS ONE** —
+  `show_arms.status()`'s `song.expected_scene_change_s` is `dwell.
+  status()["remaining_s"]`: the showing scene's own minimum-hold floor,
+  `None` when nothing is tracked. It is NOT a prediction of when the next
+  change actually happens (nothing in this codebase predicts that), and
+  `song.expected_scene_change_is_floor: True` plus the frontend's own
+  `sceneChangeLine()` wording ("at least …") keep that honest rather than
+  implying precision the number doesn't have.
+
+Spec: `tests/test_show_console.py` (every op, the close-match refusals, the
+room-effect compatibility proof), `tests/test_light_show_arms.py`'s own
+dwell-floor test, `tests/test_scene_console.py`'s widened operation-set
+proof.
 
 ## The room LIGHT-FIELD map (`/rooms`) + room effects (`/room-effects`)
 

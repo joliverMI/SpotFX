@@ -49,7 +49,7 @@ export function endShowSummary(r: EndShowReport): string {
  * each id) can see they are linked. Keep in step with show_actions.py. */
 export const SHOW_KIND_HELP_TOPICS = [
   'show-actions', 'show-device-states', 'show-level', 'show-room-effects', 'show-sets',
-  'show-arming', 'show-high-low-triggers',
+  'show-arming', 'show-high-low-triggers', 'show-run-view', 'sonic-light-show',
 ] as const;
 
 // ── PHASE 2: arms and the High/Low Triggers ───────────────────────────────
@@ -96,6 +96,14 @@ export function armLine(a: ShowArm, positionMs: number | null | undefined): stri
 /** One ended arm, for the history list. */
 export function armHistoryLine(a: ShowArm): string {
   return `${a.label || 'Action'} (${triggerLabel(a.on)}): ${a.status}${a.end_reason ? ` — ${a.end_reason}` : ''}`;
+}
+
+/** "at least 0:07" / "could change any moment" — the showing scene's own
+ * minimum-hold FLOOR, never a real prediction of when it actually changes. */
+export function sceneChangeLine(expectedS: number | null | undefined): string {
+  if (expectedS === null || expectedS === undefined) return 'unknown';
+  if (expectedS <= 0) return 'could change any moment';
+  return `at least ${mmss(expectedS * 1000)}`;
 }
 
 /** The High/Low line for this song: where it sits and why. */

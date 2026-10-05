@@ -477,9 +477,21 @@ def status() -> dict:
         row["due_ms"] = due
         waiting.append(row)
     history = [a.model_dump() for a in show_store.state().arms if a.status != ACTIVE]
+    # The scene's own minimum hold (dwell.py) is a FLOOR, never a real
+    # prediction of when the next scene change happens — it only says the
+    # room CANNOT change before this many seconds. `None` when nothing is
+    # tracked (cold start, or no fire yet this process life) rather than a
+    # fabricated zero.
+    try:
+        from spectra.services import dwell
+        expected_s = dwell.status()["remaining_s"]
+    except Exception:                                    # noqa: BLE001
+        expected_s = None
     return {"armed": waiting, "history": history,
             "song": {"uri": uri, "position_ms": position,
-                     "cues": cues.as_dict() if cues else None},
+                     "cues": cues.as_dict() if cues else None,
+                     "expected_scene_change_s": expected_s,
+                     "expected_scene_change_is_floor": True},
             "last_crossed": dict(_last_crossed),
             "refusal": show_output.refusal()}
 

@@ -14,14 +14,21 @@
  * says so and Fire is refused by the server with that same reason.
  *
  * Phase 2 adds ARMING: a set waits for the next scene change or this
- * song's High / Low Trigger (ArmBoard.tsx). The phone-first Run view is
- * phase 3. */
+ * song's High / Low Trigger (ArmBoard.tsx). Phase 3 adds a tap-mode
+ * selector between this editing surface (Build) and RunView.tsx, the
+ * phone-first surface for standing in the room: a big armed board,
+ * per-arm Disarm, the Holding list, Disarm all and End show, with no
+ * editing. Both read the same polled status/arms — one source of truth
+ * for the countdowns, never two. */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiDel, apiGet, apiPost } from '../api/client';
 import HelpLink from '../help/HelpLink';
 import { useToast } from '../components/Toast';
+import SonicChatPopover from '../components/SonicChatPopover';
+import useIsPhone from '../lib/useIsPhone';
 import { useAmbientHueGroups, useGradient2dProfiles, useScenes, useSpotColorSets } from '../queries';
 import { ArmBoard, ArmControl } from './ArmBoard';
+import RunView from './RunView';
 import { endShowSummary, runSummary } from './showSummary';
 import type {
   ArmsStatus, EndShowReport, ShowAction, ShowCatalogue, ShowKind, ShowParam, ShowRun, ShowSet,
@@ -45,6 +52,8 @@ function newId() {
 
 export default function LightShowPage() {
   const toast = useToast();
+  const isPhone = useIsPhone();
+  const [mode, setMode] = useState<'build' | 'run'>(() => (window.matchMedia('(max-width: 720px)').matches ? 'run' : 'build'));
   const [catalogue, setCatalogue] = useState<ShowCatalogue | null>(null);
   const [targets, setTargets] = useState<ShowTargets | null>(null);
   const [sets, setSets] = useState<ShowSet[]>([]);
@@ -183,13 +192,22 @@ export default function LightShowPage() {
     <div className="light-show-page">
       <div className="light-show-head">
         <h2>Light Show <HelpLink topic="light-show-page" /></h2>
-        <div className="light-show-head-actions">
-          <button className="danger" disabled={busy} onClick={() => void endShow()}
-            title="Cancel running sets, stop the show's room effect, let every fixture go and put back every setting the show changed">
-            End show
-          </button>
-          <HelpLink topic="show-end-restore" />
+        <div className="light-show-mode-select" role="tablist" aria-label="Build or run the show">
+          <button role="tab" aria-selected={mode === 'build'} className={mode === 'build' ? 'active' : ''}
+            onClick={() => setMode('build')}>Build</button>
+          <button role="tab" aria-selected={mode === 'run'} className={mode === 'run' ? 'active' : ''}
+            onClick={() => setMode('run')}>Run{isPhone ? ' (recommended)' : ''}</button>
+          <HelpLink topic="show-run-view" />
         </div>
+        {mode === 'build' && (
+          <div className="light-show-head-actions">
+            <button className="danger" disabled={busy} onClick={() => void endShow()}
+              title="Cancel running sets, stop the show's room effect, let every fixture go and put back every setting the show changed">
+              End show
+            </button>
+            <HelpLink topic="show-end-restore" />
+          </div>
+        )}
       </div>
 
       {gate && (
@@ -198,6 +216,11 @@ export default function LightShowPage() {
         </div>
       )}
 
+      {mode === 'run' ? (
+        <RunView sets={sets} status={status} arms={arms} onChangeArms={reloadArms}
+          onEndShowDone={() => void reloadSets()} toast={toast} />
+      ) : (
+      <>
       <ArmBoard arms={arms} onChange={reloadArms} toast={toast} />
 
       <ShowNowPanel status={status} onRelease={release} onEndLevel={endLevel} />
@@ -261,6 +284,11 @@ export default function LightShowPage() {
                       if (j < 0 || j >= d.actions.length) return;
                       [d.actions[i], d.actions[j]] = [d.actions[j], d.actions[i]];
                     })}
+                    onReorderFrom={(from) => edit((d) => {
+                      if (from < 0 || from >= d.actions.length || from === i) return;
+                      const [moved] = d.actions.splice(from, 1);
+                      d.actions.splice(i, 0, moved);
+                    })}
                     onDelete={() => edit((d) => { d.actions.splice(i, 1); })}
                     previewLine={preview?.[i]} />
                 ))}
@@ -274,11 +302,14 @@ export default function LightShowPage() {
       </div>
 
       {lastRun && <RunReport run={lastRun} />}
+      </>
+      )}
+      <SonicChatPopover helpTopic="sonic-light-show" />
     </div>
   );
 }
 
-function ShowNowPanel({ status, onRelease, onEndLevel }: {
+export function ShowNowPanel({ status, onRelease, onEndLevel }: {
   status: ShowStatus | null;
   onRelease: (device: string) => void;
   onEndLevel: (id: string) => void;
@@ -358,12 +389,14 @@ function AddStep({ catalogue, onAdd }: { catalogue: ShowCatalogue; onAdd: (k: Sh
   );
 }
 
-function StepEditor({ action, index, count, kind, catalogue, targets, onChange, onMove, onDelete, previewLine }: {
+function StepEditor({ action, index, count, kind, catalogue, targets, onChange, onMove, onReorderFrom, onDelete, previewLine }: {
   action: ShowAction; index: number; count: number; kind: ShowKind | undefined;
   catalogue: ShowCatalogue; targets: ShowTargets | null;
-  onChange: (a: ShowAction) => void; onMove: (d: number) => void; onDelete: () => void;
+  onChange: (a: ShowAction) => void; onMove: (d: number) => void;
+  onReorderFrom: (fromIndex: number) => void; onDelete: () => void;
   previewLine?: { change?: string; problem?: string };
 }) {
+  const [dragOver, setDragOver] = useState(false);
   const set = (name: string, value: unknown) => {
     const params = { ...action.params };
     if (value === undefined || value === '' || value === null) delete params[name];
@@ -371,8 +404,21 @@ function StepEditor({ action, index, count, kind, catalogue, targets, onChange, 
     onChange({ ...action, params });
   };
   return (
-    <li className={`light-show-step${action.enabled === false ? ' off' : ''}`}>
+    <li className={`light-show-step${action.enabled === false ? ' off' : ''}${dragOver ? ' drag-over' : ''}`}
+      onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={(e) => {
+        e.preventDefault();
+        setDragOver(false);
+        const from = Number(e.dataTransfer.getData('text/plain'));
+        if (!Number.isNaN(from)) onReorderFrom(from);
+      }}>
       <div className="light-show-step-head">
+        <span className="light-show-step-handle" draggable aria-label="Drag to reorder"
+          title="Drag to reorder"
+          onDragStart={(e) => { e.dataTransfer.setData('text/plain', String(index)); }}>
+          ⠿
+        </span>
         <label title="Switch this step off without deleting it">
           <input type="checkbox" checked={action.enabled !== false}
             onChange={(e) => onChange({ ...action, enabled: e.target.checked })} />

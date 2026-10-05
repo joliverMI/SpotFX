@@ -96,6 +96,7 @@ from spectra.services import (  # noqa: E402
     scene_console,
     settings_agent,
     settings_console,
+    show_console,
 )
 from fx import device_schema  # noqa: E402
 
@@ -107,6 +108,10 @@ _CopyFieldEnum = Literal[tuple(scene_console.COPYABLE_DEVICE_ENTRY_FIELDS)]
 _DeviceTypeEnum = Literal[tuple(device_schema.device_types())]
 _RoomEffectKeyEnum = Literal[tuple(list(room_effect_console.KNOBS)
                                    + ["name", "carrier_ids"])]
+_ArmTriggerEnum = Literal[tuple(show_console.TRIGGER_CHOICES)]
+_TargetKindEnum = Literal[tuple(show_console.TARGET_KIND_CHOICES)]
+_DeviceStateEnum = Literal[tuple(show_console.STATE_CHOICES)]
+_CueLevelEnum = Literal[tuple(show_console.CUE_LEVEL_CHOICES)]
 
 mcp = MCPServer("settings-console")
 
@@ -385,6 +390,96 @@ async def set_room_effect(effect_id: str, key: _RoomEffectKeyEnum, value: Any) -
     carrier_ids (only carriers that room has MAPPED; empty means all of
     them)."""
     return await _call("set_room_effect", effect_id=effect_id, key=key, value=value)
+
+
+# The Light Show domain (phase 3) — see spectra/services/show_console.py.
+
+
+@mcp.tool()
+async def show_status() -> dict:
+    """What the Light Show is doing right now: held fixtures, levels, a
+    running room effect, changed settings, running sets, and the full armed
+    board (with this song's High/Low for a countdown)."""
+    return await _call("show_status")
+
+
+@mcp.tool()
+async def list_show_sets() -> dict:
+    """His named Light Show sets, with their step count and kinds. Use this
+    to find the exact name/id for fire_show_set/arm_show_set."""
+    return await _call("list_show_sets")
+
+
+@mcp.tool()
+async def create_show_set(name: str) -> dict:
+    """Create a brand-new, empty Light Show set by name. Always a fresh id
+    -- it can never overwrite an existing set."""
+    return await _call("create_show_set", name=name)
+
+
+@mcp.tool()
+async def fire_show_set(set_name: str) -> dict:
+    """Fire an already-saved Light Show set right now, by id or exact name."""
+    return await _call("fire_show_set", set_name=set_name)
+
+
+@mcp.tool()
+async def arm_show_set(set_name: str, on: _ArmTriggerEnum = "scene_change",
+                       repeat: bool = False, this_song_only: bool = False,
+                       finish_on_mark: bool = True) -> dict:
+    """Arm a saved set to fire on the next scene change, or this song's High
+    or Low Trigger."""
+    return await _call("arm_show_set", set_name=set_name, on=on, repeat=repeat,
+                       this_song_only=this_song_only, finish_on_mark=finish_on_mark)
+
+
+@mcp.tool()
+async def disarm_show(arm: str) -> dict:
+    """Disarm one waiting set by its label or arm id -- call show_status
+    first if unsure."""
+    return await _call("disarm_show", arm=arm)
+
+
+@mcp.tool()
+async def disarm_all_show() -> dict:
+    """Disarm every waiting set at once."""
+    return await _call("disarm_all_show")
+
+
+@mcp.tool()
+async def hold_device(state: _DeviceStateEnum, target_kind: _TargetKindEnum = "everything",
+                      target_name: Optional[str] = None, color: Optional[str] = None,
+                      fade_ms: int = 0) -> dict:
+    """Hold a fixture, a category, or everything at Steady/Frozen/Dark, or
+    return it to Show. color (hex) only matters for 'steady'."""
+    return await _call("hold_device", state=state, target_kind=target_kind,
+                       target_name=target_name, color=color, fade_ms=fade_ms)
+
+
+@mcp.tool()
+async def dim_device(level: float, target_kind: _TargetKindEnum = "everything",
+                     target_name: Optional[str] = None, duration_s: float = 10,
+                     fade_in_ms: int = 500, fade_out_ms: int = 1000,
+                     until: Literal["time", "scene_change", "released"] = "time") -> dict:
+    """Temporarily dim or brighten a fixture, a category, or everything.
+    level is a percent; 100 is unchanged."""
+    return await _call("dim_device", level=level, target_kind=target_kind,
+                       target_name=target_name, duration_s=duration_s,
+                       fade_in_ms=fade_in_ms, fade_out_ms=fade_out_ms, until=until)
+
+
+@mcp.tool()
+async def move_high_low(level: _CueLevelEnum, seconds_into_song: float) -> dict:
+    """Move this song's High or Low Trigger to a specific moment, like
+    dragging it on the Light Show page. Needs a song actually playing."""
+    return await _call("move_high_low", level=level, seconds_into_song=seconds_into_song)
+
+
+@mcp.tool()
+async def end_show() -> dict:
+    """End the Light Show: cancel running sets, stop its room effect,
+    release every held fixture, and put back every setting it changed."""
+    return await _call("end_show")
 
 
 # The analysis domain: refreshing the analysed cues — see

@@ -1602,6 +1602,17 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        id: 'sonic-light-show',
+        title: 'Sonic on the Light Show page: fire, arm, disarm, hold, dim, move High/Low',
+        keywords: 'sonic light show chat popup pop-up fire set arm disarm whats armed hold device dim level create set move high low trigger end show',
+        body: [
+          'The Light Show page has the same floating 💬 button, scoped to a third domain. Say a set\'s name and what to do: "fire Crystal Steady", "arm Blackout for the next High Trigger", "disarm Blackout", "what\'s armed right now", "hold the TV backlight dark", "dim everything to 40% for ten seconds", "create a set called Encore", "move the Low Trigger to 1:15", or "end the show."',
+          'Sonic never guesses a name you only approximated — if it doesn\'t match a set, fixture, or category exactly, it refuses and offers the closest spellings rather than picking one. Every reply says plainly what actually ran (or why it refused), read from the same structured result the page itself shows, never from Sonic\'s own prose.',
+          'A new set Sonic creates is always empty and brand-new — it can never overwrite one of your existing sets, even given the exact same name (the name is rejected instead). Adding steps to a set, and editing an existing one\'s steps, stays the Build view\'s job — Sonic can fire, arm and create, not author.',
+          'A set holding a room-effect step fires and arms exactly like any other set — there is no separate "room effect" command.',
+        ],
+      },
+      {
         id: 'sonic-scene-backups',
         title: 'Backups, undo, and preview for scene edits',
         keywords: 'backup verify undo restore genesis preview check-in overwrite safety net',
@@ -2116,6 +2127,15 @@ export const HELP_SECTIONS: HelpSection[] = [
           'End show cancels any set still running, stops a room effect the show started, fades every held fixture back to the show, ends every Level, and puts back every setting the show changed (except ones you have changed since — those are named and left alone).',
           'Each fixture can also be let go on its own from "Right now" (Release / End).',
           'Releasing the room drops every Light Show hold before the lights are let go, so the room is never handed back dark because of the show.',
+        ],
+      },
+      {
+        id: 'show-run-view',
+        title: 'Run view: a phone-first surface for standing in the room',
+        keywords: 'run view build view mode tap phone big buttons disarm all end show holding',
+        body: [
+          'Build and Run are two tap-mode tabs at the top of the Light Show page. Build is the editor above. Run is sized for a phone in the room: tap a set\'s name to open its own sheet — ▶ Fire now, or ⏱ Arm it for the next scene change, High Trigger, or Low Trigger — then the same Armed board (with the same countdowns), the same Holding list, and big Disarm all / End show buttons.',
+          'Run never edits a set — it only runs what the Build view already saved. On a phone it opens on Run by default; either tab is always a tap away on any screen size.',
         ],
       },
       {
