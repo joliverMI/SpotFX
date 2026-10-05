@@ -11,13 +11,18 @@ reads no live storage.
 ## Run it
 
 ```bash
-# once, and after any change under spectra/web/src: build the harness page
-# (spectra/web/harness mounts the real DevicePreviewStrip)
+# once, and after any change under spectra/web/src: build the harness pages
+# (spectra/web/harness: index.html mounts the real DevicePreviewStrip,
+# live.html the real Live view)
 (cd spectra/web && npx vite build --config vite.harness.config.ts)
 
 # the gate: exit 1 unless the FIRST system passes (about 12 minutes)
 .venv/bin/python scripts/preview_perf/run_preview_perf.py --out /tmp/preview-perf \
     --systems spectra+proxy,spectra+proxy:collapsed,ledfx --gate
+
+# the Live view's gate: 60 drawn frames a second, desktop and phone, every link
+.venv/bin/python scripts/preview_perf/run_preview_perf.py --out /tmp/preview-perf-live \
+    --systems spectra+proxy:live,spectra+proxy:live:phone --pass-drawn-fps 59
 
 # quick look (2 link profiles, 8 s each)
 .venv/bin/python scripts/preview_perf/run_preview_perf.py --out /tmp/preview-perf --quick
@@ -43,6 +48,10 @@ longer than a 10-minute foreground limit.
 | the `:collapsed` row | under 20 kbit/s on the wire |
 | when `ledfx` was run too | fps, interval p95 and latency median match or beat LedFX's row on the same link **in this run** (`--vs`, with `--vs-slack-ms` 3 for noise) |
 
+`--pass-drawn-fps N` is the Live view's gate and applies to every `:live` row:
+at least N animation frames a second in which the page really drew (59 = the
+display's 60 less measurement rounding).
+
 Every limit has its own flag. `--pass-p95-ms` and `--pass-latency-ms` take one
 number or per-link values (`lan=50,ts-direct=56,ts-relay=69`).
 
@@ -61,6 +70,7 @@ one that binds.
 | interval p95 / max, gaps > 100 ms | time between consecutive frames at the browser: the evenness he sees |
 | input to photon | an API call sent through the link flips the `hues` virtual black/white; the clock stops two animation frames after the changed frame reaches the page. The effect redraws at once on both systems, and flashes are spaced randomly so they cannot lock to either sender's frame clock |
 | frame bytes / wire kbps | crystal frame size in the page, and bytes actually crossing the link (after WebSocket compression) |
+| drawn fps, long frames | animation frames in which the page made a real draw call (a WebGL draw, or the 2D fallback's clear), and frames longer than 34 ms |
 | browser main thread | Chromium task time / wall time (CDP `Performance.getMetrics`) |
 | server CPU for preview | process CPU with the page open minus CPU with nobody watching (rough) |
 
@@ -79,11 +89,24 @@ Parts combine, e.g. `spectra-legacy@30+proxy`.
 - `+proxy` — behind the real `services/spectra_proxy.py` class (the :8000
   address he uses).
 - `:collapsed` — the strip collapsed: one averaged colour per device.
+- `:live` — the Live view (Devices > Live) instead of the strip, on his
+  room's real topology (`spectra_rig.py --room`: the crystal through its
+  1,952 segments, one strip effect copied onto the TV backlight and both
+  sconces, one pixel onto seventeen bulbs — all dummies). `:phone` adds a
+  390x844 screen at 3x with the CPU slowed 4x (`--phone-cpu`); `:canvas`
+  forces the 2D-canvas fallback.
 - `-legacy` — the old JSON format (the page skips the protocol-2 hello);
   `-legacy@N` raises only its relay rate (a what-if).
 
 ## Limits
 
+- `:live` rows draw with WebGL. Headless Chromium has no GPU by default and
+  rasterises WebGL in software, which measures this machine's CPU rather
+  than the view, so `--gpu auto` gives those rows the machine's real GPU
+  (`--use-angle=gl-egl`) and leaves every other run on software as the
+  stream gate was measured. Each row's `webgl_renderer` in `results.json`
+  says what it got; `--gpu off` shows the software case. `:phone` is a
+  desktop GPU behind a slowed CPU, not a phone's GPU.
 - The link is emulated. Profiles: `lan`, `ts-direct` (30 ms), `ts-relay`
   (80 ms, 4 Mbit; a Tailscale relay ping measured 71-88 ms on 2026-10-05),
   `poor` (150 ms, 1 Mbit). His real link was not measured. The emulator does

@@ -1765,8 +1765,47 @@ export const HELP_SECTIONS: HelpSection[] = [
     title: 'Devices — create and edit the lights themselves',
     keywords: 'device devices create edit add new wled hue e131 ddp udp dummy ip address pixel count refresh rate name rename grouping category timing offset parameters ledfx settings',
     intro:
-      'One page for the fixtures: every device the room has, every parameter its driver actually accepts, its name, which groupings its virtuals belong to, and its timing offset. Everything for a device is on ONE tab — grouped inside it, never behind sub-tabs. The list shows only the devices the room actually uses; "Show all devices" reveals the rest.',
+      'One page for the fixtures, with two tabs. EDIT: every device the room has, every parameter its driver actually accepts, its name, which groupings its virtuals belong to, and its timing offset — everything for a device on one surface, grouped inside it, never behind sub-tabs. The list shows only the devices the room actually uses; "Show all devices" reveals the rest. LIVE: every in-use fixture drawn in its real shape and lit by what the room is doing right now.',
     entries: [
+      {
+        id: 'devices-live',
+        title: 'The Live tab — watch every fixture, in its real shape',
+        keywords: 'live tab preview viewer stage layout crystal hexagon strip frame tv bulbs room map webgl solo full screen fullscreen pop out popout pause smooth fixture watch',
+        body: [
+          'Devices → Live draws every fixture the room uses on one stage: the crystal as its real hexagon of 976 cells, the TV strip as a frame, each sconce as a line, the Hue bulbs as discs, single pixels as dots. It is lit by the same live feed as the top strip, at up to 30 pictures a second, and drawn at your screen\'s own rate. An unlit pixel still shows as a dim dot, so a dark fixture keeps its shape.',
+          'The shapes are a tidy layout, not a floor plan: Spectra knows how each fixture is wired, not where it hangs. Only the crystal\'s lattice is exact. "Room map" is the view that will place each LED where the camera saw it, once devices are mapped — it is not built yet, and the button says so.',
+          'It shows every in-use fixture, not only the favourites picked for the top strip. A virtual that feeds several fixtures (one strip effect copied onto the TV backlight and both sconces) is drawn as each of them.',
+          'If nothing is driving the lights (the room is released, or being handed over) the shapes still draw, dark, with a note saying why.',
+        ],
+        table: [
+          ['Click a fixture', 'Selects it: its name, size and what feeds it appear under the stage, with Open settings (the Edit tab on that device) and Solo.'],
+          ['Solo', 'Dims everything else so one fixture is easy to follow. "Show all" undoes it. It changes only this picture, never the lights.'],
+          ['⏸ Pause', 'Pauses the preview everywhere — the same pause as the top strip\'s button, and it stays paused until you resume. The stage goes dark and says it is paused.'],
+          ['Smooth', 'On: blends from each picture to the next so motion is even on an uneven link. Off: shows each picture the moment it arrives. See "Smooth" below.'],
+          ['⛶ Full screen', 'The stage fills the screen. Esc leaves.'],
+          ['↗ Pop out', 'Opens the stage alone in its own window, to keep beside another page.'],
+        ],
+      },
+      {
+        id: 'live-link-meter',
+        title: 'The link meter — fps · ms · kbit/s',
+        keywords: 'link meter fps frames per second delay latency ms kbit data rate bandwidth tailscale relay slow remote connection measure',
+        body: [
+          'The green numbers on the Live tab are measured in your own browser on your own link, from the feed itself. Nothing to set up.',
+          'fps is pictures arriving per second. The feed sends a fixture only when it changed, so a still room reads low without the link being slow; on a busy scene a good link reads about 30, and a weak one steps down to 20, 15 or 10 rather than falling behind.',
+          'ms is how old the picture is when it is drawn: the one-way trip (half the round trip the server measures from this browser\'s acknowledgements), plus how much later than the link\'s best this picture arrived, plus its short wait on the server, plus what Smooth holds back. It does not include the browser\'s own last step to the glass (about one screen refresh).',
+          'kbit/s is the size of the pictures received. The link itself carries less, because the connection is compressed.',
+        ],
+      },
+      {
+        id: 'live-smooth',
+        title: 'Smooth — even motion on an uneven link',
+        keywords: 'smooth interpolate interpolation blend playout jitter stutter 60 hz delay frame hold switch off',
+        body: [
+          'Pictures arrive about 30 times a second, and over a relayed link not evenly — the gap between two can swing by tens of milliseconds. Drawn as they land, motion stutters. With Smooth on, each fixture eases from what is on screen to its newest picture over one picture\'s worth of time, so the screen redraws at its own rate (usually 60 a second) with motion in between.',
+          'It costs about one picture (33 ms) of delay, which the link meter includes. Switch it off to see each picture the instant it arrives — useful when judging timing against the music. The choice is remembered in this browser.',
+        ],
+      },
       {
         id: 'devices-live-or-stored',
         title: 'Read the banner first: is the room running?',

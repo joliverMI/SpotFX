@@ -54,6 +54,11 @@ JSON frames (`device_preview._PreviewFrameSender`), unchanged.
    `SUMMARY_MAX_FPS`, and only when the colour changed. `full` gets every
    cell. A viewer changes level with a `subscribe` message.
 
+   SCOPE is the other half of a subscription: `favorites` (the top strip's
+   own list) or `in_use` — every in-use virtual the Live view draws
+   (preview_layout.py). The source reads the extra virtuals only while a
+   viewer asks for them, and a `favorites` viewer is never sent them.
+
 WIRE FORMAT, little-endian. Shaped so a WebGL renderer can upload a
 record's payload as a colour buffer without copying or re-ordering, and so
 the browser can report rate, round trip and frame age from the header alone.
@@ -76,8 +81,9 @@ the browser can report rate, round trip and frame age from the header alone.
     payload         r,g,b per cell, row-major over the device's real cells
 
   viewer -> server (text JSON)
-    {"type": "hello", "protocol": 2, "level": "summary" | "full"}
-    {"type": "subscribe", "level": ...}
+    {"type": "hello", "protocol": 2, "level": "summary" | "full",
+     "scope": "favorites" | "in_use"}
+    {"type": "subscribe", "level": ..., "scope": ...}
     {"type": "ack", "seq": n}
 """
 from __future__ import annotations
@@ -107,6 +113,7 @@ RECORD = struct.Struct("<BBHII")
 KIND_SUMMARY = 0
 KIND_FULL = 1
 LEVELS = ("summary", "full")
+SCOPES = ("favorites", "in_use")
 
 STREAM_RATES = (30, 20, 15, 10)
 SUMMARY_MAX_FPS = 15
@@ -235,10 +242,12 @@ class ViewerStream:
     its socket."""
 
     def __init__(self, ws, hub: "PreviewStreamHub", level: str = "summary",
-                 clock: Callable[[], float] = time.monotonic) -> None:
+                 clock: Callable[[], float] = time.monotonic,
+                 scope: str = "favorites") -> None:
         self.ws = ws
         self.hub = hub
         self.level = level if level in LEVELS else "summary"
+        self.scope = scope if scope in SCOPES else "favorites"
         self._clock = clock
         self.rate_idx = 0
         self.seq = 0
@@ -277,6 +286,15 @@ class ViewerStream:
             self._sent_frame.clear()
             self._sent_summary.clear()
 
+    def set_scope(self, scope: str) -> None:
+        if scope in SCOPES and scope != self.scope:
+            self.scope = scope
+            self.reset_devices()
+
+    def _in_scope(self, vis_id: str) -> bool:
+        favorites = self.hub.favorites
+        return self.scope == "in_use" or favorites is None or vis_id in favorites
+
     def ack(self, seq: int) -> None:
         now = self._clock()
         sent_at = self._in_flight.get(seq)
@@ -288,6 +306,8 @@ class ViewerStream:
 
     def nudge(self, vis_id: str) -> None:
         """A still device just changed: send it without waiting for the tick."""
+        if not self._in_scope(vis_id):
+            return
         self._sudden.add(vis_id)
         self._nudge.set()
 
@@ -380,6 +400,8 @@ class ViewerStream:
         records = []
         for vis_id, frame in self.hub.latest().items():
             if only is not None and vis_id not in only:
+                continue
+            if not self._in_scope(vis_id):
                 continue
             if self._sent_frame.get(vis_id) == frame.seq:
                 continue
@@ -489,7 +511,7 @@ class ViewerStream:
 
     def stats(self) -> dict:
         min_rtt = self.min_rtt()
-        return {"level": self.level, "rate_fps": self.rate,
+        return {"level": self.level, "scope": self.scope, "rate_fps": self.rate,
                 "window": self.window(), "in_flight": len(self._in_flight),
                 "srtt_ms": round(self.srtt * 1000, 1) if self.srtt is not None else None,
                 "min_rtt_ms": round(min_rtt * 1000, 1) if min_rtt is not None else None,
@@ -508,6 +530,9 @@ class PreviewStreamHub:
     _viewers: dict[object, ViewerStream] = field(default_factory=dict)
     _seq: int = 0
     _changed_at: dict[str, float] = field(default_factory=dict)
+    # The top strip's own list; None = no list known (every device is in
+    # scope). A "favorites" viewer is sent only these.
+    favorites: Optional[set] = None
 
     def _layout(self, vis_id: str, pixel_count: int, rows: int) -> DeviceLayout:
         key = (vis_id, pixel_count, rows)
@@ -550,8 +575,12 @@ class PreviewStreamHub:
         for viewer in self._viewers.values():
             viewer.reset_devices()
 
-    def connect(self, ws, level: str = "summary") -> ViewerStream:
-        viewer = ViewerStream(ws, self, level=level, clock=self.clock)
+    def wants_in_use(self) -> bool:
+        return any(v.scope == "in_use" for v in self._viewers.values())
+
+    def connect(self, ws, level: str = "summary",
+                scope: str = "favorites") -> ViewerStream:
+        viewer = ViewerStream(ws, self, level=level, clock=self.clock, scope=scope)
         self._viewers[ws] = viewer
         viewer.start()
         return viewer

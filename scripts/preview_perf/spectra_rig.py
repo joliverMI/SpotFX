@@ -6,7 +6,12 @@ devices are all DUMMIES in his real favourite shapes. Serves the harness page
 that mounts the real DevicePreviewStrip. No live storage, no real device, no
 audio device, no bridge.
 
-  python spectra_rig.py --port 9110 --harness <dist dir> [--relay-fps 8]
+  python spectra_rig.py --port 9110 --harness <dist dir> [--relay-fps 8] [--room]
+
+--room builds his room's real topology (one strip effect copied onto the TV
+backlight and both sconces, one pixel onto seventeen bulbs, the crystal
+through its 1,952 segments) instead of four plain dummies — what the Live
+view rows draw. Still dummies to the render host.
 
 --relay-fps only changes the OLD JSON format's rate (a `spectra-legacy@N`
 what-if); the protocol-2 stream paces itself.
@@ -33,6 +38,8 @@ def main() -> None:
     ap.add_argument("--harness", required=True)
     ap.add_argument("--relay-fps", type=float, default=None,
                     help="what-if: override RELAY_TARGET_FPS (default: shipped value)")
+    ap.add_argument("--room", action="store_true",
+                    help="his room's real topology on dummies (the Live view rows)")
     args = ap.parse_args()
 
     # The same thread-switch interval the real process runs with
@@ -56,6 +63,21 @@ def main() -> None:
 
     from pathlib import Path
     lo.OWNERSHIP_FILE = Path(tmp) / "ownership.json"
+    # The Live view's layout endpoint: read the rig's own config, never the
+    # worktree's category registry (no ground truth = draw everything), and
+    # be told the dummies are his fixtures' real types.
+    from fx import device_model
+    from spectra.services import device_console
+    device_model.CATEGORIES_FILE = Path(tmp) / "device_categories.json"
+    scfg.FX_LIVE_CONFIG_DIR = Path(tmp) / "fx-live"
+    stored = device_console._read_stored_config
+
+    def pretend() -> dict:
+        raw = stored()
+        for d in raw["devices"]:
+            d["type"] = rig_common.PRETEND_TYPES.get(d["id"], "wled" if not args.room else d["type"])
+        return raw
+    device_console._read_stored_config = pretend
     scfg.DEVICE_PREVIEW_FILE = Path(tmp) / "device_preview.json"
     scfg.DEVICE_PREVIEW_FILE.write_text(json.dumps({
         "favorite_virtual_ids": [s[0] for s in rig_common.SHAPES], "paused": False}))
@@ -67,7 +89,12 @@ def main() -> None:
     @app.on_event("startup")
     async def _up() -> None:
         cfg_dir = os.path.join(tmp, "fx-live")
-        rig_common.write_config(cfg_dir, CONFIGURATION_VERSION)
+        if args.room:
+            os.makedirs(cfg_dir, exist_ok=True)
+            with open(os.path.join(cfg_dir, "config.json"), "w") as f:
+                json.dump(rig_common.build_room_config(CONFIGURATION_VERSION, REPO), f)
+        else:
+            rig_common.write_config(cfg_dir, CONFIGURATION_VERSION)
         headless.silence_audio()
         host = FxHost(cfg_dir)
         await host.start()

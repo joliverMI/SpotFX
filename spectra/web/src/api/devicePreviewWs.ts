@@ -42,11 +42,14 @@
  *     pixels asks for "full".
  * A server that predates protocol 2 ignores the hello and keeps sending JSON
  * frames; those are decoded into the same PreviewFrame shape, so consumers
- * have one paint path. localStorage `spectra-device-preview-legacy` = '1'
+ * have one paint path. The SCOPE is the same idea for WHICH devices:
+ * "favorites" unless a consumer (the Live view) asks for "in_use", every
+ * in-use virtual. localStorage `spectra-device-preview-legacy` = '1'
  * skips the hello on purpose (the old format, for comparison). */
 import type { DevicePreviewStatus } from '../types';
 
 export type PreviewLevel = 'summary' | 'full';
+export type PreviewScope = 'favorites' | 'in_use';
 
 /** One device's picture, from either wire format. `rgb` holds r,g,b per
  * REAL cell; `cellIndex[i]` is the position (row-major in rows x cols) of
@@ -79,10 +82,15 @@ interface DeviceLayout {
 }
 
 type FrameListener = (frame: PreviewFrame) => void;
+/** One protocol-2 message: its size, its header, the oldest record's wait on
+ * the server, and when it arrived (performance.now()). `stats` is the one
+ * object the next message overwrites — read it, do not keep it. */
+type MessageListener = (bytes: number, stats: PreviewLinkStats, maxAgeMs: number, at: number) => void;
 type StatusListener = (status: DevicePreviewStatus) => void;
 type TabHiddenPauseListener = (paused: boolean) => void;
 
 const frameListeners = new Set<FrameListener>();
+const messageListeners = new Set<MessageListener>();
 const statusListeners = new Set<StatusListener>();
 const tabHiddenPauseListeners = new Set<TabHiddenPauseListener>();
 let lastStatus: DevicePreviewStatus | null = null;
@@ -100,7 +108,9 @@ let intentionalClose = false;
 let layouts: DeviceLayout[] = [];
 let linkStats: PreviewLinkStats | null = null;
 const levelRequests = new Map<string, PreviewLevel>();
+const scopeRequests = new Set<string>();
 let sentLevel: PreviewLevel | null = null;
+let sentScope: PreviewScope = 'favorites';
 
 const MAGIC = 0xd7;
 const HEADER_BYTES = 20;
@@ -119,12 +129,18 @@ function legacyForced(): boolean {
   }
 }
 
+function wantedScope(): PreviewScope {
+  return scopeRequests.size ? 'in_use' : 'favorites';
+}
+
 function sendLevel() {
   if (!ws || ws.readyState !== WebSocket.OPEN || sentLevel === null) return;
   const level = wantedLevel();
-  if (level !== sentLevel) {
+  const scope = wantedScope();
+  if (level !== sentLevel || scope !== sentScope) {
     sentLevel = level;
-    ws.send(JSON.stringify({ type: 'subscribe', level }));
+    sentScope = scope;
+    ws.send(JSON.stringify({ type: 'subscribe', level, scope }));
   }
 }
 
@@ -162,15 +178,19 @@ function readBinary(buffer: ArrayBuffer, socket: WebSocket) {
   const seq = view.getUint32(4, true);
   // Ack FIRST: the server paces itself on this.
   if (socket.readyState === WebSocket.OPEN) socket.send(`{"type":"ack","seq":${seq}}`);
-  linkStats = {
-    rateFps: view.getUint8(3), seq, sentMs: view.getFloat64(8, true),
-    srttMs: view.getUint16(16, true),
-  };
+  const at = performance.now();
+  if (!linkStats) linkStats = { rateFps: 0, srttMs: 0, sentMs: 0, seq: 0 };
+  linkStats.rateFps = view.getUint8(3);
+  linkStats.seq = seq;
+  linkStats.sentMs = view.getFloat64(8, true);
+  linkStats.srttMs = view.getUint16(16, true);
+  let maxAgeMs = 0;
   let offset = HEADER_BYTES;
   for (let i = 0; i < count && offset + RECORD_BYTES <= buffer.byteLength; i++) {
     const layout = layouts[view.getUint8(offset)];
     const kind: PreviewLevel = view.getUint8(offset + 1) === 1 ? 'full' : 'summary';
     const ageMs = view.getUint16(offset + 2, true);
+    if (ageMs > maxAgeMs) maxAgeMs = ageMs;
     const frameSeq = view.getUint32(offset + 4, true);
     const length = view.getUint32(offset + 8, true);
     offset += RECORD_BYTES;
@@ -183,6 +203,10 @@ function readBinary(buffer: ArrayBuffer, socket: WebSocket) {
       frameListeners.forEach((fn) => fn(frame));
     }
     offset += length;
+  }
+  if (messageListeners.size) {
+    const stats = linkStats;
+    messageListeners.forEach((fn) => fn(buffer.byteLength, stats, maxAgeMs, at));
   }
 }
 
@@ -231,7 +255,10 @@ function connect() {
   socket.onopen = () => {
     if (legacyForced()) return;
     sentLevel = wantedLevel();
-    socket.send(JSON.stringify({ type: 'hello', protocol: 2, level: sentLevel }));
+    sentScope = wantedScope();
+    socket.send(JSON.stringify({
+      type: 'hello', protocol: 2, level: sentLevel, scope: sentScope,
+    }));
   };
   ws.onmessage = (e) => {
     if (typeof e.data !== 'string') {
@@ -326,6 +353,22 @@ export function setDevicePreviewLevel(consumer: string, level: PreviewLevel | nu
   if (level === null) levelRequests.delete(consumer);
   else levelRequests.set(consumer, level);
   sendLevel();
+}
+
+/** Ask for every in-use virtual (the Live view), not only the favourites;
+ * `false` on unmount. */
+export function setDevicePreviewInUse(consumer: string, wanted: boolean) {
+  if (wanted) scopeRequests.add(consumer);
+  else scopeRequests.delete(consumer);
+  sendLevel();
+}
+
+/** Every protocol-2 message as it arrives — what the Live view's link meter
+ * is computed from. */
+export function onDevicePreviewMessage(fn: MessageListener): () => void {
+  ensureStarted();
+  messageListeners.add(fn);
+  return () => messageListeners.delete(fn);
 }
 
 /** Rate, round trip and send time from the newest message header, or null

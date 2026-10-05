@@ -1,0 +1,405 @@
+/** The Live view's renderer and playout: a StagePlan (positions.ts) plus
+ * preview-stream frames in, pixels out, at the display's own rate.
+ *
+ * ONE DRAW CALL, NOTHING ALLOCATED PER FRAME. Every point is one instance of
+ * a unit quad (WebGL2 instancing): its place and size are uploaded once per
+ * plan, its colour is three bytes in ONE buffer that is rewritten and
+ * re-uploaded each drawn frame. A frame from the stream is copied out of the
+ * message's own bytes into a preallocated array through the plan's source
+ * table — no objects, no strings, no per-pixel arrays. Where WebGL2 is not
+ * available the same colour array is painted with a 2D canvas instead.
+ *
+ * Overlapping dots (a 560-LED strip drawn as a line) combine with MAX, not
+ * addition: a strip's colour is its LEDs' colour, not their sum.
+ *
+ * PLAYOUT (the plan's change 5). Frames arrive about 30 a second and not
+ * evenly: on a relayed link the gap between two frames swings by tens of
+ * milliseconds. Drawn as they land, motion stutters. So each stream device
+ * EASES from what is on screen to its newest frame over one frame interval
+ * (its own measured arrival spacing): with even arrivals that is exactly
+ * "interpolate between the last two frames, one frame behind", and an early
+ * or late frame bends the ease instead of jumping. It costs about one frame
+ * (33 ms) of delay and can be switched off (`setSmooth(false)`), which shows
+ * each frame the moment it arrives.
+ *
+ * `draw` returns false, and touches nothing, when the picture has not
+ * changed since the last call — an idle room costs no GPU work. */
+import type { PreviewFrame } from '../api/devicePreviewWs';
+import type { StagePlan } from './positions';
+
+const VERT = `#version 300 es
+in vec2 a_corner;
+in vec2 a_xy;
+in float a_size;
+in vec3 a_color;
+uniform vec2 u_scale;
+uniform vec2 u_origin;
+out vec2 v_uv;
+out vec3 v_color;
+void main() {
+  v_uv = a_corner;
+  v_color = a_color;
+  vec2 p = a_xy + a_corner * a_size * 1.6;
+  gl_Position = vec4((p + u_origin) * u_scale * vec2(1.0, -1.0) + vec2(-1.0, 1.0), 0.0, 1.0);
+}`;
+
+// The quad is 1.6 dot radii wide: a solid core out to the dot's own edge
+// (0.625 of the quad), then a faint halo. An unlit pixel still shows a dim
+// core, so a dark fixture keeps its shape.
+const FRAG = `#version 300 es
+precision mediump float;
+in vec2 v_uv;
+in vec3 v_color;
+out vec4 o;
+void main() {
+  float r = length(v_uv);
+  float core = 1.0 - smoothstep(0.52, 0.64, r);
+  float halo = (1.0 - smoothstep(0.55, 1.0, r)) * 0.22;
+  vec3 lit = max(v_color, vec3(0.06, 0.055, 0.075));
+  o = vec4(lit * core + v_color * halo, 1.0);
+}`;
+
+const MIN_EASE_MS = 14;
+const MAX_EASE_MS = 120;
+const SOLO_DIM = 40;      // of 256: what a fixture that is not soloed keeps
+
+interface GroupState {
+  first: number;
+  count: number;
+  cells: number;
+  /** When the current ease started, and how long it runs (0 = already there). */
+  t0: number;
+  dur: number;
+  settled: boolean;
+  lastArrival: number;
+  interval: number;
+}
+
+export class LiveStage {
+  readonly mode: 'webgl' | 'canvas';
+  /** Frames actually drawn since construction (the view's own drawn-fps). */
+  drawn = 0;
+  /** Set when a frame's cell count is not the plan's: the layout this plan
+   * was built from is out of date (or the stream is the old format). The
+   * frame is not drawn — its cells would land on the wrong pixels. */
+  stale = false;
+  private canvas: HTMLCanvasElement;
+  private gl: WebGL2RenderingContext | null = null;
+  private ctx: CanvasRenderingContext2D | null = null;
+  private program: WebGLProgram | null = null;
+  private vao: WebGLVertexArrayObject | null = null;
+  private colorBuffer: WebGLBuffer | null = null;
+  private staticBuffers: WebGLBuffer[] = [];
+  private uScale: WebGLUniformLocation | null = null;
+  private uOrigin: WebGLUniformLocation | null = null;
+  private plan: StagePlan | null = null;
+  private groups = new Map<string, GroupState>();
+  private from = new Uint8Array(0);
+  private to = new Uint8Array(0);
+  private cur = new Uint8Array(0);
+  private out = new Uint8Array(0);
+  private gain: Uint8Array | null = null;
+  private smooth = true;
+  private dirty = true;
+  private lost = false;
+  private onLost = (e: Event) => { e.preventDefault(); this.lost = true; };
+  private onRestored = () => { this.lost = false; this.initGl(); this.uploadPlan(); };
+
+  constructor(canvas: HTMLCanvasElement, forceCanvas = false) {
+    this.canvas = canvas;
+    const gl = forceCanvas ? null : canvas.getContext('webgl2', {
+      antialias: false, alpha: false, depth: false, stencil: false,
+      preserveDrawingBuffer: false, powerPreference: 'low-power',
+    });
+    if (gl) {
+      this.gl = gl;
+      this.mode = 'webgl';
+      canvas.addEventListener('webglcontextlost', this.onLost);
+      canvas.addEventListener('webglcontextrestored', this.onRestored);
+      this.initGl();
+    } else {
+      this.ctx = canvas.getContext('2d', { alpha: false });
+      this.mode = 'canvas';
+    }
+  }
+
+  private initGl() {
+    const gl = this.gl;
+    if (!gl) return;
+    const compile = (type: number, source: string) => {
+      const shader = gl.createShader(type)!;
+      gl.shaderSource(shader, source);
+      gl.compileShader(shader);
+      return shader;
+    };
+    const program = gl.createProgram()!;
+    gl.attachShader(program, compile(gl.VERTEX_SHADER, VERT));
+    gl.attachShader(program, compile(gl.FRAGMENT_SHADER, FRAG));
+    ['a_corner', 'a_xy', 'a_size', 'a_color'].forEach((name, i) => gl.bindAttribLocation(program, i, name));
+    gl.linkProgram(program);
+    this.program = program;
+    this.uScale = gl.getUniformLocation(program, 'u_scale');
+    this.uOrigin = gl.getUniformLocation(program, 'u_origin');
+    gl.disable(gl.DEPTH_TEST);
+    gl.enable(gl.BLEND);
+    gl.blendEquation(gl.MAX);
+    gl.blendFunc(gl.ONE, gl.ONE);
+    gl.clearColor(0.024, 0.016, 0.043, 1);
+  }
+
+  /** A new position table: allocate the colour arrays and upload the static
+   * geometry. Colours already on screen are kept where a device keeps its
+   * point count (a resize re-plans without a flash to black). */
+  setPlan(plan: StagePlan) {
+    const previous = this.groups;
+    const previousCur = this.cur;
+    this.plan = plan;
+    const bytes = plan.pointCount * 3;
+    this.from = new Uint8Array(bytes);
+    this.to = new Uint8Array(bytes);
+    this.cur = new Uint8Array(bytes);
+    this.out = new Uint8Array(bytes);
+    this.groups = new Map();
+    for (const group of plan.groups) {
+      const old = previous.get(group.visId);
+      if (old && old.count === group.count) {
+        const kept = previousCur.subarray(old.first * 3, (old.first + old.count) * 3);
+        this.cur.set(kept, group.first * 3);
+        this.to.set(kept, group.first * 3);
+      }
+      this.groups.set(group.visId, {
+        first: group.first, count: group.count, cells: group.cells,
+        t0: 0, dur: 0, settled: true,
+        lastArrival: old?.lastArrival ?? 0, interval: old?.interval ?? 33,
+      });
+    }
+    this.gain = null;
+    this.uploadPlan();
+    this.dirty = true;
+  }
+
+  private uploadPlan() {
+    const gl = this.gl;
+    const plan = this.plan;
+    if (!gl || !plan || !this.program) return;
+    this.staticBuffers.forEach((b) => gl.deleteBuffer(b));
+    if (this.colorBuffer) gl.deleteBuffer(this.colorBuffer);
+    if (this.vao) gl.deleteVertexArray(this.vao);
+    const vao = gl.createVertexArray()!;
+    gl.bindVertexArray(vao);
+    const buffer = (data: BufferSource, usage: number) => {
+      const b = gl.createBuffer()!;
+      gl.bindBuffer(gl.ARRAY_BUFFER, b);
+      gl.bufferData(gl.ARRAY_BUFFER, data, usage);
+      return b;
+    };
+    const corner = buffer(new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+    const xy = buffer(plan.xy, gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(1);
+    gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 0, 0);
+    gl.vertexAttribDivisor(1, 1);
+    // the shader wants a radius
+    const radius = new Float32Array(plan.size.length);
+    for (let i = 0; i < radius.length; i++) radius[i] = plan.size[i] / 2;
+    const size = buffer(radius, gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(2);
+    gl.vertexAttribPointer(2, 1, gl.FLOAT, false, 0, 0);
+    gl.vertexAttribDivisor(2, 1);
+    this.colorBuffer = buffer(this.out, gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(3);
+    gl.vertexAttribPointer(3, 3, gl.UNSIGNED_BYTE, true, 0, 0);
+    gl.vertexAttribDivisor(3, 1);
+    gl.bindVertexArray(null);
+    this.vao = vao;
+    this.staticBuffers = [corner, xy, size];
+  }
+
+  setSmooth(smooth: boolean) {
+    this.smooth = smooth;
+  }
+
+  /** Dim every point outside [first, first + count); null = no solo. */
+  setSolo(range: { first: number; count: number } | null) {
+    const plan = this.plan;
+    if (!plan || !range) {
+      this.gain = null;
+    } else {
+      const gain = new Uint8Array(plan.pointCount).fill(SOLO_DIM);
+      gain.fill(255, range.first, range.first + range.count);
+      this.gain = gain;
+    }
+    this.dirty = true;
+  }
+
+  /** One stream frame. Copies what it needs: the frame's bytes are not kept. */
+  pushFrame(frame: PreviewFrame, now: number) {
+    const plan = this.plan;
+    const group = this.groups.get(frame.visId);
+    if (!plan || !group || frame.kind !== 'full') return;
+    const { rgb } = frame;
+    const cells = Math.floor(rgb.length / 3);
+    if (cells !== group.cells) {
+      this.stale = true;
+      return;
+    }
+    const { src } = plan;
+    const { from, to, cur } = this;
+    const a = group.first * 3;
+    const b = (group.first + group.count) * 3;
+    from.set(cur.subarray(a, b), a);
+    for (let p = group.first, o = a; o < b; p++, o += 3) {
+      const cell = src[p];
+      if (cell < cells) {
+        const i = cell * 3;
+        to[o] = rgb[i];
+        to[o + 1] = rgb[i + 1];
+        to[o + 2] = rgb[i + 2];
+      }
+    }
+    const gap = now - group.lastArrival;
+    if (group.lastArrival && gap < 400) group.interval += (gap - group.interval) * 0.2;
+    group.lastArrival = now;
+    group.t0 = now;
+    group.dur = this.smooth
+      ? Math.max(MIN_EASE_MS, Math.min(MAX_EASE_MS, group.interval)) : 0;
+    group.settled = false;
+  }
+
+  /** The delay smoothing adds for the busiest device right now, in ms. */
+  holdMs(): number {
+    if (!this.smooth) return 0;
+    let fastest = 0;
+    this.groups.forEach((g) => {
+      if (g.lastArrival && (!fastest || g.interval < fastest)) fastest = g.interval;
+    });
+    return Math.max(0, Math.min(MAX_EASE_MS, fastest));
+  }
+
+  /** Everything to black (the preview stopped: nothing here is live). */
+  blank() {
+    this.to.fill(0);
+    this.cur.fill(0);
+    this.groups.forEach((g) => { g.settled = true; });
+    this.dirty = true;
+  }
+
+  /** Match the canvas's pixel size to its box. Returns true when it changed. */
+  resize(): boolean {
+    // Soft dots gain nothing past 2x, and a 3x phone would fill 2.25 times
+    // the pixels every frame.
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const w = Math.max(1, Math.round(this.canvas.clientWidth * dpr));
+    const h = Math.max(1, Math.round(this.canvas.clientHeight * dpr));
+    if (this.canvas.width === w && this.canvas.height === h) return false;
+    this.canvas.width = w;
+    this.canvas.height = h;
+    this.dirty = true;
+    return true;
+  }
+
+  draw(now: number): boolean {
+    const plan = this.plan;
+    if (!plan || this.lost) return false;
+    let moved = false;
+    const { from, to, cur } = this;
+    this.groups.forEach((g) => {
+      if (g.settled) return;
+      moved = true;
+      const a = g.first * 3;
+      const b = (g.first + g.count) * 3;
+      const t = g.dur > 0 ? (now - g.t0) / g.dur : 1;
+      if (t >= 1) {
+        cur.set(to.subarray(a, b), a);
+        g.settled = true;
+      } else {
+        const k = Math.max(0, Math.round(t * 256));
+        for (let i = a; i < b; i++) cur[i] = from[i] + (((to[i] - from[i]) * k) >> 8);
+      }
+    });
+    if (!moved && !this.dirty) return false;
+    this.dirty = false;
+    let colors = cur;
+    const gain = this.gain;
+    if (gain) {
+      const out = this.out;
+      for (let p = 0, i = 0; p < gain.length; p++, i += 3) {
+        const k = gain[p];
+        out[i] = (cur[i] * k) >> 8;
+        out[i + 1] = (cur[i + 1] * k) >> 8;
+        out[i + 2] = (cur[i + 2] * k) >> 8;
+      }
+      colors = out;
+    }
+    if (this.gl) this.drawGl(plan, colors);
+    else if (this.ctx) this.drawCanvas(plan, colors);
+    this.drawn++;
+    return true;
+  }
+
+  /** The stage is fitted inside the canvas, centred, keeping its shape. */
+  private fit(plan: StagePlan): { scale: number; ox: number; oy: number } {
+    const { width, height } = this.canvas;
+    const scale = Math.min(width / plan.width, height / plan.height);
+    return {
+      scale, ox: (width / scale - plan.width) / 2, oy: (height / scale - plan.height) / 2,
+    };
+  }
+
+  private drawGl(plan: StagePlan, colors: Uint8Array) {
+    const gl = this.gl!;
+    const { width, height } = this.canvas;
+    const { scale, ox, oy } = this.fit(plan);
+    gl.viewport(0, 0, width, height);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    if (!plan.pointCount) return;
+    gl.useProgram(this.program);
+    gl.uniform2f(this.uScale, (2 * scale) / width, (2 * scale) / height);
+    gl.uniform2f(this.uOrigin, ox, oy);
+    gl.bindVertexArray(this.vao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.colorBuffer);
+    gl.bufferSubData(gl.ARRAY_BUFFER, 0, colors);
+    gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, plan.pointCount);
+    gl.bindVertexArray(null);
+  }
+
+  private drawCanvas(plan: StagePlan, colors: Uint8Array) {
+    const ctx = this.ctx!;
+    const { scale, ox, oy } = this.fit(plan);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = '#06040b';
+    ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+    ctx.globalCompositeOperation = 'lighten';
+    const { xy, size } = plan;
+    for (let p = 0, i = 0; p < plan.pointCount; p++, i += 3) {
+      const d = size[p] * scale;
+      const r = Math.max(colors[i], 15);
+      const g = Math.max(colors[i + 1], 14);
+      const b = Math.max(colors[i + 2], 19);
+      ctx.fillStyle = `rgb(${r},${g},${b})`;
+      const x = (xy[p * 2] + ox) * scale;
+      const y = (xy[p * 2 + 1] + oy) * scale;
+      if (d < 5) {
+        ctx.fillRect(x - d / 2, y - d / 2, d, d);
+      } else {
+        ctx.beginPath();
+        ctx.arc(x, y, d / 2, 0, 6.2832);
+        ctx.fill();
+      }
+    }
+  }
+
+  dispose() {
+    this.canvas.removeEventListener('webglcontextlost', this.onLost);
+    this.canvas.removeEventListener('webglcontextrestored', this.onRestored);
+    const gl = this.gl;
+    if (gl) {
+      this.staticBuffers.forEach((b) => gl.deleteBuffer(b));
+      if (this.colorBuffer) gl.deleteBuffer(this.colorBuffer);
+      if (this.vao) gl.deleteVertexArray(this.vao);
+      if (this.program) gl.deleteProgram(this.program);
+    }
+    this.plan = null;
+  }
+}

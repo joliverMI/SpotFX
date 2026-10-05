@@ -20,6 +20,11 @@ Systems (parts combine: spectra-legacy@30+proxy:collapsed):
   :collapsed     the strip collapsed (one averaged colour per device)
   -legacy        the old JSON format (the page skips the protocol-2 hello)
   -legacy@N      the old format with only its relay fps raised (what-if)
+  :live          the Live view (Devices > Live) instead of the top strip, on
+                 his room's real topology; adds "drawn fps" — animation
+                 frames in which the page actually drew
+  :phone         a phone: 390x844 at 3x, CPU slowed by --phone-cpu (4x)
+  :canvas        the Live view's 2D-canvas fallback instead of WebGL
   ledfx          the real LedFX fork + its real frontend, his config
                  (visualisation_fps 30, visualisation_maxlen 4096, compressed)
 
@@ -116,9 +121,12 @@ class Proc:
                 pass
 
 
-def start_spectra(harness: str, relay_fps: float | None, log_dir: str) -> Proc:
+def start_spectra(harness: str, relay_fps: float | None, log_dir: str,
+                  room: bool = False) -> Proc:
     argv = [sys.executable, os.path.join(HERE, "spectra_rig.py"), "--port", str(SPECTRA_PORT),
             "--harness", harness]
+    if room:
+        argv.append("--room")
     if relay_fps:
         argv += ["--relay-fps", str(relay_fps)]
     p = Proc(argv, cwd=REPO, stderr=open(os.path.join(log_dir, "spectra_rig.log"), "w"))
@@ -176,12 +184,14 @@ def pct(xs, q):
 
 
 async def measure(system: str, profile: str, seconds: float, flashes: int,
-                  server_pid: int, idle_cpu: float, shots: str | None) -> dict:
+                  server_pid: int, idle_cpu: float, shots: str | None,
+                  phone_cpu: float = 4.0) -> dict:
     import websockets
 
     rtt, jit, down, up = PROFILES[profile]
     target = LEDFX_PORT if system == "ledfx" else (PROXY_PORT if "+proxy" in system else SPECTRA_PORT)
     collapsed = ":collapsed" in system
+    live_view, phone = ":live" in system, ":phone" in system
     counter = linkemu.Counter()
     server, _ = await linkemu.serve(LINK_PORT, target, rtt, jit, down, up, counter)
     base = f"http://127.0.0.1:{LINK_PORT}"
@@ -189,9 +199,11 @@ async def measure(system: str, profile: str, seconds: float, flashes: int,
         url = f"{base}/#/Devices"
         preload = f"localStorage.setItem('ledfx-host', '{base}');"
     else:
-        url = f"{base}/spectra/"
+        url = f"{base}/spectra/" + ("live.html" if live_view else "")
         preload = ("localStorage.setItem('spectra-device-preview-expanded', '%s');"
                    % ("0" if collapsed else "1"))
+        if ":canvas" in system:
+            preload += "localStorage.setItem('spectra-live-force-canvas', '1');"
         if "legacy" in system:
             preload += "localStorage.setItem('spectra-device-preview-legacy', '1');"
     probe = (open(os.path.join(HERE, "probe.js")).read()
@@ -216,7 +228,11 @@ async def measure(system: str, profile: str, seconds: float, flashes: int,
             for m in ("Page.enable", "Runtime.enable", "Performance.enable"):
                 await cdp.call(m)
             await cdp.call("Emulation.setDeviceMetricsOverride",
+                           {"width": 390, "height": 844, "deviceScaleFactor": 3, "mobile": True}
+                           if phone else
                            {"width": 1280, "height": 900, "deviceScaleFactor": 1, "mobile": False})
+            if phone and phone_cpu > 1:
+                await cdp.call("Emulation.setCPUThrottlingRate", {"rate": phone_cpu})
             await cdp.call("Network.enable")
             await cdp.call("Network.setCacheDisabled", {"cacheDisabled": True})
             await cdp.call("Page.addScriptToEvaluateOnNewDocument", {"source": probe})
@@ -241,7 +257,8 @@ async def measure(system: str, profile: str, seconds: float, flashes: int,
                 return {m["name"]: m["value"] for m in ms["metrics"]}
 
             await cdp.eval("(()=>{const p=window.__probe;p.ws.length=0;p.paints.length=0;"
-                           "p.lat.length=0;p.rafLong.length=0;p.rafCount=0;p.start=performance.now();})()")
+                           "p.lat.length=0;p.rafLong.length=0;p.rafCount=0;p.drawnFrames=0;p.drawCalls=0;"
+                           "p.start=performance.now();})()")
             m0 = metrics(await cdp.call("Performance.getMetrics"))
             cpu0, wall0 = rig_common.cpu_seconds(server_pid), time.time()
             down0, up0 = counter.down, counter.up
@@ -253,8 +270,13 @@ async def measure(system: str, profile: str, seconds: float, flashes: int,
             down1, up1 = counter.down, counter.up
             dump = await cdp.eval("JSON.stringify({ws:window.__probe.ws,paints:window.__probe.paints,"
                                   "rafCount:window.__probe.rafCount,rafLong:window.__probe.rafLong,"
+                                  "drawnFrames:window.__probe.drawnFrames,drawCalls:window.__probe.drawCalls,"
                                   "elapsed:performance.now()-window.__probe.start,sockets:window.__probe.sockets})")
             d = json.loads(dump)
+            result["webgl_renderer"] = await cdp.eval(
+                "(()=>{const g=document.createElement('canvas').getContext('webgl2');"
+                "if(!g)return 'none';const e=g.getExtension('WEBGL_debug_renderer_info');"
+                "return e?g.getParameter(e.UNMASKED_RENDERER_WEBGL):'unknown'})()")
             if system != "ledfx":
                 try:   # the stream's own view of this viewer (rate, window, held ticks)
                     result["stream"] = http(
@@ -331,6 +353,9 @@ async def measure(system: str, profile: str, seconds: float, flashes: int,
         "browser_main_thread_pct": round(100 * (m1["TaskDuration"] - m0["TaskDuration"]) / wall, 1),
         "browser_script_pct": round(100 * (m1["ScriptDuration"] - m0["ScriptDuration"]) / wall, 1),
         "raf_fps": round(d["rafCount"] / el, 1),
+        "drawn_fps": round(d["drawnFrames"] / el, 1),
+        "draw_calls_per_frame": round(d["drawCalls"] / max(1, d["drawnFrames"]), 2),
+        "raf_longest_ms": round(max((x[1] for x in d["rafLong"]), default=0), 1),
         "raf_long_frames": len(d["rafLong"]),
         "server_cpu_pct": round(100 * (cpu1 - cpu0) / wall, 1),
         "server_cpu_idle_pct": round(idle_cpu, 1),
@@ -354,8 +379,9 @@ def idle_cpu(pid: int, seconds: float = 8.0) -> float:
 
 def table(rows: list[dict]) -> str:
     head = ("| system | link | delivered fps | painted fps | interval p95 / max (ms) | gaps >100ms | "
-            "input→photon median / max (ms) | frame bytes | wire kbps down | browser main thread | server CPU for preview |\n"
-            "|---|---|---|---|---|---|---|---|---|---|---|\n")
+            "input→photon median / max (ms) | frame bytes | wire kbps down | browser main thread | server CPU for preview | "
+            "drawn fps | long frames (>34 ms) |\n"
+            "|---|---|---|---|---|---|---|---|---|---|---|---|---|\n")
     out = []
     for r in rows:
         if "error" in r:
@@ -365,7 +391,8 @@ def table(rows: list[dict]) -> str:
         out.append(f"| {r['system']} | {r['profile']} | {r['delivered_fps']} | {r['painted_fps']} | "
                    f"{iv['p95']} / {iv['max']} | {r['gaps_over_100ms']} | "
                    f"{la['photon_median']} / {la['photon_max']} | {r['motion_frame_bytes']} | {r['down_kbps']} | "
-                   f"{r['browser_main_thread_pct']}% | {r['server_preview_cpu_pct']}% |")
+                   f"{r['browser_main_thread_pct']}% | {r['server_preview_cpu_pct']}% | "
+                   f"{r['drawn_fps']} | {r['raf_long_frames']} |")
     return head + "\n".join(out) + "\n"
 
 
@@ -380,7 +407,13 @@ async def main_async(args) -> int:
     profiles = args.profiles.split(",")
     systems = args.systems.split(",")
     profile_dir = tempfile.mkdtemp(prefix="preview-perf-chrome-")
-    chrome = Proc([CHROME, "--headless=new", "--no-sandbox", "--disable-gpu",
+    # The Live view draws with WebGL. With no GPU Chromium runs it in
+    # software (SwiftShader), which measures this machine's CPU, not the
+    # view: use the real GPU for those rows unless told otherwise. Every row
+    # records the renderer it actually got.
+    gpu = args.gpu == "on" or (args.gpu == "auto" and any(":live" in s for s in systems))
+    gpu_flags = ["--ignore-gpu-blocklist", "--use-angle=gl-egl"] if gpu else ["--disable-gpu"]
+    chrome = Proc([CHROME, "--headless=new", "--no-sandbox", *gpu_flags,
                    f"--remote-debugging-port={CDP_PORT}", "--no-first-run",
                    "--disable-background-timer-throttling", "--disable-renderer-backgrounding",
                    "--disable-backgrounding-occluded-windows",
@@ -395,7 +428,7 @@ async def main_async(args) -> int:
             else:
                 fps = (float(system.split("@")[1].split("+")[0].split(":")[0])
                        if "@" in system else None)
-                srv = start_spectra(harness, fps, args.out)
+                srv = start_spectra(harness, fps, args.out, room=":live" in system)
                 if "+proxy" in system:
                     proxy = Proc([sys.executable, os.path.join(HERE, "proxy_rig.py"),
                                   "--port", str(PROXY_PORT), "--target", str(SPECTRA_PORT)], cwd=REPO)
@@ -407,14 +440,15 @@ async def main_async(args) -> int:
                     print(f"… {system} over {profile}", flush=True)
                     try:
                         r = await asyncio.wait_for(
-                            measure(system, profile, args.seconds, args.flashes, srv.pid, idle, shots),
+                            measure(system, profile, args.seconds, args.flashes, srv.pid, idle, shots,
+                                    phone_cpu=args.phone_cpu),
                             timeout=args.seconds + 150)
                     except Exception as exc:   # a hung page must not hang the whole gate
                         r = {"system": system, "profile": profile,
                              "error": f"{type(exc).__name__}: {exc}"[:120]}
                     rows.append(r)
                     print(json.dumps({k: r.get(k) for k in (
-                        "delivered_fps", "painted_fps", "interval_ms", "latency_ms", "down_kbps",
+                        "delivered_fps", "painted_fps", "drawn_fps", "raf_long_frames", "interval_ms", "latency_ms", "down_kbps",
                         "browser_main_thread_pct", "server_preview_cpu_pct", "error")}), flush=True)
             finally:
                 srv.stop()
@@ -470,7 +504,7 @@ def gate(rows: list[dict], systems: list[str], args) -> list[str] | None:
         args.vs = "ledfx"
     asked = any((args.pass_fps, p95, latency, args.pass_max_gap_ms, args.pass_main_thread_pct,
                  args.poor_fps, args.poor_latency_ms, args.poor_latency_max_ms,
-                 args.collapsed_kbps, args.vs))
+                 args.collapsed_kbps, args.vs, args.pass_drawn_fps))
     reference = {r["profile"]: r for r in rows
                  if args.vs and r["system"] == args.vs and "error" not in r}
     if not asked:
@@ -488,6 +522,15 @@ def gate(rows: list[dict], systems: list[str], args) -> list[str] | None:
 
     for r in rows:
         name = f"{r['system']} {r['profile']}:"
+        if ":live" in r["system"] and args.pass_drawn_fps:
+            # Every Live view row, whichever system is first: the display's
+            # own rate, drawn, on every link.
+            if "error" in r:
+                failed.append(f"{name} {r['error']}")
+            else:
+                under(f"{name} drawn", r["drawn_fps"], args.pass_drawn_fps, " fps")
+            if r["system"] != subject:
+                continue
         if r["system"] == subject + ":collapsed":
             if "error" in r:
                 failed.append(f"{name} {r['error']}")
@@ -553,6 +596,15 @@ if __name__ == "__main__":
                          "rows from the same run (--gate uses ledfx when it was run)")
     ap.add_argument("--vs-slack-ms", type=float, default=3.0,
                     help="measurement noise allowed in the --vs comparison")
+    ap.add_argument("--pass-drawn-fps", type=float, default=0,
+                    help="every ':live' row must DRAW at least this many frames a "
+                         "second (the Live view's gate: 59, the display's 60 less "
+                         "measurement rounding)")
+    ap.add_argument("--gpu", choices=("auto", "on", "off"), default="auto",
+                    help="auto: the machine's GPU when a ':live' system is listed, "
+                         "software rendering otherwise (as the stream gate was measured)")
+    ap.add_argument("--phone-cpu", type=float, default=4.0,
+                    help="CPU slowdown for ':phone' rows (Chromium's own throttle)")
     ap.add_argument("--collapsed-kbps", type=float, default=0,
                     help="wire limit for the first system's ':collapsed' row")
     a = ap.parse_args()

@@ -56,6 +56,66 @@ def write_config(config_dir: str, version: str, extra: dict | None = None) -> No
         json.dump(build_config(version, extra), f)
 
 
+# ── his room's real topology, on dummies (the Live view rows) ───────────────
+# Segment lists read 2026-10-05 from fx-live/config.json. FxHost sees only
+# dummy devices; PRETEND_TYPES is what the rig tells the layout endpoint they
+# are, so the Live view draws his fixtures' real kinds (a frame, bulbs, ...).
+PRETEND_TYPES = {
+    "crystal": "wled", "tv-backlight": "wled", "sconce-kitchen-left": "wled",
+    "sconce-kitchen-right": "wled", "hue-lights": "hue", "dining-hues": "hue",
+    "porch-rail": "wled", "dining-table": "wled",
+}
+ROOM_NAMES = {
+    "crystal": "Crystal", "tv-backlight": "TV Backlight",
+    "sconce-kitchen-left": "Sconce, Kitchen, Left",
+    "sconce-kitchen-right": "Sconce, Kitchen, Right", "hue-lights": "Hue Lights",
+    "dining-hues": "Dining Hues", "porch-rail": "Porch Rail", "dining-table": "Dining Table",
+}
+
+
+def _crystal_segments(repo: str) -> list:
+    with open(os.path.join(repo, "storage", "device_profiles", "crystal-mapper.json")) as f:
+        runs = json.load(f)["mask_rle"]
+    segments, pixel, device_pixel, real = [], 0, 0, False
+    for run in runs:
+        for _ in range(run):
+            if real:
+                segments.append(["crystal", device_pixel, device_pixel, False, 0])
+                device_pixel += 1
+            else:
+                segments.append(["gap-crystal-mapper", pixel, pixel, False, 0])
+            pixel += 1
+        real = not real
+    return segments
+
+
+def build_room_config(version: str, repo: str) -> dict:
+    sizes = {"crystal": 976, "gap-crystal-mapper": 4096, "tv-backlight": 560,
+             "sconce-kitchen-left": 88, "sconce-kitchen-right": 88, "hue-lights": 10,
+             "dining-hues": 7, "porch-rail": 1, "dining-table": 1}
+    devices = [{"id": d, "type": "dummy",
+                "config": {"name": ROOM_NAMES.get(d, d), "pixel_count": n}}
+               for d, n in sizes.items()]
+    shapes = {
+        "crystal-mapper": ("span", 37, _crystal_segments(repo)),
+        "tv-mapper": ("copy", 1, [["tv-backlight", 0, 559, False, 0],
+                                  ["sconce-kitchen-right", 0, 27, False, 0],
+                                  ["sconce-kitchen-right", 28, 87, False, 0],
+                                  ["sconce-kitchen-left", 0, 27, False, -2],
+                                  ["sconce-kitchen-left", 28, 87, False, -4]]),
+        "hues": ("copy", 1, [["hue-lights", i, i, False, 0] for i in range(10)]
+                 + [["dining-hues", i, i, False, 0] for i in range(7)]),
+        "single-color-effect": ("copy", 1, [["porch-rail", 0, 0, False, 0],
+                                            ["dining-table", 0, 0, False, 0]]),
+    }
+    virtuals = [{
+        "id": vid, "is_device": False, "auto_generated": False, "active": True,
+        "config": {"name": vid, "mapping": mapping, "rows": rows, "transition_time": 0.0},
+        "segments": segments, "effect": effect_for(vid),
+    } for vid, (mapping, rows, segments) in shapes.items()]
+    return {"configuration_version": version, "devices": devices, "virtuals": virtuals}
+
+
 def cpu_seconds(pid: int) -> float:
     """utime+stime of a process (all threads), in seconds, from /proc."""
     with open(f"/proc/{pid}/stat") as f:

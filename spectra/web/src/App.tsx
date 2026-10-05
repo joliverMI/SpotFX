@@ -8,6 +8,7 @@ import { ToastProvider } from './components/Toast';
 import { confirmLeave } from './lib/unsavedGuard';
 import ColorSetsPage from './colorsets/ColorSetsPage';
 import DevicesPage from './devices/DevicesPage';
+import LiveView from './live/LiveView';
 import FeedbackPage from './feedback/FeedbackPage';
 import HelpPage from './help/HelpPage';
 import HelpLink from './help/HelpLink';
@@ -40,6 +41,7 @@ const PAGE_TITLES: [string, string][] = [
   ['/rooms', 'Rooms'],
   ['/room-effects', 'Room Effects'],
   ['/devices', 'Devices'],
+  ['/live', 'Live'],
   ['/debug', 'Debug'],
   ['/settings', 'Settings'],
   ['/status', 'Status'],
@@ -91,6 +93,16 @@ function NavBar() {
 
 export default function App() {
   usePageTitle();
+  const { pathname } = useLocation();
+  // The Live view's pop-out window: the stage alone, none of the app's bars
+  // (the top strip would hold a second, summary-level view of the same feed).
+  if (pathname === '/live') {
+    return (
+      <ToastProvider>
+        <main className="live-popout-page"><LiveView popout /></main>
+      </ToastProvider>
+    );
+  }
   return (
     <ToastProvider>
       {/* FIRST, above NavBar — this must genuinely be the top bar on every
