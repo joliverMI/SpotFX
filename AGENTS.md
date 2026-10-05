@@ -3992,8 +3992,16 @@ Five things:
   `energy.audio_pause_after_s` (120) of CONFIRMED quiet the capture stream
   closes (`live.pause_audio`); music, another hub listener (A/V sync) or the
   layer going inactive resume it; an unknown playback read restarts the
-  quiet clock. Measure with `scripts/measure_room_energy.py` (read-only,
-  the planner's method). Tests: `tests/test_house_energy.py`,
+  quiet clock. **A RELEASE HANDS BACK POWER** (found in the phase-3 room
+  re-measure: the dining table was left ON at 255): before its first owned
+  write house_fixtures records each WLED's `{on, bri, ip}`
+  (`HouseState.pre_take`, durable) and, once the owner is RELEASED, writes it
+  back and reads it back — a fixture off before a take is off after. Never
+  on a restart or a handover to SpotFX. Status labels are unique
+  (`house.fixture_labels()`: four of his WLEDs are all named "WLED").
+  Measure with `scripts/measure_room_energy.py` (read-only, the planner's
+  method; measured 2026-10-05: 39.3% → 16.1% of a core, 285 → 120 UDP/s,
+  14.1% / 78 with the sconce mains reported off). Tests: `tests/test_house_energy.py`,
   `tests/test_send_on_change_landing.py`, the phase-3 sections of
   `tests/test_device_rate.py`, `test_house_lighting.py`,
   `test_house_fixtures.py`, `test_activation_report.py`,

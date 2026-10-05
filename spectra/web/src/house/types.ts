@@ -141,6 +141,8 @@ export interface SeamFixtures {
     set: Record<string, unknown>; outcome: string; detail: string }[];
   rechecks: Record<string, { state: string; attempts?: number; after_s?: number; reason?: string; moved?: boolean }>;
   mains_off?: Record<string, number>;
+  pre_take?: Record<string, { on: boolean; bri: number | null; at_ms: number }>;
+  handed_back?: { at_ms: number; device: string; set: { on: boolean; bri?: number }; outcome: string; detail: string }[];
 }
 
 export interface SeamVoice {

@@ -27,6 +27,7 @@ fakes behind house_fixtures.deps.
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 
@@ -38,7 +39,7 @@ class FakeDev:
         self.id = did
         self.name = name
         self.type = kind
-        self.wled = object() if kind == "wled" else None
+        self.wled = SimpleNamespace(ip_address=f"ip-{did}") if kind == "wled" else None
         self._destination = "10.0.0.1" if kind == "wled" else None
         self.frozen = False
 
@@ -137,10 +138,28 @@ def seam(monkeypatch):
     async def report_refresh():
         return None
 
+    w.released = [False]
+    w.ip_posts: list = []
+
+    async def post_ip(ip, payload):
+        did = ip[len("ip-"):]
+        w.ip_posts.append((did, dict(payload)))
+        if did in w.unreachable_ips:
+            raise TimeoutError("no answer")
+        w.state[did].update({k: payload[k] for k in ("on", "bri") if k in payload})
+
+    async def get_ip(ip):
+        did = ip[len("ip-"):]
+        if did in w.unreachable_ips:
+            raise TimeoutError("no answer")
+        return dict(w.state[did])
+    w.unreachable_ips: set = set()
+
     house_fixtures.deps = house_fixtures.Deps(
         post=post, get_state=get_state, host=lambda: w.host,
         relocate=relocate, reinit=reinit, reachable=reachable,
-        report_refresh=report_refresh, clock=w.clock, sleep=no_sleep)
+        report_refresh=report_refresh, clock=w.clock, sleep=no_sleep,
+        post_ip=post_ip, get_ip=get_ip, released=lambda: w.released[0])
     w.hf, w.house, w.store = house_fixtures, house, house_store
 
     def set_mode(name="Standard"):
@@ -628,3 +647,78 @@ def test_a_restart_keeps_a_mode_off_fixture_withheld_from_the_first_pass(seam):
     assert seam.house.mode_off_devices() == {"porch-rail": "Standard"}
     _run(_settle(seam.hf))
     assert device_output.withheld().get("porch-rail") == "switched off"
+
+
+
+# ═══ 10. phase 3: a release hands back what Spectra switched on ═════════════
+
+def _release(seam):
+    seam.refusal[0] = "the room is released"
+    seam.released[0] = True
+
+
+def test_a_fixture_that_was_off_before_the_take_is_off_after_the_release(seam):
+    """2026-10-05: a take switched his dining-table under-glow on at full
+    (owned brightness) and nothing switched it back off — River's restore
+    does not capture it. Spectra remembers what it found before its first
+    write and puts it back when the room is released."""
+    seam.state["porch-rail"].update({"on": False, "bri": 40})
+    seam.set_mode()
+    _run(_settle(seam.hf))
+    assert seam.state["porch-rail"]["on"] is True          # owned: on at 255
+    before = seam.store.state().pre_take["porch-rail"]
+    assert (before["on"], before["bri"]) == (False, 40)
+    assert seam.store.state().pre_take["crystal"]["on"] is True
+    _release(seam)
+
+    async def release_pass():
+        await seam.hf.tick()
+        assert seam.hf._rt.handback_task is not None
+        await seam.hf._rt.handback_task
+    _run(release_pass())
+    assert ("porch-rail", {"on": False, "bri": 40}) in seam.ip_posts
+    assert seam.state["porch-rail"]["on"] is False
+    assert seam.state["crystal"]["on"] is True and seam.state["crystal"]["bri"] == 34
+    assert seam.store.state().pre_take == {}
+    handed = seam.hf.status()["handed_back"]
+    assert {h["device"] for h in handed} >= {"porch-rail", "crystal"}
+    assert all(h["outcome"] == "landed" for h in handed)
+
+
+def test_the_first_reading_wins_until_it_is_handed_back(seam):
+    seam.state["porch-rail"].update({"on": False, "bri": 40})
+    seam.set_mode()
+    _run(_settle(seam.hf))
+    seam.hf._rt.applied.clear()                    # a second pass re-writes
+    _run(_settle(seam.hf))
+    assert seam.store.state().pre_take["porch-rail"]["on"] is False
+
+
+def test_a_restart_or_a_handover_hands_nothing_back(seam):
+    """Only a RELEASE hands back: a restart keeps the picture, and a
+    handover to the older SpotFX process needs the fixtures on."""
+    seam.state["porch-rail"].update({"on": False, "bri": 40})
+    seam.set_mode()
+    _run(_settle(seam.hf))
+    seam.refusal[0] = "SPECTRA's live light stack is not up"   # not released
+    _run(_settle(seam.hf))
+    assert seam.ip_posts == []
+    assert "porch-rail" in seam.store.state().pre_take
+
+
+def test_a_fixture_that_does_not_confirm_is_retried_then_dropped_and_named(seam):
+    async def scenario():
+        seam.state["porch-rail"].update({"on": False, "bri": 40})
+        seam.set_mode()
+        await _settle(seam.hf)
+        seam.unreachable_ips.add("porch-rail")
+        _release(seam)
+        for _ in range(seam.hf.HANDBACK_ATTEMPTS + 1):
+            await seam.hf.tick()
+            if seam.hf._rt.handback_task:
+                await seam.hf._rt.handback_task
+        assert "porch-rail" not in seam.store.state().pre_take
+        failed = [h for h in seam.hf.status()["handed_back"] if h["device"] == "porch-rail"]
+        assert failed and failed[0]["outcome"] == "failed"
+        assert len([p for d, p in seam.ip_posts if d == "porch-rail"]) == seam.hf.HANDBACK_ATTEMPTS
+    _run(scenario())

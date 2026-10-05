@@ -876,3 +876,21 @@ def test_the_music_show_powers_every_fixture_back(world, monkeypatch):
     world.state["playing"] = True
     _run(world.house.tick())
     assert world.house.mode_off_devices() == {}
+
+
+
+def test_status_labels_are_unique_when_fixtures_share_a_name(monkeypatch):
+    """Four of his WLEDs are all named "WLED": keyed by bare name, three of
+    them vanished from every status dict during the 2026-10-05 re-measure."""
+    from types import SimpleNamespace
+
+    from spectra.services import house, show_output
+    names = {"crystal": "WLED", "porch-rail": "WLED", "radial-dummy": "Radial Dummy",
+             "x": "x"}
+    monkeypatch.setattr(show_output, "_host",
+                        lambda: SimpleNamespace(devices=dict.fromkeys(names)))
+    monkeypatch.setattr(show_output, "device_label", lambda d: names[d])
+    labels = house.fixture_labels()
+    assert labels == {"crystal": "WLED (crystal)", "porch-rail": "WLED (porch-rail)",
+                      "radial-dummy": "Radial Dummy", "x": "x"}
+    assert house.show_output_label("nope", labels) == "nope"

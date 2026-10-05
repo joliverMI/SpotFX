@@ -50,6 +50,17 @@ raises `bri` to the owned brightness: the preset is never seen at full
 either. Both apply only while Spectra owns the brightness; with ownership
 off the phase 2 sequence is unchanged.
 
+HAND-BACK (phase 3). Owning the master brightness means Spectra switches
+fixtures ON (and to 255). Before its FIRST write to a WLED it reads the
+fixture's power and brightness (HouseState.pre_take, durable — it survives a
+restart that keeps the picture); when the room is RELEASED it writes them
+back (`{"on": …, "bri": …}`, read back) to the address it had, after the
+release's own `{"live": false}`. Found 2026-10-05: a take left his dining
+table under-glow ON at full — it had been off, and River's restore does not
+capture it. The rule: a fixture that was off before a take is off after.
+Only a release hands back: a handover to the older SpotFX process needs the
+fixtures on, and a restart keeps the picture.
+
 ═══ INERT UNLESS A MODE DRIVES THE ROOM ═══
 
 Every request is RECORDED whatever the room's state (house_state.json — a
@@ -115,6 +126,8 @@ SOFT_ON_SETTLE_S = 0.3
 #: phase 3: a fixture reported mains-off has its last address knocked on
 #: this often, in case Home Assistant's "mains on" was missed
 MAINS_KNOCK_S = 600.0
+#: phase 3: HAND-BACK — attempts per fixture before it is dropped (named)
+HANDBACK_ATTEMPTS = 3
 
 TARGET_ON = "on"        # streamed, powered on, owned brightness
 TARGET_OFF = "off"      # withheld, {"on": false}
@@ -196,6 +209,28 @@ async def _default_reachable(device_id: str) -> tuple[bool, str]:
     return True, ""
 
 
+async def _default_post_ip(ip: str, payload: dict) -> None:
+    from fx.utils import WLED
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, _post_blocking, WLED(ip), dict(payload),
+                               HTTP_TIMEOUT_S)
+
+
+async def _default_get_ip(ip: str) -> dict:
+    from fx.utils import WLED
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, _get_state_blocking, WLED(ip),
+                                      HTTP_TIMEOUT_S)
+
+
+def _default_released() -> bool:
+    from fx import light_ownership
+    try:
+        return light_ownership.load().owner == light_ownership.RELEASED
+    except Exception:                                    # noqa: BLE001
+        return False
+
+
 async def _default_report_refresh() -> None:
     from spectra.services import activation_report
     await activation_report.recheck(retry_init=False)
@@ -212,6 +247,9 @@ class Deps:
     report_refresh: Callable[[], Awaitable[None]] = _default_report_refresh
     clock: Callable[[], float] = time.monotonic
     sleep: Callable[[float], Awaitable[None]] = asyncio.sleep
+    post_ip: Callable[[str, dict], Awaitable[None]] = _default_post_ip
+    get_ip: Callable[[str], Awaitable[dict]] = _default_get_ip
+    released: Callable[[], bool] = _default_released
 
 
 deps = Deps()
@@ -247,6 +285,10 @@ class _Runtime:
     kick: Optional[asyncio.Event] = None
     #: phase 3: when each mains-off fixture was last knocked on
     knocked_at: dict = field(default_factory=dict)
+    #: phase 3: HAND-BACK
+    handback_task: Optional[asyncio.Task] = None
+    handback_attempts: dict = field(default_factory=dict)
+    handed_back: list = field(default_factory=list)
 
 
 _rt = _Runtime()
@@ -259,6 +301,8 @@ def reset() -> None:
         task.cancel()
     for task in list(_rt.recheck_tasks.values()):
         task.cancel()
+    if _rt.handback_task is not None:
+        _rt.handback_task.cancel()
     _rt = _Runtime()
     deps = Deps()
 
@@ -610,6 +654,7 @@ async def _tick() -> None:
         _rt.inflight.clear()
         _push_withheld({})
         _rt.last_reason = house.inactive_reason()
+        _maybe_hand_back()
         return
     want = desired()
     _rt.last_reason = house.inactive_reason()
@@ -752,6 +797,8 @@ async def _transition(did: str, dev, target: str, why: str, *, owned: bool,
     settings = _settings()
     outcome, detail = "sent", ""
     soft = soft and owned and settings.own_brightness
+    if owned and target in (TARGET_ON, TARGET_OFF):
+        await _remember_before(did, dev)
     try:
         if target == TARGET_UNPOWERED:
             # Its mains are off: there is nothing to write to and nothing to
@@ -884,6 +931,84 @@ async def _drift_check(did: str, dev, target: str) -> None:
         cur = _rt.inflight.get(did)
         if cur is not None and cur[1] is asyncio.current_task():
             _rt.inflight.pop(did, None)
+
+
+# ── hand-back: what a fixture was before Spectra took it over ──────────────
+
+async def _remember_before(did: str, dev) -> None:
+    """Read a WLED's power and brightness before Spectra's FIRST write to it
+    (HAND-BACK). An unreadable fixture records nothing — there is nothing
+    honest to hand back. The first reading wins until it is handed back."""
+    st = house_store.state()
+    if did in st.pre_take or not _controllable(dev):
+        return
+    ip = getattr(getattr(dev, "wled", None), "ip_address", None)
+    if not ip:
+        return
+    try:
+        state = await deps.get_state(dev)
+    except Exception:                                    # noqa: BLE001
+        return
+    on, bri = state.get("on"), state.get("bri")
+    if not isinstance(on, bool):
+        return
+    st.pre_take[did] = {"on": on, "bri": bri if isinstance(bri, int) and bri > 0 else None,
+                        "ip": str(ip), "at_ms": now_ms()}
+    house_store.save_state()
+
+
+def _maybe_hand_back() -> None:
+    st = house_store.state()
+    if not st.pre_take or not deps.released():
+        return
+    task = _rt.handback_task
+    if task is not None and not task.done():
+        return
+    _rt.handback_task = asyncio.get_running_loop().create_task(
+        _hand_back(), name="house-fixture-hand-back")
+
+
+async def _hand_back() -> None:
+    """The room was released: put every WLED Spectra took over back to the
+    power and brightness it had before. Each write is read back; a fixture
+    that does not confirm is retried on later passes, then dropped and
+    named."""
+    st = house_store.state()
+    for did, before in sorted(st.pre_take.items()):
+        if not deps.released():
+            return
+        ip = before.get("ip")
+        payload: dict = {"on": bool(before.get("on"))}
+        if before.get("bri"):
+            # with "on": false a brightness is remembered for the next "on"
+            payload["bri"] = int(before["bri"])
+        outcome, detail = "failed", "no address recorded"
+        if ip:
+            try:
+                await deps.post_ip(ip, payload)
+                state = await deps.get_ip(ip)
+                if state.get("on") is payload["on"]:
+                    outcome, detail = "landed", ""
+                else:
+                    detail = f"the fixture reports on={state.get('on')}"
+            except Exception as exc:                     # noqa: BLE001
+                detail = f"{type(exc).__name__}: {exc}"
+        tries = _rt.handback_attempts.get(did, 0) + 1
+        if outcome == "landed" or tries >= HANDBACK_ATTEMPTS or not ip:
+            st.pre_take.pop(did, None)
+            _rt.handback_attempts.pop(did, None)
+            entry = {"at_ms": now_ms(), "device": did, "set": payload,
+                     "outcome": outcome, "detail": detail}
+            _rt.handed_back.append(entry)
+            del _rt.handed_back[:-MAX_RECENT]
+            level = logging.INFO if outcome == "landed" else logging.WARNING
+            logger.log(level, "house fixtures: handed %s back after the release "
+                       "(%s): %s%s", did, payload, outcome,
+                       f" — {detail}" if detail else "")
+            _record("fixture_handed_back", entry)
+        else:
+            _rt.handback_attempts[did] = tries
+    house_store.save_state()
 
 
 async def run_supervised() -> None:
@@ -1074,4 +1199,7 @@ def status() -> dict:
         "corrections": list(reversed(_rt.corrections[-5:])),
         "rechecks": dict(_rt.rechecks),
         "mains_off": dict(st.mains_off),
+        "pre_take": {d: {k: v for k, v in b.items() if k != "ip"}
+                     for d, b in st.pre_take.items()},
+        "handed_back": list(reversed(_rt.handed_back[-5:])),
     }

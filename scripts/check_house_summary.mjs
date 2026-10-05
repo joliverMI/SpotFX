@@ -149,6 +149,11 @@ console.log('§ phase 3: the Energy lines say what was sent, what is parked, whe
   const fx = { device: 'sconce-kitchen-left', name: 'Sconce L', target: 'unpowered', why: null,
     in_flight: false, override: null, applied: null };
   ok(hs.fixtureLine(fx) === 'Sconce L: mains off — no stream, not searched for', 'unpowered fixture line');
+  const back = hs.seamLines({ ...base, fixtures_seam: { acting: false, reason: null, own_brightness: true,
+    owned_brightness: 255, tv_music: null, fixtures: [], withheld: {}, corrections: [], rechecks: {},
+    handed_back: [{ at_ms: 1, device: 'dining-table', set: { on: false, bri: 40 }, outcome: 'landed', detail: '' }] } });
+  ok(back.includes('Handed back dining-table after the release: off at brightness 40 — landed.'),
+    `hand-back named: ${back.join(' | ')}`);
 }
 
 if (failures) {
