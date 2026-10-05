@@ -625,6 +625,7 @@ def desired() -> dict[str, tuple[str, str]]:
     lent = lend_reasons(st)
     mode_off = house.mode_off_devices()
     power_off_pending = house.mode_power_off_scope()
+    strips = set(tv_strip_ids())
     out: dict[str, tuple[str, str]] = {}
     for did in _in_scope_devices(host):
         dev = host.devices.get(did)
@@ -633,7 +634,8 @@ def desired() -> dict[str, tuple[str, str]]:
         if did in st.mains_off:
             out[did] = (TARGET_UNPOWERED, "Home Assistant reports its mains off "
                                           "— not streamed to, not searched for")
-        elif did in lent and (not wants_off or _hyperion_streaming(did)):
+        elif did in lent and (not wants_off or did not in strips
+                               or _hyperion_streaming(did)):
             out[did] = (TARGET_LENT, lent[did])
         elif ov is not None and ov.power == "off" and _controllable(dev):
             out[did] = (TARGET_OFF, f"switched off ({ov.source or 'request'})")

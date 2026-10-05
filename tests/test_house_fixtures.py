@@ -396,6 +396,26 @@ def test_the_admirals_tv_default_on_preference_is_unchanged(seam):
     assert ("tv-backlight", {"on": True, "bri": 255}) in seam.posts
 
 
+def test_a_generically_lent_non_tv_strip_stays_lent_even_when_a_mode_powers_it_off(seam):
+    """The Hyperion override (2026-10-05) is scoped to TV strips only — a
+    fixture lent via the generic FixtureOverride.lent_to API (not a TV
+    strip, never confirmed streaming by Hyperion) must stay lent even
+    while a mode's own plan also wants it powered off."""
+    from fx import device_output
+    seam.set_mode("Away", fixtures=[
+        FixtureHook(target=HouseTarget(kind="fixture", id="crystal"), off=True)])
+    seam.hf.set_fixture("crystal", lent_to="someone else")
+    # house.py's own supervisor has landed the mode's fade-to-black.
+    seam.house._rt.off_ready["crystal"] = seam.clock.now
+    seam.house._rt.phase = seam.house.PHASE_RESTING
+    _run(_settle(seam.hf))
+    assert device_output.withheld().get("crystal") == "lent: lent to someone else"
+    # lent, not switched off: only the lend's own {"live": False}, never
+    # the power-off write a mode-off fixture would otherwise get.
+    assert [p for d, p in seam.posts if d == "crystal"] == [{"live": False}]
+    assert seam.state["crystal"]["on"] is True
+
+
 # ═══ 3b. a mode-off fixture is never switched on while activating ═════════
 
 def test_a_plan_off_fixture_is_never_switched_on_during_activation(seam):
