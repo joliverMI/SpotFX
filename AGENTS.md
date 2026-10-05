@@ -4090,6 +4090,53 @@ Four things:
   registered with `no_background_color` and its breath survives a glide
   (VENDOR #49, `.claude/skills/gradient-effect`).
 
+**THREE DEFECTS FROM THE FIRST REAL HANDOVER, FIXED 2026-10-05 (PR
+fm/house-handover-polish)** — all found the same cutover afternoon:
+
+- **A fixture whose mode plan is off was switched ON before being switched
+  off, because `house_fixtures.py` and `house.py` run two INDEPENDENT 1 s
+  supervisor loops with no ordering guarantee between them.**
+  `house_fixtures.desired()`'s own default-everything-ON fallback used to
+  fire as soon as `house.layer_active()` went true (room taken over, mode
+  set) regardless of whether `house.py`'s own `_enter()` had even STARTED
+  computing the mode's `power_off` set — `mode_off_devices()` reads
+  `house._rt.off_ready`, which `_enter()` only populates once ITS tick has
+  caught up, so in the race window it reads `{}`, not merely "not ready
+  yet." `house.mode_power_off_scope()` is the fix: a PURE, synchronous
+  recomputation of the current mode's `power_off` set straight from
+  `build_plan(current_mode())`, with no dependency on `house.py`'s own
+  tick cadence at all. `desired()` now treats any device in that scope as
+  "no action yet" (never guessed ON) until `mode_off_devices()` itself
+  claims it. Same fix covers the TV strip's own "lend" branch: when the
+  mode's plan is off AND the strip isn't actually confirmed receiving
+  Hyperion's own realtime stream (`house_fixtures._hyperion_streaming`,
+  cached from `live_host.live.read_emission(..., read_state=False).live`,
+  refreshed at most every `HYPERION_CHECK_S` — never a live read inside
+  `desired()` itself, which must stay off the event loop), it is switched
+  off like any other mode-off fixture instead of staying "lent" on the
+  strength of "TV Music is off" alone. His "TV Music default on, off only
+  for Hyperion" preference is otherwise unchanged. Spec:
+  `tests/test_house_fixtures.py` (the Hyperion-gated lend, both ways, and
+  the never-guess-on race for a fixture that was off AND one that was on).
+- **`POST /ownership/handover` can answer `wait: false`** (default `true`
+  — the exact old blocking shape every caller before this field existed,
+  including the Spectra UI's own "Take back" button, keeps getting):
+  Home Assistant's own `rest_command` client timeout outran a slow
+  activation (two unreachable sconces each retried before the take
+  committed partial, ~50 s in the field) and reported the call failed
+  even though it landed moments later — confirmed from the journal: no
+  exception on Spectra's side, no completed access-log line for the
+  request at all, just the handler still running when HA's own client
+  gave up. `wait: false` still runs every CHEAP, inline check inline
+  (armed, already-owner 409, the readiness gate's 412 — via
+  `handover.readiness_refusal()`, the message `run_handover` itself now
+  calls too, so there is one definition of it) and only forks the SLOW
+  part (pretake ping, quiesce, activate, verify, commit —
+  `handover.run_handover` itself, completely unchanged) to a referenced
+  background task; a poller reads `GET /ownership` (its `handover` block
+  while in flight, then `owner`/`activation` once it lands) for the
+  outcome. Spec: `tests/test_handover.py` ("proof 9").
+
 ## The room LIGHT-FIELD map (`/rooms`) + room effects (`/room-effects`)
 
 **THE ONE IDEA, his own sentence, and the thing this whole area exists to

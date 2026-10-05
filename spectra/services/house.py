@@ -1174,6 +1174,32 @@ def mode_off_devices() -> dict:
     return {did: name for did, ready in _rt.off_ready.items() if now >= ready}
 
 
+def mode_power_off_scope() -> set[str]:
+    """Every WLED the CURRENT mode's plan powers off, computed straight
+    from the mode's own config — never from `_rt.off_ready`, which this
+    module's own `_enter()` only populates once ITS supervisor tick has
+    caught up with a fresh take. house_fixtures.py runs its own
+    independent 1 s loop, so the room can become SPECTRA's and that
+    loop's own default-everything-ON fallback can fire BEFORE `_enter()`
+    has even started — `_rt.off_ready` is still `{}` at that instant, not
+    merely unready. Found 2026-10-05 (the dining-table flash): a fixture
+    the mode plan would shortly power off was switched ON first, because
+    nothing told house_fixtures the mode's plan at all. This is that
+    telling — a fixture named here gets NO action from house_fixtures
+    until `mode_off_devices()` itself claims it (never guessed ON in the
+    meantime; the night rule: never switch a fixture from off to on as a
+    side effect). Empty with no mode or on a mode with nothing to power
+    off."""
+    mode = current_mode()
+    if mode is None:
+        return set()
+    try:
+        return set(build_plan(mode).power_off)
+    except Exception:                                    # noqa: BLE001
+        logger.exception("house: computing the power-off scope failed")
+        return set()
+
+
 def motion_targets(mode: HouseMode) -> dict:
     """virtual -> resting speed (0..1) for the virtuals the conductor
     tracks NOW (the scene showing). Later hooks win."""

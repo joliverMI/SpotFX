@@ -203,6 +203,23 @@ async def _best_effort(step, label: str) -> None:
 _BACKGROUND: set = set()
 
 
+async def readiness_refusal(to_world: str, sides: dict[str, WriterSide]
+                            ) -> Optional[str]:
+    """The `HandoverRefused` message `run_handover` would raise for this
+    to-world and sides RIGHT NOW, or None when ready. A pure, side-effect
+    free pre-check — `run_handover` itself is the one caller that turns a
+    non-None result into the actual raise; `spectra/api/ownership.py`'s
+    `wait: false` path calls this directly so it can refuse INLINE (before
+    forking the slow part to the background) without a second definition
+    of the message."""
+    problems = await sides[to_world].readiness_problems()
+    if not problems:
+        return None
+    return (f"handover to {to_world} refused before quiesce — the room is "
+            f"untouched and the current owner keeps writing. Missing "
+            f"preparation: " + "; ".join(problems))
+
+
 async def run_handover(
     to_world: str,
     sides: dict[str, WriterSide],
@@ -225,12 +242,9 @@ async def run_handover(
     double ping structurally impossible, never to skip the announcement:
     nothing in this app calls it with the default flipped."""
     light_ownership.check_can_begin(to_world)
-    problems = await sides[to_world].readiness_problems()
-    if problems:
-        raise HandoverRefused(
-            f"handover to {to_world} refused before quiesce — the room is "
-            f"untouched and the current owner keeps writing. Missing "
-            f"preparation: " + "; ".join(problems))
+    refusal = await readiness_refusal(to_world, sides)
+    if refusal is not None:
+        raise HandoverRefused(refusal)
     # ── THE PRE-TAKE PING (spectra/services/pretake_ping.py) ───────────────
     # THE FIRST LIGHT-AFFECTING ACT OF EVERY TAKE, and its placement IS the
     # correctness property: River's snapshot watch has to be able to read

@@ -732,3 +732,172 @@ def test_quiet_is_ignored_for_a_handover_to_spot_effects(tmp_path, monkeypatch):
 
     _run(post_handover(HandoverRequest(to=lo.SPOT_EFFECTS, quiet=True)))
     assert calls["run_handover"] == {"quiet": False}
+
+
+# ── proof 9: `wait: false` — answer fast while the handover carries on ─────
+#
+# 2026-10-05, the first real Home Assistant take-back: a slow activation
+# (two unreachable sconces, each retried before the take committed partial,
+# ~50 s in the field) outran her rest_command's own client timeout, and she
+# reported the call failed even though it landed moments later. `wait:
+# false` starts the SAME `run_handover` call in the background and answers
+# at once; a poller reads `GET /ownership` for the outcome.
+
+def test_wait_defaults_to_the_old_blocking_call(tmp_path, monkeypatch):
+    """`wait` omitted (every caller before this field existed, including
+    the Spectra UI's own "Take back" button) must behave exactly as
+    before: block and return the full committed result."""
+    from spectra.api.ownership import HandoverRequest, post_handover
+    from spectra.services import handover as handover_svc
+
+    _own_file(tmp_path)
+    monkeypatch.setenv("SPECTRA_HANDOVER_ARMED", "1")
+
+    def fake_production_sides(**kw):
+        return {}
+
+    async def fake_run_handover(to, sides, **kw):
+        token = lo.begin_handover(to).token
+        lo.mark_quiesced(token)
+        return lo.commit(token)
+
+    monkeypatch.setattr(handover_svc, "production_sides",
+                        fake_production_sides)
+    monkeypatch.setattr(handover_svc, "run_handover", fake_run_handover)
+
+    out = _run(post_handover(HandoverRequest(to=lo.SPECTRA)))
+    assert out["result"] == "committed"
+    assert out["owner"] == lo.SPECTRA
+
+
+def test_wait_false_answers_immediately_while_the_handover_continues(
+        tmp_path, monkeypatch):
+    from spectra.api.ownership import HandoverRequest, post_handover
+    from spectra.services import handover as handover_svc
+
+    _own_file(tmp_path)
+    monkeypatch.setenv("SPECTRA_HANDOVER_ARMED", "1")
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    def fake_production_sides(**kw):
+        return {}
+
+    async def fake_readiness_refusal(to, sides):
+        return None
+
+    async def fake_run_handover(to, sides, **kw):
+        started.set()
+        await release.wait()
+        token = lo.begin_handover(to).token
+        lo.mark_quiesced(token)
+        return lo.commit(token)
+
+    monkeypatch.setattr(handover_svc, "production_sides",
+                        fake_production_sides)
+    monkeypatch.setattr(handover_svc, "readiness_refusal",
+                        fake_readiness_refusal)
+    monkeypatch.setattr(handover_svc, "run_handover", fake_run_handover)
+
+    async def main():
+        resp = await post_handover(
+            HandoverRequest(to=lo.SPECTRA, wait=False))
+        import json as _json
+        body = _json.loads(bytes(resp.body))
+        assert resp.status_code == 202
+        assert body["result"] == "accepted"
+        assert body["poll"] == "/api/ownership"
+        # the slow part has not even started running yet — but it does,
+        # on its own, without anyone awaiting this response further.
+        await asyncio.wait_for(started.wait(), timeout=1.0)
+        # still unsettled at this instant — the 202 did not wait for it.
+        assert lo.load().owner == lo.SPOT_EFFECTS
+        release.set()
+        for _ in range(200):
+            if lo.load().owner == lo.SPECTRA:
+                break
+            await asyncio.sleep(0.005)
+        assert lo.load().owner == lo.SPECTRA
+
+    _run(main())
+
+
+def test_wait_false_still_refuses_409_inline_when_already_owner(
+        tmp_path, monkeypatch):
+    from fastapi import HTTPException
+    from spectra.api.ownership import HandoverRequest, post_handover
+
+    _own_file(tmp_path)
+    monkeypatch.setenv("SPECTRA_HANDOVER_ARMED", "1")
+
+    async def main():
+        with pytest.raises(HTTPException) as exc:
+            await post_handover(HandoverRequest(to=lo.SPOT_EFFECTS,
+                                                wait=False))
+        assert exc.value.status_code == 409
+
+    _run(main())
+
+
+def test_wait_false_still_refuses_412_inline_when_unseeded(
+        tmp_path, monkeypatch):
+    """The readiness gate must not get deferred to the background — a
+    call that was never going to do anything still refuses at once."""
+    from spectra import config as spectra_config
+    from spectra.api.ownership import HandoverRequest, post_handover
+
+    _own_file(tmp_path)
+    monkeypatch.setenv("SPECTRA_HANDOVER_ARMED", "1")
+    monkeypatch.setattr(spectra_config, "FX_LIVE_CONFIG_DIR",
+                        tmp_path / "never-seeded")
+
+    async def main():
+        resp = await post_handover(
+            HandoverRequest(to=lo.SPECTRA, wait=False))
+        import json as _json
+        body = _json.loads(bytes(resp.body))
+        assert resp.status_code == 412
+        assert body["result"] == "refused-preparation-missing"
+        assert "seed_spectra_fx_live" in body["error"]
+        # Room untouched, and nothing was scheduled in the background.
+        assert lo.load().owner == lo.SPOT_EFFECTS
+        assert not lo.OWNERSHIP_FILE.exists()
+
+    _run(main())
+
+
+def test_wait_false_background_crash_is_logged_not_raised(
+        tmp_path, monkeypatch, caplog):
+    from spectra.api.ownership import HandoverRequest, post_handover
+    from spectra.services import handover as handover_svc
+
+    _own_file(tmp_path)
+    monkeypatch.setenv("SPECTRA_HANDOVER_ARMED", "1")
+
+    def fake_production_sides(**kw):
+        return {}
+
+    async def fake_readiness_refusal(to, sides):
+        return None
+
+    async def fake_run_handover(to, sides, **kw):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(handover_svc, "production_sides",
+                        fake_production_sides)
+    monkeypatch.setattr(handover_svc, "readiness_refusal",
+                        fake_readiness_refusal)
+    monkeypatch.setattr(handover_svc, "run_handover", fake_run_handover)
+
+    async def main():
+        resp = await post_handover(
+            HandoverRequest(to=lo.SPECTRA, wait=False))
+        assert resp.status_code == 202
+        for _ in range(200):
+            if any("crashed" in r.message for r in caplog.records):
+                break
+            await asyncio.sleep(0.005)
+
+    _run(main())
+    assert any("crashed" in r.message for r in caplog.records
+               if r.levelname == "ERROR")
