@@ -1,12 +1,13 @@
 /** Pure wording for the Light Show's status surfaces — kept out of React so
  * scripts/check_light_show_summary.mjs can drive it with no DOM. */
-import type { EndShowReport, ShowBrief, ShowRun } from './types';
+import type { ArmTrigger, EndShowReport, ShowArm, ShowBrief, ShowCue, ShowRun } from './types';
 
 /** The top-bar strip's one line, or null when the show holds nothing (the
  * strip is absent then — it costs no space in normal use). */
 export function stripLine(b: ShowBrief | null | undefined): string | null {
   if (!b || !b.active) return null;
   const parts: string[] = [];
+  if (b.armed) parts.push(`${b.armed} armed`);
   if (b.running_sets) parts.push(`${b.running_sets} running`);
   if (b.holds) parts.push(`${b.holds} holding`);
   if (b.levels) parts.push(`${b.levels} level${b.levels === 1 ? '' : 's'}`);
@@ -48,4 +49,61 @@ export function endShowSummary(r: EndShowReport): string {
  * each id) can see they are linked. Keep in step with show_actions.py. */
 export const SHOW_KIND_HELP_TOPICS = [
   'show-actions', 'show-device-states', 'show-level', 'show-room-effects', 'show-sets',
+  'show-arming', 'show-high-low-triggers',
 ] as const;
+
+// ── PHASE 2: arms and the High/Low Triggers ───────────────────────────────
+
+
+export const TRIGGER_LABEL: Record<ArmTrigger, string> = {
+  scene_change: 'next scene change',
+  high: 'next High Trigger',
+  low: 'next Low Trigger',
+};
+
+export function triggerLabel(on: string): string {
+  return TRIGGER_LABEL[on as ArmTrigger] ?? on.replace(/_/g, ' ');
+}
+
+/** "1:05" / "0:07" — a countdown in m:ss, never negative. */
+export function mmss(ms: number): string {
+  const s = Math.max(0, Math.round(ms / 1000));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
+/** How long until `dueMs` on the song clock, or null when unknown. */
+export function countdown(dueMs: number | null | undefined,
+                          positionMs: number | null | undefined): string | null {
+  if (dueMs === null || dueMs === undefined || positionMs === null || positionMs === undefined) return null;
+  if (dueMs <= positionMs) return null;
+  return `in ${mmss(dueMs - positionMs)}`;
+}
+
+/** One armed card's line: what, on what, how, and why it is waiting. */
+export function armLine(a: ShowArm, positionMs: number | null | undefined): string {
+  const parts = [`${a.label || 'Action'} → ${triggerLabel(a.on)}`];
+  parts.push(a.repeat ? `repeat (${a.fire_count} so far)` : 'once');
+  if (a.song_uri) parts.push(a.this_song === false ? 'this song only (not this song)' : 'this song only');
+  if ((a.lead_ms ?? 0) > 0) parts.push(`starts ${((a.lead_ms ?? 0) / 1000).toFixed(1)} s early so its fade lands on the mark`);
+  const cd = countdown(a.due_ms ?? null, positionMs);
+  if (cd) parts.push(cd);
+  if (a.last_outcome?.status === 'waiting' && a.last_outcome.reason) {
+    parts.push(`waited: ${a.last_outcome.reason}`);
+  }
+  return parts.join(' · ');
+}
+
+/** One ended arm, for the history list. */
+export function armHistoryLine(a: ShowArm): string {
+  return `${a.label || 'Action'} (${triggerLabel(a.on)}): ${a.status}${a.end_reason ? ` — ${a.end_reason}` : ''}`;
+}
+
+/** The High/Low line for this song: where it sits and why. */
+export function cueLine(c: ShowCue | null, positionMs: number | null | undefined): string {
+  if (!c) return 'none on this song';
+  const why = c.source === 'moved' ? 'moved by you'
+    : c.source === 'drop_mark' ? 'your drop mark' : 'automatic';
+  const cd = countdown(c.timestamp_ms, positionMs);
+  const close = c.runner_up_close && c.source === 'auto' ? ' · a runner-up is within 10%' : '';
+  return `${mmss(c.timestamp_ms)} (${why})${cd ? ` · ${cd}` : ' · passed'}${close}`;
+}

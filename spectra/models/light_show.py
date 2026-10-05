@@ -121,19 +121,26 @@ class SettingBaseline(BaseModel):
 
 
 class ShowArm(BaseModel):
-    """PHASE 2 — declared now so the state file has the slot. Nothing in
-    phase 1 creates or reads one."""
+    """A set (or one action) waiting for its trigger
+    (spectra/services/show_arms.py is the binding statement)."""
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=_id)
     set_id: Optional[str] = None
     action: Optional[ShowAction] = None
+    #: the set's name when armed — the board still reads if it is renamed
+    label: str = ""
     on: str = "scene_change"          # open list: scene_change | high | low | ...
     repeat: bool = False
     song_uri: Optional[str] = None    # "this song only" / a playlist script step
     source: str = "manual"            # manual | sonic | script:<id>
+    #: a fade armed on High/Low starts early so it COMPLETES on the mark
+    finish_on_mark: bool = True
     created_ms: int = Field(default_factory=now_ms)
     expires_ms: Optional[int] = None
     status: str = "armed"             # armed | fired | missed | disarmed | expired
+    fire_count: int = 0
+    ended_ms: Optional[int] = None
+    end_reason: str = ""
     last_outcome: Optional[dict] = None
 
 

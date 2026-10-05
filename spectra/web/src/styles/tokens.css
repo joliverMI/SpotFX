@@ -1605,3 +1605,24 @@ kbd {
   .light-show-layout { grid-template-columns: minmax(0, 1fr); }
   .light-show-page { padding: 8px 12px; }
 }
+
+/* THE LIGHT SHOW, phase 2: the armed board, the Arm control, and the
+   High/Low flags on the Timeline (lightshow/ArmBoard.tsx,
+   timeline/components/ShowCueBar.tsx). */
+.light-show-armed { margin-bottom: 10px; }
+.light-show-armed-head { display: flex; align-items: center; gap: 8px; }
+.light-show-armed-head .danger { margin-left: auto; }
+.light-show-armed ul { list-style: none; padding: 0; margin: 6px 0 0; }
+.light-show-armed li { display: flex; align-items: center; gap: 8px; padding: 6px 0;
+  border-bottom: 1px solid var(--border); min-width: 0; }
+.light-show-armed li > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.light-show-armed li.waiting > span { color: var(--warn, #f59e0b); }
+.light-show-cues { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center;
+  margin: 6px 0 0; font-size: 13px; }
+.light-show-arm { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center;
+  margin: 8px 0; padding: 6px 8px; border: 1px dashed var(--border); border-radius: 6px; }
+.light-show-arm label { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; }
+.show-cue-bar-row { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+.show-cue-bar-row .show-cue-bar { flex: 1; min-width: 0; }
+.show-cue-bar-tools { display: inline-flex; gap: 4px; align-items: center; }
+.show-cue-bar-tools button { font-size: 11px; padding: 1px 6px; }

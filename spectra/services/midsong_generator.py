@@ -326,12 +326,14 @@ PLAN_HOLD_MARGIN_S = 0.5
 factor planned with (no genres offline) and the one the show plays with."""
 
 
-def section_energy_change(ordered: list[dict]) -> list[float]:
-    """THE RANK (2026-10-04): each section's |energy_rms - previous
-    section's energy_rms|, raw, the song's own opening section scoring 0.
-    His own model of the ranking ("by magnitude of change of intensity"),
-    measured on his hand-placed marks at AUC 0.58 against the one-beat bass
-    jump's 0.51 — see the module docstring's RANKING section."""
+def section_energy_shift(ordered: list[dict]) -> list[float]:
+    """THE SIGNED FORM of the rank: each section's energy_rms minus the
+    previous section's (positive = the music rises into this section), the
+    song's own opening section scoring 0. section_energy_change() is its
+    magnitude, and the Light Show's High/Low Triggers (spectra/services/
+    show_cues.py) are its largest rise and largest fall — ONE score, so
+    the cue a show is armed on and the scene change the planner ranks top
+    can never disagree about what "the biggest shift" means."""
     out: list[float] = []
     prev: Optional[float] = None
     for sec in ordered:
@@ -339,9 +341,18 @@ def section_energy_change(ordered: list[dict]) -> list[float]:
             e = max(0.0, min(1.0, float(sec.get("energy_rms", 0.0))))
         except (TypeError, ValueError):
             e = 0.0
-        out.append(0.0 if prev is None else abs(e - prev))
+        out.append(0.0 if prev is None else e - prev)
         prev = e
     return out
+
+
+def section_energy_change(ordered: list[dict]) -> list[float]:
+    """THE RANK (2026-10-04): each section's |energy_rms - previous
+    section's energy_rms|, raw, the song's own opening section scoring 0.
+    His own model of the ranking ("by magnitude of change of intensity"),
+    measured on his hand-placed marks at AUC 0.58 against the one-beat bass
+    jump's 0.51 — see the module docstring's RANKING section."""
+    return [abs(v) for v in section_energy_shift(ordered)]
 
 
 _hold_curves_cache: Optional[tuple[Any, list[list]]] = None

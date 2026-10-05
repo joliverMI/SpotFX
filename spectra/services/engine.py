@@ -107,6 +107,22 @@ trigger_engine._intensity_event = conductor.on_intensity_event
 # The trigger-timed colour journey's "a cue just fired, pick the next
 # horizon" hook — wired here for the same reason as the line above.
 trigger_engine._colour_cue = conductor.on_colour_cue
+# THE LIGHT SHOW's High/Low Triggers (spectra/services/show_arms.py): what
+# the trigger clock watches each tick, and what runs when it crosses one.
+
+
+def _show_cue_plan(uri):
+    from spectra.services import show_arms
+    return show_arms.cue_plan(uri)
+
+
+async def _show_cue(level, cue_ms, ahead_ms):
+    from spectra.services import show_arms
+    return await show_arms.on_cue(level, cue_ms, ahead_ms)
+
+
+trigger_engine._show_cue_plan = _show_cue_plan
+trigger_engine._show_cue = _show_cue
 
 
 async def fire_analysed_color_event(selection_intensity: float,
@@ -491,7 +507,16 @@ def on_scene_fired(scene: SceneV2, writes: list[dict],
                    color_set_id: str | None = None) -> None:
     """Any real scene fire re-baselines the engine (drift's declared life
     restarts from the new initial conditions)."""
+    # THE LIGHT SHOW: "armed for the next scene change" means the next REAL
+    # change to a DIFFERENT scene — read the scene showing BEFORE the
+    # conductor takes the new one (spectra/services/show_arms.py).
+    previous_id = conductor.scene.id if conductor.scene is not None else None
     conductor.on_scene_fire(scene, writes, color_set_id)
+    try:
+        from spectra.services import show_arms
+        show_arms.on_scene_change(previous_id, scene.id)
+    except Exception:                                    # noqa: BLE001
+        logger.exception("light show: scene-change arm hook failed")
     # THE LIGHT SHOW: a Level authored to last "until the next scene change"
     # ends here (spectra/services/show_output.py). Never allowed to break a
     # scene fire.

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import CollapsibleCard from '../components/CollapsibleCard';
 import HelpLink from '../help/HelpLink';
+import ShowCueBar from './components/ShowCueBar';
 import { useSticky } from '../lib/useSticky';
 import { fmtMs } from '../lib/time';
 import { useEvents, useSettings } from '../api/queries';
@@ -67,7 +68,7 @@ export default function BuilderPage() {
   const { data: librosa } = useLibrosa(uri);
   const { data: events } = useEvents();
   const { data: setlists } = useSetlists();
-  const { data: analysedPlan } = useAnalysedPlan(uri);
+  const { data: analysedPlan, refetch: refetchAnalysedPlan } = useAnalysedPlan(uri);
 
   // While capturing (analysis on, no completed shape yet) poll the live buffer.
   const analysisOn = useBuilderStore((s) => s.modes.analysis);
@@ -294,6 +295,10 @@ export default function BuilderPage() {
           onArmedContext={(ms, tid) => triggerPointer.onContextMenu?.(ms,
             tid ? { kind: 'trigger-triangle', triggerId: tid } : null)}
         />
+        {uri && (
+          <ShowCueBar uri={uri} durationMs={durationMs} cues={analysedPlan?.show_cues}
+            onChanged={() => void refetchAnalysedPlan()} />
+        )}
       </CollapsibleCard>
 
       <SpectraTriggersCard

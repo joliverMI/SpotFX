@@ -400,6 +400,15 @@ class _PinnedPick:
 _generation_lock: Optional[asyncio.Lock] = None
 
 
+SHOW_CUE_SEEK_SKIP_MS = 3_000
+"""A Light Show High/Low cue crossed this far in the past (a forward seek
+over it) is skipped, never fired late."""
+
+
+async def _no_show_cue(_level: str, _cue_ms: int, _ahead_ms: int) -> None:
+    return None
+
+
 def _get_generation_lock() -> asyncio.Lock:
     global _generation_lock
     if _generation_lock is None:
@@ -543,6 +552,20 @@ class TriggerEngine:
         # generator_key -> (rank, rank_of) for the cached plan's actions —
         # read by GET /api/analysed-plan's rank markers (cached_plan_ranks).
         self._plan_ranks: dict = {}
+
+        # THE LIGHT SHOW's HIGH / LOW TRIGGERS (spectra/services/show_arms.py
+        # and show_cues.py). Two hooks, both no-ops by default and wired in
+        # services/engine.py (the _intensity_event precedent — a forgotten
+        # stub costs nothing): `_show_cue_plan(uri)` returns this song's
+        # (level, cue_ms, lead_ms) — never blocks; `_show_cue(level, cue_ms,
+        # ahead_ms)` runs when the clock crosses `cue_ms - lead_ms` (or,
+        # as a net, `cue_ms` itself), EXACTLY ONCE per approach via the same
+        # fired-keys memory the stored triggers use. NO OFFSET FAMILY
+        # applies: a cue is a song-time moment, and its lead is the show's
+        # own finish-on-the-mark start (LEAD family, positive = earlier,
+        # subtracted like _lead_ms).
+        self._show_cue_plan: Callable[[str], list] = lambda _uri: []
+        self._show_cue: Callable[[str, int, int], Awaitable[Any]] = _no_show_cue
 
         # LOOKAHEAD (2026-08-19): trigger_id -> _PinnedPick, or trigger_id ->
         # None for "already attempted once, the draw came back empty" (the
@@ -766,6 +789,10 @@ class TriggerEngine:
             self._pins.clear()
             self._fired.clear()
             return []  # rewind/seek back: silently rearmed via the line above
+        # Cues run BEFORE the stored triggers in the same tick, so a set that
+        # forces a scene or a colour governs the scene change landing on
+        # that same moment.
+        await self._tick_show_cues(last, position_ms)
         triggers = self._list_triggers(self._uri)
         self._authored_cache = (self._uri,
                                 any(t.source == "authored" for t in triggers))
@@ -943,6 +970,28 @@ class TriggerEngine:
                 await self._fire(trig)
                 fired.append(trig)
         return fired
+
+    async def _tick_show_cues(self, last: int, position_ms: int) -> None:
+        try:
+            plan = self._show_cue_plan(self._uri) or []
+        except Exception:
+            logger.exception("light show: cue plan failed")
+            return
+        for level, cue_ms, lead in plan:
+            key = (f"show-cue:{level}", int(cue_ms))
+            if key in self._fired:
+                continue
+            fire_at = cue_ms - max(0, int(lead))
+            if last < fire_at <= position_ms or last < cue_ms <= position_ms:
+                self._fired.add(key)
+                if position_ms - cue_ms > SHOW_CUE_SEEK_SKIP_MS:
+                    # A forward seek jumped over the mark: a blackout armed
+                    # for the drop must not land a minute after it.
+                    continue
+                try:
+                    await self._show_cue(level, int(cue_ms), int(cue_ms - position_ms))
+                except Exception:
+                    logger.exception("light show: %s cue hook failed", level)
 
     def _analysed_flare_triggers(self, uri: str,
                                  stored: list[SpectraTrigger]) -> list[SpectraTrigger]:

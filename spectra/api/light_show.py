@@ -170,3 +170,98 @@ async def end_show(fade_ms: int = show_output.DEFAULT_RELEASE_FADE_MS):
     result = await show_actions.end_show(fade_ms=fade_ms)
     await _broadcast()
     return result
+
+
+# ── PHASE 2: arms and the High/Low Triggers ────────────────────────────────
+# spectra/services/show_arms.py and show_cues.py are the binding statements.
+#
+#   GET    /api/light-show/arms                the armed board + history +
+#                                              this song's High/Low
+#   POST   /api/light-show/arms                arm a set (or one action)
+#   DELETE /api/light-show/arms/{id}           disarm one
+#   POST   /api/light-show/arms/disarm-all
+#   GET    /api/light-show/cues?uri=           a song's High and Low
+#   PUT    /api/light-show/cues                his dragged position
+#   DELETE /api/light-show/cues?uri=&level=    back to automatic
+
+import asyncio as _asyncio
+
+from fastapi import Query as _Query
+
+from spectra.services import show_arms, show_cues
+
+
+class ArmBody(BaseModel):
+    set_id: Optional[str] = None
+    action: Optional[ShowAction] = None
+    on: str = "scene_change"
+    repeat: bool = False
+    this_song_only: bool = False
+    finish_on_mark: bool = True
+
+
+class CueBody(BaseModel):
+    uri: str
+    level: str
+    timestamp_ms: int
+
+
+@router.get("/arms")
+async def get_arms():
+    return show_arms.status()
+
+
+@router.post("/arms")
+async def post_arm(body: ArmBody):
+    try:
+        arm = show_arms.arm(set_id=body.set_id, action=body.action, on=body.on,
+                            repeat=body.repeat, this_song_only=body.this_song_only,
+                            finish_on_mark=body.finish_on_mark, source="button")
+    except show_arms.ArmError as exc:
+        return JSONResponse(status_code=400, content={"detail": str(exc)})
+    await _broadcast()
+    # Armed even while the room is not SPECTRA's — the arm waits, and says so.
+    return {**arm.model_dump(), "lead_ms": show_arms.lead_ms(arm),
+            "refusal": show_output.refusal()}
+
+
+@router.delete("/arms/{arm_id}")
+async def delete_arm(arm_id: str):
+    if not show_arms.disarm(arm_id):
+        return JSONResponse(status_code=404, content={"detail": "no such armed set"})
+    await _broadcast()
+    return {"disarmed": arm_id}
+
+
+@router.post("/arms/disarm-all")
+async def disarm_all():
+    ids = show_arms.disarm_all()
+    await _broadcast()
+    return {"disarmed": ids}
+
+
+@router.get("/cues")
+async def get_cues(uri: str = _Query(..., min_length=1)):
+    cues = await _asyncio.to_thread(show_cues.cues_for_song, uri)
+    return cues.as_dict()
+
+
+@router.put("/cues")
+async def put_cue(body: CueBody):
+    try:
+        saved = await _asyncio.to_thread(show_cues.set_override, body.uri,
+                                         body.level, body.timestamp_ms)
+    except ValueError as exc:
+        return JSONResponse(status_code=400, content={"detail": str(exc)})
+    await _broadcast()
+    return {"uri": body.uri, "level": body.level, **saved}
+
+
+@router.delete("/cues")
+async def delete_cue(uri: str = _Query(..., min_length=1),
+                     level: str = _Query(...)):
+    if level not in show_cues.LEVELS:
+        return JSONResponse(status_code=400, content={"detail": "level must be high or low"})
+    cleared = await _asyncio.to_thread(show_cues.clear_override, uri, level)
+    await _broadcast()
+    return {"uri": uri, "level": level, "reverted": cleared}

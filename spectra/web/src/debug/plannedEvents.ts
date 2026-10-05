@@ -56,6 +56,9 @@ export interface AnalysedPlan {
   flares: AnalysedPlanEvent[];
   show_clock_shift_ms: number;
   rank_of?: number | null;
+  /** THE LIGHT SHOW's High/Low Triggers for this song (spectra/services/
+   * show_cues.py; lightshow/types.ts' SongCues). Absent from an older API. */
+  show_cues?: import('../lightshow/types').SongCues | null;
 }
 
 export function plannedMarkerMs(
