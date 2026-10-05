@@ -106,6 +106,7 @@ export function fixtureLine(f: SeamFixture): string | null {
   const outcome = f.applied && f.applied.outcome !== 'landed' && f.applied.outcome !== 'sent'
     && f.applied.outcome !== 'withheld'
     ? ` — ${f.applied.outcome}${f.applied.detail ? `: ${f.applied.detail}` : ''}` : '';
+  if (f.target === 'unpowered') return `${name}: mains off — no stream, not searched for`;
   if (f.target === 'lent') return `${name}: lent — ${f.why ?? 'no stream'}${outcome}`;
   if (f.target === 'off') return `${name}: switched off — no stream${outcome}`;
   if (f.target === 'on') return outcome ? `${name}: on${outcome}` : null;
@@ -149,6 +150,51 @@ export function seamLines(l: LightingStatus | undefined): string[] {
     if (r.state === 'found') out.push(`Recheck: ${d} answered after ${r.after_s ?? '?'} s${r.moved ? ' (it had moved)' : ''}.`);
     else if (r.state === 'not_found') out.push(`Recheck: ${d} did not answer — ${r.reason ?? 'no answer'}.`);
     else if (r.state === 'rechecking') out.push(`Recheck: looking for ${d}…`);
+  }
+  return out;
+}
+
+function secondsWord(s: number): string {
+  if (s < 90) return `${Math.round(s)} s`;
+  if (s < 5400) return `${Math.round(s / 60)} min`;
+  return `${(s / 3600).toFixed(1)} h`;
+}
+
+/** Phase 3's Energy lines on the Now panel: what the room is sending, what
+ * is parked, whether SPECTRA is listening. Empty when nothing is in force
+ * (no mode driving and nothing to report). The packet number is an
+ * ESTIMATE from the frames actually handed to each transport. */
+export function energyLines(l: LightingStatus | undefined): string[] {
+  const e = l?.energy;
+  if (!e) return [];
+  const out: string[] = [];
+  const a = e.audio;
+  if (a.state === 'paused') {
+    out.push(`Audio: not listening${a.paused_for_s != null ? ` for ${secondsWord(a.paused_for_s)}` : ''}`
+      + ` — ${a.reason ?? 'no music'}. It listens again the moment music plays.`);
+    if (a.resume_error) out.push(`⚠ Audio could not restart: ${a.resume_error} — retrying every second.`);
+  } else if (a.state === 'listening' && e.acting) {
+    const wait = e.settings.audio_pause_after_s;
+    if (wait > 0 && a.quiet_for_s != null && a.listeners.length === 0) {
+      out.push(`Audio: listening — no music for ${secondsWord(a.quiet_for_s)}; stops listening after ${secondsWord(wait)}.`);
+    } else if (a.listeners.length) {
+      out.push(`Audio: listening — ${a.listeners.join(', ')} needs it.`);
+    }
+  }
+  if (e.parked.length) {
+    out.push(`Parked at 2 frames/s (lighting nothing): ${e.parked.join(', ')}.`);
+  }
+  if (e.send_on_change_s != null) {
+    out.push(`Still pictures are sent only on change, with a keep-alive every ${e.send_on_change_s} s.`);
+  }
+  const fx = Object.entries(e.fixtures).filter(([, r]) => r.sent_fps > 0 || r.skipped_fps > 0);
+  if (fx.length) {
+    const parts = fx.map(([name, r]) => `${name} ${r.sent_fps} fps${r.skipped_fps > 0 ? ` (+${r.skipped_fps} unchanged)` : ''}`);
+    out.push(`Sending${e.packets_per_s_estimate != null ? ` ≈ ${Math.round(e.packets_per_s_estimate)} packets/s` : ''}: ${parts.join(' · ')}.`);
+  }
+  const mains = Object.keys(e.mains_off);
+  if (mains.length) {
+    out.push(`Mains off (Home Assistant): ${mains.join(', ')} — ${e.acting ? 'no stream, not searched for' : 'recorded, not acted on'}.`);
   }
   return out;
 }

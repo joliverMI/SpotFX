@@ -299,7 +299,8 @@ def _isolated_house(tmp_path, monkeypatch):
     monkeypatch.setattr(scfg, "HOUSE_MODES_FILE", tmp_path / "house_modes.json")
     monkeypatch.setattr(scfg, "HOUSE_STATE_FILE", tmp_path / "house_state.json")
     monkeypatch.setattr(scfg, "HOUSE_RESTART_FILE", tmp_path / "house_restart.json")
-    from spectra.services import house_fixtures, house_restart, house_voice
+    from spectra.services import (house_energy, house_fixtures, house_restart,
+                                  house_voice)
     from fx import device_output
     from fx import hue_freeze
     house_store.reset_memory()
@@ -307,8 +308,10 @@ def _isolated_house(tmp_path, monkeypatch):
     house_fixtures.reset()
     house_voice.reset()
     house_restart.reset()
-    device_rate.clear()
+    house_energy.reset()
+    device_rate.clear()             # caps AND parking (phase 3)
     device_output.clear_withheld()
+    device_output.set_send_on_change(None)
     hue_freeze.clear()
     yield
     house_store.reset_memory()
@@ -316,8 +319,10 @@ def _isolated_house(tmp_path, monkeypatch):
     house_fixtures.reset()
     house_voice.reset()
     house_restart.reset()
+    house_energy.reset()
     device_rate.clear()
     device_output.clear_withheld()
+    device_output.set_send_on_change(None)
     hue_freeze.clear()
 
 

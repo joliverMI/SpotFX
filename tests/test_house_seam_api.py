@@ -145,3 +145,45 @@ def test_settings_round_trip_and_refuse_nonsense(client):
                       json={"voice_looks": {"singing": {"color": "#000000"}}}).status_code == 422
     # the modes in the same file are untouched by a settings edit
     assert client.get("/api/house/modes").status_code == 200
+
+
+# ═══ phase 3: mains and the energy settings ══════════════════════════════════
+
+def test_mains_off_and_on_are_recorded_and_named(client):
+    r = client.put("/api/house/mains", json={
+        "fixtures": ["sconce-kitchen-left", "Sconce, Kitchen, Left"], "on": False})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["status"] == "recorded" and body["acting"] is False
+    assert "not acted on" in body["note"]
+    assert set(body["mains_off"]) == {"sconce-kitchen-left"}
+    hb = client.get("/api/house/heartbeat").json()
+    assert hb["mains_off"] == ["sconce-kitchen-left"]
+    # the same report again is a no-op
+    assert client.post("/api/house/mains", json={
+        "fixtures": ["sconce-kitchen-left"], "on": False}).json()["status"] == "unchanged"
+    r = client.put("/api/house/mains", json={"fixtures": ["sconce-kitchen-left"], "on": True})
+    body = r.json()
+    assert body["status"] == "recorded" and body["mains_off"] == {}
+    assert body["recheck"]["status"] == "skipped", "the room is released"
+    assert client.put("/api/house/mains", json={
+        "fixtures": ["nope"], "on": False}).status_code == 404
+    assert client.put("/api/house/mains", json={"fixtures": [], "on": False}).status_code == 422
+    assert client.put("/api/house/mains", json={"fixtures": ["crystal"]}).status_code == 422
+
+
+def test_energy_settings_merge_partially(client):
+    s = client.get("/api/house/settings").json()["settings"]["energy"]
+    assert s["resting_fps"] == {"Matrix": 20, "Strips": 20, "Singles": 10}
+    assert s["park_idle"] is True and s["send_on_change"] is True
+    assert s["keepalive_s"] == 1.0 and s["audio_pause_after_s"] == 120.0
+    r = client.put("/api/house/settings", json={"energy": {
+        "resting_fps": {"Matrix": 15, "Strips": None}, "keepalive_s": 0.5}})
+    assert r.status_code == 200, r.text
+    e = r.json()["settings"]["energy"]
+    assert e["resting_fps"] == {"Matrix": 15, "Singles": 10}, "one cap, one removed"
+    assert e["keepalive_s"] == 0.5 and e["park_idle"] is True, "the rest kept"
+    assert client.put("/api/house/settings", json={"energy": {
+        "keepalive_s": 3.0}}).status_code == 422, "outside the sconces' timeout"
+    assert client.put("/api/house/settings", json={"energy": {
+        "resting_fps": {"Matrix": 0}}}).status_code == 422

@@ -221,6 +221,9 @@ class Device(BaseRegistry):
                 if device_output.is_withheld(self.id):
                     if self._timing_buffer:
                         self._timing_buffer.clear()
+                    # #48: the fixture was not shown this picture — the
+                    # first frame after withholding always goes out.
+                    self._sent_q = None
                     return
                 # Priority virtual flushes after all virtuals have updated their pixels
                 frame = self.assemble_frame()
@@ -258,11 +261,39 @@ class Device(BaseRegistry):
     # to stop.)
     _timing_buffer = None       # deque[(due_monotonic_s, frame_copy)]
     _timing_delay_s = 0.0
+    # SpotFX deviation #48 (send on change): the last frame actually sent,
+    # quantised as the DDP transport quantises it, and when; plus counters a
+    # status surface reads (frames handed to the transport / skipped as
+    # unchanged). Touched only by this device's own render thread.
+    _sent_q = None
+    _sent_at = 0.0
+    _frames_sent = 0
+    _frames_skipped = 0
 
     def _emit_frame(self, frame):
-        """Hand one frame to the transport and announce it. The two
-        statements this method holds are exactly what update_pixels ran
-        inline before the timing seam existed, in the same order."""
+        """Hand one frame to the transport and announce it. With
+        send-on-change off (the shipped state) this is exactly the two
+        statements update_pixels ran inline before the timing seam existed,
+        in the same order, plus a counter. With it on (fx/device_output.py,
+        SEND ON CHANGE), a frame byte-identical to the last one sent is
+        skipped — no transport write, no update event — until the
+        keep-alive is due."""
+        keepalive = device_output.send_on_change_s()
+        if (keepalive is not None and getattr(self, "type", None)
+                not in device_output.SEND_ALWAYS_TYPES):
+            quantised = np.asarray(frame).astype(np.uint8)
+            now = device_output.now()
+            last = self._sent_q
+            if (last is not None and last.shape == quantised.shape
+                    and now - self._sent_at < keepalive
+                    and np.array_equal(last, quantised)):
+                self._frames_skipped += 1
+                return
+            self._sent_q = quantised
+            self._sent_at = now
+        elif self._sent_q is not None:
+            self._sent_q = None
+        self._frames_sent += 1
         self.flush(frame)
         self._ledfx.events.fire_event(DeviceUpdateEvent(self.id, frame))
 
@@ -327,6 +358,7 @@ class Device(BaseRegistry):
 
     def activate(self):
         self._pixels = np.zeros((self.pixel_count, 3))
+        self._sent_q = None             # #48: a fresh activation sends at once
         self._active = True
         # SpotFX deviation #35. Set HERE, at the base, so every driver
         # inherits it from its own super().activate() — and set BEFORE any

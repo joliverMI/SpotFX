@@ -111,6 +111,22 @@ word no mode answers to changes nothing about the mode (the status says
 so). Media changes glide over the target mode's button glide. Lending the
 TV strip to Hyperion while a source is on is house_fixtures.py's half.
 
+═══ ENERGY (phase 3) ═══
+
+spectra/services/house_energy.py is the binding statement; the parts that
+live here are the plan's own:
+
+  * RESTING CAPS: every fixture gets the library's default resting frame
+    rate for its category (settings.energy.resting_fps — Matrix 20, Strips
+    20, Singles 10) before the mode's own fixture settings apply, so a calm
+    mode is calm without anyone remembering to cap it. Lifted when the music
+    show takes the room, like every mode cap.
+  * OFF MEANS NO STREAM: a mode's `off` on a WLED fades the fixture to black
+    over the glide, THEN house_fixtures.py switches it off and withholds it
+    (no packet at all) — `mode_off_devices()` is what it reads. A fixture
+    that is not a WLED (a Hue area, a dummy) keeps the dark state; Hue's
+    off is the mode's Hue look.
+
 ═══ WHO SET IT ═══
 
 `set_mode` takes a mode by id/name or Home Assistant's own lighting_mode
@@ -145,6 +161,9 @@ HOUSE_DWELL_TOLERANCE_S = 24 * 3600.0
 MOTION_REAPPLY_GLIDE_S = 3.0
 #: glide used when the mode is re-asserted after a standby (a preview etc.)
 RESUME_GLIDE_S = 3.0
+#: a mode's "off" switches a WLED off this long AFTER its fade to black is
+#: done, so the last streamed frame it holds is black
+OFF_AFTER_FADE_S = 0.5
 MAX_RECENT = 12
 
 PHASE_INACTIVE = "inactive"
@@ -183,6 +202,8 @@ class Plan:
     states: dict = field(default_factory=dict)     # device -> "dark"
     caps: dict = field(default_factory=dict)       # device -> fps
     motion: dict = field(default_factory=dict)     # virtual -> 0..1
+    #: WLEDs the mode switches OFF (no stream) once their fade is done
+    power_off: list = field(default_factory=list)
     problems: list = field(default_factory=list)
 
 
@@ -266,6 +287,9 @@ class _Runtime:
     music_levels: dict = field(default_factory=dict)
     music_mode_id: Optional[str] = None
     music_mode_updated_ms: Optional[int] = None
+    #: phase 3: WLEDs the resting mode switches off, and when their fade to
+    #: black is done (house_fixtures withholds and powers them down then)
+    off_ready: dict = field(default_factory=dict)      # device -> clock
 
 
 _rt = _Runtime()
@@ -663,6 +687,11 @@ async def tick() -> None:
             await _tick_locked()
         except Exception:                                # noqa: BLE001
             logger.exception("house: tick failed")
+    try:
+        from spectra.services import house_energy
+        await house_energy.tick()
+    except Exception:                                    # noqa: BLE001
+        logger.exception("house: energy pass failed")
 
 
 async def _tick_locked() -> None:
@@ -738,6 +767,24 @@ async def run_supervised() -> None:
         await asyncio.sleep(TICK_S)
 
 
+async def reapply() -> None:
+    """The library's energy settings changed (phase 3): a RESTING mode's
+    frame-rate caps are re-resolved and pushed now, nothing else moves. The
+    energy pass picks up the rest on this same tick."""
+    async with _get_lock():
+        try:
+            mode = current_mode()
+            kind, _reason = gate()
+            if mode is not None and kind is None and _rt.phase == PHASE_RESTING:
+                from fx import device_rate
+                caps = build_plan(mode).caps
+                device_rate.set_caps(caps)
+                _rt.caps_pushed = bool(caps)
+        except Exception:                                # noqa: BLE001
+            logger.exception("house: re-applying the energy settings failed")
+    await tick()
+
+
 # ── phases ─────────────────────────────────────────────────────────────────
 
 async def _go_inactive(why: str, *, fade_s: float, write_motion: bool) -> None:
@@ -750,6 +797,7 @@ async def _go_inactive(why: str, *, fade_s: float, write_motion: bool) -> None:
     _rt.reason = why
     _rt.applied_mode_id = None
     _rt.applied_updated_ms = None
+    _rt.off_ready = {}
     _rt.motion_authored = {}
     _rt.motion_applied = {}
     _rt.motion_key = None
@@ -810,6 +858,9 @@ def music_levels(mode: HouseMode) -> dict:
 
 async def _hand_in(mode: HouseMode) -> None:
     await _let_go(fade_s=HAND_IN_FADE_S, write_motion=True)
+    # A resting look's "off" is the mode's, not the show's: every fixture is
+    # powered and streamed for the music (house_fixtures reads this).
+    _rt.off_ready = {}
     _push_music_levels(mode)
     _rt.phase = PHASE_MUSIC
     _rt.reason = "music is playing — the show has the room"
@@ -836,6 +887,10 @@ async def _enter(mode: HouseMode, glide_s: float, *, why: str,
     plan = build_plan(mode)
     from fx import device_rate
     from spectra.services import show_output
+    # A fixture already dark (the previous mode had it off too, or a restart
+    # re-installed the snapshot) needs no fade before it is switched off.
+    already_dark = {d for d, state in show_output.base_snapshot()["states"].items()
+                    if state == "dark"}
     show_output.set_base(plan.levels, plan.states, fade_s=glide_s)
     _rt.base_pushed = bool(plan.levels or plan.states)
     _rt.music_levels = {}
@@ -843,6 +898,12 @@ async def _enter(mode: HouseMode, glide_s: float, *, why: str,
     _rt.music_mode_updated_ms = None
     device_rate.set_caps(plan.caps)
     _rt.caps_pushed = bool(plan.caps)
+    # OFF MEANS NO STREAM: the fade to black above runs first (capped by the
+    # output layer's own longest fade); the switch-off waits for it.
+    now = deps.clock()
+    fade_done = now + min(glide_s, show_output.MAX_FADE_MS / 1000.0) + OFF_AFTER_FADE_S
+    _rt.off_ready = {did: (now if did in already_dark else fade_done)
+                     for did in plan.power_off}
     _rt.hue_ramp_ms = int(glide_s * 1000)
     look = await _apply_scene_and_colour(mode, glide_s, refire=refire,
                                          prefer_remembered=prefer_remembered)
@@ -927,6 +988,7 @@ def build_plan(mode: HouseMode) -> Plan:
     fixtures the current take holds."""
     from spectra.services import show_output
     plan = Plan()
+    plan.caps.update(resting_caps())
     for i, hook in enumerate(mode.fixtures, 1):
         target = hook.target.model_dump()
         wants_device = hook.level is not None or hook.off or hook.fps is not None
@@ -942,8 +1004,80 @@ def build_plan(mode: HouseMode) -> Plan:
                     plan.states[did] = "dark"
                 if hook.fps is not None:
                     plan.caps[did] = int(hook.fps)
+    plan.power_off = _switchable(sorted(plan.states))
     plan.motion = motion_targets(mode)
     return plan
+
+
+def resting_caps() -> dict:
+    """device -> fps: the library's default resting caps (settings.energy.
+    resting_fps), resolved against the live room. Keys are a category or a
+    fixture id; a fixture id wins over its category. A key that reaches no
+    live fixture is skipped (it may be outside today's take)."""
+    from spectra.services import show_output
+    try:
+        table = house_store.load_library().settings.energy.resting_fps
+    except Exception:                                    # noqa: BLE001
+        logger.exception("house: resting caps unreadable — none applied")
+        return {}
+    host = show_output._host()
+    out: dict = {}
+    fixtures: dict = {}
+    for key, fps in table.items():
+        if host is not None and key in host.devices:
+            fixtures[key] = int(fps)
+            continue
+        devices, _problems = show_output.resolve_target({"kind": "category", "id": key})
+        for did in devices:
+            out[did] = min(int(fps), out.get(did, int(fps)))
+    for did, fps in fixtures.items():
+        devices, _problems = show_output.resolve_target({"kind": "fixture", "id": did})
+        for d in devices:
+            out[d] = fps
+    return out
+
+
+def _switchable(device_ids: list) -> list:
+    """The WLEDs among these devices — the fixtures an "off" can switch off
+    (a Hue area's off is its Hue look; a dummy has no switch)."""
+    from spectra.services import show_output
+    host = show_output._host()
+    if host is None:
+        return []
+    out = []
+    for did in device_ids:
+        dev = host.devices.get(did)
+        if str(getattr(dev, "type", "") or "").lower() == "wled":
+            out.append(did)
+    return out
+
+
+def preinstall_off(device_ids) -> None:
+    """A restart re-installs the WLEDs the mode had switched off BEFORE the
+    first pass (house_restart.prepare_for_resume), already faded: the
+    fixtures half then keeps them withheld instead of switching them back on
+    for the second or two before the mode is re-entered."""
+    if _rt.phase == PHASE_INACTIVE and _rt.reason == "not started":
+        _rt.off_ready = {str(d): 0.0 for d in (device_ids or [])}
+
+
+def switched_off_by_mode() -> list:
+    """Every WLED the current mode switches off (faded or not) — the restart
+    snapshot keeps it."""
+    return sorted(_rt.off_ready)
+
+
+def mode_off_devices() -> dict:
+    """device -> the mode's name, for every WLED the RESTING mode switches
+    off whose fade to black is done — what house_fixtures withholds and
+    powers down. Empty while the music show has the room, on standby, or
+    with no mode driving."""
+    if _rt.phase in (PHASE_MUSIC, PHASE_STANDBY) or not _rt.off_ready:
+        return {}
+    now = deps.clock()
+    mode = current_mode()
+    name = mode.name if mode is not None else "the house mode"
+    return {did: name for did, ready in _rt.off_ready.items() if now >= ready}
 
 
 def motion_targets(mode: HouseMode) -> dict:
@@ -1274,6 +1408,16 @@ def status_dict() -> dict:
     if _rt.motion_applied:
         out["motion"] = [{"virtual": v, "param": p, "value": round(val, 3)}
                          for (v, p), val in sorted(_rt.motion_applied.items())]
+    if _rt.off_ready:
+        now = deps.clock()
+        out.setdefault("fixtures", {})["switching_off"] = {
+            show_output_label(d): (round(max(0.0, ready - now), 1))
+            for d, ready in sorted(_rt.off_ready.items())}
+    try:
+        from spectra.services import house_energy
+        out["energy"] = house_energy.status()
+    except Exception:                                    # noqa: BLE001
+        logger.exception("house: energy status failed")
     try:
         d = hue_directive()
         out["hue"] = ({"looks": [{"area": a, "look": k, "mirek": m, "color": col,
@@ -1282,6 +1426,14 @@ def status_dict() -> dict:
     except Exception:                                    # noqa: BLE001
         out["hue"] = None
     return out
+
+
+def show_output_label(device_id: str) -> str:
+    try:
+        from spectra.services import show_output
+        return show_output.device_label(device_id)
+    except Exception:                                    # noqa: BLE001
+        return device_id
 
 
 def status() -> dict:
@@ -1348,6 +1500,7 @@ def heartbeat() -> dict:
                         if media_active(st) else None)
         out["tv_music"] = st.tv_music
         out["withheld"] = device_output.withheld()
+        out["mains_off"] = sorted(st.mains_off)
         try:
             from spectra.services import house_fixtures, house_voice
             out["tv_strip"] = house_fixtures.tv_strip_status()["owner"]

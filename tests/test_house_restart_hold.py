@@ -191,6 +191,18 @@ def test_withheld_caps_and_hue_are_installed_too(owned_mode):
     assert device_output.target(D2).state == "dark"
 
 
+def test_a_modes_switched_off_wleds_are_installed_ready(owned_mode):
+    """Phase 3: the fixtures the mode had switched OFF (no stream) come back
+    already off — house.mode_off_devices() names them before the layer's
+    first pass, so the fixtures half never switches them on in between."""
+    from spectra.services import house, house_restart
+    _write_snapshot(owned_mode.id, withheld={"porch-rail": "switched off"},
+                    mode_off=["porch-rail"], states={"porch-rail": "dark"})
+    assert house_restart.prepare_for_resume()["installed"]
+    assert house.mode_off_devices() == {"porch-rail": "Night light"}
+    assert house_restart.snapshot()["mode_off"] == ["porch-rail"]
+
+
 # ── 4. only when it will apply ─────────────────────────────────────────────
 
 def test_nothing_is_installed_without_a_mode(monkeypatch):

@@ -32,6 +32,7 @@ only recorded. With no modes in the library everything is inert.
 | `GET /house/fixtures` | — | every override, what was applied, corrections, rechecks | — |
 | `POST /house/voice` | `{"state": "listening" \| "processing" \| "responding" \| "idle"}` | `status`: painted / cleared / skipped / unchanged | R8 |
 | `POST /house/recheck` | `{"fixtures": ["sconce-kitchen-left", "sconce-kitchen-right"]}` | `status`: rechecking / skipped / nothing_to_recheck | R16 |
+| `PUT /house/mains` *(phase 3)* | `{"fixtures": ["sconce-kitchen-left", "sconce-kitchen-right"], "on": false \| true}` | `status`: recorded / unchanged; `mains_off`; with `on: true` also the recheck's answer | R16 |
 | `GET` / `PUT /house/settings` | partial settings object | the settings | — |
 
 `PUT` and `POST` are the same call on every route above that lists `PUT`
@@ -123,6 +124,20 @@ cycle can change the DHCP address), re-inits a driver that never resolved,
 and re-applies their power and brightness the moment they answer — looking
 for up to 45 s. It returns at once; progress is in `GET /house/fixtures`
 `rechecks`.
+
+### Sconce mains OFF (phase 3, energy)
+
+When HA switches `light.dimmer_kitchen_sconce` OFF, call
+`PUT /house/mains {"fixtures": ["sconce-kitchen-left", "sconce-kitchen-right"],
+"on": false}`. While a mode drives the room Spectra then sends them nothing
+and stops searching for them (no 30 s re-checks, no network sweeps — a
+fixture with no power cannot answer). When the mains go back ON, either call
+`PUT /house/mains {... "on": true}` or keep the existing `POST /house/recheck`
+— both clear the report and re-find the sconces at once. If an ON is ever
+missed, Spectra knocks once every 10 minutes on the address each sconce last
+had and picks it up when it answers. Spectra never switches the mains.
+Recommended: send the mains state on every change of the dimmer, and at HA
+start.
 
 ### Restarts
 

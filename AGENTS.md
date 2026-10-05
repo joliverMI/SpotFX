@@ -3953,6 +3953,52 @@ split). Six things:
   `resolve_target`. Tests: `tests/test_house_{fixtures,voice,restart_hold,
   withhold_landing,seam_api}.py`; help topic `house-ha-seam`.
 
+**PHASE 3 — ENERGY (2026-10-05).** `spectra/services/house_energy.py`'s
+docstring is the binding statement; the settings are his data
+(`HouseSettings.energy`, partial `PUT /api/house/settings {"energy": …}`).
+Five things:
+
+- **EVERYTHING HERE ACTS ONLY WHILE `house.layer_active()`** — no mode, a
+  standby or a released room is byte-identical to before (no parking, every
+  frame sent, audio listening).
+- **CAPS AND PARKING ARE TWO OWNERS IN `fx/device_rate.py`.** Resting caps
+  (`energy.resting_fps`, Matrix 20 / Strips 20 / Singles 10, a mode's own
+  `fps` wins) are pushed with the mode's plan; PARKING (2 frames/s for a
+  virtual none of whose devices takes frames — a dummy like `radial-dummy`,
+  withheld, a frozen Hue area, an inactive driver) is decided per frame on
+  the render thread (VENDOR #47). Never 0: the render-plane dead-man needs
+  every active virtual to flush within `live_host.STALE_AFTER_S` (2 s).
+  **The vendored fps→sleep table floors at 10 fps**: a cap at or below 10
+  used to run at ~11; a LOWERED rate ≤ 10 now sleeps `1/rate`.
+- **SEND ON CHANGE** (VENDOR #48): a frame byte-identical (DDP's own
+  `astype(uint8)`) to the last one sent is skipped until a keep-alive
+  (`energy.keepalive_s`, ≤ 2 s — the sconces leave realtime after 2.5 s).
+  Never Hue, never while suspended. Each device counts `_frames_sent`/
+  `_frames_skipped`; the House page's Energy lines read those, never a
+  setting.
+- **OFF MEANS NO STREAM, SOFTLY.** A mode's `off` on a WLED fades to black
+  over the glide, then `house.mode_off_devices()` hands it to
+  house_fixtures as TARGET_OFF (withheld + live:false + on:false). While
+  Spectra owns brightness every switch-off first writes `bri: 1` and every
+  power-on from withheld writes `{"on": true, "bri": 1}`, lets the stream
+  back, then the owned brightness — the WLED's own preset never shows at
+  full. A Light Show Steady/Freeze hold beats a mode's off.
+- **MAINS OFF = NO STREAM, NO SEARCH.** `PUT /api/house/mains` records HA's
+  report (`HouseState.mains_off`); acted on only while a mode drives:
+  TARGET_UNPOWERED (withheld, nothing written), `activation_report.recheck`
+  skips it (`not_searched`), and a recheck/mains-on clears it whatever the
+  room's state. A missed "on" is caught by one json/info knock every
+  `MAINS_KNOCK_S` (600 s) — never a sweep. **AUDIO PAUSE**: after
+  `energy.audio_pause_after_s` (120) of CONFIRMED quiet the capture stream
+  closes (`live.pause_audio`); music, another hub listener (A/V sync) or the
+  layer going inactive resume it; an unknown playback read restarts the
+  quiet clock. Measure with `scripts/measure_room_energy.py` (read-only,
+  the planner's method). Tests: `tests/test_house_energy.py`,
+  `tests/test_send_on_change_landing.py`, the phase-3 sections of
+  `tests/test_device_rate.py`, `test_house_lighting.py`,
+  `test_house_fixtures.py`, `test_activation_report.py`,
+  `test_house_seam_api.py`; help topic `house-energy`.
+
 ## The room LIGHT-FIELD map (`/rooms`) + room effects (`/room-effects`)
 
 **THE ONE IDEA, his own sentence, and the thing this whole area exists to

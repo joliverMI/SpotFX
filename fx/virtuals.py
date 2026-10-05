@@ -957,13 +957,21 @@ class Virtual:
             # this will be more frame accurate on high res sleep systems
             run_time = time.perf_counter() - start_time
             rate = self.refresh_rate
+            interval = None
             if device_rate.active():
-                # SpotFX deviation #43: a runtime per-device cap (house
-                # lighting's calm modes) — only ever lowers the rate.
-                rate = device_rate.effective_rate(
-                    rate, (d.id for d in self._devices))
+                # SpotFX deviations #43/#47: a runtime per-device cap (house
+                # lighting's calm modes) and parking of a virtual that
+                # lights nothing — only ever lowers the rate. A rate at or
+                # below the vendored sleep table's 10 fps floor sleeps
+                # 1/rate (device_rate.sleep_interval).
+                lowered = device_rate.rate_for(rate, self._devices)
+                if lowered != rate:
+                    rate = lowered
+                    interval = device_rate.sleep_interval(rate)
             sleep_time = max(
-                0.001, fps_to_sleep_interval(rate) - run_time
+                0.001,
+                (interval if interval is not None
+                 else fps_to_sleep_interval(rate)) - run_time
             )
             time.sleep(sleep_time)
 

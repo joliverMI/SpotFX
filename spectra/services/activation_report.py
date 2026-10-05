@@ -100,6 +100,9 @@ class SkippedDevice:
     last_checked_wall: float
     recovered_wall: Optional[float] = None
     retries: int = 0              # driver re-initialization attempts
+    #: why it is NOT being searched for right now (house lighting phase 3:
+    #: Home Assistant reports its mains off), or None
+    not_searched: Optional[str] = None
 
     @property
     def still_dark(self) -> bool:
@@ -145,7 +148,7 @@ class ActivationReport:
         if dark:
             parts.append(
                 f"{len(dark)} light(s) skipped: "
-                + "; ".join(f"{d.name} ({d.why})" for d in dark))
+                + "; ".join(f"{d.name} ({d.not_searched or d.why})" for d in dark))
         if self.recovered:
             parts.append(
                 f"{len(self.recovered)} came back later: "
@@ -303,6 +306,7 @@ def liveness_summary() -> Optional[dict]:
         "skipped": [
             {"device_id": d.device_id, "name": d.name, "kind": d.kind,
              "why": d.why, "still_dark": d.still_dark,
+             "not_searched": d.not_searched,
              "last_checked_age_s": round(time.time() - d.last_checked_wall, 1)}
             for d in sorted(report.skipped.values(), key=lambda d: d.name)],
         "virtual_gaps": dict(sorted(report.virtual_gaps.items())),
@@ -353,7 +357,17 @@ async def recheck(probe_timeout_s: float = RECHECK_PROBE_TIMEOUT_S,
         if report is None or not report.still_dark:
             return report
         now = time.time()
-        dark_ids = [d.device_id for d in report.still_dark]
+        # HOUSE LIGHTING phase 3: a fixture Home Assistant reports
+        # mains-off is not searched for at all — no relocation, no /24
+        # sweep, no driver re-init, no probe. Its mains coming on (HA's
+        # recheck call) clears the report and the next pass asks again.
+        unpowered = _mains_off()
+        for d in report.still_dark:
+            d.not_searched = (MAINS_OFF_WHY if d.device_id in unpowered else None)
+        dark_ids = [d.device_id for d in report.still_dark
+                    if d.device_id not in unpowered]
+        if not dark_ids:
+            return report
         if retry_init and live.host is not None:
             for device_id in dark_ids:
                 entry = report.skipped[device_id]
@@ -408,6 +422,20 @@ async def recheck(probe_timeout_s: float = RECHECK_PROBE_TIMEOUT_S,
             logger.warning("activation report: every skipped light is back — "
                            "%s", report.summary())
         return report
+
+
+MAINS_OFF_WHY = ("Home Assistant reports its mains off — not searched for "
+                 "until they come back on")
+
+
+def _mains_off() -> set[str]:
+    """Fixtures reported mains-off while a house mode drives the room
+    (spectra/services/house_fixtures.py). Never raises: unreadable = none."""
+    try:
+        from spectra.services import house_fixtures
+        return set(house_fixtures.mains_off_acting())
+    except Exception:                                    # noqa: BLE001
+        return set()
 
 
 async def run_supervised() -> None:

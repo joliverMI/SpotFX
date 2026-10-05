@@ -51,6 +51,9 @@ logger = logging.getLogger(__name__)
 STALE_AFTER_S = 2.0     # a live render loop flushes every ~16-40 ms; 2 s of
                         # silence on an active virtual is a dead write path
 AUDIO_PUMP_SLEEP_S = 0.01
+#: the show's own melbank's hub subscription name (audio_listeners() names
+#: every OTHER consumer)
+MELBANK_SUBSCRIPTION = "spectra-melbank"
 DEVICE_VERIFY_TIMEOUT_S = 3.0   # per-device json/info read for the live-flag check
 DEVICE_LIVE_DEADLINE_S = 25.0  # shared poll-until-live deadline: a real
                                 # take-back's WLEDs start receiving realtime
@@ -258,6 +261,14 @@ class LiveLights:
         #: Virtual ids a SCOPED activation deliberately held back — the
         #: config wanted them active and this take did not.
         self.held_back: list[str] = []
+        #: AUDIO PAUSE (house lighting phase 3, spectra/services/
+        #: house_energy.py): the capture stream is closed and the pump
+        #: stopped while nothing needs the room's audio. The hub, the melbank
+        #: and every subscription stay, so resuming is reopening one stream.
+        self.audio_paused: bool = False
+        self.audio_paused_since: Optional[float] = None
+        self.audio_pause_reason: Optional[str] = None
+        self.audio_resume_error: Optional[str] = None
 
     @property
     def active(self) -> bool:
@@ -410,6 +421,10 @@ class LiveLights:
             self.audio_source = None
         self._uninstall_hub_melbank()
         self.hub = None
+        self.audio_paused = False
+        self.audio_paused_since = None
+        self.audio_pause_reason = None
+        self.audio_resume_error = None
         self.freshness.detach()
         self.freshness.marks.clear()
         if self.host is not None:
@@ -782,6 +797,89 @@ class LiveLights:
             }
         return out
 
+    # ── audio pause (house lighting phase 3) ────────────────────────────────
+
+    def audio_listeners(self) -> list[str]:
+        """Every hub consumer other than the show's own melbank — someone
+        (an A/V-sync measurement) listening to the room right now."""
+        if self.hub is None:
+            return []
+        try:
+            names = list(self.hub.stats().get("consumers", {}))
+        except Exception:                                # noqa: BLE001
+            return []
+        return [n for n in names if n != MELBANK_SUBSCRIPTION]
+
+    async def pause_audio(self, reason: str) -> bool:
+        """Close the capture stream and stop the pump. The hub, the melbank
+        and its subscription stay. Returns True when it paused now. The
+        effects keep whatever their audio filters held — after minutes of
+        silence that is the silence state, so the picture does not change
+        (spectra/services/house_energy.py says why that is the gate)."""
+        if self.audio_source is None or self.audio_paused:
+            return False
+        if self._pump_task is not None:
+            self._pump_task.cancel()
+            try:
+                await self._pump_task
+            except asyncio.CancelledError:
+                pass
+            except Exception:                            # noqa: BLE001
+                logger.exception("live stack: audio pump ended badly")
+            self._pump_task = None
+        try:
+            self.audio_source.close()
+        except Exception:
+            logger.exception("live stack: audio source close failed (pausing)")
+        self.audio_paused = True
+        self.audio_paused_since = time.monotonic()
+        self.audio_pause_reason = reason
+        self.audio_resume_error = None
+        logger.warning("SPECTRA audio PAUSED — %s", reason)
+        return True
+
+    async def resume_audio(self, reason: str) -> bool:
+        """Reopen the capture stream and restart the pump. Anything still
+        queued from before the pause is dropped (stale audio must never be
+        analysed as now). Returns True when listening again; a device that
+        will not reopen is logged, recorded in `audio_resume_error`, and the
+        stack stays paused so the next call retries."""
+        if not self.audio_paused or self.audio_source is None:
+            return False
+        try:
+            self.audio_source.open(allow_device=True)
+        except Exception as exc:                         # noqa: BLE001
+            self.audio_resume_error = f"{type(exc).__name__}: {exc}"
+            logger.error("SPECTRA audio could NOT resume (%s) — %s; retrying",
+                         reason, self.audio_resume_error)
+            return False
+        if self._melbank_sub is not None:
+            self._melbank_sub.drain()
+        self._pump_task = asyncio.create_task(
+            self._pump_audio(), name="spectra-audio-pump")
+        paused_for = (time.monotonic() - self.audio_paused_since
+                      if self.audio_paused_since is not None else None)
+        self.audio_paused = False
+        self.audio_paused_since = None
+        self.audio_pause_reason = None
+        self.audio_resume_error = None
+        logger.warning("SPECTRA audio RESUMED — %s%s", reason,
+                       f" (paused {paused_for:.0f}s)" if paused_for is not None else "")
+        return True
+
+    def audio_status(self) -> dict:
+        if self.audio_source is None:
+            return {"state": "off", "listeners": []}
+        out = {"state": "paused" if self.audio_paused else "listening",
+               "listeners": self.audio_listeners()}
+        if self.audio_paused:
+            out["reason"] = self.audio_pause_reason
+            if self.audio_paused_since is not None:
+                out["paused_for_s"] = round(time.monotonic() - self.audio_paused_since, 1)
+            if self.audio_resume_error:
+                out["resume_error"] = self.audio_resume_error
+        return out
+
     # ── audio internals ─────────────────────────────────────────────────────
 
     def _install_hub_melbank(self, host: FxHost) -> None:
@@ -794,7 +892,7 @@ class LiveLights:
         self._prev_audio_cls = fx_audio.AudioAnalysisSource
         fx_audio.AudioAnalysisSource = HubMelbankSource
         self.melbank = HubMelbankSource(host)
-        self._melbank_sub = self.hub.subscribe("spectra-melbank")
+        self._melbank_sub = self.hub.subscribe(MELBANK_SUBSCRIPTION)
         host.audio = self.melbank
 
     def _uninstall_hub_melbank(self) -> None:

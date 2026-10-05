@@ -304,3 +304,42 @@ def test_reset_clears_state_for_the_next_test(fake_live):
     ar.reset()
     assert ar._report is None
     assert ar.status() is None
+
+
+# ── house lighting phase 3: a fixture whose mains are off is not searched ───
+
+def test_recheck_never_searches_for_a_fixture_whose_mains_are_off(fake_live, monkeypatch):
+    """Home Assistant reported the sconce mains off: no relocation, no driver
+    re-init, no probe — and the report says why instead of 'no answer'.
+    Its mains coming back on puts it back in the search."""
+    from spectra.services import device_relocation
+    dark = _FakeDevice("sconce-kitchen-left", "Sconce, Kitchen, Left",
+                       "192.168.40.110", destination=None,
+                       wled=_FakeWled(unreachable=True))
+    _room(fake_live, dark)
+    report = ar.record_from_live(ar.SOURCE_RESUME, {}, {
+        "sconce-kitchen-left": "could not confirm live state: TimeoutError()"})
+    entry = report.skipped["sconce-kitchen-left"]
+    relocated = []
+
+    async def relocate(device, host=None, allow_sweep=True):
+        relocated.append(device.id)
+        return None
+    monkeypatch.setattr(device_relocation, "reconcile", relocate)
+    off = {"sconce-kitchen-left"}
+    monkeypatch.setattr(ar, "_mains_off", lambda: set(off))
+
+    async def main():
+        before = entry.last_checked_wall
+        await ar.recheck(probe_timeout_s=0.2)
+        assert relocated == [] and dark.init_calls == 0 and dark.wled.calls == 0
+        assert entry.still_dark and entry.last_checked_wall == before
+        assert entry.not_searched == ar.MAINS_OFF_WHY
+        assert "mains off" in report.summary()
+        assert ar.liveness_summary()["skipped"][0]["not_searched"]
+        off.clear()                              # the mains came back on
+        await ar.recheck(probe_timeout_s=0.2)
+        assert relocated == ["sconce-kitchen-left"] and dark.init_calls == 1
+        assert entry.not_searched is None
+
+    _run(main())

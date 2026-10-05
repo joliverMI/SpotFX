@@ -113,6 +113,44 @@ console.log('§5 the Home Assistant card says what the seam is doing, and only t
   ok(voice[0].startsWith('Voice: listening on crystal (skipped sconce-kitchen-left: busy'), `voice: ${voice[0]}`);
 }
 
+console.log('§ phase 3: the Energy lines say what was sent, what is parked, whether it listens');
+{
+  const energy = (o) => ({ acting: true,
+    settings: { resting_fps: { Matrix: 20 }, park_idle: true, send_on_change: true,
+      keepalive_s: 1, audio_pause_after_s: 120 },
+    parking: true, parked: [], send_on_change_s: null,
+    audio: { state: 'listening', listeners: [], quiet_for_s: null },
+    fixtures: {}, packets_per_s_estimate: null, mains_off: {}, recent: [], ...o });
+  ok(hs.energyLines(base).length === 0, 'no energy block, no lines');
+  ok(hs.energyLines({ ...base, energy: energy({}) }).length === 0, 'nothing in force says nothing');
+  const paused = hs.energyLines({ ...base, energy: energy({
+    audio: { state: 'paused', listeners: [], reason: 'no music for 120s', paused_for_s: 300, quiet_for_s: 420 } }) });
+  ok(paused[0] === 'Audio: not listening for 5 min — no music for 120s. It listens again the moment music plays.',
+    `paused: ${paused[0]}`);
+  const err = hs.energyLines({ ...base, energy: energy({
+    audio: { state: 'paused', listeners: [], reason: 'quiet', resume_error: 'OSError: busy', quiet_for_s: null } }) });
+  ok(err.some((x) => x.startsWith('⚠ Audio could not restart: OSError: busy')), 'a failed resume is a warning');
+  const quiet = hs.energyLines({ ...base, energy: energy({
+    audio: { state: 'listening', listeners: [], quiet_for_s: 30 } }) });
+  ok(quiet[0] === 'Audio: listening — no music for 30 s; stops listening after 2 min.', `quiet: ${quiet[0]}`);
+  const sending = hs.energyLines({ ...base, energy: energy({
+    parked: ['radial-dummy'], send_on_change_s: 1,
+    fixtures: { Crystal: { id: 'crystal', sent_fps: 20, skipped_fps: 0, packets_per_s: 60 },
+                'Porch Rail': { id: 'porch-rail', sent_fps: 1, skipped_fps: 9, packets_per_s: 1 },
+                Idle: { id: 'x', sent_fps: 0, skipped_fps: 0, packets_per_s: 0 } },
+    packets_per_s_estimate: 61 }) });
+  ok(sending.includes('Parked at 2 frames/s (lighting nothing): radial-dummy.'), 'parked named');
+  ok(sending.includes('Still pictures are sent only on change, with a keep-alive every 1 s.'), 'send on change named');
+  ok(sending.includes('Sending ≈ 61 packets/s: Crystal 20 fps · Porch Rail 1 fps (+9 unchanged).'),
+    `sending: ${sending.find((x) => x.startsWith('Sending'))}`);
+  const mains = hs.energyLines({ ...base, energy: energy({ acting: false,
+    mains_off: { 'sconce-kitchen-left': 1 } }) });
+  ok(mains[0] === 'Mains off (Home Assistant): sconce-kitchen-left — recorded, not acted on.', `mains: ${mains[0]}`);
+  const fx = { device: 'sconce-kitchen-left', name: 'Sconce L', target: 'unpowered', why: null,
+    in_flight: false, override: null, applied: null };
+  ok(hs.fixtureLine(fx) === 'Sconce L: mains off — no stream, not searched for', 'unpowered fixture line');
+}
+
 if (failures) {
   console.log(`\n${failures} failure(s)`);
   process.exit(1);

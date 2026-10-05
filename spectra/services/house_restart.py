@@ -76,11 +76,13 @@ def snapshot() -> dict:
     """What the house layer has on the fixtures right now."""
     from fx import device_output, device_rate
     from spectra.services import house_store, show_output
+    from spectra.services import house
     base = show_output.base_snapshot()
     return {"mode_id": house_store.state().mode_id,
             "levels": base["levels"], "states": base["states"],
             "caps": device_rate.caps(),
             "withheld": device_output.withheld(),
+            "mode_off": house.switched_off_by_mode(),
             "hue_frozen": _hue_frozen_now()}
 
 
@@ -169,6 +171,8 @@ def prepare_for_resume() -> dict:
         device_rate.set_caps(snap.get("caps") or {})
         device_output.set_withheld(snap.get("withheld") or {})
         hue_freeze.set_pending(snap.get("hue_frozen") or [])
+        from spectra.services import house
+        house.preinstall_off(snap.get("mode_off") or [])
         out = {"installed": True, "levels": len(levels), "off": len(states),
                "caps": len(snap.get("caps") or {}),
                "withheld": sorted((snap.get("withheld") or {}).keys()),

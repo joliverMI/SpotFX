@@ -10,8 +10,10 @@
   3. LEND: TV Music off / a media source on → the TV strip is withheld and
      told {"live": false}; the sconces on the same virtual are untouched;
      return → power-on write FIRST, stream after.
-  4. ON / OFF: off = withheld, then {"live": false}, then {"on": false};
-     on = {"on": true, "bri": 255} while still withheld, stream after.
+  4. ON / OFF: off = withheld, then the SOFT dim {"bri": 1} (phase 3), then
+     {"live": false}, then {"on": false}; on = {"on": true, "bri": 1} while
+     still withheld, stream after, THEN the owned {"bri": 255} — the WLED's
+     own preset is never seen at full between the steps.
   5. SCOPE (PR 317): a fixture outside the take is recorded, never written.
   6. HAND-BACK: a fixture this process switched off is switched back on
      when the mode is cleared while SPECTRA still holds the room.
@@ -286,7 +288,9 @@ def test_reclaim_powers_on_first_and_streams_after(seam):
         gate.set()
         await _settle(seam.hf)
         assert "tv-backlight" not in device_output.withheld()
-        assert seam.posts[0] == ("tv-backlight", {"on": True, "bri": 255})
+        # SOFT POWER (phase 3): on at the soft brightness, stream, then full
+        assert seam.posts[:2] == [("tv-backlight", {"on": True, "bri": 1}),
+                                  ("tv-backlight", {"on": True, "bri": 255})]
     _run(scenario())
     assert seam.hf.tv_strip_status()["owner"] == "spectra"
 
@@ -331,7 +335,7 @@ def test_off_withholds_then_leaves_realtime_then_powers_down(seam):
     _run(_settle(seam.hf))
     assert device_output.withheld().get("crystal") == "switched off"
     assert [p for d, p in seam.posts if d == "crystal"] == [
-        {"live": False}, {"on": False}]
+        {"bri": 1}, {"live": False}, {"on": False}]
     assert seam.state["crystal"]["on"] is False
     assert seam.hf._rt.applied["crystal"].outcome == "landed"
 
@@ -353,7 +357,8 @@ def test_on_writes_power_and_brightness_before_the_stream(seam):
         gate.set()
         await _settle(seam.hf)
         assert "crystal" not in device_output.withheld()
-        assert seam.posts == [("crystal", {"on": True, "bri": 255})]
+        assert seam.posts == [("crystal", {"on": True, "bri": 1}),
+                              ("crystal", {"on": True, "bri": 255})]
     _run(scenario())
 
 
@@ -456,3 +461,170 @@ def test_recheck_outside_the_take_and_room_not_ours(seam):
         assert res["status"] == "skipped"
     _run(scenario())
     assert seam.reach["calls"] == 0
+
+
+# ═══ 8. phase 3: a mode's "off" is no stream ════════════════════════════════
+
+def test_a_modes_off_is_withheld_and_powered_down_softly(seam, monkeypatch):
+    from fx import device_output
+    seam.set_mode()
+    _run(_settle(seam.hf))
+    seam.posts.clear()
+    monkeypatch.setattr(seam.house, "mode_off_devices",
+                        lambda: {"porch-rail": "Night light"})
+    _run(_settle(seam.hf))
+    assert device_output.withheld().get("porch-rail") == "switched off"
+    assert [p for d, p in seam.posts if d == "porch-rail"] == [
+        {"bri": 1}, {"live": False}, {"on": False}]
+    view = [f for f in seam.hf.status()["fixtures"] if f["device"] == "porch-rail"][0]
+    assert view["why"] == "house mode 'Night light' has it off"
+    # the next mode has it on again: soft power-on, then the stream
+    seam.posts.clear()
+    monkeypatch.setattr(seam.house, "mode_off_devices", lambda: {})
+    _run(_settle(seam.hf))
+    assert "porch-rail" not in device_output.withheld()
+    assert [p for d, p in seam.posts if d == "porch-rail"] == [
+        {"on": True, "bri": 1}, {"on": True, "bri": 255}]
+
+
+def test_a_light_show_steady_hold_wins_over_a_modes_off(seam, monkeypatch):
+    from fx import device_output
+    from spectra.models.light_show import DeviceHold
+    from spectra.services import show_store
+    seam.set_mode()
+    monkeypatch.setattr(seam.house, "mode_off_devices",
+                        lambda: {"porch-rail": "Away"})
+    show_store.state().holds["porch-rail"] = DeviceHold(
+        device_id="porch-rail", state="steady", color=[255, 0, 0])
+    try:
+        _run(_settle(seam.hf))
+        assert "porch-rail" not in device_output.withheld()
+        show_store.state().holds["porch-rail"] = DeviceHold(
+            device_id="porch-rail", state="dark")
+        _run(_settle(seam.hf))
+        assert device_output.withheld().get("porch-rail") == "switched off", \
+            "a Dark hold shows nothing either — the off may stand"
+    finally:
+        show_store.state().holds.pop("porch-rail", None)
+
+
+# ═══ 9. phase 3: mains off — no stream and no search ════════════════════════
+
+def test_mains_off_is_recorded_whatever_the_room_and_acted_on_only_with_a_mode(seam):
+    from fx import device_output
+    res = seam.hf.set_mains(["sconce-kitchen-left", "Sconce, Kitchen, Right"], False)
+    assert res["status"] == "recorded" and res["acting"] is False
+    assert set(seam.store.state().mains_off) == {"sconce-kitchen-left",
+                                                 "sconce-kitchen-right"}
+    _run(_settle(seam.hf))
+    assert device_output.withheld() == {}, "no mode: recorded, not acted on"
+    assert seam.hf.mains_off_acting() == {}
+    seam.set_mode()
+    _run(_settle(seam.hf))
+    wh = device_output.withheld()
+    assert wh.get("sconce-kitchen-left") == "mains off"
+    assert wh.get("sconce-kitchen-right") == "mains off"
+    assert set(seam.hf.mains_off_acting()) == {"sconce-kitchen-left",
+                                               "sconce-kitchen-right"}
+    # nothing is written to a fixture with no power, not even a read
+    assert all(d not in ("sconce-kitchen-left", "sconce-kitchen-right")
+               for d, _ in seam.posts)
+
+
+def test_a_mains_off_fixture_is_never_drift_checked(seam):
+    seam.set_mode()
+    seam.hf.set_mains(["sconce-kitchen-left"], False)
+    _run(_settle(seam.hf))
+    seam.posts.clear()
+    seam.unreadable.add("sconce-kitchen-left")
+    seam.clock.now += seam.hf.DRIFT_CHECK_S + 1
+    _run(_settle(seam.hf))
+    assert all(d != "sconce-kitchen-left" for d, _ in seam.posts)
+
+
+def test_mains_on_clears_it_and_refinds_the_fixture(seam):
+    from fx import device_output
+
+    async def scenario():
+        seam.set_mode()
+        seam.hf.set_mains(["sconce-kitchen-left"], False)
+        await _settle(seam.hf)
+        assert "sconce-kitchen-left" in device_output.withheld()
+        res = seam.hf.set_mains(["sconce-kitchen-left"], True)
+        assert res["status"] == "recorded"
+        assert res["recheck"]["status"] == "rechecking"
+        while seam.hf._rt.recheck_tasks:
+            await asyncio.gather(*list(seam.hf._rt.recheck_tasks.values()),
+                                 return_exceptions=True)
+        await _settle(seam.hf)
+        assert "sconce-kitchen-left" not in device_output.withheld()
+        assert seam.store.state().mains_off == {}
+        assert ("sconce-kitchen-left", {"on": True, "bri": 255}) in seam.posts
+    _run(scenario())
+
+
+def test_a_recheck_says_the_mains_are_on_even_with_the_room_released(seam):
+    seam.hf.set_mains(["sconce-kitchen-left"], False)
+    seam.refusal[0] = "the room is released"
+    res = seam.hf.recheck(["sconce-kitchen-left"])
+    assert res["status"] == "skipped"
+    assert seam.store.state().mains_off == {}, "the fact is recorded anyway"
+
+
+def test_a_missed_mains_on_is_caught_by_the_knock(seam):
+    from fx import device_output
+
+    async def scenario():
+        seam.set_mode()
+        seam.reach["after"] = 10 ** 6          # silent while unpowered
+        seam.hf.set_mains(["sconce-kitchen-left"], False)
+        await _settle(seam.hf)
+        seam.clock.now += seam.hf.MAINS_KNOCK_S - 1
+        await _settle(seam.hf)
+        assert seam.reach["calls"] == 0, "no knock before MAINS_KNOCK_S"
+        seam.clock.now += 2
+        await _settle(seam.hf)
+        assert seam.reach["calls"] == 1, "one knock, never a search"
+        assert "sconce-kitchen-left" in device_output.withheld()
+        seam.reach["after"] = 0                # its mains came on, HA silent
+        seam.clock.now += seam.hf.MAINS_KNOCK_S + 1
+        await _settle(seam.hf)
+        await _settle(seam.hf)
+        assert seam.store.state().mains_off == {}
+        assert "sconce-kitchen-left" not in device_output.withheld()
+    _run(scenario())
+
+
+def test_an_unknown_mains_fixture_is_named(seam):
+    res = seam.hf.set_mains(["nope"], False)
+    assert res["status"] == "invalid" and res["unknown"][0]["fixture"] == "nope"
+    res = seam.hf.set_mains([], False)
+    assert res["status"] == "invalid"
+
+
+def test_an_already_off_fixture_is_never_dimmed_first(seam, monkeypatch):
+    """A bare {"bri": 1} turns an OFF WLED on (its JSON API reads a
+    brightness above zero as "on") — so the soft dim reads first and only
+    dims a fixture that is on."""
+    seam.set_mode()
+    _run(_settle(seam.hf))
+    seam.posts.clear()
+    seam.state["porch-rail"]["on"] = False         # HA switched it off already
+    monkeypatch.setattr(seam.house, "mode_off_devices",
+                        lambda: {"porch-rail": "Away"})
+    _run(_settle(seam.hf))
+    writes = [p for d, p in seam.posts if d == "porch-rail"]
+    assert {"bri": 1} not in writes
+    assert writes == [{"live": False}, {"on": False}]
+
+
+def test_a_restart_keeps_a_mode_off_fixture_withheld_from_the_first_pass(seam):
+    """house_restart pre-installs the mode's switched-off WLEDs before the
+    house layer's first pass: the fixtures half never switches them back on
+    for the second before the mode is re-entered."""
+    from fx import device_output
+    seam.set_mode()
+    seam.house.preinstall_off(["porch-rail"])
+    assert seam.house.mode_off_devices() == {"porch-rail": "Standard"}
+    _run(_settle(seam.hf))
+    assert device_output.withheld().get("porch-rail") == "switched off"
