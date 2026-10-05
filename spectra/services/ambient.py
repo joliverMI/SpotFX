@@ -720,7 +720,8 @@ async def _write_and_confirm(client: httpx.AsyncClient, cfg: dict,
                              pending: list[tuple[str, str]], body: dict,
                              target_xy: tuple[float, float],
                              target_brightness_pct: float,
-                             token: Optional[CancelToken] = None) -> tuple[list[str], list[str]]:
+                             token: Optional[CancelToken] = None,
+                             matcher: Optional[Any] = None) -> tuple[list[str], list[str]]:
     """The shared paced-write-then-read-back-confirm engine behind both the
     initial hold (_hold_and_confirm, every light in the entertainment set)
     and the standalone straggler repair (repair_stragglers, just the
@@ -751,7 +752,12 @@ async def _write_and_confirm(client: httpx.AsyncClient, cfg: dict,
     waits for a glide that was never sent.
     Returns (confirmed light names, still-unconfirmed light names) —
     best-effort per light, but the unconfirmed half must reach the caller,
-    never get folded into a bigger "N set" count."""
+    never get folded into a bigger "N set" count.
+
+    `matcher` (house lighting's per-area looks, `reconcile_looks`) replaces
+    the xy+brightness check with the look's own — a colour temperature or
+    "off" is confirmed by what THAT write asked for, never by a colour it
+    did not send."""
     snap_body = {k: v for k, v in body.items() if k != "dynamics"}
     confirmed: dict[str, str] = {}
     for attempt in range(AMBIENT_HOLD_ATTEMPTS):
@@ -777,7 +783,9 @@ async def _write_and_confirm(client: httpx.AsyncClient, cfg: dict,
                                  name, rid, cfg.get("ip_address"))
                 still_pending.append((rid, name))
                 continue
-            if _state_matches(state, target_xy, target_brightness_pct):
+            ok = (matcher(state) if matcher is not None
+                  else _state_matches(state, target_xy, target_brightness_pct))
+            if ok:
                 confirmed[rid] = name
             else:
                 still_pending.append((rid, name))
@@ -794,7 +802,8 @@ async def _write_and_confirm(client: httpx.AsyncClient, cfg: dict,
 
 async def _hold_and_confirm(dev: Any, body: dict, target_xy: tuple[float, float],
                             target_brightness_pct: float,
-                            token: Optional[CancelToken] = None) -> tuple[list[str], list[str]]:
+                            token: Optional[CancelToken] = None,
+                            matcher: Optional[Any] = None) -> tuple[list[str], list[str]]:
     """Resolve every light this device's entertainment stream covers, then
     run them through _write_and_confirm. See that function for the actual
     write/confirm/retry mechanics."""
@@ -804,7 +813,8 @@ async def _hold_and_confirm(dev: Any, body: dict, target_xy: tuple[float, float]
         if not pending:
             return [], []
         return await _write_and_confirm(client, cfg, pending, body, target_xy,
-                                        target_brightness_pct, token)
+                                        target_brightness_pct, token,
+                                        matcher=matcher)
 
 
 async def repair_stragglers(names: list[str], color: Optional[str]) -> dict:
@@ -1252,3 +1262,183 @@ async def _reconcile_impl(enabled: bool, color: Optional[str],
     if released:
         result["released"] = released
     return result
+
+
+# ── HOUSE LIGHTING: per-area looks (spectra/services/house.py) ─────────────
+#
+# A house mode holds each Hue AREA (one live Hue device = one entertainment
+# area) at its own look: a COLOUR TEMPERATURE (CLIP v2 `color_temperature.
+# mirek` — Home Assistant's own looks are colour temperatures, 3521 K by
+# day, 2000 K in the evening, which an xy-only hold approximates poorly),
+# a colour, or OFF — over the bridge, never streamed. An area with no look
+# (or "show") is not held: a frozen one is released through the same
+# two-phase ease the whole-room OFF uses. Everything else is THE machinery
+# above, reused, not copied: the take-scoped device list, freezing, the
+# paced writes, the read-back confirmation, the cancellation token.
+#
+# A look tuple is (area, kind, mirek, color, brightness_pct) — hashable, so
+# ambient_music_gate can compare "already landed" exactly as it compares a
+# colour. `area` is a Hue device id or "*" (every area); an exact id wins.
+#
+# THE RAMP is the mode's own glide (90 s at a clock change), carried as
+# `dynamics.duration`: the bulbs fade on the mesh; the bridge's resource
+# reports the commanded target at once (AGENTS.md "a CLIP v2 light GET
+# during an active dynamics-ramped transition reports the commanded/target
+# state"), which is exactly what the read-back confirms.
+
+MIREK_TOLERANCE = 15
+#: Hue's own dynamics ceiling is far longer; ten minutes bounds a typo.
+MAX_LOOK_RAMP_MS = 600_000
+
+
+def look_for(device_id: str, looks) -> Optional[tuple]:
+    """The look an area gets: its own entry, else the "*" entry, else None."""
+    exact = next((lk for lk in looks if lk[0] == device_id), None)
+    if exact is not None:
+        return exact
+    return next((lk for lk in looks if lk[0] == "*"), None)
+
+
+def _look_payload(look: tuple, ramp_ms: Optional[int]) -> dict:
+    _area, kind, mirek, color, brightness = look
+    if kind == "off":
+        body: dict = {"on": {"on": False}}
+    elif mirek:
+        body = {"on": {"on": True},
+                "dimming": {"brightness": float(max(1, min(100, brightness)))},
+                "color_temperature": {"mirek": int(mirek)}}
+    else:
+        body = _light_payload(color or "#ffffff", None,
+                              brightness_pct=int(round(brightness)))
+    if ramp_ms and ramp_ms > 0:
+        body["dynamics"] = {"duration": int(min(MAX_LOOK_RAMP_MS, ramp_ms))}
+    return body
+
+
+def _look_matches(state: dict, look: tuple, *, strict: bool) -> bool:
+    """Is this light showing the look. Strict (confirming OUR write) checks
+    brightness too; loose (the periodic report) does not — a bulb someone
+    dimmed is still at the look's colour, the same split as
+    _state_matches/_color_matches above."""
+    _area, kind, mirek, color, brightness = look
+    on = bool((state.get("on") or {}).get("on"))
+    if kind == "off":
+        return not on
+    if not on:
+        return False
+    if mirek:
+        got = (state.get("color_temperature") or {}).get("mirek")
+        if got is None or abs(int(got) - int(mirek)) > MIREK_TOLERANCE:
+            return False
+    else:
+        if not _color_matches(state, _hex_to_xy(color or "#ffffff")):
+            return False
+    if strict:
+        got_b = (state.get("dimming") or {}).get("brightness")
+        if got_b is None or abs(float(got_b) - float(brightness)) > _BRIGHTNESS_TOLERANCE_PCT:
+            return False
+    return True
+
+
+async def reconcile_looks(looks, ramp_ms: Optional[int] = None,
+                          token: Optional[CancelToken] = None,
+                          snap: bool = False) -> dict:
+    """Drive every live Hue area to its look (house lighting). Same lock,
+    same dark/no-device no-ops and same result shape as reconcile(), so
+    ambient_music_gate treats both alike."""
+    async with _get_lock():
+        return await _reconcile_looks_impl(tuple(looks or ()), ramp_ms, token, snap)
+
+
+async def _reconcile_looks_impl(looks: tuple, ramp_ms: Optional[int],
+                                token: Optional[CancelToken], snap: bool) -> dict:
+    from spectra.services.live_host import live
+
+    if not live.active or live.host is None:
+        logger.warning("Hue Hold (house): SPECTRA does not own the live stack — "
+                       "no lights touched")
+        return {"status": "dark"}
+    hue_devices = _hue_devices(live.host)
+    if not hue_devices:
+        return {"status": "no-hue-devices"}
+
+    plan = {did: look_for(did, looks) for did in hue_devices}
+    hold = {did: lk for did, lk in plan.items() if lk is not None and lk[1] in ("hold", "off")}
+    release = {did: dev for did, dev in hue_devices.items()
+               if did not in hold and getattr(dev, "frozen", False)}
+    released = await _release_devices(release, token, snap)
+
+    touched: list[str] = []
+    held: list[str] = []
+    unconfirmed: list[str] = []
+    for did, look in sorted(hold.items()):
+        dev = hue_devices[did]
+        body = _look_payload(look, None if snap else ramp_ms)
+        try:
+            await dev.set_frozen(True)   # must land before the REST write
+            confirmed, stragglers = await _hold_and_confirm(
+                dev, body, (0.0, 0.0), 0.0, token,
+                matcher=lambda st, lk=look: _look_matches(st, lk, strict=True))
+            held.extend(confirmed)
+            unconfirmed.extend(stragglers)
+            touched.append(did)
+        except AmbientCancelled:
+            raise
+        except Exception:
+            logger.exception("Hue Hold (house): failed to hold %s at its look", did)
+    if hold and not touched:
+        logger.error("Hue Hold (house): every held area failed — NOT holding")
+        out: dict = {"status": "failed", "devices": [], "lights_set": 0}
+        if released:
+            out["released"] = released
+        return out
+    if not hold:
+        out = {"status": "off", "devices": released}
+        return out
+    lights_set = len(held)
+    out = {"status": "partial" if unconfirmed else "on", "devices": touched,
+           "lights_set": lights_set, "lights_total": lights_set + len(unconfirmed)}
+    if unconfirmed:
+        out["unconfirmed"] = sorted(unconfirmed)
+        logger.error("Hue Hold (house): %d/%d light(s) confirmed — still not "
+                     "at their look: %s", lights_set, out["lights_total"], unconfirmed)
+    else:
+        logger.info("Hue Hold (house): %s held, %d light(s) confirmed", touched, lights_set)
+    if released:
+        out["released"] = released
+    return out
+
+
+async def verify_looks(looks) -> dict:
+    """Read-only recheck of a house hold — never a PUT. A bulb someone
+    changed from Home Assistant or the Hue app is REPORTED, never repaired:
+    house lighting yields until the next mode change (plan D7)."""
+    from spectra.services.live_host import live
+
+    if not live.active or live.host is None:
+        return {"status": "dark"}
+    hue_devices = _hue_devices(live.host)
+    lit: list[str] = []
+    unlit: list[str] = []
+    for did, dev in sorted(hue_devices.items()):
+        look = look_for(did, looks)
+        if look is None or look[1] not in ("hold", "off"):
+            continue
+        cfg = dev.config
+        try:
+            async with _bridge_client(cfg) as client:
+                for rid, name in await _resolve_lights_named(client, cfg):
+                    try:
+                        state = (await _hue_get(
+                            client, f"/clip/v2/resource/light/{rid}"))["data"][0]
+                    except Exception:
+                        unlit.append(name)
+                        continue
+                    (lit if _look_matches(state, look, strict=False) else unlit).append(name)
+        except Exception:
+            logger.exception("Hue Hold (house): could not reach the bridge for %s", did)
+    total = len(lit) + len(unlit)
+    if total == 0:
+        return {"status": "no-hue-devices"}
+    return {"status": "verified", "lights_lit": len(lit), "lights_total": total,
+            "unlit": sorted(unlit)}

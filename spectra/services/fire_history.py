@@ -83,7 +83,10 @@ BUCKETS = ("scenes", "responses", "color_sets", "triggers", "deferred",
            # "show": the Light Show — every step a set ran, End show, and
            # every arm armed/fired/missed/disarmed/expired. Missing until
            # 2026-10-04: phase 1 wrote here and every write raised KeyError.
-           "show")
+           "show",
+           # "house": house lighting (spectra/services/house.py) — every
+           # mode change, who asked, and what the resting layer did.
+           "house")
 
 # Entry-count cap for the show log — bounded, never unbounded growth. On
 # each append, entries beyond this count are dropped oldest-first.

@@ -47,7 +47,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Literal
 
-OperationDomain = Literal["settings", "scene", "device", "room", "analysis", "show", "meta"]
+OperationDomain = Literal["settings", "scene", "device", "room", "analysis", "show",
+                          "house", "meta"]
 OperationKind = Literal["read", "write"]
 
 

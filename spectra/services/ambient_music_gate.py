@@ -191,6 +191,10 @@ PHASE_UNAVAILABLE = "unavailable"
 
 # What actually landed, most recently, on the bulbs.
 _held = False
+# HOUSE LIGHTING (spectra/services/house.py hue_directive): the per-area
+# looks a house mode last LANDED, or None while the room-controls toggle
+# (ambient_enabled / ambient_color) is what drives Hue.
+_held_looks: Optional[tuple] = None
 _held_color: Optional[str] = None
 # The RAW selection input (RoomControlState.ambient_hue_group_ids, possibly
 # []) — write-INTENT, compared for the short-circuit only. NOT what
@@ -238,6 +242,8 @@ class _Transition:
     # new end state lands as fast as the confirmed writes allow.
     snap: bool
     task: Optional[asyncio.Task] = field(default=None, repr=False)
+    # A house mode's glide (house lighting's per-area looks only).
+    ramp_ms: Optional[int] = None
     result: Optional[dict] = None
     superseded: bool = False
     # Set by _run_transition the moment the room has stopped moving, BEFORE
@@ -291,26 +297,53 @@ def _desired_hold(ambient_enabled: bool, on_music_pause: bool,
     return is_playing is False
 
 
+def _house_directive():
+    """House lighting's Hue directive (house.hue_directive), or None when no
+    house mode is driving Hue — the room-controls toggle then applies,
+    exactly as before house lighting existed. Lazy (house imports engine,
+    which imports this module) and never allowed to break a reconcile."""
+    try:
+        from spectra.services import house
+        return house.hue_directive()
+    except Exception:
+        logger.exception("Hue Hold: house directive failed — using the room toggle")
+        return None
+
+
 def _target_landed(target: tuple) -> bool:
     """Is the room ALREADY in this exact state, as most recently confirmed
     by a real write. The pre-rework short-circuit, unchanged in meaning:
     compared against what LANDED (`_held*`), never against what was merely
     requested, so a failed transition is retried by the next caller rather
     than silently short-circuited forever."""
-    desired, color, group_ids = target
+    desired, color, group_ids, looks = (*target, None)[:4] if len(target) == 3 else target
+    if looks != _held_looks:
+        return False
     if desired != _held:
+        return False
+    if desired and _last_verify.get("status") == "dark":
+        # The room stopped being ours after this hold landed (a release, a
+        # handover away). The stack that comes back is a fresh one with
+        # nothing frozen and nothing held, so the take-back must apply the
+        # hold again rather than short-circuit on a landing that no longer
+        # exists — the "THE RELEASED ROOM" promise, kept for a hold that had
+        # already landed before the release, not only for a fresh press.
         return False
     if not desired:
         return True
     return color == _held_color and group_ids == _held_group_ids
 
 
-def _current_target(desired: bool, color: Optional[str], group_ids: frozenset) -> tuple:
+def _current_target(desired: bool, color: Optional[str], group_ids: frozenset,
+                    looks: Optional[tuple] = None) -> tuple:
     # A released room has no colour or group selection to compare — folding
     # them to the empty values keeps "off is off" a single state rather than
-    # one per colour he happened to have set when he turned it off.
+    # one per colour he happened to have set when he turned it off. A house
+    # mode's looks (4th element) are the whole end state when present.
+    if looks is not None:
+        return (desired, None, frozenset(), looks)
     return (desired, color if desired else None,
-            group_ids if desired else frozenset())
+            group_ids if desired else frozenset(), None)
 
 
 async def _broadcast_status() -> None:
@@ -326,11 +359,14 @@ async def _broadcast_status() -> None:
                          "itself is unaffected)")
 
 
-def _start_transition(target: tuple, *, snap: bool = False) -> _Transition:
+def _start_transition(target: tuple, *, snap: bool = False,
+                      ramp_ms: Optional[int] = None) -> _Transition:
     """Cancel whatever is in flight and start the one transition toward
     `target`. Called under `_apply_lock` — the decision is short and never
     does I/O, so an interrupting press is never queued behind one."""
     global _transition, _generation
+    if len(target) == 3:            # the pre-house-lighting 3-tuple shape
+        target = (*target, None)
     prev = _transition
     # `snap` may arrive True from the caller: a Light Show Ambient action
     # authored "snap" asks for the ramps to be dropped on THIS press, not
@@ -348,7 +384,7 @@ def _start_transition(target: tuple, *, snap: bool = False) -> _Transition:
             "on" if target[0] else "off")
     _generation += 1
     tr = _Transition(generation=_generation, target=target,
-                     token=ambient.CancelToken(), snap=snap)
+                     token=ambient.CancelToken(), snap=snap, ramp_ms=ramp_ms)
     _transition = tr
     tr.task = asyncio.create_task(
         _run_transition(tr), name=f"ambient-transition-{tr.generation}")
@@ -361,14 +397,19 @@ async def _run_transition(tr: _Transition) -> None:
     `tr.result`, and only the CURRENT transition is allowed to touch the
     module's landed-state bookkeeping."""
     global _held, _held_color, _held_group_ids, _held_resolved_groups, _last_result
-    desired, color, group_ids = tr.target
+    global _held_looks
+    desired, color, group_ids, looks = tr.target
     # START: the phase is already "turning_on"/"turning_off" by the time
     # this runs (_transition was set before the task was created), so this
     # push carries the real new phase, not a stale one.
     await _broadcast_status()
     try:
-        result = await ambient.reconcile(desired, color, group_ids,
-                                         token=tr.token, snap=tr.snap)
+        if looks is not None:
+            result = await ambient.reconcile_looks(looks, tr.ramp_ms,
+                                                   token=tr.token, snap=tr.snap)
+        else:
+            result = await ambient.reconcile(desired, color, group_ids,
+                                             token=tr.token, snap=tr.snap)
     except ambient.AmbientCancelled:
         tr.finished = True
         tr.result = {"status": "superseded",
@@ -409,6 +450,7 @@ async def _run_transition(tr: _Transition) -> None:
     else:
         if status_ != "failed":
             _held = desired
+            _held_looks = looks
             _held_color = color if desired else None
             _held_group_ids = group_ids if desired else frozenset()
             _held_resolved_groups = (
@@ -452,6 +494,8 @@ def reset_state() -> None:
     tests — tests/conftest.py's autouse fixture calls this."""
     global _held, _held_color, _held_group_ids, _held_resolved_groups
     global _last_result, _apply_lock, _last_is_playing, _transition, _generation
+    global _held_looks
+    _held_looks = None
     if _transition is not None and _transition.in_flight:
         _transition.token.cancel()
         assert _transition.task is not None
@@ -486,6 +530,14 @@ async def reconcile(is_playing: Optional[bool], *, wait: bool = True,
     global _last_is_playing
     controls = load_room_controls()
     _last_is_playing = is_playing
+    directive = _house_directive()
+    if directive is not None:
+        # HOUSE LIGHTING drives Hue: the mode's per-area looks, held over
+        # the bridge (spectra/services/house.py). The toggle's own stored
+        # value is untouched and applies again the moment no mode drives Hue.
+        return await _apply(controls, directive.holds_any, None, frozenset(),
+                            wait=wait, snap=snap, looks=directive.looks,
+                            ramp_ms=directive.ramp_ms)
     desired = _desired_hold(controls.ambient_enabled, controls.ambient_on_music_pause,
                             is_playing, _held)
     return await _apply(controls, desired, effective_ambient_color(controls),
@@ -507,8 +559,9 @@ async def reconcile_now(*, wait: bool = True, snap: bool = False) -> dict:
 
 async def _apply(controls: RoomControlState, desired: bool, color: Optional[str],
                  group_ids: frozenset = frozenset(), *, wait: bool = True,
-                 snap: bool = False) -> dict:
-    target = _current_target(desired, color, group_ids)
+                 snap: bool = False, looks: Optional[tuple] = None,
+                 ramp_ms: Optional[int] = None) -> dict:
+    target = _current_target(desired, color, group_ids, looks)
     if not ambient.room_available():
         # THE RELEASED ROOM (module docstring). Nothing physical can move,
         # so no transition is started and NOTHING is recorded as landed —
@@ -539,7 +592,7 @@ async def _apply(controls: RoomControlState, desired: bool, color: Optional[str]
             return _in_flight_result(tr)
         if (tr is None or not tr.in_flight) and _target_landed(target):
             return _settled_result(controls, desired)
-        tr = _start_transition(target, snap=snap)
+        tr = _start_transition(target, snap=snap, ramp_ms=ramp_ms)
     if wait:
         return await _await_transition(tr)
     return _in_flight_result(tr)
@@ -614,6 +667,20 @@ async def verify_now() -> dict:
         return {}
     if transition_in_flight():
         return {}
+    if _held_looks is not None:
+        # A HOUSE hold: report every bulb honestly, repair none — house
+        # lighting yields to a bulb someone changed from Home Assistant or
+        # the Hue app until the next mode change (plan D7).
+        result = await ambient.verify_looks(_held_looks)
+        if result.get("status") == "verified":
+            _record_verify("verified", result.get("lights_lit", 0),
+                           result.get("lights_total", 0), result.get("unlit"))
+            if result.get("unlit"):
+                result["repair"] = ("yielded — house lighting leaves a changed "
+                                    "bulb until the next mode change")
+        else:
+            _record_verify(result.get("status") or "dark")
+        return result
     controls = load_room_controls()
     target_color = effective_ambient_color(controls)
     result = await ambient.verify_held(target_color, frozenset(controls.ambient_hue_group_ids))
@@ -686,20 +753,23 @@ def status() -> dict:
     in_flight = tr is not None and tr.in_flight
     confirmed_held = _held and _verified_ok is not False
 
+    directive = _house_directive()
     if in_flight:
         assert tr is not None
         intent_on = tr.intent
         phase = PHASE_TURNING_ON if intent_on else PHASE_TURNING_OFF
     else:
-        intent_on = _desired_hold(controls.ambient_enabled,
-                                  controls.ambient_on_music_pause,
-                                  _last_is_playing, _held)
+        intent_on = (directive.holds_any if directive is not None else
+                     _desired_hold(controls.ambient_enabled,
+                                   controls.ambient_on_music_pause,
+                                   _last_is_playing, _held))
         # A room that is not ours cannot be moved by a press — say so
         # rather than reporting a settled on/off the lights are not in.
         phase = (PHASE_ON if _held else PHASE_OFF) if ambient.room_available() \
             else PHASE_UNAVAILABLE
 
-    if not controls.ambient_enabled and not controls.ambient_on_music_pause:
+    if (directive is None and _held_looks is None
+            and not controls.ambient_enabled and not controls.ambient_on_music_pause):
         mode = "off"
     elif in_flight:
         mode = "transitioning"
@@ -723,6 +793,14 @@ def status() -> dict:
         "held": confirmed_held,
         "groups": sorted(_held_resolved_groups) if _held else [],
     }
+    if directive is not None or _held_looks is not None:
+        # Additive — the intent/phase contract is unchanged: which house
+        # mode is driving Hue, and its per-area looks.
+        looks = directive.looks if directive is not None else (_held_looks or ())
+        out["house"] = {
+            "mode": directive.mode_name if directive is not None else None,
+            "looks": [{"area": a, "look": k, "mirek": m, "color": c, "brightness": b}
+                      for (a, k, m, c, b) in looks]}
     if in_flight:
         assert tr is not None
         out["generation"] = tr.generation

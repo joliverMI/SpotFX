@@ -436,6 +436,19 @@ def accent_param_for(effect_type: str) -> Optional[str]:
     return None
 
 
+def motion_param_for(effect_type: str) -> Optional[str]:
+    """Raw param name carrying the effect's own MOTION (how fast it moves
+    with no music: fish/orbits `base_speed`, melt/noise `speed`, radial
+    `base_rotation`), or None if the effect has none. House lighting's
+    per-fixture `motion` hook writes it (spectra/services/house.py) — same
+    registry, `"motion": true` on exactly one param per effect
+    (config/effect_params.json)."""
+    for name, meta in effect_params(effect_type).items():
+        if meta.get("motion"):
+            return name
+    return None
+
+
 def round_int_params(effect_type: str, config: dict[str, Any]) -> dict[str, Any]:
     """Round integer-typed params so LedFX schema validation never sees a
     float where an int belongs (mirrors the spot-effects client's guard)."""

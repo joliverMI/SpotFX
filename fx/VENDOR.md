@@ -1398,3 +1398,17 @@ against that commit.
     such writes via `facade.out_of_scope()` so a scene fire still lands its
     in-scope writes. Proof: `tests/test_scene_fire_scope.py` (real FxHost,
     red control with the gate removed).
+43. `virtuals.py` + new `device_rate.py` (SpotFX-authored, not fork code):
+    PER-DEVICE FRAME-RATE CAPS (2026-10-05, house lighting phase 1). A
+    virtual's render loop sleeps to `device_rate.effective_rate(
+    self.refresh_rate, its devices)` instead of `self.refresh_rate` — the
+    lower of the configured rate and any runtime cap SPECTRA pushed for one
+    of its devices (house lighting's calm modes: singles at 10 fps instead
+    of 62). ONLY EVER LOWERS; `refresh_rate` itself (the cached property the
+    transition-frame count and a device's priority-virtual election read) is
+    untouched, so a cap changes nothing but the sleep. With no cap anywhere
+    the branch is one dict check and the sleep is byte-identical. The cap is
+    per VIRTUAL loop, so a virtual spanning several devices runs at the
+    lowest cap among them (the sibling trade; per-device pacing is PR #58's
+    idea). Proof: `tests/test_device_rate.py` (real FxHost render thread,
+    frames counted at the transport, capped vs uncapped).

@@ -280,7 +280,8 @@ def room_active_set() -> Optional[ColorSetCard]:
 async def fire_scene(scene: SceneV2, *, intensity: float = 0.5,
                      color_set: Optional[ColorSetCard] = None,
                      dry_run: bool = True,
-                     rng: Random | None = None) -> dict[str, Any]:
+                     rng: Random | None = None,
+                     transition_ms: Optional[int] = None) -> dict[str, Any]:
     """Resolve at the given intensity (effect selection included), compile,
     and (live only) send through the seam. The returned resolution report +
     writes are the test-fire display: dry and live runs share every step up
@@ -292,7 +293,13 @@ async def fire_scene(scene: SceneV2, *, intensity: float = 0.5,
     a scene doesn't author its own, the room's global_transition_ms (the
     ledfx_global_transition equivalent) wins if he's set it explicitly,
     else the intensity-scaled scene_transition_ms(room, intensity) is the
-    fallback ramp — see the module docstring's fallback-chain note."""
+    fallback ramp — see the module docstring's fallback-chain note.
+
+    transition_ms, when given, REPLACES that whole chain for this one fire —
+    house lighting's mode glides (spectra/services/house.py: 90 s at a
+    clock change, 5 s on a press). An effect-type switch still crossfades
+    in at most the virtual's own transition cap; a same-effect change
+    glides the whole length."""
     if color_set is None:
         color_set = room_active_set()
     # A LOCAL, lazy import — room_controls must never be a module-level
@@ -323,8 +330,9 @@ async def fire_scene(scene: SceneV2, *, intensity: float = 0.5,
         live_writes = writes if multiplier == 1.0 else [
             {**w, "config": room_controls.apply_brightness(w["config"], multiplier)}
             for w in writes]
-        entry_ramp_ms = (scene.entry_ramp_ms or room.global_transition_ms
-                        or room_controls.scene_transition_ms(room, intensity))
+        entry_ramp_ms = (int(transition_ms) if transition_ms is not None
+                         else (scene.entry_ramp_ms or room.global_transition_ms
+                               or room_controls.scene_transition_ms(room, intensity)))
         await fx_seam.apply_writes(live_writes, transition_ms=entry_ramp_ms)
         logger.info("SPECTRA scene '%s' fired at intensity %.2f: %d virtual "
                     "writes%s", scene.name, intensity, len(writes),

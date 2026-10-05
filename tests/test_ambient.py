@@ -93,7 +93,8 @@ def _hue_handler(calls: list, fail_light_put: bool = False, lights: list | None 
                     drop_counts[rid] = drop_counts.get(rid, 0) + 1
                     return httpx.Response(200, json={"data": []})  # accepted, bulb ignores it
                 body = json.loads(request.content)
-                state(rid).update({k: v for k, v in body.items() if k in ("on", "dimming", "color")})
+                state(rid).update({k: v for k, v in body.items()
+                                   if k in ("on", "dimming", "color", "color_temperature")})
                 return httpx.Response(200, json={"data": []})
             if request.method == "GET":
                 return httpx.Response(200, json={"data": [dict(state(rid), id=rid)]})

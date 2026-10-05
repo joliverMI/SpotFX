@@ -24,6 +24,7 @@ import RoomsPage from './rooms/RoomsPage';
 import RoomEffectsPage from './roomeffects/RoomEffectsPage';
 import DebugPage from './debug/DebugPage';
 import LightShowPage from './lightshow/LightShowPage';
+import HousePage from './house/HousePage';
 
 const PAGE_TITLES: [string, string][] = [
   ['/scenes', 'Scenes'],
@@ -35,6 +36,7 @@ const PAGE_TITLES: [string, string][] = [
   ['/timing', 'Timing'],
   ['/avsync', 'AV Sync'],
   ['/show', 'Light Show'],
+  ['/house', 'House'],
   ['/rooms', 'Rooms'],
   ['/room-effects', 'Room Effects'],
   ['/devices', 'Devices'],
@@ -74,6 +76,7 @@ function NavBar() {
       <Link to="/testbed" className={cls((p) => p === '/testbed')}>Test Bed</Link>
       <Link to="/timing" className={cls((p) => p === '/timing')}>Timing</Link>
       <Link to="/avsync" className={cls((p) => p === '/avsync')}>AV Sync</Link>
+      <Link to="/house" className={cls((p) => p === '/house')}>House</Link>
       <Link to="/show" className={cls((p) => p === '/show')}>Light Show</Link>
       <Link to="/rooms" className={cls((p) => p === '/rooms')}>Rooms</Link>
       <Link to="/room-effects" className={cls((p) => p === '/room-effects')}>Room FX</Link>
@@ -112,6 +115,7 @@ export default function App() {
           <Route path="/timing" element={<TimingVizPage />} />
           <Route path="/avsync" element={<AvSyncPage />} />
           <Route path="/show" element={<LightShowPage />} />
+          <Route path="/house" element={<HousePage />} />
           <Route path="/rooms" element={<RoomsPage />} />
           <Route path="/room-effects" element={<RoomEffectsPage />} />
           <Route path="/devices" element={<DevicesPage />} />

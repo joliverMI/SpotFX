@@ -8,6 +8,7 @@
  * deliberately generic rather than energy-specific so a later addition
  * doesn't require moving or restructuring this mount point. */
 import DevicePreviewStrip from './DevicePreviewStrip';
+import ModeChip from './ModeChip';
 import IntensityMarkControl from './IntensityMarkControl';
 import LiveEnergyReadout from './LiveEnergyReadout';
 import LightShowStrip from './LightShowStrip';
@@ -15,6 +16,8 @@ import LightShowStrip from './LightShowStrip';
 export default function TopBarStrip() {
   return (
     <div className="top-bar-strip">
+      {/* House lighting's mode — FIRST, the resting state every page sits on. */}
+      <ModeChip />
       <LiveEnergyReadout />
       <IntensityMarkControl />
       <LightShowStrip />

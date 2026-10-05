@@ -8,7 +8,7 @@ from typing import Optional
 import numpy as np
 import voluptuous as vol
 
-from fx import virtual_gain_mask
+from fx import device_rate, virtual_gain_mask
 from fx.config import save_config
 from fx.effects import DummyEffect
 from fx.effects.math import CalibratorPatternCache, interpolate_pixels
@@ -956,8 +956,14 @@ class Virtual:
             # adjust for the frame assemble time, min allowed sleep 1 ms
             # this will be more frame accurate on high res sleep systems
             run_time = time.perf_counter() - start_time
+            rate = self.refresh_rate
+            if device_rate.active():
+                # SpotFX deviation #43: a runtime per-device cap (house
+                # lighting's calm modes) — only ever lowers the rate.
+                rate = device_rate.effective_rate(
+                    rate, (d.id for d in self._devices))
             sleep_time = max(
-                0.001, fps_to_sleep_interval(self.refresh_rate) - run_time
+                0.001, fps_to_sleep_interval(rate) - run_time
             )
             time.sleep(sleep_time)
 

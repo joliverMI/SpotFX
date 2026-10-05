@@ -25,6 +25,17 @@ PUT BACK IS STRUCTURAL, not a snapshot: the show keeps rendering underneath
 every hold, so ending one fades back into the live, in-step picture, and
 there is no stored "before" to go stale.
 
+THE BASE LAYER (HOUSE LIGHTING, spectra/services/house.py). A house mode
+sets a resting level per fixture (and can switch one off) BELOW every Light
+Show hold and level. It is pushed here, not written to fx/device_output.py
+separately, because the output layer holds ONE target per device: two
+writers would clobber each other. So a device's level is base × every show
+Level, and its state is the show's hold if it has one, else the base state,
+else Show. Letting go of a show hold (Show, Release, End show) fades back
+to the BASE, not to an undimmed picture — "End show returns to the current
+mode" (plan §3.3). The base is in-memory: the house layer re-pushes it on
+every tick it is active and clears it the moment it stands aside.
+
 THE STEADY SCALE (fx/device_output.set_scale_provider). A steady colour
 REPLACES the picture, so on its own it would ignore the room dimmer and a
 running room effect. This module hands the output layer a callable that
@@ -54,6 +65,10 @@ MAX_FADE_MS = 60_000
 
 _brightness_mult = 1.0
 _device_virtuals: dict[str, list[str]] = {}
+#: house lighting's resting layer — device id -> level (1.0 never stored)
+_base_levels: dict[str, float] = {}
+#: house lighting's resting layer — device id -> state (only "dark" today)
+_base_states: dict[str, str] = {}
 _was_live = False
 _task: Optional[asyncio.Task] = None
 
@@ -297,11 +312,11 @@ def set_state(device_ids: Iterable[str], state: str, *,
     st = show_store.state()
     out = []
     for did in device_ids:
-        note = "held by Ambient — the show cannot change it until Ambient lets go" \
+        note = "held by Hue Hold — the show cannot change it until Hue Hold lets go" \
             if held_by_ambient(did) else None
         if state == device_output.STATE_SHOW:
             had = st.holds.pop(did, None)
-            device_output.set_state(did, state, fade_s=_fade_s(fade_ms))
+            device_output.set_state(did, base_state(did), fade_s=_fade_s(fade_ms))
             out.append({"device": did, "name": device_label(did), "state": state,
                         "was": had.state if had else "show", "note": note})
             continue
@@ -318,7 +333,7 @@ def set_state(device_ids: Iterable[str], state: str, *,
 
 
 def _combined_level(device_id: str, levels: list[LevelHold]) -> float:
-    v = 1.0
+    v = _base_levels.get(device_id, 1.0)
     for lv in levels:
         if device_id in lv.device_ids:
             v *= lv.level
@@ -361,6 +376,49 @@ def end_level(level_id: str, *, fade_ms: Optional[int] = None) -> bool:
     return True
 
 
+# ── the base layer (house lighting) ────────────────────────────────────────
+
+def base_state(device_id: str) -> str:
+    """What a device shows when the Light Show holds nothing on it."""
+    return _base_states.get(device_id, device_output.STATE_SHOW)
+
+
+def base_snapshot() -> dict:
+    return {"levels": dict(_base_levels), "states": dict(_base_states)}
+
+
+def set_base(levels: dict[str, float], states: dict[str, str], *,
+             fade_s: float = 0.0) -> list[str]:
+    """Replace house lighting's resting layer WHOLESALE and fade every
+    device whose base changed to its new look. A device the Light Show
+    holds keeps its hold — its base state applies when the hold lets go —
+    but its level still moves, because a show Level multiplies the base.
+    Returns the devices that changed. Never raises for an unknown device:
+    the output layer is keyed by id and a stale one is simply never read."""
+    global _base_levels, _base_states
+    new_levels = {str(d): max(0.0, min(device_output.MAX_LEVEL, float(v)))
+                  for d, v in (levels or {}).items() if float(v) != 1.0}
+    new_states = {str(d): s for d, s in (states or {}).items()
+                  if s in (device_output.STATE_DARK,)}
+    old_levels, old_states = _base_levels, _base_states
+    _base_levels, _base_states = new_levels, new_states
+    fade = max(0.0, min(MAX_FADE_MS / 1000.0, float(fade_s or 0.0)))
+    st = show_store.state()
+    changed = []
+    for did in sorted(set(old_levels) | set(old_states) | set(new_levels) | set(new_states)):
+        moved = False
+        if old_levels.get(did, 1.0) != new_levels.get(did, 1.0):
+            device_output.set_level(did, _combined_level(did, st.levels), fade_s=fade)
+            moved = True
+        if old_states.get(did) != new_states.get(did):
+            moved = True
+            if did not in st.holds:
+                device_output.set_state(did, base_state(did), fade_s=fade)
+        if moved:
+            changed.append(did)
+    return changed
+
+
 def flash(device_ids: Iterable[str], *, color=(255, 255, 255), amount=1.0,
           attack_ms=50, hold_ms=100, decay_ms=400) -> list[str]:
     ids = list(device_ids)
@@ -379,8 +437,9 @@ def release_device(device_id: str, fade_ms: int = DEFAULT_RELEASE_FADE_MS) -> di
     for lv in touched:
         lv.device_ids = [d for d in lv.device_ids if d != device_id]
     st.levels = [lv for lv in st.levels if lv.device_ids]
-    device_output.set_state(device_id, device_output.STATE_SHOW, fade_s=_fade_s(fade_ms))
-    device_output.set_level(device_id, 1.0, fade_s=_fade_s(fade_ms))
+    device_output.set_state(device_id, base_state(device_id), fade_s=_fade_s(fade_ms))
+    device_output.set_level(device_id, _combined_level(device_id, st.levels),
+                            fade_s=_fade_s(fade_ms))
     show_store.save_state()
     return {"device": device_id, "released": bool(had or touched)}
 
@@ -389,20 +448,25 @@ def release_all(fade_ms: int = DEFAULT_RELEASE_FADE_MS) -> list[str]:
     """End show's device half: every hold and level faded back to Show."""
     st = show_store.state()
     devices = set(st.holds) | {d for lv in st.levels for d in lv.device_ids}
-    devices |= set(device_output.snapshot())
+    based = set(_base_levels) | set(_base_states)
+    devices |= set(device_output.snapshot()) - based
     st.holds.clear()
     st.levels.clear()
     for did in devices:
-        device_output.set_state(did, device_output.STATE_SHOW, fade_s=_fade_s(fade_ms))
-        device_output.set_level(did, 1.0, fade_s=_fade_s(fade_ms))
+        # Back to the house mode's resting look, not to an undimmed picture.
+        device_output.set_state(did, base_state(did), fade_s=_fade_s(fade_ms))
+        device_output.set_level(did, _base_levels.get(did, 1.0), fade_s=_fade_s(fade_ms))
     show_store.save_state()
     return sorted(devices)
 
 
 def on_release() -> None:
     """The room is being released: drop everything, abruptly, before the
-    release fade, so the room lets go of its TRUE state."""
+    release fade, so the room lets go of its TRUE state. The house layer's
+    base goes too — it is re-pushed when the house is active again."""
     device_output.clear_all()
+    _base_levels.clear()
+    _base_states.clear()
     try:
         from spectra.services import show_arms
         show_arms.on_release()
@@ -440,9 +504,12 @@ def repush() -> dict:
                if lv.until == "time" and lv.ends_at_ms is not None and lv.ends_at_ms <= t]
     expired = [lv for lv in st.levels if lv.id in dropped]
     st.levels = [lv for lv in st.levels if lv.id not in dropped]
+    for did, state in _base_states.items():
+        if did not in st.holds:
+            device_output.set_state(did, state)
     for h in st.holds.values():
         _push_hold(h.model_copy(update={"fade_ms": 0}))
-    devices = {d for lv in st.levels for d in lv.device_ids}
+    devices = {d for lv in st.levels for d in lv.device_ids} | set(_base_levels)
     # A dropped level's devices are reset too: within one process (a stack
     # that came back without a restart) the layer may still carry it.
     devices |= {d for lv in expired for d in lv.device_ids}
@@ -524,6 +591,8 @@ def reset() -> None:
     _was_live = False
     _brightness_mult = 1.0
     _device_virtuals = {}
+    _base_levels.clear()
+    _base_states.clear()
     device_output.clear_all()
     device_output.suspend(False)
 
@@ -549,4 +618,5 @@ def status() -> dict:
             "suspended": device_output.suspended(),
             "standdown": standdown_reason(),
             "refusal": ownership_refusal(),
+            "base": {"levels": dict(_base_levels), "states": dict(_base_states)},
             "output": device_output.snapshot()}
