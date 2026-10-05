@@ -243,7 +243,7 @@ export default function LiveView({ popout = false, forceCanvas = false }: {
           </button>
           <button type="button" onClick={toggleSmooth} className={smooth ? 'active' : ''}
                   aria-pressed={smooth}
-                  title="Blend between frames so motion is even. Costs about one frame of delay.">
+                  title="Blend between frames so motion is even. Costs about one frame (33ms) of delay on a good link, more on a rough one.">
             Smooth
           </button>
           <HelpLink topic="live-smooth" />

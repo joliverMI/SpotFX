@@ -1781,7 +1781,7 @@ export const HELP_SECTIONS: HelpSection[] = [
           ['Click a fixture', 'Selects it: its name, size and what feeds it appear under the stage, with Open settings (the Edit tab on that device) and Solo.'],
           ['Solo', 'Dims everything else so one fixture is easy to follow. "Show all" undoes it. It changes only this picture, never the lights.'],
           ['⏸ Pause', 'Pauses the preview everywhere — the same pause as the top strip\'s button, and it stays paused until you resume. The stage goes dark and says it is paused.'],
-          ['Smooth', 'On: blends from each picture to the next so motion is even on an uneven link. Off: shows each picture the moment it arrives. See "Smooth" below.'],
+          ['Smooth', 'On: blends from each picture to the next so motion is even on an uneven link, costing about one picture (33 ms) of delay on a good link and up to about 160 ms on a rough one. Off: shows each picture the moment it arrives. See "Smooth" below.'],
           ['⛶ Full screen', 'The stage fills the screen. Esc leaves.'],
           ['↗ Pop out', 'Opens the stage alone in its own window, to keep beside another page.'],
         ],
@@ -1802,8 +1802,8 @@ export const HELP_SECTIONS: HelpSection[] = [
         title: 'Smooth — even motion on an uneven link',
         keywords: 'smooth interpolate interpolation blend playout jitter stutter 60 hz delay frame hold switch off',
         body: [
-          'Pictures arrive about 30 times a second, and over a relayed link not evenly — the gap between two can swing by tens of milliseconds. Drawn as they land, motion stutters. With Smooth on, each fixture eases from what is on screen to its newest picture over one picture\'s worth of time, so the screen redraws at its own rate (usually 60 a second) with motion in between.',
-          'It costs about one picture (33 ms) of delay, which the link meter includes. Switch it off to see each picture the instant it arrives — useful when judging timing against the music. The choice is remembered in this browser.',
+          'Pictures arrive about 30 times a second, and over a relayed link not evenly — the gap between two can swing by tens of milliseconds. Drawn as they land, motion stutters. With Smooth on, each fixture eases from what is on screen to its newest picture over how long the link itself is taking between pictures, so the screen redraws at its own rate (usually 60 a second) with motion in between.',
+          'On an even link that costs about one picture (33 ms) of delay; the more uneven the link, the longer the ease runs, up to about 160 ms — either way the link meter includes it. Switch it off to see each picture the instant it arrives — useful when judging timing against the music. The choice is remembered in this browser.',
         ],
       },
       {
