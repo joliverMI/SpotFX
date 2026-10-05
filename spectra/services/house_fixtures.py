@@ -625,6 +625,7 @@ def desired() -> dict[str, tuple[str, str]]:
     lent = lend_reasons(st)
     mode_off = house.mode_off_devices()
     power_off_pending = house.mode_power_off_scope()
+    power_off_phase_active = house.mode_off_phase_active()
     strips = set(tv_strip_ids())
     out: dict[str, tuple[str, str]] = {}
     for did in _in_scope_devices(host):
@@ -641,7 +642,8 @@ def desired() -> dict[str, tuple[str, str]]:
             out[did] = (TARGET_OFF, f"switched off ({ov.source or 'request'})")
         elif did in mode_off and _controllable(dev) and not _show_holds_visible(did):
             out[did] = (TARGET_OFF, f"house mode {mode_off[did]!r} has it off")
-        elif did in power_off_pending and _controllable(dev):
+        elif (did in power_off_pending and _controllable(dev)
+              and power_off_phase_active and not _show_holds_visible(did)):
             # The mode's plan powers this fixture off, but house.py's own
             # fade/off_ready hasn't landed it in `mode_off` yet — leave it
             # alone (no action) rather than guessing ON. Night rule: never

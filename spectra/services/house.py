@@ -1174,6 +1174,18 @@ def mode_off_devices() -> dict:
     return {did: name for did, ready in _rt.off_ready.items() if now >= ready}
 
 
+def mode_off_phase_active() -> bool:
+    """Is the current phase one where `mode_off_devices()` could ever name
+    a fixture — i.e. NOT `PHASE_MUSIC` or `PHASE_STANDBY`, where
+    `_hand_in()`/`_go_standby()` keep every fixture powered and streamed
+    for the music. `house_fixtures.desired()`'s pending-power-off branch
+    (fed by `mode_power_off_scope()`, which deliberately ignores phase —
+    see that function's own docstring) must defer to this the same way
+    `mode_off_devices()` already does, or it can withhold a fixture the
+    music phase guarantees is driven."""
+    return _rt.phase not in (PHASE_MUSIC, PHASE_STANDBY)
+
+
 def mode_power_off_scope() -> set[str]:
     """Every WLED the CURRENT mode's plan powers off, computed straight
     from the mode's own config — never from `_rt.off_ready`, which this

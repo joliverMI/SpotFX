@@ -449,6 +449,45 @@ def test_a_plan_off_fixture_that_was_already_on_is_never_re_asserted_on(seam):
     assert all(did != "crystal" for did, _payload in seam.posts)
 
 
+def test_a_plan_off_fixture_still_gets_power_once_the_music_show_has_the_room(seam):
+    """mode_power_off_scope() deliberately ignores phase (its own
+    docstring) — but the pending-power-off branch it feeds must still
+    defer to the music phase, where house.py's own `_hand_in()` keeps
+    every fixture powered and streamed for the show."""
+    from fx import device_output
+    seam.set_mode("Away", fixtures=[
+        FixtureHook(target=HouseTarget(kind="fixture", id="crystal"), off=True)])
+    seam.house._rt.phase = seam.house.PHASE_MUSIC
+    _run(_settle(seam.hf))
+    assert ("crystal", {"on": True, "bri": 255}) in seam.posts
+    assert "crystal" not in device_output.withheld()
+
+
+def test_a_mode_off_fixture_held_by_the_light_show_still_gets_power(seam):
+    """The sibling exemption on the `mode_off` branch two lines above
+    (`not _show_holds_visible(did)`) must reach the pending-power-off
+    branch too: `mode_off_devices()` is always a subset of
+    `mode_power_off_scope()`, so a Steady-held fixture that already IS in
+    `mode_off` would otherwise fall straight into the pending branch's own
+    unconditional "continue" (no action) instead of its own exemption's
+    TARGET_ON."""
+    from fx import device_output
+    from spectra.models.light_show import DeviceHold
+    from spectra.services import show_store
+    seam.set_mode("Away", fixtures=[
+        FixtureHook(target=HouseTarget(kind="fixture", id="crystal"), off=True)])
+    seam.house._rt.off_ready["crystal"] = seam.clock.now
+    seam.house._rt.phase = seam.house.PHASE_RESTING
+    show_store.state().holds["crystal"] = DeviceHold(
+        device_id="crystal", state="steady", color=[255, 0, 0])
+    try:
+        _run(_settle(seam.hf))
+        assert "crystal" not in device_output.withheld()
+        assert ("crystal", {"on": True, "bri": 255}) in seam.posts
+    finally:
+        show_store.state().holds.pop("crystal", None)
+
+
 # ═══ 4. on / off ════════════════════════════════════════════════════════════
 
 def test_off_withholds_then_leaves_realtime_then_powers_down(seam):
