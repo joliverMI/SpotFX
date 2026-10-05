@@ -1392,15 +1392,16 @@ def status_dict() -> dict:
             out["scene"] = {"id": c.scene.id, "name": c.scene.name}
     except Exception:                                    # noqa: BLE001
         pass
+    labels = fixture_labels()
     try:
         from fx import device_rate
         from spectra.services import show_output
         base = show_output.base_snapshot()
         out["fixtures"] = {
-            "levels": {show_output.device_label(d): round(v * 100, 1)
+            "levels": {show_output_label(d, labels): round(v * 100, 1)
                        for d, v in base["levels"].items()},
-            "off": [show_output.device_label(d) for d in base["states"]],
-            "caps": {show_output.device_label(d): v
+            "off": [show_output_label(d, labels) for d in base["states"]],
+            "caps": {show_output_label(d, labels): v
                      for d, v in device_rate.caps().items()},
         }
     except Exception:                                    # noqa: BLE001
@@ -1411,7 +1412,7 @@ def status_dict() -> dict:
     if _rt.off_ready:
         now = deps.clock()
         out.setdefault("fixtures", {})["switching_off"] = {
-            show_output_label(d): (round(max(0.0, ready - now), 1))
+            show_output_label(d, labels): (round(max(0.0, ready - now), 1))
             for d, ready in sorted(_rt.off_ready.items())}
     try:
         from spectra.services import house_energy
@@ -1428,12 +1429,31 @@ def status_dict() -> dict:
     return out
 
 
-def show_output_label(device_id: str) -> str:
+def fixture_labels() -> dict:
+    """device id -> a label UNIQUE in the live room: the fixture's name, or
+    "name (id)" when several fixtures share it (four of his WLEDs are all
+    called "WLED" — keyed by bare name, three of them vanished from every
+    status dict). {} with the stack down."""
+    from collections import Counter
     try:
         from spectra.services import show_output
-        return show_output.device_label(device_id)
+        host = show_output._host()
+        if host is None:
+            return {}
+        names = {str(d): show_output.device_label(d) for d in list(host.devices)}
     except Exception:                                    # noqa: BLE001
-        return device_id
+        return {}
+    counts = Counter(names.values())
+    return {d: (n if counts[n] == 1 or n == d else f"{n} ({d})")
+            for d, n in names.items()}
+
+
+def show_output_label(device_id: str, labels: Optional[dict] = None) -> str:
+    """A fixture's unique status label (fixture_labels), its id when it has
+    none."""
+    if labels is None:
+        labels = fixture_labels()
+    return labels.get(device_id, device_id)
 
 
 def status() -> dict:

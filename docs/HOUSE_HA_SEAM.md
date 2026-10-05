@@ -139,6 +139,15 @@ had and picks it up when it answers. Spectra never switches the mains.
 Recommended: send the mains state on every change of the dimmer, and at HA
 start.
 
+### Releases hand power back (phase 3)
+
+While a mode drives the room Spectra holds every WLED on at full master
+brightness. Before its first such write it records what each fixture was
+(power + brightness); when the room is RELEASED it writes those back and
+checks them — so a fixture that was off before Spectra took the room is off
+after, even one River's restore does not capture (the dining-table
+under-glow). A restart keeps the picture and hands nothing back.
+
 ### Restarts
 
 While a mode drives the room a Spectra restart keeps the last picture: WLEDs

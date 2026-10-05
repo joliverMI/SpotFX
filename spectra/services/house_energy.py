@@ -325,13 +325,15 @@ def parked_virtuals() -> list[str]:
 def status() -> dict:
     """The `energy` block of the house status."""
     from fx import device_output, device_rate
-    from spectra.services import house_store, show_output
+    from spectra.services import house_store
     settings = _settings()
     live = _live()
     rates = fixture_rates()
     fixtures = {}
+    from spectra.services import house
+    labels = house.fixture_labels()
     for did, r in sorted(rates.items()):
-        fixtures[show_output.device_label(did)] = {**r, "id": did}
+        fixtures[labels.get(did, did)] = {**r, "id": did}
     total = [r["packets_per_s"] for r in rates.values() if r["packets_per_s"] is not None]
     st = house_store.state()
     quiet_for = (round(time.monotonic() - _rt.quiet_since, 1)

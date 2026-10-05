@@ -146,6 +146,10 @@ export function seamLines(l: LightingStatus | undefined): string[] {
   for (const c of l.fixtures_seam?.corrections ?? []) {
     out.push(`Corrected ${c.device}: found on=${c.found.on} brightness=${c.found.bri} — something else wrote it (${c.outcome}).`);
   }
+  for (const h of l.fixtures_seam?.handed_back ?? []) {
+    out.push(`Handed back ${h.device} after the release: ${h.set.on ? 'on' : 'off'}`
+      + `${h.set.bri ? ` at brightness ${h.set.bri}` : ''} — ${h.outcome}${h.detail ? ` (${h.detail})` : ''}.`);
+  }
   for (const [d, r] of Object.entries(l.fixtures_seam?.rechecks ?? {})) {
     if (r.state === 'found') out.push(`Recheck: ${d} answered after ${r.after_s ?? '?'} s${r.moved ? ' (it had moved)' : ''}.`);
     else if (r.state === 'not_found') out.push(`Recheck: ${d} did not answer — ${r.reason ?? 'no answer'}.`);

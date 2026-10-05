@@ -403,3 +403,9 @@ class HouseState(BaseModel):
     #: mode drives the room Spectra neither streams to them nor searches
     #: for them; "mains on" (or a recheck naming them) clears the entry.
     mains_off: dict[str, int] = Field(default_factory=dict)
+    #: phase 3: what each WLED's power and master brightness were BEFORE
+    #: Spectra first took them over (device -> {"on", "bri", "ip",
+    #: "at_ms"}) — handed back when the room is released, so a fixture
+    #: that was off before a take is off after it (house_fixtures.py
+    #: HAND-BACK). The first reading wins until it has been handed back.
+    pre_take: dict[str, dict] = Field(default_factory=dict)
