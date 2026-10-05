@@ -56,9 +56,9 @@ mechanism, not the API layer or the model prompt.
 """
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
 
-from fastapi import APIRouter, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, File, Header, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 
 from spectra import config
@@ -108,6 +108,25 @@ async def post_scene_undo():
         return await scene_console.apply_undo_last_scene_change()
     except SceneOpError as exc:
         raise HTTPException(409, exc.message) from exc
+
+
+class DispatchIn(BaseModel):
+    name: str
+    args: dict[str, Any] = {}
+
+
+@router.post("/dispatch")
+async def post_dispatch(body: DispatchIn,
+                        x_sonic_dispatch_token: Optional[str] = Header(None)):
+    """Run ONE Sonic operation in THIS process — the CLI backend's MCP
+    subprocess forwards every tool call here (settings_agent.py's
+    MAIN-PROCESS DISPATCH section). The same exhaustive _dispatch() the API
+    backend calls, so no new authority exists here."""
+    import hmac
+    if not x_sonic_dispatch_token or not hmac.compare_digest(
+            x_sonic_dispatch_token, settings_agent.DISPATCH_TOKEN):
+        raise HTTPException(403, "bad or missing dispatch token")
+    return await settings_agent._dispatch(body.name, body.args)
 
 
 @router.post("/message")

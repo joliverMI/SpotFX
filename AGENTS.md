@@ -2771,6 +2771,17 @@ against the current, wider surface) + a live smoke test skipped without
 is his call, not a deploy default** — flipping `SPECTRA_SETTINGS_AGENT_BACKEND`
 and minting a token are both separate, deliberate, human actions.
 
+**THE CLI BACKEND'S TOOLS RUN IN THE MAIN PROCESS (2026-10-04, Light Show
+proof D1).** `settings_mcp_server.py` is a subprocess with no live stack
+and its own copy of every in-process cache: Light Show fires there refused
+"live stack is not up" and an arm there was overwritten by the main
+process ("Armed" for nothing). Its `_call` now FORWARDS every tool to
+`POST /spectra/api/settings-console/dispatch` (token-checked, the same
+`settings_agent._dispatch`), named by `SPECTRA_SONIC_DISPATCH_URL`/`_TOKEN`
+which `settings_agent_cli` sets; unreachable is a stated rejection, never a
+local fallback. Every domain (show, room_effect, device, scene) inherits
+it. Spec: `tests/test_sonic_main_process_dispatch.py`.
+
 Voice reaches text by the browser RECORDING (MediaRecorder) and POSTing the
 clip to `POST /api/settings-console/transcribe`, not the browser's built-in
 SpeechRecognition (which ships audio to a third-party cloud and forecloses

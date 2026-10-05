@@ -136,8 +136,42 @@ async def _call(op_name: str, /, **kwargs: Any) -> dict:
     function with real arguments, so this whole class of bug had no
     offline coverage until now. `/` makes this the LAST time a future
     tool's own kwarg name can collide with this dispatcher's own argument
-    name, whatever that kwarg is called -- not just a fix for `name`."""
-    return await settings_agent._dispatch(op_name, kwargs)
+    name, whatever that kwarg is called -- not just a fix for `name`.
+
+    FORWARDED, NOT RUN HERE (Light Show room proof D1, 2026-10-04): this
+    is a separate interpreter with no live light stack and its own copies
+    of every in-process cache, so a Light Show fire here refused "live
+    stack is not up" and an arm here was silently overwritten by the main
+    process ("Armed" for something that never existed). When the CLI
+    backend launched us it names the main process's dispatch route; every
+    call goes there and runs the SAME _dispatch(). Unreachable is a stated
+    rejection -- never a local fallback that would quietly do the wrong
+    thing in the wrong process. Without the variable (a developer running
+    this module by hand, the offline tests) it dispatches in-process."""
+    import os
+    url = os.getenv(settings_agent.DISPATCH_URL_ENV)
+    if not url:
+        return await settings_agent._dispatch(op_name, kwargs)
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(
+                url, json={"name": op_name, "args": kwargs},
+                headers={"X-Sonic-Dispatch-Token":
+                         os.getenv(settings_agent.DISPATCH_TOKEN_ENV, "")})
+    except Exception as exc:  # noqa: BLE001
+        return {"status": "rejected",
+                "reason": (f"{op_name!r} did not run: SPECTRA's main process "
+                           f"could not be reached ({type(exc).__name__}: {exc})")}
+    if resp.status_code != 200:
+        return {"status": "rejected",
+                "reason": (f"{op_name!r} did not run: SPECTRA's main process "
+                           f"answered HTTP {resp.status_code}")}
+    try:
+        return resp.json()
+    except ValueError:
+        return {"status": "rejected",
+                "reason": f"{op_name!r}: unreadable answer from SPECTRA"}
 
 
 @mcp.tool()

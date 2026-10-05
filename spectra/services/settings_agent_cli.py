@@ -114,7 +114,7 @@ from pathlib import Path
 from typing import Optional
 
 from spectra import config
-from spectra.services import sonic_usage
+from spectra.services import settings_agent, sonic_usage
 from spectra.services.settings_agent import SYSTEM_PROMPT, TOOLS, SettingsAgentUnavailable
 
 logger = logging.getLogger(__name__)
@@ -199,6 +199,14 @@ def _mcp_config_json() -> str:
                 # (systemd units don't inherit an interactive shell's PATH).
                 "command": sys.executable,
                 "args": [str(server_script)],
+                # D1: every tool call is forwarded to THIS process
+                # (settings_agent.py MAIN-PROCESS DISPATCH). Declared here,
+                # not only inherited, because an MCP client may hand a stdio
+                # server a restricted environment.
+                "env": {
+                    settings_agent.DISPATCH_URL_ENV: settings_agent.dispatch_url(),
+                    settings_agent.DISPATCH_TOKEN_ENV: settings_agent.DISPATCH_TOKEN,
+                },
             },
         },
     })
@@ -231,6 +239,11 @@ def _subprocess_env(token: str, workdir: Path) -> dict:
     env.pop("ANTHROPIC_AUTH_TOKEN", None)
     env["CLAUDE_CODE_OAUTH_TOKEN"] = token
     env["CLAUDE_CONFIG_DIR"] = str(workdir / ".claude-config")
+    env[settings_agent.DISPATCH_URL_ENV] = settings_agent.dispatch_url()
+    env[settings_agent.DISPATCH_TOKEN_ENV] = settings_agent.DISPATCH_TOKEN
+    # The CLI subprocess inherited NOTIFY_SOCKET and spoke to systemd as
+    # if it were the unit's main PID (journal noise in the room proof).
+    env.pop("NOTIFY_SOCKET", None)
     return env
 
 
