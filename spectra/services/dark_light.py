@@ -244,6 +244,13 @@ async def _reconcile_impl(mode: str, shield_categories: list[str],
                           light_bg_brightness: float) -> dict:
     from fx import device_model
     virtual_ids = device_model.get_all_virtual_ids()
+    # A SCOPED TAKE (spectra/services/take_scope.py) brought up only some
+    # virtuals; Dark/Light must not write the others — a write onto a held-
+    # back virtual that still holds its stored effect can be "repaired"
+    # into rendering by the facade (fx/facade.py _verify_effect_took).
+    from spectra.services.live_host import live
+    if live.scope is not None:
+        virtual_ids = [v for v in virtual_ids if v in live.scope]
     if not virtual_ids:
         return {"status": "no-devices"}
     shielded = _shielded_set(shield_categories, shield_virtuals)

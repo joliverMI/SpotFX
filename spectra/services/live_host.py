@@ -263,6 +263,23 @@ class LiveLights:
     def active(self) -> bool:
         return self.host is not None
 
+    def scope_device_ids(self) -> Optional[set[str]]:
+        """THE FIXTURES A SCOPED TAKE REACHES — every device a segment of an
+        in-scope virtual touches — or None for an ordinary, whole-room take
+        (and while the stack is down). Anything that drives fixtures OUTSIDE
+        the render path (Ambient's bridge-REST hold) must stay inside this
+        set: on 2026-10-04 a take scoped to the TV backlight lit seventeen
+        Hue bulbs across his house because Ambient read "every Hue device
+        the host holds" instead (spectra/services/ambient.py)."""
+        if self.scope is None or self.host is None:
+            return None
+        out: set[str] = set()
+        for vid in self.scope:
+            v = self.host.virtuals.get(vid)
+            for seg in getattr(v, "_segments", None) or []:
+                out.add(str(seg[0]))
+        return out
+
     async def activate(
         self,
         grant: light_ownership.ActivationGrant,
