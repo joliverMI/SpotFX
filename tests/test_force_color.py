@@ -215,6 +215,44 @@ def test_fire_scene_by_id_wears_the_pin_over_the_callers_own_choice(monkeypatch)
     assert "forced_color" not in result
 
 
+def test_origin_house_ignores_the_pin_every_other_origin_still_wears_it(
+        monkeypatch):
+    """2026-10-05, the Admiral's ruling: house modes must ignore Force
+    Colour and use their own colour sets. The pin itself, and every
+    OTHER caller of this same choke point (a sequencer roll, a trigger,
+    an explicit press — all origin="auto", the default), are unchanged."""
+    from spectra.models.scene import SceneV2
+    from spectra.services import dwell, scene_compiler, scene_store
+    from spectra.services.scene_sequencer import fire_scene_by_id
+
+    _write_cards(_set("requested"), _set("pinned"))
+    scene = SceneV2(name="S")
+    scene_store.save(scene)
+
+    worn: list = []
+
+    async def fake_fire_scene(sc, *, intensity=0.5, color_set=None,
+                              dry_run=True, rng=None, transition_ms=None):
+        worn.append(color_set.id if color_set is not None else None)
+        return {"dry_run": dry_run, "intensity": intensity, "writes": [],
+                "resolved_bindings": {}, "dice_rolls": {}}
+
+    monkeypatch.setattr(scene_compiler, "fire_scene", fake_fire_scene)
+    _pin("pinned")
+
+    result = _run(fire_scene_by_id(scene.id, color_set_id="requested",
+                                   intensity=0.7, origin="house"))
+    assert worn[-1] == "requested", \
+        "a house-mode fire keeps its own card — the pin never reaches it"
+    assert "forced_color" not in result
+
+    dwell.reset()
+    result = _run(fire_scene_by_id(scene.id, color_set_id="requested",
+                                   intensity=0.7))
+    assert worn[-1] == "pinned", "default origin ('auto') still wears the pin"
+    assert result["forced_color"] == "pinned"
+
+
 def test_room_active_set_the_terminal_fallback_returns_the_pin():
     """The path 100% of his real fire_scene triggers take (none carry an
     explicit color_set_id) — a pin that didn't reach here would be

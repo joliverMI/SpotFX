@@ -234,7 +234,16 @@ async def fire_scene_by_id(scene_id: str,
     # resolve (deleted card, group with no usable member) falls through to
     # the caller's own choice rather than leaving the fire colourless —
     # the same degrade-gracefully posture an unknown color_set_id has.
-    forced_color = force_color.pinned_card(controls)
+    #
+    # EXCEPT a house-mode fire (2026-10-05, the Admiral's ruling: "house
+    # modes must ignore Force Colour and use their own colour sets") —
+    # mirrors the house_mode/Force Scene deferral's own `origin != "house"`
+    # check above: house.py already resolved its own card ignoring the pin
+    # (see _apply_scene_and_colour's docstring), and this is the ONLY other
+    # place that card could still be overridden before it reaches the room.
+    # Music/trigger-driven fires (origin="auto") and an explicit human
+    # press are unaffected — the pin keeps governing everything else.
+    forced_color = None if origin == "house" else force_color.pinned_card(controls)
     if forced_color is not None:
         color_set = forced_color
         color_set_id = forced_color.id

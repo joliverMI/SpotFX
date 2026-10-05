@@ -1279,8 +1279,18 @@ def _current_scene_id() -> Optional[str]:
 
 async def _apply_scene_and_colour(mode: HouseMode, glide_s: float, *,
                                   refire: bool, prefer_remembered: bool) -> dict:
-    """Land the mode's scene and colour set. Returns what it did."""
-    from spectra.services import force_color
+    """Land the mode's scene and colour set. Returns what it did.
+
+    FORCE COLOUR (2026-10-05, the Admiral's ruling: "house modes must
+    ignore Force Colour and use their own colour sets") is deliberately
+    NOT consulted here — a house mode picks its own card exactly as if
+    nothing were pinned. The pin itself, and every OTHER choke point it
+    governs (music/trigger-driven colour selection, an explicit human
+    press), are untouched; `fire_scene_by_id`'s own Force Colour
+    substitution is gated on `origin != "house"` for the same reason, so
+    the card resolved here actually reaches the room instead of being
+    replaced at fire time. Force SCENE is a separate pin and keeps its
+    existing deferral below — the Admiral was not asked about it."""
     from spectra.services.room_controls import load_room_controls
     controls = load_room_controls()
     st = house_store.state()
@@ -1293,7 +1303,6 @@ async def _apply_scene_and_colour(mode: HouseMode, glide_s: float, *,
     if mode.color_sets and not cards:
         out["problems"].append("none of the mode's colour sets exist or are enabled")
     pinned_scene = bool(controls.force_scene_enabled and controls.force_scene_scene_id)
-    pinned_colour = force_color.active(controls)
     current = _current_scene_id()
     scene_ids = {s.id for s, _ in scenes}
 
@@ -1318,9 +1327,6 @@ async def _apply_scene_and_colour(mode: HouseMode, glide_s: float, *,
             scene = remembered or _draw(scenes, exclude_id=None)
     elif scenes and pinned_scene:
         out["problems"].append("Force Scene is pinned — the mode's scenes wait")
-    if pinned_colour and cards:
-        out["problems"].append("Force Colour is pinned — the mode's colours wait")
-        card = None
 
     glide_ms = int(glide_s * 1000)
     if scene is not None:

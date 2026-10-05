@@ -1926,6 +1926,24 @@ response — the passive-redirect trap immediately above is documented, so
 it is not repeated. Help topic `force-color`, linked from the top bar's
 own "Colour" group button. Spec: `tests/test_force_color.py`.
 
+**HOUSE MODES ARE AN EIGHTH CHOKE POINT AND THE ONE EXCEPTION (2026-10-05,
+the Admiral's ruling: "house modes must ignore Force Colour and use their
+own colour sets")** — Force Scene is UNCHANGED, he was not asked about it.
+`house._apply_scene_and_colour` no longer waits for the pin to clear
+before picking the mode's own card (the old `pinned_colour`/`card = None`
+deferral is gone); that alone is not sufficient, because
+`fire_scene_by_id` would otherwise still substitute the pin onto the
+card house.py just resolved — so that function's own Force Colour
+substitution is gated on `origin != "house"` (mirroring the Force
+Scene/`house_mode` deferral check one function-section above it, which
+already uses the same `origin` marker). Music/trigger-driven fires
+(`origin="auto"`, the default) and an explicit human press are
+unaffected — the pin keeps governing everything else, including a house
+mode with NO colour sets of its own, which still falls through to
+`scene_compiler.room_active_set()` (deliberately untouched) and so still
+wears the pin. Spec: `tests/test_force_color.py`,
+`tests/test_house_lighting.py`.
+
 **Force Scene/Force Colour's top-bar panels** (card
 force-colour-and-forced-trigger-dialogs-p99a): each pin is a `PowerButton`
 (with `ariaLabel`, since it toggles a room pin, not an item) with its result

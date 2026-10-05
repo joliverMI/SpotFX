@@ -396,17 +396,36 @@ def test_a_scene_already_in_the_pool_is_kept_and_the_colour_glides(world):
     del std
 
 
-def test_force_scene_and_force_colour_outrank_the_mode(world):
+def test_force_scene_outranks_the_mode(world):
+    """Force Scene still waits for the mode's own scene to come due — that
+    pin's behaviour is untouched by the Force Colour change below."""
     from spectra.services import room_controls
     st = room_controls.load_room_controls()
     room_controls.save_room_controls(st.model_copy(update={
-        "force_scene_enabled": True, "force_scene_scene_id": world.scenes["Fish"].id,
-        "force_color_enabled": True, "force_color_target_id": "calm-p"}))
+        "force_scene_enabled": True, "force_scene_scene_id": world.scenes["Fish"].id}))
     _mode(world, "Standard")
     _run(world.house.set_mode(mode="Standard", source="spectra"))
-    assert world.fires == [] and world.applies == []
+    assert world.fires == []
     problems = " ".join(world.house.status_dict()["problems"])
-    assert "Force Scene" in problems and "Force Colour" in problems
+    assert "Force Scene" in problems
+
+
+def test_force_colour_no_longer_outranks_the_mode(world):
+    """2026-10-05, the Admiral's ruling: house modes must ignore Force
+    Colour and use their own colour sets. Pinned to a card the mode does
+    NOT itself offer, so a leak would be unambiguous."""
+    from spectra.services import room_controls
+    st = room_controls.load_room_controls()
+    room_controls.save_room_controls(st.model_copy(update={
+        "force_color_enabled": True, "force_color_target_id": "calm-p"}))
+    _mode(world, "Standard", color_sets=[ColorPick(card_id="eve")])
+    _run(world.house.set_mode(mode="Standard", source="spectra"))
+    worn = [card_id for card_id, _glide in world.applies] or \
+        [kw.get("color_set_id") for _sid, kw in world.fires]
+    assert "eve" in worn, "the mode's own colour set reached the room"
+    assert "calm-p" not in worn, "the pin never reached it"
+    problems = " ".join(world.house.status_dict()["problems"])
+    assert "Force Colour" not in problems
 
 
 def test_the_flow_clock_draws_a_different_scene(world):
