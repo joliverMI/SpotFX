@@ -31,7 +31,10 @@ def test_manifest_loads_and_has_both_sections():
     assert "effects" in m and "scenes" in m
     assert "acknowledged_effect_gaps" in m
     assert len(m["effects"]) >= 10
-    assert len(m["scenes"]) == 10
+    # His 10 live music scenes, plus house lighting's two house scenes
+    # (phase 4), which share ONE skill (they are seeded together).
+    assert len(m["scenes"]) == 11
+    assert "house-scenes" in m["scenes"]
 
 
 def test_effect_change_without_skill_is_a_violation():
