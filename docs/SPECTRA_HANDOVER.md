@@ -179,6 +179,18 @@ switch or stated here as why it stays an operator note:
        curl -s -X POST localhost:8000/spectra/api/ownership/handover \
             -H 'content-type: application/json' -d '{"to": "spectra"}' | jq .
 
+   A caller with its own tight client timeout (Home Assistant's
+   `rest_command`, which once outran a slow activation and reported the
+   call failed even though it landed moments later) should add
+   `"wait": false` to the body: every cheap, inline refusal (already-owner
+   409, readiness 412) still answers immediately, but the slow part
+   (quiesce/activate/verify/commit) runs in the background behind an
+   immediate `202 {"result": "accepted"}` — poll `GET /spectra/api/ownership`
+   for the outcome (its `handover` block while in flight, then
+   `owner`/`activation` once it lands). Omit it, or send `true`, for the
+   exact old blocking shape used above and by the SPECTRA UI's own
+   "Take back" button.
+
    What runs, in order (services/handover.py):
    0. **readiness gate** — SPECTRA's fx-live config is checked (present,
       readable, at least one virtual backed by a vendored driver type). A
@@ -243,6 +255,12 @@ flips `healthy` for a virtual that never came up).
 
 ## If things go wrong
 
+- **Caller reports failure (timeout/500) but the handover actually
+  landed**: the caller's own client timeout outran a slow activation
+  (e.g. two unreachable sconces each retrying before a partial commit) —
+  nothing was wrong on SPECTRA's side. Use `"wait": false` (see "Switch"
+  above) for any caller with a tight timeout; it answers at once and
+  leaves `GET /ownership` as the source of truth for the outcome.
 - **Refused handover (HTTP 412)**: not a failure — the readiness gate
   stopped the switch BEFORE anything happened. The room is untouched, the
   record never moved, nothing to clean up. The `.error` names the missing

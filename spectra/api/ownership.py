@@ -38,6 +38,18 @@
       asked (spectra/services/caller_identity.py). Refusals are named too.
       Observation only: best effort, bounded, and incapable of failing,
       delaying or altering a take.
+      "wait": true (default — every caller before this field existed,
+      including the Spectra UI's own "Take back" button) blocks until the
+      handover settles, exactly as above. "wait": false (found necessary
+      2026-10-05: Home Assistant's own rest_command client timeout outran
+      a slow activation and reported the call failed even though it landed
+      moments later) answers at once — 202 with `{"result": "accepted"}` —
+      while the SAME handover keeps running in the background; every
+      cheap, inline check (armed, already-owner 409, readiness 412) still
+      refuses immediately, only the slow part (pretake ping, quiesce,
+      activate, verify, commit) moves to the background, and a poller
+      reads GET /ownership (its "handover" block while in flight, then
+      "owner"/"activation" once it lands) for the outcome.
   POST /api/ownership/release  — THE PANIC HANDLE (spectra/services/
       release.py): one press, no body, no confirmation — the press is the
       consent. NOT gated by SPECTRA_HANDOVER_ARMED (going to no-writer is
@@ -116,6 +128,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from typing import Optional
@@ -142,6 +155,11 @@ router = APIRouter(prefix="/api", tags=["spectra-ownership"])
 LIVENESS_CONTRACT = "spectra-liveness-v1"
 LIVENESS_ADDRESS = "/spectra/api/liveness"
 
+#: `POST /ownership/handover {"wait": false}`'s background tasks, referenced
+#: so the loop cannot drop one half-run (the same pattern handover.py's own
+#: `_BACKGROUND` uses for its after-take tasks).
+_BACKGROUND_HANDOVERS: set = set()
+
 
 class HandoverRequest(BaseModel):
     to: str
@@ -166,6 +184,21 @@ class HandoverRequest(BaseModel):
     #: corrupted by the show animating mid-capture. IGNORED for a handover
     #: to spot-effects, which owns no such mode.
     quiet: bool = False
+    #: Found 2026-10-05 (the first real Home Assistant take-back): her
+    #: rest_command's own client timeout outran a slow activation (two
+    #: unreachable sconces each retried before the take committed partial,
+    #: ~50 s total) and she reported the call failed even though it landed
+    #: moments later — a settled single owner neither side could see.
+    #: `True` (default — every caller before this field existed, including
+    #: the Spectra UI's own "Take back" button) is the exact OLD shape:
+    #: this call blocks until the handover settles and returns its full
+    #: result. `False` starts the SAME handover in the background and
+    #: answers at once (202) with nothing settled yet — the caller polls
+    #: `GET /ownership` (its `handover` block while in flight, then
+    #: `owner`/`activation` once it lands) for the outcome, the
+    #: `/house/recheck` pattern applied here. Never changes ownership
+    #: semantics — `run_handover` itself is untouched either way.
+    wait: bool = True
 
 
 def _record_json() -> dict:
@@ -283,6 +316,29 @@ async def _name_the_caller(request: Optional[Request], to_world: str) -> None:
                          "itself is unaffected)")
 
 
+async def _run_handover_background(to_world: str, sides, quiet: bool) -> None:
+    """The `wait: false` half of `POST /ownership/handover`: the caller
+    already got its 202, so every outcome here can only be LOGGED, never
+    returned — `GET /ownership` is where a poller finds out what actually
+    happened. `run_handover` itself already lands a settled single owner
+    on every path it defines (committed, committed-partial, or a
+    `HandoverFailed` it commits around before raising) — these except
+    clauses exist only so a genuinely unexpected exception is seen and
+    named instead of vanishing into an unawaited task."""
+    try:
+        await handover_svc.run_handover(to_world, sides, quiet=quiet)
+    except light_ownership.OwnershipError as exc:
+        logger.warning("handover (background): %s refused — %s",
+                       to_world, exc)
+    except handover_svc.HandoverRefused as exc:
+        logger.warning("handover (background): %s refused — %s",
+                       to_world, exc)
+    except handover_svc.HandoverFailed as exc:
+        logger.error("handover (background): %s failed — %s", to_world, exc)
+    except Exception:                                   # noqa: BLE001
+        logger.exception("handover (background): %s crashed", to_world)
+
+
 @router.post("/ownership/handover")
 async def post_handover(body: HandoverRequest, request: Request = None):
     # `request` defaults so the route stays callable as a plain coroutine —
@@ -313,14 +369,45 @@ async def post_handover(body: HandoverRequest, request: Request = None):
     # it there would be a silent no-op wearing a name that implies it did
     # something (see the field's own docstring).
     quiet = bool(body.quiet) and body.to == light_ownership.SPECTRA
+    # AN UNSCOPED, NOT-QUIET CALL IS THE EXACT OLD SHAPE — no keyword at all
+    # — so the default press, and every test double built for it before
+    # 2026-09-23, is byte-identical. `quiet` is only ever passed when it is
+    # actually True, for the same reason.
+    kwargs: dict = {"quiet": True} if quiet else {}
+    if scope is not None:
+        kwargs["scope"] = scope.scope.virtual_ids
+    if not body.wait:
+        # THE 500 THIS EXISTS FOR: a slow activation (two unreachable
+        # sconces' own retries, ~50 s in the field) outran Home Assistant's
+        # rest_command client timeout — the handover still landed moments
+        # later, with nothing on either side left to show it. Every CHEAP,
+        # inline check still runs inline (already-owner, readiness) so a
+        # call that was never going to do anything still gets an
+        # immediate, honest refusal; only the slow part — pretake ping,
+        # quiesce, activate, verify, commit — moves to the background.
+        sides = handover_svc.production_sides(**kwargs)
+        try:
+            light_ownership.check_can_begin(body.to)
+        except light_ownership.OwnershipError as exc:
+            raise HTTPException(409, str(exc))
+        refusal = await handover_svc.readiness_refusal(body.to, sides)
+        if refusal is not None:
+            return JSONResponse(
+                {"result": "refused-preparation-missing", "error": refusal,
+                 "record": _record_json()}, status_code=412)
+        task = asyncio.get_running_loop().create_task(
+            _run_handover_background(body.to, sides, quiet),
+            name=f"handover-background-{body.to}")
+        _BACKGROUND_HANDOVERS.add(task)
+        task.add_done_callback(_BACKGROUND_HANDOVERS.discard)
+        return JSONResponse(
+            {"result": "accepted", "to": body.to,
+             "note": "the handover is running in the background — poll "
+                     "GET /ownership for its outcome (the \"handover\" "
+                     "block while in flight, then \"owner\"/\"activation\")",
+             "poll": "/api/ownership", "record": _record_json()},
+            status_code=202)
     try:
-        # AN UNSCOPED, NOT-QUIET CALL IS THE EXACT OLD SHAPE — no keyword at
-        # all — so the default press, and every test double built for it
-        # before 2026-09-23, is byte-identical. `quiet` is only ever passed
-        # when it is actually True, for the same reason.
-        kwargs: dict = {"quiet": True} if quiet else {}
-        if scope is not None:
-            kwargs["scope"] = scope.scope.virtual_ids
         sides = handover_svc.production_sides(**kwargs)
         record = await handover_svc.run_handover(body.to, sides, quiet=quiet)
     except light_ownership.OwnershipError as exc:

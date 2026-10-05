@@ -89,6 +89,15 @@ the WLEDs report `live: false`. Re-assert the mode (R1) when it comes back.
   `["tv-backlight"]`) to Hyperion: Spectra sends it **nothing** (not even
   black) and posts `{"live": false}` once. The sconces on the same effect keep
   going. A media source on (`state` playing / paused / idle) lends it too.
+- **The lend is honoured only while Hyperion is actually streaming to the
+  strip, whenever the current mode's own plan also wants that strip
+  powered off** (e.g. Away). Spectra re-checks the strip's own `live` flag
+  every few seconds; while the mode wants it off and Hyperion is not
+  confirmed streaming, Spectra switches the strip off instead of leaving
+  it lit on nobody's signal (fixed 2026-10-05 — Away previously left a
+  static dim amber on the TV backlight with Hyperion not running). A mode
+  that does not want the strip off is unaffected: "TV Music default on,
+  off only for Hyperion" still holds.
 - It comes back when TV Music is ON **and** no media source is on: Spectra
   writes `{"on": true, "bri": 255}` first, then streams.
 - Recommended HA order: TV Music ON → call `tv-music {"on": true}`; TV Music

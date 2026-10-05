@@ -1174,6 +1174,44 @@ def mode_off_devices() -> dict:
     return {did: name for did, ready in _rt.off_ready.items() if now >= ready}
 
 
+def mode_off_phase_active() -> bool:
+    """Is the current phase one where `mode_off_devices()` could ever name
+    a fixture — i.e. NOT `PHASE_MUSIC` or `PHASE_STANDBY`, where
+    `_hand_in()`/`_go_standby()` keep every fixture powered and streamed
+    for the music. `house_fixtures.desired()`'s pending-power-off branch
+    (fed by `mode_power_off_scope()`, which deliberately ignores phase —
+    see that function's own docstring) must defer to this the same way
+    `mode_off_devices()` already does, or it can withhold a fixture the
+    music phase guarantees is driven."""
+    return _rt.phase not in (PHASE_MUSIC, PHASE_STANDBY)
+
+
+def mode_power_off_scope() -> set[str]:
+    """Every WLED the CURRENT mode's plan powers off, computed straight
+    from the mode's own config — never from `_rt.off_ready`, which this
+    module's own `_enter()` only populates once ITS supervisor tick has
+    caught up with a fresh take. house_fixtures.py runs its own
+    independent 1 s loop, so the room can become SPECTRA's and that
+    loop's own default-everything-ON fallback can fire BEFORE `_enter()`
+    has even started — `_rt.off_ready` is still `{}` at that instant, not
+    merely unready. Found 2026-10-05 (the dining-table flash): a fixture
+    the mode plan would shortly power off was switched ON first, because
+    nothing told house_fixtures the mode's plan at all. This is that
+    telling — a fixture named here gets NO action from house_fixtures
+    until `mode_off_devices()` itself claims it (never guessed ON in the
+    meantime; the night rule: never switch a fixture from off to on as a
+    side effect). Empty with no mode or on a mode with nothing to power
+    off."""
+    mode = current_mode()
+    if mode is None:
+        return set()
+    try:
+        return set(build_plan(mode).power_off)
+    except Exception:                                    # noqa: BLE001
+        logger.exception("house: computing the power-off scope failed")
+        return set()
+
+
 def motion_targets(mode: HouseMode) -> dict:
     """virtual -> resting speed (0..1) for the virtuals the conductor
     tracks NOW (the scene showing). Later hooks win."""

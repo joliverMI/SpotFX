@@ -31,7 +31,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from spectra.models.house_mode import HouseMode
+from spectra.models.house_mode import FixtureHook, HouseMode, HouseTarget
 
 
 class FakeDev:
@@ -154,16 +154,21 @@ def seam(monkeypatch):
             raise TimeoutError("no answer")
         return dict(w.state[did])
     w.unreachable_ips: set = set()
+    w.hyperion_live: dict = {}
+
+    async def read_live(did):
+        return w.hyperion_live.get(did)
 
     house_fixtures.deps = house_fixtures.Deps(
         post=post, get_state=get_state, host=lambda: w.host,
         relocate=relocate, reinit=reinit, reachable=reachable,
         report_refresh=report_refresh, clock=w.clock, sleep=no_sleep,
-        post_ip=post_ip, get_ip=get_ip, released=lambda: w.released[0])
+        post_ip=post_ip, get_ip=get_ip, released=lambda: w.released[0],
+        read_live=read_live)
     w.hf, w.house, w.store = house_fixtures, house, house_store
 
-    def set_mode(name="Standard"):
-        mode = house_store.put_mode(HouseMode(name=name))
+    def set_mode(name="Standard", fixtures=None):
+        mode = house_store.put_mode(HouseMode(name=name, fixtures=fixtures or []))
         st = house_store.state()
         st.mode_id = mode.id
         house_store.save_state()
@@ -341,6 +346,146 @@ def test_an_explicit_lend_is_honoured_and_given_back(seam):
     seam.hf.set_fixture("tv-backlight", lent_to=None)
     _run(_settle(seam.hf))
     assert "tv-backlight" not in device_output.withheld()
+
+
+def test_a_mode_off_tv_strip_switches_off_when_hyperion_is_not_streaming(seam):
+    """Decision (2026-10-05, the TV backlight incident): when the mode's
+    plan powers the TV strip off, Spectra switches it off UNLESS Hyperion
+    is actually streaming to it — never because the lend reason (TV Music
+    off) alone says so. Unconfirmed reads as "not streaming". While the
+    mode's own fade hasn't landed it in mode_off_devices() yet, the strip
+    gets no action (never lent, never guessed on) — then, once house.py's
+    own supervisor catches up (simulated here directly), it goes off like
+    any other mode-off fixture."""
+    from fx import device_output
+    seam.set_mode("Away", fixtures=[
+        FixtureHook(target=HouseTarget(kind="fixture", id="tv-backlight"),
+                    off=True)])
+    seam.hf.set_tv_music(False)
+    _run(_settle(seam.hf))
+    assert "tv-backlight" not in device_output.withheld()
+    assert all(did != "tv-backlight" for did, _p in seam.posts)
+    # house.py's own supervisor (a no-op in this harness) has now applied
+    # the mode's fade — the fixture's fade-to-black has landed.
+    seam.house._rt.off_ready["tv-backlight"] = seam.clock.now
+    seam.house._rt.phase = seam.house.PHASE_RESTING
+    _run(_settle(seam.hf))
+    assert device_output.withheld().get("tv-backlight") == "switched off"
+    assert ("tv-backlight", {"on": False}) in seam.posts
+    assert seam.state["tv-backlight"]["on"] is False
+
+
+def test_a_mode_off_tv_strip_stays_lent_while_hyperion_actually_streams(seam):
+    from fx import device_output
+    seam.set_mode("Away", fixtures=[
+        FixtureHook(target=HouseTarget(kind="fixture", id="tv-backlight"),
+                    off=True)])
+    seam.hf.set_tv_music(False)
+    seam.hyperion_live["tv-backlight"] = True
+    _run(_settle(seam.hf))
+    assert device_output.withheld().get("tv-backlight") == "lent: TV Music is off — Hyperion drives the strip"
+    assert [p for d, p in seam.posts if d == "tv-backlight"] == [{"live": False}]
+
+
+def test_the_admirals_tv_default_on_preference_is_unchanged(seam):
+    """TV Music on (the Admiral's default, no mode off) still streams the
+    strip normally — this decision only narrows the LEND, never the
+    default."""
+    seam.set_mode()
+    _run(_settle(seam.hf))
+    assert ("tv-backlight", {"on": True, "bri": 255}) in seam.posts
+
+
+def test_a_generically_lent_non_tv_strip_stays_lent_even_when_a_mode_powers_it_off(seam):
+    """The Hyperion override (2026-10-05) is scoped to TV strips only — a
+    fixture lent via the generic FixtureOverride.lent_to API (not a TV
+    strip, never confirmed streaming by Hyperion) must stay lent even
+    while a mode's own plan also wants it powered off."""
+    from fx import device_output
+    seam.set_mode("Away", fixtures=[
+        FixtureHook(target=HouseTarget(kind="fixture", id="crystal"), off=True)])
+    seam.hf.set_fixture("crystal", lent_to="someone else")
+    # house.py's own supervisor has landed the mode's fade-to-black.
+    seam.house._rt.off_ready["crystal"] = seam.clock.now
+    seam.house._rt.phase = seam.house.PHASE_RESTING
+    _run(_settle(seam.hf))
+    assert device_output.withheld().get("crystal") == "lent: lent to someone else"
+    # lent, not switched off: only the lend's own {"live": False}, never
+    # the power-off write a mode-off fixture would otherwise get.
+    assert [p for d, p in seam.posts if d == "crystal"] == [{"live": False}]
+    assert seam.state["crystal"]["on"] is True
+
+
+# ═══ 3b. a mode-off fixture is never switched on while activating ═════════
+
+def test_a_plan_off_fixture_is_never_switched_on_during_activation(seam):
+    """The dining-table flash (2026-10-05): house.py's own fade/off_ready
+    hasn't landed this fixture in mode_off_devices() yet — because this
+    harness's house.tick is a no-op, exactly as it never does — so
+    house_fixtures must not guess it ON in the meantime. Every OTHER
+    fixture the mode doesn't plan to power off still gets the ordinary
+    own-brightness treatment."""
+    seam.set_mode("Away", fixtures=[
+        FixtureHook(target=HouseTarget(kind="fixture", id="crystal"), off=True)])
+    _run(_settle(seam.hf))
+    assert all(did != "crystal" for did, _payload in seam.posts), \
+        "a plan-off fixture must never be switched on as a side effect"
+    assert "crystal" not in seam.hf._rt.applied
+    from fx import device_output
+    assert "crystal" not in device_output.withheld()
+    # the rest of the room still comes up normally
+    written = {did for did, _p in seam.posts}
+    assert written == WLEDS - {"crystal"}
+
+
+def test_a_plan_off_fixture_that_was_already_on_is_never_re_asserted_on(seam):
+    """The same race with the fixture already reporting ON before the
+    take: it must go straight to its eventual fade/off, never an extra ON
+    write first."""
+    seam.state["crystal"]["on"] = True
+    seam.set_mode("Away", fixtures=[
+        FixtureHook(target=HouseTarget(kind="fixture", id="crystal"), off=True)])
+    _run(_settle(seam.hf))
+    assert all(did != "crystal" for did, _payload in seam.posts)
+
+
+def test_a_plan_off_fixture_still_gets_power_once_the_music_show_has_the_room(seam):
+    """mode_power_off_scope() deliberately ignores phase (its own
+    docstring) — but the pending-power-off branch it feeds must still
+    defer to the music phase, where house.py's own `_hand_in()` keeps
+    every fixture powered and streamed for the show."""
+    from fx import device_output
+    seam.set_mode("Away", fixtures=[
+        FixtureHook(target=HouseTarget(kind="fixture", id="crystal"), off=True)])
+    seam.house._rt.phase = seam.house.PHASE_MUSIC
+    _run(_settle(seam.hf))
+    assert ("crystal", {"on": True, "bri": 255}) in seam.posts
+    assert "crystal" not in device_output.withheld()
+
+
+def test_a_mode_off_fixture_held_by_the_light_show_still_gets_power(seam):
+    """The sibling exemption on the `mode_off` branch two lines above
+    (`not _show_holds_visible(did)`) must reach the pending-power-off
+    branch too: `mode_off_devices()` is always a subset of
+    `mode_power_off_scope()`, so a Steady-held fixture that already IS in
+    `mode_off` would otherwise fall straight into the pending branch's own
+    unconditional "continue" (no action) instead of its own exemption's
+    TARGET_ON."""
+    from fx import device_output
+    from spectra.models.light_show import DeviceHold
+    from spectra.services import show_store
+    seam.set_mode("Away", fixtures=[
+        FixtureHook(target=HouseTarget(kind="fixture", id="crystal"), off=True)])
+    seam.house._rt.off_ready["crystal"] = seam.clock.now
+    seam.house._rt.phase = seam.house.PHASE_RESTING
+    show_store.state().holds["crystal"] = DeviceHold(
+        device_id="crystal", state="steady", color=[255, 0, 0])
+    try:
+        _run(_settle(seam.hf))
+        assert "crystal" not in device_output.withheld()
+        assert ("crystal", {"on": True, "bri": 255}) in seam.posts
+    finally:
+        show_store.state().holds.pop("crystal", None)
 
 
 # ═══ 4. on / off ════════════════════════════════════════════════════════════
