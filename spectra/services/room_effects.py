@@ -211,6 +211,9 @@ class _Driven:
     samples: Any
     virtual_ids: list[str]
     ranges: list[PixelRange] = field(default_factory=list)
+    #: the CARRIER this emitter's light belongs to (the footprint's own
+    #: `carrier`) — what a substitute stands in for (D2, see start()).
+    carrier: str = ""
 
     @property
     def whole_carrier(self) -> bool:
@@ -238,6 +241,20 @@ class _State:
     #: virtuals start() brought up because they were idle — stop() puts back
     #: exactly these and nothing else.
     activated: list = field(default_factory=list)
+    #: carriers bringing those up took OFF THE AIR — MEASURED, never
+    #: inferred (the capture path's CaptureActivation.displaced, D2). stop()
+    #: puts each back on with the flag alone.
+    displaced: list = field(default_factory=list)
+    #: displaced carrier -> the substitutes now rendering the show for it.
+    #: While non-empty, show writes addressed to the carrier land on the
+    #: substitutes instead (`redirect_targets`) — writing the carrier would
+    #: take #29's repair, reactivate it and evict the substitute.
+    redirect: dict = field(default_factory=dict)
+    #: carrier -> (effect_type, merged config) of the show writes redirected
+    #: away from it, re-landed on the carrier once it is back on (stop()).
+    carry: dict = field(default_factory=dict)
+    #: idle substitutes not brought up because their fixture is known dark.
+    skipped_unreachable: list = field(default_factory=list)
 
 
 _state = _State()
@@ -372,6 +389,10 @@ class RunnerDeps:
     #: (scripts/check_copy_carrier_wave.py measured which side).
     activate: Optional[Callable[[str], Any]] = None
     deactivate: Optional[Callable[[str], Any]] = None
+    #: Put a DISPLACED carrier back on the air — the flag alone (D2).
+    reactivate: Optional[Callable[[str], Any]] = None
+    #: Device ids known dark right now (the take's activation report).
+    unreachable_devices: Optional[Callable[[], set]] = None
 
 
 def production_deps() -> RunnerDeps:
@@ -390,12 +411,24 @@ def production_deps() -> RunnerDeps:
     async def deactivate(virtual_id: str) -> None:
         await fx_seam.set_virtual_active(virtual_id, False)
 
+    async def reactivate(virtual_id: str) -> None:
+        await fx_seam.set_virtual_active(virtual_id, True)
+
+    def unreachable_devices() -> set:
+        from spectra.services import activation_report
+        report = activation_report.current()
+        if report is None:
+            return set()
+        return {str(d.device_id) for d in report.still_dark}
+
     return RunnerDeps(apply_writes=fx_seam.apply_writes,
                       get_virtuals=fx_seam.get_virtuals,
                       open_hold=flare_preview_hold.open_program_hold,
                       close_hold=flare_preview_hold.close_hold,
                       touch_hold=flare_preview_hold.touch,
-                      activate=activate, deactivate=deactivate)
+                      activate=activate, deactivate=deactivate,
+                      reactivate=reactivate,
+                      unreachable_devices=unreachable_devices)
 
 
 class RoomEffectProgram(flare_preview_hold.PreviewProgram):
@@ -450,7 +483,8 @@ def resolve_driven(room: RoomMap, spec: RoomEffectSpec) -> list[_Driven]:
         out.append(_Driven(emitter_id=fp.emitter_id,
                            samples=light_field.samples_for(fp, room.axis),
                            virtual_ids=list(fp.virtual_ids),
-                           ranges=list(fp.ranges)))
+                           ranges=list(fp.ranges),
+                           carrier=fp.carrier))
     return out
 
 
@@ -554,7 +588,17 @@ async def start(room: RoomMap, spec: RoomEffectSpec,
     idle = [v for v in virtual_ids if not (live.get(v) or {}).get("active", True)
             or not ((live.get(v) or {}).get("effect") or {}).get("type")]
     _state.activated = []
+    _state.displaced = []
+    _state.redirect = {}
+    _state.carry = {}
+    # A fixture known dark (the take's own activation report) is not
+    # brought up: it cannot render, and trying stalls the start (D2).
+    dark = deps.unreachable_devices() if deps.unreachable_devices else set()
+    _state.skipped_unreachable = sorted(
+        v for v in idle if _devices_of(live.get(v)) & dark)
+    idle = [v for v in idle if v not in _state.skipped_unreachable]
     if idle and deps.activate is not None:
+        before = _rendering(live)
         for vid in idle:
             try:
                 await deps.activate(vid)
@@ -562,6 +606,8 @@ async def start(room: RoomMap, spec: RoomEffectSpec,
             except Exception:                          # noqa: BLE001
                 logger.exception("room effects: could not bring up %s", vid)
         if _state.activated:
+            after_live = await deps.get_virtuals() or {}
+            await _stand_in_for_displaced(deps, live, after_live, before)
             live = await deps.get_virtuals() or {}
     base: dict[str, float] = {}
     types: dict[str, str] = {}
@@ -576,6 +622,7 @@ async def start(room: RoomMap, spec: RoomEffectSpec,
             mask_len[vid] = emitters_mod.effective_pixel_count(entry)
     known = [v for v in virtual_ids if v in types]
     if not known:
+        await _hand_back(deps)
         return {"running": False,
                 "reason": ("none of the mapped virtuals is rendering an "
                            "effect right now — is SPECTRA driving the room?"),
@@ -593,6 +640,7 @@ async def start(room: RoomMap, spec: RoomEffectSpec,
         held = await deps.open_hold(RoomEffectProgram(known), 1.0, step="arm",
                                     heartbeat_timeout_s=HOLD_HEARTBEAT_S)
         if not (held or {}).get("held"):
+            await _hand_back(deps)
             return {"running": False,
                     "reason": f"the room could not be held: "
                               f"{(held or {}).get('reason') or 'no writes'}",
@@ -603,7 +651,8 @@ async def start(room: RoomMap, spec: RoomEffectSpec,
     _state.room_id = room.id
     _state.driven = [_Driven(d.emitter_id, d.samples,
                              [v for v in d.virtual_ids if v in types],
-                             [r for r in d.ranges if r.virtual_id in types])
+                             [r for r in d.ranges if r.virtual_id in types],
+                             d.carrier)
                      for d in driven]
     _state.base = base
     _state.effect_type = types
@@ -627,6 +676,9 @@ async def start(room: RoomMap, spec: RoomEffectSpec,
             "masked_virtuals": masked_virtuals,
             "mask_pixels": {v: mask_len.get(v, 0) for v in masked_virtuals},
             "scalar_virtuals": sorted(_state.gains),
+            "displaced": list(_state.displaced),
+            "standing_in": {c: list(s) for c, s in _state.redirect.items()},
+            "skipped_unreachable": list(_state.skipped_unreachable),
             "tick_hz": TICK_HZ}
 
 
@@ -666,6 +718,22 @@ async def stop(deps: Optional[RunnerDeps] = None) -> dict:
     # AFTER the hold's revert, never before: the revert write goes to the
     # virtual, so putting it back to sleep first would leave the strip
     # holding the wave's last frame instead of the show's own state.
+    _state.activated = activated
+    handed = await _hand_back(deps)
+    return {"stopped": bool(was), "deactivated": activated, **handed}
+
+
+async def _hand_back(deps: RunnerDeps) -> dict:
+    """Put the substitutes back to sleep, THEN the displaced carriers back
+    on the air with the FLAG ALONE (deps.reactivate — never a lamp write,
+    which would destroy the effect the carrier still holds), THEN land the
+    show writes redirected away from each carrier while it was off. The
+    substitute must sleep first, or the device-layer exclusion fires the
+    other way and knocks the carrier straight back off. Idempotent."""
+    activated, _state.activated = list(_state.activated), []
+    displaced, _state.displaced = list(_state.displaced), []
+    carry, _state.carry = dict(_state.carry), {}
+    _state.redirect = {}
     for vid in activated:
         if deps.deactivate is None:
             break
@@ -674,7 +742,94 @@ async def stop(deps: Optional[RunnerDeps] = None) -> dict:
         except Exception:                              # noqa: BLE001
             logger.warning("room effects: could not put %s back to sleep",
                            vid, exc_info=True)
-    return {"stopped": bool(was), "deactivated": activated}
+    restored: list[str] = []
+    not_restored: list[str] = []
+    for vid in displaced:
+        if deps.reactivate is None:
+            not_restored.append(vid)
+            continue
+        try:
+            await deps.reactivate(vid)
+            restored.append(vid)
+        except Exception:                              # noqa: BLE001
+            logger.exception("room effects: could not put %s back on the air",
+                             vid)
+            not_restored.append(vid)
+    writes = [{"virtual_id": c, "effect_type": t, "config": cfg,
+               "room_effect": True}
+              for c, (t, cfg) in carry.items() if c in restored]
+    if writes:
+        try:
+            await deps.apply_writes(writes)
+        except Exception:                              # noqa: BLE001
+            logger.exception("room effects: the show writes made while %s "
+                             "was standing in did not re-land", restored)
+    if not_restored:
+        logger.critical("room effects: %s left OFF THE AIR — re-fire a scene "
+                        "to bring it back", not_restored)
+    return {"restored": restored, "not_restored": not_restored}
+
+
+def _devices_of(entry: Optional[dict]) -> set[str]:
+    return {str(seg[0]) for seg in ((entry or {}).get("segments") or [])}
+
+
+def _rendering(live: dict) -> set[str]:
+    return {vid for vid, e in live.items()
+            if (e or {}).get("active")
+            and ((e or {}).get("effect") or {}).get("type")}
+
+
+async def _stand_in_for_displaced(deps: RunnerDeps, before_live: dict,
+                                  after_live: dict, before: set[str]) -> None:
+    """D2 (Light Show room proof, 2026-10-04): bringing a substitute up
+    takes the copy-mapped carrier standing in front of it OFF THE AIR
+    (fx/devices Device.add_segments_batch), so the wave used to multiply a
+    BLACK lamp and leave the carrier dark after stop. Measure what stopped
+    rendering, then make each substitute render the CARRIER'S OWN EFFECT —
+    the show — so the wave modulates the show, and record the redirect
+    that keeps the show's later writes on the substitutes."""
+    now = _rendering(after_live)
+    displaced = sorted(before - now - set(_state.activated))
+    _state.displaced = displaced
+    for carrier in displaced:
+        eff = ((before_live.get(carrier) or {}).get("effect") or {})
+        if not eff.get("type"):
+            continue
+        cdev = _devices_of(before_live.get(carrier))
+        subs = [v for v in _state.activated
+                if _devices_of(after_live.get(v)) & cdev]
+        if not subs:
+            continue
+        _state.redirect[carrier] = subs
+        writes = [{"virtual_id": v, "effect_type": eff["type"],
+                   "config": dict(eff.get("config") or {}),
+                   "room_effect": True} for v in subs]
+        try:
+            await deps.apply_writes(writes)
+        except Exception:                              # noqa: BLE001
+            logger.exception("room effects: could not put the show on %s", subs)
+    if displaced:
+        logger.info("room effects: bringing up %s took %s off the air; the "
+                    "substitutes now render the show for it",
+                    _state.activated, displaced)
+
+
+def redirect_targets(virtual_id: str) -> Optional[list[str]]:
+    """The substitutes standing in for `virtual_id`, or None. Called by the
+    write seams (fx_seam, fx_executor) for every write."""
+    if not _state.redirect:
+        return None
+    return _state.redirect.get(virtual_id)
+
+
+def note_redirected(virtual_id: str, effect_type: str, cfg: dict) -> None:
+    """Remember a show write redirected away from a carrier, merged, so
+    stop() re-lands the newest show state on it."""
+    prev_type, prev = _state.carry.get(virtual_id, (effect_type, {}))
+    merged = dict(prev) if prev_type == effect_type else {}
+    merged.update(cfg or {})
+    _state.carry[virtual_id] = (effect_type, merged)
 
 
 async def _run(deps: RunnerDeps) -> None:
