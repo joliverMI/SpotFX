@@ -622,6 +622,10 @@ export interface AmbientGateStatus {
   result?: AmbientResult;
   verify?: AmbientVerify;
   verified_age_s?: number;
+  /** HOUSE LIGHTING (additive): present while a house mode drives Hue — the
+   * mode and its per-area looks; the toggle above waits until it does not. */
+  house?: { mode: string | null; looks: { area: string; look: string; mirek: number | null;
+    color: string | null; brightness: number }[] };
 }
 
 /** One entry from GET /api/room-controls/ambient-groups — a live Hue

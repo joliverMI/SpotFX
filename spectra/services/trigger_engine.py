@@ -1476,6 +1476,14 @@ class TriggerEngine:
             await engine.conductor.apply_set_directly(forced,
                                                       forced_from=set_id)
             return
+        # HOUSE LIGHTING (spectra/services/house.py): a mode that keeps its
+        # look through music ("calm"/"ignore") owns the colours too — a
+        # stored colour trigger waits, the same way its scene triggers do.
+        from spectra.services import house
+        house_reason = house.scene_deferral()
+        if house_reason is not None:
+            logger.info("select_color_set trigger: deferred — %s", house_reason)
+            return
         # §10 — a Group reference resolves to its picked member. Fetched
         # RAW (not via resolve_ref) so mode availability (owner ask
         # 2026-08-17) can gate the GROUP ITSELF before any member

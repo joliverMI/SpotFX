@@ -324,6 +324,10 @@ def test_settings_mcp_server_actually_invokes_every_tool_without_a_python_level_
                 settings = await call("get_scene_settings", {"scene_id": scene_id})
                 assert settings["scene_id"] == scene_id
 
+                # House lighting's create also carries a `name` kwarg.
+                house = await call("create_house_mode", {"name": "MCP House Mode"})
+                assert house["status"] == "applied"
+
     _run(_exercise())
 
 

@@ -38,6 +38,7 @@ from spectra.api import engine as engine_api
 from spectra.api import night_run as night_run_api
 from spectra.api import timing as timing_api
 from spectra.api import light_show as light_show_api
+from spectra.api import house as house_api
 from spectra.api import (av_sync, device_preview, devices as devices_api,
                          feedback, fire_history,
                          flare_preview, gradient2d, intensity_scale, journey,
@@ -114,6 +115,7 @@ def create_app() -> FastAPI:
     app.include_router(rooms.router)
     app.include_router(room_effects_api.router)
     app.include_router(light_show_api.router)
+    app.include_router(house_api.router)
 
     @app.websocket("/api/ws")
     async def ws_endpoint(ws: WebSocket):
@@ -302,13 +304,18 @@ async def _standalone_lifespan(app):
     from spectra.services import show_output
     light_show_task = asyncio.create_task(
         show_output.run_supervised(), name="spectra-light-show-output")
+    # HOUSE LIGHTING's resting layer (spectra/services/house.py) — inert
+    # unless SPECTRA holds the room AND a mode is set.
+    from spectra.services import house
+    house_task = asyncio.create_task(
+        house.run_supervised(), name="spectra-house-lighting")
     logger.info("SPECTRA started — own process, pid %d", os.getpid())
     yield
     all_tasks = (watchdog_task, reconciler_task, ambient_verify_task,
                 flare_preview_sweep_task, param_watchdog_task,
                 activation_recheck_task, dark_fixture_task,
                 known_buffer_poll_task, known_buffer_sse_task,
-                light_show_task)
+                light_show_task, house_task)
     for task in all_tasks:
         task.cancel()
     for task in all_tasks:

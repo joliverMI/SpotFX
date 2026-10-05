@@ -3856,6 +3856,59 @@ room-effect compatibility proof), `tests/test_light_show_arms.py`'s own
 dwell-floor test, `tests/test_scene_console.py`'s widened operation-set
 proof.
 
+## HOUSE LIGHTING (`/house`) — the room's always-on resting look (phase 1)
+
+Plan: `/home/javi/fleet-spotfx/data/standard-lighting-plan/report.md` (his
+ask: Spectra as the standard lighting engine, not only music; HA keeps its
+`lighting_mode` clock, Spectra owns what each mode looks like).
+**`spectra/services/house.py`'s module docstring is the binding statement**;
+`spectra/models/house_mode.py` is the shape (two stores, the Light Show's
+split). Six things:
+
+- **INERT UNLESS SPECTRA HOLDS THE ROOM AND A MODE IS SET.** The gate is
+  `show_output.ownership_refusal()` / `standdown_reason()` — nothing of its
+  own. No mode (the shipped state) costs one dict read in every hook. A mode
+  set while the room is released is only recorded. Standby (a preview,
+  camera run, night run) writes nothing and lifts the caps.
+- **THE BASE LAYER LIVES IN `show_output`, not `fx/device_output`** — the
+  output layer keeps ONE target per device, so two writers would clobber.
+  `show_output.set_base(levels, states)` sits below every show hold/level
+  (level = base × show Levels; a hold wins the state); letting go of a show
+  hold and End show fade back to the BASE. A room release drops it.
+- **HOOKS AT THE EXISTING CHOKE POINTS** (each lazy, never raising, None when
+  inert): `house.scene_deferral()` in `fire_scene_by_id` (after Force Scene
+  resolves — a pin outranks the mode; the house's own fires pass with
+  `origin="house"` and `transition_ms`), in the trigger engine's
+  `select_color_set` and `engine.fire_analysed_color_event`;
+  `house.response_deferral()` in `engine._response_gate`/`_update_gate`
+  ("ignore" only); `house.journey_override()` read by the conductor's
+  `_destination_pool`/`_journey_leg` (wired in `engine.py`);
+  `house.hue_directive()` read by `ambient_music_gate.reconcile`/`status`.
+  A new music-driven write path needs the same check or a calm/ignore mode
+  will leak through it.
+- **HUE: per-area looks over the bridge** — `ambient.reconcile_looks`/
+  `verify_looks` (colour temperature as CLIP v2 `color_temperature.mirek`,
+  colour, off), routed by the gate when a directive exists (target tuple
+  grew a 4th element, `looks`; a 3-tuple is still accepted). A house hold is
+  REPORTED by the verifier, never repaired (yield until the next mode
+  change). A mode with no Hue looks leaves Hue to the toggle exactly as
+  before. Today's Ambient is labelled **"Hue Hold"** in the UI only — the
+  `ambient` wire key, `ambient_status` message and every field name are a
+  frozen HA contract and did not change.
+- **MOTION AND CAPS**: `"motion": true` tags exactly one numeric param per
+  effect in `config/effect_params.json` (`device_model.motion_param_for`);
+  a hook's `motion` is a 0..1 position in that param's range, written as a
+  glide AND carried with `conductor.on_surge` (or drift and the param
+  watchdog fight it). Frame-rate caps are `fx/device_rate.py` (VENDOR #43,
+  only ever lowers, per virtual loop — siblings share the lowest cap).
+- **THE HA SEAM**: `POST`/`PUT /api/house/mode` `{"ha_mode": ..., "source":
+  "ha"}` (idempotent; always 200 with a status word, 404 only for an unknown
+  mode NAME), read back on `GET /api/house/mode` and engine status's
+  `lighting` key. A non-"ha" source is MANUAL and holds until HA's word
+  CHANGES. Sonic domain `house` (`house_console.py`; no delete). Tests:
+  `tests/test_house_*.py`, `tests/test_device_rate.py`,
+  `scripts/check_house_summary.mjs`. Help section `house`.
+
 ## The room LIGHT-FIELD map (`/rooms`) + room effects (`/room-effects`)
 
 **THE ONE IDEA, his own sentence, and the thing this whole area exists to

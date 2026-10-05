@@ -37,6 +37,11 @@ LIGHT_SHOW_SETS_FILE = SPECTRA_STORAGE / "light_show_sets.json"
 LIGHT_SHOW_STATE_FILE = SPECTRA_STORAGE / "light_show_state.json"
 #: his dragged High/Low Trigger positions, per song (spectra/services/show_cues.py)
 SHOW_CUES_FILE = SPECTRA_STORAGE / "show_cues.json"
+# HOUSE LIGHTING (spectra/services/house.py): his authored modes and the
+# runtime "which mode, set by whom" record — two files for the same reason
+# as the Light Show's pair.
+HOUSE_MODES_FILE = SPECTRA_STORAGE / "house_modes.json"
+HOUSE_STATE_FILE = SPECTRA_STORAGE / "house_state.json"
 SHOW_LOG_FILE = SPECTRA_STORAGE / "show_log.json"
 FEEDBACK_FILE = SPECTRA_STORAGE / "feedback.json"
 SETTINGS_LOG_FILE = SPECTRA_STORAGE / "settings_log.json"

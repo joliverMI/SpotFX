@@ -92,6 +92,7 @@ from mcp.server import MCPServer  # noqa: E402
 from spectra.services import (  # noqa: E402
     analysis_console,  # noqa: F401 — its operation is wrapped below
     device_console,
+    house_console,
     room_effect_console,
     scene_console,
     settings_agent,
@@ -112,6 +113,10 @@ _ArmTriggerEnum = Literal[tuple(show_console.TRIGGER_CHOICES)]
 _TargetKindEnum = Literal[tuple(show_console.TARGET_KIND_CHOICES)]
 _DeviceStateEnum = Literal[tuple(show_console.STATE_CHOICES)]
 _CueLevelEnum = Literal[tuple(show_console.CUE_LEVEL_CHOICES)]
+_HouseKeyEnum = Literal[tuple(sorted(house_console.MODE_SETTINGS))]
+_HouseTargetEnum = Literal[tuple(house_console.TARGET_KIND_CHOICES)]
+_HueLookEnum = Literal[tuple(house_console.HUE_LOOK_CHOICES)]
+_PoolEnum = Literal[tuple(house_console.POOL_CHOICES)]
 
 mcp = MCPServer("settings-console")
 
@@ -532,6 +537,74 @@ async def refresh_analysed_triggers(uri: Optional[str] = None, dry_run: bool = T
     edited or deleted by hand are left alone."""
     return await _call("refresh_analysed_triggers", uri=uri, dry_run=dry_run,
                        plan_id=plan_id)
+
+
+# House lighting (spectra/services/house_console.py): the modes.
+
+
+@mcp.tool()
+async def house_status() -> dict:
+    """Which house lighting mode is set, by whom, and what it is doing now."""
+    return await _call("house_status")
+
+
+@mcp.tool()
+async def list_house_modes() -> dict:
+    """His house lighting modes with their scenes, colours, fixture settings,
+    Hue looks and music behaviour -- use the exact names from here."""
+    return await _call("list_house_modes")
+
+
+@mcp.tool()
+async def set_house_mode(mode: str) -> dict:
+    """Switch the house to a mode by name, or 'none' to clear it. Holds until
+    Home Assistant's lighting mode next changes."""
+    return await _call("set_house_mode", mode=mode)
+
+
+@mcp.tool()
+async def create_house_mode(name: str, ha_aliases: Optional[list[str]] = None) -> dict:
+    """Create a brand-new, empty house mode (an existing name is rejected)."""
+    return await _call("create_house_mode", name=name, ha_aliases=ha_aliases)
+
+
+@mcp.tool()
+async def set_house_mode_setting(mode: str, key: _HouseKeyEnum, value: Any) -> dict:
+    """Change one setting of a house mode (music, music_hue, glides, the
+    flow pace, its Home Assistant aliases, its name)."""
+    return await _call("set_house_mode_setting", mode=mode, key=key, value=value)
+
+
+@mcp.tool()
+async def set_house_fixture(mode: str, target_kind: _HouseTargetEnum = "everything",
+                            target_name: Optional[str] = None,
+                            level: Optional[float] = None, motion: Optional[float] = None,
+                            fps: Optional[int] = None, off: Optional[bool] = None,
+                            remove: bool = False) -> dict:
+    """Set a mode's per-fixture level (%), resting motion (0..1), frame-rate
+    cap or off, for everything, a category or one fixture."""
+    return await _call("set_house_fixture", mode=mode, target_kind=target_kind,
+                       target_name=target_name, level=level, motion=motion,
+                       fps=fps, off=off, remove=remove)
+
+
+@mcp.tool()
+async def set_house_hue(mode: str, area: str = "*", look: _HueLookEnum = "hold",
+                        kelvin: Optional[int] = None, color: Optional[str] = None,
+                        brightness: Optional[float] = None) -> dict:
+    """Set how a Hue area (or '*') is held in a mode: kelvin OR colour at a
+    brightness, off, show, or remove."""
+    return await _call("set_house_hue", mode=mode, area=area, look=look,
+                       kelvin=kelvin, color=color, brightness=brightness)
+
+
+@mcp.tool()
+async def set_house_mode_pool(mode: str, pool: _PoolEnum, names: list[str],
+                              weights: Optional[list[float]] = None) -> dict:
+    """Replace a mode's scene pool or colour pool with named scenes / colour
+    sets (optionally weighted)."""
+    return await _call("set_house_mode_pool", mode=mode, pool=pool, names=names,
+                       weights=weights)
 
 
 if __name__ == "__main__":

@@ -10,7 +10,8 @@
  *   COLOURED by whichever mode is current (Light even shows the actual
  *   configured colour, since that's the whole point of the mode). Hold
  *   expands to the colour picker + brightness slider.
- * - **Ambient** — a light-bulb icon (spectra/services/ambient_music_gate.py).
+ * - **Hue Hold** (was "Ambient"; the wire keeps the name) — a light-bulb icon
+ *   (spectra/services/ambient_music_gate.py).
  *   Short press toggles it on/off (remembers the last non-off setting so
  *   toggling back "on" restores it, rather than one fixed choice). Hold
  *   expands to the three-setting select, both authored colours, the Hue
@@ -81,8 +82,8 @@ const AMBIENT_PHASE_LABEL: Partial<Record<AmbientPhase, string>> = {
   turning_off: 'Turning off…',
 };
 const AMBIENT_PHASE_TITLE: Record<AmbientPhase, string> = {
-  on: 'Ambient is on — tap to turn off, hold for options',
-  off: 'Ambient is off — tap to turn on, hold for options',
+  on: 'Hue Hold is on — tap to turn off, hold for options',
+  off: 'Hue Hold is off — tap to turn on, hold for options',
   turning_on: 'Turning on… — tap again to snap it straight back off',
   turning_off: 'Turning off… — tap again to snap it straight back to full brightness',
   unavailable: "SPECTRA isn't driving the lights right now — your choice is saved and "
@@ -99,13 +100,13 @@ const AMBIENT_PHASE_TITLE: Record<AmbientPhase, string> = {
  * actually lit, or found nothing left to hold at all — and "yielding" is
  * only reachable while the "When music pauses" switch is on. */
 const AMBIENT_MODE_NOTE: Record<string, string> = {
-  holding: 'Ambient is actively holding the room at its colour — every light confirmed.',
-  partial: "Ambient believes it should be holding, but the last check found at least one "
+  holding: 'Hue Hold is actively holding the Hue lights at its colour — every light confirmed.',
+  partial: "Hue Hold believes it should be holding, but the last check found at least one "
     + 'light not actually lit at the ambient colour (or nothing to hold at all) — see the '
     + 'lights named below.',
   yielding: '"When music pauses" is standing aside for music (or its playback state is '
     + 'momentarily unknown) — it resumes on its own the instant the room goes quiet.',
-  transitioning: 'Ambient is mid hold/release right now.',
+  transitioning: 'Hue Hold is mid hold/release right now.',
 };
 const AMBIENT_MODE_BADGE: Record<string, string> = {
   holding: 'badge-purple',
@@ -373,15 +374,23 @@ export default function RoomControlsBar() {
       <TopBarGroupButton
         className={`ambient-group-btn${!local.ambient_enabled && !ambientInFlight ? ' ambient-group-btn-off' : ''}`}
         title={AMBIENT_PHASE_TITLE[ambientPhase]}
-        ariaLabel={`Ambient: ${AMBIENT_PHASE_LABEL[ambientPhase] ?? ambientPhase}. `
+        ariaLabel={`Hue Hold: ${AMBIENT_PHASE_LABEL[ambientPhase] ?? ambientPhase}. `
           + 'Tap to toggle, hold for options.'}
         holdToExpand
         onShortPress={toggleAmbient}
-        panelTitle={<>Ambient <HelpLink topic="ambient" /></>}
+        panelTitle={<>Hue Hold <HelpLink topic="ambient" /></>}
         panel={(
           <>
+            {ambientLive?.house?.mode && (
+              <div className="top-bar-group-field">
+                <span style={{ fontSize: '0.85em', opacity: 0.85 }}>
+                  Following the house mode “{ambientLive.house.mode}” — this switch applies
+                  again when no mode drives Hue. <HelpLink topic="house-hue" />
+                </span>
+              </div>
+            )}
             <div className="top-bar-group-field">
-              <label>Ambient</label>
+              <label>Hue Hold</label>
               <button
                 type="button"
                 className="ambient-toggle-btn"
@@ -401,7 +410,7 @@ export default function RoomControlsBar() {
                   onChange={(e) => commit({ ...local, ambient_on_music_pause: e.target.checked })}
                 />
                 <span style={{ fontSize: '0.85em', opacity: 0.75 }}>
-                  turn Ambient on by itself
+                  turn Hue Hold on by itself
                 </span>
               </label>
             </div>
@@ -413,7 +422,7 @@ export default function RoomControlsBar() {
                 disabled={!local.ambient_enabled}
                 swatchWidth={40}
                 swatchHeight={28}
-                title="Ambient colour — a Hue entertainment stream only ever takes one solid colour"
+                title="Hue Hold colour — the Hue lights are held at one solid colour over the bridge"
               />
               <span style={{ fontSize: '0.85em', opacity: 0.75 }}>normal/hybrid</span>
             </div>
@@ -425,7 +434,7 @@ export default function RoomControlsBar() {
                 disabled={!local.ambient_enabled}
                 swatchWidth={40}
                 swatchHeight={28}
-                title="Ambient colour for Dark mode — held instead of the normal ambient colour while Dark mode is on; starts the same until you pick one"
+                title="Hue Hold colour for Dark mode — held instead of the normal colour while Dark mode is on; starts the same until you pick one"
               />
               <HelpLink topic="ambient-dark-colour" />
             </div>
@@ -454,7 +463,7 @@ export default function RoomControlsBar() {
                     ? ` Not lit: ${ambientLive.verify.unlit.join(', ')}.`
                     : '')}
               >
-                ambient: {ambientLive.mode}
+                hue hold: {ambientLive.mode}
                 {ambientLive.mode === 'partial' && ambientLive.verify?.status === 'verified'
                   && ` (${ambientLive.verify.lights_lit ?? 0}/${ambientLive.verify.lights_total ?? '?'} lit)`}
                 {ambientLive.verified_age_s != null && ` · ${formatVerifyAge(ambientLive.verified_age_s)}`}
@@ -467,7 +476,7 @@ export default function RoomControlsBar() {
                 className={`badge ${ambientResult.status === 'failed' ? 'badge-red' : 'badge-gray'}`}
                 title={AMBIENT_NOTE[ambientResult.status]}
               >
-                ambient: {ambientResult.status}
+                hue hold: {ambientResult.status}
               </span>
             )}
             {ambientResult?.status === 'partial' && (
@@ -477,7 +486,7 @@ export default function RoomControlsBar() {
                   + `still showing the old colour: ${(ambientResult.unconfirmed ?? []).join(', ')}. `
                   + 'Read back from the bridge after bounded, spaced retries — not just what was sent.'}
               >
-                ambient: {ambientResult.lights_set ?? 0}/{ambientResult.lights_total ?? '?'} held —{' '}
+                hue hold: {ambientResult.lights_set ?? 0}/{ambientResult.lights_total ?? '?'} held —{' '}
                 {(ambientResult.unconfirmed ?? []).join(', ')}
               </span>
             )}

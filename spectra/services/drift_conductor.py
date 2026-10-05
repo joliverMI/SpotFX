@@ -301,6 +301,7 @@ class DriftConductor:
         gradient_profiles: Callable[[], dict] | None = None,
         room_controls: Callable[[], Any] | None = None,
         next_cue: Callable[[], Any] | None = None,
+        house_journey: Callable[[], Any] | None = None,
         rng: Random | None = None,
     ) -> None:
         self.executor = executor
@@ -325,6 +326,10 @@ class DriftConductor:
         # production (services/engine.py wires it); None (no cue known)
         # everywhere else, which is exactly the distance-paced walk.
         self._next_cue = next_cue or (lambda: None)
+        # HOUSE LIGHTING (spectra/services/house.py journey_override): while
+        # a house mode rests, the journey walks ONLY the mode's colour sets
+        # at the mode's pace. None (no mode resting) is today's journey.
+        self._house_journey = house_journey or (lambda: None)
         self._rng = rng or Random()
 
         self.scene: SceneV2 | None = None
@@ -633,7 +638,19 @@ class DriftConductor:
             if position is None:
                 continue
             pool[card.id] = (card, position)
+        house = self._house_override()
+        if house is not None:
+            # The mode's own sets only — an empty result HOLDS the walk
+            # rather than wandering off to a set the mode never named.
+            pool = {sid: v for sid, v in pool.items() if sid in house.set_ids}
         return pool
+
+    def _house_override(self):
+        try:
+            return self._house_journey()
+        except Exception:                                # noqa: BLE001
+            logger.exception("house journey override failed — journey unchanged")
+            return None
 
     def _select_destination(
         self, journey: color_journey.EffectiveJourney, from_deg: float,
@@ -689,12 +706,15 @@ class DriftConductor:
             from_deg=from_deg,
             rung=pick.rung)
 
-    async def apply_color_set(self, card) -> int:
+    async def apply_color_set(self, card, *, glide_ms: Optional[int] = None) -> int:
         """Land a colour-set card on the live scene's set-mode virtuals as
         a JUMP and move the palette/brightness baselines with it (the
         conductor owns the baselines drift resumes from). Returns virtuals
         landed — 0 with no live scene, which still leaves the set active
-        for the next fire to wear (scene_compiler.fire_scene)."""
+        for the next fire to wear (scene_compiler.fire_scene).
+
+        glide_ms (house lighting's mode glides) lands the same params as a
+        GLIDE over that long instead of a jump; None is the jump, unchanged."""
         from spectra.services import scene_compiler
         from spectra.services.room_controls import resolve_authored_bg_color
         from fx import device_model
@@ -726,12 +746,17 @@ class DriftConductor:
             if entry.background_brightness is not None:
                 params["background_brightness"] = entry.background_brightness
             if params:
-                await self.executor.jump(vid, state.effect_type, params)
+                if glide_ms:
+                    await self.executor.glide(vid, state.effect_type, params,
+                                              int(glide_ms))
+                else:
+                    await self.executor.jump(vid, state.effect_type, params)
                 landed += 1
         return landed
 
     async def apply_set_directly(self, card, *,
-                                 forced_from: Optional[str] = None) -> dict:
+                                 forced_from: Optional[str] = None,
+                                 glide_ms: Optional[int] = None) -> dict:
         """The supported manual apply-this-set surface (owner defect fix,
         part b — reached via POST /api/room-color/apply): the card becomes
         the room's active set, the wheel anchors at its position (rainbow:
@@ -748,7 +773,10 @@ class DriftConductor:
         its own forced_color. None (the default, every other caller) is
         unchanged behaviour and writes no extra key."""
         position = self._set_position(card.id)
-        landed = await self.apply_color_set(card)
+        # glide_ms only when asked, so every existing caller (and test
+        # double) keeps the exact old call shape.
+        landed = await (self.apply_color_set(card, glide_ms=glide_ms)
+                        if glide_ms else self.apply_color_set(card))
         room = self._room_load()
         update: dict[str, Any] = {"active_set_id": card.id,
                                   "destination": None}
@@ -900,6 +928,10 @@ class DriftConductor:
         the cue fires (on_colour_cue) or on the next leg."""
         room = self._room_load()
         journey = color_journey.active_journey(room, self.scene)
+        house = self._house_override()
+        if house is not None:
+            journey = journey.model_copy(
+                update={"degrees_per_min": float(house.deg_per_min)})
         rainbow = False
         if room.active_set_id is not None:
             rainbow = self._set_position(room.active_set_id) is None
@@ -913,6 +945,8 @@ class DriftConductor:
             "destination": self._destination_rec(room.destination,
                                                  room.wheel_position_deg),
         }
+        if house is not None:
+            rec["house_mode"] = house.mode_name
         # Held: no chromatic story yet, rainbow palette live, or pace 0
         # (pace_factor 0 / a zero spec). Bearing kept, nothing travels.
         if (room.wheel_position_deg is None or rainbow
@@ -920,8 +954,12 @@ class DriftConductor:
             return rec
 
         wheel = room.wheel_position_deg
-        cue = self._next_cue()
+        # A resting house mode paces its own walk: no music cue times it.
+        cue = None if house is not None else self._next_cue()
         dest = room.destination
+        if (house is not None and dest is not None
+                and dest.set_id not in house.set_ids):
+            dest = None       # a bearing chosen before the mode — reselect
         dt_s = self.leg_s
         if cue is not None:
             remaining_s = max(0.0, (cue.at_ms - cue.position_ms) / 1000.0)

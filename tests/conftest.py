@@ -286,6 +286,28 @@ def _isolated_light_show(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolated_house(tmp_path, monkeypatch):
+    """House lighting's two stores (spectra/services/house_store.py), its
+    in-memory runtime and the process-global frame-rate caps (fx/
+    device_rate.py). The layer's hooks are read from production choke
+    points (fire_scene_by_id, the engine's response gates, the conductor's
+    journey, the Hue Hold gate) with no DI seam, so every test starts with
+    no mode set — the shipped, inert state."""
+    from fx import device_rate
+    from spectra import config as scfg
+    from spectra.services import house, house_store
+    monkeypatch.setattr(scfg, "HOUSE_MODES_FILE", tmp_path / "house_modes.json")
+    monkeypatch.setattr(scfg, "HOUSE_STATE_FILE", tmp_path / "house_state.json")
+    house_store.reset_memory()
+    house.reset()
+    device_rate.clear()
+    yield
+    house_store.reset_memory()
+    house.reset()
+    device_rate.clear()
+
+
+@pytest.fixture(autouse=True)
 def _isolated_fire_history(tmp_path, monkeypatch):
     """SPECTRA's fire-history counter/show-log (spectra/services/
     fire_history.py) is written from inside production choke points

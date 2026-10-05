@@ -328,7 +328,7 @@ export function ShowNowPanel({ status, onRelease, onEndLevel }: {
         {holds.map((h) => (
           <li key={h.device}>
             {h.name}: <b>{h.state}</b>
-            {h.held_by_ambient && <span className="muted"> (held by Ambient)</span>}
+            {h.held_by_ambient && <span className="muted"> (held by Hue Hold)</span>}
             <button onClick={() => onRelease(h.device)}>Release</button>
           </li>
         ))}
@@ -548,7 +548,7 @@ function ParamField({ p, value, onChange, catalogue, targets, action }: {
             <select value={t.id ?? ''} onChange={(e) => onChange({ kind: 'fixture', id: e.target.value || null })}>
               <option value="">— choose —</option>
               {(targets?.fixtures ?? []).map((f) => (
-                <option key={f.id} value={f.id}>{f.name}{f.held_by_ambient ? ' (held by Ambient)' : ''}</option>
+                <option key={f.id} value={f.id}>{f.name}{f.held_by_ambient ? ' (held by Hue Hold)' : ''}</option>
               ))}
             </select>
           )}

@@ -88,7 +88,15 @@ conductor = DriftConductor(
     broadcast=ws_manager.broadcast,
     genre_bucket=lambda: bridge.genre_bucket(),
     next_cue=lambda: trigger_engine.next_colour_cue(),
+    house_journey=lambda: _house_journey(),
 )
+
+
+def _house_journey():
+    """HOUSE LIGHTING's colour pool and pace while a mode rests (spectra/
+    services/house.py journey_override). Lazy: house imports this module."""
+    from spectra.services import house
+    return house.journey_override()
 
 responses = ResponseEngine(
     conductor=conductor,
@@ -135,8 +143,12 @@ async def fire_analysed_color_event(selection_intensity: float,
     intensity — scene_transition_lead.crossfade_ms_for, the SAME length
     tick() aimed the cue's lead at — so the colour change's middle lands on
     the mark. Precedence and holds: responses.analysed_color_jump."""
-    from spectra.services import (fire_history, room_controls, scene_store,
+    from spectra.services import (fire_history, house, room_controls, scene_store,
                                   scene_transition_lead)
+    house_reason = house.scene_deferral()
+    if house_reason is not None:
+        # A house mode that keeps its look owns the colours (house.py).
+        return {"skipped": "house_mode", "reason": house_reason}
     scene = (scene_store.get_by_id(scene_id) if scene_id is not None
              else None) or conductor.scene
     ramp_ms = scene_transition_lead.crossfade_ms_for(
@@ -238,10 +250,12 @@ def _response_gate(via_trigger: bool, analysed: bool = False) -> Optional[str]:
     see fire_response_event's docstring for the via_trigger split), or
     None to fire. Also what a staggered batch from such a fire re-checks
     when it wakes."""
-    from spectra.services import preview_pause
+    from spectra.services import house, preview_pause
     from spectra.services.room_controls import load_room_controls
     if preview_pause.active():
         return "preview"
+    if house.response_deferral() is not None:
+        return "house_mode"
     mode = load_room_controls().scene_change_mode
     if analysed:
         allowed = mode in ("full", "triggers_only", "analysed")
@@ -276,10 +290,12 @@ def _update_gate() -> Optional[str]:
     trigger_engine._trigger_allowed never lets a non-authored trigger fire
     there, and this function's own docstring/behaviour for that mode is
     otherwise unchanged."""
-    from spectra.services import preview_pause
+    from spectra.services import house, preview_pause
     from spectra.services.room_controls import load_room_controls
     if preview_pause.active():
         return "preview"
+    if house.response_deferral() is not None:
+        return "house_mode"
     if load_room_controls().scene_change_mode not in ("full", "triggers_only", "analysed"):
         return "scene_change_mode"
     return None
@@ -626,7 +642,19 @@ def status() -> dict:
         # fixtures it holds, whether it changed settings, and why it is
         # standing down if it is.
         "light_show": _light_show_brief(),
+        # HOUSE LIGHTING (spectra/services/house.py): which mode, set by
+        # whom, what it is doing — the key Home Assistant's REST sensor
+        # reads back (the HA seam's read half).
+        "lighting": _lighting_brief(),
     }
+
+
+def _lighting_brief() -> dict:
+    try:
+        from spectra.services import house
+        return house.status()
+    except Exception as exc:                             # noqa: BLE001
+        return {"error": str(exc)}
 
 
 def _light_show_brief() -> dict:

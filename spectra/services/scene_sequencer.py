@@ -74,7 +74,10 @@ FORCED_COLOR = "forced_color"
 async def fire_scene_by_id(scene_id: str,
                            color_set_id: Optional[str] = None,
                            intensity: float = 0.5,
-                           dwell_tolerance_s: float = 0.0) -> dict:
+                           dwell_tolerance_s: float = 0.0,
+                           *,
+                           transition_ms: Optional[int] = None,
+                           origin: str = "auto") -> dict:
     """The ONE scene-fire choke point for anything that picks a scene by id
     outside the editor's own test-fire — the sequencer's own rolls and
     SPECTRA-native triggers (spectra.services.trigger_engine) both call
@@ -161,7 +164,15 @@ async def fire_scene_by_id(scene_id: str,
     an update effect — dwell's placeholder flare exists to make an
     otherwise-invisible hold visible; a preview's whole point is an
     isolated, motionless room, so adding motion here would fight the thing
-    he opened the preview to see."""
+    he opened the preview to see.
+
+    HOUSE LIGHTING (2026-10-05, spectra/services/house.py) — while a house
+    mode is resting, or holds its scene through music ("calm"/"ignore"),
+    an AUTOMATIC pick is deferred (skipped="house_mode", recorded to the
+    "deferred" bucket, never an update flare — the mode owns the room's
+    scene). Checked AFTER Force Scene resolves, so a pin still outranks the
+    mode exactly as it outranks music. origin="house" is the house layer's
+    own fires, which pass with transition_ms carrying the mode's glide."""
     from spectra.services import (color_set_groups, color_sets, dwell,
                                   fire_history, force_color, mode_availability,
                                   preview_pause, scene_compiler, scene_store)
@@ -184,6 +195,15 @@ async def fire_scene_by_id(scene_id: str,
     scene = scene_store.get_by_id(scene_id)
     if scene is None:
         raise ValueError(f"scene {scene_id} not found in spectra scenes")
+    if not forced and origin != "house":
+        from spectra.services import house
+        house_reason = house.scene_deferral()
+        if house_reason is not None:
+            fire_history.record_fire("deferred", scene_id, {
+                "scene_name": scene.name, "reason": "house_mode",
+                "detail": house_reason})
+            return {"skipped": "house_mode", "scene_id": scene_id,
+                    "scene_name": scene.name, "reason": house_reason}
     overrode_disabled = forced and getattr(scene, "disabled", False)
     if not forced and getattr(scene, "disabled", False):
         return {"skipped": "disabled", "scene_id": scene_id,
@@ -226,8 +246,13 @@ async def fire_scene_by_id(scene_id: str,
             # active set below, same as an unknown plain set id already did.
             color_set = color_set_groups.resolve_for_fire_mode_gated(
                 color_set, controls.display_mode)
+    # transition_ms only when a caller asked (house lighting's glides), so
+    # every existing caller — and every test double of fire_scene — keeps
+    # the exact old call shape.
+    glide = {} if transition_ms is None else {"transition_ms": transition_ms}
     result = await scene_compiler.fire_scene(scene, intensity=intensity,
-                                             color_set=color_set, dry_run=False)
+                                             color_set=color_set, dry_run=False,
+                                             **glide)
     if overrode_disabled:
         result["overrode_disabled"] = True
     if overrode_dwell:

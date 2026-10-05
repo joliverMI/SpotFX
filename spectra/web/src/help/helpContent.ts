@@ -913,10 +913,12 @@ export const HELP_SECTIONS: HelpSection[] = [
       },
       {
         id: 'ambient',
-        title: 'Ambient — one on/off toggle, and what happens in between',
-        keywords: 'ambient on off toggle turning on turning off transition interrupt snap cancel '
-          + 'phase hue hold lag press twice music pause auto return released unavailable',
+        title: 'Hue Hold (was "Ambient") — one on/off toggle, and what happens in between',
+        keywords: 'ambient hue hold on off toggle turning on turning off transition interrupt snap cancel '
+          + 'phase lag press twice music pause auto return released unavailable house mode',
         body: [
+          'HUE HOLD IS WHAT THIS USED TO CALL AMBIENT — only the label changed (Home Assistant still reads it under its old name, so nothing there needs editing). Everything below still says "Ambient" where it describes behaviour that has not changed.',
+          'A HOUSE MODE CAN DRIVE HUE INSTEAD. When a house lighting mode with Hue looks is set and SPECTRA holds the room, the mode decides how each Hue area is held (a colour temperature, a colour, or off) and this toggle\'s own choice waits — it applies again the moment no mode drives Hue. A mode with no Hue looks leaves Hue to this toggle exactly as before. See House lighting → Hue Hold looks.',
           'Ambient holds the room\'s Hue lights lit at a colour you pick, over the bridge directly, while every other device (WLED and the rest) keeps running the normal show. It is a plain ON/OFF toggle: tap the light-bulb button on the room bar. There is no third setting — the old "Off / On during music / Auto-return" dropdown was replaced on 2026-08-30 by this toggle plus one separate checkbox (below).',
           'IT IS NOT INSTANT, AND THE BUTTON SAYS SO. Turning Ambient on writes every Hue bulb one at a time, deliberately spaced apart (a burst of writes can be silently dropped by the Zigbee mesh — the bridge says OK either way), and reads each one back to confirm it actually took the colour. On a 17-bulb room that is about 15 seconds. Turning Ambient off is longer still, about 22 seconds, because releasing is a two-step ease rather than a cut: a brief dim fade, then a slower ramp toward whatever the room\'s live show is actually rendering right now, and only then does the bulb get handed back to the stream. While either is happening the button reads "Turning on…" or "Turning off…", so you can always tell it started.',
           'INTERRUPTING IS ALLOWED, AND IT SNAPS. The button is never disabled — tapping during a transition is not a mistake to be prevented, it is a real instruction. The transition in flight is cancelled at the next safe point (never part-way through writing one bulb) and the new state is applied straight away with every fade dropped: interrupt a gradual turn-off with ON and the lights go to full ambient brightness as fast as the confirmed writes can land, not after the fade you changed your mind about. The individual write spacing stays — that is the Zigbee mesh, not choreography — so a snap still takes a few seconds on a large room, but it never waits for the sequence it cancelled. Pressing three times quickly is fine too: the last press is what the room ends up doing, and only one transition ever exists.',
@@ -2021,6 +2023,116 @@ export const HELP_SECTIONS: HelpSection[] = [
           'This is about the AIMING preview, which is still what this page opens a camera for. A measurement is taken by the capture client on another machine, and the same rule holds there: it sends the derived greyscale bytes and nothing else.',
           'Each camera frame is reduced IN THE BROWSER to a greyscale image and only those bytes cross the same-origin connection to SPECTRA, where they live in memory and are dropped the moment you disconnect. Nothing is sent anywhere else. A mapping run sends 320×180, which is all a footprint needs; the commissioning test asks for up to 1920×1080, because it has to tell individual LEDs apart. Nothing is ever compressed — a lossy codec\'s own noise would land inside the very difference these measurements are made of.',
           'The only thing written to disk is the derived map: the footprint grids, the axis profiles, the weights and the capture context (which pose, whether the exposure was locked, when). Never a frame, never an image, never audio.',
+        ],
+      },
+    ],
+  },
+  {
+    id: 'house',
+    title: 'House lighting — the room\'s resting look, all day',
+    keywords: 'house lighting modes standard evening dim night light away tv home assistant mode chip resting look always on',
+    intro:
+      'House lighting (nav "House", /house) makes SPECTRA the room\'s everyday lighting engine, not only the music lights. A MODE says what the room looks like when nothing more specific is happening: which scenes and colour sets it flows through, how bright and how fast each fixture is, how the Hue bulbs are held, and what music does on top of it. Home Assistant keeps its own clock and tells SPECTRA which mode to be in; SPECTRA owns what each mode looks like. Nothing happens unless SPECTRA holds the room AND a mode is set — until then a mode is only recorded.',
+    entries: [
+      {
+        id: 'house-page',
+        title: 'The House page',
+        keywords: 'house page editor modes list now panel cards save switch to',
+        body: [
+          'Top: Now — which mode is set, who set it and what it is doing. Left: your modes; "Switch to" puts one on the room now. Right: the chosen mode as small cards — Home Assistant\'s words, Scenes, Colours, Fixtures, Hue Hold, Music, Changes. Save writes the mode; editing the mode that is set re-applies it straight away.',
+          'Every field is also reachable through Sonic (the 💬): "make Evening\'s crystal 10%", "switch to Night light".',
+          'The House page never takes or releases the room. A mode chosen while SPECTRA does not hold the room is remembered and applies the moment it does.',
+        ],
+      },
+      {
+        id: 'house-now',
+        title: 'Now — what the house is doing',
+        keywords: 'now panel resting music paused not applied reason clear mode levels caps',
+        body: [
+          'RESTING: the mode\'s look is on the room. MUSIC: music is playing and the show has the room; the mode returns once the music has stayed stopped for its quiet time. PAUSED: a preview, a camera run or a night run is holding the room — the mode writes nothing until that ends, then comes back. NOT APPLIED: SPECTRA does not hold the room (or the engine is not live) — the reason is shown, and nothing is written.',
+          'It also lists the levels, frame-rate caps and Hue looks actually in force, and any problem (a scene that cannot fire, a pinned Force Scene the mode is waiting behind). Clear mode takes the look off the room; like any press, it holds until Home Assistant\'s lighting mode next changes.',
+        ],
+      },
+      {
+        id: 'house-modes',
+        title: 'Modes, switching, and who wins',
+        keywords: 'switch mode manual press holds until home assistant changes precedence layers force scene light show music',
+        body: [
+          'A mode you pick here (or by Sonic, or from a dashboard) HOLDS until Home Assistant\'s lighting mode next CHANGES — HA re-sends the same value every few minutes, and that never undoes your pick. When HA\'s value changes (say at 18:30), the clock wins again.',
+          'Layers, top to bottom: the Light Show (its holds, levels and flashes) → Force Scene / Force Colour (your pins — the mode waits behind them) → the music show (when the mode lets music play) → the mode. Taking a higher layer away shows the one below: End show fades back to the MODE\'s look, not to an undimmed picture.',
+        ],
+      },
+      {
+        id: 'house-ha',
+        title: 'Home Assistant: the words a mode answers to',
+        keywords: 'home assistant lighting mode input select daytime evening dim bedtime travel alias heartbeat port 8010 post api',
+        body: [
+          'Each mode lists the Home Assistant lighting_mode value(s) it answers to — Standard answers to "Daytime", Night light to "Bedtime" — so nothing in Home Assistant is renamed. A mode named exactly like HA\'s word answers to it without repeating it. One word belongs to one mode.',
+          'Home Assistant sets the mode with POST http://<spectra>:8010/spectra/api/house/mode and {"ha_mode": "Evening", "source": "ha"}, and reads it back from the same URL (or the "lighting" key of /spectra/api/engine/status). Repeating a value is a no-op, so HA can re-send it every five minutes as a heartbeat. A value no mode answers to is remembered and named here — never guessed.',
+        ],
+      },
+      {
+        id: 'house-scenes-colours',
+        title: 'Scenes and colours inside a mode',
+        keywords: 'scene pool weight change every minutes colour pool group drift pace journey',
+        body: [
+          'Scenes: the mode draws one by weight when it starts and then every "change every" minutes (0 = keep the first). A scene that is already showing and is also in the new mode\'s pool is KEPT, so two modes sharing a scene change by a pure glide. Disabled scenes and ones not available in the current display mode are skipped.',
+          'Colours: the colour journey walks only the mode\'s colour sets (a group\'s members join, with its own rotation and overrides) at the mode\'s drift pace. Entering the mode glides to one of its sets unless the room already wears one.',
+        ],
+      },
+      {
+        id: 'house-fixtures',
+        title: 'Fixture settings: level, motion, frame-rate cap, off',
+        keywords: 'fixture category everything level brightness percent motion speed resting fps frame rate cap energy off',
+        body: [
+          'Each row targets everything, a category or one fixture; a later row wins a setting an earlier one also sets. LEVEL is a percent of the picture\'s own brightness (100 = unchanged). MOTION is the resting speed with no music — 0 is the effect\'s slowest, 100 its fastest — written to the effect\'s own speed setting (Fish and Orbits base speed, Melt and Noise speed, Star\'s base rotation…). An effect with no speed setting of its own is left as it is.',
+          'CAP limits how often the fixture is drawn and sent — it only ever lowers the fixture\'s own rate, which saves network packets and computer time. A cap acts on the whole effect, so fixtures sharing one effect (the TV strip and both sconces) run at the lowest cap among them. OFF shows nothing on that fixture.',
+          'Settings apply only while the mode is resting. When music takes the room they let go (levels back to 100%, caps lifted, speed back to what the scene authored) and come back when the music has stopped.',
+        ],
+      },
+      {
+        id: 'house-hue',
+        title: 'Hue Hold looks per area',
+        keywords: 'hue hold area colour temperature kelvin mirek warm white colour off follow show bridge rest no streaming yield',
+        body: [
+          'Each row holds one Hue area (or every area) at a white colour temperature in kelvin — 2000 K is warm, 3500 K neutral — or a colour, at a brightness; or switches it off; or lets it follow the show. Held over the bridge, never streamed, so the bulbs stay controllable from Home Assistant and the Hue app.',
+          'Changes ride the mode\'s glide on the bulbs themselves. If someone changes a bulb from Home Assistant or the Hue app, the check every 30 seconds reports it and leaves it alone — the next mode change puts it back.',
+          'A mode with no Hue rows leaves Hue to the Hue Hold switch on the room bar.',
+        ],
+      },
+      {
+        id: 'house-music',
+        title: 'What music does in a mode',
+        keywords: 'music show calm ignore hue during music hold join room bright dark intensity',
+        body: [
+          'THE FULL SHOW: when music starts the show takes the room as it always has; when it has stayed stopped for the quiet time, the room glides back to the mode. KEEP THIS LOOK: the mode keeps its scene, levels and colours; the music\'s scene and colour changes wait, its flares still play. NO SHOW: nothing music-driven fires at all.',
+          'Hue during music: stay held at this mode\'s look, join the show\'s stream, or follow the Hue Hold switch (what Home Assistant\'s Bright/Dark buttons set). "Scenes resolved at intensity" is the intensity the mode\'s scenes are drawn at.',
+        ],
+      },
+      {
+        id: 'house-transitions',
+        title: 'How changes glide',
+        keywords: 'glide transition seconds clock press button music debounce quiet return crossfade',
+        body: [
+          'A mode entered because Home Assistant\'s clock moved glides over its clock time (90 s by default); one entered on a press, over its press time (5 s). Back from music waits for the quiet time (60 s), then glides over its own time (20 s).',
+          'Levels, colours, speed and the Hue bulbs take the whole glide. Switching to a different effect still crossfades in at most a few seconds — the effect cannot glide between two different effects any slower.',
+        ],
+      },
+      {
+        id: 'house-chip',
+        title: 'The Mode chip in the top bar',
+        keywords: 'mode chip top bar house green purple amber not applied paused music',
+        body: [
+          '"⌂ Mode: Evening · HA" on every page: green while the mode is on the room, purple (♪) while music has it, amber when it is paused or not applied, grey when no mode is set. "HA" means Home Assistant set it; "manual" means a person did. Tap it to open the House page.',
+        ],
+      },
+      {
+        id: 'sonic-house',
+        title: 'Sonic on the House page',
+        keywords: 'sonic house mode switch create edit level motion cap hue kelvin music pool',
+        body: [
+          'Say a mode and what to change: "switch to Evening", "make Evening\'s crystal ten percent", "cap the singles at 10 fps in Standard", "hold every Hue area at 2000 kelvin in Evening", "Night light ignores music", "create a mode called Reading". Sonic never guesses a name you only approximated — it refuses and offers the closest spellings.',
+          'A mode Sonic creates is always new and empty; deleting a mode stays the House page\'s button.',
         ],
       },
     ],
