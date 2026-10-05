@@ -193,6 +193,13 @@ async def _standalone_lifespan(app):
     # takes its own unchanged early return. A no-op on every ordinary
     # start (nothing on disk, nothing to do).
     await night_run.recover_orphaned_night()
+    # HOUSE LIGHTING keeps the last picture across a restart (spectra/
+    # services/house_restart.py): the resting layer's levels, off fixtures,
+    # rate caps, withheld (lent / off) fixtures and the Hue areas it held
+    # are re-installed BEFORE the stack comes up, so the very first frame
+    # already carries them. A no-op unless a mode is set and SPECTRA owns.
+    from spectra.services import house_restart
+    house_restart.prepare_for_resume()
     # Restart mid-reign: if the ownership record says spectra owns, the
     # live stack reactivates itself through the guarded activation path
     # (grant + readiness gate). Failure stays dark-but-owned and keeps
@@ -230,6 +237,9 @@ async def _standalone_lifespan(app):
     # the room was RELEASED (phase "unavailable") finally lands — the
     # intent was stored, never dropped. No-ops fast when Ambient is off.
     await ambient_music_gate.reconcile_now()
+    # A Hue area that came up frozen for the restart but that nothing holds
+    # any more streams again (one-shot; house_restart.after_resume).
+    await house_restart.after_resume()
     watchdog_task = asyncio.create_task(
         frame_watchdog.run_supervised(), name="spectra-frame-watchdog")
     # Record-vs-reality reconciler (report gate e3, 2026-08-13 two-writers
@@ -309,13 +319,20 @@ async def _standalone_lifespan(app):
     from spectra.services import house
     house_task = asyncio.create_task(
         house.run_supervised(), name="spectra-house-lighting")
+    # Its Home Assistant seam (phase 2, spectra/services/house_fixtures.py):
+    # the TV strip lent to Hyperion, fixtures switched on/off, the owned
+    # WLED brightness, the voice overlay's expiry, the restart snapshot.
+    # Inert unless a mode drives the room.
+    from spectra.services import house_fixtures
+    house_fixtures_task = asyncio.create_task(
+        house_fixtures.run_supervised(), name="spectra-house-fixtures")
     logger.info("SPECTRA started — own process, pid %d", os.getpid())
     yield
     all_tasks = (watchdog_task, reconciler_task, ambient_verify_task,
                 flare_preview_sweep_task, param_watchdog_task,
                 activation_recheck_task, dark_fixture_task,
                 known_buffer_poll_task, known_buffer_sse_task,
-                light_show_task, house_task)
+                light_show_task, house_task, house_fixtures_task)
     for task in all_tasks:
         task.cancel()
     for task in all_tasks:
@@ -330,10 +347,21 @@ async def _standalone_lifespan(app):
     # the next activation, a killed one has to time out first (§4d).
     # No-op while dark. The ownership record is NOT touched — the next
     # start's resume_own_room() re-lights the room she still owns.
+    #
+    # While a HOUSE MODE drives the room the WLEDs are NOT told to let go:
+    # each keeps its last frame for its own realtime timeout and the
+    # restarted stack picks it back up — a deploy must not blink the house
+    # (spectra/services/house_restart.py, fx/VENDOR.md #45). Decided BEFORE
+    # go_dark(), which puts the engine on paper and closes the house gate.
     from spectra.services.live_host import live
     if live.active:
+        hold = house_restart.hold_on_shutdown()
+        if hold:
+            house_restart.maybe_persist(force=True)
+            logger.warning("SPECTRA stopping with a house mode driving the "
+                           "room — holding the last picture on the fixtures")
         engine.go_dark()
-        await live.deactivate()
+        await live.deactivate(hold_last_frame=hold)
     logger.info("SPECTRA shutdown complete.")
 
 

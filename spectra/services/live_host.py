@@ -41,7 +41,7 @@ from typing import Callable, Optional
 
 import requests
 
-from fx import light_ownership
+from fx import device_output, light_ownership
 from fx.audio_ingest import AudioIngestHub, HubMelbankSource, LiveDeviceSource
 from fx.events import Event
 from fx.host import FxHost
@@ -383,11 +383,18 @@ class LiveLights:
                        len(list(host.virtuals.values())),
                        "open" if open_audio else "off")
 
-    async def deactivate(self) -> None:
+    async def deactivate(self, *, hold_last_frame: bool = False) -> None:
         """Tear the stack down in reverse — audio first (stop feeding), then
         the host (joins render threads, deactivates devices: the Hue driver
         releases its DTLS session, DDP senders stop). Safe on partial
-        assembly; idempotent."""
+        assembly; idempotent.
+
+        `hold_last_frame` is ONLY for a planned restart while house lighting
+        drives the room (spectra/app.py's shutdown, house_restart.py): the
+        WLEDs are not told to let go, so they keep their last frame for
+        their own realtime timeout instead of blinking to their underlying
+        preset while the process restarts (fx/VENDOR.md #45). A release, a
+        rollback and every other caller keep the default."""
         if self._pump_task is not None:
             self._pump_task.cancel()
             try:
@@ -407,7 +414,10 @@ class LiveLights:
         self.freshness.marks.clear()
         if self.host is not None:
             host, self.host = self.host, None
-            await host.shutdown()
+            if hold_last_frame:
+                await host.shutdown(release_realtime=False)
+            else:
+                await host.shutdown()
         self.expected_active_ids = set()
         self.scope = None
         self.held_back = []
@@ -564,6 +574,11 @@ class LiveLights:
                 if device is None or not device.is_active():
                     # An inactive device is not being written to at all —
                     # update_pixels() refuses and says so.
+                    continue
+                if device_output.is_withheld(device_id):
+                    # WITHHELD (house lighting: lent to Hyperion, or
+                    # switched off) — no frame leaves for it, so a dark
+                    # reading there is the point, not a fault.
                     continue
                 device_ids.add(device_id)
         return device_ids
@@ -734,7 +749,11 @@ class LiveLights:
         probe_device_live()."""
         if self.host is None:
             return {}
-        device_ids = self.expected_device_ids()
+        # A WITHHELD device (house lighting: lent to Hyperion, or switched
+        # off) is deliberately sent nothing, so `live=false` there is the
+        # point — never an activation gap.
+        device_ids = {d for d in self.expected_device_ids()
+                      if not device_output.is_withheld(d)}
         if not device_ids:
             return {}
 

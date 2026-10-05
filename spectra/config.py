@@ -42,6 +42,11 @@ SHOW_CUES_FILE = SPECTRA_STORAGE / "show_cues.json"
 # as the Light Show's pair.
 HOUSE_MODES_FILE = SPECTRA_STORAGE / "house_modes.json"
 HOUSE_STATE_FILE = SPECTRA_STORAGE / "house_state.json"
+#: what the house layer last put on the fixtures (base levels, caps, withheld
+#: fixtures, Hue areas held) — re-installed BEFORE the stack comes back up
+#: after a restart, so the first frame is already the room's picture
+#: (spectra/services/house_restart.py)
+HOUSE_RESTART_FILE = SPECTRA_STORAGE / "house_restart.json"
 SHOW_LOG_FILE = SPECTRA_STORAGE / "show_log.json"
 FEEDBACK_FILE = SPECTRA_STORAGE / "feedback.json"
 SETTINGS_LOG_FILE = SPECTRA_STORAGE / "settings_log.json"

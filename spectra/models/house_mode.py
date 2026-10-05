@@ -96,13 +96,20 @@ class FixtureHook(BaseModel):
             to effects whose registry tags a motion parameter
             (config/effect_params.json `"motion": true`).
     fps     a frame-rate CAP (only ever lowers a fixture's own rate).
-    off     the fixture shows nothing (Dark on the output layer)."""
+    off     the fixture shows nothing (Dark on the output layer).
+    music_level  percent while the MUSIC SHOW has the room (mode.music
+            "show"), 100 = unchanged. Phase 2: Spectra owns each WLED's
+            master brightness (house_fixtures.py writes 255), so the
+            brightness Home Assistant's music scripts used to write
+            (crystal 11-100%, strips 100%) lives here instead. None = the
+            show runs at the picture's own brightness."""
     model_config = ConfigDict(extra="ignore")
     target: HouseTarget = Field(default_factory=HouseTarget)
     level: Optional[float] = Field(default=None, ge=0.0, le=200.0)
     motion: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     fps: Optional[int] = Field(default=None, ge=1, le=60)
     off: bool = False
+    music_level: Optional[float] = Field(default=None, ge=0.0, le=200.0)
 
 
 class HueLook(BaseModel):
@@ -215,10 +222,95 @@ class HouseMode(BaseModel):
         return bool(low) and any(a.lower() == low for a in self.ha_aliases)
 
 
+#: Serenity's states (assist_satellite): idle is "put the look back".
+VOICE_STATES = ("listening", "processing", "responding")
+VOICE_IDLE = "idle"
+
+#: A media source Home Assistant reports (the Roku, the Switch, the Blu-ray
+#: player — or any other word it sends; the word is kept as given).
+MEDIA_ACTIVE_STATES = ("playing", "paused", "idle")
+MEDIA_STATES = MEDIA_ACTIVE_STATES + ("stopped",)
+
+
+#: Home Assistant's three Serenity colours, read off his own automations
+#: (serenity_listening / _processing / _responding, 2026-10-05): solid,
+#: brightness 100%, on the crystal and both kitchen sconces.
+DEFAULT_VOICE_LOOKS = {
+    "listening": {"color": "#0000ff", "level": 100.0},
+    "processing": {"color": "#26a269", "level": 100.0},
+    "responding": {"color": "#613583", "level": 100.0},
+}
+
+
+class VoiceLook(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    color: str = "#0000ff"
+    #: percent of full, over Spectra's owned master brightness
+    level: float = Field(default=100.0, ge=1.0, le=200.0)
+
+    @field_validator("color")
+    @classmethod
+    def _hex(cls, v: str) -> str:
+        if not _HEX.match(v or ""):
+            raise ValueError("colour must look like #ffaa00")
+        return v.lower()
+
+
+class HouseSettings(BaseModel):
+    """Phase 2's seam settings — HIS data, in the library file, edited only
+    on purpose (PUT /api/house/settings).
+
+    tv_strips        the fixture(s) lent to Hyperion while TV Music is off or
+                     a media source is on (his TV backlight)
+    voice_fixtures   where Serenity's listening/processing/responding colours
+                     show (Home Assistant used the crystal and both sconces)
+    voice_looks      one colour + level per voice state
+    own_brightness   while a mode drives the room, Spectra holds every WLED's
+                     master brightness at `owned_brightness` and its power
+                     switch where the mode says, re-asserting a drift it
+                     reads back (house_fixtures.py). Off = leave both alone.
+    owned_brightness the master brightness Spectra holds (0-255). 255 makes
+                     the per-fixture Levels the only dimmer."""
+    model_config = ConfigDict(extra="ignore")
+    tv_strips: list[str] = Field(default_factory=lambda: ["tv-backlight"])
+    voice_fixtures: list[str] = Field(default_factory=lambda: [
+        "crystal", "sconce-kitchen-left", "sconce-kitchen-right"])
+    voice_looks: dict[str, VoiceLook] = Field(default_factory=lambda: {
+        k: VoiceLook(**v) for k, v in DEFAULT_VOICE_LOOKS.items()})
+    own_brightness: bool = True
+    owned_brightness: int = Field(default=255, ge=1, le=255)
+
+    @field_validator("voice_looks")
+    @classmethod
+    def _states(cls, v: dict) -> dict:
+        bad = [k for k in v if k not in VOICE_STATES]
+        if bad:
+            raise ValueError(f"unknown voice state(s) {bad}; "
+                             f"known: {list(VOICE_STATES)}")
+        out = {k: VoiceLook(**DEFAULT_VOICE_LOOKS[k]) for k in DEFAULT_VOICE_LOOKS}
+        out.update(v)
+        return out
+
+
 class HouseLibrary(BaseModel):
     model_config = ConfigDict(extra="ignore")
     schema_version: int = SCHEMA_VERSION
     modes: list[HouseMode] = Field(default_factory=list)
+    settings: HouseSettings = Field(default_factory=HouseSettings)
+
+
+class FixtureOverride(BaseModel):
+    """What Home Assistant (or he) asked of ONE fixture, on top of the mode.
+
+    power    "off" = the WLED is switched off and gets no stream; "on" or
+             None = the mode decides (streamed, powered on)
+    lent_to  a name ("hyperion") = Spectra stops streaming to it and lets
+             go of it until it is reclaimed; None = not lent"""
+    model_config = ConfigDict(extra="ignore")
+    power: Optional[Literal["on", "off"]] = None
+    lent_to: Optional[str] = None
+    source: str = ""
+    since_ms: Optional[int] = None
 
 
 class HouseState(BaseModel):
@@ -240,3 +332,16 @@ class HouseState(BaseModel):
     #: so a Spectra restart keeps the picture instead of re-rolling it
     scene_id: Optional[str] = None
     color_card_id: Optional[str] = None
+    # ── phase 2: what Home Assistant reports (spectra/services/house.py's
+    #    MEDIA and house_fixtures.py) — facts, recorded whatever the room's
+    #    state, acted on only while a mode drives it ──
+    #: switch.tv_music_lighting as last reported; None = never reported
+    tv_music: Optional[bool] = None
+    tv_music_ms: Optional[int] = None
+    #: the media source on (roku / switch / bluray / ...) and its state;
+    #: None or "stopped" = no media centre
+    media_source: Optional[str] = None
+    media_state: Optional[str] = None
+    media_since_ms: Optional[int] = None
+    #: per-fixture overrides (device id -> FixtureOverride)
+    fixtures: dict[str, FixtureOverride] = Field(default_factory=dict)

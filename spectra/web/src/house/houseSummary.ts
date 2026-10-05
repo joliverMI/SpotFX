@@ -1,7 +1,7 @@
 /** House lighting's words — the Mode chip and the House page's "Now" panel
  * read the SAME sentences from here (no DOM, so
  * scripts/check_house_summary.mjs can drive it directly). */
-import type { HouseMode, LightingStatus } from './types';
+import type { HouseMode, LightingStatus, SeamFixture } from './types';
 
 export function sourceWord(source: string | null | undefined): string {
   switch (source) {
@@ -96,3 +96,59 @@ export const MUSIC_HUE_WORDS: Record<string, string> = {
   join: 'join the show',
   room: 'follow the Hue Hold switch',
 };
+
+/** One line per fixture the seam is doing something to, in plain words —
+ * the House page's Home Assistant card. Only fixtures that differ from
+ * "streamed and on" are named; a fixture held on at the owned brightness is
+ * the normal case and stays quiet. */
+export function fixtureLine(f: SeamFixture): string | null {
+  const name = f.name || f.device;
+  const outcome = f.applied && f.applied.outcome !== 'landed' && f.applied.outcome !== 'sent'
+    && f.applied.outcome !== 'withheld'
+    ? ` — ${f.applied.outcome}${f.applied.detail ? `: ${f.applied.detail}` : ''}` : '';
+  if (f.target === 'lent') return `${name}: lent — ${f.why ?? 'no stream'}${outcome}`;
+  if (f.target === 'off') return `${name}: switched off — no stream${outcome}`;
+  if (f.target === 'on') return outcome ? `${name}: on${outcome}` : null;
+  if (f.override?.power === 'off') return `${name}: switched off (recorded, not acted on)`;
+  if (f.override?.lent_to) return `${name}: lent to ${f.override.lent_to} (recorded, not acted on)`;
+  return null;
+}
+
+/** The Home Assistant card's lines: TV strip, media, voice, and anything
+ * the seam is doing to a fixture. */
+export function seamLines(l: LightingStatus | undefined): string[] {
+  if (!l) return [];
+  const out: string[] = [];
+  if (l.seam_active === false && l.seam_reason) {
+    out.push(`Recorded, not acted on — ${l.seam_reason}.`);
+  }
+  const strip = l.tv_strip;
+  if (strip && strip.devices.length) {
+    out.push(strip.owner === 'spectra'
+      ? `TV strip: Spectra drives it${l.tv_music === true ? ' (TV Music on)' : ''}.`
+      : `TV strip: ${strip.owner} — ${strip.why ?? 'lent'}.`);
+  }
+  const m = l.media;
+  if (m?.active) {
+    out.push(`Media: ${m.source ?? 'a source'} is ${m.state}`
+      + (m.mode ? ` → ${m.mode}.` : ` — no mode answers to ${m.words.map((w) => `"${w}"`).join(' or ')}, so ${l.clock_mode?.name ?? 'the clock\'s mode'} stays.`));
+  }
+  const v = l.voice;
+  if (v && v.state !== 'idle') {
+    out.push(`Voice: ${v.state} on ${v.fixtures.join(', ') || 'nothing'}`
+      + (v.skipped.length ? ` (skipped ${v.skipped.map((s) => `${s.fixture}: ${s.reason}`).join('; ')})` : '') + '.');
+  }
+  for (const f of l.fixtures_seam?.fixtures ?? []) {
+    const line = fixtureLine(f);
+    if (line) out.push(line);
+  }
+  for (const c of l.fixtures_seam?.corrections ?? []) {
+    out.push(`Corrected ${c.device}: found on=${c.found.on} brightness=${c.found.bri} — something else wrote it (${c.outcome}).`);
+  }
+  for (const [d, r] of Object.entries(l.fixtures_seam?.rechecks ?? {})) {
+    if (r.state === 'found') out.push(`Recheck: ${d} answered after ${r.after_s ?? '?'} s${r.moved ? ' (it had moved)' : ''}.`);
+    else if (r.state === 'not_found') out.push(`Recheck: ${d} did not answer — ${r.reason ?? 'no answer'}.`);
+    else if (r.state === 'rechecking') out.push(`Recheck: looking for ${d}…`);
+  }
+  return out;
+}

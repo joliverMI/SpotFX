@@ -1,0 +1,147 @@
+# House lighting ↔ Home Assistant: the seam (phase 2)
+
+The final wire shapes for River's side of the standard-lighting plan
+(`/home/javi/fleet-spotfx/data/standard-lighting-plan/report.md` §5, River's
+asks R1–R17). Phase 1 shipped `POST/PUT/GET /house/mode`; this document is
+everything phase 2 adds. **Nothing here should go live in Home Assistant
+until DJ confirms the matching Spectra build is deployed.**
+
+**Base URL:** `http://192.168.40.145:8010/spectra/api` — Spectra's own port
+(R11), so a SpotFX restart never cuts Home Assistant off. Every route is open
+(no token), JSON in and out, and answers within milliseconds: none of them
+waits on a fixture.
+
+## The one rule
+
+Every report is **recorded** whatever the room is doing (a TV Music report
+while the room is released is still true later) and **acted on only while a
+house mode drives the room**: a mode is set, Spectra holds the room, and
+nothing (a preview, a camera run, a night run) has it on standby. Each
+response says which: `"acting": false` plus a `note`/`reason` when it was
+only recorded. With no modes in the library everything is inert.
+
+## Calls
+
+| Call | Body | Answer | Replaces (R#) |
+|---|---|---|---|
+| `GET /house/heartbeat` | — | `{"state", "lighting_ok", "mode", "clock_mode", "ha_value", "phase", "media", "tv_music", "tv_strip", "voice", "withheld", "owner", "uptime_s", "at_ms"}` | R17's fallback read |
+| `PUT /house/mode` *(phase 1)* | `{"ha_mode": "<lighting_mode>", "source": "ha"}` | `status`: applied / unchanged / held_manual / unmapped | R1 |
+| `PUT /house/tv-music` | `{"on": true \| false}` | `status`: recorded / unchanged; `tv_strip` | R6 |
+| `PUT /house/media` | `{"source": "roku" \| "switch" \| "bluray" \| …, "state": "playing" \| "paused" \| "idle" \| "stopped"}` | `status`: applied / recorded / unchanged; `note` when no mode answers | R7 |
+| `PUT /house/fixture/{id}` | `{"state": "on" \| "off"}` and/or `{"lent_to": "hyperion" \| null}` | `status`: recorded / unchanged; `override`, `applied`, `acting` | R6, R9 |
+| `GET /house/fixtures` | — | every override, what was applied, corrections, rechecks | — |
+| `POST /house/voice` | `{"state": "listening" \| "processing" \| "responding" \| "idle"}` | `status`: painted / cleared / skipped / unchanged | R8 |
+| `POST /house/recheck` | `{"fixtures": ["sconce-kitchen-left", "sconce-kitchen-right"]}` | `status`: rechecking / skipped / nothing_to_recheck | R16 |
+| `GET` / `PUT /house/settings` | partial settings object | the settings | — |
+
+`PUT` and `POST` are the same call on every route above that lists `PUT`
+(fixture, tv-music, media). A bad request is a 4xx naming the field: an
+unknown fixture is 404, an invalid state 422.
+
+### Heartbeat states (R17)
+
+| `state` | meaning | `lighting_ok` |
+|---|---|---|
+| `driving` | a mode drives the room — leave every Spectra fixture alone | true |
+| `standby` | a preview / camera run / night run holds the room for now | true |
+| `idle` | Spectra holds the room but no mode is set | false |
+| `on_paper` | Spectra holds the room with its engine not live (a quiet take) | false |
+| `down` | the record says Spectra owns, but its light stack is not up | false |
+| `released` | nobody drives the room | false |
+| `not_owner` | the older SpotFX process owns, or a handover is in flight | false |
+
+Suggested fallback (River's review, with its hysteresis): apply the old
+time-of-day scenes when the heartbeat is unreachable, or `lighting_ok` is
+false with `state` in `down` / `released` / `not_owner`, for 2 minutes AND
+the WLEDs report `live: false`. Re-assert the mode (R1) when it comes back.
+
+### TV strip (R6)
+
+- `tv-music` OFF lends the TV strip (`settings.tv_strips`, default
+  `["tv-backlight"]`) to Hyperion: Spectra sends it **nothing** (not even
+  black) and posts `{"live": false}` once. The sconces on the same effect keep
+  going. A media source on (`state` playing / paused / idle) lends it too.
+- It comes back when TV Music is ON **and** no media source is on: Spectra
+  writes `{"on": true, "bri": 255}` first, then streams.
+- Recommended HA order: TV Music ON → call `tv-music {"on": true}`; TV Music
+  OFF → call it with `false`. The data-line switch is physical either way;
+  the call is what stops Spectra streaming to a strip nobody sees.
+
+### Media / TV mode (R7)
+
+- `playing` selects the mode answering to `"TV (<source>)"`, else `"TV"`.
+  `paused` / `idle` select the one answering to `"TV paused (<source>)"`,
+  else `"TV paused"`. `stopped` returns to the clock's mode.
+- It is an overlay: the clock's word (R1) keeps being recorded underneath, so
+  a clock change during a film shows when the film ends.
+- A media word no mode answers to changes nothing about the mode (the strip
+  is still lent). With no clock mode set, media never switches the house on.
+- Switch and Blu-ray need new HA triggers (River's media-lights list); the
+  call shape is the same for every source.
+
+### Buttons (R9)
+
+- `PUT /house/fixture/crystal {"state": "off"}` → no stream, `{"live":
+  false}`, then `{"on": false}` (confirmed by read-back). `"on"` → `{"on":
+  true, "bri": 255}` first, then the stream. `"state": null` hands the
+  fixture back to the mode.
+- Only a WLED can be switched off here; a Hue area answers 422 (its look is
+  the mode's `hue` setting). A single bulb (Kitchen Infuse) is not
+  addressable here yet — named, not built.
+- Fixture ids: `crystal`, `tv-backlight`, `porch-rail`, `dining-table`,
+  `sconce-kitchen-left`, `sconce-kitchen-right`, `hue-lights`, `dining-hues`
+  (a fixture's name, e.g. `"Porch Rail"`, works too).
+
+### Brightness (R4)
+
+While a mode drives the room Spectra **owns every streamed WLED's master
+brightness**: it writes `bri: 255` and `on: true`, and re-reads each fixture
+every minute — a drift (an HA brightness write, a rebooted sconce) is put
+back and listed as a correction in `GET /house/fixtures`. Every HA brightness
+write to these fixtures can go (R4). The mode's per-fixture `level` dims the
+rest; the music show's brightness is each fixture's `music_level`.
+`PUT /house/settings {"own_brightness": false}` turns ownership off.
+
+### Voice (R8)
+
+- `POST /house/voice` paints the crystal and both sconces
+  (`settings.voice_fixtures`) in HA's own colours — listening `#0000ff`,
+  processing `#26a269`, responding `#613583`, all at 100% — and `idle` fades
+  back over 1 s to what each fixture should show now.
+- **Never waits**: the route does no I/O. Call it with a short timeout
+  (e.g. 2 s) and `continue_on_error`; a missed call is a missed colour.
+- Skipped per fixture when the Light Show holds it, it is lent or off, or the
+  room is on standby; skipped entirely with no mode. A colour nobody cleared
+  lets go after 120 s.
+
+### Sconce mains (R16)
+
+After HA switches `light.dimmer_kitchen_sconce` ON, call
+`POST /house/recheck {"fixtures": ["sconce-kitchen-left",
+"sconce-kitchen-right"]}`. Spectra re-finds them by hardware identity (a mains
+cycle can change the DHCP address), re-inits a driver that never resolved,
+and re-applies their power and brightness the moment they answer — looking
+for up to 45 s. It returns at once; progress is in `GET /house/fixtures`
+`rechecks`.
+
+### Restarts
+
+While a mode drives the room a Spectra restart keeps the last picture: WLEDs
+are not told to let go, the first frame after the restart carries the mode's
+levels, and held Hue areas stay held. The sconces' own realtime timeout is
+2.5 s; `scripts/set_wled_realtime_timeout.py --apply` raises it to 50 s
+(an operator step on the fixtures, not run by Spectra).
+
+## Settings (`GET/PUT /house/settings`)
+
+```json
+{"tv_strips": ["tv-backlight"],
+ "voice_fixtures": ["crystal", "sconce-kitchen-left", "sconce-kitchen-right"],
+ "voice_looks": {"listening": {"color": "#0000ff", "level": 100},
+                 "processing": {"color": "#26a269", "level": 100},
+                 "responding": {"color": "#613583", "level": 100}},
+ "own_brightness": true, "owned_brightness": 255}
+```
+
+A partial `PUT` keeps everything it does not name (one voice state's colour
+can be changed alone).

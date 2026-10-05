@@ -1,0 +1,458 @@
+"""HOUSE LIGHTING phase 2 — the fixtures half of the Home Assistant seam
+(spectra/services/house_fixtures.py). The proofs, in the module's order:
+
+  1. INERT: no mode, the room released, or standby → nothing withheld and
+     no WLED written; a request is still RECORDED.
+  2. BRIGHTNESS: a mode drives the room → every in-scope WLED is held on at
+     the owned brightness (confirmed by read-back); Hue and dummies are
+     never written; a drift read back later is re-asserted and NAMED; an
+     unreadable fixture is left alone.
+  3. LEND: TV Music off / a media source on → the TV strip is withheld and
+     told {"live": false}; the sconces on the same virtual are untouched;
+     return → power-on write FIRST, stream after.
+  4. ON / OFF: off = withheld, then {"live": false}, then {"on": false};
+     on = {"on": true, "bri": 255} while still withheld, stream after.
+  5. SCOPE (PR 317): a fixture outside the take is recorded, never written.
+  6. HAND-BACK: a fixture this process switched off is switched back on
+     when the mode is cleared while SPECTRA still holds the room.
+  7. RECHECK: re-find, re-init, re-apply power/brightness when it answers;
+     unknown / outside-the-take named; not acted on when the room is not
+     SPECTRA's.
+
+No network: the WLED transport, the host, relocation and the probe are
+fakes behind house_fixtures.deps.
+"""
+from __future__ import annotations
+
+import asyncio
+
+import pytest
+
+from spectra.models.house_mode import HouseMode
+
+
+class FakeDev:
+    def __init__(self, did, name, kind="wled"):
+        self.id = did
+        self.name = name
+        self.type = kind
+        self.wled = object() if kind == "wled" else None
+        self._destination = "10.0.0.1" if kind == "wled" else None
+        self.frozen = False
+
+
+class FakeHost:
+    def __init__(self, scope=None):
+        self.devices = {
+            "crystal": FakeDev("crystal", "Crystal"),
+            "tv-backlight": FakeDev("tv-backlight", "TV Mapper"),
+            "sconce-kitchen-left": FakeDev("sconce-kitchen-left", "Sconce, Kitchen, Left"),
+            "sconce-kitchen-right": FakeDev("sconce-kitchen-right", "Sconce, Kitchen, Right"),
+            "porch-rail": FakeDev("porch-rail", "Porch Rail"),
+            "hue-lights": FakeDev("hue-lights", "Hue Lights", kind="hue"),
+            "radial-dummy": FakeDev("radial-dummy", "Radial Dummy", kind="dummy"),
+            "gap-matrix": FakeDev("gap-matrix", "gap", kind="dummy"),
+        }
+        self.virtuals = {}
+        self._scope = scope
+
+    def scope_device_ids(self):
+        return self._scope
+
+
+class Clock:
+    def __init__(self):
+        self.now = 1000.0
+
+    def __call__(self):
+        return self.now
+
+
+class World:
+    pass
+
+
+@pytest.fixture
+def seam(monkeypatch):
+    from spectra.services import house, house_fixtures, house_store, show_output
+    w = World()
+    w.host = FakeHost()
+    w.clock = Clock()
+    w.gate = [(None, None)]
+    w.refusal = [None]
+    w.posts: list = []
+    w.state = {d: {"on": True, "bri": 34, "live": True} for d in w.host.devices}
+    w.gates: dict = {}            # did -> asyncio.Event blocking its posts
+    w.unreadable: set = set()
+
+    monkeypatch.setattr(house, "gate", lambda: w.gate[0])
+
+    async def no_house_tick():
+        return None
+    # The resting layer itself is test_house_lighting.py's business; here
+    # set_media must only move the facts the seam reads.
+    monkeypatch.setattr(house, "tick", no_house_tick)
+    monkeypatch.setattr(show_output, "ownership_refusal", lambda: w.refusal[0])
+    monkeypatch.setattr(show_output, "_host", lambda: w.host)
+
+    async def post(dev, payload):
+        ev = w.gates.get(dev.id)
+        if ev is not None:
+            await ev.wait()
+        w.posts.append((dev.id, dict(payload)))
+        st = w.state[dev.id]
+        for k in ("on", "bri", "live"):
+            if k in payload:
+                st[k] = payload[k]
+
+    async def get_state(dev):
+        if dev.id in w.unreadable:
+            raise TimeoutError("no answer")
+        return dict(w.state[dev.id])
+
+    async def no_sleep(_s):
+        await asyncio.sleep(0)
+
+    w.reach = {"ok": True, "after": 0, "calls": 0}
+
+    async def reachable(did):
+        w.reach["calls"] += 1
+        if w.reach["calls"] > w.reach["after"]:
+            return True, ""
+        return False, "no answer"
+
+    w.relocated: list = []
+    w.reinited: list = []
+
+    async def relocate(dev, host):
+        w.relocated.append(dev.id)
+        return False
+
+    async def reinit(dev):
+        w.reinited.append(dev.id)
+        return True
+
+    async def report_refresh():
+        return None
+
+    house_fixtures.deps = house_fixtures.Deps(
+        post=post, get_state=get_state, host=lambda: w.host,
+        relocate=relocate, reinit=reinit, reachable=reachable,
+        report_refresh=report_refresh, clock=w.clock, sleep=no_sleep)
+    w.hf, w.house, w.store = house_fixtures, house, house_store
+
+    def set_mode(name="Standard"):
+        mode = house_store.put_mode(HouseMode(name=name))
+        st = house_store.state()
+        st.mode_id = mode.id
+        house_store.save_state()
+        return mode
+    w.set_mode = set_mode
+    return w
+
+
+async def _settle(hf, passes=2):
+    """A supervisor pass, then every write it started, then a pass to push
+    what they changed."""
+    for _ in range(passes):
+        await hf.tick()
+        while hf._rt.inflight:
+            tasks = [t for _, t in list(hf._rt.inflight.values())]
+            await asyncio.gather(*tasks, return_exceptions=True)
+    await hf.tick()
+
+
+def _run(coro):
+    return asyncio.run(coro)
+
+
+WLEDS = {"crystal", "tv-backlight", "sconce-kitchen-left",
+         "sconce-kitchen-right", "porch-rail"}
+
+
+# ═══ 1. inert ═══════════════════════════════════════════════════════════════
+
+def test_with_no_mode_nothing_is_withheld_or_written(seam):
+    from fx import device_output
+    seam.hf.set_tv_music(False)
+    seam.hf.set_fixture("crystal", power="off")
+    _run(_settle(seam.hf))
+    assert seam.posts == []
+    assert device_output.withheld() == {}
+    # …but both facts are recorded for when a mode drives the room
+    st = seam.store.state()
+    assert st.tv_music is False and st.fixtures["crystal"].power == "off"
+
+
+def test_a_released_room_is_never_written(seam):
+    from fx import device_output
+    seam.set_mode()
+    seam.refusal[0] = "the room is released"
+    seam.hf.set_fixture("crystal", power="off")
+    _run(_settle(seam.hf))
+    assert seam.posts == []
+    assert device_output.withheld() == {}
+
+
+def test_standby_changes_nothing(seam):
+    from fx import device_output
+    seam.set_mode()
+    _run(_settle(seam.hf))
+    seam.posts.clear()
+    seam.gate[0] = ("standby", "a camera run is measuring the room")
+    seam.hf.set_tv_music(False)
+    _run(_settle(seam.hf))
+    assert seam.posts == []
+    assert "tv-backlight" not in device_output.withheld()
+
+
+# ═══ 2. brightness ══════════════════════════════════════════════════════════
+
+def test_a_mode_holds_every_in_scope_wled_on_at_the_owned_brightness(seam):
+    seam.set_mode()
+    _run(_settle(seam.hf))
+    written = {did for did, p in seam.posts}
+    assert written == WLEDS, "Hue / dummies must never be written"
+    for did, payload in seam.posts:
+        assert payload == {"on": True, "bri": 255}
+    for did in WLEDS:
+        assert seam.state[did]["bri"] == 255
+        assert seam.hf._rt.applied[did].outcome == "landed"
+
+
+def test_own_brightness_off_writes_nothing(seam):
+    from spectra.models.house_mode import HouseSettings
+    seam.store.put_settings(HouseSettings(own_brightness=False))
+    seam.set_mode()
+    _run(_settle(seam.hf))
+    assert seam.posts == []
+
+
+def test_a_drift_is_re_asserted_and_named(seam):
+    seam.set_mode()
+    _run(_settle(seam.hf))
+    seam.posts.clear()
+    seam.state["crystal"]["bri"] = 34          # Home Assistant wrote it
+    seam.clock.now += seam.hf.DRIFT_CHECK_S + 1
+    _run(_settle(seam.hf))
+    assert ("crystal", {"on": True, "bri": 255}) in seam.posts
+    corr = seam.hf.status()["corrections"]
+    assert any(c["device"] == "crystal" and c["found"]["bri"] == 34 for c in corr)
+    # the fixtures that had not drifted were read, not written
+    assert {d for d, _ in seam.posts} == {"crystal"}
+
+
+def test_an_unreadable_fixture_is_left_alone_on_a_drift_check(seam):
+    seam.set_mode()
+    _run(_settle(seam.hf))
+    seam.posts.clear()
+    seam.unreadable.add("tv-backlight")
+    seam.state["tv-backlight"]["bri"] = 10
+    seam.clock.now += seam.hf.DRIFT_CHECK_S + 1
+    _run(_settle(seam.hf))
+    assert all(d != "tv-backlight" for d, _ in seam.posts)
+
+
+# ═══ 3. lend ════════════════════════════════════════════════════════════════
+
+def test_tv_music_off_lends_the_strip_and_leaves_the_sconces(seam):
+    from fx import device_output
+    seam.set_mode()
+    _run(_settle(seam.hf))
+    seam.posts.clear()
+    seam.hf.set_tv_music(False)
+    _run(_settle(seam.hf))
+    assert set(device_output.withheld()) == {"tv-backlight"}
+    assert seam.posts == [("tv-backlight", {"live": False})]
+    assert seam.hf.tv_strip_status()["owner"] == "hyperion"
+
+
+def test_reclaim_powers_on_first_and_streams_after(seam):
+    from fx import device_output
+
+    async def scenario():
+        seam.set_mode()
+        await _settle(seam.hf)
+        seam.hf.set_tv_music(False)
+        await _settle(seam.hf)
+        seam.posts.clear()
+        gate = asyncio.Event()
+        seam.gates["tv-backlight"] = gate
+        seam.hf.set_tv_music(True)
+        await seam.hf.tick()
+        await asyncio.sleep(0)
+        # the power-on write is in flight: the strip is STILL withheld
+        assert "tv-backlight" in device_output.withheld()
+        gate.set()
+        await _settle(seam.hf)
+        assert "tv-backlight" not in device_output.withheld()
+        assert seam.posts[0] == ("tv-backlight", {"on": True, "bri": 255})
+    _run(scenario())
+    assert seam.hf.tv_strip_status()["owner"] == "spectra"
+
+
+def test_a_media_source_lends_the_strip_until_it_stops(seam):
+    from fx import device_output
+
+    async def scenario():
+        seam.set_mode()
+        await _settle(seam.hf)
+        await seam.house.set_media(source="roku", state="playing")
+        await _settle(seam.hf)
+        assert "tv-backlight" in device_output.withheld()
+        assert "Roku" in seam.hf.tv_strip_status()["why"] \
+            or "roku" in seam.hf.tv_strip_status()["why"]
+        await seam.house.set_media(source="roku", state="stopped")
+        await _settle(seam.hf)
+        assert "tv-backlight" not in device_output.withheld()
+    _run(scenario())
+
+
+def test_an_explicit_lend_is_honoured_and_given_back(seam):
+    from fx import device_output
+    seam.set_mode()
+    res = seam.hf.set_fixture("tv-backlight", lent_to="hyperion")
+    assert res["status"] == "recorded"
+    _run(_settle(seam.hf))
+    assert "tv-backlight" in device_output.withheld()
+    seam.hf.set_fixture("tv-backlight", lent_to=None)
+    _run(_settle(seam.hf))
+    assert "tv-backlight" not in device_output.withheld()
+
+
+# ═══ 4. on / off ════════════════════════════════════════════════════════════
+
+def test_off_withholds_then_leaves_realtime_then_powers_down(seam):
+    from fx import device_output
+    seam.set_mode()
+    _run(_settle(seam.hf))
+    seam.posts.clear()
+    seam.hf.set_fixture("Crystal", power="off")      # by NAME
+    _run(_settle(seam.hf))
+    assert device_output.withheld().get("crystal") == "switched off"
+    assert [p for d, p in seam.posts if d == "crystal"] == [
+        {"live": False}, {"on": False}]
+    assert seam.state["crystal"]["on"] is False
+    assert seam.hf._rt.applied["crystal"].outcome == "landed"
+
+
+def test_on_writes_power_and_brightness_before_the_stream(seam):
+    from fx import device_output
+
+    async def scenario():
+        seam.set_mode()
+        seam.hf.set_fixture("crystal", power="off")
+        await _settle(seam.hf)
+        seam.posts.clear()
+        gate = asyncio.Event()
+        seam.gates["crystal"] = gate
+        seam.hf.set_fixture("crystal", power="on")
+        await seam.hf.tick()
+        await asyncio.sleep(0)
+        assert "crystal" in device_output.withheld()
+        gate.set()
+        await _settle(seam.hf)
+        assert "crystal" not in device_output.withheld()
+        assert seam.posts == [("crystal", {"on": True, "bri": 255})]
+    _run(scenario())
+
+
+def test_a_hue_area_cannot_be_switched_off_here(seam):
+    res = seam.hf.set_fixture("hue-lights", power="off")
+    assert res["status"] == "invalid"
+    res = seam.hf.set_fixture("nope", power="off")
+    assert res["status"] == "unknown_fixture"
+
+
+def test_a_name_naming_two_fixtures_is_refused(seam):
+    seam.host.devices["porch-rail"].name = "Crystal"
+    dev, why = seam.hf.resolve_fixture("crystal ")
+    assert dev is not None and dev["id"] == "crystal"      # the id wins
+    dev, why = seam.hf.resolve_fixture("CRYSTAL")
+    assert dev is None and "2 fixtures" in why
+
+
+# ═══ 5. scope ═══════════════════════════════════════════════════════════════
+
+def test_a_fixture_outside_the_take_is_never_written(seam):
+    from fx import device_output
+    seam.host._scope = {"tv-backlight", "sconce-kitchen-left", "sconce-kitchen-right"}
+    seam.set_mode()
+    seam.hf.set_fixture("crystal", power="off")
+    _run(_settle(seam.hf))
+    written = {d for d, _ in seam.posts}
+    assert "crystal" not in written and "porch-rail" not in written
+    assert "crystal" not in device_output.withheld()
+    assert written == {"tv-backlight", "sconce-kitchen-left", "sconce-kitchen-right"}
+
+
+# ═══ 6. hand-back ═══════════════════════════════════════════════════════════
+
+def test_clearing_the_mode_switches_back_on_what_we_switched_off(seam):
+    from fx import device_output
+    seam.set_mode()
+    seam.hf.set_fixture("crystal", power="off")
+    _run(_settle(seam.hf))
+    seam.posts.clear()
+    st = seam.store.state()
+    st.mode_id = None
+    seam.store.save_state()
+    _run(_settle(seam.hf))
+    assert seam.posts == [("crystal", {"on": True})]
+    assert device_output.withheld() == {}
+    assert "crystal" not in seam.hf._rt.applied
+
+
+# ═══ 7. recheck ═════════════════════════════════════════════════════════════
+
+def test_recheck_refinds_and_reapplies_when_the_sconce_answers(seam):
+    async def scenario():
+        seam.set_mode()
+        await _settle(seam.hf)
+        seam.posts.clear()
+        seam.state["sconce-kitchen-left"].update({"on": True, "bri": 128})
+        seam.reach["after"] = 2          # boots on the third ask
+        res = seam.hf.recheck(["sconce-kitchen-left", "Sconce, Kitchen, Right",
+                               "nope"])
+        assert res["status"] == "rechecking"
+        assert res["fixtures"] == ["sconce-kitchen-left", "sconce-kitchen-right"]
+        assert res["unknown"][0]["fixture"] == "nope"
+        while seam.hf._rt.recheck_tasks:
+            await asyncio.gather(*seam.hf._rt.recheck_tasks.values())
+        await _settle(seam.hf)
+        return res
+    _run(scenario())
+    rc = seam.hf.status()["rechecks"]
+    assert rc["sconce-kitchen-left"]["state"] == "found"
+    assert "sconce-kitchen-left" in seam.relocated
+    # its boot-preset brightness was put back to the owned one
+    assert ("sconce-kitchen-left", {"on": True, "bri": 255}) in seam.posts
+    assert seam.state["sconce-kitchen-left"]["bri"] == 255
+
+
+def test_recheck_gives_up_after_its_window(seam):
+    async def scenario():
+        seam.set_mode()
+        seam.reach["after"] = 10 ** 6
+        seam.hf.recheck(["porch-rail"])
+        task = seam.hf._rt.recheck_tasks["porch-rail"]
+        # let it try a couple of times, then move the clock past the window
+        for _ in range(5):
+            await asyncio.sleep(0)
+        seam.clock.now += seam.hf.RECHECK_WINDOW_S + 1
+        await task
+    _run(scenario())
+    assert seam.hf.status()["rechecks"]["porch-rail"]["state"] == "not_found"
+
+
+def test_recheck_outside_the_take_and_room_not_ours(seam):
+    async def scenario():
+        seam.host._scope = {"tv-backlight"}
+        res = seam.hf.recheck(["sconce-kitchen-left"])
+        assert res["outside_take"] == ["sconce-kitchen-left"]
+        assert res["status"] == "nothing_to_recheck"
+        seam.refusal[0] = "the room is released"
+        res = seam.hf.recheck(["tv-backlight"])
+        assert res["status"] == "skipped"
+    _run(scenario())
+    assert seam.reach["calls"] == 0

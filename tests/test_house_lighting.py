@@ -645,3 +645,127 @@ def test_music_hue_room_hands_hue_back_to_the_toggle_during_music(world):
     _run(world.house.set_mode(mode="Standard", source="spectra"))
     world.state["playing"] = True
     assert world.house.hue_directive() is None
+
+
+# ═══ 9. phase 2: music_level — the music show's brightness ══════════════════
+
+def test_hand_in_pushes_the_music_levels_and_hand_out_the_resting_ones(world):
+    """Spectra owns each WLED's master brightness in phase 2, so the music
+    brightness Home Assistant's scripts used to write lives in music_level."""
+    from spectra.services import show_output
+    _mode(world, "Standard",
+          fixtures=[FixtureHook(target=HouseTarget(kind="category", id="Matrix"),
+                                level=6, music_level=40),
+                    FixtureHook(target=HouseTarget(kind="fixture", id="dev-tv"),
+                                level=30)],
+          transitions={"music_debounce_s": 0, "music_return_glide_s": 1})
+    _run(world.house.set_mode(mode="Standard", source="spectra"))
+    assert show_output.base_snapshot()["levels"] == {"dev-crystal": 0.06,
+                                                    "dev-tv": 0.30}
+    world.state["playing"] = True
+    _run(world.house.tick())
+    # music: the crystal at its music level, the TV strip at the picture's own
+    assert show_output.base_snapshot()["levels"] == {"dev-crystal": 0.40}
+    world.state["playing"] = False
+    _run(world.house.tick())
+    _run(world.house.tick())
+    assert world.house.status_dict()["phase"] == "resting"
+    assert show_output.base_snapshot()["levels"] == {"dev-crystal": 0.06,
+                                                    "dev-tv": 0.30}
+
+
+def test_a_mode_change_during_music_moves_the_music_levels(world):
+    from spectra.services import show_output
+    matrix = HouseTarget(kind="category", id="Matrix")
+    _mode(world, "Standard", fixtures=[FixtureHook(target=matrix, music_level=80)])
+    _mode(world, "Evening", ha_aliases=["Evening"],
+          fixtures=[FixtureHook(target=matrix, music_level=30)])
+    _run(world.house.set_mode(mode="Standard", source="spectra"))
+    world.state["playing"] = True
+    _run(world.house.tick())
+    assert show_output.base_snapshot()["levels"] == {"dev-crystal": 0.80}
+    _run(world.house.set_mode(ha_mode="Evening", source="ha"))
+    assert world.house.status_dict()["phase"] == "music"
+    assert show_output.base_snapshot()["levels"] == {"dev-crystal": 0.30}
+
+
+# ═══ 10. phase 2: the media centre selects the TV mode ══════════════════════
+
+def test_a_playing_source_selects_the_tv_mode_and_stopping_returns(world):
+    from spectra.services import house_store
+    std = _mode(world, "Standard")
+    tv = _mode(world, "TV", ha_aliases=["TV"], music="ignore",
+               transitions={"button_glide_s": 2})
+    paused = _mode(world, "TV paused", ha_aliases=["TV paused"])
+    _run(world.house.set_mode(ha_mode="Daytime", source="ha"))
+    res = _run(world.house.set_media(source="roku", state="playing"))
+    assert res["status"] == "applied"
+    assert world.house.current_mode().id == tv.id
+    st = house_store.state()
+    assert st.mode_id == std.id, "the clock's pick stays underneath"
+    assert st.glide_s == 2, "a media change glides like a press"
+    lighting = world.house.status_dict()
+    assert lighting["mode"]["name"] == "TV"
+    assert lighting["clock_mode"]["name"] == "Standard"
+    assert lighting["media"]["active"] and lighting["media"]["source"] == "roku"
+    res = _run(world.house.set_media(source="roku", state="paused"))
+    assert world.house.current_mode().id == paused.id
+    res = _run(world.house.set_media(source="roku", state="stopped"))
+    assert res["status"] == "applied"
+    assert world.house.current_mode().id == std.id
+
+
+def test_a_clock_change_during_a_film_shows_after_it(world):
+    from spectra.services import house_store
+    _mode(world, "Standard")
+    eve = _mode(world, "Evening", ha_aliases=["Evening"])
+    tv = _mode(world, "TV", ha_aliases=["TV"])
+    _run(world.house.set_mode(ha_mode="Daytime", source="ha"))
+    _run(world.house.set_media(source="bluray", state="playing"))
+    res = _run(world.house.set_mode(ha_mode="Evening", source="ha"))
+    assert res["status"] == "applied"
+    assert house_store.state().mode_id == eve.id
+    assert world.house.current_mode().id == tv.id, "the film keeps the room"
+    _run(world.house.set_media(source="bluray", state="stopped"))
+    assert world.house.current_mode().id == eve.id
+
+
+def test_a_source_specific_mode_wins_over_the_plain_one(world):
+    _mode(world, "Standard")
+    _mode(world, "TV", ha_aliases=["TV"])
+    game = _mode(world, "Gaming", ha_aliases=["TV (switch)"])
+    _run(world.house.set_mode(ha_mode="Daytime", source="ha"))
+    _run(world.house.set_media(source="Switch", state="playing"))
+    assert world.house.current_mode().id == game.id
+
+
+def test_a_media_word_no_mode_answers_to_changes_nothing_but_is_recorded(world):
+    from spectra.services import house_store
+    std = _mode(world, "Standard")
+    _run(world.house.set_mode(ha_mode="Daytime", source="ha"))
+    res = _run(world.house.set_media(source="roku", state="playing"))
+    assert res["status"] == "recorded" and "no house mode answers" in res["note"]
+    assert world.house.current_mode().id == std.id
+    assert house_store.state().media_state == "playing"
+
+
+def test_media_never_switches_the_house_on_by_itself(world):
+    _mode(world, "TV", ha_aliases=["TV"])
+    res = _run(world.house.set_media(source="roku", state="playing"))
+    assert res["status"] == "recorded"
+    assert world.house.current_mode() is None, \
+        "no clock mode set: the house is off and a film does not turn it on"
+
+
+def test_an_invalid_media_state_is_refused(world):
+    res = _run(world.house.set_media(source="roku", state="rewinding"))
+    assert res["status"] == "invalid"
+
+
+def test_repeating_a_media_report_is_a_no_op(world):
+    _mode(world, "Standard")
+    _mode(world, "TV", ha_aliases=["TV"])
+    _run(world.house.set_mode(ha_mode="Daytime", source="ha"))
+    _run(world.house.set_media(source="roku", state="playing"))
+    res = _run(world.house.set_media(source="roku", state="playing"))
+    assert res["status"] == "unchanged"

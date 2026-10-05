@@ -298,13 +298,27 @@ def _isolated_house(tmp_path, monkeypatch):
     from spectra.services import house, house_store
     monkeypatch.setattr(scfg, "HOUSE_MODES_FILE", tmp_path / "house_modes.json")
     monkeypatch.setattr(scfg, "HOUSE_STATE_FILE", tmp_path / "house_state.json")
+    monkeypatch.setattr(scfg, "HOUSE_RESTART_FILE", tmp_path / "house_restart.json")
+    from spectra.services import house_fixtures, house_restart, house_voice
+    from fx import device_output
+    from fx import hue_freeze
     house_store.reset_memory()
     house.reset()
+    house_fixtures.reset()
+    house_voice.reset()
+    house_restart.reset()
     device_rate.clear()
+    device_output.clear_withheld()
+    hue_freeze.clear()
     yield
     house_store.reset_memory()
     house.reset()
+    house_fixtures.reset()
+    house_voice.reset()
+    house_restart.reset()
     device_rate.clear()
+    device_output.clear_withheld()
+    hue_freeze.clear()
 
 
 @pytest.fixture(autouse=True)

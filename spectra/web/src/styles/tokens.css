@@ -1658,6 +1658,9 @@ button.big { padding: 16px 18px; font-size: 1.05em; min-height: 52px; border-rad
 .house-phase-music { border-color: var(--accent2); }
 .house-phase-standby, .house-phase-inactive { border-color: var(--border); }
 .house-problem { color: var(--warning); }
+.house-seam { margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--border, rgba(255,255,255,0.08)); min-width: 0; }
+.house-seam ul { margin: 4px 0 0; padding-left: 18px; }
+.house-seam li { margin: 2px 0; overflow-wrap: anywhere; }
 .house-layout { display: grid; grid-template-columns: minmax(0, 260px) minmax(0, 1fr); gap: 12px; align-items: start; }
 .house-modes ul { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .house-modes li { display: flex; gap: 4px; min-width: 0; }

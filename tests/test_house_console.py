@@ -90,6 +90,19 @@ def test_make_evenings_crystal_ten_percent_is_one_upserted_call(lib):
     assert res["status"] == "applied" and house_store.find_mode("Evening").fixtures == []
 
 
+def test_the_music_level_is_one_more_field_of_the_same_setting(lib):
+    """Phase 2: Spectra owns the WLEDs' own brightness, so 'the crystal at
+    40% during music in Evening' is music_level on the same fixture row."""
+    from spectra.services import house_store
+    _op(lib, "set_house_fixture", mode="Evening", target_kind="category",
+        target_name="Matrix", level=13)
+    res = _op(lib, "set_house_fixture", mode="Evening", target_kind="category",
+              target_name="Matrix", music_level=40)
+    assert res["status"] == "applied" and "music_level 40" in res["summary"]
+    hooks = house_store.find_mode("Evening").fixtures
+    assert len(hooks) == 1 and (hooks[0].level, hooks[0].music_level) == (13, 40)
+
+
 def test_an_unknown_category_and_an_unchecked_fixture_are_rejected(lib):
     res = _op(lib, "set_house_fixture", mode="Evening", target_kind="category",
               target_name="Matrx", level=10)

@@ -47,6 +47,18 @@ capture or night run holds the room, because a fixture the show holds dark
 would otherwise make a mapping run record it as unseen. Lifting it resumes
 exactly where the targets say.
 
+WITHHELD — NO STREAM AT ALL (house lighting phase 2, `fx/VENDOR.md` #44).
+Dark still SENDS black frames: the fixture is driven, just at zero. A fixture
+LENT to another controller (his TV strip, while Hyperion drives it) or
+switched OFF must get NO packets, or Spectra keeps a WLED in realtime mode
+for a strip nobody can see and keeps the network busy for it. `set_withheld`
+names such devices; `Device.update_pixels` asks `is_withheld()` and skips the
+flush entirely — no transport write, no DeviceUpdateEvent. The show keeps
+rendering the virtual (a sibling fixture on it is untouched), so picking the
+fixture back up lands in step. Suspension applies here too: while a preview,
+camera run or night run holds the room nothing is withheld, because a capture
+must see every fixture it drives. Idle cost: one truthiness check.
+
 `fx/` may not import `spectra/`: SPECTRA pushes, this module never pulls
 (the shape of fx/device_timing.py).
 """
@@ -75,6 +87,9 @@ _runtime: dict[str, "_Runtime"] = {}
 _suspended = False
 _clock: Callable[[], float] = time.monotonic
 _scale_provider: Optional[Callable[[str], float]] = None
+#: device id -> why it gets no stream ("lent:hyperion", "off"). Replaced
+#: wholesale by set_withheld (copy-on-write, like _targets).
+_withheld: dict[str, str] = {}
 
 
 @dataclass(frozen=True)
@@ -267,6 +282,38 @@ def prune() -> list[str]:
     for d in gone:
         clear(d)
     return gone
+
+
+# ── withheld: no stream at all ──────────────────────────────────────────────
+
+def set_withheld(mapping: Optional[dict]) -> dict[str, str]:
+    """Replace the withheld set WHOLESALE (device id -> reason). Returns what
+    is now in force. Cheap and idempotent — the house layer pushes its whole
+    answer on every pass."""
+    global _withheld
+    new = {str(d): str(r or "withheld") for d, r in (mapping or {}).items()}
+    with _lock:
+        _withheld = new
+    return dict(new)
+
+
+def clear_withheld() -> None:
+    set_withheld({})
+
+
+def withheld() -> dict[str, str]:
+    """Every device named withheld, suspension or not (status surfaces)."""
+    return dict(_withheld)
+
+
+def is_withheld(device_id: str) -> bool:
+    """Does this device get NO frame right now? Runs on render threads: one
+    truthiness check when nothing is withheld (the shipped state). False
+    while suspended — a capture must see every fixture it drives."""
+    w = _withheld
+    if not w or _suspended:
+        return False
+    return device_id in w
 
 
 def snapshot() -> dict[str, dict]:

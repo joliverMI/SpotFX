@@ -145,6 +145,15 @@ def delete_mode(mode_id: str) -> bool:
         return True
 
 
+def put_settings(settings) -> "object":
+    """Replace the seam's settings (phase 2) in his library file."""
+    with _lock:
+        lib = load_library()
+        lib.settings = settings
+        save_library(lib)
+        return lib.settings
+
+
 # ── runtime state ──────────────────────────────────────────────────────────
 
 def state() -> HouseState:

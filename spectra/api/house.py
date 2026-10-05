@@ -14,6 +14,25 @@ statement for what a mode does; spectra/models/house_mode.py for its shape).
                                    or clear: {"clear": true}
   GET    /api/house/targets        fixtures, categories, Hue areas
 
+PHASE 2 — the rest of the Home Assistant seam (docs/HOUSE_HA_SEAM.md has
+every shape with examples; each call is RECORDED whatever the room's state
+and ACTED ON only while a mode drives the room):
+
+  GET    /api/house/heartbeat      one-word state for HA's fallback
+  PUT    /api/house/fixture/{id}   {"state": "on"|"off"} and/or
+  POST                             {"lent_to": "hyperion"|null}
+  GET    /api/house/fixtures       every override and what was applied
+  PUT    /api/house/tv-music       {"on": true|false} — OFF lends the TV strip
+  POST                             to Hyperion, ON takes it back
+  PUT    /api/house/media          {"source": "roku", "state": "playing" |
+  POST                             "paused" | "idle" | "stopped"} — drives
+                                   the TV mode and lends the TV strip
+  POST   /api/house/voice          {"state": "listening" | "processing" |
+                                   "responding" | "idle"} — never waits
+  POST   /api/house/recheck        {"fixtures": [...]} — "the mains are on"
+  GET    /api/house/settings       the seam's settings (TV strip, voice
+  PUT                              fixtures and colours, owned brightness)
+
 Selecting a mode is idempotent (the same value again is a no-op, so HA's
 5-minute re-assert is a cheap heartbeat) and always 200 with a `status`
 word: applied / unchanged / held_manual / unmapped / cleared. An unknown
@@ -108,7 +127,9 @@ async def post_mode(body: dict):
         saved = house_store.put_mode(mode)
     except house_store.ModeConflict as exc:
         return JSONResponse(status_code=409, content={"detail": str(exc)})
-    if saved.id == house_store.state().mode_id:
+    live_mode = house.current_mode()
+    if saved.id in (house_store.state().mode_id,
+                    live_mode.id if live_mode is not None else None):
         await house.tick()       # an edit to the live mode lands now
     return {"mode": saved.model_dump(), "warnings": warnings}
 
@@ -148,6 +169,159 @@ async def post_select(body: ModeRequest):
 @router.put("/mode")
 async def put_select(body: ModeRequest):
     return await _select(body)
+
+
+# ── phase 2: the rest of the Home Assistant seam ──────────────────────────
+
+class FixtureRequest(BaseModel):
+    state: Optional[str] = None
+    lent_to: Optional[str] = None
+    source: str = "ha"
+
+
+class TvMusicRequest(BaseModel):
+    on: bool
+    source: str = "ha"
+
+
+class MediaRequest(BaseModel):
+    source: Optional[str] = None
+    state: str
+    origin: str = "ha"
+
+
+class VoiceRequest(BaseModel):
+    state: str
+    source: str = "ha"
+
+
+class RecheckRequest(BaseModel):
+    fixtures: list[str]
+
+
+@router.get("/heartbeat")
+async def get_heartbeat() -> dict:
+    return house.heartbeat()
+
+
+@router.get("/fixtures")
+async def get_fixtures() -> dict:
+    from spectra.services import house_fixtures
+    return house_fixtures.status()
+
+
+async def _fixture(fixture_id: str, body: FixtureRequest):
+    from spectra.services import house_fixtures
+    sent = body.model_fields_set
+    kw: dict = {"source": body.source}
+    if "state" in sent:
+        kw["power"] = body.state
+    if "lent_to" in sent:
+        kw["lent_to"] = body.lent_to
+    if "power" not in kw and "lent_to" not in kw:
+        return JSONResponse(status_code=422, content={
+            "detail": "send \"state\" (\"on\"/\"off\") and/or \"lent_to\""})
+    res = house_fixtures.set_fixture(fixture_id, **kw)
+    if res["status"] == "unknown_fixture":
+        return JSONResponse(status_code=404, content={"detail": res["reason"], **res})
+    if res["status"] == "invalid":
+        return JSONResponse(status_code=422, content={"detail": res["reason"], **res})
+    res["acting"] = house.layer_active()
+    if not res["acting"]:
+        res["note"] = (f"recorded — not acted on: {house.inactive_reason()}")
+    return res
+
+
+@router.put("/fixture/{fixture_id}")
+async def put_fixture(fixture_id: str, body: FixtureRequest):
+    return await _fixture(fixture_id, body)
+
+
+@router.post("/fixture/{fixture_id}")
+async def post_fixture(fixture_id: str, body: FixtureRequest):
+    return await _fixture(fixture_id, body)
+
+
+async def _tv_music(body: TvMusicRequest):
+    from spectra.services import house_fixtures
+    return house_fixtures.set_tv_music(body.on, source=body.source)
+
+
+@router.put("/tv-music")
+async def put_tv_music(body: TvMusicRequest):
+    return await _tv_music(body)
+
+
+@router.post("/tv-music")
+async def post_tv_music(body: TvMusicRequest):
+    return await _tv_music(body)
+
+
+async def _media(body: MediaRequest):
+    res = await house.set_media(source=body.source, state=body.state,
+                                source_from=body.origin)
+    if res.get("status") == "invalid":
+        return JSONResponse(status_code=422, content={"detail": res["reason"], **res})
+    return res
+
+
+@router.put("/media")
+async def put_media(body: MediaRequest):
+    return await _media(body)
+
+
+@router.post("/media")
+async def post_media(body: MediaRequest):
+    return await _media(body)
+
+
+@router.post("/voice")
+async def post_voice(body: VoiceRequest):
+    """Never waits: the voice pipeline calls this and moves on."""
+    from spectra.services import house_voice
+    res = house_voice.set_voice(body.state, source=body.source)
+    if res.get("status") == "invalid":
+        return JSONResponse(status_code=422, content={"detail": res["reason"], **res})
+    return res
+
+
+@router.post("/recheck")
+async def post_recheck(body: RecheckRequest):
+    from spectra.services import house_fixtures
+    res = house_fixtures.recheck(body.fixtures)
+    if res.get("status") == "invalid":
+        return JSONResponse(status_code=422, content={"detail": res["reason"], **res})
+    return res
+
+
+@router.get("/settings")
+async def get_settings() -> dict:
+    return {"settings": house_store.load_library().settings.model_dump()}
+
+
+@router.put("/settings")
+async def put_settings(body: dict):
+    from spectra.models.house_mode import HouseSettings
+    current = house_store.load_library().settings.model_dump()
+    body = dict(body or {})
+    if isinstance(body.get("voice_looks"), dict):
+        # A partial edit of one voice state keeps every other state as HE
+        # set it, not as the defaults.
+        looks = {k: dict(v) for k, v in current["voice_looks"].items()}
+        for state, look in body["voice_looks"].items():
+            looks[state] = {**looks.get(state, {}),
+                            **(look if isinstance(look, dict) else {})}
+        body["voice_looks"] = looks
+    try:
+        merged = HouseSettings(**{**current, **body})
+    except ValidationError as exc:
+        return JSONResponse(status_code=422, content={
+            "detail": "; ".join(f"{'.'.join(str(x) for x in e['loc'])}: {e['msg']}"
+                                for e in exc.errors())})
+    saved = house_store.put_settings(merged)
+    from spectra.services import house_fixtures
+    house_fixtures.kick()
+    return {"settings": saved.model_dump()}
 
 
 @router.get("/targets")
