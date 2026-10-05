@@ -79,7 +79,11 @@ BUCKETS = ("scenes", "responses", "color_sets", "triggers", "deferred",
            # "watchdog": the param orphan watchdog's restores
            # (spectra/services/param_watchdog.py) — every restore is a
            # show event worth seeing on the Review page timeline.
-           "watchdog")
+           "watchdog",
+           # "show": the Light Show — every step a set ran, End show, and
+           # every arm armed/fired/missed/disarmed/expired. Missing until
+           # 2026-10-04: phase 1 wrote here and every write raised KeyError.
+           "show")
 
 # Entry-count cap for the show log — bounded, never unbounded growth. On
 # each append, entries beyond this count are dropped oldest-first.

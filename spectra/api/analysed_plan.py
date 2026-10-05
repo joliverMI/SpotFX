@@ -87,10 +87,26 @@ def _plan(uri: str) -> dict:
             "scene_changes": scene, "flares": flares, "rank_of": rank_of}
 
 
+def _show_cues(uri: str) -> dict:
+    """THE LIGHT SHOW's High and Low Triggers for this song (spectra/
+    services/show_cues.py) — independent of whether analysed events apply:
+    a cue exists on every analysed song, his own triggers or not."""
+    from spectra.services import show_cues
+    try:
+        return show_cues.get_or_compute(uri).as_dict()
+    except Exception as exc:                             # noqa: BLE001
+        return {"uri": uri, "high": None, "low": None,
+                "reason": f"the cues could not be derived: {exc}"}
+
+
+def _plan_with_cues(uri: str) -> dict:
+    return {**_plan(uri), "show_cues": _show_cues(uri)}
+
+
 @router.get("/analysed-plan")
 async def get_analysed_plan(uri: str = Query(..., min_length=1)):
     from spectra.services import engine
-    body = await asyncio.to_thread(_plan, uri)
+    body = await asyncio.to_thread(_plan_with_cues, uri)
     try:
         body["show_clock_shift_ms"] = engine.show_clock_shift_ms()
     except Exception:

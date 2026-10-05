@@ -13,16 +13,18 @@
  * not own it, or a preview / camera run / night run holds it, the banner
  * says so and Fire is refused by the server with that same reason.
  *
- * Arming (next scene change, High / Low triggers) and the phone-first Run
- * view are phases 2 and 3. */
+ * Phase 2 adds ARMING: a set waits for the next scene change or this
+ * song's High / Low Trigger (ArmBoard.tsx). The phone-first Run view is
+ * phase 3. */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiDel, apiGet, apiPost } from '../api/client';
 import HelpLink from '../help/HelpLink';
 import { useToast } from '../components/Toast';
 import { useAmbientHueGroups, useGradient2dProfiles, useScenes, useSpotColorSets } from '../queries';
+import { ArmBoard, ArmControl } from './ArmBoard';
 import { endShowSummary, runSummary } from './showSummary';
 import type {
-  EndShowReport, ShowAction, ShowCatalogue, ShowKind, ShowParam, ShowRun, ShowSet,
+  ArmsStatus, EndShowReport, ShowAction, ShowCatalogue, ShowKind, ShowParam, ShowRun, ShowSet,
   ShowStatus, ShowTargets,
 } from './types';
 
@@ -53,6 +55,9 @@ export default function LightShowPage() {
   const [preview, setPreview] = useState<{ label: string; change?: string; problem?: string }[] | null>(null);
   const [lastRun, setLastRun] = useState<ShowRun | null>(null);
   const [busy, setBusy] = useState(false);
+  const [arms, setArms] = useState<ArmsStatus | null>(null);
+  const reloadArms = useCallback(
+    () => void apiGet<ArmsStatus>('/light-show/arms').then(setArms).catch(() => undefined), []);
 
   const kinds = useMemo(() => new Map((catalogue?.kinds ?? []).map((k) => [k.kind, k])), [catalogue]);
 
@@ -69,11 +74,14 @@ export default function LightShowPage() {
   }, [reloadSets, toast]);
 
   useEffect(() => {
-    const poll = () => void apiGet<ShowStatus>('/light-show/status').then(setStatus).catch(() => undefined);
+    const poll = () => {
+      void apiGet<ShowStatus>('/light-show/status').then(setStatus).catch(() => undefined);
+      reloadArms();
+    };
     poll();
     const t = window.setInterval(poll, 1500);
     return () => window.clearInterval(t);
-  }, []);
+  }, [reloadArms]);
 
   // A run with a pause keeps going after Fire returns — follow it.
   useEffect(() => {
@@ -190,6 +198,8 @@ export default function LightShowPage() {
         </div>
       )}
 
+      <ArmBoard arms={arms} onChange={reloadArms} toast={toast} />
+
       <ShowNowPanel status={status} onRelease={release} onEndLevel={endLevel} />
 
       <div className="light-show-layout">
@@ -233,6 +243,8 @@ export default function LightShowPage() {
                   title="What it would change against the room as it is now — writes nothing">Preview changes</button>
                 {draft.id && <button className="danger" onClick={() => void remove()}>Delete</button>}
               </div>
+              <ArmControl setId={draft.id} disabled={busy || dirty} onArmed={reloadArms} toast={toast} />
+              {dirty && <p className="muted">Save the set before arming it.</p>}
               {(draft.problems?.length ?? 0) > 0 && !dirty && (
                 <ul className="light-show-problems">{draft.problems!.map((p) => <li key={p}>⚠ {p}</li>)}</ul>
               )}

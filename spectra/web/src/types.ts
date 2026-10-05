@@ -1248,7 +1248,8 @@ export const newFeedbackEntry = (capture: {
 /** Stage 3 review view (GET /api/review/sessions, GET /api/review/timeline)
  * — see spectra/services/show_reconstruction.py for the merge rule this
  * mirrors. A session is one sent feedback batch. */
-export type FireHistoryBucket = 'scenes' | 'responses' | 'color_sets' | 'triggers' | 'deferred';
+export type FireHistoryBucket = 'scenes' | 'responses' | 'color_sets' | 'triggers' | 'deferred'
+  | 'watchdog' | 'show';
 
 export interface ReviewSession {
   session_id: string;

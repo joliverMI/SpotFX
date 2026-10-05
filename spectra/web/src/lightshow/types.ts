@@ -81,6 +81,8 @@ export interface ShowBrief {
   running_sets: number;
   room_effect: string | null;
   changed_settings: number;
+  /** waiting arms (phase 2) */
+  armed?: number;
   standdown: string | null;
   refusal: string | null;
 }
@@ -109,4 +111,61 @@ export interface EndShowReport {
   restored: string[];
   left_alone: { key: string; label: string; reason: string }[];
   failed: { key: string; label: string; reason: string }[];
+}
+
+// ── PHASE 2: arms and the High/Low Triggers (spectra/services/show_arms.py,
+//    show_cues.py) ──────────────────────────────────────────────────────────
+
+export type ArmTrigger = 'scene_change' | 'high' | 'low';
+
+export interface ShowArm {
+  id: string;
+  set_id: string | null;
+  action: ShowAction | null;
+  label: string;
+  on: ArmTrigger | string;
+  repeat: boolean;
+  song_uri: string | null;
+  source: string;
+  finish_on_mark: boolean;
+  created_ms: number;
+  expires_ms: number | null;
+  status: 'armed' | 'fired' | 'missed' | 'disarmed' | 'expired';
+  fire_count: number;
+  ended_ms: number | null;
+  end_reason: string;
+  last_outcome: { status: string; reason?: string; at_ms?: number; trigger?: string } | null;
+  /** status only (armed rows) */
+  lead_ms?: number;
+  this_song?: boolean;
+  due_ms?: number | null;
+}
+
+export interface ShowCue {
+  level: 'high' | 'low';
+  timestamp_ms: number;
+  source: 'auto' | 'drop_mark' | 'moved';
+  shift: number | null;
+  auto_ms: number | null;
+  auto_shift: number | null;
+  drop_mark_ms: number | null;
+  alternates: { timestamp_ms: number; shift: number; close: boolean }[];
+  runner_up_close: boolean;
+  moved_ms: number | null;
+}
+
+export interface SongCues {
+  uri: string;
+  reason: string | null;
+  duration_ms: number | null;
+  high: ShowCue | null;
+  low: ShowCue | null;
+}
+
+export interface ArmsStatus {
+  armed: ShowArm[];
+  history: ShowArm[];
+  song: { uri: string | null; position_ms: number | null; cues: SongCues | null };
+  last_crossed: Record<string, { uri: string | null; cue_ms: number; at_ms: number }>;
+  refusal: string | null;
 }

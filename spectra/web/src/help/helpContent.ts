@@ -1200,6 +1200,7 @@ export const HELP_SECTIONS: HelpSection[] = [
               'A solid cyan line with a ▼ tab is a SCENE CHANGE (a generated transition cue); a dashed amber line with a ● dot is an ANALYSED FLARE (an analysed action that did not become a scene change and fires as a flare instead — see "Analysed flares"). The line under the canvas counts both and says when the scene changes are only planned because the song has not been generated yet.',
               'RANK, kept subtle: every marker shows how strong its moment is among the song\'s transitions (ranked by how much the section energy changes there). The top third of moments get the widest ▼ tab (14 px) and biggest ● dot, the middle third the original size, the bottom third the smallest — and brightness runs from faint for the weakest to full for the strongest. Hover a marker for its rank in words, e.g. "#2 of 21 · section-energy change · scene change". A stored scene change planned under older settings shows unranked, at the original size, until the song is re-planned (see "Re-analysing songs after a settings change").',
               'This works for whatever song is currently shown on the Timeline — playing or manually selected — not only the one playing right now.',
+              'The Light Show\'s High (▲) and Low (▼) Triggers have their own draggable strip under the Timeline bar — see "High and Low Triggers". They exist on every analysed song, whatever the mode.',
               'Nothing is drawn, and the line says why, whenever the room\'s per-song mode does not let analysed events fire for this song: "Transitions only" (analysed events never fire, room-wide), or a song carrying your own authored triggers under "My triggers only" (its own triggers fire instead of the analysed plan).',
             ],
           },
@@ -2016,9 +2017,9 @@ export const HELP_SECTIONS: HelpSection[] = [
   {
     id: 'light-show',
     title: 'Light Show — named sets of actions, fired on your word',
-    keywords: 'light show show actions sets fire end show blackout intermission arm',
+    keywords: 'light show show actions sets fire end show blackout intermission arm armed high low trigger',
     intro:
-      'The Light Show (nav "Light Show", /show) groups changes to the room into named SETS you fire with one press. A set is an ordered list of steps: room settings (Ambient, Dark/Light/Hybrid, forced scene or colour, scene and colour-set on/off, the drift gradient, the scene-change setting), firing a scene or applying a colour set now, per-fixture DEVICE steps (Dark, Steady, Freeze, back to Show, a timed Level, a Flash), room effects, and pauses. Arming a set for the next scene change or a High/Low Trigger comes in the next phase.',
+      'The Light Show (nav "Light Show", /show) groups changes to the room into named SETS you fire with one press. A set is an ordered list of steps: room settings (Ambient, Dark/Light/Hybrid, forced scene or colour, scene and colour-set on/off, the drift gradient, the scene-change setting), firing a scene or applying a colour set now, per-fixture DEVICE steps (Dark, Steady, Freeze, back to Show, a timed Level, a Flash), room effects, and pauses. A set can also be ARMED to fire on the next scene change, or on this song\'s High or Low Trigger.',
     entries: [
       {
         id: 'light-show-page',
@@ -2083,6 +2084,31 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        id: 'show-arming',
+        title: 'Arming a set: next scene change, High, Low',
+        keywords: 'arm armed disarm next scene change high trigger low trigger repeat once this song only carry expire finish on the mark countdown',
+        body: [
+          'Below a set\'s name, ⏱ Arm sets it waiting for one of three triggers: the next scene change, this song\'s High Trigger, or its Low Trigger. The Armed board at the top of the page lists everything waiting, with a countdown when its trigger is ahead on this song, and a Disarm on each (plus Disarm all).',
+          '"Next scene change" means a real change to a DIFFERENT scene — from the sequencer, a trigger, the automatic transition, or your own Fire button. A scene firing again over itself does not count, and neither does a scene change the Light Show itself made (a Forced scene or Fire-a-scene step).',
+          'Once (the default) fires one time and is done; repeat stays armed and fires every time. Arming the same set on the same trigger again REPLACES the earlier arm — a double tap never stacks. Different sets on one trigger all fire, in the order you armed them.',
+          'This song only: the arm belongs to the song playing now; if another song starts first it is recorded as missed. Otherwise an arm carries to the next song that reaches its trigger.',
+          'Finish on the mark (High/Low only, on by default): a set with a fade starts early by its longest fade — a Device state fade or a Level fade-in, counted over the steps before its first pause — so the fade COMPLETES on the trigger. The whole set moves early, so an instant step in it lands that much early too; untick it to start everything on the mark. Ambient\'s own slow ease is not counted — it starts on the trigger.',
+          'An arm never fires while SPECTRA does not hold the room, or while a preview, a camera run or a night run holds it — and it is not used up: it stays armed, says why it waited, and fires on the next occurrence. A trigger skipped by a seek forward is not fired late.',
+          'Arms expire when the room is released, 12 hours after arming, or after 30 minutes with no music playing — each with the reason under Recent. They survive a restart.',
+        ],
+      },
+      {
+        id: 'show-high-low-triggers',
+        title: 'High and Low Triggers',
+        keywords: 'high trigger low trigger biggest rise biggest fall section energy drop mark move drag automatic runner up timeline flag',
+        body: [
+          'Every analysed song has ONE High Trigger, at its biggest rise in section energy, and ONE Low Trigger, at its biggest fall — the same score the scene-change planner ranks moments by, and placed on exactly the moment that boundary\'s scene change or flare fires. The first and last 15 seconds of a song never hold one.',
+          'Where you have placed your own drop mark on a song, the High sits on it instead (the one nearest the biggest rise, if you placed several).',
+          'On the Timeline, under the trigger bar: ▲ is the High and ▼ the Low. Drag a flag to move it — the move is saved for that song and always wins. A moved flag shows a faint dashed line where the analysis puts it, and an "auto" button to put it back. Faint dots are the runners-up; a brighter one is within 10% of the winner — tap a dot to move the flag there.',
+          'Nothing here writes a trigger: High and Low are worked out fresh on each play, and only your moves are stored, so moving one never changes which of your own triggers a song has.',
+        ],
+      },
+      {
         id: 'show-end-restore',
         title: 'End show: putting the room back',
         keywords: 'end show restore put back release holds cancel',
@@ -2097,7 +2123,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         title: 'The Show line in the top bar',
         keywords: 'top bar strip show holding levels running',
         body: [
-          'While the Light Show is holding anything — a fixture, a level, a changed setting, a running set or room effect — a "◈ Show: …" line appears in the top bar on every page. Tap it to open the Light Show. It disappears when the show holds nothing.',
+          'While the Light Show is holding anything — a fixture, a level, a changed setting, a running set or room effect, or a set armed and waiting — a "◈ Show: …" line appears in the top bar on every page. Tap it to open the Light Show. It disappears when the show holds nothing.',
         ],
       },
     ],

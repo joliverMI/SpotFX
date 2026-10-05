@@ -386,6 +386,11 @@ def on_release() -> None:
     """The room is being released: drop everything, abruptly, before the
     release fade, so the room lets go of its TRUE state."""
     device_output.clear_all()
+    try:
+        from spectra.services import show_arms
+        show_arms.on_release()
+    except Exception:                                    # noqa: BLE001
+        logger.exception("light show: arm expiry on release failed")
     st = show_store.state()
     if st.holds or st.levels:
         st.holds.clear()
@@ -461,6 +466,11 @@ def tick() -> None:
     # engine on paper — a held Steady must not light a capture's dark step).
     # `refusal()` covers both an engine on paper and every stand-down.
     device_output.suspend(refusal() is not None)
+    try:
+        from spectra.services import show_arms
+        show_arms.tick()
+    except Exception:                                    # noqa: BLE001
+        logger.exception("light show: arm expiry pass failed")
     if is_live and not _was_live:
         _safe_refresh()
         try:

@@ -3696,7 +3696,7 @@ observation must reset it the way a song change would — otherwise the
 second fire in one process is legitimately deferred by the first one's
 dwell floor and renders nothing at all.**
 
-## THE LIGHT SHOW (`/show`) — named sets of actions, fired now (phase 1 of 3)
+## THE LIGHT SHOW (`/show`) — named sets of actions, fired now or ARMED (phases 1-2 of 3)
 
 Plan: `/home/javi/fleet-spotfx/data/light-show-plan/report.md` (his spec in
 its `brief.md`; his answers: ONE High + ONE Low trigger per song, "non-
@@ -3745,6 +3745,37 @@ slots already in the schema). Six things:
   the old call shape. Stores are isolated per test by conftest's
   `_isolated_light_show`. Help: section `light-show` (topics linked from
   the page, the strip and the served catalogue's `help_topic`s).
+
+**PHASE 2 — ARMS AND THE HIGH/LOW TRIGGERS (2026-10-04).** Read
+`spectra/services/show_arms.py` (triggers, replace-not-stack, one-shot/
+repeat, this-song-only, finish-on-the-mark, expiry, the gate that never
+consumes) and `show_cues.py` (derivation, edges, drop seeding, overrides)
+first. Five things:
+
+- **CUES ARE DERIVED AT PLAY TIME, NEVER STORED AS TRIGGERS** — only his
+  dragged positions (`storage/spectra/show_cues.json`). A stored cue row
+  would stamp the song "authored" (silencing its analysed show under My
+  triggers only) and block auto-generation. The score is
+  `midsong_generator.section_energy_shift` — the SIGNED form of the
+  planner's rank, `section_energy_change` is now its `abs()` — and the time
+  is the planner's own placed time, so a High sits on its scene change.
+- **THE TRIGGER CLOCK OWNS THE CROSSING**: `TriggerEngine.tick()` runs
+  `_tick_show_cues` BEFORE stored triggers (two no-op hooks wired in
+  `engine.py`), exactly once per approach via `_fired`; a cue jumped over
+  by a seek further than `SHOW_CUE_SEEK_SKIP_MS` is skipped, never late.
+  Cues are independent of `scene_change_mode`.
+- **"NEXT SCENE CHANGE" IS READ IN `engine.on_scene_fired` BEFORE the
+  conductor takes the new scene** (a re-fire is not a change), and
+  `show_actions.executing()` excludes a change the show itself caused.
+- **FINISH ON THE MARK**: the clock fires a cue at the largest lead any
+  armed set needs; each set waits the difference to its own
+  (`show_arms.lead_ms`, longest fade before the first pause). The whole set
+  moves early — stated on the arm card.
+- Phase 1 shipped two defects the room proof found, both fixed here: the
+  supervisor crashed every tick on the real `Virtuals` registry (no
+  `.items()` — the test fakes now have the real registry shape), and
+  `fire_history` had no `show` bucket, so the show log never recorded.
+  Spec: `tests/test_light_show_arms.py`, `scripts/check_show_cue_flags.mjs`.
 
 ## The room LIGHT-FIELD map (`/rooms`) + room effects (`/room-effects`)
 
@@ -5540,7 +5571,9 @@ Six things:
   "released" | "window_open" | "window_close", room_id, at_ms}` — ONE
   endpoint, ONE bearer, ONE wire shape, the `event` word the only field
   that differs, which is why this is one module and not four — and **SUCCESS IS HTTP 200, her word, never "any 2xx"** —
-  answering `{captured, elapsed_s, result}`. Her `captured`/`elapsed_s` are
+  answering `{captured, elapsed_s, result}`. **One exception (2026-10-04): a RELEASE answered
+  202** — her async accept — is told too (`RELEASE_ACCEPTED_STATUS`); the
+  pre-take stays 200-only, because there she must already have captured. Her `captured`/`elapsed_s` are
   SURFACED on the take's own record rather than reduced to a boolean: a 200
   saying `captured: false` is still `sent` (inventing a verdict she has not
   defined would be renegotiating her contract) and is still LOUD, in the

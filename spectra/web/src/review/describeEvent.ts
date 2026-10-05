@@ -9,6 +9,8 @@ const BUCKET_LABEL: Record<ReviewEventItem['bucket'], string> = {
   color_sets: 'Colour set',
   triggers: 'Trigger',
   deferred: 'Deferred (dwell)',
+  watchdog: 'Watchdog',
+  show: 'Light Show',
 };
 
 export const BUCKET_COLOR: Record<ReviewEventItem['bucket'], string> = {
@@ -17,6 +19,8 @@ export const BUCKET_COLOR: Record<ReviewEventItem['bucket'], string> = {
   color_sets: '#14b8a6',
   triggers: '#60a5fa',
   deferred: '#94a3b8',
+  watchdog: '#64748b',
+  show: '#f472b6',
 };
 
 /** engine._response_gate/_update_gate's refusal words, as a reader says them.
@@ -75,6 +79,21 @@ export function describeEvent(item: ReviewEventItem): string {
       const remaining = d.remaining_dwell_s as number | undefined;
       const result = d.update_result as string | undefined;
       return `Held (minimum dwell): ${name}${remaining != null ? `, ${remaining.toFixed(1)}s left` : ''}${result ? ` — update: ${result}` : ''}`;
+    }
+    case 'show': {
+      // spectra/services/show_actions.py (each step a set ran, End show)
+      // and show_arms.py (arm_armed / arm_fired / arm_missed / ...).
+      const set = d.set as string | undefined;
+      if (item.key.startsWith('arm_')) {
+        const what = item.key.slice(4);
+        const on = (d.on as string | undefined)?.replace('_', ' ');
+        const reason = d.reason as string | undefined;
+        return `Light Show: ${set ?? 'a set'} ${what}${on ? ` (on ${on})` : ''}${reason ? ` — ${reason}` : ''}`;
+      }
+      if (item.key === 'end_show') return 'Light Show: End show';
+      const step = d.step as string | undefined;
+      const detail = d.detail as string | undefined;
+      return `Light Show: ${set ?? ''}${step ? ` · ${step}` : ''}${detail ? ` — ${detail}` : ''}`;
     }
     default:
       return `${BUCKET_LABEL[item.bucket] ?? item.bucket}: ${item.key}`;

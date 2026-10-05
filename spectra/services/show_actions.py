@@ -849,6 +849,15 @@ class Run:
 
 
 _runs: list[Run] = []
+_executing = 0
+
+
+def executing() -> bool:
+    """True while a show step is being applied — a scene change the show
+    itself causes (a Forced scene or Fire-a-scene step) must never count as
+    "the next scene change" for an arm, or a repeat arm would loop
+    (spectra/services/show_arms.py)."""
+    return _executing > 0
 
 
 def runs() -> list[dict]:
@@ -920,6 +929,7 @@ def _finish(run: Run) -> None:
 
 
 async def _execute(run: Run, actions: list[ShowAction]) -> None:
+    global _executing
     ctx = RunContext(run_id=run.id, source=run.source)
     pending: list[tuple[int, ShowAction, dict]] = []
 
@@ -932,7 +942,12 @@ async def _execute(run: Run, actions: list[ShowAction]) -> None:
                 for i, _a, _p in group:
                     _record(run, i, Outcome("refused", reason))
                 return
-            await _run_room_group(run, group)
+            global _executing
+            _executing += 1
+            try:
+                await _run_room_group(run, group)
+            finally:
+                _executing -= 1
 
     try:
         for i, a in enumerate(actions):
@@ -960,11 +975,14 @@ async def _execute(run: Run, actions: list[ShowAction]) -> None:
             if reason:
                 _record(run, i, Outcome("refused", reason))
                 continue
+            _executing += 1
             try:
                 outcome = await kind.apply(p, ctx)
             except Exception as exc:                     # noqa: BLE001
                 logger.exception("light show: %s failed", a.kind)
                 outcome = Outcome("failed", f"{type(exc).__name__}: {exc}")
+            finally:
+                _executing -= 1
             _record(run, i, outcome)
         await flush_group()
     except asyncio.CancelledError:
@@ -1130,15 +1148,16 @@ async def end_show(*, fade_ms: int = show_output.DEFAULT_RELEASE_FADE_MS) -> dic
 def status() -> dict:
     st = show_store.state()
     running = [r.as_dict() for r in _runs if r.state == "running"]
+    armed = any(a.status == "armed" for a in st.arms)
     return {"active": bool(st.started_ms or st.holds or st.levels or st.baselines
-                           or st.room_effect or running),
+                           or st.room_effect or running or armed),
             "started_ms": st.started_ms,
             "baselines": [{"key": b.key, "label": b.label, "original": b.original,
                            "written": b.written} for b in st.baselines.values()],
             "room_effect": st.room_effect,
             "running_sets": running,
             "recent_runs": runs()[:5],
-            "arms": [a.model_dump() for a in st.arms]}
+            "arms": [a.model_dump() for a in st.arms if a.status == "armed"]}
 
 
 def brief() -> dict:
@@ -1150,11 +1169,13 @@ def brief() -> dict:
             "running_sets": len(act["running_sets"]),
             "room_effect": (act["room_effect"] or {}).get("name"),
             "changed_settings": len(act["baselines"]),
+            "armed": len(act["arms"]),
             "standdown": out["standdown"], "refusal": out["refusal"]}
 
 
 def reset() -> None:
     """Tests."""
-    global _effect_task
+    global _effect_task, _executing
+    _executing = 0
     _runs.clear()
     _effect_task = None
