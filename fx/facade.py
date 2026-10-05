@@ -111,6 +111,32 @@ async def get_host() -> FxHost:
     return _host
 
 
+# ── SpotFX deviation #42: a scoped take is a write boundary ─────────────────
+
+def out_of_scope(virtual_id: str) -> bool:
+    """True when the installed host is a SCOPED take and `virtual_id` lies
+    outside it (FxHost.virtual_in_scope). No host, or a whole-room host,
+    is never out of scope. The write seams (spectra/services/fx_seam.py,
+    fx_executor.py) skip such writes; `handle` refuses them outright."""
+    host = _host
+    if host is None:
+        return False
+    check = getattr(host, "virtual_in_scope", None)
+    return bool(check is not None and not check(virtual_id))
+
+
+def _scope_refusal(virtual_id: str) -> FacadeResponse:
+    logger.warning(
+        "fx facade: refused a write to %s — it is outside the active take "
+        "scope, and writing it could activate a fixture this take was never "
+        "handed", virtual_id)
+    return FacadeResponse(
+        {"status": "failed", "payload": {
+            "type": "error",
+            "reason": f"virtual {virtual_id} is outside the active take scope",
+            "out_of_scope": True}}, 403)
+
+
 # ── Shared response builders (ports of fork api/virtual.py:14-38) ────────────
 
 def _virtual_response(virtual) -> dict:
@@ -458,6 +484,10 @@ def _verify_effect_took(host, virtual, effect_type):
             f"virtual is driving '{virtual.active_effect.type}', "
             f"not the written '{effect_type}'"
         )
+    if not virtual.active and not getattr(
+            host, "virtual_in_scope", lambda _v: True)(virtual.id):
+        # Deviation #42: never repair a held-back virtual into life.
+        return False, "virtual is outside the active take scope"
     if not virtual.active:
         logger.error(
             "fx facade: %s holds effect '%s' but is NOT ACTIVE — a write to "
@@ -908,6 +938,18 @@ async def handle(
     if parts[:1] != ["api"]:
         return FacadeResponse({"status": "failed", "reason": f"unknown path {path}"}, 404)
     route = parts[1:]
+
+    # A write that could bring a held-back virtual up — any effect write
+    # (the type-switch branch and the #29 repair both ACTIVATE) or an
+    # activation — is refused outside a scoped take. Deactivating and
+    # reading stay allowed.
+    if len(route) >= 2 and route[0] == "virtuals" and out_of_scope(route[1]):
+        m = method.upper()
+        effect_write = len(route) == 3 and route[2] == "effects" \
+            and m in ("PUT", "POST")
+        activation = len(route) == 2 and m == "PUT" and bool(body.get("active"))
+        if effect_write or activation:
+            return _scope_refusal(route[1])
 
     match (method.upper(), route):
         case ("GET", ["info"]):

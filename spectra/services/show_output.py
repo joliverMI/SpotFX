@@ -136,14 +136,26 @@ def _host():
     return live.host
 
 
+def _scope(host):
+    """The fixtures a scoped take reaches (FxHost.scope_device_ids), or
+    None for a whole-room take. The show never addresses a fixture the take
+    was not handed — it would not be streamed, and offering it is a promise
+    the room cannot keep."""
+    fn = getattr(host, "scope_device_ids", None) if host is not None else None
+    return fn() if fn is not None else None
+
+
 def _virtual_devices(host, vid: str) -> list[str]:
     v = host.virtuals.get(vid) if host is not None else None
     if v is None:
         return []
+    scope = _scope(host)
     out = []
     for seg in getattr(v, "_segments", None) or []:
         did = str(seg[0])
         if did.startswith("gap-") or did in out:
+            continue
+        if scope is not None and did not in scope:
             continue
         if did in host.devices:
             out.append(did)
@@ -153,7 +165,9 @@ def _virtual_devices(host, vid: str) -> list[str]:
 def _real_devices(host) -> list[str]:
     if host is None:
         return []
-    return [d for d in host.devices if not str(d).startswith("gap-")]
+    scope = _scope(host)
+    return [d for d in host.devices if not str(d).startswith("gap-")
+            and (scope is None or str(d) in scope)]
 
 
 def resolve_target(target: dict) -> tuple[list[str], list[str]]:
@@ -168,6 +182,9 @@ def resolve_target(target: dict) -> tuple[list[str], list[str]]:
         return _real_devices(host), []
     if kind == "fixture":
         if tid in host.devices:
+            scope = _scope(host)
+            if scope is not None and tid not in scope:
+                return [], [f"fixture {tid!r} is outside the current take"]
             return [tid], []
         return [], [f"no fixture called {tid!r} is in the live stack"]
     if kind == "category":

@@ -71,6 +71,10 @@ class FxHost:
         load_logger()  # fx/config.py's own init hook: binds its module logger
         self._live_grant = live_grant
         self.config_dir = config_dir
+        #: SpotFX deviation #42: the virtual ids a SCOPED take brought up
+        #: (`start(only_active=...)`), or None for a whole-room host. Read by
+        #: `virtual_in_scope`, which the facade's write gate consults.
+        self.scope_virtual_ids = None
         self.config = load_config(config_dir)
         self.loop = asyncio.get_running_loop()
         self.thread_executor = ThreadPoolExecutor(
@@ -94,6 +98,44 @@ class FxHost:
             validate_gradient, parse_gradient,
         )
         self._started = False
+
+    # ── SpotFX deviation #42: the take scope is a WRITE boundary too ────────
+
+    def scope_device_ids(self):
+        """Every device a segment of an in-scope virtual touches, or None
+        for a whole-room host. The fixtures this take may drive."""
+        if self.scope_virtual_ids is None:
+            return None
+        out = set()
+        for vid in self.scope_virtual_ids:
+            v = self.virtuals.get(vid)
+            for seg in getattr(v, "_segments", None) or []:
+                out.add(str(seg[0]))
+        return out
+
+    def virtual_in_scope(self, virtual_id) -> bool:
+        """May anything write to or activate `virtual_id` under this take?
+
+        `only_active` decided what came up at START; it said nothing about
+        what a later write may bring up. On 2026-10-04 a scene fire during a
+        take scoped to the TV backlight wrote every virtual the scene
+        targets, and the facade's activate-on-write repair (deviation #29)
+        ACTIVATED the held-back ones — both Hue entertainment areas
+        streamed the show for four minutes and the release fade then
+        flashed 25 house lights. A virtual is in scope when it was brought
+        up by the take, or when every device its segments touch is one of
+        the take's own fixtures (a fixture's own device-virtual, the
+        capture/room-effect substitute). A whole-room host is unrestricted."""
+        if self.scope_virtual_ids is None:
+            return True
+        if virtual_id in self.scope_virtual_ids:
+            return True
+        v = self.virtuals.get(virtual_id)
+        segs = getattr(v, "_segments", None) or []
+        if not segs:
+            return False
+        devices = self.scope_device_ids() or set()
+        return all(str(seg[0]) in devices for seg in segs)
 
     async def start(self, *, blackout: bool = False,
                     only_active=None) -> None:
@@ -127,6 +169,8 @@ class FxHost:
                 self._live_grant, light_ownership.SPECTRA,
                 detail=f"device types {live_types}",
             )
+        self.scope_virtual_ids = (set(only_active) if only_active is not None
+                                  else None)
         self.devices.create_from_config(self.config["devices"])
         await self.devices.async_initialize_devices()
         self.virtuals.create_from_config(self.config["virtuals"],

@@ -115,6 +115,11 @@ class FacadeExecutor(RecordingExecutor):
     async def _put(self, virtual_id: str, effect_type: str,
                    params: dict[str, Any], duration_ms: int) -> None:
         from fx import facade
+        if facade.out_of_scope(virtual_id):
+            # Outside a scoped take (fx/VENDOR.md #42): the engine still
+            # models it, nothing is written — writing would be refused, and
+            # a refusal here would kill the glide burst for in-scope ones.
+            return
         current = (await self._current_effect(facade, virtual_id)
                    if duration_ms > 0 else None)
         current_type = (current or {}).get("type")
