@@ -495,3 +495,18 @@ def test_an_arm_made_while_released_waits_instead_of_expiring(room, monkeypatch)
     show_arms.is_playing = lambda: True
     show_arms.tick()
     assert len(show_arms.active_arms()) == 1
+
+
+def test_status_carries_the_dwell_floor_as_an_honest_estimate(room):
+    from spectra.services import dwell
+    from spectra.models.scene import SceneV2
+    dwell.reset()
+    try:
+        assert show_arms.status()["song"]["expected_scene_change_s"] is None
+        scene = SceneV2(name="Dwell Test")
+        dwell.note_fired(scene, intensity=0.5)
+        body = show_arms.status()
+        assert body["song"]["expected_scene_change_s"] is not None
+        assert body["song"]["expected_scene_change_is_floor"] is True
+    finally:
+        dwell.reset()

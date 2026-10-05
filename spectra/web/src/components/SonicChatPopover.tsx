@@ -22,7 +22,7 @@ import { uuid } from '../lib/uid';
 import { useSendSettingsMessage, useTranscribeSettingsAudio, useUndoLastSceneChange } from '../queries';
 import type { SettingsChatMessage } from '../types';
 
-export default function SonicChatPopover() {
+export default function SonicChatPopover({ helpTopic = 'sonic-scenes' }: { helpTopic?: string } = {}) {
   const toast = useToast();
   const send = useSendSettingsMessage();
   const transcribe = useTranscribeSettingsAudio();
@@ -165,7 +165,7 @@ export default function SonicChatPopover() {
           }}
         >
           <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            Sonic <HelpLink topic="sonic-scenes" />
+            Sonic <HelpLink topic={helpTopic} />
             <button
               style={{ marginLeft: 'auto', fontSize: 11, padding: '2px 8px' }}
               title="Undo the most recent scene/flare change Sonic made — always available, no chat needed"

@@ -165,7 +165,14 @@ export interface SongCues {
 export interface ArmsStatus {
   armed: ShowArm[];
   history: ShowArm[];
-  song: { uri: string | null; position_ms: number | null; cues: SongCues | null };
+  song: {
+    uri: string | null; position_ms: number | null; cues: SongCues | null;
+    /** The showing scene's own minimum-hold FLOOR (dwell.py) in seconds —
+     * null when nothing is tracked. Not a real prediction of when a scene
+     * actually changes, only the earliest it could. */
+    expected_scene_change_s: number | null;
+    expected_scene_change_is_floor: boolean;
+  };
   last_crossed: Record<string, { uri: string | null; cue_ms: number; at_ms: number }>;
   refusal: string | null;
 }

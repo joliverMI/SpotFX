@@ -9,7 +9,7 @@
 import { useState } from 'react';
 import { apiDel, apiPost } from '../api/client';
 import HelpLink from '../help/HelpLink';
-import { armHistoryLine, armLine, cueLine, TRIGGER_LABEL } from './showSummary';
+import { armHistoryLine, armLine, cueLine, sceneChangeLine, TRIGGER_LABEL } from './showSummary';
 import type { ArmsStatus, ArmTrigger } from './types';
 
 export function ArmBoard({ arms, onChange, toast }: {
@@ -38,6 +38,9 @@ export function ArmBoard({ arms, onChange, toast }: {
         <p className="light-show-cues">
           <span>▲ High: {cueLine(cues?.high ?? null, pos)}</span>
           <span>▼ Low: {cueLine(cues?.low ?? null, pos)}</span>
+          <span title="The showing scene's own minimum hold — the earliest it could change, not a prediction of when it will">
+            ⟳ Scene change: {sceneChangeLine(arms.song.expected_scene_change_s)}
+          </span>
           {cues?.reason && <span className="muted">{cues.reason}</span>}
           <HelpLink topic="show-high-low-triggers" />
         </p>
