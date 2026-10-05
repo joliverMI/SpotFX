@@ -15,6 +15,14 @@ the engine is live). Setting a mode while the room is released only records
 it; it applies the moment SPECTRA holds the room. It never takes or releases
 the room and has no code that could.
 
+PHASE 4 ADDED A THIRD CONDITION — THE CUTOVER SWITCH (HouseSettings.enabled,
+default OFF). Once his modes exist, Home Assistant's lighting_mode maps to
+one every five minutes, so without the switch his next music take would run
+under a house mode (Hue held at the mode's look, master brightness owned,
+Away silencing the music) before River has cut a single HA writer over.
+Off, gate() answers ("off", ...): HA's word is still recorded and mapped,
+the status still names the mode, and nothing reaches a fixture.
+
 A preview, a camera run or a night run holding the room puts the layer on
 STANDBY (`show_output.standdown_reason()`): no writes at all, frame-rate caps
 lifted, the per-device output layer already suspended by the Light Show's
@@ -138,14 +146,16 @@ fight. Nothing here invents a clock — HA keeps it (decision B1).
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import random
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Awaitable, Callable, Optional
 
-from spectra.models.house_mode import (MEDIA_ACTIVE_STATES, MEDIA_STATES,
-                                       HouseMode, now_ms)
+from spectra.models.house_mode import (EVERY_AREA, MEDIA_ACTIVE_STATES, MEDIA_STATES,
+                                       SKIP_LOOK, HouseMode, now_ms)
 from spectra.services import house_store
 
 logger = logging.getLogger(__name__)
@@ -379,6 +389,8 @@ def inactive_reason() -> Optional[str]:
         return ("no house mode is set" if st.mode_id is None
                 else "the set house mode no longer exists")
     kind, reason = gate()
+    if kind == "off":
+        return reason
     if kind == "refused":
         return reason or "the room is not SPECTRA's"
     if kind == "standby":
@@ -386,11 +398,31 @@ def inactive_reason() -> Optional[str]:
     return None
 
 
+def house_enabled() -> bool:
+    """The cutover switch (HouseSettings.enabled). Never raises: an
+    unreadable library reads as OFF — the safe direction, nothing applied."""
+    try:
+        return bool(house_store.load_library().settings.enabled)
+    except Exception:                                    # noqa: BLE001
+        logger.exception("house: settings unreadable — treating house lighting as off")
+        return False
+
+
+SWITCHED_OFF = ("house lighting is switched off — Home Assistant's mode is "
+                "recorded, nothing is applied")
+
+
 def gate() -> tuple[Optional[str], Optional[str]]:
-    """(kind, reason): ("refused", why) when the layer must do nothing at
-    all, ("standby", why) when a preview/camera/night run holds the room,
-    (None, None) when it may act. A mode must also be set — checked by the
-    callers, which need the mode anyway."""
+    """(kind, reason): ("off", why) while the cutover switch is off,
+    ("refused", why) when the layer must do nothing at all, ("standby",
+    why) when a preview/camera/night run holds the room, (None, None) when
+    it may act. A mode must also be set — checked by the callers, which
+    need the mode anyway. "off" is its own kind (not "refused") because the
+    room may still be SPECTRA's: switching off hands the look back —
+    motion restored, Hue released to the room toggle — where a refusal
+    (the room not ours) cannot write anything."""
+    if not house_enabled():
+        return "off", SWITCHED_OFF
     try:
         from spectra.services import show_output
         refusal = show_output.ownership_refusal()
@@ -402,6 +434,15 @@ def gate() -> tuple[Optional[str], Optional[str]]:
     except Exception as exc:                             # noqa: BLE001
         return "refused", f"the room's state could not be read ({exc})"
     return None, None
+
+
+def _room_writable() -> bool:
+    try:
+        from spectra.services import show_output
+        return (show_output.ownership_refusal() is None
+                and show_output.standdown_reason() is None)
+    except Exception:                                    # noqa: BLE001
+        return False
 
 
 def _house_words(reason: str) -> str:
@@ -421,7 +462,7 @@ def _live_mode() -> Optional[HouseMode]:
     if mode is None:
         return None
     kind, _reason = gate()
-    if kind == "refused":
+    if kind in ("refused", "off"):
         return None
     return mode
 
@@ -502,8 +543,19 @@ def journey_override() -> Optional[JourneyOverride]:
 
 
 def _looks(mode: HouseMode) -> tuple:
-    return tuple(sorted((lk.area, lk.look, lk.mirek, lk.color, float(lk.brightness))
-                        for lk in mode.hue))
+    """The mode's per-area looks, plus one SKIP look per bulb the house
+    leaves alone (HouseSettings.hue_excluded_lights) — "*/<bulb>", so the
+    exclusion is part of what the Hue Hold gate compares and an edit to the
+    list re-lands the hold."""
+    looks = [(lk.area, lk.look, lk.mirek, lk.color, float(lk.brightness))
+             for lk in mode.hue]
+    try:
+        excluded = house_store.load_library().settings.hue_excluded_lights
+    except Exception:                                    # noqa: BLE001
+        logger.exception("house: settings unreadable — no Hue bulb left alone")
+        excluded = []
+    looks += [(f"{EVERY_AREA}/{name}", SKIP_LOOK, None, None, 0.0) for name in excluded]
+    return tuple(sorted(looks))
 
 
 def hue_directive() -> Optional[HueDirective]:
@@ -523,6 +575,40 @@ def hue_directive() -> Optional[HueDirective]:
                                 ramp_ms=int(HAND_IN_FADE_S * 1000),
                                 mode_name=mode.name)
     return HueDirective(looks=_looks(mode), ramp_ms=ramp, mode_name=mode.name)
+
+
+def take_frozen_areas(config_dir=None) -> list[str]:
+    """Hue areas (device ids) a house mode will hold the moment SPECTRA
+    holds the room — named to fx/hue_freeze BEFORE an ordinary take brings
+    the stack up (handover.SpectraSide.activate), so they come up frozen and
+    are never streamed. Without it a take streamed the current scene to
+    every bulb in the area for the seconds before the Hue Hold gate froze
+    it, lighting the bulbs a mode leaves alone (his loft and ledge lights)
+    and every bulb a Night light / Away mode holds off. Empty when house
+    lighting is off, no mode is set, the mode holds no Hue, or music is
+    playing under a show mode whose Hue does not stay held. Never raises."""
+    try:
+        if not house_enabled():
+            return []
+        mode = current_mode()
+        if mode is None:
+            return []
+        if (mode.music == "show" and deps.playing() is True
+                and mode.music_hue != "hold"):
+            return []
+        held = {lk.area for lk in mode.hue if lk.look in ("hold", "off")}
+        if not held:
+            return []
+        if EVERY_AREA not in held:
+            return sorted(held)
+        from spectra import config as scfg
+        path = Path(config_dir or scfg.FX_LIVE_CONFIG_DIR) / "config.json"
+        cfg = json.loads(path.read_text(encoding="utf-8"))
+        return sorted(d.get("id") for d in cfg.get("devices") or []
+                      if d.get("type") == "hue" and d.get("id"))
+    except Exception:                                    # noqa: BLE001
+        logger.exception("house: could not name the Hue areas to come up frozen")
+        return []
 
 
 # ── setting the mode ───────────────────────────────────────────────────────
@@ -705,6 +791,14 @@ async def _tick_locked() -> None:
         # the clear asked for, restoring motion. Otherwise nothing to write.
         await _go_inactive(why, fade_s=st.glide_s or HAND_IN_FADE_S,
                            write_motion=kind is None)
+        return
+    if kind == "off":
+        # Switched off: hand the look back over a press's glide. Motion is
+        # written back only while the room is still SPECTRA's (a released
+        # room cannot be written to).
+        await _go_inactive(reason or SWITCHED_OFF,
+                           fade_s=mode.transitions.button_glide_s or HAND_IN_FADE_S,
+                           write_motion=_room_writable())
         return
     if kind == "refused":
         await _go_inactive(reason or "the room is not SPECTRA's",
@@ -1330,6 +1424,7 @@ def status_dict() -> dict:
     mapped = (house_store.mode_for_ha(st.ha_value) if st.ha_value else None)
     out: dict = {
         "mode": ({"id": mode.id, "name": mode.name} if mode is not None else None),
+        "enabled": house_enabled(),
         "source": st.source or None,
         "since_ms": st.since_ms,
         "manual": st.manual,
@@ -1471,7 +1566,8 @@ def heartbeat() -> dict:
 
       driving    a mode drives the room — HA leaves every Spectra fixture alone
       standby    a preview / camera run / night run holds the room for now
-      idle       SPECTRA holds the room but no mode is set
+      idle       SPECTRA holds the room but no mode drives it (none is
+                 set, or house lighting is switched off — `house_enabled`)
       on_paper   SPECTRA holds the room with its engine not live (a quiet take)
       down       the record says SPECTRA owns but its light stack is not up
       released   nobody drives the room (his panic release, or not taken)
@@ -1501,7 +1597,7 @@ def heartbeat() -> dict:
             else:
                 mode = current_mode()
                 kind, _reason = gate()
-                if mode is None:
+                if mode is None or kind in ("off", "refused"):
                     state = "idle"
                 elif kind == "standby":
                     state = "standby"
@@ -1509,6 +1605,7 @@ def heartbeat() -> dict:
                     state = HEARTBEAT_DRIVING
         out["state"] = state
         out["lighting_ok"] = state in (HEARTBEAT_DRIVING, "standby")
+        out["house_enabled"] = house_enabled()
         mode = current_mode()
         st = house_store.state()
         out["mode"] = mode.name if mode is not None else None

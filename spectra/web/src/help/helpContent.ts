@@ -2032,7 +2032,7 @@ export const HELP_SECTIONS: HelpSection[] = [
     title: 'House lighting — the room\'s resting look, all day',
     keywords: 'house lighting modes standard evening dim night light away tv home assistant mode chip resting look always on',
     intro:
-      'House lighting (nav "House", /house) makes SPECTRA the room\'s everyday lighting engine, not only the music lights. A MODE says what the room looks like when nothing more specific is happening: which scenes and colour sets it flows through, how bright and how fast each fixture is, how the Hue bulbs are held, and what music does on top of it. Home Assistant keeps its own clock and tells SPECTRA which mode to be in; SPECTRA owns what each mode looks like. Nothing happens unless SPECTRA holds the room AND a mode is set — until then a mode is only recorded.',
+      'House lighting (nav "House", /house) makes SPECTRA the room\'s everyday lighting engine, not only the music lights. A MODE says what the room looks like when nothing more specific is happening: which scenes and colour sets it flows through, how bright and how fast each fixture is, how the Hue bulbs are held, and what music does on top of it. Home Assistant keeps its own clock and tells SPECTRA which mode to be in; SPECTRA owns what each mode looks like. Nothing happens unless house lighting is SWITCHED ON, SPECTRA holds the room AND a mode is set — until then a mode is only recorded.',
     entries: [
       {
         id: 'house-page',
@@ -2054,12 +2054,32 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        id: 'house-switch',
+        title: 'Switching house lighting on and off',
+        keywords: 'house lighting switch power on off cutover enable disable recorded applied music take',
+        body: [
+          'The power button in Now is house lighting\'s master switch. OFF (how it ships): Home Assistant\'s lighting mode is still recorded and the mode it maps to is named, but NOTHING is applied — no look, no level, no Hue hold, no master brightness, no lending — so a music take runs exactly as it always has.',
+          'ON: whenever SPECTRA holds the room, the set mode drives it. Switching off while a mode is on the room hands the look back over the mode\'s press glide: levels fade out, speeds go back to what the scene authored, the Hue bulbs go back to the Hue Hold switch, fixtures a button switched off come back on.',
+          'It is meant to be switched on once, when Home Assistant stops writing to Spectra\'s fixtures itself (River\'s cutover). Until then, leave it off.',
+        ],
+      },
+      {
+        id: 'house-hue-left-alone',
+        title: 'Hue bulbs house lighting leaves alone',
+        keywords: 'hue bulbs excluded left alone loft ceiling uplight ledge left right center home assistant',
+        body: [
+          'Some bulbs sit in Spectra\'s Hue entertainment areas but belong to the rest of the house — the Loft Ceiling Uplight and the three Ledge lights. A house mode never writes them: not held at its look, not switched off, not reported. They stay Home Assistant\'s outside music shows; during a music show they follow the show like every other bulb in the area.',
+          'The list is part of house lighting\'s settings (hue_excluded_lights: the bridge\'s own bulb names). The Now panel shows them as "left to Home Assistant".',
+        ],
+      },
+      {
         id: 'house-modes',
         title: 'Modes, switching, and who wins',
         keywords: 'switch mode manual press holds until home assistant changes precedence layers force scene light show music',
         body: [
           'A mode you pick here (or by Sonic, or from a dashboard) HOLDS until Home Assistant\'s lighting mode next CHANGES — HA re-sends the same value every few minutes, and that never undoes your pick. When HA\'s value changes (say at 18:30), the clock wins again.',
           'Layers, top to bottom: the Light Show (its holds, levels and flashes) → Force Scene / Force Colour (your pins — the mode waits behind them) → the music show (when the mode lets music play) → the mode. Taking a higher layer away shows the one below: End show fades back to the MODE\'s look, not to an undimmed picture.',
+          'THE STARTING MODES: Standard (the Calm colours, the crystal\'s Star turning slowly at about 6%, Melt on the TV strip and sconces, the porch rail and dining table breathing, Hue at 3521 K), Evening (the same looks on Calm – Evening\'s redder, dimmer background, the crystal at about 13%, Hue at 2000 K), Dim (three large, slow fish on the crystal in the Night Light colours at about 3%, everything dimmer, Hue deep red-orange), Night light (only the fish on the crystal; everything else and the Hue off), Away (everything off), TV and TV paused (the crystal and sconces dim, Hue off while playing and warm while paused; the TV strip goes to Hyperion). The music show plays on top of Standard, Evening and Dim; Night light, Away and TV ignore music. Change any of it here or with Sonic.',
         ],
       },
       {
@@ -2068,6 +2088,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         keywords: 'home assistant lighting mode input select daytime evening dim bedtime travel alias heartbeat port 8010 post api',
         body: [
           'Each mode lists the Home Assistant lighting_mode value(s) it answers to — Standard answers to "Daytime", Night light to "Bedtime" — so nothing in Home Assistant is renamed. A mode named exactly like HA\'s word answers to it without repeating it. One word belongs to one mode.',
+          'Every value Home Assistant\'s lighting mode can take is answered: Daytime → Standard, Evening → Evening, Dim → Dim, Bedtime → Night light, Travel → Away (and "Away" itself), Party → Standard (there is no Party mode; Home Assistant\'s own crystal script already treats Party as Daytime). HA\'s "unknown"/"unavailable" (while it restarts) is deliberately left unanswered, so a restart never flips the house to Standard in the middle of the night — the room keeps the mode it was in.',
           'Home Assistant sets the mode with POST http://<spectra>:8010/spectra/api/house/mode and {"ha_mode": "Evening", "source": "ha"}, and reads it back from the same URL (or the "lighting" key of /spectra/api/engine/status). Repeating a value is a no-op, so HA can re-send it every five minutes as a heartbeat. A value no mode answers to is remembered and named here — never guessed.',
         ],
       },

@@ -156,6 +156,29 @@ console.log('§ phase 3: the Energy lines say what was sent, what is parked, whe
     `hand-back named: ${back.join(' | ')}`);
 }
 
+console.log('§6 phase 4: switched off never claims a look, and left-alone bulbs are Home Assistant\'s');
+{
+  const off = { ...base, enabled: false, phase: 'inactive', active: false,
+    reason: 'house lighting is switched off — Home Assistant\'s mode is recorded, nothing is applied' };
+  const c = hs.chipLine(off);
+  ok(c.text === 'Mode: Evening · HA · off' && c.tone === 'off', `switched off: "${c.text}"`);
+  const line = hs.phaseLine(off);
+  ok(line.startsWith('House lighting is switched off') && line.includes('Evening is recorded'),
+    `the phase line says nothing is applied: "${line}"`);
+  ok(hs.phaseLine({ ...off, mode: null }).startsWith('House lighting is switched off'),
+    'switched off with no mode');
+  ok(hs.chipLine(base).text === 'Mode: Evening · HA', 'switched on (or an older server): unchanged');
+  const looks = [
+    { area: 'hue-lights', look: 'hold', mirek: 284, color: null, brightness: 100 },
+    { area: 'dining-hues', look: 'off', mirek: null, color: null, brightness: 100 },
+    { area: '*/Loft Ceiling Uplight', look: 'skip', mirek: null, color: null, brightness: 0 },
+    { area: '*/Ledge Left', look: 'skip', mirek: null, color: null, brightness: 0 },
+  ];
+  const hue = hs.hueLookLine(looks, (id) => ({ 'hue-lights': 'Hue Lights', 'dining-hues': 'Dining Hues' }[id] ?? id));
+  ok(hue === 'Hue Lights 3521 K 100% · Dining Hues off · left to Home Assistant: Loft Ceiling Uplight, Ledge Left',
+    `hue line: "${hue}"`);
+}
+
 if (failures) {
   console.log(`\n${failures} failure(s)`);
   process.exit(1);

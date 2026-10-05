@@ -20,11 +20,38 @@ nothing (a preview, a camera run, a night run) has it on standby. Each
 response says which: `"acting": false` plus a `note`/`reason` when it was
 only recorded. With no modes in the library everything is inert.
 
+**Phase 4 added the CUTOVER SWITCH** (`"enabled"` in the settings below,
+OFF as shipped): while it is off nothing is acted on even with a mode set,
+so the seeded modes change nothing in the room until River's cutover is
+done and house lighting is switched on (the House tab's power button, or
+`PUT /house/settings {"enabled": true}`). Everything is still recorded and
+mapped, and `GET /house/mode` names the mode HA's word maps to.
+
+## Home Assistant's lighting words (phase 4)
+
+Every value `input_select.lighting_mode` can take reaches a mode:
+
+| HA sends | Spectra mode |
+|---|---|
+| `Daytime` | Standard |
+| `Party` | Standard (there is no Party mode; HA's own crystal script treats Party as Daytime) |
+| `Evening` | Evening |
+| `Dim` | Dim |
+| `Bedtime` | Night light |
+| `Travel` | Away |
+| `Away` | Away |
+| media `playing` | TV (by name) |
+| media `paused` / `idle` | TV paused (by name) |
+
+`unknown` / `unavailable` (while HA restarts) are deliberately unmapped: an
+unmapped word keeps the current mode, so a restart never flips the house to
+Standard in the middle of the night.
+
 ## Calls
 
 | Call | Body | Answer | Replaces (R#) |
 |---|---|---|---|
-| `GET /house/heartbeat` | — | `{"state", "lighting_ok", "mode", "clock_mode", "ha_value", "phase", "media", "tv_music", "tv_strip", "voice", "withheld", "owner", "uptime_s", "at_ms"}` | R17's fallback read |
+| `GET /house/heartbeat` | — | `{"state", "lighting_ok", "house_enabled", "mode", "clock_mode", "ha_value", "phase", "media", "tv_music", "tv_strip", "voice", "withheld", "owner", "uptime_s", "at_ms"}` | R17's fallback read |
 | `PUT /house/mode` *(phase 1)* | `{"ha_mode": "<lighting_mode>", "source": "ha"}` | `status`: applied / unchanged / held_manual / unmapped | R1 |
 | `PUT /house/tv-music` | `{"on": true \| false}` | `status`: recorded / unchanged; `tv_strip` | R6 |
 | `PUT /house/media` | `{"source": "roku" \| "switch" \| "bluray" \| …, "state": "playing" \| "paused" \| "idle" \| "stopped"}` | `status`: applied / recorded / unchanged; `note` when no mode answers | R7 |
@@ -45,7 +72,7 @@ unknown fixture is 404, an invalid state 422.
 |---|---|---|
 | `driving` | a mode drives the room — leave every Spectra fixture alone | true |
 | `standby` | a preview / camera run / night run holds the room for now | true |
-| `idle` | Spectra holds the room but no mode is set | false |
+| `idle` | Spectra holds the room but no mode drives it: none is set, or house lighting is switched off (`house_enabled: false`) | false |
 | `on_paper` | Spectra holds the room with its engine not live (a quiet take) | false |
 | `down` | the record says Spectra owns, but its light stack is not up | false |
 | `released` | nobody drives the room | false |
@@ -159,7 +186,9 @@ levels, and held Hue areas stay held. The sconces' own realtime timeout is
 ## Settings (`GET/PUT /house/settings`)
 
 ```json
-{"tv_strips": ["tv-backlight"],
+{"enabled": false,
+ "hue_excluded_lights": ["Loft Ceiling Uplight", "Ledge Left", "Ledge Right", "Ledge Center"],
+ "tv_strips": ["tv-backlight"],
  "voice_fixtures": ["crystal", "sconce-kitchen-left", "sconce-kitchen-right"],
  "voice_looks": {"listening": {"color": "#0000ff", "level": 100},
                  "processing": {"color": "#26a269", "level": 100},
@@ -168,4 +197,7 @@ levels, and held Hue areas stay held. The sconces' own realtime timeout is
 ```
 
 A partial `PUT` keeps everything it does not name (one voice state's colour
-can be changed alone).
+can be changed alone). `enabled` is the cutover switch; `hue_excluded_lights`
+names the Hue bulbs a mode never writes (they stay Home Assistant's outside
+music shows). A `PUT` that changes either applies at once and answers with
+the `lighting` status too.

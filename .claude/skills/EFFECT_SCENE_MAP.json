@@ -113,6 +113,14 @@
       "files": [
         "fx/effects/power.py"
       ]
+    },
+    "gradient-effect": {
+      "skill": ".claude/skills/gradient-effect/SKILL.md",
+      "files": [
+        "fx/effects/gradient.py",
+        "fx/effects/modulate.py",
+        "tests/test_gradient_breathing.py"
+      ]
     }
   },
   "acknowledged_effect_gaps": {
@@ -122,7 +130,6 @@
       "fx/effects/concentric.py",
       "fx/effects/equalizer2d.py",
       "fx/effects/gifplayer.py",
-      "fx/effects/gradient.py",
       "fx/effects/keybeat2d.py",
       "fx/effects/noise2d.py",
       "fx/effects/pixelPattern.py",
@@ -196,6 +203,13 @@
       "files": [
         "scripts/seed_fish_scene.py",
         "scripts/add_fish_swim_burst_flare.py"
+      ]
+    },
+    "house-scenes": {
+      "skill": ".claude/skills/house-scenes/SKILL.md",
+      "files": [
+        "scripts/seed_house_lighting.py",
+        "tests/test_seed_house_lighting.py"
       ]
     }
   }

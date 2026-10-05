@@ -24,6 +24,9 @@ own cause and its own fix here:
      unfrozen and start an entertainment session before the Hue Hold gate
      re-freezes them. The areas held at the last snapshot are named to
      fx/hue_freeze.py and come up frozen — no session, the held look stays.
+     (Phase 4: an ordinary TAKE does the same — handover.SpectraSide.
+     activate names house.take_frozen_areas(), and `after_take` is this
+     module's `after_resume` once the gate's post-commit transition ends.)
 
 ONLY WHEN IT WILL APPLY. `prepare_for_resume` does nothing unless a mode is
 set, the ownership record says SPECTRA (resume will bring the stack up) and
@@ -225,3 +228,31 @@ async def after_resume() -> list[str]:
     except Exception:                                    # noqa: BLE001
         logger.exception("house restart: after-resume Hue check failed")
     return unfrozen
+
+
+#: How long after a take the Hue check waits for the gate's own post-commit
+#: transition (a whole-room hold paces its writes 300 ms apart and confirms
+#: each) before it reads what landed.
+AFTER_TAKE_WAIT_S = 90.0
+AFTER_TAKE_POLL_S = 0.5
+
+
+async def after_take(*, sleep=None, wait_s: float = AFTER_TAKE_WAIT_S) -> list[str]:
+    """after_resume, for an ordinary take: handover.SpectraSide.activate
+    named the Hue areas the house mode was about to hold
+    (house.take_frozen_areas) so they came up frozen. Once the Hue Hold
+    gate's post-commit transition has finished, any of them it does NOT
+    hold (the room moved on — music started with Hue joining the show, the
+    mode was cleared) is unfrozen so it streams. Never raises."""
+    import asyncio
+    sleep = sleep or asyncio.sleep
+    try:
+        from spectra.services import ambient_music_gate as gate
+        waited = 0.0
+        await sleep(AFTER_TAKE_POLL_S)
+        while gate.transition_in_flight() and waited < wait_s:
+            await sleep(AFTER_TAKE_POLL_S)
+            waited += AFTER_TAKE_POLL_S
+    except Exception:                                    # noqa: BLE001
+        logger.exception("house: after-take wait failed")
+    return await after_resume()

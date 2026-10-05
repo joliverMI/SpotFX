@@ -41,7 +41,16 @@ class ModulateEffect(Effect):
     )
 
     def config_updated(self, config):
-        self._counter = 0
+        # SpotFX (VENDOR.md #49): keep the breathing PHASE across ordinary
+        # config updates. Effect._apply_config runs this on EVERY write and
+        # on every frame of a numeric/colour param tween, so resetting here
+        # froze the breath at one level for as long as any glide ran (a
+        # house mode's 90 s change, a colour landing). Only a change of
+        # animation resets it — the two count in different units.
+        mode = config.get("modulation_effect")
+        if getattr(self, "_counter_mode", None) != mode:
+            self._counter = 0
+            self._counter_mode = mode
 
         # temporal array for breathing cycle
         self._breath_cycle = np.linspace(0, 9, 9 * _rate)

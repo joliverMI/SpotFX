@@ -286,7 +286,7 @@ def _isolated_light_show(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _isolated_house(tmp_path, monkeypatch):
+def _isolated_house(tmp_path_factory, monkeypatch):
     """House lighting's two stores (spectra/services/house_store.py), its
     in-memory runtime and the process-global frame-rate caps (fx/
     device_rate.py). The layer's hooks are read from production choke
@@ -296,9 +296,12 @@ def _isolated_house(tmp_path, monkeypatch):
     from fx import device_rate
     from spectra import config as scfg
     from spectra.services import house, house_store
-    monkeypatch.setattr(scfg, "HOUSE_MODES_FILE", tmp_path / "house_modes.json")
-    monkeypatch.setattr(scfg, "HOUSE_STATE_FILE", tmp_path / "house_state.json")
-    monkeypatch.setattr(scfg, "HOUSE_RESTART_FILE", tmp_path / "house_restart.json")
+    # Its own temp dir, not the test's tmp_path: the library is WRITTEN
+    # below (the switch), and tests that list their tmp_path must not see it.
+    house_dir = tmp_path_factory.mktemp("house")
+    monkeypatch.setattr(scfg, "HOUSE_MODES_FILE", house_dir / "house_modes.json")
+    monkeypatch.setattr(scfg, "HOUSE_STATE_FILE", house_dir / "house_state.json")
+    monkeypatch.setattr(scfg, "HOUSE_RESTART_FILE", house_dir / "house_restart.json")
     from spectra.services import (house_energy, house_fixtures, house_restart,
                                   house_voice)
     from fx import device_output
@@ -313,6 +316,12 @@ def _isolated_house(tmp_path, monkeypatch):
     device_output.clear_withheld()
     device_output.set_send_on_change(None)
     hue_freeze.clear()
+    # The CUTOVER SWITCH (phase 4, HouseSettings.enabled) ships OFF; the
+    # house suites prove what a mode does once it is on, so each test starts
+    # switched ON with no mode set. tests/test_house_phase4.py proves the
+    # shipped OFF default itself, on a library written without this.
+    from spectra.models.house_mode import HouseLibrary, HouseSettings
+    house_store.save_library(HouseLibrary(settings=HouseSettings(enabled=True)))
     yield
     house_store.reset_memory()
     house.reset()

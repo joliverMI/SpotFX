@@ -803,13 +803,16 @@ async def _write_and_confirm(client: httpx.AsyncClient, cfg: dict,
 async def _hold_and_confirm(dev: Any, body: dict, target_xy: tuple[float, float],
                             target_brightness_pct: float,
                             token: Optional[CancelToken] = None,
-                            matcher: Optional[Any] = None) -> tuple[list[str], list[str]]:
+                            matcher: Optional[Any] = None,
+                            skip: frozenset = frozenset()) -> tuple[list[str], list[str]]:
     """Resolve every light this device's entertainment stream covers, then
     run them through _write_and_confirm. See that function for the actual
-    write/confirm/retry mechanics."""
+    write/confirm/retry mechanics. `skip` (lower-cased bulb names) are left
+    out entirely — house lighting's bulbs that stay Home Assistant's."""
     cfg = dev.config
     async with _bridge_client(cfg) as client:
-        pending = await _resolve_lights_named(client, cfg)
+        pending = [(rid, name) for rid, name in await _resolve_lights_named(client, cfg)
+                   if (name or "").strip().lower() not in skip]
         if not pending:
             return [], []
         return await _write_and_confirm(client, cfg, pending, body, target_xy,
@@ -1279,6 +1282,10 @@ async def _reconcile_impl(enabled: bool, color: Optional[str],
 # A look tuple is (area, kind, mirek, color, brightness_pct) — hashable, so
 # ambient_music_gate can compare "already landed" exactly as it compares a
 # colour. `area` is a Hue device id or "*" (every area); an exact id wins.
+# kind "skip" (phase 4) names ONE BULB the house leaves alone, area
+# "<device id or *>/<bulb name>" — skipped_lights() reads them; the bulb is
+# never held, switched off or reported (his Loft Ceiling Uplight and Ledge
+# lights stay Home Assistant's outside music shows).
 #
 # THE RAMP is the mode's own glide (90 s at a clock change), carried as
 # `dynamics.duration`: the bulbs fade on the mesh; the bridge's resource
@@ -1292,11 +1299,27 @@ MAX_LOOK_RAMP_MS = 600_000
 
 
 def look_for(device_id: str, looks) -> Optional[tuple]:
-    """The look an area gets: its own entry, else the "*" entry, else None."""
-    exact = next((lk for lk in looks if lk[0] == device_id), None)
+    """The look an area gets: its own entry, else the "*" entry, else None.
+    A SKIP look ("<area>/<bulb>") names one bulb, never an area."""
+    exact = next((lk for lk in looks if lk[0] == device_id and lk[1] != "skip"), None)
     if exact is not None:
         return exact
-    return next((lk for lk in looks if lk[0] == "*"), None)
+    return next((lk for lk in looks if lk[0] == "*" and lk[1] != "skip"), None)
+
+
+def skipped_lights(device_id: str, looks) -> frozenset:
+    """Bulb names (lower-cased) a house mode leaves alone in this area —
+    SKIP looks for "<device_id>/<bulb>" or "*/<bulb>" (house.py adds one per
+    HouseSettings.hue_excluded_lights entry). Never held, never switched
+    off, never reported: they stay Home Assistant's."""
+    out = set()
+    for lk in looks or ():
+        if lk[1] != "skip" or "/" not in lk[0]:
+            continue
+        area, name = lk[0].split("/", 1)
+        if area in ("*", device_id) and name.strip():
+            out.add(name.strip().lower())
+    return frozenset(out)
 
 
 def _look_payload(look: tuple, ramp_ms: Optional[int]) -> dict:
@@ -1378,7 +1401,8 @@ async def _reconcile_looks_impl(looks: tuple, ramp_ms: Optional[int],
             await dev.set_frozen(True)   # must land before the REST write
             confirmed, stragglers = await _hold_and_confirm(
                 dev, body, (0.0, 0.0), 0.0, token,
-                matcher=lambda st, lk=look: _look_matches(st, lk, strict=True))
+                matcher=lambda st, lk=look: _look_matches(st, lk, strict=True),
+                skip=skipped_lights(did, looks))
             held.extend(confirmed)
             unconfirmed.extend(stragglers)
             touched.append(did)
@@ -1425,9 +1449,12 @@ async def verify_looks(looks) -> dict:
         if look is None or look[1] not in ("hold", "off"):
             continue
         cfg = dev.config
+        skip = skipped_lights(did, looks)
         try:
             async with _bridge_client(cfg) as client:
                 for rid, name in await _resolve_lights_named(client, cfg):
+                    if (name or "").strip().lower() in skip:
+                        continue
                     try:
                         state = (await _hue_get(
                             client, f"/clip/v2/resource/light/{rid}"))["data"][0]

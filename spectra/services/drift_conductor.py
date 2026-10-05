@@ -618,6 +618,7 @@ class DriftConductor:
         scene = self.scene
         override = (scene is not None
                     and scene.color_journey.mode == "override")
+        house = self._house_override()
         pool: dict[str, tuple[Any, float]] = {}
         for card in self._set_cards():
             if getattr(card, "kind", "set") != "set":
@@ -629,7 +630,15 @@ class DriftConductor:
             # this only stops it being travelled TO again.
             if getattr(card, "disabled", False):
                 continue
-            if override:
+            if house is not None:
+                # A resting house mode NAMED these sets — his explicit
+                # pick, like Force Colour naming one — so the global
+                # opt-out (which keeps a set out of automatic music pools)
+                # does not apply. His Calm members are all opted out; the
+                # opt-out test held Standard's walk forever.
+                if card.id not in house.set_ids:
+                    continue
+            elif override:
                 if not scene.accepts_color_set(card):
                     continue
             elif getattr(card, "scene_v2_opt_out", False):
@@ -638,11 +647,9 @@ class DriftConductor:
             if position is None:
                 continue
             pool[card.id] = (card, position)
-        house = self._house_override()
-        if house is not None:
-            # The mode's own sets only — an empty result HOLDS the walk
-            # rather than wandering off to a set the mode never named.
-            pool = {sid: v for sid, v in pool.items() if sid in house.set_ids}
+        # With a house mode the pool is the mode's own sets only — an empty
+        # result HOLDS the walk rather than wandering off to a set the mode
+        # never named.
         return pool
 
     def _house_override(self):

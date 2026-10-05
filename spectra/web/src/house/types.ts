@@ -66,6 +66,8 @@ export type HousePhase = 'inactive' | 'standby' | 'resting' | 'music';
 /** The `lighting` key on GET /api/engine/status (and GET /api/house/mode). */
 export interface LightingStatus {
   mode: { id: string; name: string } | null;
+  /** Phase 4's cutover switch (HouseSettings.enabled) — off = nothing applied. */
+  enabled?: boolean;
   source: string | null;
   since_ms: number | null;
   manual: boolean;

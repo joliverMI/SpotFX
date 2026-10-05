@@ -34,6 +34,10 @@ and ACTED ON only while a mode drives the room):
   POST                             phase 3: mains off = no stream, no search
   GET    /api/house/settings       the seam's settings (TV strip, voice
   PUT                              fixtures and colours, owned brightness)
+                                   and phase 4's CUTOVER SWITCH
+                                   {"enabled": true|false} plus the Hue
+                                   bulbs a mode leaves alone
+                                   {"hue_excluded_lights": [...]}
 
 Selecting a mode is idempotent (the same value again is a no-op, so HA's
 5-minute re-assert is a cheap heartbeat) and always 200 with a `status`
@@ -368,7 +372,17 @@ async def put_settings(body: dict):
         # Resting caps are part of the mode's plan: re-enter so a changed
         # default lands now, not at the next mode change.
         await house.reapply()
-    return {"settings": saved.model_dump()}
+    out: dict = {"settings": saved.model_dump()}
+    if (current.get("enabled") != saved.enabled
+            or current.get("hue_excluded_lights") != saved.hue_excluded_lights):
+        # THE CUTOVER SWITCH (or the bulbs it leaves alone) moved: apply it
+        # now rather than on the supervisor's next pass, and say what the
+        # room is doing as a result.
+        house._record("switched", {"enabled": saved.enabled,
+                                   "hue_excluded_lights": saved.hue_excluded_lights})
+        await house.tick()
+        out["lighting"] = house.status_dict()
+    return out
 
 
 @router.get("/targets")

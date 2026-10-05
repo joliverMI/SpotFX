@@ -12,13 +12,15 @@
  * not hold the room is recorded and applies on take-back, and the Now panel
  * says exactly that. Every field is also reachable through Sonic (the 💬). */
 import { useCallback, useEffect, useState } from 'react';
-import { apiDel, apiGet, apiPost } from '../api/client';
+import { apiDel, apiGet, apiPost, apiPut } from '../api/client';
 import HelpLink from '../help/HelpLink';
+import PowerButton from '../components/PowerButton';
 import SonicChatPopover from '../components/SonicChatPopover';
 import { useToast } from '../components/Toast';
 import { useEngineStatus, useScenes, useSpotColorSets } from '../queries';
 import {
-  blankMode, energyLines, kelvinToHex, manualLine, MUSIC_HUE_WORDS, MUSIC_WORDS, phaseLine, seamLines,
+  blankMode, energyLines, hueLookLine, kelvinToHex, manualLine, MUSIC_HUE_WORDS, MUSIC_WORDS, phaseLine,
+  seamLines,
   sourceWord,
 } from './houseSummary';
 import type {
@@ -119,6 +121,20 @@ export default function HousePage() {
     }
   };
 
+  const switchHouse = async (on: boolean) => {
+    if (!on && !window.confirm('Switch house lighting off? The mode stays recorded; nothing is applied until you switch it back on.')) return;
+    setBusy(true);
+    try {
+      await apiPut('/house/settings', { enabled: on });
+      toast(on ? 'House lighting on' : 'House lighting off', 'success');
+      await refetch();
+    } catch (e) {
+      toast(String(e), 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const current = lib?.current_mode_id ?? null;
 
   return (
@@ -129,7 +145,7 @@ export default function HousePage() {
       </div>
 
       <NowPanel lighting={lighting} busy={busy} areas={targets?.hue_areas ?? []}
-        onClear={() => void switchTo(null)} />
+        onClear={() => void switchTo(null)} onSwitch={(on) => void switchHouse(on)} />
 
       <div className="house-layout">
         <div className="card house-modes">
@@ -179,9 +195,9 @@ export default function HousePage() {
   );
 }
 
-function NowPanel({ lighting, busy, areas, onClear }: {
+function NowPanel({ lighting, busy, areas, onClear, onSwitch }: {
   lighting: LightingStatus | undefined; busy: boolean;
-  areas: { id: string; name: string }[]; onClear: () => void;
+  areas: { id: string; name: string }[]; onClear: () => void; onSwitch: (on: boolean) => void;
 }) {
   const areaName = (id: string) => (id === '*' ? 'every area' : areas.find((a) => a.id === id)?.name ?? id);
   const manual = manualLine(lighting);
@@ -189,6 +205,15 @@ function NowPanel({ lighting, busy, areas, onClear }: {
     <div className={`card house-now house-phase-${lighting?.phase ?? 'inactive'}`}>
       <div className="house-now-head">
         <strong>Now</strong> <HelpLink topic="house-now" />
+        {lighting && (
+          <span className="house-switch-wrap">
+            <PowerButton on={lighting.enabled !== false} onChange={onSwitch} ariaLabel="house lighting"
+              title={lighting.enabled === false
+                ? 'House lighting is OFF — Home Assistant\'s mode is recorded, nothing is applied. Press to switch it on.'
+                : 'House lighting is ON — a set mode drives the room whenever SPECTRA holds it. Press to switch it off.'} />
+            {' '}House lighting {lighting.enabled === false ? 'off' : 'on'} <HelpLink topic="house-switch" />
+          </span>
+        )}
         {lighting?.mode && (
           <button disabled={busy} onClick={onClear}
             title="Clear the mode — the room behaves as it always has. Holds until Home Assistant's lighting mode next changes.">
@@ -226,7 +251,7 @@ function NowPanel({ lighting, busy, areas, onClear }: {
             <li className="muted">Frame-rate caps: {Object.entries(lighting.fixtures.caps).map(([d, v]) => `${d} ${v} fps`).join(' · ')}</li>
           )}
           {lighting.hue && lighting.hue.looks.length > 0 && (
-            <li className="muted">Hue Hold: {lighting.hue.looks.map((l) => `${areaName(l.area)} ${l.look}${l.mirek ? ` ${Math.round(1e6 / l.mirek)} K` : l.color ? ` ${l.color}` : ''}`).join(' · ')}</li>
+            <li className="muted">Hue Hold: {hueLookLine(lighting.hue.looks, areaName)} <HelpLink topic="house-hue-left-alone" /></li>
           )}
           {lighting.problems.map((p) => <li key={p} className="house-problem">⚠ {p}</li>)}
           {lighting.clock_mode && lighting.mode && lighting.clock_mode.id !== lighting.mode.id && (
