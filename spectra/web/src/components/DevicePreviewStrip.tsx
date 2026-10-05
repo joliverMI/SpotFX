@@ -18,9 +18,10 @@
  * now — "facade" (SPECTRA's own in-process render pipeline, his normal S3
  * operating state), "ledfx" (the external LedFX process), or "none"
  * (nobody currently owns the lights). The swatches themselves don't
- * branch on it — DevicePreviewFrame's wire shape is identical either way
- * (types.ts) — but the "reconnecting…" badge's tooltip does, so it never
- * claims to be reconnecting to LedFX when LedFX was never the source.
+ * branch on it — PreviewFrame's wire shape is identical either way
+ * (api/devicePreviewWs.ts) — but the "reconnecting…" badge's tooltip does,
+ * so it never claims to be reconnecting to LedFX when LedFX was never the
+ * source.
  *
  * HIDDEN-TAB AUTO-PAUSE (OQ-7, decided 2026-08-15): a browser tab going
  * hidden auto-pauses the feed too (api/devicePreviewWs.ts closes its own
@@ -33,10 +34,11 @@
  * Resume; "idle — tab hidden" (blue) means only that this tab isn't
  * looking right now and it will pick back up on its own.
  *
- * Default view is a compact single swatch per favourite device (LedFX's
- * own per-pixel average — see api/devicePreviewWs.ts's averageRgb);
- * "Expand" reveals the full per-pixel layout, remembered client-side
- * (report §5), same local-first pattern as the feedback queue.
+ * Default view is a compact single swatch per favourite device — the mean
+ * colour of its real cells (see THE STRIP ASKS ONLY FOR WHAT IT DRAWS,
+ * below, for where that mean is computed); "Expand" reveals the full
+ * per-pixel layout, remembered client-side (report §5), same local-first
+ * pattern as the feedback queue.
  *
  * PHONE-FIRST LAYOUT (fixed 2026-08-16, his own report: "the preview
  * stretches out in a line super far ... I don't see any Matrix for The

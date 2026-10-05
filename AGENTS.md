@@ -2309,34 +2309,6 @@ constrained-link profiles (2 Mbps/60ms: 4.76fps → 9.59fps; 768kbps/120ms:
 1.96fps → 4.27fps) — labeled a remote-EQUIVALENT proxy, not his actual
 connection, which this task never touched.
 
-**THE PREVIEW STREAM IS PROTOCOL 2 (2026-10-05, phase 1 of
-`data/preview-perf-plan/report.md`).** `spectra/services/preview_stream.py`'s
-docstring is the binding statement (wire format included); the paragraphs
-above describe the OLD JSON format, which a viewer that never says hello
-still gets (`localStorage spectra-device-preview-legacy=1` forces it). Five
-things:
-
-- **The gap was the 8 fps cap, and raising it alone is unsafe** (2.3 s behind
-  at 60 fps on 1 Mbit). The stream is a per-viewer 30 fps STEADY CLOCK (a
-  "min interval since last send" test rounds 30 down to 20.7 against a 60 Hz
-  source), binary, real cells only (crystal 976 of 2,664, from the device
-  profile mask), paced by the browser's acks.
-- **The ack window is "two frames beyond the link's own round trip"**
-  (`ceil(min_rtt * rate) + 2`, capped), NOT a flat two — a flat two caps the
-  rate at 2/RTT (22 fps on an 80 ms relay link) and cannot pass the gate.
-- **Negotiation is a `hello` MESSAGE, never a query string**:
-  `services/spectra_proxy.py` drops the query on a WebSocket.
-- **uvicorn's WebSocket deflate uses a 4 kB window**, so consecutive frames
-  do not compress against each other the way LedFX's (aiohttp, 32 kB) do —
-  the reason Spectra's wire cost per byte is higher. Size frames to be small
-  on their own.
-- **The gate is `scripts/preview_perf/run_preview_perf.py --gate`** (README
-  beside it): real browser, emulated links, LedFX measured in the same run.
-  Rebuild `spectra/web/harness-dist` first. Two test traps it already
-  handles: `singleColor` redraws on its own 100 ms loop (a flash must force a
-  redraw), and evenly spaced flashes phase-lock to the sender's frame clock.
-  Unit spec: `tests/test_preview_stream.py`.
-
 Verified against a static harness reproducing his real favourite shapes
 at 390×844 and 360×780 (headless Chromium via chrome-devtools-axi), plus
 a live isolated instance (spare port, `fx.headless` multi-virtual host
@@ -2378,6 +2350,34 @@ path's concurrent-send overlap and its false eviction-without-close
 side by side with the NEW path showing neither) + `tests/
 test_device_preview.py` section 6. This is a delivery-TIMING fix, not a
 second bytes fix — `_facade_frame_payload`'s encoding above is untouched.
+
+**THE PREVIEW STREAM IS PROTOCOL 2 (2026-10-05, phase 1 of
+`data/preview-perf-plan/report.md`).** `spectra/services/preview_stream.py`'s
+docstring is the binding statement (wire format included); the paragraphs
+above describe the OLD JSON format, which a viewer that never says hello
+still gets (`localStorage spectra-device-preview-legacy=1` forces it). Five
+things:
+
+- **The gap was the 8 fps cap, and raising it alone is unsafe** (2.3 s behind
+  at 60 fps on 1 Mbit). The stream is a per-viewer 30 fps STEADY CLOCK (a
+  "min interval since last send" test rounds 30 down to 20.7 against a 60 Hz
+  source), binary, real cells only (crystal 976 of 2,664, from the device
+  profile mask), paced by the browser's acks.
+- **The ack window is "two frames beyond the link's own round trip"**
+  (`ceil(min_rtt * rate) + 2`, capped), NOT a flat two — a flat two caps the
+  rate at 2/RTT (22 fps on an 80 ms relay link) and cannot pass the gate.
+- **Negotiation is a `hello` MESSAGE, never a query string**:
+  `services/spectra_proxy.py` drops the query on a WebSocket.
+- **uvicorn's WebSocket deflate uses a 4 kB window**, so consecutive frames
+  do not compress against each other the way LedFX's (aiohttp, 32 kB) do —
+  the reason Spectra's wire cost per byte is higher. Size frames to be small
+  on their own.
+- **The gate is `scripts/preview_perf/run_preview_perf.py --gate`** (README
+  beside it): real browser, emulated links, LedFX measured in the same run.
+  Rebuild `spectra/web/harness-dist` first. Two test traps it already
+  handles: `singleColor` redraws on its own 100 ms loop (a flash must force a
+  redraw), and evenly spaced flashes phase-lock to the sender's frame clock.
+  Unit spec: `tests/test_preview_stream.py`.
 
 **Global Dark/Light mode** — day-one bar item, SPECTRA_SPEC.md §9 (`AGREED`,
 built, room-proof pending for the Light half — see below); NOT the same
