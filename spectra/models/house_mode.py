@@ -256,6 +256,57 @@ class VoiceLook(BaseModel):
         return v.lower()
 
 
+#: Phase 3's default resting frame-rate caps (the plan's energy section,
+#: data/standard-lighting-plan/report.md §6.3 E1): every calm mode gets
+#: these unless one of its own fixture settings says otherwise. Keys are a
+#: device CATEGORY or a fixture id; a cap only ever lowers a fixture's own
+#: rate (fx/device_rate.py), so his crystal's 30 fps is a ceiling no cap
+#: can raise.
+DEFAULT_RESTING_FPS = {"Matrix": 20, "Strips": 20, "Singles": 10}
+
+
+class HouseEnergy(BaseModel):
+    """PHASE 3 — what a mode does to save energy and network while it drives
+    the room (spectra/services/house_energy.py is the binding statement).
+
+    resting_fps        frame-rate caps while the mode RESTS (and through
+                       music in a calm/ignore mode): {category or fixture:
+                       fps}. A mode's own fixture setting `fps` wins for the
+                       fixtures it names. {} = no default caps.
+    park_idle          a virtual none of whose fixtures takes its frames (a
+                       dummy, a fixture lent / off / unpowered, a Hue area
+                       held over the bridge) renders at 2 frames/s instead
+                       of its full rate (fx/device_rate.py PARKING)
+    send_on_change     a fixture whose picture is not changing is sent
+                       nothing but a keep-alive every `keepalive_s`
+                       (fx/device_output.py SEND ON CHANGE)
+    keepalive_s        that keep-alive — must stay well inside the shortest
+                       WLED realtime timeout in the room (the sconces' 2.5 s)
+    audio_pause_after_s  stop listening to the room's audio after this long
+                       with no music (0 = never). Listening resumes the
+                       moment music plays."""
+    model_config = ConfigDict(extra="ignore")
+    resting_fps: dict[str, int] = Field(default_factory=lambda: dict(DEFAULT_RESTING_FPS))
+    park_idle: bool = True
+    send_on_change: bool = True
+    keepalive_s: float = Field(default=1.0, ge=0.2, le=2.0)
+    audio_pause_after_s: float = Field(default=120.0, ge=0.0, le=3600.0)
+
+    @field_validator("resting_fps")
+    @classmethod
+    def _fps(cls, v: dict) -> dict:
+        out: dict[str, int] = {}
+        for k, fps in (v or {}).items():
+            key = str(k or "").strip()
+            if not key:
+                continue
+            n = int(fps)
+            if n < 1 or n > 60:
+                raise ValueError(f"resting fps for {key!r} must be 1-60")
+            out[key] = n
+        return out
+
+
 class HouseSettings(BaseModel):
     """Phase 2's seam settings — HIS data, in the library file, edited only
     on purpose (PUT /api/house/settings).
@@ -279,6 +330,8 @@ class HouseSettings(BaseModel):
         k: VoiceLook(**v) for k, v in DEFAULT_VOICE_LOOKS.items()})
     own_brightness: bool = True
     owned_brightness: int = Field(default=255, ge=1, le=255)
+    #: phase 3: energy and network (HouseEnergy above)
+    energy: HouseEnergy = Field(default_factory=HouseEnergy)
 
     @field_validator("voice_looks")
     @classmethod
@@ -345,3 +398,8 @@ class HouseState(BaseModel):
     media_since_ms: Optional[int] = None
     #: per-fixture overrides (device id -> FixtureOverride)
     fixtures: dict[str, FixtureOverride] = Field(default_factory=dict)
+    #: phase 3: fixtures whose MAINS Home Assistant reports OFF (his kitchen
+    #: sconces on light.dimmer_kitchen_sconce) -> since when (ms). While a
+    #: mode drives the room Spectra neither streams to them nor searches
+    #: for them; "mains on" (or a recheck naming them) clears the entry.
+    mains_off: dict[str, int] = Field(default_factory=dict)

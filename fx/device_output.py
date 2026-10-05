@@ -59,6 +59,20 @@ fixture back up lands in step. Suspension applies here too: while a preview,
 camera run or night run holds the room nothing is withheld, because a capture
 must see every fixture it drives. Idle cost: one truthiness check.
 
+SEND ON CHANGE (house lighting phase 3, `fx/VENDOR.md` #48). A fixture
+held Steady, Frozen or Dark — or showing a picture that simply is not moving
+— used to be sent the same bytes every frame. With `set_send_on_change(k)`
+in force, `Device._emit_frame` compares each frame, quantised exactly as the
+DDP transport quantises it (`astype(np.uint8)`, fx/devices/ddp.py), with the
+last one it actually sent, and skips the transport write while they are
+identical — sending a KEEP-ALIVE copy every `k` seconds so the fixture never
+leaves realtime (his kitchen sconces give up after 2.5 s, WLED
+`if.live.timeout` 25). A frame that differs by one byte goes out at once.
+Never in force while suspended (a capture must see every frame), never for
+a Hue area (SEND_ALWAYS_TYPES: a DTLS session with its own timeout, and a
+held area already sends nothing), and off by default — None is the shipped
+state, byte-identical.
+
 `fx/` may not import `spectra/`: SPECTRA pushes, this module never pulls
 (the shape of fx/device_timing.py).
 """
@@ -90,6 +104,17 @@ _scale_provider: Optional[Callable[[str], float]] = None
 #: device id -> why it gets no stream ("lent:hyperion", "off"). Replaced
 #: wholesale by set_withheld (copy-on-write, like _targets).
 _withheld: dict[str, str] = {}
+
+#: SEND ON CHANGE's keep-alive bounds. The ceiling sits well inside the
+#: shortest realtime timeout in his room (the sconces' 2.5 s) so one lost
+#: keep-alive on Wi-Fi still lands inside it.
+KEEPALIVE_MIN_S = 0.2
+KEEPALIVE_MAX_S = 2.0
+DEFAULT_KEEPALIVE_S = 1.0
+#: device types always sent every frame (see SEND ON CHANGE above)
+SEND_ALWAYS_TYPES = frozenset({"hue"})
+#: None = send every frame (the shipped state); else the keep-alive seconds
+_keepalive_s: Optional[float] = None
 
 
 @dataclass(frozen=True)
@@ -326,6 +351,33 @@ def snapshot() -> dict[str, dict]:
                   "level": round(tg.level_at(t), 3), "level_target": tg.level,
                   "flashing": bool(tg.flash and not tg.flash.done(t))}
     return out
+
+
+# ── send on change (house lighting phase 3) ─────────────────────────────────
+
+def set_send_on_change(keepalive_s: Optional[float]) -> Optional[float]:
+    """Switch send-on-change on with a keep-alive of `keepalive_s` seconds
+    (clamped to KEEPALIVE_MIN_S..KEEPALIVE_MAX_S), or off with None. Returns
+    what is now in force."""
+    global _keepalive_s
+    if keepalive_s is None:
+        _keepalive_s = None
+    else:
+        _keepalive_s = max(KEEPALIVE_MIN_S, min(KEEPALIVE_MAX_S, float(keepalive_s)))
+    return _keepalive_s
+
+
+def send_on_change_s() -> Optional[float]:
+    """The keep-alive in force for a render thread right now, or None to
+    send every frame (off, or the layer is suspended for a capture)."""
+    if _keepalive_s is None or _suspended:
+        return None
+    return _keepalive_s
+
+
+def send_on_change_setting() -> Optional[float]:
+    """What SPECTRA set, suspension or not (status surfaces)."""
+    return _keepalive_s
 
 
 # ── the render-thread half ─────────────────────────────────────────────────

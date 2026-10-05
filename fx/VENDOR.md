@@ -1446,3 +1446,38 @@ against that commit.
     unfreezes any consumed area its gate does not hold after its startup
     pass (`house_restart.after_resume`). Proof:
     `tests/test_house_restart_hold.py`.
+47. `device_rate.py` + `virtuals.py` (SpotFX-authored): PARKING, and a
+    sleep below the vendored table (2026-10-05, house lighting phase 3). With
+    parking switched on (`device_rate.set_park_idle`, SPECTRA's house layer
+    while a mode drives the room) a virtual NONE of whose devices takes its
+    frames — a dummy, a WITHHELD fixture (#44), a frozen Hue area, an
+    inactive driver — renders at `PARKED_FPS` (2) instead of its full rate.
+    Read LIVE per frame on the render thread (`device_rate.rate_for(rate,
+    self._devices)` replaces #43's `effective_rate` call), so a fixture
+    coming back un-parks its virtual on the next frame. Not zero: the
+    render-plane dead-man needs a frame from every active virtual inside 2 s.
+    ALSO: the vendored `fx/utils.py fps_to_sleep_interval` table starts at
+    10 fps, so every rate at or below it slept one table step (91 ms, ~11
+    fps) — a cap of 10 gave ~11 and a park at 2 would have given ~11 too. A
+    rate this module LOWERED to 10 or below now sleeps `1/rate`
+    (`device_rate.sleep_interval`); a configured rate and every rate above
+    10 still use the table unchanged. Parking off and no cap: byte-identical.
+    Proof: `tests/test_device_rate.py` (real FxHost render loop: a
+    dummy-only virtual parks, an emitting sibling keeps the full rate, a
+    withhold lifted mid-run un-parks on the next frame).
+48. `device_output.py` + `devices/__init__.py` (SpotFX-authored): SEND ON
+    CHANGE (2026-10-05, house lighting phase 3). With
+    `device_output.set_send_on_change(keepalive_s)` in force,
+    `Device._emit_frame` compares each frame — quantised exactly as the DDP
+    transport quantises it (`astype(np.uint8)`, `devices/ddp.py`) — with the
+    last one it sent and skips the transport write and the
+    DeviceUpdateEvent while they are identical, sending one copy every
+    `keepalive_s` (clamped 0.2-2.0 s, inside his sconces' 2.5 s realtime
+    timeout). A changed frame goes out at once; the first frame after a
+    withhold or an activation always goes out. Never for a Hue area
+    (`SEND_ALWAYS_TYPES`), never while suspended (a capture). Every device
+    also counts `_frames_sent` / `_frames_skipped` (read by SPECTRA's
+    energy status). Off (None) is the shipped state: the two original
+    statements plus a counter. Proof: `tests/test_send_on_change_landing.py`
+    (real FxHost, frames counted at the transport, a red control with the
+    comparison removed).

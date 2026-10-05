@@ -30,6 +30,8 @@ and ACTED ON only while a mode drives the room):
   POST   /api/house/voice          {"state": "listening" | "processing" |
                                    "responding" | "idle"} — never waits
   POST   /api/house/recheck        {"fixtures": [...]} — "the mains are on"
+  PUT    /api/house/mains          {"fixtures": [...], "on": false|true} —
+  POST                             phase 3: mains off = no stream, no search
   GET    /api/house/settings       the seam's settings (TV strip, voice
   PUT                              fixtures and colours, owned brightness)
 
@@ -294,6 +296,33 @@ async def post_recheck(body: RecheckRequest):
     return res
 
 
+class MainsRequest(BaseModel):
+    fixtures: list[str] = []
+    on: bool
+    source: str = "ha"
+
+
+@router.put("/mains")
+async def put_mains(body: MainsRequest):
+    """Home Assistant reports a fixture's MAINS supply switched (the kitchen
+    sconces on light.dimmer_kitchen_sconce). OFF: no stream and no search
+    while a mode drives the room. ON: cleared, and the fixtures are re-found
+    at once (the recheck). Spectra never switches the mains itself."""
+    from spectra.services import house_fixtures
+    res = house_fixtures.set_mains(body.fixtures, body.on, source=body.source)
+    if res.get("status") == "invalid":
+        code = 404 if res.get("unknown") else 422
+        return JSONResponse(status_code=code, content={"detail": res.get("reason"), **res})
+    if not res["acting"]:
+        res["note"] = f"recorded — not acted on: {house.inactive_reason()}"
+    return res
+
+
+@router.post("/mains")
+async def post_mains(body: MainsRequest):
+    return await put_mains(body)
+
+
 @router.get("/settings")
 async def get_settings() -> dict:
     return {"settings": house_store.load_library().settings.model_dump()}
@@ -312,6 +341,20 @@ async def put_settings(body: dict):
             looks[state] = {**looks.get(state, {}),
                             **(look if isinstance(look, dict) else {})}
         body["voice_looks"] = looks
+    if isinstance(body.get("energy"), dict):
+        # A partial edit of the energy block (one keep-alive, one cap)
+        # keeps everything else in it as he set it.
+        energy = dict(current.get("energy") or {})
+        patch = dict(body["energy"])
+        if isinstance(patch.get("resting_fps"), dict):
+            fps = dict(energy.get("resting_fps") or {})
+            for k, v in patch["resting_fps"].items():
+                if v is None:
+                    fps.pop(k, None)
+                else:
+                    fps[k] = v
+            patch["resting_fps"] = fps
+        body["energy"] = {**energy, **patch}
     try:
         merged = HouseSettings(**{**current, **body})
     except ValidationError as exc:
@@ -321,6 +364,10 @@ async def put_settings(body: dict):
     saved = house_store.put_settings(merged)
     from spectra.services import house_fixtures
     house_fixtures.kick()
+    if "energy" in body:
+        # Resting caps are part of the mode's plan: re-enter so a changed
+        # default lands now, not at the next mode change.
+        await house.reapply()
     return {"settings": saved.model_dump()}
 
 

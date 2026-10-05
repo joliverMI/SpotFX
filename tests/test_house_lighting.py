@@ -769,3 +769,110 @@ def test_repeating_a_media_report_is_a_no_op(world):
     _run(world.house.set_media(source="roku", state="playing"))
     res = _run(world.house.set_media(source="roku", state="playing"))
     assert res["status"] == "unchanged"
+
+
+# ═══ 11. phase 3: energy — resting caps and "off means no stream" ═══════════
+
+class _TypedDev:
+    def __init__(self, did, kind):
+        self.id, self.type = did, kind
+
+
+class _TypedHost:
+    def __init__(self):
+        self.devices = {"dev-crystal": _TypedDev("dev-crystal", "wled"),
+                        "dev-tv": _TypedDev("dev-tv", "wled"),
+                        "dev-porch": _TypedDev("dev-porch", "wled"),
+                        "dev-hue": _TypedDev("dev-hue", "hue")}
+
+
+def test_a_calm_mode_gets_the_librarys_resting_caps_without_asking(world):
+    """settings.energy.resting_fps (Matrix 20, Strips 20, Singles 10) under
+    every mode — no fixture setting needed."""
+    from fx import device_rate
+    _mode(world, "Standard")
+    _run(world.house.set_mode(mode="Standard", source="spectra"))
+    assert device_rate.caps() == {"dev-crystal": 20.0, "dev-porch": 10.0}
+
+
+def test_a_modes_own_fps_wins_over_the_resting_default(world):
+    from fx import device_rate
+    _mode(world, "Night light", fixtures=[
+        FixtureHook(target=HouseTarget(kind="category", id="Matrix"), fps=15)])
+    _run(world.house.set_mode(mode="Night light", source="spectra"))
+    assert device_rate.caps() == {"dev-crystal": 15.0, "dev-porch": 10.0}
+
+
+def test_resting_caps_are_lifted_when_the_music_show_takes_the_room(world):
+    from fx import device_rate
+    _mode(world, "Standard")
+    _run(world.house.set_mode(mode="Standard", source="spectra"))
+    assert device_rate.caps()
+    world.state["playing"] = True
+    _run(world.house.tick())
+    assert device_rate.caps() == {}
+
+
+def test_an_emptied_resting_table_lands_at_once(world):
+    from fx import device_rate
+    from spectra.models.house_mode import HouseEnergy, HouseSettings
+    from spectra.services import house_store
+    _mode(world, "Standard")
+    _run(world.house.set_mode(mode="Standard", source="spectra"))
+    house_store.put_settings(HouseSettings(energy=HouseEnergy(resting_fps={})))
+    _run(world.house.reapply())
+    assert device_rate.caps() == {}
+
+
+def test_off_on_a_wled_switches_it_off_only_after_the_fade(world, monkeypatch):
+    """The mode's dark state fades over the glide; mode_off_devices() names
+    the WLED only once that fade (+ OFF_AFTER_FADE_S) is done. A Hue area's
+    off stays a dark state — its off is the mode's Hue look."""
+    from spectra.services import show_output
+    monkeypatch.setattr(show_output, "_host", lambda: _TypedHost())
+    _mode(world, "Night light", fixtures=[
+        FixtureHook(target=HouseTarget(kind="fixture", id="dev-tv"), off=True),
+        FixtureHook(target=HouseTarget(kind="fixture", id="dev-hue"), off=True)],
+        transitions={"button_glide_s": 5})
+    # make dev-hue resolvable in the world's fake resolver
+    real = show_output.resolve_target
+    monkeypatch.setattr(show_output, "resolve_target", lambda t: (
+        (["dev-hue"], []) if t.get("id") == "dev-hue" else real(t)))
+    _run(world.house.set_mode(mode="Night light", source="spectra"))
+    assert show_output.base_snapshot()["states"] == {"dev-tv": "dark", "dev-hue": "dark"}
+    assert world.house.mode_off_devices() == {}, "still fading to black"
+    world.clock.now += 5.0
+    assert world.house.mode_off_devices() == {}
+    world.clock.now += world.house.OFF_AFTER_FADE_S + 0.01
+    assert world.house.mode_off_devices() == {"dev-tv": "Night light"}
+    st = world.house.status_dict()
+    assert "dev-tv" in st["fixtures"]["switching_off"]
+
+
+def test_a_fixture_already_dark_is_switched_off_at_once(world, monkeypatch):
+    """Night light -> Away (both have the strip off), or a restart that
+    re-installed the dark base: no second fade before the switch-off."""
+    from spectra.services import show_output
+    monkeypatch.setattr(show_output, "_host", lambda: _TypedHost())
+    off = [FixtureHook(target=HouseTarget(kind="fixture", id="dev-tv"), off=True)]
+    _mode(world, "Night light", fixtures=off, transitions={"button_glide_s": 30})
+    _mode(world, "Away", fixtures=off, transitions={"button_glide_s": 30})
+    _run(world.house.set_mode(mode="Night light", source="spectra"))
+    world.clock.now += 31
+    assert world.house.mode_off_devices() == {"dev-tv": "Night light"}
+    _run(world.house.set_mode(mode="Away", source="spectra"))
+    assert world.house.mode_off_devices() == {"dev-tv": "Away"}
+
+
+def test_the_music_show_powers_every_fixture_back(world, monkeypatch):
+    from spectra.services import show_output
+    monkeypatch.setattr(show_output, "_host", lambda: _TypedHost())
+    _mode(world, "Evening", fixtures=[
+        FixtureHook(target=HouseTarget(kind="fixture", id="dev-tv"), off=True)],
+        transitions={"button_glide_s": 0})
+    _run(world.house.set_mode(mode="Evening", source="spectra"))
+    world.clock.now += 1
+    assert world.house.mode_off_devices() == {"dev-tv": "Evening"}
+    world.state["playing"] = True
+    _run(world.house.tick())
+    assert world.house.mode_off_devices() == {}

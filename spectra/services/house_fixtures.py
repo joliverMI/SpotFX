@@ -26,6 +26,30 @@ FIXTURES, and what Spectra then does to them:
              brightness the moment each one answers — seconds instead of the
              activation report's 30 s recheck.
 
+  MAINS OFF  (phase 3) Home Assistant reports a fixture's mains switched off
+             (his kitchen sconces on light.dimmer_kitchen_sconce, PUT
+             /api/house/mains): no stream, no write, no drift check — and no
+             SEARCH (activation_report.py skips it: no relocation, no /24
+             sweep, no driver re-init). "Mains on" (or a recheck naming it)
+             clears it and re-finds the fixture at once. In case that call
+             is ever missed, its LAST address is knocked on once every
+             MAINS_KNOCK_S (one json/info, never a sweep); an answer clears
+             the report and says so.
+  MODE OFF   (phase 3) a resting mode's `off` on a WLED: house.py fades it
+             to black, then `house.mode_off_devices()` names it and it is
+             switched off exactly like a button OFF — no stream at all. A
+             Light Show Steady/Freeze hold on the fixture wins (a higher
+             layer): it stays powered and streamed.
+
+SOFT POWER (phase 3). Spectra owns the master brightness, so a switch-off
+first drops `bri` to SOFT_BRI under the (withheld, so frozen) last frame,
+then leaves realtime, then switches off — the WLED's own preset never shows
+at full brightness between the two. A power-on from withheld writes
+`{"on": true, "bri": SOFT_BRI}`, lets the stream resume, and only then
+raises `bri` to the owned brightness: the preset is never seen at full
+either. Both apply only while Spectra owns the brightness; with ownership
+off the phase 2 sequence is unchanged.
+
 ═══ INERT UNLESS A MODE DRIVES THE ROOM ═══
 
 Every request is RECORDED whatever the room's state (house_state.json — a
@@ -83,10 +107,19 @@ WRITE_SPACING_S = 0.4
 RECHECK_WINDOW_S = 45.0
 RECHECK_EVERY_S = 3.0
 MAX_RECENT = 12
+#: phase 3: SOFT POWER — the master brightness a fixture passes through on
+#: its way off or on, and how long the stream runs at it before the owned
+#: brightness is written (several frames even at a 10 fps cap)
+SOFT_BRI = 1
+SOFT_ON_SETTLE_S = 0.3
+#: phase 3: a fixture reported mains-off has its last address knocked on
+#: this often, in case Home Assistant's "mains on" was missed
+MAINS_KNOCK_S = 600.0
 
 TARGET_ON = "on"        # streamed, powered on, owned brightness
 TARGET_OFF = "off"      # withheld, {"on": false}
 TARGET_LENT = "lent"    # withheld, {"live": false} once, nothing else
+TARGET_UNPOWERED = "unpowered"  # withheld, nothing written: its mains are off
 
 CONTROLLABLE_TYPES = {"wled"}
 
@@ -212,6 +245,8 @@ class _Runtime:
     withheld_pushed: Optional[dict] = None
     last_reason: Optional[str] = None
     kick: Optional[asyncio.Event] = None
+    #: phase 3: when each mains-off fixture was last knocked on
+    knocked_at: dict = field(default_factory=dict)
 
 
 _rt = _Runtime()
@@ -370,6 +405,72 @@ def set_tv_music(on: bool, *, source: str = "ha") -> dict:
     return {"status": "recorded", "tv_music": on, "tv_strip": tv_strip_status()}
 
 
+def set_mains(fixtures: list[str], on: bool, *, source: str = "ha") -> dict:
+    """Home Assistant reports the MAINS supply of these fixtures switched
+    (his kitchen sconces: light.dimmer_kitchen_sconce). OFF: recorded, and
+    while a mode drives the room the fixtures get no stream and are not
+    searched for. ON: the report is cleared and a recheck starts at once —
+    the same as POST /api/house/recheck. Spectra never switches the mains
+    itself (THE SCONCE MAINS RULE). Returns {"status", ...}: recorded /
+    unchanged / invalid, plus the recheck's own answer when ON."""
+    names = [str(f).strip() for f in (fixtures or []) if str(f).strip()]
+    if not names:
+        return {"status": "invalid", "reason": "name at least one fixture"}
+    st = house_store.state()
+    changed, unknown, ids = [], [], []
+    for name in names:
+        dev, why = resolve_fixture(name)
+        if dev is None:
+            unknown.append({"fixture": name, "reason": why})
+            continue
+        did = dev["id"]
+        ids.append(did)
+        if on and did in st.mains_off:
+            st.mains_off.pop(did, None)
+            changed.append(did)
+        elif not on and did not in st.mains_off:
+            st.mains_off[did] = now_ms()
+            changed.append(did)
+    if changed:
+        house_store.save_state()
+        _record("mains", {"devices": changed, "on": bool(on), "source": source})
+        if not on:
+            for did in changed:
+                task = _rt.recheck_tasks.pop(did, None)
+                if task is not None:
+                    task.cancel()
+                _rt.rechecks.pop(did, None)
+        kick()
+    out = {"status": "recorded" if changed else ("unchanged" if ids else "invalid"),
+           "on": bool(on), "fixtures": ids, "changed": changed,
+           "unknown": unknown, "acting": _acting(),
+           "mains_off": dict(st.mains_off)}
+    if not ids:
+        out["reason"] = "none of the named fixtures exists"
+    if on and ids:
+        out["recheck"] = recheck(ids)
+    return out
+
+
+def _clear_mains_off(names: list[str], *, source: str) -> list[str]:
+    st = house_store.state()
+    cleared = []
+    for name in names:
+        dev, _why = resolve_fixture(str(name))
+        if dev is not None and st.mains_off.pop(dev["id"], None) is not None:
+            cleared.append(dev["id"])
+    if cleared:
+        house_store.save_state()
+        _record("mains", {"devices": cleared, "on": True, "source": source})
+        kick()
+    return cleared
+
+
+def _acting() -> bool:
+    from spectra.services import house
+    return house.layer_active()
+
+
 # ── what the fixtures should be ────────────────────────────────────────────
 
 def tv_strip_ids() -> list[str]:
@@ -413,23 +514,57 @@ def desired() -> dict[str, tuple[str, str]]:
     st = house_store.state()
     settings = _settings()
     lent = lend_reasons(st)
+    mode_off = house.mode_off_devices()
     out: dict[str, tuple[str, str]] = {}
     for did in _in_scope_devices(host):
         dev = host.devices.get(did)
         ov = st.fixtures.get(did)
-        if did in lent:
+        if did in st.mains_off:
+            out[did] = (TARGET_UNPOWERED, "Home Assistant reports its mains off "
+                                          "— not streamed to, not searched for")
+        elif did in lent:
             out[did] = (TARGET_LENT, lent[did])
         elif ov is not None and ov.power == "off" and _controllable(dev):
             out[did] = (TARGET_OFF, f"switched off ({ov.source or 'request'})")
+        elif did in mode_off and _controllable(dev) and not _show_holds_visible(did):
+            out[did] = (TARGET_OFF, f"house mode {mode_off[did]!r} has it off")
         elif _controllable(dev) and settings.own_brightness:
             out[did] = (TARGET_ON, f"Spectra holds it on at brightness "
                                    f"{settings.owned_brightness}")
     return out
 
 
+def _show_holds_visible(did: str) -> bool:
+    """Does the Light Show hold this fixture Steady or Frozen (a picture a
+    mode's "off" must not switch off)?"""
+    try:
+        from spectra.services import show_store
+        hold = show_store.state().holds.get(did)
+    except Exception:                                    # noqa: BLE001
+        return False
+    return hold is not None and hold.state in ("steady", "freeze")
+
+
+def mains_off_acting() -> dict[str, int]:
+    """device -> since (ms) for every fixture reported mains-off, while a
+    mode drives the room (the only time it is acted on). activation_report
+    reads it to leave those fixtures unsearched."""
+    from spectra.services import house
+    try:
+        if not house.layer_active():
+            return {}
+        return dict(house_store.state().mains_off)
+    except Exception:                                    # noqa: BLE001
+        return {}
+
+
+_WITHHELD_WORDS = {TARGET_OFF: "switched off", TARGET_UNPOWERED: "mains off"}
+
+
 def _withheld_map(want: dict) -> dict[str, str]:
-    out = {did: (f"lent: {why}" if t == TARGET_LENT else "switched off")
-           for did, (t, why) in want.items() if t in (TARGET_LENT, TARGET_OFF)}
+    out = {did: (f"lent: {why}" if t == TARGET_LENT else _WITHHELD_WORDS[t])
+           for did, (t, why) in want.items()
+           if t in (TARGET_LENT, TARGET_OFF, TARGET_UNPOWERED)}
     for did in _rt.pending_on:
         out.setdefault(did, "powering on")
     return out
@@ -509,6 +644,13 @@ async def _tick() -> None:
               and now - prev.last_check >= DRIFT_CHECK_S):
             prev.last_check = now
             _start_check(did, target, host)
+        elif (target == TARGET_UNPOWERED
+              and now - _rt.knocked_at.get(did, prev.at) >= MAINS_KNOCK_S):
+            _rt.knocked_at[did] = now
+            _start_knock(did)
+    for did in list(_rt.knocked_at):
+        if did not in want or want[did][0] != TARGET_UNPOWERED:
+            _rt.knocked_at.pop(did, None)
     _push_withheld(want)
 
 
@@ -520,9 +662,47 @@ def _start(did: str, target: str, why: str, host, *, owned: bool,
     if target == TARGET_ON and withhold_until_on:
         _rt.pending_on.add(did)
     task = asyncio.get_running_loop().create_task(
-        _transition(did, dev, target, why, owned=owned),
+        _transition(did, dev, target, why, owned=owned,
+                    soft=(withhold_until_on and owned)),
         name=f"house-fixture-{did}")
     _rt.inflight[did] = (target, task)
+
+
+def _start_knock(did: str) -> None:
+    if did in _rt.inflight:
+        return
+    task = asyncio.get_running_loop().create_task(
+        _knock(did), name=f"house-fixture-knock-{did}")
+    _rt.inflight[did] = (TARGET_UNPOWERED, task)
+
+
+async def _knock(did: str) -> None:
+    """One json/info at a mains-off fixture's last address. An answer means
+    its mains are on after all (Home Assistant's call was missed): clear the
+    report, say so, and re-find it. Silence changes nothing."""
+    try:
+        try:
+            ok, _why = await deps.reachable(did)
+        except Exception:                                # noqa: BLE001
+            ok = False
+        if not ok:
+            return
+        st = house_store.state()
+        if did not in st.mains_off:
+            return
+        st.mains_off.pop(did, None)
+        house_store.save_state()
+        logger.warning("house fixtures: %s answered although Home Assistant "
+                       "reported its mains off — treating its mains as on "
+                       "(was the 'mains on' call missed?)", did)
+        _record("mains", {"device": did, "on": True,
+                          "source": "spectra (it answered)"})
+        _rt.applied.pop(did, None)
+        kick()
+    finally:
+        cur = _rt.inflight.get(did)
+        if cur is not None and cur[1] is asyncio.current_task():
+            _rt.inflight.pop(did, None)
 
 
 def _start_check(did: str, target: str, host) -> None:
@@ -567,11 +747,17 @@ async def _write_confirmed(dev, payload: dict, check: Callable[[dict], bool]
     return "failed", error, last
 
 
-async def _transition(did: str, dev, target: str, why: str, *, owned: bool) -> None:
+async def _transition(did: str, dev, target: str, why: str, *, owned: bool,
+                      soft: bool = False) -> None:
     settings = _settings()
     outcome, detail = "sent", ""
+    soft = soft and owned and settings.own_brightness
     try:
-        if target == TARGET_LENT:
+        if target == TARGET_UNPOWERED:
+            # Its mains are off: there is nothing to write to and nothing to
+            # read back. The withheld set (pushed this pass) is the act.
+            outcome = "withheld"
+        elif target == TARGET_LENT:
             if not _controllable(dev):
                 # Nothing to tell a non-WLED fixture; no stream is the lend.
                 outcome = "withheld"
@@ -585,11 +771,27 @@ async def _transition(did: str, dev, target: str, why: str, *, owned: bool) -> N
             # RELEASE FIRST, THEN OFF — an off issued under a live stream
             # does not stick (night_power.py's one observed fact). The
             # stream is already withheld; this ends realtime, then powers
-            # the fixture down.
+            # the fixture down. SOFT POWER: while Spectra owns the master
+            # brightness it first drops it under the frozen last frame, so
+            # the WLED's own preset never shows at full in between.
+            if owned and settings.own_brightness:
+                # Only a fixture that is ON is dimmed first: a bare "bri"
+                # write turns an OFF WLED on (its JSON API reads a
+                # brightness above zero as "on"). Unreadable = skip the dim.
+                try:
+                    current = await deps.get_state(dev)
+                except Exception:                        # noqa: BLE001
+                    current = None
+                if current is not None and current.get("on") is True:
+                    try:
+                        await deps.post(dev, {"bri": SOFT_BRI})
+                    except Exception as exc:             # noqa: BLE001
+                        detail = f"soft dim failed ({type(exc).__name__})"
             try:
                 await deps.post(dev, {"live": False})
             except Exception as exc:                     # noqa: BLE001
-                detail = f"leaving realtime failed ({type(exc).__name__})"
+                detail = "; ".join(x for x in (
+                    detail, f"leaving realtime failed ({type(exc).__name__})") if x)
             outcome, more, _last = await _write_confirmed(
                 dev, {"on": False}, lambda s: s.get("on") is False)
             detail = "; ".join(x for x in (detail, more) if x)
@@ -598,10 +800,22 @@ async def _transition(did: str, dev, target: str, why: str, *, owned: bool) -> N
             if owned and settings.own_brightness:
                 payload["bri"] = int(settings.owned_brightness)
             want_bri = payload.get("bri")
-            outcome, detail, _last = await _write_confirmed(
+            if soft:
+                # SOFT POWER: on at the soft brightness, let the stream back
+                # (pending_on cleared), and only then the owned brightness —
+                # the WLED's own preset is never seen at full.
+                s_out, s_detail, _s = await _write_confirmed(
+                    dev, {"on": True, "bri": SOFT_BRI},
+                    lambda s: s.get("on") is True)
+                if s_out != "landed":
+                    detail = f"soft power-on {s_out}: {s_detail}"
+                _rt.pending_on.discard(did)
+                await deps.sleep(SOFT_ON_SETTLE_S)
+            outcome, more, _last = await _write_confirmed(
                 dev, payload,
                 lambda s: s.get("on") is True and (want_bri is None
                                                    or s.get("bri") == want_bri))
+            detail = "; ".join(x for x in (detail, more) if x)
     except asyncio.CancelledError:
         _rt.pending_on.discard(did)
         raise
@@ -711,6 +925,9 @@ def recheck(fixtures: list[str]) -> dict:
     names = [f for f in (fixtures or []) if str(f).strip()]
     if not names:
         return {"status": "invalid", "reason": "name at least one fixture"}
+    # "I just powered the sconce mains" says the mains are ON — a fact
+    # recorded whatever the room's state (phase 3: it ends a mains-off).
+    _clear_mains_off(names, source="recheck")
     if refusal or host is None:
         return {"status": "skipped",
                 "reason": refusal or "SPECTRA's live light stack is not up"}
@@ -836,7 +1053,7 @@ def status() -> dict:
     want = desired()
     fixtures = []
     host = deps.host()
-    ids = set(want) | set(_rt.applied) | set(st.fixtures)
+    ids = set(want) | set(_rt.applied) | set(st.fixtures) | set(st.mains_off)
     for did in sorted(ids):
         t = want.get(did)
         dev = host.devices.get(did) if host is not None else None
@@ -856,4 +1073,5 @@ def status() -> dict:
         "withheld": device_output.withheld(),
         "corrections": list(reversed(_rt.corrections[-5:])),
         "rechecks": dict(_rt.rechecks),
+        "mains_off": dict(st.mains_off),
     }

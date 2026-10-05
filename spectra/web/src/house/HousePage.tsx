@@ -18,7 +18,8 @@ import SonicChatPopover from '../components/SonicChatPopover';
 import { useToast } from '../components/Toast';
 import { useEngineStatus, useScenes, useSpotColorSets } from '../queries';
 import {
-  blankMode, kelvinToHex, manualLine, MUSIC_HUE_WORDS, MUSIC_WORDS, phaseLine, seamLines, sourceWord,
+  blankMode, energyLines, kelvinToHex, manualLine, MUSIC_HUE_WORDS, MUSIC_WORDS, phaseLine, seamLines,
+  sourceWord,
 } from './houseSummary';
 import type {
   FixtureHook, HouseMode, HouseModesResponse, HouseTargets, HueLook, LightingStatus,
@@ -234,6 +235,21 @@ function NowPanel({ lighting, busy, areas, onClear }: {
         </ul>
       )}
       {lighting && <SeamLines lighting={lighting} />}
+      {lighting && <EnergyLines lighting={lighting} />}
+    </div>
+  );
+}
+
+/** Phase 3: what the room is sending and whether SPECTRA is listening —
+ * read off the fixtures' own counters, so a number here is what actually
+ * left, never what a setting promised. */
+function EnergyLines({ lighting }: { lighting: LightingStatus }) {
+  const lines = energyLines(lighting);
+  if (!lines.length) return null;
+  return (
+    <div className="house-seam house-energy">
+      <strong>Energy</strong> <HelpLink topic="house-energy" />
+      <ul>{lines.map((l) => <li key={l} className={l.startsWith('⚠') ? 'house-problem' : 'muted'}>{l}</li>)}</ul>
     </div>
   );
 }

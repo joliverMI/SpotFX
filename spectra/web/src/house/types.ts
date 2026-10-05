@@ -81,7 +81,9 @@ export interface LightingStatus {
   music?: { playing: boolean | null; policy: MusicPolicy; hue: MusicHue; returns_in_s: number | null };
   next_scene_in_s?: number | null;
   scene?: { id: string; name: string };
-  fixtures?: { levels: Record<string, number>; off: string[]; caps: Record<string, number> };
+  fixtures?: { levels: Record<string, number>; off: string[]; caps: Record<string, number>;
+    /** phase 3: WLEDs the mode switches off -> seconds until the switch-off */
+    switching_off?: Record<string, number> };
   motion?: { virtual: string; param: string; value: number }[];
   hue?: { looks: { area: string; look: string; mirek: number | null; color: string | null; brightness: number }[] } | null;
   error?: string;
@@ -95,6 +97,27 @@ export interface LightingStatus {
   tv_strip?: SeamTvStrip;
   fixtures_seam?: SeamFixtures;
   voice?: SeamVoice;
+  // ── phase 3: energy and network (spectra/services/house_energy.py) ──
+  energy?: HouseEnergyStatus;
+}
+
+export interface HouseEnergySettings {
+  resting_fps: Record<string, number>; park_idle: boolean; send_on_change: boolean;
+  keepalive_s: number; audio_pause_after_s: number;
+}
+
+export interface HouseEnergyStatus {
+  acting: boolean;
+  settings: HouseEnergySettings;
+  parking: boolean;
+  parked: string[];
+  send_on_change_s: number | null;
+  audio: { state: 'listening' | 'paused' | 'off'; listeners: string[]; reason?: string;
+    paused_for_s?: number; resume_error?: string; quiet_for_s: number | null };
+  fixtures: Record<string, { id: string; sent_fps: number; skipped_fps: number; packets_per_s: number | null }>;
+  packets_per_s_estimate: number | null;
+  mains_off: Record<string, number>;
+  recent: { at_ms: number; kind: string; [k: string]: unknown }[];
 }
 
 export interface SeamMedia {
@@ -105,7 +128,7 @@ export interface SeamMedia {
 export interface SeamTvStrip { devices: string[]; owner: string; why: string | null; streaming: string[] }
 
 export interface SeamFixture {
-  device: string; name: string; target: 'on' | 'off' | 'lent' | null; why: string | null;
+  device: string; name: string; target: 'on' | 'off' | 'lent' | 'unpowered' | null; why: string | null;
   in_flight: boolean;
   override: { power: 'on' | 'off' | null; lent_to: string | null; source: string; since_ms: number | null } | null;
   applied: { target: string; outcome: string; detail: string; at_ms: number } | null;
@@ -117,6 +140,7 @@ export interface SeamFixtures {
   corrections: { at_ms: number; device: string; target: string; found: { on: boolean | null; bri: number | null };
     set: Record<string, unknown>; outcome: string; detail: string }[];
   rechecks: Record<string, { state: string; attempts?: number; after_s?: number; reason?: string; moved?: boolean }>;
+  mains_off?: Record<string, number>;
 }
 
 export interface SeamVoice {
