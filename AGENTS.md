@@ -4292,6 +4292,19 @@ and the id shape. Five things to know:
   `stop()` clears `running` BEFORE closing the hold — order is load-bearing,
   or the hold's revert write would be scaled by the gain and hand the room
   back dimmed.
+- **A ROOM EFFECT STANDS IN FOR THE CARRIER IT DISPLACES, and gives it
+  back (2026-10-04, D2).** Bringing a substitute strip up takes the
+  copy-mapped carrier off the air (the same exclusion the capture path
+  restores). `room_effects.start` MEASURES what stopped rendering
+  (`_state.displaced`), writes the carrier's own effect onto the
+  substitutes so the wave modulates the show (not the black lamp), and
+  while displaced `fx_seam`/`FacadeExecutor` REDIRECT show writes addressed
+  to the carrier onto the substitutes (`room_effects.redirect_targets`) —
+  writing the carrier would take #29's repair and evict them. `stop()`
+  (`_hand_back`) sleeps the substitutes, puts the carrier back with the flag
+  alone, then re-lands the newest redirected show state on it. A substitute
+  whose fixture the activation report lists dark is never brought up. Spec:
+  `tests/test_room_effect_carrier_restore.py`.
 - **Holder 4 on the param watchdog** (`Deps.room_effect_holds`): per (virtual,
   "brightness") KEY, never a global stand-down. Today `_production_gate()`
   already skips the whole sweep while any hold is active, so this is

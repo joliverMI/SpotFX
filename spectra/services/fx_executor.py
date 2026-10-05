@@ -120,6 +120,15 @@ class FacadeExecutor(RecordingExecutor):
             # models it, nothing is written — writing would be refused, and
             # a refusal here would kill the glide burst for in-scope ones.
             return
+        from spectra.services import room_effects
+        subs = room_effects.redirect_targets(virtual_id)
+        if subs:
+            # A room effect has this carrier off the air; its substitutes
+            # render the show for it (room_effects D2, fx_seam's twin).
+            room_effects.note_redirected(virtual_id, effect_type, params)
+            for sub in subs:
+                await self._put(sub, effect_type, params, duration_ms)
+            return
         current = (await self._current_effect(facade, virtual_id)
                    if duration_ms > 0 else None)
         current_type = (current or {}).get("type")

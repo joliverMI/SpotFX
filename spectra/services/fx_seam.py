@@ -230,6 +230,27 @@ def _compose_room_effect(w: dict) -> dict:
     return w if cfg is w["config"] else {**w, "config": cfg}
 
 
+def _redirect_room_effect(writes: list[dict]) -> list[dict]:
+    """While a room effect has a carrier OFF THE AIR (its substitutes hold
+    the device), a show write addressed to that carrier lands on the
+    substitutes instead — writing the carrier itself would take the facade's
+    activate-on-write repair (#29) and evict the substitutes mid-wave
+    (spectra/services/room_effects.py, D2). Identity when nothing is
+    displaced."""
+    from spectra.services import room_effects
+    out: list[dict] = []
+    for w in writes:
+        subs = None if w.get("room_effect") else \
+            room_effects.redirect_targets(w["virtual_id"])
+        if not subs:
+            out.append(w)
+            continue
+        room_effects.note_redirected(w["virtual_id"], w["effect_type"],
+                                     w["config"])
+        out.extend({**w, "virtual_id": v} for v in subs)
+    return out
+
+
 def _body(w: dict, transition_ms: int = 0) -> dict:
     w = _compose_room_effect(w)
     body = {
@@ -318,6 +339,7 @@ async def _apply_via_facade(writes: list[dict], transition_ms: int = 0) -> None:
         logger.info("fx seam: skipped %d write(s) outside the take scope: %s",
                     len(skipped), sorted(set(skipped)))
         writes = [w for w in writes if w["virtual_id"] not in skipped]
+    writes = _redirect_room_effect(writes)
     for w in writes:
         vid = w["virtual_id"]
         current = await _current_effect(facade, vid) if transition_ms > 0 else None
