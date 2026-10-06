@@ -250,3 +250,16 @@ def test_apply_only_in_the_daytime_window():
     at = lambda h, mi: _t.struct_time((2026, 10, 6, h, mi, 0, 1, 279, 1))
     assert not m.in_window(at(8, 29)) and m.in_window(at(8, 30))
     assert m.in_window(at(22, 29)) and not m.in_window(at(22, 30))
+
+
+def test_the_delay_uses_the_cameras_real_frame_rate_not_its_nominal_one():
+    """The kiosk stream runs ~4.2 fps against a nominal 5; timing frames at
+    the nominal period would shrink every measured delay by a sixth."""
+    room = m.simulated_room()
+    room.fps = 4.2
+    room.frame_period_s = 0.2          # what the room CLAIMS
+    res = m.run(room, ["dining-table", "dining-hues"], trials=24)
+    assert res["frame_period_s"] == pytest.approx(1 / 4.2, abs=0.01)
+    a, b = room.fixtures["dining-table"], room.fixtures["dining-hues"]
+    want = 1000 * ((b.delay_s + 0.693 * b.tau_s) - (a.delay_s + 0.693 * a.tau_s))
+    assert res["pairs"][0]["hue_minus_wled_ms"] == pytest.approx(want, abs=60.0)

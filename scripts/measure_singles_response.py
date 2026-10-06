@@ -499,6 +499,22 @@ def fit_gamma(levels, ys) -> Optional[dict]:
             "points": int(ok.sum())}
 
 
+def estimate_frame_period(room, seconds: float = 4.0) -> float:
+    """The camera's real frame period, from distinct frames seen arriving (the
+    kiosk stream runs ~4.2 fps, not its nominal 5 — measured 2026-10-06)."""
+    t0 = room.now()
+    seen, times = set(), []
+    while room.now() - t0 < seconds:
+        key, img = room.latest_frame()
+        if img is not None and key not in seen:
+            seen.add(key)
+            times.append(room.now())
+        room.sleep(POLL_S)
+    if len(times) < 3:
+        return room.frame_period_s
+    return (times[-1] - times[0]) / (len(times) - 1)
+
+
 def crossing_time(t: list, y: list, half: float) -> Optional[float]:
     for i in range(1, len(y)):
         if y[i] >= half > y[i - 1]:
@@ -569,6 +585,8 @@ def measure(room, fixtures: list[str], *, trials: int = DELAY_TRIALS,
                    key=lambda d: -int(exclusive[d].sum()))
     hues = [d for d in exclusive if "hue" in d]
     pairs = [(wleds[i % len(wleds)], h) for i, h in enumerate(hues)] if wleds else []
+    period = estimate_frame_period(room) if pairs else room.frame_period_s
+    out["frame_period_s"] = round(period, 4)
     full_ex = {d: float(np.mean(lit[d][exclusive[d]])) for d in exclusive}
     for a, b in pairs:
         guard()
@@ -579,13 +597,11 @@ def measure(room, fixtures: list[str], *, trials: int = DELAY_TRIALS,
             t_fire = room.now()
             room.hold([(a, grey_hex(1.0)), (b, grey_hex(1.0))])
             seen, ts, ya, yb = set(), [], [], []
-            k0 = None
             while room.now() - t_fire < DELAY_WAIT_S:
                 key, img = room.latest_frame()
                 if img is not None and key not in seen:
                     seen.add(key)
-                    k0 = len(seen) if k0 is None else k0
-                    ts.append(len(seen) * room.frame_period_s)
+                    ts.append(len(seen) * period)
                     ya.append(reading(img, dark, exclusive[a])[0] / full_ex[a])
                     yb.append(reading(img, dark, exclusive[b])[0] / full_ex[b])
                     if ya[-1] > 0.9 and yb[-1] > 0.9:
