@@ -8296,7 +8296,10 @@ binding statement** (hit detector, rise/fade, rest/depth, smallest pulse,
   by editing ONLY that area's look (restored in a `finally`, from a record
   written first). **A Hue area is streamed whole**: `hue-lights` carries
   Loft Ceiling Uplight and the three Ledge bulbs, so it is refused outright.
-  `--apply` only with firstmate's go, and only 08:30-22:30.
+  `--apply` only with firstmate's go, and only 08:30-22:30. **Its first live
+  run (2026-10-06 08:45) measured nothing: the kitchen-kiosk camera pose sees
+  none of the three Singles fixtures at full white** — the measurement stays
+  pending until a different pose or a light sensor; gamma ships at 2.2.
 
 ## Radial (STAR) rotation is audio-lows-driven — a healthy `spin` can read as parked
 
