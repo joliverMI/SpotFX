@@ -1,25 +1,25 @@
 /** HOUSE LIGHTING (/house) — the always-on resting look (spectra/services/
  * house.py is the binding statement; spectra/models/house_mode.py the shape).
  *
- * Left: his modes, each with a "Switch to" press (a person's pick — it holds
- * until Home Assistant's lighting mode next changes). Right: the chosen
- * mode as small cards — scenes, colours, per-fixture settings, the Hue Hold
- * looks, what music does, how changes glide, and the Home Assistant words it
- * answers to. Top: "Now" — which mode, who set it, what it is doing, and
- * why it is not applied when it is not.
- *
- * Nothing here takes or releases the room: a mode set while SPECTRA does
- * not hold the room is recorded and applies on take-back, and the Now panel
- * says exactly that. Every field is also reachable through Sonic (the 💬).
- *
  * TWO SUB-TABS (his ask, 2026-10-06: "make the house tab have two sub
  * tabs. the default tab is for editing the different scenes and the
  * second tab is the info section that currently comes above the editing
- * portion"). "Modes" (default, no ?tab=) is the editor below; "Info" is
- * the Now panel verbatim — same arrangement, same content, same
- * `useSearchParams` tab-bar shape as DevicesPage.tsx's Edit/Live split,
- * so a link or a refresh keeps the tab. The Mode chip still links to
- * plain `/house`, which is this page's default. */
+ * portion"), same `useSearchParams` tab-bar shape as DevicesPage.tsx's
+ * Edit/Live split, so a link or a refresh keeps the tab. The Mode chip
+ * still links to plain `/house`, which is this page's default.
+ *
+ * MODES (default, no ?tab=) — the editor: left, his modes, each with a
+ * "Switch to" press (a person's pick — it holds until Home Assistant's
+ * lighting mode next changes); right, the chosen mode as small cards —
+ * scenes, colours, per-fixture settings, the Hue Hold looks, what music
+ * does, how changes glide, and the Home Assistant words it answers to.
+ *
+ * INFO (?tab=info) — the Now panel: which mode, who set it, what it is
+ * doing, and why it is not applied when it is not.
+ *
+ * Nothing here takes or releases the room: a mode set while SPECTRA does
+ * not hold the room is recorded and applies on take-back, and the Now panel
+ * says exactly that. Every field is also reachable through Sonic (the 💬). */
 import { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { apiDel, apiGet, apiPost, apiPut } from '../api/client';
