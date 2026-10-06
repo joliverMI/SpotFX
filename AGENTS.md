@@ -2472,6 +2472,11 @@ touching it again:
   element this component mounts conditionally needs this shape, not a
   plain `useRef` — check both existing instances before adding a third.**
 
+Proof: `node scripts/check_device_preview_compact_layout.mjs` (the
+transpiled real `compactPositions` against `layoutPositions` — no label
+row reserved, genuine reflow against a measured width rather than a
+two-preset switch, and identical per-fixture box shapes between the two).
+
 **THE PREVIEW STREAM IS PROTOCOL 2 (2026-10-05, phase 1 of
 `data/preview-perf-plan/report.md`).** `spectra/services/preview_stream.py`'s
 docstring is the binding statement (wire format included); the paragraphs
