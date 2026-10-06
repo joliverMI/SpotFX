@@ -49,7 +49,11 @@ judged table came out `pass` or `findings` is drawn; a `fail` decodes
 confidently to wrong places (docs/SPECTRA_SPEC.md §98) and is named in the
 view's notes instead. Stored results from before decodes kept their
 positions (gray_code.Decode.as_dict) carry none and are skipped the same
-way.
+way — and so is a composition stored before its segments recorded where
+each one starts in the DEVICE's own pixel numbering (`commission_compare.
+Segment.device_start`): a decode's positions key on the composition's own
+re-addressed indices, never the device's, and resolving one without the
+other would place a pixel by the wrong number (`_composition_pixels`).
 """
 from __future__ import annotations
 
