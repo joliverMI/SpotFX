@@ -4,9 +4,10 @@ engine normalizes to the SAME mark shape
 (`{"time_ms", "kind", "label", "score"}`) so the comparison/metrics/render
 code never branches on which engine produced a mark.
 
-Four engines ship with this build (report Phase 0 + Phase 1 item 1, the
-Admiral's 2026-09-08 generation-alignment sharpening, and
-data/transition-alignment-plan/report.md section 4's tuning-loop lanes):
+Five engines ship with this build (report Phase 0 + Phase 1 item 1, the
+Admiral's 2026-09-08 generation-alignment sharpening,
+data/transition-alignment-plan/report.md section 4's tuning-loop lanes,
+and the drop-detection plan's phase 2 Drops lane):
 
   librosa   — "current" / the production baseline. Derived LIVE from the
               already-computed `.librosa.json` (spectra.services.
@@ -48,6 +49,20 @@ data/transition-alignment-plan/report.md section 4's tuning-loop lanes):
               shares that engine's raw (WAV-time) frame and IS shifted by
               _estimate_for like every analysis-derived engine.
 
+  drops     — the drop detector (spectra.services.drop_detector, the
+              drop-detection plan's method B, phase 2): kinds drop (every
+              detected drop, both tiers; the mark's label is its tier),
+              drop_confident (the confident tier alone), lull and charge
+              (each sequence's placed lull and charge). Run at the page's
+              own two thresholds (confident_score / suggested_score; None
+              = the room's own drop_confident_score / drop_suggested_score)
+              with the detector's guards applied, but WITHOUT his edits or
+              the "matches yours" stand-down: this lane scores what the
+              detector proposes against his own marks, and standing down
+              where he has a drop would score it on nothing. Derived from
+              the stored audio shape, which is already in SONG time, so it
+              is NOT shifted by _estimate_for (the generator's exception).
+
 `librosa`'s "interior boundaries" (report's own Part 1.2 term) are every
 section's start_ms EXCEPT the first section's (the song's own opening
 boundary is not a "transition" — nothing precedes it), matching the
@@ -58,13 +73,20 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
-from spectra.services import (analysis_reader, midsong_generator, rhythmic_edges,
-                              testbed_cache, trigger_store)
+from spectra import config
+from spectra.services import (analysis_reader, drop_detector, midsong_generator,
+                              rhythmic_edges, testbed_cache, trigger_store)
 
 ENGINE_LIBROSA = "librosa"
 ENGINE_BEAT_THIS = "beat_this"
 ENGINE_GENERATOR = "generator"
 ENGINE_EDGES = "edges"
+ENGINE_DROPS = "drops"
+
+DROPS_KIND_DROP = "drop"
+DROPS_KIND_CONFIDENT = "drop_confident"
+DROPS_KIND_LULL = "lull"
+DROPS_KIND_CHARGE = "charge"
 
 GENERATOR_KIND_STORED = "stored"
 GENERATOR_KIND_PREVIEW = "preview"
@@ -90,7 +112,17 @@ ENGINES: dict[str, dict] = {
         "kinds": list(rhythmic_edges.KINDS),
         "live": True,
     },
+    ENGINE_DROPS: {
+        "label": "Drops (break and return)",
+        "kinds": [DROPS_KIND_DROP, DROPS_KIND_CONFIDENT, DROPS_KIND_LULL, DROPS_KIND_CHARGE],
+        "live": True,
+    },
 }
+
+# Engines whose marks are already in SONG time — spectra/api/testbed.py's
+# _estimate_for shifts every other engine's WAV-time marks by the capture
+# offset and must leave these alone.
+SONG_TIME_ENGINES = frozenset({ENGINE_GENERATOR, ENGINE_DROPS})
 
 
 @dataclass(frozen=True)
@@ -200,12 +232,61 @@ def _edges_marks(uri: str, *, window_beats: int, sensitivity: float,
     return sorted(out, key=lambda m: m.time_ms)
 
 
+def drop_thresholds(confident_score: Optional[float],
+                    suggested_score: Optional[float]) -> tuple[float, float]:
+    """The page's two thresholds, each falling back to the room's own
+    setting when omitted — the "explicit overrides, omitted tracks the
+    room" shape every other knob here has."""
+    if confident_score is None or suggested_score is None:
+        from spectra.services import room_controls
+        controls = room_controls.load_room_controls()
+        if confident_score is None:
+            confident_score = float(controls.drop_confident_score)
+        if suggested_score is None:
+            suggested_score = float(controls.drop_suggested_score)
+    return float(confident_score), float(suggested_score)
+
+
+def _drops_marks(uri: str, *, confident_score: Optional[float],
+                 suggested_score: Optional[float]) -> Optional[list[EngineMark]]:
+    confident, suggested = drop_thresholds(confident_score, suggested_score)
+    try:
+        det = drop_detector.detect_uri(uri, confident_score=confident,
+                                       suggested_score=suggested)
+    except drop_detector.Unavailable:
+        return None
+    out: list[EngineMark] = []
+    for seq in det.sequences:
+        out.append(EngineMark(time_ms=float(seq.drop_ms), kind=DROPS_KIND_DROP,
+                              label=seq.tier, score=seq.score))
+        if seq.tier == drop_detector.TIER_CONFIDENT:
+            out.append(EngineMark(time_ms=float(seq.drop_ms), kind=DROPS_KIND_CONFIDENT,
+                                  label=seq.tier, score=seq.score))
+        if seq.lull_ms is not None:
+            out.append(EngineMark(time_ms=float(seq.lull_ms), kind=DROPS_KIND_LULL,
+                                  label=f"lull of the drop at {seq.drop_ms} ms ({seq.tier})",
+                                  score=seq.score))
+        if seq.charge_ms is not None:
+            out.append(EngineMark(time_ms=float(seq.charge_ms), kind=DROPS_KIND_CHARGE,
+                                  label=f"charge of the drop at {seq.drop_ms} ms ({seq.tier})",
+                                  score=seq.score))
+    return sorted(out, key=lambda m: m.time_ms)
+
+
+def _drops_available(stem: Optional[str]) -> bool:
+    """A stat, never a detection: the shape and the beat analysis exist."""
+    return (stem is not None and analysis_reader.has_librosa_analysis(stem)
+            and (config.AUDIO_SHAPES_DIR / f"{stem}.npz").exists())
+
+
 def marks_for(
     engine: str, uri: str, *,
     window_beats: int = rhythmic_edges.DEFAULT_WINDOW_BEATS,
     sensitivity: float = rhythmic_edges.DEFAULT_SENSITIVITY,
     direction: str = rhythmic_edges.DEFAULT_DIRECTION,
     transitions_per_minute: Optional[float] = None,
+    confident_score: Optional[float] = None,
+    suggested_score: Optional[float] = None,
 ) -> Optional[list[EngineMark]]:
     """None = not available for this song (either the engine hasn't been
     precomputed for it, or — for librosa/generator/edges — no analysis
@@ -214,7 +295,9 @@ def marks_for(
     (2026-09-23, the R3 placement rule); `transitions_per_minute` is read
     only by the `generator` engine's preview kind (the density rate has
     no meaning for `edges`, which only detects edges, never ranks
-    candidates); every other engine ignores all four."""
+    candidates); `confident_score`/`suggested_score` only by `drops` (None
+    = the room's own setting). Every engine ignores the knobs it does not
+    use."""
     if engine == ENGINE_LIBROSA:
         return _librosa_marks(uri)
     if engine == ENGINE_GENERATOR:
@@ -224,6 +307,9 @@ def marks_for(
     if engine == ENGINE_EDGES:
         return _edges_marks(uri, window_beats=window_beats, sensitivity=sensitivity,
                             direction=direction)
+    if engine == ENGINE_DROPS:
+        return _drops_marks(uri, confident_score=confident_score,
+                            suggested_score=suggested_score)
     cached = testbed_cache.load(engine, uri)
     if cached is None:
         return None
@@ -322,6 +408,16 @@ def availability_for(uri: str, *,
                 "available": marks is not None,
                 "computed_at": None,
                 "mark_count": len(marks) if marks else 0,
+            }
+        elif key == ENGINE_DROPS:
+            marks = (_drops_marks(uri, confident_score=None, suggested_score=None)
+                     if count_marks and _drops_available(stem) else None)
+            out[key] = {
+                "label": meta["label"], "kinds": meta["kinds"],
+                "available": (_drops_available(stem) if not count_marks
+                              else marks is not None),
+                "computed_at": None,
+                "mark_count": (len(marks) if marks else 0) if count_marks else None,
             }
         elif not count_marks:
             out[key] = {

@@ -7,15 +7,19 @@ reviewed push-to-real button.
   GET    /api/testbed/marks?uri=                      his real marks (split)
   GET    /api/testbed/waveform?uri=                    waveform/energy lane
   GET    /api/testbed/engines?uri=                    per-engine availability
-  GET    /api/testbed/engine-marks?uri=&engine=&mark_kind=&window_beats=&sensitivity=&direction=&transitions_per_minute=
+  GET    /api/testbed/engine-marks?uri=&engine=&mark_kind=&window_beats=&sensitivity=&direction=&transitions_per_minute=&confident_score=&suggested_score=
                                                        one engine's marks, nothing else
-  GET    /api/testbed/compare?uri=&engine=&mark_kind=&reference=&tolerance_ms=&window_beats=&sensitivity=&direction=&transitions_per_minute=
+  GET    /api/testbed/compare?uri=&engine=&mark_kind=&reference=&tolerance_ms=&window_beats=&sensitivity=&direction=&transitions_per_minute=&confident_score=&suggested_score=
                                                        one engine's marks + P/R/F1
   GET    /api/testbed/reference-set?window_beats=&sensitivity=&direction=&transitions_per_minute=
                                                        generator:preview one-beat recall/F1 for the
                                                        four pinned reference songs, at these knobs
                                                        (data/transition-alignment-plan/report.md
                                                        section 4/5 task 4)
+  GET    /api/testbed/drop-reference-set?confident_score=&suggested_score=
+                                                       the drop detector on Contra / Dopamine /
+                                                       Pop Off / 100 Millones against his marks
+                                                       (drop-detection plan, section 5.1)
   GET    /api/testbed/audio/status?uri=                pin/WAV status
   POST   /api/testbed/audio/pin?uri=                    pin (copy + peaks)
   DELETE /api/testbed/audio/pin?uri=                    unpin
@@ -37,8 +41,8 @@ from pydantic import BaseModel, Field
 
 from spectra.models.trigger import TriggerAction
 from spectra.services import (analysis_reader, rhythmic_edges, room_controls,
-                              testbed_audio, testbed_engines, testbed_marks,
-                              testbed_metrics, testbed_promote,
+                              testbed_audio, testbed_drop_reference, testbed_engines,
+                              testbed_marks, testbed_metrics, testbed_promote,
                               testbed_reference_set, trigger_store)
 
 # transitions_per_minute's own Field(ge=, le=) on RoomControlState — read
@@ -46,6 +50,10 @@ from spectra.services import (analysis_reader, rhythmic_edges, room_controls,
 # the room setting the "Transitions per minute" knob and "Use as room
 # default" button actually write.
 _RATE_GE, _RATE_LE = room_controls.field_bounds("transitions_per_minute")
+# The Drops lane's two thresholds — bounded by the room settings they
+# stand in for (drop_confident_score / drop_suggested_score), read live.
+_DROP_GE, _DROP_LE = room_controls.field_bounds("drop_confident_score")
+_REFERENCE_PATTERN = "^(transitions|flares|drops|lulls|charges)$"
 
 router = APIRouter(prefix="/api/testbed", tags=["spectra-testbed"])
 
@@ -74,6 +82,8 @@ def _song_list() -> list[dict]:
             "artist": marks.artist,
             "n_transitions": len(marks.transitions),
             "n_flares": len(marks.flares),
+            **{f"n_{ref}": len(testbed_marks.phase_marks(marks.flares, ref))
+               for ref in testbed_marks.PHASE_REFERENCES},
             "n_generated": marks.n_generated,
             "n_promoted": marks.n_promoted,
             "n_snapped": marks.n_snapped,
@@ -165,6 +175,8 @@ def _estimate_for(
     sensitivity: float = rhythmic_edges.DEFAULT_SENSITIVITY,
     direction: str = rhythmic_edges.DEFAULT_DIRECTION,
     transitions_per_minute: Optional[float] = None,
+    confident_score: Optional[float] = None,
+    suggested_score: Optional[float] = None,
 ):
     """One engine's marks of one kind, or None when the engine has nothing
     for this song — the ONLY read the page's per-lane fetch needs. Never
@@ -191,13 +203,15 @@ def _estimate_for(
     fires from — shifting them again here would hide, not show, a
     generator frame defect like data/transition-alignment-plan/report.md's
     own Finding 1 (see spectra/services/testbed_engines.py's module
-    docstring, "generator" entry)."""
+    docstring, "generator" entry). The `drops` engine is the other one: it
+    reads the stored audio shape, which is already in song time."""
     engine_marks = testbed_engines.marks_for(
         engine, uri, window_beats=window_beats, sensitivity=sensitivity,
-        direction=direction, transitions_per_minute=transitions_per_minute)
+        direction=direction, transitions_per_minute=transitions_per_minute,
+        confident_score=confident_score, suggested_score=suggested_score)
     if engine_marks is None:
         return None
-    if engine != testbed_engines.ENGINE_GENERATOR:
+    if engine not in testbed_engines.SONG_TIME_ENGINES:
         offset_ms = testbed_audio.capture_offset_ms_or_zero(uri)
         if offset_ms:
             engine_marks = [dataclasses.replace(m, time_ms=m.time_ms + offset_ms)
@@ -224,6 +238,8 @@ async def engine_marks(
     direction: str = Query(rhythmic_edges.DEFAULT_DIRECTION,
                            pattern="^(both|up|down)$"),
     transitions_per_minute: Optional[float] = Query(None, ge=_RATE_GE, le=_RATE_LE),
+    confident_score: Optional[float] = Query(None, ge=_DROP_GE, le=_DROP_LE),
+    suggested_score: Optional[float] = Query(None, ge=_DROP_GE, le=_DROP_LE),
 ):
     """The page's per-lane fetch: it recomputes P/R/F1 locally against the
     marks it already holds (spectra/web/src/testbed/metrics.ts), so the
@@ -246,7 +262,8 @@ async def engine_marks(
     estimate = await asyncio.to_thread(
         _estimate_for, engine, uri, mark_kind,
         window_beats=window_beats, sensitivity=sensitivity, direction=direction,
-        transitions_per_minute=transitions_per_minute)
+        transitions_per_minute=transitions_per_minute,
+        confident_score=confident_score, suggested_score=suggested_score)
     return {
         "uri": uri, "engine": engine, "mark_kind": mark_kind,
         "available": estimate is not None,
@@ -259,7 +276,7 @@ async def compare(
     uri: str = Query(...),
     engine: str = Query(...),
     mark_kind: str = Query(...),
-    reference: str = Query("transitions", pattern="^(transitions|flares)$"),
+    reference: str = Query("transitions", pattern=_REFERENCE_PATTERN),
     tolerance_ms: float = Query(500.0, gt=0),
     window_beats: int = Query(rhythmic_edges.DEFAULT_WINDOW_BEATS,
                               ge=rhythmic_edges.MIN_WINDOW_BEATS,
@@ -270,6 +287,8 @@ async def compare(
     direction: str = Query(rhythmic_edges.DEFAULT_DIRECTION,
                            pattern="^(both|up|down)$"),
     transitions_per_minute: Optional[float] = Query(None, ge=_RATE_GE, le=_RATE_LE),
+    confident_score: Optional[float] = Query(None, ge=_DROP_GE, le=_DROP_LE),
+    suggested_score: Optional[float] = Query(None, ge=_DROP_GE, le=_DROP_LE),
 ):
     """Server-computed P/R/F1 at a fixed tolerance — for any caller that
     wants the number from the reference matcher itself rather than the
@@ -282,7 +301,8 @@ async def compare(
     def _read() -> dict:
         estimate = _estimate_for(engine, uri, mark_kind,
                                  window_beats=window_beats, sensitivity=sensitivity,
-                                 direction=direction, transitions_per_minute=transitions_per_minute)
+                                 direction=direction, transitions_per_minute=transitions_per_minute,
+                                 confident_score=confident_score, suggested_score=suggested_score)
         if estimate is None:
             return {"uri": uri, "engine": engine, "mark_kind": mark_kind,
                     "reference": reference, "tolerance_ms": tolerance_ms,
@@ -294,7 +314,9 @@ async def compare(
         # docstring: an engine must not be graded against its own pushed
         # suggestions).
         transitions, flares = testbed_marks.reference_marks_for_song(uri)
-        ref_marks = transitions if reference == "transitions" else flares
+        ref_marks = (transitions if reference == "transitions"
+                     else flares if reference == "flares"
+                     else testbed_marks.phase_marks(flares, reference))
         result = testbed_metrics.match_marks(
             [m.timestamp_ms for m in ref_marks],
             [m.time_ms for m in estimate],
@@ -306,7 +328,8 @@ async def compare(
             "available": True,
             "estimate": _estimate_payload(estimate),
             "reference_marks": [{"id": m.id, "timestamp_ms": m.timestamp_ms,
-                                 "kind": m.kind} for m in ref_marks],
+                                 "kind": m.kind, "event_class": m.event_class}
+                                for m in ref_marks],
             "metrics": testbed_metrics.match_result_dict(result),
         }
     return await asyncio.to_thread(_read)
@@ -342,6 +365,21 @@ async def reference_set(
         "direction": direction, "transitions_per_minute": transitions_per_minute,
         "songs": rows,
     }
+
+
+@router.get("/drop-reference-set")
+async def drop_reference_set(
+    confident_score: Optional[float] = Query(None, ge=_DROP_GE, le=_DROP_LE),
+    suggested_score: Optional[float] = Query(None, ge=_DROP_GE, le=_DROP_LE),
+):
+    """The drop-detection plan's own four-song table (report section 5.1:
+    Contra / Dopamine / Pop Off / 100 Millones), live at the caller's two
+    thresholds (omitted = the room's own) — found / extra at each tier,
+    timing, and lull/charge placement against his own marks. Off the loop
+    (spectra/services/testbed_drop_reference.py)."""
+    return await asyncio.to_thread(
+        testbed_drop_reference.compute,
+        confident_score=confident_score, suggested_score=suggested_score)
 
 
 @router.get("/audio/status")

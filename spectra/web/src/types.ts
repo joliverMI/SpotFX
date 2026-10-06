@@ -459,6 +459,11 @@ export interface RoomControlState {
   transitions_per_minute: number;
   /** Optional ceiling on analysed scene changes per minute; 0 = off. */
   scene_changes_per_minute: number;
+  /** The drop detector's two tiers (spectra/services/drop_detector.py):
+   * a detected drop scoring at least this is CONFIDENT. Default 1.0. */
+  drop_confident_score: number;
+  /** ...and at least this, SUGGESTED (waits for his confirm). Default 0.7. */
+  drop_suggested_score: number;
   /** Legacy Now Playing "Force Scene" control, ported verbatim: while
    * enabled, every scene the system would otherwise pick automatically
    * (sequencer roll, trigger fire, or the automatic transition fire) fires
@@ -1493,6 +1498,10 @@ export interface TestbedSong {
   artist: string | null;
   n_transitions: number;
   n_flares: number;
+  /** His own flares of one event_class — the Drops lane's reference sets. */
+  n_drops: number;
+  n_lulls: number;
+  n_charges: number;
   n_generated: number;
   n_promoted: number;
   /** Phase 2 beat-snap (spectra/services/beat_snap.py) over this song's
@@ -1514,7 +1523,14 @@ export interface TestbedReferenceMark {
    * button (resolved from the promotion audit log). Rendered, labelled,
    * and deliberately NOT scored — see spectra/services/testbed_marks.py. */
   promoted: boolean;
+  /** fire_response's event_class (flare / charge / lull / drop); null for
+   * every other action kind. */
+  event_class: string | null;
 }
+
+/** The test bed's reference sets — his transitions, his flares, or his
+ * flares of one phase class (the Drops lane's). */
+export type TestbedReference = 'transitions' | 'flares' | 'drops' | 'lulls' | 'charges';
 
 export interface TestbedMarks {
   uri: string;
@@ -1615,6 +1631,47 @@ export interface TestbedReferenceSetRow {
   available: boolean;
   tolerance_ms: number | null;
   metrics: TestbedMetrics | null;
+}
+
+/** One song's row of the drop-detection plan's four-song table
+ * (spectra/services/drop_scoring.py's score_song). */
+export interface TestbedDropScore {
+  beat_ms: number;
+  his_drops: number;
+  found: number;
+  detected: number;
+  extra: number;
+  confident_found: number;
+  confident_detected: number;
+  confident_extra: number;
+  extras: { drop_ms: number; tier: string; his_mark_here: string }[];
+  extras_by_kind: Record<string, number>;
+  missed: number[];
+  drop_errors_ms: number[];
+  median_abs_ms: number | null;
+  worst_abs_ms: number | null;
+  within_50ms: number;
+  lull_compared: number;
+  lull_within_1_beat: number;
+  charge_compared: number;
+  charge_within_2_beats: number;
+}
+
+export interface TestbedDropReferenceRow {
+  name: string;
+  uri: string;
+  edm: boolean;
+  available: boolean;
+  reason: string | null;
+  score: TestbedDropScore | null;
+}
+
+export interface TestbedDropReferenceSet {
+  confident_score: number;
+  suggested_score: number;
+  songs: TestbedDropReferenceRow[];
+  total: Partial<TestbedDropScore> | null;
+  edm_total: Partial<TestbedDropScore> | null;
 }
 
 export interface TestbedReferenceSet {

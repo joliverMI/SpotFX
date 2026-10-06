@@ -440,6 +440,13 @@ async def _on_track_uri(uri) -> None:
             # awaited here, so a slow/unanalyzed song can't delay the
             # scene_sequencer/trigger_engine transition work below.
             trigger_engine.maybe_auto_generate(uri)
+            # THE DROP DETECTOR (drop-detection plan, phase 2): the same
+            # first-play edge detects this song's charge/lull/drop
+            # sequences, and re-detects when its stamp is stale — in a
+            # worker thread, fire-and-forget, never raising into the
+            # engine (spectra/services/drop_sequences.py).
+            from spectra.services import drop_sequences
+            drop_sequences.on_song_played(uri)
     from spectra.services.scene_sequencer import scene_sequencer
     await scene_sequencer.on_track_state(uri)
     await trigger_engine.on_track_state(uri)

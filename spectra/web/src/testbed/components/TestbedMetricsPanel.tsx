@@ -95,8 +95,9 @@ export default function TestbedMetricsPanel({
       </div>
       <p style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 0, marginBottom: 8 }}>
         Default for these lanes: {defaultToleranceMs}ms — below half a beat
-        for a beat/downbeat lane, 500ms for section boundaries. The slider
-        can still be set to any value, including 500ms.
+        for a beat/downbeat lane, one beat for a Drops lane, 500ms for
+        section boundaries. The slider can still be set to any value,
+        including 500ms.
       </p>
       {showEdgeKnobs && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginBottom: 8 }}>
@@ -220,6 +221,7 @@ export default function TestbedMetricsPanel({
           {referenceSetLoading || !referenceSet ? (
             <p className="empty-note" style={{ fontSize: 12 }}>Loading…</p>
           ) : (
+            <div style={{ overflowX: 'auto' }}>
             <table className="testbed-metrics-table">
               <thead>
                 <tr>
@@ -250,6 +252,7 @@ export default function TestbedMetricsPanel({
                 ))}
               </tbody>
             </table>
+            </div>
           )}
         </div>
       )}
@@ -258,6 +261,9 @@ export default function TestbedMetricsPanel({
           {emptyNote} — precision/recall need at least one of your own marks to score against.
         </p>
       ) : (
+      // Eight columns do not fit a phone: the table scrolls inside its own
+      // box rather than pushing the whole page sideways.
+      <div style={{ overflowX: 'auto' }}>
       <table className="testbed-metrics-table">
         <thead>
           <tr>
@@ -294,6 +300,7 @@ export default function TestbedMetricsPanel({
           ))}
         </tbody>
       </table>
+      </div>
       )}
     </div>
   );

@@ -206,17 +206,21 @@ export function EngineLane({
   const matchedEstIndices = new Set(metrics?.matches.map((m) => m.est_index) ?? []);
   return (
     <div className="testbed-lane-row">
-      <span className="testbed-lane-label">{label}</span>
+      <span className="testbed-lane-label" title={label}>{label}</span>
       <div className="testbed-lane-bar">
         {hover && <div className="review-lane-tooltip" style={{ left: hover.leftPct }}>{hover.text}</div>}
         {estimate.map((m, i) => {
           const matched = matchedEstIndices.has(i);
-          const text = `${fmtMs(m.time_ms)}${matched ? ' (matched)' : ' (extra — no match to his marks)'}`;
+          // An engine's own label (a section name, a drop's tier) rides in
+          // the tooltip; a drops-lane suggestion is drawn fainter.
+          const text = `${fmtMs(m.time_ms)}${m.label ? ` · ${m.label}` : ''}`
+            + `${matched ? ' (matched)' : ' (extra — no match to his marks)'}`;
           return (
             <button
               key={i}
               type="button"
-              className={`testbed-lane-marker ${matched ? 'matched-tight' : 'extra'}`}
+              className={`testbed-lane-marker ${matched ? 'matched-tight' : 'extra'}`
+                + `${m.label === 'suggested' ? ' est-suggested' : ''}`}
               style={{ left: pct(m.time_ms) }}
               onPointerEnter={() => setHover({ text, leftPct: pct(m.time_ms) })}
               onPointerLeave={() => setHover(null)}
@@ -232,16 +236,16 @@ export function EngineLane({
 }
 
 export default function TestbedLaneBar({
-  durationMs, waveform, transitions, flares, scoredMarks, reference, referenceLabel,
+  durationMs, waveform, referenceMarks, scoredMarks, referenceLabel,
   referenceEmptyNote, engineLanes, toleranceMs, onEstimateMarkClick,
 }: {
   durationMs: number;
   waveform: TestbedWaveform | undefined;
-  transitions: TestbedReferenceMark[];
-  flares: TestbedReferenceMark[];
+  /** His marks of the ACTIVE reference set (transitions, flares, or his
+   * drops / lulls / charges) — the page picks, this lane draws. */
+  referenceMarks: TestbedReferenceMark[];
   /** The scored subset of the ACTIVE reference set — see ReferenceMarksLane. */
   scoredMarks: TestbedReferenceMark[];
-  reference: 'transitions' | 'flares';
   referenceLabel: string;
   referenceEmptyNote?: string;
   engineLanes: { key: string; label: string; estimate: TestbedEstimateMark[];
@@ -250,14 +254,13 @@ export default function TestbedLaneBar({
   onEstimateMarkClick?: (engineKey: string, mark: TestbedEstimateMark) => void;
 }) {
   const [hover, setHover] = useState<{ text: string; leftPct: string } | null>(null);
-  const activeReferenceMarks = reference === 'transitions' ? transitions : flares;
   const activeMetrics = engineLanes[0]?.metrics; // the primary engine's own compare tints his marks
   return (
     <div className="testbed-lane-stack">
       <WaveformLane waveform={waveform} durationMs={durationMs} />
       <ReferenceMarksLane
         label={`His ${referenceLabel}`}
-        marks={activeReferenceMarks}
+        marks={referenceMarks}
         scoredMarks={scoredMarks}
         durationMs={durationMs}
         metrics={activeMetrics}

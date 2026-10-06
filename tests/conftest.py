@@ -286,6 +286,21 @@ def _isolated_light_show(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolated_drop_sequences(tmp_path, monkeypatch):
+    """The drop detector's store (spectra/services/drop_sequences.py) is
+    reached with no DI seam from services/engine.py's song-change edge, so
+    every test gets its own empty file and a cold analysis memo."""
+    from spectra import config as scfg
+    from spectra.services import drop_detector, drop_sequences
+    monkeypatch.setattr(scfg, "DROP_SEQUENCES_FILE", tmp_path / "drop_sequences.json")
+    drop_sequences.reset()
+    drop_detector.reset_memo()
+    yield
+    drop_sequences.reset()
+    drop_detector.reset_memo()
+
+
+@pytest.fixture(autouse=True)
 def _permissive_hue_scope(tmp_path_factory, monkeypatch):
     """fx/hue_scope.py's allow-list ships CLOSED (no file = no Hue write).
     Suites that are not about the scope run as they did before it existed:

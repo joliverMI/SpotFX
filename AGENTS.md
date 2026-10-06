@@ -9627,6 +9627,37 @@ draws the tab/dot size by rank third and opacity by rank (pure helpers in
 never steals a click from a trigger. Specs: `node scripts/
 check_planned_event_markers.mjs` (FOUR), `tests/test_analysed_plan_api.py`.
 
+## DROP DETECTION — the detector and its file (drop-detection plan, phase 2)
+
+Plan: `/home/javi/fleet-spotfx/data/drop-detection-plan/report.md` (approved
+2026-10-05, "Do all recs"; phase 1, the partner timing rule, is
+`phase_partner.py` above). **`spectra/services/drop_detector.py` and
+`drop_sequences.py` are the binding statements.** Five things:
+
+- **THE DETECTOR IS THE PLAN'S METHOD B, PORTED LINE FOR LINE** — the
+  arithmetic is the measured thing. `scripts/check_drop_detector.py`
+  (read-only against live storage, on temp copies) holds its raw output
+  identical to the testbed's on Contra / Dopamine / Pop Off / 100 Millones
+  and the plan's numbers (11 of 13; 9 of 13 confident, 0 false on the EDM
+  songs). Change a rule and that script tells you what moved; bump
+  `DETECTOR_VERSION` whenever an unchanged song would detect differently.
+- **IT READS ONLY THE STORED AUDIO SHAPE AND THE BEATS, AND EVERY TIME IS
+  SONG TIME** (the `.npz` is captured in song time; beats shift by its first
+  timestamp). The test bed's `_estimate_for` must NOT shift the Drops lane
+  (`testbed_engines.SONG_TIME_ENGINES`).
+- **DETECTED ≠ HIS.** `storage/spectra/drop_sequences.json` holds the
+  detection (a stamped cache, replaced wholesale when stale) plus ONLY his
+  edits, keyed `drop:<detected ms>` and re-attached within two beats after a
+  re-detection — never rows in triggers.json (an edit there would stamp
+  `authored` and silence the song's analysed show under My triggers only).
+- **HIS OWN TRIGGERS WIN IN THE VIEW, NOT IN THE TEST BED.** `view()` stands
+  a detection down as `matches_yours` within two beats of his enabled
+  charge/lull/drop; the Drops lane and `drop_scoring.score_song` score the
+  detector's raw proposal, or every match would stand down and score zero.
+- **NOTHING FIRES FROM IT YET** (phase 5: synthetic triggers in `tick()`,
+  the protected window). Write routes and the Timeline layer are phases 3-4;
+  the service-level edit functions already exist and are tested.
+
 ## Maintaining this file
 
 Keep this file for knowledge useful to almost every future agent session in this project.

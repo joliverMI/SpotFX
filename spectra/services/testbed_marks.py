@@ -76,6 +76,10 @@ class ReferenceMark:
     # push-to-real button, per the promotion audit log. Shown, never
     # scored — see the module docstring.
     promoted: bool = False
+    # fire_response's own event_class (flare / charge / lull / drop) — the
+    # Drops lane's reference sets (drops / lulls / charges) are the flares
+    # filtered by it. None for every other action kind.
+    event_class: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -143,7 +147,8 @@ def _split(triggers: list[SpectraTrigger],
         promoted = t.id in promoted_ids
         mark = ReferenceMark(id=t.id, timestamp_ms=t.timestamp_ms,
                              kind=t.action.kind, enabled=t.enabled,
-                             promoted=promoted)
+                             promoted=promoted,
+                             event_class=getattr(t.action, "event_class", None))
         if t.action.kind in TRANSITION_KINDS:
             transitions.append(mark)
         elif t.action.kind in FLARE_KINDS:
@@ -154,6 +159,19 @@ def _split(triggers: list[SpectraTrigger],
             n_promoted += 1
     return _SplitMarks(transitions, flares, n_generated, n_promoted,
                        n_snapped, n_unsnapped_generated, snap_grid_counts)
+
+
+PHASE_REFERENCES = {"drops": "drop", "lulls": "lull", "charges": "charge"}
+"""The Drops lane's reference sets: his own flares of one event_class."""
+
+
+def phase_marks(flares: list[ReferenceMark], reference: str) -> list[ReferenceMark]:
+    """His drops / lulls / charges — the flares whose event_class the
+    reference set names. The /compare route and the song list's counts
+    both use this; spectra/web/src/testbed/TestbedPage.tsx mirrors it
+    (the same event_class filter) for its local matcher."""
+    cls = PHASE_REFERENCES[reference]
+    return [m for m in flares if m.event_class == cls]
 
 
 def scoring_marks(marks: list[ReferenceMark]) -> list[ReferenceMark]:

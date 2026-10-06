@@ -596,6 +596,21 @@ class RoomControlState(BaseModel):
     # It only ever lowers the count — the dwell already caps it near 3/min.
     scene_changes_per_minute: float = Field(default=0.0, ge=0.0, le=30.0)
 
+    # THE DROP DETECTOR'S TWO TIERS (drop-detection plan, phase 2; the
+    # Admiral's decision 2: "confident detections fire on songs that play
+    # the analysed show, and suggestions wait for his confirm"). A detected
+    # drop scoring at least drop_confident_score is CONFIDENT; at least
+    # drop_suggested_score, SUGGESTED (spectra/services/drop_detector.py's
+    # own docstring for what the score measures). Defaults are the plan's
+    # measured operating points (1.0 / 0.7: on Contra, Dopamine, Pop Off
+    # and 100 Millones, 9 of his 13 drops confident with nothing false on
+    # the three EDM songs; 11 of 13 at suggested). Tuned by eye on the test
+    # bed's Drops lane ("Use as room default"); a change re-detects each
+    # song the next time it plays (drop_sequences.py's stamp). Inverted
+    # values never hide a detection (drop_detector.tier_for).
+    drop_confident_score: float = Field(default=1.0, ge=0.3, le=2.0)
+    drop_suggested_score: float = Field(default=0.7, ge=0.3, le=2.0)
+
     # THE A/V-SYNC LEAD (owner ask 2026-08-28) — LEAD family: positive =
     # fire EARLIER, negative = fire LATER. The value the /avsync
     # instrument's Apply button writes, and the ONLY authored term in
