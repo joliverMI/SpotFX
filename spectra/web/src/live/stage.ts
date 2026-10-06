@@ -175,6 +175,14 @@ export class LiveStage {
   private uFloor: WebGLUniformLocation | null = null;
   private plan: StagePlan | null = null;
   private groups = new Map<string, GroupState>();
+  /** A full frame for a device whose group doesn't exist yet — the layout
+   * plan hasn't resolved yet (the REST fetch races the WS stream, which can
+   * burst within ms of connecting), or the stream names a device this
+   * plan doesn't. Kept so the only frame a static-colour fixture ever sends
+   * is never silently dropped; replayed through the same intake the moment
+   * `setPlan` creates a matching group. One entry per visId — a later frame
+   * for the same still-missing group simply replaces the earlier one. */
+  private pending = new Map<string, Uint8Array>();
   private from = new Uint8Array(0);
   private to = new Uint8Array(0);
   private cur = new Uint8Array(0);
@@ -262,8 +270,11 @@ export class LiveStage {
 
   /** A new position table: allocate the colour arrays and upload the static
    * geometry. Colours already on screen are kept where a device keeps its
-   * point count (a resize re-plans without a flash to black). */
-  setPlan(plan: StagePlan) {
+   * point count (a resize re-plans without a flash to black). `now` is the
+   * clock a replayed pending frame (below) is timed from — an explicit
+   * parameter, like `pushFrame`'s own, rather than this reading
+   * `performance.now()` itself, so a test can drive both on one clock. */
+  setPlan(plan: StagePlan, now: number = performance.now()) {
     const previous = this.groups;
     const previousCur = this.cur;
     this.plan = plan;
@@ -295,6 +306,21 @@ export class LiveStage {
     }
     this.uploadPlan();
     this.dirty = true;
+    this.replayPending(now);
+  }
+
+  /** Apply every buffered frame whose device now has a group (the layout
+   * plan this `setPlan` just installed may be the first one to name it).
+   * A visId still unmatched stays buffered — the plan may yet gain it. */
+  private replayPending(now: number) {
+    if (!this.pending.size) return;
+    for (const visId of [...this.pending.keys()]) {
+      const group = this.groups.get(visId);
+      if (!group) continue;
+      const rgb = this.pending.get(visId)!;
+      this.pending.delete(visId);
+      this.applyFrame(group, rgb, now);
+    }
   }
 
   /** The glow picture as last composed (RGBA, grid order) — for a test to
@@ -394,12 +420,29 @@ export class LiveStage {
     this.dirty = true;
   }
 
-  /** One stream frame. Copies what it needs: the frame's bytes are not kept. */
+  /** One stream frame. Copies what it needs: the frame's bytes are not kept.
+   * A frame for a device the current plan has no group for yet — the
+   * layout fetch hasn't resolved, or just hasn't named this device — is
+   * buffered (see `pending`) rather than dropped, so a fixture whose colour
+   * never changes again still gets painted once its group exists. */
   pushFrame(frame: PreviewFrame, now: number) {
+    if (frame.kind !== 'full') return;
     const plan = this.plan;
-    const group = this.groups.get(frame.visId);
-    if (!plan || !group || frame.kind !== 'full') return;
-    const { rgb } = frame;
+    const group = plan ? this.groups.get(frame.visId) : undefined;
+    if (!plan || !group) {
+      this.pending.set(frame.visId, frame.rgb.slice());
+      return;
+    }
+    this.pending.delete(frame.visId);
+    this.applyFrame(group, frame.rgb, now);
+  }
+
+  /** Land one device's rgb bytes onto its group and arm the usual ease —
+   * the shared tail of `pushFrame` and `replayPending`, so a buffered
+   * frame is painted exactly as a live one would be. */
+  private applyFrame(group: GroupState, rgb: Uint8Array, now: number) {
+    const plan = this.plan;
+    if (!plan) return;
     const cells = Math.floor(rgb.length / 3);
     if (cells !== group.cells) {
       this.stale = true;

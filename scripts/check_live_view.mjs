@@ -156,6 +156,19 @@ const bulbColor = () => fills[fills.length - 1];
   ok(stage.stale === true && stage.draw(2006) === false,
     'a frame with a different cell count than the plan is not drawn, and says the layout is stale');
 }
+{
+  // the frame/layout race: a static-colour fixture's only frame can arrive
+  // before setPlan ever runs (the layout fetch is async, the WS stream is
+  // not) — it must still land once the matching group exists, not be
+  // silently dropped forever.
+  const racer = new LiveStage(canvas, true);
+  racer.pushFrame(frame(123), 500);
+  ok(racer.draw(500) === false, 'nothing to draw before a plan exists — the frame is buffered, not drawn yet');
+  racer.setPlan(plan, 533);
+  ok(racer.draw(533 + 40) && bulbColor() === 'rgb(123,14,19)',
+    'a frame that arrived before the plan is painted once setPlan creates its group');
+  ok(racer.draw(600) === false, 'and it settles there — no further catch-up animation needed');
+}
 
 console.log('THREE — the link meter');
 {

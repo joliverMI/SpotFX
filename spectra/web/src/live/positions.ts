@@ -139,6 +139,14 @@ export interface StagePlan {
 
 export type PositionSource = (layout: LiveLayout, wide: boolean) => StagePlan;
 
+/** A plan with nothing in it — the stage before a real one has loaded, or
+ * while there's nothing to draw. Shared so a resetting consumer doesn't
+ * invent its own empty shape. */
+export const EMPTY_PLAN: StagePlan = {
+  width: 16, height: 9, pointCount: 0, xy: new Float32Array(0), size: new Float32Array(0),
+  src: new Uint32Array(0), groups: [], fixtures: [],
+};
+
 const GAP = 7;
 const LABEL_H = 7;
 const MATRIX_H = 56;
