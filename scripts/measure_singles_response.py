@@ -108,6 +108,11 @@ def camera_decode(v):
     return np.where(x <= 0.04045, x / 12.92, ((x + 0.055) / 1.055) ** 2.4)
 
 
+def say(msg: str) -> None:
+    """A timestamped progress line on stderr (the run reports as it goes)."""
+    print(f"[{time.strftime('%H:%M:%S')}] {msg}", file=sys.stderr, flush=True)
+
+
 def grey_hex(level: float) -> str:
     v = int(round(255 * min(1.0, max(0.0, level))))
     return "#%02x%02x%02x" % (v, v, v)
@@ -540,10 +545,12 @@ def measure(room, fixtures: list[str], *, trials: int = DELAY_TRIALS,
     guard = guard or (lambda: None)
     out: dict = {"fixtures": {}, "pairs": [], "assumption": "camera = sRGB curve"}
     guard()
+    say("isolate: every target dark")
     room.hold([(d, None) for d in fixtures])
     dark = _fresh_frames(room, CAPTURE_FRAMES, SETTLE_S)
     masks, lit = {}, {}
     for d in fixtures:
+        say(f"find: {d} alone at full white")
         room.hold([(d, grey_hex(1.0))])
         full = _fresh_frames(room, CAPTURE_FRAMES, SETTLE_S)
         room.hold([(d, None)])
@@ -568,6 +575,7 @@ def measure(room, fixtures: list[str], *, trials: int = DELAY_TRIALS,
             exclusive[d] = ex
     for d, mask in masks.items():
         guard()
+        say(f"sweep: {d}")
         ups, raws = [], []
         order = SWEEP_LEVELS + SWEEP_LEVELS[-2::-1]
         for lv in order:
@@ -600,6 +608,7 @@ def measure(room, fixtures: list[str], *, trials: int = DELAY_TRIALS,
     full_ex = {d: float(np.mean(lit[d][exclusive[d]])) for d in exclusive}
     for a, b in pairs:
         guard()
+        say(f"delay: {a} + {b}, {trials} trials")
         diffs = []
         for _ in range(trials):
             room.hold([(a, None), (b, None)])
@@ -639,8 +648,10 @@ def run(room, fixtures: list[str], *, lift: list[str] = (),
     result: dict = {}
     try:
         if lift:
+            say(f"lift: house Hue look for {', '.join(lift)}")
             record = lift_house_hue(room, list(lift), record_path)
             wait_hue_free(room, list(lift))
+            say("lift: free")
 
         def guard():
             held = room.hue_held(list(lift)) if lift else []
@@ -651,16 +662,19 @@ def run(room, fixtures: list[str], *, lift: list[str] = (),
         result = measure(room, fixtures, guard=guard, **kw)
         return result
     finally:
+        say("release: every fixture")
         for d in fixtures:
             try:
                 room.release(d)
             except Exception as exc:  # noqa: BLE001
                 print(f"  ! could not release {d}: {exc}", file=sys.stderr)
         if record is not None:
+            say("restore: house Hue look")
             try:
                 result["restore"] = restore_house_hue(room, record)
                 if result["restore"]["restored"]:
                     result["restore"]["held_again"] = wait_hue_held(room, list(lift))
+                say(f"restore: {result['restore']}")
                 if result["restore"]["restored"] and record_path and os.path.exists(record_path):
                     os.remove(record_path)
             except Exception as exc:  # noqa: BLE001
