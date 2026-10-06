@@ -7,6 +7,7 @@ import type {
 } from './types';
 import type { AnalysedPlan } from '../debug/plannedEvents';
 import type { DropRails, DropSequencesResponse } from './dropSequences';
+import type { ArmsStatus } from '../lightshow/types';
 
 const enc = encodeURIComponent;
 
@@ -141,6 +142,20 @@ export function useDropSequences(uri: string | null, enabled = true) {
     enabled: !!uri && enabled,
     staleTime: 30_000,
     refetchInterval: 60_000,
+    retry: false,
+  });
+}
+
+/** The Light Show's armed board (spectra/services/show_arms.py) — which
+ * action sets are currently armed, and on what. Global room state, not
+ * scoped to one song (an arm's own `song_uri` is what says whether it
+ * applies to the song shown here — see ../lightShowMarkers.ts). */
+export function useShowArms(enabled = true) {
+  return useQuery({
+    queryKey: ['light-show-arms'],
+    queryFn: () => spectraGet<ArmsStatus>('/light-show/arms'),
+    enabled,
+    refetchInterval: 10_000,
     retry: false,
   });
 }

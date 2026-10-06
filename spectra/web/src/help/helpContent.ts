@@ -1245,14 +1245,15 @@ export const HELP_SECTIONS: HelpSection[] = [
           },
           {
             id: 'builder-analysed-events',
-            title: 'Analysed events on the shape canvas',
-            keywords: 'analysed plan scene change flare marker upcoming toggle legend count planned my triggers only transitions only rank ranking strongest size brightness tooltip hover',
+            title: 'Analysed events on the shape canvas and the trigger strip',
+            keywords: 'analysed plan scene change flare marker upcoming toggle legend count planned my triggers only transitions only rank ranking strongest size brightness tooltip hover strip generated flares',
             body: [
               'The "Analysed events" toggle (Audio Shape header) shows what SPECTRA\'s trigger clock will do to the currently-shown song, drawn where it actually lands in the SONG (not shifted by any live-playhead clock the way the debug page\'s copy of these markers is — the Timeline canvas already draws everything at raw song position, and so does this).',
               'A solid cyan line with a ▼ tab is a SCENE CHANGE (a generated transition cue); a dashed lime line with a ● dot is an ANALYSED FLARE (an analysed action that did not become a scene change and fires as a flare instead — see "Analysed flares"). Lime, not gold: gold, sky blue and magenta belong to the charge, lull and drop (see "Drop sequences"). The line under the canvas counts both and says when the scene changes are only planned because the song has not been generated yet.',
+              'The SAME markers — same colours, same source, same rank sizing/brightness — also draw as a thin "Analysed events" row directly under your SPECTRA triggers strip, above the drop-sequence strip: a cyan square is a scene change, a lime dot a flare. One list of what will fire, never a second one with its own idea — a scene cue a drop sequence\'s protected window holds back (see "When drop sequences fire") never shows on either surface.',
               'RANK, kept subtle: every marker shows how strong its moment is among the song\'s transitions (ranked by how much the section energy changes there). The top third of moments get the widest ▼ tab (14 px) and biggest ● dot, the middle third the original size, the bottom third the smallest — and brightness runs from faint for the weakest to full for the strongest. Hover a marker for its rank in words, e.g. "#2 of 21 · section-energy change · scene change". A stored scene change planned under older settings shows unranked, at the original size, until the song is re-planned (see "Re-analysing songs after a settings change").',
               'This works for whatever song is currently shown on the Timeline — playing or manually selected — not only the one playing right now.',
-              'The Light Show\'s High (▲) and Low (▼) Triggers have their own draggable strip under the Timeline bar — see "High and Low Triggers". They exist on every analysed song, whatever the mode.',
+              'The Light Show\'s High (▲) and Low (▼) Triggers have their own draggable strip under the Timeline bar, and a "Light Show" toggle draws them on the graph too — see "High and Low Triggers". They exist on every analysed song, whatever the mode.',
               'Nothing is drawn, and the line says why, whenever the room\'s per-song mode does not let analysed events fire for this song: "Transitions only" (analysed events never fire, room-wide), or a song carrying your own authored triggers under "My triggers only" (its own triggers fire instead of the analysed plan).',
             ],
           },
@@ -2542,11 +2543,12 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         id: 'show-high-low-triggers',
         title: 'High and Low Triggers',
-        keywords: 'high trigger low trigger biggest rise biggest fall section energy drop mark move drag automatic runner up timeline flag',
+        keywords: 'high trigger low trigger biggest rise biggest fall section energy drop mark move drag automatic runner up timeline flag armed muted active shape canvas',
         body: [
           'Every analysed song has ONE High Trigger, at its biggest rise in section energy, and ONE Low Trigger, at its biggest fall — the same score the scene-change planner ranks moments by, and placed on exactly the moment that boundary\'s scene change or flare fires. The first and last 15 seconds of a song never hold one.',
           'Where you have placed your own drop mark on a song, the High sits on it instead (the one nearest the biggest rise, if you placed several).',
           'On the Timeline, under the trigger bar: the white ▲ is the High and the indigo ▼ the Low (kept off the charge, lull and drop colours, so a flag never reads as a phase). Drag a flag to move it — the move is saved for that song and always wins. A moved flag shows a faint dashed line where the analysis puts it, and an "auto" button to put it back. Faint dots are the runners-up; a brighter one is within 10% of the winner — tap a dot to move the flag there.',
+          'Both flags are shown even when NOTHING is armed on them — the position is worked out fresh on each play, whether or not an action set is waiting for it. A flag glows solid with a ring when something IS armed to fire there (hover it for which set); it sits muted/dim otherwise. The "Light Show" toggle on the Audio Shape header draws the same solid-or-muted ▲/▼ on the big graph, so you can see them against the waveform too. An arm whose trigger is the next scene change has no fixed song position to mark — it is named in words in the graph\'s own legend line instead, since it could fire on any upcoming scene change.',
           'Nothing here writes a trigger: High and Low are worked out fresh on each play, and only your moves are stored, so moving one never changes which of your own triggers a song has.',
         ],
       },
