@@ -224,6 +224,10 @@ def _record_json() -> dict:
         # tv-backlight reports); this is the continuous half, on its own
         # cadence, and the room bar renders both.
         "dark_fixtures": dark_fixture_watch.status(),
+        # A Hue area whose entertainment session is NOT started because it
+        # holds a bulb Spectra may not light (fx/hue_scope.py — his Loft
+        # Ceiling Uplight and Ledge bulbs): {device_id: the sentence}.
+        "hue_stream_refusals": live.hue_stream_refusals(),
     }
     if record.handover:
         out["handover"]["age_s"] = round(
@@ -562,6 +566,11 @@ async def get_liveness():
             # read that and a restart cannot fix a switched-off light while
             # it certainly would darken the ones that work.
             "dark_fixtures": dark_fixture_watch.liveness_summary(),
+            # Additive (2026-10-06): a Hue area NOT streamed because it
+            # holds a bulb off the allow-list — starting its session would
+            # switch that bulb on (fx/devices/hue.py, deviation #52).
+            # Informational only; never part of `healthy`.
+            "hue_stream_refusals": live.hue_stream_refusals(),
         },
         status_code=200 if healthy else 503,
     )

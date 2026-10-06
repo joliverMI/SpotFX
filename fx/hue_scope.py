@@ -31,6 +31,22 @@ forgets. Reads (GET) are not this module's business.
 Both processes use it (`fx/` may be imported by spot-effects and SPECTRA
 alike; it imports neither): SPECTRA's ambient.py and release_fade.py, and
 spot-effects' legacy services/ambient_mode.py.
+
+THE ENTERTAINMENT STREAM IS IN SCOPE TOO (2026-10-06). A REST write is not
+the only way a bulb comes on: asking the bridge to START an entertainment
+session (`devices/hue.py`, `action: start`) switches on EVERY bulb in that
+entertainment area, whatever frames follow. His "Music Group" area carries
+the Loft Ceiling Uplight and the three Ledge bulbs, so every session start
+lit them — at 18:28 on 2026-10-06, after a restart with house lighting and
+Ambient both off, they came on one by one from 18:28:07, seventeen seconds
+before the stream's DTLS handshake had even completed (18:28:24), i.e.
+before a single frame could have been sent. Leaving those channels out of
+the frames cannot help with that, so the rule is the area-level one:
+`stream_refusal()` names an area that holds any bulb not on the allow-list
+(or a channel whose bulb cannot be identified), and `HueDevice` never
+starts a session on it. Removing those bulbs from the entertainment area in
+the Hue app is what lets Spectra stream the rest; this module never edits
+the bridge's configuration.
 """
 from __future__ import annotations
 
@@ -39,7 +55,7 @@ import logging
 import re
 import threading
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +105,70 @@ def allowed_pairs(pairs: Iterable[tuple[str, str]]) -> list[tuple[str, str]]:
     writer. Order kept."""
     ok = load_allowed()
     return [(rid, name) for rid, name in pairs if str(rid) in ok]
+
+
+def area_lights(ent_config: dict, entertainments: list, lights: list
+                ) -> list[tuple[object, Optional[str], str]]:
+    """Every bulb an entertainment configuration drives, one entry per
+    channel member: `(channel_id, light resource id or None, name)`.
+
+    The same walk spectra/services/ambient.py makes (channel member ->
+    entertainment service -> its owning device -> that device's light), but
+    over EVERY member of every channel, and a member that does not resolve
+    to a light is kept with `None` rather than dropped — the stream judges
+    what it cannot identify as out of scope. Pure: the three bridge payloads
+    (`entertainment_configuration/<id>` data[0], `entertainment` data,
+    `light` data) are passed in."""
+    ent_owner = {e.get("id"): (e.get("owner") or {}).get("rid")
+                 for e in entertainments or ()}
+    dev_light = {(l.get("owner") or {}).get("rid"): l.get("id")
+                 for l in lights or ()}
+    light_name = {l.get("id"): (l.get("metadata") or {}).get("name") or l.get("id")
+                  for l in lights or ()}
+    out: list[tuple[object, Optional[str], str]] = []
+    for channel in (ent_config or {}).get("channels", []) or []:
+        cid = channel.get("channel_id")
+        members = channel.get("members") or []
+        if not members:
+            out.append((cid, None, f"channel {cid} (no bulb named)"))
+            continue
+        for member in members:
+            svc = member.get("service") or {}
+            rid = None
+            if svc.get("rtype") == "entertainment":
+                rid = dev_light.get(ent_owner.get(svc.get("rid")))
+            if rid:
+                out.append((cid, str(rid), str(light_name.get(rid, rid))))
+            else:
+                out.append((cid, None, f"channel {cid} (bulb not identified)"))
+    return out
+
+
+def stream_refusal(area: Iterable[tuple[object, Optional[str], str]]
+                   ) -> Optional[str]:
+    """None when every bulb of an entertainment area is allow-listed (a
+    session may start); otherwise the sentence naming the bulbs that keep
+    it from starting. An empty area is refused too: nothing to judge is not
+    the same as nothing to light."""
+    area = list(area)
+    if not area:
+        return ("refused to start the Hue entertainment stream: the area's "
+                "bulbs could not be read from the bridge, so Spectra cannot "
+                "tell which bulbs a session would switch on")
+    ok = load_allowed()
+    bad = []
+    for _cid, rid, name in area:
+        if rid is None or str(rid) not in ok:
+            if name not in bad:
+                bad.append(name)
+    if not bad:
+        return None
+    return ("refused to start the Hue entertainment stream: this area "
+            f"includes {', '.join(bad)}, which Spectra may not light "
+            f"(not on {SCOPE_FILE.name}). Starting a session switches on "
+            "every bulb in the area, so the area is not streamed at all. "
+            "Remove those bulbs from the entertainment area in the Hue app "
+            "and Spectra streams the rest.")
 
 
 def light_id(endpoint: str) -> str:

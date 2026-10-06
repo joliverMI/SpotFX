@@ -1501,7 +1501,8 @@ against that commit.
     group) and any light not on `storage/spectra/hue_scope.json` (his
     living-room and dining bulbs; `scripts/seed_hue_scope.py` writes it
     from the bridges). A missing file allows nothing. The entertainment
-    STREAM (devices/hue.py) is not a REST light write and is unchanged.
+    STREAM (devices/hue.py) is not a REST light write; its session start
+    is scoped separately by #52.
     Proof: `tests/test_hue_scope.py`.
 51. `effects/pulse.py`: an ENTIRELY NEW, SpotFX-authored effect, registry
     id `pulse` (single-led-power plan, phase 1, 2026-10-06; the Admiral
@@ -1541,3 +1542,19 @@ against that commit.
     (`_guard_output`) that holds the budget on the light actually
     delivered, which never engages on his four fixture songs without
     flares. Proof: `tests/test_pulse_rainbow_flares.py`.
+52. `devices/hue.py` + `hue_scope.py`: A SESSION IS NEVER STARTED ON AN
+    ENTERTAINMENT AREA HOLDING A BULB OFF THE ALLOW-LIST (2026-10-06). After
+    a restart with house lighting and Hue Hold both off, the Loft Ceiling
+    Uplight and the three Ledge bulbs came on from 18:28:07 — seventeen
+    seconds before the DTLS handshake completed, i.e. before any frame:
+    the bridge switches on every bulb of an area when a session STARTS.
+    `_blocking_activate` now reads the area (entertainment_configuration,
+    entertainment, light — three GETs) and raises `HueStreamRefused`
+    before the `action: start` PUT when `hue_scope.stream_refusal` names a
+    bulb off `hue_scope.json` (or one it cannot identify, or an unreadable
+    area). The refusal is not retried by the activation loop; `flush()`
+    re-reads at `SCOPE_RECHECK_INTERVAL` (60 s) instead of every 5 s, so
+    fixing the area in the Hue app is picked up without a restart. It is
+    said once at CRITICAL and exposed as `HueDevice.scope_refusal`. The
+    DTLS socket setup moved into `_open_dtls()` unchanged. Proof:
+    `tests/test_hue_stream_scope.py`.

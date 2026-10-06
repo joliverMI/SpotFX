@@ -108,6 +108,33 @@ export function DarkFixtureStrip({ dark }: { dark: DarkFixtureStatus | null | un
   );
 }
 
+/** THE HUE SCOPE STRIP — a Hue area SPECTRA is deliberately NOT streaming,
+ * because it holds a bulb Spectra may not light (fx/hue_scope.py's
+ * allow-list; his Loft Ceiling Uplight and Ledge bulbs). Starting a Hue
+ * entertainment session switches on every bulb in the area, so the whole
+ * area stays out of the show until those bulbs are taken out of it in the
+ * Hue app — and that has to be said, or the area just looks broken. */
+export function HueScopeStrip({ refusals }: { refusals: Record<string, string> | null | undefined }) {
+  const entries = Object.entries(refusals ?? {});
+  if (entries.length === 0) return null;
+  return (
+    <div className="activation-strip" role="status">
+      <span className="activation-strip-lead">
+        ⚠ {entries.length} Hue area{entries.length === 1 ? ' is' : 's are'} not in the show
+        {' '}— {entries.length === 1 ? 'it holds' : 'they hold'} bulbs Spectra may not light
+      </span>
+      <ul>
+        {entries.map(([did, why]) => (
+          <li key={did}>
+            <strong>{did}</strong> <span className="activation-strip-why">— {why}</span>
+          </li>
+        ))}
+      </ul>
+      <HelpLink topic="hue-scope-stream" title="A Hue area left out of the show" />
+    </div>
+  );
+}
+
 export default function RoomOwnershipBar() {
   const { data } = useOwnership();
   const takeBack = useTakeBackToSpectra();
@@ -150,6 +177,7 @@ export default function RoomOwnershipBar() {
     <>
       <ActivationStrip act={data.activation} />
       <DarkFixtureStrip dark={data.dark_fixtures} />
+      <HueScopeStrip refusals={data.hue_stream_refusals} />
     </>
   );
 }
