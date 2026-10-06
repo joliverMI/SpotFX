@@ -6,8 +6,8 @@
 import { useRef, useState } from 'react';
 import type { ResponseClass, SpectraTrigger, TriggerActionKind } from '../../types';
 import type { Win } from '../canvas/frame';
-import { isPhaseStretchClass, phaseBlendSpan } from '../phaseBlend';
-import type { PhaseBlendSpan } from '../phaseBlend';
+import { isPhaseClass, isPhaseStretchClass, phaseBlendSpanFor } from '../phaseBlend';
+import type { LaterMoment, PhaseBlendSpan, PhaseBuildTarget } from '../phaseBlend';
 
 const KIND_COLOR: Record<TriggerActionKind, string> = {
   fire_scene: '#a855f7',       // violet — matches the SPECTRA purple
@@ -37,25 +37,35 @@ export function triggerColor(t: SpectraTrigger): string {
     : KIND_COLOR[t.action.kind];
 }
 
+/** A stored trigger's phase class for the partner rule ('charge' / 'lull' /
+ * 'drop'), or null for anything that writes no phase. */
+function phaseClassOf(t: SpectraTrigger): string | null {
+  return t.action.kind === 'fire_response' && isPhaseClass(t.action.event_class)
+    ? t.action.event_class : null;
+}
+
 /** A charge/lull trigger's own blend, ready to draw: its ramp stretches to
- * the next trigger that will actually fire, then hangs at full for the last
- * ~10% of that gap. UNCONDITIONAL by class — see ../phaseBlend.ts for why
- * this is never keyed on a stored flag. "Next" mirrors
- * trigger_engine._next_trigger_gap_ms: the nearest later ENABLED trigger,
- * whatever kind it is; none means the flat class default, not the song end.
+ * where its build ends, then hangs at full for the last ~10% of that gap.
+ * UNCONDITIONAL by class — see ../phaseBlend.ts for why this is never keyed
+ * on a stored flag. Where the build ends mirrors
+ * trigger_engine._phase_partner_gap_ms (the PHASE PARTNER rule,
+ * ../phaseBlend.ts::phaseBuildTarget): its own lull or drop, whatever sits
+ * between; with no partner ahead, the nearest later ENABLED trigger of any
+ * kind; none means the flat class default, not the song end.
  *
  * A DISABLED charge/lull draws no blend at all — it never fires. */
 export function phaseBlendSpans(triggers: SpectraTrigger[]): Array<PhaseBlendSpan & {
-  triggerId: string; color: string;
+  triggerId: string; color: string; buildsTo: PhaseBuildTarget;
 }> {
   const enabled = triggers.filter((t) => t.enabled)
     .sort((a, b) => a.timestamp_ms - b.timestamp_ms);
-  const out: Array<PhaseBlendSpan & { triggerId: string; color: string }> = [];
+  const out: Array<PhaseBlendSpan & { triggerId: string; color: string; buildsTo: PhaseBuildTarget }> = [];
+  const moments = enabled.map((n) => ({ id: n.id, ms: n.timestamp_ms, phaseClass: phaseClassOf(n) }));
   for (const t of enabled) {
     if (t.action.kind !== 'fire_response' || !isPhaseStretchClass(t.action.event_class)) continue;
-    const next = enabled.find((n) => n.timestamp_ms > t.timestamp_ms);
+    const later: LaterMoment[] = moments.filter((m) => m.id !== t.id);
     out.push({
-      ...phaseBlendSpan(t.action.event_class, t.timestamp_ms, next ? next.timestamp_ms : null),
+      ...phaseBlendSpanFor(t.action.event_class, t.timestamp_ms, later),
       triggerId: t.id,
       color: triggerColor(t),
     });
@@ -67,11 +77,14 @@ const secs = (ms: number) => `${(ms / 1000).toFixed(1)}s`;
 
 /** The hover suffix explaining a drawn blend, so the tint is never a shape
  * he has to guess at. Says outright when the length is the flat class
- * default rather than a real stretch. */
-export function blendNote(b: PhaseBlendSpan | undefined): string {
+ * default rather than a real stretch, and names what the build ends on —
+ * its own lull or drop, or (no partner ahead) simply the next trigger. */
+export function blendNote(b: (PhaseBlendSpan & { buildsTo?: PhaseBuildTarget }) | undefined): string {
   if (!b) return '';
   if (!b.stretched) return `  ⤳ blend ${secs(b.endMs - b.startMs)} (no next trigger — flat default)`;
-  return `  ⤳ blend ${secs(b.endMs - b.startMs)} to the next trigger`
+  const to = b.buildsTo?.reason === 'partner' && b.buildsTo.targetClass
+    ? `to its ${b.buildsTo.targetClass}` : 'to the next trigger';
+  return `  ⤳ blend ${secs(b.endMs - b.startMs)} ${to}`
     + ` (ramp ${secs(b.rampEndMs - b.startMs)}, hang ${secs(b.endMs - b.rampEndMs)})`;
 }
 

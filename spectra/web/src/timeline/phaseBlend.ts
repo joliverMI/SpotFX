@@ -2,9 +2,9 @@
  * blend", mirrored from the engine so the graph shows what the room does.
  *
  * THE FACT THIS MODULE EXISTS FOR: in SPECTRA a charge or lull ramp
- * stretches to the real gap to the next trigger UNCONDITIONALLY, for every
- * one of them — spectra/services/scene_response.py::_phase_ramp_ms, whose
- * gap comes from trigger_engine._next_trigger_gap_ms. There is no per-
+ * stretches to the real gap to where its build ends UNCONDITIONALLY, for
+ * every one of them — spectra/services/scene_response.py::_phase_ramp_ms,
+ * whose gap comes from trigger_engine._phase_partner_gap_ms. There is no per-
  * trigger flag gating it; the per-scene PhaseBlend knob that once carried
  * the static half was RETIRED 2026-08-20 (Admiral order "fix the lull
  * ramp"). So a charge/lull blend is keyed on the CLASS, never on a stored
@@ -12,9 +12,19 @@
  * of his 338 real charge/lull triggers carry it False while the engine
  * blends them anyway, which is exactly the omission this draws away.
  *
+ * WHERE A BUILD ENDS — the PHASE PARTNER rule (2026-10-06, drop-detection
+ * plan phase 1; spectra/services/phase_partner.py is the binding
+ * statement, phaseBuildTarget below its mirror): a charge builds to its own
+ * next lull or drop and a lull to its own next drop, whatever flare, scene
+ * change or colour change sits between, if that partner is within the
+ * effects' own 60 s cap. A charge or lull with no partner ahead keeps the
+ * pre-rule answer: the next trigger of any kind.
+ *
  * The numbers below are the engine's own, mirrored (nothing serves them
- * over the wire). If _phase_ramp_ms changes, change them here too — a ruler
- * that quietly disagrees with the show is worse than no ruler.
+ * over the wire). If _phase_ramp_ms or phase_partner.py changes, change
+ * them here too — a ruler that quietly disagrees with the show is worse
+ * than no ruler. scripts/check_charge_lull_blend_spans.mjs reads both
+ * Python modules and goes red when they drift.
  */
 
 /** The flat, hand-tuned fallback the engine uses when the gap is
@@ -56,14 +66,15 @@ export interface PhaseBlendSpan {
   startMs: number;
   rampEndMs: number;
   endMs: number;
-  /** true when the length came from a real next trigger; false when it is
+  /** true when the length came from a real later trigger; false when it is
    * the flat class default because there was nothing to stretch toward. */
   stretched: boolean;
 }
 
-/** Resolve one charge/lull trigger's drawn blend. nextMs is the timestamp of
- * the next trigger that will actually fire (null = none) — the same quantity
- * trigger_engine._next_trigger_gap_ms resolves at fire time. */
+/** Resolve one charge/lull trigger's drawn blend. nextMs is the timestamp the
+ * build ends on (null = none) — the same quantity
+ * trigger_engine._phase_partner_gap_ms resolves at fire time; use
+ * phaseBlendSpanFor to resolve it from the song's triggers. */
 export function phaseBlendSpan(
   eventClass: string,
   startMs: number,
@@ -73,4 +84,79 @@ export function phaseBlendSpan(
   const ramp = phaseRampMs(eventClass, gap);
   const end = gap !== null ? startMs + gap : startMs + ramp;
   return { startMs, rampEndMs: Math.min(startMs + ramp, end), endMs: end, stretched: gap !== null };
+}
+
+/** phase_partner.PHASE_ORDER — a later class is a partner, the same or an
+ * earlier one is a restart (it rewrites phase_progress to 0 itself). */
+export const PHASE_ORDER: Record<string, number> = { charge: 0, lull: 1, drop: 2 };
+
+/** True for 'charge' / 'lull' / 'drop' — an own-property check, so a
+ * stray class name that happens to be an Object prototype key never
+ * reads as a phase. */
+export function isPhaseClass(cls: string | null | undefined): cls is string {
+  return typeof cls === 'string' && Object.prototype.hasOwnProperty.call(PHASE_ORDER, cls);
+}
+
+/** phase_partner.PARTNER_REACH_MS — the effects' own absolute charge/lull
+ * cap (fx/effects/particle_handoff.PHASE_HOLD_MAX_S, 60 s). */
+export const PHASE_PARTNER_REACH_MS = 60_000;
+
+/** phase_partner.TARGET_* — what a build ends on. */
+export type PhaseBuildReason = 'partner' | 'next_trigger' | 'none';
+
+export interface PhaseBuildTarget {
+  /** null exactly when reason === 'none'. */
+  ms: number | null;
+  reason: PhaseBuildReason;
+  /** the target's phase class, or null when it is not a phase trigger. */
+  targetClass: string | null;
+}
+
+/** One later trigger, as the partner rule sees it: its time and its phase
+ * class ('charge' / 'lull' / 'drop'), or null for anything that writes no
+ * phase (a flare, a scene change, a colour change, an update). */
+export interface LaterMoment {
+  ms: number;
+  phaseClass: string | null;
+}
+
+/** True when laterClass completes eventClass's build: a lull or drop for a
+ * charge, a drop for a lull. Mirrors phase_partner.is_partner. */
+export function isPhasePartner(eventClass: string, laterClass: string | null): boolean {
+  if (!isPhaseStretchClass(eventClass) || !isPhaseClass(laterClass)) return false;
+  return PHASE_ORDER[laterClass] > PHASE_ORDER[eventClass];
+}
+
+/** Where one charge/lull's build ends. Mirrors phase_partner.build_target
+ * exactly: the next PHASE trigger, if it is a partner within the reach;
+ * otherwise the next trigger of any kind (the pre-rule answer); otherwise
+ * nothing. `later` is every OTHER trigger that will fire — order does not
+ * matter, and anything at or before startMs is ignored. */
+export function phaseBuildTarget(
+  eventClass: string,
+  startMs: number,
+  later: LaterMoment[],
+): PhaseBuildTarget {
+  if (!isPhaseStretchClass(eventClass)) return { ms: null, reason: 'none', targetClass: null };
+  const ahead = later.filter((m) => m.ms > startMs).sort((a, b) => a.ms - b.ms);
+  if (ahead.length === 0) return { ms: null, reason: 'none', targetClass: null };
+  const nextPhase = ahead.find((m) => isPhaseClass(m.phaseClass));
+  if (nextPhase && isPhasePartner(eventClass, nextPhase.phaseClass)
+      && nextPhase.ms - startMs <= PHASE_PARTNER_REACH_MS) {
+    return { ms: nextPhase.ms, reason: 'partner', targetClass: nextPhase.phaseClass };
+  }
+  const first = ahead[0];
+  return { ms: first.ms, reason: 'next_trigger',
+    targetClass: isPhaseClass(first.phaseClass) ? first.phaseClass : null };
+}
+
+/** phaseBlendSpan with the build's end resolved by the partner rule, plus
+ * what it ends on (for the hover note). */
+export function phaseBlendSpanFor(
+  eventClass: string,
+  startMs: number,
+  later: LaterMoment[],
+): PhaseBlendSpan & { buildsTo: PhaseBuildTarget } {
+  const buildsTo = phaseBuildTarget(eventClass, startMs, later);
+  return { ...phaseBlendSpan(eventClass, startMs, buildsTo.ms), buildsTo };
 }

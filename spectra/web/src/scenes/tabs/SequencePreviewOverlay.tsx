@@ -6,7 +6,9 @@
  * WHAT THE RULER SHOWS, and why the gap sliders are the control that
  * matters. Each class's ramp is production's own (scene_response.
  * _phase_ramp_ms), which since 2026-08-20 STRETCHES a charge or lull to
- * ~90% of the real gap to the next trigger and hangs the remaining ~10%.
+ * ~90% of the real gap to its own lull or drop (the PHASE PARTNER rule,
+ * spectra/services/phase_partner.py — nothing else ever sits between the
+ * marks on this ruler) and hangs the remaining ~10%.
  * That hang is his own spec — "the single blob waiting in lull should
  * reach the center just and hang for just a moment, maybe 10% of the lull
  * time, before the explosion" — and a number in a form could never show

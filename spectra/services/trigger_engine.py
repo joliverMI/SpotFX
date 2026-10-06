@@ -28,11 +28,14 @@ moment its timestamp is first crossed:
                        bridge's classified trigger_fired events already
                        drive (phase drive, band selection, pulse release).
                        A charge/lull action also carries the real gap to
-                       the next trigger this song will fire
-                       (_next_trigger_gap_ms) — OVERRIDE BLEND's dynamic
-                       ramp stretch (scene_response._phase_ramp_ms), 2026-
-                       08-20. A bridge-classified flare carries no such
-                       gap; drop is never stretched either way.
+                       what its build ends on — its own lull or drop when
+                       it has one, whatever sits between, else the next
+                       trigger this song will fire
+                       (_phase_partner_gap_ms, spectra/services/
+                       phase_partner.py) — OVERRIDE BLEND's dynamic ramp
+                       stretch (scene_response._phase_ramp_ms), 2026-08-20.
+                       A bridge-classified flare carries no such gap; drop
+                       is never stretched either way.
   select_color_set      drift_conductor.apply_set_directly — the SAME
                        manual-apply surface POST /api/room-color/apply uses.
   fire_scene_update      engine.fire_scene_update_event — UPDATE (data/
@@ -335,7 +338,8 @@ from random import Random
 from typing import Any, Awaitable, Callable, Optional
 
 from spectra.models.trigger import FireResponseAction, SpectraTrigger
-from spectra.services import analysed_flares, transition_phases, trigger_store
+from spectra.services import (analysed_flares, phase_partner, transition_phases,
+                               trigger_store)
 
 logger = logging.getLogger(__name__)
 
@@ -419,6 +423,15 @@ def _get_generation_lock() -> asyncio.Lock:
 # next_colour_cue refuses a show clock not fed for this long (tick() runs
 # every TICK_S while a song plays).
 POSITION_STALE_S = 3.0
+
+
+def _phase_class(trig: SpectraTrigger) -> Optional[str]:
+    """A stored trigger's phase class ("charge"/"lull"/"drop") for the
+    phase-partner rule, or None for anything that writes no phase."""
+    a = trig.action
+    if a.kind == "fire_response" and a.event_class in phase_partner.PHASE_ORDER:
+        return a.event_class
+    return None
 
 
 @dataclass(frozen=True)
@@ -1217,9 +1230,9 @@ class TriggerEngine:
                 # OVERRIDE BLEND's dynamic half (2026-08-20, "fix the lull
                 # ramp"): only charge/lull stretch a ramp to the real gap
                 # — drop is always the fixed snap, so no gap is worth
-                # computing for it (see _next_trigger_gap_ms/_phase_ramp_ms
+                # computing for it (see _phase_partner_gap_ms/_phase_ramp_ms
                 # for the full mechanism).
-                gap_ms = (self._next_trigger_gap_ms(trig)
+                gap_ms = (self._phase_partner_gap_ms(trig)
                          if a.event_class in ("charge", "lull") else None)
                 await self._fire_response(a.event_class,
                                           self._render_intensity(a.intensity),
@@ -1278,38 +1291,43 @@ class TriggerEngine:
         except Exception:
             logger.exception("trigger %s: analysed colour jump failed", trig.id)
 
-    def _next_trigger_gap_ms(self, trig: SpectraTrigger) -> Optional[int]:
+    def _phase_partner_gap_ms(self, trig: SpectraTrigger) -> Optional[int]:
         """OVERRIDE BLEND's dynamic half (ported from legacy trigger_engine.
         _phase_blend_ramp_ms/_blend_factor_for, missing from the SPECTRA
         port until 2026-08-20 — see scene_response.py's own OVERRIDE BLEND
-        note for the full incident writeup): milliseconds from this trigger
-        to the next trigger THIS SONG WILL ACTUALLY FIRE, honoring the same
-        settings-model gate tick() itself applies. Resolves the PER-SONG
-        EFFECTIVE mode exactly as tick() does (_effective_mode_for_song
-        against this song's own trigger list, not the raw stored setting)
-        before calling _trigger_allowed — load-bearing since "triggers_only"
-        (#148): a trigger the effective mode won't actually fire is not a
-        real "next moment" to stretch a ramp toward, and under
-        "triggers_only" that set differs from the raw mode's own on a song
-        with no authored trigger of its own (falls back to "analysed").
-        None means there's nothing to stretch to: no next trigger is
-        enabled/allowed for this song (this is the last one), or no song is
-        loaded at all — the caller (scene_response._phase_ramp_ms) falls
-        back to a documented flat default in that case, never a guess."""
+        note for the full incident writeup): milliseconds from this charge
+        or lull to the end of its build.
+
+        THE PHASE PARTNER RULE (2026-10-06, drop-detection plan phase 1 —
+        spectra/services/phase_partner.py is the binding statement): a
+        charge builds to its own next lull or drop and a lull to its own
+        next drop, whatever flare, scene change, colour change or update
+        sits between, provided the partner is within the effects' own 60 s
+        cap. A charge or lull with no partner ahead keeps the pre-rule
+        answer: the next trigger of any kind. Before this rule every build
+        ran to the next trigger of any kind, so a flare inside a charge
+        made the build peak at the flare.
+
+        "Will actually fire" is unchanged: only ENABLED triggers count, and
+        the PER-SONG EFFECTIVE mode is resolved exactly as tick() does
+        (_effective_mode_for_song against this song's own trigger list,
+        not the raw stored setting) before _trigger_allowed — load-bearing
+        since "triggers_only" (#148): a trigger the effective mode won't
+        fire is neither a partner nor a next moment. None means there's
+        nothing to stretch to: nothing ahead fires (this is the last one),
+        or no song is loaded at all — the caller (scene_response.
+        _phase_ramp_ms) falls back to a documented flat default in that
+        case, never a guess."""
         if self._uri is None:
             return None
         triggers = self._list_triggers(self._uri)
         mode = self._effective_mode_for_song(self._scene_change_mode(), triggers)
-        nxt = min(
-            (t.timestamp_ms for t in triggers
-             if t.enabled and t.id != trig.id
-             and t.timestamp_ms > trig.timestamp_ms
-             and self._trigger_allowed(t, mode)),
-            default=None)
-        if nxt is None:
-            return None
-        gap = nxt - trig.timestamp_ms
-        return gap if gap > 0 else None
+        later = [(t.timestamp_ms, _phase_class(t)) for t in triggers
+                 if t.enabled and t.id != trig.id
+                 and self._trigger_allowed(t, mode)]
+        target = phase_partner.build_target(
+            trig.action.event_class, trig.timestamp_ms, later)
+        return target.gap_ms(trig.timestamp_ms)
 
     # ── observability ─────────────────────────────────────────────────────
 
@@ -1435,7 +1453,7 @@ class TriggerEngine:
         # at "full" OR "triggers_only" — see engine.fire_response_event's
         # own docstring for the dual-path reasoning. gap_ms is the
         # SEPARATE charge/lull OVERRIDE BLEND stretch input (this
-        # engine's own _next_trigger_gap_ms) — orthogonal to via_trigger,
+        # engine's own _phase_partner_gap_ms) — orthogonal to via_trigger,
         # threaded through unconditionally (None for a flare/drop, same
         # as always).
         await engine.fire_response_event(event_class, intensity,

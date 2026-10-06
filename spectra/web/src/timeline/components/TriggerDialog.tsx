@@ -219,8 +219,9 @@ export default function TriggerDialog({ events }: { events: EventOption[] }) {
         </label>
 
         {/* CHARGE/LULL HAVE NO CHOICE HERE, so they are shown none. SPECTRA
-          * stretches a charge or lull ramp to the real gap to the next
-          * trigger unconditionally (scene_response._phase_ramp_ms) — the
+          * stretches a charge or lull ramp to the real gap to its own lull
+          * or drop unconditionally (scene_response._phase_ramp_ms, the
+          * PHASE PARTNER rule in ../phaseBlend.ts) — the
           * per-scene knob that once gated it was retired 2026-08-20. A box
           * he cannot untick still implies agency he does not have, so the
           * control is hidden and the truth is carried on the graph instead:
@@ -231,7 +232,9 @@ export default function TriggerDialog({ events }: { events: EventOption[] }) {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, fontSize: 13 }}>
             <span style={{ width: 90, color: 'var(--text-muted)' }}>Blend ⤳</span>
             <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>
-              Always ramps to the next trigger — shown on the timeline
+              {events.find((e) => e.id === eventId)?.event_type === 'lull'
+                ? 'Always ramps to its own drop (else the next trigger) — shown on the timeline'
+                : 'Always ramps to its own lull or drop (else the next trigger) — shown on the timeline'}
             </span>
             <HelpLink topic="charge-lull-blend" title="Charge / lull always blend" />
           </div>

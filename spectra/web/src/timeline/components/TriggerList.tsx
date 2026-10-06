@@ -95,7 +95,7 @@ export default function TriggerList({
                 * everything else. */}
               {(isPhaseStretchClass(ev?.event_type) || t.override_blend) && (
                 <span title={isPhaseStretchClass(ev?.event_type)
-                  ? 'Charge/lull always ramps until the next trigger — no setting to turn it off'
+                  ? 'Charge/lull always ramps, to its own lull or drop (else the next trigger) — no setting to turn it off'
                   : 'Override Blend — ramps until the next trigger'}
                   style={{ color: 'var(--accent)', flex: 'none' }}>⤳</span>
               )}
