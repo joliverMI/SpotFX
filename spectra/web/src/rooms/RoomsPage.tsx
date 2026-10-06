@@ -41,6 +41,7 @@
  * present comes back with the server's own sentence naming the one next
  * step. A disabled button explains nothing; the refusal explains everything,
  * and it is the same wording the gate itself uses. */
+import { Link } from 'react-router-dom';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import HelpLink from '../help/HelpLink';
 import { apiDel, apiGet, apiPost } from '../api/client';
@@ -658,7 +659,8 @@ export default function RoomsPage() {
               <p className="muted small">
                 Each carrier can sit out of runs and effects while staying in the room, or be
                 removed from the room entirely — two different things.{' '}
-                <HelpLink topic="room-members" />
+                <HelpLink topic="room-members" />{' '}
+                <Link to="/devices?tab=live">Watch every fixture live →</Link>
               </p>
               {/* One card per EMITTER, grouped under the carrier it belongs to.
                 * A carrier mapped whole has one; a strip mapped per segment has

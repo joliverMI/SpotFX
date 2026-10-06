@@ -6,9 +6,11 @@
 //   lat     : luminance transitions of the latency virtual
 //             [epoch_ms_arrival, epoch_ms_presented, lum]
 //   raf     : rAF frame count + long frames (main-thread jank)
+//   drawn   : rAF frames in which the page actually DREW (a WebGL draw call,
+//             or a 2D fill on the Live view's canvas) — "drawn frames a second"
 (() => {
   const LAT_ID = '__LAT_ID__';
-  const P = (window.__probe = { ws: [], paints: [], lat: [], rafCount: 0, rafLong: [], start: performance.now(), origin: performance.timeOrigin, sockets: [] });
+  const P = (window.__probe = { ws: [], paints: [], lat: [], rafCount: 0, rafLong: [], drawnFrames: 0, drawCalls: 0, start: performance.now(), origin: performance.timeOrigin, sockets: [] });
   const VIS = /"vis_id":\s*"([^"]+)"/;
   const PIX = /"pixels":\s*"([^"]{0,8})/;
   const LAYOUT = /"type":\s*"device_preview_layout"/;
@@ -77,9 +79,26 @@
     return r;
   };
 
+  let drew = false;
+  const noteDraw = () => { drew = true; P.drawCalls++; };
+  if (window.WebGL2RenderingContext) {
+    const proto = WebGL2RenderingContext.prototype;
+    for (const name of ['drawArrays', 'drawArraysInstanced', 'drawElements']) {
+      const native = proto[name];
+      proto[name] = function (...a) { noteDraw(); return native.apply(this, a); };
+    }
+  }
+  const fillRect = CanvasRenderingContext2D.prototype.fillRect;
+  CanvasRenderingContext2D.prototype.fillRect = function (...a) {
+    // the 2D fallback clears with one full-canvas fill per drawn frame
+    if (this.canvas.className === 'live-canvas' && a[2] === this.canvas.width) noteDraw();
+    return fillRect.apply(this, a);
+  };
+
   let last = performance.now();
   const tick = (now) => {
     P.rafCount++;
+    if (drew) { P.drawnFrames++; drew = false; }
     if (now - last > 34) P.rafLong.push([now, now - last]);
     last = now;
     requestAnimationFrame(tick);

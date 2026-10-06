@@ -423,6 +423,9 @@ class DevicePreviewRelay:
     ) -> None:
         self.ws_url = ws_url or config.ledfx_ws_url()
         self._favorite_ids: list[str] = list(favorite_ids or [])
+        # Virtuals read beyond the favourites, while a Live-view viewer asks
+        # for every in-use one (preview_stream.py, SCOPE).
+        self._extra_ids: list[str] = []
         self.paused = paused
         self.target_fps = target_fps
         self._min_interval = (1.0 / target_fps) if target_fps > 0 else 0.0
@@ -447,8 +450,19 @@ class DevicePreviewRelay:
         self._task: Optional[asyncio.Task] = None
         self._sync()
 
+    def _wanted(self) -> list[str]:
+        return self._favorite_ids + [v for v in self._extra_ids
+                                     if v not in self._favorite_ids]
+
+    def set_extra(self, ids: list[str]) -> None:
+        if list(ids) != self._extra_ids:
+            self._extra_ids = list(ids)
+            if self._on_source_reset is not None:
+                self._on_source_reset()
+            self._sync()
+
     def _wants_upstream(self) -> bool:
-        return (not self.paused) and bool(self._favorite_ids) and self._has_viewers()
+        return (not self.paused) and bool(self._wanted()) and self._has_viewers()
 
     def _sync(self) -> None:
         if self._wants_upstream():
@@ -562,7 +576,7 @@ class DevicePreviewRelay:
         still is."""
         while True:
             await self._active_event.wait()
-            ids = list(self._favorite_ids)
+            ids = self._wanted()
             if not ids:
                 await asyncio.sleep(POLL_INTERVAL_S)
                 continue
@@ -578,7 +592,7 @@ class DevicePreviewRelay:
     async def _consume_ledfx(self, ids: list[str]) -> None:
         import websockets
         backoff = RECONNECT_MIN_S
-        while (self._active_event.is_set() and self._favorite_ids == ids
+        while (self._active_event.is_set() and self._wanted() == ids
                and _source_mode() == "ledfx"):
             try:
                 async with websockets.connect(self.ws_url) as ws:
@@ -588,7 +602,7 @@ class DevicePreviewRelay:
                     backoff = RECONNECT_MIN_S
                     logger.info("device_preview: connected to %s (%d favourite(s))",
                                self.ws_url, len(ids))
-                    while (self._active_event.is_set() and self._favorite_ids == ids
+                    while (self._active_event.is_set() and self._wanted() == ids
                            and _source_mode() == "ledfx"):
                         try:
                             raw = await asyncio.wait_for(ws.recv(), timeout=POLL_INTERVAL_S)
@@ -631,7 +645,8 @@ class DevicePreviewRelay:
             return
 
         def on_update(event) -> None:
-            if event.virtual_id not in self._favorite_ids:
+            if (event.virtual_id not in self._favorite_ids
+                    and event.virtual_id not in self._extra_ids):
                 return
             if self._on_source_frame is not None:
                 virtual = host.virtuals.get(event.virtual_id)
@@ -652,7 +667,7 @@ class DevicePreviewRelay:
         logger.info("device_preview: subscribed in-process to the live facade "
                    "(%d favourite(s))", len(self._favorite_ids))
         try:
-            while (self._active_event.is_set() and bool(self._favorite_ids)
+            while (self._active_event.is_set() and bool(self._wanted())
                    and _source_mode() == "facade" and live.host is host):
                 await asyncio.sleep(POLL_INTERVAL_S)
         finally:
@@ -797,7 +812,9 @@ async def handle_client_message(ws, text: str) -> None:
     viewer = stream_hub.viewer(ws)
     if kind == "hello" and msg.get("protocol") == 2 and viewer is None:
         await frame_hub.disconnect(ws)
-        stream_hub.connect(ws, level=str(msg.get("level") or "summary"))
+        stream_hub.connect(ws, level=str(msg.get("level") or "summary"),
+                           scope=str(msg.get("scope") or "favorites"))
+        await refresh_scope()
     elif viewer is None:
         return
     elif kind == "ack":
@@ -807,6 +824,23 @@ async def handle_client_message(ws, text: str) -> None:
             pass
     elif kind == "subscribe":
         viewer.set_level(str(msg.get("level")))
+        if msg.get("scope") is not None:
+            viewer.set_scope(str(msg.get("scope")))
+            await refresh_scope()
+
+
+async def refresh_scope() -> None:
+    """Read every in-use virtual while a viewer asks for them, and only then
+    (preview_stream.py, SCOPE). Called when a viewer's scope may have changed
+    and when one leaves. Working out what is in use reads the stored config
+    and the scene store, so it runs off the event loop."""
+    stream_hub.favorites = set(relay._favorite_ids)
+    if stream_hub.wants_in_use():
+        from spectra.services import preview_layout
+        ids = await asyncio.to_thread(preview_layout.in_use_virtual_ids)
+        relay.set_extra(ids if stream_hub.wants_in_use() else [])
+    else:
+        relay.set_extra([])
 
 
 def init_from_storage() -> None:
@@ -815,6 +849,7 @@ def init_from_storage() -> None:
     have drifted from the relay's in-memory copy."""
     state = load_state()
     relay.set_favorites(effective_favorite_ids(state))
+    stream_hub.favorites = set(relay._favorite_ids)
     relay.paused = state.paused
     relay._sync()
 
@@ -850,6 +885,7 @@ def set_favorite_ids(ids: list[str]) -> dict:
     state.favorite_virtual_ids = list(dict.fromkeys(ids))
     save_state(state)
     relay.set_favorites(effective_favorite_ids(state))
+    stream_hub.favorites = set(relay._favorite_ids)
     return get_favorites()
 
 

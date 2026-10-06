@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect } from 'react';
 import { apiDel, apiGet, apiPost, apiPostForm, apiPut, spotfxDel, spotfxGet, spotfxPost } from './api/client';
 import { onSpectraMessage } from './api/spectraWs';
+import type { LiveLayout } from './live/positions';
 import type { CurvePoint } from './components/CurveEditor';
 import type {
   AmbientHueGroup, ColorWheelPosition, DeviceListing, DevicePreviewFavorites, DevicePreviewStatus,
@@ -666,6 +667,14 @@ export function useSaveDevicePreviewFavorites() {
     mutationFn: (favorite_virtual_ids: string[]) =>
       apiPut<DevicePreviewFavorites>('/device-preview/favorites', { favorite_virtual_ids }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['spectra-device-preview-favorites'] }),
+  });
+}
+
+/** Every in-use fixture's shape and stream cells (the Live view). */
+export function useDevicePreviewLayout() {
+  return useQuery({
+    queryKey: ['spectra-device-preview-layout'],
+    queryFn: () => apiGet<LiveLayout>('/device-preview/layout'),
   });
 }
 

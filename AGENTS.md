@@ -2379,6 +2379,46 @@ things:
   redraw), and evenly spaced flashes phase-lock to the sender's frame clock.
   Unit spec: `tests/test_preview_stream.py`.
 
+**THE LIVE VIEW (Devices → Live, pop-out `/live`; 2026-10-05, phase 2 of the
+same plan).** `spectra/web/src/live/` — each file's header is the binding
+statement. Five things:
+
+- **The stream carries VIRTUALS; a person looks at FIXTURES.**
+  `spectra/services/preview_layout.py` (`GET /api/device-preview/layout`)
+  reads the stored fx config's segments and says, per fixture, its drawing
+  kind and which stream CELL colours each pixel (`src`). A copy-mapped
+  virtual's frame is its LONGEST segment (`tv-mapper` 560, `hues` ONE pixel
+  for seventeen bulbs), and a masked device's cell index is the rank among
+  its real cells, not the pixel index. Shapes other than the crystal's
+  lattice are HINTS read off type and name — Spectra stores no positions.
+- **The position table is the seam for the room map.** `positions.ts`
+  returns a `StagePlan` (points, sizes, source cells, grouped by stream
+  device); `layoutPositions` is one `PositionSource`. Phase 3 is another
+  source for the SAME renderer — do not add a second renderer or teach
+  `stage.ts` about fixtures.
+- **Nothing per frame goes through React or allocates.** `stage.ts` copies a
+  frame out of the message's bytes through the plan's source table into
+  preallocated arrays and draws every point in ONE instanced WebGL2 call
+  (MAX blend, so overlapping strip dots do not add up); 2D canvas fallback.
+  Smoothing EASES each device from what is on screen to its newest frame
+  over its measured arrival interval PLUS twice the arrivals' spread: an
+  ease of exactly one interval ends before a late frame lands and the
+  picture stands still (58.5 drawn fps on the relay profile, 59.8 after).
+  About one frame of delay on an even link; switchable.
+- **SCOPE**: the Live view asks the stream for `in_use` (every drawable
+  virtual), the strip for `favorites`; the relay reads the extra virtuals
+  only while a viewer asks (`device_preview.refresh_scope`). Pause is the
+  preview's ONE sticky pause, shared with the strip.
+- **The gate is a `:live` system in the perf runner** (`--pass-drawn-fps 59`,
+  `:phone` = 390x844 with a 4x CPU slowdown; "drawn fps" = animation frames
+  with a real draw call). `:live` rows use the machine's GPU
+  (`--gpu auto`): headless Chromium otherwise rasterises WebGL in software
+  and measures this box's CPU, not the view — every row records its
+  `webgl_renderer`. The rig's `--room` builds his real topology on dummies
+  and tells the layout endpoint their pretend types. `chrome-devtools-axi`
+  was broken here (pageId error) — drive raw CDP as the runner does.
+  Specs: `tests/test_preview_layout.py`, `node scripts/check_live_view.mjs`.
+
 **Global Dark/Light mode** — day-one bar item, SPECTRA_SPEC.md §9 (`AGREED`,
 built, room-proof pending for the Light half — see below); NOT the same
 feature as the retired per-node Light Mode Chooser/§36, which shares only a

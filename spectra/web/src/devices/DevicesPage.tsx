@@ -4,7 +4,12 @@
  * devices. It should include all the parameters that were tunable in ledfx
  * on one tab, as well as the groupings and namings."
  *
- * ONE TAB is a hard constraint from him, so there are no sub-tabs: a
+ * TWO TABS, Edit and Live (2026-10-05). Live is the watching side — every
+ * in-use fixture drawn in its real shape (live/LiveView.tsx) — and `?tab=live`
+ * opens it directly; `?device=<id>` opens Edit on that device, which is how
+ * a click on a fixture in Live lands on its settings.
+ *
+ * EDITING STAYS ON ONE SURFACE, a hard constraint from him: a
  * selected device shows its complete parameter set on one surface,
  * GROUPED WITHIN it — Base (the keys every device type shares), Type (what
  * this one driver adds), Groupings & naming, and Timing. The field list is
@@ -30,9 +35,11 @@
  * write is never silently lost and never silently claimed live.
  */
 import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import SonicChatPopover from '../components/SonicChatPopover';
 import { useToast } from '../components/Toast';
 import HelpLink from '../help/HelpLink';
+import LiveView from '../live/LiveView';
 import {
   useCreateDevice, useDevices, useSetDeviceCategories, useSetDeviceTiming, useUpdateDevice,
 } from '../queries';
@@ -324,7 +331,17 @@ function CreateDevice({ types, fieldsByType, onCreated }: {
 
 export default function DevicesPage() {
   const { data, isLoading, error } = useDevices();
-  const [selected, setSelected] = useState<string | null>(null);
+  const [params, setParams] = useSearchParams();
+  const tab = params.get('tab') === 'live' ? 'live' : 'edit';
+  const linked = params.get('device');
+  const [selected, setSelected] = useState<string | null>(linked);
+  useEffect(() => { if (linked) setSelected(linked); }, [linked]);
+  const tabs = (
+    <div className="tab-bar" style={{ marginBottom: 12 }}>
+      <button className={tab === 'edit' ? 'active' : ''} onClick={() => setParams({})}>Edit</button>
+      <button className={tab === 'live' ? 'active' : ''} onClick={() => setParams({ tab: 'live' })}>Live</button>
+    </div>
+  );
   const [creating, setCreating] = useState(false);
   // Collapsed on every load, deliberately — not remembered. The default
   // view IS the answer to his ask; a sticky expansion would quietly undo it.
@@ -338,8 +355,20 @@ export default function DevicesPage() {
   const current = devices.find((d) => d.id === selected)
     ?? shown[0] ?? devices[0] ?? null;
 
+  if (tab === 'live') {
+    return (
+      <div>
+        {tabs}
+        <div className="card">
+          <LiveView />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div>
+      {tabs}
       <div className="card">
         <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           Devices <HelpLink topic="devices-page" />

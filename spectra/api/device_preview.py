@@ -3,6 +3,9 @@
   GET  /api/device-preview/favorites — stored + effective (default-filled)
                                        favourite virtual ids
   PUT  /api/device-preview/favorites — replace the stored list
+  GET  /api/device-preview/layout    — every in-use fixture's shape and which
+                                       stream cell lights each pixel (the
+                                       Live view; services/preview_layout.py)
   GET  /api/device-preview/status    — relay state (paused/connected/fps)
   POST /api/device-preview/pause     — genuinely drops the upstream LedFX
                                        connection (see services/
@@ -33,6 +36,8 @@
 """
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
@@ -60,6 +65,14 @@ async def put_favorites(body: FavoritesBody):
 @router.get("/device-preview/status")
 async def get_status():
     return device_preview.relay.status()
+
+
+@router.get("/device-preview/layout")
+async def get_layout():
+    """Every in-use fixture's shape and stream cells, for the Live view
+    (services/preview_layout.py)."""
+    from spectra.services import preview_layout
+    return await asyncio.to_thread(preview_layout.current_layout)
 
 
 @router.post("/device-preview/pause")
@@ -91,4 +104,5 @@ async def device_preview_ws(ws: WebSocket):
         device_preview.preview_ws_manager.disconnect(ws)
         await device_preview.frame_hub.disconnect(ws)
         await device_preview.stream_hub.disconnect(ws)
+        await device_preview.refresh_scope()
         device_preview.relay.viewers_changed()
