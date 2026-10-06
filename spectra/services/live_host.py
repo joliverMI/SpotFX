@@ -261,6 +261,16 @@ class LiveLights:
         #: Virtual ids a SCOPED activation deliberately held back — the
         #: config wanted them active and this take did not.
         self.held_back: list[str] = []
+        #: THE STACK IS STILL COMING UP — True from the moment `host` is set
+        #: (which already makes `active` read True) until activate() returns
+        #: or deactivate() tears a failed start down. A restart's resume takes
+        #: ~16 s here with the ownership record saying SPECTRA owns and NO
+        #: handover in flight, so without this the Hue Hold gate read the room
+        #: as available and landed the stored room toggle on 13 bulbs before
+        #: the house mode could say "off" (2026-10-06, every restart).
+        #: ambient.room_available() refuses while it is set, exactly as it
+        #: refuses mid-handover.
+        self.assembling: bool = False
         #: AUDIO PAUSE (house lighting phase 3, spectra/services/
         #: house_energy.py): the capture stream is closed and the pump
         #: stopped while nothing needs the room's audio. The hub, the melbank
@@ -339,6 +349,7 @@ class LiveLights:
             raise RuntimeError("live stack already active")
 
         host = FxHost(config_dir, live_grant=grant)
+        self.assembling = True    # cleared at the end, or by deactivate()
         self.host = host          # set before start() so a failed start still
         expected = scoped_expected_active(
             _restrict_to_genuinely_driven(
@@ -393,6 +404,7 @@ class LiveLights:
                        "audio=%s", len(list(host.devices.values())),
                        len(list(host.virtuals.values())),
                        "open" if open_audio else "off")
+        self.assembling = False
 
     async def deactivate(self, *, hold_last_frame: bool = False) -> None:
         """Tear the stack down in reverse — audio first (stop feeding), then
@@ -436,6 +448,7 @@ class LiveLights:
         self.expected_active_ids = set()
         self.scope = None
         self.held_back = []
+        self.assembling = False
         # Nothing is rendering any more; a stale delay map must not survive
         # into whatever comes up next (a re-activation re-pushes above).
         from fx import device_timing

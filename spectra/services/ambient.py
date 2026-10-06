@@ -451,6 +451,16 @@ def room_available() -> bool:
 
     if not (live.active and live.host is not None):
         return False
+    # NOT WHILE THE STACK IS STILL COMING UP (2026-10-06). A restart's
+    # resume brings the stack up with the record already saying SPECTRA
+    # owns and no handover in flight, so the check below passed for the ~16
+    # s the host took to start — and the first bridge broadcast landed the
+    # stored room toggle (Ambient ON, #ffe392 at 100 %) on 13 bulbs a house
+    # mode was holding off, until the mode's own look took over ~20 s later.
+    # The same rule as mid-handover: the resume's own reconcile (app.py,
+    # after the stack is up and the engine live) is where a hold applies.
+    if getattr(live, "assembling", False):
+        return False
     # NOT MID-HANDOVER. The stack is up a few seconds before a take commits,
     # and a bridge broadcast in that window (engine._on_track_uri's
     # reconcile) used to land the stored hold before the room was even ours
