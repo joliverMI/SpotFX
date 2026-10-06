@@ -212,6 +212,38 @@ def test_filling_on_a_song_that_cannot_be_read_says_so():
         ds.apply_edit(URI, "fill", key=key, handle="lull")
 
 
+def test_adding_a_drop_leaves_a_too_close_filled_lull_out_not_refused(monkeypatch):
+    # a high-tempo song's own break can legally sit closer to the drop than
+    # the engine's own RAMP_FLOOR_MS — the filled lull is left out, exactly
+    # like the charge-vs-partner guard just below it in _added_record
+    from spectra.services import drop_detector as dd
+    from spectra.services import drop_sequences as ds
+    _song()
+    drop_ms = int(drop_synth.DROP_S * 1000)
+    monkeypatch.setattr(dd, "place_lull", lambda prep, dms: dms - 150)
+    res = ds.apply_edit(URI, "add", drop_ms=drop_ms)
+    key = res.result
+    s = _by_key(key)
+    assert s["state"] == "added"
+    assert s["lull_ms"] is None
+    assert s["charge_ms"] is not None            # the charge still builds to the drop
+
+
+def test_filling_a_too_close_lull_on_a_bare_drop_is_left_out_not_refused(monkeypatch):
+    # the detail box's "+ Lull" button on a bare-drop sequence has the same
+    # guard: a computed-but-too-close lull is left out, never a 422
+    from spectra.services import drop_detector as dd
+    from spectra.services import drop_sequences as ds
+    _song()
+    drop_ms = int(drop_synth.DROP_S * 1000)
+    key = ds.add(URI, drop_ms, fill=False)
+    monkeypatch.setattr(dd, "place_lull", lambda prep, dms: dms - 150)
+    res = ds.apply_edit(URI, "fill", key=key, handle="lull")
+    assert res.before == res.after              # nothing changed — left out, not refused
+    s = _by_key(key)
+    assert s["lull_ms"] is None
+
+
 # ── "the analysis moved it": keep his, or take the new place ─────────────
 
 def test_keep_pins_his_old_place_and_stops_asking():

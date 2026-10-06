@@ -216,6 +216,25 @@ export function addPlacement(
 
 // ── undo / redo ───────────────────────────────────────────────────────────
 
+/** A single-flight guard: while `run`'s own promise from an earlier call is
+ * still settling, a second call never runs `run` again — it resolves to
+ * `fallback` right away. This is what keeps undo()/redo() from reading the
+ * SAME stale top-of-stack entry twice: a save only reaches the stack
+ * (`stacksRef.current`) once its queued POST answers, asynchronously, so a
+ * held-down Ctrl+Z firing keydown repeats faster than one round trip would
+ * otherwise read the same entry a second time and re-submit it — the
+ * duplicate restore then 409s against the first one's own already-advanced
+ * rev and wipes the whole stack. `flag` is a plain mutable box (a React ref
+ * in practice): checked and set synchronously at call time, so there is no
+ * gap for a second call to slip through before the first has claimed it. */
+export function guardInFlight<T>(
+  flag: { current: boolean }, run: () => Promise<T>, fallback: T,
+): Promise<T> {
+  if (flag.current) return Promise.resolve(fallback);
+  flag.current = true;
+  return run().finally(() => { flag.current = false; });
+}
+
 /** His edits on one song, as the server keeps them. */
 export interface DropEdits {
   overrides: Record<string, unknown>;

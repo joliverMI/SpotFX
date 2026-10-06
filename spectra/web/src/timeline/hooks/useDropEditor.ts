@@ -11,7 +11,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { apiPost } from '../../api/client';
 import type { DropSequencesResponse, Handle } from '../dropSequences';
 import {
-  EMPTY_STACKS, afterRedo, afterUndo, editErrorText, pushEdit, redoRequest, undoRequest,
+  EMPTY_STACKS, afterRedo, afterUndo, editErrorText, guardInFlight, pushEdit, redoRequest, undoRequest,
   type DropEdits, type UndoEntry, type UndoStacks,
 } from '../dropEdit';
 
@@ -60,6 +60,10 @@ export function useDropEditor(uri: string | null): DropEditor {
   const queue = useRef<Promise<unknown>>(Promise.resolve());
   const uriRef = useRef(uri);
   uriRef.current = uri;
+  // guards undo()/redo() against a second call reading the same stale
+  // top-of-stack entry while the first is still queued/in flight — e.g.
+  // holding Ctrl+Z fires keydown repeats faster than one round trip
+  const undoRedoInFlight = useRef(false);
 
   useEffect(() => {
     setStacks(EMPTY_STACKS);
@@ -176,7 +180,7 @@ export function useDropEditor(uri: string | null): DropEditor {
     }
   }, [putView]);
 
-  const undo = useCallback(async () => {
+  const undo = useCallback(() => guardInFlight(undoRedoInFlight, async () => {
     const e = stacksRef.current.undo[stacksRef.current.undo.length - 1];
     if (!e) return null;
     const ok = await run('restore', undoRequest(e) as unknown as Record<string, unknown>, () => true);
@@ -186,9 +190,9 @@ export function useDropEditor(uri: string | null): DropEditor {
       return e.key;
     }
     return null;
-  }, [run]);
+  }, null), [run]);
 
-  const redo = useCallback(async () => {
+  const redo = useCallback(() => guardInFlight(undoRedoInFlight, async () => {
     const e = stacksRef.current.redo[stacksRef.current.redo.length - 1];
     if (!e) return null;
     const ok = await run('restore', redoRequest(e) as unknown as Record<string, unknown>, () => true);
@@ -198,7 +202,7 @@ export function useDropEditor(uri: string | null): DropEditor {
       return e.key;
     }
     return null;
-  }, [run]);
+  }, null), [run]);
 
   const u = stacks.undo[stacks.undo.length - 1];
   const r = stacks.redo[stacks.redo.length - 1];

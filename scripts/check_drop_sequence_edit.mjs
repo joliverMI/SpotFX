@@ -1,10 +1,11 @@
 /** No-DOM proof for EDITING drop sequences on the Timeline (drop-detection
  * plan, phase 4): spectra/web/src/timeline/dropEdit.ts (snap, step, the
  * order clamp, the whole-sequence move, the ghost, the add placement, the
- * undo stack and the keyboard map) and what the canvas layer draws while a
- * hand is on it (spectra/web/src/timeline/canvas/dropSeqLayer.ts — the
- * ghost, the lit snap target, the add preview), all transpiled from the
- * REAL modules with esbuild. Synthetic data; never his storage.
+ * undo stack, the undo/redo single-flight guard and the keyboard map) and
+ * what the canvas layer draws while a hand is on it
+ * (spectra/web/src/timeline/canvas/dropSeqLayer.ts — the ghost, the lit
+ * snap target, the add preview), all transpiled from the REAL modules with
+ * esbuild. Synthetic data; never his storage.
  *
  * Run: node scripts/check_drop_sequence_edit.mjs
  */
@@ -222,6 +223,23 @@ ok(f.ctx.calls.some((c) => c[0] === 'fillText' && String(c[1]).startsWith('click
 ok(f.ctx.calls.some((c) => c[0] === 'fillText' && String(c[1]).startsWith('add a drop: bass spike')), 'and where the drop would go');
 ok(L.dropSeqBody.hitTest(xs(48000), 120, f) === null && L.dropSeqRail.hitTest(xs(48000), 17, f) === null,
   'while adding, a press on a sequence adds rather than grabs');
+
+console.log('§10 undo/redo single-flight: a second call while one is in flight reads nothing twice');
+{
+  const flag = { current: false };
+  let calls = 0;
+  const slow = () => { calls += 1; return new Promise((resolve) => setTimeout(() => resolve('ok'), 20)); };
+  const p1 = E.guardInFlight(flag, slow, null);
+  ok(flag.current === true, 'the flag is claimed synchronously, before the first call settles');
+  const p2 = E.guardInFlight(flag, slow, null);
+  const [r1, r2] = await Promise.all([p1, p2]);
+  ok(calls === 1, 'a repeat call fired while the first is still running never runs again — the stale-entry race this guards against');
+  ok(r1 === 'ok' && r2 === null, 'the first call resolves normally; the repeat resolves to the fallback, not a stale retry');
+  ok(flag.current === false, 'the flag clears once the in-flight call settles');
+  calls = 0;
+  const r3 = await E.guardInFlight(flag, slow, null);
+  ok(calls === 1 && r3 === 'ok', 'once clear, a later call runs again normally');
+}
 
 rmSync(tmp, { recursive: true, force: true });
 if (failures) {

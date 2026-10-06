@@ -658,6 +658,12 @@ def _op_fill(entry: dict, key: str, handle: str, placed: Optional[int]) -> str:
         raise InvalidEdit("only a lull or a charge can be added to a sequence")
     if placed is None:
         raise InvalidEdit("this song's audio shape cannot be read to place one")
+    # a placed lull too near the drop itself is left out, not refused — the
+    # same shape as _added_record's charge-vs-partner guard just below
+    if handle == "lull":
+        drop_ms = _current_times(entry, key).get("drop")
+        if drop_ms is not None and int(drop_ms) - int(placed) < drop_detector.RAMP_FLOOR_MS:
+            return key
     return _op_set_handles(entry, key, {handle: placed})
 
 
@@ -705,6 +711,12 @@ def _added_record(uri: str, drop_ms: int, lull_ms: Optional[int],
                 lull_ms = None
             if charge_ms is not None and int(charge_ms) <= prev:
                 charge_ms = None
+    # a filled lull that lands too near the drop itself is left out, not
+    # refused — a high-tempo song's own break can legally sit closer to
+    # the drop than the engine's own ramp floor
+    if lull_ms is not None and fill:
+        if drop_ms - int(lull_ms) < drop_detector.RAMP_FLOOR_MS:
+            lull_ms = None
     # a filled charge that lands too near its partner is left out, not refused
     if charge_ms is not None:
         upper = lull_ms if lull_ms is not None else drop_ms
