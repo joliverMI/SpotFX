@@ -1223,6 +1223,36 @@ def snap_rails(uri: str) -> dict:
             "spikes": spikes, "beats": beats}
 
 
+def summary() -> dict:
+    """Every song the store holds: what was detected, by tier, and how many
+    edits he has made — a store read, never a detection. Factored out of
+    spectra/api/drop_sequences.py's own `/summary` route so the route and
+    Sonic's drop_console.py share one definition."""
+    data = all_stored()
+    songs = []
+    for uri, entry in sorted(data.items()):
+        if not isinstance(entry, dict):
+            continue
+        det = entry.get("detected") or {}
+        tiers: dict[str, int] = {}
+        for s in det.get("sequences") or []:
+            tiers[s.get("tier")] = tiers.get(s.get("tier"), 0) + 1
+        overrides = entry.get("overrides") or {}
+        songs.append({
+            "uri": uri,
+            "detected": bool(det),
+            "detected_at": det.get("detected_at"),
+            "stamp": det.get("stamp"),
+            "tiers": tiers,
+            "excluded": len(det.get("excluded") or []),
+            "overrides": len(overrides),
+            "dismissed": sum(1 for o in overrides.values()
+                             if isinstance(o, dict) and o.get("state") == STATE_DISMISSED),
+            "added": len(entry.get("added") or []),
+        })
+    return {"songs": songs}
+
+
 def view_with_detection(uri: str) -> dict:
     """Read-through: detect when missing or stale, then the merged view.
     Synchronous — call it off the event loop."""

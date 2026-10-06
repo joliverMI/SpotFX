@@ -151,3 +151,123 @@ def test_dispatch_reaches_a_house_operation():
     from spectra.services import settings_agent as sa
     res = _run(sa._dispatch("house_status", {}))
     assert res["phase"] == "inactive"
+
+
+# ═══ house-wide settings (Sonic coverage audit build item C, 2026-10-06):
+# read all of HouseSettings; change the cutover switch, the energy knobs,
+# and Serenity's voice colours — never the seam-wiring/safety-fence fields
+# (hue_excluded_lights/tv_strips/voice_fixtures/own_brightness/
+# owned_brightness stay read-only). ═══════════════════════════════════
+
+def test_get_house_settings_reads_everything(lib):
+    # tests/conftest.py's autouse _isolated_house fixture writes enabled=True
+    # for every house test (the suites prove a mode acting); this reads it
+    # back, it doesn't assume a particular default.
+    res = lib.OPERATIONS["get_house_settings"].handler()
+    settings = res["settings"]
+    assert settings["enabled"] is True
+    assert "hue_excluded_lights" in settings
+    assert "tv_strips" in settings
+    assert "voice_fixtures" in settings
+    assert "own_brightness" in settings
+    assert "owned_brightness" in settings
+    assert "energy" in settings and "voice_looks" in settings
+
+
+def test_set_house_lighting_enabled_both_directions(lib):
+    from spectra.services import house_store
+    res = _run(lib.OPERATIONS["set_house_lighting_enabled"].handler(on=True))
+    assert res["status"] == "applied" and "now on" in res["summary"]
+    assert house_store.load_library().settings.enabled is True
+
+    res = _run(lib.OPERATIONS["set_house_lighting_enabled"].handler(on=False))
+    assert res["status"] == "applied" and "now off" in res["summary"]
+    assert house_store.load_library().settings.enabled is False
+
+
+def test_set_house_energy_resting_fps_set_and_remove(lib):
+    from spectra.services import house_store
+    res = _run(lib.OPERATIONS["set_house_energy"].handler(
+        key="resting_fps", target="Matrix", value=15))
+    assert res["status"] == "applied"
+    assert house_store.load_library().settings.energy.resting_fps["Matrix"] == 15
+
+    res = _run(lib.OPERATIONS["set_house_energy"].handler(
+        key="resting_fps", target="Matrix", value=None))
+    assert res["status"] == "applied"
+    assert "Matrix" not in house_store.load_library().settings.energy.resting_fps
+
+
+def test_set_house_energy_resting_fps_needs_a_target(lib):
+    res = _run(lib.OPERATIONS["set_house_energy"].handler(key="resting_fps", value=15))
+    assert res["status"] == "rejected" and "target" in res["reason"]
+
+
+def test_set_house_energy_scalar_fields(lib):
+    from spectra.services import house_store
+    res = _run(lib.OPERATIONS["set_house_energy"].handler(key="keepalive_s", value=0.5))
+    assert res["status"] == "applied"
+    assert house_store.load_library().settings.energy.keepalive_s == 0.5
+
+    res = _run(lib.OPERATIONS["set_house_energy"].handler(key="audio_pause_after_s", value=60))
+    assert res["status"] == "applied"
+    assert house_store.load_library().settings.energy.audio_pause_after_s == 60
+
+    res = _run(lib.OPERATIONS["set_house_energy"].handler(key="park_idle", value=False))
+    assert res["status"] == "applied"
+    assert house_store.load_library().settings.energy.park_idle is False
+
+
+def test_set_house_energy_rejects_unknown_key_and_out_of_range(lib):
+    res = _run(lib.OPERATIONS["set_house_energy"].handler(key="not_a_real_key", value=1))
+    assert res["status"] == "rejected"
+    res = _run(lib.OPERATIONS["set_house_energy"].handler(key="keepalive_s", value=99))
+    assert res["status"] == "rejected"
+
+
+def test_set_house_voice_look_color_and_level(lib):
+    from spectra.services import house_store
+    res = _run(lib.OPERATIONS["set_house_voice_look"].handler(
+        state="listening", color="#00ff00", level=50.0))
+    assert res["status"] == "applied"
+    look = house_store.load_library().settings.voice_looks["listening"]
+    assert look.color == "#00ff00" and look.level == 50.0
+    # another voice state is untouched
+    assert house_store.load_library().settings.voice_looks["processing"].color == "#26a269"
+
+
+def test_set_house_voice_look_rejects_unknown_state_and_requires_a_value(lib):
+    res = _run(lib.OPERATIONS["set_house_voice_look"].handler(state="not-a-state", color="#fff"))
+    assert res["status"] == "rejected"
+    res = _run(lib.OPERATIONS["set_house_voice_look"].handler(state="listening"))
+    assert res["status"] == "rejected"
+
+
+def test_house_wide_settings_ops_are_declared_and_discoverable():
+    from spectra.services import settings_agent as sa
+
+    for name in ("get_house_settings", "set_house_lighting_enabled",
+                "set_house_energy", "set_house_voice_look"):
+        assert name in sa.ALL_OPERATIONS
+        assert sa.ALL_OPERATIONS[name].domain == "house"
+    idx = _run(sa._dispatch("list_operations", {"domain": "house"}))
+    names = {o["name"] for o in idx["operations"]}
+    assert {"get_house_settings", "set_house_lighting_enabled",
+            "set_house_energy", "set_house_voice_look"} <= names
+
+
+def test_every_house_settings_field_is_settable_or_read_only():
+    """Build item C13: every HouseSettings field is either reachable
+    through a write op here, or on this test's own named read-only list —
+    never silently missing from both."""
+    from spectra.models.house_mode import HouseSettings
+
+    WRITABLE_TOP_LEVEL = {"enabled"}            # set_house_lighting_enabled
+    WRITABLE_NESTED = {"energy", "voice_looks"}  # set_house_energy / set_house_voice_look
+    READ_ONLY_SEAM_WIRING = {
+        "hue_excluded_lights",  # a safety fence around bulbs outside the room
+        "tv_strips", "voice_fixtures",          # set once at cutover with River
+        "own_brightness", "owned_brightness",   # seam wiring
+    }
+    accounted = WRITABLE_TOP_LEVEL | WRITABLE_NESTED | READ_ONLY_SEAM_WIRING
+    assert set(HouseSettings.model_fields) == accounted

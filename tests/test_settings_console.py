@@ -67,6 +67,9 @@ def test_registry_is_an_explicit_allowlist_matching_room_control_bounds():
         "scene_change_mode", "transition_window_beats",
         "transition_edge_sensitivity", "transitions_per_minute",
         "scene_changes_per_minute",
+        # 2026-10-06 Sonic coverage audit build (build item D15):
+        "midsong_snap_to_beat", "display_mode", "rainbow_select_limit",
+        "drop_confident_score", "drop_suggested_score",
     }
     # force_scene_* deliberately excluded — see settings_console.py docstring
     assert "force_scene_enabled" not in sc.SETTINGS_REGISTRY
@@ -192,12 +195,18 @@ def test_dispatch_recognizes_exactly_the_declared_settings_tools():
     """Sonic's tool set is now wider than settings alone (see
     tests/test_scene_console.py for the full merged-boundary proof, which
     is where the exhaustive full-set assertion now lives) — this file only
-    proves the settings HALF is still exactly get_settings/set_setting."""
+    proves the settings domain is exactly these five ops: the original
+    get_settings/set_setting, plus the 2026-10-06 Force Scene/Force
+    Colour trio (set_force_scene/set_force_color/get_force_pins — by
+    NAME, not registry keys; see the module docstring)."""
     from spectra.services import settings_agent as sa
     from spectra.services import settings_console as sc
 
-    assert set(sc.OPERATIONS) == {"get_settings", "set_setting"}
-    assert {"get_settings", "set_setting"} <= {t["name"] for t in sa.TOOLS}
+    assert set(sc.OPERATIONS) == {
+        "get_settings", "set_setting",
+        "get_force_pins", "set_force_scene", "set_force_color",
+    }
+    assert set(sc.OPERATIONS) <= {t["name"] for t in sa.TOOLS}
 
 
 def test_dispatch_get_settings_is_read_only():
@@ -466,6 +475,219 @@ def test_transcribe_connection_refused_is_the_honest_unavailable_state(monkeypat
 
     with pytest.raises(transcription.TranscriptionUnavailable, match="unreachable"):
         _run(transcription.transcribe(b"abc", "audio/webm"))
+
+
+# ═══ 5b. the three new room-control registry keys (build item D15) ═════
+
+def test_new_registry_keys_are_readable_and_writable():
+    from spectra.services import settings_console as sc
+
+    for key, value in (("midsong_snap_to_beat", False),
+                       ("display_mode", "dark"),
+                       ("rainbow_select_limit", 0.5),
+                       ("drop_confident_score", 1.2),
+                       ("drop_suggested_score", 0.6)):
+        result = _run(sc.apply_change(key, value))
+        assert result["status"] == "applied"
+        assert sc.current_values()[key] == value
+
+
+def test_display_mode_is_an_enum_with_its_real_choices():
+    from spectra.services import settings_console as sc
+
+    spec = sc.SETTINGS_REGISTRY["display_mode"]
+    assert spec.kind == "enum"
+    assert set(spec.choices) == {"default", "dark", "light"}
+    with pytest.raises(sc.SettingChangeError):
+        _run(sc.apply_change("display_mode", "not-a-real-mode"))
+
+
+# ═══ 5c. Force Scene / Force Colour by NAME (his ruling, 2026-10-06:
+# "allow some flexibility in phrasing ... it should be a close match") ═══
+
+def test_set_force_scene_by_exact_name(monkeypatch):
+    from spectra.models.scene import SceneV2
+    from spectra.services import room_controls as rc
+    from spectra.services import scene_compiler, scene_store
+    from spectra.services import settings_console as sc
+
+    scene = SceneV2(name="Orbits V2")
+    scene_store.save(scene)
+
+    fired = []
+
+    async def fake_fire_scene(s, *, intensity=0.5, color_set=None, dry_run=True, rng=None):
+        fired.append(s.id)
+        return {"dry_run": dry_run, "intensity": intensity, "writes": [],
+               "resolved_bindings": {}, "dice_rolls": {}}
+    monkeypatch.setattr(scene_compiler, "fire_scene", fake_fire_scene)
+
+    result = _run(sc.apply_force_scene(True, "Orbits V2"))
+    assert result["status"] == "applied"
+    assert result["scene_id"] == scene.id
+    assert fired == [scene.id]
+    assert rc.load_room_controls().force_scene_enabled is True
+    assert rc.load_room_controls().force_scene_scene_id == scene.id
+
+
+def test_set_force_scene_tolerates_a_dropped_v2_suffix(monkeypatch):
+    """His own example, verbatim: 'I know we have scenes named with "V2"
+    at the end, and I don't want to have to say that.'"""
+    from spectra.models.scene import SceneV2
+    from spectra.services import scene_compiler, scene_store
+    from spectra.services import settings_console as sc
+
+    scene = SceneV2(name="Orbits V2")
+    scene_store.save(scene)
+
+    async def fake_fire_scene(s, *, intensity=0.5, color_set=None, dry_run=True, rng=None):
+        return {"dry_run": dry_run, "intensity": intensity, "writes": [],
+               "resolved_bindings": {}, "dice_rolls": {}}
+    monkeypatch.setattr(scene_compiler, "fire_scene", fake_fire_scene)
+
+    result = _run(sc.apply_force_scene(True, "Orbits"))
+    assert result["status"] == "applied"
+    assert result["scene_name"] == "Orbits V2"
+
+
+def test_set_force_scene_refuses_a_near_tie_between_two_scenes():
+    from spectra.models.scene import SceneV2
+    from spectra.services import scene_store
+    from spectra.services import settings_console as sc
+
+    scene_store.save(SceneV2(name="Black Hole V2"))
+    scene_store.save(SceneV2(name="Black Hole V2 UI"))
+
+    with pytest.raises(sc.SettingChangeError) as exc:
+        _run(sc.apply_force_scene(True, "Black Hole"))
+    assert "candidates" in exc.value.detail or "close_matches" in exc.value.detail
+
+
+def test_set_force_scene_refuses_with_no_close_match():
+    from spectra.models.scene import SceneV2
+    from spectra.services import scene_store
+    from spectra.services import settings_console as sc
+
+    scene_store.save(SceneV2(name="Orbits V2"))
+    with pytest.raises(sc.SettingChangeError) as exc:
+        _run(sc.apply_force_scene(True, "a completely unrelated name"))
+    assert "known_names" in exc.value.detail
+
+
+def test_set_force_scene_turning_off_needs_no_name():
+    from spectra.services import room_controls as rc
+    from spectra.services import settings_console as sc
+
+    rc.save_room_controls(rc.RoomControlState(force_scene_enabled=True,
+                                              force_scene_scene_id="whatever"))
+    result = _run(sc.apply_force_scene(False))
+    assert result["status"] == "applied"
+    assert rc.load_room_controls().force_scene_enabled is False
+
+
+def test_set_force_scene_turning_on_with_no_name_and_none_pinned_is_refused():
+    from spectra.services import settings_console as sc
+
+    with pytest.raises(sc.SettingChangeError, match="name a scene"):
+        _run(sc.apply_force_scene(True))
+
+
+def test_set_force_color_by_exact_and_fuzzy_name(monkeypatch):
+    import json
+    from spectra import config as scfg
+    from spectra.services import engine
+    from spectra.services import room_controls as rc
+    from spectra.services import settings_console as sc
+    from spectra.services.color_sets import ColorSetCard
+
+    card = ColorSetCard(id="warm-set", name="Warm Hype V2")
+    scfg.COLOR_SETS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    scfg.COLOR_SETS_FILE.write_text(json.dumps({card.id: json.loads(card.model_dump_json())}))
+
+    applied = []
+
+    class _FakeConductor:
+        async def apply_set_directly(self, c, *, forced_from=None):
+            applied.append(c.id)
+            return {"applied": c.id, "set_name": c.name, "virtuals": []}
+    monkeypatch.setattr(engine, "conductor", _FakeConductor())
+
+    result = _run(sc.apply_force_color(True, "Warm Hype"))
+    assert result["status"] == "applied"
+    assert result["target_id"] == "warm-set"
+    assert applied == ["warm-set"]
+    assert rc.load_room_controls().force_color_enabled is True
+
+
+def test_set_force_color_refuses_turning_on_with_nothing_pinned_and_no_target():
+    from spectra.services import settings_console as sc
+
+    with pytest.raises(sc.SettingChangeError, match="name a colour set"):
+        _run(sc.apply_force_color(True))
+
+
+def test_get_force_pins_reads_both_pins_by_name():
+    from spectra.models.scene import SceneV2
+    from spectra.services import room_controls as rc
+    from spectra.services import scene_store
+    from spectra.services import settings_console as sc
+
+    scene = SceneV2(name="Fireworks V2")
+    scene_store.save(scene)
+    rc.save_room_controls(rc.RoomControlState(force_scene_enabled=True,
+                                              force_scene_scene_id=scene.id))
+    result = sc.get_force_pins()
+    assert result["force_scene"]["enabled"] is True
+    assert result["force_scene"]["scene_name"] == "Fireworks V2"
+    assert result["force_color"]["enabled"] is False
+
+
+def test_force_scene_and_color_ops_wrap_errors_as_rejected_not_raise():
+    from spectra.services import settings_console as sc
+
+    assert _run(sc._op_set_force_scene(True))["status"] == "rejected"
+    assert _run(sc._op_set_force_color(True))["status"] == "rejected"
+
+
+def test_force_scene_and_color_are_declared_and_discoverable():
+    from spectra.services import settings_agent as sa
+
+    for name in ("get_force_pins", "set_force_scene", "set_force_color"):
+        assert name in sa.ALL_OPERATIONS
+        assert sa.ALL_OPERATIONS[name].domain == "settings"
+    idx = _run(sa._dispatch("list_operations", {"domain": "settings"}))
+    names = {o["name"] for o in idx["operations"]}
+    assert {"get_force_pins", "set_force_scene", "set_force_color"} <= names
+
+
+def test_name_resolve_tiers_directly():
+    """The resolver itself, independent of any one domain's wiring —
+    exact, dropped-suffix, near-tie, no-match."""
+    from spectra.services import name_resolve as nr
+
+    candidates = [("1", "Orbits V2"), ("2", "Fish")]
+    match, rej = nr.resolve_name("Orbits V2", candidates, noun="scene")
+    assert rej is None and match.id == "1"
+
+    match, rej = nr.resolve_name("orbits", candidates, noun="scene")
+    assert rej is None and match.id == "1"
+
+    match, rej = nr.resolve_name("fish", candidates, noun="scene")
+    assert rej is None and match.id == "2"
+
+    tie_candidates = [("1", "Black Hole V2"), ("2", "Black Hole V2 UI")]
+    match, rej = nr.resolve_name("Black Hole", tie_candidates, noun="scene")
+    assert match is None and rej is not None
+
+    match, rej = nr.resolve_name("nothing like this at all", candidates, noun="scene")
+    assert match is None and rej is not None
+    assert rej["known_names"] == ["Fish", "Orbits V2"]
+
+    match, rej = nr.resolve_name("", candidates, noun="scene")
+    assert match is None and rej is not None
+
+    match, rej = nr.resolve_name("x", [], noun="scene")
+    assert match is None and "no scenes exist" in rej["reason"]
 
 
 # ═══ 6. live-model smoke test (skipped: no ANTHROPIC_API_KEY here) ═══════

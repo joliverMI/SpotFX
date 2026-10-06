@@ -162,6 +162,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Optional
 
+from pydantic import ValidationError
+
 from spectra.models.house_mode import (EVERY_AREA, MEDIA_ACTIVE_STATES, MEDIA_STATES,
                                        SKIP_LOOK, HouseMode, now_ms)
 from spectra.services import house_store
@@ -920,6 +922,66 @@ async def reapply() -> None:
         except Exception:                                # noqa: BLE001
             logger.exception("house: re-applying the energy settings failed")
     await tick()
+
+
+async def apply_settings_patch(body: dict) -> dict:
+    """THE ONE HOUSE-SETTINGS WRITER — the exact merge PUT /api/house/
+    settings has always done (spectra/api/house.py's own put_settings),
+    factored out here (Sonic coverage audit build item 10) so the HTTP
+    route and Sonic's house_console.py share one definition and can never
+    diverge on what a settings save does: a partial `voice_looks` edit
+    keeps every OTHER voice state as he set it; a partial `energy` edit
+    (one keep-alive, one resting-fps entry) keeps everything else in that
+    block as he set it, with a `None` resting_fps value REMOVING that
+    key rather than storing a null; `enabled`/`hue_excluded_lights`
+    moving re-applies immediately rather than waiting for the next
+    supervisor tick; any OTHER `energy` edit re-enters the current mode
+    so a changed default lands now.
+
+    Raises ValueError (the pydantic errors, pre-joined into one message)
+    on a body HouseSettings would reject — never persists a partial
+    write. Returns the route's own response shape:
+    {"settings": {...}, "lighting": {...}?} — `lighting` present only
+    when enabled/hue_excluded_lights actually moved."""
+    from spectra.models.house_mode import HouseSettings
+    current = house_store.load_library().settings.model_dump()
+    body = dict(body or {})
+    if isinstance(body.get("voice_looks"), dict):
+        looks = {k: dict(v) for k, v in current["voice_looks"].items()}
+        for state, look in body["voice_looks"].items():
+            looks[state] = {**looks.get(state, {}),
+                            **(look if isinstance(look, dict) else {})}
+        body["voice_looks"] = looks
+    if isinstance(body.get("energy"), dict):
+        energy = dict(current.get("energy") or {})
+        patch = dict(body["energy"])
+        if isinstance(patch.get("resting_fps"), dict):
+            fps = dict(energy.get("resting_fps") or {})
+            for k, v in patch["resting_fps"].items():
+                if v is None:
+                    fps.pop(k, None)
+                else:
+                    fps[k] = v
+            patch["resting_fps"] = fps
+        body["energy"] = {**energy, **patch}
+    try:
+        merged = HouseSettings(**{**current, **body})
+    except ValidationError as exc:
+        raise ValueError("; ".join(f"{'.'.join(str(x) for x in e['loc'])}: {e['msg']}"
+                                   for e in exc.errors())) from exc
+    saved = house_store.put_settings(merged)
+    from spectra.services import house_fixtures
+    house_fixtures.kick()
+    if "energy" in body:
+        await reapply()
+    out: dict = {"settings": saved.model_dump()}
+    if (current.get("enabled") != saved.enabled
+            or current.get("hue_excluded_lights") != saved.hue_excluded_lights):
+        _record("switched", {"enabled": saved.enabled,
+                             "hue_excluded_lights": saved.hue_excluded_lights})
+        await tick()
+        out["lighting"] = status_dict()
+    return out
 
 
 # ── phases ─────────────────────────────────────────────────────────────────

@@ -32,8 +32,8 @@ from typing import Any, Optional
 
 from pydantic import ValidationError
 
-from spectra.models.house_mode import (ColorPick, FixtureHook, HouseMode, HouseTarget,
-                                       HueLook, ScenePick)
+from spectra.models.house_mode import (VOICE_STATES, ColorPick, FixtureHook, HouseMode,
+                                       HouseTarget, HueLook, ScenePick)
 from spectra.services import house, house_store
 from spectra.services.sonic_ops import SonicOperation
 
@@ -42,6 +42,11 @@ MUSIC_HUE_CHOICES = ("hold", "join", "room")
 TARGET_KIND_CHOICES = ("everything", "category", "fixture")
 HUE_LOOK_CHOICES = ("hold", "off", "show", "remove")
 POOL_CHOICES = ("scenes", "color_sets")
+#: set_house_energy's own keys — resting_fps is keyed further by a
+#: category/fixture `target` (see that op's own docstring); the other four
+#: are plain HouseEnergy scalars.
+ENERGY_KEYS = ("resting_fps", "park_idle", "send_on_change", "keepalive_s",
+              "audio_pause_after_s")
 
 #: key -> (dotted path in HouseMode, kind). Bounds come from the model.
 MODE_SETTINGS: dict[str, tuple[str, str]] = {
@@ -334,6 +339,92 @@ async def _op_set_house_mode_pool(mode: str, pool: str, names: list[str],
             "summary": f"{m.name}: {label} — " + (", ".join(names) or "none")}
 
 
+# ═══ HOUSE-WIDE SETTINGS (Sonic coverage audit build, 2026-10-06) — read
+# all of HouseSettings, and change the cutover switch, the energy knobs,
+# and Serenity's voice-state colours. Deliberately NOT here, by name,
+# same reasoning as force_scene_*/force_color_* staying out of the room
+# settings registry plus its own safety note (AGENTS.md's "What should
+# stay off-limits to Sonic" table): hue_excluded_lights — the Hue bulbs a
+# mode never touches, outside the room (Loft Ceiling Uplight, the Ledge
+# lights) — a dropped name here could light or switch off a bulb nobody
+# meant to touch; tv_strips/voice_fixtures/own_brightness/owned_
+# brightness — seam wiring set once at cutover with River, not a
+# standing setting. All four stay READABLE via get_house_settings; none
+# is writable from here. enabled is BOTH directions (his ruling,
+# 2026-10-06: "both on and off") — unlike the audit's own cautious
+# default, which only proposed "off". ═══════════════════════════════════
+
+def _op_get_house_settings() -> dict:
+    return {"settings": house_store.load_library().settings.model_dump()}
+
+
+async def _op_set_house_lighting_enabled(on: bool) -> dict:
+    try:
+        result = await house.apply_settings_patch({"enabled": on})
+    except ValueError as exc:
+        return _reject(str(exc))
+    out = {"status": "applied", "settings": result["settings"],
+          "summary": f"house lighting is now {'on' if on else 'off'}"}
+    if "lighting" in result:
+        out["lighting"] = result["lighting"]
+    return out
+
+
+async def _op_set_house_energy(key: str, value: Any = None,
+                               target: Optional[str] = None) -> dict:
+    if key not in ENERGY_KEYS:
+        return _reject(f"{key!r} is not a house energy setting", known_settings=list(ENERGY_KEYS))
+    if key == "resting_fps":
+        if not target:
+            return _reject("resting_fps needs a target — a category or fixture name, "
+                           "or null value to remove one")
+        patch = {"resting_fps": {target: value}}
+    else:
+        patch = {key: value}
+    try:
+        result = await house.apply_settings_patch({"energy": patch})
+    except ValueError as exc:
+        return _reject(str(exc))
+    saved_energy = result["settings"]["energy"]
+    if key == "resting_fps":
+        summary = (f"removed the resting frame-rate cap for {target}" if value is None
+                  else f"set the resting frame-rate cap for {target} to {value} fps")
+    else:
+        summary = f"house energy: {key} = {value!r}"
+    out = {"status": "applied", "energy": saved_energy, "summary": summary}
+    if "lighting" in result:
+        out["lighting"] = result["lighting"]
+    return out
+
+
+async def _op_set_house_voice_look(state: str, color: Optional[str] = None,
+                                   level: Optional[float] = None) -> dict:
+    if state not in VOICE_STATES:
+        return _reject(f"{state!r} is not a voice state", known_states=list(VOICE_STATES))
+    if color is None and level is None:
+        return _reject("give a colour, a level, or both")
+    patch: dict[str, Any] = {}
+    if color is not None:
+        patch["color"] = color
+    if level is not None:
+        patch["level"] = level
+    try:
+        result = await house.apply_settings_patch({"voice_looks": {state: patch}})
+    except ValueError as exc:
+        return _reject(str(exc))
+    saved_look = result["settings"]["voice_looks"][state]
+    bits = []
+    if color is not None:
+        bits.append(f"colour {color}")
+    if level is not None:
+        bits.append(f"level {level:g}%")
+    out = {"status": "applied", "voice_look": saved_look,
+          "summary": f"Serenity's {state} look — " + ", ".join(bits)}
+    if "lighting" in result:
+        out["lighting"] = result["lighting"]
+    return out
+
+
 _EMPTY = {"type": "object", "properties": {}, "additionalProperties": False}
 
 OPERATIONS: dict[str, SonicOperation] = {
@@ -445,4 +536,60 @@ OPERATIONS: dict[str, SonicOperation] = {
                                      "weights": {"type": "array", "items": {"type": "number"}}},
                       "required": ["mode", "pool", "names"], "additionalProperties": False},
         handler=_op_set_house_mode_pool),
+    "get_house_settings": SonicOperation(
+        name="get_house_settings", domain="house", kind="read",
+        summary="Read the house-wide seam settings: the cutover switch, "
+                "Hue bulbs a mode leaves alone, the TV strip/voice "
+                "fixtures, owned brightness, and the energy block.",
+        instructions="hue_excluded_lights/tv_strips/voice_fixtures/"
+                    "own_brightness/owned_brightness are READ ONLY here "
+                    "(seam wiring, or a safety fence around bulbs outside "
+                    "the room) — use set_house_lighting_enabled/"
+                    "set_house_energy/set_house_voice_look for what can change.",
+        input_schema=_EMPTY, handler=_op_get_house_settings),
+    "set_house_lighting_enabled": SonicOperation(
+        name="set_house_lighting_enabled", domain="house", kind="write",
+        summary="Turn house lighting on or off — THE cutover switch.",
+        instructions=(
+            "Off: house lighting applies nothing (a music take runs "
+            "exactly as it did before house lighting existed); Home "
+            "Assistant's lighting_mode is still recorded and mapped. On: "
+            "a set mode drives the room whenever SPECTRA holds it. "
+            "Applies immediately rather than waiting for the next tick."),
+        input_schema={"type": "object", "properties": {"on": {"type": "boolean"}},
+                      "required": ["on"], "additionalProperties": False},
+        handler=_op_set_house_lighting_enabled),
+    "set_house_energy": SonicOperation(
+        name="set_house_energy", domain="house", kind="write",
+        summary="Change one house energy/network setting: resting_fps "
+                "(per category or fixture, or null to remove), "
+                "park_idle, send_on_change, keepalive_s, "
+                "audio_pause_after_s.",
+        instructions=(
+            "For key='resting_fps', target names a category or fixture "
+            "and value is the fps cap (1-60) or null/omitted to remove "
+            "that cap. For the other four keys, target is unused and "
+            "value is the plain setting (park_idle/send_on_change are "
+            "booleans; keepalive_s is 0.2-2.0 seconds; "
+            "audio_pause_after_s is 0-3600 seconds, 0 = never pause). "
+            "An energy change re-enters the current mode so a changed "
+            "default lands now, not at the next mode switch."),
+        input_schema={"type": "object",
+                      "properties": {"key": {"type": "string", "enum": list(ENERGY_KEYS)},
+                                     "value": {},
+                                     "target": {"type": "string"}},
+                      "required": ["key"], "additionalProperties": False},
+        handler=_op_set_house_energy),
+    "set_house_voice_look": SonicOperation(
+        name="set_house_voice_look", domain="house", kind="write",
+        summary="Change Serenity's colour and/or level for one voice "
+                "state (listening, processing, responding).",
+        instructions="level is a percent of full, over Spectra's owned "
+                    "master brightness (1-200). Give colour, level, or both.",
+        input_schema={"type": "object",
+                      "properties": {"state": {"type": "string", "enum": list(VOICE_STATES)},
+                                     "color": {"type": "string"},
+                                     "level": {"type": "number", "minimum": 1, "maximum": 200}},
+                      "required": ["state"], "additionalProperties": False},
+        handler=_op_set_house_voice_look),
 }

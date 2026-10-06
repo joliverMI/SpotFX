@@ -494,6 +494,20 @@ def test_a_device_domain_write_parses_from_its_structured_tool_result():
     assert "earlier" in result["changes"][0]["summary"]
 
 
+def test_the_scene_entry_param_widening_parses_from_its_structured_tool_result():
+    """The 2026-10-06 Sonic coverage audit build's own widening (Pulse and
+    every other effect's per-entry params) gets its own synthetic fixture
+    on the CURRENT manifest, same precedent as the device domain above."""
+    from spectra.services import settings_agent_cli as sac
+
+    result = sac._parse_transcript(
+        _load("cli_transcript_synthetic_scene_entry_param_applied.json"))
+    assert [c["param"] for c in result["changes"]] == ["rest_calm"]
+    assert result["changes"][0]["effect_type"] == "pulse"
+    assert result["changes"][0]["was_bound"] is False
+    assert "Singles" in result["changes"][0]["summary"]
+
+
 def test_every_declared_operation_including_the_device_domain_is_in_the_manifest():
     """--allowedTools and the live manifest check are both derived from
     ALL_OPERATIONS, so a new domain cannot be added without its tools

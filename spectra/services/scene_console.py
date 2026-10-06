@@ -130,6 +130,7 @@ from pydantic import BaseModel, ValidationError
 
 from fx import device_model
 from spectra import config
+from spectra.models.binding import is_binding
 from spectra.models.scene import (DEFAULT_MIN_INTENSITY, FlareKind, PhaseChoreography,
                                   SceneColorJourney, SceneDeviceConfig, SceneV2)
 from spectra.services import scene_store
@@ -538,6 +539,165 @@ def get_param_info(effect_type: str, name: str) -> dict:
             f"effect {effect_type!r} has no parameter named {name!r}",
             known_params=sorted(catalogue))
     return {"effect_type": effect_type, "name": name, **info}
+
+
+# ═══ scene ENTRY PARAMETERS — his 2026-10-06 ask, "does Sonic have access
+# to all the settings for Pulse": list_scene_params/get_param_info above
+# only ever read the registry's NAMES/ranges, never a scene's own stored
+# VALUE, and nothing could WRITE one — so Pulse's 26 settings (and every
+# other effect's own params) were read-only here even though flares,
+# scene-level settings and whole scenes were already Sonic's to edit.
+# PURELY ADDITIVE: nothing above is narrowed by this — a scalar effect
+# param on ONE device entry is now also settable, the same two-step
+# validate-then-write shape every other write in this module already
+# uses. Device/effect SELECTION (which effect an entry runs, its drift,
+# its colour mode) is still the Initial Set tab's job, unchanged: this
+# only ever edits a value INSIDE the entry's already-chosen effect's
+# `params` dict. A value authored as a ⚡ binding (dice/intensity/random)
+# is REPLACED, not refused — his own request "a value bound to dice or
+# intensity may be replaced when asked" — but the write result says so
+# plainly (`was_bound`) rather than silently discarding the binding he
+# might not have meant to remove. ═══════════════════════════════════════
+
+#: Simple scalar param TYPES this can validate and write. A composite type
+#: (move_polar/move_xy/polar) has no single legal value shape to check
+#: here — refused by name rather than guessed at.
+_SIMPLE_PARAM_TYPES = {"numeric", "integer", "toggle", "enum", "string", "color", "gradient"}
+
+
+def _validate_param_value(name: str, meta: dict, value: Any) -> Any:
+    ptype = meta.get("type")
+    if ptype not in _SIMPLE_PARAM_TYPES:
+        raise SceneOpError(
+            f"{name!r} is a {ptype!r} parameter — Sonic cannot set this type of "
+            f"value yet; use the Scenes page's Initial Set tab",
+            param_type=ptype)
+    if ptype == "toggle":
+        if not isinstance(value, bool):
+            raise SceneOpError(f"{name!r} is a toggle — send true or false, not {value!r}")
+        return value
+    if ptype in ("numeric", "integer"):
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise SceneOpError(f"{name!r} is a number — got {value!r}")
+        lo, hi = meta.get("min"), meta.get("max")
+        if lo is not None and value < lo:
+            raise SceneOpError(f"{value!r} is below {name!r}'s minimum ({lo})", min=lo, max=hi)
+        if hi is not None and value > hi:
+            raise SceneOpError(f"{value!r} is above {name!r}'s maximum ({hi})", min=lo, max=hi)
+        return int(round(value)) if ptype == "integer" else float(value)
+    if ptype == "enum":
+        options = meta.get("options") or []
+        if value not in options:
+            raise SceneOpError(f"{value!r} is not a legal option for {name!r}", options=options)
+        return value
+    # string / color / gradient — any text value; the vendored effect's own
+    # schema is the final word, same as every other value this module writes.
+    if not isinstance(value, str):
+        raise SceneOpError(f"{name!r} expects a text value, got {value!r}")
+    return value
+
+
+def get_scene_entry_params(scene: str, target: str) -> dict:
+    """One entry's effect params, with their CURRENT stored value (or the
+    registry default when nothing is authored), label, type, and legal
+    range/options — never the whole entry's devices/drift/colour. `scene`
+    is an id or name (case-insensitive), like copy_scene_device_entry's."""
+    sc = _resolve_scene_ref(scene)
+    matches = _find_target_entries(sc, target)
+    if not matches:
+        raise SceneOpError(
+            f"scene {sc.name!r} has no device entry for {target!r}",
+            known_targets=sorted({d.target for d in sc.devices if d.target}))
+    if len(matches) > 1:
+        raise SceneOpError(
+            f"{target!r} matches more than one device entry on {sc.name!r}",
+            matches=[{"target_kind": d.target_kind, "target": d.target} for d in matches])
+    entry = matches[0]
+    if not entry.effect_type:
+        raise SceneOpError(
+            f"the {target!r} entry on {sc.name!r} has no effect chosen yet — "
+            f"set one on the Scenes page's Initial Set tab first")
+    catalogue = device_model.param_catalogue(entry.effect_type)
+    params: dict[str, Any] = {}
+    for name, info in catalogue.items():
+        raw = entry.params.get(name)
+        bound = is_binding(raw)
+        params[name] = {
+            **info,
+            "value": None if bound else (raw if raw is not None else info.get("default")),
+            "is_bound": bound,
+            "binding": (raw.model_dump() if bound and hasattr(raw, "model_dump")
+                       else (raw if bound else None)),
+        }
+    return {"scene_id": sc.id, "scene_name": sc.name, "target": entry.target,
+            "target_kind": entry.target_kind, "effect_type": entry.effect_type,
+            "params": params}
+
+
+def _validate_set_scene_entry_param(scene: str, target: str, name: str, value: Any
+                                    ) -> tuple[SceneV2, SceneV2, SceneDeviceConfig, bool]:
+    sc = _resolve_scene_ref(scene)
+    matches = _find_target_entries(sc, target)
+    if not matches:
+        raise SceneOpError(
+            f"scene {sc.name!r} has no device entry for {target!r}",
+            known_targets=sorted({d.target for d in sc.devices if d.target}))
+    if len(matches) > 1:
+        raise SceneOpError(
+            f"{target!r} matches more than one device entry on {sc.name!r}",
+            matches=[{"target_kind": d.target_kind, "target": d.target} for d in matches])
+    entry = matches[0]
+    if not entry.effect_type:
+        raise SceneOpError(
+            f"the {target!r} entry on {sc.name!r} has no effect chosen yet — "
+            f"set one on the Scenes page's Initial Set tab first")
+    meta = device_model.get_param_meta(entry.effect_type, name)
+    if meta is None:
+        raise SceneOpError(
+            f"{entry.effect_type!r} has no parameter named {name!r}",
+            known_params=sorted(device_model.effect_params(entry.effect_type)))
+    checked = _validate_param_value(name, meta, value)
+    was_bound = is_binding(entry.params.get(name))
+
+    candidate = sc.model_copy(deep=True)
+    idx = next(i for i, d in enumerate(candidate.devices) if d.id == entry.id)
+    new_params = dict(candidate.devices[idx].params)
+    new_params[name] = checked
+    candidate.devices[idx] = candidate.devices[idx].model_copy(update={"params": new_params})
+    try:
+        candidate = SceneV2.model_validate(candidate.model_dump(mode="json"))
+    except ValidationError as exc:
+        raise SceneOpError(
+            f"setting {name!r} to {checked!r} would make scene {sc.name!r} invalid: "
+            f"{_errs(exc)}", pydantic_errors=_errs(exc)) from exc
+    try:
+        scene_store.validate_for_save(candidate)
+    except ValueError as exc:
+        raise SceneOpError(str(exc)) from exc
+    return sc, candidate, entry, was_bound
+
+
+async def apply_scene_entry_param(scene: str, target: str, name: str, value: Any,
+                                  source: str = "agent") -> dict:
+    sc, candidate, entry, was_bound = _validate_set_scene_entry_param(scene, target, name, value)
+    backup = _write_and_verify_backup(sc.id, sc, op="set_scene_entry_param")
+    scene_store.save(candidate)
+    new_params = next(d for d in candidate.devices if d.id == entry.id).params
+    new_value = new_params[name]
+    label = device_model.param_catalogue(entry.effect_type).get(name, {}).get("label", name)
+    target_label = entry.target or "All Devices"
+    bound_note = " — replacing its ⚡ binding" if was_bound else ""
+    entry_log = {
+        "id": str(uuid.uuid4()), "ts_ms": int(time.time() * 1000),
+        "op": "set_scene_entry_param", "scene_id": sc.id, "scene_name": candidate.name,
+        "target": entry.target, "target_kind": entry.target_kind,
+        "effect_type": entry.effect_type, "param": name, "was_bound": was_bound,
+        "summary": f'Set {label} to {_fmt_value(new_value)} on "{candidate.name}"\'s '
+                   f'{target_label} entry{bound_note}.',
+        "backup_id": backup["id"], "preview": _diff_scenes(sc, candidate), "source": source,
+    }
+    _append_log(entry_log)
+    return {"status": "applied", **entry_log}
 
 
 # ═══ create_scene — always a fresh id, can never overwrite ═════════════
@@ -1114,6 +1274,20 @@ def _op_get_param_info(effect_type: str, name: str) -> dict:
         return exc.payload()
 
 
+def _op_get_scene_entry_params(scene: str, target: str) -> dict:
+    try:
+        return get_scene_entry_params(scene, target)
+    except SceneOpError as exc:
+        return exc.payload()
+
+
+async def _op_set_scene_entry_param(scene: str, target: str, name: str, value: Any) -> dict:
+    try:
+        return await apply_scene_entry_param(scene, target, name, value)
+    except SceneOpError as exc:
+        return exc.payload()
+
+
 async def _op_create_scene(name: str, labels: Optional[list[str]] = None) -> dict:
     try:
         return await apply_create_scene(name, labels)
@@ -1284,6 +1458,58 @@ OPERATIONS: dict[str, SonicOperation] = {
             },
             "required": ["effect_type", "name"], "additionalProperties": False},
         handler=_op_get_param_info),
+    "get_scene_entry_params": SonicOperation(
+        name="get_scene_entry_params", domain="scene", kind="read",
+        summary="Read one scene device entry's effect parameters — label, "
+                "type, legal range/options, AND the CURRENT stored value "
+                "(or the registry default when nothing is authored).",
+        instructions=(
+            "scene from list_scenes (id or name — case-insensitive; a name "
+            "matching more than one scene is refused and lists every "
+            "match). target is the category (Strips/Matrix/Singles/...) or "
+            "virtual name shown on that entry in the Scenes page's Initial "
+            "Set tab. Call this before set_scene_entry_param so you know "
+            "the real current value and range rather than guessing. A "
+            "param whose value is a ⚡ binding (dice/intensity/random) "
+            "shows value=null and is_bound=true with the binding's own "
+            "shape under `binding` — tell him it's bound before replacing it."),
+        input_schema={
+            "type": "object",
+            "properties": {"scene": {"type": "string"}, "target": {"type": "string"}},
+            "required": ["scene", "target"], "additionalProperties": False},
+        handler=_op_get_scene_entry_params),
+    "set_scene_entry_param": SonicOperation(
+        name="set_scene_entry_param", domain="scene", kind="write",
+        summary="Change ONE effect parameter's value on ONE device entry of "
+                "ONE scene — e.g. any of Pulse's settings on a scene's "
+                "Singles entry.",
+        instructions=(
+            "scene/target as in get_scene_entry_params — call that first "
+            "for the param's real name, type and range. name must be a "
+            "parameter the entry's own effect actually declares (the "
+            "server re-validates against the real effect registry and "
+            "refuses anything out of range, the wrong type, or unknown). "
+            "A toggle needs true/false; a numeric/integer needs a plain "
+            "number; an enum needs one of its listed options. This NEVER "
+            "changes which effect an entry runs, its drift, or its colour "
+            "mode — those stay the Scenes page's job. If the param "
+            "currently holds a ⚡ binding (dice/intensity/random — "
+            "get_scene_entry_params shows is_bound=true), this REPLACES "
+            "the binding with the plain value you give — say so plainly "
+            "('that was bound to dice; it's now a fixed value') rather "
+            "than letting him assume the binding is still there; the "
+            "result's `was_bound` field confirms it happened."),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "scene": {"type": "string"},
+                "target": {"type": "string"},
+                "name": {"type": "string"},
+                "value": {"description": "New value — type depends on the "
+                                         "parameter (see get_scene_entry_params)."},
+            },
+            "required": ["scene", "target", "name", "value"], "additionalProperties": False},
+        handler=_op_set_scene_entry_param),
     "create_scene": SonicOperation(
         name="create_scene", domain="scene", kind="write",
         summary="Create a new, empty scene shell with a name.",

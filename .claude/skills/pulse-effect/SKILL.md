@@ -69,10 +69,18 @@ Plan: `/home/javi/fleet-spotfx/data/single-led-power-plan/report.md`.
 
 ## Sonic reach
 
-Effect params: none directly. Flares: `set_flare_kind` creates/updates
+Effect params: YES, as of the 2026-10-06 Sonic coverage audit build —
+`get_scene_entry_params`/`set_scene_entry_param` (spectra/services/
+scene_console.py) read and write any of the 26 Pulse settings' current
+value on one scene's one device entry (e.g. "set Resting Level (calm) to
+0.3 on Pulse Test's Singles entry"). A value held by a ⚡ binding is
+replaced, named as such. Flares: `set_flare_kind` creates/updates
 `pulse_flash` / `pulse_flip` and `min_intensity` (omit-means-keep).
 Declaring both on the test scene: `scripts/add_pulse_flares.py` (dry run
-default; refuses any scene with no Pulse entry).
+default; refuses any scene with no Pulse entry). Putting Pulse on a
+scene's Singles entry, or choosing its colour mode, is still NOT Sonic's
+(the Initial Set tab's job) — only copy_scene_device_entry reaches that,
+and only by copying a whole entry from another scene.
 
 ## Proofs
 

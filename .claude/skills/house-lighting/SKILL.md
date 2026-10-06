@@ -1,0 +1,78 @@
+---
+name: house-lighting
+description: >
+  The house lighting ENGINE — spectra/services/house.py (modes, the gate,
+  tick/reapply, the settings writer), house_fixtures.py (per-fixture
+  power/brightness), house_energy.py (frame-rate caps, parking,
+  send-on-change, audio pause), house_voice.py (Serenity's colours), and
+  the Home Assistant seam (spectra/api/house.py). Load before touching
+  any of these modules, the House page's settings panel, or Sonic's
+  house_console.py. For the SEEDED CONTENT (the modes/scenes/colour sets
+  scripts/seed_house_lighting.py writes), load house-scenes instead —
+  that skill covers the data, this one covers the engine that runs it.
+---
+
+# House lighting engine
+
+`spectra/services/house.py`'s module docstring (and AGENTS.md's "HOUSE
+LIGHTING" sections, phases 1-4) are the binding statements. Five things
+worth knowing cold:
+
+1. **INERT UNLESS THREE THINGS ARE ALL TRUE**: a mode is set, SPECTRA
+   holds the room, and `HouseSettings.enabled` is True (the CUTOVER
+   SWITCH, phase 4 — ships OFF, so adding house lighting never silently
+   changed a music take before someone turned it on). `house.gate()`
+   answers this in one call; check it before assuming anything here
+   acts.
+2. **ONE SETTINGS WRITER**: `house.apply_settings_patch(body)` is the
+   exact merge `PUT /api/house/settings` has always done (voice_looks and
+   energy sub-merges keep every OTHER field as he set it;
+   `enabled`/`hue_excluded_lights` moving re-applies immediately). The
+   HTTP route and Sonic's `house_console.py` (`set_house_lighting_
+   enabled`/`set_house_energy`/`set_house_voice_look`) BOTH call this one
+   function — never build a second merge beside it.
+3. **TWO THINGS NEVER MOVE BY VOICE**: `hue_excluded_lights` (a safety
+   fence around bulbs OUTSIDE the room — the loft uplight, the ledge
+   lights) and the seam-wiring fields (`tv_strips`, `voice_fixtures`,
+   `own_brightness`, `owned_brightness`, set once at cutover with River).
+   All five stay readable through `get_house_settings`; none is in
+   `house_console.ENERGY_KEYS` or any other write op. Don't add a write
+   path for them without going back to the Admiral.
+4. **A MODE IS A PERSON'S PICK; HOME ASSISTANT'S WORD IS A CLOCK.**
+   `house.set_mode(mode=..., source="sonic")` behaves exactly like a
+   House page press — it holds until HA's own `lighting_mode` next
+   changes, not until the next tick. `house_console.set_house_mode`
+   already resolves a mode by name (exact, then close match) — reuse that
+   pattern, don't add id-based lookup.
+5. **THE ENERGY BLOCK ACTS ONLY WHILE THE LAYER IS ACTIVE** (same gate as
+   #1) — `resting_fps`/`park_idle`/`send_on_change`/`keepalive_s`/
+   `audio_pause_after_s` are real-time knobs over `fx/device_rate.py` and
+   `fx/device_output.py`; an energy edit re-enters the current mode
+   (`house.reapply()`) so a changed default lands now, not at the next
+   mode switch.
+
+## Sonic reach
+
+`spectra/services/house_console.py`, domain `"house"`. Inside a mode:
+`house_status`, `list_house_modes`, `set_house_mode`, `create_house_mode`,
+`set_house_mode_setting`, `set_house_fixture`, `set_house_hue`,
+`set_house_mode_pool` (all pre-existing). House-wide, added 2026-10-06:
+`get_house_settings` (reads everything, including the read-only fields),
+`set_house_lighting_enabled` (his ruling: BOTH directions by voice),
+`set_house_energy`, `set_house_voice_look`. Deleting a mode, and anything
+that writes Home Assistant's own facts (mains, TV Music, media, voice
+state) stay out — River's side of the seam, or an irreversible act on his
+authored library.
+
+Build item C13's own discipline: every `HouseSettings` field must be
+either reachable through a write op or on a named read-only list —
+`tests/test_house_console.py::
+test_every_house_settings_field_is_settable_or_read_only` holds that by
+walking the real model.
+
+## Proofs
+
+`tests/test_house_engine_hooks.py`, `tests/test_house_fixtures.py`,
+`tests/test_house_energy.py`, `tests/test_house_voice.py`,
+`tests/test_house_console.py`, `tests/test_house_seam_api.py`,
+`scripts/check_house_summary.mjs`.

@@ -119,6 +119,10 @@ _HouseKeyEnum = Literal[tuple(sorted(house_console.MODE_SETTINGS))]
 _HouseTargetEnum = Literal[tuple(house_console.TARGET_KIND_CHOICES)]
 _HueLookEnum = Literal[tuple(house_console.HUE_LOOK_CHOICES)]
 _PoolEnum = Literal[tuple(house_console.POOL_CHOICES)]
+_HouseEnergyKeyEnum = Literal[tuple(house_console.ENERGY_KEYS)]
+_VoiceStateEnum = Literal[tuple(house_console.VOICE_STATES)]
+_DropHandleEnum = Literal["lull", "charge"]
+_DropReviewChoiceEnum = Literal["keep", "take"]
 
 mcp = MCPServer("settings-console")
 
@@ -205,6 +209,26 @@ async def set_setting(key: _KeyEnum, value: Any) -> dict:
 
 
 @mcp.tool()
+async def get_force_pins() -> dict:
+    """Read whether Force Scene and Force Colour are pinned right now,
+    and to what."""
+    return await _call("get_force_pins")
+
+
+@mcp.tool()
+async def set_force_scene(enabled: bool, scene: Optional[str] = None) -> dict:
+    """Turn Force Scene on (pinned to a named scene, tolerating a dropped
+    qualifier like 'V2') or off."""
+    return await _call("set_force_scene", enabled=enabled, scene=scene)
+
+
+@mcp.tool()
+async def set_force_color(enabled: bool, target: Optional[str] = None) -> dict:
+    """Turn Force Colour on (pinned to a named colour set or group) or off."""
+    return await _call("set_force_color", enabled=enabled, target=target)
+
+
+@mcp.tool()
 async def list_scenes() -> dict:
     """List every scene's id, name, and labels -- never the full scene."""
     return await _call("list_scenes")
@@ -256,6 +280,23 @@ async def set_scene_setting(scene_id: str, key: _SceneKeyEnum, value: Any) -> di
     re-validates the key and value against that scene's own declared
     range and rejects anything outside them."""
     return await _call("set_scene_setting", scene_id=scene_id, key=key, value=value)
+
+
+@mcp.tool()
+async def get_scene_entry_params(scene: str, target: str) -> dict:
+    """Read one scene device entry's effect parameters, with their current
+    stored value (or default) and legal range — e.g. Pulse's settings on a
+    scene's Singles entry."""
+    return await _call("get_scene_entry_params", scene=scene, target=target)
+
+
+@mcp.tool()
+async def set_scene_entry_param(scene: str, target: str, name: str, value: Any) -> dict:
+    """Change ONE effect parameter's value on ONE device entry of ONE
+    scene. Replaces a ⚡ binding (dice/intensity/random) with the plain
+    value given, rather than refusing."""
+    return await _call("set_scene_entry_param", scene=scene, target=target,
+                       name=name, value=value)
 
 
 @mcp.tool()
@@ -584,6 +625,60 @@ async def move_drop_handle(sequence: int, handle: Literal["charge", "lull", "dro
                        by_beats=by_beats, to_seconds=to_seconds, uri=uri)
 
 
+@mcp.tool()
+async def add_drop_sequence(drop_seconds: float, lull_seconds: Optional[float] = None,
+                            charge_seconds: Optional[float] = None,
+                            uri: Optional[str] = None) -> dict:
+    """Add a drop sequence of his own at a time in seconds -- a missing
+    lull/charge is placed by the detector's own rules."""
+    return await _call("add_drop_sequence", drop_seconds=drop_seconds,
+                       lull_seconds=lull_seconds, charge_seconds=charge_seconds, uri=uri)
+
+
+@mcp.tool()
+async def set_drop_member(sequence: int, handle: _DropHandleEnum, on: bool,
+                          uri: Optional[str] = None) -> dict:
+    """Switch a drop sequence's lull or charge off, back on, or add one
+    that was never there."""
+    return await _call("set_drop_member", sequence=sequence, handle=handle, on=on, uri=uri)
+
+
+@mcp.tool()
+async def revert_drop_sequence(sequence: int, uri: Optional[str] = None) -> dict:
+    """'Back to detected' -- forget every edit made to one detected drop
+    sequence."""
+    return await _call("revert_drop_sequence", sequence=sequence, uri=uri)
+
+
+@mcp.tool()
+async def resolve_drop_review(sequence: int, choice: _DropReviewChoiceEnum,
+                              uri: Optional[str] = None) -> dict:
+    """Answer a sequence's 'needs review' flag after a re-detection moved
+    it: keep his place, or take the analysis's new one."""
+    return await _call("resolve_drop_review", sequence=sequence, choice=choice, uri=uri)
+
+
+@mcp.tool()
+async def undo_drop_edit(uri: Optional[str] = None) -> dict:
+    """Undo the single most recent drop-sequence edit Sonic itself made on
+    this song."""
+    return await _call("undo_drop_edit", uri=uri)
+
+
+@mcp.tool()
+async def redetect_drop_sequences(uri: Optional[str] = None) -> dict:
+    """Re-run drop detection on this song right now; his edits are never
+    touched."""
+    return await _call("redetect_drop_sequences", uri=uri)
+
+
+@mcp.tool()
+async def drop_detection_summary() -> dict:
+    """How many songs have drop detection, and how many edits each one
+    carries -- library-wide, not one song."""
+    return await _call("drop_detection_summary")
+
+
 # House lighting (spectra/services/house_console.py): the modes.
 
 
@@ -652,6 +747,42 @@ async def set_house_mode_pool(mode: str, pool: _PoolEnum, names: list[str],
     sets (optionally weighted)."""
     return await _call("set_house_mode_pool", mode=mode, pool=pool, names=names,
                        weights=weights)
+
+
+@mcp.tool()
+async def get_house_settings() -> dict:
+    """Read the house-wide seam settings (the cutover switch, excluded Hue
+    bulbs, TV/voice fixtures, owned brightness, energy block)."""
+    return await _call("get_house_settings")
+
+
+@mcp.tool()
+async def set_house_lighting_enabled(on: bool) -> dict:
+    """Turn house lighting on or off -- THE cutover switch."""
+    return await _call("set_house_lighting_enabled", on=on)
+
+
+@mcp.tool()
+async def set_house_energy(key: _HouseEnergyKeyEnum, value: Any = None,
+                           target: Optional[str] = None) -> dict:
+    """Change one house energy/network setting. For key='resting_fps',
+    target names a category/fixture and value is its fps cap (null removes
+    it); the other four keys ignore target."""
+    return await _call("set_house_energy", key=key, value=value, target=target)
+
+
+@mcp.tool()
+async def set_house_voice_look(state: _VoiceStateEnum, color: Optional[str] = None,
+                               level: Optional[float] = None) -> dict:
+    """Change Serenity's colour and/or level for one voice state."""
+    return await _call("set_house_voice_look", state=state, color=color, level=level)
+
+
+@mcp.tool()
+async def list_room_map(pose: Optional[str] = None) -> dict:
+    """The Live view's room map: camera poses with anything drawn, or (with
+    one pose_id) which pieces are placed and which are still in the tray."""
+    return await _call("list_room_map", pose=pose)
 
 
 if __name__ == "__main__":
