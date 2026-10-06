@@ -32,10 +32,10 @@ THE RULE, in plain words (report section 5, method B):
   the strongest, then each moves to the FIRST strong spike of its hit
   (his rule: "the drop should be on the first bass/beat spike").
 
-  Two tiers (decision 2): CONFIDENT at score >= 1.0 (may fire on its own,
-  in phase 5), SUGGESTED at >= 0.7 (shown, waits for his confirm). Both
-  thresholds are room settings (drop_confident_score / drop_suggested_
-  score) so the test bed's Drops lane can tune them by eye.
+  Two tiers (decision 2): CONFIDENT at score >= 1.0 (fires on its own —
+  spectra/services/drop_firing.py), SUGGESTED at >= 0.7 (shown, waits for
+  his confirm). Both thresholds are room settings (drop_confident_score /
+  drop_suggested_score) so the test bed's Drops lane can tune them by eye.
 
   THE LULL ("right after the last beat spike leading into the drop") —
   rule `tail`: find where the bass goes quiet before the drop; if the last

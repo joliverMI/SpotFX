@@ -78,7 +78,6 @@ def _view_with_detection(uri: str) -> dict:
     return drop_firing.annotated_view(uri, drop_sequences.view_with_detection(uri))
 
 
-
 def _summary() -> dict:
     data = drop_sequences.all_stored()
     songs = []
