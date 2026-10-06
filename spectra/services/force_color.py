@@ -64,16 +64,20 @@ had to be fixed on their own; "the family is covered" is not evidence):
                                         immediate apply on enable/repin
 
 HOUSE LIGHTING IS THE ONE EXCEPTION (2026-10-05, the Admiral's ruling:
-"house modes must ignore Force Colour and use their own colour sets") — a
-resting house mode's own `house.journey_override()` outranks the pin at
-TWO of the gates above: `drift_conductor._colour_leg` checks it BEFORE
+"house modes must ignore Force Colour and use their own colour sets") —
+THREE of the gates above defer to a resting house mode instead of the pin,
+closed in two passes (the first at scene-fire time, the other two found
+the same day by asking whether the ask held OUTSIDE scene-fire time too):
+`scene_sequencer.fire_scene_by_id` skips `pinned_card()` outright for an
+`origin="house"` fire (house.py already resolved its own card ignoring
+the pin — see `_apply_scene_and_colour`'s own docstring);
+`drift_conductor._colour_leg` checks `house.journey_override()` BEFORE
 `active(controls)` and falls through to the journey (which narrows to the
-mode's own sets) instead of holding for the pin, and
-`reconcile_force_color_if_changed` skips the apply entirely (named, never
-silent) rather than repainting a room a resting mode governs. Every OTHER
-gate above, plus music/trigger-driven selection and his own explicit
-presses, are unaffected — see house.py's own `_apply_scene_and_colour`
-docstring for the scene-fire-time half of this exception.
+mode's own sets) instead of holding for the pin; and
+`reconcile_force_color_if_changed` checks the same override and skips the
+apply entirely (named, never silent) rather than repainting a room a
+resting mode governs. Every OTHER gate above, plus music/trigger-driven
+selection and his own explicit presses, is unaffected.
 
 NOT gated, deliberately: his own EXPLICIT actions. POST /api/room-color/
 apply and the Colour Sets editor's Preview still do exactly what he asked

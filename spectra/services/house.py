@@ -34,11 +34,19 @@ is still showing).
   Light Show holds/levels/flashes   show_output's own holds sit ABOVE the
                                     base layer this module pushes (base ×
                                     show Level; a show hold wins the state)
-  Force Scene / Force Colour        his pins: the mode does not fire a
-                                    scene while a scene is pinned, nor
-                                    apply colours while colours are pinned
+  Force Scene                       his pin: the mode does not fire a
+                                    scene while a scene is pinned
   the music show                    see MUSIC below
   the mode                          this module
+
+FORCE COLOUR IS THE ONE EXCEPTION (2026-10-05, the Admiral's ruling: "house
+modes must ignore Force Colour and use their own colour sets") — it no
+longer sits in this table at all. A resting mode picks its own colours
+exactly as if nothing were pinned; see `_apply_scene_and_colour`'s own
+docstring and `force_color.py`'s "HOUSE LIGHTING IS THE ONE EXCEPTION"
+section for the mechanism. The pin keeps governing everything else
+(music/trigger-driven colour selection, an explicit human press) — only a
+resting house mode's own colours are unaffected by it.
 
 The base layer is pushed into show_output (not fx/device_output directly):
 the output layer keeps ONE target per device, so two writers would clobber
