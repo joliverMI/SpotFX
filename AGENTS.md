@@ -4003,9 +4003,11 @@ split). Six things:
   `house.response_deferral()` in `engine._response_gate`/`_update_gate`
   ("ignore" only); `house.journey_override()` read by the conductor's
   `_destination_pool`/`_journey_leg` (wired in `engine.py`);
-  `house.hue_directive()` read by `ambient_music_gate.reconcile`/`status`.
-  A new music-driven write path needs the same check or a calm/ignore mode
-  will leak through it.
+  `house.hue_directive()` read by `ambient_music_gate.reconcile`/`status`
+  (plus `house.pending_hue_directive()` at the same two choke points — a
+  mode that WILL hold Hue once the layer may act, see the restart-flash fix
+  below). A new music-driven write path needs the same check or a calm/
+  ignore mode will leak through it.
 - **HUE: per-area looks over the bridge** — `ambient.reconcile_looks`/
   `verify_looks` (colour temperature as CLIP v2 `color_temperature.mirek`,
   colour, off), routed by the gate when a directive exists (target tuple
@@ -4146,6 +4148,19 @@ release fade dims only bulbs that READ ON (its dim write carries on:true) and
 sends an unreadable bulb the off write only. The DTLS entertainment stream
 (`fx/devices/hue.py`) still drives every bulb in its area during a music
 show — by the Admiral's design; it is not a REST write.
+
+**A RESTART MUST NOT LAND THE ROOM TOGGLE BEFORE THE MODE (2026-10-06).**
+Every restart under Away lit his 13 allow-listed Hue bulbs for ~20 s: the
+resume sets `live.host` (so `live.active` reads True) ~16 s before the
+engine goes live, the house gate refuses while the engine is on paper, so
+`house.hue_directive()` was None and the first bridge broadcast landed the
+STORED Hue Hold toggle (#ffe392, 100 %) until the mode's "off" took over.
+Two guards: `ambient.room_available()` refuses while `live.assembling`, and
+the Hue Hold gate holds the toggle back (no write, status
+`house-pending`) while `house.pending_hue_directive()` names a set mode that
+will hold Hue once the layer may act (also a quiet take). A new path that
+reaches Hue while the house layer is refused must ask the same question.
+Spec: `tests/test_restart_hue_flash.py`.
 
 **PHASE 4 — his starting content, and the CUTOVER SWITCH (2026-10-05).**
 `scripts/seed_house_lighting.py`'s docstring and `.claude/skills/

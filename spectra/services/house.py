@@ -572,6 +572,41 @@ def hue_directive() -> Optional[HueDirective]:
     mode = _live_mode()
     if mode is None or not mode.hue:
         return None
+    return _directive_for(mode)
+
+
+def pending_hue_directive() -> Optional[HueDirective]:
+    """The directive a set mode WILL hold Hue with, while SPECTRA owns the
+    room but the layer may not act YET — the stack is still coming up (a
+    restart's resume, a take before its commit) or the engine is on paper
+    (a quiet take). None whenever hue_directive() already answers, house
+    lighting is off, no mode is set, the mode holds no Hue, or the room is
+    not SPECTRA's.
+
+    The Hue Hold gate (ambient_music_gate.reconcile) reads this to HOLD
+    BACK the room toggle instead of landing it: before it existed, a
+    restart under Away landed the stored Hue Hold (#ffe392 at 100 %) on 13
+    bulbs the mode holds off, for the ~20 s until the mode's own look took
+    over (2026-10-06, every restart). Never raises."""
+    try:
+        if not house_enabled():
+            return None
+        mode = current_mode()
+        if mode is None or not mode.hue:
+            return None
+        kind, _reason = gate()
+        if kind != "refused":
+            return None
+        from fx import light_ownership
+        if light_ownership.load().owner != light_ownership.SPECTRA:
+            return None
+        return _directive_for(mode)
+    except Exception:                                    # noqa: BLE001
+        logger.exception("house: pending Hue directive unreadable")
+        return None
+
+
+def _directive_for(mode: HouseMode) -> Optional[HueDirective]:
     ramp = _rt.hue_ramp_ms or int(mode.transitions.clock_glide_s * 1000)
     if not _resting_now(mode, deps.playing()):
         if mode.music_hue == "room":

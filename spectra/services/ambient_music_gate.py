@@ -310,6 +310,26 @@ def _house_directive():
         return None
 
 
+def _house_pending():
+    """house.pending_hue_directive(): a set mode that WILL hold Hue the
+    moment the house layer may act, while SPECTRA owns the room but the
+    stack/engine is not live yet. Lazy and never allowed to break a
+    reconcile — an unreadable answer is None (the toggle applies, as before
+    this existed)."""
+    try:
+        from spectra.services import house
+        return house.pending_hue_directive()
+    except Exception:
+        logger.exception("Hue Hold: pending house directive failed — using the room toggle")
+        return None
+
+
+# The mode name the gate is currently holding the room toggle back for
+# (reconcile's HOUSE PENDING branch) — logs the deferral once, not on every
+# bridge broadcast.
+_deferred_for: Optional[str] = None
+
+
 def _target_landed(target: tuple) -> bool:
     """Is the room ALREADY in this exact state, as most recently confirmed
     by a real write. The pre-rework short-circuit, unchanged in meaning:
@@ -494,8 +514,9 @@ def reset_state() -> None:
     tests — tests/conftest.py's autouse fixture calls this."""
     global _held, _held_color, _held_group_ids, _held_resolved_groups
     global _last_result, _apply_lock, _last_is_playing, _transition, _generation
-    global _held_looks
+    global _held_looks, _deferred_for
     _held_looks = None
+    _deferred_for = None
     if _transition is not None and _transition.in_flight:
         _transition.token.cancel()
         assert _transition.task is not None
@@ -535,14 +556,45 @@ async def reconcile(is_playing: Optional[bool], *, wait: bool = True,
         # HOUSE LIGHTING drives Hue: the mode's per-area looks, held over
         # the bridge (spectra/services/house.py). The toggle's own stored
         # value is untouched and applies again the moment no mode drives Hue.
+        _note_deferral(None)
         return await _apply(controls, directive.holds_any, None, frozenset(),
                             wait=wait, snap=snap, looks=directive.looks,
                             ramp_ms=directive.ramp_ms)
+    pending = _house_pending()
+    if pending is not None:
+        # HOUSE PENDING (2026-10-06): a mode WILL hold Hue the moment the
+        # layer may act, but SPECTRA's stack/engine is not live yet (a
+        # restart's resume, a quiet take). Landing the room toggle here is
+        # what lit 13 bulbs for ~20 s on every restart under Away — the
+        # stored Hue Hold, applied before the mode could say "off". Nothing
+        # is written and nothing is recorded as landed; the house layer's
+        # own reconcile (its supervisor, and app.py's after the resume)
+        # lands the mode's looks once it may act. Bulbs keep whatever they
+        # hold now — never switched on as a side effect.
+        _note_deferral(pending.mode_name)
+        state = PHASE_ON if _held else PHASE_OFF
+        return {"status": "house-pending", "intent": state, "phase": state,
+                "house_mode": pending.mode_name,
+                "reason": (f"house mode {pending.mode_name!r} will hold Hue "
+                           "once SPECTRA's live stack is up — the room "
+                           "toggle is held back until then")}
+    _note_deferral(None)
     desired = _desired_hold(controls.ambient_enabled, controls.ambient_on_music_pause,
                             is_playing, _held)
     return await _apply(controls, desired, effective_ambient_color(controls),
                         frozenset(controls.ambient_hue_group_ids), wait=wait,
                         snap=snap)
+
+
+def _note_deferral(mode_name: Optional[str]) -> None:
+    global _deferred_for
+    if mode_name == _deferred_for:
+        return
+    if mode_name is not None:
+        logger.warning("Hue Hold: house mode %r will hold Hue once the live "
+                       "stack is up — holding the room toggle back (no Hue "
+                       "write)", mode_name)
+    _deferred_for = mode_name
 
 
 async def reconcile_now(*, wait: bool = True, snap: bool = False) -> dict:
@@ -754,6 +806,10 @@ def status() -> dict:
     confirmed_held = _held and _verified_ok is not False
 
     directive = _house_directive()
+    pending = False
+    if directive is None:
+        directive = _house_pending()
+        pending = directive is not None
     if in_flight:
         assert tr is not None
         intent_on = tr.intent
@@ -801,6 +857,10 @@ def status() -> dict:
             "mode": directive.mode_name if directive is not None else None,
             "looks": [{"area": a, "look": k, "mirek": m, "color": c, "brightness": b}
                       for (a, k, m, c, b) in looks]}
+        if pending:
+            # The mode has not landed yet — the room toggle is held back
+            # for it (reconcile's HOUSE PENDING branch).
+            out["house"]["pending"] = True
     if in_flight:
         assert tr is not None
         out["generation"] = tr.generation

@@ -69,6 +69,7 @@ const AMBIENT_NOTE: Record<string, string> = {
   dark: "SPECTRA isn't driving the lights right now — saved, nothing changed live",
   'no-hue-devices': 'no live Hue device in the room — saved, nothing to hold',
   failed: 'every live Hue device rejected the change (bridge unreachable?) — saved, but the room may not match this switch',
+  'house-pending': 'Waiting for the house mode: Spectra is starting up, and the house will set the Hue lights once it is running.',
 };
 
 /** The FROZEN phase contract, rendered (spectra/services/

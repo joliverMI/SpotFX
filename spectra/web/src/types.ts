@@ -548,10 +548,15 @@ export interface DarkLightResult {
  * the pushed ambient_status message and on GET /api/engine/status's own
  * `ambient` key. A "dark" result now also carries phase "unavailable" and
  * `stored: true`: the room isn't SPECTRA's to drive, the intent is saved,
- * and it applies on the next take-back. */
+ * and it applies on the next take-back. "house-pending" (2026-10-06): a
+ * house mode WILL hold Hue the moment SPECTRA's live stack is up, but it
+ * is not yet — the room toggle is held back rather than landed, naming the
+ * mode in `house_mode`/`reason` (spectra/services/ambient_music_gate.py's
+ * reconcile(), the fix for a restart flashing bulbs the mode was about to
+ * hold off). */
 export interface AmbientResult {
   status: 'on' | 'off' | 'dark' | 'no-hue-devices' | 'failed' | 'partial' | 'yielding'
-    | 'turning_on' | 'turning_off' | 'superseded';
+    | 'turning_on' | 'turning_off' | 'superseded' | 'house-pending';
   intent?: AmbientIntent;
   phase?: AmbientPhase;
   /** "dark" only — the intent is durable and applies on the next take-back. */
@@ -566,6 +571,10 @@ export interface AmbientResult {
    * of ambient_hue_group_ids while Ambient stayed engaged (the group he
    * just deselected), not on a plain hold or a whole-room OFF. */
   released?: string[];
+  /** "house-pending" only — the mode that will hold Hue once it can. */
+  house_mode?: string;
+  /** "house-pending" only — a human-readable sentence naming why. */
+  reason?: string;
 }
 
 /** spectra/services/ambient_music_gate.py's status() — the room's honest,
@@ -627,10 +636,17 @@ export interface AmbientGateStatus {
   result?: AmbientResult;
   verify?: AmbientVerify;
   verified_age_s?: number;
-  /** HOUSE LIGHTING (additive): present while a house mode drives Hue — the
-   * mode and its per-area looks; the toggle above waits until it does not. */
+  /** HOUSE LIGHTING (additive): present while a house mode drives Hue, OR
+   * while one is about to (a restart's resume, a quiet take) and the room
+   * toggle is being held back for it — see `pending` below and
+   * spectra/services/house.py's pending_hue_directive(). The toggle above
+   * waits until neither applies. */
   house?: { mode: string | null; looks: { area: string; look: string; mirek: number | null;
-    color: string | null; brightness: number }[] };
+    color: string | null; brightness: number }[];
+    /** True only while `mode` names a house mode that has not landed yet —
+     * nothing is held for it, the room toggle is deferred (status()'s
+     * HOUSE PENDING branch). Absent once the mode's own hold is live. */
+    pending?: boolean };
 }
 
 /** One entry from GET /api/room-controls/ambient-groups — a live Hue
