@@ -460,6 +460,18 @@ def _isolated_preview_pause():
 
 
 @pytest.fixture(autouse=True)
+def _isolated_pulse_feed():
+    """spectra/services/pulse_feed.py's `feed` singleton caches the current
+    song's section table and its last computed values; a table cached by one
+    test's fake analysis would otherwise be read by a later test using the
+    same uri. Autouse, the param-watchdog shape below."""
+    from spectra.services import pulse_feed
+    pulse_feed.feed.reset()
+    yield
+    pulse_feed.feed.reset()
+
+
+@pytest.fixture(autouse=True)
 def _isolated_param_watchdog():
     """spectra/services/param_watchdog.py (the param orphan watchdog,
     2026-08-21) keeps its suspicion clocks / restore counts / give-ups as

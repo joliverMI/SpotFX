@@ -1517,10 +1517,13 @@ against that commit.
     control in the tests), and NO background layer
     (`_refresh_bg_render_state` switches it off, so a colour set's Singles
     background never paints under it). `energy`, `beat_ms` and
-    `phase`/`phase_progress` are hooks with safe defaults; nothing pushes
-    them yet and `pulse` is deliberately NOT in `device_model.PHASE_EFFECTS`
-    or `config/effect_params.json` (phase 2 wires both). Power is untouched
-    and stays bound everywhere. Proof: `tests/test_pulse_effect.py` (the
+    `phase`/`phase_progress` are hooks with safe defaults. Phase 2
+    (2026-10-06) wires them from SPECTRA: `pulse` is in
+    `device_model.PHASE_EFFECTS` and the new `ONE_COLOUR_EFFECTS`, its
+    tunable params are in `config/effect_params.json`, and
+    `spectra/services/pulse_feed.py` pushes `energy`/`beat_ms`; the effect
+    module itself only had its docstring updated. Power is untouched and
+    stays bound everywhere. Proof: `tests/test_pulse_effect.py` (the
     contract on the real class, plus Dopamine / Contra / Let It Be / Soy
     Peor from `tests/fixtures/pulse`), `scripts/check_pulse_effect.py` (the
     whole pipeline from his captured WAVs, and that the fixture-driven run

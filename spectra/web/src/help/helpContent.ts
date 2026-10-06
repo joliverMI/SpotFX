@@ -205,6 +205,19 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        id: 'pulse-effect',
+        title: 'Pulse — the Singles\' one-colour effect (being tuned)',
+        keywords: 'pulse singles single led hue bulbs porch rail dining table power replacement resting level depth fade beats rise sharp soft hit sensitivity bulb curve gamma charge top drop burst white flash budget intensity tempo test scene tune',
+        body: [
+          'Pulse is the effect built to replace Power on the Singles (the 17 Hue bulbs, the porch rail and the dining table). Power runs at one pixel there and barely moves; Pulse treats each light as one light of one colour and moves its brightness on purpose. Power stays installed and every one of your scenes still uses it — nothing switches over until you have tuned Pulse.',
+          'HITS. Pulse listens to the music itself and finds hits by how far a sound jumps above the music\'s own recent level, so quiet songs still make hits. A sharp, hard hit rises in one frame (Sharp Rise); a soft one over Soft Rise. Each pulse then fades to a tenth in a number of BEATS, so fades follow the tempo. Hue bulbs smooth anything faster than about 40–80 ms, so on Hue sharpness mostly reads as size.',
+          'CALM AND INTENSE. Most settings come in pairs: the value in a calm section and in an intense one, with a straight line between. Calm music rests brighter with small, slow pulses; intense music rests lower with deep, quick ones. The intensity is the section the song is in — the same number a generated scene change at that section carries, scaled by the song\'s own intensity scale. It reaches the fully intense end only on a track you have marked up (the automatic ceiling is 0.75), and each new section eases in over two seconds.',
+          'CHARGE, LULL, DROP. They reach Pulse on the same clock as the crystal and the strips. A charge raises the resting level to Charge Top while hits keep landing on top; a lull fades to full black exactly as the other lights arrive; the drop bursts on its mark (Drop Burst, whitened by Drop White Mix) and settles over Drop Settle beats. True black happens only during a music show: while a house mode\'s resting look owns the room, Pulse is not sent charges, lulls or drops, and house levels, Hue Hold and a mode\'s off rule apply after the effect either way.',
+          'COLOUR. One colour, no background: the resting glow is the same colour, dimmer. Where a colour set has its own Singles colour, Pulse wears it. Where a set has none, or the set is a rainbow, Pulse takes the first colour of the strips\' gradient. The colour journey turns it with the strips.',
+          'TUNING. A test scene, "Pulse Test (Orbits V2)", is Orbits V2 with Pulse on the Singles. It is never picked automatically — fire it from the Scenes page or pin it with Force Scene, then change the Singles row on its Initial Set tab. Bulb Curve stays at 2.2 until the Singles\' response has been measured.',
+        ],
+      },
+      {
         id: 'tab-drift',
         title: 'Drift tab — declarations the engine runs',
         keywords: 'creep follow wander slow evolution profile inline live legs bounds',

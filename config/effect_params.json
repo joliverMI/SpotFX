@@ -68,6 +68,245 @@
     }
   },
   "effects": {
+    "pulse": {
+      "no_background_color": true,
+      "params": {
+        "gradient": {
+          "label": "Gradient",
+          "type": "gradient",
+          "smooth": true,
+          "aspect": "color",
+          "note": "Pulse shows ONE colour: the gradient's first colour (position 0). The compiler fills it from the strips' gradient where a colour set has no Singles entry, and in rainbow sets (spectra/services/scene_compiler.set_entries_for)."
+        },
+        "brightness": {
+          "label": "Effect Brightness",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "aspect": "brightness",
+          "aspect_scale": 1.0,
+          "default": 1.0,
+          "note": "A plain dimmer applied after the bulb curve. A colour set's own Singles brightness lands here."
+        },
+        "rest_calm": {
+          "label": "Resting Level (calm)",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "aspect": "brightness",
+          "aspect_scale": 1.0,
+          "default": 0.4,
+          "help_topic": "pulse-effect",
+          "note": "Brightness between hits at section intensity 0, on the eye's scale (0 black, 1 full). Calm rests brighter so small pulses have steps to move between."
+        },
+        "rest_intense": {
+          "label": "Resting Level (intense)",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "aspect": "brightness",
+          "aspect_scale": 1.0,
+          "default": 0.22,
+          "help_topic": "pulse-effect",
+          "note": "Brightness between hits at section intensity 1 (eye scale). Lower so hits have room."
+        },
+        "depth_calm": {
+          "label": "Pulse Depth (calm)",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "aspect": "reactivity",
+          "aspect_scale": 1.0,
+          "default": 0.1,
+          "help_topic": "pulse-effect",
+          "note": "How far a full-size hit lifts the light at section intensity 0 (eye scale)."
+        },
+        "depth_intense": {
+          "label": "Pulse Depth (intense)",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "aspect": "reactivity",
+          "aspect_scale": 1.0,
+          "default": 0.78,
+          "help_topic": "pulse-effect",
+          "note": "How far a full-size hit lifts the light at section intensity 1 (eye scale)."
+        },
+        "fade_beats_calm": {
+          "label": "Fade Beats (calm)",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.05,
+          "max": 8,
+          "aspect": "reactivity",
+          "aspect_scale": 1.0,
+          "default": 1.6,
+          "help_topic": "pulse-effect",
+          "note": "Beats for a pulse to fall to a tenth at section intensity 0. Counted in beats so it follows tempo."
+        },
+        "fade_beats_intense": {
+          "label": "Fade Beats (intense)",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.05,
+          "max": 8,
+          "aspect": "reactivity",
+          "aspect_scale": 1.0,
+          "default": 0.5,
+          "help_topic": "pulse-effect",
+          "note": "Beats for a pulse to fall to a tenth at section intensity 1."
+        },
+        "rise_soft_ms": {
+          "label": "Soft Rise (ms)",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1000,
+          "aspect": "reactivity",
+          "aspect_scale": 1.0,
+          "default": 160.0,
+          "help_topic": "pulse-effect",
+          "note": "Rise time of a soft, small hit. Each hit's rise sits between this and Sharp Rise by its sharpness and size."
+        },
+        "rise_sharp_ms": {
+          "label": "Sharp Rise (ms)",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1000,
+          "aspect": "reactivity",
+          "aspect_scale": 1.0,
+          "default": 16.0,
+          "help_topic": "pulse-effect",
+          "note": "Rise time of a sharp, hard hit (16 ms = one frame). Hue bulbs smooth anything under roughly 40-80 ms."
+        },
+        "hit_sensitivity": {
+          "label": "Hit Sensitivity",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.02,
+          "max": 1,
+          "aspect": "reactivity",
+          "aspect_scale": 1.0,
+          "default": 0.22,
+          "help_topic": "pulse-effect",
+          "note": "How far above the music's recent level a sound must jump to count as a hit, as a fraction of the recent peak. Lower = more hits."
+        },
+        "hit_source": {
+          "label": "Hit Source",
+          "type": "enum",
+          "smooth": false,
+          "options": [
+            "bass weighted",
+            "bass only"
+          ],
+          "default": "bass weighted",
+          "help_topic": "pulse-effect",
+          "note": "bass weighted: bass first, but piano and voice still make hits so calm songs move. bass only: low end alone."
+        },
+        "min_pulse": {
+          "label": "Smallest Pulse",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 0.5,
+          "aspect": "reactivity",
+          "aspect_scale": 1.0,
+          "default": 0.05,
+          "help_topic": "pulse-effect",
+          "note": "A pulse under way is never smaller than this (eye scale): dim bulbs have few brightness steps."
+        },
+        "max_flash_rate": {
+          "label": "Max Flashes per Second",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.5,
+          "max": 20,
+          "default": 3.0,
+          "help_topic": "pulse-effect",
+          "note": "A luminance budget: the rises of all hits in any second may not add up past this many black-to-full flashes. For comfort and photosensitive safety."
+        },
+        "gamma": {
+          "label": "Bulb Curve",
+          "type": "numeric",
+          "smooth": true,
+          "min": 1,
+          "max": 4,
+          "default": 2.2,
+          "help_topic": "pulse-effect",
+          "note": "Converts eye-scale brightness to the value sent. 2.2 until the camera measurement of the Singles is taken."
+        },
+        "charge_top": {
+          "label": "Charge Top",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "aspect": "brightness",
+          "aspect_scale": 1.0,
+          "default": 0.8,
+          "help_topic": "pulse-effect",
+          "note": "Resting level at the end of a charge (eye scale). Below 1 so the drop has somewhere to go."
+        },
+        "drop_burst": {
+          "label": "Drop Burst",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "aspect": "brightness",
+          "aspect_scale": 1.0,
+          "default": 1.0,
+          "help_topic": "pulse-effect",
+          "note": "Brightness the drop bursts to on its mark (eye scale)."
+        },
+        "drop_white": {
+          "label": "Drop White Mix",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "default": 0.45,
+          "help_topic": "pulse-effect",
+          "note": "White mixed into the drop's burst (the white LED on the porch rail and dining table)."
+        },
+        "drop_settle_beats": {
+          "label": "Drop Settle (beats)",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.1,
+          "max": 16,
+          "default": 2.0,
+          "help_topic": "pulse-effect",
+          "note": "Beats for the drop's burst to settle back."
+        }
+      },
+      "defaults": {
+        "brightness": 1.0,
+        "rest_calm": 0.4,
+        "rest_intense": 0.22,
+        "depth_calm": 0.1,
+        "depth_intense": 0.78,
+        "fade_beats_calm": 1.6,
+        "fade_beats_intense": 0.5,
+        "rise_soft_ms": 160.0,
+        "rise_sharp_ms": 16.0,
+        "hit_sensitivity": 0.22,
+        "hit_source": "bass weighted",
+        "min_pulse": 0.05,
+        "max_flash_rate": 3.0,
+        "gamma": 2.2,
+        "charge_top": 0.8,
+        "drop_burst": 1.0,
+        "drop_white": 0.45,
+        "drop_settle_beats": 2.0
+      }
+    },
     "power": {
       "params": {
         "background_brightness": {

@@ -251,7 +251,21 @@ def resolve_scope(virtual_ids: list[str] = (), categories: list[str] = (),
 PHASE_EFFECTS = frozenset({
     "blackhole", "blackhole1d", "orbits", "orbits1d", "radial",
     "fireworks", "fireworks1d", "squiggles", "dancer", "eye", "fish",
+    "pulse",
 })
+
+# The ONE-COLOUR effects (single-led-power plan, phase 2): each pixel is one
+# light wearing one colour. Three things key off this set, and only these:
+#   - the engine FEEDS them section intensity and tempo (`energy`, `beat_ms`
+#     — spectra/services/pulse_feed.py), keys that, like the phase keys
+#     above, are deliberately NOT in the registry below;
+#   - the compiler FILLS their colour from the strips' gradient where a
+#     colour set has no entry of its own for them, and in rainbow sets
+#     (spectra/services/scene_compiler.set_entries_for);
+#   - their charge/lull/drop is withheld while a house mode's resting look
+#     owns the room, because a lull takes them to TRUE black, which is only
+#     right during a music show (scene_response._drive_phase).
+ONE_COLOUR_EFFECTS = frozenset({"pulse"})
 
 # The vendored effects carrying the flare-driven payoff burst: the
 # `burst_rockets` config key (an instant "explode N payoff rockets NOW"

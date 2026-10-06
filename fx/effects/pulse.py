@@ -54,14 +54,18 @@ This is the plan's rule ("about three full-depth flashes a second"), not
 WCAG's stricter count of every >=10% flash; that would cap fast music at
 three pulses a second whatever their size.
 
-INPUTS THE ENGINE WILL PUSH (phase 2) — hooks with safe defaults, NOT wired:
-- `energy` (0..1, default 0.5): section intensity. The effect eases toward a
-  new value over ENERGY_SLEW_S so the light's character never snaps.
-- `beat_ms` (default 0 = unknown): beat length. Unknown falls back to the
-  live pipeline's tempo when it reads 60-200 bpm, else 500 ms (120 bpm).
+INPUTS THE ENGINE PUSHES (phase 2) — hooks with safe defaults:
+- `energy` (0..1, default 0.5): section intensity, pushed by SPECTRA's Pulse
+  feed (spectra/services/pulse_feed.py) at each section edge and carried in
+  the scene fire that installs the effect. The effect eases toward a new
+  value over ENERGY_SLEW_S so the light's character never snaps.
+- `beat_ms` (default 0 = unknown): beat length, from the song's analysed
+  tempo (same feed). Unknown falls back to the live pipeline's tempo when it
+  reads 60-200 bpm, else 500 ms (120 bpm).
 - `phase` + `phase_progress`: the shared charge/lull/drop keys every phase
-  effect takes (fx/device_model.PHASE_EFFECTS — Pulse is NOT in that set
-  yet, so the engine sends it nothing). Edge-detected in config_updated,
+  effect takes (fx/device_model.PHASE_EFFECTS), driven by SPECTRA's response
+  engine on the same ramp as every other phase effect, so a lull reaches
+  black as the crystal and strips arrive. Edge-detected in config_updated,
   consumed in render, orphan-watched by particle_handoff.phase_release_due.
   charge: the rest level climbs to `charge_top` (smoothstep of progress),
   hits keep landing on top (never less than CHARGE_MIN_DEPTH), fades

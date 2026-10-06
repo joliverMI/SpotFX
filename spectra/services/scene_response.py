@@ -652,6 +652,20 @@ def _phase_ramp_ms(event_class: str, gap_ms: Optional[int]) -> int:
     return PHASE_RAMP_MS[event_class]
 
 
+def _house_owns_the_look() -> Optional[str]:
+    """Why a house mode's resting look owns the room right now (so this is
+    not a music show), or None. house.scene_deferral is the one statement
+    of it — the same predicate that keeps automatic scene picks off a
+    resting room. Lazy: house reaches the engine. Never raises; an
+    unreadable house reads as no mode, which is today's behaviour."""
+    try:
+        from spectra.services import house
+        return house.scene_deferral()
+    except Exception:                                    # noqa: BLE001
+        logger.exception("phase drive: house state unreadable — driving")
+        return None
+
+
 def select_band(bands: list[FlareBand], intensity: float) -> Optional[FlareBand]:
     for band in bands:
         if band.intensity_min <= intensity < band.intensity_max:
@@ -2275,11 +2289,29 @@ class ResponseEngine:
         OVERRIDE BLEND equivalent (see _phase_ramp_ms/PHASE_RAMP_MS above):
         charge/lull ramps stretch to ~90% of the real gap_ms when it's
         known, hanging the remaining ~10% at phase_progress=1.0; drop is
-        never stretched, it stays the fixed snap."""
+        never stretched, it stays the fixed snap.
+
+        TRUE BLACK ONLY DURING A MUSIC SHOW: a one-colour effect's lull
+        (Pulse, fx.device_model.ONE_COLOUR_EFFECTS) fades it to true black.
+        While a house mode's resting look owns the room (house.
+        scene_deferral — a calm/ignore mode, or a show mode resting while
+        no music plays) the choreography is withheld from those virtuals
+        and NAMED in the record; every other phase effect is driven as
+        before. The house layer's levels, Hue Hold and off rules sit
+        downstream of every effect and keep winning either way."""
         ramp_ms = _phase_ramp_ms(event_class, gap_ms)
         targets: list[str] = []
+        withheld: list[str] = []
+        house_reason: Optional[str] = None
+        if any(st.effect_type in device_model.ONE_COLOUR_EFFECTS
+               for st in self.conductor.virtuals.values()):
+            house_reason = _house_owns_the_look()
         for vid, state in self.conductor.virtuals.items():
             if state.effect_type not in device_model.PHASE_EFFECTS:
+                continue
+            if (house_reason is not None
+                    and state.effect_type in device_model.ONE_COLOUR_EFFECTS):
+                withheld.append(vid)
                 continue
             await self.executor.jump(
                 vid, state.effect_type,
@@ -2291,7 +2323,10 @@ class ResponseEngine:
             self._phase_armed = (event_class
                                  if event_class in ("charge", "lull")
                                  else None)
-        return {"targets": targets, "ramp_ms": ramp_ms, "gap_ms": gap_ms}
+        record = {"targets": targets, "ramp_ms": ramp_ms, "gap_ms": gap_ms}
+        if withheld:
+            record["withheld"] = {"virtuals": withheld, "reason": house_reason}
+        return record
 
     async def release_phases(self, *, force: bool = False) -> int:
         """The lifecycle guard carried from the original program
@@ -2472,7 +2507,9 @@ class ResponseEngine:
                 return {"result": "missing_set", "picked_id": picked_id}
         from spectra.services import scene_compiler
         from spectra.services.room_controls import resolve_authored_bg_color
-        by_vid = scene_compiler._set_entry_by_virtual(card)
+        by_vid = scene_compiler.set_entries_for(
+            card, {vid: st.effect_type
+                   for vid, st in self.conductor.virtuals.items()})
         controls = self._room_controls()
         if ramp_ms is None:
             ramp_ms = color_jump_ramp_ms(intensity)

@@ -7,11 +7,11 @@ SpotFX program and carried verbatim into `fx/effects/`. SPECTRA's response
 engine (`spectra/services/scene_response.py`) DRIVES that machinery; it
 does not re-invent it.
 
-## The universal contract (all eleven phase-capable effects)
+## The universal contract (all twelve phase-capable effects)
 
 Every effect in `fx/device_model.PHASE_EFFECTS` — `blackhole`,
 `blackhole1d`, `orbits`, `orbits1d`, `radial`, `fireworks`, `fireworks1d`,
-`squiggles`, `dancer`, `eye`, `fish` — carries two config params:
+`squiggles`, `dancer`, `eye`, `fish`, `pulse` — carries two config params:
 
 - `phase`: `"none" | "charge" | "lull" | "drop"` — edge-detected in
   `config_updated` (a stale persisted value never edge-fires on a fresh
@@ -40,7 +40,12 @@ exactly the drive the original program used (`services/trigger_engine.py`
 
 1. **Arm**: an instant `{"phase": <class>, "phase_progress": 0.0}` jump to
    every virtual whose live effect is phase-capable (the `0.0` reset makes
-   the edge re-fire).
+   the edge re-fire). EXCEPTION: a one-colour effect (Pulse,
+   `fx.device_model.ONE_COLOUR_EFFECTS`) is skipped — and NAMED as
+   `withheld` in the surge record — while a house mode's resting look owns
+   the room (`house.scene_deferral`), because a lull's true black is only
+   right during a music show; every other phase-capable virtual arms as
+   before.
 2. **Ramp**: a glide of `phase_progress → 1.0` over the class's duration.
    Charge/lull DYNAMICALLY STRETCH to ~90% of `gap_ms` — the real distance
    to where the build ends: a charge's own next lull or drop, a lull's own
@@ -225,6 +230,25 @@ beat clock, not this machinery)
 - **Drop** — if a short lull left the lids mid-close they SLAM shut first,
   then the eye explodes open (0.18 s), a flame burst with a randomness
   spike rides the opening, settling over 1.2 s.
+
+### Pulse (`pulse.py`, the Singles — a one-colour effect, not a particle
+one; single-led-power plan phase 2, 2026-10-06)
+
+- **Charge** — the resting level climbs to `charge_top` (smoothstep of
+  progress) while hits keep landing on top (never shallower than
+  `CHARGE_MIN_DEPTH`); fades shorten by `CHARGE_FADE_X`.
+- **Lull** — the level held at lull entry is multiplied by
+  `1 - smoothstep(progress)`, reaching true black exactly when the ramp
+  completes — the same clock the crystal and strips use.
+- **Drop** — begins ON its first frame at `drop_burst`, whitened by
+  `drop_white`, settling over `drop_settle_beats`; the phase then
+  self-resets so an identical later drop edges again. A charge or lull
+  that ends without a drop eases back over `EXIT_BLEND_S` instead of
+  snapping.
+
+Unlike every other family above, Pulse's choreography is WITHHELD (see
+the Arm step's exception) while a house mode's resting look owns the
+room — true black is only right during a music show.
 
 ## Where SPECTRA proves it
 

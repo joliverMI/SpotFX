@@ -85,7 +85,9 @@ async def _writes_for(card: ColorSetCard, live: dict) -> tuple[list[dict], dict[
     resolved = await _resolve(card)
     if resolved is None:
         return [], {}
-    by_vid = scene_compiler._set_entry_by_virtual(resolved)
+    by_vid = scene_compiler.set_entries_for(
+        resolved, {vid: ((v or {}).get("effect") or {}).get("type")
+                   for vid, v in live.items()})
     writes: list[dict] = []
     snapshot: dict[str, dict] = {}
     for vid, entry in by_vid.items():
