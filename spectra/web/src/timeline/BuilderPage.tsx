@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import CollapsibleCard from '../components/CollapsibleCard';
 import HelpLink from '../help/HelpLink';
+import SonicChatPopover from '../components/SonicChatPopover';
 import ShowCueBar from './components/ShowCueBar';
 import { useSticky } from '../lib/useSticky';
 import { fmtMs } from '../lib/time';
@@ -661,6 +662,8 @@ export default function BuilderPage() {
           {liveMode ? 'Play something on Spotify, or switch off Live and search a song.' : 'Search a song above.'}
         </p>
       )}
+
+      <SonicChatPopover helpTopic="sonic-drops" />
     </>
   );
 }

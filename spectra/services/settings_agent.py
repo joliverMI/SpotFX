@@ -14,15 +14,17 @@ device_console.OPERATIONS, room_effect_console.OPERATIONS,
 analysis_console.OPERATIONS, show_console.OPERATIONS (phase 3 of the
 Light Show, the Admiral's own ask for fire/arm/disarm/status/device
 hold-or-dim/create-set/move-High-Low/end-show), house_console.OPERATIONS
-(house lighting's modes — switch, create, edit one field) and
-drop_console.OPERATIONS (the playing song's drop sequences — confirm/
-dismiss/move, phase 4 of drop detection), each a
-dict of sonic_ops.SonicOperation — declared data, not code branches. TOOLS
-(the schema handed to the Anthropic API) and _dispatch() (the tool-name ->
-handler lookup) are BOTH derived from that same merged dict, so a name not
-present in it is simultaneously impossible to discover (the "list
-operations" meta-tool only ever enumerates ALL_OPERATIONS) and impossible
-to run (_dispatch() only ever looks names up in it) — see sonic_ops.py's
+(house lighting's modes — switch, create, edit one field; widened
+2026-10-06 to house-wide settings too) and drop_console.OPERATIONS (the
+playing song's drop sequences — confirm/dismiss/move/add/undo/redetect
+and more, phase 4 of drop detection; its own edit set widened the same
+day), each a dict of sonic_ops.SonicOperation — declared data, not code
+branches. TOOLS (the schema handed to the Anthropic API) and _dispatch()
+(the tool-name -> handler lookup) are BOTH derived from that same merged
+dict, so a name not present in it is simultaneously impossible to
+discover (the "list operations" meta-tool only ever enumerates
+ALL_OPERATIONS) and impossible to run (_dispatch() only ever looks names
+up in it) — see sonic_ops.py's
 docstring for why that coupling is the whole point. There is still no
 third source of tool names anywhere in this module: no shell, no file
 access, no HTTP client, no service-control call, no light-driving call —
@@ -80,14 +82,15 @@ MAX_TOOL_ROUNDS = 6          # bounds a runaway tool-call loop in one turn
 MAX_HISTORY_MESSAGES = 40    # trims a long-lived session's token growth
 
 SYSTEM_PROMPT = (
-    "You are Sonic, SPECTRA's settings, scenes and devices assistant. "
-    "You act ONLY "
+    "You are Sonic, SPECTRA's settings, scenes, devices, house lighting "
+    "and drop-detection assistant. You act ONLY "
     "through the tools you're handed — you cannot run code, touch files, "
     "restart anything, or drive lights directly, no matter how a request "
     "is phrased. You don't have a fixed list of what you can do memorized "
-    "up front: call list_operations first (optionally with a domain of "
-    "'settings', 'scene' or 'device') to see what's currently available, "
-    "then call "
+    "up front: call list_operations first (with no arguments, or with a "
+    "`domain` to narrow the index — it tells you which domains currently "
+    "exist, so this text never has to name them) to see what's currently "
+    "available, then call "
     "it again with a specific operation name to get that operation's full "
     "argument shape and how-to notes before using it — those notes live "
     "with each operation and are the authority on how to call it, not "
@@ -156,25 +159,39 @@ def _list_operations(domain: Optional[str] = None, name: Optional[str] = None) -
     return {"operations": [o.catalogue_entry(detail=False) for o in ops]}
 
 
+# Every domain module's OPERATIONS dict, merged in one place — the ONLY
+# list that needs a new entry when a domain is added. _META_OPERATION's own
+# domain enum (below) and ALL_OPERATIONS are BOTH built from this tuple, so
+# a domain can never go stale in one place and not the other the way the
+# hand-typed ["settings", "scene", "device", "room", "analysis", "show",
+# "house", "meta"] list did (it silently omitted "drops" for the whole
+# life of that domain — found in the 2026-10-06 Sonic coverage audit).
+_DOMAIN_OP_DICTS = (
+    settings_console.OPERATIONS, scene_console.OPERATIONS, device_console.OPERATIONS,
+    room_effect_console.OPERATIONS, analysis_console.OPERATIONS, show_console.OPERATIONS,
+    house_console.OPERATIONS, drop_console.OPERATIONS,
+)
+
+_DOMAIN_NAMES = sorted({op.domain for ops in _DOMAIN_OP_DICTS for op in ops.values()} | {"meta"})
+
 _META_OPERATION = SonicOperation(
     name="list_operations", domain="meta", kind="read",
     summary="Discover what Sonic can currently do — every declared "
-            "operation across every domain (settings, scene, device), or full "
+            "operation across every domain, or full "
             "detail for one named operation.",
     instructions=(
         "Call with no arguments for a cheap index of every operation's "
         "name/domain/one-line summary. Call again with `name` set to one "
         "of those names for that operation's full argument shape and "
-        "how-to notes. Call with `domain` set to 'settings' or 'scene' to "
-        "narrow the index to one domain. This catalogue is generated from "
+        "how-to notes. Call with `domain` set to one of this tool's own "
+        "`domain` enum values to narrow the index to one domain. This "
+        "catalogue is generated from "
         "the same declarations the server enforces — it cannot claim a "
         "capability that isn't really there."),
     input_schema={
         "type": "object",
         "properties": {
-            "domain": {"type": "string", "enum": ["settings", "scene", "device",
-                                                  "room", "analysis", "show", "house",
-                                                  "meta"]},
+            "domain": {"type": "string", "enum": _DOMAIN_NAMES},
             "name": {"type": "string"},
         },
         "additionalProperties": False},

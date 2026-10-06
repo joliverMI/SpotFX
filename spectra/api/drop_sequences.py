@@ -78,35 +78,9 @@ def _view_with_detection(uri: str) -> dict:
     return drop_firing.annotated_view(uri, drop_sequences.view_with_detection(uri))
 
 
-def _summary() -> dict:
-    data = drop_sequences.all_stored()
-    songs = []
-    for uri, entry in sorted(data.items()):
-        if not isinstance(entry, dict):
-            continue
-        det = entry.get("detected") or {}
-        tiers: dict[str, int] = {}
-        for s in det.get("sequences") or []:
-            tiers[s.get("tier")] = tiers.get(s.get("tier"), 0) + 1
-        overrides = entry.get("overrides") or {}
-        songs.append({
-            "uri": uri,
-            "detected": bool(det),
-            "detected_at": det.get("detected_at"),
-            "stamp": det.get("stamp"),
-            "tiers": tiers,
-            "excluded": len(det.get("excluded") or []),
-            "overrides": len(overrides),
-            "dismissed": sum(1 for o in overrides.values()
-                             if isinstance(o, dict) and o.get("state") == "dismissed"),
-            "added": len(entry.get("added") or []),
-        })
-    return {"songs": songs}
-
-
 @router.get("/summary")
 async def get_summary():
-    return await asyncio.to_thread(_summary)
+    return await asyncio.to_thread(drop_sequences.summary)
 
 
 @router.get("/rails")

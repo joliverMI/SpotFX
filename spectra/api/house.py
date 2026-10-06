@@ -334,55 +334,14 @@ async def get_settings() -> dict:
 
 @router.put("/settings")
 async def put_settings(body: dict):
-    from spectra.models.house_mode import HouseSettings
-    current = house_store.load_library().settings.model_dump()
-    body = dict(body or {})
-    if isinstance(body.get("voice_looks"), dict):
-        # A partial edit of one voice state keeps every other state as HE
-        # set it, not as the defaults.
-        looks = {k: dict(v) for k, v in current["voice_looks"].items()}
-        for state, look in body["voice_looks"].items():
-            looks[state] = {**looks.get(state, {}),
-                            **(look if isinstance(look, dict) else {})}
-        body["voice_looks"] = looks
-    if isinstance(body.get("energy"), dict):
-        # A partial edit of the energy block (one keep-alive, one cap)
-        # keeps everything else in it as he set it.
-        energy = dict(current.get("energy") or {})
-        patch = dict(body["energy"])
-        if isinstance(patch.get("resting_fps"), dict):
-            fps = dict(energy.get("resting_fps") or {})
-            for k, v in patch["resting_fps"].items():
-                if v is None:
-                    fps.pop(k, None)
-                else:
-                    fps[k] = v
-            patch["resting_fps"] = fps
-        body["energy"] = {**energy, **patch}
+    # The merge/apply logic itself lives in house.apply_settings_patch — the
+    # ONE house-settings writer, shared with Sonic's house_console.py (the
+    # Sonic coverage audit build, 2026-10-06) so the two can never diverge
+    # on what a settings save does.
     try:
-        merged = HouseSettings(**{**current, **body})
-    except ValidationError as exc:
-        return JSONResponse(status_code=422, content={
-            "detail": "; ".join(f"{'.'.join(str(x) for x in e['loc'])}: {e['msg']}"
-                                for e in exc.errors())})
-    saved = house_store.put_settings(merged)
-    from spectra.services import house_fixtures
-    house_fixtures.kick()
-    if "energy" in body:
-        # Resting caps are part of the mode's plan: re-enter so a changed
-        # default lands now, not at the next mode change.
-        await house.reapply()
-    out: dict = {"settings": saved.model_dump()}
-    if (current.get("enabled") != saved.enabled
-            or current.get("hue_excluded_lights") != saved.hue_excluded_lights):
-        # THE CUTOVER SWITCH (or the bulbs it leaves alone) moved: apply it
-        # now rather than on the supervisor's next pass, and say what the
-        # room is doing as a result.
-        house._record("switched", {"enabled": saved.enabled,
-                                   "hue_excluded_lights": saved.hue_excluded_lights})
-        await house.tick()
-        out["lighting"] = house.status_dict()
-    return out
+        return await house.apply_settings_patch(dict(body or {}))
+    except ValueError as exc:
+        return JSONResponse(status_code=422, content={"detail": str(exc)})
 
 
 @router.get("/targets")

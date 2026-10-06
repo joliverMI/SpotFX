@@ -7,7 +7,12 @@ room's mapped fixtures it drives, plus the two reads a caller needs to work
 out what to change. Bounds come off RoomEffectSpec's own Field(ge=, le=) —
 never a second hand-typed copy — the same discipline
 settings_console.SETTINGS_REGISTRY and scene_console.SCENE_SETTINGS_REGISTRY
-already keep.
+already keep. A third read, `list_room_map` (2026-10-06), answers the SAME
+question read-only for the Live view's own room map — which camera poses
+have anything drawn, and for one, which pieces are placed (measured, read
+from the camera, or by his own hand) vs. still in the tray — see that
+operation's own comment immediately above its handler for why it stays
+read-only.
 
 WHAT IS DELIBERATELY EXCLUDED, by name, because each is a different kind of
 act rather than a setting:
@@ -177,7 +182,58 @@ def _op_set_room_effect(effect_id: str, key: str, value: Any) -> dict:
                     "mine."}
 
 
+# ═══ THE ROOM MAP (Live view's hand-placement surface, Sonic coverage
+# audit build item D16) — READ ONLY, deliberately: a placement is a visual
+# act (drag a piece onto a camera picture), the same reasoning that keeps
+# the axis calibration out of this module's own scope above. This never
+# returns a pose's glow/backdrop images (base64 pixel data,
+# room_view.current_view's own heavy fields) — only which pieces exist,
+# whether each is placed (by a measured footprint, a per-pixel camera
+# read, or his own hand) or still sitting in the tray. ═══════════════════
+
+def _op_list_room_map(pose: Optional[str] = None) -> dict:
+    from spectra.services import room_view
+    poses = room_view.current_poses()
+    if pose is None:
+        return {"poses": [{"pose_id": p["pose_id"], "label": p.get("label"),
+                           "rooms": p.get("rooms")} for p in poses]}
+    known = {p["pose_id"] for p in poses}
+    if pose not in known:
+        return {"status": "rejected", "reason": f"no camera pose {pose!r} has anything mapped",
+                "known_poses": sorted(known)}
+    view = room_view.current_view(pose)
+    if view is None:
+        return {"status": "rejected", "reason": f"no camera pose {pose!r} has anything mapped"}
+    hand = view.get("hand") or {}
+    pieces = []
+    tray = []
+    for p in view.get("pieces") or []:
+        placed = bool(hand.get(p["key"])) or p.get("at") is not None or p.get("xy") is not None
+        entry = {"key": p["key"], "label": p["label"], "virtual_id": p["virtual_id"],
+                 "device_id": p["device_id"], "placed": placed, "source": p["source"]}
+        pieces.append(entry)
+        if not placed:
+            tray.append(p["label"])
+    return {"pose_id": pose, "label": view.get("label"), "pieces": pieces,
+            "tray": tray, "notes": view.get("notes") or []}
+
+
 OPERATIONS: dict[str, SonicOperation] = {
+    "list_room_map": SonicOperation(
+        name="list_room_map", domain="room", kind="read",
+        summary="The Live view's room map: which camera poses have "
+                "anything drawn, and for one pose, which pieces are "
+                "placed (measured, read from the camera, or by his own "
+                "hand) and which are still sitting in the tray.",
+        instructions=(
+            "Call with no `pose` for the list of poses; call again with "
+            "one pose_id for its pieces/tray. Hand placement itself is a "
+            "drag on a camera picture — a visual act, not a setting — so "
+            "there is no write op here; point him at the Live view's "
+            "room map to place a piece."),
+        input_schema={"type": "object", "properties": {"pose": {"type": "string"}},
+                      "additionalProperties": False},
+        handler=_op_list_room_map),
     "list_rooms": SonicOperation(
         name="list_rooms", domain="room", kind="read",
         summary="Every mapped room — its fixtures, which of them have a "

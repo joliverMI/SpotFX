@@ -1545,3 +1545,226 @@ def test_copy_scene_device_entry_discoverable_via_list_operations():
     idx = _run(sa._dispatch("list_operations", {"domain": "scene"}))
     names = {o["name"] for o in idx["operations"]}
     assert "copy_scene_device_entry" in names
+
+
+# ═══ 13. get_scene_entry_params / set_scene_entry_param — his 2026-10-06
+# ask ("does Sonic have access to all the settings for Pulse") — one
+# effect param's current value, readable and (newly) writable on one
+# device entry of one scene. PURELY ADDITIVE: every op proven above still
+# works exactly as it did (test_dispatch_recognizes_exactly_the_declared_
+# operation_set in the merged-boundary section already re-proves the full
+# set is a superset, not a replacement). ═══════════════════════════════
+
+def test_get_scene_entry_params_reads_current_value_and_default():
+    from spectra.services import scene_console as sc
+
+    _seed_scene_with_entry("STAR", target_kind="category", target="Singles",
+                           effect_type="pulse", params={"rest_calm": 0.3})
+    result = sc.get_scene_entry_params("STAR", "Singles")
+    assert result["effect_type"] == "pulse"
+    assert result["params"]["rest_calm"]["value"] == 0.3
+    # a param he never authored reads the registry default, never a
+    # fabricated None-as-zero
+    assert result["params"]["rest_intense"]["value"] == \
+        result["params"]["rest_intense"]["default"]
+    assert result["params"]["rest_calm"]["is_bound"] is False
+
+
+def test_get_scene_entry_params_by_scene_name_or_id():
+    from spectra.services import scene_console as sc
+    from spectra.services import scene_store
+
+    scene, _ = _seed_scene_with_entry("STAR", target_kind="category", target="Singles",
+                                      effect_type="pulse")
+    by_id = sc.get_scene_entry_params(scene.id, "Singles")
+    by_name = sc.get_scene_entry_params("star", "Singles")  # case-insensitive
+    assert by_id["scene_id"] == by_name["scene_id"] == scene.id
+
+
+def test_get_scene_entry_params_unknown_target_lists_known_ones():
+    from spectra.services import scene_console as sc
+
+    _seed_scene_with_entry("STAR", target_kind="category", target="Singles",
+                           effect_type="pulse")
+    with pytest.raises(sc.SceneOpError) as exc:
+        sc.get_scene_entry_params("STAR", "Nonexistent Target")
+    assert "no device entry" in exc.value.message
+    assert exc.value.detail["known_targets"] == ["Singles"]
+
+
+def test_set_scene_entry_param_round_trips_a_numeric_value():
+    from spectra.services import scene_console as sc
+    from spectra.services import scene_store
+
+    scene, _ = _seed_scene_with_entry("STAR", target_kind="category", target="Singles",
+                                      effect_type="pulse")
+    result = _run(sc.apply_scene_entry_param(scene.id, "Singles", "rest_calm", 0.55))
+    assert result["status"] == "applied"
+    assert "0.55" in result["summary"]
+    assert "Singles" in result["summary"]
+
+    reloaded = scene_store.get_by_id(scene.id)
+    entry = next(d for d in reloaded.devices if d.target == "Singles")
+    assert entry.params["rest_calm"] == 0.55
+
+    # the value really is readable back through the paired read op too
+    read_back = sc.get_scene_entry_params(scene.id, "Singles")
+    assert read_back["params"]["rest_calm"]["value"] == 0.55
+
+
+def test_set_scene_entry_param_accepts_toggle_and_enum_types():
+    from spectra.services import scene_console as sc
+    from spectra.services import scene_store
+
+    scene, _ = _seed_scene_with_entry("STAR", target_kind="category", target="Singles",
+                                      effect_type="pulse")
+    _run(sc.apply_scene_entry_param(scene.id, "Singles", "rainbow_walk", True))
+    _run(sc.apply_scene_entry_param(scene.id, "Singles", "hit_source", "bass only"))
+    reloaded = scene_store.get_by_id(scene.id)
+    entry = next(d for d in reloaded.devices if d.target == "Singles")
+    assert entry.params["rainbow_walk"] is True
+    assert entry.params["hit_source"] == "bass only"
+
+
+def test_set_scene_entry_param_rejects_out_of_range_numeric():
+    from spectra.services import scene_console as sc
+
+    scene, _ = _seed_scene_with_entry("STAR", target_kind="category", target="Singles",
+                                      effect_type="pulse")
+    with pytest.raises(sc.SceneOpError) as exc:
+        _run(sc.apply_scene_entry_param(scene.id, "Singles", "rest_calm", 5.0))
+    assert "above" in exc.value.message
+
+
+def test_set_scene_entry_param_rejects_wrong_type_for_toggle():
+    from spectra.services import scene_console as sc
+
+    scene, _ = _seed_scene_with_entry("STAR", target_kind="category", target="Singles",
+                                      effect_type="pulse")
+    with pytest.raises(sc.SceneOpError) as exc:
+        _run(sc.apply_scene_entry_param(scene.id, "Singles", "rainbow_walk", "yes"))
+    assert "toggle" in exc.value.message
+
+
+def test_set_scene_entry_param_rejects_unknown_enum_option():
+    from spectra.services import scene_console as sc
+
+    scene, _ = _seed_scene_with_entry("STAR", target_kind="category", target="Singles",
+                                      effect_type="pulse")
+    with pytest.raises(sc.SceneOpError) as exc:
+        _run(sc.apply_scene_entry_param(scene.id, "Singles", "hit_source", "mid only"))
+    assert "not a legal option" in exc.value.message
+    assert "bass weighted" in exc.value.detail["options"]
+
+
+def test_set_scene_entry_param_rejects_unknown_param_name():
+    from spectra.services import scene_console as sc
+
+    scene, _ = _seed_scene_with_entry("STAR", target_kind="category", target="Singles",
+                                      effect_type="pulse")
+    with pytest.raises(sc.SceneOpError) as exc:
+        _run(sc.apply_scene_entry_param(scene.id, "Singles", "not_a_real_param", 1.0))
+    assert "no parameter named" in exc.value.message
+
+
+def test_set_scene_entry_param_replaces_a_binding_and_says_so():
+    from spectra.services import scene_console as sc
+    from spectra.services import scene_store
+    from spectra.models.binding import ValueBinding
+
+    scene, _ = _seed_scene_with_entry(
+        "STAR", target_kind="category", target="Singles", effect_type="pulse",
+        params={"rest_calm": ValueBinding(signal="trigger_intensity")})
+
+    before = sc.get_scene_entry_params(scene.id, "Singles")
+    assert before["params"]["rest_calm"]["is_bound"] is True
+    assert before["params"]["rest_calm"]["value"] is None
+
+    result = _run(sc.apply_scene_entry_param(scene.id, "Singles", "rest_calm", 0.2))
+    assert result["was_bound"] is True
+    assert "replacing its" in result["summary"]
+
+    after = sc.get_scene_entry_params(scene.id, "Singles")
+    assert after["params"]["rest_calm"]["is_bound"] is False
+    assert after["params"]["rest_calm"]["value"] == 0.2
+
+
+def test_set_scene_entry_param_does_not_touch_other_entries_or_scenes():
+    from spectra.services import scene_console as sc
+    from spectra.services import scene_store
+    from spectra.models.scene import SceneDeviceConfig
+
+    _seed_his_real_scenes()
+
+    scene = scene_store.get_by_id([s.id for s in scene_store.list_all()
+                                   if s.name == "STAR"][0])
+    candidate = scene.model_copy(deep=True)
+    candidate.devices = [
+        SceneDeviceConfig(target_kind="category", target="Singles", effect_type="pulse"),
+        SceneDeviceConfig(target_kind="category", target="Strips", effect_type="melt"),
+    ]
+    scene_store.save(candidate)
+
+    _run(sc.apply_scene_entry_param(scene.id, "Singles", "rest_calm", 0.42))
+
+    reloaded = scene_store.get_by_id(scene.id)
+    strips_entry = next(d for d in reloaded.devices if d.target == "Strips")
+    assert strips_entry.params == {}
+    for name in HIS_REAL_SCENE_NAMES:
+        if name == "STAR":
+            continue
+        other = next(s for s in scene_store.list_all() if s.name == name)
+        assert other.entry_ramp_ms == 100 + HIS_REAL_SCENE_NAMES.index(name)
+
+
+def test_get_scene_entry_params_is_declared_as_a_read_op():
+    from spectra.services import settings_agent as sa
+
+    assert "get_scene_entry_params" in sa.ALL_OPERATIONS
+    op = sa.ALL_OPERATIONS["get_scene_entry_params"]
+    assert op.domain == "scene" and op.kind == "read"
+
+
+def test_set_scene_entry_param_is_declared_as_a_write_op():
+    from spectra.services import settings_agent as sa
+
+    assert "set_scene_entry_param" in sa.ALL_OPERATIONS
+    op = sa.ALL_OPERATIONS["set_scene_entry_param"]
+    assert op.domain == "scene" and op.kind == "write"
+    schema = op.tool_schema()
+    assert set(schema["input_schema"]["required"]) == {"scene", "target", "name", "value"}
+
+
+def test_set_scene_entry_param_op_wrapper_returns_rejected_not_raise():
+    from spectra.services import scene_console as sc
+
+    result = _run(sc._op_set_scene_entry_param("no-such-scene", "Singles", "rest_calm", 0.5))
+    assert result["status"] == "rejected"
+
+
+def test_set_scene_entry_param_undo_restores_the_original_value():
+    """set_scene_entry_param is an ordinary backed-up scene edit, so
+    undo_last_scene_change puts it back exactly like any other — proven
+    here rather than assumed, since this is a newly added write path."""
+    from spectra.services import scene_console as sc
+    from spectra.services import scene_store
+
+    scene, _ = _seed_scene_with_entry("STAR", target_kind="category", target="Singles",
+                                      effect_type="pulse", params={"rest_calm": 0.1})
+    _run(sc.apply_scene_entry_param(scene.id, "Singles", "rest_calm", 0.9))
+    reloaded = scene_store.get_by_id(scene.id)
+    assert next(d for d in reloaded.devices if d.target == "Singles").params["rest_calm"] == 0.9
+
+    undo = _run(sc.apply_undo_last_scene_change())
+    assert undo["status"] == "applied"
+    restored = scene_store.get_by_id(scene.id)
+    assert next(d for d in restored.devices
+               if d.target == "Singles").params["rest_calm"] == 0.1
+
+
+def test_set_scene_entry_param_discoverable_via_list_operations():
+    from spectra.services import settings_agent as sa
+
+    idx = _run(sa._dispatch("list_operations", {"domain": "scene"}))
+    names = {o["name"] for o in idx["operations"]}
+    assert {"get_scene_entry_params", "set_scene_entry_param"} <= names

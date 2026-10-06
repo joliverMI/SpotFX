@@ -214,6 +214,7 @@ function Detail({ s, confidentScore, onJump, onClose, editor, selHandle, onSelec
         Drag a handle on the graph (it snaps to bass spikes and beats; Alt places freely), or step it here.
         Every change is one undo step, and takes effect on the show from the next moment on. "Make it my triggers" comes later.
         {' '}<HelpLink topic="drop-sequence-editing" title="Editing drop sequences" />
+        {' '}· or tell Sonic <HelpLink topic="sonic-drops" title="Sonic on drop detection" />
       </p>
       </>)}
     </div>

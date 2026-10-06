@@ -2749,10 +2749,19 @@ runner.
 
 `/settings` — a small Sonnet-class model, not a form, is the only thing
 that changes anything here. Mechanism `spectra/services/settings_console.py`
-(scope: the five RoomControlState fields already labelled "agent-tellable"
+(scope: the RoomControlState fields already labelled "agent-tellable"
 in `room_controls.py`'s own docstring — brightness, ambient enable/colour,
-global transition, scene-change tier; `force_scene_*` deliberately
-excluded, it names a scene by opaque id). `SETTINGS_REGISTRY` is an
+global transition, scene-change tier, the PLACEMENT RULE R3 knobs,
+midsong-snap-to-beat/display-mode/rainbow-select-limit, and the drop
+detector's two thresholds). **Force Scene and Force Colour are no longer
+excluded** (2026-10-06, the Admiral's ruling: "allow some flexibility in
+phrasing ... it should be a close match") — `set_force_scene`/
+`set_force_color`/`get_force_pins` resolve a scene/colour-set by NAME
+through `spectra/services/name_resolve.py` (exact, then a dropped
+qualifier like "V2", then a fuzzy match refusing a near-tie) rather than
+needing the opaque id the original exclusion was about, then write
+through `room_controls.apply_patch` — the same writer a human PUT uses,
+so the identical reconcilers run. `SETTINGS_REGISTRY` is an
 explicit allowlist whose bounds/choices are READ off RoomControlState's own
 `Field(ge=, le=)`/`Literal[...]` (`room_controls.field_bounds`/
 `field_choices`) — never a second hand-typed copy of the range.
@@ -2790,6 +2799,20 @@ settings_agent_model()` (env `SPECTRA_SETTINGS_AGENT_MODEL`, default
 `claude-sonnet-5`); API key from `settings_agent_api_key()` (env
 `ANTHROPIC_API_KEY`) — unset means a stated 503, never a silent no-op.
 
+**The 2026-10-06 Sonic coverage audit build widened four domains at
+once** (Pulse/every effect's per-entry params, Force Scene/Force Colour by
+name, house-wide settings, and drop detection's full edit set — see each
+domain's own entry below and the `pulse-effect`/`house-lighting`/
+`drop-detection` skills for the cold-start detail). **Before adding,
+changing or removing ANY Sonic operation, load the `sonic-ops` skill** —
+it is the one checklist (console module → `ALL_OPERATIONS` → MCP wrapper
+→ CLI fixtures → help topic → skill line → tests) that previously lived
+spread across this file; AGENTS.md itself no longer repeats those steps.
+The standing rule: a change that adds or changes a user-facing setting or
+action owes a Sonic follow-up — an operation, or a named exclusion with
+the reason — plus the skill update, filed as a follow-up task when the
+feature ships, never a gate on the feature's own deploy.
+
 **Sonic's scene/flare authority (2026-08-15, his own ask: "manage flares
 and the settings within the scenes and creating scenes")** — a SECOND
 mechanism module, `spectra/services/scene_console.py`, zero import of
@@ -2803,8 +2826,15 @@ reads bounds off `SceneV2`/`PhaseChoreography`/`SceneColorJourney`'s own
 create/update/remove
 (upsert by name) and `create_scene` (name + labels only — no device/effect
 authoring, that stays the Initial Set tab) round out the original
-enumerated set; device/effect editing is deliberately NOT in scope, still
-true after the widening below. **The property that protects his authored
+enumerated set; device/effect SELECTION (which effect, drift, colour mode)
+is deliberately NOT in scope, still true after the widening below.
+**Reversed for VALUES only, 2026-10-06 (his own ruling: "yes, as long as
+it doesn't limit more than we currently have")**: `get_scene_entry_params`/
+`set_scene_entry_param` read and write any registered effect param's
+CURRENT value on one scene's one device entry — the 26 Pulse settings
+among them — validated against the real effect registry (type/range/
+options), with a ⚡-bound value REPLACED (and named as such) rather than
+refused. **The property that protects his authored
 scenes**: `create_scene` only ever builds a fresh `SceneV2(name=...)` — id
 is the model's own `default_factory=uuid4`, so a created scene can never
 collide with, and therefore never overwrite, an existing one. Reachable by
@@ -4242,6 +4272,22 @@ Four things:
   registered with `no_background_color` and its breath survives a glide
   (VENDOR #49, `.claude/skills/gradient-effect`).
 
+**SONIC REACH WIDENED TO HOUSE-WIDE SETTINGS (2026-10-06, Sonic coverage
+audit build).** Before this, Sonic could do almost everything INSIDE a
+mode but could not touch `HouseSettings` itself — not even read it.
+`house_console.py` gained `get_house_settings` (reads everything,
+including the fields it cannot change), `set_house_lighting_enabled`
+(his ruling: BOTH directions by voice, not off-only), `set_house_energy`
+(resting fps per category/fixture or remove, park_idle, send_on_change,
+keepalive_s, audio_pause_after_s), and `set_house_voice_look` (Serenity's
+colours). `house.apply_settings_patch()` is the ONE writer both
+`PUT /api/house/settings` and these ops call — factored out of
+`spectra/api/house.py`'s own route so neither can diverge. Still
+deliberately read-only: `hue_excluded_lights` (a safety fence around
+bulbs outside the room) and the seam-wiring fields (`tv_strips`,
+`voice_fixtures`, `own_brightness`, `owned_brightness` — set once at
+cutover with River). See the `house-lighting` skill.
+
 **THREE DEFECTS FROM THE FIRST REAL HANDOVER, FIXED 2026-10-05 (PR
 fm/house-handover-polish)** — all found the same cutover afternoon:
 
@@ -4325,6 +4371,13 @@ things:
   --pass-drawn-fps 59` (the rig's synthetic pose, 74 emitters;
   `spectra_rig.py --room --room-maps <copy>` shows a real one).
   Specs: `tests/test_room_view.py`, `node scripts/check_live_view.mjs` (FOUR).
+
+**Sonic reach, read only (2026-10-06)**: `room_effect_console.
+list_room_map(pose?)` lists camera poses and, for one pose, which pieces
+are placed (by a measured footprint, a per-pixel camera read, or his own
+hand) and which are still in the tray — never the glow/backdrop image
+data. Hand placement itself stays a drag on the camera picture; there is
+no write op.
 
 ## The room LIGHT-FIELD map (`/rooms`) + room effects (`/room-effects`)
 
@@ -4815,8 +4868,9 @@ and the id shape. Five things to know:
   cannot outlive the hold's 3-minute ceiling. Right for a slice whose whole
   safety story is that seam; "leave the wave on all evening" needs its own
   lifetime story, not a bigger number.
-- Sonic parity is `room_effect_console.py` (4 ops, `domain="room"`).
-  Its `carrier_ids` name CARRIERS, not fixtures.
+- Sonic parity is `room_effect_console.py` (5 ops, `domain="room"` —
+  `list_room_map` read-only since 2026-10-06, see the room-map bullet
+  below). Its `carrier_ids` name CARRIERS, not fixtures.
   Excluded BY NAME with reasons in its docstring: starting/stopping an
   effect (a light-driving call — `settings_agent.py`'s whole boundary
   argument is that none exists), running a mapping sync (needs a phone in
@@ -9907,6 +9961,28 @@ window). Four things:
   `tests/test_preview_holds_the_show.py`, and the offline show run
   `scripts/check_drop_firing.py` (temp copies of live storage). Help topic
   `drop-sequence-firing`.
+
+**SONIC'S FULL EDIT SET (2026-10-06, Sonic coverage audit build).**
+`spectra/services/drop_console.py` now covers every `apply_edit` op, AND
+reads what fires: `list_drop_sequences` runs `drop_firing.
+annotated_view` (not the plain `drop_sequences.view`), so every
+sequence carries `fires`/`fires_reason` — the same phase-5 verdict the
+Timeline shows — alongside state and times. Edit ops still resolve a
+sequence off the plain view (`_pick`, key/times/state only). The edit
+set itself: add/confirm/dismiss/move (pre-existing) plus switching a lull/charge off
+or adding one that was never there (`set_drop_member` — distinguishing
+"off, time remembered" from "never there, place it by the detector's own
+rules" via the view's own `lull_off`/`charge_off` flags), back-to-detected
+(`revert_drop_sequence`), answering a re-detection's "needs review"
+(`resolve_drop_review`), Sonic's own one-step undo (`undo_drop_edit` — its
+own last edit only, in-memory per uri, refused rather than clobbering if
+the Timeline edited the same song since), re-detecting now
+(`redetect_drop_sequences`), and the library-wide summary
+(`drop_detection_summary`). The two detection thresholds
+(`drop_confident_score`/`drop_suggested_score`) are ordinary
+`settings_console.SETTINGS_REGISTRY` keys. See the `drop-detection` skill
+for the cold-start detail and `tests/test_drop_console.py::
+test_every_apply_edit_op_has_a_sonic_operation_or_is_acknowledged`.
 
 ## Maintaining this file
 
