@@ -611,6 +611,25 @@ class RoomControlState(BaseModel):
     drop_confident_score: float = Field(default=1.0, ge=0.3, le=2.0)
     drop_suggested_score: float = Field(default=0.7, ge=0.3, le=2.0)
 
+    # THE DROP FLOOR (the Admiral, 2026-10-06 ~18:00 EDT, verbatim: "add a
+    # setting called drop floor and set it as a default to 0.95. drop
+    # sequences only get generated if the final energy value for the post
+    # drop or during drop section is at least the drop floor. so quiet
+    # songs or sections don't accidentally get drops"). Read as the
+    # containing librosa SECTION's own `energy_rms` at the drop's own
+    # moment (spectra/services/analysis_reader.py's section_energy_at —
+    # the same field/scale every other section-energy reader in this
+    # codebase uses: max-normalized per song, so 0.95 means "one of this
+    # song's loudest few sections," not "95% of full volume"). Gated ONLY
+    # in drop_detector.detect() — a sequence he confirmed, edited or added
+    # never goes away because of this floor (drop_sequences.py never
+    # re-runs the detector over his own edits). A song with no section
+    # energy yet (no librosa sections stored) is UNKNOWN, never gated —
+    # "we can't tell" is not "below the floor". Folded into
+    # drop_sequences.stamp_for's own stamp, so a change re-detects each
+    # song the next time it plays.
+    drop_floor: float = Field(default=0.95, ge=0.0, le=1.0)
+
     # THE A/V-SYNC LEAD (owner ask 2026-08-28) — LEAD family: positive =
     # fire EARLIER, negative = fire LATER. The value the /avsync
     # instrument's Apply button writes, and the ONLY authored term in

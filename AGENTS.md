@@ -10058,8 +10058,25 @@ Plan: `/home/javi/fleet-spotfx/data/drop-detection-plan/report.md` (approved
   (read-only against live storage, on temp copies) holds its raw output
   identical to the testbed's on Contra / Dopamine / Pop Off / 100 Millones
   and the plan's numbers (11 of 13; 9 of 13 confident, 0 false on the EDM
-  songs). Change a rule and that script tells you what moved; bump
-  `DETECTOR_VERSION` whenever an unchanged song would detect differently.
+  songs — that script now detects at `drop_floor=0.0` so the floor below
+  doesn't move this acceptance). Change a rule and that script tells you
+  what moved; bump `DETECTOR_VERSION` whenever an unchanged song would
+  detect differently.
+- **THE DROP FLOOR (2026-10-06, the Admiral's own setting, default
+  0.95): a candidate is only kept if the containing librosa section's own
+  `energy_rms` at the drop's moment (`analysis_reader.section_energy_at`,
+  `drop_detector.final_energy_at`) clears it** — room setting `drop_floor`,
+  folded into `drop_sequences.stamp_for`'s own stamp so a change re-detects
+  each song the next time it plays. Gated ONLY inside `detect()`, so a
+  sequence he has confirmed, edited or added is never removed by it. A
+  song with no stored section energy is UNKNOWN, never gated. **Measured,
+  not assumed**: `scripts/check_drop_floor.py` scores the same four songs
+  at the shipped default against the floor off — at 0.95, 0 of his 13
+  real drops on those four songs survive (the stored `energy_rms` field is
+  max-normalized PER SONG with no floor subtraction, AGENTS.md's own
+  "Raw `energy_rms` skews high" note — 0.95 means "one of the song's few
+  loudest sections," which the bar right after a break rarely is). The
+  default stays 0.95 regardless — his own number, asked for verbatim.
 - **IT READS ONLY THE STORED AUDIO SHAPE AND THE BEATS, AND EVERY TIME IS
   SONG TIME** (the `.npz` is captured in song time; beats shift by its first
   timestamp). The test bed's `_estimate_for` must NOT shift the Drops lane

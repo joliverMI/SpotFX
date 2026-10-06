@@ -70,6 +70,8 @@ def test_registry_is_an_explicit_allowlist_matching_room_control_bounds():
         # 2026-10-06 Sonic coverage audit build (build item D15):
         "midsong_snap_to_beat", "display_mode", "rainbow_select_limit",
         "drop_confident_score", "drop_suggested_score",
+        # 2026-10-06, the Admiral's own drop-floor ask:
+        "drop_floor",
     }
     # force_scene_* deliberately excluded — see settings_console.py docstring
     assert "force_scene_enabled" not in sc.SETTINGS_REGISTRY

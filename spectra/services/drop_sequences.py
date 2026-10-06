@@ -245,11 +245,12 @@ def _mutate_tracked(uri: str, fn) -> EditResult:
 
 # ── the stamp ──────────────────────────────────────────────────────────────
 
-def _thresholds(controls: Any = None) -> tuple[float, float]:
+def _thresholds(controls: Any = None) -> tuple[float, float, float]:
     if controls is None:
         from spectra.services import room_controls
         controls = room_controls.load_room_controls()
-    return (float(controls.drop_confident_score), float(controls.drop_suggested_score))
+    return (float(controls.drop_confident_score), float(controls.drop_suggested_score),
+            float(controls.drop_floor))
 
 
 def song_inputs(uri: str) -> dict:
@@ -284,12 +285,12 @@ def song_inputs(uri: str) -> dict:
 def stamp_for(uri: str, controls: Any = None, *,
               inputs: Optional[dict] = None) -> str:
     """THE stamp a detection of `uri` made right now carries: 16 hex chars
-    of a SHA-1 over the detector version, the two thresholds and the
-    song's own inputs. Raises drop_detector.Unavailable."""
-    confident, suggested = _thresholds(controls)
+    of a SHA-1 over the detector version, the two tier thresholds, the
+    drop floor and the song's own inputs. Raises drop_detector.Unavailable."""
+    confident, suggested, floor = _thresholds(controls)
     payload = {
         "version": drop_detector.DETECTOR_VERSION,
-        "settings": {"confident": confident, "suggested": suggested},
+        "settings": {"confident": confident, "suggested": suggested, "floor": floor},
         "song": inputs if inputs is not None else song_inputs(uri),
     }
     blob = json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
@@ -316,9 +317,10 @@ def ensure_detected(uri: str, controls: Any = None, *, force: bool = False) -> d
                 current = stored(uri).get("detected") or {}
                 if current.get("stamp") == stamp and not force:
                     return {"uri": uri, "status": "fresh", "stamp": stamp}
-                confident, suggested = _thresholds(controls)
+                confident, suggested, floor = _thresholds(controls)
                 det = drop_detector.detect_uri(
-                    uri, confident_score=confident, suggested_score=suggested)
+                    uri, confident_score=confident, suggested_score=suggested,
+                    drop_floor=floor)
         except drop_detector.Unavailable as exc:
             return {"uri": uri, "status": "unavailable", "reason": str(exc)}
         record = {**det.as_dict(), "stamp": stamp, "detected_at": _now_ms()}

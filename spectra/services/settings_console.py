@@ -16,7 +16,9 @@ sensitivity/transitions_per_minute — see room_controls.py's own
 docstring on those fields and AGENTS.md's PLACEMENT RULE R3 section), and
 again 2026-10-06 (the Sonic coverage audit/build) with
 midsong_snap_to_beat, display_mode, rainbow_select_limit, and the drop
-detector's own drop_confident_score/drop_suggested_score.
+detector's own drop_confident_score/drop_suggested_score. Widened again
+2026-10-06 with the drop detector's own drop_floor (the Admiral's own
+ask for a quiet-song energy gate).
 
 force_scene_scene_id/force_color_target_id STAY OUT OF THIS REGISTRY —
 each targets a scene or colour SET/GROUP by OPAQUE ID, a poor fit for
@@ -130,7 +132,8 @@ def _spec(key: str, label: str, description: str) -> SettingSpec:
             "scene_changes_per_minute": "per minute of song, 0 = off",
             "rainbow_select_limit": "fraction 0.0-1.0",
             "drop_confident_score": "detector score",
-            "drop_suggested_score": "detector score"}.get(key)
+            "drop_suggested_score": "detector score",
+            "drop_floor": "section energy_rms, fraction 0.0-1.0"}.get(key)
     return SettingSpec(key=key, label=label, kind=kind, description=description,
                        unit=unit, min=ge, max=le, choices=choices)
 
@@ -251,6 +254,13 @@ SETTINGS_REGISTRY: dict[str, SettingSpec] = {
         "The detector score at or above which a drop sequence is "
         "offered at all (below confident). Below this score nothing is "
         "reported for that moment."),
+    "drop_floor": _spec(
+        "drop_floor", "Drop detection — energy floor",
+        "A drop sequence is only generated where the music during or "
+        "right after the drop reaches at least this section energy "
+        "(0.0-1.0, the loudest section of the song = 1.0), so quiet "
+        "songs or sections don't get drops. Never removes a drop he has "
+        "already confirmed, edited or added himself. Default 0.95."),
 }
 
 

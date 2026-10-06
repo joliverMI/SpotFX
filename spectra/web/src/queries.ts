@@ -1260,32 +1260,34 @@ export function useTestbedWaveform(uri: string | null) {
 export function useTestbedEngineMarks(
   uri: string | null, engine: string | null, markKind: string | null,
   windowBeats = 8, sensitivity = 0.5, direction = 'both', transitionsPerMinute?: number | null,
-  confidentScore?: number | null, suggestedScore?: number | null,
+  confidentScore?: number | null, suggestedScore?: number | null, floorScore?: number | null,
 ) {
   return useQuery({
     queryKey: ['testbed-engine-marks', uri, engine, markKind, windowBeats, sensitivity, direction,
-      transitionsPerMinute ?? null, confidentScore ?? null, suggestedScore ?? null],
+      transitionsPerMinute ?? null, confidentScore ?? null, suggestedScore ?? null, floorScore ?? null],
     queryFn: () => apiGet<TestbedEngineMarks>(
       `/testbed/engine-marks?uri=${enc(uri!)}&engine=${enc(engine!)}&mark_kind=${enc(markKind!)}`
       + `&window_beats=${windowBeats}&sensitivity=${sensitivity}&direction=${enc(direction)}`
       + (transitionsPerMinute != null ? `&transitions_per_minute=${transitionsPerMinute}` : '')
       + (confidentScore != null ? `&confident_score=${confidentScore}` : '')
-      + (suggestedScore != null ? `&suggested_score=${suggestedScore}` : '')),
+      + (suggestedScore != null ? `&suggested_score=${suggestedScore}` : '')
+      + (floorScore != null ? `&floor_score=${floorScore}` : '')),
     enabled: !!uri && !!engine && !!markKind,
   });
 }
 
 /** The drop-detection plan's own four-song table (Contra / Dopamine /
- * Pop Off / 100 Millones), live at the page's two drop thresholds —
- * spectra/services/testbed_drop_reference.py. Only fetched while a Drops
- * lane is shown. */
+ * Pop Off / 100 Millones), live at the page's drop thresholds and energy
+ * floor — spectra/services/testbed_drop_reference.py. Only fetched while
+ * a Drops lane is shown. */
 export function useTestbedDropReferenceSet(
-  confidentScore: number, suggestedScore: number, enabled: boolean,
+  confidentScore: number, suggestedScore: number, floorScore: number, enabled: boolean,
 ) {
   return useQuery({
-    queryKey: ['testbed-drop-reference-set', confidentScore, suggestedScore],
+    queryKey: ['testbed-drop-reference-set', confidentScore, suggestedScore, floorScore],
     queryFn: () => apiGet<TestbedDropReferenceSet>(
-      `/testbed/drop-reference-set?confident_score=${confidentScore}&suggested_score=${suggestedScore}`),
+      `/testbed/drop-reference-set?confident_score=${confidentScore}`
+      + `&suggested_score=${suggestedScore}&floor_score=${floorScore}`),
     enabled,
   });
 }

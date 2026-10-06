@@ -473,6 +473,12 @@ export interface RoomControlState {
   drop_confident_score: number;
   /** ...and at least this, SUGGESTED (waits for his confirm). Default 0.7. */
   drop_suggested_score: number;
+  /** A drop sequence is only generated where the containing librosa
+   * section's own energy_rms during or right after the drop reaches at
+   * least this (0.0-1.0, loudest section of the song = 1.0) — so quiet
+   * songs or sections don't get drops. Never removes a sequence he has
+   * confirmed, edited or added. Default 0.95. */
+  drop_floor: number;
   /** Legacy Now Playing "Force Scene" control, ported verbatim: while
    * enabled, every scene the system would otherwise pick automatically
    * (sequencer roll, trigger fire, or the automatic transition fire) fires
@@ -1700,6 +1706,7 @@ export interface TestbedDropReferenceRow {
 export interface TestbedDropReferenceSet {
   confident_score: number;
   suggested_score: number;
+  floor_score: number;
   songs: TestbedDropReferenceRow[];
   total: Partial<TestbedDropScore> | null;
   edm_total: Partial<TestbedDropScore> | null;

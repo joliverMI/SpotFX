@@ -28,7 +28,13 @@ FRAME_MS = 12
 def write_song(shapes_dir: Path, uri: str, sections: list[tuple], *,
                tempo: float = 120.0, offset_ms: int = 0, duration_ms: int | None = None,
                stem: str = "Synth - Song", analyzed_at: str = "2026-10-01T00:00:00",
-               double_hit_at_s: tuple = ()) -> str:
+               double_hit_at_s: tuple = (), energy_sections: list[tuple] | None = None) -> str:
+    """`energy_sections`: optional `[(start_s, end_s, energy_rms), ...]` in
+    SONG time, written into the librosa.json's own `sections` (WAV time —
+    shifted back by `offset_ms`, the real capture convention) for the drop
+    floor's own `analysis_reader.section_energy_at` read. `None` (the
+    default) keeps writing `sections: []`, which `section_energy_at`
+    reads as "unknown" — every existing test's songs are unaffected."""
     shapes_dir.mkdir(parents=True, exist_ok=True)
     end_s = max(s[2] for s in sections)
     t = np.arange(offset_ms, int(end_s * 1000), FRAME_MS, dtype=np.int64)
@@ -73,9 +79,14 @@ def write_song(shapes_dir: Path, uri: str, sections: list[tuple], *,
             beats.append({"ms": round(b_ms - offset_ms, 1), "is_downbeat": k % 4 == 0})
         k += 1
         b_ms = k * beat
+    sections_doc = [
+        {"start_ms": round(a_s * 1000 - offset_ms, 1), "end_ms": round(b_s * 1000 - offset_ms, 1),
+         "energy_rms": e}
+        for a_s, b_s, e in (energy_sections or [])
+    ]
     (shapes_dir / f"{stem}.librosa.json").write_text(json.dumps({
         "spotify_uri": uri, "tempo_bpm": tempo, "analyzed_at": analyzed_at,
-        "beats": beats, "sections": [],
+        "beats": beats, "sections": sections_doc,
     }), encoding="utf-8")
     (shapes_dir / f"{stem}.json").write_text(json.dumps({
         "spotify_uri": uri,

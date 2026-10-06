@@ -233,26 +233,30 @@ def _edges_marks(uri: str, *, window_beats: int, sensitivity: float,
 
 
 def drop_thresholds(confident_score: Optional[float],
-                    suggested_score: Optional[float]) -> tuple[float, float]:
-    """The page's two thresholds, each falling back to the room's own
+                    suggested_score: Optional[float],
+                    floor_score: Optional[float] = None) -> tuple[float, float, float]:
+    """The page's three drop knobs, each falling back to the room's own
     setting when omitted — the "explicit overrides, omitted tracks the
     room" shape every other knob here has."""
-    if confident_score is None or suggested_score is None:
+    if confident_score is None or suggested_score is None or floor_score is None:
         from spectra.services import room_controls
         controls = room_controls.load_room_controls()
         if confident_score is None:
             confident_score = float(controls.drop_confident_score)
         if suggested_score is None:
             suggested_score = float(controls.drop_suggested_score)
-    return float(confident_score), float(suggested_score)
+        if floor_score is None:
+            floor_score = float(controls.drop_floor)
+    return float(confident_score), float(suggested_score), float(floor_score)
 
 
 def _drops_marks(uri: str, *, confident_score: Optional[float],
-                 suggested_score: Optional[float]) -> Optional[list[EngineMark]]:
-    confident, suggested = drop_thresholds(confident_score, suggested_score)
+                 suggested_score: Optional[float],
+                 floor_score: Optional[float] = None) -> Optional[list[EngineMark]]:
+    confident, suggested, floor = drop_thresholds(confident_score, suggested_score, floor_score)
     try:
         det = drop_detector.detect_uri(uri, confident_score=confident,
-                                       suggested_score=suggested)
+                                       suggested_score=suggested, drop_floor=floor)
     except drop_detector.Unavailable:
         return None
     out: list[EngineMark] = []
@@ -287,6 +291,7 @@ def marks_for(
     transitions_per_minute: Optional[float] = None,
     confident_score: Optional[float] = None,
     suggested_score: Optional[float] = None,
+    floor_score: Optional[float] = None,
 ) -> Optional[list[EngineMark]]:
     """None = not available for this song (either the engine hasn't been
     precomputed for it, or — for librosa/generator/edges — no analysis
@@ -295,9 +300,9 @@ def marks_for(
     (2026-09-23, the R3 placement rule); `transitions_per_minute` is read
     only by the `generator` engine's preview kind (the density rate has
     no meaning for `edges`, which only detects edges, never ranks
-    candidates); `confident_score`/`suggested_score` only by `drops` (None
-    = the room's own setting). Every engine ignores the knobs it does not
-    use."""
+    candidates); `confident_score`/`suggested_score`/`floor_score` only by
+    `drops` (None = the room's own setting). Every engine ignores the
+    knobs it does not use."""
     if engine == ENGINE_LIBROSA:
         return _librosa_marks(uri)
     if engine == ENGINE_GENERATOR:
@@ -309,7 +314,7 @@ def marks_for(
                             direction=direction)
     if engine == ENGINE_DROPS:
         return _drops_marks(uri, confident_score=confident_score,
-                            suggested_score=suggested_score)
+                            suggested_score=suggested_score, floor_score=floor_score)
     cached = testbed_cache.load(engine, uri)
     if cached is None:
         return None

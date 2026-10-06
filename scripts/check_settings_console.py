@@ -129,8 +129,11 @@ check(set(sc.SETTINGS_REGISTRY) == {
     # the Sonic coverage audit/build (2026-10-06)
     "midsong_snap_to_beat", "display_mode", "rainbow_select_limit",
     "drop_confident_score", "drop_suggested_score",
+    # the drop-floor setting (2026-10-06, the Admiral's own ask)
+    "drop_floor",
 }, "registry is the deliberate allowlist (eight room keys + the four "
-   "analysed-transition knobs + the five 2026-10-06 widening keys)")
+   "analysed-transition knobs + the five 2026-10-06 widening keys + "
+   "drop_floor)")
 check(sc.SETTINGS_REGISTRY["ambient_enabled"].kind == "bool"
       and sc.SETTINGS_REGISTRY["ambient_on_music_pause"].kind == "bool",
       "the ambient toggle is binary to Sonic too — no mode string to mis-say")

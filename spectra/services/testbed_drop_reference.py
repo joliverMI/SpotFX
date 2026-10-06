@@ -33,13 +33,14 @@ DROP_REFERENCE_SONGS: list[tuple[str, str, bool]] = [
 
 
 def compute(*, confident_score: Optional[float] = None,
-            suggested_score: Optional[float] = None) -> dict:
-    confident, suggested = drop_thresholds(confident_score, suggested_score)
+            suggested_score: Optional[float] = None,
+            floor_score: Optional[float] = None) -> dict:
+    confident, suggested, floor = drop_thresholds(confident_score, suggested_score, floor_score)
     rows = []
     for name, uri, edm in DROP_REFERENCE_SONGS:
         try:
             det = drop_detector.detect_uri(uri, confident_score=confident,
-                                           suggested_score=suggested)
+                                           suggested_score=suggested, drop_floor=floor)
         except drop_detector.Unavailable as exc:
             rows.append({"name": name, "uri": uri, "edm": edm, "available": False,
                          "reason": str(exc), "score": None})
@@ -51,6 +52,7 @@ def compute(*, confident_score: Optional[float] = None,
     return {
         "confident_score": confident,
         "suggested_score": suggested,
+        "floor_score": floor,
         "songs": rows,
         "total": drop_scoring.totals([r["score"] for r in scored]) if scored else None,
         "edm_total": (drop_scoring.totals([r["score"] for r in scored],
