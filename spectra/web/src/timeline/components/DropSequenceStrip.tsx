@@ -1,10 +1,11 @@
 /** THE DROP-SEQUENCE STRIP — the whole song at a glance, under his SPECTRA
  * triggers strip (drop-detection plan, phase 3; plan.html's "New strip
  * below it"). Gold and blue segments are each sequence's build and lull; a
- * numbered pink pill is a sequence that fires (his own triggers today, or
- * one that will once detected drops go live); a dashed "?" is a suggestion
- * waiting for his confirm; an outlined "✦" is a confident detection this
- * song will not play. Clicking a pill selects it and zooms the big graph
+ * numbered pink pill is a sequence that fires on this song now (his own
+ * triggers, a sequence of his, or a confident detection where the song
+ * plays the analysed show — the server's `fires`); a dashed "?" is a
+ * suggestion waiting for his confirm; an outlined "✦" is one this song
+ * will not play under the room's setting now. Clicking a pill selects it and zooms the big graph
  * from two bars before the charge to two bars after the drop. Read-only:
  * nothing here moves or edits a sequence. */
 import type { Win } from '../canvas/frame';

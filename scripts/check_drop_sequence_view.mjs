@@ -91,17 +91,45 @@ console.log('§2 what fires is numbered, in time order; a suggestion is "?"');
 const fired = seqs.filter((s) => s.number != null);
 ok(fired.map((s) => s.number).join() === fired.map((_, i) => i + 1).join(), 'numbers run 1..n with no gaps');
 ok(byDrop(66817).number === 1 && byDrop(66817).fire === 'fires', 'his own group fires today, number 1');
-ok(byDrop(87070).fire === 'will_fire' && byDrop(87070).badge === String(byDrop(87070).number),
-  'a confident detection on an analysed-show song will fire: numbered');
+ok(byDrop(87070).fire === 'fires' && byDrop(87070).badge === String(byDrop(87070).number),
+  'a confident detection on an analysed-show song fires: numbered');
 ok(byDrop(47612).badge === '?' && byDrop(47612).fire === 'waits', 'a suggestion waits: "?"');
-ok(byDrop(189677).fire === 'will_fire' && byDrop(220000).fire === 'will_fire',
-  'edited and added sequences are his: they will fire');
+ok(byDrop(189677).fire === 'fires' && byDrop(220000).fire === 'fires',
+  'edited and added sequences are his: they fire');
 
 console.log('§3 a confident detection on a song that plays only his triggers is "✦", not numbered');
 seqs = v.buildDisplay(resp, { showDismissed: false, analysedApplies: false });
 ok(byDrop(87070).fire === 'muted' && byDrop(87070).badge === '✦' && byDrop(87070).number === null,
   'muted, outlined ✦, no number');
 ok(byDrop(66817).number === 1, 'his own still number 1');
+
+console.log('§3b the server\'s own answer wins (phase 5: drop_firing.annotate)');
+{
+  const withFires = JSON.parse(JSON.stringify(resp));
+  for (const sv of withFires.sequences) {
+    if (sv.drop_ms === 87070) { sv.fires = false; sv.fires_reason = 'analysed_show_off'; }
+    if (sv.drop_ms === 220000) { sv.fires = false; sv.fires_reason = 'transitions_only'; }
+    if (sv.drop_ms === 189677) { sv.fires = true; sv.fires_reason = 'his'; sv.stood_down = { charge: 'his-c' }; }
+  }
+  const s3 = v.buildDisplay(withFires, { showDismissed: false, analysedApplies: true });
+  const at = (ms) => s3.find((x) => x.drop === ms);
+  ok(at(87070).fire === 'muted' && at(87070).number === null,
+    'a confident one the server says does not fire here is muted, even with analysedApplies');
+  ok(at(220000).fire === 'muted' && at(220000).badge === '✦',
+    'one of his under "Transitions only" is muted');
+  ok(/Transitions only/.test(v.fireLine(at(220000))), 'and says why');
+  ok(at(189677).fire === 'fires' && /left out/.test(v.fireLine(at(189677))),
+    'a member standing down on his own trigger is named');
+  const onHis = JSON.parse(JSON.stringify(resp));
+  for (const sv of onHis.sequences) {
+    if (sv.drop_ms === 220000) { sv.fires = false; sv.fires_reason = 'matches_yours'; }
+  }
+  const s4 = v.buildDisplay(onHis, { showDismissed: false, analysedApplies: true });
+  ok(s4.find((x) => x.drop === 220000).fire === 'stands_down',
+    'an added sequence on his own trigger stands down, never "muted"');
+  ok(!/does not fire yet|once detected drops go live/.test(
+    s3.map((x) => v.fireLine(x)).join(' ')), 'no "not live yet" wording remains');
+}
 
 console.log('§4 dismissed is hidden unless "show dismissed"');
 ok(!seqs.some((s) => s.drop === 170486), 'hidden by default');

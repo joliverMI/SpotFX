@@ -213,6 +213,19 @@ the same safety rules, each of which is a test:
   - a song whose capture offset cannot be right (it would put the captured
     audio past the song's own end) keeps its stored cues — re-placing them
     by that offset would put them after the song is over.
+
+DROP SEQUENCES (2026-10-06, drop-detection plan phase 5; spectra/services/
+drop_firing.py is the binding statement). Each sequence that may fire —
+and each of his own grouped charge/lull/drop — carries a PROTECTED WINDOW
+from its first member to two bars after its drop. plan_moments takes a
+moment AT the drop or inside the lull out of the ranking entirely (the
+drop is the action there), and the strongest-first fill never makes a
+moment inside a window a scene change (it stays a flare). The windows are
+part of song_inputs, so confirming, dismissing or moving a sequence marks
+the song's stored cues stale; GENERATOR_VERSION "3" re-plans every song
+once for the rule itself. The trigger clock applies the same windows
+again at fire time (trigger_engine), which covers the play during which a
+plan was made before an edit or before detection landed.
 """
 from __future__ import annotations
 
@@ -233,7 +246,7 @@ logger = logging.getLogger(__name__)
 INTENSITY_FLOOR = 0.05
 EDGE_TRIM_MS = 15_000
 
-GENERATOR_VERSION = "2"
+GENERATOR_VERSION = "3"
 """Bumped whenever this module's own planning changes what it would store
 for an unchanged song and unchanged settings — part of every generated
 cue's generator_stamp, so a bump marks every stored analysed cue stale and
@@ -410,14 +423,17 @@ def planning_hold_s(raw_intensity: float, factor: float, curves: list[list]) -> 
 def _strongest_first_fill(
     by_strength: list[CandidateMoment], ordered: list[dict], factor: float,
     ceiling: Optional[int], hold_curves: list[list],
+    protected: tuple = (),
 ) -> list[CandidateMoment]:
     """THE STRONGEST-FIRST FILL (the module docstring's SCENE-CHANGE PLANNER):
     walk the actions strongest first; each becomes a scene change when it
     fits the hold IN BOTH DIRECTIONS around every scene change already
     chosen and the song-start pick — after an earlier change's hold has run
     out, and early enough that its own hold runs out before a later one —
-    until `ceiling` (None = no ceiling) is reached. Returns the chosen, in
-    strength order. Pure: no I/O."""
+    until `ceiling` (None = no ceiling) is reached. A moment inside a drop
+    sequence's protected window (`protected`, drop_firing.Window) is never
+    a scene change — it stays a flare. Returns the chosen, in strength
+    order. Pure: no I/O."""
     try:
         start_raw = max(0.0, min(1.0, float(ordered[0].get("energy_rms", 0.5))))
     except (IndexError, TypeError, ValueError):
@@ -429,6 +445,8 @@ def _strongest_first_fill(
             break
         t = c.timestamp_ms
         if (t - PLAN_START_MS) / 1000.0 < start_hold:
+            continue
+        if any(w.holds_scene_change(t) for w in protected):
             continue
         hold = planning_hold_s(c.intensity, factor, hold_curves)
         fits = all(
@@ -574,6 +592,7 @@ def plan_moments(
     claimed: Optional[set[str]] = None,
     scene_changes_per_minute: Optional[float] = None,
     hold_curves: Optional[list[list]] = None,
+    protected: Optional[list] = None,
 ) -> MomentPlan:
     """The song's MomentPlan — its scene changes, its flares and the
     moments that are no action, each placed and ranked (the module
@@ -596,7 +615,14 @@ def plan_moments(
 
     `claimed` is the set of generator keys he has edited or deleted by hand
     (spectra/services/analysed_claims.py), read fresh when not given: those
-    moments are his and never become a cue or a flare again."""
+    moments are his and never become a cue or a flare again.
+
+    `protected` is the song's drop-sequence windows (spectra/services/
+    drop_firing.py — the module docstring's DROP SEQUENCES section), read
+    fresh when not given: a moment AT a sequence's drop or inside its lull
+    is no action at all (the drop moment leaves the ranking — the drop
+    itself is the action there), and a moment anywhere else inside a
+    window may be a flare but never a scene change."""
     sections = analysis_reader.sections_for_uri(uri)
     if not sections:
         return MomentPlan([], [])
@@ -649,6 +675,16 @@ def plan_moments(
             result.timestamp_ms, intensity, f"section:{raw_ms}",
             result.snap_grid, result.snap_moved_ms, strength=strength))
 
+    # 0. DROP SEQUENCES — a moment at a sequence's drop or inside its lull
+    #    leaves the ranking (drop_firing.Window.silences_flare).
+    if protected is None:
+        protected = _protected_windows(uri)
+    blocked = [c for c in placed
+               if any(w.silences_flare(c.timestamp_ms) for w in protected)]
+    if blocked:
+        blocked_keys = {c.generator_key for c in blocked}
+        placed = [c for c in placed if c.generator_key not in blocked_keys]
+
     # 1. DEDUPE — two transitions placed onto the same moment are one
     #    moment: the stronger keeps it (the earlier on a tie).
     by_moment: dict[int, CandidateMoment] = {}
@@ -674,14 +710,22 @@ def plan_moments(
     # 4. STRONGEST-FIRST FILL — see the module docstring.
     if hold_curves is None:
         hold_curves = planning_hold_curves()
-    chosen = _strongest_first_fill(pool, ordered, factor, ceiling, hold_curves)
+    chosen = _strongest_first_fill(pool, ordered, factor, ceiling, hold_curves,
+                                   tuple(protected))
     chosen_keys = {c.generator_key for c in chosen}
     kept = sorted(chosen, key=lambda c: c.timestamp_ms)
     flares = sorted((c for c in pool if c.generator_key not in chosen_keys),
                     key=lambda c: c.timestamp_ms)
-    dropped = sorted([ranked.get(c.generator_key, c) for c in duplicates] + below,
-                     key=lambda c: c.timestamp_ms)
+    dropped = sorted([ranked.get(c.generator_key, c) for c in duplicates] + below
+                     + blocked, key=lambda c: c.timestamp_ms)
     return MomentPlan(kept, flares, dropped=dropped, rank_of=rank_of)
+
+
+def _protected_windows(uri: str) -> list:
+    """The song's drop-sequence windows (lazy: drop_firing imports
+    analysed_flares, which imports this module)."""
+    from spectra.services import drop_firing
+    return drop_firing.protected_windows(uri)
 
 
 def _settings_part(controls: Any) -> dict:
@@ -698,14 +742,17 @@ def _settings_part(controls: Any) -> dict:
     }
 
 
-def song_inputs(uri: str, *, claimed: Optional[set[str]] = None) -> dict:
+def song_inputs(uri: str, *, claimed: Optional[set[str]] = None,
+                protected: Optional[list] = None) -> dict:
     """The song-specific half of generator_stamp: what this song's plan is
     read from, beyond the room settings. Content values, never file times —
     a capture sidecar rewritten with the same numbers must not mark a song
     stale. The automatic intensity factor is deliberately NOT here: its
     genre half is only known while the song plays and its bass half drifts
     as the library grows, so stamping it would re-plan songs for reasons
-    nobody chose. His manual mark is a choice, so it is here."""
+    nobody chose. His manual mark is a choice, so it is here, and so are
+    the song's drop-sequence windows (a confirm, a dismissal or a moved
+    handle changes where scene changes may land)."""
     from spectra.services import intensity_scale_marks, testbed_cache
     doc = analysis_reader.librosa_analysis_for_stem(analysis_reader.stem_for_uri(uri))
     beat_this = testbed_cache.load(beat_snap.GRID_BEAT_THIS, uri)
@@ -717,6 +764,8 @@ def song_inputs(uri: str, *, claimed: Optional[set[str]] = None) -> dict:
         "beat_this": (beat_this or {}).get("computed_at"),
         "mark": intensity_scale_marks.get_mark(uri),
         "claimed": sorted(claimed),
+        "protected": [w.as_list() for w in (
+            protected if protected is not None else _protected_windows(uri))],
     }
 
 
@@ -903,8 +952,10 @@ def plan_song(uri: str, controls: Any = None) -> SongPlanResult:
         if capture_offset_past_end(uri):
             return SongPlanResult(uri, None, None, OFFSET_PAST_END_REASON)
         claimed = analysed_claims.claimed_keys(uri)
-        inputs = song_inputs(uri, claimed=claimed)
-        moments = plan_moments(uri, claimed=claimed, **_planning_kwargs(controls)).kept
+        protected = _protected_windows(uri)
+        inputs = song_inputs(uri, claimed=claimed, protected=protected)
+        moments = plan_moments(uri, claimed=claimed, protected=protected,
+                               **_planning_kwargs(controls)).kept
     return SongPlanResult(uri, moments, generator_stamp(uri, controls, inputs=inputs))
 
 

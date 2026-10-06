@@ -2,8 +2,9 @@
  * the full-song strip and the review list (drop-detection plan, phase 3:
  * /home/javi/fleet-spotfx/data/drop-detection-plan/report.md section 8,
  * built to plan.html's Timeline mock). What a hand on a sequence DOES
- * (drag, snap, add, undo — phase 4) is ./dropEdit.ts; nothing detected
- * fires yet (phase 5).
+ * (drag, snap, add, undo — phase 4) is ./dropEdit.ts. What FIRES is the
+ * server's answer (spectra/services/drop_firing.py, phase 5): each sequence
+ * in the view carries `fires` for this song under the room's setting now.
  *
  * WHAT IT READS. GET /spectra/api/drop-sequences?uri= (spectra/services/
  * drop_sequences.py's `view`: the song's detected sequences merged with his
@@ -26,12 +27,14 @@
  *   mine (his own triggers) · dismissed (hidden unless "show dismissed").
  *
  *   WHAT FIRES, under the approved design (decisions 2 and 3): his own
- *   triggers fire today; a confirmed, edited or added sequence will fire
- *   wherever his triggers fire; a CONFIDENT detection will fire only on a
- *   song that plays the analysed show (`analysedApplies`, the analysed
- *   plan's own `applies`); a suggestion waits for his confirm. Numbered
- *   pills are the ones that fire or will, in time order; a suggestion is
- *   "?", a confident detection this song will not play is "✦".
+ *   triggers fire as they always have; a confirmed, edited or added
+ *   sequence fires wherever his triggers fire and wherever the analysed
+ *   show plays; a CONFIDENT detection fires only on a song that plays the
+ *   analysed show; a suggestion waits for his confirm. The server says it
+ *   per sequence (`fires`, the trigger clock's own rule); without that
+ *   field (an older server) `analysedApplies` — the analysed plan's own
+ *   `applies` — stands in. Numbered pills are the ones that fire, in time
+ *   order; a suggestion is "?", a sequence this song will not play is "✦".
  *
  * THE BUILD each charge and lull is drawn with is the engine's own
  * arithmetic — phaseBlendSpan from ./phaseBlend.ts (scene_response.
@@ -95,6 +98,36 @@ export interface DropSequenceView {
   detection_lost: boolean;
   matches: HisMark[];
   his_marks_near: HisMark[];
+  /** phase 5 (drop_firing.annotate): whether it fires on this song under
+   * the room's "Scene changes" setting now, and why (not). Absent from an
+   * older server. */
+  fires?: boolean;
+  fires_reason?: 'his' | 'analysed_show' | 'analysed_show_off' | 'transitions_only'
+    | 'matches_yours' | 'waits_for_confirm' | 'dismissed';
+  /** members left out because one of his own triggers of that class fires
+   * within two beats of it: handle -> his trigger id */
+  stood_down?: Partial<Record<Handle, string>>;
+  /** the intensity it fires at (before the room's render scaling) */
+  intensity?: number;
+}
+
+/** The trigger clock's gate for this song now (drop_firing.annotate). */
+export interface DropFiring {
+  effective_mode: string;
+  has_authored: boolean;
+  analysed_applies: boolean;
+  his_applies: boolean;
+}
+
+/** A protected window: no analysed scene change inside it, no analysed
+ * flare in its lull or on its drop. */
+export interface DropWindow {
+  key: string;
+  source: 'sequence' | 'yours';
+  start_ms: number;
+  lull_ms: number | null;
+  drop_ms: number;
+  end_ms: number;
 }
 
 export interface AuthoredGroup {
@@ -120,6 +153,8 @@ export interface DropSequencesResponse {
   counts: Record<string, number>;
   authored: AuthoredGroup[];
   authored_lone: HisMark[];
+  firing?: DropFiring;
+  windows?: DropWindow[];
 }
 
 export interface DropRails {
@@ -139,12 +174,14 @@ export interface DropRails {
 export type SeqLook =
   | 'confident' | 'suggested' | 'confirmed' | 'edited' | 'added' | 'mine' | 'dismissed';
 
-/** fires = his own triggers, firing as they always have (wherever the
- * room's "Scene changes" setting fires his triggers). will_fire = fires once detected
- * sequences go live (phase 5). muted = a confident detection on a song that
- * plays only his own triggers. waits = a suggestion, waiting for his
- * confirm. stands_down = a detection on one of his lone phase triggers. */
-export type FireStatus = 'fires' | 'will_fire' | 'muted' | 'waits' | 'stands_down' | 'dismissed';
+/** fires = it fires on this song under the room's setting now (his own
+ * triggers, a sequence of his, or a confident detection on a song that
+ * plays the analysed show). muted = it would fire, but not on this song
+ * under the room's setting now (a confident detection on a song that plays
+ * only his own triggers; anything under "Transitions only"). waits = a
+ * suggestion, waiting for his confirm. stands_down = a detection on one of
+ * his lone phase triggers. */
+export type FireStatus = 'fires' | 'muted' | 'waits' | 'stands_down' | 'dismissed';
 
 export interface DisplaySeq {
   /** unique across the song: the detection's key, an added id, or
@@ -178,18 +215,21 @@ function lookOf(v: DropSequenceView): SeqLook {
   }
 }
 
-function fireOf(look: SeqLook, analysedApplies: boolean): FireStatus {
+function fireOf(look: SeqLook, analysedApplies: boolean, serverFires?: boolean): FireStatus {
   switch (look) {
     case 'mine': return 'fires';
-    case 'confirmed': case 'edited': case 'added': return 'will_fire';
-    case 'confident': return analysedApplies ? 'will_fire' : 'muted';
+    case 'confirmed': case 'edited': case 'added':
+      return serverFires === false ? 'muted' : 'fires';
+    case 'confident':
+      if (serverFires != null) return serverFires ? 'fires' : 'muted';
+      return analysedApplies ? 'fires' : 'muted';
     case 'suggested': return 'waits';
     default: return 'dismissed';
   }
 }
 
 export function sequenceFires(s: Pick<DisplaySeq, 'fire'>): boolean {
-  return s.fire === 'fires' || s.fire === 'will_fire';
+  return s.fire === 'fires';
 }
 
 function analysisHad(v: DropSequenceView): Partial<Record<Handle, number>> {
@@ -211,7 +251,9 @@ function fromView(v: DropSequenceView, analysedApplies: boolean): DisplaySeq {
     charge: v.charge_ms, lull: v.lull_ms, drop: v.drop_ms,
     analysisHad: analysisHad(v),
     off: { charge: !!v.charge_off, lull: !!v.lull_off },
-    fire: fireOf(look, analysedApplies),
+    // an added sequence on one of his own phase triggers stands down too
+    fire: v.fires === false && v.fires_reason === 'matches_yours' && look !== 'dismissed'
+      ? 'stands_down' : fireOf(look, analysedApplies, v.fires),
     number: null, badge: '', view: v, his: null,
   };
 }
@@ -374,29 +416,40 @@ export function reviewStatus(s: DisplaySeq): string {
     const k = v?.matches[0]?.kind;
     return `stands down: you have a ${markName(k ?? 'drop')} here`;
   }
-  if (s.look === 'confirmed') return `confirmed by you${flag}`;
-  if (s.look === 'edited') return `edited by you${flag}`;
-  if (s.look === 'added') return 'added by you';
+  const silent = s.fire === 'muted' ? ' · "Transitions only" fires no drops' : '';
+  if (s.look === 'confirmed') return `confirmed by you${flag}${silent}`;
+  if (s.look === 'edited') return `edited by you${flag}${silent}`;
+  if (s.look === 'added') return `added by you${silent}`;
   if (s.look === 'dismissed') return 'dismissed · not a drop';
   const near = v?.his_marks_near ?? [];
   if (near.length) return `you have a ${markName(near[0].kind)} here`;
   if (s.look === 'confident') {
     return s.fire === 'muted'
-      ? 'detected · this song plays only your own triggers'
+      ? (s.view?.fires_reason === 'transitions_only'
+        ? 'detected · "Transitions only" fires no drops'
+        : 'detected · this song plays only your own triggers')
       : 'detected · fires with the analysed show';
   }
   return 'suggested · waits for your confirm';
 }
 
-/** One line on what firing this sequence means — the honest version for a
- * read-only phase: nothing detected fires yet. */
+/** One line on what firing this sequence means, as the trigger clock will
+ * do it (spectra/services/drop_firing.py). */
 export function fireLine(s: DisplaySeq): string {
+  const standing = Object.keys(s.view?.stood_down ?? {});
+  const left = standing.length
+    ? ` Its ${standing.join(' and ')} is left out: your own ${standing.join(' and ')} fires there.`
+    : '';
   switch (s.fire) {
-    case 'fires': return 'Your own triggers — they fire wherever your triggers fire (your "Scene changes" setting decides that), exactly as they always have.';
-    case 'will_fire': return s.look === 'confident'
-      ? 'Confident: once detected drops go live it fires on its own, because this song plays the analysed show. It does not fire yet.'
-      : 'Yours: once detected drops go live it fires wherever your triggers fire. It does not fire yet.';
-    case 'muted': return 'Confident, but this song plays only your own triggers, so it would not fire here. It does not fire yet in any case.';
+    case 'fires':
+      if (s.look === 'mine') return 'Your own triggers — they fire wherever your triggers fire (your "Scene changes" setting decides that), exactly as they always have.';
+      return (s.look === 'confident'
+        ? 'Confident: it fires on its own, because this song plays the analysed show — charge, lull and drop as the ordinary responses, each build peaking on its own partner.'
+        : 'Yours: it fires wherever your triggers fire, and with the analysed show too — charge, lull and drop as the ordinary responses, each build peaking on its own partner.')
+        + left;
+    case 'muted': return s.view?.fires_reason === 'transitions_only'
+      ? 'Not on this setting: "Scene changes" is "Transitions only", which fires no drops, analysed or yours.'
+      : 'Confident, but this song plays only your own triggers, so it does not fire here. Confirm it to make it yours and it will.';
     case 'waits': return 'A suggestion: it waits for your confirm and never fires on its own.';
     case 'stands_down': return 'Your own trigger sits here, so this detection stands down and yours fires.';
     default: return 'Dismissed: it never fires and is never offered again.';

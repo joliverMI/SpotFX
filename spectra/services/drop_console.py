@@ -6,7 +6,8 @@ earlier", "no drops on this song").
 Every write goes through spectra/services/drop_sequences.py's own
 `apply_edit` — the same edits the Timeline's buttons make, never a second
 write path — so the "How edits are kept" rules hold here exactly as there.
-Nothing here fires anything (phase 5).
+What fires is spectra/services/drop_firing.py's rule (phase 5): a
+sequence confirmed, edited or added here counts as his.
 
 NUMBERING. A sequence is named by its number in song order among the
 song's sequences that are not dismissed (#1 is the earliest), the same

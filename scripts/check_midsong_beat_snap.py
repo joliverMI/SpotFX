@@ -105,6 +105,7 @@ def _run_generation(tmp_root: Path, uri: str, *, snap: bool) -> list[int]:
 
     run_dir = tmp_root / ("snap_on" if snap else "snap_off") / uri.replace(":", "_")
     scfg.TRIGGERS_FILE = run_dir / "triggers.json"
+    scfg.DROP_SEQUENCES_FILE = run_dir / "drop_sequences.json"
     scfg.ROOM_CONTROLS_FILE = run_dir / "room_controls.json"
     run_dir.mkdir(parents=True, exist_ok=True)
     room_controls.save_room_controls(

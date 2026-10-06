@@ -200,6 +200,7 @@ def _run_generation(
 
     run_dir = tmp_root / label / uri.replace(":", "_")
     scfg.TRIGGERS_FILE = run_dir / "triggers.json"
+    scfg.DROP_SEQUENCES_FILE = run_dir / "drop_sequences.json"
     scfg.ROOM_CONTROLS_FILE = run_dir / "room_controls.json"
     run_dir.mkdir(parents=True, exist_ok=True)
     room_controls.save_room_controls(room_controls.RoomControlState(

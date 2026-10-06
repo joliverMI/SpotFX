@@ -1,0 +1,755 @@
+{
+ "_about": "The four test songs' drop detections (drop_detector at DETECTOR_VERSION '1', the shipped thresholds) and his own enabled charge/lull/drop triggers, captured 2026-10-06 by running drop_sequences.ensure_detected over TEMP COPIES of the live storage (scripts/check_drop_detector.py's isolation). Read by tests/test_drop_firing.py \u2014 never live storage.",
+ "songs": {
+  "spotify:track:2zVg53xdC6RMpthWju6LRT": {
+   "name": "Contra",
+   "detected": {
+    "uri": "spotify:track:2zVg53xdC6RMpthWju6LRT",
+    "detector_version": "1",
+    "confident_score": 1.0,
+    "suggested_score": 0.7,
+    "tempo_bpm": 126.05,
+    "beat_ms": 476.002,
+    "captured_from_ms": 0,
+    "captured_to_ms": 238625,
+    "duration_ms": 238080,
+    "sequences": [
+     {
+      "key": "drop:47612",
+      "drop_ms": 47612,
+      "lull_ms": 46080,
+      "charge_ms": 39915,
+      "score": 0.717,
+      "tier": "suggested",
+      "break_beats": 3.22,
+      "step": 0.46,
+      "rise": 0.697,
+      "path": "step",
+      "loud_before": true,
+      "capped": false,
+      "notes": []
+     },
+     {
+      "key": "drop:66803",
+      "drop_ms": 66803,
+      "lull_ms": 65236,
+      "charge_ms": 62484,
+      "score": 1.202,
+      "tier": "confident",
+      "break_beats": 3.29,
+      "step": 0.939,
+      "rise": 0.907,
+      "path": "step",
+      "loud_before": true,
+      "capped": false,
+      "notes": []
+     },
+     {
+      "key": "drop:112883",
+      "drop_ms": 112883,
+      "lull_ms": 111130,
+      "charge_ms": 105209,
+      "score": 1.088,
+      "tier": "confident",
+      "break_beats": 3.68,
+      "step": 0.793,
+      "rise": 0.845,
+      "path": "step",
+      "loud_before": true,
+      "capped": false,
+      "notes": []
+     },
+     {
+      "key": "drop:158969",
+      "drop_ms": 158969,
+      "lull_ms": 147551,
+      "charge_ms": 139552,
+      "score": 0.821,
+      "tier": "suggested",
+      "break_beats": 23.99,
+      "step": 0.501,
+      "rise": 0.791,
+      "path": "step",
+      "loud_before": true,
+      "capped": false,
+      "notes": []
+     },
+     {
+      "key": "drop:162811",
+      "drop_ms": 162811,
+      "lull_ms": null,
+      "charge_ms": null,
+      "score": 0.707,
+      "tier": "suggested",
+      "break_beats": 3.02,
+      "step": 0.465,
+      "rise": 0.701,
+      "path": "step",
+      "loud_before": true,
+      "capped": false,
+      "notes": [
+       "lull and charge left out: they fell inside the previous drop's two bars (until 162777 ms)"
+      ]
+     },
+     {
+      "key": "drop:170486",
+      "drop_ms": 170486,
+      "lull_ms": 169081,
+      "charge_ms": 166626,
+      "score": 0.712,
+      "tier": "suggested",
+      "break_beats": 2.95,
+      "step": 0.476,
+      "rise": 0.715,
+      "path": "step",
+      "loud_before": true,
+      "capped": false,
+      "notes": [
+       "charge moved from 162811 ms to 166626 ms: it started inside the previous drop's two bars"
+      ]
+     },
+     {
+      "key": "drop:189677",
+      "drop_ms": 189677,
+      "lull_ms": 187889,
+      "charge_ms": 181039,
+      "score": 1.431,
+      "tier": "confident",
+      "break_beats": 3.76,
+      "step": 1.111,
+      "rise": 0.627,
+      "path": "step",
+      "loud_before": true,
+      "capped": false,
+      "notes": []
+     },
+     {
+      "key": "drop:205048",
+      "drop_ms": 205048,
+      "lull_ms": 202332,
+      "charge_ms": 197363,
+      "score": 1.499,
+      "tier": "confident",
+      "break_beats": 3.73,
+      "step": 1.179,
+      "rise": 0.574,
+      "path": "step",
+      "loud_before": true,
+      "capped": false,
+      "notes": []
+     }
+    ],
+    "excluded": [],
+    "stamp": "51672f29e472aefa",
+    "detected_at": 1791307562620
+   },
+   "his_phase_triggers": [
+    {
+     "id": "6db33d83-2689-4bbf-b868-45662ef9b846",
+     "timestamp_ms": 59143,
+     "trigger_offset_ms": 0,
+     "enabled": true,
+     "event_class": "charge",
+     "intensity": 0.6048
+    },
+    {
+     "id": "de7c007b-a6c9-4d93-ab44-e5061c42eb87",
+     "timestamp_ms": 65397,
+     "trigger_offset_ms": 0,
+     "enabled": true,
+     "event_class": "lull",
+     "intensity": 0.9158
+    },
+    {
+     "id": "db21494a-9afd-4f40-a424-39392159e755",
+     "timestamp_ms": 66817,
+     "trigger_offset_ms": 0,
+     "enabled": true,
+     "event_class": "drop",
+     "intensity": 0.9158
+    },
+    {
+     "id": "37384840-3f6c-441b-b1ed-4a93c01931f3",
+     "timestamp_ms": 109075,
+     "trigger_offset_ms": 0,
+     "enabled": true,
+     "event_class": "charge",
+     "intensity": 0.72
+    },
+    {
+     "id": "8726fe69-aad4-41c7-82ea-790520d8e815",
+     "timestamp_ms": 110978,
+     "trigger_offset_ms": 0,
+     "enabled": true,
+     "event_class": "lull",
+     "intensity": 0.8963
+    },
+    {
+     "id": "f00123e5-7d7f-4846-b754-f403967f6868",
+     "timestamp_ms": 112897,
+     "trigger_offset_ms": 0,
+     "enabled": true,
+     "event_class": "drop",
+     "intensity": 0.8963
+    },
+    {
+     "id": "599ac9dc-dd7f-4e36-a65a-ad72deb4ee98",
+     "timestamp_ms": 185815,
+     "trigger_offset_ms": 0,
+     "enabled": true,
+     "event_class": "charge",
+     "intensity": 0.42
+    },
+    {
+     "id": "3235f813-ebb1-43b6-abaa-bf0e971c8a6f",
+     "timestamp_ms": 188678,
+     "trigger_offset_ms": 0,
+     "enabled": true,
+     "event_class": "lull",
+     "intensity": 0.27
+    },
+    {
+     "id": "d4e0ad64-5f72-408b-bd40-776628b07354",
+     "timestamp_ms": 189686,
+     "trigger_offset_ms": 0,
+     "enabled": true,
+     "event_class": "drop",
+     "intensity": 0.9687
+    },
+    {
+     "id": "c94d7b07-4202-4ca8-aa2f-eee857640425",
+     "timestamp_ms": 205162,
+     "trigger_offset_ms": 0,
+     "enabled": true,
+     "event_class": "drop",
+     "intensity": 1.0
+    }
+   ]
+  },
+  "spotify:track:7vFKcXQ39f74XNrZmXADIT": {
+   "name": "Dopamine",
+   "detected": {
+    "uri": "spotify:track:7vFKcXQ39f74XNrZmXADIT",
+    "detector_version": "1",
+    "confident_score": 1.0,
+    "suggested_score": 0.7,
+    "tempo_bpm": 143.55,
+    "beat_ms": 417.973,
+    "captured_from_ms": 0,
+    "captured_to_ms": 159668,
+    "duration_ms": 158896,
+    "sequences": [
+     {
+      "key": "drop:47853",
+      "drop_ms": 47853,
+      "lull_ms": 41827,
+      "charge_ms": 35047,
+      "score": 1.532,
+      "tier": "confident",
+      "break_beats": 12.72,
+      "step": 1.212,
+      "rise": 0.662,
+      "path": "step",
+      "loud_before": true,
+      "capped": false,
+      "notes": []
+     },
+     {
+      "key": "drop:87582",
+      "drop_ms": 87582,
+      "lull_ms": 85086,
+      "charge_ms": 81327,
+      "score": 0.918,
+      "tier": "suggested",
+      "break_beats": 5.97,
+      "step": 0.598,
+      "rise": 0.734,
+      "path": "step",
+      "loud_before": true,
+      "capped": false,
+      "notes": []
+     },
+     {
+      "key": "drop:100829",
+      "drop_ms": 100829,
+      "lull_ms": 100028,
+      "charge_ms": 97520,
+      "score": 0.974,
+      "tier": "suggested",
+      "break_beats": 1.92,
+      "step": 0.186,
+      "rise": 0.847,
+      "path": "roll",
+      "loud_before": true,
+      "capped": false,
+      "notes": []
+     }
+    ],
+    "excluded": [],
+    "stamp": "5b9ed9d76b804da9",
+    "detected_at": 1791307562699
+   },
+   "his_phase_triggers": [
+    {
+     "id": "f82b34f3-c4dd-4ed7-adf4-b8411291eb9f",
+     "timestamp_ms": 37976,
+     "trigger_offset_ms": 0,
+     "enabled": true,
+     "event_class": "charge",
+     "intensity": 0.6341
+    },
+    {
+     "id": "d2dfa0b6-7674-4695-9a2f-e0f734c2e287",
+     "timestamp_ms": 41850,
+     "trigger_offset_ms": 0,
+     "enabled": true,
+     "event_class": "lull",
+     "intensity": 0.6341
+    },
+    {
+     "id": "6533f1e1-0b66-4947-90fa-4bee64aa5d96",
+     "timestamp_ms": 47850,
+     "trigger_offset_ms": 0,
+     "enabled": true,
+     "event_class": "drop",
+     "intensity": 1.0
+    },
+    {
+     "id": "6e3278ce-8c99-406a-8463-3dcaed8495bb",
+     "timestamp_ms": 97590,
+     "trigger_offset_ms": 0,
+     "enabled": true,
+     "event_class": "charge",
+     "intensity": 0.6549
+    },
+    {
+     "id": "47d668b5-030c-4e0a-9bbb-e3cb62a76377",
+     "timestamp_ms": 99630,
+     "trigger_offset_ms": 0,
+     "enabled": true,
+     "event_class": "lull",
+     "intensity": 0.11
+    },
+    {
+     "id": "658934a4-73f3-45e9-8571-9b2135b7957f",
+     "timestamp_ms": 100950,
+     "trigger_offset_ms": 0,
+     "enabled": true,
+     "event_class": "drop",
+     "intensity": 1.0
+    }
+   ]
+  },
+  "spotify:track:4PolqZLqReEqc3yURJtzc4": {
+   "name": "Pop Off",
+   "detected": {
+    "uri": "spotify:track:4PolqZLqReEqc3yURJtzc4",
+    "detector_version": "1",
+    "confident_score": 1.0,
+    "suggested_score": 0.7,
+    "tempo_bpm": 143.55,
+    "beat_ms": 417.973,
+    "captured_from_ms": 18005,
+    "captured_to_ms": 195630,
+    "duration_ms": 196056,
+    "sequences": [
+     {
+      "key": "drop:59570",
+      "drop_ms": 59570,
+      "lull_ms": 57248,
+      "charge_ms": 53474,
+      "score": 1.211,
+      "tier": "confident",
+      "break_beats": 5.56,
+      "step": 0.891,
+      "rise": 0.306,
+      "path": "step",
+      "loud_before": true,
+      "capped": false,
+      "notes": []
+     },
+     {
+      "key": "drop:100983",
+      "drop_ms": 100983,
+      "lull_ms": 100228,
+      "charge_ms": 94446,
+      "score": 0.8,
+      "tier": "suggested",
+      "break_beats": 1.81,
+      "step": 0.656,
+      "rise": 0.8,
+      "path": "step",
+      "loud_before": true,
+      "capped": false,
+      "notes": []
+     },
+     {
+      "key": "drop:171983",
+      "drop_ms": 171983,
+      "lull_ms": 169302,
+      "charge_ms": 165226,
+      "score": 1.077,
+      "tier": "confident",
+      "break_beats": 6.41,
+      "step": 0.757,
+      "rise": 0.506,
+      "path": "step",
+      "loud_before": true,
+      "capped": false,
+      "notes": []
+     },
+     {
+      "key": "drop:178753",
+      "drop_ms": 178753,
+      "lull_ms": 177196,
+      "charge_ms": 175378,
+      "score": 1.309,
+      "tier": "confident",
+      "break_beats": 3.81,
+      "step": 1.004,
+      "rise": 0.703,
+      "path": "step",
+      "loud_before": true,
+      "capped": false,
+      "notes": [
+       "charge moved from 171152 ms to 175378 ms: it started inside the previous drop's two bars"
+      ]
+     }
+    ],
+    "excluded": [],
+    "stamp": "7726769415769380",
+    "detected_at": 1791307562787
+   },
+   "his_phase_triggers": [
+    {
+     "id": "0c27446f-cb98-40ce-863b-a0300d28985d",
+     "timestamp_ms": 49874,
+     "trigger_offset_ms": 0,
+     "enabled": true,
+     "event_class": "charge",
+     "intensity": 0.914
+    },
+    {
+     "id": "b8f3ae1e-54f0-4333-bff0-ed72f0b35fc5",
+     "timestamp_ms": 56400,
+     "trigger_offset_ms": 0,
+     "enabled": true,
+     "event_class": "lull",
+     "intensity": 0.26
+    },
+    {
+     "id": "1af110cd-32ae-4d13-967e-d06dedc996d3",
+     "timestamp_ms": 59603,
+     "trigger_offset_ms": 0,
+     "enabled": true,
+     "event_class": "drop",
+     "intensity": 0.934
+    },
+    {
+     "id": "22ad0e44-abea-4d9f-88c3-808bc98b4b39",
+     "timestamp_ms": 65954,
+     "trigger_offset_ms": 0,
+     "enabled": true,
+     "event_class": "charge",
+     "intensity": 0.923
+    },
+    {
+     "id": "22456aa2-0e80-419b-8a73-69aa8a9ef08e",
+     "timestamp_ms": 94247,
+     "trigger_offset_ms": 0,
+     "enabled": true,
+     "event_class": "charge",
+     "intensity": 0.89
+    },
+    {
+     "id": "01a65b1a-f89b-40f6-8927-057f17156389",
+     "timestamp_ms": 99948,
+     "trigger_offset_ms": 0,
+     "enabled": true,
+     "event_class": "lull",
+     "intensity": 0.86
+    },
+    {
+     "id": "55e49082-a4a3-44ba-87f9-e2c15db08f0d",
+     "timestamp_ms": 101020,
+     "trigger_offset_ms": 0,
+     "enabled": true,
+     "event_class": "drop",
+     "intensity": 0.859
+    },
+    {
+     "id": "e910e51c-8f42-4785-a3bb-ce5d50e08eaa",
+     "timestamp_ms": 162800,
+     "trigger_offset_ms": 0,
+     "enabled": true,
+     "event_class": "charge",
+     "intensity": 0.935
+    },
+    {
+     "id": "4f539c1c-c5f6-4a69-a186-bc9a28a71de2",
+     "timestamp_ms": 168621,
+     "trigger_offset_ms": 0,
+     "enabled": true,
+     "event_class": "lull",
+     "intensity": 0.964
+    },
+    {
+     "id": "1ca77630-2ea2-4d6c-ab85-c205c14c1b20",
+     "timestamp_ms": 172011,
+     "trigger_offset_ms": 0,
+     "enabled": true,
+     "event_class": "drop",
+     "intensity": 0.964
+    },
+    {
+     "id": "f149ed44-324c-43dd-a019-abac43ec2aca",
+     "timestamp_ms": 175100,
+     "trigger_offset_ms": 0,
+     "enabled": true,
+     "event_class": "charge",
+     "intensity": 0.96
+    },
+    {
+     "id": "478d9ac2-4e65-4f39-be9e-85806438dd5a",
+     "timestamp_ms": 177140,
+     "trigger_offset_ms": 0,
+     "enabled": true,
+     "event_class": "lull",
+     "intensity": 0.35
+    },
+    {
+     "id": "c059fbe7-c16d-43ae-af2b-2f5a624781da",
+     "timestamp_ms": 178740,
+     "trigger_offset_ms": 0,
+     "enabled": true,
+     "event_class": "drop",
+     "intensity": 0.897
+    },
+    {
+     "id": "de96601d-7b44-495b-b94c-2e8b32d4382d",
+     "timestamp_ms": 188892,
+     "trigger_offset_ms": 0,
+     "enabled": true,
+     "event_class": "drop",
+     "intensity": 1.0
+    },
+    {
+     "id": "333d2a09-7e12-488f-a93c-a86eeb5071a8",
+     "timestamp_ms": 192282,
+     "trigger_offset_ms": 0,
+     "enabled": true,
+     "event_class": "drop",
+     "intensity": 1.0
+    }
+   ]
+  },
+  "spotify:track:4Ixc50wY5pbUvNEogTQ2wL": {
+   "name": "100 Millones",
+   "detected": {
+    "uri": "spotify:track:4Ixc50wY5pbUvNEogTQ2wL",
+    "detector_version": "1",
+    "confident_score": 1.0,
+    "suggested_score": 0.7,
+    "tempo_bpm": 112.35,
+    "beat_ms": 534.045,
+    "captured_from_ms": 29882,
+    "captured_to_ms": 235792,
+    "duration_ms": 237459,
+    "sequences": [
+     {
+      "key": "drop:39314",
+      "drop_ms": 39314,
+      "lull_ms": 37939,
+      "charge_ms": 32497,
+      "score": 0.773,
+      "tier": "suggested",
+      "break_beats": 2.57,
+      "step": 0.567,
+      "rise": 0.782,
+      "path": "step",
+      "loud_before": true,
+      "capped": false,
+      "notes": []
+     },
+     {
+      "key": "drop:59194",
+      "drop_ms": 59194,
+      "lull_ms": 47873,
+      "charge_ms": 43918,
+      "score": 1.101,
+      "tier": "confident",
+      "break_beats": 21.2,
+      "step": 0.781,
+      "rise": 0.436,
+      "path": "step",
+      "loud_before": true,
+      "capped": false,
+      "notes": [
+       "charge moved from 39314 ms to 43918 ms: it started inside the previous drop's two bars"
+      ]
+     },
+     {
+      "key": "drop:87070",
+      "drop_ms": 87070,
+      "lull_ms": 81962,
+      "charge_ms": 77306,
+      "score": 1.014,
+      "tier": "confident",
+      "break_beats": 9.56,
+      "step": 0.694,
+      "rise": 0.404,
+      "path": "step",
+      "loud_before": true,
+      "capped": false,
+      "notes": []
+     },
+     {
+      "key": "drop:96114",
+      "drop_ms": 96114,
+      "lull_ms": 94733,
+      "charge_ms": 91705,
+      "score": 0.793,
+      "tier": "suggested",
+      "break_beats": 2.59,
+      "step": 0.586,
+      "rise": 0.797,
+      "path": "step",
+      "loud_before": true,
+      "capped": false,
+      "notes": [
+       "charge moved from 87070 ms to 91705 ms: it started inside the previous drop's two bars"
+      ]
+     },
+     {
+      "key": "drop:116002",
+      "drop_ms": 116002,
+      "lull_ms": 104682,
+      "charge_ms": 100412,
+      "score": 0.944,
+      "tier": "suggested",
+      "break_beats": 21.2,
+      "step": 0.624,
+      "rise": 0.583,
+      "path": "step",
+      "loud_before": true,
+      "capped": false,
+      "notes": [
+       "charge moved from 96114 ms to 100412 ms: it started inside the previous drop's two bars"
+      ]
+     },
+     {
+      "key": "drop:127357",
+      "drop_ms": 127357,
+      "lull_ms": 125267,
+      "charge_ms": 120834,
+      "score": 1.132,
+      "tier": "confident",
+      "break_beats": 3.91,
+      "step": 0.819,
+      "rise": 0.587,
+      "path": "step",
+      "loud_before": true,
+      "capped": false,
+      "notes": [
+       "charge moved from 118835 ms to 120834 ms: it started inside the previous drop's two bars"
+      ]
+     },
+     {
+      "key": "drop:150084",
+      "drop_ms": 150084,
+      "lull_ms": 137267,
+      "charge_ms": 133860,
+      "score": 1.147,
+      "tier": "confident",
+      "break_beats": 24.0,
+      "step": 0.827,
+      "rise": 0.578,
+      "path": "step",
+      "loud_before": true,
+      "capped": false,
+      "notes": []
+     },
+     {
+      "key": "drop:155819",
+      "drop_ms": 155819,
+      "lull_ms": null,
+      "charge_ms": null,
+      "score": 0.905,
+      "tier": "suggested",
+      "break_beats": 4.0,
+      "step": 0.585,
+      "rise": 0.306,
+      "path": "step",
+      "loud_before": true,
+      "capped": false,
+      "notes": [
+       "lull and charge left out: they fell inside the previous drop's two bars (until 154356 ms)"
+      ]
+     },
+     {
+      "key": "drop:166594",
+      "drop_ms": 166594,
+      "lull_ms": 161485,
+      "charge_ms": 160587,
+      "score": 1.004,
+      "tier": "suggested",
+      "break_beats": 9.57,
+      "step": 0.684,
+      "rise": 0.41,
+      "path": "step",
+      "loud_before": true,
+      "capped": true,
+      "notes": [
+       "suggested, not confident: this song allows 5 confident sequences (one per 45 s) and stronger ones took them",
+       "charge moved from 153242 ms to 160587 ms: it started inside the previous drop's two bars"
+      ]
+     },
+     {
+      "key": "drop:221442",
+      "drop_ms": 221442,
+      "lull_ms": 217030,
+      "charge_ms": 212926,
+      "score": 1.029,
+      "tier": "confident",
+      "break_beats": 6.57,
+      "step": 0.709,
+      "rise": 0.54,
+      "path": "step",
+      "loud_before": true,
+      "capped": false,
+      "notes": []
+     }
+    ],
+    "excluded": [],
+    "stamp": "45d9ff4e603f2a0f",
+    "detected_at": 1791307562855
+   },
+   "his_phase_triggers": [
+    {
+     "id": "37083d36-b08e-49d3-afa0-bc63e712fe01",
+     "timestamp_ms": 46420,
+     "trigger_offset_ms": 0,
+     "enabled": true,
+     "event_class": "charge",
+     "intensity": 0.968
+    },
+    {
+     "id": "1a9a62d8-7453-4ff7-8306-caba8b4e9f56",
+     "timestamp_ms": 47900,
+     "trigger_offset_ms": 0,
+     "enabled": true,
+     "event_class": "lull",
+     "intensity": 0.78
+    },
+    {
+     "id": "c82f2ac7-6d98-4f84-878b-58f3e5cf3adf",
+     "timestamp_ms": 59260,
+     "trigger_offset_ms": 0,
+     "enabled": true,
+     "event_class": "drop",
+     "intensity": 0.923
+    }
+   ]
+  }
+ }
+}

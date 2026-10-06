@@ -9765,8 +9765,8 @@ Plan: `/home/javi/fleet-spotfx/data/drop-detection-plan/report.md` (approved
   a detection down as `matches_yours` within two beats of his enabled
   charge/lull/drop; the Drops lane and `drop_scoring.score_song` score the
   detector's raw proposal, or every match would stand down and score zero.
-- **NOTHING FIRES FROM IT YET** (phase 5: synthetic triggers in `tick()`,
-  the protected window).
+- **WHAT FIRES IS `drop_firing.py`** (phase 5, below) — this store only says
+  what each sequence IS.
 
 **PHASE 3 — SEEN ON THE TIMELINE, READ-ONLY (2026-10-06).**
 `spectra/web/src/timeline/dropSequences.ts` is the binding statement: ONE
@@ -9806,6 +9806,41 @@ scripts/check_drop_sequence_view.mjs`.
   "Make it my triggers" is still to come. Proof: `node
   scripts/check_drop_sequence_edit.mjs`, `tests/test_drop_sequence_edits.py`,
   `tests/test_drop_console.py`.
+
+**PHASE 5 — FIRING (2026-10-06).** `spectra/services/drop_firing.py` is the
+binding statement (what fires per mode, the stand-downs, the protected
+window). Four things:
+
+- **A MEMBER IS A SYNTHETIC TRIGGER IN `tick()`**, the analysed flares'
+  shape: `drop-seq:<key>:<class>` beside the stored triggers, gated by
+  `drop_firing.fires_here` (NOT `_trigger_allowed`), relocated and led like
+  any `fire_response`, fired through `engine.fire_response_event(...,
+  via_trigger=True, analysed=True)` with its gap from its OWN sequence
+  (`FiringSequence.gap_ms`). The view is memoised on
+  `drop_sequences.revision()` plus his phase triggers, so a tick costs a
+  stat. A sequence of his never counts as an authored trigger for the
+  "My triggers only" per-song fallback.
+- **THE PROTECTED WINDOW IS APPLIED TWICE, ON PURPOSE**: `plan_moments`
+  (`protected=`, read through `drop_firing.protected_windows`; the drop
+  moment and lull leave the ranking, the window holds no scene change) with
+  the windows in `song_inputs` so an edit marks stored cues stale
+  (`GENERATOR_VERSION` "3"), and `tick()` holds a generated `fire_scene` /
+  analysed flare at fire time (`_held_by_drop_window`, recorded as
+  `deferred/drop_window`) for the play during which a plan predates an edit
+  or a detection. His own grouped sequences are windows too. A new analysed
+  write path near a drop needs the same check.
+- **AN EDIT OR A DETECTION CALLS `drop_sequences._changed`**, which drops the
+  trigger clock's cached analysed plan for the song. A planner test that
+  puts phase triggers in the store now gets windows from them — pass
+  `protected=[]` when that is not what it is about.
+- **THE TIMELINE FOLLOWS THE SERVER'S `fires`** (`drop_firing.annotate`, on
+  every drop-sequences view and the analysed plan): `FireStatus` is
+  fires / muted / waits / stands_down / dismissed. Proof:
+  `tests/test_drop_firing.py` (the four songs' real detections and phase
+  triggers as `tests/fixtures/drop_sequences_four_songs.json`, every mode),
+  `tests/test_preview_holds_the_show.py`, and the offline show run
+  `scripts/check_drop_firing.py` (temp copies of live storage). Help topic
+  `drop-sequence-firing`.
 
 ## Maintaining this file
 
