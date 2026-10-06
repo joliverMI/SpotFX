@@ -93,6 +93,11 @@ def test_a_number_that_names_nothing_is_rejected_with_the_list_never_guessed():
     _detected([(44_000, 40_000, 35_000, "confident")])
     out = _run("confirm_drop_sequence", sequence=3)
     assert out["status"] == "rejected" and len(out["sequences"]) == 1
+    # the rejection's embedded list is built off the plain, un-annotated
+    # view (never checked against drop_firing) — it must not fabricate a
+    # fires/fires_reason verdict nothing actually computed
+    assert "fires" not in out["sequences"][0]
+    assert "fires_reason" not in out["sequences"][0]
     out = _run("move_drop_handle", sequence=1, handle="lull", by_beats=10)
     assert out["status"] == "rejected" and "before" in out["reason"]
     out = _run("move_drop_handle", sequence=1, handle="lull")

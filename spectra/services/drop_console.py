@@ -55,7 +55,7 @@ def _numbered(view: dict) -> list[dict]:
 
 
 def _describe(n: int, s: dict) -> dict:
-    return {
+    out = {
         "number": n, "state": s["state"],
         "drop_s": _secs(s["drop_ms"]), "lull_s": _secs(s.get("lull_ms")),
         "charge_s": _secs(s.get("charge_ms")),
@@ -66,11 +66,16 @@ def _describe(n: int, s: dict) -> dict:
         "lull_off": bool(s.get("lull_off")), "charge_off": bool(s.get("charge_off")),
         "editable": s["state"] != ds.STATE_MATCHES_YOURS,
         "needs_review": bool(s.get("needs_review")),
-        # whether this sequence fires under the room's scene-change setting
-        # right now (drop_firing.annotate, phase 5) — reading this was the
-        # one thing the audit found nothing covered at all.
-        "fires": bool(s.get("fires")), "fires_reason": s.get("fires_reason"),
     }
+    # whether this sequence fires under the room's scene-change setting right
+    # now (drop_firing.annotate, phase 5) — only present when `s` came from
+    # annotated_view (_op_list); a sequence resolved off the plain, un-
+    # annotated view (e.g. _pick's rejection payload) never had this checked,
+    # so it must never be reported as a "does not fire" verdict here.
+    if "fires" in s:
+        out["fires"] = bool(s.get("fires"))
+        out["fires_reason"] = s.get("fires_reason")
+    return out
 
 
 def _pick(view: dict, number: Any) -> tuple[Optional[dict], Optional[dict]]:
