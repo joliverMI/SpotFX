@@ -259,7 +259,7 @@ def virtual_layout(virtual: dict, devices: dict[str, dict], hue_looks=None) -> O
                     else [int(i) for i in src]),
             "grid": [int(i) for i in pixels] if rows > 1 else None,
             "held": _held_hex(fx["device_id"], device.get("type"),
-                             device.get("config"), hue_looks),
+                              device.get("config"), hue_looks),
         })
     return {
         "id": resolved["id"], "name": resolved["name"], "rows": rows,
