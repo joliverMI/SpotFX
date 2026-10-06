@@ -126,8 +126,11 @@ check(set(sc.SETTINGS_REGISTRY) == {
     "transitions_per_minute",
     # the scene-change planner's optional ceiling (2026-10-04)
     "scene_changes_per_minute",
+    # the Sonic coverage audit/build (2026-10-06)
+    "midsong_snap_to_beat", "display_mode", "rainbow_select_limit",
+    "drop_confident_score", "drop_suggested_score",
 }, "registry is the deliberate allowlist (eight room keys + the four "
-   "analysed-transition knobs)")
+   "analysed-transition knobs + the five 2026-10-06 widening keys)")
 check(sc.SETTINGS_REGISTRY["ambient_enabled"].kind == "bool"
       and sc.SETTINGS_REGISTRY["ambient_on_music_pause"].kind == "bool",
       "the ambient toggle is binary to Sonic too — no mode string to mis-say")
@@ -171,10 +174,13 @@ check(rc.load_room_controls().brightness_multiplier == 1.0, "undo's restore land
 
 # ═══ 3. the structural tool boundary ═══════════════════════════════════
 
-check(set(sc.OPERATIONS) == {"get_settings", "set_setting"},
-      "the settings domain itself is still exactly two operations")
-check({"get_settings", "set_setting"} <= {t["name"] for t in sa.TOOLS},
-      "the merged tool set still carries both settings operations")
+check(set(sc.OPERATIONS) == {
+    "get_settings", "set_setting",
+    "get_force_pins", "set_force_scene", "set_force_color",
+}, "the settings domain is now five operations (Force Scene/Colour by "
+   "name, added 2026-10-06)")
+check(set(sc.OPERATIONS) <= {t["name"] for t in sa.TOOLS},
+      "the merged tool set still carries every settings operation")
 
 for bad_tool in ("run_shell", "restart_service", "deploy", "drive_lights"):
     r = run(sa._dispatch(bad_tool, {}))
