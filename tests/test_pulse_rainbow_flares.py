@@ -668,7 +668,7 @@ def test_his_flares_flip_only_above_0_4_and_flash_every_time(slug):
     meta, arrays = h.load_fixture(slug)
     flares = _authored_flare_pokes(meta)
     above = [f for f in flares if f[1] > 0.4]
-    assert above and len(above) < len(flares) or slug == "dopamine"
+    assert above and len(above) < len(flares)    # both sides of 0.4 occur
     assert all(("flip" in p) is (i > 0.4) for _t, i, p in flares)
     assert all("flash" in p for _t, _i, p in flares)
     tr = h.run(meta, arrays, scale=h.SONGS[slug]["scale"],
