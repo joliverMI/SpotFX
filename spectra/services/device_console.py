@@ -97,6 +97,20 @@ def _live_host():
     return getattr(live, "host", None)
 
 
+def _live_host_for(action: str):
+    """`_live_host()`, refusing while the stack is still starting: the
+    facade would otherwise start an empty host of its own (fx_seam's "A
+    WRITE NEVER STARTS A HOST"), and the stored config is the starting
+    stack's to read, not ours to write."""
+    host = _live_host()
+    if host is not None:
+        from spectra.services import fx_seam
+        if not fx_seam.facade_host_ready():
+            raise DeviceOpError(f"the room's live stack is still starting — "
+                                f"{action} again in a few seconds")
+    return host
+
+
 def _config_path():
     from spectra import config as scfg
     return scfg.FX_LIVE_CONFIG_DIR / "config.json"
@@ -238,6 +252,10 @@ async def list_devices() -> dict:
     settings = device_settings.load_all()
     host = _live_host()
     if host is not None:
+        from spectra.services import fx_seam
+        if not fx_seam.facade_host_ready():
+            host = None           # still starting: answer from the stored config
+    if host is not None:
         from fx import facade
         resp = await facade.handle("GET", "/api/devices")
         if resp.status_code == 200:
@@ -308,7 +326,7 @@ async def create_device(device_type: str, config: dict) -> dict:
     name = (config or {}).get("name")
     if not name:
         raise DeviceOpError("a device needs a name")
-    host = _live_host()
+    host = _live_host_for("create it")
     if host is not None:
         from fx import facade
         resp = await facade.handle("POST", "/api/devices",
@@ -361,7 +379,7 @@ async def update_device(device_id: str, config: dict) -> dict:
     config revalidated against the same schema and written back."""
     if not isinstance(config, dict) or not config:
         raise DeviceOpError("nothing to change")
-    host = _live_host()
+    host = _live_host_for("change it")
     if host is not None:
         from fx import facade
         resp = await facade.handle("PUT", f"/api/devices/{device_id}",

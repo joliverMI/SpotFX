@@ -22,6 +22,20 @@ convention:
                       RELEASED). Fires stay refused until the way-back
                       handover lands.
 
+A WRITE NEVER STARTS A HOST (2026-10-06, the deploy that came back with 0 of
+5 virtuals up). `fx.facade.handle` lazily starts a fresh FxHost on the
+DEFAULT config dir when none is installed — right for spot-effects'
+in-process switch, fatal here: while a resume or take is still assembling
+the live stack (`live.assembling`, the facade host not yet installed), a
+trigger crossing on the playing song sent a scene write through this module,
+the facade started an EMPTY host (0 devices) and the real stack then loaded
+every virtual against an empty device registry. So with SPECTRA owning, every
+primitive here first asks `facade_host_ready()` and, while the stack is
+starting or no host is installed, REFUSES with `HostNotReady` — a
+HandoverInProgress, because to every caller it is the same thing: the room
+is not ready to take a write yet. Logged once per episode, not per write.
+fx_executor.FacadeExecutor and device_console carry the same check.
+
 Bounded concurrency + a hard per-request deadline carry the write-plane
 lesson (the 2026-08-12 outage was leaked slots parking calls forever).
 
@@ -74,13 +88,49 @@ class RoomReleased(RuntimeError):
     lands."""
 
 
+class HostNotReady(HandoverInProgress):
+    """Raised when a write arrives while SPECTRA owns the room but its live
+    stack is still starting (or no facade host is installed) — refused, so
+    the facade never starts an empty host of its own (module docstring)."""
+
+
+_not_ready_logged = False
+
+
+def facade_host_ready() -> bool:
+    """True when the facade has the live stack's host installed and the
+    stack is not mid-assembly — the only state in which an in-process write
+    may reach fx.facade.handle without it starting a host of its own. Logs
+    once when it turns False, and once when it recovers."""
+    global _not_ready_logged
+    from fx import facade
+    from spectra.services.live_host import live
+    ready = (getattr(facade, "_host", None) is not None
+             and not getattr(live, "assembling", False))
+    if not ready and not _not_ready_logged:
+        _not_ready_logged = True
+        logger.warning("fx seam: the live stack is still starting (or no host "
+                       "is installed) — in-process writes are refused until it "
+                       "is up, so the facade never starts a host of its own")
+    elif ready and _not_ready_logged:
+        _not_ready_logged = False
+        logger.info("fx seam: the live stack is up — in-process writes resume")
+    return ready
+
+
 def _require_owner() -> str:
     """The owner to route THIS call through, or raise the same refusal
     apply_writes always has — a single place so every new primitive added
     here (get_virtuals, set_virtual_config, ...) refuses identically rather
     than re-deriving the branch."""
     owner = light_ownership.load().owner
-    if owner in (light_ownership.SPECTRA, light_ownership.SPOT_EFFECTS):
+    if owner == light_ownership.SPECTRA:
+        if not facade_host_ready():
+            raise HostNotReady(
+                "the live stack is still starting — writes are refused until "
+                "it is up")
+        return owner
+    if owner == light_ownership.SPOT_EFFECTS:
         return owner
     if owner == light_ownership.RELEASED:
         raise RoomReleased(

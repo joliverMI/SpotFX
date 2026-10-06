@@ -206,7 +206,9 @@ def test_a_write_with_the_room_up_goes_through_the_live_host(monkeypatch):
         return _Resp()
 
     import fx.facade as facade
+    from spectra.services import fx_seam
     monkeypatch.setattr(device_console, "_live_host", lambda: object())
+    monkeypatch.setattr(fx_seam, "facade_host_ready", lambda: True)
     monkeypatch.setattr(facade, "handle", fake_handle)
 
     result = _run(device_console.update_device("live-1", {"pixel_count": 64}))
@@ -229,7 +231,9 @@ def test_a_live_refusal_is_carried_forward_verbatim(monkeypatch):
         return _Resp()
 
     import fx.facade as facade
+    from spectra.services import fx_seam
     monkeypatch.setattr(device_console, "_live_host", lambda: object())
+    monkeypatch.setattr(fx_seam, "facade_host_ready", lambda: True)
     monkeypatch.setattr(facade, "handle", fake_handle)
     with pytest.raises(device_console.DeviceOpError, match="nope"):
         _run(device_console.update_device("live-1", {"pixel_count": 64}))
