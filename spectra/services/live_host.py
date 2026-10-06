@@ -570,6 +570,24 @@ class LiveLights:
                 return gaps
             await asyncio.sleep(0.05)
 
+    def hue_stream_refusals(self) -> dict[str, str]:
+        """Hue areas whose entertainment session is NOT started because the
+        area holds a bulb off fx/hue_scope's allow-list (or one the bridge
+        would not identify) — `{device_id: the sentence}`. Starting a
+        session switches on every bulb in the area, so such an area is not
+        streamed at all (fx/devices/hue.py, SpotFX deviation #52). A pure
+        read of each device's own flag; empty when nothing is refused or
+        the stack is down."""
+        if self.host is None:
+            return {}
+        out: dict[str, str] = {}
+        devices = self.host.devices
+        for did in list(devices):            # the real registry has no .items()
+            reason = getattr(devices.get(did), "scope_refusal", None)
+            if isinstance(reason, str) and reason:
+                out[str(did)] = reason
+        return out
+
     def streaming_device_ids(self,
                              stale_after_s: float = STALE_AFTER_S) -> set[str]:
         """Every real (non-gap) device SPECTRA is PUSHING FRAMES AT RIGHT

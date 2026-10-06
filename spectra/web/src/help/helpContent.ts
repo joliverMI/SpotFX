@@ -770,6 +770,16 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        id: 'hue-scope-stream',
+        title: 'A Hue area left out of the show (it holds a bulb Spectra may not light)',
+        keywords: 'hue scope allow-list allow list excluded bulbs loft ceiling uplight ledge left right center music group entertainment area session start switched on turned on restart not streamed left out refused home assistant hue_scope.json hue app remove bulb',
+        body: [
+          'WHAT YOU SEE: an amber strip at the top of every page — "⚠ 1 Hue area is not in the show — it holds bulbs Spectra may not light" — naming the area and the bulbs.',
+          'WHY: some Hue bulbs are Home Assistant\'s, not Spectra\'s — today the Loft Ceiling Uplight and the three Ledge bulbs, which sit in the living room\'s "Music Group" entertainment area. Spectra only ever writes the bulbs on its allow-list (storage/spectra/hue_scope.json), one at a time. But starting a Hue entertainment session (how the music show drives Hue) makes the bridge switch on EVERY bulb in that area, before a single colour is sent — that is how those four came on after a restart on 2026-10-06 with house lighting and Hue Hold both off. Leaving their channels dark cannot stop that, so Spectra does not start a session on an area that holds a bulb off the allow-list (or one the bridge will not identify) at all. The other areas stream as usual.',
+          'HOW TO GET IT BACK: take those bulbs out of the entertainment area in the Hue app (or move them to an area of their own). Spectra re-reads the area about once a minute, so the strip clears and the rest of the area joins the show without a restart. Hue Hold and house modes are not affected: they write the allowed bulbs one by one, as before.',
+        ],
+      },
+      {
         id: 'param-watchdog',
         title: 'Parameter watchdog — a value left stranded gets put back',
         keywords: 'watchdog orphan orphaned stuck stranded reverse backwards parameter param value baseline restore restored put back momentary flare release lost nothing holding it left alone permanent in flight hold glide liveness count show log review 30 seconds grace status engine card given up',
@@ -2317,9 +2327,9 @@ export const HELP_SECTIONS: HelpSection[] = [
         title: 'Hue bulbs house lighting leaves alone',
         keywords: 'hue bulbs excluded left alone loft ceiling uplight ledge left right center home assistant',
         body: [
-          'Some bulbs sit in Spectra\'s Hue entertainment areas but belong to the rest of the house — the Loft Ceiling Uplight and the three Ledge lights. A house mode never writes them: not held at its look, not switched off, not reported. They stay Home Assistant\'s outside music shows; during a music show they follow the show like every other bulb in the area.',
+          'Some bulbs sit in Spectra\'s Hue entertainment areas but belong to the rest of the house — the Loft Ceiling Uplight and the three Ledge lights. A house mode never writes them: not held at its look, not switched off, not reported. They stay Home Assistant\'s outside music shows — and, because starting a music show\'s entertainment session would switch them on too, Spectra does not start one on their shared area at all. See "A Hue area left out of the show" for what that looks like and how to get the rest of the area back.',
           'The list is part of house lighting\'s settings (hue_excluded_lights: the bridge\'s own bulb names). The Now panel shows them as "left to Home Assistant".',
-          'Underneath that, SPECTRA has a hard boundary for every Hue write it makes (house modes, the Hue Hold switch, a release): an explicit allow-list of its own bulbs — the living-room and dining bulbs only. A bulb not on it is never written, and SPECTRA never writes a Hue group, room or "all lights". During a music show the Hue entertainment stream still drives every bulb in its area, as before.',
+          'Underneath that, SPECTRA has a hard boundary for every Hue write it makes (house modes, the Hue Hold switch, a release): an explicit allow-list of its own bulbs — the living-room and dining bulbs only. A bulb not on it is never written, and SPECTRA never writes a Hue group, room or "all lights".',
         ],
       },
       {

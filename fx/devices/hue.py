@@ -18,11 +18,16 @@ try:
 except ImportError:
     MBEDTLS_AVAILABLE = False
 
-from fx import hue_freeze
+from fx import hue_freeze, hue_scope
 from fx.devices import NetworkedDevice
 from fx.utils import async_fire_and_forget
 
 _LOGGER = logging.getLogger(__name__)
+
+
+class HueStreamRefused(RuntimeError):
+    """The entertainment area holds a bulb SPECTRA may not light (or one it
+    cannot identify): no session is started. SpotFX deviation #52."""
 
 
 class HueDevice(NetworkedDevice):
@@ -46,6 +51,9 @@ class HueDevice(NetworkedDevice):
 
     status: dict[int, tuple[int, int, int]]
     _sock: Optional[socket.socket] = None
+    # SpotFX deviation #52 (class default, so a device built without
+    # __init__ — tests, a half-constructed instance — reads "not refused")
+    _scope_refusal: Optional[str] = None
 
     # DTLS handshake is bounded by both an attempt count and a wall-clock
     # deadline so a slow/unreachable bridge can't stall (re)activation forever.
@@ -71,6 +79,13 @@ class HueDevice(NetworkedDevice):
     # retries — the device is dark until the virtual is manually re-activated.
     # So flush() re-arms a reconnect at most once per interval while down.
     RECONNECT_RETRY_INTERVAL = 5.0    # seconds between flush-driven reconnects
+
+    # SpotFX deviation #52: an area refused by the Hue scope (it holds a bulb
+    # off fx/hue_scope's allow-list) is re-read this often, not every five
+    # seconds — slow enough not to pester the bridge, quick enough that
+    # taking the bulbs out of the area in the Hue app is picked up without a
+    # restart.
+    SCOPE_RECHECK_INTERVAL = 60.0
 
     # Every blocking REST call to the bridge runs in loop.run_in_executor on the
     # loop's DEFAULT ThreadPoolExecutor (set in core.py). A request with no
@@ -100,6 +115,9 @@ class HueDevice(NetworkedDevice):
         # driving virtual stays ACTIVE and rendering — only this device's output
         # is muted. In-memory only: a LedFX restart clears it (SpotFX re-asserts).
         self._frozen = False
+        # SpotFX deviation #52: why the last session start was refused (the
+        # area holds a bulb Spectra may not light), or None.
+        self._scope_refusal: Optional[str] = None
         if not MBEDTLS_AVAILABLE:
             raise Exception(
                 "You need to install the python-mbedtls package for Hue to work."
@@ -279,6 +297,14 @@ class HueDevice(NetworkedDevice):
                     await self._ledfx.loop.run_in_executor(
                         self._ledfx.thread_executor, self._blocking_activate
                     )
+                except HueStreamRefused as e:
+                    # Not a transient failure: retrying would only re-read
+                    # the same area. No session was started; flush() re-reads
+                    # it at SCOPE_RECHECK_INTERVAL.
+                    self._stream_ready = False
+                    self._cleanup_socket()
+                    self._note_scope_refusal(str(e))
+                    return
                 except Exception as e:
                     self._stream_ready = False
                     self._cleanup_socket()
@@ -306,6 +332,7 @@ class HueDevice(NetworkedDevice):
                     self._cleanup_socket()
                     return
                 self._stream_ready = True
+                self._note_scope_refusal(None)
                 _LOGGER.info(
                     "Hue %s: entertainment stream activated", self.name
                 )
@@ -320,6 +347,14 @@ class HueDevice(NetworkedDevice):
         Serialized across all Hue bridges via _activation_lock so concurrent
         bridge activations don't contend and starve each other's handshake."""
         with HueDevice._activation_lock:
+            # SpotFX deviation #52: starting a session switches on EVERY bulb
+            # in the entertainment area, before any frame is sent. Read the
+            # area from the bridge now — every start, so a change made in the
+            # Hue app is seen — and refuse before the start request when it
+            # holds a bulb off fx/hue_scope's allow-list.
+            refusal = self._area_scope_refusal()
+            if refusal:
+                raise HueStreamRefused(refusal)
             # Tell the bridge to start streaming for this entertainment zone.
             request_data = {"action": "start"}
             self._hue_request(
@@ -328,17 +363,60 @@ class HueDevice(NetworkedDevice):
                 request_data,
                 ssl=True,
             )
+            self._sock = self._open_dtls()
 
-            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            sock.settimeout(5)
-            wrapped = self._dtls_client_context.wrap_socket(
-                sock, self._config["ip_address"]
-            )
-            wrapped.connect(
-                (self._config["ip_address"], self._config["udp_port"])
-            )
-            self._do_handshake_with_timeout(wrapped)
-            self._sock = wrapped
+    def _open_dtls(self):
+        """The DTLS session to the bridge's entertainment port (blocking)."""
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.settimeout(5)
+        wrapped = self._dtls_client_context.wrap_socket(
+            sock, self._config["ip_address"]
+        )
+        wrapped.connect(
+            (self._config["ip_address"], self._config["udp_port"])
+        )
+        self._do_handshake_with_timeout(wrapped)
+        return wrapped
+
+    def _area_scope_refusal(self) -> Optional[str]:
+        """Blocking (runs inside _blocking_activate, on a worker thread):
+        read this device's entertainment area from the bridge — three GETs,
+        no writes — and judge every bulb in it against fx/hue_scope. None
+        means the session may start; otherwise the sentence naming why not.
+        A bridge that will not say what is in the area is refused too."""
+        eid = self._config.get("entertainment_id")
+        try:
+            ec, _ = self._hue_request(
+                "GET", f"/clip/v2/resource/entertainment_configuration/{eid}",
+                ssl=True)
+            ent, _ = self._hue_request(
+                "GET", "/clip/v2/resource/entertainment", ssl=True)
+            lights, _ = self._hue_request(
+                "GET", "/clip/v2/resource/light", ssl=True)
+            area = hue_scope.area_lights(
+                ec["data"][0], ent["data"], lights["data"])
+        except Exception as exc:                          # noqa: BLE001
+            return ("refused to start the Hue entertainment stream: could "
+                    "not read the area's bulbs from the bridge "
+                    f"({type(exc).__name__}: {exc}), so Spectra cannot tell "
+                    "which bulbs a session would switch on")
+        return hue_scope.stream_refusal(area)
+
+    def _note_scope_refusal(self, reason: Optional[str]) -> None:
+        """Record (and say, once per distinct reason, at CRITICAL) why this
+        area is not streamed; None clears it."""
+        previous, self._scope_refusal = self._scope_refusal, reason
+        if reason and reason != previous:
+            _LOGGER.critical("Hue %s: %s", self.name, reason)
+        elif reason is None and previous:
+            _LOGGER.warning("Hue %s: the area now holds only allow-listed "
+                            "bulbs — streaming it", self.name)
+
+    @property
+    def scope_refusal(self) -> Optional[str]:
+        """Why this area's entertainment session is not started (it holds a
+        bulb Spectra may not light), or None. SpotFX deviation #52."""
+        return self._scope_refusal
 
     def _do_handshake_with_timeout(self, wrapped):
         """Drive the DTLS handshake on a non-blocking socket, waiting on the
@@ -474,7 +552,9 @@ class HueDevice(NetworkedDevice):
         # _trigger_reconnect is debounced (_reconnecting), so this is cheap.
         if not self._stream_ready or self._sock is None:
             now = time.monotonic()
-            if now - self._last_reconnect_attempt >= self.RECONNECT_RETRY_INTERVAL:
+            interval = (self.SCOPE_RECHECK_INTERVAL if self._scope_refusal
+                        else self.RECONNECT_RETRY_INTERVAL)
+            if now - self._last_reconnect_attempt >= interval:
                 self._last_reconnect_attempt = now
                 self._trigger_reconnect()
             return

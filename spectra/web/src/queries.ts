@@ -856,6 +856,9 @@ export interface OwnershipRecord {
   history: { at: number; event: string; detail: string }[];
   activation: ActivationReport | null;
   dark_fixtures: DarkFixtureStatus;
+  /** A Hue area whose entertainment session is NOT started because it holds
+   * a bulb Spectra may not light (fx/hue_scope.py) — device id → sentence. */
+  hue_stream_refusals?: Record<string, string>;
 }
 
 /** Polls fast enough that the banner/button reflect a press from another

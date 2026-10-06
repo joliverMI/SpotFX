@@ -4269,9 +4269,23 @@ RELEASED record (a release moves the record first and keeps the stack up for
 seconds — the stored Hue Hold landed on all 17 bulbs after River's restore),
 and `ambient._hue_put` re-checks it per bulb so a hold in flight stops; the
 release fade dims only bulbs that READ ON (its dim write carries on:true) and
-sends an unreadable bulb the off write only. The DTLS entertainment stream
-(`fx/devices/hue.py`) still drives every bulb in its area during a music
-show — by the Admiral's design; it is not a REST write.
+sends an unreadable bulb the off write only.
+
+**THE STREAM IS IN SCOPE TOO (2026-10-06, after a restart with house
+lighting AND Hue Hold off lit the Loft/Ledge bulbs).** Starting a Hue
+entertainment session (`action: start`) makes the bridge switch on EVERY
+bulb in the area before any frame is sent, so the REST allow-list alone
+never covered them: the Music Group area holds the four. `HueDevice.
+_blocking_activate` reads the area from the bridge before every start and
+refuses (`hue_scope.stream_refusal`, `fx/VENDOR.md` #52) an area holding a
+bulb off the allow-list or one it cannot identify; the area is then simply
+not streamed, re-read every `SCOPE_RECHECK_INTERVAL` (60 s), and named on
+`/ownership` + `/liveness` (`hue_stream_refusals`) and the room bar
+(help `hue-scope-stream`). The remedy is his: take the bulbs out of that
+entertainment area in the Hue app. Nothing here depends on the house
+layer — the start is the one door every Hue stream goes through. Spec:
+`tests/test_hue_stream_scope.py` (a model bridge that powers the area on
+start, with the shipped driver as red control).
 
 **A RESTART MUST NOT LAND THE ROOM TOGGLE BEFORE THE MODE (2026-10-06).**
 Every restart under Away lit his 13 allow-listed Hue bulbs for ~20 s: the
