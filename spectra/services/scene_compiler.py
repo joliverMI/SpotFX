@@ -38,14 +38,14 @@ from __future__ import annotations
 
 import logging
 from random import Random
-from typing import Any, Optional
+from typing import Any, Mapping, Optional
 
 from fx import device_model
 from spectra.models.binding import ValueBinding
 from spectra.models.scene import SceneDeviceConfig, SceneV2
 from spectra.services import binding_resolver, fx_seam
 from spectra.services.binding_resolver import FireContext
-from spectra.services.color_sets import ColorSetCard, ColorSetEntry
+from spectra.services.color_sets import ColorSetCard, ColorSetEntry, SetScope
 
 logger = logging.getLogger(__name__)
 
@@ -129,6 +129,88 @@ def _set_entry_by_virtual(color_set: ColorSetCard) -> dict[str, ColorSetEntry]:
     return by_vid
 
 
+# ONE-COLOUR virtuals (fx.device_model.ONE_COLOUR_EFFECTS — Pulse on the
+# Singles, single-led-power plan phase 2) take the strips' colour where the
+# set does not give them one. The strips are this category; any other entry
+# that colours virtuals other than the one-colour ones is the fallback.
+STRIPS_CATEGORY = "Strips"
+
+
+def _multi_led_source(color_set: ColorSetCard,
+                      by_vid: Mapping[str, ColorSetEntry],
+                      one_colour: set[str]) -> Optional[ColorSetEntry]:
+    """The entry the strips wear in `color_set`: the first Strips-category
+    virtual the set colours; else the first entry (in the set's own order)
+    that colours some virtual and none of the one-colour ones; else None."""
+    for vid in device_model.get_virtuals_for_category(STRIPS_CATEGORY):
+        entry = by_vid.get(vid)
+        if vid not in one_colour and entry is not None and entry.color_value:
+            return entry
+    for entry in color_set.entries:
+        if not entry.color_value:
+            continue
+        vids = set(device_model.resolve_scope(entry.scope.virtual_ids,
+                                              entry.scope.categories,
+                                              entry.scope.roles))
+        if vids and not vids & one_colour:
+            return entry
+    return None
+
+
+def set_entries_for(color_set: ColorSetCard,
+                    effect_types: Mapping[str, str]) -> dict[str, ColorSetEntry]:
+    """The colour-set entry each virtual wears, given what each runs
+    (virtual id -> effect type). Every virtual gets exactly what
+    _set_entry_by_virtual gives it, EXCEPT a one-colour virtual
+    (fx.device_model.ONE_COLOUR_EFFECTS), which keeps his own hand-picked
+    entry for it and takes the first colour of the strips' gradient (the
+    colour at position 0, which is the one colour such an effect shows)
+    only:
+
+      - where the set has no entry for it (it would otherwise keep whatever
+        it wore before), or
+      - in a RAINBOW set — marked `is_rainbow`, or whose strips' gradient
+        spans more than half the wheel (the journey's own rainbow test,
+        color_wheel.value_span_deg) — where his fixed pick would sit apart
+        from a strip running every colour. Only the colour is replaced; the
+        rest of his entry (brightness) stands.
+
+    A filled entry carries the colour and nothing else: one-colour effects
+    have no background. Every caller that lands a colour set on live
+    virtuals goes through here (the compiler, the conductor's set landing,
+    the flare colour jump, the colour-set Preview), so the fill is the same
+    wherever a set arrives — and because it lands in `gradient`, the colour
+    journey turns it with the strips exactly as it turns everything else."""
+    by_vid = _set_entry_by_virtual(color_set)
+    one_colour = {vid for vid, effect_type in effect_types.items()
+                  if effect_type in device_model.ONE_COLOUR_EFFECTS}
+    if not one_colour:
+        return by_vid
+    source = _multi_led_source(color_set, by_vid, one_colour)
+    if source is None:
+        return by_vid
+    from spectra.models.gradient2d import sample_edge
+    from spectra.services import color_wheel
+    colour = sample_edge(source.color_value, 0.0)
+    if colour is None:
+        return by_vid
+    rainbow = (bool(getattr(color_set, "is_rainbow", False))
+               or color_wheel.value_span_deg(source.color_value)
+               > color_wheel.RAINBOW_SPAN_DEG)
+    out = dict(by_vid)
+    for vid in sorted(one_colour):
+        own = by_vid.get(vid)
+        if own is not None and not rainbow:
+            continue
+        if own is None:
+            out[vid] = ColorSetEntry(scope=SetScope(virtual_ids=[vid]),
+                                     color_kind="solid", color_value=colour)
+        else:
+            out[vid] = own.model_copy(update={"color_kind": "solid",
+                                              "color_value": colour})
+    return out
+
+
 def _apply_set_colors(config: dict[str, Any], effect_type: str,
                       entry: ColorSetEntry, display_mode: str = "default",
                       light_bg_color: str = "#201830") -> dict[str, Any]:
@@ -209,7 +291,8 @@ def compile_scene(scene: SceneV2,
                 else:
                     set_mode_vids.discard(vid)
     if color_set is not None:
-        by_vid = _set_entry_by_virtual(color_set)
+        by_vid = set_entries_for(
+            color_set, {vid: writes[vid]["effect_type"] for vid in set_mode_vids})
         for vid in set_mode_vids:
             entry = by_vid.get(vid)
             if entry is None:
@@ -321,6 +404,11 @@ async def fire_scene(scene: SceneV2, *, intensity: float = 0.5,
         from spectra.services import engine
         writes = engine.conductor.refire_palette(
             scene.id, color_set.id if color_set else None, writes)
+        # A ONE-COLOUR effect (Pulse) is born knowing the section intensity
+        # and tempo the song is at right now, rather than starting at its
+        # neutral defaults and easing over from there (pulse_feed.py). Live
+        # only, like the re-fire palette above: it reads the song position.
+        writes = engine.pulse_fire_overlay(writes)
         # The brightness-multiplier room control scales the ACTUAL bytes
         # sent to hardware only — never the returned/baselined writes, so
         # dry-run and live previews stay byte-identical (the honest-window

@@ -70,6 +70,7 @@ from spectra.services import av_sync_lead
 # test_light_mode_cold_start.py proves the cold start in a fresh
 # interpreter, which is the only check that can speak to this.
 from spectra.services import known_buffer
+from spectra.services import pulse_feed
 from spectra.services.bridge import SpotEffectsBridge
 from spectra.services.drift_conductor import DriftConductor
 from spectra.services.fx_executor import RecordingExecutor
@@ -434,6 +435,12 @@ async def _on_track_uri(uri) -> None:
         _last_track_uri = uri
         await responses.release_phases()
         if uri is not None:
+            # THE PULSE FEED (spectra/services/pulse_feed.py): read the new
+            # song's section table off the event loop now, so the scene this
+            # change fires can already carry its intensity. Fire-and-forget,
+            # like the auto-generation below; the feed's own tick catches up
+            # if it is not ready in time.
+            asyncio.create_task(pulse_feed.feed.prepare(uri))
             # Admiral ask, order 12: a song with no stored triggers gets
             # them generated automatically — see trigger_engine's
             # AUTO-GENERATION docstring section. Fire-and-forget; never
@@ -467,6 +474,40 @@ bridge = SpotEffectsBridge(
 
 _conductor_task: asyncio.Task | None = None
 _trigger_task: asyncio.Task | None = None
+_pulse_task: asyncio.Task | None = None
+
+
+def pulse_fire_overlay(writes: list[dict]) -> list[dict]:
+    """A live scene fire's writes with section intensity and tempo added for
+    every one-colour effect (Pulse) it installs — scene_compiler.fire_scene
+    calls this, so the new instance starts where the song is
+    (spectra/services/pulse_feed.py)."""
+    return pulse_feed.feed.overlay(writes, bridge.track_uri(),
+                                   bridge.effective_position_ms(),
+                                   bridge.track_genres)
+
+
+async def pulse_feed_step() -> int:
+    """One pass of the Pulse feed against the live scene: the song position
+    the trigger clock ticks on (before the A/V lead — the effect eases each
+    value over 2 s, so a section edge needs no lead), standing down while
+    the conductor is deferred."""
+    return await pulse_feed.feed.tick(
+        bridge.track_uri(), bridge.effective_position_ms(),
+        conductor=conductor, deferral=bridge.conductor_deferral(),
+        genres=bridge.track_genres)
+
+
+async def _run_pulse_feed() -> None:
+    """The Pulse feed's own loop, separate from the trigger clock so a push
+    (one write per one-colour virtual, at a section edge) never delays a
+    trigger crossing. Errors are logged and swallowed per pass."""
+    while True:
+        try:
+            await pulse_feed_step()
+        except Exception:
+            logger.exception("pulse feed: pass failed")
+        await asyncio.sleep(pulse_feed.TICK_S)
 
 
 _last_show_clock_shift_ms = 0
@@ -581,7 +622,7 @@ def go_dark() -> None:
 
 
 async def start() -> None:
-    global _conductor_task, _trigger_task
+    global _conductor_task, _trigger_task, _pulse_task
     # A handover orphaned by a crash leaves owner=handing-over — both worlds
     # refusing to write (safe but dark). Land it back at its from-world.
     # Age-gated so a live orchestrator in another process is never fought.
@@ -593,14 +634,17 @@ async def start() -> None:
     if _trigger_task is None or _trigger_task.done():
         _trigger_task = asyncio.create_task(_run_trigger_engine(),
                                             name="spectra-trigger-engine")
+    if _pulse_task is None or _pulse_task.done():
+        _pulse_task = asyncio.create_task(_run_pulse_feed(),
+                                          name="spectra-pulse-feed")
     logger.info("SPECTRA S2 engine started (executor=%s — dark against real "
                 "lights until S3)", executor.mode)
 
 
 async def stop() -> None:
-    global _conductor_task, _trigger_task
+    global _conductor_task, _trigger_task, _pulse_task
     await bridge.stop()
-    for attr in ("_conductor_task", "_trigger_task"):
+    for attr in ("_conductor_task", "_trigger_task", "_pulse_task"):
         task = globals()[attr]
         if task is not None and not task.done():
             task.cancel()
@@ -632,6 +676,10 @@ def status() -> dict:
         # all.
         "known_buffer": known_buffer.state(),
         "triggers": trigger_engine.status(),
+        # THE PULSE FEED (spectra/services/pulse_feed.py): the section
+        # intensity and tempo the Singles' Pulse effect is being fed, and
+        # the last push — what to read while tuning it.
+        "pulse_feed": pulse_feed.feed.status(),
         "ambient": ambient_music_gate.status(),
         # The param orphan watchdog (spectra/services/param_watchdog.py):
         # restores, suspicions, give-ups — loud by design, see its docstring.

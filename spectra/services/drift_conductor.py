@@ -733,7 +733,8 @@ class DriftConductor:
         from spectra.services import scene_compiler
         from spectra.services.room_controls import resolve_authored_bg_color
         from fx import device_model
-        by_vid = scene_compiler._set_entry_by_virtual(card)
+        by_vid = scene_compiler.set_entries_for(
+            card, {vid: st.effect_type for vid, st in self.virtuals.items()})
         controls = self._room_controls()
         landed = 0
         for vid, state in self.virtuals.items():

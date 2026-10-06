@@ -15,9 +15,9 @@ Two halves:
   run lands on the pipeline's light frame by frame). Measured on the
   OUTPUT, not on the effect's own bookkeeping.
 
-Engine wiring (energy, tempo and charge/lull/drop pushed live) is phase 2;
-here the harness stands in for it with each song's stored analysis and his
-own authored marks.
+Engine wiring (energy, tempo and charge/lull/drop pushed live) is phase 2,
+proven in tests/test_pulse_engine_wiring.py; here the harness stands in for
+it with each song's stored analysis and his own authored marks.
 """
 from __future__ import annotations
 
@@ -307,9 +307,10 @@ def test_the_hooks_have_safe_defaults(rig):
     assert r.e.beat_s() == pytest.approx(0.42)
 
 
-def test_pulse_is_not_yet_a_phase_effect_the_engine_drives():
-    from fx.device_model import PHASE_EFFECTS
-    assert "pulse" not in PHASE_EFFECTS
+def test_pulse_is_a_phase_effect_the_engine_drives():
+    # phase 2 wires it (tests/test_pulse_engine_wiring.py proves the drive)
+    from fx.device_model import ONE_COLOUR_EFFECTS, PHASE_EFFECTS
+    assert "pulse" in PHASE_EFFECTS and "pulse" in ONE_COLOUR_EFFECTS
 
 
 def test_a_stale_persisted_phase_never_fires_on_a_fresh_effect(rig):

@@ -441,6 +441,14 @@ def _strongest_first_fill(
     return [c for _, _, c in chosen]
 
 
+def section_intensities(sections: list[dict]) -> list[float]:
+    """Each section's intensity as a generated cue at it carries (the
+    per-song stretch below), for a reader outside this module — the Pulse
+    feed (spectra/services/pulse_feed.py) feeds the Singles exactly this
+    number, so a section reads the same to the effect as to the cue."""
+    return _normalized_intensities(sections)
+
+
 def _normalized_intensities(sections: list[dict]) -> list[float]:
     """Per-song min-max stretch of energy_rms with a floor — mirrors
     scripts/backfill_trigger_intensity.py's default `minmax` curve, plus

@@ -8298,7 +8298,7 @@ tunable, not tuned. Proof: `scripts/check_fish.py`,
 `scripts/check_fish_disperse.py`, `tests/test_fish.py`,
 `tests/test_fish_camera.py`, `tests/test_fish_disperse.py`.
 
-## Pulse (`fx/effects/pulse.py`) — the Singles' one-colour effect, phase 1 of 4
+## Pulse (`fx/effects/pulse.py`) — the Singles' one-colour effect, phases 1-2 of 4
 
 The single-led-power plan (`/home/javi/fleet-spotfx/data/single-led-power-plan/
 report.md`, approved by the Admiral "with all recommendations") replaces
@@ -8307,12 +8307,43 @@ measurement, (2) engine wiring + a test scene and HIS TUNING GATE, (3)
 rainbow walk + two flare kinds, (4) scene migration, one scene first and
 undoable. Power stays installed throughout. **The module docstring is the
 binding statement** (hit detector, rise/fade, rest/depth, smallest pulse,
-`gamma`, no background, the flash budget, the hooks). Five things:
+`gamma`, no background, the flash budget, the hooks). Eight things:
 
-- **BUILT, NOT WIRED.** `pulse` is deliberately in neither
-  `fx/device_model.PHASE_EFFECTS` nor `config/effect_params.json`, and
-  nothing pushes its `energy`/`beat_ms` hooks; phase 2 does all three. It is
-  an acknowledged skill gap in `EFFECT_SCENE_MAP.json` until a scene binds it.
+- **WIRED (phase 2) THROUGH TWO SETS IN `fx/device_model`.** `pulse` is in
+  `PHASE_EFFECTS` (charge/lull/drop on the shared ramp — a lull reaches black
+  on the frame the strips' ramp completes) and in `ONE_COLOUR_EFFECTS`, which
+  keys exactly three things: the feed, the colour fill and the house guard
+  below. Its tunable params are in `config/effect_params.json` (help topic
+  `pulse-effect`); `energy`/`beat_ms`/`phase`/`phase_progress` are
+  deliberately NOT, like every phase effect's phase keys. Still an
+  acknowledged skill gap in `EFFECT_SCENE_MAP.json` until a live scene binds
+  it (phase 3 writes the skill).
+- **THE FEED** (`spectra/services/pulse_feed.py`, binding statement):
+  `energy` = the section's render intensity (the generator's per-song
+  stretch, `midsong_generator.section_intensities`, through
+  `intensity_scale.combine_measured_and_scale` — so it obeys his 0.75
+  automatic ceiling and reaches 1.0 only on a marked track), `beat_ms` from
+  the analysed tempo. Pushed only when it changes (a section edge, a song)
+  by its own engine loop on `bridge.effective_position_ms` — no A/V lead, so
+  not a second application point — and carried in the scene fire that
+  installs Pulse (`engine.pulse_fire_overlay`). Every push moves the
+  conductor's `param_baseline` (`on_surge`), which is what keeps the param
+  watchdog from "restoring" a pushed value.
+- **ONE PLACE PICKS A SET'S ENTRY PER VIRTUAL**: `scene_compiler.
+  set_entries_for` (compile, the conductor's set landing, the flare colour
+  jump, the colour-set Preview). A one-colour virtual keeps his own Singles
+  colour; with none, or in a rainbow set (`is_rainbow`, or the strips'
+  gradient spans >180°), it takes the strips' FIRST colour. A new set-landing
+  path must use it, not `_set_entry_by_virtual`, or Pulse goes unfilled there.
+- **TRUE BLACK ONLY DURING A MUSIC SHOW**: `_drive_phase` withholds phases
+  from one-colour virtuals while `house.scene_deferral()` names a reason
+  (`withheld` in the record). House levels, Hue Hold and off rules sit
+  downstream of every effect and apply regardless.
+- **THE TEST SCENE** (`scripts/seed_pulse_test_scene.py`, dry run default,
+  `--apply`, `--remove`): "Pulse Test (Orbits V2)" — Orbits V2 with Pulse on
+  the Singles, params empty so he tunes from the defaults, NO sequencer
+  entry so it is never drawn automatically. Not run by the build: a deploy
+  step. Spec: `tests/test_pulse_engine_wiring.py`.
 - **ONE COLOUR, NO BACKGROUND, structurally** — `_refresh_bg_render_state`
   switches the base background layer off, so a colour set's Singles
   background (42 of his sets carry one) can never paint under it.

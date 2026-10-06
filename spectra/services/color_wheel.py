@@ -69,6 +69,19 @@ def _chromatic_span_deg(hues: list[float]) -> float:
     return 360.0 - max(gaps)
 
 
+def value_span_deg(value: str | None) -> float:
+    """The chromatic span of ONE colour value's stops (a solid hex spans 0)
+    — the journey's own rainbow measure applied to a single entry rather
+    than a whole card. A value spanning more than RAINBOW_SPAN_DEG is a
+    rainbow gradient."""
+    hues: list[float] = []
+    for hex_color in _stop_hexes(value):
+        h, s, v = colorsys.rgb_to_hsv(*_hex_to_rgb(hex_color))
+        if s * v >= _ACHROMATIC_WEIGHT:
+            hues.append(h * 360.0)
+    return _chromatic_span_deg(hues)
+
+
 def wheel_position(card: ColorSetCard) -> ColorWheelPosition:
     stops = _weighted_hues(card) if card.kind == "set" else []
     if not stops:
