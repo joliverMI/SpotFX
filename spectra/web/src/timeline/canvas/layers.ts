@@ -10,6 +10,7 @@ import type { MarkType } from '../types';
 // same layer here as there; each page supplies its own placement (see
 // ../../debug/plannedEvents.ts's module docstring for why they differ).
 import { plannedEvents as analysedEvents } from '../../debug/layers';
+import { lightShowMarkers } from './lightShowLayer';
 import { dropSeqBody, dropSeqRail, dropSeqRailBand } from './dropSeqLayer';
 
 const TRI_H = 8;
@@ -631,5 +632,6 @@ export const beatStrips: CanvasLayer = {
 // (./dropSeqLayer.ts) slot in at z 1, 45 and 65 — see that module for why.
 export const BUILDER_LAYERS: CanvasLayer[] = [
   intensityBackground, dropSeqRailBand, blendSpans, rmsBands, avgLines, diamonds, librosaOverlays,
-  analysedEvents, dropSeqBody, musicMarks, triggers, dropSeqRail, calibration, playhead, beatStrips,
+  analysedEvents, lightShowMarkers, dropSeqBody, musicMarks, triggers, dropSeqRail, calibration,
+  playhead, beatStrips,
 ];

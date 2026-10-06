@@ -7,8 +7,10 @@ import { useSticky } from '../lib/useSticky';
 import { fmtMs } from '../lib/time';
 import { useEvents, useSettings } from '../api/queries';
 import { useBuilderStore } from './store';
-import { useAnalysedPlan, useAudioShapeData, useAudioShapeMeta, useCalibrationStatus, useDropRails, useDropSequences, useLibrosa, useLiveShape, useProfileByUri, useSetlists } from './queries';
+import { useAnalysedPlan, useAudioShapeData, useAudioShapeMeta, useCalibrationStatus, useDropRails, useDropSequences, useLibrosa, useLiveShape, useProfileByUri, useSetlists, useShowArms } from './queries';
 import { FLARE_MARKER_COLOR, SCENE_MARKER_COLOR, songPositionMarkers } from '../debug/plannedEvents';
+import { LIGHT_SHOW_COLOR, lightShowCueMarkers, sceneChangeArms } from './lightShowMarkers';
+import AnalysedEventsStrip from './components/AnalysedEventsStrip';
 import { usePlayhead } from './hooks/usePlayhead';
 import { useFollowWindow } from './hooks/useFollowWindow';
 import TimelineCanvas from './canvas/TimelineCanvas';
@@ -113,6 +115,7 @@ export default function BuilderPage() {
   const [showAnalysedEvents, setShowAnalysedEvents] = useSticky('showAnalysedEvents', true);
   const [showDropSeqs, setShowDropSeqs] = useSticky('showDropSequences', true);
   const [showDismissedDrops, setShowDismissedDrops] = useSticky('dropShowDismissed', false);
+  const [showLightShow, setShowLightShow] = useSticky('showLightShowMarkers', true);
 
   const durationMs = profile?.duration_ms || meta?.duration_ms || track?.duration_ms || 1;
 
@@ -228,9 +231,23 @@ export default function BuilderPage() {
   // Analysed events (scene changes + analysed flares) at their SONG position —
   // see ../debug/plannedEvents.ts's module docstring for why the Timeline
   // canvas needs a different placement than the debug page's own clock-shifted one.
+  // The SAME list also draws on the full-song strip (AnalysedEventsStrip,
+  // below) — one source of truth for what will fire, never a second one.
   const analysedMarkers = useMemo(
     () => (showAnalysedEvents ? songPositionMarkers(analysedPlan) : []),
     [showAnalysedEvents, analysedPlan]);
+
+  // The Light Show's High/Low Trigger markers — his ask: "see a marker
+  // showing where the light show triggers are, even if they aren't
+  // active" (./lightShowMarkers.ts). `showArms` is global room state
+  // (spectra/services/show_arms.py), polled independently of which song
+  // is shown; a scene_change-armed set has no fixed song position, so it
+  // is named in the legend below rather than drawn as a marker.
+  const { data: showArms } = useShowArms(!!uri);
+  const lightShowCues = useMemo(
+    () => (showLightShow ? lightShowCueMarkers(analysedPlan?.show_cues, showArms, uri) : []),
+    [showLightShow, analysedPlan, showArms, uri]);
+  const armedSceneChangeSets = useMemo(() => sceneChangeArms(showArms, uri), [showArms, uri]);
 
   // ── drop sequences (drop-detection plan, phases 3–4) ────────────────────
   // ./dropSequences.ts decides what each sequence IS (its look, whether it
@@ -294,8 +311,10 @@ export default function BuilderPage() {
     hoverTriggerId,
     plannedEvents: analysedMarkers,
     dropSeq: dropLayer,
+    lightShow: lightShowCues,
   }), [shape, averages, meta, librosa, mfccDistances, workingTriggers, events,
-       calibrationTargetsMs, draggingIntensity, selectedIds, hoverTriggerId, analysedMarkers, dropLayer]);
+       calibrationTargetsMs, draggingIntensity, selectedIds, hoverTriggerId, analysedMarkers, dropLayer,
+       lightShowCues]);
 
   const stripCount = stripCountFor(data, librosaFilters);
   // The drop-sequence snap rails get their own band under the main area, so
@@ -373,7 +392,7 @@ export default function BuilderPage() {
             tid ? { kind: 'trigger-triangle', triggerId: tid } : null)}
         />
         {uri && (
-          <ShowCueBar uri={uri} durationMs={durationMs} cues={analysedPlan?.show_cues}
+          <ShowCueBar uri={uri} durationMs={durationMs} cues={analysedPlan?.show_cues} arms={showArms}
             onChanged={() => void refetchAnalysedPlan()} />
         )}
       </CollapsibleCard>
@@ -385,6 +404,22 @@ export default function BuilderPage() {
         getNowMs={getNowMs}
         below={uri ? (
           <>
+            {showAnalysedEvents && (
+              <>
+                <div className="analysed-events-strip-label">
+                  <span>Analysed events</span>
+                  <span className="analysed-events-strip-count">
+                    {!analysedPlan
+                      ? 'reading…'
+                      : analysedPlan.applies
+                        ? `${analysedPlan.scene_changes.length} scene changes, ${analysedPlan.flares.length} flares`
+                        : `none: ${analysedPlan.reason}`}
+                  </span>
+                  <HelpLink topic="builder-analysed-events" title="Analysed events" />
+                </div>
+                <AnalysedEventsStrip markers={analysedMarkers} durationMs={durationMs} />
+              </>
+            )}
             <div className="drop-strip-label">
               <span>Drop sequences</span>
               <span className="drop-strip-count">
@@ -432,7 +467,7 @@ export default function BuilderPage() {
             <button
               style={{ fontSize: 12 }}
               className={`chip filter ${showAnalysedEvents ? 'active' : ''}`}
-              title="Show/hide SPECTRA's planned scene changes and analysed flares for this song"
+              title="Show/hide SPECTRA's planned scene changes and analysed flares for this song, on the graph and on the trigger strip"
               onClick={() => setShowAnalysedEvents((v) => !v)}
             >
               Analysed events
@@ -444,6 +479,14 @@ export default function BuilderPage() {
               onClick={() => setShowDropSeqs((v) => !v)}
             >
               Drop sequences
+            </button>
+            <button
+              style={{ fontSize: 12 }}
+              className={`chip filter ${showLightShow ? 'active' : ''}`}
+              title="Show/hide the Light Show's High/Low Trigger positions — solid when an action set is armed on it, muted when nothing is"
+              onClick={() => setShowLightShow((v) => !v)}
+            >
+              Light Show
             </button>
             <button
               style={{ fontSize: 12 }}
@@ -554,6 +597,7 @@ export default function BuilderPage() {
           <span style={{ minWidth: 0 }} title="Each marker's size and brightness follow its rank among the song's transitions (by section-energy change); hover a marker for its rank">
             bigger · brighter = stronger
           </span>
+          <span style={{ minWidth: 0 }}>also drawn on the trigger strip above</span>
           <span style={{ minWidth: 0 }}>
             {!showAnalysedEvents
               ? 'analysed events hidden — click "Analysed events" above to show them'
@@ -567,6 +611,28 @@ export default function BuilderPage() {
           </span>
           <HelpLink topic="builder-analysed-events" />
         </div>
+        {showLightShow && uri && (
+          <div
+            data-testid="light-show-legend"
+            style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 12, marginTop: 4, fontSize: 11, color: 'var(--text-muted)' }}
+          >
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ display: 'inline-block', width: 0, height: 0, borderLeft: '5px solid transparent', borderRight: '5px solid transparent', borderBottom: `7px solid ${LIGHT_SHOW_COLOR.high}` }} />
+              High Trigger
+            </span>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ display: 'inline-block', width: 0, height: 0, borderLeft: '5px solid transparent', borderRight: '5px solid transparent', borderTop: `7px solid ${LIGHT_SHOW_COLOR.low}` }} />
+              Low Trigger
+            </span>
+            <span style={{ minWidth: 0 }}>solid = an action set is armed and fires here · muted/dashed = nothing armed</span>
+            {!!armedSceneChangeSets.length && (
+              <span style={{ minWidth: 0 }} title={armedSceneChangeSets.map((a) => a.label || 'an action').join(', ')}>
+                {armedSceneChangeSets.length} armed on the next scene change (no fixed position to mark)
+              </span>
+            )}
+            <HelpLink topic="show-high-low-triggers" title="High and Low Triggers" />
+          </div>
+        )}
         {showDropSeqs && uri && (
           <div
             data-testid="drop-sequences-legend"

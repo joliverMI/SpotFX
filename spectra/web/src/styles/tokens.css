@@ -1809,6 +1809,21 @@ button.big { padding: 16px 18px; font-size: 1.05em; min-height: 52px; border-rad
   .live-label-detail { font-size: 9px; }
 }
 
+/* ── Generated (analysed) scene changes + flares on the full-song strip,
+   under his SPECTRA triggers strip — the same source and placement as the
+   audio-shape canvas's own "Analysed events" layer (timeline/canvas/
+   layers.ts's `analysedEvents`); AnalysedEventsStrip.tsx is read-only. */
+.analysed-events-strip-label {
+  display: flex; align-items: center; gap: 8px; margin: 8px 0 3px;
+  font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em;
+}
+.analysed-events-strip-label .analysed-events-strip-count { text-transform: none; letter-spacing: 0; }
+.analysed-events-strip {
+  position: relative; height: 16px; background: var(--surface2);
+  border: 1px solid var(--border); border-radius: 6px; overflow: hidden; user-select: none;
+}
+.analysed-events-strip-empty { position: absolute; left: 8px; top: 0; line-height: 14px; font-size: 11px; color: var(--text-muted); }
+
 /* ── Drop sequences on the Timeline (drop-detection plan, phase 3; built to
    plan.html's Timeline mock). The canvas layer is timeline/canvas/
    dropSeqLayer.ts; this is the strip under the SPECTRA triggers strip, the

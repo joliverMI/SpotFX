@@ -71,6 +71,10 @@ export interface LayerDataBag {
    *  and what is selected/hovered. Absent = the layer draws nothing and
    *  reserves no rail band. */
   dropSeq?: DropSeqLayerData | null;
+  /** THE LIGHT SHOW's High/Low Trigger markers (Timeline page only;
+   *  ./lightShowLayer.ts, ../lightShowMarkers.ts) — shown whether or not
+   *  anything is armed on them; empty/absent = the layer draws nothing. */
+  lightShow?: import('../lightShowMarkers').LightShowCueMarker[];
 }
 
 /** What a hand on the drop-sequence layer is doing RIGHT NOW (phase 4) —
