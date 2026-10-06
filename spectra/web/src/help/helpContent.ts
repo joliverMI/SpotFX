@@ -2389,9 +2389,10 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         id: 'house-chip',
         title: 'The Mode chip in the top bar',
-        keywords: 'mode chip top bar house green purple amber not applied paused music',
+        keywords: 'mode chip top bar house green purple amber not applied paused music hold press toggle on off enabled cutover switch',
         body: [
-          '"⌂ Mode: Evening · HA" on every page: green while the mode is on the room, purple (♪) while music has it, amber when it is paused or not applied, grey when no mode is set. "HA" means Home Assistant set it; "manual" means a person did. Tap it to open the House page.',
+          '"⌂ Mode: Evening · HA" on every page: green while the mode is on the room, purple (♪) while music has it, amber when it is paused or not applied, grey ("· off") when house lighting itself is switched off. "HA" means Home Assistant set it; "manual" means a person did. Tap it to open the House page.',
+          'Press and hold it (~1 s, a filling ring shows progress) to turn house lighting on or off — the same switch the House page\'s own toggle writes. A short tap still opens the page; only a completed hold flips the switch.',
         ],
       },
       {
