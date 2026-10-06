@@ -298,9 +298,11 @@ asyncio.run(engine5.tick(400))
 check(fired_color == ["w"], "select_color_set actions reached the injected fake")
 
 # ═══ OVERRIDE BLEND's dynamic half (2026-08-20, "fix the lull ramp"): a
-# charge/lull fire_response action carries the real gap to the next
-# trigger this song will fire — the gap scene_response._phase_ramp_ms
-# stretches a ramp toward instead of a flat constant ═════════════════════
+# charge/lull fire_response action carries the real gap to where its build
+# ends — its own lull or drop under the PHASE PARTNER rule (2026-10-06,
+# spectra/services/phase_partner.py), else the next trigger this song will
+# fire — the gap scene_response._phase_ramp_ms stretches a ramp toward
+# instead of a flat constant ═════════════════════════════════════════════
 
 gap_calls: list[tuple] = []
 
@@ -323,8 +325,8 @@ asyncio.run(engine_gap.tick(0))
 asyncio.run(engine_gap.tick(1000))
 asyncio.run(engine_gap.tick(1900))
 check(gap_calls == [("lull", 0.5, 900), ("drop", 0.9, None)],
-      "a charge/lull action's gap_ms is the real distance to the next "
-      "trigger (1900 - 1000 = 900ms); drop never computes a gap at all — "
+      "a charge/lull action's gap_ms is the real distance to its own "
+      "drop (1900 - 1000 = 900ms); drop never computes a gap at all — "
       "it's never stretched, so no gap is worth computing for it")
 
 # a disabled trigger doesn't count as the "next" moment to stretch toward
@@ -346,9 +348,9 @@ asyncio.run(engine_gated.on_track_state("gap_gated"))
 asyncio.run(engine_gated.tick(0))
 asyncio.run(engine_gated.tick(1000))
 check(gap_calls == [("charge", 0.8, 2000)],
-      "a disabled trigger is skipped when finding the next moment to "
-      "stretch toward — the gap is 3000 - 1000 = 2000ms, past the "
-      "disabled one, never a false-short 500ms")
+      "a disabled trigger is skipped when finding the build's partner — "
+      "the gap is 3000 - 1000 = 2000ms to the drop, past the disabled "
+      "lull, never a false-short 500ms")
 
 # the LAST trigger in a song has no next trigger to stretch toward — the
 # gap is honestly None (unknown), never a fabricated distance to song end
@@ -367,9 +369,36 @@ check(gap_calls == [("lull", 0.5, None)],
       "the last trigger in a song has no next trigger to stretch toward "
       "— gap_ms is honestly None, not a fabricated distance to song end")
 
-# ═══ #148's "triggers_only" mode changes WHICH triggers count as "next" —
-# the gap must reach past a mode-gated-out candidate, exactly the way
-# tick() itself would never fire it ══════════════════════════════════════
+# ═══ THE PHASE PARTNER RULE (2026-10-06, drop-detection plan phase 1): a
+# build runs to its own lull or drop whatever sits between — a scene change
+# inside a lull no longer ends it, under any mode ══════════════════════════
+gap_calls.clear()
+song["gap_partner_scene"] = [
+    SpectraTrigger(timestamp_ms=1000, source="authored",
+                  action=FireResponseAction(event_class="lull", intensity=0.5)),
+    SpectraTrigger(timestamp_ms=1400, source="generated",
+                  action=FireSceneAction(scene_id="s")),
+    SpectraTrigger(timestamp_ms=2200, source="authored",
+                  action=FireResponseAction(event_class="drop", intensity=1.0)),
+]
+for _mode in ("triggers_only", "full"):
+    gap_calls.clear()
+    _eng = TriggerEngine(list_triggers=lambda uri: song.get(uri, []),
+                         fire_scene=fake_fire_scene,
+                         fire_response=gap_recording_fire_response,
+                         render_intensity=lambda x: x,
+                         scene_change_mode=lambda m=_mode: m)
+    asyncio.run(_eng.on_track_state("gap_partner_scene"))
+    asyncio.run(_eng.tick(0))
+    asyncio.run(_eng.tick(1000))
+    check(gap_calls == [("lull", 0.5, 1200)],
+          f"{_mode}: the lull builds to its own drop at 2200ms (1200ms) — "
+          "the generated scene change at 1400ms between them no longer "
+          "ends the build, whether or not the mode would fire it")
+
+# ═══ #148's "triggers_only" mode still changes WHICH triggers count — for a
+# build with NO partner ahead (the pre-rule next-trigger gap), and for the
+# partner itself. A trigger the effective mode won't fire is neither ═══════
 gap_calls.clear()
 song["gap_triggers_only"] = [
     SpectraTrigger(timestamp_ms=1000, source="authored",
@@ -377,7 +406,7 @@ song["gap_triggers_only"] = [
     SpectraTrigger(timestamp_ms=1400, source="generated",
                   action=FireSceneAction(scene_id="s")),
     SpectraTrigger(timestamp_ms=2200, source="authored",
-                  action=FireResponseAction(event_class="drop", intensity=1.0)),
+                  action=FireResponseAction(event_class="flare", intensity=1.0)),
 ]
 engine_to_gap = TriggerEngine(list_triggers=lambda uri: song.get(uri, []),
                               fire_scene=fake_fire_scene,
@@ -388,11 +417,11 @@ asyncio.run(engine_to_gap.on_track_state("gap_triggers_only"))
 asyncio.run(engine_to_gap.tick(0))
 asyncio.run(engine_to_gap.tick(1000))
 check(gap_calls == [("lull", 0.5, 1200)],
-      "triggers_only, on a song with an authored trigger of its own: the "
-      "generated trigger at 1400ms is mode-gated out (only his own "
-      "triggers fire for this song), so the gap reaches past it to the "
-      "next AUTHORED trigger at 2200ms (2200-1000=1200ms), never the "
-      "false-short 400ms a raw-mode read would have given")
+      "triggers_only, a lull with no drop of its own ahead: the generated "
+      "trigger at 1400ms is mode-gated out (only his own triggers fire "
+      "for this song), so the gap reaches past it to the next AUTHORED "
+      "trigger at 2200ms (1200ms), never the false-short 400ms a raw-mode "
+      "read would have given")
 
 # the SAME trigger list, contrasted under "full" — the generated trigger
 # DOES count there, proving the gated-out set genuinely differs by mode
@@ -407,9 +436,33 @@ asyncio.run(engine_full_gap.on_track_state("gap_triggers_only"))
 asyncio.run(engine_full_gap.tick(0))
 asyncio.run(engine_full_gap.tick(1000))
 check(gap_calls == [("lull", 0.5, 400)],
-      "the identical trigger list under 'full': the generated trigger at "
-      "1400ms DOES count as next (400ms) — the same song's gap genuinely "
-      "differs by mode, confirming the gate isn't a no-op in this proof")
+      "the identical trigger list under 'full': with no partner ahead the "
+      "generated trigger at 1400ms DOES count as next (400ms) — the same "
+      "song's gap genuinely differs by mode, confirming the gate isn't a "
+      "no-op in this proof")
+
+# the mode gate applies to the PARTNER too: a generated drop the mode
+# mutes is no partner, so the charge reaches past it to the drop that fires
+song["gap_partner_gated"] = [
+    SpectraTrigger(timestamp_ms=1000, source="authored",
+                  action=FireResponseAction(event_class="charge", intensity=0.5)),
+    SpectraTrigger(timestamp_ms=2000, source="generated",
+                  action=FireResponseAction(event_class="drop", intensity=1.0)),
+    SpectraTrigger(timestamp_ms=3000, source="authored",
+                  action=FireResponseAction(event_class="drop", intensity=1.0)),
+]
+for _mode, _want in (("triggers_only", 2000), ("full", 1000)):
+    gap_calls.clear()
+    _eng = TriggerEngine(list_triggers=lambda uri: song.get(uri, []),
+                         fire_response=gap_recording_fire_response,
+                         render_intensity=lambda x: x,
+                         scene_change_mode=lambda m=_mode: m)
+    asyncio.run(_eng.on_track_state("gap_partner_gated"))
+    asyncio.run(_eng.tick(0))
+    asyncio.run(_eng.tick(1000))
+    check(gap_calls == [("charge", 0.5, _want)],
+          f"{_mode}: the charge's partner is the first drop the mode will "
+          f"actually fire ({_want}ms) — a muted drop is no partner")
 
 # triggers_only's PER-SONG FALLBACK (a song with NO authored trigger of
 # its own falls back to "analysed" — _effective_mode_for_song): proven
@@ -429,11 +482,11 @@ engine_fallback = TriggerEngine(list_triggers=lambda uri: song.get(uri, []),
 asyncio.run(engine_fallback.on_track_state("gap_fallback"))
 probe_trig = SpectraTrigger(timestamp_ms=1000, source="authored",
                             action=FireResponseAction(event_class="lull"))
-check(engine_fallback._next_trigger_gap_ms(probe_trig) == 600,
+check(engine_fallback._phase_partner_gap_ms(probe_trig) == 600,
       "triggers_only on a song with NO authored trigger of its own falls "
-      "back to 'analysed' for gap purposes too — the generated trigger at "
-      "1600ms counts as next (600ms), never gated out by the raw "
-      "'triggers_only' setting alone")
+      "back to 'analysed' for gap purposes too — with no partner ahead, "
+      "the generated trigger at 1600ms counts as next (600ms), never "
+      "gated out by the raw 'triggers_only' setting alone")
 
 # an action that raises is logged and recorded, never crashes the tick
 song["boom"] = [_mk(0, kind="fire_scene")]

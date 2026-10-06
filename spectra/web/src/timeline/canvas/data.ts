@@ -1,6 +1,6 @@
 /** Pure data helpers ported from frontend/js/shape_canvas.js. */
 import type { AudioShapeData, LibrosaAnalysis, MarkType, MusicTrigger } from '../types';
-import { isPhaseStretchClass, phaseBlendSpan } from '../phaseBlend';
+import { isPhaseClass, isPhaseStretchClass, phaseBlendSpan, phaseBuildTarget } from '../phaseBlend';
 
 /** One blend region: from a blending trigger to the next enabled trigger.
  *
@@ -11,7 +11,10 @@ import { isPhaseStretchClass, phaseBlendSpan } from '../phaseBlend';
  *                mirroring trigger_engine._blend_factor_for.
  *   'phase'    — a CHARGE or LULL event, which SPECTRA blends
  *                UNCONDITIONALLY (scene_response._phase_ramp_ms) with no
- *                flag to consult, so it is keyed on the event's TYPE. See
+ *                flag to consult, so it is keyed on the event's TYPE. Its
+ *                span runs to its own lull or drop, whatever sits between
+ *                (the PHASE PARTNER rule, ../phaseBlend.ts::
+ *                phaseBuildTarget), else to the next enabled trigger. See
  *                ../phaseBlend.ts for the full statement; a charge/lull
  *                that happens to carry override_blend too is drawn once,
  *                as 'phase', because that is what actually runs.
@@ -41,12 +44,20 @@ export function computeBlendSpans(
   const enabled = triggers
     .filter((t) => t.enabled !== false)
     .sort((a, b) => a.timestamp_ms - b.timestamp_ms);
+  // Each trigger's class resolved once per call (this runs every frame).
+  const classes = enabled.map((t) => eventType?.(t.event_id));
+  const moments = enabled.map((t, i) => ({
+    id: t.id, ms: t.timestamp_ms, phaseClass: isPhaseClass(classes[i]) ? classes[i]! : null,
+  }));
   const spans: BlendSpan[] = [];
-  for (const t of enabled) {
-    const cls = eventType?.(t.event_id);
+  for (let i = 0; i < enabled.length; i += 1) {
+    const t = enabled[i];
+    const cls = classes[i];
     const next = enabled.find((n) => n.timestamp_ms > t.timestamp_ms);
     if (isPhaseStretchClass(cls)) {
-      const b = phaseBlendSpan(cls!, t.timestamp_ms, next ? next.timestamp_ms : null);
+      const later = moments.filter((m) => m.id !== t.id);
+      const end = phaseBuildTarget(cls!, t.timestamp_ms, later).ms;
+      const b = phaseBlendSpan(cls!, t.timestamp_ms, end);
       spans.push({ ...b, triggerId: t.id, eventId: t.event_id, source: 'phase' });
       continue;
     }

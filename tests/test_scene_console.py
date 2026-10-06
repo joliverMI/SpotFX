@@ -94,7 +94,8 @@ def test_scene_settings_registry_bounds_are_read_from_the_real_models():
     # phase_blend_charge_ramp_ms/lull_ramp_ms retired 2026-08-20
     # (fm/spectra-lull-ramp-does-not-scale) along with models.scene.
     # PhaseBlend — the charge/lull ramp is a computed dynamic stretch to
-    # the real gap to the next trigger now, not a per-scene knob.
+    # where the build ends (its own lull or drop, else the next trigger —
+    # spectra/services/phase_partner.py) now, not a per-scene knob.
     assert set(sc.SCENE_SETTINGS_REGISTRY) == {
         "entry_ramp_ms",
         "choreography_enabled", "choreography_transition_ms", "choreography_anchor_frac",

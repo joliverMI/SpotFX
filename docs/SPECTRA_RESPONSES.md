@@ -43,8 +43,10 @@ exactly the drive the original program used (`services/trigger_engine.py`
    the edge re-fire).
 2. **Ramp**: a glide of `phase_progress → 1.0` over the class's duration.
    Charge/lull DYNAMICALLY STRETCH to ~90% of `gap_ms` — the real distance
-   to the next trigger this song will actually fire
-   (`TriggerEngine._next_trigger_gap_ms`) — hanging the remaining ~10% at
+   to where the build ends: a charge's own next lull or drop, a lull's own
+   next drop, whatever flare or scene change sits between, else the next
+   trigger this song will actually fire (`TriggerEngine.
+   _phase_partner_gap_ms`, `spectra/services/phase_partner.py`) — hanging the remaining ~10% at
    `phase_progress=1.0` for free (nothing writes it again before the next
    phase event); his verbatim spec (2026-08-20, "fix the lull ramp"): "the
    single blob waiting in lull should reach the center just and hang for

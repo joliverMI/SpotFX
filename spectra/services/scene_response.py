@@ -13,12 +13,14 @@ Per event, fed by the bridge with the fire's intensity:
      an instant {"phase": <class>, "phase_progress": 0.0} arm per
      phase-capable virtual (the 0.0 reset re-arms the edge), then a glide
      of phase_progress → 1.0 over the class's ramp — charge/lull DYNAMICALLY
-     stretch to ~90% of the real gap to the next trigger when it's known
-     (_phase_ramp_ms, the OVERRIDE BLEND equivalent), else the flat 4000 ms/
-     2500 ms tuned default; drop always stays the fixed 400 ms snap. The
-     drive fires for EVERY charge/lull/drop event, band or no band — exactly
-     as the
-     original fired the phase for every phase event, with the per-scene
+     stretch to ~90% of the real gap to where the build ends, when it's
+     known (_phase_ramp_ms, the OVERRIDE BLEND equivalent; the gap itself
+     is the PHASE PARTNER rule, spectra/services/phase_partner.py — a
+     charge's own lull or drop, a lull's own drop, else the next trigger),
+     else the flat 4000 ms/2500 ms tuned default; drop always stays the
+     fixed 400 ms snap. The drive fires for EVERY charge/lull/drop event,
+     band or no band — exactly as the original fired the phase for every
+     phase event, with the per-scene
      band riding on top as the scene's colouring. Per-family grammar:
      docs/SPECTRA_RESPONSES.md. Phase keys ride ONLY these dedicated
      writes (the registry gate keeps them out of band patches; the
@@ -590,7 +592,7 @@ PHASE_RAMP_MS = {"charge": 4000, "lull": 2500, "drop": 400}
 # PORTING GAP, not a deliberate simplification: at the time it was built,
 # SPECTRA had no forward trigger schedule to compute a gap against, so the
 # dynamic half was left for later. trigger_store now gives it exactly that
-# schedule (TriggerEngine._next_trigger_gap_ms), so this closes the actual
+# schedule (TriggerEngine._phase_partner_gap_ms), so this closes the actual
 # gap instead of leaving the placeholder. Measured on his own room (Dopamine
 # repeat capture, 2026-08-20): one lull ran 6040ms, another 900ms, on the
 # SAME song — PHASE_RAMP_MS["lull"]=2500 idled for 3.5s on the long one and
@@ -598,6 +600,14 @@ PHASE_RAMP_MS = {"charge": 4000, "lull": 2500, "drop": 400}
 # so a per-scene static number was RETIRED rather than kept alongside the
 # dynamic stretch — see PhaseBlend's own retirement note in
 # spectra/models/scene.py for why a knob was deliberately not rebuilt here.
+#
+# WHAT THE GAP RUNS TO (2026-10-06, drop-detection plan phase 1): a charge's
+# gap runs to its own next lull or drop and a lull's to its own next drop,
+# whatever flare, scene change or colour change sits between — the PHASE
+# PARTNER rule, spectra/services/phase_partner.py. Before it the gap ran to
+# the next trigger of any kind, so 35 of his sequence charges peaked at a
+# flare inside the build. With no partner ahead the gap is still the next
+# trigger of any kind, exactly as before.
 #
 # His spec, verbatim: "the single blob waiting in lull should reach the
 # center just and hang for just a moment, maybe 10% of the lull time,
@@ -615,8 +625,10 @@ PHASE_RAMP_MIN_MS = 200
 
 def _phase_ramp_ms(event_class: str, gap_ms: Optional[int]) -> int:
     """The class's phase ramp for one fire. gap_ms is the live distance
-    (from TriggerEngine._next_trigger_gap_ms) to the next trigger this
-    song will actually fire — None means the gap is UNKNOWABLE, not merely
+    (from TriggerEngine._phase_partner_gap_ms) to where this build ends:
+    the charge's or lull's own phase partner when it has one, else the
+    next trigger this song will actually fire (spectra/services/
+    phase_partner.py) — None means the gap is UNKNOWABLE, not merely
     unset: either there's no next trigger for this song (this fire is the
     last one, or nothing is playing), or the event arrived with no SPECTRA
     trigger-schedule context at all (a bridge-classified legacy

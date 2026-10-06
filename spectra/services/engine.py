@@ -201,9 +201,11 @@ async def fire_response_event(event_class: str, intensity: float,
 
     gap_ms is the OVERRIDE BLEND charge/lull stretch input
     (scene_response._phase_ramp_ms): TriggerEngine._fire computes it from
-    the real per-song trigger schedule (honoring the SAME per-song
-    effective mode _effective_mode_for_song resolves — see
-    TriggerEngine._next_trigger_gap_ms) and passes it through; the
+    the real per-song trigger schedule — to the charge's or lull's own
+    phase partner when it has one (spectra/services/phase_partner.py),
+    honoring the SAME per-song effective mode _effective_mode_for_song
+    resolves — see TriggerEngine._phase_partner_gap_ms) and passes it
+    through; the
     bridge's own classified-event call (no SPECTRA trigger context) and a
     manual /api/engine/event test-fire both omit it, its documented
     default — an honest "unknown," not a zero.

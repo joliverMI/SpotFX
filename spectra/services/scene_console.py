@@ -197,9 +197,11 @@ def _spec(key: str, model_cls: type[BaseModel], field_name: str, label: str, kin
 # phase_blend_charge_ramp_ms/phase_blend_lull_ramp_ms RETIRED 2026-08-20
 # (fm/spectra-lull-ramp-does-not-scale) along with models.scene.PhaseBlend —
 # the charge/lull ramp is now a computed dynamic stretch to the real gap
-# to the next trigger (scene_response._drive_phase), not a per-scene
-# number Sonic (or anyone) could hand-tune; see PhaseBlend's own retirement
-# note in spectra/models/scene.py for why a knob was deliberately not kept.
+# to where the build ends — its own lull or drop, else the next trigger
+# (scene_response._drive_phase, spectra/services/phase_partner.py) — not a
+# per-scene number Sonic (or anyone) could hand-tune; see PhaseBlend's own
+# retirement note in spectra/models/scene.py for why a knob was
+# deliberately not kept.
 _ACCESSORS: dict[str, tuple[Callable[[SceneV2], Any], Callable[[SceneV2, Any], None]]] = {
     "entry_ramp_ms": (
         lambda s: s.entry_ramp_ms,

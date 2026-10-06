@@ -1854,12 +1854,13 @@ class Fish2d(Twod, GradientEffect):
         by 1/3, ripples only to 2/3, dark after that until the drop.
 
         The thirds are of `phase_progress`, which SpotFX ramps over the real
-        gap to the next trigger (`scene_response._phase_ramp_ms`) — so they
-        are thirds of the DYNAMIC lull, never of a wall-clock constant. The
-        same honesty note the charge carries applies: that ramp covers ~90%
-        of the true gap and then hangs at 1.0, so 1/3 lands a little before
-        a third of the wall clock. That is the closest an effect can get
-        without ever being told the duration.
+        gap to the lull's own drop, else the next trigger with no drop ahead
+        (`scene_response._phase_ramp_ms`, `spectra/services/phase_partner.py`)
+        — so they are thirds of the DYNAMIC lull, never of a wall-clock
+        constant. The same honesty note the charge carries applies: that
+        ramp covers ~90% of the true gap and then hangs at 1.0, so 1/3
+        lands a little before a third of the wall clock. That is the
+        closest an effect can get without ever being told the duration.
         """
         st = self._lull_state
         if st is None:

@@ -679,7 +679,7 @@ independently authorised piece of work (fixed 2026-08-20,
 `fm/spectra-lull-ramp-does-not-scale`, see the Override Blend entry
 below); bundling the two would have let a fault in one hold up the
 other. That fix's own gap computation (`TriggerEngine.
-_next_trigger_gap_ms`) resolves the SAME per-song effective mode this
+_phase_partner_gap_ms`) resolves the SAME per-song effective mode this
 mode introduces (`_effective_mode_for_song`) before deciding what counts
 as "next" — a trigger `"triggers_only"` mode-gates out must not count as
 the next moment to stretch a ramp toward either.
@@ -1723,7 +1723,7 @@ Reconcilers still receive `(previous, merged)`. Spec:
   His spec, verbatim: "the single blob waiting in lull should reach the
   center just and hang for just a moment, maybe 10% of the lull time,
   before the explosion" — charge/lull ramp to ~90% of the real gap
-  (`TriggerEngine._next_trigger_gap_ms`, honoring the same
+  (`TriggerEngine._phase_partner_gap_ms`, honoring the same
   `scene_change_mode` gate `tick()` itself applies), hanging the remaining
   ~10% at `phase_progress=1.0` for free (nothing writes it again before
   the next phase event); drop is never stretched. An UNKNOWABLE gap (no
@@ -1766,6 +1766,24 @@ Reconcilers still receive `(previous, merged)`. Spec:
   REAL frontend module with esbuild and asserts it against `_phase_ramp_ms`'s
   constants READ OUT OF the Python source, so a constant drifting on either
   side goes red. Help: `charge-lull-blend`.
+
+  **A BUILD RUNS TO ITS OWN PARTNER (2026-10-06, drop-detection plan phase
+  1, the Admiral: "a charge builds to its own lull or drop, and a lull to its
+  own drop, whatever else sits between").** `spectra/services/
+  phase_partner.py` is the binding statement and the ONE definition; the
+  gap above is `TriggerEngine._phase_partner_gap_ms` (renamed from
+  `_next_trigger_gap_ms`), mirrored by `phaseBlend.ts::phaseBuildTarget` on
+  both Timeline surfaces. The next PHASE trigger is the build's end when it
+  is a partner (later in charge → lull → drop) within `PARTNER_REACH_MS`
+  (the effects' own 60 s cap); flares, scene changes, colour changes and
+  updates in between are ignored. **A charge or lull with no partner ahead
+  keeps the pre-rule gap (the next trigger of any kind), deliberately**:
+  ~100 of his charges are lone or run into another charge (a RESTART, never
+  a partner), and he uses them as builds into the next flare — sending them
+  to the flat default would change far more than the sequences this fixes.
+  `scripts/check_phase_partner_library.py` lists, per song, every build
+  whose end moves (old vs new, the pre-rule engine loaded out of git at a
+  pinned ref); spec `tests/test_phase_partner.py`.
 - **Energy gates/tilt** — PROVEN EQUIVALENT, nothing built: sequencer
   likelihood curves already express floor/ceiling/scale gating exactly
   (`scripts/seed_sequencer_from_legacy.gate_points`, zero=veto in
@@ -3219,8 +3237,9 @@ the `"full"` default every other test here runs under. #150 removed
 `SceneV2.phase_blend`/`PhaseBlend` entirely — unrelated to `dwell_curve`,
 which sits lower in the same model and rebased clean. **The one real
 interaction, named not silently accepted**: #150's charge/lull ramp
-stretches toward the NEXT trigger's timestamp (`_next_trigger_gap_ms`, a
-FORWARD-looking gap read off the trigger schedule) — if that next trigger
+stretches toward the NEXT trigger's timestamp when it has no lull or drop
+of its own ahead (`_phase_partner_gap_ms`, a FORWARD-looking gap read off
+the trigger schedule) — if that next trigger
 is a `fire_scene` action and dwell's minimum hasn't cleared, the dramatic
 build lands on an update effect instead of the scene switch it visually
 promised. `dwell.py` and `_phase_ramp_ms`'s own docstrings both spell out

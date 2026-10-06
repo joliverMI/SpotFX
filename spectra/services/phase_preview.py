@@ -6,7 +6,7 @@ WHAT IT SHOWS, and why the ruler is the point. A flare is one moment; the
 drop sequence is three, and their SHAPE is the thing he tunes. Each ramp is
 computed by scene_response._phase_ramp_ms — production's own function, not
 a re-derivation — which since 2026-08-20 STRETCHES a charge or lull to
-~90% of the real gap to the next trigger and hangs the remaining ~10% at
+~90% of the real gap to its build's end and hangs the remaining ~10% at
 phase_progress = 1.0. That hang is his own spec, verbatim: "the single blob
 waiting in lull should reach the center just and hang for just a moment,
 maybe 10% of the lull time, before the explosion." The ruler draws ramp and
@@ -14,6 +14,14 @@ hang as separate bands per class so the hang is a thing he can SEE and set
 the gaps against, which is exactly what a number in a settings form could
 never give him. DROP IS NEVER STRETCHED (PHASE_RAMP_STRETCH_CLASSES) — it
 stays the fixed snap.
+
+THE GAPS ARE THE PARTNER GAPS. This ruler lays out a clean charge → lull →
+drop with nothing between the marks, so the charge's gap is the distance to
+its own lull and the lull's to its own drop — exactly what the firing path
+resolves for a stored sequence under the PHASE PARTNER rule (spectra/
+services/phase_partner.py: a build runs to its own lull or drop whatever
+sits between). tests/test_phase_partner.py asserts the two agree rather
+than trusting it.
 
 THE ANCHORS, which differ per class and are the settled law rather than a
 choice made here (his ruling 2026-08-20, data/drops-still-fire-early-star-
