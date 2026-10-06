@@ -93,12 +93,12 @@ def test_a_restart_under_away_never_switches_a_bulb_on(monkeypatch, room):
     assembling when the first bridge broadcast lands; the stack is up but
     the engine still on paper; the engine is live and app.py reconciles.
     Not one write may carry on:true, and the mode's off look lands."""
-    live.assembling = True
+    monkeypatch.setattr(live, "assembling", True, raising=False)
     result = _run(gate.reconcile(None))
     assert room.bodies == [], f"a Hue write landed mid-assembly: {room.bodies}"
     assert result["status"] in ("dark", "house-pending")
 
-    live.assembling = False
+    monkeypatch.setattr(live, "assembling", False, raising=False)
     result = _run(gate.reconcile(None))
     assert room.bodies == [], "the room toggle landed while the engine was on paper"
     assert result["status"] == "house-pending" and result["house_mode"] == "Away"
@@ -116,7 +116,7 @@ def test_red_control_the_shipped_order_lights_every_bulb(monkeypatch, room):
     — every allow-listed bulb is switched ON at the stored colour before the
     mode can say off. This is the ~20 s flash River's witness recorded."""
     monkeypatch.setattr(house, "pending_hue_directive", lambda: None, raising=False)
-    live.assembling = False         # the flag did not exist
+    monkeypatch.setattr(live, "assembling", False, raising=False)         # the flag did not exist
     _run(gate.reconcile(None))
     assert room.lit() == ["l0", "l1", "l2"]
 
@@ -130,7 +130,7 @@ def test_red_control_the_shipped_order_lights_every_bulb(monkeypatch, room):
 def test_room_available_refuses_while_the_stack_assembles(monkeypatch):
     monkeypatch.setattr(live, "host", FakeHost({}))
     monkeypatch.setattr(lo, "load", lambda: lo.OwnershipRecord(owner=lo.SPECTRA))
-    monkeypatch.setattr(live, "assembling", True)
+    monkeypatch.setattr(live, "assembling", True, raising=False)
     assert ambient.room_available() is False
     monkeypatch.setattr(live, "assembling", False, raising=False)
     assert ambient.room_available() is True
@@ -140,7 +140,7 @@ def test_the_assembling_guard_alone_holds_the_resume_window(monkeypatch, room):
     """With the house-pending guard removed, the assembling guard by itself
     still keeps the toggle off the bulbs for the whole activation."""
     monkeypatch.setattr(house, "pending_hue_directive", lambda: None, raising=False)
-    live.assembling = True
+    monkeypatch.setattr(live, "assembling", True, raising=False)
     _run(gate.reconcile(None))
     assert room.bodies == []
 
