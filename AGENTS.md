@@ -2444,8 +2444,8 @@ statement. Five things:
   lattice are HINTS read off type and name — Spectra stores no positions.
 - **The position table is the seam for the room map.** `positions.ts`
   returns a `StagePlan` (points, sizes, source cells, grouped by stream
-  device); `layoutPositions` is one `PositionSource`. Phase 3 is another
-  source for the SAME renderer — do not add a second renderer or teach
+  device); `layoutPositions` is one `PositionSource` and `roomMap.ts` is the
+  other, for the SAME renderer — do not add a second renderer or teach
   `stage.ts` about fixtures.
 - **Nothing per frame goes through React or allocates.** `stage.ts` copies a
   frame out of the message's bytes through the plan's source table into
@@ -4228,6 +4228,43 @@ fm/house-handover-polish)** — all found the same cutover afternoon:
   background task; a poller reads `GET /ownership` (its `handover` block
   while in flight, then `owner`/`activation` once it lands) for the
   outcome. Spec: `tests/test_handover.py` ("proof 9").
+
+**THE ROOM MAP VIEW (Devices → Live → Room map; 2026-10-06, phase 3 of the
+same plan).** `spectra/services/room_view.py`'s docstring is the binding
+statement (server); `spectra/web/src/live/roomMap.ts`'s is the client's. Six
+things:
+
+- **ONE CAMERA POSE AT A TIME, and a pose is a `capture.pose_id`, not a room
+  entry.** His kiosk pose spans three room entries (Living Room, the crystal,
+  the dining table) and they are drawn together; two pose ids never are.
+  Every position is a place in that camera's picture (0..1), never a room
+  coordinate and never where an LED is — a marker sits at the centre of its
+  LIGHT (`room_view.light_core`). The light-field model's fence is unchanged;
+  this view only reads it.
+- **IT READS `room_maps.json` AND `commissioning.json` AND WRITES NEITHER.**
+  Its one store is `config.ROOM_VIEW_FILE` (hand placements per pose, `PUT
+  /api/room-view/placements/{pose}`, a partial merge where null removes).
+  `tests/test_room_view.py` holds that by bytes and mtime.
+- **THERE IS NO STILL OF THE ROOM, by the capture path's own rule** (numbers,
+  never images). The backdrop is every footprint of the pose added up.
+- **STORED COMMISSIONING DECODES HAD NO POSITIONS** until this build:
+  `gray_code.Decode.as_dict` now keeps `positions` for seen indices. The view
+  draws a decode only when its own judged table is `pass`/`findings` AND it
+  was taken at the pose on screen — a `fail` decodes confidently to wrong
+  places. With his data today no decode qualifies, so the sconces are placed
+  from their block footprints.
+- **`room_view.register_source` is where another per-pixel map plugs in**
+  (positions in the pose's picture, per fixture pixel); the decode is the
+  first source. Authority per pixel: his hand, a per-pixel source, a
+  footprint, the "not placed" tray.
+- **THE GLOW IS SUMMED ON THE CPU into one 64x36 texture and drawn with one
+  quad** (`stage.ts`), so its cost does not grow with the canvas or the
+  emitter count; every fixture pixel stays in the plan (size 0 when not
+  placed) because an emitter's glow is tinted by all the pixels it lit. Gate:
+  `--systems spectra+proxy:live:map,spectra+proxy:live:map:phone
+  --pass-drawn-fps 59` (the rig's synthetic pose, 74 emitters;
+  `spectra_rig.py --room --room-maps <copy>` shows a real one).
+  Specs: `tests/test_room_view.py`, `node scripts/check_live_view.mjs` (FOUR).
 
 ## The room LIGHT-FIELD map (`/rooms`) + room effects (`/room-effects`)
 

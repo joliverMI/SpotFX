@@ -23,6 +23,8 @@ Systems (parts combine: spectra-legacy@30+proxy:collapsed):
   :live          the Live view (Devices > Live) instead of the top strip, on
                  his room's real topology; adds "drawn fps" — animation
                  frames in which the page actually drew
+  :map           the Live view's Room map instead of its Layout (with :live):
+                 the rig's synthetic camera pose, every strip block mapped
   :phone         a phone: 390x844 at 3x, CPU slowed by --phone-cpu (4x)
   :canvas        the Live view's 2D-canvas fallback instead of WebGL
   ledfx          the real LedFX fork + its real frontend, his config
@@ -204,6 +206,9 @@ async def measure(system: str, profile: str, seconds: float, flashes: int,
                    % ("0" if collapsed else "1"))
         if ":canvas" in system:
             preload += "localStorage.setItem('spectra-live-force-canvas', '1');"
+        if live_view:
+            preload += ("localStorage.setItem('spectra-live-view', '%s');"
+                        % ("room" if ":map" in system else "layout"))
         if "legacy" in system:
             preload += "localStorage.setItem('spectra-device-preview-legacy', '1');"
     probe = (open(os.path.join(HERE, "probe.js")).read()

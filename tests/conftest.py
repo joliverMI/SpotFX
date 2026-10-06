@@ -526,6 +526,7 @@ def _isolated_room_light_field(tmp_path, monkeypatch):
     from spectra.services import room_effects
     monkeypatch.setattr(scfg, "ROOM_MAPS_FILE", tmp_path / "room_maps.json")
     monkeypatch.setattr(scfg, "ROOM_EFFECTS_FILE", tmp_path / "room_effects.json")
+    monkeypatch.setattr(scfg, "ROOM_VIEW_FILE", tmp_path / "room_view.json")
     room_effects.reset()
     yield
     room_effects.reset()

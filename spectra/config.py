@@ -107,6 +107,11 @@ ROOM_MAPS_FILE = SPECTRA_STORAGE / "room_maps.json"
 # — kind + knobs + which devices they drive. The running gains themselves are
 # in-memory only; only the authored spec is durable.
 ROOM_EFFECTS_FILE = SPECTRA_STORAGE / "room_effects.json"
+#: THE ROOM MAP VIEW's hand placements (spectra/services/room_view.py): where
+#: he put a fixture the camera could not place, per camera pose. The view's
+#: only store — everything else it draws is read from ROOM_MAPS_FILE and
+#: COMMISSIONING_FILE and never written back.
+ROOM_VIEW_FILE = SPECTRA_STORAGE / "room_view.json"
 #: The commissioning ground-truth test's judged results (the frozen table,
 #: bounded) — spectra/services/commissioning.py.
 COMMISSIONING_FILE = SPECTRA_STORAGE / "commissioning.json"

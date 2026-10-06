@@ -1776,7 +1776,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         keywords: 'live tab preview viewer stage layout crystal hexagon strip frame tv bulbs room map webgl solo full screen fullscreen pop out popout pause smooth fixture watch',
         body: [
           'Devices → Live draws every fixture the room uses on one stage: the crystal as its real hexagon of 976 cells, the TV strip as a frame, each sconce as a line, the Hue bulbs as discs, single pixels as dots. It is lit by the same live feed as the top strip, at up to 30 pictures a second, and drawn at your screen\'s own rate. An unlit pixel still shows as a dim dot, so a dark fixture keeps its shape.',
-          'The shapes are a tidy layout, not a floor plan: Spectra knows how each fixture is wired, not where it hangs. Only the crystal\'s lattice is exact. "Room map" is the view that will place each LED where the camera saw it, once devices are mapped — it is not built yet, and the button says so.',
+          'It has two views. LAYOUT is a tidy arrangement, not a floor plan: Spectra knows how each fixture is wired, not where it hangs, and only the crystal\'s lattice is exact. ROOM MAP puts each fixture where a camera saw its light — see "Room map" below.',
           'It shows every in-use fixture, not only the favourites picked for the top strip. A virtual that feeds several fixtures (one strip effect copied onto the TV backlight and both sconces) is drawn as each of them.',
           'If nothing is driving the lights (the room is released, or being handed over) the shapes still draw, dark, with a note saying why.',
         ],
@@ -1787,6 +1787,34 @@ export const HELP_SECTIONS: HelpSection[] = [
           ['Smooth', 'On: blends from each picture to the next so motion is even on an uneven link, costing about one picture (33 ms) of delay on a good link and up to about 160 ms on a rough one. Off: shows each picture the moment it arrives. See "Smooth" below.'],
           ['⛶ Full screen', 'The stage fills the screen. Esc leaves.'],
           ['↗ Pop out', 'Opens the stage alone in its own window, to keep beside another page.'],
+        ],
+      },
+      {
+        id: 'live-room-map',
+        title: 'Room map — every fixture where the camera saw its light',
+        keywords: 'room map live view camera pose kiosk footprint glow light field placed marker cluster fit lights arrange picture backdrop still photo mapped unseen position where',
+        body: [
+          'Devices → Live → Room map draws the same live pixels as Layout, but in one camera\'s picture: each fixture sits where that camera saw its light when the room was mapped (Rooms page), and behind the pixels each mapped light glows in its live colour over the part of the picture it lit. Brighter light to the camera glows stronger. Where two lights land on the same wall, their glows add.',
+          'Everything on it is a place in that camera\'s picture — not a floor plan, and not where an LED hangs. A marker sits at the centre of its light: a sconce whose light is mostly on the ceiling has its marker on the ceiling. Move it by hand if you want it on the fixture.',
+          'There is no photograph behind it. Mapping keeps numbers, never images, so the dim picture behind the lights is the camera\'s own measurements — every mapped light added up. It shows the walls and ceiling the lights reached, and nothing they did not.',
+          'How a fixture is drawn at its place: a fixture mapped whole (the crystal) keeps its real shape, and a small one is drawn a little larger than the camera saw it so its pixels can be told apart. A strip mapped in blocks shows each block as a small round cluster — the camera measured where the block\'s light is, not which way the strip runs. A fixture read pixel by pixel in a commissioning run that passed its check is drawn pixel by pixel; a run that failed its check is not used, and the note under the picture says so.',
+          'It reads the room maps and commissioning results and never changes them. The only thing it saves is where you put a piece by hand.',
+        ],
+        table: [
+          ['Camera view', 'Which camera position to look from. Measurements from two positions cannot be compared, so the map shows one at a time. One position can cover several rooms from the Rooms page when they were mapped in the same sitting; the name lists them.'],
+          ['Fit lights', 'On: zooms to the part of the picture the lights are in. Off: the camera\'s whole picture.'],
+          ['✥ Arrange', 'Lets you move pieces: drag one on the picture, or pick one under "Not placed" and click where it goes. With a piece selected: − and + change its size, ⟲ ⟳ turn it, and "Undo my placement" forgets where you put it (it goes back to where the camera placed it, or to Not placed).'],
+          ['Click a piece', 'Its name and how it was placed appear under the picture, with Open settings and Solo, as in Layout. Names show only for the piece you point at or select — there are too many to label at once.'],
+        ],
+      },
+      {
+        id: 'live-room-map-tray',
+        title: 'Not placed — fixtures the camera has no position for',
+        keywords: 'not placed tray unmapped unseen hue lamps bulbs hand placement place drag by hand room map missing block',
+        body: [
+          'Under the room map, "Not placed" lists every piece with no position in this camera view. "Not mapped" means nothing has measured it from here (the Hue lamps, or part of a strip a mapping run did not cover). "Not seen from this view" means a mapping run lit it and the camera saw nothing — its light is outside the picture.',
+          'To place one: click it, then click the picture where it is. A group (ten lamps, six blocks) asks for each in turn and names the one it wants; Skip passes over one, Done stops. A hand-placed strip is drawn as that part of the fixture\'s own shape, and you can turn it.',
+          'Your placements are saved for this camera view only, and nothing else is changed: not the room map, not the device. They stay until you undo them; if a strip is later mapped again in different pieces, a placement made for one of the old pieces no longer applies. A fixture that is not placed is still in the Layout view and still lit in the room — only this picture leaves it out.',
         ],
       },
       {

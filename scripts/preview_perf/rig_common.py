@@ -113,7 +113,75 @@ def build_room_config(version: str, repo: str) -> dict:
         "config": {"name": vid, "mapping": mapping, "rows": rows, "transition_time": 0.0},
         "segments": segments, "effect": effect_for(vid),
     } for vid, (mapping, rows, segments) in shapes.items()]
+    # The strips' own device virtuals, asleep as in his config: a camera
+    # measures a copy-mapped carrier through these (room_maps.json names
+    # their pixel ranges), so the Room map needs them to exist.
+    virtuals += [{
+        "id": dev, "is_device": dev, "auto_generated": False, "active": False,
+        "config": {"name": dev, "mapping": "span", "rows": 1, "transition_time": 0.0},
+        "segments": [[dev, 0, sizes[dev] - 1, False, 0]],
+    } for dev in ("tv-backlight", "sconce-kitchen-left", "sconce-kitchen-right")]
     return {"configuration_version": version, "devices": devices, "virtuals": virtuals}
+
+
+# ── a camera pose for that room (the Live view's Room map rows) ─────────────
+# Synthetic footprints, 64x36 like the real store's: a soft blob per measured
+# emitter with a wide faint spill, so the glow is as costly to add up as a
+# real one. DENSER than his room is today (every block of the TV strip and
+# both sconces seen, 74 emitters against his 12), so the gate measures the
+# view with the whole room mapped.
+MAP_POSE = "rigpose1"
+
+
+def _blob(cx: float, cy: float, spread: float, peak: float) -> list[float]:
+    import math
+    out = []
+    for row in range(36):
+        for col in range(64):
+            d2 = ((col + 0.5) / 64 - cx) ** 2 + (((row + 0.5) / 36 - cy) * 9 / 16) ** 2
+            out.append(round(peak * (math.exp(-d2 / (2 * spread ** 2))
+                                     + 0.08 * math.exp(-d2 / (2 * (spread * 6) ** 2))), 5))
+    return out
+
+
+def build_room_maps() -> dict:
+    import math
+
+    def footprint(emitter_id, carrier, grid, ranges=()):
+        return {
+            "emitter_id": emitter_id, "label": emitter_id, "carrier_id": carrier,
+            "virtual_ids": sorted({r[0] for r in ranges}) or [carrier],
+            "ranges": [{"virtual_id": v, "start": a, "end": b} for v, a, b in ranges],
+            "grid": grid, "weight": round(sum(grid), 4),
+            "capture": {"pose_id": MAP_POSE, "exposure_locked": True,
+                        "white_balance_locked": True, "frame_width": 320, "frame_height": 180},
+        }
+
+    living = [footprint("unseen-sconce-tail", "tv-mapper", [],
+                        [("sconce-kitchen-left", 80, 87)])]
+    living[0].update({"unseen": True, "weight": 0.2, "note": "not seen from this pose"})
+    for block in range(56):                      # the TV strip, round a screen
+        turn = block / 56 * 2 * math.pi
+        living.append(footprint(
+            f"tv-backlight:blk{block}", "tv-mapper",
+            _blob(0.36 + 0.13 * math.cos(turn), 0.6 + 0.18 * math.sin(turn), 0.02, 0.05),
+            [("tv-backlight", block * 10, block * 10 + 9)]))
+    for side, x in (("left", 0.62), ("right", 0.78)):
+        for block in range(8):
+            living.append(footprint(
+                f"sconce-kitchen-{side}:blk{block}", "tv-mapper",
+                _blob(x, 0.72 - block * 0.05, 0.016, 0.2),
+                [(f"sconce-kitchen-{side}", block * 10, block * 10 + 9)]))
+    rooms = [
+        {"id": "rigliving", "name": "Living Room", "carrier_ids": ["tv-mapper"],
+         "footprints": living},
+        {"id": "rigcrystal", "name": "Crystal", "carrier_ids": ["crystal-mapper"],
+         "footprints": [footprint("crystal-mapper", "crystal-mapper", _blob(0.52, 0.3, 0.035, 0.03))]},
+        {"id": "rigdining", "name": "Dining Table + Porch", "carrier_ids": ["single-color-effect"],
+         "footprints": [footprint("single-color-effect", "single-color-effect",
+                                  _blob(0.86, 0.3, 0.03, 0.02))]},
+    ]
+    return {"rooms": rooms}
 
 
 def cpu_seconds(pid: int) -> float:

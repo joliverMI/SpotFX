@@ -4,6 +4,7 @@ import { useEffect } from 'react';
 import { apiDel, apiGet, apiPost, apiPostForm, apiPut, spotfxDel, spotfxGet, spotfxPost } from './api/client';
 import { onSpectraMessage } from './api/spectraWs';
 import type { LiveLayout } from './live/positions';
+import type { RoomPlacement, RoomPose, RoomView } from './live/roomMap';
 import type { CurvePoint } from './components/CurveEditor';
 import type {
   AmbientHueGroup, ColorWheelPosition, DeviceListing, DevicePreviewFavorites, DevicePreviewStatus,
@@ -677,6 +678,29 @@ export function useDevicePreviewLayout() {
     queryFn: () => apiGet<LiveLayout>('/device-preview/layout'),
   });
 }
+
+/** The Live view's Room map: the camera poses that have something to draw. */
+export function useRoomViewPoses(enabled: boolean) {
+  return useQuery({
+    queryKey: ['spectra-room-view-poses'],
+    queryFn: () => apiGet<{ poses: RoomPose[] }>('/room-view/poses'),
+    enabled,
+  });
+}
+
+/** One pose's view: glows, pieces and his hand placements. */
+export function useRoomView(poseId: string | null) {
+  return useQuery({
+    queryKey: ['spectra-room-view', poseId],
+    queryFn: () => apiGet<RoomView>(`/room-view?pose=${encodeURIComponent(poseId ?? '')}`),
+    enabled: !!poseId,
+  });
+}
+
+/** Merge hand placements into a pose's store (null removes one). */
+export const putRoomViewPlacements = (poseId: string, placements: Record<string, RoomPlacement | null>) =>
+  apiPut<{ pose_id: string; placements: Record<string, RoomPlacement> }>(
+    `/room-view/placements/${encodeURIComponent(poseId)}`, { placements });
 
 export const pauseDevicePreview = () => apiPost<DevicePreviewStatus>('/device-preview/pause');
 export const resumeDevicePreview = () => apiPost<DevicePreviewStatus>('/device-preview/resume');

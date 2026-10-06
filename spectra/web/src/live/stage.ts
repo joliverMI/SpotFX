@@ -30,6 +30,15 @@
  * switched off (`setSmooth(false)`), which shows
  * each frame the moment it arrives.
  *
+ * THE GLOW (a plan with a `glow` layer — the room map). Under the points the
+ * stage draws one small picture, stretched over the plan: every measured
+ * emitter's footprint times that emitter's live colour (the mean of the
+ * pixels it lit), ADDED together, over a dim backdrop. The sum is made on
+ * the CPU into one 64x36 texture — a few tens of thousands of multiply-adds
+ * a frame however many emitters there are — and drawn with ONE more quad, so
+ * the picture costs the same on a phone as on a desk. Points go on top with
+ * MAX as before: a dot stays the colour of its LED.
+ *
  * `draw` returns false, and touches nothing, when the picture has not
  * changed since the last call — an idle room costs no GPU work. */
 import type { PreviewFrame } from '../api/devicePreviewWs';
@@ -58,15 +67,72 @@ const FRAG = `#version 300 es
 precision mediump float;
 in vec2 v_uv;
 in vec3 v_color;
+uniform vec3 u_floor;
 out vec4 o;
 void main() {
   float r = length(v_uv);
   float core = 1.0 - smoothstep(0.52, 0.64, r);
   float halo = (1.0 - smoothstep(0.55, 1.0, r)) * 0.22;
-  vec3 lit = max(v_color, vec3(0.06, 0.055, 0.075));
+  vec3 lit = max(v_color, u_floor);
   o = vec4(lit * core + v_color * halo, 1.0);
 }`;
 
+const GLOW_VERT = `#version 300 es
+in vec2 a_corner;
+uniform vec2 u_scale;
+uniform vec2 u_origin;
+uniform vec2 u_size;
+uniform vec4 u_crop;
+out vec2 v_uv;
+void main() {
+  vec2 unit = a_corner * 0.5 + 0.5;
+  v_uv = mix(u_crop.xy, u_crop.zw, unit);
+  gl_Position = vec4((unit * u_size + u_origin) * u_scale * vec2(1.0, -1.0) + vec2(-1.0, 1.0), 0.0, 1.0);
+}`;
+
+// The grid is coarse (64x36 stretched over the stage). A cubic filter (four
+// bilinear taps) turns its cells into soft light; plain bilinear leaves a
+// visible lattice of straight seams.
+const GLOW_FRAG = `#version 300 es
+precision highp float;
+in vec2 v_uv;
+uniform sampler2D u_tex;
+uniform vec2 u_texSize;
+out vec4 o;
+vec4 cubic(float v) {
+  vec4 n = vec4(1.0, 2.0, 3.0, 4.0) - v;
+  vec4 s = n * n * n;
+  float x = s.x;
+  float y = s.y - 4.0 * s.x;
+  float z = s.z - 4.0 * s.y + 6.0 * s.x;
+  return vec4(x, y, z, 6.0 - x - y - z) / 6.0;
+}
+void main() {
+  vec2 tc = v_uv * u_texSize - 0.5;
+  vec2 f = fract(tc);
+  tc -= f;
+  vec4 xc = cubic(f.x);
+  vec4 yc = cubic(f.y);
+  vec4 c = tc.xxyy + vec2(-0.5, 1.5).xyxy;
+  vec4 s = vec4(xc.xz + xc.yw, yc.xz + yc.yw);
+  vec4 at = (c + vec4(xc.yw, yc.yw) / s) / u_texSize.xxyy;
+  vec3 a = texture(u_tex, at.xz).rgb;
+  vec3 b = texture(u_tex, at.yz).rgb;
+  vec3 d = texture(u_tex, at.xw).rgb;
+  vec3 e = texture(u_tex, at.yw).rgb;
+  float sx = s.x / (s.x + s.y);
+  float sy = s.z / (s.z + s.w);
+  o = vec4(mix(mix(e, d, sx), mix(b, a, sx), sy), 1.0);
+}`;
+
+// The stage's own dark, and how much of the backdrop and the glow show.
+// What an unlit pixel is drawn as, 0..255: dim on the bare stage, a little
+// brighter over a glow picture, where the dim one disappears.
+const UNLIT = [15, 14, 19];
+const UNLIT_OVER_GLOW = [40, 37, 52];
+const BG = [6, 4, 11];
+const BACKDROP_TINT = [0.1, 0.085, 0.15];
+const GLOW_GAIN = 0.95;
 const MIN_EASE_MS = 14;
 const MAX_EASE_MS = 160;
 const SOLO_DIM = 40;      // of 256: what a fixture that is not soloed keeps
@@ -106,6 +172,7 @@ export class LiveStage {
   private staticBuffers: WebGLBuffer[] = [];
   private uScale: WebGLUniformLocation | null = null;
   private uOrigin: WebGLUniformLocation | null = null;
+  private uFloor: WebGLUniformLocation | null = null;
   private plan: StagePlan | null = null;
   private groups = new Map<string, GroupState>();
   private from = new Uint8Array(0);
@@ -113,6 +180,16 @@ export class LiveStage {
   private cur = new Uint8Array(0);
   private out = new Uint8Array(0);
   private gain: Uint8Array | null = null;
+  private glowProgram: WebGLProgram | null = null;
+  private glowVao: WebGLVertexArrayObject | null = null;
+  private glowCorner: WebGLBuffer | null = null;
+  private glowTexture: WebGLTexture | null = null;
+  private glowUniforms: Record<string, WebGLUniformLocation | null> = {};
+  private glowAcc = new Float32Array(0);
+  private glowRgba = new Uint8ClampedArray(0);
+  private glowCanvas: HTMLCanvasElement | null = null;
+  private glowImage: ImageData | null = null;
+  private glowTextureCells = 0;
   private smooth = true;
   private dirty = true;
   private lost = false;
@@ -154,6 +231,28 @@ export class LiveStage {
     this.program = program;
     this.uScale = gl.getUniformLocation(program, 'u_scale');
     this.uOrigin = gl.getUniformLocation(program, 'u_origin');
+    this.uFloor = gl.getUniformLocation(program, 'u_floor');
+    const glow = gl.createProgram()!;
+    gl.attachShader(glow, compile(gl.VERTEX_SHADER, GLOW_VERT));
+    gl.attachShader(glow, compile(gl.FRAGMENT_SHADER, GLOW_FRAG));
+    gl.bindAttribLocation(glow, 0, 'a_corner');
+    gl.linkProgram(glow);
+    this.glowProgram = glow;
+    this.glowUniforms = {};
+    ['u_scale', 'u_origin', 'u_size', 'u_crop', 'u_tex', 'u_texSize'].forEach((name) => {
+      this.glowUniforms[name] = gl.getUniformLocation(glow, name);
+    });
+    // its own vertex array: the points' one carries per-instance buffers a
+    // plain quad must not be drawn with
+    this.glowCorner = gl.createBuffer();
+    this.glowVao = gl.createVertexArray();
+    gl.bindVertexArray(this.glowVao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.glowCorner);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+    gl.bindVertexArray(null);
+    this.glowTexture = null;
     gl.disable(gl.DEPTH_TEST);
     gl.enable(gl.BLEND);
     gl.blendEquation(gl.MAX);
@@ -189,8 +288,55 @@ export class LiveStage {
       });
     }
     this.gain = null;
+    const cells = plan.glow ? plan.glow.w * plan.glow.h : 0;
+    if (this.glowAcc.length !== cells * 3) {
+      this.glowAcc = new Float32Array(cells * 3);
+      this.glowRgba = new Uint8ClampedArray(cells * 4);
+    }
     this.uploadPlan();
     this.dirty = true;
+  }
+
+  /** The glow picture as last composed (RGBA, grid order) — for a test to
+   * read; nothing draws from the returned array's identity. */
+  glowPixels(): Uint8ClampedArray {
+    return this.glowRgba;
+  }
+
+  /** Every emitter's footprint times its live colour, added up, over the
+   * backdrop, into `glowRgba`. `colors` is what the points are drawn with. */
+  private composeGlow(colors: Uint8Array) {
+    const glow = this.plan!.glow!;
+    const acc = this.glowAcc;
+    const out = this.glowRgba;
+    acc.fill(0);
+    for (const emitter of glow.emitters) {
+      const { points, cells, weights } = emitter;
+      if (!points.length || !cells.length) continue;
+      let r = 0; let g = 0; let b = 0;
+      for (let k = 0; k < points.length; k++) {
+        const i = points[k] * 3;
+        r += colors[i]; g += colors[i + 1]; b += colors[i + 2];
+      }
+      if (r + g + b === 0) continue;
+      const scale = GLOW_GAIN / (points.length * 255);
+      r *= scale; g *= scale; b *= scale;
+      for (let k = 0; k < cells.length; k++) {
+        const c = cells[k] * 3;
+        const w = weights[k];
+        acc[c] += w * r; acc[c + 1] += w * g; acc[c + 2] += w * b;
+      }
+    }
+    const backdrop = glow.backdrop;
+    for (let c = 0, a = 0, o = 0; c < glow.w * glow.h; c++, a += 3, o += 4) {
+      const base = backdrop ? backdrop[c] : 0;
+      // overlapping lights ease toward full instead of clipping to white
+      const r = acc[a]; const g = acc[a + 1]; const b = acc[a + 2];
+      out[o] = BG[0] + base * BACKDROP_TINT[0] + (r * 320) / (255 + r);
+      out[o + 1] = BG[1] + base * BACKDROP_TINT[1] + (g * 320) / (255 + g);
+      out[o + 2] = BG[2] + base * BACKDROP_TINT[2] + (b * 320) / (255 + b);
+      out[o + 3] = 255;
+    }
   }
 
   private uploadPlan() {
@@ -351,6 +497,7 @@ export class LiveStage {
       }
       colors = out;
     }
+    if (plan.glow) this.composeGlow(colors);
     if (this.gl) this.drawGl(plan, colors);
     else if (this.ctx) this.drawCanvas(plan, colors);
     this.drawn++;
@@ -372,10 +519,45 @@ export class LiveStage {
     const { scale, ox, oy } = this.fit(plan);
     gl.viewport(0, 0, width, height);
     gl.clear(gl.COLOR_BUFFER_BIT);
+    const glow = plan.glow;
+    if (glow && this.glowProgram) {
+      const u = this.glowUniforms;
+      gl.activeTexture(gl.TEXTURE0);
+      if (!this.glowTexture) {
+        this.glowTexture = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, this.glowTexture);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        this.glowTextureCells = 0;
+      } else {
+        gl.bindTexture(gl.TEXTURE_2D, this.glowTexture);
+      }
+      if (this.glowTextureCells !== glow.w * glow.h) {
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, glow.w, glow.h, 0, gl.RGBA, gl.UNSIGNED_BYTE,
+          this.glowRgba);
+        this.glowTextureCells = glow.w * glow.h;
+      } else {
+        gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, glow.w, glow.h, gl.RGBA, gl.UNSIGNED_BYTE,
+          this.glowRgba);
+      }
+      gl.useProgram(this.glowProgram);
+      gl.uniform2f(u.u_scale, (2 * scale) / width, (2 * scale) / height);
+      gl.uniform2f(u.u_origin, ox, oy);
+      gl.uniform2f(u.u_size, plan.width, plan.height);
+      gl.uniform4f(u.u_crop, glow.crop[0], glow.crop[1], glow.crop[2], glow.crop[3]);
+      gl.uniform1i(u.u_tex, 0);
+      gl.uniform2f(u.u_texSize, glow.w, glow.h);
+      gl.bindVertexArray(this.glowVao);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    }
     if (!plan.pointCount) return;
     gl.useProgram(this.program);
     gl.uniform2f(this.uScale, (2 * scale) / width, (2 * scale) / height);
     gl.uniform2f(this.uOrigin, ox, oy);
+    const unlit = glow ? UNLIT_OVER_GLOW : UNLIT;
+    gl.uniform3f(this.uFloor, unlit[0] / 255, unlit[1] / 255, unlit[2] / 255);
     gl.bindVertexArray(this.vao);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.colorBuffer);
     gl.bufferSubData(gl.ARRAY_BUFFER, 0, colors);
@@ -389,13 +571,36 @@ export class LiveStage {
     ctx.globalCompositeOperation = 'source-over';
     ctx.fillStyle = '#06040b';
     ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+    const glow = plan.glow;
+    if (glow && typeof document !== 'undefined') {
+      if (!this.glowCanvas) this.glowCanvas = document.createElement('canvas');
+      const small = this.glowCanvas;
+      if (small.width !== glow.w || small.height !== glow.h) {
+        small.width = glow.w;
+        small.height = glow.h;
+      }
+      const smallCtx = small.getContext('2d');
+      if (smallCtx) {
+        if (!this.glowImage || this.glowImage.data !== this.glowRgba) {
+          this.glowImage = new ImageData(this.glowRgba, glow.w, glow.h);
+        }
+        smallCtx.putImageData(this.glowImage, 0, 0);
+        ctx.imageSmoothingEnabled = true;
+        ctx.drawImage(small,
+          glow.crop[0] * glow.w, glow.crop[1] * glow.h,
+          (glow.crop[2] - glow.crop[0]) * glow.w, (glow.crop[3] - glow.crop[1]) * glow.h,
+          ox * scale, oy * scale, plan.width * scale, plan.height * scale);
+      }
+    }
     ctx.globalCompositeOperation = 'lighten';
+    const unlit = glow ? UNLIT_OVER_GLOW : UNLIT;
     const { xy, size } = plan;
     for (let p = 0, i = 0; p < plan.pointCount; p++, i += 3) {
+      if (size[p] <= 0) continue;
       const d = size[p] * scale;
-      const r = Math.max(colors[i], 15);
-      const g = Math.max(colors[i + 1], 14);
-      const b = Math.max(colors[i + 2], 19);
+      const r = Math.max(colors[i], unlit[0]);
+      const g = Math.max(colors[i + 1], unlit[1]);
+      const b = Math.max(colors[i + 2], unlit[2]);
       ctx.fillStyle = `rgb(${r},${g},${b})`;
       const x = (xy[p * 2] + ox) * scale;
       const y = (xy[p * 2 + 1] + oy) * scale;
@@ -418,6 +623,10 @@ export class LiveStage {
       if (this.colorBuffer) gl.deleteBuffer(this.colorBuffer);
       if (this.vao) gl.deleteVertexArray(this.vao);
       if (this.program) gl.deleteProgram(this.program);
+      if (this.glowProgram) gl.deleteProgram(this.glowProgram);
+      if (this.glowVao) gl.deleteVertexArray(this.glowVao);
+      if (this.glowCorner) gl.deleteBuffer(this.glowCorner);
+      if (this.glowTexture) gl.deleteTexture(this.glowTexture);
     }
     this.plan = null;
   }
