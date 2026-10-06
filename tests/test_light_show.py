@@ -553,3 +553,47 @@ def test_a_saved_set_with_house_actions_validates_and_dry_runs(room, monkeypatch
     assert len(out) == 2 and all("problem" not in row for row in out)
     assert calls["set_mode"] == [] and calls["set_enabled"] == [], \
         "a preview/dry-run must write nothing"
+
+
+def test_house_mode_on_then_end_show_restores_the_switch_and_prior_mode(room, monkeypatch):
+    """His own contract (show-actions help, "End show puts it back") must
+    hold for house lighting too: firing "Turn on house mode" from off, with
+    some other mode already his pick, leaves End show putting BOTH the
+    switch and the prior mode back."""
+    from spectra.models.house_mode import HouseMode
+    from spectra.services import house, house_store
+    evening = _a_house_mode()
+    standard = house_store.put_mode(HouseMode(name="Standard"))
+    st = house_store.state()
+    st.mode_id, st.manual, st.source = standard.id, True, "spectra"
+    house_store.save_state()
+
+    calls, state = _house_fakes(monkeypatch, enabled=False)
+
+    async def set_mode(*, mode=None, source="spectra", glide_s=None, clear=False, **kw):
+        calls["set_mode"].append({"mode": mode, "source": source, "clear": clear})
+        s = house_store.state()
+        if clear:
+            s.mode_id, s.manual, s.source = None, True, source
+            house_store.save_state()
+            return {"status": "cleared"}
+        target = house_store.find_mode(mode) if mode else None
+        if target is None:
+            return {"status": "unknown_mode", "mode": mode,
+                    "reason": f"no house mode called {mode!r}"}
+        s.mode_id, s.manual, s.source = target.id, source != "ha", source
+        house_store.save_state()
+        return {"status": "applied"}
+    monkeypatch.setattr(house, "set_mode", set_mode)
+
+    run = fire([A("house_mode_on", mode=evening.id)])
+    assert run["steps"][0]["status"] == "applied"
+    assert state["enabled"] is True
+    assert house_store.state().mode_id == evening.id
+
+    report = asyncio.run(show_actions.end_show())
+    assert state["enabled"] is False
+    assert house_store.state().mode_id == standard.id
+    assert "house lighting" in report["restored"]
+    assert "house mode" in report["restored"]
+    assert show_store.state().baselines == {}
