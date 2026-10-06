@@ -395,7 +395,7 @@ def resolve_composition(mapper_id: str, virtuals: dict[str, dict],
             target[effect_pixel] = cursor + (p - lo)
         comp.segments.append(compare.Segment(
             index=seg_no, device_id=device_id, virtual_id=driver_id,
-            start=cursor, end=cursor + (hi - lo)))
+            start=cursor, end=cursor + (hi - lo), device_start=lo))
         cursor += hi - lo + 1
 
     for vid, mapping in plans.items():
@@ -539,7 +539,8 @@ def slice_composition(comp: "Composition", spec: str) -> "Composition":
         out.segments.append(compare.Segment(
             index=seg.index, device_id=seg.device_id,
             virtual_id=seg.virtual_id,
-            start=cursor, end=cursor + seg.length - 1))
+            start=cursor, end=cursor + seg.length - 1,
+            device_start=seg.device_start))
         globals_.extend(range(seg.start, seg.end + 1))
         cursor += seg.length
     out.global_indices = globals_

@@ -117,12 +117,21 @@ class Segment:
     """One segment of the stored composition, in composition order — the
     ground truth for rows 2 and 4. `start`/`end` are inclusive indices in
     the COMPOSITION's own global pixel order (the mapper's stored segment
-    list walked in order); `device_id` is which fixture backs it."""
+    list walked in order); `device_id` is which fixture backs it.
+
+    `device_start` is the SAME segment's first index in the DEVICE's own
+    physical pixel numbering (the mapper's stored `lo`) — a different
+    space from `start`/`end`, which this dataclass otherwise never
+    records. `-1` means not recorded (a result stored before this field
+    existed): a reader that needs the device pixel a composition index
+    actually lit must treat that as unresolvable rather than guessing it
+    equals the composition index."""
     index: int
     device_id: str
     virtual_id: str
     start: int
     end: int
+    device_start: int = -1
 
     @property
     def length(self) -> int:
@@ -135,7 +144,8 @@ class Segment:
     def as_dict(self) -> dict:
         return {"index": self.index, "device_id": self.device_id,
                 "virtual_id": self.virtual_id, "start": self.start,
-                "end": self.end, "length": self.length}
+                "end": self.end, "length": self.length,
+                "device_start": self.device_start}
 
 
 @dataclass

@@ -24,6 +24,10 @@ reads no live storage.
 .venv/bin/python scripts/preview_perf/run_preview_perf.py --out /tmp/preview-perf-live \
     --systems spectra+proxy:live,spectra+proxy:live:phone --pass-drawn-fps 59
 
+# the same gate in the Live view's Room map (glow layer, 74 mapped emitters)
+.venv/bin/python scripts/preview_perf/run_preview_perf.py --out /tmp/preview-perf-map \
+    --systems spectra+proxy:live:map,spectra+proxy:live:map:phone --pass-drawn-fps 59
+
 # quick look (2 link profiles, 8 s each)
 .venv/bin/python scripts/preview_perf/run_preview_perf.py --out /tmp/preview-perf --quick
 
@@ -96,7 +100,14 @@ Parts combine, e.g. `spectra-legacy@30+proxy`.
   1,952 segments, one strip effect copied onto the TV backlight and both
   sconces, one pixel onto seventeen bulbs — all dummies). `:phone` adds a
   390x844 screen at 3x with the CPU slowed 4x (`--phone-cpu`); `:canvas`
-  forces the 2D-canvas fallback.
+  forces the 2D-canvas fallback. `:map` opens the Room map instead of the
+  Layout: the rig stores a synthetic camera pose for that room
+  (`rig_common.build_room_maps`) with every block of the TV strip and both
+  sconces mapped — 74 glowing emitters, against the 12 his own stored pose
+  has — so the row measures the view with the whole room mapped. To look at
+  a real pose by hand, start the rig yourself with
+  `spectra_rig.py --room --room-maps <a copy of room_maps.json>`; the file
+  is copied into the rig's own storage and never written.
 - `-legacy` — the old JSON format (the page skips the protocol-2 hello);
   `-legacy@N` raises only its relay rate (a what-if).
 

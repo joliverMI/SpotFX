@@ -283,7 +283,13 @@ class Decode:
                 "undecodable_pixels": self.undecodable_pixels,
                 "out_of_range_pixels": self.out_of_range_pixels,
                 "bit_contrast": self.bit_contrast,
-                "resolution": self.resolution}
+                "resolution": self.resolution,
+                # Where each SEEN index landed in the picture. Kept so the
+                # Live view's room map (services/room_view.py) can draw a
+                # judged decode's pixels without a second capture.
+                "positions": {str(i): [round(self.positions[i][0], 5),
+                                       round(self.positions[i][1], 5)]
+                              for i in self.seen if i in self.positions}}
 
 
 def bright_and_lit(dark: np.ndarray, full: np.ndarray, *,

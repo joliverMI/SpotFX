@@ -21,8 +21,9 @@ THE SHAPE IS A HINT, NOT A MEASUREMENT. Spectra stores how pixels are
 addressed, never where they are, so "frame" and "vertical" are read off the
 fixture's type and name (`_kind`). The exact crystal lattice is the one real
 geometry here (storage/device_profiles). The Live view's position table
-takes this as ONE source; the room map (a later phase) is another source for
-the same renderer, built from camera data, and replaces these hints.
+takes this as ONE source; the room map (room_view.py) is another source for
+the same renderer, built from camera data, and keeps only the crystal's
+lattice from here.
 
 COPY MAPPING is reproduced as nearest-pixel: the render path interpolates
 the effect onto each segment (fx/virtuals.py `_flush_simple_segments`); a
@@ -71,8 +72,17 @@ def _profile_hex(vis_id: str) -> bool:
         return False
 
 
-def virtual_layout(virtual: dict, devices: dict[str, dict]) -> Optional[dict]:
-    """One virtual's fixtures, or None when it reaches no fixture that emits."""
+def fixture_pixels(virtual: dict, devices: dict[str, dict]) -> Optional[dict]:
+    """One virtual resolved to its light-emitting fixtures, pixel by pixel.
+
+    Per fixture, three parallel arrays over the fixture's own pixels (the
+    order `virtual_layout` publishes them in):
+      virtual_px   the virtual's effect pixel each one shows
+      device_px    its index on the device's own strip
+      src          the stream cell that colours it
+    `virtual_layout` is this with the arrays turned into the Live view's
+    wire shape; the room map (room_view.py) reads the arrays themselves to
+    tie a measured pixel range to the fixture pixels it lit."""
     cfg = virtual.get("config") or {}
     segments = [_segment(s) for s in virtual.get("segments") or []]
     if not segments:
@@ -110,31 +120,53 @@ def virtual_layout(virtual: dict, devices: dict[str, dict]) -> Optional[dict]:
 
     fixtures = []
     for device_id, parts in per_device.items():
-        device = devices[device_id]
-        pixels = np.concatenate([p for _, p in sorted(parts, key=lambda part: part[0])])
+        parts = sorted(parts, key=lambda part: part[0])
+        pixels = np.concatenate([p for _, p in parts])
+        device_px = np.concatenate(
+            [np.arange(start, start + len(p), dtype=np.int64) for start, p in parts])
         if rows > 1:
-            pixels = np.sort(pixels)
-        pixels = pixels[rank[pixels] >= 0]
+            order = np.argsort(pixels, kind="stable")
+            pixels, device_px = pixels[order], device_px[order]
+        sent = rank[pixels] >= 0
+        pixels, device_px = pixels[sent], device_px[sent]
         if len(pixels) == 0:
             continue
-        src = rank[pixels]
+        fixtures.append({"device_id": device_id, "device": devices[device_id],
+                         "virtual_px": pixels, "device_px": device_px,
+                         "src": rank[pixels]})
+    if not fixtures:
+        return None
+    return {
+        "id": vis_id, "name": cfg.get("name") or vis_id, "rows": rows, "cols": cols,
+        "cells": int(len(cell_index)) if cell_index is not None else pixel_count,
+        "copy": copy, "fixtures": fixtures,
+    }
+
+
+def virtual_layout(virtual: dict, devices: dict[str, dict]) -> Optional[dict]:
+    """One virtual's fixtures, or None when it reaches no fixture that emits."""
+    resolved = fixture_pixels(virtual, devices)
+    if resolved is None:
+        return None
+    rows = resolved["rows"]
+    fixtures = []
+    for fx in resolved["fixtures"]:
+        device, pixels, src = fx["device"], fx["virtual_px"], fx["src"]
         kind, orient = ("matrix", "h") if rows > 1 else _kind(device, len(pixels))
         fixtures.append({
-            "device_id": device_id,
-            "name": (device.get("config") or {}).get("name") or device_id,
+            "device_id": fx["device_id"],
+            "name": (device.get("config") or {}).get("name") or fx["device_id"],
             "type": device.get("type"),
             "kind": kind, "orient": orient, "count": int(len(pixels)),
             "src": (None if np.array_equal(src, np.arange(len(src)))
                     else [int(i) for i in src]),
             "grid": [int(i) for i in pixels] if rows > 1 else None,
         })
-    if not fixtures:
-        return None
     return {
-        "id": vis_id, "name": cfg.get("name") or vis_id, "rows": rows, "cols": cols,
-        "cells": int(len(cell_index)) if cell_index is not None else pixel_count,
-        "mapping": "copy" if copy else "span",
-        "hex_lattice": rows > 1 and _profile_hex(vis_id),
+        "id": resolved["id"], "name": resolved["name"], "rows": rows,
+        "cols": resolved["cols"], "cells": resolved["cells"],
+        "mapping": "copy" if resolved["copy"] else "span",
+        "hex_lattice": rows > 1 and _profile_hex(resolved["id"]),
         "fixtures": fixtures,
     }
 

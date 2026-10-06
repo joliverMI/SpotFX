@@ -660,7 +660,7 @@ export default function RoomsPage() {
                 Each carrier can sit out of runs and effects while staying in the room, or be
                 removed from the room entirely — two different things.{' '}
                 <HelpLink topic="room-members" />{' '}
-                <Link to="/devices?tab=live">Watch every fixture live →</Link>
+                <Link to="/devices?tab=live&view=room">Watch them live on the room map →</Link>
               </p>
               {/* One card per EMITTER, grouped under the carrier it belongs to.
                 * A carrier mapped whole has one; a strip mapped per segment has

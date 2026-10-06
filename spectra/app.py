@@ -43,7 +43,8 @@ from spectra.api import (av_sync, device_preview, devices as devices_api,
                          feedback, fire_history,
                          flare_preview, gradient2d, intensity_scale, journey,
                          ownership, preview, registry, room_controls,
-                         room_effects as room_effects_api, room_preview, rooms,
+                         room_effects as room_effects_api, room_preview,
+                         room_view as room_view_api, rooms,
                          scenes, sequencer, settings_console, show_review,
                          sonic_usage, spec, test_session, testbed, triggers)
 
@@ -113,6 +114,7 @@ def create_app() -> FastAPI:
     app.include_router(calibrations_api.router)
     app.include_router(night_run_api.router)
     app.include_router(rooms.router)
+    app.include_router(room_view_api.router)
     app.include_router(room_effects_api.router)
     app.include_router(light_show_api.router)
     app.include_router(house_api.router)

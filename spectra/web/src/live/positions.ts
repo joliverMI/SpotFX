@@ -12,11 +12,12 @@
  * discs. The shapes are hints read off each fixture's type and name; only the
  * crystal's lattice is real geometry.
  *
- * THE ROOM MAP IS ANOTHER SOURCE, NOT ANOTHER RENDERER. When devices are
- * mapped, a source that places each point where the camera saw it (and a
- * fixture with no map in a "not placed" tray) returns the same StagePlan and
- * everything downstream — drawing, smoothing, solo, the click targets — is
- * unchanged. That source is not built here.
+ * THE ROOM MAP IS ANOTHER SOURCE, NOT ANOTHER RENDERER. roomMap.ts places
+ * each point where one camera saw its light (and a fixture with no map in a
+ * "not placed" tray) and returns the same StagePlan; everything downstream —
+ * drawing, smoothing, solo, the click targets — is unchanged. Its one
+ * addition is optional: a plan may carry a `glow` layer the stage draws
+ * under the points.
  *
  * Units are abstract "stage units"; the view scales the stage to its box. */
 
@@ -72,6 +73,32 @@ export interface StageFixture {
   y: number;
   w: number;
   h: number;
+  /** Room map only: how this piece came to be where it is. */
+  placedBy?: 'camera' | 'hand';
+  /** Room map only: where it sits in the camera's picture (the seed for
+   * moving it by hand). */
+  placement?: { x: number; y: number; size: number; angle: number };
+  note?: string;
+}
+
+/** A measured light, ready to tint: the cells of the glow picture it reaches
+ * (sparse) and the plan points whose live colour it takes. */
+export interface GlowEmitter {
+  cells: Uint16Array;
+  weights: Uint8Array;
+  points: Uint32Array;
+}
+
+/** A picture drawn UNDER the points: a small grid the stage fills each drawn
+ * frame with every emitter's footprint times its live colour, added up, over
+ * a dim backdrop. `crop` is the part of the grid the plan shows (u0, v0, u1,
+ * v1 in 0..1). */
+export interface GlowLayer {
+  w: number;
+  h: number;
+  backdrop: Uint8Array | null;
+  emitters: GlowEmitter[];
+  crop: [number, number, number, number];
 }
 
 export interface StagePlan {
@@ -86,6 +113,7 @@ export interface StagePlan {
   src: Uint32Array;
   groups: StageGroup[];
   fixtures: StageFixture[];
+  glow?: GlowLayer;
 }
 
 export type PositionSource = (layout: LiveLayout, wide: boolean) => StagePlan;
@@ -101,7 +129,7 @@ const KIND_ORDER: Record<LiveFixture['kind'], number> = {
   matrix: 0, frame: 1, strip: 2, bulbs: 3, dot: 4,
 };
 
-interface Box {
+export interface Box {
   virtual: LiveVirtual;
   fixture: LiveFixture;
   w: number;
@@ -201,14 +229,14 @@ function bulbBox(virtual: LiveVirtual, fixture: LiveFixture): Box {
   };
 }
 
-function boxFor(virtual: LiveVirtual, fixture: LiveFixture): Box {
+export function boxFor(virtual: LiveVirtual, fixture: LiveFixture): Box {
   if (fixture.kind === 'matrix') return matrixBox(virtual, fixture);
   if (fixture.kind === 'frame') return frameBox(virtual, fixture);
   if (fixture.kind === 'strip') return lineBox(virtual, fixture);
   return bulbBox(virtual, fixture);
 }
 
-function detailFor(fixture: LiveFixture, virtual: LiveVirtual): string {
+export function detailFor(fixture: LiveFixture, virtual: LiveVirtual): string {
   const n = fixture.count;
   if (fixture.kind === 'matrix') {
     return `${n} cells${virtual.hex_lattice ? ', hex lattice' : `, ${virtual.cols} × ${virtual.rows}`}`;

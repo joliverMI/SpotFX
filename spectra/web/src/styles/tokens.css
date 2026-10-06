@@ -1752,6 +1752,31 @@ button.big { padding: 16px 18px; font-size: 1.05em; min-height: 52px; border-rad
 .live-selected-detail, .live-list-detail { color: var(--text-muted); font-size: 11.5px; }
 .live-list { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .live-list button { padding: 4px 9px; font-size: 12px; }
+/* The room map (live/roomMap.ts): the stage is the camera's picture. A
+ * piece's label shows only when it is picked or pointed at — two dozen
+ * pieces sit close together. */
+.live-room-bar, .live-placing, .live-tray {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: 12.5px;
+}
+.live-room-bar label { display: flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; white-space: nowrap; }
+.live-room-bar select { flex: 1 1 auto; min-width: 0; max-width: 420px; }
+.live-room-bar button, .live-placing button, .live-tray button { padding: 4px 10px; font-size: 12px; }
+.live-room-bar button.active, .live-tray button.active {
+  border-color: var(--accent); color: var(--accent); background: rgba(168, 85, 247, 0.12);
+}
+.live-room-counts { color: var(--text-muted); font-size: 11.5px; margin-left: auto; }
+.live-placing {
+  background: rgba(168, 85, 247, 0.12); border: 1px solid var(--accent);
+  border-radius: var(--radius); padding: 6px 10px;
+}
+.live-placing > span { margin-right: auto; }
+.live-room .live-label { display: none; background: rgba(20, 13, 31, 0.88); border-radius: 4px; padding: 1px 5px; z-index: 2; }
+.live-room .live-hit:hover .live-label, .live-room .live-hit.selected .live-label { display: flex; }
+.live-room .live-hit.arrange { cursor: grab; touch-action: none; border-color: rgba(168, 85, 247, 0.28); }
+.live-place-catcher { position: absolute; inset: 0; cursor: crosshair; z-index: 3; }
+.live-room-caption { color: var(--text-muted); font-size: 11.5px; line-height: 1.45; }
+.live-tray-title { font-weight: 600; }
+.live-list[hidden] { display: none; }
 .live-fullscreen {
   background: var(--bg); padding: 12px; height: 100vh; overflow: auto;
 }

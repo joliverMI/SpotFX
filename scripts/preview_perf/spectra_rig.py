@@ -11,7 +11,10 @@ audio device, no bridge.
 --room builds his room's real topology (one strip effect copied onto the TV
 backlight and both sconces, one pixel onto seventeen bulbs, the crystal
 through its 1,952 segments) instead of four plain dummies — what the Live
-view rows draw. Still dummies to the render host.
+view rows draw. Still dummies to the render host. It also stores a camera
+pose for that room (rig_common.build_room_maps, synthetic) so the Room map
+has something to draw; --room-maps <file> uses a copy of a real
+room_maps.json instead (the file is read, never written).
 
 --relay-fps only changes the OLD JSON format's rate (a `spectra-legacy@N`
 what-if); the protocol-2 stream paces itself.
@@ -40,6 +43,9 @@ def main() -> None:
                     help="what-if: override RELAY_TARGET_FPS (default: shipped value)")
     ap.add_argument("--room", action="store_true",
                     help="his room's real topology on dummies (the Live view rows)")
+    ap.add_argument("--room-maps", default=None,
+                    help="with --room: a room_maps.json to COPY into the rig's own "
+                         "storage for the Room map, instead of the synthetic pose")
     args = ap.parse_args()
 
     # The same thread-switch interval the real process runs with
@@ -58,6 +64,7 @@ def main() -> None:
     from fx.host import FxHost
     from spectra import config as scfg
     from spectra.api import device_preview as dp_api
+    from spectra.api import room_view as room_view_api
     from spectra.services import device_preview as dp
     from spectra.services.live_host import live
 
@@ -82,8 +89,16 @@ def main() -> None:
     scfg.DEVICE_PREVIEW_FILE.write_text(json.dumps({
         "favorite_virtual_ids": [s[0] for s in rig_common.SHAPES], "paused": False}))
 
+    if args.room:
+        os.makedirs(scfg.ROOM_MAPS_FILE.parent, exist_ok=True)
+        if args.room_maps:
+            scfg.ROOM_MAPS_FILE.write_text(Path(args.room_maps).read_text())
+        else:
+            scfg.ROOM_MAPS_FILE.write_text(json.dumps(rig_common.build_room_maps()))
+
     app = FastAPI()
     app.include_router(dp_api.router, prefix="/spectra")
+    app.include_router(room_view_api.router, prefix="/spectra")
     state: dict = {}
 
     @app.on_event("startup")
