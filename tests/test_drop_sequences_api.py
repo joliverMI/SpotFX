@@ -81,6 +81,40 @@ def test_summary_reads_the_store_and_never_detects():
     assert row["uri"] == URI and row["tiers"] == {"confident": 1}
 
 
+def test_rails_are_the_detectors_own_spikes_and_the_beats_in_song_time():
+    """The Timeline's snap rails (phase 3): every bass spike the detector
+    counts and every beat, both in SONG time — on a capture that starts
+    5 s in, a beat stored at recording-time 0 sits at song-time 5000 — and
+    the drop the detector chose is one of the drawn spikes."""
+    _song(offset_ms=5000)
+    from spectra.services import drop_detector
+    client = _client()
+    rails = client.get(f"/api/drop-sequences/rails?uri={URI}").json()
+    assert rails["status"] == "ok" and rails["beat_ms"] == 500.0
+    assert rails["captured_from_ms"] == 5000
+    assert rails["beats"][0] == [5000, 0] and rails["beats"][3] == [6500, 0]
+    downs = [ms for ms, down in rails["beats"] if down]
+    assert downs and all((ms // 500) % 4 == 0 for ms in downs)
+    spike_ms = [ms for ms, _ in rails["spikes"]]
+    analysis = drop_detector.analyse(URI)
+    assert spike_ms == [int(m) for m in analysis.prep.att_ms]
+    assert all(rise >= drop_detector.ATTACK_MIN_RISE for _, rise in rails["spikes"])
+    seq = client.get(f"/api/drop-sequences?uri={URI}").json()["sequences"][0]
+    assert seq["drop_ms"] in spike_ms
+
+
+def test_rails_are_read_only_and_say_why_when_there_is_nothing_to_draw():
+    from spectra import config as scfg
+    resp = _client().get("/api/drop-sequences/rails?uri=spotify:track:none")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "unavailable" and "no captured" in body["reason"]
+    assert body["spikes"] == [] and body["beats"] == []
+    _song()
+    _client().get(f"/api/drop-sequences/rails?uri={URI}")
+    assert not scfg.DROP_SEQUENCES_FILE.exists()
+
+
 def test_analysed_plan_carries_the_stored_drop_sequences_without_detecting():
     _song()
     client = _client()

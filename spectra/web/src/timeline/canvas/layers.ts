@@ -10,6 +10,7 @@ import type { MarkType } from '../types';
 // same layer here as there; each page supplies its own placement (see
 // ../../debug/plannedEvents.ts's module docstring for why they differ).
 import { plannedEvents as analysedEvents } from '../../debug/layers';
+import { dropSeqBody, dropSeqRail, dropSeqRailBand } from './dropSeqLayer';
 
 const TRI_H = 8;
 const TRI_W = 7;
@@ -578,7 +579,8 @@ export const beatStrips: CanvasLayer = {
 
     ctx.save();
     for (let s = 0; s < strips.length; s++) {
-      const baseY = f.mainH + s * f.stripH;
+      // below the main area AND the drop-sequence snap rails (f.railH, 0 when off)
+      const baseY = f.mainH + f.railH + s * f.stripH;
       const stripY = baseY + 1;
       ctx.globalAlpha = 0.25;
       ctx.strokeStyle = '#ffffff';
@@ -608,7 +610,7 @@ export const beatStrips: CanvasLayer = {
     ctx.restore();
   },
   hitTest(x, y, f): Hit {
-    if (y < f.mainH || !f.data.librosa?.beats?.length) return null;
+    if (y < f.mainH + f.railH || !f.data.librosa?.beats?.length) return null;
     const ms = f.xToTime(x) - f.view.librosaOffsetMs;
     const la = f.data.librosa;
     let best = la.beats[0];
@@ -625,7 +627,9 @@ export const beatStrips: CanvasLayer = {
   },
 };
 
+// Drawn in this order (ascending z); the drop-sequence layer's three parts
+// (./dropSeqLayer.ts) slot in at z 1, 45 and 65 — see that module for why.
 export const BUILDER_LAYERS: CanvasLayer[] = [
-  intensityBackground, blendSpans, rmsBands, avgLines, diamonds, librosaOverlays,
-  analysedEvents, musicMarks, triggers, calibration, playhead, beatStrips,
+  intensityBackground, dropSeqRailBand, blendSpans, rmsBands, avgLines, diamonds, librosaOverlays,
+  analysedEvents, dropSeqBody, musicMarks, triggers, dropSeqRail, calibration, playhead, beatStrips,
 ];

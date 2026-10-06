@@ -10,7 +10,11 @@ import HelpLink from '../../help/HelpLink';
 import { cueFlags, dragMs } from '../../lightshow/cueFlags';
 import type { SongCues } from '../../lightshow/types';
 
-const COLOR = { high: '#f472b6', low: '#38bdf8' } as const;
+/** Warm white ▲ High and indigo ▼ Low — kept OFF the phase colours (gold
+ * charge, sky-blue lull, magenta drop; timeline/dropSequences.ts
+ * PHASE_COLOR). Until 2026-10-06 Low was the lull's own sky blue and High a
+ * pink beside the drop's magenta (drop-detection plan, report section 9). */
+const COLOR = { high: '#f5f5f4', low: '#818cf8' } as const;
 
 export default function ShowCueBar({ uri, durationMs, cues, onChanged }: {
   uri: string;

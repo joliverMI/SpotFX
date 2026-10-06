@@ -3,6 +3,7 @@
 import type {
   AudioShapeData, AudioShapeMeta, EventOption, LibrosaAnalysis, MarkType, MusicTrigger,
 } from '../types';
+import type { DisplaySeq, DropRails, Handle } from '../dropSequences';
 
 export interface Win {
   startMs: number;
@@ -64,6 +65,22 @@ export interface LayerDataBag {
   /** planned analysed events (debug page): scene changes + analysed flares,
    *  already placed where they will fire against this canvas's playhead */
   plannedEvents?: PlannedEventMarker[];
+  /** THE DROP-SEQUENCE LAYER (Timeline page only; ./dropSeqLayer.ts): the
+   *  song's charge/lull/drop sequences, the snap rails drawn under them,
+   *  and what is selected/hovered. Absent = the layer draws nothing and
+   *  reserves no rail band. */
+  dropSeq?: DropSeqLayerData | null;
+}
+
+export interface DropSeqLayerData {
+  seqs: DisplaySeq[];
+  rails: DropRails | null;
+  selectedKey: string | null;
+  hover: { key: string; handle: Handle } | null;
+  /** where the recording starts (song ms) — before it is "not captured" */
+  capturedFromMs: number | null;
+  /** one beat, ms (the protected two-bar tail after a drop is 8 of them) */
+  beatMs: number;
 }
 
 export interface PlannedEventMarker {
@@ -87,7 +104,10 @@ export interface CanvasFrame {
   ctx: CanvasRenderingContext2D;
   w: number;       // CSS px (ctx pre-scaled by dpr)
   h: number;
-  mainH: number;   // h minus beat-strip area
+  mainH: number;   // h minus the snap-rail band and the beat-strip area
+  /** the drop-sequence snap rails' band, directly under the main area
+   *  (0 when the layer is off); the beat strips start below it */
+  railH: number;
   stripH: number;  // height of one strip incl. separator
   stripCount: number;
   win: Win;
@@ -103,6 +123,7 @@ export type Hit =
   | { kind: 'trigger-triangle'; triggerId: string }
   | { kind: 'ai-marker'; index: number }
   | { kind: 'beat'; beatMs: number; values: Record<string, number> }
+  | { kind: 'drop-seq'; key: string; handle: Handle }
   | null;
 
 export interface CanvasLayer {
@@ -117,6 +138,17 @@ export interface CanvasLayer {
 }
 
 export const BEAT_STRIP_H = 21;
+
+/** The drop-sequence snap rails: bass spikes (18 px) over beats (16 px),
+ * plus a 2 px gap — plan.html's Timeline mock. */
+export const SNAP_RAIL_H = 36;
+
+/** How tall the snap-rail band is for this data: SNAP_RAIL_H while the
+ * drop-sequence layer has rails to draw, else 0 — so a canvas without the
+ * layer (the debug page) keeps its geometry exactly. */
+export function snapRailHFor(data: Pick<LayerDataBag, 'dropSeq'>): number {
+  return data.dropSeq?.rails ? SNAP_RAIL_H : 0;
+}
 
 export function stripCountFor(data: Pick<LayerDataBag, 'librosa' | 'mfccDistances'>,
                               lib: ViewState['librosaFilters']): number {

@@ -272,7 +272,7 @@ export const spikes: CanvasLayer = {
 };
 
 // ── Planned analysed events: SCENE CHANGE (solid cyan, full height, ▼ tab)
-// and FLARE (dashed amber, lower half, ● dot). Positions arrive pre-placed
+// and FLARE (dashed lime, lower half, ● dot — never the charge's gold). Positions arrive pre-placed
 // on this canvas's clock (plannedEvents.ts). RANK (2026-10-04) is drawn
 // subtly and twice over: the tab's width / the dot's radius by rank third,
 // and the marker's opacity by rank (plannedEvents.ts's rank helpers); an

@@ -92,7 +92,11 @@ export function songPositionMarkers(plan: AnalysedPlan | null | undefined): Plan
 }
 
 export const SCENE_MARKER_COLOR = '#22d3ee';
-export const FLARE_MARKER_COLOR = '#fbbf24';
+/** Lime, NOT gold: gold, sky-blue and magenta belong to the charge, lull
+ * and drop phases (drop-detection plan decision 5; timeline/dropSequences.ts
+ * PHASE_COLOR). Until 2026-10-06 this was the charge's own gold #fbbf24, so
+ * an analysed flare and a charge read as the same thing. */
+export const FLARE_MARKER_COLOR = '#a3e635';
 
 /** RANK — how strong a planned moment is among the song's analysed
  * transitions (2026-10-04, data/scene-change-ranking-plan/report.md §4, the

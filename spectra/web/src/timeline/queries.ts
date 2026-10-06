@@ -6,6 +6,7 @@ import type {
   AudioShapeData, AudioShapeMeta, LibrosaAnalysis, Palette, Setlist, SongProfile,
 } from './types';
 import type { AnalysedPlan } from '../debug/plannedEvents';
+import type { DropRails, DropSequencesResponse } from './dropSequences';
 
 const enc = encodeURIComponent;
 
@@ -125,6 +126,33 @@ export function useAnalysedPlan(uri: string | null) {
     queryFn: () => spectraGet<AnalysedPlan>(`/analysed-plan?uri=${enc(uri!)}`),
     enabled: !!uri,
     refetchInterval: 15_000,
+    retry: false,
+  });
+}
+
+/** The song's drop sequences (spectra/api/drop_sequences.py): detected
+ * charge/lull/drop sequences merged with his edits and his own phase
+ * triggers. Read-through — the first read of a song not analysed for drops
+ * yet runs the detection (the same thing its first play does). */
+export function useDropSequences(uri: string | null, enabled = true) {
+  return useQuery({
+    queryKey: ['drop-sequences', uri],
+    queryFn: () => spectraGet<DropSequencesResponse>(`/drop-sequences?uri=${enc(uri!)}`),
+    enabled: !!uri && enabled,
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+    retry: false,
+  });
+}
+
+/** The snap rails drawn under the sequence layer: the detector's own bass
+ * spikes and the beats, song time. Read-only; changes only on a recapture. */
+export function useDropRails(uri: string | null, enabled = true) {
+  return useQuery({
+    queryKey: ['drop-rails', uri],
+    queryFn: () => spectraGet<DropRails>(`/drop-sequences/rails?uri=${enc(uri!)}`),
+    enabled: !!uri && enabled,
+    staleTime: 5 * 60_000,
     retry: false,
   });
 }

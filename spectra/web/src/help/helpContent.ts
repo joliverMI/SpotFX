@@ -841,7 +841,7 @@ export const HELP_SECTIONS: HelpSection[] = [
           'They are placed by the same rule as the scene changes (nearest rhythmic edge, else nearest downbeat) and fire on the same show clock, including any flare-kind offset and the automatic lead a flare trigger gets.',
           'When they fire: only while "Scene changes" is "Transitions + analysed", or on a song that has none of your own triggers (under "Everything" or "My triggers only"). Never under "Transitions only", and never on a song carrying your own triggers under "My triggers only" or "Everything".',
           'Spacing: a flare within 2 seconds of a planned scene change is dropped, so a flare never lands on top of a transition; and flares closer than 2 seconds to each other are thinned, keeping the stronger one.',
-          'They are worked out from the song\'s analysis when it starts playing — nothing is written to your triggers, and they never appear on the Timeline as triggers. Changing "Total actions per minute" or the edge settings moves the split between scene changes and flares from the next play of a song. The Review page lists each one as "Analysed flare", and the debug page\'s audio-shape graph (and the Timeline\'s) marks where the upcoming ones will land (dashed amber) — sized and brightened by rank, so the stronger moments stand out.',
+          'They are worked out from the song\'s analysis when it starts playing — nothing is written to your triggers, and they never appear on the Timeline as triggers. Changing "Total actions per minute" or the edge settings moves the split between scene changes and flares from the next play of a song. The Review page lists each one as "Analysed flare", and the debug page\'s audio-shape graph (and the Timeline\'s) marks where the upcoming ones will land (dashed lime) — sized and brightened by rank, so the stronger moments stand out.',
         ],
       },
       {
@@ -1203,7 +1203,7 @@ export const HELP_SECTIONS: HelpSection[] = [
             keywords: 'analysed plan scene change flare marker upcoming toggle legend count planned my triggers only transitions only rank ranking strongest size brightness tooltip hover',
             body: [
               'The "Analysed events" toggle (Audio Shape header) shows what SPECTRA\'s trigger clock will do to the currently-shown song, drawn where it actually lands in the SONG (not shifted by any live-playhead clock the way the debug page\'s copy of these markers is — the Timeline canvas already draws everything at raw song position, and so does this).',
-              'A solid cyan line with a ▼ tab is a SCENE CHANGE (a generated transition cue); a dashed amber line with a ● dot is an ANALYSED FLARE (an analysed action that did not become a scene change and fires as a flare instead — see "Analysed flares"). The line under the canvas counts both and says when the scene changes are only planned because the song has not been generated yet.',
+              'A solid cyan line with a ▼ tab is a SCENE CHANGE (a generated transition cue); a dashed lime line with a ● dot is an ANALYSED FLARE (an analysed action that did not become a scene change and fires as a flare instead — see "Analysed flares"). Lime, not gold: gold, sky blue and magenta belong to the charge, lull and drop (see "Drop sequences"). The line under the canvas counts both and says when the scene changes are only planned because the song has not been generated yet.',
               'RANK, kept subtle: every marker shows how strong its moment is among the song\'s transitions (ranked by how much the section energy changes there). The top third of moments get the widest ▼ tab (14 px) and biggest ● dot, the middle third the original size, the bottom third the smallest — and brightness runs from faint for the weakest to full for the strongest. Hover a marker for its rank in words, e.g. "#2 of 21 · section-energy change · scene change". A stored scene change planned under older settings shows unranked, at the original size, until the song is re-planned (see "Re-analysing songs after a settings change").',
               'This works for whatever song is currently shown on the Timeline — playing or manually selected — not only the one playing right now.',
               'The Light Show\'s High (▲) and Low (▼) Triggers have their own draggable strip under the Timeline bar — see "High and Low Triggers". They exist on every analysed song, whatever the mode.',
@@ -1222,6 +1222,59 @@ export const HELP_SECTIONS: HelpSection[] = [
               ['Modes', 'Song search picks any profile; Live mode follows Spotify playback; Auto Wait pauses placement until playback reaches the window.'],
             ],
             kbd: false,
+          },
+        ],
+      },
+      {
+        id: 'drop-sequences',
+        title: 'Drop sequences (charge → lull → drop)',
+        keywords: 'drop detection charge lull drop sequence break return bass detected confident suggested read only preview contra dopamine pop off 100 millones matches yours',
+        intro:
+          'SPECTRA finds each drop where the bass comes back after a break, places its lull and its charge from it, and shows the three as ONE sequence: on the big audio-shape graph, on its own strip under your SPECTRA triggers, and in a review list with a detail box. FOR NOW IT IS READ-ONLY: you can look, not edit — and nothing detected fires yet. Your own charge, lull and drop triggers fire exactly as before. Confirming, dismissing, dragging and snapping come next, and only after that does anything detected fire.',
+        entries: [
+          {
+            id: 'drop-sequence-layer',
+            title: 'On the big graph',
+            keywords: 'gold wedge blue band pink star fade tail rail handles ramp pause bars snap rails bass spikes beats downbeat dotted analysis not captured chip toggle',
+            body: [
+              'The "Drop sequences" chip in the Audio Shape header shows or hides the layer. Each sequence is drawn the way the room will run it. The GOLD WEDGE is the charge\'s build: it rises for 90% of the way to its own lull (or its drop, when it has no lull), then holds. The BLUE BAND is the lull, with its own rise and its last-10% hang before the drop. The PINK STAR line is the drop, and the PINK FADE after it is the two bars kept clear of scene changes.',
+              'A rail along the top carries each sequence\'s three handles — a ramp for the charge, pause bars for the lull, a star for the drop — joined by a bracket, with a chip saying what it is. Hover a handle for its time; click a handle, its line or its chip to open its details. (Dragging comes with editing.)',
+              'Two SNAP RAILS run under the graph: bass spikes (taller means a harder hit) and beats (taller means the first beat of a bar). They are what a handle will snap to once editing arrives; hover one for its time. Where you have moved a handle, a dotted white line shows where the analysis had it.',
+              'A song recorded from part-way in (Pop Off\'s recording starts at 0:18, 100 Millones\' at 0:30) is hatched "not captured" before that point: nothing there can be analysed, so no sequence can be found there.',
+            ],
+          },
+          {
+            id: 'drop-sequence-states',
+            title: 'What each look means',
+            keywords: 'state detected confident suggested confirmed edited added yours your triggers dismissed solid dashed faded dotted show dismissed fires will fire',
+            table: [
+              ['Detected ✦ (solid)', 'Confident. Once detected drops go live it fires on its own on songs that play the analysed show. A song that plays only your own triggers ("My triggers only" with triggers of yours on it) would not play it — its pill is an outlined ✦ instead of a number.'],
+              ['Suggested ? (dashed, faded)', 'Less sure. It never fires on its own; it waits for you to confirm it.'],
+              ['Your triggers (solid)', 'Your own charge, lull and drop, grouped and drawn in the same shape. Where the analysis found the same drop it stands down ("matches your drop") — your triggers fire, as today.'],
+              ['Confirmed ✓', 'Yours now: it will fire wherever your triggers fire.'],
+              ['Edited ✎', 'Yours, with a dotted line where the analysis had each handle you moved.'],
+              ['Added ＋', 'A sequence you placed yourself.'],
+              ['Dismissed ✕', 'Not a drop: hidden, never offered again, and shown greyed only with "Show dismissed" ticked.'],
+            ],
+            kbd: false,
+          },
+          {
+            id: 'drop-sequence-strip',
+            title: 'The drop-sequence strip',
+            keywords: 'strip full song pills numbered question mark jump zoom two bars overview',
+            body: [
+              'Under your SPECTRA triggers strip, the whole song at a glance: gold and blue segments are each sequence\'s build and lull, a numbered pink pill is a sequence that fires (your own triggers today, or one that will once detected drops go live), a dashed "?" is a suggestion, an outlined "✦" is a confident detection this song will not play. Click a pill to select it and zoom the big graph to it, from two bars before the charge to two bars after the drop.',
+            ],
+          },
+          {
+            id: 'drop-sequence-review',
+            title: 'The review list and the detail box',
+            keywords: 'review list jump matches your drop you have a flare here break beats detail box why found score strength what the room does confirm dismiss lull off charge off make it my triggers',
+            body: [
+              'The Drop sequences card lists every sequence in song order: its time, how long the break before the drop was (in beats), and what of yours is already there — "matches your drop", "you have a flare here", "yours · the analysis did not find this drop". "jump" zooms the big graph to it.',
+              'Selecting one — here, on the graph or on the strip — opens its detail box: the charge, lull and drop times (and how far each sits from the analysis), why it was found (the break, the step up, the score and the confident threshold), whether and when it fires, and what the room does with it — how long each build ramps and holds, worked out with the engine\'s own arithmetic.',
+              'The Confirm, Lull off, Charge off, Make it my triggers and Not a drop buttons — and Confirm all confident and Re-detect under the list — are shown where they will be, but stay greyed until editing arrives.',
+            ],
           },
         ],
       },
@@ -1310,7 +1363,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         body: [
           'The saved shape draws upward from the centerline; live capture (25 ms bins) draws downward, so a good lock looks like a mirror image. Brackets mark the xcorr windows; magenta spikes are confirmed mismatches — or, on a song that never locked, the windows the matcher placed while it kept searching (the spike list names which). Middle-drag pans; the timeline handles zoom. Follow resumes automatically when the page opens or the song changes.',
           'Perception trim is a per-track manual offset layered on top of the xcorr result — negative fires lighting earlier, positive later.',
-          'Planned analysed events: while the playing song\'s analysed events are live (Scene changes set to "Transitions + analysed", or a song with none of your own triggers), the graph marks what is coming. A solid cyan line with a ▼ tab is a SCENE CHANGE (a generated transition cue); a dashed amber line with a ● dot is an ANALYSED FLARE (a transition that did not make the cut — see "Analysed flares"). They are drawn on the show clock — including your A/V-sync lead, the audio-buffer compensation and this page\'s own latency and trim — so the playhead crosses each marker at the moment it fires. The line under the graph says how many are planned, notes when the scene changes are only planned because the song has not been generated yet, or says why nothing is drawn (Transitions only, or a song carrying your own triggers). Each marker\'s size and brightness follow its rank among the song\'s transitions — bigger and brighter is stronger — and hovering one names it (e.g. "#2 of 21 · section-energy change · scene change"); the Timeline topic "Analysed events on the shape canvas" spells the sizes out.',
+          'Planned analysed events: while the playing song\'s analysed events are live (Scene changes set to "Transitions + analysed", or a song with none of your own triggers), the graph marks what is coming. A solid cyan line with a ▼ tab is a SCENE CHANGE (a generated transition cue); a dashed lime line with a ● dot is an ANALYSED FLARE (a transition that did not make the cut — see "Analysed flares"). They are drawn on the show clock — including your A/V-sync lead, the audio-buffer compensation and this page\'s own latency and trim — so the playhead crosses each marker at the moment it fires. The line under the graph says how many are planned, notes when the scene changes are only planned because the song has not been generated yet, or says why nothing is drawn (Transitions only, or a song carrying your own triggers). Each marker\'s size and brightness follow its rank among the song\'s transitions — bigger and brighter is stronger — and hovering one names it (e.g. "#2 of 21 · section-energy change · scene change"); the Timeline topic "Analysed events on the shape canvas" spells the sizes out.',
         ],
       },
       {
@@ -1346,9 +1399,10 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         id: 'spectra-trigger-colours',
         title: 'Marker colours',
-        keywords: 'color colour code charge lull drop flare regular violet amber teal red blue pink gold',
+        keywords: 'color colour code charge lull drop flare regular violet amber teal red blue pink gold lime white indigo shape',
         body: [
           'Each marker on the trigger bar is coloured by what it fires: violet for Fire scene, teal for Select colour set, red for Fire update. A Fire response marker is coloured by its own class instead of one flat amber — a plain flare stays amber (the "regular" trigger colour), while Charge (gold), Lull (sky blue), and Drop (magenta) each get their own colour so they read apart from a flare and from each other at a glance while a sequence is running. The edit dialog\'s Class picker shows the same colour next to its dropdown.',
+          'Gold, sky blue and magenta belong to the charge, lull and drop and to nothing else on the Timeline: the drop sequences use them (with a shape each — a ramp, pause bars, a star), the analysed flares on the big graph are lime, and the Light Show\'s High and Low flags are white and indigo.',
         ],
       },
       {
@@ -2367,7 +2421,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         body: [
           'Every analysed song has ONE High Trigger, at its biggest rise in section energy, and ONE Low Trigger, at its biggest fall — the same score the scene-change planner ranks moments by, and placed on exactly the moment that boundary\'s scene change or flare fires. The first and last 15 seconds of a song never hold one.',
           'Where you have placed your own drop mark on a song, the High sits on it instead (the one nearest the biggest rise, if you placed several).',
-          'On the Timeline, under the trigger bar: ▲ is the High and ▼ the Low. Drag a flag to move it — the move is saved for that song and always wins. A moved flag shows a faint dashed line where the analysis puts it, and an "auto" button to put it back. Faint dots are the runners-up; a brighter one is within 10% of the winner — tap a dot to move the flag there.',
+          'On the Timeline, under the trigger bar: the white ▲ is the High and the indigo ▼ the Low (kept off the charge, lull and drop colours, so a flag never reads as a phase). Drag a flag to move it — the move is saved for that song and always wins. A moved flag shows a faint dashed line where the analysis puts it, and an "auto" button to put it back. Faint dots are the runners-up; a brighter one is within 10% of the winner — tap a dot to move the flag there.',
           'Nothing here writes a trigger: High and Low are worked out fresh on each play, and only your moves are stored, so moving one never changes which of your own triggers a song has.',
         ],
       },

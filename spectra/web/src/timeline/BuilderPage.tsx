@@ -6,13 +6,16 @@ import { useSticky } from '../lib/useSticky';
 import { fmtMs } from '../lib/time';
 import { useEvents, useSettings } from '../api/queries';
 import { useBuilderStore } from './store';
-import { useAnalysedPlan, useAudioShapeData, useAudioShapeMeta, useCalibrationStatus, useLibrosa, useLiveShape, useProfileByUri, useSetlists } from './queries';
+import { useAnalysedPlan, useAudioShapeData, useAudioShapeMeta, useCalibrationStatus, useDropRails, useDropSequences, useLibrosa, useLiveShape, useProfileByUri, useSetlists } from './queries';
 import { FLARE_MARKER_COLOR, SCENE_MARKER_COLOR, songPositionMarkers } from '../debug/plannedEvents';
 import { usePlayhead } from './hooks/usePlayhead';
 import { useFollowWindow } from './hooks/useFollowWindow';
 import TimelineCanvas from './canvas/TimelineCanvas';
 import { BUILDER_LAYERS } from './canvas/layers';
-import { BEAT_STRIP_H, stripCountFor, type IntensityBgMode, type LayerDataBag, type ViewState } from './canvas/frame';
+import { BEAT_STRIP_H, snapRailHFor, stripCountFor, type IntensityBgMode, type LayerDataBag, type ViewState } from './canvas/frame';
+import { DEFAULT_BEAT_MS, PHASE_COLOR, buildDisplay, fmtTenths, zoomWindow, type Handle } from './dropSequences';
+import DropSequenceStrip from './components/DropSequenceStrip';
+import DropSequencesCard from './components/DropSequencesCard';
 import { computeAverages, computeMfccDistances } from './canvas/data';
 import ModeBar from './components/ModeBar';
 import TimelineBar from './components/TimelineBar';
@@ -104,6 +107,8 @@ export default function BuilderPage() {
   const [intensityMode, setIntensityMode] = useSticky<IntensityBgMode>('intensityMode', 'off');
   const [canvasHeight, setCanvasHeight] = useSticky('canvasHeight', 260);
   const [showAnalysedEvents, setShowAnalysedEvents] = useSticky('showAnalysedEvents', true);
+  const [showDropSeqs, setShowDropSeqs] = useSticky('showDropSequences', true);
+  const [showDismissedDrops, setShowDismissedDrops] = useSticky('dropShowDismissed', false);
 
   const durationMs = profile?.duration_ms || meta?.duration_ms || track?.duration_ms || 1;
 
@@ -206,6 +211,39 @@ export default function BuilderPage() {
     () => (showAnalysedEvents ? songPositionMarkers(analysedPlan) : []),
     [showAnalysedEvents, analysedPlan]);
 
+  // ── drop sequences (drop-detection plan, phase 3 — read-only) ───────────
+  // ./dropSequences.ts decides what each sequence IS (its look, whether it
+  // fires, its words); the canvas layer, the strip and the review card all
+  // draw that one list.
+  const { data: dropResp, isLoading: dropLoading, error: dropError } = useDropSequences(uri);
+  const { data: dropRails } = useDropRails(uri, showDropSeqs);
+  const [dropSel, setDropSel] = useState<string | null>(null);
+  const [dropHover, setDropHover] = useState<{ key: string; handle: Handle } | null>(null);
+  useEffect(() => { setDropSel(null); setDropHover(null); }, [uri]);
+  const analysedApplies = analysedPlan ? analysedPlan.applies : true;
+  const dropSeqs = useMemo(
+    () => buildDisplay(dropResp, { showDismissed: showDismissedDrops, analysedApplies }),
+    [dropResp, showDismissedDrops, analysedApplies]);
+  const dropBeatMs = dropResp?.song?.beat_ms ?? dropRails?.beat_ms ?? DEFAULT_BEAT_MS;
+  const dropCapturedFrom = dropResp?.song?.captured_from_ms ?? dropRails?.captured_from_ms ?? null;
+  const dropLayer = useMemo(() => {
+    const rails = dropRails?.status === 'ok' ? dropRails : null;
+    if (!showDropSeqs || (!dropSeqs.length && !rails)) return null;
+    return { seqs: dropSeqs, rails, selectedKey: dropSel, hover: dropHover,
+             capturedFromMs: dropCapturedFrom, beatMs: dropBeatMs };
+  }, [showDropSeqs, dropSeqs, dropRails, dropSel, dropHover, dropCapturedFrom, dropBeatMs]);
+  const canvasWrapRef = useRef<HTMLDivElement>(null);
+  const detailRef = useRef<HTMLDivElement>(null);
+  const jumpToDrop = useCallback((key: string) => {
+    const seq = dropSeqs.find((q) => q.key === key);
+    if (!seq) return;
+    followWin.setFollow(false);
+    followWin.setManualWin(zoomWindow(seq, dropBeatMs, durationMs));
+    canvasWrapRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dropSeqs, dropBeatMs, durationMs]);
+  const selectedDrop = dropSeqs.find((q) => q.key === dropSel) ?? null;
+
   const data: LayerDataBag = useMemo(() => ({
     shape: shape ?? null,
     averages,
@@ -219,11 +257,14 @@ export default function BuilderPage() {
     selectedIds,
     hoverTriggerId,
     plannedEvents: analysedMarkers,
+    dropSeq: dropLayer,
   }), [shape, averages, meta, librosa, mfccDistances, workingTriggers, events,
-       calibrationTargetsMs, draggingIntensity, selectedIds, hoverTriggerId, analysedMarkers]);
+       calibrationTargetsMs, draggingIntensity, selectedIds, hoverTriggerId, analysedMarkers, dropLayer]);
 
   const stripCount = stripCountFor(data, librosaFilters);
-  const totalCanvasHeight = canvasHeight + stripCount * BEAT_STRIP_H;
+  // The drop-sequence snap rails get their own band under the main area, so
+  // the waveform keeps its height when the layer is on.
+  const totalCanvasHeight = canvasHeight + snapRailHFor(data) + stripCount * BEAT_STRIP_H;
 
   return (
     <>
@@ -306,14 +347,39 @@ export default function BuilderPage() {
         durationMs={durationMs}
         getWin={followWin.getWin}
         getNowMs={getNowMs}
+        below={uri ? (
+          <>
+            <div className="drop-strip-label">
+              <span>Drop sequences</span>
+              <span className="drop-strip-count">
+                {dropResp?.status === 'ok'
+                  ? `${dropSeqs.filter((q) => q.number != null).length} that fire · ${dropSeqs.filter((q) => q.fire === 'waits').length} suggested`
+                  : dropLoading ? 'reading…' : (dropResp?.reason ?? '')}
+              </span>
+              <HelpLink topic="drop-sequence-strip" title="The drop-sequence strip" />
+            </div>
+            <DropSequenceStrip
+              seqs={dropSeqs}
+              durationMs={durationMs}
+              capturedFromMs={dropCapturedFrom}
+              selectedKey={dropSel}
+              getWin={followWin.getWin}
+              getNowMs={getNowMs}
+              onPick={(key) => { setDropSel(key); jumpToDrop(key); }}
+            />
+          </>
+        ) : null}
       />
 
       <CollapsibleCard
         id="shape"
+        wrapHeader
         title={<>Audio Shape <HelpLink topic="builder-mouse" title="Canvas mouse actions" />
           <HelpLink topic="builder-selection-keys" title="Selection & intensity keys" /></>}
         headerExtra={
-          <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          // Wraps rather than widening the page on a phone (390 px).
+          <span style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap',
+                         justifyContent: 'flex-end', minWidth: 0 }}>
             {capturing && (
               <span style={{ fontSize: 11, color: 'var(--accent2)' }}>● capturing…</span>
             )}
@@ -332,6 +398,14 @@ export default function BuilderPage() {
               onClick={() => setShowAnalysedEvents((v) => !v)}
             >
               Analysed events
+            </button>
+            <button
+              style={{ fontSize: 12 }}
+              className={`chip filter ${showDropSeqs ? 'active' : ''}`}
+              title="Show/hide the drop sequences (charge → lull → drop) and the snap rails under them"
+              onClick={() => setShowDropSeqs((v) => !v)}
+            >
+              Drop sequences
             </button>
             <button
               style={{ fontSize: 12 }}
@@ -356,6 +430,7 @@ export default function BuilderPage() {
           </span>
         }
       >
+        <div ref={canvasWrapRef} style={{ scrollMarginTop: 12 }}>
         <TimelineCanvas
           layers={BUILDER_LAYERS}
           data={data}
@@ -365,6 +440,26 @@ export default function BuilderPage() {
           height={totalCanvasHeight}
           pointer={{
             ...triggerPointer,
+            // A drop-sequence hit (./canvas/dropSeqLayer.ts) selects that
+            // sequence for its detail box and goes no further — it is never
+            // handed to the legacy trigger interactions, which would read it
+            // as "empty canvas" (clearing a selection, or creating a trigger
+            // on a double-click).
+            onHit: (hit, ev, g) => {
+              if (hit?.kind === 'drop-seq') { setDropSel(hit.key); return; }
+              triggerPointer.onHit?.(hit, ev, g);
+            },
+            onDoubleClick: (ms, y, hit, g) => {
+              if (hit?.kind === 'drop-seq') { setDropSel(hit.key); return; }
+              triggerPointer.onDoubleClick?.(ms, y, hit, g);
+            },
+            onHoverMove: (hit) => {
+              const next = hit?.kind === 'drop-seq' ? { key: hit.key, handle: hit.handle } : null;
+              setDropHover((prev) => (prev?.key === next?.key && prev?.handle === next?.handle ? prev : next));
+              triggerPointer.onHoverMove?.(hit?.kind === 'drop-seq' ? null : hit);
+            },
+            onContextMenu: (ms, hit, y, g) =>
+              triggerPointer.onContextMenu?.(ms, hit?.kind === 'drop-seq' ? null : hit, y, g),
             onPan: (deltaMs) => {
               const w = followWin.getWin();
               followWin.setFollow(false);
@@ -372,6 +467,7 @@ export default function BuilderPage() {
             },
           }}
         />
+        </div>
         <div
           title="Drag to resize the canvas"
           style={{ height: 8, cursor: 'ns-resize', display: 'flex', alignItems: 'center',
@@ -423,6 +519,29 @@ export default function BuilderPage() {
           </span>
           <HelpLink topic="builder-analysed-events" />
         </div>
+        {showDropSeqs && uri && (
+          <div
+            data-testid="drop-sequences-legend"
+            style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 12, marginTop: 4, fontSize: 11, color: 'var(--text-muted)' }}
+          >
+            <span className="drop-legend-item"><span className="drop-swatch charge" style={{ color: PHASE_COLOR.charge }} />charge build</span>
+            <span className="drop-legend-item"><span className="drop-swatch lull" style={{ color: PHASE_COLOR.lull }} />lull</span>
+            <span className="drop-legend-item"><span className="drop-swatch drop" style={{ color: PHASE_COLOR.drop }} />drop</span>
+            <span style={{ minWidth: 0 }}>solid = fires · dashed = suggested · dotted = where the analysis had it</span>
+            <span style={{ minWidth: 0 }}>rails under the graph: bass spikes (taller = harder) and beats</span>
+            <HelpLink topic="drop-sequence-layer" title="The drop-sequence layer" />
+            {selectedDrop && (
+              <button
+                type="button"
+                style={{ fontSize: 11, padding: '1px 8px' }}
+                title="Show this sequence's details"
+                onClick={() => detailRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })}
+              >
+                selected: {fmtTenths(selectedDrop.drop)} · details ↓
+              </button>
+            )}
+          </div>
+        )}
         <ShiftAllControl open={shiftOpen} setOpen={setShiftOpen} durationMs={durationMs} />
         <HelpLink topic="builder-navigation" title="Navigation & view" />
         {beatTip && (
@@ -445,6 +564,30 @@ export default function BuilderPage() {
           hasIntensityCurve={!!shape?.avg_rms_1s?.length}
         />
       </CollapsibleCard>
+
+      {uri && (
+        <div ref={detailRef} style={{ scrollMarginTop: 12 }}>
+          <CollapsibleCard
+            id="drop-sequences"
+            wrapHeader
+            title={<>Drop sequences <HelpLink topic="drop-sequences" title="Drop sequences" /></>}
+          >
+            <DropSequencesCard
+              resp={dropResp}
+              loading={dropLoading}
+              error={dropError ? (dropError as Error).message : null}
+              seqs={dropSeqs}
+              selectedKey={dropSel}
+              onSelect={setDropSel}
+              onJump={jumpToDrop}
+              showDismissed={showDismissedDrops}
+              setShowDismissed={setShowDismissedDrops}
+              analysedApplies={analysedApplies}
+              analysedReason={analysedPlan?.reason ?? null}
+            />
+          </CollapsibleCard>
+        </div>
+      )}
 
       <CollapsibleCard id="palettes"
         title={<>Palettes <HelpLink topic="builder-palette-keys" title="Keyboard palettes" />

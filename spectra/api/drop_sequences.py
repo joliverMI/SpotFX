@@ -13,6 +13,10 @@ phase 4). spectra/services/drop_sequences.py is the binding statement.
                                     detected, by tier, and how many edits
                                     he has made — a store read, never a
                                     detection.
+  GET /api/drop-sequences/rails?uri= the snap rails the Timeline draws under
+                                    the sequence layer (phase 3): the
+                                    detector's own bass spikes and the
+                                    beats, song time. Read-only.
 
 Nothing here fires anything (phase 5).
 """
@@ -63,3 +67,9 @@ def _summary() -> dict:
 @router.get("/summary")
 async def get_summary():
     return await asyncio.to_thread(_summary)
+
+
+@router.get("/rails")
+async def get_rails(uri: str = Query(..., min_length=1)):
+    """Off the loop: the analysis reads the song's audio shape and beats."""
+    return await asyncio.to_thread(drop_sequences.snap_rails, uri)
