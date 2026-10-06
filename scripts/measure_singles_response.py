@@ -220,13 +220,18 @@ class LiveRoom:
             raise RuntimeError(f"{path} refused: {r.status_code} {r.text}")
         return r.json()
 
-    def live_mode(self) -> dict:
-        """The house mode driving the room right now (the full stored body)."""
+    def live_mode(self) -> Optional[dict]:
+        """The house mode driving the room right now (the full stored body),
+        or None when no mode is driving it — nothing is held, nothing to
+        lift (HouseSettings.enabled ships off, so this is the normal state
+        of a room that hasn't had a house mode turned on yet)."""
         mode_id = ((self.get("/api/house/mode") or {}).get("mode") or {}).get("id")
+        if mode_id is None:
+            return None
         for m in self.get("/api/house/modes").get("modes", []):
             if m.get("id") == mode_id:
                 return m
-        raise RuntimeError("no house mode is driving the room — nothing to lift")
+        return None
 
     def mode_by_id(self, mode_id: str) -> Optional[dict]:
         return next((m for m in self.get("/api/house/modes").get("modes", [])
@@ -287,9 +292,7 @@ class SimRoom:
         return {"mode": self.mode}
 
     def live_mode(self):
-        if self.mode is None:
-            raise RuntimeError("no house mode is driving the room — nothing to lift")
-        return deepcopy(self.mode)
+        return deepcopy(self.mode) if self.mode is not None else None
 
     def mode_by_id(self, mode_id):
         return deepcopy(self.mode) if self.mode and self.mode["id"] == mode_id else None
@@ -408,8 +411,12 @@ def preflight(room, fixtures: list[str], lift: list[str] = ()) -> list[str]:
 
 def lift_house_hue(room, areas: list[str], record_path: Optional[str]) -> Optional[dict]:
     """Free the named Hue areas from the live house mode's hold. Writes the
-    record BEFORE the lift. Returns it, or None when nothing was held."""
+    record BEFORE the lift. Returns it, or None when nothing was held — no
+    house mode is driving the room at all, or none of the named areas were
+    held by the one that is."""
     mode = room.live_mode()
+    if mode is None:
+        return None
     body, originals = lifted_mode(mode, list(areas))
     if not originals:
         return None
@@ -706,6 +713,8 @@ def planned_calls(room, lift: list[str]) -> list[dict]:
     if not lift:
         return []
     mode = room.live_mode()
+    if mode is None:
+        return []
     body, originals = lifted_mode(mode, list(lift))
     if not originals:
         return []

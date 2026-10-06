@@ -201,6 +201,34 @@ def test_the_record_is_on_disk_before_the_lift_lands(tmp_path):
     assert seen[0] is True
 
 
+def test_a_lift_requested_with_no_house_mode_driving_the_room_does_nothing(tmp_path):
+    """The documented bare `--simulate` smoke test (and any real room before
+    a house mode has ever been turned on, since HouseSettings.enabled ships
+    off) starts with no mode at all. Asking to lift an area then must be a
+    no-op — nothing held, nothing to put back — not a crash."""
+    room = m.simulated_room()
+    assert room.mode is None
+    rec = tmp_path / "lift.json"
+    res = m.run(room, ["dining-table", "dining-hues"], lift=["dining-hues"],
+                record_path=str(rec), trials=2)
+    assert res["fixtures"]["dining-hues"]["visible"]      # the measurement still ran
+    assert "restore" not in res                           # nothing was lifted to restore
+    assert room.mode is None                               # untouched
+    assert not rec.exists()
+
+
+def test_planned_calls_with_no_house_mode_reports_nothing_to_lift():
+    room = m.simulated_room()
+    assert room.mode is None
+    assert m.planned_calls(room, ["dining-hues"]) == []
+
+
+def test_lift_house_hue_with_no_house_mode_returns_none():
+    room = m.simulated_room()
+    assert room.mode is None
+    assert m.lift_house_hue(room, ["dining-hues"], None) is None
+
+
 def test_the_look_is_put_back_even_when_the_run_fails(monkeypatch):
     room = _away_room()
 
