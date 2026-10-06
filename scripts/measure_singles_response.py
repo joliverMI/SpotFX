@@ -48,8 +48,11 @@ Protocol, per run:
      half its full reading, sub-frame interpolated, read only where that
      fixture dominates. Their DIFFERENCE is the relative delay (the
      camera's own seconds-long stream lag cancels, because both are seen
-     in the same frames); the random wait between trials dithers the 5 fps
-     frame clock so the average resolves well below one frame.
+     in the same frames); trials are timed against the camera's MEASURED
+     frame period (`estimate_frame_period`, from distinct frames actually
+     arriving — the kiosk stream runs ~4.2 fps against a nominal 5), and
+     the random wait between trials dithers that same cadence so the
+     average resolves well below one frame.
 
 THE NAMED ASSUMPTION. A webcam encodes light with a tone curve. Readings
 are linearised with the sRGB/BT.709-style curve (`camera_decode`) before the
