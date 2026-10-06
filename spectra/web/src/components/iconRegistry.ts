@@ -33,7 +33,7 @@
  * matching a generic 24x24 icon-grid convention (Feather-style) rather
  * than any specific icon library's bundle. */
 
-export const ICONS: Record<string, string> = {
+export const ICONS = {
   /** Generic power glyph — PowerButton.tsx's shared enable/disable
    * control, used for scenes, colour sets, flares, and Force Colour. */
   power: 'M12 2L12 12M18.36 6.64a9 9 0 1 1-12.73 0',
@@ -46,6 +46,6 @@ export const ICONS: Record<string, string> = {
    * suggestion: "an exit/home glyph"). Used only by the small, long-press
    * release control at the right end of the top bar. */
   home: 'M3 9.5L12 3l9 6.5V20a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1Z',
-};
+} satisfies Record<string, string>;
 
 export type IconName = keyof typeof ICONS;
