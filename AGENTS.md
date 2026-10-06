@@ -9869,6 +9869,30 @@ playing. Toggle + count/reason legend: `BuilderPage.tsx`'s "Analysed
 events" chip and its legend row, help topic `builder-analysed-events`.
 Proven by `node scripts/check_timeline_analysed_markers.mjs`.
 
+**The SAME markers also draw on the full-song trigger strip (2026-10-06,
+his ask: "I want to see the generated flares on the timeline. I see them
+on the audio shape")** — `spectra/web/src/timeline/components/
+AnalysedEventsStrip.tsx`, mounted in `SpectraTriggersCard`'s `below` slot
+above the drop-sequence strip, fed the exact same `songPositionMarkers(
+analysedPlan)` list the canvas layer draws (one source, so a drop
+sequence's protected window holds a cue back on both surfaces alike).
+Gated by the same "Analysed events" toggle.
+
+**Light Show High/Low Trigger markers, same ask, same night** — his
+`show_cues.py`/`ArmsStatus` data (already served on `AnalysedPlan.
+show_cues` and `GET /api/light-show/arms`) is now ALSO drawn as a marker
+on both the trigger strip and the audio-shape canvas, shown whether or
+not anything is armed on it: `spectra/web/src/timeline/
+lightShowMarkers.ts` (pure — `armAppliesToCue` mirrors `show_arms.py`'s
+own `_applies_to_song`, `lightShowCueMarkers` produces solid-when-armed/
+muted-when-not markers, `sceneChangeArms` picks out arms with no fixed
+song position for the legend line instead of a marker) +
+`canvas/lightShowLayer.ts` (the canvas layer, z=41, right above
+`analysedEvents`) + `ShowCueBar.tsx`'s own armed ring/glow (the SAME
+rule, since that strip already existed and only needed the armed/muted
+distinction added). New "Light Show" toggle, on by default, legend under
+the canvas. Proven by `node scripts/check_timeline_light_show_markers.mjs`.
+
 ## THE SCENE-CHANGE PLANNER — the strongest transitions are the scene changes
 
 2026-10-04 (data/scene-change-ranking-plan/report.md, the Admiral's "use all
