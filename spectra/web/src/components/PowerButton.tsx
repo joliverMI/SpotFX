@@ -28,8 +28,17 @@
  *
  * `size` exists because a list row wants a smaller target than a toolbar;
  * the button is square at whatever size it is given, and the row must not
- * change height when it flips, at any size. */
+ * change height when it flips, at any size.
+ *
+ * The glyph is an inline SVG (`Icon name="power"`), not the raw U+23FB
+ * POWER SYMBOL character this used to render directly — that codepoint
+ * has no glyph in several common UI font stacks and falls back to a
+ * missing-glyph box, which is what showed up as an "X" on his screen
+ * ("Force colour" and "Snap generated cues to beat" are both this same
+ * shared component; fixing it here fixes every caller at once). See
+ * `iconRegistry.ts`'s own docstring for the full reasoning. */
 import { fixedSizeToggleStyle } from './fixedSizeToggleStyle';
+import Icon from './Icon';
 
 export default function PowerButton({
   on, onChange, itemLabel = 'scene', size = 26, title, ariaLabel,
@@ -75,7 +84,7 @@ export default function PowerButton({
       onClick={(e) => { e.stopPropagation(); onChange(!on); }}
       onPointerDown={(e) => e.stopPropagation()}
     >
-      ⏻
+      <Icon name="power" size={Math.round(size * 0.58)} />
     </button>
   );
 }

@@ -128,23 +128,6 @@ button:hover { border-color: var(--accent); }
 button.primary { background: var(--accent); border-color: var(--accent); color: #14061f; font-weight: 600; }
 button.danger:hover { border-color: var(--danger); color: var(--danger); }
 
-/* The panic release: an always-reachable, unmissable action — never buried
- * in a menu, never behind a confirm dialog (the press IS the consent). */
-.panic-release-btn {
-  display: block;
-  margin: 8px 16px;
-  align-self: flex-start;
-  background: transparent;
-  border: 1px solid var(--danger);
-  color: var(--danger);
-  font-weight: 700;
-  font-size: 12px;
-  letter-spacing: 0.02em;
-  padding: 7px 14px;
-}
-.panic-release-btn:hover:not(:disabled) { background: var(--danger); color: #1a0505; }
-.panic-release-btn:disabled { opacity: 0.5; cursor: default; }
-
 .release-banner {
   display: flex;
   align-items: center;
@@ -208,6 +191,59 @@ button.danger:hover { border-color: var(--danger); color: var(--danger); }
 .room-control input[type="range"] { width: 100px; }
 .room-control input[type="number"] { width: 64px; }
 .room-control-value { min-width: 32px; color: var(--text); }
+
+/* THE PANIC HANDLE, small and iconic, at the right end of the top bar
+ * (ReleaseButton.tsx; his ask 2026-10-06: it hands away SPECTRA's own
+ * everyday house lighting now, so it must be small AND require a hold,
+ * not an always-reachable tap). The ring is an SVG <circle> overlaid on
+ * the icon button, its `stroke-dashoffset` driven by the hold's live
+ * progress (0..1) — a visible fill, not a spinner, so a held finger/mouse
+ * can see exactly how much longer it needs without looking away. */
+.release-hold-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.release-hold-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1px solid var(--danger);
+  background: transparent;
+  color: var(--danger);
+  cursor: pointer;
+  padding: 0;
+  touch-action: manipulation;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.release-hold-btn:hover:not(:disabled) { background: rgba(248, 113, 113, 0.14); }
+.release-hold-btn:disabled { opacity: 0.5; cursor: default; }
+.release-hold-btn:focus-visible { outline: 2px solid var(--danger); outline-offset: 2px; }
+.release-hold-ring {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  color: var(--danger);
+}
+.release-hold-hint {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--danger);
+  background: var(--surface);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius);
+  padding: 3px 8px;
+  z-index: 5;
+}
 
 /* The three grouped press-and-hold buttons (Mode / Ambient / Scenes,
  * TopBarGroupButton.tsx) — Mode/Ambient short-press act directly (cycle
@@ -607,7 +643,6 @@ button.danger:hover { border-color: var(--danger); color: var(--danger); }
 .device-preview-picker-actions { display: flex; justify-content: flex-end; gap: 8px; }
 
 @media (max-width: 720px) {
-  .panic-release-btn { margin: 8px; width: calc(100% - 16px); padding: 10px; font-size: 13px; text-align: center; }
   .release-banner { padding: 10px; font-size: 12.5px; }
   .release-banner button.primary { width: 100%; padding: 10px; }
   .activation-strip { padding: 8px 10px; font-size: 12px; }

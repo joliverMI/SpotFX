@@ -366,7 +366,7 @@ export default function FlarePreviewOverlay({ sceneId, kind, onClose, onTriggerO
         {timeline?.overrode_disabled && (
           <div style={{ fontSize: 12, color: 'var(--warning)' }}>
             ⚠ This flare is switched OFF — it never fires automatically. Previewing it
-            anyway (an explicit press always wins); tap its ⏻ power button to turn it
+            anyway (an explicit press always wins); tap its power button to turn it
             back on.
           </div>
         )}

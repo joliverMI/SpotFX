@@ -74,9 +74,11 @@ contract in `data/spectra-design-decisions.md`).
 ## Panic release — the emergency exit, no arming required
 
 Unlike the handover below, `POST /spectra/api/ownership/release` is NOT
-gated by `SPECTRA_HANDOVER_ARMED` and needs no body — one press (the SPECTRA
-UI's red "Release to Home Assistant" button, or the bare POST) and whichever
-world owned the room lets go: the ownership record moves to `released`
+gated by `SPECTRA_HANDOVER_ARMED` and needs no body — one call (the bare
+POST, or holding the small release icon at the end of the SPECTRA UI's
+room-controls bar — see helpContent.ts topic `panic-release` for that
+control's own hold-to-confirm behaviour) and whichever world owned the room
+lets go: the ownership record moves to `released`
 first (both worlds' write gates shed immediately), then each device is told
 to let go explicitly — WLED gets the JSON API's `{"live": false}`, Hue's
 entertainment session is stopped, the external LedFX service's active

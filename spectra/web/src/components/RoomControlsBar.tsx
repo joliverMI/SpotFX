@@ -34,7 +34,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import AmbientGroupsPicker from './AmbientGroupsPicker';
 import ColorGradientPicker from './ColorGradientPicker';
 import DriftGradientBar from './DriftGradientBar';
+import Icon from './Icon';
 import PowerButton from './PowerButton';
+import ReleaseButton from './ReleaseButton';
 import RecentChoiceButtons from './RecentChoiceButtons';
 import TopBarGroupButton from './TopBarGroupButton';
 import HelpLink from '../help/HelpLink';
@@ -793,8 +795,9 @@ export default function RoomControlsBar() {
 
       <DriftGradientBar />
 
-      <label className="room-control" title="Dims/undims the whole room uniformly">
-        Brightness
+      <label className="room-control" aria-label="Brightness"
+        title="Brightness — dims/undims the whole room uniformly">
+        <Icon name="bulb" size={15} title="Brightness" />
         <input
           type="range" min={0} max={100} step={1}
           value={Math.round(local.brightness_multiplier * 100)}
@@ -806,6 +809,13 @@ export default function RoomControlsBar() {
       </label>
 
       <HelpLink topic="room-controls-bar" />
+
+      {/* THE PANIC HANDLE, moved to the right end of this row and made
+        * small/iconic/hold-to-confirm (his ask 2026-10-06) — see
+        * ReleaseButton.tsx's own docstring. Renders nothing once the room
+        * is actually released; the way back lives in RoomOwnershipBar,
+        * unchanged. */}
+      <ReleaseButton />
     </div>
   );
 }

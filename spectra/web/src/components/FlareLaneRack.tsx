@@ -16,6 +16,7 @@
  *     same-param precedence (flareKindOps.ts header).
  * Purely presentational: all pointer tracking and the actual scene mutation
  * live in ResponseTab.tsx / flareKindOps.moveKindToLane. */
+import Icon from './Icon';
 import PowerButton from './PowerButton';
 import { NumberInput } from './inputs';
 import { bandPools } from '../scenes/tabs/flareKindOps';
@@ -113,9 +114,10 @@ export default function FlareLaneRack({
                 rack must not quietly look normal. */}
             {pool.members.length > 0
               && pool.members.every((n) => kindsByName[n] && kindsByName[n].enabled === false) && (
-              <div style={{ fontSize: 9, color: 'var(--text-muted)', lineHeight: '11px' }}
+              <div style={{ fontSize: 9, color: 'var(--text-muted)', lineHeight: '11px',
+                            display: 'flex', alignItems: 'center', gap: 3 }}
                 title="Every kind in this lane is switched off — this lane fires nothing">
-                ⏻ lane off
+                <Icon name="power" size={9} /> lane off
               </div>
             )}
             {pool.members.map((name, mi) => {
