@@ -190,7 +190,7 @@ export default function ScenesPage() {
     <>
       <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         Scenes <HelpLink topic="scenes-page" />
-        <HelpLink topic="power-button" title="The ⏻ power button" />
+        <HelpLink topic="power-button" title="The power button" />
         <button className="primary" style={{ marginLeft: 'auto', fontSize: 11, padding: '3px 10px' }}
           onClick={() => { create(); setPickerOpen(false); }}>
           + Scene

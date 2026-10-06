@@ -1,11 +1,19 @@
 /** THE OWNER'S PANIC HANDLE — mounted once in App.tsx under the nav, on
- * every page, phone-first. Two shapes, one component:
- *   - normal:   a small, always-reachable "Release to HA" button. No
- *               confirmation — the press is the consent, the same
- *               deliberate asymmetry as the scene Fire button.
- *   - released: an unmissable full-width banner replaces the button, with
- *               the way back — the SAME guarded handover to SPECTRA, still
- *               readiness-gated and SPECTRA_HANDOVER_ARMED-gated.
+ * every page, phone-first.
+ *   - normal:   RENDERS NOTHING OF ITS OWN besides the strips below — the
+ *               small, always-reachable "Release to HA" control itself
+ *               moved to the right end of RoomControlsBar's row as a
+ *               small icon button requiring a hold to confirm (his ask
+ *               2026-10-06: it was "too prominent" for a control that now
+ *               hands away SPECTRA's own everyday house lighting — see
+ *               ReleaseButton.tsx). This module keeps only the strips,
+ *               which belong on every page regardless of where the
+ *               release control itself lives.
+ *   - released: an unmissable full-width banner, with the way back — the
+ *               SAME guarded handover to SPECTRA, still readiness-gated
+ *               and SPECTRA_HANDOVER_ARMED-gated. UNCHANGED by the move
+ *               above (his own "its behaviour after release is
+ *               unchanged").
  * Plus, since 2026-08-21 (owner ruling: one unreachable device must not
  * keep the whole room dark — spectra/services/activation_report.py): the
  * ACTIVATION STRIP. A take-back from released now commits over a light it
@@ -20,7 +28,6 @@ import HelpLink from '../help/HelpLink';
 import { fmtAgo, fmtDuration } from '../lib/time';
 import {
   useOwnership,
-  useReleaseRoom,
   useTakeBackToSpectra,
   type ActivationReport,
   type DarkFixtureStatus,
@@ -103,30 +110,12 @@ export function DarkFixtureStrip({ dark }: { dark: DarkFixtureStatus | null | un
 
 export default function RoomOwnershipBar() {
   const { data } = useOwnership();
-  const release = useReleaseRoom();
   const takeBack = useTakeBackToSpectra();
   const toast = useToast();
 
   if (!data) return null;
 
   const released = data.owner === 'released';
-  const handingOver = data.owner === 'handing-over';
-
-  const doRelease = () => {
-    release.mutate(undefined, {
-      onSuccess: (result) => {
-        if (result.result !== 'released') {
-          // Loud, not silent: the record moved to released, but a device
-          // could not be confirmed dark — it may still be lit.
-          toast(
-            `Release unverified — these lights may still be lit: ${(result.problems ?? []).join('; ')}`,
-            'error',
-          );
-        }
-      },
-      onError: (e) => toast(`Release failed: ${(e as Error).message}`, 'error'),
-    });
-  };
 
   const doTakeBack = () => {
     takeBack.mutate(undefined, {
@@ -161,14 +150,6 @@ export default function RoomOwnershipBar() {
     <>
       <ActivationStrip act={data.activation} />
       <DarkFixtureStrip dark={data.dark_fixtures} />
-      <button
-        className="panic-release-btn"
-        onClick={doRelease}
-        disabled={release.isPending || handingOver}
-        title="Release ALL lights to Home Assistant — no confirmation, the press is the consent"
-      >
-        {release.isPending ? 'Releasing…' : '⏻ Release to Home Assistant'}
-      </button>
     </>
   );
 }

@@ -365,7 +365,7 @@ export default function ColorSetsPage() {
       <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
         Colour Sets & Groups <HelpLink topic="colorsets-groups" title="Colour Sets & Groups page" />
         <HelpLink topic="colorsets-groups-page" title="Sets vs Groups, and the tiered list" />
-        <HelpLink topic="power-button" title="The ⏻ power button" />
+        <HelpLink topic="power-button" title="The power button" />
         {isPhone && pickerOpen && (
           <button style={{ fontSize: 12, marginLeft: 'auto' }} onClick={() => setPickerOpen(false)}>✕</button>
         )}

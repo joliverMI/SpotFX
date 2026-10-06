@@ -8450,6 +8450,44 @@ reading the proxy's `_pass_headers`, not assumed. Regression coverage:
 `tests/test_spa_cache_headers.py` (parametrized over both mounts; proven
 red against the pre-fix code, green after).
 
+## SPECTRA icons are inline SVG, never a raw Unicode character — his "appears as an X" report (2026-10-06)
+
+Found 2026-10-06: "Force colour" and "Snap generated cues to beat" both
+showed an X instead of their power-toggle glyph on his screen.
+Root cause: `PowerButton.tsx` (used by scenes, colour sets, flares, Force
+Colour, "Snap generated cues to beat", and more) rendered the raw
+character `⏻` (U+23FB POWER SYMBOL) and relied on the viewer's font stack
+having a glyph for it — a Miscellaneous Technical codepoint several UI
+fonts lack, which falls back to a missing-glyph box (an "X" on some
+platforms). `spectra/web/src/components/{iconRegistry.ts,Icon.tsx}` is
+the fix: every icon is a hand-authored inline SVG path, so rendering never
+depends on font coverage. `iconRegistry.ts`'s `ICONS` map is the one
+registry; `Icon`'s `name` prop is the closed `IconName` TypeScript union
+(an unregistered name is a compile error — `tsc --noEmit` runs as part of
+`npm run build`), and `scripts/check_icon_registry.mjs` is the second,
+independent check (every real `<Icon name="...">` call site across the
+app, verified against the registry; also fails if the raw U+23FB
+character reappears anywhere). Add a new icon by adding a key to
+`ICONS`, never by embedding a Unicode symbol character directly in JSX —
+that's the whole class of defect this exists to close.
+
+## The Release-to-Home-Assistant control is small, iconic, and hold-to-confirm
+
+His ask, 2026-10-06: SPECTRA now runs his everyday house lighting (see the
+HOUSE LIGHTING section above), so releasing the room is rare and
+consequential — the opposite of the always-reachable, no-confirmation
+button `RoomOwnershipBar.tsx` shipped with originally.
+`spectra/web/src/components/ReleaseButton.tsx` is the control now
+(mounted at the right end of `RoomControlsBar.tsx`'s row, after
+brightness): a small icon button requiring roughly a one-second
+press-and-hold (`spectra/web/src/lib/useHoldToConfirm.ts` — pointer AND
+keyboard, Enter/Space held down; visible progress via an SVG ring whose
+`stroke-dashoffset` tracks live progress). A short tap/keypress shows
+"hold to release" and does nothing. `RoomOwnershipBar.tsx` keeps only the
+activation/dark-fixture strips and the full-width released banner — its
+own always-reachable button is gone, moved here; the way back from
+`released` is unchanged.
+
 ## SPECTRA spec, rendered for a phone: `GET /spectra/spec`
 
 He asked for a link three times and got a file path twice. `docs/
