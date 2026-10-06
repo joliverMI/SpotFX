@@ -65,10 +65,11 @@ mirek/colour via `ambient.py`'s own look tuples).
   yellow-green stream frame and confirms the held area overrides it
   while the un-held area still shows the raw stream.
 - Real-browser check (headless Chromium, no live SPECTRA instance — a
-  throwaway client-side harness deleted before commit): `before-after.png`
-  in this folder. BEFORE — both Hue areas drawn yellow-green from the
-  shared stream pixel (reproducing the report exactly). AFTER — Living
-  (`#ff9d31`, authored) and Dining (2095 K / mirek 477) each draw their
-  own correct warm colour.
+  throwaway client-side harness deleted before commit): a before/after
+  screenshot (hosted on the PR, not committed to this repo) shows BEFORE
+  — both Hue areas drawn yellow-green from the shared stream pixel
+  (reproducing the report exactly) — and AFTER — Living (`#ff9d31`,
+  authored) and Dining (2095 K / mirek 477) each draw their own correct
+  warm colour.
 
 No live light, room-control, or house setting was touched at any point.

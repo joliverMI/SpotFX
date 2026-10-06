@@ -8,6 +8,7 @@ as plain dicts — nothing here builds a device or touches storage.
 from __future__ import annotations
 
 import asyncio
+import copy
 
 import numpy as np
 
@@ -168,6 +169,64 @@ def test_held_fixtures_draw_their_own_area_colour_not_the_shared_pixel():
     # show — both held areas are warm, so the mean must stay warm too.
     r, g, b = hpc.hex_to_rgb(hues["held"])
     assert r >= g >= b
+
+
+# ── a bulb left to Home Assistant (HouseSettings.hue_excluded_lights, e.g.
+#    scripts/seed_house_lighting.py's HUE_LEFT_ALONE) must never preview as
+#    the held colour, even when it shares a SPECTRA device/area with bulbs
+#    the house mode genuinely holds ─────────────────────────────────────
+
+def _looks_with_his_real_exclusions(*area_looks):
+    skips = tuple(
+        (f"*/{name}", "skip", None, None, 0.0)
+        for name in ("Loft Ceiling Uplight", "Ledge Left", "Ledge Right", "Ledge Center")
+    )
+    return tuple(area_looks) + skips
+
+
+def test_a_mixed_area_falls_back_once_its_own_excluded_bulb_is_known(monkeypatch):
+    from spectra.services import ambient
+
+    room = copy.deepcopy(ROOM)
+    devices = {d["id"]: d for d in room["devices"]}
+    devices["hue-lights"]["config"].update(
+        {"ip_address": "10.0.0.5", "entertainment_id": "ent-living"})
+    devices["dining-hues"]["config"].update(
+        {"ip_address": "10.0.0.6", "entertainment_id": "ent-dining"})
+    # a real hold/verify has already resolved each area's own bulbs — his
+    # loft/ledge bulbs turn out to live in hue-lights, not dining-hues.
+    monkeypatch.setattr(ambient, "_light_cache", {
+        ("10.0.0.5", "ent-living"): [
+            ("l1", "Loft Ceiling Uplight"), ("l2", "Ledge Left"),
+            ("l3", "Ledge Right"), ("l4", "Ledge Center"), ("l5", "Living 5")],
+        ("10.0.0.6", "ent-dining"): [("d1", "Dining 1"), ("d2", "Dining 2")],
+    })
+
+    looks = _looks_with_his_real_exclusions(
+        ("hue-lights", "hold", 477, None, 29.0),
+        ("dining-hues", "hold", 477, None, 54.0),
+    )
+    virtuals = pl.build_layout(room, DRIVEN, lambda v: v.get("active") is True, hue_looks=looks)
+    hues = _fixtures({v["id"]: v for v in virtuals}["hues"])
+    # hue-lights genuinely has excluded bulbs mixed in with held ones — the
+    # preview cannot draw just the held bulbs at the held colour, so it
+    # must fall back to the live render for the whole fixture rather than
+    # paint the excluded bulbs with a colour they do not actually show.
+    assert hues["hue-lights"]["held"] is None
+    # dining-hues shares none of those bulbs, confirmed by its own resolved
+    # list — a sibling area's exclusion must not disable its hold too.
+    assert hues["dining-hues"]["held"] is not None
+
+
+def test_an_unresolved_bulb_cache_falls_back_rather_than_guessing():
+    # no hold/verify has resolved hue-lights' own bulbs yet (a cold cache,
+    # e.g. right after a restart) — never claim a held colour we cannot
+    # confirm excludes nothing, the same conservative default as a known
+    # overlap.
+    looks = _looks_with_his_real_exclusions(("hue-lights", "hold", 477, None, 29.0))
+    virtuals = pl.build_layout(ROOM, DRIVEN, lambda v: v.get("active") is True, hue_looks=looks)
+    hues = _fixtures({v["id"]: v for v in virtuals}["hues"])
+    assert hues["hue-lights"]["held"] is None
 
 
 def test_a_show_look_leaves_the_fixture_unheld():

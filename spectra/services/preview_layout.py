@@ -48,13 +48,20 @@ and a pixel-weighted mean per virtual for the top strip's single swatch)
 is resolved from `house.hue_directive()`'s own per-device look — the
 SAME tuple ambient.py sends to the bridge — converted through
 `hue_preview_colour.held_hex_for_look`; `None` means "not held, draw the
-live render exactly as before". `build_layout`/`virtual_layout` stay
-PURE (no live read inside them) — `current_layout()` is the one caller
-that resolves the live directive via `current_hue_looks()`.
+live render exactly as before". A bulb left to Home Assistant
+(`HouseSettings.hue_excluded_lights`) must never draw the held colour
+either, even mixed into the SAME SPECTRA device as held bulbs — `_held_hex`
+checks that against `ambient.cached_light_names()`'s own cached, per-device
+bulb list (never a fresh bridge call), falling back to the live render for
+the whole fixture when it can't yet confirm no overlap. `build_layout`/
+`virtual_layout` stay PURE (no live read inside them) — `current_layout()`
+is the one caller that resolves the live directive via
+`current_hue_looks()`.
 """
 from __future__ import annotations
 
 import json
+import logging
 from typing import Callable, Optional
 
 import numpy as np
@@ -62,6 +69,8 @@ import numpy as np
 from spectra import config
 from spectra.services import emitters
 from spectra.services.preview_stream import profile_cell_index
+
+logger = logging.getLogger(__name__)
 
 
 def _segment(seg: list) -> tuple[str, int, int, bool, int]:
@@ -161,17 +170,45 @@ def fixture_pixels(virtual: dict, devices: dict[str, dict]) -> Optional[dict]:
     }
 
 
-def _held_hex(device_id: str, device_name: str, device_type: Optional[str], looks) -> Optional[str]:
+def _held_hex(device_id: str, device_type: Optional[str], device_cfg: dict,
+              looks) -> Optional[str]:
     """The colour a HELD Hue fixture actually shows right now, or `None` to
     draw its live render unchanged (not Hue, no hold in effect, a `"show"`
-    look, or this bulb left to Home Assistant — see hue_preview_colour.py's
-    module docstring for the whole defect this closes)."""
+    look, or this fixture has a bulb left to Home Assistant — see
+    hue_preview_colour.py's module docstring for the whole defect this
+    closes).
+
+    One preview fixture is a WHOLE SPECTRA device (one Hue entertainment
+    area), lumping together every physical bulb it drives — his
+    `hue-lights` area mixes 6 bulbs the house mode holds with 4
+    (`HouseSettings.hue_excluded_lights`, e.g. Loft Ceiling Uplight, the
+    Ledge bulbs) it deliberately leaves alone. `ambient.skipped_lights()`
+    is GLOBAL by design (house.py names an excluded bulb under area "*",
+    since it has no idea which area a bulb lives in), so a non-empty
+    result says nothing about whether THIS device actually has one of
+    those bulbs — comparing it against this device's own AREA NAME (the
+    original bug) can never match, and comparing it against EVERY area
+    unconditionally would disable held preview for every Hue fixture the
+    moment any bulb anywhere is excluded, including areas with no overlap
+    at all (e.g. `dining-hues`, which shares none of `hue-lights`' excluded
+    bulbs). `ambient.cached_light_names()` is the one thing that actually
+    knows which bulbs belong to this device — a pure cache read, warmed by
+    the SAME hold/verify that reported this exclusion in the first place,
+    never a fresh network call. Only once that intersection comes back
+    genuinely non-empty do we know this fixture has an excluded bulb mixed
+    in, and only then do we fall back to the live render for the WHOLE
+    fixture — there is no pixel-level membership to draw the held colour
+    on just the rest. An unresolved cache (no hold has touched this device
+    yet) is treated the same conservative way: never claim a colour we
+    cannot confirm excludes nothing."""
     if looks is None or str(device_type or "").lower() != "hue":
         return None
     from spectra.services import ambient, hue_preview_colour
-    name = (device_name or "").strip().lower()
-    if name and name in ambient.skipped_lights(device_id, looks):
-        return None
+    excluded = ambient.skipped_lights(device_id, looks)
+    if excluded:
+        names = ambient.cached_light_names(device_cfg or {})
+        if names is None or names & excluded:
+            return None
     return hue_preview_colour.held_hex_for_look(ambient.look_for(device_id, looks))
 
 
@@ -218,7 +255,8 @@ def virtual_layout(virtual: dict, devices: dict[str, dict], hue_looks=None) -> O
             "src": (None if np.array_equal(src, np.arange(len(src)))
                     else [int(i) for i in src]),
             "grid": [int(i) for i in pixels] if rows > 1 else None,
-            "held": _held_hex(fx["device_id"], name, device.get("type"), hue_looks),
+            "held": _held_hex(fx["device_id"], device.get("type"),
+                             device.get("config"), hue_looks),
         })
     return {
         "id": resolved["id"], "name": resolved["name"], "rows": rows,
@@ -246,6 +284,8 @@ def current_hue_looks():
         directive = house.hue_directive()
         return directive.looks if directive is not None else None
     except Exception:                                    # noqa: BLE001
+        logger.exception("preview_layout: could not read the live Hue hold "
+                         "— drawing the live render instead")
         return None
 
 
