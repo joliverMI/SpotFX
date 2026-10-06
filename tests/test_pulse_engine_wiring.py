@@ -639,11 +639,30 @@ def test_the_seeder_copies_one_scene_with_pulse_on_the_singles(tmp_path):
     assert json.loads(path.read_text()) == before
 
 
-def test_the_test_scene_is_never_a_sequencer_candidate(tmp_path):
-    from spectra.models.sequencer import SequencerConfig
+def test_the_test_scene_is_never_a_sequencer_candidate(tmp_path, monkeypatch):
+    from spectra import config as scfg
+    from spectra.models.sequencer import SelectorEntry
+    from spectra.services import selection_kernel, sequencer_store
+
+    seq_path = tmp_path / "sequencer.json"
+    monkeypatch.setattr(scfg, "SEQUENCER_FILE", seq_path)
+
     seed = _seeder()
-    path = _store(tmp_path)
-    result = seed.run(path, "Orbits V2", apply=True, out=lambda *a: None)
-    assert result["scene_id"] not in SequencerConfig().entries
-    src = Path(seed.__file__).read_text()
-    assert "SEQUENCER_FILE" not in src and "sequencer_store" not in src
+    scenes_path = _store(tmp_path)
+    scenes = json.loads(scenes_path.read_text())
+    source_ids = {raw["name"]: sid for sid, raw in scenes.items()}
+
+    cfg = sequencer_store.load_config()
+    cfg.entries = {source_ids["Orbits V2"]: SelectorEntry(),
+                  source_ids["Black Hole V2"]: SelectorEntry()}
+    sequencer_store.save_config(cfg)
+    before = seq_path.read_bytes()
+
+    result = seed.run(scenes_path, "Orbits V2", apply=True, out=lambda *a: None)
+
+    assert seq_path.read_bytes() == before            # the store was never touched
+
+    loaded = sequencer_store.load_config()
+    candidates = selection_kernel.build_scene_candidates(
+        loaded.entries, {}, loaded.affinity, genre_bucket=None, prev_id=None)
+    assert result["scene_id"] not in {c.id for c in candidates}
