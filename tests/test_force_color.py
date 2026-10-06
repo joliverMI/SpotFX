@@ -215,6 +215,44 @@ def test_fire_scene_by_id_wears_the_pin_over_the_callers_own_choice(monkeypatch)
     assert "forced_color" not in result
 
 
+def test_origin_house_ignores_the_pin_every_other_origin_still_wears_it(
+        monkeypatch):
+    """2026-10-05, the Admiral's ruling: house modes must ignore Force
+    Colour and use their own colour sets. The pin itself, and every
+    OTHER caller of this same choke point (a sequencer roll, a trigger,
+    an explicit press — all origin="auto", the default), are unchanged."""
+    from spectra.models.scene import SceneV2
+    from spectra.services import dwell, scene_compiler, scene_store
+    from spectra.services.scene_sequencer import fire_scene_by_id
+
+    _write_cards(_set("requested"), _set("pinned"))
+    scene = SceneV2(name="S")
+    scene_store.save(scene)
+
+    worn: list = []
+
+    async def fake_fire_scene(sc, *, intensity=0.5, color_set=None,
+                              dry_run=True, rng=None, transition_ms=None):
+        worn.append(color_set.id if color_set is not None else None)
+        return {"dry_run": dry_run, "intensity": intensity, "writes": [],
+                "resolved_bindings": {}, "dice_rolls": {}}
+
+    monkeypatch.setattr(scene_compiler, "fire_scene", fake_fire_scene)
+    _pin("pinned")
+
+    result = _run(fire_scene_by_id(scene.id, color_set_id="requested",
+                                   intensity=0.7, origin="house"))
+    assert worn[-1] == "requested", \
+        "a house-mode fire keeps its own card — the pin never reaches it"
+    assert "forced_color" not in result
+
+    dwell.reset()
+    result = _run(fire_scene_by_id(scene.id, color_set_id="requested",
+                                   intensity=0.7))
+    assert worn[-1] == "pinned", "default origin ('auto') still wears the pin"
+    assert result["forced_color"] == "pinned"
+
+
 def test_room_active_set_the_terminal_fallback_returns_the_pin():
     """The path 100% of his real fire_scene triggers take (none carry an
     explicit color_set_id) — a pin that didn't reach here would be
@@ -392,6 +430,56 @@ def test_the_colour_journey_holds_under_a_pin_and_outranks_the_gradient():
         "the gradient resumed on release — nothing about it was torn down"
 
 
+def test_the_journey_runs_under_a_pin_when_a_house_mode_rests():
+    """2026-10-05, the Admiral's ruling: house modes must ignore Force
+    Colour and use their own colour sets. The DRIFT CONDUCTOR half: a
+    resting house mode's own journey_override must govern the colour leg
+    even while the pin is active — the force_color-held branch must never
+    engage while a house mode rests."""
+    from spectra.services import color_journey, house
+    from spectra.services import room_controls as rc
+
+    _write_cards(_set("pinned"), _set("eve"))
+    color_journey.save_room(color_journey.load_room().model_copy(
+        update={"active_set_id": "eve", "wheel_position_deg": 90.0}))
+
+    controls = rc.RoomControlState(force_color_enabled=True,
+                                   force_color_target_id="pinned")
+    rc.save_room_controls(controls)
+    house_override = house.JourneyOverride(
+        set_ids=frozenset({"eve"}), deg_per_min=12.0, mode_name="Standard")
+    conductor, _saved = _conductor(room_controls=lambda: controls,
+                                   house_journey=lambda: house_override)
+    rec = _run(conductor.tick())
+    assert rec["journey"].get("held_for") != "force_color", \
+        "a resting house mode must not be held for the pin"
+    assert rec["journey"]["house_mode"] == "Standard", \
+        "the journey leg (not the force_color branch) ran"
+    assert rec["gradient"]["active"] is False
+    assert rec["gradient"].get("held_for") != "force_color"
+
+
+def test_with_no_house_mode_the_pin_still_holds_the_journey():
+    """The house-mode check must not catch an ordinary pin with no mode
+    resting — house.journey_override() returning None (its own default)
+    must leave the pin's existing hold byte-identical."""
+    from spectra.services import color_journey
+    from spectra.services import room_controls as rc
+
+    _write_cards(_set("pinned"))
+    color_journey.save_room(color_journey.load_room().model_copy(
+        update={"active_set_id": "pinned", "wheel_position_deg": 90.0}))
+
+    controls = rc.RoomControlState(force_color_enabled=True,
+                                   force_color_target_id="pinned")
+    rc.save_room_controls(controls)
+    conductor, _saved = _conductor(room_controls=lambda: controls)
+    rec = _run(conductor.tick())
+    assert rec["journey"]["held_for"] == "force_color"
+    assert rec["journey"]["forced_color_id"] == "pinned"
+    assert rec["gradient"]["held_for"] == "force_color"
+
+
 def test_a_set_less_room_bootstraps_to_the_pin_not_a_selector_draw():
     """Anchoring the wheel on a selector draw that is about to be
     overridden on the very next fire would leave active_set_id disagreeing
@@ -449,6 +537,62 @@ def test_enabling_the_pin_applies_it_immediately(monkeypatch):
     result = _run(rc.reconcile_force_color_if_changed(on, repinned))
     assert result["status"] == "applied"
     assert conductor.applied == ["pinned", "other"]
+
+
+def test_enabling_the_pin_skips_the_apply_while_a_house_mode_rests(monkeypatch):
+    """2026-10-05, the Admiral's ruling: house modes must ignore Force
+    Colour and use their own colour sets. The RECONCILE half: enabling or
+    repinning Force Colour while a house mode's own journey_override is
+    live must not repaint the room — the mode's own colour governs it."""
+    from spectra.services import engine, house
+    from spectra.services import room_controls as rc
+
+    _write_cards(_set("pinned"), _set("other"))
+    conductor = _RecordingConductor()
+    monkeypatch.setattr(engine, "conductor", conductor)
+    monkeypatch.setattr(house, "journey_override",
+                        lambda: house.JourneyOverride(
+                            set_ids=frozenset({"eve"}), deg_per_min=12.0,
+                            mode_name="Standard"))
+
+    off = rc.RoomControlState()
+    on = rc.RoomControlState(force_color_enabled=True,
+                             force_color_target_id="pinned")
+    result = _run(rc.reconcile_force_color_if_changed(off, on))
+    assert result == {
+        "status": "skipped",
+        "reason": "a house mode owns the room's colour while it rests",
+        "target_id": "pinned", "target_name": "pinned"}
+    assert conductor.applied == [], "the room must not be repainted"
+
+    # A repin while already enabled is skipped the same way, and the
+    # pinned GROUP's own rotation cursor must never advance for a skipped
+    # apply — proven here by "other" being a plain Set with no cursor to
+    # advance, so any advance would show up as an unexpected apply call.
+    repinned = on.model_copy(update={"force_color_target_id": "other"})
+    result = _run(rc.reconcile_force_color_if_changed(on, repinned))
+    assert result["status"] == "skipped"
+    assert conductor.applied == []
+
+
+def test_an_unaffected_edit_still_applies_with_no_house_mode(monkeypatch):
+    """The house-mode gate must not catch an ordinary pin with nothing
+    resting — house.journey_override() returning None (its own default,
+    no mode set) must leave the existing apply behaviour byte-identical."""
+    from spectra.services import engine, house
+    from spectra.services import room_controls as rc
+
+    _write_cards(_set("pinned"))
+    conductor = _RecordingConductor()
+    monkeypatch.setattr(engine, "conductor", conductor)
+    monkeypatch.setattr(house, "journey_override", lambda: None)
+
+    off = rc.RoomControlState()
+    on = rc.RoomControlState(force_color_enabled=True,
+                             force_color_target_id="pinned")
+    result = _run(rc.reconcile_force_color_if_changed(off, on))
+    assert result["status"] == "applied"
+    assert conductor.applied == ["pinned"]
 
 
 def test_an_unrelated_field_resave_never_reapplies(monkeypatch):
