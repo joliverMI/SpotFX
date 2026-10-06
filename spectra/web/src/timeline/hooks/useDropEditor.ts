@@ -11,8 +11,8 @@ import { useQueryClient } from '@tanstack/react-query';
 import { apiPost } from '../../api/client';
 import type { DropSequencesResponse, Handle } from '../dropSequences';
 import {
-  EMPTY_STACKS, afterRedo, afterUndo, editErrorText, guardInFlight, pushEdit, redoRequest, undoRequest,
-  type DropEdits, type UndoEntry, type UndoStacks,
+  EMPTY_STACKS, afterRedo, afterUndo, editErrorText, guardInFlight, pushEdit, pushEditChanged,
+  redoRequest, undoRequest, type DropEdits, type UndoEntry, type UndoStacks,
 } from '../dropEdit';
 
 interface EditAnswer {
@@ -118,8 +118,16 @@ export function useDropEditor(uri: string | null): DropEditor {
           label, before: a.before, after: a.after,
           revBefore: a.rev_before, revAfter: a.rev_after, key,
         };
-        setStacks((st) => pushEdit(st, entry));
-        setNote(label);
+        // pushEditChanged is the one place that decides whether anything
+        // actually changed; a note is shown only when it did, or a no-op
+        // edit would claim a success that never happened
+        let changed = false;
+        setStacks((st) => {
+          const [next, did] = pushEditChanged(st, entry);
+          changed = did;
+          return next;
+        });
+        if (changed) setNote(label);
       }
       return key;
     }), [run]);

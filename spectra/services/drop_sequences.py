@@ -654,16 +654,21 @@ def _place(uri: str, entry: dict, handle: str, drop_ms: int,
 
 
 def _op_fill(entry: dict, key: str, handle: str, placed: Optional[int]) -> str:
+    """Add a lull or a charge the detector's own rules placed (`_place`).
+    This is HIS explicit press — unlike `_added_record`'s automatic fill
+    (which quietly leaves a too-close member out), a placement that would
+    not hold the order rule is refused and names why, rather than silently
+    doing nothing to a press he made on purpose."""
     if handle not in ("lull", "charge"):
         raise InvalidEdit("only a lull or a charge can be added to a sequence")
     if placed is None:
         raise InvalidEdit("this song's audio shape cannot be read to place one")
-    # a placed lull too near the drop itself is left out, not refused — the
-    # same shape as _added_record's charge-vs-partner guard just below
     if handle == "lull":
         drop_ms = _current_times(entry, key).get("drop")
         if drop_ms is not None and int(drop_ms) - int(placed) < drop_detector.RAMP_FLOOR_MS:
-            return key
+            raise InvalidEdit(
+                "there is no room for a lull before this drop: it would sit "
+                f"closer than {drop_detector.RAMP_FLOOR_MS} ms")
     return _op_set_handles(entry, key, {handle: placed})
 
 

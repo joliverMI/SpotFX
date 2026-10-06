@@ -229,19 +229,20 @@ def test_adding_a_drop_leaves_a_too_close_filled_lull_out_not_refused(monkeypatc
     assert s["charge_ms"] is not None            # the charge still builds to the drop
 
 
-def test_filling_a_too_close_lull_on_a_bare_drop_is_left_out_not_refused(monkeypatch):
-    # the detail box's "+ Lull" button on a bare-drop sequence has the same
-    # guard: a computed-but-too-close lull is left out, never a 422
+def test_filling_a_too_close_lull_on_a_bare_drop_is_refused_by_name(monkeypatch):
+    # the detail box's "+ Lull" button is his explicit press: a
+    # computed-but-too-close lull is refused and names why, unlike the
+    # automatic fill inside add() which leaves it out silently
     from spectra.services import drop_detector as dd
     from spectra.services import drop_sequences as ds
     _song()
     drop_ms = int(drop_synth.DROP_S * 1000)
     key = ds.add(URI, drop_ms, fill=False)
     monkeypatch.setattr(dd, "place_lull", lambda prep, dms: dms - 150)
-    res = ds.apply_edit(URI, "fill", key=key, handle="lull")
-    assert res.before == res.after              # nothing changed — left out, not refused
+    with pytest.raises(ds.InvalidEdit, match="no room for a lull"):
+        ds.apply_edit(URI, "fill", key=key, handle="lull")
     s = _by_key(key)
-    assert s["lull_ms"] is None
+    assert s["lull_ms"] is None                  # nothing was written
 
 
 # ── "the analysis moved it": keep his, or take the new place ─────────────

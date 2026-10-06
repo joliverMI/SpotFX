@@ -265,6 +265,16 @@ export function pushEdit(st: UndoStacks, e: UndoEntry, depth = UNDO_DEPTH): Undo
   return { undo: [...st.undo, e].slice(-depth), redo: [] };
 }
 
+/** `pushEdit`, plus whether it actually changed anything — the same
+ * identity check (the stacks object coming back unchanged) as the single
+ * source of truth for whether a "it worked" note should show. A save that
+ * no-oped (e.g. a placement his explicit press refuses instead, or an
+ * already-his sequence re-confirmed) earns neither a step nor a note. */
+export function pushEditChanged(st: UndoStacks, e: UndoEntry): [UndoStacks, boolean] {
+  const next = pushEdit(st, e);
+  return [next, next !== st];
+}
+
 /** After an undo landed: the step moves to the redo stack. */
 export function afterUndo(st: UndoStacks): UndoStacks {
   const e = st.undo[st.undo.length - 1];
