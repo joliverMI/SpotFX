@@ -66,7 +66,7 @@ import uuid
 from typing import Any, Optional
 
 from spectra import config
-from spectra.services import (analysis_console, device_console, house_console,
+from spectra.services import (analysis_console, device_console, drop_console, house_console,
                               room_effect_console, scene_console, settings_console,
                               show_console, sonic_usage)
 from spectra.services.sonic_ops import SonicOperation
@@ -188,6 +188,7 @@ ALL_OPERATIONS: dict[str, SonicOperation] = {
     **analysis_console.OPERATIONS,
     **show_console.OPERATIONS,
     **house_console.OPERATIONS,
+    **drop_console.OPERATIONS,
 }
 
 TOOLS = [op.tool_schema() for op in ALL_OPERATIONS.values()]

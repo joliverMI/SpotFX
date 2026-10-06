@@ -9701,8 +9701,7 @@ Plan: `/home/javi/fleet-spotfx/data/drop-detection-plan/report.md` (approved
   charge/lull/drop; the Drops lane and `drop_scoring.score_song` score the
   detector's raw proposal, or every match would stand down and score zero.
 - **NOTHING FIRES FROM IT YET** (phase 5: synthetic triggers in `tick()`,
-  the protected window). Write routes are phase 4; the service-level edit
-  functions already exist and are tested.
+  the protected window).
 
 **PHASE 3 — SEEN ON THE TIMELINE, READ-ONLY (2026-10-06).**
 `spectra/web/src/timeline/dropSequences.ts` is the binding statement: ONE
@@ -9718,6 +9717,30 @@ the beats, song time, read-only) in their own band under the main area
 (`PHASE_COLOR`) belong to the phases ONLY — the analysed flare is lime, the
 High/Low flags white/indigo (decision 5). Proof: `node
 scripts/check_drop_sequence_view.mjs`.
+
+**PHASE 4 — EDITING (2026-10-06).** Four things:
+
+- **EVERY EDIT IS `drop_sequences.apply_edit`** (the write routes in
+  `spectra/api/drop_sequences.py`, and Sonic's `drop_console.py` — no second
+  write path), and answers HIS EDITS before and after (`{overrides, added}`,
+  never the detection). That pair IS undo: `POST /restore` puts one side back
+  and 409s when his edits are no longer the other side (another tab).
+- **A DRAG MOVES A GHOST IN A REF** (`useDropSeqInteractions.live`, read by
+  the layer every frame — no React render per pointer move) and saves ONCE on
+  release with only the changed handles; keyboard steps coalesce the same
+  way (`dropEdit.KEY_SAVE_IDLE_MS`). The saved ghost is dropped only once the
+  saved view is drawn, so a handle never jumps back. `dropEdit.ts` is the
+  pure arithmetic (snap, step, order clamp, undo stack, key map).
+- **THE KEYBOARD IS GATED ON FOCUS**: a capture listener registered in
+  BuilderPage BEFORE the palette/intensity hooks takes C/L/D, arrows, Enter,
+  Delete, N/P, Ctrl+Z only while a sequence has the Timeline's attention
+  (a press inside a `data-drop-focus` element); otherwise every key goes on
+  to the page exactly as before.
+- **A FILLED LULL/CHARGE NEVER REACHES BACK PAST THE PREVIOUS DROP** (a quick
+  re-drop gets a bare drop, his to extend with ＋ Lull / ＋ Charge).
+  "Make it my triggers" is still to come. Proof: `node
+  scripts/check_drop_sequence_edit.mjs`, `tests/test_drop_sequence_edits.py`,
+  `tests/test_drop_console.py`.
 
 ## Maintaining this file
 

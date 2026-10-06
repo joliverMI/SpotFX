@@ -368,3 +368,13 @@ def test_http_add_confirm_all_dismiss_revert_and_redetect():
     red = c.post("/api/drop-sequences/redetect", json={"uri": URI}).json()
     assert red["detection"]["status"] == "detected"
     assert any(s["key"] == added["result"] for s in red["sequences"])
+
+
+def test_a_filled_build_never_reaches_back_past_the_previous_drop():
+    from spectra.services import drop_sequences as ds
+    _song()
+    drop = int(drop_synth.DROP_S * 1000)
+    ds.add(URI, drop, fill=False)                 # a drop of his at 44 s
+    key = ds.add(URI, drop + 1500)                # a quick re-drop 1.5 s later
+    rec = next(r for r in ds.stored(URI)["added"] if r["id"] == key)
+    assert rec["lull_ms"] is None and rec["charge_ms"] is None

@@ -1293,12 +1293,13 @@ export const HELP_SECTIONS: HelpSection[] = [
           {
             id: 'drop-sequence-editing',
             title: 'Editing drop sequences: drag, snap, add, undo',
-            keywords: 'edit drag snap move handle line ghost alt free shift whole sequence keyboard c l d arrows enter delete n p undo redo ctrl z add a drop bass rail not a drop confirm back to detected order gap 200 ms saved',
+            keywords: 'edit drag snap move handle line ghost alt free shift whole sequence keyboard c l d arrows enter delete n p undo redo ctrl z add a drop bass rail not a drop confirm back to detected order gap 200 ms saved sonic voice',
             body: [
               'DRAG a handle on the top rail, or its line on the graph. The drop snaps to BASS SPIKES (a hard spike before a faint one); the lull to spikes or beats; the charge to beats, downbeats first. The spike or beat it lands on lights up white on the rails, and its name shows on the graph. Hold Alt to place it freely (20 ms grid). Hold Shift as you start the drag to move the WHOLE sequence by the same amount. Order is kept: charge before lull before drop, at least 200 ms apart (the engine\'s own ramp floor) — a handle dragged into its neighbour stops at that gap, it never pushes the neighbour.',
               'While you drag only a ghost moves; the sequence is SAVED ONCE, when you let go, and only the handle you moved is saved — the others stay automatic. A detection you moved becomes "edited" and a dotted white line shows where the analysis had it.',
               '＋ ADD A DROP (the button under the graph), then click a bass spike: the drop goes to the nearest spike, and its lull and charge are filled in by the detector\'s own placement rules — then they are yours to move. Esc cancels.',
               'Every change is ONE undo step: ↶ Undo / ↷ Redo under the graph or the list, or Ctrl+Z / Ctrl+Y while a sequence has the keyboard. At least the last 50 are kept per song. An undo is refused (and says so) if your edits on the song were changed somewhere else in the meantime, so it can never overwrite something newer.',
+              'You can also tell Sonic: "list the drops on this song", "confirm every drop on this song" (the confident ones), "the third one is not a drop", "move the second drop one beat earlier". Sonic names them by number in song order, as the review list shows them, and makes the same edits these buttons make.',
               'Nothing you do here fires anything yet: your own triggers fire exactly as before.',
             ],
           },

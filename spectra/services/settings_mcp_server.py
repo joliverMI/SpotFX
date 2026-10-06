@@ -77,7 +77,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Any, Literal, Optional
+from typing import Any, Literal, Optional, Union
 
 # Must run before the `spectra.services` import below -- see module
 # docstring's "CWD-INDEPENDENT ON PURPOSE" section. This file lives at
@@ -92,6 +92,7 @@ from mcp.server import MCPServer  # noqa: E402
 from spectra.services import (  # noqa: E402
     analysis_console,  # noqa: F401 — its operation is wrapped below
     device_console,
+    drop_console,  # noqa: F401 — its operations are wrapped below
     house_console,
     room_effect_console,
     scene_console,
@@ -537,6 +538,44 @@ async def refresh_analysed_triggers(uri: Optional[str] = None, dry_run: bool = T
     edited or deleted by hand are left alone."""
     return await _call("refresh_analysed_triggers", uri=uri, dry_run=dry_run,
                        plan_id=plan_id)
+
+
+# Drop sequences (spectra/services/drop_console.py): the playing song's
+# charge -> lull -> drop sequences, named by number in song order.
+
+
+@mcp.tool()
+async def list_drop_sequences(uri: Optional[str] = None) -> dict:
+    """List the drop sequences (charge -> lull -> drop) on the playing song (or
+    one song by spotify:track: URI), numbered in song order, with their state
+    and times. Call first, then name a sequence by its number."""
+    return await _call("list_drop_sequences", uri=uri)
+
+
+@mcp.tool()
+async def confirm_drop_sequence(sequence: Union[int, Literal["all"]],
+                                uri: Optional[str] = None) -> dict:
+    """Confirm a drop sequence by its number, or every confident one on the
+    song with sequence="all"."""
+    return await _call("confirm_drop_sequence", sequence=sequence, uri=uri)
+
+
+@mcp.tool()
+async def dismiss_drop_sequence(sequence: int, uri: Optional[str] = None) -> dict:
+    """'Not a drop': dismiss a drop sequence by its number (removes one he
+    added). It is never offered again within two beats of there."""
+    return await _call("dismiss_drop_sequence", sequence=sequence, uri=uri)
+
+
+@mcp.tool()
+async def move_drop_handle(sequence: int, handle: Literal["charge", "lull", "drop"],
+                           by_beats: Optional[float] = None,
+                           to_seconds: Optional[float] = None,
+                           uri: Optional[str] = None) -> dict:
+    """Move the charge, lull or drop of a drop sequence by a number of beats
+    (negative = earlier) or to a time in seconds -- exactly one of the two."""
+    return await _call("move_drop_handle", sequence=sequence, handle=handle,
+                       by_beats=by_beats, to_seconds=to_seconds, uri=uri)
 
 
 # House lighting (spectra/services/house_console.py): the modes.

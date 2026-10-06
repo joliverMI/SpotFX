@@ -695,6 +695,16 @@ def _added_record(uri: str, drop_ms: int, lull_ms: Optional[int],
                     analysis.prep, lull_ms if lull_ms is not None else drop_ms)
         except drop_detector.Unavailable:
             pass
+    # A filled lull or charge never reaches back past the drop before this
+    # one (a quick re-drop): the build would start inside the previous
+    # sequence's payoff. Left out rather than overlapped — his to add.
+    if fill:
+        prev = _previous_drop_ms(uri, drop_ms)
+        if prev is not None:
+            if lull_ms is not None and int(lull_ms) <= prev:
+                lull_ms = None
+            if charge_ms is not None and int(charge_ms) <= prev:
+                charge_ms = None
     # a filled charge that lands too near its partner is left out, not refused
     if charge_ms is not None:
         upper = lull_ms if lull_ms is not None else drop_ms
@@ -704,6 +714,20 @@ def _added_record(uri: str, drop_ms: int, lull_ms: Optional[int],
             "lull_ms": int(lull_ms) if lull_ms is not None else None,
             "charge_ms": int(charge_ms) if charge_ms is not None else None,
             "at": _now_ms()}
+
+
+def _previous_drop_ms(uri: str, drop_ms: int) -> Optional[int]:
+    """The latest drop before `drop_ms` on this song — a detected or added
+    sequence that is not dismissed, or one of his own drop triggers."""
+    try:
+        v = view(uri)
+    except Exception:                                    # noqa: BLE001
+        return None
+    drops = [int(s["drop_ms"]) for s in v.get("sequences") or []
+             if s.get("state") != STATE_DISMISSED]
+    drops += [int(g["drop"]["timestamp_ms"]) for g in v.get("authored") or [] if g.get("drop")]
+    earlier = [d for d in drops if d < drop_ms - drop_detector.RAMP_FLOOR_MS]
+    return max(earlier) if earlier else None
 
 
 def _confident_keys(uri: str) -> list[str]:
