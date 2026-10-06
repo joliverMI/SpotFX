@@ -1524,6 +1524,10 @@ kbd {
   outline: 1px dashed var(--text-muted); outline-offset: 1px;
 }
 .testbed-lane-marker.selected { outline: 2px solid var(--text); outline-offset: 1px; z-index: 2; }
+/* A drops-lane SUGGESTION (spectra/services/drop_detector.py's lower tier):
+   shorter and fainter than a confident detection, whatever its tint — the
+   plan's "solid = confident · faded = suggested". */
+.testbed-lane-marker.est-suggested { top: 8px; bottom: 8px; opacity: 0.55; }
 .testbed-waveform-svg { width: 100%; height: 100%; display: block; }
 .testbed-waveform-caption {
   position: absolute; left: 6px; top: 3px; right: 6px; z-index: 1;

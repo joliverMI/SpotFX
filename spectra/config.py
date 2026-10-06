@@ -37,6 +37,11 @@ LIGHT_SHOW_SETS_FILE = SPECTRA_STORAGE / "light_show_sets.json"
 LIGHT_SHOW_STATE_FILE = SPECTRA_STORAGE / "light_show_state.json"
 #: his dragged High/Low Trigger positions, per song (spectra/services/show_cues.py)
 SHOW_CUES_FILE = SPECTRA_STORAGE / "show_cues.json"
+# The drop detector's per-song sequences: what was detected (a regenerable
+# cache, stamped) plus ONLY his edits to it (spectra/services/
+# drop_sequences.py) — never stored as rows in triggers.json, the show_cues
+# precedent.
+DROP_SEQUENCES_FILE = SPECTRA_STORAGE / "drop_sequences.json"
 # HOUSE LIGHTING (spectra/services/house.py): his authored modes and the
 # runtime "which mode, set by whom" record — two files for the same reason
 # as the Light Show's pair.

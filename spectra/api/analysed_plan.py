@@ -21,6 +21,10 @@ same plan the flares come from (the engine's cached one while it plays); a
 stored cue the current plan does not contain (planned under older settings,
 not yet refreshed) carries rank null.
 
+DROP SEQUENCES (drop-detection plan, phase 2): `drop_sequences` is the
+song's stored drop detection merged with his edits (spectra/services/
+drop_sequences.py's view) — read from the store, never detected here.
+
 Every time is SONG time, the stored-trigger convention (timestamp + the
 trigger's own offset). `show_clock_shift_ms` is how far the trigger clock
 reads ahead of the bridge's effective position right now, so a client
@@ -39,8 +43,9 @@ from spectra.services.trigger_engine import TriggerEngine, trigger_engine
 router = APIRouter(prefix="/api", tags=["spectra-analysed-plan"])
 
 
-def _plan(uri: str) -> dict:
-    stored = trigger_store.list_for_song(uri)
+def _plan(uri: str, stored: list | None = None) -> dict:
+    if stored is None:
+        stored = trigger_store.list_for_song(uri)
     mode = TriggerEngine._effective_mode_for_song(
         load_room_controls().scene_change_mode, stored)
     has_authored = any(t.source == "authored" for t in stored)
@@ -99,8 +104,25 @@ def _show_cues(uri: str) -> dict:
                 "reason": f"the cues could not be derived: {exc}"}
 
 
+def _drop_sequences(uri: str, stored: list) -> dict:
+    """THE DROP SEQUENCES (spectra/services/drop_sequences.py) for the
+    canvases — the STORED detection merged with his edits, never a
+    detection run here (this route is polled): a song not detected yet
+    says so, and is detected the first time it plays or GET
+    /api/drop-sequences asks. Independent of whether analysed events
+    apply, like the show cues. Nothing fires from these yet (phase 5)."""
+    from spectra.services import drop_sequences
+    try:
+        return drop_sequences.view(uri, triggers=stored)
+    except Exception as exc:                             # noqa: BLE001
+        return {"uri": uri, "status": "error", "sequences": [],
+                "reason": f"the drop sequences could not be read: {exc}"}
+
+
 def _plan_with_cues(uri: str) -> dict:
-    return {**_plan(uri), "show_cues": _show_cues(uri)}
+    stored = trigger_store.list_for_song(uri)
+    return {**_plan(uri, stored), "show_cues": _show_cues(uri),
+            "drop_sequences": _drop_sequences(uri, stored)}
 
 
 @router.get("/analysed-plan")

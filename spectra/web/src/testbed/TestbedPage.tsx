@@ -14,12 +14,14 @@ import { useToast } from '../components/Toast';
 import HelpLink from '../help/HelpLink';
 import {
   useRoomControls, useSaveRoomControls, useTestbedAudioPin, useTestbedAudioUnpin,
-  useTestbedEngineMarks, useTestbedMarks, useTestbedPromotions, useTestbedReferenceSet,
-  useTestbedSongs, useTestbedWaveform,
+  useTestbedDropReferenceSet, useTestbedEngineMarks, useTestbedMarks, useTestbedPromotions,
+  useTestbedReferenceSet, useTestbedSongs, useTestbedWaveform,
 } from '../queries';
 import type {
-  TestbedEngineMarks, TestbedEstimateMark, TestbedMetrics, TestbedReferenceMark, TestbedSong,
+  TestbedEngineMarks, TestbedEstimateMark, TestbedMetrics, TestbedReference, TestbedReferenceMark,
+  TestbedSong,
 } from '../types';
+import DropKnobsPanel from './components/DropKnobsPanel';
 import PromotionReviewDialog from './components/PromotionReviewDialog';
 import TestbedLaneBar from './components/TestbedLaneBar';
 import TestbedMetricsPanel from './components/TestbedMetricsPanel';
@@ -29,6 +31,11 @@ import {
   knobsRelevant, roomControlsPatchForUseAsDefault, transitionsPerMinuteRelevant, useAsRoomDefaultConfirmMessage,
 } from './edgeKnobs';
 import type { Direction, TransitionKnobValues } from './edgeKnobs';
+import {
+  clampDropScore, DEFAULT_CONFIDENT_SCORE, DEFAULT_SUGGESTED_SCORE, dropKnobsRelevant,
+  dropRoomControlsPatch, dropUseAsRoomDefaultConfirmMessage, isDropKind, oneBeatToleranceMs,
+} from './dropKnobs';
+import type { DropKnobValues } from './dropKnobs';
 import { matchMarks } from './metrics';
 import { filterAndSortSongs } from './songSearch';
 
@@ -56,7 +63,25 @@ const MARK_KIND_LABEL: Record<string, string> = {
   bass_down: 'Bass out',
   gap_stop: 'Beat stops',
   gap_resume: 'Beat resumes',
+  drop: 'Drops (both tiers)',
+  drop_confident: 'Drops (confident only)',
+  lull: 'Lulls',
+  charge: 'Charges',
 };
+
+/** The reference sets, with what each is called in the picker. */
+const REFERENCE_LABEL: Record<TestbedReference, string> = {
+  transitions: 'transitions', flares: 'flares', drops: 'drops', lulls: 'lulls', charges: 'charges',
+};
+
+/** A drops lane scores against the matching phase of his own (a drop lane
+ * against his drops, a lull lane against his lulls) — scoring it against
+ * his scene changes would grade it on a question it does not answer. */
+function referenceForDropKind(kind: string): TestbedReference {
+  if (kind === 'lull') return 'lulls';
+  if (kind === 'charge') return 'charges';
+  return 'drops';
+}
 
 const markKindLabel = (kind: string) => MARK_KIND_LABEL[kind] ?? kind;
 
@@ -70,6 +95,8 @@ const TOLERANCE_MAX_MS = 3000;
  * signed offset +470ms on a 499ms beat). Section boundaries are not a
  * beat-level phenomenon and keep the flat default. */
 function laneDefaultToleranceMs(kind: string, tempoBpm: number | null): number {
+  // The drop-detection plan's own measure: found within ONE BEAT of his mark.
+  if (isDropKind(kind)) return oneBeatToleranceMs(tempoBpm, TOLERANCE_MIN_MS, TOLERANCE_MAX_MS);
   if (kind !== 'beat' && kind !== 'downbeat') return 500;
   if (!tempoBpm || tempoBpm <= 0) return 200;
   const beatMs = 60000 / tempoBpm;
@@ -126,7 +153,7 @@ export default function TestbedPage() {
   // Page-local only, per his ask ("no server change") — resets on reload.
   const [songQuery, setSongQuery] = useState('');
   const [uri, setUri] = useState<string | null>(null);
-  const [reference, setReference] = useState<'transitions' | 'flares'>('transitions');
+  const [reference, setReference] = useState<TestbedReference>('transitions');
   const [engineA, setEngineA] = useState<{ engine: string; kind: string }>({ engine: 'librosa', kind: 'section_boundary' });
   const [engineB, setEngineB] = useState<{ engine: string; kind: string } | null>(
     { engine: 'beat_this', kind: 'downbeat' },
@@ -143,6 +170,11 @@ export default function TestbedPage() {
   // edgeKnobs.ts's own header comment) — same held-regardless-of-active-
   // engine shape as the three above.
   const [transitionsPerMinute, setTransitionsPerMinute] = useState(DEFAULT_TRANSITIONS_PER_MINUTE);
+  // The Drops lane's two thresholds (dropKnobs.ts) — same shape as the
+  // knobs above: held regardless of the active engine, synced ONCE from
+  // the room's own drop_confident_score / drop_suggested_score.
+  const [confidentScore, setConfidentScore] = useState(DEFAULT_CONFIDENT_SCORE);
+  const [suggestedScore, setSuggestedScore] = useState(DEFAULT_SUGGESTED_SCORE);
   // True once he has touched the slider himself for the CURRENT song — the
   // default below stops re-asserting itself over his own choice, but a new
   // song (or a mark-kind change on either lane) still gets its own honest
@@ -175,9 +207,11 @@ export default function TestbedPage() {
   const { data: waveform } = useTestbedWaveform(uri);
   const { data: engineMarksA } = useTestbedEngineMarks(
     uri, engineA.engine, engineA.kind, windowBeats, sensitivity, direction, transitionsPerMinute,
+    confidentScore, suggestedScore,
   );
   const { data: engineMarksB } = useTestbedEngineMarks(
     uri, engineB?.engine ?? null, engineB?.kind ?? null, windowBeats, sensitivity, direction, transitionsPerMinute,
+    confidentScore, suggestedScore,
   );
   const { data: promotions } = useTestbedPromotions(uri);
 
@@ -211,6 +245,8 @@ export default function TestbedPage() {
     setWindowBeats(clampWindowBeats(roomControls.transition_window_beats));
     setSensitivity(clampSensitivity(roomControls.transition_edge_sensitivity));
     setTransitionsPerMinute(clampTransitionsPerMinute(roomControls.transitions_per_minute));
+    setConfidentScore(clampDropScore(roomControls.drop_confident_score, DEFAULT_CONFIDENT_SCORE));
+    setSuggestedScore(clampDropScore(roomControls.drop_suggested_score, DEFAULT_SUGGESTED_SCORE));
   }, [roomControls]);
 
   const currentTransitionKnobs: TransitionKnobValues = { windowBeats, sensitivity, transitionsPerMinute };
@@ -228,6 +264,31 @@ export default function TestbedPage() {
       },
     );
   };
+  // The Drops lane's own "Use as room default" — the same ONE write, for
+  // the two drop thresholds only.
+  const roomDropDefaults: DropKnobValues | null = roomControls ? {
+    confident: roomControls.drop_confident_score,
+    suggested: roomControls.drop_suggested_score,
+  } : null;
+  const currentDropKnobs: DropKnobValues = { confident: confidentScore, suggested: suggestedScore };
+  const useDropsAsRoomDefault = () => {
+    if (!roomControls || !roomDropDefaults) return;
+    const patch = dropRoomControlsPatch(currentDropKnobs, roomDropDefaults);
+    if (Object.keys(patch).length === 0) return;
+    if (!window.confirm(dropUseAsRoomDefaultConfirmMessage(currentDropKnobs, roomDropDefaults))) return;
+    saveRoomControls.mutate(
+      { ...roomControls, ...patch },
+      {
+        onSuccess: () => toast(`Room drop thresholds updated — confident ${confidentScore.toFixed(2)}, `
+          + `suggested ${suggestedScore.toFixed(2)}.`, 'success'),
+        onError: () => toast('Could not update the room drop thresholds.', 'error'),
+      },
+    );
+  };
+  const showDropKnobs = dropKnobsRelevant([engineA, engineB]);
+  const { data: dropReferenceSet, isLoading: dropReferenceSetLoading } = useTestbedDropReferenceSet(
+    confidentScore, suggestedScore, showDropKnobs,
+  );
   // The plan's own four-song table, recomputed at the current knobs on
   // every drag — shown regardless of which song is currently selected,
   // since it judges the four PINNED reference songs, not this one.
@@ -259,7 +320,12 @@ export default function TestbedPage() {
 
   const referenceMarks = marks?.transitions ?? [];
   const flareMarks = marks?.flares ?? [];
-  const activeReferenceMarks = reference === 'transitions' ? referenceMarks : flareMarks;
+  const activeReferenceMarks = useMemo(() => {
+    if (reference === 'transitions') return referenceMarks;
+    if (reference === 'flares') return flareMarks;
+    const cls = reference === 'drops' ? 'drop' : reference === 'lulls' ? 'lull' : 'charge';
+    return flareMarks.filter((m) => m.event_class === cls);
+  }, [reference, referenceMarks, flareMarks]);
   /** The scoring set: his own marks minus every one this page pushed. Same
    * rule the server applies (spectra/services/testbed_marks.scoring_marks) —
    * a promoted mark sits at the suggesting engine's exact time and would
@@ -275,9 +341,9 @@ export default function TestbedPage() {
     : noAuthoredMarks
       ? `no authored marks yet for this song${marks.n_generated ? ` — only ${marks.n_generated} machine-generated trigger${marks.n_generated === 1 ? '' : 's'}, which are never used as ground truth` : ''}`
       : activeReferenceMarks.length === 0
-        ? `no authored ${reference} for this song`
+        ? `no authored ${REFERENCE_LABEL[reference]} for this song`
         : scoredMarks.length === 0
-          ? `every authored ${reference} for this song was pushed from this page — nothing left to score an engine against`
+          ? `every authored ${REFERENCE_LABEL[reference]} for this song was pushed from this page — nothing left to score an engine against`
           : undefined;
   /** ONE timebase for every lane, and it is a REAL duration wherever the
    * song has one (the pinned WAV, else the coarse npz envelope). Padding a
@@ -314,14 +380,21 @@ export default function TestbedPage() {
   );
 
   const engineLabel = (key: string) => song?.engines[key]?.label ?? key;
+  // Two slots on the SAME engine (drops: both tiers vs confident only, or
+  // beats vs downbeats) would read identically by engine name alone.
+  const sameEngine = !!engineB && engineB.engine === engineA.engine;
+  // The kind goes FIRST: a lane label is truncated to a narrow column, and
+  // the kind is the part that tells the two lanes apart.
+  const laneLabel = (slot: { engine: string; kind: string }) => (sameEngine
+    ? `${markKindLabel(slot.kind)} · ${engineLabel(slot.engine)}` : engineLabel(slot.engine));
   const engineLanes = [
     {
-      key: 'a', label: engineLabel(engineA.engine),
+      key: 'a', label: laneLabel(engineA),
       estimate: (engineMarksA?.estimate ?? []) as TestbedEstimateMark[],
       metrics: metricsA,
     },
     ...(engineB ? [{
-      key: 'b', label: engineLabel(engineB.engine),
+      key: 'b', label: laneLabel(engineB),
       estimate: (engineMarksB?.estimate ?? []) as TestbedEstimateMark[],
       metrics: metricsB,
     }] : []),
@@ -433,9 +506,12 @@ export default function TestbedPage() {
               </div>
               <div>
                 <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Reference set</div>
-                <select value={reference} onChange={(e) => setReference(e.target.value as 'transitions' | 'flares')}>
+                <select value={reference} onChange={(e) => setReference(e.target.value as TestbedReference)}>
                   <option value="transitions">Transitions ({song.n_transitions})</option>
                   <option value="flares">Flares ({song.n_flares})</option>
+                  <option value="drops">Drops ({song.n_drops})</option>
+                  <option value="lulls">Lulls ({song.n_lulls})</option>
+                  <option value="charges">Charges ({song.n_charges})</option>
                 </select>
               </div>
               {song.n_generated > 0 && (
@@ -468,7 +544,13 @@ export default function TestbedPage() {
             <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 12 }}>
               <EnginePicker
                 label="Engine A" value={engineA}
-                onChange={(v) => { if (v) setEngineA(v); }}
+                onChange={(v) => {
+                  if (!v) return;
+                  setEngineA(v);
+                  // Engine A tints his marks, so a Drops lane picked there
+                  // brings the matching reference set with it.
+                  if (v.engine === 'drops') setReference(referenceForDropKind(v.kind));
+                }}
                 song={song}
               />
               <EnginePicker
@@ -482,11 +564,9 @@ export default function TestbedPage() {
             <TestbedLaneBar
               durationMs={durationMs}
               waveform={waveform}
-              transitions={referenceMarks}
-              flares={flareMarks}
+              referenceMarks={activeReferenceMarks}
               scoredMarks={scoredMarks}
-              reference={reference}
-              referenceLabel={reference}
+              referenceLabel={REFERENCE_LABEL[reference]}
               referenceEmptyNote={referenceEmptyNote}
               engineLanes={engineLanes}
               toleranceMs={toleranceMs}
@@ -504,10 +584,23 @@ export default function TestbedPage() {
             <div className="card-title">Metrics</div>
             {nPromotedActive > 0 && (
               <p className="empty-note" style={{ fontSize: 12, marginTop: 0 }}>
-                {nPromotedActive} of these {reference} were pushed to your real
+                {nPromotedActive} of these {REFERENCE_LABEL[reference]} were pushed to your real
                 triggers from this page — shown in the lane, but left out of the
                 scores below, since they sit exactly where the engine put them.
               </p>
+            )}
+            {showDropKnobs && (
+              <DropKnobsPanel
+                confident={confidentScore}
+                suggested={suggestedScore}
+                onConfidentChange={(v) => setConfidentScore(clampDropScore(v, DEFAULT_CONFIDENT_SCORE))}
+                onSuggestedChange={(v) => setSuggestedScore(clampDropScore(v, DEFAULT_SUGGESTED_SCORE))}
+                roomDefaults={roomDropDefaults}
+                onUseAsRoomDefault={useDropsAsRoomDefault}
+                useAsRoomDefaultPending={saveRoomControls.isPending}
+                referenceSet={dropReferenceSet}
+                referenceSetLoading={dropReferenceSetLoading}
+              />
             )}
             <TestbedMetricsPanel
               rows={[

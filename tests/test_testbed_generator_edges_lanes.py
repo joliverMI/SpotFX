@@ -173,13 +173,13 @@ def test_edges_engine_none_when_no_beat_analysis():
 
 # ── whole-corpus availability listing ──────────────────────────────────
 
-def test_availability_listing_includes_all_four_engines():
+def test_availability_listing_includes_every_engine():
     from spectra import config as scfg
     from spectra.services import analysis_reader, testbed_engines
     _seed_librosa(scfg, rms_bass_spike_at=20)
     avail = testbed_engines.availability_for(
         URI, stem_index=analysis_reader.stem_index(), count_marks=False)
-    assert set(avail.keys()) == {"librosa", "beat_this", "generator", "edges"}
+    assert set(avail.keys()) == {"librosa", "beat_this", "generator", "edges", "drops"}
     assert avail["generator"]["available"] is True
     assert avail["edges"]["available"] is True
     assert avail["generator"]["mark_count"] is None  # fast path never counts
