@@ -30,6 +30,7 @@ export interface ShowCatalogue {
   kinds: ShowKind[];
   room_effects: { id: string; name: string; kind: string; room_id: string }[];
   room_effect_schema: { properties?: Record<string, { type?: string; minimum?: number; maximum?: number; title?: string }> } | null;
+  house_modes: { id: string; name: string }[];
 }
 
 export interface ShowAction {

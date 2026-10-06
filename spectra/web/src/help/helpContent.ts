@@ -2486,11 +2486,12 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         id: 'show-actions',
         title: 'What each action does, and how it is put back',
-        keywords: 'ambient display mode forced scene forced colour drift gradient scene changes fire scene apply colour set baseline restore',
+        keywords: 'ambient display mode forced scene forced colour drift gradient scene changes fire scene apply colour set baseline restore house lighting mode turn on turn off',
         body: [
           'Settings go through the same save the room bar uses, so every side effect (Ambient\'s transition, Dark/Light\'s repaint, a forced scene firing its pin) happens exactly as if you had pressed it there. Scene and colour-set on/off flip the same switch as their power buttons.',
           'Ambient is Hue only and physically slow: Eased takes ~15-22 s across the bulbs, Snap drops the ramps (~5 s — the 300 ms gap per bulb is zigbee physics). For an instant change, use Device state → Steady on the Hue areas instead.',
-          'The first time the show changes a setting, it remembers what it was. End show puts it back — unless you changed it yourself since, in which case it is left as you have it and named in the report.',
+          'Turn on house mode switches house lighting on (if it is off) and selects one of your house modes — the same as the House page\'s mode picker. Turn house lighting off/on flip the same switch as the top-bar Mode chip\'s long press, without touching which mode is set.',
+          'The first time the show changes a setting, it remembers what it was. End show puts it back — unless you changed it yourself since, in which case it is left as you have it and named in the report. House lighting\'s switch and mode are both put back this way too.',
           'Fire a scene now and Apply a colour set now are presses, like their own buttons; there is nothing to put back.',
         ],
       },

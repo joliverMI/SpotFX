@@ -418,6 +418,30 @@ def house_enabled() -> bool:
         return False
 
 
+async def set_enabled(enabled: bool) -> dict:
+    """Flip THE CUTOVER SWITCH — the same effect as `PUT /api/house/settings
+    {"enabled": ...}` and the top-bar Mode chip's long press
+    (`ModeChip.tsx`), factored out so a second caller (Light Show's own
+    "Turn house lighting on/off" actions) can't diverge from what a human
+    press does. Idempotent. Returns {"status": "unchanged"|"applied",
+    "lighting": status_dict()}."""
+    current = house_store.load_library().settings
+    enabled = bool(enabled)
+    if bool(current.enabled) == enabled:
+        return {"status": "unchanged", "lighting": status_dict()}
+    merged = current.model_copy(update={"enabled": enabled})
+    house_store.put_settings(merged)
+    try:
+        from spectra.services import house_fixtures
+        house_fixtures.kick()
+    except Exception:                                    # noqa: BLE001
+        logger.exception("house: fixture kick after switch failed")
+    _record("switched", {"enabled": merged.enabled,
+                         "hue_excluded_lights": merged.hue_excluded_lights})
+    await tick()
+    return {"status": "applied", "lighting": status_dict()}
+
+
 SWITCHED_OFF = ("house lighting is switched off — Home Assistant's mode is "
                 "recorded, nothing is applied")
 

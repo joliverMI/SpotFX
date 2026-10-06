@@ -24,13 +24,17 @@ worth knowing cold:
    changed a music take before someone turned it on). `house.gate()`
    answers this in one call; check it before assuming anything here
    acts.
-2. **ONE SETTINGS WRITER**: `house.apply_settings_patch(body)` is the
-   exact merge `PUT /api/house/settings` has always done (voice_looks and
-   energy sub-merges keep every OTHER field as he set it;
-   `enabled`/`hue_excluded_lights` moving re-applies immediately). The
-   HTTP route and Sonic's `house_console.py` (`set_house_lighting_
+2. **ONE SETTINGS WRITER FOR A FULL PATCH**: `house.apply_settings_patch(body)`
+   is the exact merge `PUT /api/house/settings` has always done
+   (voice_looks and energy sub-merges keep every OTHER field as he set
+   it; `enabled`/`hue_excluded_lights` moving re-applies immediately).
+   The HTTP route and Sonic's `house_console.py` (`set_house_lighting_
    enabled`/`set_house_energy`/`set_house_voice_look`) BOTH call this one
-   function — never build a second merge beside it.
+   function — never build a second merge beside it. `house.set_enabled
+   (bool)` is the ONE exception: a narrower, in-process toggle of just
+   the cutover switch (no body to merge), used by Light Show's "Turn
+   house lighting on/off" actions — same end effect as the PUT, separate
+   code path because Light Show runs in-process and has no body to PATCH.
 3. **TWO THINGS NEVER MOVE BY VOICE**: `hue_excluded_lights` (a safety
    fence around bulbs OUTSIDE the room — the loft uplight, the ledge
    lights) and the seam-wiring fields (`tv_strips`, `voice_fixtures`,
