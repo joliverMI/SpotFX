@@ -46,6 +46,11 @@ export const ICONS = {
    * suggestion: "an exit/home glyph"). Used only by the small, long-press
    * release control at the right end of the top bar. */
   home: 'M3 9.5L12 3l9 6.5V20a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1Z',
+  /** Gear outline — "open this fixture's settings" from the device-preview
+   * strip's expanded stage (icon-only; his "take all the text out of the
+   * preview window" ask, 2026-10-06, replaced the old "Open settings" text
+   * button). */
+  settings: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM19.4 13a7.4 7.4 0 0 0 0-2l2-1.5-2-3.4-2.3.9a7.4 7.4 0 0 0-1.7-1l-.3-2.5h-4l-.3 2.5a7.4 7.4 0 0 0-1.7 1l-2.3-.9-2 3.4L6.6 11a7.4 7.4 0 0 0 0 2l-2 1.5 2 3.4 2.3-.9c.5.4 1.1.75 1.7 1l.3 2.5h4l.3-2.5c.6-.25 1.2-.6 1.7-1l2.3.9 2-3.4Z',
 } satisfies Record<string, string>;
 
 export type IconName = keyof typeof ICONS;

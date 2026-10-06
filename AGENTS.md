@@ -2428,6 +2428,50 @@ preview_perf/run_preview_perf.py`'s existing gate still measures
 don't depend on what the page draws with) and `spectra+proxy:live` (the
 Live tab, now sharing the strip's code) alike.
 
+**NO TEXT IN THE EXPANDED STAGE, AND IT NOW LANDS BELOW THE REST OF THE TOP
+BAR AS ITS OWN FULL-WIDTH ROW (2026-10-06, his own words: "take all the
+text out of the preview window, it is too messy. also, make it land below
+the rest of the items on that horizontal bar and have it fill
+horizontally. it is okay to rearange the different devices for it to fit
+well on different devices")** — `DevicePreviewStrip.tsx`'s own module
+docstring is the binding statement; three things worth knowing before
+touching it again:
+
+- `<DevicePreviewStrip />` renders TWO top-level siblings (a Fragment),
+  not one — the controls (`.device-preview-strip`, unchanged in place) and,
+  only while expanded, the stage (`.device-preview-expanded-row`,
+  `flex: 1 0 100%`). Both land as DIRECT children of `TopBarStrip`'s own
+  `display: flex; flex-wrap: wrap;` row, which is what forces the second
+  one onto its own full-width line below every other top-bar item — no
+  portal, no restructuring of where the controls sit. Every fixture label,
+  the paused/idle/connecting notice, the selected-fixture name/detail and
+  the "Open settings" button's own text are all gone from the stage;
+  accessibility lives entirely in `aria-label`/`title` now (a new `settings`
+  gear icon in `iconRegistry.ts` replaces the old text button).
+- The stage's ARRANGEMENT is now MEASURED rather than a phone/not-phone
+  guess: `live/positions.ts`'s new `compactPositions` (strip-only —
+  `layoutPositions` itself, and the Live tab's own Layout view that calls
+  it, are untouched) wraps fixtures at the row's own observed pixel width
+  (a `ResizeObserver` on the wrap, via a constant stage-units-per-pixel
+  scale) and reserves no row space for a label, since the strip draws none.
+- **THE SAME CALLBACK-REF GOTCHA BIT A SECOND TIME, in a second ref, one
+  paragraph after the first one was written down.** The measuring
+  `ResizeObserver` was first wired to a plain `useRef` object
+  (`stageWrapRef.current`), which silently measured nothing — a fresh
+  render with `expanded` already `true` (restored from localStorage) can
+  reach the measuring effect before `favoriteIds`/`stageLayout` have
+  loaded, so the wrap element doesn't exist yet on the render that effect
+  depends on (`[expanded]`), and nothing else in that dependency array
+  changes once the wrap mounts later. Found only by comparing the real
+  computed `--live-ar` against a hand-derived expectation — the stage
+  rendered a plausible-looking but WRONG (narrow/tall) arrangement with no
+  error of any kind. Fixed the same way the paragraph above already fixed
+  `useLiveStageCanvas`'s `canvasRef`: a state-backed callback ref
+  (`stageWrapEl`/`setStageWrapEl`), with the measuring effect depending on
+  `[expanded, stageWrapEl]` instead of `[expanded]` alone. **Any ref on an
+  element this component mounts conditionally needs this shape, not a
+  plain `useRef` — check both existing instances before adding a third.**
+
 **THE PREVIEW STREAM IS PROTOCOL 2 (2026-10-05, phase 1 of
 `data/preview-perf-plan/report.md`).** `spectra/services/preview_stream.py`'s
 docstring is the binding statement (wire format included); the paragraphs
