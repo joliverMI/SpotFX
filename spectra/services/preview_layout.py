@@ -45,7 +45,6 @@ from spectra.services import emitters
 from spectra.services.preview_stream import profile_cell_index
 
 
-
 def _segment(seg: list) -> tuple[str, int, int, bool, int]:
     offset = int(seg[4]) if len(seg) > 4 and seg[4] else 0
     return str(seg[0]), int(seg[1]), int(seg[2]), bool(seg[3]), offset
