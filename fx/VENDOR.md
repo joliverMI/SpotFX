@@ -1527,4 +1527,17 @@ against that commit.
     contract on the real class, plus Dopamine / Contra / Let It Be / Soy
     Peor from `tests/fixtures/pulse`), `scripts/check_pulse_effect.py` (the
     whole pipeline from his captured WAVs, and that the fixture-driven run
-    lands on the same light frame by frame).
+    lands on the same light frame by frame). Phase 3 (2026-10-06) adds, in
+    the effect: the RAINBOW WALK (a gradient spanning > 180 degrees of hue
+    is walked a seventh per solid hit and 2% a bar, `rainbow_walk`/
+    `rainbow_step`/`rainbow_drift`); two flare POKE keys, `flash` and
+    `flip`, edge-detected and self-resetting like #15's burst_rockets and
+    likewise unregistered (written only by SpotFX's pulse_flash /
+    pulse_flip flare kinds; their size/timing are the registered
+    `flash_size`/`flash_ms`/`flip_degrees`/`flip_beats`); a colour flip that
+    is a HUE ROTATION (saturation and value held — never through grey);
+    the flash budget moved to the RENDER clock (a flare flash lands with
+    no audio, and the window must still expire); and an OUTPUT GUARD
+    (`_guard_output`) that holds the budget on the light actually
+    delivered, which never engages on his four fixture songs without
+    flares. Proof: `tests/test_pulse_rainbow_flares.py`.

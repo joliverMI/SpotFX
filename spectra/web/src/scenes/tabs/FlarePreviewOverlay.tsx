@@ -375,7 +375,9 @@ export default function FlarePreviewOverlay({ sceneId, kind, onClose, onTriggerO
           <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
             This kind produces no writes at this intensity — {timeline.result === 'no_visible_effect'
               ? 'its params don\'t match any live virtual\'s registered params (or its gain is 1.0 with no params at all).'
-              : `result: ${timeline.result}.`}
+              : timeline.result === 'below_min_intensity'
+                ? `it only fires above intensity ${kind.min_intensity ?? '?'}; raise the intensity slider to see it.`
+                : `result: ${timeline.result}.`}
           </div>
         )}
 

@@ -344,13 +344,17 @@ def test_his_own_singles_colour_is_kept(categories):
     _card(singles="#800080",
           strips="linear-gradient(90deg, #ff0000 0%,#00ff00 50%,#0000ff 100%)"),
 ])
-def test_a_rainbow_set_gives_pulse_the_strips_colour_but_keeps_his_brightness(
+def test_a_rainbow_set_gives_pulse_the_strips_gradient_but_keeps_his_brightness(
         categories, card):
+    """Phase 3: in a rainbow set Pulse takes the strips' WHOLE gradient (it
+    walks along it on hits — tests/test_pulse_rainbow_flares.py), not just
+    its first colour; his own brightness stands."""
     from spectra.services import scene_compiler
     by_vid = scene_compiler.set_entries_for(card, {SINGLE_V: "pulse",
                                                    HUES_V: "power"})
-    first = "#ff00b3" if card.is_rainbow else "#ff0000"
-    assert by_vid[SINGLE_V].color_value == first
+    strips = card.entries[0].color_value
+    assert by_vid[SINGLE_V].color_value == strips
+    assert by_vid[SINGLE_V].color_kind == "gradient"
     assert by_vid[SINGLE_V].brightness == 0.8
     assert by_vid[HUES_V].color_value == "#800080"   # Power: his pick, as ever
 

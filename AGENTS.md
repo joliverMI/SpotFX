@@ -8313,7 +8313,7 @@ tunable, not tuned. Proof: `scripts/check_fish.py`,
 `scripts/check_fish_disperse.py`, `tests/test_fish.py`,
 `tests/test_fish_camera.py`, `tests/test_fish_disperse.py`.
 
-## Pulse (`fx/effects/pulse.py`) — the Singles' one-colour effect, phases 1-2 of 4
+## Pulse (`fx/effects/pulse.py`) — the Singles' one-colour effect, phases 1-3 of 4
 
 The single-led-power plan (`/home/javi/fleet-spotfx/data/single-led-power-plan/
 report.md`, approved by the Admiral "with all recommendations") replaces
@@ -8322,7 +8322,9 @@ measurement, (2) engine wiring + a test scene and HIS TUNING GATE, (3)
 rainbow walk + two flare kinds, (4) scene migration, one scene first and
 undoable. Power stays installed throughout. **The module docstring is the
 binding statement** (hit detector, rise/fade, rest/depth, smallest pulse,
-`gamma`, no background, the flash budget, the hooks). Nine things:
+`gamma`, no background, the flash budget, the hooks, the rainbow walk, the
+flare pokes); `.claude/skills/pulse-effect/SKILL.md` is the cold-start map.
+Ten things:
 
 - **WIRED (phase 2) THROUGH TWO SETS IN `fx/device_model`.** `pulse` is in
   `PHASE_EFFECTS` (charge/lull/drop on the shared ramp — a lull reaches black
@@ -8330,9 +8332,8 @@ binding statement** (hit detector, rise/fade, rest/depth, smallest pulse,
   keys exactly three things: the feed, the colour fill and the house guard
   below. Its tunable params are in `config/effect_params.json` (help topic
   `pulse-effect`); `energy`/`beat_ms`/`phase`/`phase_progress` are
-  deliberately NOT, like every phase effect's phase keys. Still an
-  acknowledged skill gap in `EFFECT_SCENE_MAP.json` until a live scene binds
-  it (phase 3 writes the skill).
+  deliberately NOT, like every phase effect's phase keys (nor the flare
+  pokes `flash`/`flip`).
 - **THE FEED** (`spectra/services/pulse_feed.py`, binding statement):
   `energy` = the section's render intensity (the generator's per-song
   stretch, `midsong_generator.section_intensities`, through
@@ -8347,9 +8348,12 @@ binding statement** (hit detector, rise/fade, rest/depth, smallest pulse,
 - **ONE PLACE PICKS A SET'S ENTRY PER VIRTUAL**: `scene_compiler.
   set_entries_for` (compile, the conductor's set landing, the flare colour
   jump, the colour-set Preview). A one-colour virtual keeps his own Singles
-  colour; with none, or in a rainbow set (`is_rainbow`, or the strips'
-  gradient spans >180°), it takes the strips' FIRST colour. A new set-landing
-  path must use it, not `_set_entry_by_virtual`, or Pulse goes unfilled there.
+  colour; with none it takes the strips' FIRST colour; in a rainbow set
+  (`is_rainbow`, or the strips' gradient spans >180°) it takes the strips'
+  WHOLE gradient, which Pulse walks (phase 3: a seventh per solid hit, 2% a
+  bar — it walks only a gradient spanning >180°, the same test). A new
+  set-landing path must use it, not `_set_entry_by_virtual`, or Pulse goes
+  unfilled there.
 - **TRUE BLACK ONLY DURING A MUSIC SHOW**: `_drive_phase` withholds phases
   from one-colour virtuals while `house.scene_deferral()` names a reason
   (`withheld` in the record). House levels, Hue Hold and off rules sit
@@ -8365,6 +8369,29 @@ binding statement** (hit detector, rise/fade, rest/depth, smallest pulse,
 - **THE FLASH BUDGET IS LUMINANCE, not a count**: the delivered-light rises
   of all hits in any second may not sum past `max_flash_rate` (3); a drop is
   never shrunk but spends it. Not WCAG's stricter count of every >=10% flash.
+  It runs on the RENDER clock, and since phase 3 an OUTPUT GUARD
+  (`_guard_output`) holds it on the light actually delivered too: booking is
+  predictive, and a hit's attack under a decaying flash delivers more through
+  the bulb curve than either booked (3.02-3.37/s measured on his songs with
+  dense flares before it). It never engages on his fixture songs without
+  flares; keep that true.
+- **TWO PULSE FLARE KINDS AND A GENERIC MINIMUM INTENSITY (phase 3).**
+  `pulse_flash` / `pulse_flip` (`spectra/models/scene.py`, `scene_response.
+  _pulse_flash`/`_pulse_flip`) write unregistered, self-resetting pokes to
+  `fx.device_model.PULSE_FLARE_EFFECTS` — the firework_burst shape: no
+  knobs on the kind (size/angle/timing are Pulse's registered settings), no
+  lead, no carry, no release queue. The flip is a HUE rotation back round the
+  wheel, never an RGB return (grey, which Hue shows as white).
+  `FlareKind.min_intensity` (any type; pulse_flip defaults to 0.4) is STRICT
+  (fires only above), gated in `resolve_lane_picks` (a gated kind leaves its
+  pool like a disabled one, named `below_min_intensity`), again on the run
+  list, and in `fire_kind` (the ▶ Preview reports it). Sonic's
+  `set_flare_kind` takes both types and `min_intensity` (omit-means-keep).
+  `scripts/add_pulse_flares.py` (dry run default) declares and attaches both
+  on the test scene and REFUSES a scene with no Pulse entry — moving a real
+  scene is phase 4. Help: `pulse-rainbow-walk`, `pulse-flares`,
+  `flare-min-intensity`. Spec: `tests/test_pulse_rainbow_flares.py` (incl.
+  the real pipeline into the device preview's encoders).
 - **HIS SONGS ARE FIXTURES, AND THE FIXTURES ARE PROVEN**:
   `tests/fixtures/pulse/` is the effect's own audio input recorded through
   the real pipeline from his WAVs; `scripts/check_pulse_effect.py

@@ -127,13 +127,22 @@ export interface FlareKind {
    * firework_burst: the firework burst flare — same no-authored-knobs
    * shape; the payoff-rocket count (3 at intensity 0, 6 at 1, linear)
    * scales from the fire's intensity and explodes immediately on every
-   * live fireworks effect. */
-  type: 'drift_jump' | 'momentary' | 'permanent' | 'color_rotate' | 'firework_burst' | 'blob_rush';
+   * live fireworks effect.
+   * pulse_flash / pulse_flip: the Singles' Pulse flares — a brightness
+   *   flash that fades back in ~180 ms, and a 180° colour flip that swings
+   *   back round the wheel over 0.75 beat; size/angle/timing are Pulse's own
+   *   settings, so no knobs on the kind. */
+  type: 'drift_jump' | 'momentary' | 'permanent' | 'color_rotate' | 'firework_burst' | 'blob_rush'
+    | 'pulse_flash' | 'pulse_flip';
   jump: 'color_set' | 'dice' | null;
   params: Record<string, ParamTarget>;
   gain: number;
   hold_ms: number | null;
   trigger_offset_ms: number;
+  /** The kind fires only when the fire's intensity is ABOVE this (0..1);
+   * null/absent = no gate. pulse_flip defaults to 0.4 (models/scene.py
+   * FlareKind.min_intensity). */
+  min_intensity?: number | null;
   /** Temporary disable for ONE kind (owner ask 2026-08-27) — the power
    * button on the flare bar (components/PowerButton.tsx). Optional here
    * only because a kind stored before this field existed carries no value;

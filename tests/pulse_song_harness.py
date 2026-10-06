@@ -165,6 +165,11 @@ class Trace:
     phase: list
     hits: list                 # (audio_t, strength, sharp, rise_ms, want, target)
     plan: list = field(default_factory=list)
+    colour: np.ndarray | None = None     # (n, 3) the colour shown, before level
+    hue_offset: np.ndarray | None = None  # a colour flip's offset (degrees)
+    walk: np.ndarray | None = None       # the rainbow walk's position (unwrapped)
+    steps: list = field(default_factory=list)   # (audio_t, walk target)
+    flashes: list = field(default_factory=list)  # (render_t, wanted, landed)
 
 
 def new_effect(config: dict):
@@ -222,9 +227,11 @@ class EngineStandIn:
                 self._active = None
 
 
-def run(meta: dict, arrays: dict, *, scale: float, config: dict | None = None) -> Trace:
+def run(meta: dict, arrays: dict, *, scale: float, config: dict | None = None,
+        hook=None) -> Trace:
     """Step the real effect over a recorded song: per frame, the engine's
-    writes, then the audio frame (when it reached the effect), then render."""
+    writes (plus `hook(effect, t)`, e.g. flare pokes), then the audio frame
+    (when it reached the effect), then render."""
     from fx import headless
 
     cfg = base_config(meta, scale, config)
@@ -235,6 +242,9 @@ def run(meta: dict, arrays: dict, *, scale: float, config: dict | None = None) -
     out = np.zeros(n)
     rest = np.zeros(n)
     energy = np.zeros(n)
+    colour = np.zeros((n, 3))
+    hue_offset = np.zeros(n)
+    walk = np.zeros(n)
     phase = []
     with headless.fake_clock() as clock:
         e = new_effect(cfg)
@@ -242,6 +252,8 @@ def run(meta: dict, arrays: dict, *, scale: float, config: dict | None = None) -
         for i in range(n):
             t = (i + 1) * DT
             eng.before_frame(e, t)
+            if hook is not None:
+                hook(e, t)
             if fired[i]:
                 e.ingest_signal(float(x[i]), DT)
             clock.advance(DT)
@@ -251,10 +263,15 @@ def run(meta: dict, arrays: dict, *, scale: float, config: dict | None = None) -
             out[i] = float(np.max(px[0])) / 255.0
             rest[i] = e._rest
             energy[i] = e._energy_live
+            colour[i] = e.shown_colour
+            hue_offset[i] = e.hue_offset
+            walk[i] = e._walk_pos
             phase.append(e._phase)
     return Trace(
         t=(np.arange(n) + 1) * DT, level=level, out=out, rest=rest,
         energy=energy, phase=phase, hits=list(e.hits), plan=eng.plan,
+        colour=colour, hue_offset=hue_offset, walk=walk,
+        steps=list(e.steps), flashes=list(e.flashes),
     )
 
 

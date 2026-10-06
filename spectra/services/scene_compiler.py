@@ -163,17 +163,20 @@ def set_entries_for(color_set: ColorSetCard,
     (virtual id -> effect type). Every virtual gets exactly what
     _set_entry_by_virtual gives it, EXCEPT a one-colour virtual
     (fx.device_model.ONE_COLOUR_EFFECTS), which keeps his own hand-picked
-    entry for it and takes the first colour of the strips' gradient (the
-    colour at position 0, which is the one colour such an effect shows)
-    only:
+    entry for it and takes its colour from the strips only:
 
       - where the set has no entry for it (it would otherwise keep whatever
-        it wore before), or
+        it wore before): the first colour of the strips' gradient (the
+        colour at position 0, which is the one colour such an effect shows
+        from an ordinary gradient), or
       - in a RAINBOW set — marked `is_rainbow`, or whose strips' gradient
         spans more than half the wheel (the journey's own rainbow test,
         color_wheel.value_span_deg) — where his fixed pick would sit apart
-        from a strip running every colour. Only the colour is replaced; the
-        rest of his entry (brightness) stands.
+        from a strip running every colour: the strips' WHOLE gradient
+        (phase 3), which Pulse walks along on hits (fx/effects/pulse.py,
+        RAINBOW WALK — it walks a gradient spanning more than half the
+        wheel, the same test). Only the colour is replaced; the rest of his
+        entry (brightness) stands.
 
     A filled entry carries the colour and nothing else: one-colour effects
     have no background. Every caller that lands a colour set on live
@@ -197,6 +200,10 @@ def set_entries_for(color_set: ColorSetCard,
     rainbow = (bool(getattr(color_set, "is_rainbow", False))
                or color_wheel.value_span_deg(source.color_value)
                > color_wheel.RAINBOW_SPAN_DEG)
+    if rainbow:
+        kind, value = source.color_kind, source.color_value
+    else:
+        kind, value = "solid", colour
     out = dict(by_vid)
     for vid in sorted(one_colour):
         own = by_vid.get(vid)
@@ -204,10 +211,10 @@ def set_entries_for(color_set: ColorSetCard,
             continue
         if own is None:
             out[vid] = ColorSetEntry(scope=SetScope(virtual_ids=[vid]),
-                                     color_kind="solid", color_value=colour)
+                                     color_kind=kind, color_value=value)
         else:
-            out[vid] = own.model_copy(update={"color_kind": "solid",
-                                              "color_value": colour})
+            out[vid] = own.model_copy(update={"color_kind": kind,
+                                              "color_value": value})
     return out
 
 

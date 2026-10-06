@@ -130,7 +130,7 @@ from pydantic import BaseModel, ValidationError
 
 from fx import device_model
 from spectra import config
-from spectra.models.scene import (FlareKind, PhaseChoreography,
+from spectra.models.scene import (DEFAULT_MIN_INTENSITY, FlareKind, PhaseChoreography,
                                   SceneColorJourney, SceneDeviceConfig, SceneV2)
 from spectra.services import scene_store
 from spectra.services.sonic_ops import SonicOperation
@@ -465,6 +465,7 @@ def list_flare_kinds(scene_id: str) -> dict:
     return {"scene_id": scene.id, "name": scene.name, "flare_kinds": [
         {"name": k.name, "type": k.type, "jump": k.jump, "gain": k.gain,
          "hold_ms": k.hold_ms, "enabled": k.enabled,
+         "min_intensity": k.min_intensity,
          "param_names": sorted(k.params)}
         for k in scene.flare_kinds
     ]}
@@ -664,6 +665,15 @@ def _validate_set_flare_kind(scene_id: str, **kind_fields: Any) -> tuple[SceneV2
     if (kind_fields.get("jump") is None and stored is not None
             and kind_fields.get("type") == "drift_jump"):
         kind_fields["jump"] = stored["jump"]
+    # `min_intensity` follows the same omit-means-keep rule — except a value
+    # that was only ever the OLD type's own default (pulse_flip's 0.4) is
+    # not carried onto a different type, which has a default of its own.
+    if kind_fields.get("min_intensity") is None and existing is not None:
+        kept = existing.min_intensity
+        if (kind_fields.get("type") != existing.type
+                and kept == DEFAULT_MIN_INTENSITY.get(existing.type)):
+            kept = None
+        kind_fields["min_intensity"] = kept
     try:
         kind = FlareKind.model_validate(kind_fields)
     except ValidationError as exc:
@@ -692,11 +702,12 @@ async def apply_flare_kind(scene_id: str, *, name: str, type: str,  # noqa: A002
                            gain: Optional[float] = None, hold_ms: Optional[int] = None,
                            enabled: Optional[bool] = None,
                            trigger_offset_ms: Optional[int] = None,
+                           min_intensity: Optional[float] = None,
                            source: str = "agent") -> dict:
     scene, candidate, op = _validate_set_flare_kind(
         scene_id, name=name, type=type, jump=jump, params=params,
         gain=gain, hold_ms=hold_ms, enabled=enabled,
-        trigger_offset_ms=trigger_offset_ms)
+        trigger_offset_ms=trigger_offset_ms, min_intensity=min_intensity)
     backup = _write_and_verify_backup(scene_id, scene, op=f"flare_kind_{op}")
     scene_store.save(candidate)
     entry = {"id": str(uuid.uuid4()), "ts_ms": int(time.time() * 1000),
@@ -1121,11 +1132,13 @@ async def _op_set_flare_kind(scene_id: str, name: str, type: str,  # noqa: A002
                              jump: Optional[str] = None, params: Optional[dict] = None,
                              gain: Optional[float] = None, hold_ms: Optional[int] = None,
                              enabled: Optional[bool] = None,
-                             trigger_offset_ms: Optional[int] = None) -> dict:
+                             trigger_offset_ms: Optional[int] = None,
+                             min_intensity: Optional[float] = None) -> dict:
     try:
         return await apply_flare_kind(
             scene_id, name=name, type=type, jump=jump, params=params, gain=gain,
-            hold_ms=hold_ms, enabled=enabled, trigger_offset_ms=trigger_offset_ms)
+            hold_ms=hold_ms, enabled=enabled, trigger_offset_ms=trigger_offset_ms,
+            min_intensity=min_intensity)
     except SceneOpError as exc:
         return exc.payload()
 
@@ -1319,7 +1332,18 @@ OPERATIONS: dict[str, SonicOperation] = {
             "no params/gain/hold_ms on this type), momentary (a param/gain "
             "spike that returns to baseline — hold_ms optional, default "
             "250ms), permanent (params/gain land and become the new "
-            "baseline — no hold_ms, it never releases). params maps a "
+            "baseline — no hold_ms, it never releases), pulse_flash (the "
+            "Singles' Pulse light jumps in brightness and fades back in "
+            "~180ms — no jump/params/gain/hold_ms; its size and fade are "
+            "Pulse's own flash_size/flash_ms settings), pulse_flip (Pulse's "
+            "colour turns 180 degrees at once and swings back round the "
+            "colour wheel over 0.75 beat — no jump/params/gain/hold_ms; "
+            "angle and return are Pulse's flip_degrees/flip_beats). "
+            "min_intensity (0..1, any type) makes the kind fire only when "
+            "the fire's intensity is ABOVE it; pulse_flip defaults to 0.4 "
+            "(never fires at or below 0.4). Like enabled, OMIT it to keep "
+            "the stored value; send 0 to let it fire at any intensity "
+            "above 0. params maps a "
             "param name to either a bare number (an absolute target) or "
             "{mode: 'absolute'|'offset'|'random', value|offset|lo,hi}. "
             "The server re-validates the whole shape and refuses anything "
@@ -1357,7 +1381,8 @@ OPERATIONS: dict[str, SonicOperation] = {
             "properties": {
                 "scene_id": {"type": "string"},
                 "name": {"type": "string"},
-                "type": {"type": "string", "enum": ["drift_jump", "momentary", "permanent"]},
+                "type": {"type": "string", "enum": ["drift_jump", "momentary", "permanent",
+                                                    "pulse_flash", "pulse_flip"]},
                 "jump": {"type": "string", "enum": ["color_set", "dice"]},
                 "params": {"type": "object", "additionalProperties": True},
                 "gain": {"type": "number"},
@@ -1365,6 +1390,7 @@ OPERATIONS: dict[str, SonicOperation] = {
                 "enabled": {"type": "boolean"},
                 "trigger_offset_ms": {"type": "integer",
                                       "minimum": -60000, "maximum": 60000},
+                "min_intensity": {"type": "number", "minimum": 0, "maximum": 1},
             },
             "required": ["scene_id", "name", "type"], "additionalProperties": False},
         handler=_op_set_flare_kind),

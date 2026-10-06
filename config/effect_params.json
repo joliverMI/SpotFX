@@ -284,6 +284,82 @@
           "default": 2.0,
           "help_topic": "pulse-effect",
           "note": "Beats for the drop's burst to settle back."
+        },
+        "rainbow_walk": {
+          "label": "Rainbow Walk",
+          "type": "toggle",
+          "smooth": false,
+          "default": true,
+          "help_topic": "pulse-rainbow-walk",
+          "note": "In a rainbow colour set (the strips' gradient spans more than half the wheel), walk along the strips' gradient on hits instead of showing its first colour. Every Hue bulb shows the same colour."
+        },
+        "rainbow_step": {
+          "label": "Rainbow Step",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 0.5,
+          "aspect": "color",
+          "aspect_scale": 1.0,
+          "default": 0.142857,
+          "help_topic": "pulse-rainbow-walk",
+          "note": "How far along the rainbow each solid hit steps, as a fraction of the gradient (1/7 by default). Only hits stronger than 0.35, at most one per 0.45 beat."
+        },
+        "rainbow_drift": {
+          "label": "Rainbow Drift (per bar)",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 0.25,
+          "aspect": "color",
+          "aspect_scale": 1.0,
+          "default": 0.02,
+          "help_topic": "pulse-rainbow-walk",
+          "note": "How far along the rainbow it drifts per bar (4 beats) between hits, as a fraction of the gradient."
+        },
+        "flash_size": {
+          "label": "Flash Flare Size",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "aspect": "brightness",
+          "aspect_scale": 1.0,
+          "default": 0.45,
+          "help_topic": "pulse-flares",
+          "note": "How far a Pulse Flash flare lifts the light (eye scale), times 0.4 + 0.6 x the flare's intensity. Spent from the same flash budget as hits."
+        },
+        "flash_ms": {
+          "label": "Flash Flare Fade (ms)",
+          "type": "numeric",
+          "smooth": true,
+          "min": 20,
+          "max": 2000,
+          "default": 180.0,
+          "help_topic": "pulse-flares",
+          "note": "Time for a Pulse Flash flare to fall to a tenth."
+        },
+        "flip_degrees": {
+          "label": "Colour Flip Angle",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 360,
+          "aspect": "color",
+          "aspect_scale": 1.0,
+          "default": 180.0,
+          "help_topic": "pulse-flares",
+          "note": "How far a Pulse Colour Flip flare turns the hue (degrees). It swings back round the colour wheel, never through grey or white."
+        },
+        "flip_beats": {
+          "label": "Colour Flip Return (beats)",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.05,
+          "max": 8,
+          "default": 0.75,
+          "help_topic": "pulse-flares",
+          "note": "Beats for a Pulse Colour Flip to swing back to the original colour."
         }
       },
       "defaults": {
@@ -304,7 +380,14 @@
         "charge_top": 0.8,
         "drop_burst": 1.0,
         "drop_white": 0.45,
-        "drop_settle_beats": 2.0
+        "drop_settle_beats": 2.0,
+        "rainbow_walk": true,
+        "rainbow_step": 0.142857,
+        "rainbow_drift": 0.02,
+        "flash_size": 0.45,
+        "flash_ms": 180.0,
+        "flip_degrees": 180.0,
+        "flip_beats": 0.75
       }
     },
     "power": {
