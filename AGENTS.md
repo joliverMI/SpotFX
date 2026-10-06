@@ -2402,6 +2402,32 @@ side by side with the NEW path showing neither) + `tests/
 test_device_preview.py` section 6. This is a delivery-TIMING fix, not a
 second bytes fix — `_facade_frame_payload`'s encoding above is untouched.
 
+**EXPANDED NOW DRAWS WITH THE LIVE TAB'S OWN RENDERER, NOT A PER-DEVICE
+GRID/STRIP (2026-10-06, his ask: "make the expanded preview for the
+devices look like the layout screen on devices").** The `device-preview-
+matrix`/`device-preview-pixel-strip` CSS classes and the per-device
+`canvasRefs`/`putImageData` painting the paragraphs above describe are
+GONE from expanded mode — collapsed mode (the swatches, `paintSwatch`) is
+unchanged and still works exactly as those paragraphs say. Expanded now
+fetches `/device-preview/layout` (narrowed to his favourites), builds a
+`StagePlan` with `live/positions.ts`'s `layoutPositions` and draws it with
+`live/useLiveStageCanvas.ts` — the SAME hook + `LiveStage` class the
+Devices page's Live tab uses, factored out of `LiveView.tsx` for exactly
+this reuse. A conditionally-mounted `<canvas>` (the strip's canvas only
+exists once `expanded` AND favourites have loaded) needed the hook's
+`canvasRef` to become a state-backed CALLBACK ref rather than a plain
+`useRef` object — a plain ref's `.current` can be null on the render
+where the construction effect's dependency array happens to evaluate,
+and since nothing else in that array changes once the canvas does mount,
+the effect would otherwise never retry. See that hook's own docstring
+before changing anything here. Both consumers (`DevicePreviewStrip.tsx`
+expanded, `LiveView.tsx`'s Layout/Room map) share one renderer now, so a
+future renderer fix benefits both automatically. Proof: `scripts/
+preview_perf/run_preview_perf.py`'s existing gate still measures
+`spectra+proxy` (the expanded strip, unaffected — its WS-level timings
+don't depend on what the page draws with) and `spectra+proxy:live` (the
+Live tab, now sharing the strip's code) alike.
+
 **THE PREVIEW STREAM IS PROTOCOL 2 (2026-10-05, phase 1 of
 `data/preview-perf-plan/report.md`).** `spectra/services/preview_stream.py`'s
 docstring is the binding statement (wire format included); the paragraphs

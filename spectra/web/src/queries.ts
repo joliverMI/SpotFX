@@ -672,17 +672,22 @@ export function useSaveDevicePreviewFavorites() {
   });
 }
 
-/** Every in-use fixture's shape and stream cells (the Live view), plus
- * which ones are currently HELD at a Hue Hold colour (`held`, per fixture
- * and per virtual) — the top strip and the Live view both read this to
- * draw a frozen Hue bulb's real colour instead of its driving virtual's
+/** Every in-use fixture's shape and stream cells — the Live view's Layout,
+ * and the top-bar strip's own stage (expanded mode draws it with the same
+ * renderer; see live/useLiveStageCanvas.ts) — plus which ones are currently
+ * HELD at a Hue Hold colour (`held`, per fixture and per virtual) so a
+ * frozen Hue bulb draws its real colour instead of its driving virtual's
  * live render. Polled (shape rarely changes; `held` can, on a house mode
- * "Set" press) so that override shows up without a manual refetch. */
-export function useDevicePreviewLayout() {
+ * "Set" press) so that override shows up without a manual refetch. The
+ * strip fetches this unconditionally, collapsed or expanded, since even a
+ * collapsed swatch needs `held` to draw a frozen Hue bulb's real colour.
+ * `enabled` is here for a future caller that genuinely wants to skip it. */
+export function useDevicePreviewLayout(enabled = true) {
   return useQuery({
     queryKey: ['spectra-device-preview-layout'],
     queryFn: () => apiGet<LiveLayout>('/device-preview/layout'),
     refetchInterval: 5000,
+    enabled,
   });
 }
 

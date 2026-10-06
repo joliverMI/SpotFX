@@ -33,7 +33,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import {
-  onDevicePreviewFrame, onDevicePreviewMessage, onDevicePreviewStatus,
+  onDevicePreviewMessage, onDevicePreviewStatus,
   onDevicePreviewTabHiddenPause, setDevicePreviewInUse, setDevicePreviewLevel,
 } from '../api/devicePreviewWs';
 import { useToast } from '../components/Toast';
@@ -50,17 +50,13 @@ import { layoutPositions, withHeldOverlay } from './positions';
 import type { StageFixture, StagePlan } from './positions';
 import { decodeRoomView, roomMapPositions, STAGE_H, STAGE_W } from './roomMap';
 import type { RoomPlacement, RoomPlan, RoomView, TrayPiece } from './roomMap';
-import { LiveStage } from './stage';
+import { useLiveStageCanvas } from './useLiveStageCanvas';
 
 const SMOOTH_KEY = 'spectra-live-smooth';
 const VIEW_KEY = 'spectra-live-view';
 const POSE_KEY = 'spectra-live-pose';
 const FIT_KEY = 'spectra-live-fit';
 const CONSUMER = 'live-view';
-const EMPTY_PLAN: StagePlan = {
-  width: 16, height: 9, pointCount: 0, xy: new Float32Array(0), size: new Float32Array(0),
-  src: new Uint32Array(0), groups: [], fixtures: [],
-};
 const TRAY_REASON: Record<string, string> = {
   unseen: 'not seen from this view', unmapped: 'not mapped',
 };
@@ -116,17 +112,12 @@ export default function LiveView({ popout = false, forceCanvas = false }: {
   const [smooth, setSmooth] = useState(readSmooth);
   const [fullscreen, setFullscreen] = useState(false);
   const [pausePending, setPausePending] = useState(false);
-  const [mode, setMode] = useState<'webgl' | 'canvas' | null>(null);
 
   const rootRef = useRef<HTMLDivElement | null>(null);
   const stageBoxRef = useRef<HTMLDivElement | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const meterRef = useRef<HTMLSpanElement | null>(null);
-  const stageRef = useRef<LiveStage | null>(null);
   const liveRef = useRef(false);
   const meter = useMemo(() => new LinkMeter(), []);
-  const refetchRef = useRef(refetch);
-  refetchRef.current = refetch;
 
   const room = view === 'room';
   const posesQuery = useRoomViewPoses(room);
@@ -162,70 +153,35 @@ export default function LiveView({ popout = false, forceCanvas = false }: {
     };
   }, []);
 
-  // The stage and its draw loop live as long as the canvas does.
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return undefined;
-    const stage = new LiveStage(canvas, forceCanvas);
-    stageRef.current = stage;
-    setMode(stage.mode);
-    stage.setSmooth(readSmooth());
-    stage.resize();
-    const observer = new ResizeObserver(() => stage.resize());
-    observer.observe(canvas);
-    let raf = 0;
-    const tick = (now: number) => {
-      stage.draw(now);
-      raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    const stopFrames = onDevicePreviewFrame((frame) => {
-      if (liveRef.current) stage.pushFrame(frame, performance.now());
-    });
-    const stopMessages = onDevicePreviewMessage((bytes, stats, age, at) => {
-      meter.note(bytes, stats, age, at);
-    });
-    const reading: LinkReading = { fps: 0, delayMs: null, kbps: 0, rateFps: 0 };
-    let refetchedAt = 0;
-    const meterTimer = window.setInterval(() => {
-      // Frames that no longer fit the layout: read the layout again (at most
-      // every few seconds — the old stream format never fits a masked device).
-      if (stage.stale && performance.now() - refetchedAt > 5000) {
-        stage.stale = false;
-        refetchedAt = performance.now();
-        refetchRef.current();
-      }
-      const el = meterRef.current;
-      if (!el) return;
-      if (!liveRef.current) { el.textContent = '—'; return; }
-      meter.read(performance.now(), stage.holdMs(), reading);
-      const delay = reading.delayMs === null ? '— ms' : `${Math.round(reading.delayMs)} ms`;
-      el.textContent = `${reading.fps.toFixed(0)} fps · ${delay} · ${reading.kbps.toFixed(0)} kbit/s`;
-    }, 500);
-    return () => {
-      cancelAnimationFrame(raf);
-      observer.disconnect();
-      stopFrames();
-      stopMessages();
-      window.clearInterval(meterTimer);
-      stage.dispose();
-      stageRef.current = null;
-    };
-  }, [forceCanvas, meter]);
-
-  useEffect(() => {
-    stageRef.current?.setPlan(plan ?? EMPTY_PLAN);
-  }, [plan, mode]);
-
   const paused = status?.paused ?? false;
   const connected = status?.connected ?? false;
   const live = !paused && !tabHidden && connected;
+
+  const { canvasRef, stageRef, mode } = useLiveStageCanvas({
+    plan, live, smooth, forceCanvas, onStale: refetch,
+  });
+
+  // The link meter: fps/delay/kbit-s text, on its own 500ms tick (the
+  // stage's own stale-layout refetch is the hook's concern now).
+  useEffect(() => onDevicePreviewMessage((bytes, stats, age, at) => {
+    meter.note(bytes, stats, age, at);
+  }), [meter]);
+  useEffect(() => {
+    const reading: LinkReading = { fps: 0, delayMs: null, kbps: 0, rateFps: 0 };
+    const timer = window.setInterval(() => {
+      const el = meterRef.current;
+      if (!el) return;
+      if (!liveRef.current) { el.textContent = '—'; return; }
+      meter.read(performance.now(), stageRef.current?.holdMs() ?? 0, reading);
+      const delay = reading.delayMs === null ? '— ms' : `${Math.round(reading.delayMs)} ms`;
+      el.textContent = `${reading.fps.toFixed(0)} fps · ${delay} · ${reading.kbps.toFixed(0)} kbit/s`;
+    }, 500);
+    return () => window.clearInterval(timer);
+  }, [meter, stageRef]);
+
   useEffect(() => {
     liveRef.current = live;
-    if (!live) {
-      stageRef.current?.blank();
-      meter.reset();
-    }
+    if (!live) meter.reset();
   }, [live, meter]);
 
   // What is in use can change with who is driving the lights.
@@ -269,7 +225,6 @@ export default function LiveView({ popout = false, forceCanvas = false }: {
   const toggleSmooth = () => setSmooth((prev) => {
     const next = !prev;
     try { localStorage.setItem(SMOOTH_KEY, next ? '1' : '0'); } catch { /* private window */ }
-    stageRef.current?.setSmooth(next);
     return next;
   });
 

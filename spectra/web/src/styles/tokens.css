@@ -507,8 +507,10 @@ button.danger:hover { border-color: var(--danger); color: var(--danger); }
 
 /* Device-preview strip (DevicePreviewStrip.tsx) — the top-bar strip's
  * second occupant. A compact swatch per favourite device by default;
- * "Expand" swaps the swatch for a small per-pixel strip. No text label:
- * he knows what he's looking at. */
+ * "Expand" swaps it for the same shaped-fixture stage the Devices page's
+ * Live tab draws (live/useLiveStageCanvas.ts, live/positions.ts), sized to
+ * fit the strip — see `.device-preview-live*` below. No text label: he
+ * knows what he's looking at. */
 .device-preview-strip {
   display: flex;
   align-items: center;
@@ -544,30 +546,7 @@ button.danger:hover { border-color: var(--danger); color: var(--danger); }
 .device-preview-status-amber { background: #3a2c0e; color: var(--warning); }
 .device-preview-status-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .device-preview-chips { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; max-width: 100%; }
-/* Expanded: devices stack vertically ("expand grows downward, not
- * sideways" — his own rule) instead of sitting side by side. */
-.device-preview-chips.expanded {
-  flex-direction: column;
-  align-items: stretch;
-  width: 100%;
-  gap: 10px;
-}
 .device-preview-device { display: flex; align-items: center; }
-.device-preview-device.expanded {
-  flex-direction: column;
-  align-items: stretch;
-  gap: 3px;
-  width: 100%;
-  max-width: min(360px, 100%);
-}
-.device-preview-device-label {
-  font-size: 11px;
-  font-family: var(--font-mono, monospace);
-  color: var(--text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .device-preview-swatch {
   display: inline-block;
   width: 20px;
@@ -576,39 +555,21 @@ button.danger:hover { border-color: var(--danger); color: var(--danger); }
   border: 1px solid var(--border);
   transition: background-color 0.2s linear;
 }
-/* A strip (shape rows === 1) — reads as ONE line, at 100% of the
- * container's width regardless of pixel count, so a 7-pixel dining-room
- * strip and a 900+-pixel strip both stay inside the container instead of
- * running off the side. A single <canvas> (see DevicePreviewStrip.tsx) —
- * its backing resolution is the real pixel count, CSS stretches it to the
- * display width, `image-rendering: pixelated` keeps individual LEDs crisp
- * blocks rather than a browser-smoothed blur. */
-.device-preview-pixel-strip {
-  display: block;
-  width: 100%;
-  height: 22px;
-  border-radius: 3px;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  image-rendering: pixelated;
+/* Expanded: the SAME stage the Devices page's Live tab draws (its own
+ * `.live-stage-wrap`/`.live-stage`/`.live-canvas`/`.live-hit`/`.live-label`
+ * classes, reused verbatim so a fixture looks identical in both places —
+ * only the box around it is sized for a top-bar strip instead of a full
+ * page: narrower, and it grows DOWNWARD ("expand grows downward, not
+ * sideways" still holds — the strip's own row stays full width, the stage
+ * inside it does not sprawl past a sensible preview size). */
+.device-preview-live { display: flex; flex-direction: column; gap: 8px; width: 100%; min-width: 0; }
+.device-preview-live-wrap {
+  background: #06040b; border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 10px 10px 18px; display: flex; justify-content: center; min-width: 0;
 }
-/* A matrix (shape rows > 1) — reads as a GRID, at its own aspect ratio, at
- * 100% of the available width; height follows from aspect-ratio, so it
- * grows downward as rows increase, never sideways past the container. Also
- * a single <canvas>, same reasoning as the strip above — this is what
- * replaced the old one-<span>-per-pixel DOM grid (2026-08-17, choppy
- * device-preview fix): a 72x37 matrix was 2664 React-reconciled elements
- * re-rendered on every incoming frame, ~30-1000x more expensive than one
- * canvas.putImageData() call regardless of pixel count (measured — see
- * docs/SPECTRA_SPEC.md's device-preview-smoothness section). */
-.device-preview-matrix {
-  display: block;
-  width: 100%;
-  aspect-ratio: var(--cols) / var(--rows);
-  border-radius: 3px;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  image-rendering: pixelated;
+.device-preview-live-stage {
+  position: relative; aspect-ratio: var(--live-ar);
+  width: min(100%, 640px);
 }
 .device-preview-btn { padding: 3px 8px; font-size: 11.5px; }
 .device-preview-btn:disabled { opacity: 0.5; cursor: not-allowed; }

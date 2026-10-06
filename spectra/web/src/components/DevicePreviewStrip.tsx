@@ -34,107 +34,45 @@
  * Resume; "idle — tab hidden" (blue) means only that this tab isn't
  * looking right now and it will pick back up on its own.
  *
- * Default view is a compact single swatch per favourite device — the mean
- * colour of its real cells (see THE STRIP ASKS ONLY FOR WHAT IT DRAWS,
- * below, for where that mean is computed); "Expand" reveals the full
- * per-pixel layout, remembered client-side (report §5), same local-first
- * pattern as the feedback queue.
+ * COLLAPSED = ONE AVERAGED COLOUR PER FAVOURITE DEVICE, on the lightweight
+ * "summary" level — three bytes per device, nothing else fetched. This
+ * never changed; "Expand" is the only thing that does.
  *
- * PHONE-FIRST LAYOUT (fixed 2026-08-16, his own report: "the preview
- * stretches out in a line super far ... I don't see any Matrix for The
- * Matrix previews"). Every frame already carries `shape: [rows, cols]`
- * (services/device_preview.py reads it off the real virtual and has since
- * launch — this was never a payload gap) but this component used to ignore
- * it and render every device, matrix or strip, as one flat row of
- * fixed-width pixel spans: fine for a handful of strip pixels, but his
- * `crystal-mapper` favourite is a real 72x37 matrix (2664 pixels laid out
- * in ONE row = 2664 * 3px wide), which is exactly the "stretches out in a
- * line super far" and "I don't see any Matrix" reports. Fix, per his own
- * stated rule ("a matrix reads as a grid, a strip reads as a line,
- * expanding grows downward not sideways"):
- *   - `shape[0] > 1` (more than one row) renders as a CSS grid
- *     (`device-preview-matrix`, `repeat(cols, 1fr)` columns via a `--cols`/
- *     `--rows` custom property, `aspect-ratio: cols / rows` so it never
- *     needs JS measurement) — reads as a grid, grows only as tall as its
- *     own aspect ratio requires at 100% of the available width.
- *   - `shape[0] === 1` (an ordinary strip) renders as a single flexible
- *     line (`device-preview-pixel-strip`) whose pixels use `flex: 1` to
- *     share exactly 100% of the container width, rather than a fixed
- *     per-pixel width — a 7-pixel dining room strip and a 2664-pixel strip
- *     alike stay within the container, never off the side.
- *   - Expanded devices stack VERTICALLY (`device-preview-chips.expanded`
- *     switches from a flex row to a flex column) instead of sitting side
- *     by side, so "expand" genuinely grows the page downward.
- * Collapsed mode's separate complaint ("it still doesn't quite fit") was
- * `.device-preview-strip`'s own `white-space: nowrap` with no `flex-wrap`
- * — the whole label+swatches+badge+buttons row was forced onto one line
- * that just ran off the right edge of a phone screen. Now wraps.
+ * EXPANDED NOW MATCHES THE DEVICES PAGE'S LIVE TAB, FORMAT AND RENDERER
+ * ALIKE (2026-10-06, the owner's own words: "make the expanded preview
+ * for the devices look like the layout screen on devices. match the
+ * layout and the format"). Before this, expanding drew a flat per-device
+ * grid/strip (one <canvas> per favourite, painted with plain
+ * putImageData calls) — workable, but a DIFFERENT shape from the real
+ * fixture geometry the Live tab draws (the crystal's hex lattice, the TV
+ * strip as a frame, bulbs as discs). Expanding now builds its stage from
+ * the SAME layout the Live tab's Layout view reads (`/device-preview/layout`,
+ * narrowed here to his favourites only — never every in-use fixture,
+ * that stays the Live view's own, broader job), builds the identical
+ * `StagePlan` (`live/positions.ts`'s `layoutPositions`) and draws it with
+ * the identical renderer (`live/useLiveStageCanvas.ts`, the hook factored
+ * out of `LiveView.tsx` for exactly this reuse — one WebGL stage class,
+ * one draw loop, never two copies that could drift apart). Labels, shapes
+ * and click-to-select all read the same as the Live tab's Layout view;
+ * "Open settings" reuses its exact navigation target. What stays strip-
+ * only: no Room map, no solo/drag/fullscreen/link-meter chrome — those
+ * belong to the dedicated page, not a compact top-bar widget, and adding
+ * them here was never the ask ("match the layout and the format", not
+ * "become the Live tab").
  *
- * NO "PREVIEW" LABEL, ONE ICON-ONLY STATUS/PAUSE CONTROL (2026-08-16, his
- * own words: "it doesn't need to say the word preview I know what it is
- * ... we don't need a button for pause and resume and also an indicator
- * for if it's paused or running or reconnecting. make the button the
- * indicator ... don't put text use icons"). The separate label span, the
- * standalone paused/running/reconnecting badge, and the Pause/Resume text
- * button collapse into ONE `device-preview-status-btn`: its icon+colour
- * pairing IS the current state, and clicking it is still the same
- * pause/resume toggle. The four states the badge used to carry stay
- * distinguishable at a glance, unchanged in substance — his own manual
- * Pause is a DIFFERENT icon+colour than the automatic hidden-tab pause,
- * on purpose, because collapsing that distinction was never part of the
- * ask (module docstring above, HIDDEN-TAB AUTO-PAUSE): ⏸ live/purple
- * (click pauses), ▶ his own pause/gray (click resumes), ⏾ auto idle —
- * tab hidden/blue (click still pauses manually, same as before), ↻
- * reconnecting-or-unavailable/amber. The full explanation each state used
- * to carry in the badge's `title` lives on this button's `title` +
- * `aria-label` now instead — nothing lost, just not printed as visible
- * text.
- *
- * CANVAS PIXEL PAINT, NOT REACT STATE (2026-08-17, "not anywhere near as
- * smooth as ledfx" — his report; docs/SPECTRA_SPEC.md's device-preview-
- * smoothness section carries the measured numbers). The old shape used one
- * <span> DOM element per pixel inside React state (`setFrames` on every
- * incoming frame, for EVERY favourite device, coalesced into one shared
- * object) — for his `crystal-mapper` favourite (72x37 = 2664 pixels) that
- * meant reconciling 2664 elements on every frame, AND on every OTHER
- * favourite device's frame too, since one shared `frames` state object
- * re-renders the whole strip regardless of which device's frame arrived.
- * Measured: React reconciliation of that grid costs ~30-1000x a single
- * canvas.putImageData() call for the same frame, and under a phone-class
- * (4x) CPU-throttle proxy the DOM path climbed to 43-98ms per frame — a
- * third to most of the entire 125ms budget at the relay's 8fps, BEFORE any
- * other page activity — while canvas stayed under 1.2ms throttled. LedFX's
- * own frontend reaches the identical conclusion: it ships FIVE preview
- * render variants, and the DOM-per-pixel one ('original') is kept only as
- * a slower legacy fallback behind a settings toggle — 'canvas'
- * (PixelGraphCanvas.tsx: direct WebSocket subscription callback ->
- * ctx.putImageData(), no React state in the hot path) is what actually
- * ships by default.
- *
- * Pixel data therefore never touches React state at all: `canvasRefs`/
- * `swatchRefs` hold direct DOM refs per favourite device, and the single
- * onDevicePreviewFrame subscription below paints straight into whichever
- * one is currently mounted (paintDevice) — imperative, exactly LedFX's own
- * division of labour (structural things like a device's shape go through
- * React state since they change rarely and drive which CSS layout to use;
- * per-frame pixel colour never does). `shapes` state exists ONLY to pick
- * matrix-vs-strip layout and is guarded to skip setState when a device's
- * shape hasn't actually changed, so it doesn't reintroduce a per-frame
- * re-render. `latestFrames` remembers each device's last frame so
- * expanding (mounting a fresh canvas) or the live/paused transition can
- * repaint immediately instead of waiting for the next tick.
+ * Expanding still switches the WS subscription level to "full" (every
+ * favourite's whole frame) and collapsing back to "summary" — unchanged
+ * from before, and the one thing the hook needs to actually have pixels
+ * to draw. The SCOPE stays "favorites" throughout (api/devicePreviewWs.ts)
+ * — expanding here never asks for "in_use" the way mounting the Live view
+ * does, so the strip's own cost never grows past his chosen handful of
+ * devices regardless of how many fixtures the room has.
  *
  * NOT CARRIED FROM LEDFX: the ~81-total-pixel downsample its backend
- * applies by default (visualisation_maxlen, ledfx/core.py — see
- * spectra/services/device_preview.py's module docstring for why that file
- * doesn't port it either) is deliberately NOT added on the frontend side —
- * measured JSON.parse + decode cost for crystal-mapper's full 2664-pixel
- * payload is <1ms even under the same throttle, so it buys no smoothness
- * once canvas removes the render bottleneck, and it would directly conflict
- * with his own explicit ask three months earlier ("I don't see any Matrix
- * for The Matrix previews" — the phone-matrix fix above): downsampling to
- * ~81 points would make Expand show a blur instead of his actual matrix
- * shape. Named incompatibility, not a silent omission.
+ * applies by default (visualisation_maxlen, ledfx/core.py) is deliberately
+ * NOT added — see spectra/services/device_preview.py's module docstring
+ * for why that file doesn't port it either, and the Live tab's own
+ * docstring for why a real matrix shape is worth the extra points.
  *
  * THE STRIP ASKS ONLY FOR WHAT IT DRAWS (2026-10-05, the protocol-2 stream —
  * api/devicePreviewWs.ts). Collapsed, it subscribes at "summary" and each
@@ -143,16 +81,30 @@
  * this the server sent every viewer every favourite's whole frame (10.8 kB
  * for the crystal) on every page, to paint one swatch. A full frame carries
  * real cells only: `cellIndex` says where each one sits, and the rest of the
- * rectangle stays black — the crystal draws as the hexagon it is. One
- * ImageData per canvas is kept and rewritten; nothing is allocated per
- * frame. */
+ * rectangle stays black — the crystal draws as the hexagon it is.
+ *
+ * A HELD HUE FAVOURITE DRAWS ITS REAL COLOUR, NOT THE STREAM (`layout`'s
+ * `LiveVirtual.held`/`LiveFixture.held`, services/preview_layout.py's own
+ * `_virtual_held_hex`/`_held_hex`) — a frozen Hue bulb's driving virtual
+ * never stops rendering (hue_preview_colour.py's own docstring), so without
+ * this the swatch/stage would show the room's live show, not the colour the
+ * real bulb is actually held at. Collapsed, the swatch paint helpers below
+ * check `held` before the stream; expanded, `live/positions.ts`'s
+ * `withHeldOverlay` bakes the same override straight into the `StagePlan`
+ * so the shared stage draws it with no extra code here — one definition,
+ * reused by this strip and the Live tab's Layout view alike. */
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   frameColor, onDevicePreviewFrame, onDevicePreviewStatus,
   onDevicePreviewTabHiddenPause, setDevicePreviewLevel,
 } from '../api/devicePreviewWs';
 import type { PreviewFrame } from '../api/devicePreviewWs';
 import HelpLink from '../help/HelpLink';
+import useIsPhone from '../lib/useIsPhone';
+import { layoutPositions, withHeldOverlay } from '../live/positions';
+import type { LiveLayout, StagePlan } from '../live/positions';
+import { useLiveStageCanvas } from '../live/useLiveStageCanvas';
 import {
   pauseDevicePreview, resumeDevicePreview, useDevicePreviewFavorites, useDevicePreviewLayout,
 } from '../queries';
@@ -172,18 +124,17 @@ export default function DevicePreviewStrip() {
   // the real bulb is actually held at.
   const { data: layout } = useDevicePreviewLayout();
   const [status, setStatus] = useState<DevicePreviewStatus | null>(null);
-  const [shapes, setShapes] = useState<Record<string, [number, number]>>({});
   const [expanded, setExpanded] = useState(() => localStorage.getItem(EXPANDED_KEY) === '1');
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pausePending, setPausePending] = useState(false);
   const [tabHiddenPause, setTabHiddenPause] = useState(false);
+  const [selected, setSelected] = useState<string | null>(null);
   const toast = useToast();
+  const navigate = useNavigate();
+  const phone = useIsPhone();
 
-  const canvasRefs = useRef<Record<string, HTMLCanvasElement | null>>({});
   const swatchRefs = useRef<Record<string, HTMLSpanElement | null>>({});
   const latestFrames = useRef<Record<string, PreviewFrame>>({});
-  const imageCache = useRef<Record<string, ImageData>>({});
-  const maskedCache = useRef<Record<string, boolean>>({});
   const liveRef = useRef(false);
   const heldRef = useRef<Record<string, string | null>>({});
   const heldByVirtual = useMemo(() => {
@@ -196,110 +147,44 @@ export default function DevicePreviewStrip() {
   useEffect(() => onDevicePreviewStatus(setStatus), []);
   useEffect(() => onDevicePreviewTabHiddenPause(setTabHiddenPause), []);
 
-  /** Imperative paint helpers — never touch React state, so a frame never
-   * costs a re-render (see the module docstring's CANVAS PIXEL PAINT
-   * section). Each reads only ref containers, so it stays correct even
-   * though it's captured once by the frame-subscription effect below. */
-  const paintCanvas = (id: string, frame: PreviewFrame) => {
-    const canvas = canvasRefs.current[id];
-    if (!canvas) return;
-    const { rows, cols, rgb, cellIndex } = frame;
-    if (canvas.width !== cols || canvas.height !== rows) {
-      canvas.width = cols;
-      canvas.height = rows;
-    }
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    ctx.imageSmoothingEnabled = false;
-    let image = imageCache.current[id];
-    // A masked frame after a whole-rectangle one (the first old-format frame
-    // can land before the hello takes effect) starts from black again, or
-    // the cells that are not real light would keep that stale picture.
-    const masked = cellIndex !== null;
-    if (!image || image.width !== cols || image.height !== rows
-        || maskedCache.current[id] !== masked) {
-      image = ctx.createImageData(cols, rows);
-      for (let i = 3; i < image.data.length; i += 4) image.data[i] = 255;
-      imageCache.current[id] = image;
-      maskedCache.current[id] = masked;
-    }
-    const out = image.data;
-    const cells = Math.min(Math.floor(rgb.length / 3),
-      cellIndex ? cellIndex.length : rows * cols);
-    for (let i = 0; i < cells; i++) {
-      const o = (cellIndex ? cellIndex[i] : i) * 4;
-      out[o] = rgb[i * 3];
-      out[o + 1] = rgb[i * 3 + 1];
-      out[o + 2] = rgb[i * 3 + 2];
-    }
-    ctx.putImageData(image, 0, 0);
-  };
-  const blankCanvas = (id: string) => {
-    const canvas = canvasRefs.current[id];
-    if (!canvas || !canvas.width || !canvas.height) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    ctx.fillStyle = DARK_PLACEHOLDER;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-  };
   const paintSwatch = (id: string, color: string) => {
     const el = swatchRefs.current[id];
     if (el) el.style.backgroundColor = color;
   };
-  /** A held Hue favourite draws its real colour SOLID — never the stream,
-   * not even a per-pixel one, since every bulb it reaches shares the one
-   * colour this device is actually held at. */
-  const paintHeld = (id: string, hex: string) => {
-    const canvas = canvasRefs.current[id];
-    if (canvas && canvas.width && canvas.height) {
-      const ctx = canvas.getContext('2d');
-      if (ctx) { ctx.fillStyle = hex; ctx.fillRect(0, 0, canvas.width, canvas.height); }
-    }
-    paintSwatch(id, hex);
-  };
-  const paintDevice = (id: string, frame: PreviewFrame) => {
-    if (!liveRef.current) return;
-    const held = heldRef.current[id];
-    if (held) { paintHeld(id, held); return; }
-    if (frame.kind === 'full') paintCanvas(id, frame);
-    if (swatchRefs.current[id]) paintSwatch(id, frameColor(frame));
-  };
-  /** Repaint one favourite right now, from whatever is already known (no
-   * frame required) — held colour wins, else its latest frame, else the
+  /** Repaint one collapsed swatch right now, from whatever is already known
+   * (no frame required) — held colour wins, else its latest frame, else the
    * dark placeholder. Used when `held` itself changes, so a Set press is
-   * reflected without waiting for the next stream frame. */
-  const repaintNow = (id: string) => {
-    if (!liveRef.current) { paintHeld(id, DARK_PLACEHOLDER); return; }
+   * reflected without waiting for the next stream frame. The expanded
+   * stage needs no equivalent — its held override lives in the `StagePlan`
+   * itself (module docstring), so the stage repaints it on its own. */
+  const repaintSwatch = (id: string) => {
+    if (!liveRef.current) { paintSwatch(id, DARK_PLACEHOLDER); return; }
     const held = heldRef.current[id];
-    if (held) { paintHeld(id, held); return; }
+    if (held) { paintSwatch(id, held); return; }
     const frame = latestFrames.current[id];
-    if (frame) paintDevice(id, frame);
+    if (frame) paintSwatch(id, frameColor(frame));
   };
 
-  // The single per-frame hot path: no setState, so a frame never triggers a
-  // React re-render (or worse, re-renders EVERY favourite device's DOM just
-  // because one of them got a new frame — the exact cross-device
-  // amplification the old shared `frames` state object caused).
+  // The collapsed strip's own per-frame hot path: no setState, so a frame
+  // never triggers a React re-render. The expanded stage paints straight
+  // from the same onDevicePreviewFrame stream inside useLiveStageCanvas —
+  // this subscription only ever touches the swatches. A held favourite's
+  // swatch ignores the stream entirely (repaintSwatch below owns it).
   useEffect(() => onDevicePreviewFrame((frame) => {
-    const id = frame.visId;
-    latestFrames.current[id] = frame;
-    const { rows, cols } = frame;
-    setShapes((prev) => {
-      const existing = prev[id];
-      if (existing && existing[0] === rows && existing[1] === cols) return prev;
-      return { ...prev, [id]: [rows, cols] };
-    });
-    paintDevice(id, frame);
+    latestFrames.current[frame.visId] = frame;
+    if (!liveRef.current || heldRef.current[frame.visId]) return;
+    paintSwatch(frame.visId, frameColor(frame));
   }), []);
 
   // `held` changes independently of the stream (a mode "Set" press, polled
-  // via the layout query) — repaint every mounted favourite immediately
+  // via the layout query) — repaint every mounted swatch immediately
   // rather than waiting for its next frame.
   useEffect(() => {
-    Object.keys({ ...canvasRefs.current, ...swatchRefs.current }).forEach(repaintNow);
+    Object.keys(swatchRefs.current).forEach(repaintSwatch);
   }, [heldByVirtual]);
 
-  // Full frames only while this strip draws them (module docstring).
+  // 'summary' collapsed, 'full' expanded (module docstring: THE STRIP ASKS
+  // ONLY FOR WHAT IT DRAWS). Scope stays "favorites" either way.
   useEffect(() => {
     setDevicePreviewLevel('top-strip', expanded ? 'full' : 'summary');
     return () => setDevicePreviewLevel('top-strip', null);
@@ -317,14 +202,11 @@ export default function DevicePreviewStrip() {
 
   // No new frames arrive once non-live (server-side: upstream genuinely
   // stops — see services/device_preview.py), so nothing else would ever
-  // blank an already-painted canvas/swatch. liveRef updates first so a
-  // frame racing this effect never slips through and repaints afterward.
+  // blank an already-painted swatch. liveRef updates first so a frame
+  // racing this effect never slips through and repaints afterward.
   useEffect(() => {
     liveRef.current = live;
-    if (!live) {
-      Object.keys(canvasRefs.current).forEach(blankCanvas);
-      Object.keys(swatchRefs.current).forEach((id) => paintSwatch(id, DARK_PLACEHOLDER));
-    }
+    if (!live) Object.keys(swatchRefs.current).forEach((id) => paintSwatch(id, DARK_PLACEHOLDER));
   }, [live]);
 
   const togglePause = async () => {
@@ -339,6 +221,28 @@ export default function DevicePreviewStrip() {
   };
 
   const favoriteIds = favorites?.effective_virtual_ids ?? [];
+
+  // Expanded: the SAME layout the Devices page's Live tab draws from,
+  // narrowed to his favourites — the strip's own scope.
+  const favoriteSet = useMemo(() => new Set(favoriteIds), [favoriteIds]);
+  const stageLayout: LiveLayout | null = useMemo(() => (layout
+    ? { ...layout, virtuals: layout.virtuals.filter((v) => favoriteSet.has(v.id)) }
+    : null), [layout, favoriteSet]);
+  const plan: StagePlan | null = useMemo(
+    () => (expanded && stageLayout ? withHeldOverlay(layoutPositions(stageLayout, !phone), stageLayout) : null),
+    [expanded, stageLayout, phone]);
+  const { canvasRef } = useLiveStageCanvas({
+    plan, live, smooth: true, active: expanded,
+  });
+  const fixtures = plan?.fixtures ?? [];
+  const selectedFixture = fixtures.find((f) => f.key === selected) ?? null;
+  useEffect(() => {
+    if (!expanded) setSelected(null);
+  }, [expanded]);
+
+  const openSettings = (deviceId: string) => navigate(`/devices?device=${encodeURIComponent(deviceId)}`);
+
+  const pct = (value: number, of: number) => `${(value / of) * 100}%`;
 
   const state: 'paused' | 'idle' | 'live' | 'reconnecting' = paused
     ? 'paused' : tabHiddenPause ? 'idle' : connected ? 'live' : 'reconnecting';
@@ -364,56 +268,85 @@ export default function DevicePreviewStrip() {
   const stateLabel = { paused: 'Paused, click to resume', idle: 'Idle, tab hidden, click to pause',
     live: 'Live, click to pause', reconnecting: 'Reconnecting' }[state];
 
+  const notice = paused
+    ? 'The preview is paused.'
+    : tabHiddenPause
+      ? 'Idle while this tab is hidden.'
+      : !connected
+        ? (status?.source === 'none'
+          ? 'Nothing is driving the lights right now.'
+          : 'Connecting…')
+        : null;
+
   return (
     <div className="device-preview-strip">
       {favoriteIds.length === 0 ? (
         <span className="device-preview-empty">no favourite devices</span>
+      ) : !expanded ? (
+        <div className="device-preview-chips">
+          {favoriteIds.map((id) => (
+            <div key={id} className="device-preview-device" title={id}>
+              <span
+                ref={(el) => {
+                  swatchRefs.current[id] = el;
+                  if (!el) return;
+                  const held = heldRef.current[id];
+                  if (held && liveRef.current) {
+                    paintSwatch(id, held);
+                  } else {
+                    const frame = latestFrames.current[id];
+                    if (frame && liveRef.current) {
+                      paintSwatch(id, frameColor(frame));
+                    } else {
+                      paintSwatch(id, DARK_PLACEHOLDER);
+                    }
+                  }
+                }}
+                className="device-preview-swatch"
+                style={{ backgroundColor: DARK_PLACEHOLDER }}
+              />
+            </div>
+          ))}
+        </div>
       ) : (
-        <div className={`device-preview-chips${expanded ? ' expanded' : ''}`}>
-          {favoriteIds.map((id) => {
-            const [rows, cols] = shapes[id] ?? [1, 1];
-            const isMatrix = rows > 1;
-            return (
-              <div key={id} className={`device-preview-device${expanded ? ' expanded' : ''}`} title={id}>
-                {expanded && <span className="device-preview-device-label">{id}</span>}
-                {expanded ? (
-                  <canvas
-                    ref={(el) => {
-                      canvasRefs.current[id] = el;
-                      if (!el) return;
-                      const held = heldRef.current[id];
-                      if (held && liveRef.current) { paintHeld(id, held); return; }
-                      const frame = latestFrames.current[id];
-                      if (frame && frame.kind === 'full' && liveRef.current) paintDevice(id, frame);
-                      else blankCanvas(id);
-                    }}
-                    className={isMatrix ? 'device-preview-matrix' : 'device-preview-pixel-strip'}
-                    style={{ '--cols': cols, '--rows': rows } as React.CSSProperties}
-                  />
-                ) : (
-                  <span
-                    ref={(el) => {
-                      swatchRefs.current[id] = el;
-                      if (!el) return;
-                      const held = heldRef.current[id];
-                      if (held && liveRef.current) {
-                        paintSwatch(id, held);
-                      } else {
-                        const frame = latestFrames.current[id];
-                        if (frame && liveRef.current) {
-                          paintSwatch(id, frameColor(frame));
-                        } else {
-                          paintSwatch(id, DARK_PLACEHOLDER);
-                        }
-                      }
-                    }}
-                    className="device-preview-swatch"
-                    style={{ backgroundColor: DARK_PLACEHOLDER }}
-                  />
-                )}
-              </div>
-            );
-          })}
+        <div className="device-preview-live">
+          <div className="device-preview-live-wrap">
+            <div className="device-preview-live-stage"
+                 style={{ '--live-ar': plan ? plan.width / plan.height : 2 } as React.CSSProperties}>
+              <canvas ref={canvasRef} className="live-canvas" />
+              {plan && fixtures.map((f) => (
+                <button key={f.key} type="button"
+                        className={`live-hit${selected === f.key ? ' selected' : ''}`}
+                        style={{
+                          left: pct(f.x, plan.width), top: pct(f.y, plan.height),
+                          width: pct(f.w, plan.width), height: pct(f.h, plan.height),
+                        }}
+                        onClick={() => setSelected(selected === f.key ? null : f.key)}
+                        aria-label={`${f.name}, ${f.detail}`}>
+                  <span className="live-label">
+                    <span className="live-label-name">{f.name}</span>
+                    <span className="live-label-detail">{f.detail}</span>
+                  </span>
+                </button>
+              ))}
+              {notice && (
+                <div className="live-notice">
+                  <span>{notice}</span>
+                </div>
+              )}
+            </div>
+          </div>
+          {selectedFixture && (
+            <div className="live-selected">
+              <span>
+                <strong>{selectedFixture.name}</strong>
+                <span className="live-selected-detail"> · {selectedFixture.detail}</span>
+              </span>
+              <button type="button" onClick={() => openSettings(selectedFixture.deviceId)}>
+                Open settings
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -425,7 +358,7 @@ export default function DevicePreviewStrip() {
 
       {favoriteIds.length > 0 && (
         <button type="button" className="device-preview-btn" onClick={toggleExpanded}
-          title={expanded ? 'Collapse to one swatch per device' : 'Expand to a per-pixel strip'}>
+          title={expanded ? 'Collapse to one swatch per device' : 'Expand to the real fixture layout'}>
           {expanded ? '▾ Collapse' : '▸ Expand'}
         </button>
       )}
