@@ -839,10 +839,31 @@ def _changed(uri: str) -> None:
     """The song's sequences changed (a detection or one of his edits): the
     trigger clock re-plans its analysed flares around the new protected
     windows (drop_firing.py). Its drop-sequence view itself follows the
-    store's revision on its own. Never raises."""
+    store's revision on its own. Never raises.
+
+    THREAD SAFETY: both call sites (ensure_detected, apply_edit) run inside
+    an asyncio.to_thread worker (see spectra/api/drop_sequences.py), off
+    the event loop tick() reads trigger_engine's _flare_* state on. Calling
+    invalidate_analysed_plan directly from there would race tick() (see
+    trigger_engine.TriggerEngine.loop's own docstring) — so a call made off
+    the engine's remembered loop is marshalled onto it via
+    call_soon_threadsafe instead of applied in this thread. A call already
+    on that loop (or made before the engine has ever run, loop is None)
+    applies directly, matching every test that calls this synchronously."""
     try:
         from spectra.services.trigger_engine import trigger_engine
-        trigger_engine.invalidate_analysed_plan(uri)
+        loop = trigger_engine.loop
+        if loop is None:
+            trigger_engine.invalidate_analysed_plan(uri)
+            return
+        try:
+            running = asyncio.get_running_loop()
+        except RuntimeError:
+            running = None
+        if running is loop:
+            trigger_engine.invalidate_analysed_plan(uri)
+        else:
+            loop.call_soon_threadsafe(trigger_engine.invalidate_analysed_plan, uri)
     except Exception:                                    # noqa: BLE001
         logger.exception("drop sequences: could not re-plan %s", uri)
 

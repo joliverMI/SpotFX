@@ -636,6 +636,29 @@ class TriggerEngine:
         self._last_transition_uri: Optional[str] = None
         self.last_fire: Optional[dict] = None  # observability
 
+        # THE RUNNING LOOP (2026-10-06, drop_sequences._changed's thread-
+        # safety fix): remembered on every on_track_state/tick — both always
+        # run on the event loop that drives this engine — so a caller on a
+        # DIFFERENT thread (drop_sequences' own asyncio.to_thread worker)
+        # can marshal a mutation back onto it instead of racing tick()'s own
+        # reads of _flare_* state. None until the engine has run at least
+        # once (construction happens at module import time, with no loop
+        # running yet); a caller with no loop known falls back to a direct
+        # call, matching every pre-existing single-threaded caller.
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+
+    def _remember_loop(self) -> None:
+        try:
+            self._loop = asyncio.get_running_loop()
+        except RuntimeError:
+            pass
+
+    @property
+    def loop(self) -> Optional[asyncio.AbstractEventLoop]:
+        """The event loop this engine's on_track_state/tick last ran on, or
+        None if neither has run yet. See drop_sequences._changed."""
+        return self._loop
+
     # ── feed (services/engine.py calls both) ─────────────────────────────
 
     async def on_track_state(self, uri: Optional[str]) -> None:
@@ -645,6 +668,7 @@ class TriggerEngine:
         after the first URI ever seen; a stop/None neither fires nor
         disarms) additionally fires the automatic transition scene change —
         see the module docstring's _fire_transition section."""
+        self._remember_loop()
         if uri != self._uri:
             self._uri = uri
             self._last_position_ms = None
@@ -805,6 +829,7 @@ class TriggerEngine:
         Also called directly by the executable spec / tests with a fake
         position feed. Returns the triggers fired this tick, in timestamp
         order."""
+        self._remember_loop()
         if self._uri is None or position_ms is None:
             return []
         if self._last_position_ms is None:

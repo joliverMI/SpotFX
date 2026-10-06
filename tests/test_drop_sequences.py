@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
+import time
 
 import pytest
 
@@ -157,6 +159,52 @@ def test_the_song_change_edge_detects_off_the_loop_once():
     asyncio.run(run())
     assert calls == [URI]
     assert ds.stored(URI)["detected"]["sequences"]
+
+
+def test_changed_off_the_trigger_engines_loop_is_marshalled_onto_it(monkeypatch):
+    """ensure_detected/apply_edit run inside an asyncio.to_thread worker —
+    off the event loop tick() reads trigger_engine's _flare_* state on. A
+    call to drop_sequences._changed from that worker thread must not
+    mutate that state directly; it must be marshalled onto the engine's
+    own remembered loop (see TriggerEngine.loop's docstring)."""
+    from spectra.services import drop_sequences as ds
+    from spectra.services.trigger_engine import trigger_engine
+
+    loop = asyncio.new_event_loop()
+    runner = threading.Thread(target=loop.run_forever, daemon=True)
+    runner.start()
+    original_loop = trigger_engine.loop
+    try:
+        # trigger_engine._remember_loop() is what tick()/on_track_state
+        # call every time they run; exercise it for real, on the loop's
+        # own thread, rather than poking the private attribute directly.
+        async def remember():
+            trigger_engine._remember_loop()
+        asyncio.run_coroutine_threadsafe(remember(), loop).result(timeout=2)
+        assert trigger_engine.loop is loop
+
+        calls: list[bool] = []
+
+        def fake_invalidate(uri=None):
+            calls.append(threading.current_thread() is runner)
+
+        monkeypatch.setattr(trigger_engine, "invalidate_analysed_plan", fake_invalidate)
+
+        # Called from THIS thread (pytest's own) — not the loop's thread —
+        # so it must be dispatched via call_soon_threadsafe, never run here.
+        ds._changed(URI)
+        assert calls == []  # not yet run synchronously in this thread
+
+        for _ in range(200):
+            if calls:
+                break
+            time.sleep(0.01)
+        assert calls == [True]  # ran, and on the loop's own thread
+    finally:
+        loop.call_soon_threadsafe(loop.stop)
+        runner.join(timeout=2)
+        loop.close()
+        trigger_engine._loop = original_loop
 
 
 # ── the plan's "How edits are kept, and what wins" table ─────────────────
