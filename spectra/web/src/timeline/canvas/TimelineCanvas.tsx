@@ -15,6 +15,11 @@ export interface PointerHandlers {
   onDragMove?: (ev: PointerEvent, frame: FrameGeom) => void;
   onDragEnd?: (ev: PointerEvent, frame: FrameGeom) => void;
   onPan?: (deltaMs: number) => void;
+  /** The pointer moving with no button down, anywhere on the canvas (the
+   *  drop-sequence layer's add-a-drop preview). */
+  onIdleMove?: (x: number, y: number, frame: FrameGeom) => void;
+  /** The cursor for a hover hit (undefined = the default). */
+  cursorFor?: (hit: Hit) => string | undefined;
 }
 
 /** Geometry snapshot handed to interaction callbacks. */
@@ -194,7 +199,8 @@ export default function TimelineCanvas({
       if (ev.button !== 0) return;
       const hit = hitTest(x, y);
       s.pointer?.onHit?.(hit, ev, g);
-      if (hit && (hit.kind === 'trigger-intensity' || hit.kind === 'trigger-triangle' || hit.kind === 'ai-marker')) {
+      if (hit && (hit.kind === 'trigger-intensity' || hit.kind === 'trigger-triangle' || hit.kind === 'ai-marker'
+                  || (hit.kind === 'drop-seq' && !hit.chip))) {
         dragging = true;
         canvas.setPointerCapture(ev.pointerId);
       }
@@ -221,6 +227,9 @@ export default function TimelineCanvas({
         const { x, y } = rel(ev);
         const hit = hitTest(x, y);
         s.pointer?.onHoverMove?.(hit);
+        s.pointer?.onIdleMove?.(x, y, g);
+        const cursor = s.pointer?.cursorFor?.(hit) ?? '';
+        if (canvas.style.cursor !== cursor) canvas.style.cursor = cursor;
         const tip = hit ? null : tooltipAt(x, y);
         if ((canvas.title || null) !== tip) canvas.title = tip ?? '';
       }

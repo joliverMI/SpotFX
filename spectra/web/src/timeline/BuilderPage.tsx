@@ -13,9 +13,12 @@ import { useFollowWindow } from './hooks/useFollowWindow';
 import TimelineCanvas from './canvas/TimelineCanvas';
 import { BUILDER_LAYERS } from './canvas/layers';
 import { BEAT_STRIP_H, snapRailHFor, stripCountFor, type IntensityBgMode, type LayerDataBag, type ViewState } from './canvas/frame';
-import { DEFAULT_BEAT_MS, PHASE_COLOR, buildDisplay, fmtTenths, zoomWindow, type Handle } from './dropSequences';
+import { DEFAULT_BEAT_MS, PHASE_COLOR, buildDisplay, zoomWindow, type Handle } from './dropSequences';
 import DropSequenceStrip from './components/DropSequenceStrip';
 import DropSequencesCard from './components/DropSequencesCard';
+import DropSeqToolbar from './components/DropSeqToolbar';
+import { useDropEditor } from './hooks/useDropEditor';
+import { DROP_FOCUS_ATTR, useDropSeqInteractions } from './hooks/useDropSeqInteractions';
 import { computeAverages, computeMfccDistances } from './canvas/data';
 import ModeBar from './components/ModeBar';
 import TimelineBar from './components/TimelineBar';
@@ -145,6 +148,23 @@ export default function BuilderPage() {
     return palettesRef.current?.find((pl) => pl.id === st.activePaletteId)?.keys[st.armedKey] ?? null;
   }, []);
 
+  // The drop-sequence keyboard (C L D · ← → · Enter · Delete · N P ·
+  // Ctrl+Z) goes FIRST while a sequence has the Timeline's attention: this
+  // capture listener is registered before the palette and intensity keys,
+  // and stops a key it uses from reaching them. The handler is filled in
+  // below, once the sequences are known (./hooks/useDropSeqInteractions.ts).
+  const dropKeyRef = useRef<((e: KeyboardEvent) => boolean) | null>(null);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (dropKeyRef.current?.(e)) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+      }
+    };
+    window.addEventListener('keydown', onKey, { capture: true });
+    return () => window.removeEventListener('keydown', onKey, { capture: true });
+  }, []);
+
   usePaletteKeyboard({
     getPalettes: () => palettesRef.current,
     onToggleFollow: () => followWin.setFollowSnapped(!followWin.follow),
@@ -211,10 +231,11 @@ export default function BuilderPage() {
     () => (showAnalysedEvents ? songPositionMarkers(analysedPlan) : []),
     [showAnalysedEvents, analysedPlan]);
 
-  // ── drop sequences (drop-detection plan, phase 3 — read-only) ───────────
+  // ── drop sequences (drop-detection plan, phases 3–4) ────────────────────
   // ./dropSequences.ts decides what each sequence IS (its look, whether it
   // fires, its words); the canvas layer, the strip and the review card all
-  // draw that one list.
+  // draw that one list. Editing (phase 4): ./hooks/useDropEditor.ts saves,
+  // ./hooks/useDropSeqInteractions.ts turns a hand on the graph into edits.
   const { data: dropResp, isLoading: dropLoading, error: dropError } = useDropSequences(uri);
   const { data: dropRails } = useDropRails(uri, showDropSeqs);
   const [dropSel, setDropSel] = useState<string | null>(null);
@@ -226,14 +247,27 @@ export default function BuilderPage() {
     [dropResp, showDismissedDrops, analysedApplies]);
   const dropBeatMs = dropResp?.song?.beat_ms ?? dropRails?.beat_ms ?? DEFAULT_BEAT_MS;
   const dropCapturedFrom = dropResp?.song?.captured_from_ms ?? dropRails?.captured_from_ms ?? null;
-  const dropLayer = useMemo(() => {
-    const rails = dropRails?.status === 'ok' ? dropRails : null;
-    if (!showDropSeqs || (!dropSeqs.length && !rails)) return null;
-    return { seqs: dropSeqs, rails, selectedKey: dropSel, hover: dropHover,
-             capturedFromMs: dropCapturedFrom, beatMs: dropBeatMs };
-  }, [showDropSeqs, dropSeqs, dropRails, dropSel, dropHover, dropCapturedFrom, dropBeatMs]);
+  const dropRailsOk = dropRails?.status === 'ok' ? dropRails : null;
   const canvasWrapRef = useRef<HTMLDivElement>(null);
   const detailRef = useRef<HTMLDivElement>(null);
+  const showDropDetail = useCallback(
+    () => detailRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }), []);
+  const dropEditor = useDropEditor(uri);
+  // jumpToDrop is defined below; the interactions reach it through a ref
+  const jumpRef = useRef<(key: string) => void>(() => {});
+  const dropUi = useDropSeqInteractions({
+    seqs: dropSeqs, rails: dropRailsOk, beatMs: dropBeatMs, editor: dropEditor,
+    selectedKey: dropSel, setSelectedKey: setDropSel,
+    onJump: (key) => jumpRef.current(key), onShowDetail: showDropDetail,
+  });
+  dropKeyRef.current = showDropSeqs ? dropUi.onKey : null;
+  const dropLayer = useMemo(() => {
+    if (!showDropSeqs || (!dropSeqs.length && !dropRailsOk && !dropUi.adding)) return null;
+    return { seqs: dropSeqs, rails: dropRailsOk, selectedKey: dropSel, hover: dropHover,
+             selectedHandle: dropUi.selHandle, adding: dropUi.adding, live: dropUi.live,
+             capturedFromMs: dropCapturedFrom, beatMs: dropBeatMs };
+  }, [showDropSeqs, dropSeqs, dropRailsOk, dropSel, dropHover, dropUi.selHandle, dropUi.adding,
+      dropUi.live, dropCapturedFrom, dropBeatMs]);
   const jumpToDrop = useCallback((key: string) => {
     const seq = dropSeqs.find((q) => q.key === key);
     if (!seq) return;
@@ -242,6 +276,7 @@ export default function BuilderPage() {
     canvasWrapRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dropSeqs, dropBeatMs, durationMs]);
+  jumpRef.current = jumpToDrop;
   const selectedDrop = dropSeqs.find((q) => q.key === dropSel) ?? null;
 
   const data: LayerDataBag = useMemo(() => ({
@@ -358,6 +393,7 @@ export default function BuilderPage() {
               </span>
               <HelpLink topic="drop-sequence-strip" title="The drop-sequence strip" />
             </div>
+            <div {...{ [DROP_FOCUS_ATTR]: '' }}>
             <DropSequenceStrip
               seqs={dropSeqs}
               durationMs={durationMs}
@@ -365,8 +401,9 @@ export default function BuilderPage() {
               selectedKey={dropSel}
               getWin={followWin.getWin}
               getNowMs={getNowMs}
-              onPick={(key) => { setDropSel(key); jumpToDrop(key); }}
+              onPick={(key) => { dropUi.select(key); jumpToDrop(key); }}
             />
+            </div>
           </>
         ) : null}
       />
@@ -430,7 +467,7 @@ export default function BuilderPage() {
           </span>
         }
       >
-        <div ref={canvasWrapRef} style={{ scrollMarginTop: 12 }}>
+        <div ref={canvasWrapRef} style={{ scrollMarginTop: 12 }} {...{ [DROP_FOCUS_ATTR]: '' }}>
         <TimelineCanvas
           layers={BUILDER_LAYERS}
           data={data}
@@ -446,11 +483,21 @@ export default function BuilderPage() {
             // as "empty canvas" (clearing a selection, or creating a trigger
             // on a double-click).
             onHit: (hit, ev, g) => {
-              if (hit?.kind === 'drop-seq') { setDropSel(hit.key); return; }
+              if (showDropSeqs && dropUi.onHit(hit, ev, g)) return;
               triggerPointer.onHit?.(hit, ev, g);
             },
+            onDragMove: (ev, g) => {
+              if (dropUi.onDragMove(ev, g)) return;
+              triggerPointer.onDragMove?.(ev, g);
+            },
+            onDragEnd: (ev, g) => {
+              if (dropUi.onDragEnd(ev, g)) return;
+              triggerPointer.onDragEnd?.(ev, g);
+            },
+            onIdleMove: showDropSeqs ? dropUi.onIdleMove : undefined,
+            cursorFor: showDropSeqs ? dropUi.cursorFor : undefined,
             onDoubleClick: (ms, y, hit, g) => {
-              if (hit?.kind === 'drop-seq') { setDropSel(hit.key); return; }
+              if (dropUi.onDoubleHit(hit)) return;
               triggerPointer.onDoubleClick?.(ms, y, hit, g);
             },
             onHoverMove: (hit) => {
@@ -530,17 +577,17 @@ export default function BuilderPage() {
             <span style={{ minWidth: 0 }}>solid = fires · dashed = suggested · dotted = where the analysis had it</span>
             <span style={{ minWidth: 0 }}>rails under the graph: bass spikes (taller = harder) and beats</span>
             <HelpLink topic="drop-sequence-layer" title="The drop-sequence layer" />
-            {selectedDrop && (
-              <button
-                type="button"
-                style={{ fontSize: 11, padding: '1px 8px' }}
-                title="Show this sequence's details"
-                onClick={() => detailRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })}
-              >
-                selected: {fmtTenths(selectedDrop.drop)} · details ↓
-              </button>
-            )}
           </div>
+        )}
+        {showDropSeqs && uri && (
+          <DropSeqToolbar
+            editor={dropEditor}
+            selected={selectedDrop}
+            adding={dropUi.adding}
+            setAdding={dropUi.setAdding}
+            focus={dropUi.focus}
+            onShowDetail={showDropDetail}
+          />
         )}
         <ShiftAllControl open={shiftOpen} setOpen={setShiftOpen} durationMs={durationMs} />
         <HelpLink topic="builder-navigation" title="Navigation & view" />
@@ -578,12 +625,16 @@ export default function BuilderPage() {
               error={dropError ? (dropError as Error).message : null}
               seqs={dropSeqs}
               selectedKey={dropSel}
-              onSelect={setDropSel}
+              onSelect={(key) => dropUi.select(key)}
               onJump={jumpToDrop}
               showDismissed={showDismissedDrops}
               setShowDismissed={setShowDismissedDrops}
               analysedApplies={analysedApplies}
               analysedReason={analysedPlan?.reason ?? null}
+              editor={dropEditor}
+              selHandle={dropUi.selHandle}
+              onSelectHandle={(h) => { dropUi.setSelHandle(h); dropUi.setFocus(true); }}
+              onStep={(h, dir) => { dropUi.setFocus(true); dropUi.step(h, dir); }}
             />
           </CollapsibleCard>
         </div>
