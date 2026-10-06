@@ -6,6 +6,7 @@ import { onSpectraMessage } from './api/spectraWs';
 import type { LiveLayout } from './live/positions';
 import type { RoomPlacement, RoomPose, RoomView } from './live/roomMap';
 import type { CurvePoint } from './components/CurveEditor';
+import type { LightingStatus } from './house/types';
 import type {
   AmbientHueGroup, ColorWheelPosition, DeviceListing, DevicePreviewFavorites, DevicePreviewStatus,
   DeviceWriteResult, DriftProfile,
@@ -880,6 +881,42 @@ export function useTakeBackToSpectra() {
       apiPost<{ result: string; owner: string; activation?: ActivationReport }>(
         '/ownership/handover', { to: 'spectra' }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['spectra-ownership'] }),
+  });
+}
+
+/* ── house lighting's cutover switch (the Mode chip's long-press, ModeChip.tsx) ── */
+
+/** The Mode chip's long-press toggle (his ask, 2026-10-06: "pressing and
+ * holding the house mode button on the top bars should turn it on and
+ * off" — read as HouseSettings.enabled, the same cutover switch
+ * HousePage.tsx's own toggle already writes). Reads the CURRENT switch
+ * fresh (never trusts the possibly-stale 3s-polled engine status) right
+ * before flipping it, then folds `PUT /house/settings`'s own returned
+ * `lighting` key (present whenever `enabled` actually changed — see
+ * spectra/api/house.py's `put_settings`) straight into the SAME
+ * engine-status cache entry `useEngineStatus()` reads, so the chip shows
+ * the confirmed new state at once rather than waiting out the next poll —
+ * the same fold-the-push-into-the-poll-cache shape `useAmbientStatusPush`
+ * already uses above. A PUT that for any reason comes back with no
+ * `lighting` key (enabled read back unchanged — e.g. a race with another
+ * writer) falls back to invalidating the query so the next real read
+ * settles it, rather than asserting a state nobody confirmed. */
+export function useToggleHouseEnabled() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const before = await apiGet<{ settings: { enabled: boolean } }>('/house/settings');
+      return apiPut<{ settings: { enabled: boolean }; lighting?: LightingStatus }>(
+        '/house/settings', { enabled: !before.settings.enabled });
+    },
+    onSuccess: (res) => {
+      if (res.lighting) {
+        qc.setQueryData<EngineStatus>(['spectra-engine-status'], (prev) => (
+          prev ? { ...prev, lighting: res.lighting } as EngineStatus : prev));
+      } else {
+        void qc.invalidateQueries({ queryKey: ['spectra-engine-status'] });
+      }
+    },
   });
 }
 
