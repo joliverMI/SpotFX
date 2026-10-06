@@ -18,6 +18,13 @@ HOW EACH FAMILY LANDS, and how it is put back:
                   would. Consecutive room-setting steps in a set are
                   COALESCED into one patch, so a set behaves like one save.
                   Put back from a BASELINE (below).
+  house lighting  (turn on house mode, turn house lighting off/on) — through
+                  `house.set_mode` (the SAME function the House page's
+                  "Switch to" button calls) and `house.set_enabled` (the
+                  same EFFECT as the top-bar Mode chip's long press);
+                  never `room_controls.apply_patch` — house lighting has
+                  its own store. Put back from a BASELINE (below), same
+                  as room settings.
   item on/off     (scene, colour set/group) — the same `disabled` flag his
                   power buttons write: a raw single-key patch of
                   scenes.json, and the colour card through SpotFX's own
