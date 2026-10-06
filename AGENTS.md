@@ -9701,8 +9701,23 @@ Plan: `/home/javi/fleet-spotfx/data/drop-detection-plan/report.md` (approved
   charge/lull/drop; the Drops lane and `drop_scoring.score_song` score the
   detector's raw proposal, or every match would stand down and score zero.
 - **NOTHING FIRES FROM IT YET** (phase 5: synthetic triggers in `tick()`,
-  the protected window). Write routes and the Timeline layer are phases 3-4;
-  the service-level edit functions already exist and are tested.
+  the protected window). Write routes are phase 4; the service-level edit
+  functions already exist and are tested.
+
+**PHASE 3 — SEEN ON THE TIMELINE, READ-ONLY (2026-10-06).**
+`spectra/web/src/timeline/dropSequences.ts` is the binding statement: ONE
+`buildDisplay` decides each sequence's look, whether it fires, its number and
+its words, and the canvas layer (`canvas/dropSeqLayer.ts`, three z-slots —
+read its header for why), the strip (`DropSequenceStrip.tsx`) and the review
+card (`DropSequencesCard.tsx`) all draw that list; the builds are
+`phaseBlend.ts`'s engine mirror. His grouped charge/lull/drop is drawn in the
+same shape (look `mine`) and the detection it matched is NOT drawn twice.
+Snap rails: `GET /api/drop-sequences/rails` (the detector's own spikes and
+the beats, song time, read-only) in their own band under the main area
+(`frame.ts` `railH`; the beat strips start below it). Gold/sky/magenta
+(`PHASE_COLOR`) belong to the phases ONLY — the analysed flare is lime, the
+High/Low flags white/indigo (decision 5). Proof: `node
+scripts/check_drop_sequence_view.mjs`.
 
 ## Maintaining this file
 

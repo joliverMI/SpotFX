@@ -801,6 +801,32 @@ def _counts(seqs: list[dict]) -> dict:
     return counts
 
 
+def snap_rails(uri: str) -> dict:
+    """THE SNAP RAILS (drop-detection plan, phase 3): what the Timeline
+    draws under the sequence layer and, in phase 4, what a dragged handle
+    snaps to — every BASS SPIKE the detector counts (song ms and its rise,
+    the height a rail tick is drawn at: taller = harder) and every BEAT
+    (song ms and whether it is a downbeat). Read straight from the
+    detector's own analysis, so a rail tick is exactly a spike the
+    detector could have chosen — never a second definition of one.
+    Read-only: no detection is stored and nothing is written."""
+    try:
+        analysis = drop_detector.analyse(uri)
+    except drop_detector.Unavailable as exc:
+        return {"uri": uri, "status": "unavailable", "reason": str(exc),
+                "beat_ms": None, "captured_from_ms": None, "spikes": [], "beats": []}
+    song = analysis.song
+    doc = analysis_reader.librosa_analysis_for_stem(song.stem) or {}
+    flags = [bool(b.get("is_downbeat")) for b in doc.get("beats") or []]
+    beats = [[int(round(float(ms))), 1 if i < len(flags) and flags[i] else 0]
+             for i, ms in enumerate(song.beat_ms)]
+    spikes = [[int(ms), round(float(rise), 3)]
+              for ms, rise in zip(analysis.prep.att_ms, analysis.prep.att_rise)]
+    return {"uri": uri, "status": "ok", "reason": None,
+            "beat_ms": round(song.beat_len, 3), "captured_from_ms": int(song.t[0]),
+            "spikes": spikes, "beats": beats}
+
+
 def view_with_detection(uri: str) -> dict:
     """Read-through: detect when missing or stale, then the merged view.
     Synchronous — call it off the event loop."""

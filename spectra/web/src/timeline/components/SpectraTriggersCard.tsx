@@ -3,7 +3,7 @@
  * timeline. Self-contained — its own data hooks and dialog state, no
  * coupling to the legacy MusicTrigger/SongProfile store (the two worlds
  * coexist; this card only ever touches spectra/api/triggers.py). */
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import CollapsibleCard from '../../components/CollapsibleCard';
 import HelpLink from '../../help/HelpLink';
 import { useToast } from '../../components/Toast';
@@ -22,11 +22,14 @@ export default function SpectraTriggersCard({
   durationMs,
   getWin,
   getNowMs,
+  below,
 }: {
   uri: string | null;
   durationMs: number;
   getWin: () => Win;
   getNowMs: () => number | null;
+  /** drawn directly under the triggers strip — the drop-sequence strip */
+  below?: ReactNode;
 }) {
   const { data: triggers } = useSpectraTriggers(uri);
   const { data: scenes } = useScenes();
@@ -45,8 +48,10 @@ export default function SpectraTriggersCard({
     <CollapsibleCard
       id="spectra-triggers"
       title="SPECTRA Triggers"
+      wrapHeader
       headerExtra={
-        <span style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 12 }}>
+        <span style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 12, flexWrap: 'wrap',
+                       justifyContent: 'flex-end' }}>
           <span style={{ color: 'var(--text-muted)' }}>{list.length} placed</span>
           <button style={{ fontSize: 12 }}
             title="Add a SPECTRA trigger at the current playhead"
@@ -99,6 +104,7 @@ export default function SpectraTriggersCard({
         })}
         onCreate={(ms) => setEditing({ trigger: newTrigger(ms), isNew: true })}
       />
+      {below}
       <SpectraTriggerDialog
         trigger={editing?.trigger ?? null}
         isNew={editing?.isNew ?? false}

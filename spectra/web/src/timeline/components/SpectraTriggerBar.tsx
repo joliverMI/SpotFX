@@ -7,6 +7,7 @@ import { useRef, useState } from 'react';
 import type { ResponseClass, SpectraTrigger, TriggerActionKind } from '../../types';
 import type { Win } from '../canvas/frame';
 import { isPhaseClass, isPhaseStretchClass, phaseBlendSpanFor } from '../phaseBlend';
+import { PHASE_COLOR } from '../dropSequences';
 import type { LaterMoment, PhaseBlendSpan, PhaseBuildTarget } from '../phaseBlend';
 
 const KIND_COLOR: Record<TriggerActionKind, string> = {
@@ -22,9 +23,9 @@ const KIND_COLOR: Record<TriggerActionKind, string> = {
 // each other at a glance while watching a sequence run.
 export const RESPONSE_CLASS_COLOR: Record<ResponseClass, string> = {
   flare: KIND_COLOR.fire_response,
-  charge: '#fbbf24', // amber-gold — building
-  lull: '#38bdf8',   // sky blue — receding
-  drop: '#ec4899',   // magenta — impact
+  charge: PHASE_COLOR.charge, // amber-gold — building
+  lull: PHASE_COLOR.lull,     // sky blue — receding
+  drop: PHASE_COLOR.drop,     // magenta — impact
 };
 
 /** The marker colour for a trigger: fire_response splits further by its

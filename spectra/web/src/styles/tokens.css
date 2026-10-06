@@ -1795,3 +1795,113 @@ button.big { padding: 16px 18px; font-size: 1.05em; min-height: 52px; border-rad
   .live-label-name { font-size: 10.5px; }
   .live-label-detail { font-size: 9px; }
 }
+
+/* ── Drop sequences on the Timeline (drop-detection plan, phase 3; built to
+   plan.html's Timeline mock). The canvas layer is timeline/canvas/
+   dropSeqLayer.ts; this is the strip under the SPECTRA triggers strip, the
+   review list and the read-only detail box. Gold / sky / magenta are the
+   PHASE colours (timeline/dropSequences.ts PHASE_COLOR) — nothing else on
+   the page wears them. */
+.drop-strip-label {
+  display: flex; align-items: center; gap: 8px; margin: 8px 0 3px;
+  font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em;
+}
+.drop-strip-label .drop-strip-count { text-transform: none; letter-spacing: 0; }
+.drop-strip {
+  position: relative; height: 26px; background: var(--surface2);
+  border: 1px solid var(--border); border-radius: 6px; overflow: hidden; user-select: none;
+}
+.drop-strip-uncaptured {
+  position: absolute; left: 0; top: 0; bottom: 0; pointer-events: auto;
+  background: repeating-linear-gradient(135deg, rgba(0,0,0,0.35) 0 5px, rgba(255,255,255,0.05) 5px 9px);
+}
+.drop-strip-played { position: absolute; left: 0; top: 0; bottom: 0; background: rgba(168, 85, 247, 0.12); pointer-events: none; }
+.drop-strip-window {
+  position: absolute; top: 0; bottom: 0; background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.18); pointer-events: none;
+}
+.drop-strip-seg { position: absolute; top: 7px; height: 10px; opacity: 0.85; border-radius: 2px; pointer-events: none; }
+.drop-strip-seg.faded { opacity: 0.3; }
+.drop-strip-empty { position: absolute; left: 8px; top: 0; line-height: 24px; font-size: 11px; color: var(--text-muted); }
+.drop-pill, .drop-badge {
+  width: 18px; height: 20px; border-radius: 9px; padding: 0;
+  background: #ec4899; color: #14061f; border: 1.5px solid #ec4899;
+  font-size: 11px; font-weight: 700; text-align: center; line-height: 17px;
+  font-family: var(--font);
+}
+.drop-pill { position: absolute; top: 2px; margin-left: -9px; cursor: pointer; z-index: 1; }
+.drop-pill:hover { box-shadow: 0 0 0 2px rgba(255,255,255,0.55); border-color: #ec4899; }
+.drop-pill.selected { box-shadow: 0 0 0 2px #ffffff; z-index: 2; }
+.drop-pill.waits, .drop-badge.waits,
+.drop-pill.stands_down, .drop-badge.stands_down { background: transparent; color: #ec4899; border-style: dashed; }
+.drop-pill.muted, .drop-badge.muted { background: transparent; color: #ec4899; }
+.drop-pill.dismissed, .drop-badge.dismissed { background: transparent; color: #888; border: 1.5px dashed #666; }
+.drop-badge { display: inline-block; flex: none; }
+
+.drop-readonly-note { font-size: 12.5px; color: var(--text-muted); margin-bottom: 6px; }
+.drop-meta { font-size: 12px; color: var(--text-muted); margin-bottom: 8px; }
+.drop-review-grid {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start;
+}
+@media (max-width: 860px) { .drop-review-grid { grid-template-columns: minmax(0, 1fr); } }
+.drop-review-list { min-width: 0; }
+.drop-q {
+  display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 8px; align-items: center;
+  padding: 6px 8px; border-radius: 6px; font-size: 13px; cursor: pointer; border: 1px solid transparent;
+}
+.drop-q:nth-child(odd) { background: rgba(255,255,255,0.03); }
+.drop-q:hover { border-color: var(--border); }
+.drop-q.selected { border-color: var(--accent); background: rgba(168, 85, 247, 0.10); }
+.drop-q.dismissed { opacity: 0.55; }
+.drop-q-text { min-width: 0; overflow-wrap: anywhere; }
+.drop-q-text .muted, .drop-review .muted { color: var(--text-muted); }
+.drop-q-acts { display: inline-flex; gap: 4px; }
+.drop-q-acts button { font-size: 12px; padding: 1px 8px; border-radius: 6px; }
+.drop-review-foot { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; font-size: 12px; color: var(--text-muted); }
+.drop-review-foot button { font-size: 12px; padding: 3px 9px; }
+.drop-review-notes { font-size: 12px; color: var(--text-muted); margin: 8px 0 0 18px; }
+.drop-review button:disabled { opacity: 0.45; cursor: not-allowed; }
+.drop-review button:disabled:hover { border-color: var(--border); color: inherit; }
+
+.drop-detail {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px;
+  font-size: 13px; box-shadow: 0 10px 30px rgba(0,0,0,0.45); min-width: 0;
+}
+.drop-detail.placeholder { box-shadow: none; border-style: dashed; }
+.drop-detail-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+.drop-detail-head button { font-size: 12px; padding: 2px 8px; }
+.drop-detail-sp { flex: 1; }
+.drop-detail-row {
+  display: grid; grid-template-columns: 74px minmax(0, 1fr) auto; gap: 4px 8px; align-items: center; padding: 3px 0;
+}
+.drop-detail-name { display: inline-flex; align-items: center; gap: 6px; }
+.drop-detail-time {
+  background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 4px 8px;
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace; font-size: 12.5px; min-width: 0;
+}
+.drop-detail-time.empty { color: var(--text-muted); }
+.drop-detail-time.wide { grid-column: 2 / 4; font-family: var(--font); }
+.drop-detail-steps { display: inline-flex; gap: 4px; }
+.drop-detail-steps button { font-size: 11.5px; padding: 2px 7px; border-radius: 6px; }
+.drop-detail-note { grid-column: 2 / 4; font-size: 11.5px; color: var(--text-muted); margin-top: -2px; }
+.drop-detail-p { margin: 8px 0 0; font-size: 12.5px; line-height: 1.45; }
+.drop-detail-p b { font-weight: 600; }
+.drop-detail-notes { font-size: 12px; color: var(--text-muted); margin: 8px 0 0 18px; }
+.drop-detail-notes.review { color: var(--warning); }
+.drop-detail-tools { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.drop-detail-tools button { font-size: 12.5px; }
+.drop-detail-soon { font-size: 11.5px; color: var(--text-muted); margin-top: 6px; }
+/* The phase SHAPES (report section 9): a ramp for the charge, pause bars for
+   the lull, a star for the drop — the canvas handles' own glyphs, in CSS. */
+.drop-swatch { display: inline-block; width: 12px; height: 12px; flex: none; position: relative; }
+.drop-swatch.charge { background: currentColor; clip-path: polygon(0 100%, 100% 100%, 100% 0); }
+.drop-swatch.lull::before, .drop-swatch.lull::after {
+  content: ''; position: absolute; top: 0; bottom: 0; width: 4px; background: currentColor;
+}
+.drop-swatch.lull::before { left: 1px; }
+.drop-swatch.lull::after { right: 1px; }
+.drop-swatch.drop {
+  background: currentColor;
+  clip-path: polygon(50% 0, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);
+}
+.drop-legend-item { display: inline-flex; align-items: center; gap: 4px; }

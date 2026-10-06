@@ -3,7 +3,7 @@
  * only on slow state). Interactions are delegated to the `pointer` prop. */
 import { useEffect, useRef } from 'react';
 import type { CanvasFrame, CanvasLayer, Hit, LayerDataBag, ViewState, Win } from './frame';
-import { BEAT_STRIP_H, stripCountFor } from './frame';
+import { BEAT_STRIP_H, snapRailHFor, stripCountFor } from './frame';
 
 export interface PointerHandlers {
   onHit?: (hit: Hit, ev: PointerEvent, frame: FrameGeom) => void;
@@ -22,6 +22,8 @@ export interface FrameGeom {
   w: number;
   h: number;
   mainH: number;
+  /** the drop-sequence snap-rail band under the main area (0 when off) */
+  railH: number;
   win: Win;
   timeToX(ms: number): number;
   xToTime(x: number): number;
@@ -55,11 +57,12 @@ export default function TimelineCanvas({
     const w = canvas.clientWidth;
     const h = canvas.clientHeight;
     const stripCount = stripCountFor(s.data, s.view.librosaFilters);
-    const mainH = h - stripCount * BEAT_STRIP_H;
+    const railH = snapRailHFor(s.data);
+    const mainH = h - stripCount * BEAT_STRIP_H - railH;
     const win = s.getWin();
     const span = Math.max(1, win.endMs - win.startMs);
     return {
-      w, h, mainH, win,
+      w, h, mainH, railH, win,
       timeToX: (ms) => ((ms - win.startMs) / span) * w,
       xToTime: (x) => win.startMs + (x / Math.max(1, w)) * span,
     };
@@ -87,6 +90,7 @@ export default function TimelineCanvas({
           const frame: CanvasFrame = {
             ctx, w, h,
             mainH: g.mainH,
+            railH: g.railH,
             stripH: BEAT_STRIP_H,
             stripCount: stripCountFor(s.data, s.view.librosaFilters),
             win: g.win,
