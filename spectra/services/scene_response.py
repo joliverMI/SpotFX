@@ -13,12 +13,14 @@ Per event, fed by the bridge with the fire's intensity:
      an instant {"phase": <class>, "phase_progress": 0.0} arm per
      phase-capable virtual (the 0.0 reset re-arms the edge), then a glide
      of phase_progress → 1.0 over the class's ramp — charge/lull DYNAMICALLY
-     stretch to ~90% of the real gap to the next trigger when it's known
-     (_phase_ramp_ms, the OVERRIDE BLEND equivalent), else the flat 4000 ms/
-     2500 ms tuned default; drop always stays the fixed 400 ms snap. The
-     drive fires for EVERY charge/lull/drop event, band or no band — exactly
-     as the
-     original fired the phase for every phase event, with the per-scene
+     stretch to ~90% of the real gap to where the build ends, when it's
+     known (_phase_ramp_ms, the OVERRIDE BLEND equivalent; the gap itself
+     is the PHASE PARTNER rule, spectra/services/phase_partner.py — a
+     charge's own lull or drop, a lull's own drop, else the next trigger),
+     else the flat 4000 ms/2500 ms tuned default; drop always stays the
+     fixed 400 ms snap. The drive fires for EVERY charge/lull/drop event,
+     band or no band — exactly as the original fired the phase for every
+     phase event, with the per-scene
      band riding on top as the scene's colouring. Per-family grammar:
      docs/SPECTRA_RESPONSES.md. Phase keys ride ONLY these dedicated
      writes (the registry gate keeps them out of band patches; the

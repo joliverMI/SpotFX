@@ -186,9 +186,11 @@ export default function SpectraTriggerBar({
                     width: `${Math.max(0.5, ((win.endMs - win.startMs) / dur) * 100)}%`,
                     background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.2)',
                     pointerEvents: 'none' }} />
-      {/* Charge/lull blend: the ramp to the next trigger, then the hang.
-        * Drawn under the markers, tinted in the class's own colour — the
-        * same read the legacy canvas gives an Override Blend trigger. */}
+      {/* Charge/lull blend: the ramp to where the build ends (its own
+        * lull or drop, else the next trigger — the PHASE PARTNER rule),
+        * then the hang. Drawn under the markers, tinted in the class's own
+        * colour — the same read the legacy canvas gives an Override Blend
+        * trigger. */}
       {blends.map((b) => {
         const spanMs = Math.max(1, b.endMs - b.startMs);
         // Percentages of the SPAN, not of the song — the two children live

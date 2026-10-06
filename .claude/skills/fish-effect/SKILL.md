@@ -108,7 +108,10 @@ brightness, steered out under the ordinary turn-rate clamp, retired only
 once the WHOLE body clears the panel. Speed is DERIVED every frame from
 remaining distance-to-clear (never a tuned speed) — this is what lets a
 900ms lull and a 6s one both work. Mode 2 (linear fade) now belongs ONLY
-to the drop's ejecta.
+to the drop's ejecta. The lull's own duration is `phase_progress`'s real
+gap to its own drop under the PHASE PARTNER rule (`spectra/services/
+phase_partner.py`), else the next trigger with no drop ahead — see
+`_lull_step`'s own docstring in `fish.py`.
 
 ## The swim burst can push a fish off-screen — a boundary SPEED BRAKE
    exists specifically for burst speed, and it's scoped tightly
