@@ -4842,8 +4842,9 @@ and the id shape. Five things to know:
   cannot outlive the hold's 3-minute ceiling. Right for a slice whose whole
   safety story is that seam; "leave the wave on all evening" needs its own
   lifetime story, not a bigger number.
-- Sonic parity is `room_effect_console.py` (4 ops, `domain="room"`).
-  Its `carrier_ids` name CARRIERS, not fixtures.
+- Sonic parity is `room_effect_console.py` (5 ops, `domain="room"` —
+  `list_room_map` read-only since 2026-10-06, see the room-map bullet
+  below). Its `carrier_ids` name CARRIERS, not fixtures.
   Excluded BY NAME with reasons in its docstring: starting/stopping an
   effect (a light-driving call — `settings_agent.py`'s whole boundary
   argument is that none exists), running a mapping sync (needs a phone in

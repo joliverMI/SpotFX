@@ -14,15 +14,17 @@ device_console.OPERATIONS, room_effect_console.OPERATIONS,
 analysis_console.OPERATIONS, show_console.OPERATIONS (phase 3 of the
 Light Show, the Admiral's own ask for fire/arm/disarm/status/device
 hold-or-dim/create-set/move-High-Low/end-show), house_console.OPERATIONS
-(house lighting's modes — switch, create, edit one field) and
-drop_console.OPERATIONS (the playing song's drop sequences — confirm/
-dismiss/move, phase 4 of drop detection), each a
-dict of sonic_ops.SonicOperation — declared data, not code branches. TOOLS
-(the schema handed to the Anthropic API) and _dispatch() (the tool-name ->
-handler lookup) are BOTH derived from that same merged dict, so a name not
-present in it is simultaneously impossible to discover (the "list
-operations" meta-tool only ever enumerates ALL_OPERATIONS) and impossible
-to run (_dispatch() only ever looks names up in it) — see sonic_ops.py's
+(house lighting's modes — switch, create, edit one field; widened
+2026-10-06 to house-wide settings too) and drop_console.OPERATIONS (the
+playing song's drop sequences — confirm/dismiss/move/add/undo/redetect
+and more, phase 4 of drop detection; its own edit set widened the same
+day), each a dict of sonic_ops.SonicOperation — declared data, not code
+branches. TOOLS (the schema handed to the Anthropic API) and _dispatch()
+(the tool-name -> handler lookup) are BOTH derived from that same merged
+dict, so a name not present in it is simultaneously impossible to
+discover (the "list operations" meta-tool only ever enumerates
+ALL_OPERATIONS) and impossible to run (_dispatch() only ever looks names
+up in it) — see sonic_ops.py's
 docstring for why that coupling is the whole point. There is still no
 third source of tool names anywhere in this module: no shell, no file
 access, no HTTP client, no service-control call, no light-driving call —

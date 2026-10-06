@@ -8,12 +8,22 @@ word next changes, exactly like a press on the House page; creating a
 brand-new mode by name (fresh id, a name clash REJECTED, never overwritten —
 the Light Show console's own rule); and editing a mode's fields one at a
 time: a named setting, one fixture setting (level / motion / frame-rate cap
-/ off), one Hue area's look, or the scene / colour pools.
+/ off), one Hue area's look, or the scene / colour pools. Widened
+2026-10-06 (the Sonic coverage audit build) to HOUSE-WIDE settings, not
+just one mode's: reading every `HouseSettings` field, turning the
+cutover switch on or off, and editing the energy block (resting fps,
+park_idle, send_on_change, keepalive_s, audio_pause_after_s) or
+Serenity's voice-state colours — see the "HOUSE-WIDE SETTINGS" comment
+below for the mechanism.
 
 EXCLUDED, BY NAME: deleting a mode (an irreversible act on his authored
 library — the House page's button, his press); taking or releasing the room
 (no domain here has that authority; settings_agent.py's boundary argument);
-anything that writes Home Assistant (River's side of the seam).
+anything that writes Home Assistant (River's side of the seam);
+`hue_excluded_lights` (a safety fence around bulbs outside the room) and
+the seam-wiring fields (`tv_strips`/`voice_fixtures`/`own_brightness`/
+`owned_brightness`, set once at cutover with River) — readable, never
+writable, from here.
 
 NAMES ARE NEVER GUESSED. A mode, scene, colour set, category, fixture or Hue
 area named by a person resolves only on an exact id or case-insensitive

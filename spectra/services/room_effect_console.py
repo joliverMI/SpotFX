@@ -7,7 +7,12 @@ room's mapped fixtures it drives, plus the two reads a caller needs to work
 out what to change. Bounds come off RoomEffectSpec's own Field(ge=, le=) —
 never a second hand-typed copy — the same discipline
 settings_console.SETTINGS_REGISTRY and scene_console.SCENE_SETTINGS_REGISTRY
-already keep.
+already keep. A third read, `list_room_map` (2026-10-06), answers the SAME
+question read-only for the Live view's own room map — which camera poses
+have anything drawn, and for one, which pieces are placed (measured, read
+from the camera, or by his own hand) vs. still in the tray — see that
+operation's own comment immediately above its handler for why it stays
+read-only.
 
 WHAT IS DELIBERATELY EXCLUDED, by name, because each is a different kind of
 act rather than a setting:

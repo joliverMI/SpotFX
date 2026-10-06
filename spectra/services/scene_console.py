@@ -88,14 +88,19 @@ works by loading everything"): list_scenes_index() returns only
 id/name/labels; get_scene_settings()/list_flare_kinds() return only the
 enumerated scalar settings / flare-kind summaries for ONE named scene;
 get_flare_kind() returns full detail for exactly one named kind. Nothing
-here ever returns a scene's full `devices` list — general device/effect
-editing is still NOT in this registry (out of scope for tonight's ask; a
-future, deliberate extension, not a silent omission — the exact "manage
-flares, settings within scenes, and create scenes" surface he asked for is
-what's built). copy_scene_device_entry (below) is the one narrow exception:
-it copies exactly one existing device entry's fields between two scenes —
-never a general read or edit of `devices` — see its own comment block for
-why that's a different, safer shape.
+here ever returns a scene's full `devices` list — device/effect SELECTION
+(which effect an entry runs, its drift, its colour mode) stays out of
+this registry; that remains the Scenes page's Initial Set tab's job, not
+a silent omission. copy_scene_device_entry (below) is one narrow
+exception: it copies exactly one existing device entry's fields between
+two scenes — never a general read or edit of `devices` — see its own
+comment block for why that's a different, safer shape. Reversed for
+VALUES only, 2026-10-06 (the Sonic coverage audit build, his own ruling:
+"yes, as long as it doesn't limit more than we currently have"):
+get_scene_entry_params/set_scene_entry_param read and write any
+registered effect param's CURRENT value on one scene's one device
+entry — see the "scene ENTRY PARAMETERS" comment block below for the
+mechanism and its own ⚡-binding-replacement rule.
 
 SCENE_SETTINGS_REGISTRY mirrors settings_console.SETTINGS_REGISTRY's own
 discipline: bounds are READ off the real pydantic Field(ge=, le=)
