@@ -1,8 +1,13 @@
 /** A press-and-HOLD confirm gesture, with visible progress, for a control
- * whose short tap must do nothing — the Release-to-Home-Assistant button
- * (his ask 2026-10-06: "make the release to home assistant button require
- * a long press"), which hands the room away from SPECTRA and is rare and
- * consequential by design.
+ * where a completed hold must do something consequential — originally the
+ * Release-to-Home-Assistant button (his ask 2026-10-06: "make the release
+ * to home assistant button require a long press"), which hands the room
+ * away from SPECTRA and is rare and consequential by design.
+ * `ModeChip.tsx` reuses it a second time (his ask, same day: "pressing and
+ * holding the house mode button ... should turn it on and off") for a
+ * control whose SHORT tap is not a no-op either — it navigates — see that
+ * component's own header comment for how it swallows the trailing click/
+ * keyup after a completed hold without this hook's help.
  *
  * Unlike `useLongPress.ts` (fire-after-N-ms, no visible feedback, pointer
  * events only — built for "hold to open a panel"), this reports live
@@ -16,10 +21,11 @@
  * to release" hint; a release that reaches 1.0 fires `onConfirm` exactly
  * once and resets.
  *
- * Does not call `preventDefault()` on pointerdown — unlike a hold-to-open
- * gesture there is no click to protect (no onClick on this button at
- * all), and withholding it keeps normal focus/tab behaviour intact for
- * keyboard users. */
+ * Does not call `preventDefault()` on pointerdown — ReleaseButton has no
+ * onClick at all, so there's nothing to protect there; a consumer that
+ * DOES have a click to protect (ModeChip) must swallow it itself, since
+ * this hook never assumes one exists. Withholding `preventDefault()` here
+ * also keeps normal focus/tab behaviour intact for keyboard users. */
 import { useCallback, useRef, useState } from 'react';
 
 const HINT_MS = 1600;
