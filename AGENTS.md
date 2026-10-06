@@ -1941,8 +1941,23 @@ already uses the same `origin` marker). Music/trigger-driven fires
 unaffected — the pin keeps governing everything else, including a house
 mode with NO colour sets of its own, which still falls through to
 `scene_compiler.room_active_set()` (deliberately untouched) and so still
-wears the pin. Spec: `tests/test_force_color.py`,
-`tests/test_house_lighting.py`.
+wears the pin.
+
+**Two more choke points closed the same day, found by asking whether the
+ask holds OUTSIDE scene-fire time too**: `room_controls.
+reconcile_force_color_if_changed` (the PUT-triggered immediate apply on
+enable/repin) now checks `house.journey_override() is not None` — BEFORE
+`force_color.pinned_card()` is called, so a pinned GROUP's rotation
+cursor never advances for an apply that is about to be skipped — and
+returns `{"status": "skipped", "reason": "a house mode owns the room's
+colour while it rests", ...}` rather than repainting the room out from
+under a resting mode. `drift_conductor._colour_leg` now consults
+`self._house_override()` BEFORE `force_color.active(controls)`: while a
+house mode rests, the force_color-held branch is skipped entirely and the
+leg falls through to `self._journey_leg(...)`, which already narrows the
+pool/pace to the mode's own sets via that same `_house_override()` call.
+The existing gradient precedence is untouched — this is only about Force
+Colour. Spec: `tests/test_force_color.py`, `tests/test_house_lighting.py`.
 
 **Force Scene/Force Colour's top-bar panels** (card
 force-colour-and-forced-trigger-dialogs-p99a): each pin is a `PowerButton`

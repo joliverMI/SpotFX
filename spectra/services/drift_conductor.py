@@ -573,8 +573,16 @@ class DriftConductor:
         # active() (never pinned_card()) because this runs every leg: a
         # pinned GROUP's rotation must advance once per FIRE, not once per
         # 20-second conductor tick.
+        #
+        # HOUSE LIGHTING (owner ask 2026-10-05: "house modes must ignore
+        # Force Colour and use their own colour sets") checks FIRST — a
+        # resting house mode's own journey (below, via _journey_leg's own
+        # _house_override() call) governs the room's ambient colour
+        # rotation, and Force Colour never holds it. Gradient precedence is
+        # untouched: this ask is only about Force Colour, not gradients.
         from spectra.services import force_color
-        if force_color.active(controls):
+        house = self._house_override()
+        if house is None and force_color.active(controls):
             journey_rec = {"custody": "room", "paused": True,
                           "held_for": force_color.HELD_FOR,
                           "forced_color_id": force_color.pinned_id(controls)}

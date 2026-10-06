@@ -60,6 +60,20 @@ had to be fixed on their own; "the family is covered" is not evidence):
   trigger_engine._default_select_color_set  a select_color_set trigger
                                         redirects to the pin, NAMED in its
                                         fire-history record (forced_from)
+  room_controls.reconcile_force_color_if_changed  the PUT-triggered
+                                        immediate apply on enable/repin
+
+HOUSE LIGHTING IS THE ONE EXCEPTION (2026-10-05, the Admiral's ruling:
+"house modes must ignore Force Colour and use their own colour sets") — a
+resting house mode's own `house.journey_override()` outranks the pin at
+TWO of the gates above: `drift_conductor._colour_leg` checks it BEFORE
+`active(controls)` and falls through to the journey (which narrows to the
+mode's own sets) instead of holding for the pin, and
+`reconcile_force_color_if_changed` skips the apply entirely (named, never
+silent) rather than repainting a room a resting mode governs. Every OTHER
+gate above, plus music/trigger-driven selection and his own explicit
+presses, are unaffected — see house.py's own `_apply_scene_and_colour`
+docstring for the scene-fire-time half of this exception.
 
 NOT gated, deliberately: his own EXPLICIT actions. POST /api/room-color/
 apply and the Colour Sets editor's Preview still do exactly what he asked

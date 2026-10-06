@@ -1251,6 +1251,16 @@ async def reconcile_force_color_if_changed(previous: RoomControlState,
     if referenced is None:
         return {"status": "skipped", "reason": "pinned colour set not found",
                 "target_id": new_state.force_color_target_id}
+    # HOUSE LIGHTING (owner ask 2026-10-05: "house modes must ignore Force
+    # Colour and use their own colour sets") — checked BEFORE
+    # force_color.pinned_card() below, so a pinned GROUP's rotation cursor
+    # is never advanced for an apply that is about to be skipped.
+    from spectra.services import house
+    if house.journey_override() is not None:
+        return {"status": "skipped",
+                "reason": "a house mode owns the room's colour while it rests",
+                "target_id": new_state.force_color_target_id,
+                "target_name": referenced.name}
     # Resolved with the NEW state passed explicitly — the save has landed
     # on disk by the time the PUT handler calls this, but passing it keeps
     # the resolution honest against the state being reconciled rather than
