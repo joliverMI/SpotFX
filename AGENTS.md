@@ -4003,9 +4003,11 @@ split). Six things:
   `house.response_deferral()` in `engine._response_gate`/`_update_gate`
   ("ignore" only); `house.journey_override()` read by the conductor's
   `_destination_pool`/`_journey_leg` (wired in `engine.py`);
-  `house.hue_directive()` read by `ambient_music_gate.reconcile`/`status`.
-  A new music-driven write path needs the same check or a calm/ignore mode
-  will leak through it.
+  `house.hue_directive()` read by `ambient_music_gate.reconcile`/`status`
+  (plus `house.pending_hue_directive()` at the same two choke points — a
+  mode that WILL hold Hue once the layer may act, see the restart-flash fix
+  below). A new music-driven write path needs the same check or a calm/
+  ignore mode will leak through it.
 - **HUE: per-area looks over the bridge** — `ambient.reconcile_looks`/
   `verify_looks` (colour temperature as CLIP v2 `color_temperature.mirek`,
   colour, off), routed by the gate when a directive exists (target tuple
