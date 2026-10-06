@@ -181,7 +181,7 @@ def test_a_lifted_run_measures_the_area_then_releases_then_restores(tmp_path):
                 record_path=str(rec), trials=4)
     assert res["fixtures"]["dining-hues"]["visible"]          # the stream reached it
     assert res["restore"] == {"restored": True, "areas": ["dining-hues"],
-                              "detail": "read back as before"}
+                              "detail": "read back as before", "held_again": True}
     assert events[0] == ("post", "show")
     assert events[-1] == ("post", "off")
     assert {e for e in events[-3:-1]} == {("release", "dining-table"),

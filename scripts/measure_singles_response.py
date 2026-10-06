@@ -429,6 +429,16 @@ def wait_hue_free(room, areas: list[str], wait_s: float = HUE_FREE_WAIT_S) -> No
         room.sleep(1.0)
 
 
+def wait_hue_held(room, areas: list[str], wait_s: float = HUE_FREE_WAIT_S) -> bool:
+    """After the restore: does every lifted area read frozen (held) again?"""
+    deadline = room.now() + wait_s
+    while set(room.hue_held(list(areas))) != set(areas):
+        if room.now() >= deadline:
+            return False
+        room.sleep(1.0)
+    return True
+
+
 def restore_house_hue(room, record: dict) -> dict:
     """Put back ONLY the lifted looks, onto the mode as it stands now, then
     read it back."""
@@ -649,6 +659,8 @@ def run(room, fixtures: list[str], *, lift: list[str] = (),
         if record is not None:
             try:
                 result["restore"] = restore_house_hue(room, record)
+                if result["restore"]["restored"]:
+                    result["restore"]["held_again"] = wait_hue_held(room, list(lift))
                 if result["restore"]["restored"] and record_path and os.path.exists(record_path):
                     os.remove(record_path)
             except Exception as exc:  # noqa: BLE001
