@@ -5,7 +5,12 @@ For each (system, link profile) it opens the system's real preview page in
 headless Chromium THROUGH the link emulator and measures, in the browser:
 
   delivered fps      WebSocket frames/s for the motion virtual (crystal-mapper)
-  painted fps        canvas putImageData calls/s for the 72-wide canvas
+  painted fps        ledfx: canvas putImageData calls/s for the 72-wide
+                      canvas; every "spectra*" system: the same drawn-frame
+                      count "drawn fps" uses, since the expanded strip and
+                      the Live view share one WebGL/2D-fallback renderer
+                      (live/useLiveStageCanvas.ts) and neither ever calls
+                      putImageData for its own pixels
   jitter             inter-frame interval: mean / stdev / p95 / p99 / max, stalls
   input-to-photon    API call (through the link) -> changed frame presented
   bandwidth          bytes/s through the link, both directions
@@ -339,7 +344,13 @@ async def measure(system: str, profile: str, seconds: float, flashes: int,
     result.update({
         "window_s": round(el, 2),
         "delivered_fps": round(len(motion) / el, 2),
-        "painted_fps": round(len(paints) / el, 2),
+        # ledfx's own frontend still paints its 72-wide canvas with
+        # putImageData; every "spectra*" system draws the expanded strip
+        # (and the Live view) with the shared LiveStage renderer instead
+        # (live/useLiveStageCanvas.ts -- a WebGL draw, or the 2D fallback's
+        # full-canvas clear), so for those systems this reports the SAME
+        # drawn-frame count "drawn_fps" below does, never 0.
+        "painted_fps": round((len(paints) if system == "ledfx" else d["drawnFrames"]) / el, 2),
         "all_ws_msgs_per_s": round(len(d["ws"]) / el, 1),
         "interval_ms": {
             "mean": round(statistics.mean(gaps), 1) if gaps else None,

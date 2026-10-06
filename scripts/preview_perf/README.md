@@ -72,7 +72,7 @@ one that binds.
 | number | how |
 |---|---|
 | delivered fps | frames per second for `crystal-mapper`, counted in the page |
-| painted fps | `putImageData` calls per second on the 72-wide canvas |
+| painted fps | `ledfx`: `putImageData` calls per second on its 72-wide canvas. Every `spectra*` system: the same drawn-frame count as "drawn fps" below — the expanded strip and the Live view share one WebGL/2D-fallback renderer (`live/useLiveStageCanvas.ts`) and neither calls `putImageData` for its own pixels, so counting that call there would always read ~0 |
 | interval p95 / max, gaps > 100 ms | time between consecutive frames at the browser: the evenness he sees |
 | input to photon | an API call sent through the link flips the `hues` virtual black/white; the clock stops two animation frames after the changed frame reaches the page. The effect redraws at once on both systems, and flashes are spaced randomly so they cannot lock to either sender's frame clock |
 | frame bytes / wire kbps | crystal frame size in the page, and bytes actually crossing the link (after WebSocket compression) |
