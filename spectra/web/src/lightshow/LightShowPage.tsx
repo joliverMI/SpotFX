@@ -529,6 +529,12 @@ function ParamField({ p, value, onChange, catalogue, targets, action }: {
         </select>);
     case 'hue_areas':
       return wrap(<Chips options={hueAreas} value={(value as string[]) ?? []} onChange={onChange} />);
+    case 'house_mode':
+      return wrap(
+        <select value={String(value ?? '')} onChange={(e) => onChange(e.target.value || undefined)}>
+          <option value="">— choose —</option>
+          {catalogue.house_modes.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+        </select>);
     case 'target': {
       const t = (value as { kind: string; id: string | null }) ?? { kind: 'everything', id: null };
       return wrap(

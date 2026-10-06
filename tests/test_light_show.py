@@ -421,3 +421,135 @@ def test_the_supervisor_suspends_the_layer_before_it_repushes(room):
         show_output.tick()
     assert order[0] == ("suspend", True) and ("repush",) in order
     assert device_output.suspended()
+
+
+# ── house lighting actions ──────────────────────────────────────────────────
+# ("Turn on house mode" / "Turn house lighting off" / "Turn house lighting
+# on" — spectra/services/house.py is the binding statement for set_mode/
+# set_enabled; these go through the real house_store so an unknown mode is
+# a real refusal, but house.set_mode/set_enabled themselves are faked —
+# the StubRunner precedent above — since house.tick()'s own fixture/scene/
+# Hue machinery is proven in tests/test_house_phase4.py, not here.)
+
+def _house_fakes(monkeypatch, *, enabled: bool):
+    from spectra.services import house, house_store
+    calls = {"set_mode": [], "set_enabled": []}
+    state = {"enabled": enabled}
+
+    def house_enabled():
+        return state["enabled"]
+
+    async def set_enabled(v):
+        state["enabled"] = bool(v)
+        calls["set_enabled"].append(bool(v))
+        return {"status": "applied"}
+
+    async def set_mode(*, mode=None, source="spectra", glide_s=None, **kw):
+        calls["set_mode"].append({"mode": mode, "source": source, "glide_s": glide_s})
+        target = house_store.find_mode(mode) if mode else None
+        if target is None:
+            return {"status": "unknown_mode", "mode": mode,
+                    "reason": f"no house mode called {mode!r}"}
+        return {"status": "applied"}
+
+    monkeypatch.setattr(house, "house_enabled", house_enabled)
+    monkeypatch.setattr(house, "set_enabled", set_enabled)
+    monkeypatch.setattr(house, "set_mode", set_mode)
+    return calls, state
+
+
+def _a_house_mode():
+    from spectra.models.house_mode import HouseMode
+    from spectra.services import house_store
+    return house_store.put_mode(HouseMode(name="Evening"))
+
+
+def test_house_mode_on_switches_on_when_off_and_selects(room, monkeypatch):
+    mode = _a_house_mode()
+    calls, _state = _house_fakes(monkeypatch, enabled=False)
+    run = fire([A("house_mode_on", mode=mode.id, glide_s=12.0)])
+    assert run["steps"][0]["status"] == "applied"
+    assert "switched house lighting on" in run["steps"][0]["detail"]
+    assert "Evening" in run["steps"][0]["detail"]
+    assert calls["set_enabled"] == [True]
+    assert calls["set_mode"] == [{"mode": mode.id, "source": "light-show", "glide_s": 12.0}]
+
+
+def test_house_mode_on_leaves_an_already_on_switch_alone(room, monkeypatch):
+    mode = _a_house_mode()
+    calls, _state = _house_fakes(monkeypatch, enabled=True)
+    run = fire([A("house_mode_on", mode=mode.name)])
+    assert run["steps"][0]["status"] == "applied"
+    assert "switched house lighting on" not in run["steps"][0]["detail"]
+    assert calls["set_enabled"] == []
+
+
+def test_house_mode_on_refuses_an_unknown_mode(room, monkeypatch):
+    _house_fakes(monkeypatch, enabled=True)
+    run = fire([A("house_mode_on", mode="no-such-mode")])
+    assert run["steps"][0]["status"] == "failed"
+    assert "no house mode" in run["steps"][0]["detail"]
+    with pytest.raises(show_actions.ActionError, match="no house mode"):
+        show_actions.validate("house_mode_on", {"mode": "no-such-mode"})
+
+
+def test_house_lighting_off_calls_the_switch(room, monkeypatch):
+    calls, _state = _house_fakes(monkeypatch, enabled=True)
+    run = fire([A("house_lighting_off")])
+    assert run["steps"][0]["status"] == "applied"
+    assert calls["set_enabled"] == [False]
+
+
+def test_house_lighting_off_is_a_no_op_when_already_off(room, monkeypatch):
+    calls, _state = _house_fakes(monkeypatch, enabled=False)
+    run = fire([A("house_lighting_off")])
+    assert run["steps"][0]["status"] == "skipped"
+    assert calls["set_enabled"] == []
+
+
+def test_house_lighting_on_calls_the_switch(room, monkeypatch):
+    calls, _state = _house_fakes(monkeypatch, enabled=False)
+    run = fire([A("house_lighting_on")])
+    assert run["steps"][0]["status"] == "applied"
+    assert calls["set_enabled"] == [True]
+
+
+def test_house_lighting_on_is_a_no_op_when_already_on(room, monkeypatch):
+    calls, _state = _house_fakes(monkeypatch, enabled=True)
+    run = fire([A("house_lighting_on")])
+    assert run["steps"][0]["status"] == "skipped"
+    assert calls["set_enabled"] == []
+
+
+def test_house_actions_are_refused_with_a_reason_when_the_show_may_not_act(room, monkeypatch):
+    mode = _a_house_mode()
+    calls, _state = _house_fakes(monkeypatch, enabled=False)
+    room.gate["reason"] = "the room is released"
+    run = fire([A("house_mode_on", mode=mode.id), A("house_lighting_off")])
+    assert all(s["status"] == "refused" and "released" in s["detail"] for s in run["steps"])
+    assert calls["set_enabled"] == [] and calls["set_mode"] == []
+
+
+def test_house_mode_on_preview_shows_the_change_without_writing(room, monkeypatch):
+    mode = _a_house_mode()
+    calls, _state = _house_fakes(monkeypatch, enabled=True)
+    out = show_actions.preview([A("house_mode_on", mode=mode.id)])
+    assert "problem" not in out[0]
+    assert calls["set_mode"] == [] and calls["set_enabled"] == []
+
+
+def test_a_saved_set_with_house_actions_validates_and_dry_runs(room, monkeypatch):
+    """The whole action-set path — validate_set/conflicts/preview — never
+    chokes on the new kinds, the same proof test_preview_writes_nothing
+    gives display_mode."""
+    mode = _a_house_mode()
+    calls, _state = _house_fakes(monkeypatch, enabled=False)
+    actions = [A("house_mode_on", mode=mode.id, glide_s=5.0),
+               A("house_lighting_off")]
+    s = show_store.put_set(ActionSet(name="House demo", actions=actions))
+    assert show_actions.validate_set(s.actions) == []
+    assert show_actions.conflicts(s.actions) == []
+    out = show_actions.preview(s.actions)
+    assert len(out) == 2 and all("problem" not in row for row in out)
+    assert calls["set_mode"] == [] and calls["set_enabled"] == [], \
+        "a preview/dry-run must write nothing"

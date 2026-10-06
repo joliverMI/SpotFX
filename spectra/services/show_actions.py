@@ -82,7 +82,8 @@ ROOM_EFFECT_HEARTBEAT_S = 5.0
 class Param:
     """One parameter. `type` is what the Build view renders:
     bool | enum | number | color | text | scene | scenes | color_set |
-    color_sets | gradient | target | hue_areas | room_effect | overrides."""
+    color_sets | gradient | target | hue_areas | room_effect | house_mode |
+    overrides."""
     name: str
     type: str
     label: str = ""
@@ -385,6 +386,88 @@ register(ActionKind(
     help="Which scene changes the room makes (the room bar's Scene changes select).",
     restore="End show puts it back, unless you changed it since.",
     room_patch=lambda p: {"scene_change_mode": p["mode"]}))
+
+
+# ── house lighting ─────────────────────────────────────────────────────────
+# (spectra/services/house.py is the binding statement; HouseSettings.enabled
+# is THE CUTOVER SWITCH, the same one the top-bar Mode chip's long press and
+# the House page's own power button flip.)
+
+def _check_house_mode(p: dict) -> dict:
+    from spectra.services import house_store
+    if house_store.find_mode(p["mode"]) is None:
+        known = [m.name for m in house_store.list_modes()]
+        raise ActionError(
+            f"House mode: no house mode called {p['mode']!r}"
+            + (f" — known: {', '.join(known)}" if known else
+               " — no house modes exist yet"))
+    return p
+
+
+async def _apply_house_mode_on(p: dict, ctx: "RunContext") -> Outcome:
+    from spectra.services import house, house_store
+    switched_on = False
+    if not house.house_enabled():
+        await house.set_enabled(True)
+        switched_on = True
+    result = await house.set_mode(mode=p["mode"], source="light-show",
+                                  glide_s=p.get("glide_s"))
+    status = result.get("status")
+    if status == "unknown_mode":
+        # The check() above catches this under ordinary editing; still
+        # refuse cleanly rather than silently doing nothing if the mode was
+        # deleted between save and fire.
+        return Outcome("failed", result.get("reason") or f"no house mode {p['mode']!r}")
+    mode_obj = house_store.find_mode(p["mode"])
+    name = mode_obj.name if mode_obj else p["mode"]
+    prefix = "switched house lighting on; " if switched_on else ""
+    return Outcome("applied", f"{prefix}house mode: {name} ({status})")
+
+
+async def _apply_house_lighting_off(p: dict, ctx: "RunContext") -> Outcome:
+    from spectra.services import house
+    if not house.house_enabled():
+        return Outcome("skipped", "house lighting was already off")
+    await house.set_enabled(False)
+    return Outcome("applied", "house lighting off — handing the look back to the show")
+
+
+async def _apply_house_lighting_on(p: dict, ctx: "RunContext") -> Outcome:
+    from spectra.services import house
+    if house.house_enabled():
+        return Outcome("skipped", "house lighting was already on")
+    await house.set_enabled(True)
+    return Outcome("applied", "house lighting on")
+
+
+register(ActionKind(
+    name="house_mode_on", label="Turn on house mode", group="setting",
+    params=[Param("mode", "house_mode", "Mode", required=True,
+                  help="One of his house modes (Standard, Evening, Dim, "
+                       "Night light, Away, TV, TV paused, or any he adds)."),
+            Param("glide_s", "number", "Glide", min=0.0, max=600.0, unit="s",
+                  help="Empty = the mode's own button glide.")],
+    help="Switch house lighting on (if it is off) and select a mode — the "
+         "same as the House page's own mode picker.",
+    restore="Nothing to put back — pick another mode, Turn house lighting "
+            "off, or End show hands the whole room back.",
+    apply=_apply_house_mode_on, check=_check_house_mode, help_topic="house"))
+
+register(ActionKind(
+    name="house_lighting_off", label="Turn house lighting off", group="setting",
+    params=[],
+    help="Switch house lighting off — hands the look back to the music "
+         "show smoothly, the same as the top-bar Mode chip's long press.",
+    restore="Turn house lighting on brings it back (the mode stays set, "
+            "if one is).",
+    apply=_apply_house_lighting_off, help_topic="house"))
+
+register(ActionKind(
+    name="house_lighting_on", label="Turn house lighting on", group="setting",
+    params=[],
+    help="Switch house lighting back on without changing which mode is set.",
+    restore="Turn house lighting off switches it back off.",
+    apply=_apply_house_lighting_on, help_topic="house"))
 
 
 # ── item on/off ────────────────────────────────────────────────────────────
@@ -816,8 +899,14 @@ def catalogue() -> dict:
         effect_schema = RoomEffectSpec.model_json_schema()
     except Exception:                                    # noqa: BLE001
         logger.exception("light show: could not list room effects")
+    house_modes = []
+    try:
+        from spectra.services import house_store
+        house_modes = [{"id": m.id, "name": m.name} for m in house_store.list_modes()]
+    except Exception:                                    # noqa: BLE001
+        logger.exception("light show: could not list house modes")
     return {"kinds": kinds, "room_effects": effects,
-            "room_effect_schema": effect_schema}
+            "room_effect_schema": effect_schema, "house_modes": house_modes}
 
 
 # ── running a set ──────────────────────────────────────────────────────────
