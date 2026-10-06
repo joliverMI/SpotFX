@@ -92,3 +92,40 @@ def test_preflight_refuses_a_hue_area_held_by_hue_hold(monkeypatch):
     problems = m.preflight(room, list(room.fixtures))
     assert len(problems) == 1 and "hue-lights" in problems[0]
     assert m.preflight(m.simulated_room(), list(room.fixtures)) == []
+
+
+def test_preflight_refuses_a_fixture_someone_else_already_holds(monkeypatch):
+    """The run lets every target go at the end; that must never drop a hold
+    it did not put there."""
+    room = m.simulated_room()
+    real = room.get
+
+    def get(path):
+        out = real(path)
+        if path == "/api/light-show/status":
+            out["output"]["holds"] = [{"device": "dining-table", "state": "steady"}]
+        return out
+
+    monkeypatch.setattr(room, "get", get)
+    problems = m.preflight(room, list(room.fixtures))
+    assert len(problems) == 1 and "dining-table" in problems[0]
+
+
+def test_fixtures_that_light_the_same_table_are_timed_where_each_dominates():
+    """The dining table WLED and the dining bulbs light the same table: a
+    shared region would read both in each crossing. Each is timed only where
+    it dominates, and the delay still comes back."""
+    room = m.simulated_room()
+    room.fixtures = {"dining-table": room.fixtures["dining-table"],
+                     "dining-hues": room.fixtures["dining-hues"]}
+    room.fixtures["dining-hues"].region = (2, 12, 24, 40)   # overlaps x 24..28
+    room._cmd = {d: [(-1e9, 0.0)] for d in room.fixtures}
+    res = m.run(room, list(room.fixtures), trials=24)
+    overlap = 6 * 4          # rows 2..8 x columns 24..28 lit by both
+    for d in room.fixtures:
+        f = res["fixtures"][d]
+        assert f["exclusive_pixels"] == f["pixels"] - overlap, (d, f)
+    (p,) = res["pairs"]
+    a, b = room.fixtures["dining-table"], room.fixtures["dining-hues"]
+    want = 1000 * ((b.delay_s + 0.693 * b.tau_s) - (a.delay_s + 0.693 * a.tau_s))
+    assert p["hue_minus_wled_ms"] == pytest.approx(want, abs=60.0)

@@ -66,6 +66,7 @@ CAPTURE_FRAMES = 4        # averaged per reading (5 fps -> ~0.8 s)
 DELAY_TRIALS = 24
 DELAY_WAIT_S = 4.0        # longest to wait for a switch to show in frame
 VISIBLE_MIN = 8.0         # grey levels: below this the camera cannot see it
+DOMINANCE = 3.0           # a delay pixel: this fixture's light >= 3x any other's
 POLL_S = 0.05
 
 
@@ -254,6 +255,12 @@ def preflight(room, fixtures: list[str]) -> list[str]:
         problems.append(f"Light Show refuses: {st['refusal']}")
     if st.get("standdown"):
         problems.append(f"Light Show stands down: {st['standdown']}")
+    held = {h.get("device"): h.get("state") for h in st.get("holds") or []}
+    for d in fixtures:
+        if d in held:
+            problems.append(f"{d}: already held by the Light Show ({held[d]}) — this "
+                            f"run lets every target go at the end, which would drop "
+                            f"that hold. Release it first.")
     targets = {t["id"]: t for t in room.get("/api/light-show/targets").get("fixtures", [])}
     for d in fixtures:
         t = targets.get(d)
@@ -339,7 +346,7 @@ def measure(room, fixtures: list[str], *, trials: int = DELAY_TRIALS,
     out: dict = {"fixtures": {}, "pairs": [], "assumption": "camera = sRGB curve"}
     room.hold([(d, None) for d in fixtures])
     dark = _fresh_frames(room, CAPTURE_FRAMES, SETTLE_S)
-    masks, full_lin = {}, {}
+    masks, lit = {}, {}
     for d in fixtures:
         room.hold([(d, grey_hex(1.0))])
         full = _fresh_frames(room, CAPTURE_FRAMES, SETTLE_S)
@@ -350,9 +357,19 @@ def measure(room, fixtures: list[str], *, trials: int = DELAY_TRIALS,
             room.sleep(SETTLE_S)
             continue
         masks[d] = mask
-        full_lin[d] = reading(full, dark, mask)[0]
+        lit[d] = camera_decode(full) - camera_decode(dark)
         out["fixtures"][d] = {"visible": True, "pixels": int(mask.sum())}
         room.sleep(SETTLE_S)
+    # For the paired delay trials two fixtures are lit at once, so each is
+    # read only where IT dominates (the dining table and the dining bulbs
+    # light the same table). A fixture with no such pixels sits them out.
+    exclusive = {}
+    for d, mask in masks.items():
+        others = [lit[o] for o in masks if o != d]
+        ex = mask & (lit[d] > DOMINANCE * np.max(others, axis=0)) if others else mask
+        out["fixtures"][d]["exclusive_pixels"] = int(ex.sum())
+        if ex.sum() >= 4:
+            exclusive[d] = ex
     for d, mask in masks.items():
         ups, raws = [], []
         order = SWEEP_LEVELS + SWEEP_LEVELS[-2::-1]
@@ -376,9 +393,10 @@ def measure(room, fixtures: list[str], *, trials: int = DELAY_TRIALS,
             fit=fit_gamma(SWEEP_LEVELS, both),
             hysteresis=round(float(np.max(np.abs(np.asarray(up) - np.asarray(down))) /
                                    max(1e-9, up[-1])), 3))
-    wleds = [d for d in masks if "hue" not in d]
-    hues = [d for d in masks if "hue" in d]
+    wleds = [d for d in exclusive if "hue" not in d]
+    hues = [d for d in exclusive if "hue" in d]
     pairs = list(zip(wleds, hues)) if wleds and hues else []
+    full_ex = {d: float(np.mean(lit[d][exclusive[d]])) for d in exclusive}
     for a, b in pairs:
         diffs, lags = [], []
         for _ in range(trials):
@@ -394,8 +412,8 @@ def measure(room, fixtures: list[str], *, trials: int = DELAY_TRIALS,
                     seen.add(key)
                     k0 = len(seen) if k0 is None else k0
                     ts.append(len(seen) * room.frame_period_s)
-                    ya.append(reading(img, dark, masks[a])[0] / full_lin[a])
-                    yb.append(reading(img, dark, masks[b])[0] / full_lin[b])
+                    ya.append(reading(img, dark, exclusive[a])[0] / full_ex[a])
+                    yb.append(reading(img, dark, exclusive[b])[0] / full_ex[b])
                     if ya[-1] > 0.9 and yb[-1] > 0.9:
                         break
                 room.sleep(POLL_S)
