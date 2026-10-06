@@ -49,13 +49,15 @@ is resolved from `house.hue_directive()`'s own per-device look — the
 SAME tuple ambient.py sends to the bridge — converted through
 `hue_preview_colour.held_hex_for_look`; `None` means "not held, draw the
 live render exactly as before". A bulb left to Home Assistant
-(`HouseSettings.hue_excluded_lights`) must never draw the held colour
-either, even mixed into the SAME SPECTRA device as held bulbs — `_held_hex`
-checks that against `ambient.cached_light_names()`'s own cached, per-device
-bulb list (never a fresh bridge call), falling back to the live render for
-the whole fixture when it can't yet confirm no overlap. `build_layout`/
-`virtual_layout` stay PURE (no live read inside them) — `current_layout()`
-is the one caller that resolves the live directive via
+(`HouseSettings.hue_excluded_lights`) still shares one fixture with every
+other bulb SPECTRA holds in the same area, so showing a single colour for
+the whole thing is a trade-off, not a bug: `_held_hex` falls back to the
+live render for the WHOLE fixture only once `ambient.cached_light_names()`
+(its own cached, per-device bulb list, never a fresh bridge call) confirms
+EVERY one of that device's bulbs is excluded — a mixed area (his real
+`hue-lights`, 6 held bulbs beside 4 excluded ones) keeps its held colour.
+`build_layout`/`virtual_layout` stay PURE (no live read inside them) —
+`current_layout()` is the one caller that resolves the live directive via
 `current_hue_looks()`.
 """
 from __future__ import annotations
@@ -187,27 +189,28 @@ def _held_hex(device_id: str, device_type: Optional[str], device_cfg: dict,
     since it has no idea which area a bulb lives in), so a non-empty
     result says nothing about whether THIS device actually has one of
     those bulbs — comparing it against this device's own AREA NAME (the
-    original bug) can never match, and comparing it against EVERY area
-    unconditionally would disable held preview for every Hue fixture the
-    moment any bulb anywhere is excluded, including areas with no overlap
-    at all (e.g. `dining-hues`, which shares none of `hue-lights`' excluded
-    bulbs). `ambient.cached_light_names()` is the one thing that actually
-    knows which bulbs belong to this device — a pure cache read, warmed by
+    original bug) can never match. There is no pixel-level membership to
+    draw the held colour on just the genuinely-held bulbs, so a MIXED
+    fixture (his real `hue-lights`, 6 held + 4 excluded) has to pick one
+    reading for the whole thing: this picks HELD, the same trade every
+    whole-area look already makes for the colour of a bulb he dimmed by
+    hand — a fixture falls back to the live render only when EVERY one of
+    its own bulbs is confirmed excluded (an area wholly left to Home
+    Assistant), never merely because some of them are.
+    `ambient.cached_light_names()` is the one thing that knows which
+    bulbs actually belong to this device — a pure cache read, warmed by
     the SAME hold/verify that reported this exclusion in the first place,
-    never a fresh network call. Only once that intersection comes back
-    genuinely non-empty do we know this fixture has an excluded bulb mixed
-    in, and only then do we fall back to the live render for the WHOLE
-    fixture — there is no pixel-level membership to draw the held colour
-    on just the rest. An unresolved cache (no hold has touched this device
-    yet) is treated the same conservative way: never claim a colour we
-    cannot confirm excludes nothing."""
+    never a fresh network call. An unresolved cache (no hold has touched
+    this device yet) cannot confirm total exclusion either, so it reads
+    the same as "not entirely excluded" — showing the held colour rather
+    than withholding it on a guess."""
     if looks is None or str(device_type or "").lower() != "hue":
         return None
     from spectra.services import ambient, hue_preview_colour
     excluded = ambient.skipped_lights(device_id, looks)
     if excluded:
         names = ambient.cached_light_names(device_cfg or {})
-        if names is None or names & excluded:
+        if names and names <= excluded:
             return None
     return hue_preview_colour.held_hex_for_look(ambient.look_for(device_id, looks))
 
