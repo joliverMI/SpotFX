@@ -407,10 +407,18 @@ export class LiveStage {
     }
     const { src } = plan;
     const { from, to, cur } = this;
+    const held = plan.held;
     const a = group.first * 3;
     const b = (group.first + group.count) * 3;
     from.set(cur.subarray(a, b), a);
     for (let p = group.first, o = a; o < b; p++, o += 3) {
+      if (held && held.mask[p]) {
+        // A held Hue fixture draws its real colour, never the stream's —
+        // the driving virtual keeps rendering underneath the freeze
+        // (positions.ts::withHeldOverlay's own docstring).
+        to[o] = held.rgb[o]; to[o + 1] = held.rgb[o + 1]; to[o + 2] = held.rgb[o + 2];
+        continue;
+      }
       const cell = src[p];
       if (cell < cells) {
         const i = cell * 3;

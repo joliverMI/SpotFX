@@ -32,6 +32,14 @@ export interface LiveFixture {
   src: number[] | null;
   /** Matrix only: row-major position per pixel. */
   grid: number[] | null;
+  /** The hex colour this fixture is actually HELD at right now (a frozen
+   * Hue bulb — services/preview_layout.py's own `_held_hex`), or null to
+   * draw its live render unchanged. A frozen Hue device's driving virtual
+   * never stops rendering, so without this the preview shows whatever the
+   * room's ordinary show happens to paint there, not the colour the real
+   * bulb is actually showing (see hue_preview_colour.py's module
+   * docstring for the Admiral's own report this closes). */
+  held: string | null;
 }
 
 export interface LiveVirtual {
@@ -43,6 +51,10 @@ export interface LiveVirtual {
   mapping: 'span' | 'copy';
   hex_lattice: boolean;
   favorite?: boolean;
+  /** A single swatch colour for the whole virtual — only set when every
+   * fixture it reaches is currently held (see `_virtual_held_hex`); null
+   * otherwise, including a mix of held and live-rendered fixtures. */
+  held: string | null;
   fixtures: LiveFixture[];
 }
 
@@ -101,6 +113,14 @@ export interface GlowLayer {
   crop: [number, number, number, number];
 }
 
+/** A static colour override per point, independent of the streamed frame —
+ * a HELD Hue fixture's real colour (see `LiveFixture.held`). `mask[p]` is
+ * 1 where `rgb[p*3..p*3+3)` must win over whatever the stream says. */
+export interface HeldOverlay {
+  mask: Uint8Array;
+  rgb: Uint8Array;
+}
+
 export interface StagePlan {
   width: number;
   height: number;
@@ -114,6 +134,7 @@ export interface StagePlan {
   groups: StageGroup[];
   fixtures: StageFixture[];
   glow?: GlowLayer;
+  held?: HeldOverlay;
 }
 
 export type PositionSource = (layout: LiveLayout, wide: boolean) => StagePlan;
@@ -341,3 +362,39 @@ export const layoutPositions: PositionSource = (layout, wide) => {
   }
   return plan;
 };
+
+function hexTriplet(hex: string): [number, number, number] {
+  const h = hex.replace('#', '');
+  return [parseInt(h.slice(0, 2), 16) || 0, parseInt(h.slice(2, 4), 16) || 0, parseInt(h.slice(4, 6), 16) || 0];
+}
+
+/** `plan` with every HELD fixture's points carrying a static colour
+ * override instead of the streamed frame — a held Hue bulb's real colour
+ * (see `LiveFixture.held`'s own docstring). A position source (this file,
+ * roomMap.ts) builds the plan; this is a pure post-step over either one,
+ * so neither has to know about Hue holds itself. A plan with nothing held
+ * is returned unchanged — no allocation on the common, un-held path. */
+export function withHeldOverlay<T extends StagePlan>(plan: T, layout: LiveLayout): T {
+  const byKey = new Map<string, string>();
+  for (const virtual of layout.virtuals) {
+    for (const fixture of virtual.fixtures) {
+      if (fixture.held) byKey.set(`${virtual.id}/${fixture.device_id}`, fixture.held);
+    }
+  }
+  if (byKey.size === 0) return plan;
+  const mask = new Uint8Array(plan.pointCount);
+  const rgb = new Uint8Array(plan.pointCount * 3);
+  for (const f of plan.fixtures) {
+    // Keyed by (virtual, device) — NOT `f.key`, which the room map splits
+    // into one key per PIECE of a fixture (one bulb placed at a time), so
+    // several StageFixtures here can share one underlying device.
+    const hex = byKey.get(`${f.visId}/${f.deviceId}`);
+    if (!hex) continue;
+    const [r, g, b] = hexTriplet(hex);
+    for (let p = f.first; p < f.first + f.count; p++) {
+      mask[p] = 1;
+      rgb[p * 3] = r; rgb[p * 3 + 1] = g; rgb[p * 3 + 2] = b;
+    }
+  }
+  return { ...plan, held: { mask, rgb } };
+}

@@ -1368,6 +1368,26 @@ def skipped_lights(device_id: str, looks) -> frozenset:
     return frozenset(out)
 
 
+def cached_light_names(cfg: dict) -> Optional[frozenset]:
+    """This device's OWN bulb names (lower-cased), if `_resolve_lights_named`
+    has already resolved them for this bridge/entertainment config — a pure
+    cache read, NEVER a network call. `None` means "not yet resolved" (no
+    hold/verify has run for this device since the process started), not
+    "this device has no bulbs".
+
+    `skipped_lights()` is a GLOBAL set by design (house.py always names an
+    excluded bulb under area "*", since it has no idea which Hue area a
+    bulb actually lives in) — a caller with no per-device bulb identity of
+    its own, like a preview, cannot tell "this device has an excluded bulb"
+    from "that bulb lives in a different area entirely" without
+    intersecting against THIS device's own real bulb list. This is that
+    list, read from the same cache ambient's own hold/verify paths warm."""
+    key = (cfg.get("ip_address"), cfg.get("entertainment_id"))
+    if key[0] is None or key[1] is None or key not in _light_cache:
+        return None
+    return frozenset(name.strip().lower() for _rid, name in _light_cache[key])
+
+
 def _look_payload(look: tuple, ramp_ms: Optional[int]) -> dict:
     _area, kind, mirek, color, brightness = look
     if kind == "off":

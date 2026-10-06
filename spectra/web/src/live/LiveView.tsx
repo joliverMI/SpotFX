@@ -46,7 +46,7 @@ import {
 import type { DevicePreviewStatus } from '../types';
 import { LinkMeter } from './linkMeter';
 import type { LinkReading } from './linkMeter';
-import { layoutPositions } from './positions';
+import { layoutPositions, withHeldOverlay } from './positions';
 import type { StageFixture, StagePlan } from './positions';
 import { decodeRoomView, roomMapPositions, STAGE_H, STAGE_W } from './roomMap';
 import type { RoomPlacement, RoomPlan, RoomView, TrayPiece } from './roomMap';
@@ -138,10 +138,13 @@ export default function LiveView({ popout = false, forceCanvas = false }: {
   const handMap = roomView && hand.pose === roomView.pose_id ? hand.map : roomView?.hand;
 
   const layoutPlan = useMemo(
-    () => (layout && !room ? layoutPositions(layout, !phone) : null), [layout, phone, room]);
+    () => (layout && !room ? withHeldOverlay(layoutPositions(layout, !phone), layout) : null),
+    [layout, phone, room]);
   const roomPlan = useMemo(
     () => (layout && roomView && decoded
-      ? roomMapPositions(layout, roomView, decoded, handMap ?? {}, { fit, frame: pinnedFrame ?? undefined })
+      ? withHeldOverlay(
+        roomMapPositions(layout, roomView, decoded, handMap ?? {}, { fit, frame: pinnedFrame ?? undefined }),
+        layout)
       : null),
     [layout, roomView, decoded, handMap, fit, pinnedFrame]);
   const plan: StagePlan | null = room ? roomPlan : layoutPlan;
