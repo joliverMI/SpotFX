@@ -454,9 +454,13 @@ def test_a_drop_is_never_shrunk_but_spends_the_budget(rig):
     r = rig(energy=1.0)
     settle(r)
     _hit_train(r, 8.0, 2.0)                    # the budget is spent
+    assert r.e._budget_left() < 0.5
+    before = r.levels[-1]
     r.write(phase="drop", phase_progress=0.0)
     r.frame(0.1)
-    assert r.levels[-1] == pytest.approx(1.0)
+    assert r.levels[-1] == pytest.approx(1.0)  # never shrunk
+    # ...but its rise is booked against the next second's hits
+    assert r.e._flash_window[-1][1] == pytest.approx(1.0 - before**2.2)
 
 
 def test_a_charge_ending_without_a_drop_eases_back(rig):
