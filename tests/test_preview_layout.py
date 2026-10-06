@@ -134,6 +134,63 @@ def test_bulbs_and_single_pixels():
     assert {f["kind"] for f in singles.values()} == {"dot"}
 
 
+# ── a HELD Hue fixture draws its real colour, never the shared single
+#    pixel the "hues" virtual's effect renders (hue_preview_colour.py's
+#    own docstring has the full defect) ──────────────────────────────────
+
+def test_with_no_hue_looks_every_fixture_draws_its_live_render():
+    hues = _fixtures(_layout()["hues"])
+    assert all(f["held"] is None for f in hues.values())
+    assert _layout()["hues"]["held"] is None
+
+
+def test_held_fixtures_draw_their_own_area_colour_not_the_shared_pixel():
+    from spectra.services import hue_preview_colour as hpc
+    # the Admiral's own 14:41 report: living held at an authored colour,
+    # dining at 2095K — two different areas, one shared effect pixel.
+    looks = (
+        ("hue-lights", "hold", None, "#ff9d31", 29.0),
+        ("dining-hues", "hold", 477, None, 54.0),
+    )
+    virtuals = pl.build_layout(ROOM, DRIVEN, lambda v: v.get("active") is True, hue_looks=looks)
+    hues = {v["id"]: v for v in virtuals}["hues"]
+    fixtures = _fixtures(hues)
+    assert fixtures["hue-lights"]["held"] == hpc.rgb_to_hex(
+        hpc.scale_rgb(hpc.hex_to_rgb("#ff9d31"), 0.29))
+    assert fixtures["dining-hues"]["held"] == hpc.rgb_to_hex(
+        hpc.scale_rgb(hpc.kelvin_to_rgb(1_000_000 / 477), 0.54))
+    # the two areas disagree, so the whole-virtual swatch (the top strip,
+    # which has no per-fixture granularity) is a pixel-weighted mean, never
+    # either area's colour alone and never the live render.
+    assert hues["held"] is not None
+    assert hues["held"] not in (fixtures["hue-lights"]["held"], fixtures["dining-hues"]["held"])
+    # it must never be the literal yellow-green the raw render happened to
+    # show — both held areas are warm, so the mean must stay warm too.
+    r, g, b = hpc.hex_to_rgb(hues["held"])
+    assert r >= g >= b
+
+
+def test_a_show_look_leaves_the_fixture_unheld():
+    looks = (("*", "show", None, None, 100.0),)
+    virtuals = pl.build_layout(ROOM, DRIVEN, lambda v: v.get("active") is True, hue_looks=looks)
+    hues = _fixtures({v["id"]: v for v in virtuals}["hues"])
+    assert all(f["held"] is None for f in hues.values())
+
+
+def test_off_look_draws_black():
+    looks = (("*", "off", None, None, 0.0),)
+    virtuals = pl.build_layout(ROOM, DRIVEN, lambda v: v.get("active") is True, hue_looks=looks)
+    hues = _fixtures({v["id"]: v for v in virtuals}["hues"])
+    assert all(f["held"] == "#000000" for f in hues.values())
+
+
+def test_a_non_hue_fixture_is_never_held():
+    looks = (("*", "hold", 2700, None, 100.0),)
+    virtuals = pl.build_layout(ROOM, DRIVEN, lambda v: v.get("active") is True, hue_looks=looks)
+    tv = _fixtures({v["id"]: v for v in virtuals}["tv-mapper"])
+    assert all(f["held"] is None for f in tv.values())
+
+
 def test_no_ground_truth_means_no_restriction():
     assert len(pl.build_layout(ROOM, set(), lambda v: v.get("active") is True)) == 4
 

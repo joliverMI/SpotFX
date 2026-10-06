@@ -2470,6 +2470,25 @@ statement. Five things:
   was broken here (pageId error) — drive raw CDP as the runner does.
   Specs: `tests/test_preview_layout.py`, `node scripts/check_live_view.mjs`.
 
+**A HELD HUE FIXTURE PREVIEWS ITS REAL COLOUR, NEVER THE STREAM'S
+(2026-10-06, his report: Hue bulbs read yellow-green in the preview
+despite being held at a white kelvin look).** `fx/devices/hue.py`: a
+frozen Hue device's driving virtual "stays ACTIVE and rendering — only
+this device's output is muted," so the preview (which taps that same
+render via `Event.VIRTUAL_UPDATE`) always showed the room's live show on
+a held bulb, never the REST colour actually on it — structural on his
+`hues` virtual, which is ONE shared copy-mapped pixel across both
+entertainment areas, so even a correct render could never show two held
+areas at two different colours. `spectra/services/
+hue_preview_colour.py` (kelvin/xy → sRGB, the SAME blackbody fit
+`houseSummary.ts::kelvinToHex` already used correctly) +
+`preview_layout.py`'s per-fixture/per-virtual `held` hex (from
+`house.hue_directive()`'s own look, `None` = draw the live render as
+before) is the fix; `positions.ts::withHeldOverlay` + `stage.ts` apply it
+in the Live view, `DevicePreviewStrip.tsx` in the top strip. Specs:
+`tests/test_hue_preview_colour.py`, `tests/test_preview_layout.py`,
+`node scripts/check_hue_preview_colour.mjs`.
+
 **Global Dark/Light mode** — day-one bar item, SPECTRA_SPEC.md §9 (`AGREED`,
 built, room-proof pending for the Light half — see below); NOT the same
 feature as the retired per-node Light Mode Chooser/§36, which shares only a

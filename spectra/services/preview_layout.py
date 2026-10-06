@@ -33,6 +33,24 @@ Which virtuals: the room's genuinely driven ones (room_topology) that are
 active and reach at least one fixture that emits light
 (`emitters.emits_light` — a dummy backs real virtuals and emits nothing).
 An empty ground truth means no restriction, never "nothing".
+
+A HELD HUE FIXTURE CARRIES ITS REAL COLOUR, NEVER THE STREAM'S (2026-10-06,
+`hue_preview_colour.py`'s own module docstring has the full defect). A Hue
+device's driving virtual never stops rendering while the device is
+FROZEN (held by house lighting or plain Ambient over REST) — so the
+preview stream, which taps that same render, shows whatever the room's
+ordinary show happens to paint there, unrelated to the colour the real
+bulb actually shows. On his "hues" virtual this is structural, not
+incidental: it is ONE shared effect pixel, copy-mapped onto every bulb
+across both entertainment areas, so even a perfectly correct render could
+never show two held areas at two different colours. `held` (per fixture,
+and a pixel-weighted mean per virtual for the top strip's single swatch)
+is resolved from `house.hue_directive()`'s own per-device look — the
+SAME tuple ambient.py sends to the bridge — converted through
+`hue_preview_colour.held_hex_for_look`; `None` means "not held, draw the
+live render exactly as before". `build_layout`/`virtual_layout` stay
+PURE (no live read inside them) — `current_layout()` is the one caller
+that resolves the live directive via `current_hue_looks()`.
 """
 from __future__ import annotations
 
@@ -143,8 +161,46 @@ def fixture_pixels(virtual: dict, devices: dict[str, dict]) -> Optional[dict]:
     }
 
 
-def virtual_layout(virtual: dict, devices: dict[str, dict]) -> Optional[dict]:
-    """One virtual's fixtures, or None when it reaches no fixture that emits."""
+def _held_hex(device_id: str, device_name: str, device_type: Optional[str], looks) -> Optional[str]:
+    """The colour a HELD Hue fixture actually shows right now, or `None` to
+    draw its live render unchanged (not Hue, no hold in effect, a `"show"`
+    look, or this bulb left to Home Assistant — see hue_preview_colour.py's
+    module docstring for the whole defect this closes)."""
+    if looks is None or str(device_type or "").lower() != "hue":
+        return None
+    from spectra.services import ambient, hue_preview_colour
+    name = (device_name or "").strip().lower()
+    if name and name in ambient.skipped_lights(device_id, looks):
+        return None
+    return hue_preview_colour.held_hex_for_look(ambient.look_for(device_id, looks))
+
+
+def _virtual_held_hex(fixtures: list[dict]) -> Optional[str]:
+    """A single swatch colour for the WHOLE virtual (the top strip has no
+    per-fixture granularity) — only when every fixture it reaches is
+    currently held; a mix of held/un-held or held/non-Hue draws the live
+    render instead, since this module has no render pixels to blend with.
+    A pixel-count-weighted mean, so a 10-bulb area doesn't get swamped by a
+    1-bulb one."""
+    if not fixtures or any(f["held"] is None for f in fixtures):
+        return None
+    hexes = {f["held"] for f in fixtures}
+    if len(hexes) == 1:
+        return next(iter(hexes))
+    from spectra.services import hue_preview_colour
+    total = sum(f["count"] for f in fixtures) or 1
+    r = g = b = 0.0
+    for f in fixtures:
+        cr, cg, cb = hue_preview_colour.hex_to_rgb(f["held"])
+        r += cr * f["count"]; g += cg * f["count"]; b += cb * f["count"]
+    return hue_preview_colour.rgb_to_hex((round(r / total), round(g / total), round(b / total)))
+
+
+def virtual_layout(virtual: dict, devices: dict[str, dict], hue_looks=None) -> Optional[dict]:
+    """One virtual's fixtures, or None when it reaches no fixture that emits.
+    `hue_looks` is `house.hue_directive().looks` (or the plain Ambient
+    equivalent) — the SAME tuple ambient.py sends to the bridge, resolved
+    ONCE by the caller rather than per fixture."""
     resolved = fixture_pixels(virtual, devices)
     if resolved is None:
         return None
@@ -153,26 +209,53 @@ def virtual_layout(virtual: dict, devices: dict[str, dict]) -> Optional[dict]:
     for fx in resolved["fixtures"]:
         device, pixels, src = fx["device"], fx["virtual_px"], fx["src"]
         kind, orient = ("matrix", "h") if rows > 1 else _kind(device, len(pixels))
+        name = (device.get("config") or {}).get("name") or fx["device_id"]
         fixtures.append({
             "device_id": fx["device_id"],
-            "name": (device.get("config") or {}).get("name") or fx["device_id"],
+            "name": name,
             "type": device.get("type"),
             "kind": kind, "orient": orient, "count": int(len(pixels)),
             "src": (None if np.array_equal(src, np.arange(len(src)))
                     else [int(i) for i in src]),
             "grid": [int(i) for i in pixels] if rows > 1 else None,
+            "held": _held_hex(fx["device_id"], name, device.get("type"), hue_looks),
         })
     return {
         "id": resolved["id"], "name": resolved["name"], "rows": rows,
         "cols": resolved["cols"], "cells": resolved["cells"],
         "mapping": "copy" if resolved["copy"] else "span",
         "hex_lattice": rows > 1 and _profile_hex(resolved["id"]),
+        "held": _virtual_held_hex(fixtures),
         "fixtures": fixtures,
     }
 
 
-def build_layout(raw: dict, driven: set[str], active: Callable[[dict], bool]) -> list[dict]:
-    """Pure: the fx config dict in, the drawable virtuals out."""
+def current_hue_looks():
+    """The look every live Hue device is currently held at, read fresh —
+    house lighting's own directive when it holds Hue, else `None` (no mode,
+    no Hue looks, or the house layer isn't driving — a plain, non-house
+    Ambient hold has no per-device look to show distinct areas with, so it
+    is left to the live render same as always). Never raises: a broken read
+    must not take the whole layout down with it. Called once by
+    `current_layout()` — never by `build_layout`/`virtual_layout`
+    themselves, which stay pure (fx config dict in, drawable virtuals out,
+    `hue_looks` an explicit argument) so a test can drive them without
+    touching any live store."""
+    try:
+        from spectra.services import house
+        directive = house.hue_directive()
+        return directive.looks if directive is not None else None
+    except Exception:                                    # noqa: BLE001
+        return None
+
+
+def build_layout(raw: dict, driven: set[str], active: Callable[[dict], bool],
+                 hue_looks=None) -> list[dict]:
+    """Pure: the fx config dict in, the drawable virtuals out. `hue_looks`
+    (the house hue_directive's own look tuples, `current_hue_looks()` for a
+    live caller) says which Hue fixtures are currently HELD and at what
+    colour — `None` (the default) means no override, draw every fixture's
+    live render exactly as before this field existed."""
     devices = {str(d.get("id")): d for d in raw.get("devices") or [] if d.get("id")}
     out = []
     for virtual in raw.get("virtuals") or []:
@@ -180,7 +263,7 @@ def build_layout(raw: dict, driven: set[str], active: Callable[[dict], bool]) ->
             continue
         if not active(virtual):
             continue
-        described = virtual_layout(virtual, devices)
+        described = virtual_layout(virtual, devices, hue_looks)
         if described is not None:
             out.append(described)
     # Four of his WLEDs are all named "WLED": a name shared by two fixtures
@@ -208,7 +291,8 @@ def current_layout() -> dict:
                 return bool(live_virtual.active)
         return virtual.get("active") is True
 
-    virtuals = build_layout(raw, room_topology.genuinely_driven_virtual_ids(), active)
+    virtuals = build_layout(raw, room_topology.genuinely_driven_virtual_ids(), active,
+                            hue_looks=current_hue_looks())
     favorites = set(device_preview.effective_favorite_ids())
     for virtual in virtuals:
         virtual["favorite"] = virtual["id"] in favorites

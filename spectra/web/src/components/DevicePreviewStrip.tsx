@@ -146,14 +146,16 @@
  * rectangle stays black — the crystal draws as the hexagon it is. One
  * ImageData per canvas is kept and rewritten; nothing is allocated per
  * frame. */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   frameColor, onDevicePreviewFrame, onDevicePreviewStatus,
   onDevicePreviewTabHiddenPause, setDevicePreviewLevel,
 } from '../api/devicePreviewWs';
 import type { PreviewFrame } from '../api/devicePreviewWs';
 import HelpLink from '../help/HelpLink';
-import { pauseDevicePreview, resumeDevicePreview, useDevicePreviewFavorites } from '../queries';
+import {
+  pauseDevicePreview, resumeDevicePreview, useDevicePreviewFavorites, useDevicePreviewLayout,
+} from '../queries';
 import type { DevicePreviewStatus } from '../types';
 import FavoritesPicker from './FavoritesPicker';
 import { useToast } from './Toast';
@@ -163,6 +165,12 @@ const DARK_PLACEHOLDER = 'rgb(40,40,40)';
 
 export default function DevicePreviewStrip() {
   const { data: favorites } = useDevicePreviewFavorites();
+  // Every HELD Hue favourite's own colour (services/preview_layout.py's
+  // `_virtual_held_hex`) — the whole point: a frozen Hue bulb's driving
+  // virtual never stops rendering (hue_preview_colour.py's own docstring),
+  // so without this the swatch shows the room's live show, not the colour
+  // the real bulb is actually held at.
+  const { data: layout } = useDevicePreviewLayout();
   const [status, setStatus] = useState<DevicePreviewStatus | null>(null);
   const [shapes, setShapes] = useState<Record<string, [number, number]>>({});
   const [expanded, setExpanded] = useState(() => localStorage.getItem(EXPANDED_KEY) === '1');
@@ -177,6 +185,13 @@ export default function DevicePreviewStrip() {
   const imageCache = useRef<Record<string, ImageData>>({});
   const maskedCache = useRef<Record<string, boolean>>({});
   const liveRef = useRef(false);
+  const heldRef = useRef<Record<string, string | null>>({});
+  const heldByVirtual = useMemo(() => {
+    const m: Record<string, string | null> = {};
+    (layout?.virtuals ?? []).forEach((v) => { m[v.id] = v.held; });
+    return m;
+  }, [layout]);
+  heldRef.current = heldByVirtual;
 
   useEffect(() => onDevicePreviewStatus(setStatus), []);
   useEffect(() => onDevicePreviewTabHiddenPause(setTabHiddenPause), []);
@@ -231,10 +246,34 @@ export default function DevicePreviewStrip() {
     const el = swatchRefs.current[id];
     if (el) el.style.backgroundColor = color;
   };
+  /** A held Hue favourite draws its real colour SOLID — never the stream,
+   * not even a per-pixel one, since every bulb it reaches shares the one
+   * colour this device is actually held at. */
+  const paintHeld = (id: string, hex: string) => {
+    const canvas = canvasRefs.current[id];
+    if (canvas && canvas.width && canvas.height) {
+      const ctx = canvas.getContext('2d');
+      if (ctx) { ctx.fillStyle = hex; ctx.fillRect(0, 0, canvas.width, canvas.height); }
+    }
+    paintSwatch(id, hex);
+  };
   const paintDevice = (id: string, frame: PreviewFrame) => {
     if (!liveRef.current) return;
+    const held = heldRef.current[id];
+    if (held) { paintHeld(id, held); return; }
     if (frame.kind === 'full') paintCanvas(id, frame);
     if (swatchRefs.current[id]) paintSwatch(id, frameColor(frame));
+  };
+  /** Repaint one favourite right now, from whatever is already known (no
+   * frame required) — held colour wins, else its latest frame, else the
+   * dark placeholder. Used when `held` itself changes, so a Set press is
+   * reflected without waiting for the next stream frame. */
+  const repaintNow = (id: string) => {
+    if (!liveRef.current) { paintHeld(id, DARK_PLACEHOLDER); return; }
+    const held = heldRef.current[id];
+    if (held) { paintHeld(id, held); return; }
+    const frame = latestFrames.current[id];
+    if (frame) paintDevice(id, frame);
   };
 
   // The single per-frame hot path: no setState, so a frame never triggers a
@@ -252,6 +291,13 @@ export default function DevicePreviewStrip() {
     });
     paintDevice(id, frame);
   }), []);
+
+  // `held` changes independently of the stream (a mode "Set" press, polled
+  // via the layout query) — repaint every mounted favourite immediately
+  // rather than waiting for its next frame.
+  useEffect(() => {
+    Object.keys({ ...canvasRefs.current, ...swatchRefs.current }).forEach(repaintNow);
+  }, [heldByVirtual]);
 
   // Full frames only while this strip draws them (module docstring).
   useEffect(() => {
@@ -335,6 +381,8 @@ export default function DevicePreviewStrip() {
                     ref={(el) => {
                       canvasRefs.current[id] = el;
                       if (!el) return;
+                      const held = heldRef.current[id];
+                      if (held && liveRef.current) { paintHeld(id, held); return; }
                       const frame = latestFrames.current[id];
                       if (frame && frame.kind === 'full' && liveRef.current) paintDevice(id, frame);
                       else blankCanvas(id);
@@ -347,11 +395,16 @@ export default function DevicePreviewStrip() {
                     ref={(el) => {
                       swatchRefs.current[id] = el;
                       if (!el) return;
-                      const frame = latestFrames.current[id];
-                      if (frame && liveRef.current) {
-                        paintSwatch(id, frameColor(frame));
+                      const held = heldRef.current[id];
+                      if (held && liveRef.current) {
+                        paintSwatch(id, held);
                       } else {
-                        paintSwatch(id, DARK_PLACEHOLDER);
+                        const frame = latestFrames.current[id];
+                        if (frame && liveRef.current) {
+                          paintSwatch(id, frameColor(frame));
+                        } else {
+                          paintSwatch(id, DARK_PLACEHOLDER);
+                        }
                       }
                     }}
                     className="device-preview-swatch"
