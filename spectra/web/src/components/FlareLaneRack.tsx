@@ -26,6 +26,8 @@ const kindIcon = (k: FlareKind): string =>
     : k.type === 'color_rotate' ? '🔄'
       : k.type === 'firework_burst' ? '🎆'
       : k.type === 'blob_rush' ? '🌠'
+      : k.type === 'pulse_flash' ? '⚡'
+      : k.type === 'pulse_flip' ? '🌗'
         : k.type === 'momentary' ? '↩' : '⚓';
 
 export interface RackDropTarget { mode: 'insert' | 'join'; anchor: string | null; }

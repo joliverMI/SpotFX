@@ -145,6 +145,22 @@ Per event, fed by the bridge with the fire's intensity:
                   firework_burst in every structural respect: an instant,
                   self-resetting, deliberately-unregistered count key, no
                   carry, no release, no lead.
+       pulse_flash / pulse_flip — the Singles' PULSE flares (single-led-
+                  power plan, phase 3): on every virtual whose live effect
+                  is Pulse, a FLASH (the light jumps by the effect's own
+                  flash_size x a strength of 0.4 + 0.6 x intensity, back to
+                  a tenth in its flash_ms) or a COLOUR FLIP (the hue turns
+                  flip_degrees at once and swings back round the wheel over
+                  flip_beats). Same shape as firework_burst in every
+                  structural respect — an instant, self-resetting,
+                  deliberately-unregistered poke key, no carry, no release,
+                  no lead — see _pulse_flash/_pulse_flip.
+  MINIMUM INTENSITY (FlareKind.min_intensity, any type; pulse_flip defaults
+  to 0.4): a kind fires only ABOVE its minimum. Below it the kind leaves its
+  lane's pool for that fire, exactly as a disabled kind does
+  (resolve_lane_picks — a lane-mate fires instead, and a lane left empty
+  says so), and the list that actually runs is filtered again on its own.
+  The intensity compared is the fire's own, before any band scale.
   Stepped-effect entries (SceneDeviceConfig.effect_steps) and surges — the
   stated interplay, simple on purpose: EFFECT SELECTION IS FIRE-TIME ONLY.
   A surge never switches an entry's effect; dice re-rolls re-resolve the
@@ -528,6 +544,21 @@ def firework_burst_rockets(intensity: float) -> int:
         intensity, FIREWORK_BURST_ROCKETS_GENTLE, FIREWORK_BURST_ROCKETS_HARD)))
 
 
+# PULSE FLASH (single-led-power plan, phase 3): the strength a flash flare
+# hands Pulse, 0.4 at intensity 0 to 1.0 at intensity 1 — the plan
+# prototype's own curve (evidence/proto.py: flash_gain x (0.4 + 0.6 x
+# intensity)), so a quiet flare still flashes faintly. The size it is a
+# fraction of (flash_size, 0.45) and the fade (flash_ms, 180) are Pulse's own
+# settings, tuned with the rest of the effect.
+PULSE_FLASH_STRENGTH_GENTLE = 0.4   # intensity 0.0
+PULSE_FLASH_STRENGTH_HARD = 1.0     # intensity 1.0
+
+
+def pulse_flash_strength(intensity: float) -> float:
+    return round(_intensity_scaled(
+        intensity, PULSE_FLASH_STRENGTH_GENTLE, PULSE_FLASH_STRENGTH_HARD), 4)
+
+
 # BLOB RUSH: his number, verbatim and fixed — "it just generates 12 blobs
 # all at once spread out fairly evenly". Deliberately NOT intensity-scaled
 # (unlike firework_burst's rocket count): he named one count, so there is
@@ -678,6 +709,7 @@ def select_band(bands: list[FlareBand], intensity: float) -> Optional[FlareBand]
 def resolve_lane_picks(band: FlareBand,
                        rng: Random,
                        declared: Optional[dict[str, FlareKind]] = None,
+                       intensity: Optional[float] = None,
                        ) -> tuple[list[str], list[dict]]:
     """LANES (owner ask, 2026-08-21): which of a fired band's attached kinds
     actually run THIS fire. band.kind_lanes (models/scene.py FlareBand — its
@@ -698,7 +730,13 @@ def resolve_lane_picks(band: FlareBand,
     WHO fires, never the execution order the same-param precedence
     tie-break reads; pick records for every genuine >1-member pool, for
     the fire record/show log so "why didn't my other colour flare run"
-    is a log lookup, not a mystery)."""
+    is a log lookup, not a mystery).
+
+    MINIMUM INTENSITY: with `intensity` given, a kind whose min_intensity
+    the fire does not exceed (FlareKind.fires_at) leaves its pool for this
+    fire exactly as a disabled one does; the record names it
+    (`below_min_intensity`) so "why didn't the flip fire" is a lookup too.
+    A solo kind gated this way gets a record of its own."""
     pools: dict[str, list[str]] = {}
     for name in band.kinds:
         lane = band.kind_lanes.get(name)
@@ -713,10 +751,23 @@ def resolve_lane_picks(band: FlareBand,
         kind = declared.get(name)
         return kind is None or kind.enabled
 
+    def _above_min(name: str) -> bool:
+        if declared is None or intensity is None:
+            return True
+        kind = declared.get(name)
+        return kind is None or kind.fires_at(intensity)
+
     picked: set[str] = set()
     records: list[dict] = []
     for lane_key, members in pools.items():
-        live = [n for n in members if _enabled(n)]
+        enabled = [n for n in members if _enabled(n)]
+        live = [n for n in enabled if _above_min(n)]
+        gated = [n for n in enabled if n not in live]
+        if gated:
+            records.append({"lane": lane_key, "below_min_intensity": gated,
+                            "intensity": round(float(intensity), 4)})
+        if not live and gated:
+            continue
         if not live:
             # EVERY member of this lane is disabled: the lane fires nothing
             # this time — never a silent substitution of a disabled member,
@@ -1149,15 +1200,17 @@ class ResponseEngine:
         by max(0, ...) — rode that later moment while its own flare
         preview still drew it exactly on the mark."""
         declared = {k.name: k for k in scene.flare_kinds}
-        picked_names, lane_picks = resolve_lane_picks(band, self._rng, declared)
+        picked_names, lane_picks = resolve_lane_picks(band, self._rng, declared,
+                                                      intensity)
         if lane_picks:
             record["lane_picks"] = lane_picks
         # Second, independent gate: resolve_lane_picks already dropped every
-        # disabled kind from its pool, but this list is what actually runs —
-        # checked here on its own rather than trusted to the pick above
-        # (the "check each choke point individually, never by family" rule).
+        # disabled kind (and every kind below its minimum intensity) from
+        # its pool, but this list is what actually runs — checked here on
+        # its own rather than trusted to the pick above (the "check each
+        # choke point individually, never by family" rule).
         attached = [(declared[n], band.kinds[n]) for n in picked_names
-                    if declared[n].enabled]
+                    if declared[n].enabled and declared[n].fires_at(intensity)]
         if not anchor_relocated:
             record.update(await self._run_kinds(scene, attached, intensity,
                                                 fire_seq))
@@ -1229,6 +1282,8 @@ class ResponseEngine:
         rotates = [(k, s) for k, s in attached if k.type == "color_rotate"]
         bursts = [(k, s) for k, s in attached if k.type == "firework_burst"]
         rushes = [(k, s) for k, s in attached if k.type == "blob_rush"]
+        flashes = [(k, s) for k, s in attached if k.type == "pulse_flash"]
+        flips = [(k, s) for k, s in attached if k.type == "pulse_flip"]
 
         carry: dict[tuple[str, str], Any] = {}
         jumps: dict[str, dict[str, Any]] = {}    # vid → params, instant
@@ -1316,6 +1371,21 @@ class ResponseEngine:
             kind_records.append({
                 "name": kind.name, "type": kind.type,
                 "scale": scale, **result["blob_rush"]})
+
+        if flashes:   # one flash per batch — a flash is a flash
+            kind, scale = flashes[0]
+            sel_intensity = max(0.0, min(1.0, intensity * scale))
+            result["pulse_flash"] = await self._pulse_flash(sel_intensity)
+            kind_records.append({
+                "name": kind.name, "type": kind.type,
+                "scale": scale, **result["pulse_flash"]})
+
+        if flips:   # one flip per batch — a flip is a flip
+            kind, scale = flips[0]
+            result["pulse_flip"] = await self._pulse_flip(intensity)
+            kind_records.append({
+                "name": kind.name, "type": kind.type,
+                "scale": scale, **result["pulse_flip"]})
 
         result["kinds"] = kind_records
         self.conductor.on_surge(carry)
@@ -1413,6 +1483,13 @@ class ResponseEngine:
         if scene is None:
             record["result"] = "no_active_scene"
             return record
+        if not kind.fires_at(intensity):
+            # The preview's intensity slider is there to show what a fire
+            # at that intensity does — below its minimum, this kind does
+            # nothing, and the preview says so rather than firing it.
+            record["result"] = "below_min_intensity"
+            record["min_intensity"] = kind.min_intensity
+            return record
         fire_seq = self._begin_fire()
         try:
             return await self._fire_kind_locked(scene, kind, intensity, record,
@@ -1456,6 +1533,10 @@ class ResponseEngine:
             record["firework_burst"] = await self._firework_burst(intensity)
         if kind.type == "blob_rush":
             record["blob_rush"] = await self._blob_rush(intensity)
+        if kind.type == "pulse_flash":
+            record["pulse_flash"] = await self._pulse_flash(intensity)
+        if kind.type == "pulse_flip":
+            record["pulse_flip"] = await self._pulse_flip(intensity)
         self.conductor.on_surge(carry)
         record["carried"] = [{"virtual_id": vid, "param": p} for (vid, p) in carry]
         record["result"] = "applied"
@@ -1911,6 +1992,56 @@ class ResponseEngine:
                                      {"blob_rush": BLOB_RUSH_BLOBS})
             targets += 1
         return {"blobs": BLOB_RUSH_BLOBS, "virtuals": targets}
+
+    async def _pulse_flash(self, intensity: float) -> dict:
+        """The PULSE FLASH flare (single-led-power plan, phase 3, his goal 7:
+        "brightness spikes, that jump in brightness and then quickly fade to
+        normal"): one instant jump of Pulse's own `flash` poke key, carrying
+        a strength of 0.4 + 0.6 x intensity (pulse_flash_strength), on every
+        virtual whose live effect is in fx.device_model.PULSE_FLARE_EFFECTS
+        — the membership-gate shape _firework_burst uses. The effect
+        edge-detects it, lifts its level by its own flash_size x strength
+        on the frame it lands, spends that rise from its own flash budget
+        (about three full-depth flashes a second; a flash that would
+        overspend is shrunk), fades it back to a tenth in its flash_ms, and
+        self-resets the key so the next fire edges again.
+
+        Nothing carries and nothing releases — the effect decays the flash
+        itself, so like firework_burst there is NO release queue for any of
+        the four drain points. `flash` is deliberately absent from the
+        effect-parameter registry, so it never enters the param/gain kinds'
+        jumps/glides dicts: it composes with every other kind in the band.
+        LEAD: none — the write is instant and the jump IS the animation."""
+        strength = pulse_flash_strength(intensity)
+        targets = 0
+        for vid, state in self.conductor.virtuals.items():
+            if state.effect_type not in device_model.PULSE_FLARE_EFFECTS:
+                continue
+            await self.executor.jump(vid, state.effect_type,
+                                     {"flash": strength})
+            targets += 1
+        return {"strength": strength, "virtuals": targets}
+
+    async def _pulse_flip(self, intensity: float) -> dict:
+        """The PULSE COLOUR FLIP flare (same plan, his goal 7: "a temporary
+        color rotation by 180 for the beat onset and fade out, but only at
+        intensities greater than .4"): one instant jump of Pulse's own
+        `flip` poke key on every Pulse virtual. The effect edge-detects it,
+        turns the shown colour's hue by its own flip_degrees (180) on the
+        frame it lands and swings it back over its flip_beats (0.75 beat)
+        as a HUE ROTATION — saturation and value held, so the return goes
+        round the colour wheel and never through grey or white. The ">.4"
+        is the kind's own min_intensity (0.4 by default for this type),
+        applied before this runs; `intensity` is recorded, not consulted.
+        Same structural shape as _pulse_flash: no carry, no release, no
+        lead, unregistered key."""
+        targets = 0
+        for vid, state in self.conductor.virtuals.items():
+            if state.effect_type not in device_model.PULSE_FLARE_EFFECTS:
+                continue
+            await self.executor.jump(vid, state.effect_type, {"flip": 1})
+            targets += 1
+        return {"intensity": round(intensity, 4), "virtuals": targets}
 
     def pending_color_rotate_holds(self) -> list[float]:
         """Distinct DWELLS still pending for the colour rotate-and-back

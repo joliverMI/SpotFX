@@ -233,6 +233,45 @@ def _scratch_engine(scene: SceneV2, intensity: float,
     return conductor, responder, writes
 
 
+PULSE_DEFAULT_BEAT_MS = 500.0   # the effect's own no-tempo fallback (120 bpm)
+
+
+def pulse_effect_ms(kind: FlareKind, conductor: DriftConductor) -> float | None:
+    """How long a Pulse flare's own animation runs on the scene's Pulse
+    virtual(s) — the flash's fade to a tenth (flash_ms) or the colour
+    flip's swing back (flip_beats x the beat) — read off the scene's own
+    Pulse config over the effect's schema defaults; the beat is the one the
+    Pulse feed is pushing now, else the effect's 120 bpm fallback. None for
+    any other kind, or when no Pulse virtual is in the scene (the flare
+    then writes nothing)."""
+    if kind.type not in ("pulse_flash", "pulse_flip"):
+        return None
+    from fx import device_model
+    from fx.effects.pulse import PulseAudioEffect
+    defaults = PulseAudioEffect.schema()({})
+    longest = None
+    for state in conductor.virtuals.values():
+        if state.effect_type not in device_model.PULSE_FLARE_EFFECTS:
+            continue
+        cfg = {**defaults, **state.param_baseline}
+        if kind.type == "pulse_flash":
+            ms = float(cfg["flash_ms"])
+        else:
+            beat_ms = float(cfg.get("beat_ms") or 0.0) or _live_beat_ms()
+            ms = float(cfg["flip_beats"]) * beat_ms
+        longest = ms if longest is None else max(longest, ms)
+    return None if longest is None else round(longest, 1)
+
+
+def _live_beat_ms() -> float:
+    try:
+        from spectra.services import pulse_feed
+        beat = pulse_feed.feed.status().get("beat_ms")
+    except Exception:                                    # noqa: BLE001
+        beat = None
+    return float(beat) if beat else PULSE_DEFAULT_BEAT_MS
+
+
 async def build_timeline(scene: SceneV2, kind: FlareKind,
                          intensity: float) -> dict[str, Any]:
     """The isolated single-kind execution timeline: every write fire_kind
@@ -279,6 +318,7 @@ async def build_timeline(scene: SceneV2, kind: FlareKind,
                else kind_lead_ms(kind, intensity, conductor.virtuals))
 
     writes = list(responder.executor.writes)
+    effect_ms = pulse_effect_ms(kind, conductor)
     if not writes:
         anchor_s = animation_anchor_s(MIN_TIMELINE_S)
         return {
@@ -301,6 +341,11 @@ async def build_timeline(scene: SceneV2, kind: FlareKind,
         }
     start_s = min(w["at"] for w in writes)
     end_s = max(w["at"] + w["duration_ms"] / 1000.0 for w in writes)
+    if effect_ms is not None:
+        # A Pulse flare's write is one instant poke; the animation is the
+        # effect's own (the flash's fade, the flip's swing back), so the
+        # ruler's end marker is where that animation finishes.
+        end_s = max(end_s, start_s + effect_ms / 1000.0)
     duration_s = max(MIN_TIMELINE_S, (end_s - start_s) + TAIL_PAD_S + 2.0)
     anchor_s = animation_anchor_s(duration_s)
     return {
@@ -311,6 +356,7 @@ async def build_timeline(scene: SceneV2, kind: FlareKind,
         "overrode_disabled": not kind.enabled,
         "animation_start_s": round(start_s - start_s, 4),
         "animation_end_s": round(end_s - start_s, 4),
+        "effect_animation_ms": effect_ms,
         "duration_s": round(duration_s, 4),
         "animation_anchor_s": round(anchor_s, 4),
         "trigger_mark_s": round(

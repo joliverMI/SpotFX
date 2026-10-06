@@ -121,6 +121,19 @@
         "fx/effects/modulate.py",
         "tests/test_gradient_breathing.py"
       ]
+    },
+    "pulse-effect": {
+      "skill": ".claude/skills/pulse-effect/SKILL.md",
+      "files": [
+        "fx/effects/pulse.py",
+        "scripts/check_pulse_effect.py",
+        "scripts/measure_singles_response.py",
+        "tests/pulse_song_harness.py",
+        "tests/test_pulse_effect.py",
+        "tests/test_pulse_engine_wiring.py",
+        "tests/test_pulse_rainbow_flares.py",
+        "tests/test_measure_singles_response.py"
+      ]
     }
   },
   "acknowledged_effect_gaps": {
@@ -134,7 +147,6 @@
       "fx/effects/noise2d.py",
       "fx/effects/pixelPattern.py",
       "fx/effects/pixelRange.py",
-      "fx/effects/pulse.py",
       "fx/effects/singleColor.py"
     ]
   },

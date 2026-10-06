@@ -290,6 +290,16 @@ FIREWORK_BURST_EFFECTS = frozenset({"fireworks", "fireworks1d"})
 # counts, and mirroring it there was not asked for.
 BLOB_RUSH_EFFECTS = frozenset({"blackhole"})
 
+# The effects carrying the Pulse flare pokes (single-led-power plan, phase
+# 3): `flash` (a strength — the light jumps and fades back) and `flip` (a
+# count — the colour turns 180° and swings back round the wheel), the same
+# edge-detected, self-resetting shape as burst_rockets/blob_rush and, like
+# them, deliberately absent from the registry: they ride ONLY the
+# pulse_flash / pulse_flip flare writes (spectra scene_response.
+# _pulse_flash/_pulse_flip). The size, angle and timing they produce are
+# Pulse's own registered settings.
+PULSE_FLARE_EFFECTS = frozenset({"pulse"})
+
 
 # ── effect-parameter registry ────────────────────────────────────────────────
 

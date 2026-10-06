@@ -15,7 +15,7 @@ plus DECLARED MECHANISMS:
   drift      — per-param creep/follow declarations (named profile with an
                inline one-off escape hatch, decision-4 pattern)
   flare_kinds — NAMED FLARE KINDS (the owner's item-8 shape, judged and
-               accepted): each kind is one of five types —
+               accepted): each kind is one of eight types —
                  drift_jump  jumps the drift: the colour-set jump through
                              the shipped selector, or a 🎲 re-roll for shape
                  momentary   a parameter spike that RETURNS to where it was
@@ -30,6 +30,12 @@ plus DECLARED MECHANISMS:
                  blob_rush   12 blobs appear at once, evenly spread, on
                              every live Black Hole, past its density cap —
                              see FlareKind's own docstring
+                 pulse_flash the Singles' Pulse light jumps in brightness
+                             and fades back in ~180 ms
+                 pulse_flip  the Singles' Pulse colour turns 180° at once and
+                             swings back round the wheel over 0.75 beat
+               Any kind may carry a min_intensity: it fires only ABOVE it
+               (pulse_flip defaults to 0.4) — see FlareKind's own docstring.
                A momentary/permanent kind's params are ParamTarget
                expressions (absolute / offset-from-baseline / random-in-
                range — see ParamTarget); INTENSITY-DRIVEN strength is the
@@ -274,9 +280,15 @@ class ParamTarget(BaseModel):
         return self
 
 
+# A flare kind type's minimum intensity when none is authored (FlareKind.
+# min_intensity). His goal 7: the colour flip "only at intensities greater
+# than .4".
+DEFAULT_MIN_INTENSITY: dict[str, float] = {"pulse_flip": 0.4}
+
+
 class FlareKind(BaseModel):
     """One NAMED flare kind — a first-class concept the scene declares and
-    its bands select. Five types, binding semantics:
+    its bands select. Eight types, binding semantics:
       drift_jump  jump the drift — jump="color_set" rolls the shipped
                   colour-set selector and JUMPS to the pick; jump="dice"
                   re-rolls the scene's 🎲 bindings (fresh shape). Both
@@ -330,6 +342,39 @@ class FlareKind(BaseModel):
                   firework_burst this type carries no jump/params/gain/
                   hold_ms of its own (see _shape below), and like
                   firework_burst there is nothing to release.
+      pulse_flash the FLASH flare (single-led-power plan, phase 3 — his goal
+                  7: "brightness spikes, that jump in brightness and then
+                  quickly fade to normal"): on every virtual whose live
+                  effect is Pulse (fx.device_model.PULSE_FLARE_EFFECTS) the
+                  light jumps by the effect's own flash_size (0.45, eye
+                  scale) x a strength of 0.4 + 0.6 x the fire's intensity,
+                  and falls back to a tenth in its flash_ms (180). Spent
+                  from the effect's own flash budget (about three
+                  full-depth flashes a second), so a run of flares can
+                  never strobe. The size and fade are Pulse SETTINGS (tuned
+                  with the rest of Pulse on the Initial Set tab), so this
+                  type carries no jump/params/gain/hold_ms; nothing
+                  carries and nothing releases — the effect decays it.
+      pulse_flip  the COLOUR FLIP flare (same plan, goal 7: "a temporary
+                  color rotation by 180 for the beat onset and fade out,
+                  but only at intensities greater than .4"): Pulse's colour
+                  turns its flip_degrees (180) at once and swings back over
+                  its flip_beats (0.75 beat) ROUND THE COLOUR WHEEL (a hue
+                  rotation, never a straight line through grey, which a Hue
+                  bulb shows as white). min_intensity defaults to 0.4 for
+                  this type, so it never fires at or below 0.4. Like
+                  pulse_flash: no jump/params/gain/hold_ms, nothing
+                  carries, nothing releases.
+    min_intensity (any type; None = no gate, except pulse_flip, which
+    defaults to 0.4) — the kind fires only when the fire's intensity is
+    strictly ABOVE it ("only at intensities greater than .4"). Gated where
+    a band's kinds are picked (scene_response.resolve_lane_picks: a kind
+    below its minimum leaves its lane's pool for this fire, like a
+    disabled one, so a lane-mate fires instead) and again on the list that
+    actually runs; the explicit single-kind preview (fire_kind) honours it
+    too and says so, since the preview's intensity slider is there to show
+    what a fire at that intensity does. The intensity compared is the
+    fire's own, before any band scale.
     gain is a brightness-envelope multiplier around the carried baseline;
     params are ParamTarget expressions (absolute/offset/random — see that
     type), name-broadcast to every virtual whose live effect carries the
@@ -388,12 +433,13 @@ class FlareKind(BaseModel):
     is unaffected."""
     name: str = Field(min_length=1)
     type: Literal["drift_jump", "momentary", "permanent", "color_rotate",
-                  "firework_burst", "blob_rush"]
+                  "firework_burst", "blob_rush", "pulse_flash", "pulse_flip"]
     jump: Optional[Literal["color_set", "dice"]] = None
     params: dict[str, ParamTarget] = Field(default_factory=dict)
     gain: float = Field(default=1.0, ge=0.0)
     hold_ms: Optional[int] = Field(default=None, ge=0, le=60_000)
     trigger_offset_ms: int = Field(default=0, ge=-60_000, le=60_000)
+    min_intensity: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     enabled: bool = True
     """Temporary disable for ONE flare kind (owner ask, 2026-08-27: "disable/
     enable flares" — the same plain, reversible, no-timer shape SceneV2.
@@ -432,8 +478,28 @@ class FlareKind(BaseModel):
                 for k, v in data["params"].items()}}
         return data
 
+    def fires_at(self, intensity: float) -> bool:
+        """True when a fire at `intensity` is above this kind's minimum
+        intensity (always, with no minimum)."""
+        return self.min_intensity is None or intensity > self.min_intensity
+
     @model_validator(mode="after")
     def _shape(self) -> "FlareKind":
+        if self.type in DEFAULT_MIN_INTENSITY and self.min_intensity is None:
+            self.min_intensity = DEFAULT_MIN_INTENSITY[self.type]
+        if self.type in ("pulse_flash", "pulse_flip"):
+            if self.jump is not None:
+                raise ValueError(
+                    f"kind '{self.name}' is {self.type} — jump belongs on a "
+                    f"drift_jump kind")
+            if self.params or self.gain != 1.0 or self.hold_ms is not None:
+                raise ValueError(
+                    f"kind '{self.name}' is {self.type} — its size, angle "
+                    f"and timing are the Pulse effect's own settings "
+                    f"(flash_size/flash_ms, flip_degrees/flip_beats — see "
+                    f"FlareKind's own docstring); params/gain/hold_ms "
+                    f"don't apply here and would silently do nothing")
+            return self
         if self.type == "drift_jump":
             if self.jump is None:
                 raise ValueError(

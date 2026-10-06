@@ -103,7 +103,8 @@ from fx import device_schema  # noqa: E402
 
 _KeyEnum = Literal[tuple(sorted(settings_console.SETTINGS_REGISTRY))]
 _SceneKeyEnum = Literal[tuple(sorted(scene_console.SCENE_SETTINGS_REGISTRY))]
-_FlareTypeEnum = Literal["drift_jump", "momentary", "permanent"]
+_FlareTypeEnum = Literal["drift_jump", "momentary", "permanent",
+                         "pulse_flash", "pulse_flip"]
 _JumpEnum = Literal["color_set", "dice"]
 _CopyFieldEnum = Literal[tuple(scene_console.COPYABLE_DEVICE_ENTRY_FIELDS)]
 _DeviceTypeEnum = Literal[tuple(device_schema.device_types())]
@@ -263,16 +264,21 @@ async def set_flare_kind(scene_id: str, name: str, type: _FlareTypeEnum,  # noqa
                          gain: Optional[float] = None,
                          hold_ms: Optional[int] = None,
                          enabled: Optional[bool] = None,
-                         trigger_offset_ms: Optional[int] = None) -> dict:
+                         trigger_offset_ms: Optional[int] = None,
+                         min_intensity: Optional[float] = None) -> dict:
     """Create or update one NAMED flare kind on one scene, matched by name.
     enabled=false disables it (never fires automatically); omit to leave
     the current setting alone. trigger_offset_ms is signed ms relative to
     the trigger mark, NEGATIVE = EARLIER; omit to keep the stored value.
-    hold_ms is a momentary kind's spike length. On an update, params, gain,
-    jump and hold_ms are omit-means-keep too: send only what changes."""
+    hold_ms is a momentary kind's spike length. min_intensity (0..1) fires
+    the kind only ABOVE that intensity (pulse_flip defaults to 0.4).
+    pulse_flash / pulse_flip are the Singles' Pulse flash and colour flip.
+    On an update, params, gain, jump, hold_ms and min_intensity are
+    omit-means-keep too: send only what changes."""
     return await _call("set_flare_kind", scene_id=scene_id, name=name, type=type,
                        jump=jump, params=params, gain=gain, hold_ms=hold_ms,
-                       enabled=enabled, trigger_offset_ms=trigger_offset_ms)
+                       enabled=enabled, trigger_offset_ms=trigger_offset_ms,
+                       min_intensity=min_intensity)
 
 
 @mcp.tool()

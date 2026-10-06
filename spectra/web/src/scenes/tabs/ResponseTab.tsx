@@ -49,6 +49,8 @@ const kindIcon = (k: FlareKind): string =>
     : k.type === 'color_rotate' ? '🔄'
       : k.type === 'firework_burst' ? '🎆'
       : k.type === 'blob_rush' ? '🌠'
+      : k.type === 'pulse_flash' ? '⚡'
+      : k.type === 'pulse_flip' ? '🌗'
         : k.type === 'momentary' ? '↩' : '⚓';
 
 const kindTypeLabel = (k: FlareKind): string =>
@@ -74,6 +76,9 @@ const kindContent = (k: FlareKind): string => {
   for (const [p, t] of Object.entries(k.params ?? {})) bits.push(targetContent(p, t));
   if (k.gain !== 1) bits.push(`gain ×${k.gain}`);
   if (k.hold_ms != null) bits.push(`hold ${k.hold_ms} ms`);
+  if (k.type === 'pulse_flash') bits.push('Pulse flashes brighter and fades back');
+  if (k.type === 'pulse_flip') bits.push('Pulse colour turns 180° and swings back');
+  if (k.min_intensity != null) bits.push(`only above intensity ${k.min_intensity}`);
   return bits.join(' · ');
 };
 
@@ -83,6 +88,8 @@ const TYPE_HINT: Record<string, string> = {
   permanent: 'Lands and BECOMES the new baseline drift carries from. Same target expressions as momentary (absolute / offset / random), just never released.',
   color_rotate: 'Rotates the live foreground colour\'s hue and returns it — degrees, ramp-in, dwell, and fade-back all scale from the fire\'s intensity; no knobs of its own.',
   blob_rush: 'Twelve blobs appear at once on every live Black Hole, spread fairly evenly around the circle — arriving from the panel edge as it falls in, or leaving the event horizon while it is reversed. They ignore the effect\'s max-blob cap and disturb nothing already on screen; no knobs of its own.',
+  pulse_flash: 'On the Singles\' Pulse light: an instant jump in brightness that fades back to normal in about 180 ms (Pulse\'s Flash Flare Size and Fade settings), bigger at higher intensity. Spent from the same flash budget as hits, so a run of flares never strobes.',
+  pulse_flip: 'On the Singles\' Pulse light: the colour turns 180° at once and swings back round the colour wheel over three quarters of a beat — never through grey or white. Fires only above intensity 0.4 unless the kind sets its own minimum.',
   firework_burst: 'Explodes extra payoff rockets the instant the flare fires, on every live fireworks effect — 3 rockets at intensity 0 up to 6 at intensity 1, on top of whatever the scene is already launching; no knobs of its own.',
 };
 
@@ -226,6 +233,12 @@ export default function ResponseTab({ scene, setScene, classes, helpTopic }: {
         <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
           Flare kinds <HelpLink topic="flare-kinds" />
           <HelpLink topic="flare-disable" title="Switching a flare off" />
+          {kinds.some((k) => k.min_intensity != null) && (
+            <HelpLink topic="flare-min-intensity" title="Minimum intensity" />
+          )}
+          {kinds.some((k) => k.type === 'pulse_flash' || k.type === 'pulse_flip') && (
+            <HelpLink topic="pulse-flares" title="Pulse flash and colour flip" />
+          )}
           <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 'normal' }}>
             tap/double-click a kind to rename, delete, or copy — drag it into a lane below to attach it
           </span>

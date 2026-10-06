@@ -77,12 +77,55 @@ INPUTS THE ENGINE PUSHES (phase 2) — hooks with safe defaults:
   identical later write edges again. A charge or lull that ends without a
   drop eases back over EXIT_BLEND_S instead of snapping.
 
+RAINBOW WALK (phase 3). When the colour it is given is a RAINBOW — a
+gradient whose stops span more than RAINBOW_SPAN_DEG of hue, the same test
+the colour journey and the compiler use (SpotFX hands Pulse the strips'
+whole gradient in a rainbow set, spectra scene_compiler.set_entries_for) —
+and `rainbow_walk` is on, the light walks along that gradient instead of
+showing its first colour: a step of `rainbow_step` (1/7) on each solid hit
+(strength above RAINBOW_STEP_MIN_STRENGTH, no more often than every
+RAINBOW_MIN_GAP_BEATS), a drift of `rainbow_drift` (2%) per bar between
+hits, each change glided over RAINBOW_GLIDE_S so a step reads as a jump
+without a hard cut. The walk samples the same gradient curve the strips
+render, so every colour it shows is one the strips are showing. One pixel
+per virtual, so every Hue bulb shows the same colour.
+
+FLARES (phase 3) — two poke keys, the burst_rockets pattern (fx/VENDOR.md
+#15): written by SpotFX's pulse_flash / pulse_flip flare kinds,
+edge-detected in config_updated, consumed in render, self-reset to 0 so an
+identical later write edges again; a stale persisted value never fires on
+a fresh instance.
+- `flash` (0..1, a strength): the level jumps by `flash_size` x strength
+  on the frame it lands and falls back to a tenth in `flash_ms` (180).
+  Spent from the SAME flash budget as hits: a flash that would overspend
+  is shrunk to what is left. Scaled down by a lull's own fade so a lull
+  still reaches black on time.
+- `flip` (a count): the colour's hue turns `flip_degrees` (180) at once
+  and swings back over `flip_beats` (0.75 beat), eased to land exactly at
+  zero. The swing is a HUE rotation of the shown colour (saturation and
+  value held), so it travels round the colour wheel and never through
+  grey or white, which a Hue bulb would show as white. Whether a flip
+  fires at all (only above intensity 0.4 by default) is decided by the
+  flare kind's minimum intensity before the write.
+
+THE OUTPUT GUARD backs the budget up on the light actually delivered: the
+rises really sent in the last second may not pass `max_flash_rate` either
+(a hit's attack under a flash, or a charge's climb under hits, deliver more
+through the bulb curve than either booked). It only ever lowers a rise,
+lets the drop's landing frame through, and with nothing overspent changes
+nothing.
+
+THE BUDGET'S CLOCK is the render clock (`_render_t`), not the audio clock:
+a flare flash lands with or without audio arriving, and a budget window
+that only audio advances would never expire if the audio stopped.
+
 State that must survive config writes lives in _init_state (created once);
 config_updated only edge-detects the phase, because Effect._apply_config
 runs it on EVERY write and on EVERY frame of a param tween.
 """
 
 import collections
+import colorsys
 import logging
 import math
 
@@ -126,6 +169,17 @@ CHARGE_FADE_X = 0.55         # fades shorten to this fraction by charge end
 EXIT_BLEND_S = 1.0           # charge/lull ending without a drop eases back
 BURST_DONE = 0.01            # drop burst below this = settled
 
+# rainbow walk
+RAINBOW_SPAN_DEG = 180.0     # a gradient spanning more hue than this walks
+ACHROMATIC_WEIGHT = 0.05     # a stop below this saturation x value has no hue
+RAINBOW_STEP_MIN_STRENGTH = 0.35   # only solid hits step
+RAINBOW_MIN_GAP_BEATS = 0.45       # at most one step per this many beats
+RAINBOW_GLIDE_S = 0.07       # a step glides over this (reads as a jump)
+BEATS_PER_BAR = 4.0
+
+# flares
+FLASH_DONE = 1e-3            # a flash below this has faded
+
 HIT_LOG_LEN = 4096
 
 
@@ -141,6 +195,44 @@ def _smooth(x):
 def _per_frame(alpha_60, dt):
     """A per-60-Hz-frame smoothing factor, rescaled to step `dt`."""
     return 1.0 - (1.0 - alpha_60) ** (dt * 60.0)
+
+
+def chromatic_span_deg(gradient) -> float:
+    """The smallest arc of the colour wheel holding every chromatic stop of
+    a colour/gradient string (a solid spans 0) — the colour journey's own
+    rainbow measure (spectra color_wheel), restated here because fx/ may
+    not import spectra/."""
+    from fx.color import parse_gradient
+
+    try:
+        parsed = parse_gradient(gradient)
+    except Exception:
+        return 0.0
+    stops = [c for c, _pos in getattr(parsed, "colors", [])] or [parsed]
+    hues = []
+    for c in stops:
+        try:
+            r, g, b = (float(v) / 255.0 for v in c)
+        except Exception:
+            continue
+        h, s_, v = colorsys.rgb_to_hsv(r, g, b)
+        if s_ * v >= ACHROMATIC_WEIGHT:
+            hues.append(h * 360.0)
+    if len(hues) < 2:
+        return 0.0
+    ordered = sorted(h % 360.0 for h in hues)
+    gaps = [b - a for a, b in zip(ordered, ordered[1:])]
+    gaps.append(360.0 - ordered[-1] + ordered[0])
+    return 360.0 - max(gaps)
+
+
+def rotate_hue(rgb, degrees: float) -> np.ndarray:
+    """`rgb` (0..255) with its hue turned by `degrees`, saturation and value
+    held — a turn round the colour wheel, never a path through grey."""
+    r, g, b = (min(1.0, max(0.0, float(v) / 255.0)) for v in rgb)
+    h, s_, v = colorsys.rgb_to_hsv(r, g, b)
+    h = (h + degrees / 360.0) % 1.0
+    return np.asarray(colorsys.hsv_to_rgb(h, s_, v), dtype=float) * 255.0
 
 
 class PulseAudioEffect(AudioReactiveEffect, GradientEffect):
@@ -166,6 +258,8 @@ class PulseAudioEffect(AudioReactiveEffect, GradientEffect):
         "beat_ms",
         "phase",
         "phase_progress",
+        "flash",
+        "flip",
     ]
 
     CONFIG_SCHEMA = vol.Schema(
@@ -256,6 +350,51 @@ class PulseAudioEffect(AudioReactiveEffect, GradientEffect):
                 default=2.0,
             ): vol.All(vol.Coerce(float), vol.Range(min=0.1, max=16.0)),
             vol.Optional(
+                "rainbow_walk",
+                description="Walk a rainbow gradient on hits instead of showing its first colour",
+                default=True,
+            ): bool,
+            vol.Optional(
+                "rainbow_step",
+                description="How far along the rainbow each solid hit steps (fraction of the gradient)",
+                default=0.142857,  # one seventh
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=0.5)),
+            vol.Optional(
+                "rainbow_drift",
+                description="How far along the rainbow it drifts per bar between hits",
+                default=0.02,
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=0.25)),
+            vol.Optional(
+                "flash_size",
+                description="How far a flash flare lifts the light (eye scale)",
+                default=0.45,
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1.0)),
+            vol.Optional(
+                "flash_ms",
+                description="Time for a flash flare to fall to a tenth (ms)",
+                default=180.0,
+            ): vol.All(vol.Coerce(float), vol.Range(min=20.0, max=2000.0)),
+            vol.Optional(
+                "flip_degrees",
+                description="How far a colour-flip flare turns the hue (degrees)",
+                default=180.0,
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=360.0)),
+            vol.Optional(
+                "flip_beats",
+                description="Beats for a colour flip to swing back round the wheel",
+                default=0.75,
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.05, max=8.0)),
+            vol.Optional(
+                "flash",
+                description="Flash flare poke: strength 0..1 (written by SpotFX, self-resets)",
+                default=0.0,
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1.0)),
+            vol.Optional(
+                "flip",
+                description="Colour-flip flare poke (written by SpotFX, self-resets)",
+                default=0,
+            ): vol.All(vol.Coerce(int), vol.Range(min=0, max=1_000_000)),
+            vol.Optional(
                 "energy",
                 description="Section intensity, 0 calm to 1 intense (pushed by SpotFX)",
                 default=0.5,
@@ -313,13 +452,38 @@ class PulseAudioEffect(AudioReactiveEffect, GradientEffect):
         self._phase_pending = None
         cfg["phase"] = "none"
         cfg["phase_progress"] = 0.0
-        # flash budget: deque of [audio_t, delivered-light rise]
+        # render clock: the flash budget's time base (see module docstring)
+        self._render_t = 0.0
+        # flash budget: deque of [render_t, delivered-light rise]
         self._flash_window = collections.deque()
         self._hit_entry = [0.0, 0.0]
+        # the output guard: [render_t, rise] of what was actually DELIVERED
+        self._out_window = collections.deque()
+        self._lin_prev = 0.0
+        self._drop_landing = False
+        self.guarded_frames = 0
+        # rainbow walk (positions are fractions of the gradient, unwrapped)
+        self._walk_pos = 0.0
+        self._walk_target = 0.0
+        self._last_step = -1e9
+        self._rainbow_cache = (None, False)
+        # flare pokes (creation baseline: a stale persisted poke never fires)
+        self._flash = 0.0
+        self._flash_seen = 0.0
+        self._flash_pending = 0.0
+        self._flip_seen = 0
+        self._flip_pending = False
+        self._flip_t = None
+        cfg["flash"] = 0.0
+        cfg["flip"] = 0
         # diagnostics (read by tests and the check script)
         self.level = 0.0
         self.white = 0.0
+        self.hue_offset = 0.0
+        self.shown_colour = np.zeros(3)
         self.hits = collections.deque(maxlen=HIT_LOG_LEN)
+        self.steps = collections.deque(maxlen=HIT_LOG_LEN)    # (audio_t, target)
+        self.flashes = collections.deque(maxlen=HIT_LOG_LEN)  # (render_t, wanted, landed)
 
     def config_updated(self, config):
         if not hasattr(self, "_env"):
@@ -327,6 +491,18 @@ class PulseAudioEffect(AudioReactiveEffect, GradientEffect):
             return
         new_phase = self._config.get("phase", "none")
         self._phase_pending = new_phase if new_phase != self._phase else None
+        # flare pokes: edge-detected like burst_rockets (a write that changes
+        # the value arms; render consumes and self-resets the key to 0)
+        new_flash = float(self._config.get("flash", 0.0) or 0.0)
+        if new_flash != self._flash_seen:
+            self._flash_seen = new_flash
+            if new_flash > 0.0:
+                self._flash_pending = max(self._flash_pending, new_flash)
+        new_flip = int(self._config.get("flip", 0) or 0)
+        if new_flip != self._flip_seen:
+            self._flip_seen = new_flip
+            if new_flip > 0:
+                self._flip_pending = True
 
     def _refresh_bg_render_state(self):
         # One colour, no background: whatever background a colour set writes
@@ -405,6 +581,7 @@ class PulseAudioEffect(AudioReactiveEffect, GradientEffect):
             sharp = min(1.0, rise / (SHARP_REF * pk))
             self._last_hit = t
             self._start_hit(strength, sharp)
+            self._maybe_step(strength)
         elif self._attacking and rise > 0 and over > 0:
             # the hit is still growing: let the peak follow it (budget-capped)
             grown = min(1.0, over / pk) ** PEAK_EXP
@@ -433,26 +610,66 @@ class PulseAudioEffect(AudioReactiveEffect, GradientEffect):
         self._attacking = delta > 1e-9
         self._attack_left = rise_s
         self._attack_v = (delta / rise_s) if rise_s > 0 else math.inf
-        self._hit_entry = [self._audio_t, self._swing(target)]
+        self._hit_entry = [self._render_t, self._swing(target)]
         self._flash_window.append(self._hit_entry)
         self.hits.append(
             (self._audio_t, strength, sharp, rise_ms, want, target)
         )
 
+    def _maybe_step(self, strength):
+        """A solid hit steps the rainbow walk (audio thread, under the lock)."""
+        if strength <= RAINBOW_STEP_MIN_STRENGTH or not self._walking():
+            return
+        if self._render_t - self._last_step < RAINBOW_MIN_GAP_BEATS * self.beat_s():
+            return
+        self._last_step = self._render_t
+        self._walk_target += self._config["rainbow_step"]
+        self.steps.append((self._audio_t, self._walk_target))
+
     # ── flash-rate budget ────────────────────────────────────────────────
 
     def _budget_left(self):
         win = self._flash_window
-        cutoff = self._audio_t - FLASH_WINDOW_S
+        cutoff = self._render_t - FLASH_WINDOW_S
         while win and win[0][0] <= cutoff:
             win.popleft()
         used = sum(w[1] for w in win)
         return max(0.0, self._config["max_flash_rate"] - used)
 
-    def _swing(self, env):
-        """Rise in delivered light (0..1) if the envelope went to `env` now."""
+    def _guard_output(self, lin):
+        """THE OUTPUT GUARD: the flash budget held on the light actually
+        delivered, not only on what hits and flashes booked. Booking is
+        predictive (a hit books its whole rise when it starts), and through
+        the bulb curve two things rising together — a hit's attack under a
+        flash flare, a charge's climb under hits — deliver more than either
+        booked alone. So the rises actually sent in the last second are
+        summed too, and a frame that would take that sum past
+        max_flash_rate rises only by what is left. The drop's landing frame
+        is let through (a drop is never shrunk) and spends the window like
+        any other rise. Only ever lowers a rise; with nothing overspent it
+        changes nothing."""
+        rise = lin - self._lin_prev
+        if rise > 0.0:
+            win = self._out_window
+            cutoff = self._render_t - FLASH_WINDOW_S + 1e-9
+            while win and win[0][0] <= cutoff:
+                win.popleft()
+            left = max(0.0, self._config["max_flash_rate"] - sum(w[1] for w in win))
+            if rise > left and not self._drop_landing:
+                lin = self._lin_prev + left
+                rise = left
+                self.guarded_frames += 1
+            if rise > 0.0:
+                win.append([self._render_t, rise])
+        self._drop_landing = False
+        self._lin_prev = lin
+        return lin
+
+    def _swing(self, env, flash=None):
+        """Rise in delivered light (0..1) if the envelope went to `env` (and
+        the flash to `flash`, default: as it is) now."""
         g = self._config["gamma"]
-        return max(0.0, self._compose(env)[0] ** g - self.level ** g)
+        return max(0.0, self._compose(env, flash)[0] ** g - self.level ** g)
 
     def _budget_cap(self):
         """The largest envelope value this hit may reach without the last
@@ -501,12 +718,14 @@ class PulseAudioEffect(AudioReactiveEffect, GradientEffect):
         p = self._config.get("phase_progress", 0.0)
         return min(1.0, max(0.0, float(p)))
 
-    def _compose(self, env):
+    def _compose(self, env, flash=None):
         """Eye-scale level for envelope `env` under the CURRENT energy, phase,
-        burst and blend state. Pure (mutates nothing): the flash budget asks
-        it about hypothetical envelopes. Returns (level, rest)."""
+        burst, blend and flash state (`flash` overrides the flash level).
+        Pure (mutates nothing): the flash budget asks it about hypothetical
+        envelopes and flashes. Returns (level, rest)."""
         rest, depth = self._rest_and_depth()
         floor = rest
+        keep = 1.0
         ph = self._phase
         if ph == "charge":
             prog = self._progress()
@@ -529,6 +748,10 @@ class PulseAudioEffect(AudioReactiveEffect, GradientEffect):
         if self._blend_from is not None:
             s = _smooth(self._blend_t / EXIT_BLEND_S)
             level = _lerp(self._blend_from, level, s)
+        fl = self._flash if flash is None else flash
+        if fl > 0.0:
+            # a lull's fade scales a flash too, so the lull still lands black
+            level += fl * keep
         return min(1.0, max(0.0, level)), rest
 
     # ── phases ───────────────────────────────────────────────────────────
@@ -553,9 +776,10 @@ class PulseAudioEffect(AudioReactiveEffect, GradientEffect):
             self._blend_from = None
             g = self._config["gamma"]
             self._burst = 1.0
+            self._drop_landing = True   # the output guard lets it through
             # never shrunk, but spent: hits right after a drop are
             rise = max(0.0, self._config["drop_burst"] ** g - self.level**g)
-            self._flash_window.append([self._audio_t, rise])
+            self._flash_window.append([self._render_t, rise])
             return
         if phase == "lull":
             # fade from where the light actually rests now (mid-ease: from
@@ -595,6 +819,82 @@ class PulseAudioEffect(AudioReactiveEffect, GradientEffect):
             self._phase = "none"
             self._self_reset_phase()
 
+    # ── flares ───────────────────────────────────────────────────────────
+
+    def _self_reset_poke(self, key, value):
+        self._apply_config({key: value}, validate=False, fire_event=False)
+
+    def _land_flash(self, strength):
+        """A flash flare of `strength` (0..1) lands NOW: the level jumps by
+        flash_size x strength, shrunk to what the flash budget has left."""
+        want = self._config["flash_size"] * min(1.0, max(0.0, strength))
+        landed = self._flash
+        if want > self._flash:
+            budget = self._budget_left()
+            if self._swing(self._env, want) <= budget:
+                landed = want
+            else:
+                lo, hi = self._flash, want
+                for _ in range(24):
+                    mid = 0.5 * (lo + hi)
+                    if self._swing(self._env, mid) <= budget:
+                        lo = mid
+                    else:
+                        hi = mid
+                landed = lo
+            rise = self._swing(self._env, landed)
+            if rise > 0.0:
+                self._flash_window.append([self._render_t, rise])
+            self._flash = landed
+        self.flashes.append((self._render_t, want, landed))
+
+    def _consume_pokes(self):
+        if self._flash_pending > 0.0:
+            strength, self._flash_pending = self._flash_pending, 0.0
+            self._land_flash(strength)
+            self._self_reset_poke("flash", 0.0)
+        if self._flip_pending:
+            self._flip_pending = False
+            self._flip_t = 0.0
+            self._self_reset_poke("flip", 0)
+
+    def _flip_offset(self, dt):
+        """The colour flip's hue offset this frame (degrees), then advance
+        its clock. Full angle on the frame it lands, back to exactly 0 at
+        flip_beats x beat, eased (smoothstep) so it lingers on the flipped
+        colour for the onset and settles gently onto the original."""
+        if self._flip_t is None:
+            return 0.0
+        span = max(1e-3, self._config["flip_beats"] * self.beat_s())
+        s = self._flip_t / span
+        if s >= 1.0:
+            self._flip_t = None
+            return 0.0
+        offset = self._config["flip_degrees"] * (1.0 - _smooth(s))
+        self._flip_t += dt
+        return offset
+
+    # ── rainbow walk ─────────────────────────────────────────────────────
+
+    def _walking(self):
+        """True while the colour is a rainbow and the walk is switched on."""
+        if not self._config.get("rainbow_walk", True):
+            return False
+        grad = self._config.get("gradient")
+        key, rainbow = self._rainbow_cache
+        if key != grad:
+            rainbow = chromatic_span_deg(grad) > RAINBOW_SPAN_DEG
+            self._rainbow_cache = (grad, rainbow)
+        return rainbow
+
+    def _advance_walk(self, dt):
+        if not self._walking():
+            return
+        bar = BEATS_PER_BAR * self.beat_s()
+        self._walk_target += self._config["rainbow_drift"] * dt / max(1e-3, bar)
+        self._walk_pos += (self._walk_target - self._walk_pos) * (
+            1.0 - math.exp(-dt / RAINBOW_GLIDE_S))
+
     # ── render ───────────────────────────────────────────────────────────
 
     def _advance_envelope(self, dt):
@@ -616,17 +916,22 @@ class PulseAudioEffect(AudioReactiveEffect, GradientEffect):
         self._env *= math.exp(-dt / tau)
 
     def colour(self):
-        """The light's colour: the gradient's first colour (0..255 RGB)."""
-        return np.asarray(self.get_gradient_color(0.0), dtype=float)
+        """The light's colour before any flip (0..255 RGB): where the walk
+        has got to on a rainbow, else the gradient's first colour."""
+        pos = (self._walk_pos % 1.0) if self._walking() else 0.0
+        return np.asarray(self.get_gradient_color(pos), dtype=float)
 
     def render(self):
         dt = min(max(float(self.passed), 0.0), DT_MAX)
+        self._render_t += dt
         target_e = float(self._config["energy"])
         self._energy_live += (target_e - self._energy_live) * (
             1.0 - math.exp(-dt / ENERGY_SLEW_S)
         )
         self._phase_step(dt)
         self._advance_envelope(dt)
+        self._consume_pokes()
+        self._advance_walk(dt)
         level, self._rest = self._compose(self._env)
         white = self._config["drop_white"] * self._burst**2
         if self._burst > 0.0:
@@ -638,8 +943,22 @@ class PulseAudioEffect(AudioReactiveEffect, GradientEffect):
             self._blend_t += dt
             if self._blend_t >= EXIT_BLEND_S:
                 self._blend_from = None
+        if self._flash > 0.0:
+            tau = self._config["flash_ms"] / 1000.0 / LN10
+            self._flash *= math.exp(-dt / max(1e-3, tau))
+            if self._flash < FLASH_DONE:
+                self._flash = 0.0
+        offset = self._flip_offset(dt)
+        colour = self.colour()
+        if offset:
+            colour = rotate_hue(colour, offset)
+        g = self._config["gamma"]
+        lin = self._guard_output(level ** g)
+        if lin < level ** g:
+            level = lin ** (1.0 / g)
         self.level = level
         self.white = white
-        lin = level ** self._config["gamma"]
-        rgb = (self.colour() * (1.0 - white) + 255.0 * white) * lin
+        self.hue_offset = offset
+        self.shown_colour = colour
+        rgb = (colour * (1.0 - white) + 255.0 * white) * lin
         self.pixels[:] = rgb
