@@ -1503,3 +1503,25 @@ against that commit.
     from the bridges). A missing file allows nothing. The entertainment
     STREAM (devices/hue.py) is not a REST light write and is unchanged.
     Proof: `tests/test_hue_scope.py`.
+51. `effects/pulse.py`: an ENTIRELY NEW, SpotFX-authored effect, registry
+    id `pulse` (single-led-power plan, phase 1, 2026-10-06; the Admiral
+    approved the plan "with all recommendations"). Not in the fork source at
+    `/home/javi/ledfx-src`. A one-colour light for the Singles, where Power
+    runs at ONE pixel and is mostly inert (no sparks, its bass overlay never
+    fires, brightness only moving 0.64-0.71). Live hit detection against the
+    music's own recent level (size and sharpness), a rise from 160 ms (soft)
+    to one frame (sharp), a fade counted in beats from intensity, a resting
+    level and pulse depth that scale with intensity, a smallest pulse, an
+    eye-scale level converted by a `gamma` bulb curve, a flash budget of
+    about three full-depth flashes a second (a luminance budget, with a red
+    control in the tests), and NO background layer
+    (`_refresh_bg_render_state` switches it off, so a colour set's Singles
+    background never paints under it). `energy`, `beat_ms` and
+    `phase`/`phase_progress` are hooks with safe defaults; nothing pushes
+    them yet and `pulse` is deliberately NOT in `device_model.PHASE_EFFECTS`
+    or `config/effect_params.json` (phase 2 wires both). Power is untouched
+    and stays bound everywhere. Proof: `tests/test_pulse_effect.py` (the
+    contract on the real class, plus Dopamine / Contra / Let It Be / Soy
+    Peor from `tests/fixtures/pulse`), `scripts/check_pulse_effect.py` (the
+    whole pipeline from his captured WAVs, and that the fixture-driven run
+    lands on the same light frame by frame).

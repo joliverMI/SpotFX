@@ -134,6 +134,7 @@
       "fx/effects/noise2d.py",
       "fx/effects/pixelPattern.py",
       "fx/effects/pixelRange.py",
+      "fx/effects/pulse.py",
       "fx/effects/singleColor.py"
     ]
   },

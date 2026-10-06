@@ -8298,6 +8298,46 @@ tunable, not tuned. Proof: `scripts/check_fish.py`,
 `scripts/check_fish_disperse.py`, `tests/test_fish.py`,
 `tests/test_fish_camera.py`, `tests/test_fish_disperse.py`.
 
+## Pulse (`fx/effects/pulse.py`) — the Singles' one-colour effect, phase 1 of 4
+
+The single-led-power plan (`/home/javi/fleet-spotfx/data/single-led-power-plan/
+report.md`, approved by the Admiral "with all recommendations") replaces
+Power on the Singles in four phases: (1) the effect offline + a camera
+measurement, (2) engine wiring + a test scene and HIS TUNING GATE, (3)
+rainbow walk + two flare kinds, (4) scene migration, one scene first and
+undoable. Power stays installed throughout. **The module docstring is the
+binding statement** (hit detector, rise/fade, rest/depth, smallest pulse,
+`gamma`, no background, the flash budget, the hooks). Five things:
+
+- **BUILT, NOT WIRED.** `pulse` is deliberately in neither
+  `fx/device_model.PHASE_EFFECTS` nor `config/effect_params.json`, and
+  nothing pushes its `energy`/`beat_ms` hooks; phase 2 does all three. It is
+  an acknowledged skill gap in `EFFECT_SCENE_MAP.json` until a scene binds it.
+- **ONE COLOUR, NO BACKGROUND, structurally** — `_refresh_bg_render_state`
+  switches the base background layer off, so a colour set's Singles
+  background (42 of his sets carry one) can never paint under it.
+- **THE FLASH BUDGET IS LUMINANCE, not a count**: the delivered-light rises
+  of all hits in any second may not sum past `max_flash_rate` (3); a drop is
+  never shrunk but spends it. Not WCAG's stricter count of every >=10% flash.
+- **HIS SONGS ARE FIXTURES, AND THE FIXTURES ARE PROVEN**:
+  `tests/fixtures/pulse/` is the effect's own audio input recorded through
+  the real pipeline from his WAVs; `scripts/check_pulse_effect.py
+  [--write-fixtures]` reruns the whole pipeline and fails if the fixture-
+  driven run (the pytest path, `tests/pulse_song_harness.py`) lands on a
+  different light. Regenerate after any change to the hit signal.
+- **THE CAMERA MEASUREMENT DRIVES REAL FIXTURES** —
+  `scripts/measure_singles_response.py` (dry run by default, `--simulate`
+  proves the analysis against known answers) holds `porch-rail`,
+  `dining-table`, `dining-hues` through Light Show device holds, reads the
+  capture frame tap, and frees `dining-hues` from the house mode's Hue hold
+  by editing ONLY that area's look (restored in a `finally`, from a record
+  written first). **A Hue area is streamed whole**: `hue-lights` carries
+  Loft Ceiling Uplight and the three Ledge bulbs, so it is refused outright.
+  `--apply` only with firstmate's go, and only 08:30-22:30. **Its first live
+  run (2026-10-06 08:45) measured nothing: the kitchen-kiosk camera pose sees
+  none of the three Singles fixtures at full white** — the measurement stays
+  pending until a different pose or a light sensor; gamma ships at 2.2.
+
 ## Radial (STAR) rotation is audio-lows-driven — a healthy `spin` can read as parked
 
 `fx/effects/radial.py`'s ONLY motion source is the audio callback:
