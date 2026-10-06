@@ -48,17 +48,17 @@
  * strip as a frame, bulbs as discs). Expanding now builds its stage from
  * the SAME layout the Live tab's Layout view reads (`/device-preview/layout`,
  * narrowed here to his favourites only — never every in-use fixture,
- * that stays the Live view's own, broader job), builds the identical
- * `StagePlan` (`live/positions.ts`'s `layoutPositions`) and draws it with
- * the identical renderer (`live/useLiveStageCanvas.ts`, the hook factored
- * out of `LiveView.tsx` for exactly this reuse — one WebGL stage class,
- * one draw loop, never two copies that could drift apart). Labels, shapes
- * and click-to-select all read the same as the Live tab's Layout view;
- * "Open settings" reuses its exact navigation target. What stays strip-
- * only: no Room map, no solo/drag/fullscreen/link-meter chrome — those
- * belong to the dedicated page, not a compact top-bar widget, and adding
- * them here was never the ask ("match the layout and the format", not
- * "become the Live tab").
+ * that stays the Live view's own, broader job) and draws a `StagePlan`
+ * with the identical renderer (`live/useLiveStageCanvas.ts`, the hook
+ * factored out of `LiveView.tsx` for exactly this reuse — one WebGL stage
+ * class, one draw loop, never two copies that could drift apart). A
+ * fixture's SHAPE and click-to-select read the same as the Live tab's
+ * Layout view; the ARRANGEMENT and the text no longer do — see "NO TEXT
+ * IN THE EXPANDED STAGE" below, added 2026-10-06. "Open settings" reuses
+ * its exact navigation target. What stays strip-only: no Room map, no
+ * solo/drag/fullscreen/link-meter chrome — those belong to the dedicated
+ * page, not a compact top-bar widget, and adding them here was never the
+ * ask ("match the layout and the format", not "become the Live tab").
  *
  * Expanding still switches the WS subscription level to "full" (every
  * favourite's whole frame) and collapsing back to "summary" — unchanged
@@ -92,8 +92,47 @@
  * check `held` before the stream; expanded, `live/positions.ts`'s
  * `withHeldOverlay` bakes the same override straight into the `StagePlan`
  * so the shared stage draws it with no extra code here — one definition,
- * reused by this strip and the Live tab's Layout view alike. */
-import { useEffect, useMemo, useRef, useState } from 'react';
+ * reused by this strip and the Live tab's Layout view alike.
+ *
+ * NO TEXT IN THE EXPANDED STAGE, AND IT NOW LANDS BELOW THE REST OF THE TOP
+ * BAR AS ITS OWN FULL-WIDTH ROW (2026-10-06, his own words: "take all the
+ * text out of the preview window, it is too messy. also, make it land
+ * below the rest of the items on that horizontal bar and have it fill
+ * horizontally. it is okay to rearange the different devices for it to fit
+ * well on different devices"). Three things:
+ *
+ * - Every visible string the expanded stage used to draw — a fixture's
+ *   name/detail under its shape, the paused/idle/connecting notice, the
+ *   selected-fixture name/detail and the "Open settings" button's own
+ *   label — is gone. Accessibility survives through `aria-label`/`title`
+ *   only, never visible text, per his own instruction: a fixture's hit
+ *   target still carries its name+detail as an accessible name and a
+ *   hover tooltip, the stage wrap carries the state notice as a `title`
+ *   (the status button beside it already carries the SAME sentence, so
+ *   nothing informative was dropped, only its always-visible copy), and
+ *   "Open settings" is now an icon-only gear button (`Icon name="settings"`
+ *   — see iconRegistry.ts) with the same accessible name it always had.
+ * - `<DevicePreviewStrip />` returns TWO top-level siblings (a Fragment),
+ *   not one: `.device-preview-strip` (the status/expand/favourites
+ *   controls, unchanged in place) and, only while expanded,
+ *   `.device-preview-expanded-row` (the stage). Both are DIRECT children
+ *   of `TopBarStrip`'s own flex-wrap row, so giving the second one
+ *   `flex: 1 0 100%` forces it onto its own line below every other top-bar
+ *   item and lets it fill that line's full width — no portal, no change to
+ *   where the controls themselves sit.
+ * - The stage's own ARRANGEMENT is now MEASURED, not a phone/not-phone
+ *   guess: `compactPositions` (live/positions.ts, strip-only — the Live
+ *   tab's own Layout view keeps calling `layoutPositions`, untouched)
+ *   wraps fixtures at the row's own observed pixel width (ResizeObserver on
+ *   the wrap, ~`UNIT_PX` stage units per pixel) rather than one of
+ *   `layoutPositions`' two fixed presets, so a phone gets a tall single
+ *   column, a tablet gets a couple of rows, and a wide desktop spreads
+ *   fixtures across one or two short rows that actually use the space —
+ *   reflowing continuously rather than switching between two hardcoded
+ *   shapes. It carries no per-row label allowance (there is no label to
+ *   draw), so it never wastes the vertical room `layoutPositions` reserves
+ *   for one. */
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   frameColor, onDevicePreviewFrame, onDevicePreviewStatus,
@@ -101,8 +140,7 @@ import {
 } from '../api/devicePreviewWs';
 import type { PreviewFrame } from '../api/devicePreviewWs';
 import HelpLink from '../help/HelpLink';
-import useIsPhone from '../lib/useIsPhone';
-import { layoutPositions, withHeldOverlay } from '../live/positions';
+import { compactPositions, withHeldOverlay } from '../live/positions';
 import type { LiveLayout, StagePlan } from '../live/positions';
 import { useLiveStageCanvas } from '../live/useLiveStageCanvas';
 import {
@@ -110,9 +148,19 @@ import {
 } from '../queries';
 import type { DevicePreviewStatus } from '../types';
 import FavoritesPicker from './FavoritesPicker';
+import Icon from './Icon';
 import { useToast } from './Toast';
 
 const EXPANDED_KEY = 'spectra-device-preview-expanded';
+/** Stage units per measured pixel of the expanded row's own width —
+ * chosen to land close to `layoutPositions`' old fixed presets at their
+ * own typical container widths (phone ~62 units at ~370px, the "others"
+ * column ~118 units at ~700px), so a given screen size looks about as
+ * large as it did before this became measured instead of guessed. */
+const UNIT_PX = 6;
+/** Before the first measurement lands, assume a phone-ish width so there's
+ * no flash of an oversized layout on a narrow screen. */
+const INITIAL_STAGE_WIDTH_PX = 320;
 const DARK_PLACEHOLDER = 'rgb(40,40,40)';
 
 export default function DevicePreviewStrip() {
@@ -131,7 +179,18 @@ export default function DevicePreviewStrip() {
   const [selected, setSelected] = useState<string | null>(null);
   const toast = useToast();
   const navigate = useNavigate();
-  const phone = useIsPhone();
+  const [stageWidthPx, setStageWidthPx] = useState(INITIAL_STAGE_WIDTH_PX);
+  // A STATE-BACKED CALLBACK REF, not a plain `useRef` object — the same
+  // shape `useLiveStageCanvas.ts`'s own `canvasRef` uses, and for the
+  // identical reason (see that hook's own docstring): `expanded` can
+  // already be `true` on mount (restored from localStorage) before
+  // `favoriteIds`/`stageLayout` have loaded, so the wrap element doesn't
+  // exist on the FIRST render that runs this effect. A plain object ref
+  // read once at that render would stay null forever once the wrap
+  // actually mounts later, because nothing else in the measuring effect's
+  // dependency array changes to re-run it.
+  const [stageWrapEl, setStageWrapEl] = useState<HTMLDivElement | null>(null);
+  const stageWrapRef = useCallback((el: HTMLDivElement | null) => setStageWrapEl(el), []);
 
   const swatchRefs = useRef<Record<string, HTMLSpanElement | null>>({});
   const latestFrames = useRef<Record<string, PreviewFrame>>({});
@@ -228,9 +287,26 @@ export default function DevicePreviewStrip() {
   const stageLayout: LiveLayout | null = useMemo(() => (layout
     ? { ...layout, virtuals: layout.virtuals.filter((v) => favoriteSet.has(v.id)) }
     : null), [layout, favoriteSet]);
+  // The expanded row's own observed content width, in pixels — fed into
+  // `compactPositions` (via UNIT_PX) so the arrangement reflows against the
+  // row's REAL width (phone/tablet/desktop alike) instead of a phone/
+  // not-phone guess. Measured on the wrap, not the stage itself: the
+  // stage's own width is a plain `100%` of the wrap (module docstring),
+  // never a function of the plan, so there's no circularity in measuring
+  // it before `plan` exists.
+  useEffect(() => {
+    if (!expanded || !stageWrapEl) return undefined;
+    const measure = () => setStageWidthPx(stageWrapEl.clientWidth);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(stageWrapEl);
+    return () => observer.disconnect();
+  }, [expanded, stageWrapEl]);
   const plan: StagePlan | null = useMemo(
-    () => (expanded && stageLayout ? withHeldOverlay(layoutPositions(stageLayout, !phone), stageLayout) : null),
-    [expanded, stageLayout, phone]);
+    () => (expanded && stageLayout
+      ? withHeldOverlay(compactPositions(stageLayout, stageWidthPx / UNIT_PX), stageLayout)
+      : null),
+    [expanded, stageLayout, stageWidthPx]);
   const { canvasRef } = useLiveStageCanvas({
     plan, live, smooth: true, active: expanded,
   });
@@ -278,105 +354,107 @@ export default function DevicePreviewStrip() {
           : 'Connecting…')
         : null;
 
+  // `<DevicePreviewStrip />` returns TWO top-level siblings here, not one —
+  // module docstring's "NO TEXT IN THE EXPANDED STAGE..." section explains
+  // why: `.device-preview-strip` (the controls, unchanged in place) and,
+  // only while expanded, `.device-preview-expanded-row` (the stage) — both
+  // land as direct children of `TopBarStrip`'s own flex-wrap row, which is
+  // what lets the second one drop onto its own full-width line below every
+  // other top-bar item.
   return (
-    <div className="device-preview-strip">
-      {favoriteIds.length === 0 ? (
-        <span className="device-preview-empty">no favourite devices</span>
-      ) : !expanded ? (
-        <div className="device-preview-chips">
-          {favoriteIds.map((id) => (
-            <div key={id} className="device-preview-device" title={id}>
-              <span
-                ref={(el) => {
-                  swatchRefs.current[id] = el;
-                  if (!el) return;
-                  const held = heldRef.current[id];
-                  if (held && liveRef.current) {
-                    paintSwatch(id, held);
-                  } else {
-                    const frame = latestFrames.current[id];
-                    if (frame && liveRef.current) {
-                      paintSwatch(id, frameColor(frame));
+    <>
+      <div className="device-preview-strip">
+        {favoriteIds.length === 0 ? (
+          <span className="device-preview-empty">no favourite devices</span>
+        ) : !expanded ? (
+          <div className="device-preview-chips">
+            {favoriteIds.map((id) => (
+              <div key={id} className="device-preview-device" title={id}>
+                <span
+                  ref={(el) => {
+                    swatchRefs.current[id] = el;
+                    if (!el) return;
+                    const held = heldRef.current[id];
+                    if (held && liveRef.current) {
+                      paintSwatch(id, held);
                     } else {
-                      paintSwatch(id, DARK_PLACEHOLDER);
+                      const frame = latestFrames.current[id];
+                      if (frame && liveRef.current) {
+                        paintSwatch(id, frameColor(frame));
+                      } else {
+                        paintSwatch(id, DARK_PLACEHOLDER);
+                      }
                     }
-                  }
-                }}
-                className="device-preview-swatch"
-                style={{ backgroundColor: DARK_PLACEHOLDER }}
-              />
-            </div>
-          ))}
-        </div>
-      ) : (
-        <div className="device-preview-live">
-          <div className="device-preview-live-wrap">
-            <div className="device-preview-live-stage"
-                 style={{ '--live-ar': plan ? plan.width / plan.height : 2 } as React.CSSProperties}>
-              <canvas ref={canvasRef} className="live-canvas" />
-              {plan && fixtures.map((f) => (
-                <button key={f.key} type="button"
-                        className={`live-hit${selected === f.key ? ' selected' : ''}`}
-                        style={{
-                          left: pct(f.x, plan.width), top: pct(f.y, plan.height),
-                          width: pct(f.w, plan.width), height: pct(f.h, plan.height),
-                        }}
-                        onClick={() => setSelected(selected === f.key ? null : f.key)}
-                        aria-label={`${f.name}, ${f.detail}`}>
-                  <span className="live-label">
-                    <span className="live-label-name">{f.name}</span>
-                    <span className="live-label-detail">{f.detail}</span>
-                  </span>
-                </button>
-              ))}
-              {notice && (
-                <div className="live-notice">
-                  <span>{notice}</span>
-                </div>
-              )}
-            </div>
+                  }}
+                  className="device-preview-swatch"
+                  style={{ backgroundColor: DARK_PLACEHOLDER }}
+                />
+              </div>
+            ))}
           </div>
-          {selectedFixture && (
-            <div className="live-selected">
-              <span>
-                <strong>{selectedFixture.name}</strong>
-                <span className="live-selected-detail"> · {selectedFixture.detail}</span>
-              </span>
-              <button type="button" onClick={() => openSettings(selectedFixture.deviceId)}>
-                Open settings
-              </button>
-            </div>
-          )}
-        </div>
-      )}
+        ) : null}
 
-      <button type="button" className={`device-preview-status-btn ${stateClass}`}
-        disabled={pausePending || favoriteIds.length === 0}
-        onClick={togglePause} aria-label={stateLabel} title={stateTitle}>
-        {stateIcon}
-      </button>
-
-      {favoriteIds.length > 0 && (
-        <button type="button" className="device-preview-btn" onClick={toggleExpanded}
-          title={expanded ? 'Collapse to one swatch per device' : 'Expand to the real fixture layout'}>
-          {expanded ? '▾ Collapse' : '▸ Expand'}
+        <button type="button" className={`device-preview-status-btn ${stateClass}`}
+          disabled={pausePending || favoriteIds.length === 0}
+          onClick={togglePause} aria-label={stateLabel} title={stateTitle}>
+          {stateIcon}
         </button>
-      )}
 
-      <button type="button" className="device-preview-btn" onClick={() => setPickerOpen(true)}
-        title="Choose favourite devices">
-        ★ Favourites
-      </button>
+        {favoriteIds.length > 0 && (
+          <button type="button" className="device-preview-btn" onClick={toggleExpanded}
+            title={expanded ? 'Collapse to one swatch per device' : 'Expand to the real fixture layout'}>
+            {expanded ? '▾ Collapse' : '▸ Expand'}
+          </button>
+        )}
 
-      {pickerOpen && (
-        <div className="device-preview-picker-overlay" onClick={() => setPickerOpen(false)}>
-          <div onClick={(e) => e.stopPropagation()}>
-            <FavoritesPicker onClose={() => setPickerOpen(false)} />
+        <button type="button" className="device-preview-btn" onClick={() => setPickerOpen(true)}
+          title="Choose favourite devices">
+          ★ Favourites
+        </button>
+
+        {pickerOpen && (
+          <div className="device-preview-picker-overlay" onClick={() => setPickerOpen(false)}>
+            <div onClick={(e) => e.stopPropagation()}>
+              <FavoritesPicker onClose={() => setPickerOpen(false)} />
+            </div>
+          </div>
+        )}
+
+        <HelpLink topic="device-preview" />
+      </div>
+
+      {expanded && favoriteIds.length > 0 && (
+        <div className="device-preview-expanded-row">
+          <div className="device-preview-live">
+            <div className="device-preview-live-wrap" ref={stageWrapRef} title={notice ?? undefined}>
+              <div className="device-preview-live-stage"
+                   style={{ '--live-ar': plan ? plan.width / plan.height : 2 } as React.CSSProperties}>
+                <canvas ref={canvasRef} className="live-canvas" />
+                {plan && fixtures.map((f) => (
+                  <button key={f.key} type="button"
+                          className={`live-hit${selected === f.key ? ' selected' : ''}`}
+                          style={{
+                            left: pct(f.x, plan.width), top: pct(f.y, plan.height),
+                            width: pct(f.w, plan.width), height: pct(f.h, plan.height),
+                          }}
+                          onClick={() => setSelected(selected === f.key ? null : f.key)}
+                          aria-label={`${f.name}, ${f.detail}`}
+                          title={`${f.name} — ${f.detail}`} />
+                ))}
+              </div>
+            </div>
+            {selectedFixture && (
+              <div className="live-selected">
+                <button type="button" onClick={() => openSettings(selectedFixture.deviceId)}
+                        aria-label={`Open settings for ${selectedFixture.name}, ${selectedFixture.detail}`}
+                        title={`Open settings for ${selectedFixture.name} — ${selectedFixture.detail}`}>
+                  <Icon name="settings" size={14} />
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
-
-      <HelpLink topic="device-preview" />
-    </div>
+    </>
   );
 }

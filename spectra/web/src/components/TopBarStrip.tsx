@@ -6,7 +6,18 @@
  * it — see IntensityMarkControl.tsx), and the device-preview strip
  * (data/spectra-device-preview-plan/report.md §5) — this container is
  * deliberately generic rather than energy-specific so a later addition
- * doesn't require moving or restructuring this mount point. */
+ * doesn't require moving or restructuring this mount point.
+ *
+ * `.top-bar-strip` is `display: flex; flex-wrap: wrap;` — load-bearing for
+ * `<DevicePreviewStrip />`, which renders TWO top-level siblings (a
+ * Fragment) rather than one: its own controls plus, only while its
+ * preview is expanded, a second element with `flex: 1 0 100%`. Because a
+ * Fragment's children land directly as flex items of THIS div, that
+ * second element always wraps onto its own full-width line below every
+ * other occupant here — see DevicePreviewStrip.tsx's own module docstring
+ * ("NO TEXT IN THE EXPANDED STAGE, AND IT NOW LANDS BELOW...") before
+ * changing this element to anything other than a flex-wrap container, or
+ * that mechanism breaks. */
 import DevicePreviewStrip from './DevicePreviewStrip';
 import ModeChip from './ModeChip';
 import IntensityMarkControl from './IntensityMarkControl';

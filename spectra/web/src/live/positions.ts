@@ -306,6 +306,45 @@ function flow(boxes: Box[], width: number): { placed: Placed[]; height: number; 
   return { placed, height: Math.max(0, y - GAP), width: used };
 }
 
+/** The shared tail of `layoutPositions`/`compactPositions`: turns a flat,
+ * already-wrapped `placed` list into a `StagePlan` grouped by stream
+ * device (one frame fills one run). Both callers place every box exactly
+ * once, so `placed` and the original box list carry the same point count. */
+function assemblePlan(layout: LiveLayout, placed: Placed[], width: number, height: number): StagePlan {
+  const byVirtual = new Map<string, Placed[]>();
+  for (const p of placed) {
+    const list = byVirtual.get(p.box.virtual.id) ?? [];
+    list.push(p);
+    byVirtual.set(p.box.virtual.id, list);
+  }
+  const pointCount = placed.reduce((n, p) => n + p.box.fixture.count, 0);
+  const plan: StagePlan = {
+    width: Math.max(width, 1), height: Math.max(height, 1), pointCount,
+    xy: new Float32Array(pointCount * 2), size: new Float32Array(pointCount),
+    src: new Uint32Array(pointCount), groups: [], fixtures: [],
+  };
+  let next = 0;
+  for (const virtual of layout.virtuals) {
+    const members = byVirtual.get(virtual.id);
+    if (!members) continue;
+    const groupFirst = next;
+    for (const { box, x, y } of members) {
+      const { fixture } = box;
+      box.place(x, y, plan.xy, plan.size, next);
+      for (let i = 0; i < fixture.count; i++) plan.src[next + i] = fixture.src ? fixture.src[i] : i;
+      plan.fixtures.push({
+        key: `${virtual.id}/${fixture.device_id}`, deviceId: fixture.device_id,
+        visId: virtual.id, name: fixture.name, detail: detailFor(fixture, virtual),
+        kind: fixture.kind, first: next, count: fixture.count,
+        x, y, w: box.w, h: box.h,
+      });
+      next += fixture.count;
+    }
+    plan.groups.push({ visId: virtual.id, first: groupFirst, count: next - groupFirst, cells: virtual.cells });
+  }
+  return plan;
+}
+
 export const layoutPositions: PositionSource = (layout, wide) => {
   const boxes: Box[] = [];
   for (const virtual of layout.virtuals) {
@@ -336,39 +375,58 @@ export const layoutPositions: PositionSource = (layout, wide) => {
     height = all.height;
   }
 
-  // Points are stored grouped by stream device, so one frame fills one run.
-  const byVirtual = new Map<string, Placed[]>();
-  for (const p of placed) {
-    const list = byVirtual.get(p.box.virtual.id) ?? [];
-    list.push(p);
-    byVirtual.set(p.box.virtual.id, list);
-  }
-  const pointCount = boxes.reduce((n, b) => n + b.fixture.count, 0);
-  const plan: StagePlan = {
-    width: Math.max(width, 1), height: Math.max(height, 1), pointCount,
-    xy: new Float32Array(pointCount * 2), size: new Float32Array(pointCount),
-    src: new Uint32Array(pointCount), groups: [], fixtures: [],
+  return assemblePlan(layout, placed, width, height);
+};
+
+/** Wraps boxes left-to-right at `width`, like `flow` above, but reserves no
+ * row space for a label below each box — used only by `compactPositions`,
+ * which draws no text at all. */
+function packFlow(boxes: Box[], width: number): { placed: Placed[]; height: number; width: number } {
+  const placed: Placed[] = [];
+  let x = 0;
+  let y = 0;
+  let rowH = 0;
+  let rowStart = 0;
+  let used = 0;
+  const closeRow = () => {
+    for (let i = rowStart; i < placed.length; i++) placed[i].y = y + rowH - placed[i].box.h;
+    y += rowH + GAP;
+    rowStart = placed.length;
+    x = 0;
+    rowH = 0;
   };
-  let next = 0;
-  for (const virtual of layout.virtuals) {
-    const members = byVirtual.get(virtual.id);
-    if (!members) continue;
-    const groupFirst = next;
-    for (const { box, x, y } of members) {
-      const { fixture } = box;
-      box.place(x, y, plan.xy, plan.size, next);
-      for (let i = 0; i < fixture.count; i++) plan.src[next + i] = fixture.src ? fixture.src[i] : i;
-      plan.fixtures.push({
-        key: `${virtual.id}/${fixture.device_id}`, deviceId: fixture.device_id,
-        visId: virtual.id, name: fixture.name, detail: detailFor(fixture, virtual),
-        kind: fixture.kind, first: next, count: fixture.count,
-        x, y, w: box.w, h: box.h,
-      });
-      next += fixture.count;
-    }
-    plan.groups.push({ visId: virtual.id, first: groupFirst, count: next - groupFirst, cells: virtual.cells });
+  for (const box of boxes) {
+    if (x > 0 && x + box.w > width) closeRow();
+    placed.push({ box, x, y: 0 });
+    x += box.w + GAP;
+    used = Math.max(used, x - GAP);
+    rowH = Math.max(rowH, box.h);
   }
-  return plan;
+  if (placed.length > rowStart) closeRow();
+  return { placed, height: Math.max(0, y - GAP), width: used };
+}
+
+/** A text-free arrangement for the top-bar device-preview strip's expanded
+ * row (captain's ask, 2026-10-06: "take all the text out of the preview
+ * window... make it... fill horizontally... rearrange the different
+ * devices... to fit well on different devices"). Reuses `boxFor`'s own
+ * per-fixture geometry and `KIND_ORDER` so a fixture's SHAPE is identical
+ * to the Live tab's — only the arrangement differs: no label is ever drawn
+ * here, so no row reserves `LABEL_H` for one, and it wraps at the caller's
+ * own MEASURED container width (in stage units), rather than
+ * `layoutPositions`' two fixed phone/desktop presets — so it genuinely
+ * reflows across phone, tablet and desktop widths instead of only ever
+ * choosing between two hardcoded shapes. `layoutPositions` itself, and the
+ * Live tab's own Layout view that calls it, are untouched by this. */
+export const compactPositions = (layout: LiveLayout, widthUnits: number): StagePlan => {
+  const boxes: Box[] = [];
+  for (const virtual of layout.virtuals) {
+    for (const fixture of virtual.fixtures) boxes.push(boxFor(virtual, fixture));
+  }
+  boxes.sort((a, b) => KIND_ORDER[a.fixture.kind] - KIND_ORDER[b.fixture.kind]);
+  const width = Math.max(widthUnits, ...boxes.map((b) => b.w), 1);
+  const { placed, height, width: usedWidth } = packFlow(boxes, width);
+  return assemblePlan(layout, placed, usedWidth, height);
 };
 
 function hexTriplet(hex: string): [number, number, number] {

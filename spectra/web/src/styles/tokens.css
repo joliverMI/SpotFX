@@ -555,22 +555,30 @@ button.danger:hover { border-color: var(--danger); color: var(--danger); }
   border: 1px solid var(--border);
   transition: background-color 0.2s linear;
 }
-/* Expanded: the SAME stage the Devices page's Live tab draws (its own
- * `.live-stage-wrap`/`.live-stage`/`.live-canvas`/`.live-hit`/`.live-label`
- * classes, reused verbatim so a fixture looks identical in both places —
- * only the box around it is sized for a top-bar strip instead of a full
- * page: narrower, and it grows DOWNWARD ("expand grows downward, not
- * sideways" still holds — the strip's own row stays full width, the stage
- * inside it does not sprawl past a sensible preview size). */
+/* Expanded: the SAME renderer the Devices page's Live tab draws with
+ * (its own `.live-stage`/`.live-canvas`/`.live-hit` classes, reused
+ * verbatim so a fixture's shape looks identical in both places), but the
+ * row it sits in is now its OWN full-width row below the rest of the top
+ * bar, not a narrow box squeezed next to the other controls (his own ask,
+ * 2026-10-06 — see the component's module docstring). `.live-label` is
+ * deliberately NOT reused here: the strip draws no text at all, so there
+ * is nothing to position under a fixture's shape. */
+.device-preview-expanded-row { flex: 1 0 100%; width: 100%; min-width: 0; }
 .device-preview-live { display: flex; flex-direction: column; gap: 8px; width: 100%; min-width: 0; }
 .device-preview-live-wrap {
   background: #06040b; border: 1px solid var(--border); border-radius: var(--radius);
-  padding: 10px 10px 18px; display: flex; justify-content: center; min-width: 0;
+  padding: 10px; display: flex; justify-content: center; min-width: 0;
 }
 .device-preview-live-stage {
   position: relative; aspect-ratio: var(--live-ar);
-  width: min(100%, 640px);
+  width: 100%;
 }
+/* The one fixture-info control left inside the expanded stage once a
+ * fixture is selected — an icon-only "open settings" button, no visible
+ * name/detail text (see Icon name="settings" in iconRegistry.ts). Scoped
+ * to the strip's own `.live-selected` instance — the Live tab's own copy
+ * (LiveView.tsx) still shows its name/detail text and stays unchanged. */
+.device-preview-live .live-selected { justify-content: center; }
 .device-preview-btn { padding: 3px 8px; font-size: 11.5px; }
 .device-preview-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
