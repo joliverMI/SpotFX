@@ -115,6 +115,13 @@ class FacadeExecutor(RecordingExecutor):
     async def _put(self, virtual_id: str, effect_type: str,
                    params: dict[str, Any], duration_ms: int) -> None:
         from fx import facade
+        from spectra.services import fx_seam
+        if not fx_seam.facade_host_ready():
+            # The live stack is still starting (or no host is installed):
+            # writing would make the facade start an EMPTY host of its own
+            # (fx_seam's "A WRITE NEVER STARTS A HOST"). The engine still
+            # models the write; nothing reaches a fixture, logged once.
+            return
         if facade.out_of_scope(virtual_id):
             # Outside a scoped take (fx/VENDOR.md #42): the engine still
             # models it, nothing is written — writing would be refused, and

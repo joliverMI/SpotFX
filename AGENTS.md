@@ -7747,6 +7747,27 @@ a later wiring stage. The Hue-DTLS / DDP single-sender exclusivity with the
 running LedFX service is resolved by the S3 ownership gate: the facade
 reaches live hardware only through the handover (see the S3 section above).
 
+## A WRITE NEVER STARTS A HOST (`fx_seam.facade_host_ready`)
+
+Found 2026-10-06 when a deploy restart came back with 0 of 5 virtuals up:
+`fx.facade.handle()` lazily STARTS a fresh `FxHost` on the default config dir
+(`storage/fx`, 0 devices) whenever no host is installed — right for
+spot-effects' in-process switch, fatal in SPECTRA. A resume/take assembles
+the live stack for ~17 s before `facade.set_host` runs; a trigger crossing
+on the playing song in that window sent a scene write through the facade,
+the facade started an EMPTY host, and the real stack then loaded every
+virtual against an empty device registry ("segment schema rejected the
+stored segments ... data[0]" for all of them). So with SPECTRA owning, every
+in-process write path asks `fx_seam.facade_host_ready()` first (facade host
+installed AND `live.assembling` False): `fx_seam`'s primitives refuse with
+`HostNotReady` (a `HandoverInProgress`, so existing handlers treat it the
+same), `FacadeExecutor` models the write and sends nothing, and
+`device_console` refuses a live edit (its list answers from the stored
+config). Logged once per episode. **A new module that calls
+`fx.facade.handle` from `spectra/` must make the same check.** Spec:
+`tests/test_no_lazy_host_on_write.py` (a trigger fired mid start-up, with a
+red control that reproduces the empty host).
+
 ## A CONFIG LOAD IS AN ORDERED PROGRAM — a virtual's restore can undo its neighbour's
 
 Found live 2026-09-01 (`fx/VENDOR.md` #29, PR fm/tvmapper-cold-load-fix): his
