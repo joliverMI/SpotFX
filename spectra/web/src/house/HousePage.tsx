@@ -10,8 +10,18 @@
  *
  * Nothing here takes or releases the room: a mode set while SPECTRA does
  * not hold the room is recorded and applies on take-back, and the Now panel
- * says exactly that. Every field is also reachable through Sonic (the 💬). */
+ * says exactly that. Every field is also reachable through Sonic (the 💬).
+ *
+ * TWO SUB-TABS (his ask, 2026-10-06: "make the house tab have two sub
+ * tabs. the default tab is for editing the different scenes and the
+ * second tab is the info section that currently comes above the editing
+ * portion"). "Modes" (default, no ?tab=) is the editor below; "Info" is
+ * the Now panel verbatim — same arrangement, same content, same
+ * `useSearchParams` tab-bar shape as DevicesPage.tsx's Edit/Live split,
+ * so a link or a refresh keeps the tab. The Mode chip still links to
+ * plain `/house`, which is this page's default. */
 import { useCallback, useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { apiDel, apiGet, apiPost, apiPut } from '../api/client';
 import HelpLink from '../help/HelpLink';
 import PowerButton from '../components/PowerButton';
@@ -40,6 +50,8 @@ function num(v: string): number | null {
 
 export default function HousePage() {
   const toast = useToast();
+  const [params, setParams] = useSearchParams();
+  const tab = params.get('tab') === 'info' ? 'info' : 'modes';
   const { data: engine, refetch } = useEngineStatus();
   const lighting = (engine as { lighting?: LightingStatus } | undefined)?.lighting;
   const [lib, setLib] = useState<HouseModesResponse | null>(null);
@@ -144,52 +156,61 @@ export default function HousePage() {
         <span className="muted">The room&apos;s resting look — music and the Light Show play on top of it. <HelpLink topic="house-page" title="How this page works" /></span>
       </div>
 
-      <NowPanel lighting={lighting} busy={busy} areas={targets?.hue_areas ?? []}
-        onClear={() => void switchTo(null)} onSwitch={(on) => void switchHouse(on)} />
-
-      <div className="house-layout">
-        <div className="card house-modes">
-          <div className="house-modes-head">
-            <strong>Modes</strong> <HelpLink topic="house-modes" />
-            <button onClick={() => {
-              if (dirty && !window.confirm('Discard unsaved changes?')) return;
-              setSelected(NEW_ID);
-              setDraft(blankMode('New mode'));
-              setDirty(true);
-            }}>+ New</button>
-          </div>
-          {lib && lib.modes.length === 0 && (
-            <p className="muted">No modes yet. A mode needs a scene, colours and fixture settings to give it a look.</p>
-          )}
-          <ul>
-            {(lib?.modes ?? []).map((m) => (
-              <li key={m.id}>
-                <button className={m.id === selected ? 'active' : ''} onClick={() => {
-                  if (dirty && !window.confirm('Discard unsaved changes?')) return;
-                  setSelected(m.id ?? null);
-                }}>
-                  {m.id === current && <span className="house-now-dot" title="The mode that is set">● </span>}
-                  {m.name}
-                  {m.ha_aliases.length > 0 && <span className="muted"> · {m.ha_aliases.join(', ')}</span>}
-                </button>
-                <button className="house-switch" disabled={busy || m.id === current}
-                  onClick={() => void switchTo(m.id ?? null)}
-                  title="Switch to this mode now — holds until Home Assistant's lighting mode next changes">
-                  {m.id === current ? 'Set' : 'Switch to'}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-
-        <div className="card house-editor">
-          {!draft && <p className="muted">Choose a mode, or make a new one.</p>}
-          {draft && (
-            <ModeEditor draft={draft} edit={edit} targets={targets} dirty={dirty} busy={busy}
-              warnings={warnings} onSave={() => void save()} onDelete={() => void remove()} />
-          )}
-        </div>
+      <div className="tab-bar">
+        <button className={tab === 'modes' ? 'active' : ''} onClick={() => setParams({})}>Modes</button>
+        <button className={tab === 'info' ? 'active' : ''} onClick={() => setParams({ tab: 'info' })}>Info</button>
       </div>
+
+      {tab === 'info' && (
+        <NowPanel lighting={lighting} busy={busy} areas={targets?.hue_areas ?? []}
+          onClear={() => void switchTo(null)} onSwitch={(on) => void switchHouse(on)} />
+      )}
+
+      {tab === 'modes' && (
+        <div className="house-layout">
+          <div className="card house-modes">
+            <div className="house-modes-head">
+              <strong>Modes</strong> <HelpLink topic="house-modes" />
+              <button onClick={() => {
+                if (dirty && !window.confirm('Discard unsaved changes?')) return;
+                setSelected(NEW_ID);
+                setDraft(blankMode('New mode'));
+                setDirty(true);
+              }}>+ New</button>
+            </div>
+            {lib && lib.modes.length === 0 && (
+              <p className="muted">No modes yet. A mode needs a scene, colours and fixture settings to give it a look.</p>
+            )}
+            <ul>
+              {(lib?.modes ?? []).map((m) => (
+                <li key={m.id}>
+                  <button className={m.id === selected ? 'active' : ''} onClick={() => {
+                    if (dirty && !window.confirm('Discard unsaved changes?')) return;
+                    setSelected(m.id ?? null);
+                  }}>
+                    {m.id === current && <span className="house-now-dot" title="The mode that is set">● </span>}
+                    {m.name}
+                    {m.ha_aliases.length > 0 && <span className="muted"> · {m.ha_aliases.join(', ')}</span>}
+                  </button>
+                  <button className="house-switch" disabled={busy || m.id === current}
+                    onClick={() => void switchTo(m.id ?? null)}
+                    title="Switch to this mode now — holds until Home Assistant's lighting mode next changes">
+                    {m.id === current ? 'Set' : 'Switch to'}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          <div className="card house-editor">
+            {!draft && <p className="muted">Choose a mode, or make a new one.</p>}
+            {draft && (
+              <ModeEditor draft={draft} edit={edit} targets={targets} dirty={dirty} busy={busy}
+                warnings={warnings} onSave={() => void save()} onDelete={() => void remove()} />
+            )}
+          </div>
+        </div>
+      )}
       <SonicChatPopover helpTopic="sonic-house" />
     </div>
   );

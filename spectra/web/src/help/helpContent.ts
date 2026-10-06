@@ -2283,9 +2283,9 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         id: 'house-page',
         title: 'The House page',
-        keywords: 'house page editor modes list now panel cards save switch to',
+        keywords: 'house page editor modes list now panel cards save switch to tab tabs info sub-tab',
         body: [
-          'Top: Now — which mode is set, who set it and what it is doing. Left: your modes; "Switch to" puts one on the room now. Right: the chosen mode as small cards — Home Assistant\'s words, Scenes, Colours, Fixtures, Hue Hold, Music, Changes. Save writes the mode; editing the mode that is set re-applies it straight away.',
+          'Two tabs, like Devices\' Edit/Live: MODES (the default) is the editor — left, your modes, with "Switch to" to put one on the room now; right, the chosen mode as small cards — Home Assistant\'s words, Scenes, Colours, Fixtures, Hue Hold, Music, Changes. INFO is the Now panel — which mode is set, who set it and what it is doing. Save writes the mode; editing the mode that is set re-applies it straight away.',
           'Every field is also reachable through Sonic (the 💬): "make Evening\'s crystal 10%", "switch to Night light".',
           'The House page never takes or releases the room. A mode chosen while SPECTRA does not hold the room is remembered and applies the moment it does.',
         ],
