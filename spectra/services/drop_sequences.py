@@ -49,7 +49,7 @@ the whole of undo/redo: `restore_edits` puts one side back, and refuses
 another tab), so an undo can never silently overwrite a newer edit.
 `resolve_review` answers the "the analysis moved it" question (keep his
 place, or take the new one). A whole-sequence move is ONE edit
-(`set_handles`). Nothing here fires anything: phase 5.
+(`set_handles`). Nothing here fires anything: drop_firing.py decides that.
 
 KEYS SURVIVE RE-DETECTION. A re-detected sequence keeps an override whose
 key's drop lies within MATCH_BEATS (two beats) of its new drop — nearest
@@ -65,8 +65,9 @@ own trigger already fires there. An added sequence is his and never stands
 down.
 
 STATES, in precedence order: dismissed > matches_yours > edited >
-confirmed > confident | suggested; and added. Nothing fires from here yet
-(phase 5): this module only says what each sequence IS.
+confirmed > confident | suggested; and added. This module only says what
+each sequence IS; what fires, and the protected window around each, is
+spectra/services/drop_firing.py (phase 5).
 
 EVERY TIME IS SONG TIME, the frame his triggers are in.
 """
@@ -176,6 +177,12 @@ def _write(data: dict) -> None:
 
 def _now_ms() -> int:
     return int(time.time() * 1000)
+
+
+def revision() -> Optional[tuple]:
+    """The store's revision (its file stat), for a reader that caches a
+    view between ticks (trigger_engine): any edit or detection changes it."""
+    return _signature()
 
 
 def all_stored() -> dict:
@@ -319,6 +326,7 @@ def ensure_detected(uri: str, controls: Any = None, *, force: bool = False) -> d
         def put(entry: dict) -> None:
             entry["detected"] = record
         _mutate(uri, put)
+    _changed(uri)
     logger.info("drop detection: %s — %d sequence(s) under stamp %s",
                 uri, len(det.sequences), stamp)
     return {"uri": uri, "status": "detected", "stamp": stamp,
@@ -827,10 +835,28 @@ def edits(uri: str) -> dict:
     return out
 
 
+def _changed(uri: str) -> None:
+    """The song's sequences changed (a detection or one of his edits): the
+    trigger clock re-plans its analysed flares around the new protected
+    windows (drop_firing.py). Its drop-sequence view itself follows the
+    store's revision on its own. Never raises."""
+    try:
+        from spectra.services.trigger_engine import trigger_engine
+        trigger_engine.invalidate_analysed_plan(uri)
+    except Exception:                                    # noqa: BLE001
+        logger.exception("drop sequences: could not re-plan %s", uri)
+
+
 def apply_edit(uri: str, op: str, **kw) -> EditResult:
-    """THE edit entry point the API uses: one named edit, locked, with his
-    edits before and after it (the undo pair). Raises SequenceNotFound,
-    InvalidEdit or EditConflict, writing nothing."""
+    """THE edit entry point the API and Sonic use: one named edit, locked,
+    with his edits before and after it (the undo pair). Raises
+    SequenceNotFound, InvalidEdit or EditConflict, writing nothing."""
+    res = _apply_edit(uri, op, **kw)
+    _changed(uri)
+    return res
+
+
+def _apply_edit(uri: str, op: str, **kw) -> EditResult:
     key = kw.get("key")
     if op == "confirm":
         return _mutate_tracked(uri, lambda e: _op_confirm(e, key))

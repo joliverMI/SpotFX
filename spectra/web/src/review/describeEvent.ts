@@ -50,6 +50,14 @@ export function describeEvent(item: ReviewEventItem): string {
       return `Colour set: ${name}${d.via === 'analysed_cue' ? ' (analysed moment)' : ''}`;
     }
     case 'triggers': {
+      if (d.drop_sequence) {
+        // A drop-sequence member (spectra/services/drop_firing.py) — the
+        // ordinary charge/lull/drop response, not a stored trigger.
+        const member = (d.member as string | undefined) ?? item.key.split(':')[1];
+        const whose = d.his ? 'yours' : 'detected';
+        const intensity = d.intensity as number | undefined;
+        return `Drop sequence: ${member} (${whose})${intensity != null ? ` @ ⚡${intensity.toFixed(2)}` : ''}`;
+      }
       if (d.analysed_flare) {
         // An unselected analysed transition fired as a flare
         // (spectra/services/analysed_flares.py) — not a stored trigger.
@@ -65,6 +73,12 @@ export function describeEvent(item: ReviewEventItem): string {
       return `Trigger fired: ${kind}${source ? ` (${source})` : ''}${snapNote}`;
     }
     case 'deferred': {
+      if (item.key === 'drop_window') {
+        // trigger_engine held an analysed scene change or flare out of a
+        // drop sequence's protected window (drop_firing.py).
+        const what = (d.what as string | undefined) ?? 'analysed event';
+        return `Kept clear of a drop sequence: ${what}${d.window_source === 'yours' ? ' (your own charge/lull/drop)' : ''}`;
+      }
       if (item.key === 'kind_batch') {
         // A staggered flare-kind batch that woke to a refused show gate
         // (engine._run_kind_batch) — not a dwell hold, so it names its own

@@ -338,8 +338,8 @@ from random import Random
 from typing import Any, Awaitable, Callable, Optional
 
 from spectra.models.trigger import FireResponseAction, SpectraTrigger
-from spectra.services import (analysed_flares, phase_partner, transition_phases,
-                               trigger_store)
+from spectra.services import (analysed_flares, drop_firing, drop_sequences,
+                               phase_partner, transition_phases, trigger_store)
 
 logger = logging.getLogger(__name__)
 
@@ -476,6 +476,9 @@ class TriggerEngine:
         fire_analysed_flare: Callable[[float], Awaitable[Any]] | None = None,
         analysed_color: Callable[[float, float, Optional[str]], Awaitable[Any]] | None = None,
         colour_cue: Callable[[], None] | None = None,
+        drop_view: Callable[[str, list], dict] | None = None,
+        drop_revision: Callable[[], Any] | None = None,
+        fire_sequence: Callable[[str, float, Optional[int]], Awaitable[Any]] | None = None,
         clock: Callable[[], float] | None = None,
         rng: Random | None = None,
     ) -> None:
@@ -566,6 +569,24 @@ class TriggerEngine:
         # read by GET /api/analysed-plan's rank markers (cached_plan_ranks).
         self._plan_ranks: dict = {}
 
+        # DROP SEQUENCES (2026-10-06, drop-detection plan phase 5 —
+        # spectra/services/drop_firing.py is the binding statement). The
+        # song's merged drop-sequence view is read through `_drop_view`
+        # (drop_sequences.view over the trigger list tick() already holds:
+        # one small stat-cached file, no analysis I/O) and memoised on the
+        # store's revision plus his own phase triggers, so a tick costs one
+        # stat. Each firing member becomes a synthetic fire_response trigger
+        # ("drop-seq:<key>:<class>") fed into tick() beside the stored ones;
+        # `_seq_meta` maps those ids back to (sequence, class) for _fire.
+        # `_drop_windows` are the protected windows tick() holds analysed
+        # scene changes and flares out of.
+        self._drop_view = drop_view or self._default_drop_view
+        self._drop_revision = drop_revision or drop_sequences.revision
+        self._fire_sequence = fire_sequence or self._default_fire_sequence
+        self._drop_memo: Optional[tuple[tuple, tuple[list, list]]] = None
+        self._seq_meta: dict[str, tuple[drop_firing.FiringSequence, str]] = {}
+        self._drop_windows: list[drop_firing.Window] = []
+
         # THE LIGHT SHOW's HIGH / LOW TRIGGERS (spectra/services/show_arms.py
         # and show_cues.py). Two hooks, both no-ops by default and wired in
         # services/engine.py (the _intensity_event precedent — a forgotten
@@ -638,6 +659,8 @@ class TriggerEngine:
             self._flare_ids = set()
             self._scene_cue_plan = []
             self._plan_ranks = {}
+            self._seq_meta = {}
+            self._drop_windows = []
         if uri is None or uri == self._last_transition_uri:
             return
         armed = self._last_transition_uri is not None
@@ -809,16 +832,21 @@ class TriggerEngine:
         triggers = self._list_triggers(self._uri)
         self._authored_cache = (self._uri,
                                 any(t.source == "authored" for t in triggers))
+        has_authored = self._authored_cache[1]
         mode = self._effective_mode_for_song(self._scene_change_mode(), triggers)
         candidates = triggers
-        if analysed_flares.analysed_flares_allowed(
-                mode, any(t.source == "authored" for t in triggers)):
+        if analysed_flares.analysed_flares_allowed(mode, has_authored):
             candidates = triggers + self._analysed_flare_triggers(self._uri, triggers)
+        seq_trigs = self._sequence_triggers(self._uri, triggers, mode, has_authored)
+        if seq_trigs:
+            candidates = candidates + seq_trigs
+        windows = self._drop_windows
         fired: list[SpectraTrigger] = []
         for trig in candidates:
             if not trig.enabled:
                 continue
-            if trig.id not in self._flare_ids and not self._trigger_allowed(trig, mode):
+            if (trig.id not in self._flare_ids and trig.id not in self._seq_meta
+                    and not self._trigger_allowed(trig, mode)):
                 continue
             # EXACTLY-ONCE per approach (see self._fired's own comment in
             # __init__): a trigger that already fired since the last rearm
@@ -980,9 +1008,97 @@ class TriggerEngine:
                     or last < target_ms <= position_ms
                     or stranded):
                 self._fired.add(fired_key)
+                held = self._held_by_drop_window(trig, target_ms, windows)
+                if held is not None:
+                    self._record_window_hold(trig, target_ms, held)
+                    continue
                 await self._fire(trig)
                 fired.append(trig)
         return fired
+
+    # ── drop sequences (drop_firing.py) ──────────────────────────────────
+
+    def _drop_state(self, uri: str, triggers: list[SpectraTrigger]
+                    ) -> tuple[list, list]:
+        """(firing sequences, protected windows) for `uri` — mode-
+        independent, memoised on the store's revision and his own phase
+        triggers (the two things the view reads). A view that cannot be
+        read fires nothing and protects nothing, and says so once."""
+        marks = tuple(sorted(
+            (t.id, t.timestamp_ms, t.trigger_offset_ms, t.enabled, _phase_class(t))
+            for t in triggers
+            if t.source == "authored" and _phase_class(t) is not None))
+        try:
+            rev = self._drop_revision()
+        except Exception:
+            rev = None
+        key = (uri, rev, marks)
+        if self._drop_memo is not None and self._drop_memo[0] == key:
+            return self._drop_memo[1]
+        try:
+            view = self._drop_view(uri, triggers)
+            state = (drop_firing.firing_sequences(view),
+                     drop_firing.windows_from_view(view))
+        except Exception:
+            logger.exception("drop sequences: view unreadable for %s — none "
+                             "fire and none protect on this song for now", uri)
+            state = ([], [])
+        self._drop_memo = (key, state)
+        return state
+
+    def _sequence_triggers(self, uri: str, triggers: list[SpectraTrigger],
+                           mode: str, has_authored: bool) -> list[SpectraTrigger]:
+        """This song's firing drop-sequence members as synthetic
+        fire_response triggers — only the sequences the room's gate lets
+        fire right now (drop_firing.fires_here). Also refreshes
+        `_seq_meta` and `_drop_windows`."""
+        seqs, windows = self._drop_state(uri, triggers)
+        self._drop_windows = windows
+        out: list[SpectraTrigger] = []
+        meta: dict[str, tuple[drop_firing.FiringSequence, str]] = {}
+        for seq in seqs:
+            if not drop_firing.fires_here(seq, mode, has_authored):
+                continue
+            for cls, ms in seq.members():
+                tid = seq.trigger_id(cls)
+                meta[tid] = (seq, cls)
+                out.append(SpectraTrigger(
+                    id=tid, timestamp_ms=ms,
+                    source="authored" if seq.his else "generated",
+                    action=FireResponseAction(event_class=cls,
+                                              intensity=seq.intensity)))
+        self._seq_meta = meta
+        return out
+
+    def _held_by_drop_window(self, trig: SpectraTrigger, target_ms: int,
+                             windows: list) -> Optional[drop_firing.Window]:
+        """THE PROTECTED WINDOW at fire time (drop_firing.py): a GENERATED
+        scene change landing inside a window, or an analysed flare in a
+        lull or on a drop, is held back. His own triggers and the
+        sequences' own members are never held."""
+        if not windows or trig.id in self._seq_meta:
+            return None
+        if trig.source == "generated" and trig.action.kind == "fire_scene":
+            return drop_firing.holding_window(windows, target_ms)
+        if trig.id in self._flare_ids:
+            return drop_firing.silencing_window(windows, target_ms)
+        return None
+
+    def _record_window_hold(self, trig: SpectraTrigger, target_ms: int,
+                            window: drop_firing.Window) -> None:
+        what = "analysed flare" if trig.id in self._flare_ids else "analysed scene change"
+        logger.info("drop sequence %s: %s @ %dms held back by its protected "
+                    "window (%d–%dms)", window.key, what, target_ms,
+                    window.start_ms, window.end_ms)
+        self.last_fire = {"id": trig.id, "kind": trig.action.kind, "ok": True,
+                          "held_by": window.key}
+        from spectra.services import fire_history
+        fire_history.record_fire(
+            "deferred", "drop_window",
+            {"trigger_id": trig.id, "what": what, "window": window.key,
+             "window_source": window.source, "start_ms": window.start_ms,
+             "drop_ms": window.drop_ms, "end_ms": window.end_ms},
+            uri=self._uri, position_ms=self._last_position_ms)
 
     async def _tick_show_cues(self, last: int, position_ms: int) -> None:
         try:
@@ -1136,6 +1252,10 @@ class TriggerEngine:
         has_authored = any(t.source == "authored" for t in triggers)
         mode = self._effective_mode_for_song(self._scene_change_mode(), triggers)
         best: Optional[NextCue] = None
+        # A generated scene cue inside a drop sequence's protected window is
+        # held back at fire time (tick()), so it is not the next cue.
+        windows = (self._drop_windows if self._drop_memo is not None
+                   and self._drop_memo[0][0] == uri else [])
 
         def consider(cue: NextCue) -> None:
             nonlocal best
@@ -1147,6 +1267,10 @@ class TriggerEngine:
             if (not t.enabled or not self._trigger_allowed(t, mode)
                     or a.kind not in ("fire_scene", "select_color_set")):
                 continue
+            if (t.source == "generated" and a.kind == "fire_scene"
+                    and drop_firing.holding_window(
+                        windows, t.timestamp_ms + t.trigger_offset_ms) is not None):
+                continue
             consider(NextCue(
                 uri=uri, key=t.id, at_ms=t.timestamp_ms + t.trigger_offset_ms,
                 position_ms=pos, kind=a.kind, source=t.source,
@@ -1157,7 +1281,7 @@ class TriggerEngine:
             planned = (self._scene_cue_plan
                        if self._flare_plan_uri == uri else [])
             moments, source = analysed_flares.scene_change_moments(
-                triggers, lambda: planned)
+                triggers, lambda: planned, windows)
             if source == "planned":
                 for m in moments:
                     consider(NextCue(uri=uri, key=m.key, at_ms=m.timestamp_ms,
@@ -1226,6 +1350,13 @@ class TriggerEngine:
                 self._notify_colour_cue()
             elif a.kind == "fire_response" and trig.id in self._flare_ids:
                 await self._fire_analysed_flare(self._render_intensity(a.intensity))
+            elif a.kind == "fire_response" and trig.id in self._seq_meta:
+                # A DROP SEQUENCE member (drop_firing.py): the same charge/
+                # lull/drop response his own triggers fire, building to its
+                # OWN partner in the sequence (the phase-partner rule).
+                seq, cls = self._seq_meta[trig.id]
+                await self._fire_sequence(cls, self._render_intensity(a.intensity),
+                                          seq.gap_ms(cls))
             elif a.kind == "fire_response":
                 # OVERRIDE BLEND's dynamic half (2026-08-20, "fix the lull
                 # ramp"): only charge/lull stretch a ramp to the real gap
@@ -1255,6 +1386,15 @@ class TriggerEngine:
         if trig.id in self._flare_ids:
             detail["analysed_flare"] = True
             key = "analysed:flare"
+        seq_meta = self._seq_meta.get(trig.id)
+        if seq_meta is not None:
+            seq, cls = seq_meta
+            members = [c for c, _ms in seq.members()]
+            detail.update({"drop_sequence": seq.key, "member": cls,
+                           "state": seq.state, "origin": seq.origin,
+                           "his": seq.his, "members": members,
+                           "intensity": a.intensity})
+            key = f"drop_sequence:{cls}"
         if trig.snap_grid is not None:
             # Phase 2 (spectra/services/beat_snap.py) — which grid this
             # generated cue was snapped to and how far, so the Review
@@ -1467,6 +1607,21 @@ class TriggerEngine:
         # the per-song rule (analysed_flares.analysed_flares_allowed).
         await engine.fire_response_event("flare", intensity, via_trigger=True,
                                          analysed=True)
+
+    async def _default_fire_sequence(self, event_class: str, intensity: float,
+                                     gap_ms: Optional[int] = None) -> None:
+        from spectra.services import engine
+        # via_trigger=True: tick() relocated this member by its band's
+        # anchor exactly as it does a stored fire_response trigger.
+        # analysed=True admits the analysed tier beside "full"/
+        # "triggers_only": tick() has already applied the sequence's own
+        # gate (drop_firing.fires_here) before calling.
+        await engine.fire_response_event(event_class, intensity, gap_ms=gap_ms,
+                                         via_trigger=True, analysed=True)
+
+    @staticmethod
+    def _default_drop_view(uri: str, triggers: list) -> dict:
+        return drop_sequences.view(uri, triggers=triggers)
 
     @staticmethod
     def _default_analysed_plan(uri: str, stored: list):

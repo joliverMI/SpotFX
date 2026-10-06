@@ -7,8 +7,9 @@
  * how near the placed lulls and charges sit to his.
  *
  * Shown only while a `drops` lane is selected in either A/B slot
- * (dropKnobs.ts::dropKnobsRelevant). Nothing here fires anything: drop
- * detection only proposes, until phase 5. */
+ * (dropKnobs.ts::dropKnobsRelevant). Nothing here fires anything: the
+ * thresholds tuned here decide which detections are confident, and only
+ * those fire on their own (spectra/services/drop_firing.py). */
 import HelpLink from '../../help/HelpLink';
 import type { TestbedDropReferenceSet } from '../../types';
 import {

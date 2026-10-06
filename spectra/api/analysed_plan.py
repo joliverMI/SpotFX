@@ -21,9 +21,12 @@ same plan the flares come from (the engine's cached one while it plays); a
 stored cue the current plan does not contain (planned under older settings,
 not yet refreshed) carries rank null.
 
-DROP SEQUENCES (drop-detection plan, phase 2): `drop_sequences` is the
-song's stored drop detection merged with his edits (spectra/services/
-drop_sequences.py's view) — read from the store, never detected here.
+DROP SEQUENCES (drop-detection plan, phases 2 and 5): `drop_sequences` is
+the song's stored drop detection merged with his edits (spectra/services/
+drop_sequences.py's view) — read from the store, never detected here — with
+what fires on this song now (drop_firing.annotate). A stored scene cue the
+trigger clock holds back inside a sequence's protected window is left out
+of `scene_changes`: it will not fire.
 
 Every time is SONG time, the stored-trigger convention (timestamp + the
 trigger's own offset). `show_clock_shift_ms` is how far the trigger clock
@@ -76,7 +79,9 @@ def _plan(uri: str, stored: list | None = None) -> dict:
             plan = analysed_flares.plan_for_song(uri, stored)
         return plan.scene_cues
 
-    moments, scene_source = analysed_flares.scene_change_moments(stored, planned)
+    from spectra.services import drop_firing
+    moments, scene_source = analysed_flares.scene_change_moments(
+        stored, planned, drop_firing.protected_windows(uri, stored))
     ranks = ranks or {}
 
     def ranked(event: dict, key) -> dict:
@@ -110,10 +115,11 @@ def _drop_sequences(uri: str, stored: list) -> dict:
     detection run here (this route is polled): a song not detected yet
     says so, and is detected the first time it plays or GET
     /api/drop-sequences asks. Independent of whether analysed events
-    apply, like the show cues. Nothing fires from these yet (phase 5)."""
-    from spectra.services import drop_sequences
+    apply, like the show cues. Each sequence says whether it fires here
+    (`fires`, drop_firing.annotate)."""
+    from spectra.services import drop_firing
     try:
-        return drop_sequences.view(uri, triggers=stored)
+        return drop_firing.annotated_view(uri, triggers=stored)
     except Exception as exc:                             # noqa: BLE001
         return {"uri": uri, "status": "error", "sequences": [],
                 "reason": f"the drop sequences could not be read: {exc}"}

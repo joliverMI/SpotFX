@@ -11,8 +11,9 @@
  * previous/next snap steps for each handle, and the "the analysis moved
  * it" question — all through ../hooks/useDropEditor.ts, each one an undo
  * step. "Make it my triggers" stays for later (shown disabled, saying so).
- * Nothing detected fires yet (phase 5). ../dropSequences.ts holds every
- * word and number shown here. */
+ * What fires is the server's answer per sequence (phase 5, spectra/
+ * services/drop_firing.py). ../dropSequences.ts holds every word and
+ * number shown here. */
 import HelpLink from '../../help/HelpLink';
 import { fmtAgo } from '../../lib/time';
 import {
@@ -48,7 +49,7 @@ function breakText(s: DisplaySeq): string | null {
 function title(s: DisplaySeq): string {
   if (s.look === 'mine') return `Sequence ${s.number} · your triggers`;
   if (s.number != null) return `Sequence ${s.number} · ${s.look === 'confident' ? 'detected' : s.look}`;
-  if (s.fire === 'muted') return 'Detected · not played on this song';
+  if (s.fire === 'muted') return s.look === 'confident' ? 'Detected · not played on this song' : 'Yours · not played on this setting';
   if (s.look === 'dismissed') return 'Dismissed';
   if (s.fire === 'stands_down') return 'Stands down · yours fires';
   return 'Suggestion';
@@ -146,7 +147,8 @@ function Detail({ s, confidentScore, onJump, onClose, editor, selHandle, onSelec
       {s.look === 'mine' && !s.view && (
         <p className="drop-detail-p">The analysis did not find this drop — it is yours alone, and it fires as it always has.</p>
       )}
-      <p className="drop-detail-p"><b>Fires?</b> {fireLine(s)}</p>
+      <p className="drop-detail-p"><b>Fires?</b> {fireLine(s)}
+        {' '}<HelpLink topic="drop-sequence-firing" title="When drop sequences fire" /></p>
       <div className="drop-detail-p">
         <b>What the room does</b>
         {roomLines(s).map((l) => <div key={l}>{l}</div>)}
@@ -210,7 +212,7 @@ function Detail({ s, confidentScore, onJump, onClose, editor, selHandle, onSelec
       </div>
       <p className="drop-detail-soon">
         Drag a handle on the graph (it snaps to bass spikes and beats; Alt places freely), or step it here.
-        Every change is one undo step. "Make it my triggers" comes later. Nothing detected fires yet.
+        Every change is one undo step, and takes effect on the show from the next moment on. "Make it my triggers" comes later.
         {' '}<HelpLink topic="drop-sequence-editing" title="Editing drop sequences" />
       </p>
       </>)}
@@ -257,8 +259,10 @@ export default function DropSequencesCard({
     <div className="drop-review" {...{ [DROP_FOCUS_ATTR]: '' }}>
       <p className="drop-readonly-note">
         Confirm the ones you agree with, dismiss the ones that are not drops, drag a handle on the graph to
-        move it, or add a drop the analysis missed — each change is one undo step. Nothing detected fires
-        yet; your own charge, lull and drop triggers fire exactly as before.
+        move it, or add a drop the analysis missed — each change is one undo step. Confident detections
+        fire where this song plays the analysed show; the ones you confirm, edit or add are yours and fire
+        wherever your triggers fire too. Suggestions and dismissed ones never fire, and nothing fires on top
+        of your own charge, lull or drop.
         {' '}<HelpLink topic="drop-sequences" title="Drop sequences" />
       </p>
       {statusLine && <p className="empty-note">{statusLine}</p>}

@@ -455,6 +455,47 @@ def test_drop_sequence_hold_silences_every_trigger_and_says_so(monkeypatch, seam
     asyncio.run(main())
 
 
+def test_a_preview_holds_drop_sequence_fires_too(monkeypatch, seam):
+    """DROP SEQUENCES FIRE (drop-detection plan phase 5, spectra/services/
+    drop_firing.py): a sequence member is a synthetic trigger fired through
+    the SAME engine.fire_response_event choke point, so a preview must
+    silence it exactly as it silences his own triggers — measured at the
+    show, not assumed from the path."""
+    from spectra import config as scfg
+    from spectra.models.scene import FlareBand, ResponseSpec
+    from spectra.services import drop_sequences, flare_preview_hold as fph
+    from spectra.services import preview_pause
+    scene, kind = _scene_and_kind("Drop Sequence Scene")
+    band = FlareBand(intensity_min=0.0, intensity_max=1.0, kinds={kind.name: 1.0})
+    scene = scene.model_copy(update={"responses": {
+        **scene.responses, "drop": ResponseSpec(bands=[band])}})
+    _seed_scene(scene)
+    responder, executor = _install_scratch_responder(monkeypatch, scene)
+    # one sequence of HIS (added), so it fires under "full" beside his corpus
+    scfg.DROP_SEQUENCES_FILE.write_text(json.dumps({uri: {"added": [
+        {"id": "added:hold", "charge_ms": 400, "lull_ms": 1400, "drop_ms": 2400}]}
+        for uri in ("song:seq-held", "song:seq-freed")}), encoding="utf-8")
+    drop_sequences.reset()
+
+    async def main():
+        assert await fph.open_hold(scene, kind, 1.0, heartbeat_timeout_s=60.0)
+        preview_pause.start(60.0)
+        held = await _measure_show(_engine(_corpus(scene.id)), responder,
+                                   executor, seam, "song:seq-held")
+        assert held["engine_fired"] == 7, held          # 4 his + 3 members
+        assert held["seam_writes"] == 0 and held["executor_writes"] == 0, held
+        assert held["new_surges"] == 0, "a drop-sequence member surged under a hold"
+
+        preview_pause.clear()
+        await fph.close_hold()
+        freed = await _measure_show(_engine(_corpus(scene.id)), responder,
+                                    executor, seam, "song:seq-freed")
+        assert freed["engine_fired"] == 7, freed
+        assert freed["new_surges"] >= 2, freed           # his flare + the drop band
+
+    asyncio.run(main())
+
+
 def test_every_new_hold_user_obeys_the_absolute_ceiling(monkeypatch, seam):
     """The 13m54s incident's fix is a property of the HOLD, not of the
     flare route that happened to be written first — so a transition and a

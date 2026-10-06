@@ -151,6 +151,7 @@ class SceneCueMoment:
 def scene_change_moments(
     stored: Iterable[SpectraTrigger],
     planned: Callable[[], Iterable[midsong_generator.CandidateMoment]],
+    protected: Iterable = (),
 ) -> tuple[list[SceneCueMoment], Optional[str]]:
     """THE scene-change list for a song's analysed events: its enabled
     stored GENERATED fire_scene triggers (what actually fires), else — the
@@ -159,7 +160,10 @@ def scene_change_moments(
     from disk). Returns (chronological moments, "stored" | "planned" |
     None). Read by GET /api/analysed-plan's markers and by
     trigger_engine.next_colour_cue (the trigger-timed colour journey), so
-    the two can never disagree about when the next scene change is."""
+    the two can never disagree about when the next scene change is.
+    `protected` (drop_firing.Window) leaves out a stored cue the trigger
+    clock will hold back because it lands inside a drop sequence's
+    protected window — it will not fire, so it is not the next one."""
     cues = [SceneCueMoment(t.timestamp_ms + t.trigger_offset_ms,
                            t.action.intensity, t.id, t.generator_key)
             for t in stored
@@ -171,5 +175,9 @@ def scene_change_moments(
                                "planned:" + m.generator_key, m.generator_key)
                 for m in planned()]
         source = "planned" if cues else None
+    windows = list(protected)
+    if windows:
+        cues = [c for c in cues
+                if not any(w.holds_scene_change(c.timestamp_ms) for w in windows)]
     cues.sort(key=lambda c: c.timestamp_ms)
     return cues, source

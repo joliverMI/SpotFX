@@ -43,8 +43,15 @@ side of it — the pair the Timeline's undo/redo puts back through
   GET  /edits?uri=                                  his edits and their rev
 
 Errors: 404 no such sequence, 422 an edit that would break charge < lull
-< drop (or a bad body), 409 a stale undo. Nothing here fires anything
-(phase 5).
+< drop (or a bad body), 409 a stale undo.
+
+WHAT FIRES (phase 5, spectra/services/drop_firing.py). Every view these
+routes answer carries, per sequence, `fires` (whether it fires on this song
+under the room's scene-change setting right now) and `fires_reason`, plus
+the body's `firing` (the gate for detected and for his sequences) and
+`windows` (the protected windows). An edit changes what fires from the next
+tick on, and drops the trigger clock's cached analysed plan for the song so
+its flares are re-planned around the new windows (drop_sequences._changed).
 """
 from __future__ import annotations
 
@@ -55,7 +62,7 @@ from typing import Any, Literal, Optional
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from spectra.services import drop_sequences
+from spectra.services import drop_firing, drop_sequences
 
 router = APIRouter(prefix="/api/drop-sequences", tags=["spectra-drop-sequences"])
 
@@ -64,7 +71,12 @@ router = APIRouter(prefix="/api/drop-sequences", tags=["spectra-drop-sequences"]
 async def get_drop_sequences(uri: str = Query(..., min_length=1)):
     """Off the loop: a detection reads the song's audio shape and beat
     analysis, and the merge reads the trigger store."""
-    return await asyncio.to_thread(drop_sequences.view_with_detection, uri)
+    return await asyncio.to_thread(_view_with_detection, uri)
+
+
+def _view_with_detection(uri: str) -> dict:
+    return drop_firing.annotated_view(uri, drop_sequences.view_with_detection(uri))
+
 
 
 def _summary() -> dict:
@@ -153,7 +165,7 @@ def _edit(uri: str, op: str, **kw) -> dict:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {
         "result": res.result,
-        "view": drop_sequences.view(uri),
+        "view": drop_firing.annotated_view(uri),
         "before": res.before,
         "after": res.after,
         "rev_before": drop_sequences.edits_rev(res.before),
@@ -225,7 +237,7 @@ async def post_restore(body: _Restore):
 
 def _redetect(uri: str) -> dict:
     result = drop_sequences.ensure_detected(uri, force=True)
-    body = drop_sequences.view(uri)
+    body = drop_firing.annotated_view(uri)
     body["detection"] = result
     return body
 

@@ -885,7 +885,7 @@ export const HELP_SECTIONS: HelpSection[] = [
           'Generation keeps only a song\'s strongest transitions as scene changes ("Total actions per minute"). Every other transition it found — the ones that did not rank high enough — now fires as a FLARE on whatever scene is playing: the scene\'s ordinary flare band, at an intensity taken from that transition\'s own section energy and scaled exactly like any other fire.',
           'They are placed by the same rule as the scene changes (nearest rhythmic edge, else nearest downbeat) and fire on the same show clock, including any flare-kind offset and the automatic lead a flare trigger gets.',
           'When they fire: only while "Scene changes" is "Transitions + analysed", or on a song that has none of your own triggers (under "Everything" or "My triggers only"). Never under "Transitions only", and never on a song carrying your own triggers under "My triggers only" or "Everything".',
-          'Spacing: a flare within 2 seconds of a planned scene change is dropped, so a flare never lands on top of a transition; and flares closer than 2 seconds to each other are thinned, keeping the stronger one.',
+          'Spacing: a flare within 2 seconds of a planned scene change is dropped, so a flare never lands on top of a transition; and flares closer than 2 seconds to each other are thinned, keeping the stronger one. Around a drop sequence, none fires during its lull or on its drop, and no analysed scene change lands anywhere from its charge to two bars after its drop (see "When drop sequences fire").',
           'They are worked out from the song\'s analysis when it starts playing — nothing is written to your triggers, and they never appear on the Timeline as triggers. Changing "Total actions per minute" or the edge settings moves the split between scene changes and flares from the next play of a song. The Review page lists each one as "Analysed flare", and the debug page\'s audio-shape graph (and the Timeline\'s) marks where the upcoming ones will land (dashed lime) — sized and brightened by rank, so the stronger moments stand out.',
         ],
       },
@@ -1275,7 +1275,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         title: 'Drop sequences (charge → lull → drop)',
         keywords: 'drop detection charge lull drop sequence break return bass detected confident suggested edit confirm dismiss drag snap preview contra dopamine pop off 100 millones matches yours',
         intro:
-          'SPECTRA finds each drop where the bass comes back after a break, places its lull and its charge from it, and shows the three as ONE sequence: on the big audio-shape graph, on its own strip under your SPECTRA triggers, and in a review list with a detail box. You can confirm a sequence, dismiss it ("not a drop"), drag any of its three handles (they snap to bass spikes and beats), switch its lull or charge off, add a drop the analysis missed, and undo any of it. NOTHING DETECTED FIRES YET: your own charge, lull and drop triggers fire exactly as before, and the sequences start firing only in the next step of the build.',
+          'SPECTRA finds each drop where the bass comes back after a break, places its lull and its charge from it, and shows the three as ONE sequence: on the big audio-shape graph, on its own strip under your SPECTRA triggers, and in a review list with a detail box. You can confirm a sequence, dismiss it ("not a drop"), drag any of its three handles (they snap to bass spikes and beats), switch its lull or charge off, add a drop the analysis missed, and undo any of it. Confident detections FIRE on songs that play the analysed show, and the ones you confirm, edit or add are yours and fire wherever your triggers fire too — each as the ordinary charge, lull and drop, every build peaking on its own partner. Suggestions wait for you, nothing fires on top of your own charge, lull or drop, and the stretch around each sequence is kept clear of analysed scene changes (see "When drop sequences fire").',
         entries: [
           {
             id: 'drop-sequence-layer',
@@ -1293,10 +1293,10 @@ export const HELP_SECTIONS: HelpSection[] = [
             title: 'What each look means',
             keywords: 'state detected confident suggested confirmed edited added yours your triggers dismissed solid dashed faded dotted show dismissed fires will fire',
             table: [
-              ['Detected ✦ (solid)', 'Confident. Once detected drops go live it fires on its own on songs that play the analysed show. A song that plays only your own triggers ("My triggers only" with triggers of yours on it) would not play it — its pill is an outlined ✦ instead of a number.'],
+              ['Detected ✦ (solid)', 'Confident. It fires on its own on songs that play the analysed show. A song that plays only your own triggers ("My triggers only" or "Everything" with triggers of yours on it) does not play it — its pill is an outlined ✦ instead of a number. Confirm it and it is yours, and fires there too.'],
               ['Suggested ? (dashed, faded)', 'Less sure. It never fires on its own; it waits for you to confirm it.'],
               ['Your triggers (solid)', 'Your own charge, lull and drop, grouped and drawn in the same shape. Where the analysis found the same drop it stands down ("matches your drop") — your triggers fire, as today.'],
-              ['Confirmed ✓', 'Yours now: it will fire wherever your triggers fire.'],
+              ['Confirmed ✓', 'Yours now: it fires wherever your triggers fire, and with the analysed show. A sequence of yours never counts as one of "your triggers" for "My triggers only" — confirming a drop does not silence the rest of a song\'s analysed show.'],
               ['Edited ✎', 'Yours, with a dotted line where the analysis had each handle you moved.'],
               ['Added ＋', 'A sequence you placed yourself.'],
               ['Dismissed ✕', 'Not a drop: hidden, never offered again, and shown greyed only with "Show dismissed" ticked.'],
@@ -1308,7 +1308,7 @@ export const HELP_SECTIONS: HelpSection[] = [
             title: 'The drop-sequence strip',
             keywords: 'strip full song pills numbered question mark jump zoom two bars overview',
             body: [
-              'Under your SPECTRA triggers strip, the whole song at a glance: gold and blue segments are each sequence\'s build and lull, a numbered pink pill is a sequence that fires (your own triggers today, or one that will once detected drops go live), a dashed "?" is a suggestion, an outlined "✦" is a confident detection this song will not play. Click a pill to select it and zoom the big graph to it, from two bars before the charge to two bars after the drop.',
+              'Under your SPECTRA triggers strip, the whole song at a glance: gold and blue segments are each sequence\'s build and lull, a numbered pink pill is a sequence that fires on this song under your "Scene changes" setting right now (your own triggers, a sequence of yours, or a confident detection on a song that plays the analysed show), a dashed "?" is a suggestion, an outlined "✦" is one this song will not play. Click a pill to select it and zoom the big graph to it, from two bars before the charge to two bars after the drop.',
             ],
           },
           {
@@ -1332,8 +1332,27 @@ export const HELP_SECTIONS: HelpSection[] = [
               '＋ ADD A DROP (the button under the graph), then click a bass spike: the drop goes to the nearest spike, and its lull and charge are filled in by the detector\'s own placement rules — then they are yours to move. Esc cancels.',
               'Every change is ONE undo step: ↶ Undo / ↷ Redo under the graph or the list, or Ctrl+Z / Ctrl+Y while a sequence has the keyboard. At least the last 50 are kept per song. An undo is refused (and says so) if your edits on the song were changed somewhere else in the meantime, so it can never overwrite something newer.',
               'You can also tell Sonic: "list the drops on this song", "confirm every drop on this song" (the confident ones), "the third one is not a drop", "move the second drop one beat earlier". Sonic names them by number in song order, as the review list shows them, and makes the same edits these buttons make.',
-              'Nothing you do here fires anything yet: your own triggers fire exactly as before.',
+              'An edit takes effect on the show from the next moment on: a confirmed, moved or added sequence fires where it now sits, and a dismissed one goes quiet (see "When drop sequences fire").',
             ],
+          },
+          {
+            id: 'drop-sequence-firing',
+            title: 'When drop sequences fire',
+            keywords: 'fire fires firing live analysed show my triggers only everything transitions only confident suggested confirmed edited added dismissed matches yours double protected window two bars scene change flare lull intensity step review page fire history',
+            body: [
+              'A sequence fires as three ordinary responses — the same Charge, Lull and Drop your own triggers fire, through the same flare bands of whatever scene is playing. Not a scene change and not a flare. The charge builds to its own lull (or its drop, with no lull), the lull to its own drop, whatever sits between; the drop begins on its mark. All three fire at the drop\'s own strength: how far the level stepped up at the drop (a sequence you added fires at 0.8), scaled for the song exactly like any trigger.',
+              'THE PROTECTED WINDOW, from a sequence\'s first member to two bars after its drop: no analysed scene change lands inside it (a scene change that swaps the effect would break the build), and no analysed flare fires during its lull or on its drop. Flares during the charge, and in the two bars after the drop, are fine. Your own grouped charge, lull and drop get the same window. The moment of the drop leaves the scene-change ranking altogether — the drop is the action there. A song\'s stored scene changes are re-planned around the windows on its next play; until then the show simply holds back any that fall inside one.',
+              'Nothing double-fires: a detection within two beats of one of your own charge, lull or drop stands down ("matches yours"); so does a sequence you added on top of one of yours, and a single lull or charge of a sequence that lands on one of yours of the same kind.',
+              'The Review page lists every member that fired as "Drop sequence", and every analysed scene change or flare a window held back as "Kept clear of a drop sequence".',
+            ],
+            table: [
+              ['Confident ✦', 'Fires on a song that plays the analysed show: "Transitions + analysed", or "Everything" / "My triggers only" on a song with none of your own triggers.'],
+              ['Confirmed ✓ · Edited ✎ · Added ＋', 'Yours: fires wherever your triggers fire ("Everything", "My triggers only") and wherever the analysed show plays.'],
+              ['Suggested ?', 'Never — it waits for your confirm.'],
+              ['Dismissed ✕ · Matches yours', 'Never.'],
+              ['"Transitions only"', 'No sequence fires, analysed or yours.'],
+            ],
+            kbd: false,
           },
           {
             id: 'drop-sequence-keys',
@@ -1713,8 +1732,8 @@ export const HELP_SECTIONS: HelpSection[] = [
         body: [
           'The "Drops (break and return)" engine finds each drop the way you hear one: the bass hits hard and the level steps up, right after a break where it had gone quiet (at least three quarters of a beat), and the music was loud before that break — so the first bass entry after a quiet intro does not count. A second path catches a dense kick roll, a short gap, then a hard hit, where the level does not step up. Each drop lands on the FIRST bass spike of its hit. It reads only what every captured song already has (the audio shape and the beat analysis) — no re-capture.',
           'Every drop gets its lull and its charge. The lull is where the bass goes quiet before the drop — or, when the last hit before the quiet rings on for more than a beat, that hit\'s own start. The charge is the strongest change in the music (a roll starting, the highs coming in) between about 5 and 16 beats before the lull, on a beat or bass spike; 10 beats before the lull when nothing stands out. A drop with no break before it gets neither.',
-          'Two levels of trust. CONFIDENT drops (score 1.0 and up by default) are the ones that will be allowed to fire on their own on songs that play the analysed show, once firing is built; SUGGESTED drops (0.7 and up) wait for you to confirm them, and are drawn shorter and fainter in the lane. Pick "Drops (both tiers)" or "Drops (confident only)" for an engine slot to see each; the Lulls and Charges kinds show where the sequence\'s other two markers land. Picking a Drops kind for Engine A switches the reference set to your own drops, lulls or charges to match.',
-          'Two sliders appear with a Drops lane: "Confident from" and "Suggested from". Dragging them recomputes the lane and the table below them live; "Use as room default" writes only the one(s) you moved, after a confirmation, and each song is detected again under the new values the next time it plays. Nothing fires from drop detection yet.',
+          'Two levels of trust. CONFIDENT drops (score 1.0 and up by default) are the ones that fire on their own on songs that play the analysed show; SUGGESTED drops (0.7 and up) wait for you to confirm them, and are drawn shorter and fainter in the lane. Pick "Drops (both tiers)" or "Drops (confident only)" for an engine slot to see each; the Lulls and Charges kinds show where the sequence\'s other two markers land. Picking a Drops kind for Engine A switches the reference set to your own drops, lulls or charges to match.',
+          'Two sliders appear with a Drops lane: "Confident from" and "Suggested from". Dragging them recomputes the lane and the table below them live; "Use as room default" writes only the one(s) you moved, after a confirmation, and each song is detected again under the new values the next time it plays. Moving "Confident from" changes which detections fire on their own.',
           'The table scores the current sliders on your four test songs at once — Contra, Dopamine, Pop Off and 100 Millones — exactly the way the plan measured them: a drop counts as found within one beat of yours, extras are the detections with none of your drops nearby (hover the number for what of yours sits there instead — usually a scene change or a flare), and the lull and charge columns count how many land within one and two beats of your own. At the shipped values it finds 11 of your 13 drops, 9 of them confident, with nothing false on the three EDM songs. 100 Millones is not EDM: every chorus brings the bass back after a break, and you chose which one is the drop.',
           'A few things are guarded. A drop in a song\'s first or last 15 seconds is left out. At most one confident drop per 45 seconds of song — any beyond that become suggestions, strongest first. A later sequence\'s charge never starts inside the previous drop\'s two bars: it moves to the first beat after them, and a lull that would fall inside them is left out with its charge.',
           'Where one of your own charges, lulls or drops already sits within two beats of a detected drop, the detection stands down as "matches yours" — your own trigger already does it. That stand-down is applied when the sequences are shown on the Timeline, not in this lane: here the detector is scored against your marks, which it could not be if it stood down wherever you have one.',
