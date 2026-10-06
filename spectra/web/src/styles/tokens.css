@@ -1940,3 +1940,29 @@ button.big { padding: 16px 18px; font-size: 1.05em; min-height: 52px; border-rad
   clip-path: polygon(50% 0, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);
 }
 .drop-legend-item { display: inline-flex; align-items: center; gap: 4px; }
+
+/* ── drop-sequence EDITING (phase 4) — the toolbar under the graph, the
+   keyboard cue, and the detail box's review question. */
+.drop-toolbar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-top: 6px;
+  font-size: 12px; min-width: 0;
+}
+.drop-toolbar button { font-size: 12px; padding: 3px 9px; }
+.drop-toolbar button:disabled { opacity: 0.45; cursor: not-allowed; }
+.drop-toolbar button.primary:disabled { opacity: 0.55; }
+.drop-toolbar-sel { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.drop-toolbar-sel .link-button { font-size: 12px; }
+.drop-keys {
+  font-size: 11px; color: var(--text-muted); border: 1px dashed var(--border); border-radius: 10px;
+  padding: 1px 8px; white-space: nowrap;
+}
+.drop-keys.on { color: var(--text); border-style: solid; border-color: var(--accent); background: rgba(168, 85, 247, 0.12); }
+.drop-toolbar-msg { color: var(--text-muted); min-width: 0; overflow-wrap: anywhere; }
+.drop-toolbar-msg.error { color: var(--warning); display: inline-flex; gap: 6px; align-items: baseline; }
+.drop-review-q {
+  margin-top: 10px; padding: 8px 10px; border: 1px solid var(--warning); border-radius: 8px;
+  background: rgba(245, 158, 11, 0.08); font-size: 12.5px;
+}
+.drop-review-q .drop-detail-tools { margin-top: 6px; }
+.drop-detail-tools button:disabled { opacity: 0.45; cursor: not-allowed; }
+.drop-detail-steps button:disabled { opacity: 0.35; cursor: not-allowed; }

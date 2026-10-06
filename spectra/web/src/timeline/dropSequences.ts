@@ -1,8 +1,9 @@
 /** DROP SEQUENCES ON THE TIMELINE — the pure half of the sequence layer,
  * the full-song strip and the review list (drop-detection plan, phase 3:
  * /home/javi/fleet-spotfx/data/drop-detection-plan/report.md section 8,
- * built to plan.html's Timeline mock). READ-ONLY: nothing here edits a
- * sequence (phase 4) and nothing detected fires yet (phase 5).
+ * built to plan.html's Timeline mock). What a hand on a sequence DOES
+ * (drag, snap, add, undo — phase 4) is ./dropEdit.ts; nothing detected
+ * fires yet (phase 5).
  *
  * WHAT IT READS. GET /spectra/api/drop-sequences?uri= (spectra/services/
  * drop_sequences.py's `view`: the song's detected sequences merged with his
@@ -457,8 +458,9 @@ export function handleRows(s: DisplaySeq): HandleRow[] {
     const had = s.analysisHad[h];
     if (ms == null) {
       const off = (h === 'lull' && s.off.lull) || (h === 'charge' && s.off.charge);
-      return { handle: h, ms, note: off ? `switched off (analysis: ${had != null ? fmtHundredths(had) : '—'})`
-        : 'none — no break before this drop' };
+      const was = s.look === 'added' ? 'was' : 'analysis';
+      return { handle: h, ms, note: off ? `switched off (${was}: ${had != null ? fmtHundredths(had) : '—'})`
+        : s.look === 'added' ? 'none — add one from the buttons below' : 'none — no break before this drop' };
     }
     if (had != null) {
       const d = Math.round(ms - had);

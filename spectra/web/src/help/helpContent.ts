@@ -1273,9 +1273,9 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         id: 'drop-sequences',
         title: 'Drop sequences (charge → lull → drop)',
-        keywords: 'drop detection charge lull drop sequence break return bass detected confident suggested read only preview contra dopamine pop off 100 millones matches yours',
+        keywords: 'drop detection charge lull drop sequence break return bass detected confident suggested edit confirm dismiss drag snap preview contra dopamine pop off 100 millones matches yours',
         intro:
-          'SPECTRA finds each drop where the bass comes back after a break, places its lull and its charge from it, and shows the three as ONE sequence: on the big audio-shape graph, on its own strip under your SPECTRA triggers, and in a review list with a detail box. FOR NOW IT IS READ-ONLY: you can look, not edit — and nothing detected fires yet. Your own charge, lull and drop triggers fire exactly as before. Confirming, dismissing, dragging and snapping come next, and only after that does anything detected fire.',
+          'SPECTRA finds each drop where the bass comes back after a break, places its lull and its charge from it, and shows the three as ONE sequence: on the big audio-shape graph, on its own strip under your SPECTRA triggers, and in a review list with a detail box. You can confirm a sequence, dismiss it ("not a drop"), drag any of its three handles (they snap to bass spikes and beats), switch its lull or charge off, add a drop the analysis missed, and undo any of it. NOTHING DETECTED FIRES YET: your own charge, lull and drop triggers fire exactly as before, and the sequences start firing only in the next step of the build.',
         entries: [
           {
             id: 'drop-sequence-layer',
@@ -1283,8 +1283,8 @@ export const HELP_SECTIONS: HelpSection[] = [
             keywords: 'gold wedge blue band pink star fade tail rail handles ramp pause bars snap rails bass spikes beats downbeat dotted analysis not captured chip toggle',
             body: [
               'The "Drop sequences" chip in the Audio Shape header shows or hides the layer. Each sequence is drawn the way the room will run it. The GOLD WEDGE is the charge\'s build: it rises for 90% of the way to its own lull (or its drop, when it has no lull), then holds. The BLUE BAND is the lull, with its own rise and its last-10% hang before the drop. The PINK STAR line is the drop, and the PINK FADE after it is the two bars kept clear of scene changes.',
-              'A rail along the top carries each sequence\'s three handles — a ramp for the charge, pause bars for the lull, a star for the drop — joined by a bracket, with a chip saying what it is. Hover a handle for its time; click a handle, its line or its chip to open its details. (Dragging comes with editing.)',
-              'Two SNAP RAILS run under the graph: bass spikes (taller means a harder hit) and beats (taller means the first beat of a bar). They are what a handle will snap to once editing arrives; hover one for its time. Where you have moved a handle, a dotted white line shows where the analysis had it.',
+              'A rail along the top carries each sequence\'s three handles — a ramp for the charge, pause bars for the lull, a star for the drop — joined by a bracket, with a chip saying what it is. Hover a handle for its time; click a handle, its line or its chip to select it; double-click to open its details; drag a handle or its line to move it (see "Editing drop sequences").',
+              'Two SNAP RAILS run under the graph: bass spikes (taller means a harder hit) and beats (taller means the first beat of a bar). They are what a dragged handle snaps to — the one it lands on lights up white; hover one for its time. Where you have moved a handle, a dotted white line shows where the analysis had it.',
               'A song recorded from part-way in (Pop Off\'s recording starts at 0:18, 100 Millones\' at 0:30) is hatched "not captured" before that point: nothing there can be analysed, so no sequence can be found there.',
             ],
           },
@@ -1314,11 +1314,51 @@ export const HELP_SECTIONS: HelpSection[] = [
           {
             id: 'drop-sequence-review',
             title: 'The review list and the detail box',
-            keywords: 'review list jump matches your drop you have a flare here break beats detail box why found score strength what the room does confirm dismiss lull off charge off make it my triggers',
+            keywords: 'review list jump matches your drop you have a flare here break beats detail box why found score strength what the room does confirm dismiss lull off charge off make it my triggers confirm all confident re-detect undo redo',
             body: [
               'The Drop sequences card lists every sequence in song order: its time, how long the break before the drop was (in beats), and what of yours is already there — "matches your drop", "you have a flare here", "yours · the analysis did not find this drop". "jump" zooms the big graph to it.',
               'Selecting one — here, on the graph or on the strip — opens its detail box: the charge, lull and drop times (and how far each sits from the analysis), why it was found (the break, the step up, the score and the confident threshold), whether and when it fires, and what the room does with it — how long each build ramps and holds, worked out with the engine\'s own arithmetic.',
-              'The Confirm, Lull off, Charge off, Make it my triggers and Not a drop buttons — and Confirm all confident and Re-detect under the list — are shown where they will be, but stay greyed until editing arrives.',
+              'The ✓ on a row confirms it, the ✕ dismisses it (or removes a drop you added), and ↺ on a dismissed row brings it back. Under the list: "Confirm all confident" confirms every confident detection on the song in one undo step; "Re-detect" runs the detection again now (your confirms, moves, dismissals and added drops are kept); ↶ ↷ undo and redo; "Show dismissed" shows the ones you dismissed, greyed.',
+              'The detail box\'s buttons edit the selected sequence: ◀ ▶ beside each time step that handle to the previous or next snap point; Confirm; Lull off / Charge off (and back on); ＋ Lull / ＋ Charge on a drop that has none (placed by the detector\'s own rules); Not a drop; Back to detected. "Make it my triggers" — turning a sequence into three triggers of your own — comes later and is greyed.',
+            ],
+          },
+          {
+            id: 'drop-sequence-editing',
+            title: 'Editing drop sequences: drag, snap, add, undo',
+            keywords: 'edit drag snap move handle line ghost alt free shift whole sequence keyboard c l d arrows enter delete n p undo redo ctrl z add a drop bass rail not a drop confirm back to detected order gap 200 ms saved sonic voice',
+            body: [
+              'DRAG a handle on the top rail, or its line on the graph. The drop snaps to BASS SPIKES (a hard spike before a faint one); the lull to spikes or beats; the charge to beats, downbeats first. The spike or beat it lands on lights up white on the rails, and its name shows on the graph. Hold Alt to place it freely (20 ms grid). Hold Shift as you start the drag to move the WHOLE sequence by the same amount. Order is kept: charge before lull before drop, at least 200 ms apart (the engine\'s own ramp floor) — a handle dragged into its neighbour stops at that gap, it never pushes the neighbour.',
+              'While you drag only a ghost moves; the sequence is SAVED ONCE, when you let go, and only the handle you moved is saved — the others stay automatic. A detection you moved becomes "edited" and a dotted white line shows where the analysis had it.',
+              '＋ ADD A DROP (the button under the graph), then click a bass spike: the drop goes to the nearest spike, and its lull and charge are filled in by the detector\'s own placement rules — then they are yours to move. Esc cancels.',
+              'Every change is ONE undo step: ↶ Undo / ↷ Redo under the graph or the list, or Ctrl+Z / Ctrl+Y while a sequence has the keyboard. At least the last 50 are kept per song. An undo is refused (and says so) if your edits on the song were changed somewhere else in the meantime, so it can never overwrite something newer.',
+              'You can also tell Sonic: "list the drops on this song", "confirm every drop on this song" (the confident ones), "the third one is not a drop", "move the second drop one beat earlier". Sonic names them by number in song order, as the review list shows them, and makes the same edits these buttons make.',
+              'Nothing you do here fires anything yet: your own triggers fire exactly as before.',
+            ],
+          },
+          {
+            id: 'drop-sequence-keys',
+            title: 'Drop-sequence keyboard',
+            keywords: 'keyboard keys shortcuts c l d select handle arrow step nudge shift enter confirm delete dismiss n p next previous escape ctrl z undo y redo focus',
+            table: [
+              ['Click a sequence', 'Gives it the keyboard (the ⌨ cue under the graph lights up). Clicking anywhere else, or Esc, gives the keyboard back to the rest of the page.'],
+              ['C · L · D', 'Select the charge, lull or drop handle.'],
+              ['← →', 'Step the selected handle to the previous / next snap point (drop: bass spikes; lull: spikes and beats; charge: beats). Steps in a row save as one edit.'],
+              ['Shift + ← →', 'Nudge it 10 ms.'],
+              ['Enter', 'Confirm the sequence.'],
+              ['Delete / Backspace', 'Not a drop (removes a drop you added).'],
+              ['N · P', 'Next / previous sequence (the graph jumps to it).'],
+              ['Ctrl+Z · Ctrl+Y (or Ctrl+Shift+Z)', 'Undo / redo a drop-sequence edit.'],
+              ['Esc', 'Cancel "Add a drop", or let go of the sequence.'],
+            ],
+            kbd: true,
+          },
+          {
+            id: 'drop-sequence-review-moved',
+            title: 'When the analysis moves a sequence you confirmed',
+            keywords: 'kept saved re-analysis redetect moved more than a beat keep mine take the new place lost no longer finds let it go dismissed never offered again within two beats added untouched how edits are kept',
+            body: [
+              'How your edits are kept: an untouched detection saves nothing and may move if the analysis improves. A confirm is saved against the drop it was found at and stays through re-analysis. A handle you dragged keeps YOUR time, always — the dotted line follows the analysis to its new place. A dismissal means that moment is never offered again (within two beats). A drop you added is never touched by the analysis.',
+              'If the analysis later finds a sequence you confirmed or edited more than a beat away from where it was, the detail box asks: "Keep mine" pins the place you last saw, "Take the new place" moves it to where the analysis puts it now (your confirm and any lull/charge you switched off stay). If the analysis no longer finds it at all, it stays yours as you left it, and you can "Keep it" or "Let it go".',
             ],
           },
         ],

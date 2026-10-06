@@ -18,13 +18,42 @@ phase 4). spectra/services/drop_sequences.py is the binding statement.
                                     detector's own bass spikes and the
                                     beats, song time. Read-only.
 
-Nothing here fires anything (phase 5).
+EDITS (phase 4) — each a POST with a JSON body naming the song (`uri`)
+and, where it applies, the sequence (`key`, as the view gives it). Every
+edit answers {"result", "view", "before", "after", "rev_before",
+"rev_after"}: the song's merged view after the edit, and HIS EDITS either
+side of it — the pair the Timeline's undo/redo puts back through
+/restore, which refuses (409) when his edits changed since.
+
+  POST /confirm       {uri, key}                    confirm a detection
+  POST /dismiss       {uri, key}                    "not a drop" (removes an added one)
+  POST /revert        {uri, key}                    back to detected
+  POST /handles       {uri, key, handles}           move handles in one edit;
+                                                    {"drop": ms, "lull": null, ...}
+                                                    (null = back to automatic)
+  POST /member        {uri, key, handle, off}       lull/charge off or back on
+  POST /fill          {uri, key, handle}            add a lull or charge by the rules
+  POST /review        {uri, key, choice}            "the analysis moved it": keep|take
+  POST /add           {uri, drop_ms, lull_ms?, charge_ms?}
+                                                    a sequence of his; a missing lull
+                                                    and charge are placed by the rules
+  POST /confirm-all   {uri}                         every confident detection
+  POST /redetect      {uri}                         detect again now
+  POST /restore       {uri, edits, expect}          undo/redo
+  GET  /edits?uri=                                  his edits and their rev
+
+Errors: 404 no such sequence, 422 an edit that would break charge < lull
+< drop (or a bad body), 409 a stale undo. Nothing here fires anything
+(phase 5).
 """
 from __future__ import annotations
 
 import asyncio
 
-from fastapi import APIRouter, Query
+from typing import Any, Literal, Optional
+
+from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel, Field
 
 from spectra.services import drop_sequences
 
@@ -73,3 +102,134 @@ async def get_summary():
 async def get_rails(uri: str = Query(..., min_length=1)):
     """Off the loop: the analysis reads the song's audio shape and beats."""
     return await asyncio.to_thread(drop_sequences.snap_rails, uri)
+
+
+# ── edits (phase 4) ──────────────────────────────────────────────────────
+
+class _Song(BaseModel):
+    uri: str = Field(..., min_length=1)
+
+
+class _Seq(_Song):
+    key: str = Field(..., min_length=1)
+
+
+class _Handles(_Seq):
+    handles: dict[Literal["charge", "lull", "drop"], Optional[int]]
+
+
+class _Member(_Seq):
+    handle: Literal["lull", "charge"]
+    off: bool
+
+
+class _Fill(_Seq):
+    handle: Literal["lull", "charge"]
+
+
+class _Review(_Seq):
+    choice: Literal["keep", "take"]
+
+
+class _Add(_Song):
+    drop_ms: int
+    lull_ms: Optional[int] = None
+    charge_ms: Optional[int] = None
+
+
+class _Restore(_Song):
+    edits: dict[str, Any]
+    expect: Optional[str] = None
+
+
+def _edit(uri: str, op: str, **kw) -> dict:
+    try:
+        res = drop_sequences.apply_edit(uri, op, **kw)
+    except drop_sequences.SequenceNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except drop_sequences.InvalidEdit as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except drop_sequences.EditConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {
+        "result": res.result,
+        "view": drop_sequences.view(uri),
+        "before": res.before,
+        "after": res.after,
+        "rev_before": drop_sequences.edits_rev(res.before),
+        "rev_after": drop_sequences.edits_rev(res.after),
+    }
+
+
+async def _run(uri: str, op: str, **kw) -> dict:
+    """Off the loop: an edit rewrites the store, and the view reads the
+    trigger store."""
+    return await asyncio.to_thread(_edit, uri, op, **kw)
+
+
+@router.get("/edits")
+async def get_edits(uri: str = Query(..., min_length=1)):
+    return await asyncio.to_thread(drop_sequences.edits, uri)
+
+
+@router.post("/confirm")
+async def post_confirm(body: _Seq):
+    return await _run(body.uri, "confirm", key=body.key)
+
+
+@router.post("/dismiss")
+async def post_dismiss(body: _Seq):
+    return await _run(body.uri, "dismiss", key=body.key)
+
+
+@router.post("/revert")
+async def post_revert(body: _Seq):
+    return await _run(body.uri, "revert", key=body.key)
+
+
+@router.post("/handles")
+async def post_handles(body: _Handles):
+    return await _run(body.uri, "handles", key=body.key, handles=dict(body.handles))
+
+
+@router.post("/member")
+async def post_member(body: _Member):
+    return await _run(body.uri, "member", key=body.key, handle=body.handle, off=body.off)
+
+
+@router.post("/fill")
+async def post_fill(body: _Fill):
+    return await _run(body.uri, "fill", key=body.key, handle=body.handle)
+
+
+@router.post("/review")
+async def post_review(body: _Review):
+    return await _run(body.uri, "review", key=body.key, choice=body.choice)
+
+
+@router.post("/add")
+async def post_add(body: _Add):
+    return await _run(body.uri, "add", drop_ms=body.drop_ms, lull_ms=body.lull_ms,
+                      charge_ms=body.charge_ms)
+
+
+@router.post("/confirm-all")
+async def post_confirm_all(body: _Song):
+    return await _run(body.uri, "confirm_all")
+
+
+@router.post("/restore")
+async def post_restore(body: _Restore):
+    return await _run(body.uri, "restore", edits=body.edits, expect=body.expect)
+
+
+def _redetect(uri: str) -> dict:
+    result = drop_sequences.ensure_detected(uri, force=True)
+    body = drop_sequences.view(uri)
+    body["detection"] = result
+    return body
+
+
+@router.post("/redetect")
+async def post_redetect(body: _Song):
+    return await asyncio.to_thread(_redetect, body.uri)

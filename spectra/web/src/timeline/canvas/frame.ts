@@ -4,6 +4,7 @@ import type {
   AudioShapeData, AudioShapeMeta, EventOption, LibrosaAnalysis, MarkType, MusicTrigger,
 } from '../types';
 import type { DisplaySeq, DropRails, Handle } from '../dropSequences';
+import type { Ghost, SnapGuide } from '../dropEdit';
 
 export interface Win {
   startMs: number;
@@ -72,10 +73,27 @@ export interface LayerDataBag {
   dropSeq?: DropSeqLayerData | null;
 }
 
+/** What a hand on the drop-sequence layer is doing RIGHT NOW (phase 4) —
+ * read by the layer every frame from a ref, so a drag never costs a React
+ * render: the ghost being moved, the snap target it is on, and the add-a-
+ * drop preview. */
+export interface DropLive {
+  ghost: Ghost | null;
+  guide: SnapGuide | null;
+  /** "＋ Add a drop" is armed: where a click would put the drop */
+  addAt: SnapGuide | null;
+}
+
 export interface DropSeqLayerData {
   seqs: DisplaySeq[];
   rails: DropRails | null;
   selectedKey: string | null;
+  /** the selected handle (C/L/D, or the one last grabbed) — ringed */
+  selectedHandle?: Handle | null;
+  /** "＋ Add a drop" is armed */
+  adding?: boolean;
+  /** the live drag/add state (a ref the page mutates) */
+  live?: { current: DropLive } | null;
   hover: { key: string; handle: Handle } | null;
   /** where the recording starts (song ms) — before it is "not captured" */
   capturedFromMs: number | null;
@@ -123,7 +141,7 @@ export type Hit =
   | { kind: 'trigger-triangle'; triggerId: string }
   | { kind: 'ai-marker'; index: number }
   | { kind: 'beat'; beatMs: number; values: Record<string, number> }
-  | { kind: 'drop-seq'; key: string; handle: Handle }
+  | { kind: 'drop-seq'; key: string; handle: Handle; chip?: boolean }
   | null;
 
 export interface CanvasLayer {

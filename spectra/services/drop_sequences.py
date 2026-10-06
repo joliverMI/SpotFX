@@ -41,6 +41,16 @@ HOW EDITS ARE KEPT, AND WHAT WINS (the plan's table, each a test):
   dismiss       "not a drop": never offered again within two beats.
   add           the whole sequence, his; re-detection never touches it.
 
+EDITING (phase 4). Every edit is one locked read-modify-write of this
+song's entry that returns HIS EDITS before and after (`EditResult`):
+{"overrides", "added"} — the detection is never part of it. That pair is
+the whole of undo/redo: `restore_edits` puts one side back, and refuses
+(`EditConflict`) when his edits are no longer the other side (changed in
+another tab), so an undo can never silently overwrite a newer edit.
+`resolve_review` answers the "the analysis moved it" question (keep his
+place, or take the new one). A whole-sequence move is ONE edit
+(`set_handles`). Nothing here fires anything: phase 5.
+
 KEYS SURVIVE RE-DETECTION. A re-detected sequence keeps an override whose
 key's drop lies within MATCH_BEATS (two beats) of its new drop — nearest
 first, one override per detection. An override nothing matches any more
@@ -182,18 +192,48 @@ def stored(uri: str) -> dict:
 def _mutate(uri: str, fn) -> Any:
     """Read-modify-write one song's entry under the lock. `fn(entry)`
     changes the (copied) entry in place and returns the caller's result."""
+    return _mutate_tracked(uri, fn).result
+
+
+@dataclass
+class EditResult:
+    """What one edit returned, plus HIS EDITS before and after it — the
+    pair an undo/redo puts back (`restore_edits`)."""
+    result: Any
+    before: dict
+    after: dict
+
+
+def edits_of(entry: dict) -> dict:
+    """HIS edits in an entry: overrides and added sequences, never the
+    detection (a regenerable cache). Always both keys."""
+    return {"overrides": copy.deepcopy(entry.get("overrides") or {}),
+            "added": copy.deepcopy(entry.get("added") or [])}
+
+
+def edits_rev(edits: dict) -> str:
+    """A short fingerprint of his edits, so an undo can say "only if
+    nothing changed since"."""
+    norm = {"overrides": edits.get("overrides") or {}, "added": edits.get("added") or []}
+    blob = json.dumps(norm, sort_keys=True, default=str).encode("utf-8")
+    return hashlib.sha1(blob).hexdigest()[:16]
+
+
+def _mutate_tracked(uri: str, fn) -> EditResult:
     with _lock:
         data = copy.deepcopy(_read())
         entry = data.get(uri)
         if not isinstance(entry, dict):
             entry = {}
+        before = edits_of(entry)
         result = fn(entry)
+        after = edits_of(entry)
         if entry:
             data[uri] = entry
         else:
             data.pop(uri, None)
         _write(data)
-        return result
+        return EditResult(result=result, before=before, after=after)
 
 
 # ── the stamp ──────────────────────────────────────────────────────────────
@@ -254,19 +294,20 @@ def stamp_for(uri: str, controls: Any = None, *,
 _detect_lock = threading.Lock()
 
 
-def ensure_detected(uri: str, controls: Any = None) -> dict:
-    """Detect `uri` when it has no stored detection or its stamp is stale,
-    and store the result (one write; his overrides and added sequences are
-    never touched). Returns {"status": "fresh" | "detected" |
-    "unavailable", ...}. Synchronous file and analysis I/O — call it off
-    the event loop."""
+def ensure_detected(uri: str, controls: Any = None, *, force: bool = False) -> dict:
+    """Detect `uri` when it has no stored detection or its stamp is stale
+    (or always, with `force` — the review list's "Re-detect"), and store
+    the result (one write; his overrides and added sequences are never
+    touched). Returns {"status": "fresh" | "detected" | "unavailable",
+    ...}. Synchronous file and analysis I/O — call it off the event
+    loop."""
     with _detect_lock:
         try:
             with analysis_reader.memoized_reads():
                 inputs = song_inputs(uri)
                 stamp = stamp_for(uri, controls, inputs=inputs)
                 current = stored(uri).get("detected") or {}
-                if current.get("stamp") == stamp:
+                if current.get("stamp") == stamp and not force:
                     return {"uri": uri, "status": "fresh", "stamp": stamp}
                 confident, suggested = _thresholds(controls)
                 det = drop_detector.detect_uri(
@@ -389,96 +430,145 @@ def _check_order(times: dict) -> None:
         raise InvalidEdit("a sequence needs its drop")
 
 
-def confirm(uri: str, key: str) -> str:
-    """"This one is confirmed", against the drop it was found at. Returns
-    the override key."""
-    def fn(entry):
-        okey, det = _resolve_detected_key(entry, key)
-        ovs = entry.setdefault("overrides", {})
-        ov = ovs.setdefault(okey, {"detected": _snapshot(det) if det else None})
-        ov["state"] = STATE_CONFIRMED
-        ov["at"] = _now_ms()
-        return okey
-    return _mutate(uri, fn)
+class EditConflict(RuntimeError):
+    """An undo/redo found his edits changed since (another tab, another
+    edit): nothing is restored."""
 
 
-def dismiss(uri: str, key: str) -> str:
-    """"Not a drop": never offered again within two beats."""
-    def fn(entry):
-        okey, det = _resolve_detected_key(entry, key)
-        ovs = entry.setdefault("overrides", {})
-        ov = ovs.setdefault(okey, {"detected": _snapshot(det) if det else None})
-        ov["state"] = STATE_DISMISSED
-        ov["at"] = _now_ms()
-        return okey
-    return _mutate(uri, fn)
+def _override(entry: dict, key: str) -> tuple[str, Optional[dict], dict]:
+    """The override an edit to detected `key` lands in (created on first
+    touch, with a snapshot of the detection it was made against)."""
+    okey, det = _resolve_detected_key(entry, key)
+    ovs = entry.setdefault("overrides", {})
+    ov = ovs.setdefault(okey, {"detected": _snapshot(det) if det else None})
+    return okey, det, ov
 
 
-def reset_to_detected(uri: str, key: str) -> bool:
-    """"Back to detected": forget every edit to this detection."""
-    def fn(entry):
-        try:
-            okey, _ = _resolve_detected_key(entry, key)
-        except SequenceNotFound:
-            return False
-        ovs = entry.get("overrides") or {}
-        if okey not in ovs:
-            return False
-        ovs.pop(okey)
-        if not ovs:
-            entry.pop("overrides", None)
-        return True
-    return _mutate(uri, fn)
+def _is_added(key: str) -> bool:
+    return isinstance(key, str) and key.startswith("added:")
 
 
-def set_handle(uri: str, key: str, handle: str, ms: Optional[int]) -> str:
-    """Move one handle of a detected or added sequence (`ms` None = back to
-    the detector's place for that handle; on an added sequence, removes
-    that member). The other two stay as they are. Order is enforced:
-    charge < lull < drop, RAMP_FLOOR_MS apart."""
-    if handle not in HANDLES:
-        raise InvalidEdit(f"handle must be one of {HANDLES}")
-    if ms is not None and int(ms) < 0:
-        raise InvalidEdit("a handle cannot sit before the song starts")
+def _op_confirm(entry: dict, key: str) -> str:
+    if _is_added(key):
+        _find_added(entry, key)
+        return key                      # an added sequence is his already
+    okey, _det, ov = _override(entry, key)
+    ov["state"] = STATE_CONFIRMED
+    ov["at"] = _now_ms()
+    return okey
 
-    def fn(entry):
-        if key.startswith("added:"):
-            rec = _find_added(entry, key)
-            trial = {h: rec.get(f"{h}_ms") for h in HANDLES}
-            if handle == "drop" and ms is None:
+
+def _op_dismiss(entry: dict, key: str) -> str:
+    """"Not a drop". On a sequence he added himself, it removes it."""
+    if _is_added(key):
+        if not _op_remove_added(entry, key):
+            raise SequenceNotFound(f"no added sequence {key!r} on this song")
+        return key
+    okey, _det, ov = _override(entry, key)
+    ov["state"] = STATE_DISMISSED
+    ov["at"] = _now_ms()
+    return okey
+
+
+def _op_reset(entry: dict, key: str) -> bool:
+    try:
+        okey, _ = _resolve_detected_key(entry, key)
+    except SequenceNotFound:
+        return False
+    ovs = entry.get("overrides") or {}
+    if okey not in ovs:
+        return False
+    ovs.pop(okey)
+    if not ovs:
+        entry.pop("overrides", None)
+    return True
+
+
+def _check_handle_values(handles: dict) -> dict:
+    out = {}
+    for h, ms in handles.items():
+        if h not in HANDLES:
+            raise InvalidEdit(f"handle must be one of {HANDLES}")
+        if ms is not None and int(ms) < 0:
+            raise InvalidEdit("a handle cannot sit before the song starts")
+        out[h] = int(ms) if ms is not None else None
+    if not out:
+        raise InvalidEdit("name at least one handle to move")
+    return out
+
+
+def _op_set_handles(entry: dict, key: str, handles: dict) -> str:
+    """Move one or more handles of a sequence in ONE edit. `None` for a
+    handle = back to the detector's place (on an added sequence: remove
+    that member; the drop can never be removed). The rest stay as they
+    are. Order is enforced: charge < lull < drop, RAMP_FLOOR_MS apart."""
+    handles = _check_handle_values(handles)
+    if _is_added(key):
+        rec = _find_added(entry, key)
+        trial = {h: rec.get(f"{h}_ms") for h in HANDLES}
+        offs = {h: bool(rec.get(f"{h}_off")) for h in ("lull", "charge")}
+        for h, ms in handles.items():
+            if h == "drop" and ms is None:
                 raise InvalidEdit("a sequence needs its drop")
-            trial[handle] = int(ms) if ms is not None else None
-            _check_order(trial)
-            rec[f"{handle}_ms"] = trial[handle]
-            rec["at"] = _now_ms()
-            return key
-        okey, det = _resolve_detected_key(entry, key)
-        ovs = entry.setdefault("overrides", {})
-        ov = ovs.setdefault(okey, {"detected": _snapshot(det) if det else None})
-        base = det or ov.get("detected") or {}
-        trial_ov = {**ov, f"{handle}_ms": int(ms) if ms is not None else None}
-        if ms is not None and handle in ("lull", "charge"):
-            trial_ov[f"{handle}_off"] = False
-        _check_order(_effective(base, trial_ov))
-        ov.update(trial_ov)
-        ov["at"] = _now_ms()
-        return okey
-    return _mutate(uri, fn)
+            trial[h] = ms
+            if h in offs and ms is not None:
+                offs[h] = False
+        eff = dict(trial)
+        for h, off in offs.items():
+            if off:
+                eff[h] = None
+        _check_order(eff)
+        for h in HANDLES:
+            rec[f"{h}_ms"] = trial[h]
+        for h, off in offs.items():
+            if off:
+                rec[f"{h}_off"] = True
+            else:
+                rec.pop(f"{h}_off", None)
+        rec["at"] = _now_ms()
+        return key
+    okey, det, ov = _override(entry, key)
+    base = det or ov.get("detected") or {}
+    trial_ov = dict(ov)
+    for h, ms in handles.items():
+        trial_ov[f"{h}_ms"] = ms
+        if ms is not None and h in ("lull", "charge"):
+            trial_ov[f"{h}_off"] = False
+    _check_order(_effective(base, trial_ov))
+    ov.update(trial_ov)
+    ov["at"] = _now_ms()
+    return okey
 
 
-def set_member_off(uri: str, key: str, handle: str, off: bool) -> str:
-    """Lull off / charge off on a detected sequence."""
+def _op_member_off(entry: dict, key: str, handle: str, off: bool) -> str:
     if handle not in ("lull", "charge"):
         raise InvalidEdit("only the lull or the charge can be switched off")
-
-    def fn(entry):
-        okey, det = _resolve_detected_key(entry, key)
-        ovs = entry.setdefault("overrides", {})
-        ov = ovs.setdefault(okey, {"detected": _snapshot(det) if det else None})
-        ov[f"{handle}_off"] = bool(off)
-        ov["at"] = _now_ms()
-        return okey
-    return _mutate(uri, fn)
+    if _is_added(key):
+        rec = _find_added(entry, key)
+        if not off:
+            eff = {h: rec.get(f"{h}_ms") for h in HANDLES}
+            other = "charge" if handle == "lull" else "lull"
+            if rec.get(f"{other}_off"):
+                eff[other] = None
+            if eff[handle] is None:
+                raise InvalidEdit(f"this sequence has no {handle} to switch on — add one")
+            _check_order(eff)
+            rec.pop(f"{handle}_off", None)
+        else:
+            rec[f"{handle}_off"] = True
+        rec["at"] = _now_ms()
+        return key
+    okey, det, ov = _override(entry, key)
+    if not off:
+        base = det or ov.get("detected") or {}
+        trial = {**ov, f"{handle}_off": False}
+        eff = _effective(base, trial)
+        if eff[handle] is None:
+            raise InvalidEdit(f"this sequence has no {handle} to switch on — add one")
+        _check_order(eff)
+    ov[f"{handle}_off"] = bool(off)
+    ov["at"] = _now_ms()
+    return okey
 
 
 def _find_added(entry: dict, key: str) -> dict:
@@ -488,46 +578,297 @@ def _find_added(entry: dict, key: str) -> dict:
     raise SequenceNotFound(f"no added sequence {key!r} on this song")
 
 
-def add(uri: str, drop_ms: int, *, lull_ms: Optional[int] = None,
-        charge_ms: Optional[int] = None, fill: bool = True) -> str:
-    """A sequence he places himself. With `fill`, a missing lull and charge
-    are placed by the detector's own rules from the song's audio shape
-    (left out when the song cannot be analysed, or there is no break
-    before his drop). Returns its key ("added:<id>")."""
+def _op_remove_added(entry: dict, key: str) -> bool:
+    recs = entry.get("added") or []
+    keep = [r for r in recs if r.get("id") != key]
+    if len(keep) == len(recs):
+        return False
+    if keep:
+        entry["added"] = keep
+    else:
+        entry.pop("added", None)
+    return True
+
+
+def _op_resolve_review(entry: dict, key: str, choice: str) -> str:
+    """"The analysis moved it": `keep` pins his place (the times he last
+    saw) and stops asking; `take` moves his sequence to where the analysis
+    puts it now (his confirm and his lull/charge off stay). On a sequence
+    the analysis no longer finds, `take` lets it go (the override is
+    forgotten)."""
+    if choice not in ("keep", "take"):
+        raise InvalidEdit("choose keep or take")
+    okey, det = _resolve_detected_key(entry, key)
+    ovs = entry.get("overrides") or {}
+    ov = ovs.get(okey)
+    if not isinstance(ov, dict):
+        raise SequenceNotFound(f"nothing of yours to review at {key!r}")
+    old = ov.get("detected") or {}
+    if det is None:                                    # the analysis lost it
+        if choice == "take":
+            ovs.pop(okey)
+            if not ovs:
+                entry.pop("overrides", None)
+        else:
+            ov["kept"] = True
+            ov["at"] = _now_ms()
+        return okey
+    if choice == "keep":
+        pinned = []
+        for h in HANDLES:
+            if ov.get(f"{h}_ms") is None and old.get(f"{h}_ms") is not None:
+                ov[f"{h}_ms"] = int(old[f"{h}_ms"])
+                pinned.append(h)
+        try:
+            _check_order(_effective(det, ov))
+        except InvalidEdit:
+            # an old automatic lull/charge no longer fits: pin only the drop
+            for h in pinned:
+                if h != "drop":
+                    ov.pop(f"{h}_ms", None)
+    else:
+        for h in HANDLES:
+            ov.pop(f"{h}_ms", None)
+    ov["detected"] = _snapshot(det)
+    ov.pop("kept", None)
+    ov["at"] = _now_ms()
+    return okey
+
+
+def _place(uri: str, entry: dict, handle: str, drop_ms: int,
+           lull_ms: Optional[int]) -> Optional[int]:
+    """Where the detector's own placement rules put a lull or a charge for
+    this drop (report section 6), or None when the song cannot be read.
+    A lull with no break before the drop falls back to two beats before
+    it, snapped to a beat."""
+    try:
+        analysis = drop_detector.analyse(uri)
+    except drop_detector.Unavailable:
+        return None
+    if handle == "lull":
+        got = drop_detector.place_lull(analysis.prep, drop_ms)
+        if got is None:
+            got = drop_detector._to_beat(analysis.song, drop_ms - 2 * analysis.song.beat_len)
+        return int(got)
+    return int(drop_detector.place_charge(analysis.prep, lull_ms if lull_ms is not None else drop_ms))
+
+
+def _op_fill(entry: dict, key: str, handle: str, placed: Optional[int]) -> str:
+    """Add a lull or a charge the detector's own rules placed (`_place`).
+    This is HIS explicit press — unlike `_added_record`'s automatic fill
+    (which quietly leaves a too-close member out), a placement that would
+    not hold the order rule is refused and names why, rather than silently
+    doing nothing to a press he made on purpose."""
+    if handle not in ("lull", "charge"):
+        raise InvalidEdit("only a lull or a charge can be added to a sequence")
+    if placed is None:
+        raise InvalidEdit("this song's audio shape cannot be read to place one")
+    if handle == "lull":
+        drop_ms = _current_times(entry, key).get("drop")
+        if drop_ms is not None and int(drop_ms) - int(placed) < drop_detector.RAMP_FLOOR_MS:
+            raise InvalidEdit(
+                "there is no room for a lull before this drop: it would sit "
+                f"closer than {drop_detector.RAMP_FLOOR_MS} ms")
+    return _op_set_handles(entry, key, {handle: placed})
+
+
+def _current_times(entry: dict, key: str) -> dict:
+    if _is_added(key):
+        rec = _find_added(entry, key)
+        out = {h: rec.get(f"{h}_ms") for h in HANDLES}
+        for h in ("lull", "charge"):
+            if rec.get(f"{h}_off"):
+                out[h] = None
+        return out
+    okey, det = _resolve_detected_key(entry, key)
+    ov = (entry.get("overrides") or {}).get(okey) or {}
+    return _effective(det or ov.get("detected") or {}, ov)
+
+
+def _op_add(entry: dict, rec: dict) -> str:
+    _check_order({h: rec[f"{h}_ms"] for h in HANDLES})
+    entry.setdefault("added", []).append(rec)
+    return rec["id"]
+
+
+def _added_record(uri: str, drop_ms: int, lull_ms: Optional[int],
+                  charge_ms: Optional[int], fill: bool) -> dict:
     drop_ms = int(drop_ms)
+    if drop_ms < 0:
+        raise InvalidEdit("a drop cannot sit before the song starts")
     if fill and (lull_ms is None or charge_ms is None):
         try:
             analysis = drop_detector.analyse(uri)
             if lull_ms is None:
                 lull_ms = drop_detector.place_lull(analysis.prep, drop_ms)
-            if charge_ms is None and lull_ms is not None:
-                charge_ms = drop_detector.place_charge(analysis.prep, lull_ms)
+            if charge_ms is None:
+                charge_ms = drop_detector.place_charge(
+                    analysis.prep, lull_ms if lull_ms is not None else drop_ms)
         except drop_detector.Unavailable:
             pass
-    rec = {"id": f"added:{uuid.uuid4().hex[:10]}", "drop_ms": drop_ms,
-           "lull_ms": int(lull_ms) if lull_ms is not None else None,
-           "charge_ms": int(charge_ms) if charge_ms is not None else None,
-           "at": _now_ms()}
-    _check_order({h: rec[f"{h}_ms"] for h in HANDLES})
+    # A filled lull or charge never reaches back past the drop before this
+    # one (a quick re-drop): the build would start inside the previous
+    # sequence's payoff. Left out rather than overlapped — his to add.
+    if fill:
+        prev = _previous_drop_ms(uri, drop_ms)
+        if prev is not None:
+            if lull_ms is not None and int(lull_ms) <= prev:
+                lull_ms = None
+            if charge_ms is not None and int(charge_ms) <= prev:
+                charge_ms = None
+    # a filled lull that lands too near the drop itself is left out, not
+    # refused — a high-tempo song's own break can legally sit closer to
+    # the drop than the engine's own ramp floor
+    if lull_ms is not None and fill:
+        if drop_ms - int(lull_ms) < drop_detector.RAMP_FLOOR_MS:
+            lull_ms = None
+    # a filled charge that lands too near its partner is left out, not refused
+    if charge_ms is not None:
+        upper = lull_ms if lull_ms is not None else drop_ms
+        if upper - int(charge_ms) < drop_detector.RAMP_FLOOR_MS and fill:
+            charge_ms = None
+    return {"id": f"added:{uuid.uuid4().hex[:10]}", "drop_ms": drop_ms,
+            "lull_ms": int(lull_ms) if lull_ms is not None else None,
+            "charge_ms": int(charge_ms) if charge_ms is not None else None,
+            "at": _now_ms()}
 
-    def fn(entry):
-        entry.setdefault("added", []).append(rec)
-        return rec["id"]
-    return _mutate(uri, fn)
+
+def _previous_drop_ms(uri: str, drop_ms: int) -> Optional[int]:
+    """The latest drop before `drop_ms` on this song — a detected or added
+    sequence that is not dismissed, or one of his own drop triggers."""
+    try:
+        v = view(uri)
+    except Exception:                                    # noqa: BLE001
+        return None
+    drops = [int(s["drop_ms"]) for s in v.get("sequences") or []
+             if s.get("state") != STATE_DISMISSED]
+    drops += [int(g["drop"]["timestamp_ms"]) for g in v.get("authored") or [] if g.get("drop")]
+    earlier = [d for d in drops if d < drop_ms - drop_detector.RAMP_FLOOR_MS]
+    return max(earlier) if earlier else None
+
+
+def _confident_keys(uri: str) -> list[str]:
+    return [s["key"] for s in view(uri)["sequences"]
+            if s["origin"] == "detected" and s["state"] == STATE_CONFIDENT]
+
+
+def _op_restore(entry: dict, edits: dict, expect_rev: Optional[str]) -> str:
+    current = edits_of(entry)
+    if expect_rev is not None and edits_rev(current) != expect_rev:
+        raise EditConflict("your drop-sequence edits on this song changed since — "
+                           "nothing was undone; reload and try again")
+    ovs = edits.get("overrides") if isinstance(edits, dict) else None
+    added = edits.get("added") if isinstance(edits, dict) else None
+    if not isinstance(ovs, dict) or not isinstance(added, list):
+        raise InvalidEdit("edits must carry an overrides object and an added list")
+    if ovs:
+        entry["overrides"] = copy.deepcopy(ovs)
+    else:
+        entry.pop("overrides", None)
+    if added:
+        entry["added"] = copy.deepcopy(added)
+    else:
+        entry.pop("added", None)
+    return edits_rev(edits_of(entry))
+
+
+# ── the public edits (each one locked read-modify-write) ──────────────────
+
+def confirm(uri: str, key: str) -> str:
+    """"This one is confirmed", against the drop it was found at. Returns
+    the override key."""
+    return _mutate(uri, lambda e: _op_confirm(e, key))
+
+
+def dismiss(uri: str, key: str) -> str:
+    """"Not a drop": never offered again within two beats."""
+    return _mutate(uri, lambda e: _op_dismiss(e, key))
+
+
+def reset_to_detected(uri: str, key: str) -> bool:
+    """"Back to detected": forget every edit to this detection."""
+    return _mutate(uri, lambda e: _op_reset(e, key))
+
+
+def set_handle(uri: str, key: str, handle: str, ms: Optional[int]) -> str:
+    """Move one handle (see `set_handles`)."""
+    return _mutate(uri, lambda e: _op_set_handles(e, key, {handle: ms}))
+
+
+def set_handles(uri: str, key: str, handles: dict) -> str:
+    """Move one or more handles in one edit (a whole-sequence move)."""
+    return _mutate(uri, lambda e: _op_set_handles(e, key, handles))
+
+
+def set_member_off(uri: str, key: str, handle: str, off: bool) -> str:
+    """Lull off / charge off (and back on) on a detected or added sequence."""
+    return _mutate(uri, lambda e: _op_member_off(e, key, handle, off))
+
+
+def add(uri: str, drop_ms: int, *, lull_ms: Optional[int] = None,
+        charge_ms: Optional[int] = None, fill: bool = True) -> str:
+    """A sequence he places himself. With `fill`, a missing lull and charge
+    are placed by the detector's own rules from the song's audio shape
+    (the lull is left out when there is no break before his drop, and the
+    charge then builds to the drop; both are left out when the song cannot
+    be analysed). Returns its key ("added:<id>")."""
+    rec = _added_record(uri, drop_ms, lull_ms, charge_ms, fill)
+    return _mutate(uri, lambda e: _op_add(e, rec))
 
 
 def remove_added(uri: str, key: str) -> bool:
-    def fn(entry):
-        recs = entry.get("added") or []
-        keep = [r for r in recs if r.get("id") != key]
-        if len(keep) == len(recs):
-            return False
-        if keep:
-            entry["added"] = keep
-        else:
-            entry.pop("added", None)
-        return True
-    return _mutate(uri, fn)
+    return _mutate(uri, lambda e: _op_remove_added(e, key))
+
+
+def edits(uri: str) -> dict:
+    """His edits on this song: {"overrides", "added", "rev"}."""
+    out = edits_of(stored(uri))
+    out["rev"] = edits_rev(out)
+    return out
+
+
+def apply_edit(uri: str, op: str, **kw) -> EditResult:
+    """THE edit entry point the API uses: one named edit, locked, with his
+    edits before and after it (the undo pair). Raises SequenceNotFound,
+    InvalidEdit or EditConflict, writing nothing."""
+    key = kw.get("key")
+    if op == "confirm":
+        return _mutate_tracked(uri, lambda e: _op_confirm(e, key))
+    if op == "dismiss":
+        return _mutate_tracked(uri, lambda e: _op_dismiss(e, key))
+    if op == "revert":
+        return _mutate_tracked(uri, lambda e: _op_reset(e, key))
+    if op == "handles":
+        return _mutate_tracked(uri, lambda e: _op_set_handles(e, key, kw["handles"]))
+    if op == "member":
+        return _mutate_tracked(uri, lambda e: _op_member_off(e, key, kw["handle"], kw["off"]))
+    if op == "review":
+        return _mutate_tracked(uri, lambda e: _op_resolve_review(e, key, kw["choice"]))
+    if op == "fill":
+        handle = kw["handle"]
+        times = _current_times(stored(uri), key)
+        placed = _place(uri, stored(uri), handle, int(times["drop"]),
+                        times.get("lull") if handle == "charge" else None)
+        return _mutate_tracked(uri, lambda e: _op_fill(e, key, handle, placed))
+    if op == "add":
+        rec = _added_record(uri, kw["drop_ms"], kw.get("lull_ms"), kw.get("charge_ms"),
+                            kw.get("fill", True))
+        return _mutate_tracked(uri, lambda e: _op_add(e, rec))
+    if op == "confirm_all":
+        keys = _confident_keys(uri)
+
+        def fn(entry):
+            done = []
+            for k in keys:
+                try:
+                    done.append(_op_confirm(entry, k))
+                except SequenceNotFound:
+                    continue
+            return done
+        return _mutate_tracked(uri, fn)
+    if op == "restore":
+        return _mutate_tracked(uri, lambda e: _op_restore(e, kw["edits"], kw.get("expect")))
+    raise InvalidEdit(f"unknown edit {op!r}")
 
 
 # ── his own triggers ───────────────────────────────────────────────────────
@@ -677,7 +1018,8 @@ def _orphan_view(okey: str, ov: dict) -> Optional[SequenceView]:
         lull_ms=eff["lull"], drop_ms=int(eff["drop"]), tier=snap.get("tier"),
         auto=base, moved=moved, lull_off=bool(ov.get("lull_off")),
         charge_off=bool(ov.get("charge_off")), score=snap.get("score"),
-        detection_lost=True, needs_review=state != STATE_DISMISSED)
+        detection_lost=True,
+        needs_review=state != STATE_DISMISSED and not ov.get("kept"))
     if state != STATE_DISMISSED:
         v.notes.append("the analysis no longer finds this drop; it stays yours "
                        "as you left it")
@@ -784,10 +1126,17 @@ def view(uri: str, *, triggers: Optional[list] = None) -> dict:
 def _add_added(out: dict, entry: dict, marks: list[HisMark], beat: float) -> None:
     for rec in entry.get("added") or []:
         try:
+            lull_off = bool(rec.get("lull_off"))
+            charge_off = bool(rec.get("charge_off"))
             v = SequenceView(
                 key=rec["id"], origin="added", state=STATE_ADDED,
-                charge_ms=rec.get("charge_ms"), lull_ms=rec.get("lull_ms"),
-                drop_ms=int(rec["drop_ms"]))
+                charge_ms=None if charge_off else rec.get("charge_ms"),
+                lull_ms=None if lull_off else rec.get("lull_ms"),
+                drop_ms=int(rec["drop_ms"]), lull_off=lull_off, charge_off=charge_off,
+                # an added sequence keeps its switched-off member's time, so
+                # the Timeline can draw where it was and switch it back on
+                auto={"charge_ms": rec.get("charge_ms"), "lull_ms": rec.get("lull_ms"),
+                      "drop_ms": int(rec["drop_ms"])} if (lull_off or charge_off) else None)
         except (KeyError, TypeError, ValueError):
             continue
         v.his_marks_near = _near(marks, v.drop_ms, NEAR_BEATS * beat)

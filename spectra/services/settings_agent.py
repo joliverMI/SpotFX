@@ -13,8 +13,10 @@ merging settings_console.OPERATIONS, scene_console.OPERATIONS,
 device_console.OPERATIONS, room_effect_console.OPERATIONS,
 analysis_console.OPERATIONS, show_console.OPERATIONS (phase 3 of the
 Light Show, the Admiral's own ask for fire/arm/disarm/status/device
-hold-or-dim/create-set/move-High-Low/end-show) and house_console.OPERATIONS
-(house lighting's modes — switch, create, edit one field), each a
+hold-or-dim/create-set/move-High-Low/end-show), house_console.OPERATIONS
+(house lighting's modes — switch, create, edit one field) and
+drop_console.OPERATIONS (the playing song's drop sequences — confirm/
+dismiss/move, phase 4 of drop detection), each a
 dict of sonic_ops.SonicOperation — declared data, not code branches. TOOLS
 (the schema handed to the Anthropic API) and _dispatch() (the tool-name ->
 handler lookup) are BOTH derived from that same merged dict, so a name not
@@ -66,7 +68,7 @@ import uuid
 from typing import Any, Optional
 
 from spectra import config
-from spectra.services import (analysis_console, device_console, house_console,
+from spectra.services import (analysis_console, device_console, drop_console, house_console,
                               room_effect_console, scene_console, settings_console,
                               show_console, sonic_usage)
 from spectra.services.sonic_ops import SonicOperation
@@ -188,6 +190,7 @@ ALL_OPERATIONS: dict[str, SonicOperation] = {
     **analysis_console.OPERATIONS,
     **show_console.OPERATIONS,
     **house_console.OPERATIONS,
+    **drop_console.OPERATIONS,
 }
 
 TOOLS = [op.tool_schema() for op in ALL_OPERATIONS.values()]

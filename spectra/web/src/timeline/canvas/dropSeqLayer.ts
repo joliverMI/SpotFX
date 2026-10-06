@@ -1,7 +1,10 @@
 /** THE DROP-SEQUENCE LAYER on the Timeline's audio-shape canvas
  * (drop-detection plan, phase 3 — built to plan.html's Timeline mock).
- * Read-only: a click selects a sequence for the detail box; nothing drags
- * yet (phase 4).
+ * A click selects a sequence for the detail box; dragging a handle (or its
+ * line) moves a GHOST of it (phase 4: the page's useDropSeqInteractions
+ * keeps the ghost, the snap target and the add-a-drop preview in a ref this
+ * layer reads every frame — ../dropEdit.ts), and one save goes out on
+ * release.
  *
  * Three layers, because draw order and click priority pull different ways:
  *
@@ -37,6 +40,7 @@ import {
   HANDLES, LOOK_CHIP, LOOK_GLYPH, PHASE_COLOR, TAIL_BEATS, fmtHundredths, firstHandleMs,
   sequenceBuilds, type DisplaySeq, type Handle,
 } from '../dropSequences';
+import { editable, withGhost } from '../dropEdit';
 
 /** The rail band at the top of the main area (mock: RAIL 30). */
 export const RAIL_H = 30;
@@ -52,6 +56,10 @@ const CHIP_H = 18;
 const RGB: Record<Handle, string> = { charge: '251,191,36', lull: '56,189,248', drop: '236,72,153' };
 
 const seqData = (f: CanvasFrame): DropSeqLayerData | null => f.data.dropSeq ?? null;
+
+/** The sequences as drawn this frame: the ghost of the one being moved laid
+ * over the saved list. */
+const seqsOf = (d: DropSeqLayerData): DisplaySeq[] => withGhost(d.seqs, d.live?.current.ghost);
 
 function dimOf(s: DisplaySeq): number {
   if (s.look === 'dismissed') return 0.22;
@@ -124,17 +132,32 @@ function drawRails(f: CanvasFrame, d: DropSeqLayerData) {
   ctx.fillRect(0, top, f.w, f.railH);
   ctx.fillStyle = 'rgba(255,255,255,0.08)';
   ctx.fillRect(0, top, f.w, 1);
+  // the snap target a dragged handle (or the add preview) is on lights up
+  const live = d.live?.current;
+  const hot = live?.guide ?? live?.addAt ?? null;
+  const hotSpike = hot && hot.rail === 'spike' ? hot.ms : null;
+  const hotBeat = hot && hot.rail === 'beat' ? hot.ms : null;
   for (const [ms, rise] of rails.spikes) {
     if (ms < f.win.startMs || ms > f.win.endMs) continue;
     const x = f.timeToX(ms);
     const r = Math.min(1, Math.max(0, rise));
     const h = 4 + 12 * r;
+    if (ms === hotSpike) {
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(x - 1.5, top + 1, 3, SPIKE_H - 1);
+      continue;
+    }
     ctx.fillStyle = `rgba(68,221,136,${0.3 + 0.7 * r})`;
     ctx.fillRect(x - 1, top + SPIKE_H - h, 2, h);
   }
   for (const [ms, down] of rails.beats) {
     if (ms < f.win.startMs || ms > f.win.endMs) continue;
     const x = f.timeToX(ms);
+    if (ms === hotBeat) {
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(x - 1, top + SPIKE_H + 1, 2, 14);
+      continue;
+    }
     ctx.fillStyle = down ? 'rgba(255,255,255,0.6)' : 'rgba(255,255,255,0.28)';
     ctx.fillRect(x - 0.5, top + SPIKE_H + (down ? 2 : 6), 1, down ? 12 : 8);
   }
@@ -236,17 +259,18 @@ export const dropSeqBody: CanvasLayer = {
     const d = seqData(f)!;
     drawNotCaptured(f, d);
     drawRails(f, d);
-    for (const s of d.seqs) {
+    const seqs = seqsOf(d);
+    for (const s of seqs) {
       if (inView(f, s, d.beatMs) && s.key !== d.selectedKey) drawSequenceBody(f, d, s);
     }
-    const sel = d.seqs.find((s) => s.key === d.selectedKey);
+    const sel = seqs.find((s) => s.key === d.selectedKey);
     if (sel && inView(f, sel, d.beatMs)) drawSequenceBody(f, d, sel);
   },
   hitTest(x, y, f): Hit {
     const d = seqData(f);
-    if (!d || y < RAIL_H || y > f.mainH + (f.railH > 0 ? SPIKE_H : 0)) return null;
+    if (!d || d.adding || y < RAIL_H || y > f.mainH + (f.railH > 0 ? SPIKE_H : 0)) return null;
     let best: { key: string; handle: Handle; dist: number } | null = null;
-    for (const s of d.seqs) {
+    for (const s of seqsOf(d)) {
       for (const h of HANDLES) {
         const ms = s[h];
         if (ms == null || ms < f.win.startMs || ms > f.win.endMs) continue;
@@ -368,13 +392,14 @@ function drawRailFor(f: CanvasFrame, d: DropSeqLayerData, s: DisplaySeq, selecte
   }
   ctx.restore();
   const hover = d.hover && d.hover.key === s.key ? d.hover.handle : null;
+  const selH: Handle = selected && d.selectedHandle && s[d.selectedHandle] != null ? d.selectedHandle : 'drop';
   ctx.save();
   if (selected) {
     ctx.strokeStyle = '#ffffff';
     ctx.lineWidth = 1.5;
-    ctx.beginPath(); ctx.arc(xd, HANDLE_Y, 12, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(X(s[selH]!), HANDLE_Y, 12, 0, Math.PI * 2); ctx.stroke();
   }
-  if (hover && s[hover] != null && !(selected && hover === 'drop')) {
+  if (hover && s[hover] != null && !(selected && hover === selH)) {
     ctx.strokeStyle = 'rgba(255,255,255,0.7)';
     ctx.lineWidth = 1;
     ctx.beginPath(); ctx.arc(X(s[hover]!), HANDLE_Y, 11, 0, Math.PI * 2); ctx.stroke();
@@ -384,7 +409,7 @@ function drawRailFor(f: CanvasFrame, d: DropSeqLayerData, s: DisplaySeq, selecte
 
 function drawHover(f: CanvasFrame, d: DropSeqLayerData) {
   const hv = d.hover;
-  if (!hv) return;
+  if (!hv || d.live?.current.ghost) return;
   const s = d.seqs.find((q) => q.key === hv.key);
   const ms = s?.[hv.handle];
   if (!s || ms == null) return;
@@ -392,7 +417,8 @@ function drawHover(f: CanvasFrame, d: DropSeqLayerData) {
   const extra = s.look === 'mine' ? 'your trigger'
     : s.view?.score != null && hv.handle === 'drop' ? `${LOOK_CHIP[s.look]} · score ${s.view.score.toFixed(2)}`
     : LOOK_CHIP[s.look];
-  const text = `${hv.handle} · ${fmtHundredths(ms)} · ${extra} · click for details`;
+  const how = editable(s) ? 'drag to move · double-click for details' : 'click for details';
+  const text = `${hv.handle} · ${fmtHundredths(ms)} · ${extra} · ${how}`;
   ctx.save();
   ctx.font = '11px system-ui, sans-serif';
   const tw = ctx.measureText(text).width;
@@ -401,6 +427,57 @@ function drawHover(f: CanvasFrame, d: DropSeqLayerData) {
   ctx.fillRect(x - 4, RAIL_H + 2, tw + 8, 16);
   ctx.fillStyle = '#ffffff';
   ctx.fillText(text, x, RAIL_H + 14);
+  ctx.restore();
+}
+
+function label(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, w: number,
+               bg = 'rgba(0,0,0,0.85)') {
+  ctx.font = '600 10px system-ui, sans-serif';
+  const tw = ctx.measureText(text).width + 10;
+  const lx = Math.min(Math.max(2, x), w - tw - 2);
+  ctx.fillStyle = bg;
+  ctx.fillRect(lx, y, tw, 16);
+  ctx.fillStyle = '#ffffff';
+  ctx.fillText(text, lx + 5, y + 11.5);
+}
+
+/** While a handle is moving: what it snapped to, named, at the bottom of the
+ * graph (mock: "snap: bass spike"). */
+function drawGuide(f: CanvasFrame, d: DropSeqLayerData) {
+  const g = d.live?.current.guide;
+  if (!g) return;
+  const { ctx } = f;
+  ctx.save();
+  label(ctx, `snap: ${g.what} · ${fmtHundredths(g.ms)}`, f.timeToX(g.ms) + 6, f.mainH - 22, f.w);
+  ctx.restore();
+}
+
+/** "＋ Add a drop" armed: the instruction, and a dashed drop line where a
+ * click would put it. */
+function drawAdding(f: CanvasFrame, d: DropSeqLayerData) {
+  if (!d.adding) return;
+  const { ctx } = f;
+  ctx.save();
+  ctx.font = '600 11px system-ui, sans-serif';
+  const text = 'click a bass spike (or anywhere) to add a drop there — it goes to the nearest bass spike · Esc cancels';
+  const tw = ctx.measureText(text).width + 12;
+  ctx.fillStyle = 'rgba(10,6,18,0.9)';
+  ctx.fillRect(4, RAIL_H + 2, Math.min(tw, f.w - 8), 17);
+  ctx.fillStyle = PHASE_COLOR.drop;
+  ctx.fillText(text, 10, RAIL_H + 14);
+  const at = d.live?.current.addAt;
+  if (at && at.ms >= f.win.startMs && at.ms <= f.win.endMs) {
+    const x = f.timeToX(at.ms);
+    ctx.setLineDash([4, 3]);
+    ctx.strokeStyle = PHASE_COLOR.drop;
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(x, 4); ctx.lineTo(x, f.mainH + (f.railH > 0 ? SPIKE_H : 0)); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 0.7;
+    drawHandle(ctx, 'drop', x, HANDLE_Y, PHASE_COLOR.drop);
+    ctx.globalAlpha = 1;
+    label(ctx, `add a drop: ${at.what} · ${fmtHundredths(at.ms)}`, x + 8, f.mainH - 22, f.w);
+  }
   ctx.restore();
 }
 
@@ -448,7 +525,7 @@ export const dropSeqRail: CanvasLayer = {
   draw(f) {
     const d = seqData(f)!;
     const { ctx } = f;
-    const visible = d.seqs.filter((s) => inView(f, s, d.beatMs));
+    const visible = seqsOf(d).filter((s) => inView(f, s, d.beatMs));
     for (const s of visible) if (s.key !== d.selectedKey) drawRailFor(f, d, s, false);
     const chips = layoutChips(f, d, visible);
     const sel = visible.find((s) => s.key === d.selectedKey);
@@ -469,18 +546,20 @@ export const dropSeqRail: CanvasLayer = {
     }
     lastChips = chips;
     drawHover(f, d);
+    drawGuide(f, d);
+    drawAdding(f, d);
   },
   hitTest(x, y, f): Hit {
     const d = seqData(f);
-    if (!d || y < RAIL_HIT_TOP || y > RAIL_H) return null;
+    if (!d || d.adding || y < RAIL_HIT_TOP || y > RAIL_H) return null;
     for (let i = lastChips.length - 1; i >= 0; i--) {
       const c = lastChips[i];
       if (x >= c.x && x <= c.x + c.w && y >= c.y && y <= c.y + c.h) {
-        return { kind: 'drop-seq', key: c.key, handle: 'drop' };
+        return { kind: 'drop-seq', key: c.key, handle: 'drop', chip: true };
       }
     }
     let best: { key: string; handle: Handle; dist: number } | null = null;
-    for (const s of d.seqs) {
+    for (const s of seqsOf(d)) {
       for (const h of HANDLES) {
         const ms = s[h];
         if (ms == null || ms < f.win.startMs || ms > f.win.endMs) continue;
