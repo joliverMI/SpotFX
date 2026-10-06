@@ -8291,9 +8291,12 @@ binding statement** (hit detector, rise/fade, rest/depth, smallest pulse,
 - **THE CAMERA MEASUREMENT DRIVES REAL FIXTURES** —
   `scripts/measure_singles_response.py` (dry run by default, `--simulate`
   proves the analysis against known answers) holds `porch-rail`,
-  `dining-table`, `hue-lights`, `dining-hues` through Light Show device
-  holds and reads the capture frame tap. Its preflight refuses while Hue
-  Hold drives the Hue areas; `--apply` only with firstmate's go, 08:30-22:30.
+  `dining-table`, `dining-hues` through Light Show device holds, reads the
+  capture frame tap, and frees `dining-hues` from the house mode's Hue hold
+  by editing ONLY that area's look (restored in a `finally`, from a record
+  written first). **A Hue area is streamed whole**: `hue-lights` carries
+  Loft Ceiling Uplight and the three Ledge bulbs, so it is refused outright.
+  `--apply` only with firstmate's go, and only 08:30-22:30.
 
 ## Radial (STAR) rotation is audio-lows-driven — a healthy `spin` can read as parked
 

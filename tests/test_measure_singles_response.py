@@ -58,7 +58,7 @@ def test_the_simulated_room_gives_back_what_was_put_in():
 def test_a_fixture_the_camera_cannot_see_is_named_not_guessed():
     room = m.simulated_room()
     room.fixtures["porch-rail"].gain = 0.0001
-    res = m.run(room, ["porch-rail", "hue-lights"], trials=4)
+    res = m.run(room, ["porch-rail", "living-hues"], trials=4)
     assert res["fixtures"]["porch-rail"] == {"visible": False}
     assert res["pairs"] == []
 
@@ -85,12 +85,12 @@ def test_preflight_refuses_a_hue_area_held_by_hue_hold(monkeypatch):
         out = real(path)
         if path == "/api/light-show/targets":
             for t in out["fixtures"]:
-                t["held_by_ambient"] = t["id"] == "hue-lights"
+                t["held_by_ambient"] = t["id"] == "living-hues"
         return out
 
     monkeypatch.setattr(room, "get", get)
     problems = m.preflight(room, list(room.fixtures))
-    assert len(problems) == 1 and "hue-lights" in problems[0]
+    assert len(problems) == 1 and "living-hues" in problems[0]
     assert m.preflight(m.simulated_room(), list(room.fixtures)) == []
 
 
@@ -129,3 +129,124 @@ def test_fixtures_that_light_the_same_table_are_timed_where_each_dominates():
     a, b = room.fixtures["dining-table"], room.fixtures["dining-hues"]
     want = 1000 * ((b.delay_s + 0.693 * b.tau_s) - (a.delay_s + 0.693 * a.tau_s))
     assert p["hue_minus_wled_ms"] == pytest.approx(want, abs=60.0)
+
+
+# ── the house Hue lift: only what was named, always put back ──────────────
+
+AWAY = {"id": "away1", "name": "Away", "notes": "",
+        "hue": [{"area": "living-hues", "look": "off", "kelvin": None, "color": None,
+                 "brightness": 100.0},
+                {"area": "dining-hues", "look": "off", "kelvin": None, "color": None,
+                 "brightness": 100.0}],
+        "fixtures": [{"target": {"kind": "everything", "id": None}, "off": True}],
+        "updated_ms": 1}
+
+
+def _away_room():
+    room = m.simulated_room()
+    room.mode = m.deepcopy(AWAY)
+    return room
+
+
+def test_the_lift_changes_only_the_named_areas_look():
+    body, originals = m.lifted_mode(AWAY, ["dining-hues"])
+    assert body["hue"][0] == AWAY["hue"][0]                 # the other area untouched
+    assert body["hue"][1]["area"] == "dining-hues" and body["hue"][1]["look"] == "show"
+    assert {k: v for k, v in body.items() if k != "hue"} == \
+        {k: v for k, v in AWAY.items() if k != "hue"}
+    assert originals == {"dining-hues": {"index": 1, "look": AWAY["hue"][1]}}
+    assert m.restored_mode(body, originals) == AWAY
+    # nothing held, nothing lifted
+    assert m.lifted_mode(body, ["dining-hues"])[1] == {}
+
+
+def test_the_restore_keeps_an_edit_someone_else_made_meanwhile():
+    body, originals = m.lifted_mode(AWAY, ["dining-hues"])
+    body["notes"] = "edited mid-run"
+    body["hue"][0]["look"] = "hold"
+    body["hue"][0]["kelvin"] = 2700
+    back = m.restored_mode(body, originals)
+    assert back["notes"] == "edited mid-run" and back["hue"][0]["kelvin"] == 2700
+    assert back["hue"][1] == AWAY["hue"][1]
+
+
+def test_a_lifted_run_measures_the_area_then_releases_then_restores(tmp_path):
+    room = _away_room()
+    events = []
+    real_release, real_post = room.release, room.post
+    room.release = lambda d: (events.append(("release", d)), real_release(d))[1]
+    room.post = lambda p, b: (events.append(("post", b["hue"][1]["look"])), real_post(p, b))[1]
+    rec = tmp_path / "lift.json"
+    res = m.run(room, ["dining-table", "dining-hues"], lift=["dining-hues"],
+                record_path=str(rec), trials=4)
+    assert res["fixtures"]["dining-hues"]["visible"]          # the stream reached it
+    assert res["restore"] == {"restored": True, "areas": ["dining-hues"],
+                              "detail": "read back as before"}
+    assert events[0] == ("post", "show")
+    assert events[-1] == ("post", "off")
+    assert {e for e in events[-3:-1]} == {("release", "dining-table"),
+                                          ("release", "dining-hues")}
+    assert {k: v for k, v in room.mode.items() if k != "updated_ms"} == \
+        {k: v for k, v in AWAY.items() if k != "updated_ms"}
+    assert not rec.exists()                                   # put back: record cleared
+
+
+def test_the_record_is_on_disk_before_the_lift_lands(tmp_path):
+    room = _away_room()
+    rec = tmp_path / "lift.json"
+    seen = []
+    real_post = room.post
+    room.post = lambda p, b: (seen.append(rec.exists()), real_post(p, b))[1]
+    m.run(room, ["dining-hues"], lift=["dining-hues"], record_path=str(rec), trials=2)
+    assert seen[0] is True
+
+
+def test_the_look_is_put_back_even_when_the_run_fails(monkeypatch):
+    room = _away_room()
+
+    def boom(*_a, **_k):
+        raise RuntimeError("camera went away")
+
+    monkeypatch.setattr(m, "_fresh_frames", boom)
+    with pytest.raises(RuntimeError):
+        m.run(room, ["dining-hues"], lift=["dining-hues"])
+    assert room.mode["hue"] == AWAY["hue"]
+
+
+def test_a_house_mode_change_mid_run_stops_it_and_still_puts_back(monkeypatch):
+    room = _away_room()
+    real = m._fresh_frames
+    calls = []
+
+    def flip(r, n, settle):
+        calls.append(1)
+        if len(calls) == 3:                 # HA re-lands a held look mid-run
+            r.mode["hue"][1]["look"] = "off"
+        return real(r, n, settle)
+
+    monkeypatch.setattr(m, "_fresh_frames", flip)
+    with pytest.raises(RuntimeError, match="held again"):
+        m.run(room, ["dining-table", "dining-hues"], lift=["dining-hues"], trials=2)
+    assert room.mode["hue"] == AWAY["hue"]
+
+
+def test_a_killed_run_can_be_put_back_from_its_record(tmp_path):
+    room = _away_room()
+    rec = tmp_path / "lift.json"
+    m.lift_house_hue(room, ["dining-hues"], str(rec))        # ...and then the run dies
+    assert room.mode["hue"][1]["look"] == "show"
+    import json
+    out = m.restore_house_hue(room, json.loads(rec.read_text()))
+    assert out["restored"] and room.mode["hue"] == AWAY["hue"]
+
+
+def test_an_area_streamed_with_bulbs_the_house_leaves_alone_is_refused():
+    problems = m.preflight(m.simulated_room(), ["dining-table", "hue-lights"], ["hue-lights"])
+    assert any("hue-lights" in p and "Ledge" in p for p in problems)
+
+
+def test_apply_only_in_the_daytime_window():
+    import time as _t
+    at = lambda h, mi: _t.struct_time((2026, 10, 6, h, mi, 0, 1, 279, 1))
+    assert not m.in_window(at(8, 29)) and m.in_window(at(8, 30))
+    assert m.in_window(at(22, 29)) and not m.in_window(at(22, 30))
