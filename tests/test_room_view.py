@@ -214,8 +214,8 @@ def test_the_backdrop_is_the_poses_measurements_added_up():
 def _result(verdict: str, positions: dict, pose=POSE) -> dict:
     return {"mapper_id": "tv-mapper", "pose_id": pose, "at": 200.0, "targets": [{
         "composition": {"segments": [
-            {"device_id": "sconce-kitchen-right", "start": 0, "end": 27},
-            {"device_id": "sconce-kitchen-right", "start": 28, "end": 87}]},
+            {"device_id": "sconce-kitchen-right", "start": 0, "end": 27, "device_start": 0},
+            {"device_id": "sconce-kitchen-right", "start": 28, "end": 87, "device_start": 28}]},
         "decodes": [{"positions": positions}], "table": {"verdict": verdict}}]}
 
 
@@ -243,6 +243,48 @@ def test_a_decode_that_cannot_be_trusted_here_is_not_drawn(result):
     assert all(p["source"] != "decode" for p in view["pieces"])
     if result["pose_id"] == POSE:
         assert any("not drawn" in note for note in view["notes"])
+
+
+def test_a_later_segments_composition_index_is_resolved_by_its_own_device_start():
+    """tv-mapper's real shape: tv-backlight occupies composition indices
+    0-559, then sconce-kitchen-right lands at composition indices 560-647
+    across two sub-segments whose OWN device numbering is 0-27 and 28-87.
+    Those composition indices are not the device's own pixel numbers —
+    only `device_start` tells them apart. Before the fix, the decode source
+    read `start`/`end` as device pixel numbers directly, so these positions
+    (keyed 560 and 647) never matched sconce-kitchen-right's real device
+    pixels (0-87) and the decode was silently dropped for this fixture."""
+    positions = {"560": [0.11, 0.22], "647": [0.33, 0.44]}
+    result = {"mapper_id": "tv-mapper", "pose_id": POSE, "at": 200.0, "targets": [{
+        "composition": {"segments": [
+            {"device_id": "tv-backlight", "start": 0, "end": 559, "device_start": 0},
+            {"device_id": "sconce-kitchen-right", "start": 560, "end": 587, "device_start": 0},
+            {"device_id": "sconce-kitchen-right", "start": 588, "end": 647, "device_start": 28},
+        ]},
+        "decodes": [{"positions": positions}], "table": {"verdict": "pass"}}]}
+    view = _view(results=[result])
+    (piece,) = _pieces(view, "tv-mapper", "sconce-kitchen-right")
+    assert (piece["source"], piece["first"], piece["count"]) == ("decode", 0, 88)
+    xy = np.asarray(piece["xy"]).reshape(-1, 2)
+    # device pixel 0 (composition index 560) and device pixel 87
+    # (composition index 647) — never the composition index itself.
+    assert xy[0] == pytest.approx([0.11, 0.22])
+    assert xy[87] == pytest.approx([0.33, 0.44])
+
+
+def test_a_composition_stored_before_device_start_was_recorded_is_not_drawn():
+    """A segment with no `device_start` (or a negative one) predates this
+    field — there is nothing to resolve its composition index into a real
+    device pixel without guessing, so it is skipped exactly like any other
+    unusable decode rather than placed by the composition index."""
+    result = {"mapper_id": "tv-mapper", "pose_id": POSE, "at": 200.0, "targets": [{
+        "composition": {"segments": [
+            {"device_id": "sconce-kitchen-right", "start": 0, "end": 27},
+            {"device_id": "sconce-kitchen-right", "start": 28, "end": 87}]},
+        "decodes": [{"positions": POSITIONS}], "table": {"verdict": "pass"}}]}
+    view = _view(results=[result])
+    assert all(p["source"] != "decode" for p in view["pieces"])
+    assert any("not drawn" in note for note in view["notes"])
 
 
 def test_a_decode_keeps_where_it_saw_each_index():

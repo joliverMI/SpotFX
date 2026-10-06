@@ -103,14 +103,33 @@ def register_source(name: str, fn: PixelSource) -> None:
     _sources = [(n, f) for n, f in _sources if n != name] + [(name, fn)]
 
 
-def _composition_pixels(composition: dict) -> list[tuple[str, int]]:
-    """A commissioning composition's index -> (device id, device pixel)."""
-    out: list[tuple[str, int]] = []
+def _composition_pixels(composition: dict) -> Optional[list[Optional[tuple[str, int]]]]:
+    """A commissioning composition's index -> (device id, device pixel).
+
+    `start`/`end` on a stored segment are indices in the COMPOSITION's own
+    re-addressed order, not the device's own pixel numbering — that is
+    `device_start` (`commission_compare.Segment.device_start`), recorded
+    separately because the two spaces agree only by accident (a single
+    segment whose device numbering happens to start at 0). A segment
+    stored before that field existed carries no `device_start` (or a
+    negative one) and there is nothing to resolve it from — this returns
+    `None` rather than guess, so the caller can skip it exactly like a
+    decode whose own check failed."""
+    out: dict[int, tuple[str, int]] = {}
     for seg in composition.get("segments") or []:
+        device_start = seg.get("device_start")
+        if device_start is None or int(device_start) < 0:
+            return None
         device_id = str(seg.get("device_id"))
-        for px in range(int(seg.get("start", 0)), int(seg.get("end", -1)) + 1):
-            out.append((device_id, px))
-    return out
+        start = int(seg.get("start", 0))
+        end = int(seg.get("end", -1))
+        device_start = int(device_start)
+        for offset, index in enumerate(range(start, end + 1)):
+            out[index] = (device_id, device_start + offset)
+    if not out:
+        return []
+    size = max(out) + 1
+    return [out.get(i) for i in range(size)]
 
 
 def _judged_decodes(results: list[dict], pose_id: str):
@@ -138,10 +157,12 @@ def decode_source(results: list[dict]) -> PixelSource:
             if verdict not in DECODE_VERDICTS or not positions:
                 continue
             pixels = _composition_pixels(composition)
+            if pixels is None:
+                continue
             where: dict[tuple[str, int], tuple[float, float]] = {}
             for index, xy in positions.items():
                 i = int(index)
-                if 0 <= i < len(pixels) and len(xy) == 2:
+                if 0 <= i < len(pixels) and pixels[i] is not None and len(xy) == 2:
                     where[pixels[i]] = (float(xy[0]), float(xy[1]))
             for fx in fixtures:
                 key = (fx["virtual_id"], fx["device_id"])
@@ -158,8 +179,13 @@ def decode_source(results: list[dict]) -> PixelSource:
 
 
 def _skipped_decodes(results: list[dict], pose_id: str) -> int:
-    return sum(1 for _, _, positions, verdict in _judged_decodes(results, pose_id)
-               if verdict not in DECODE_VERDICTS or not positions)
+    count = 0
+    for _, composition, positions, verdict in _judged_decodes(results, pose_id):
+        if verdict not in DECODE_VERDICTS or not positions:
+            count += 1
+        elif _composition_pixels(composition) is None:
+            count += 1
+    return count
 
 
 # ── footprints as pictures ─────────────────────────────────────────────────
@@ -421,8 +447,9 @@ def build_view(pose_id: str, *, raw: dict, layout: dict, rooms: list[RoomMap],
     skipped = _skipped_decodes(results, pose_id)
     if skipped:
         notes.append(f"{skipped} per-pixel camera read(s) of this pose are not drawn: "
-                     "their own check failed, or they were stored before reads kept "
-                     "their positions.")
+                     "their own check failed, they were stored before reads kept "
+                     "their positions, or their composition was stored before it "
+                     "recorded which device pixel each segment actually starts at.")
 
     pieces: list[dict] = []
     for i, fx in enumerate(fixtures):
