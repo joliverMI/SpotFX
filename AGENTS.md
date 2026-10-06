@@ -8307,7 +8307,7 @@ measurement, (2) engine wiring + a test scene and HIS TUNING GATE, (3)
 rainbow walk + two flare kinds, (4) scene migration, one scene first and
 undoable. Power stays installed throughout. **The module docstring is the
 binding statement** (hit detector, rise/fade, rest/depth, smallest pulse,
-`gamma`, no background, the flash budget, the hooks). Eight things:
+`gamma`, no background, the flash budget, the hooks). Nine things:
 
 - **WIRED (phase 2) THROUGH TWO SETS IN `fx/device_model`.** `pulse` is in
   `PHASE_EFFECTS` (charge/lull/drop on the shared ramp — a lull reaches black
