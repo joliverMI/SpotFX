@@ -1675,3 +1675,28 @@ against that commit.
     `headless.py` (SpotFX-authored) gained `real_mask` so a rig can be his
     crystal's real/gap shape. Evidence: `scripts/check_fish_wall.py`,
     `tests/test_fish_wall.py`. Unverified against his live room.
+56. `facade.py` + `host.py` (SpotFX-authored): AN EFFECT WRITE PERSISTS
+    COALESCED, NOT INLINE (2026-10-07, his report: "flares and transitions
+    don't work well in the preview, it seems to jump past them"). The
+    fork's effects PUT saves the whole config on every write. In SPECTRA the
+    facade runs on the ONE event loop that also sends the device preview
+    stream, and his live fx-live config is ~1 MB (the crystal's 1,952
+    segments, every virtual's effect history, his LedFX scenes): one save
+    measured ~25 ms plus an fsync, so a flare's write burst (a spike, gain
+    and colour write per virtual) or a scene change (a type switch per
+    virtual plus the colour moment) held the loop 0.3-0.7 s. The render
+    threads kept the lights right; the preview could send nothing until the
+    burst ended, then sent the newest frame — the flare already over, most
+    of the 0.5 s crossfade gone. Now `_effects_put` marks the config dirty
+    and ONE save lands `PERSIST_QUIET_S` (1 s) after the last effect write,
+    never more than `PERSIST_MAX_WAIT_S` (5 s) after the first. What is
+    stored is unchanged — a save always writes the live `host.config` as it
+    is then. Every other facade route still saves at once (`_persist_now`),
+    which also covers and cancels a pending save; `set_host` replacing a
+    host and `FxHost.shutdown` flush it; with no running loop the save is
+    inline; `PERSIST_QUIET_S = 0` is the fork's behaviour exactly. The one
+    cost: a process KILLED (not stopped) inside that window comes back with
+    the effect stored a few seconds earlier. Evidence:
+    `scripts/check_preview_flare_skip.py` (the preview against the lights,
+    with the inline save as its own red control),
+    `tests/test_facade_coalesced_save.py`, `tests/test_preview_flare_skip.py`.

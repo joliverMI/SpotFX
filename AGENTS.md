@@ -2481,7 +2481,7 @@ two-preset switch, and identical per-fixture box shapes between the two).
 `data/preview-perf-plan/report.md`).** `spectra/services/preview_stream.py`'s
 docstring is the binding statement (wire format included); the paragraphs
 above describe the OLD JSON format, which a viewer that never says hello
-still gets (`localStorage spectra-device-preview-legacy=1` forces it). Five
+still gets (`localStorage spectra-device-preview-legacy=1` forces it). Six
 things:
 
 - **The gap was the 8 fps cap, and raising it alone is unsafe** (2.3 s behind
@@ -2504,6 +2504,15 @@ things:
   handles: `singleColor` redraws on its own 100 ms loop (a flash must force a
   redraw), and evenly spaced flashes phase-lock to the sender's frame clock.
   Unit spec: `tests/test_preview_stream.py`.
+- **THE STREAM IS A PASSENGER ON THE EVENT LOOP.** Anything that holds
+  SPECTRA's loop holds the preview: the lights keep rendering on their own
+  threads, the stream sends nothing, then sends only the newest frame — the
+  preview "jumps past" whatever happened meanwhile (his 2026-10-07 flares-
+  and-transitions report: an inline save of the ~1 MB fx config on every
+  facade effect write, ~30 ms each, held the loop for a whole flare burst;
+  effect writes now persist coalesced, `fx/VENDOR.md` #56). Before adding
+  synchronous work to a write path, measure it with
+  `scripts/check_preview_flare_skip.py` (the preview against the lights).
 
 **THE LIVE VIEW (Devices → Live, pop-out `/live`; 2026-10-05, phase 2 of the
 same plan).** `spectra/web/src/live/` — each file's header is the binding
