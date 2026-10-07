@@ -1,11 +1,12 @@
 ---
 name: dancers-v2-scene
 description: >
-  The "Dancers V2" SPECTRA scene — Matrix `dancer`, Strips `orbits1d`
-  (not a Dancer-specific strip effect), Singles `power` (`pulse` once scripts/migrate_singles_to_pulse.py runs). Load before
-  editing this scene's flare bands/kinds, GIF pose/style selection, or
-  flame-burst thresholds. Load the dancer-effect skill first (and
-  led-gif-assets for asset authoring specifically).
+  The "Dancers V2" SPECTRA scene — Matrix `dancer`, Strips `orbits1d` (not a
+  Dancer-specific strip effect), Singles `power` (`pulse` once
+  scripts/migrate_singles_to_pulse.py runs). Load before editing this scene's
+  flare bands/kinds, GIF pose/style selection, or flame-burst thresholds. Load
+  the dancer-effect skill first (and led-gif-assets for asset authoring
+  specifically).
 ---
 
 # Dancers V2 (scene)

@@ -4,13 +4,12 @@ description: >
   fx/effects/pulse.py (registry id `pulse`) — the Singles' one-colour light
   that pulses on hits, built to replace Power on the 17 Hue bulbs, the porch
   rail and the dining table (single-led-power plan, phases 1-4). Tuned on
-  "Pulse Test (Orbits V2)"; phase 4 (scripts/migrate_singles_to_pulse.py,
-  run at deploy) moves every Power Singles scene onto it. Load before
-  touching hit
+  "Pulse Test (Orbits V2)"; phase 4 (scripts/migrate_singles_to_pulse.py, run
+  at deploy) moves every Power Singles scene onto it. Load before touching hit
   detection, the flash budget or its output guard, charge/lull/drop on the
   Singles, the rainbow walk, the pulse_flash / pulse_flip flares or a flare
-  kind's min_intensity, or a "the singles flash too much / don't move /
-  went white" report.
+  kind's min_intensity, or a "the singles flash too much / don't move / went
+  white" report.
 ---
 
 # Pulse

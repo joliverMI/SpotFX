@@ -227,7 +227,7 @@ export const HELP_SECTIONS: HelpSection[] = [
       },
       {
         id: 'pulse-effect',
-        title: 'Pulse — the Singles\' one-colour effect (being tuned)',
+        title: 'Pulse — the Singles\' one-colour effect',
         keywords: 'pulse singles single led hue bulbs porch rail dining table power replacement resting level depth fade beats rise sharp soft hit sensitivity hit source kick bass bulb curve gamma charge top drop burst white flash budget intensity tempo test scene tune',
         body: [
           'Pulse is the effect built to replace Power on the Singles (the 17 Hue bulbs, the porch rail and the dining table). Power runs at one pixel there and barely moves; Pulse treats each light as one light of one colour and moves its brightness on purpose. Power stays installed. Your scenes move from Power to Pulse in one step at deploy: every scene whose Singles run Power switches to Pulse with the settings on Pulse Test\'s Singles, and gets Pulse Test\'s two Pulse flares with your trigger timing; a flare timing you have already set on a scene of its own is kept. The step can be undone.',

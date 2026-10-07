@@ -2,11 +2,12 @@
 name: black-hole-v2-ui-scene
 description: >
   The "Black Hole V2 UI" SPECTRA scene — a separate, structurally THINNER
-  scene than Black Hole V2: its `blackhole` entry targets the Particles
-  device category (not Matrix/crystal-mapper), with `blackhole1d` on
-  Strips and `power` on Singles (`pulse` once scripts/migrate_singles_to_pulse.py runs), and far fewer flare kinds. Load before
-  editing this scene's own bands/kinds/colour preference; load the
-  blackhole-effect skill first for the effect's code-level semantics.
+  scene than Black Hole V2: its `blackhole` entry targets the Particles device
+  category (not Matrix/crystal-mapper), with `blackhole1d` on Strips and
+  `power` on Singles (`pulse` once scripts/migrate_singles_to_pulse.py runs),
+  and far fewer flare kinds. Load before editing this scene's own
+  bands/kinds/colour preference; load the blackhole-effect skill first for the
+  effect's code-level semantics.
 ---
 
 # Black Hole V2 UI (scene)
