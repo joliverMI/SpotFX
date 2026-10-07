@@ -214,7 +214,12 @@ class FxHost:
         skipped as a no-op or its own fire-and-forget got dropped the same
         way). Devices are idempotent once deactivated (fx/VENDOR.md
         deviation 8), so a redundant listener-triggered deactivate() firing
-        after this point is a safe no-op."""
+        after this point is a safe no-op.
+
+        A coalesced effect save (fx/facade.py, deviation #56) lands FIRST, so
+        a stopped host leaves on disk what an inline save would have left."""
+        from fx import facade
+        facade.flush_pending_saves(self)
         if not release_realtime:
             for device in list(self.devices.values()):
                 device._hold_last_frame = True

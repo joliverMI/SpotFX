@@ -59,6 +59,17 @@ JSON frames (`device_preview._PreviewFrameSender`), unchanged.
    (preview_layout.py). The source reads the extra virtuals only while a
    viewer asks for them, and a `favorites` viewer is never sent them.
 
+5. THE STREAM RIDES THE ONE EVENT LOOP. Source frames reach `publish` and
+   every viewer's ticker runs on SPECTRA's event loop, while the lights are
+   painted by the render threads. So anything that holds the loop holds the
+   preview: the ticker sends nothing, then sends only the newest frame, and
+   the preview jumps past whatever the lights showed meanwhile. That was his
+   2026-10-07 "flares and transitions skip" report — a ~30 ms inline config
+   save on every facade effect write held the loop for a whole flare burst
+   (now coalesced, fx/VENDOR.md #56). `scripts/check_preview_flare_skip.py`
+   measures the preview against the lights through a flare and a scene
+   change.
+
 WIRE FORMAT, little-endian. Shaped so a WebGL renderer can upload a
 record's payload as a colour buffer without copying or re-ordering, and so
 the browser can report rate, round trip and frame age from the header alone.

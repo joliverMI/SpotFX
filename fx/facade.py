@@ -8,8 +8,9 @@ callers are untouched.
 
 Each handler is a port of the fork's thin aiohttp handler onto the FxHost
 registries; the source handler is cited above each. Ported faithfully,
-including per-write save_config persistence. Omissions — surface SpotFX never
-sends, dropped deliberately:
+including save_config persistence — except that an effects PUT's save is
+COALESCED rather than inline (deviation #56, below). Omissions — surface
+SpotFX never sends, dropped deliberately:
   - config "RANDOMIZE" payloads (virtual_effects.py:109-142, 333-370)
   - preset annotation on GET /api/scenes (scenes.py:31-56; needs the presets
     library, which is not vendored)
@@ -24,6 +25,8 @@ Tests inject their own started FxHost via set_host().
 """
 from __future__ import annotations
 
+import asyncio
+import atexit
 import base64
 import io
 import logging
@@ -95,6 +98,8 @@ _host: Optional[FxHost] = None
 def set_host(host: Optional[FxHost]) -> None:
     """Test seam: install an already-started FxHost (None to clear)."""
     global _host
+    if _host is not None and _host is not host:
+        flush_pending_saves(_host)
     _host = host
 
 
@@ -109,6 +114,102 @@ async def get_host() -> FxHost:
         await host.start()
         _host = host
     return _host
+
+
+# ── SpotFX deviation #56: an EFFECT write persists coalesced, not inline ─────
+#
+# The fork saves the whole config to disk on every effects PUT. SPECTRA runs
+# this facade on its ONE event loop — the loop that also sends the device
+# preview stream, the trigger tick and every WebSocket — and his live
+# fx-live config is about a megabyte (the crystal's 1,952 segments, 29
+# virtuals' effect histories, his LedFX scenes): one save measured ~25 ms
+# plus an fsync, so one effect write blocked the loop ~30 ms. A flare is a
+# BURST of them (one spike, gain and colour write per virtual, ~13 on Black
+# Hole V2) and a scene change is one per virtual, so the loop stood still for
+# 0.4-0.7 s — the length of the flare, or most of a 0.5 s crossfade. The
+# render threads kept painting the lights; the preview stream could send
+# nothing until the burst ended, then sent the newest frame: the preview
+# froze and "jumped past" every flare and transition
+# (scripts/check_preview_flare_skip.py measures it).
+#
+# So an effects PUT now marks the config DIRTY and the save lands once,
+# `PERSIST_QUIET_S` after the last effect write and never more than
+# `PERSIST_MAX_WAIT_S` after the first. What is stored does not change — a
+# save always writes the live `host.config` as it is at that moment, exactly
+# what the last inline save would have written. Every OTHER route still saves
+# at once, and that save writes everything, so it also covers (and cancels) a
+# pending one. Shutting the host down or replacing it flushes, and so does
+# the interpreter exiting (a one-shot script whose loop ended before the
+# timer fired); with no running loop the save is inline as before. The one
+# cost, named: a process KILLED (not stopped) within that window comes back
+# with the effect stored a few seconds earlier.
+PERSIST_QUIET_S = 1.0
+PERSIST_MAX_WAIT_S = 5.0
+
+
+class _PendingSave:
+    __slots__ = ("loop", "first_at", "handle")
+
+    def __init__(self, loop: asyncio.AbstractEventLoop, first_at: float) -> None:
+        self.loop = loop
+        self.first_at = first_at
+        self.handle: Optional[asyncio.TimerHandle] = None
+
+
+_pending_saves: dict[FxHost, _PendingSave] = {}
+
+
+def _persist_now(host: FxHost) -> None:
+    pending = _pending_saves.pop(host, None)
+    if pending is not None and pending.handle is not None:
+        pending.handle.cancel()
+    save_config(config=host.config, config_dir=host.config_dir)
+
+
+def _persist_soon(host: FxHost) -> None:
+    if PERSIST_QUIET_S <= 0:
+        _persist_now(host)
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        _persist_now(host)
+        return
+    pending = _pending_saves.get(host)
+    if pending is not None and pending.loop is not loop:
+        # Scheduled on a loop that is gone (a test's own loop): its timer can
+        # never fire, so land what it held now.
+        flush_pending_saves(host)
+        pending = None
+    now = loop.time()
+    if pending is None:
+        pending = _pending_saves[host] = _PendingSave(loop, now)
+    if pending.handle is not None:
+        pending.handle.cancel()
+    due = min(now + PERSIST_QUIET_S, pending.first_at + PERSIST_MAX_WAIT_S)
+    pending.handle = loop.call_at(due, flush_pending_saves, host)
+
+
+def flush_pending_saves(host: Optional[FxHost] = None) -> None:
+    """Write a coalesced effect save now (every host's, when `host` is None).
+    Never raises: a failed save is logged, and the next write tries again."""
+    for target in [h for h in _pending_saves if host is None or h is host]:
+        pending = _pending_saves.pop(target)
+        if pending.handle is not None:
+            pending.handle.cancel()
+        try:
+            save_config(config=target.config, config_dir=target.config_dir)
+        except Exception:
+            logger.exception("fx facade: coalesced config save to %s failed",
+                             target.config_dir)
+
+
+def save_pending(host: Optional[FxHost] = None) -> bool:
+    """Whether an effect write is waiting to be saved."""
+    return any(host is None or h is host for h in _pending_saves)
+
+
+atexit.register(flush_pending_saves)
 
 
 # ── SpotFX deviation #42: a scoped take is a write boundary ─────────────────
@@ -211,7 +312,7 @@ async def _config_put(host, body: dict) -> FacadeResponse:
     except Exception as e:
         return _invalid(f"invalid config patch: {e}")
     host.config.update({k: validated[k] for k in body})
-    save_config(config=host.config, config_dir=host.config_dir)
+    _persist_now(host)
     host.events.fire_event(BaseConfigUpdateEvent(dict(body)))
     return _ok({"status": "success", "payload": {"type": "success",
                 "reason": "Configuration Updated"}})
@@ -261,7 +362,7 @@ async def _scenes_put(host, body: dict) -> FacadeResponse:
     if name is None:
         return _invalid('Required attribute "name" was not provided')
     host.config["scenes"][scene_id]["name"] = name
-    save_config(config=host.config, config_dir=host.config_dir)
+    _persist_now(host)
     return _ok({"status": "success", "payload": {"type": "info",
                 "reason": f"Renamed to {name}"}})
 
@@ -336,7 +437,7 @@ async def _scenes_post(host, body: dict) -> FacadeResponse:
             scene_config["virtuals"][virtual.id] = effect
 
     host.config["scenes"][scene_id] = scene_config
-    save_config(config=host.config, config_dir=host.config_dir)
+    _persist_now(host)
     return _ok({"status": "success",
                 "scene": {"id": scene_id, "config": scene_config}})
 
@@ -348,7 +449,7 @@ async def _scenes_delete(host, body: dict) -> FacadeResponse:
     if scene_id not in host.config["scenes"]:
         return _invalid(f"Scene {scene_id} does not exist")
     del host.config["scenes"][scene_id]
-    save_config(config=host.config, config_dir=host.config_dir)
+    _persist_now(host)
     return _ok({"status": "success"})
 
 
@@ -387,7 +488,7 @@ async def _virtuals_post(host, body: dict) -> FacadeResponse:
             }
         )
         virtual.virtual_cfg = host.config["virtuals"][-1]
-    save_config(config=host.config, config_dir=host.config_dir)
+    _persist_now(host)
     return _ok(
         {
             "status": "success",
@@ -453,7 +554,7 @@ async def _virtual_put_active(host, virtual_id: str, body: dict) -> FacadeRespon
         return _internal(f"Unable to set virtual {virtual.id} status: {msg}")
 
     virtual.virtual_cfg["active"] = virtual.active if persist else False
-    save_config(config=host.config, config_dir=host.config_dir)
+    _persist_now(host)
     return _ok({"status": "success", "active": virtual.active,
                 "stored_active": virtual.virtual_cfg["active"]})
 
@@ -618,7 +719,7 @@ async def _effects_put(host, virtual_id: str, body: dict) -> FacadeResponse:
         )
 
     virtual.update_effect_config(effect, config_override=config_override)
-    save_config(config=host.config, config_dir=host.config_dir)
+    _persist_soon(host)     # deviation #56: coalesced, never a burst of saves
 
     return _ok(
         {
@@ -657,7 +758,7 @@ async def _effects_post(host, virtual_id: str, body: dict) -> FacadeResponse:
     except (ValueError, RuntimeError) as msg:
         return _internal(f"Unable to set effect on {virtual_id}: {msg}")
     virtual.update_effect_config(effect)
-    save_config(config=host.config, config_dir=host.config_dir)
+    _persist_now(host)
     return _ok(
         {
             "status": "success",
@@ -673,7 +774,7 @@ async def _effects_delete(host, virtual_id: str) -> FacadeResponse:
         return _invalid(f"Virtual with ID {virtual_id} not found")
     virtual.clear_effect()
     virtual.virtual_cfg.pop("effect", None)
-    save_config(config=host.config, config_dir=host.config_dir)
+    _persist_now(host)
     return _ok({"status": "success", "effect": {}})
 
 
@@ -727,7 +828,7 @@ async def _shape_put(host, virtual_id: str, body: dict) -> FacadeResponse:
         virtual.config = {"shape_map": ""}
         if getattr(virtual, "virtual_cfg", None) is not None:
             virtual.virtual_cfg["config"] = virtual.config
-        save_config(config=host.config, config_dir=host.config_dir)
+        _persist_now(host)
         return _ok({"status": "success", "cleared": True})
 
     try:
@@ -773,7 +874,7 @@ async def _shape_put(host, virtual_id: str, body: dict) -> FacadeResponse:
     if getattr(virtual, "virtual_cfg", None) is not None:
         virtual.virtual_cfg["config"] = virtual.config
         virtual.virtual_cfg["segments"] = virtual._segments
-    save_config(config=host.config, config_dir=host.config_dir)
+    _persist_now(host)
     return _ok({"status": "success",
                 "summary": _shape_summary(virtual, virtual._shape)})
 
@@ -871,7 +972,7 @@ async def _device_put(host, device_id: str, body: dict) -> FacadeResponse:
         if entry["id"] == device_id:
             entry["config"] = device.config
             break
-    save_config(config=host.config, config_dir=host.config_dir)
+    _persist_now(host)
     return _ok({"status": "success", "device": _device_entry(host, device)})
 
 
