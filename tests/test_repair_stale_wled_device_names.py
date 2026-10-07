@@ -12,11 +12,15 @@ the planned renames.
 from __future__ import annotations
 
 import copy
+import contextlib
 import importlib.util
 import json
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
+import requests
 
 _SCRIPT = (Path(__file__).resolve().parent.parent / "scripts"
            / "repair_stale_wled_device_names.py")
@@ -59,6 +63,53 @@ def _run(monkeypatch, path: Path, *flags: str) -> int:
     monkeypatch.setattr("sys.argv", [str(_SCRIPT), "--config", str(path),
                                      *flags])
     return repair.main()
+
+
+@contextlib.contextmanager
+def _fake_live_service(fail_device_ids: frozenset[str] = frozenset()):
+    """A minimal stand-in for spectra.service's real `PUT /api/devices/{id}`
+    route (fx/facade.py::_device_put): merges the posted config into an
+    in-memory per-device store and echoes it back, exactly like the real
+    `host.config` mutation this script exists to reach. `fail_device_ids`
+    makes the named device(s) answer 400, like a device the live host
+    cannot find."""
+    received: dict[str, dict] = {}
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_PUT(self):
+            device_id = self.path.rsplit("/", 1)[-1]
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length) or b"{}")
+            if device_id in fail_device_ids:
+                payload = json.dumps(
+                    {"status": "failed",
+                     "payload": {"reason": f"no such device {device_id}"}}
+                ).encode()
+                self.send_response(400)
+            else:
+                received[device_id] = body.get("config") or {}
+                payload = json.dumps(
+                    {"status": "success",
+                     "device": {"id": device_id,
+                               "config": received[device_id]}}
+                ).encode()
+                self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def log_message(self, *args):  # silence BaseHTTPRequestHandler noise
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}", received
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
 
 
 def test_only_the_four_named_devices_at_the_stale_name_are_found():
@@ -204,3 +255,80 @@ def test_the_written_diff_guard_refuses_anything_but_the_plan():
 def test_a_missing_config_is_a_stated_exit(tmp_path, monkeypatch, capsys):
     assert _run(monkeypatch, tmp_path / "nope.json") == 2
     assert "pass --config PATH" in capsys.readouterr().out
+
+
+def test_apply_live_renames_through_a_real_http_put():
+    planned = {"crystal": "Crystal", "tv-backlight": "TV Backlight",
+              "porch-rail": "Porch Rail"}
+    with _fake_live_service() as (url, received):
+        results = repair.apply_live(url, planned)
+    assert dict(results) == {"crystal": "live", "tv-backlight": "live",
+                             "porch-rail": "live"}
+    assert received == {
+        "crystal": {"name": "Crystal"},
+        "tv-backlight": {"name": "TV Backlight"},
+        "porch-rail": {"name": "Porch Rail"},
+    }
+
+
+def test_main_with_spectra_url_applies_live_and_never_rewrites_the_file(
+        tmp_path, monkeypatch, capsys):
+    """The whole point of the live path: `host.config` (here, the fake
+    service's own `received` store) gets the rename, and the on-disk file
+    this script would otherwise edit is left holding the stale names —
+    exactly as a real spectra.service's own save would, since nothing
+    here ever told it to change anything."""
+    path = tmp_path / "fx" / "config.json"
+    _write(path, _config())
+    raw = path.read_bytes()
+
+    with _fake_live_service() as (url, received):
+        assert _run(monkeypatch, path, "--spectra-url", url, "--apply") == 0
+
+    assert received == {
+        "crystal": {"name": "Crystal"},
+        "tv-backlight": {"name": "TV Backlight"},
+        "porch-rail": {"name": "Porch Rail"},
+    }
+    assert path.read_bytes() == raw, (
+        "the live path must not touch config.json's device names — the "
+        "live service's own save is what persists them")
+    backups = list((tmp_path / "fx" / "backups").glob("*.json"))
+    assert len(backups) == 1
+    assert json.loads(backups[0].read_text()) == json.loads(raw)
+    out = capsys.readouterr().out
+    assert "live" in out
+    assert "crystal" in out and "tv-backlight" in out and "porch-rail" in out
+
+
+def test_apply_live_stops_and_names_the_device_on_a_bad_response():
+    planned = {"crystal": "Crystal", "tv-backlight": "TV Backlight"}
+    with _fake_live_service(fail_device_ids=frozenset({"crystal"})) as (
+            url, received):
+        with pytest.raises(SystemExit, match="crystal"):
+            repair.apply_live(url, planned)
+    assert received == {}, (
+        "crystal sorts before tv-backlight, so the failure must stop "
+        "before any rename is attempted")
+
+
+def test_apply_live_names_the_device_when_the_service_is_unreachable():
+    with _fake_live_service() as (url, _received):
+        pass  # server is already shut down by the time we call below
+    with pytest.raises(SystemExit, match="crystal"):
+        repair.apply_live(url, {"crystal": "Crystal"})
+
+
+def test_dry_run_with_spectra_url_names_the_live_path_and_makes_no_call(
+        tmp_path, monkeypatch, capsys):
+    path = tmp_path / "fx" / "config.json"
+    _write(path, _config())
+    raw = path.read_bytes()
+    # No server listening at all — a network call here would raise and
+    # fail the test, proving the dry run makes none.
+    assert _run(monkeypatch, path, "--spectra-url",
+               "http://127.0.0.1:1") == 0
+    assert path.read_bytes() == raw
+    assert not (tmp_path / "fx" / "backups").exists()
+    out = capsys.readouterr().out
+    assert "live service" in out

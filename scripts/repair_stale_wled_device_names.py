@@ -34,13 +34,45 @@ has already renamed to something else, or one that genuinely still
 carries no name at all, is left alone. Idempotent: re-running after a
 successful --apply finds nothing left to do.
 
-Dry-run by default; --apply writes (atomic tmp+replace) AFTER copying the
-config to a timestamped backup, and ASSERTS the written file is
-semantically identical to the original except for exactly the planned
-`name` fields before declaring success.
+TWO WRITE PATHS, AND THE CHOICE IS NOT COSMETIC. A standalone run of this
+script is its OWN OS process — it has no access to a running
+`spectra.service`'s in-memory `host.config`, which is the SAME dict
+object `save_config` re-serializes to this very file on essentially
+every ordinary effect/scene write. Writing the file directly while that
+process is live only fixes the file for as long as it takes the next
+scene or flare to fire: the next `save_config(host.config, ...)` call
+flushes the live process's still-stale in-memory name right back over
+this script's edit, reproducing the bug it exists to close.
+
+So: if `spectra.service` is RUNNING, pass `--spectra-url` pointing at it
+(the direct SPECTRA process, not the spot-effects proxy — e.g.
+`--spectra-url http://127.0.0.1:8010`) and this script renames through
+its own live device-update endpoint (`PUT {url}/api/devices/{id}`, the
+exact call `device_console.update_device`'s live branch makes) — which
+updates `host.config` in memory AND persists it in the same call, so
+there is nothing left in memory to flush back over the fix. Only omit
+`--spectra-url` (writing config.json directly) when the service is
+genuinely stopped. Every applied rename states which path it took.
+
+DEPLOY ORDER: restart `spectra.service` FIRST (so the already-landed
+"already-set name wins" code fix is live before any name is re-asserted),
+THEN run this script with `--apply` — against the live service via
+`--spectra-url` if it is up, or directly against the file if it is not.
+Running this before the restart (file path) and then restarting risks
+nothing, since the restarted process loads the now-corrected file fresh;
+running it against the file WHILE the service is live is the one order
+that silently loses the fix, per the note above.
+
+Dry-run by default; --apply with no --spectra-url writes the file
+(atomic tmp+replace) AFTER copying the config to a timestamped backup,
+and ASSERTS the written file is semantically identical to the original
+except for exactly the planned `name` fields before declaring success.
+--apply with --spectra-url backs up the file the same way (a record of
+the pre-repair state) before issuing the live PUTs.
 
 Run from repo root:
-    .venv/bin/python scripts/repair_stale_wled_device_names.py [--config PATH] [--apply]
+    .venv/bin/python scripts/repair_stale_wled_device_names.py [--config PATH] --apply
+    .venv/bin/python scripts/repair_stale_wled_device_names.py --spectra-url http://127.0.0.1:8010 --apply
 """
 from __future__ import annotations
 
@@ -129,6 +161,39 @@ def assert_only_planned_name_changes(before: dict, after: dict,
                              f"{sorted(changed)}")
 
 
+def apply_live(spectra_url: str, planned: dict[str, str]) -> list[tuple[str, str]]:
+    """Rename each planned device through the running service's own device
+    endpoint — the live branch `device_console.update_device` itself calls
+    (`PUT /api/devices/{id}`, `fx/facade.py::_device_put`), which updates
+    `host.config` in memory and calls `save_config` in the one request, so
+    nothing is left stale in memory to flush back over the fix. Returns
+    (device_id, result) pairs; raises SystemExit naming the device on any
+    non-200 response or connection failure rather than silently falling
+    back to a file write that would only be undone by the next effect
+    write."""
+    import requests
+    results: list[tuple[str, str]] = []
+    base = spectra_url.rstrip("/")
+    for device_id, target in sorted(planned.items()):
+        url = f"{base}/api/devices/{device_id}"
+        try:
+            resp = requests.put(url, json={"config": {"name": target}},
+                                timeout=10.0)
+        except requests.RequestException as exc:
+            raise SystemExit(
+                f"FATAL: could not reach the live service at {url} to "
+                f"rename {device_id} ({exc}) — is --spectra-url correct, "
+                f"and is spectra.service actually running?")
+        if resp.status_code != 200:
+            raise SystemExit(
+                f"FATAL: the live service refused the rename of "
+                f"{device_id} at {url} (HTTP {resp.status_code}: "
+                f"{resp.text}) — nothing further was applied")
+        results.append((device_id, "live"))
+        print(f"    {device_id}: \"{STALE_NAME}\" -> {target!r}  (live)")
+    return results
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=__doc__,
@@ -138,6 +203,15 @@ def main() -> int:
                              "spectra.config.FX_LIVE_CONFIG_DIR/config.json)")
     parser.add_argument("--apply", action="store_true",
                         help="write the correction (default: dry-run report)")
+    parser.add_argument("--spectra-url", default=None,
+                        help="the running spectra.service's own base URL "
+                             "(e.g. http://127.0.0.1:8010) — pass this "
+                             "ONLY when the service is actually running; "
+                             "renames then go through its live device "
+                             "endpoint instead of writing config.json "
+                             "directly, which a live process would "
+                             "otherwise overwrite on its next effect "
+                             "write. Omit it when the service is stopped.")
     args = parser.parse_args()
 
     if args.config:
@@ -169,9 +243,35 @@ def main() -> int:
     planned = {s["id"]: s["target"] for s in stale}
 
     if not args.apply:
-        print(f"\ndry-run: would set {len(planned)} device name(s) in "
-              f"{path} (pass --apply). Only each device's `config.name` "
-              f"key changes; every other field keeps its value.")
+        if args.spectra_url:
+            print(f"\ndry-run: would PUT {len(planned)} device rename(s) "
+                  f"through the live service at {args.spectra_url} (pass "
+                  f"--apply). Nothing in {path} is read-written directly "
+                  f"in this mode — the service's own save does that.")
+        else:
+            print(f"\ndry-run: would set {len(planned)} device name(s) in "
+                  f"{path} (pass --apply). Only each device's "
+                  f"`config.name` key changes; every other field keeps "
+                  f"its value. If spectra.service is currently RUNNING, "
+                  f"re-run with --spectra-url instead — writing the file "
+                  f"directly while the service is live will be undone by "
+                  f"its next ordinary effect write.")
+        return 0
+
+    backup_dir = path.parent / "backups"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    backup_path = backup_dir / f"{path.stem}-wled-names-{stamp}.json"
+    shutil.copy2(path, backup_path)
+    print(f"\nbacked up {path} -> {backup_path}")
+
+    if args.spectra_url:
+        print(f"\napplying through the live service at {args.spectra_url} "
+              f"— {len(planned)} device name(s):")
+        apply_live(args.spectra_url, planned)
+        print(f"\ndone: {len(planned)} device name(s) renamed via the "
+              f"live device endpoint (host.config updated in memory and "
+              f"persisted in the same call).")
         return 0
 
     patched = json.loads(json.dumps(original))
@@ -181,13 +281,6 @@ def main() -> int:
             entry.setdefault("config", {})["name"] = planned[device_id]
 
     assert_only_planned_name_changes(original, patched, planned)
-
-    backup_dir = path.parent / "backups"
-    backup_dir.mkdir(parents=True, exist_ok=True)
-    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
-    backup_path = backup_dir / f"{path.stem}-wled-names-{stamp}.json"
-    shutil.copy2(path, backup_path)
-    print(f"\nbacked up {path} -> {backup_path}")
 
     tmp = path.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(patched, ensure_ascii=False, sort_keys=True,
@@ -201,7 +294,8 @@ def main() -> int:
                          + str(backup_path))
     assert_only_planned_name_changes(original, written, planned)
 
-    print(f"wrote {path}: {len(planned)} device name(s) changed:")
+    print(f"wrote {path}: {len(planned)} device name(s) changed  (stored, "
+          f"file only — the service was not told anything):")
     for device_id, target in sorted(planned.items()):
         print(f"    {device_id}: \"{STALE_NAME}\" -> {target!r}")
     return 0

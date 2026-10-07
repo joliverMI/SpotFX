@@ -1584,6 +1584,15 @@ against that commit.
     restarts, and the new "already-set wins" rule cannot tell a
     corrupted "WLED" apart from one he genuinely wants. One-time,
     idempotent catch-up for the data side:
-    `.venv/bin/python scripts/repair_stale_wled_device_names.py --apply`
-    (dry-run by default; only rewrites a device's stored `config.name`
-    when it is still exactly the stale "WLED").
+    `scripts/repair_stale_wled_device_names.py` (only rewrites a device's
+    stored `config.name` when it is still exactly the stale "WLED").
+    POST-DEPLOY STEP, in order: restart `spectra.service` first (so this
+    fix is live before any name is re-asserted), then run the script —
+    **against the live service, not the file, if it is running**:
+    `.venv/bin/python scripts/repair_stale_wled_device_names.py
+    --spectra-url http://127.0.0.1:8010 --apply`. Writing the file
+    directly while the service is live would only be undone by its next
+    ordinary effect write (`save_config(host.config, ...)` re-flushes the
+    still-stale in-memory name) — the script's own module docstring has
+    the full reasoning and the file-only `--apply` form for when the
+    service is genuinely stopped.
