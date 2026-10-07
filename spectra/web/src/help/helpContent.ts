@@ -612,12 +612,13 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         id: 'colorsets-preview',
         title: 'Preview: tap vs hold',
-        keywords: 'apply to room preview tap hold press revert pause live drag temporary',
+        keywords: 'apply to room preview tap hold press revert pause live drag temporary brightness dim dimmer washed out house mode level 100%',
         body: [
           'Preview replaced the old permanent "Apply to room" — every apply here is temporary and reverts. TAP: pauses SPECTRA\'s own automatic scene/response/set changes for 5 seconds, applies this card\'s colours to the room, then reverts to EXACTLY what was live the instant you tapped. HOLD (½ second): pauses for up to 60 seconds and STAYS applied — release it early with a second tap, wait out the timer, or just navigate away (leaving the page releases it too).',
           'While previewing, drag any colour on the card (FG, BG, an override entry) and the room updates live — the preview keeps running, the pause timer keeps counting from when you started, nothing restarts or drops.',
           'The revert always restores the room\'s TRUE pre-preview state, read live the instant Preview started — never a guess. His show keeps running underneath a tap or a released hold exactly as if nothing happened.',
           'Previewing a plain Set shows exactly what firing it for real will render — including any enclosing Group\'s override, same as "Group overrides" below.',
+          'A preview shows the colours at the room\'s own brightness: your house mode\'s fixture levels stay in force (a crystal resting at 12% stays at 12%), a fixture the mode has switched off stays off, the room dimmer applies, and so does Light mode\'s background — the same as applying the set for real. It never pushes your lights to full.',
         ],
       },
       {

@@ -406,19 +406,36 @@ def test_end_show_stops_the_shows_room_effect(room, monkeypatch):
     assert report["room_effect_stopped"] and stub.stopped == 1
 
 
-def test_the_supervisor_suspends_the_layer_before_it_repushes(room):
-    """A quiet take / night run brings the stack up with the show forbidden:
-    a saved hold may be re-pushed, but the layer is suspended in the SAME
-    pass, before anything else, so a held Steady never lights a capture."""
-    fire([A("device_state", target={"kind": "fixture", "id": "tv"}, state="steady")])
+def _tick_recording_order(room, reason):
+    """One supervisor pass from a stack that just came up, with `reason` as
+    the room's refusal; returns the order suspend/repush ran in."""
     show_output._was_live = False
-    room.gate["reason"] = "a night run is in progress"
+    room.gate["reason"] = reason
     order = []
     real_suspend, real_repush = device_output.suspend, show_output.repush
     import unittest.mock as m
     with m.patch.object(device_output, "suspend", side_effect=lambda on: (order.append(("suspend", on)), real_suspend(on))), \
          m.patch.object(show_output, "repush", side_effect=lambda: (order.append(("repush",)), real_repush())[1]):
         show_output.tick()
+    return order
+
+
+def test_the_supervisor_suspends_the_layer_before_it_repushes(room):
+    """A quiet take / night run brings the stack up with the show forbidden:
+    a saved hold may be re-pushed, but the layer is suspended in the SAME
+    pass, before anything else, so a held Steady never lights a capture.
+
+    The no-refusal pass first is the control that keeps this honest: the
+    suspension must come from the room's refusal (the fixture's night run),
+    never from some other check that refuses on its own — the real ownership
+    read refuses in this fixture, so a supervisor that ignored refusal()
+    would suspend here too and this test would pass for the wrong reason."""
+    fire([A("device_state", target={"kind": "fixture", "id": "tv"}, state="steady")])
+    order = _tick_recording_order(room, None)
+    assert order[0] == ("suspend", False) and ("repush",) in order
+    assert not device_output.suspended()
+
+    order = _tick_recording_order(room, "a night run is in progress")
     assert order[0] == ("suspend", True) and ("repush",) in order
     assert device_output.suspended()
 

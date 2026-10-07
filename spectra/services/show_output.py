@@ -158,6 +158,56 @@ def refusal() -> Optional[str]:
     return ownership_refusal() or standdown_reason()
 
 
+def _colour_preview_alone() -> bool:
+    """Is a colour-set preview (room_preview.py) the ONLY thing holding the
+    room? Anything unreadable answers False — the old, suspended behaviour."""
+    try:
+        from spectra.services import room_preview
+        if not room_preview.active():
+            return False
+        from spectra.services import flare_preview_hold, room_effects
+        if flare_preview_hold.active() and not room_effects._state.running:
+            return False
+        from spectra.services import av_sync_pattern
+        if av_sync_pattern.driver.active:
+            return False
+        from spectra.services import capture_runs
+        if capture_runs.current_run() is not None:
+            return False
+        from spectra.services import night_run
+        cur = night_run.current
+        if cur is not None and cur.state not in night_run.ENDED_STATES:
+            return False
+    except Exception:                                    # noqa: BLE001
+        return False
+    return True
+
+
+def suspension_reason() -> Optional[str]:
+    """Why the per-device output layer must pass every frame through
+    untouched right now, or None. Narrower than refusal() by exactly one
+    case: a COLOUR-SET PREVIEW holding the room on its own.
+
+    Suspension exists for things that must see raw frames — a camera run, a
+    night run, the A/V-sync flash pattern, a scene/flare preview — and for a
+    room that is not ours or an engine on paper. A colour preview is none of
+    those: it is "these colours on the room as it is", so the house mode's
+    resting levels, its switched-off and lent fixtures, and any Light Show
+    hold stay in force. Suspending them under it took his Standard mode's
+    crystal from 12% to full for the length of every preview (the Admiral,
+    2026-10-07: "when i preview a color set, it pushes to 100% brightness").
+    The colour preview still stands everything else down — refusal() and
+    house.gate() are unchanged, so Light Show fires stay refused and the
+    house writes nothing over it. Built FROM refusal(), never beside it, so
+    there is still one gate deciding what holds the room."""
+    reason = refusal()
+    if reason is None:
+        return None
+    if ownership_refusal() is None and _colour_preview_alone():
+        return None
+    return reason
+
+
 # ── targets ────────────────────────────────────────────────────────────────
 
 def _host():
@@ -645,8 +695,9 @@ def tick() -> None:
     # Suspend FIRST, so a re-push never gets a frame out before the stand-
     # down applies (a night run's quiet take brings the stack up with the
     # engine on paper — a held Steady must not light a capture's dark step).
-    # `refusal()` covers both an engine on paper and every stand-down.
-    device_output.suspend(refusal() is not None)
+    # `suspension_reason()` covers an engine on paper and every stand-down
+    # except a colour preview on its own (see its docstring).
+    device_output.suspend(suspension_reason() is not None)
     try:
         from spectra.services import show_arms
         show_arms.tick()

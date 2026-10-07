@@ -25,9 +25,11 @@ the status still names the mode, and nothing reaches a fixture.
 
 A preview, a camera run or a night run holding the room puts the layer on
 STANDBY (`show_output.standdown_reason()`): no writes at all, frame-rate caps
-lifted, the per-device output layer already suspended by the Light Show's
-supervisor. When the hold ends the mode is re-asserted (its scene kept if it
-is still showing).
+lifted, the per-device output layer suspended by the Light Show's supervisor
+— except under a colour-set preview on its own, which keeps the base levels
+and off fixtures in force so the preview shows the room at its own
+brightness (`show_output.suspension_reason`). When the hold ends the mode is
+re-asserted (its scene kept if it is still showing).
 
 ═══ PRECEDENCE — a higher layer wins; removing it shows the one below ═══
 
@@ -1108,7 +1110,9 @@ async def _go_inactive(why: str, *, fade_s: float, write_motion: bool) -> None:
 
 def _go_standby(why: str) -> None:
     """No writes. Caps lifted (a capture wants fresh frames); the output
-    layer is already suspended by the Light Show's supervisor."""
+    layer is suspended by the Light Show's supervisor (not for a colour
+    preview alone — show_output.suspension_reason), and the base stays
+    installed either way."""
     if _rt.phase != PHASE_STANDBY:
         _record("standby", {"reason": why})
     if _rt.caps_pushed:
