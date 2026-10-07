@@ -168,14 +168,16 @@ console.log('§6 phase 4: switched off never claims a look, and left-alone bulbs
   ok(hs.phaseLine({ ...off, mode: null }).startsWith('House lighting is switched off'),
     'switched off with no mode');
   ok(hs.chipLine(base).text === 'Mode: Evening · HA', 'switched on (or an older server): unchanged');
+  // Generic rendering test for a FUTURE excluded bulb (hue_excluded_lights
+  // ships empty by default — no real bulb of his is excluded today).
   const looks = [
     { area: 'hue-lights', look: 'hold', mirek: 284, color: null, brightness: 100 },
     { area: 'dining-hues', look: 'off', mirek: null, color: null, brightness: 100 },
-    { area: '*/Loft Ceiling Uplight', look: 'skip', mirek: null, color: null, brightness: 0 },
-    { area: '*/Ledge Left', look: 'skip', mirek: null, color: null, brightness: 0 },
+    { area: '*/Guest Room Lamp', look: 'skip', mirek: null, color: null, brightness: 0 },
+    { area: '*/Attic Sconce', look: 'skip', mirek: null, color: null, brightness: 0 },
   ];
   const hue = hs.hueLookLine(looks, (id) => ({ 'hue-lights': 'Hue Lights', 'dining-hues': 'Dining Hues' }[id] ?? id));
-  ok(hue === 'Hue Lights 3521 K 100% · Dining Hues off · left to Home Assistant: Loft Ceiling Uplight, Ledge Left',
+  ok(hue === 'Hue Lights 3521 K 100% · Dining Hues off · left to Home Assistant: Guest Room Lamp, Attic Sconce',
     `hue line: "${hue}"`);
 }
 

@@ -99,11 +99,6 @@ HA_LIGHTING_MODES = ("Daytime", "Evening", "Dim", "Bedtime", "Travel", "Party", 
 #: house.py media_words).
 MEDIA_WORDS = ("TV", "TV paused")
 
-#: Bulbs in Spectra's Hue entertainment areas that stay Home Assistant's
-#: outside music shows (his word via firstmate, 2026-10-05). Read off the
-#: Hue Lights bridge's "Music Group" entertainment configuration.
-HUE_LEFT_ALONE = ("Loft Ceiling Uplight", "Ledge Left", "Ledge Right", "Ledge Center")
-
 CALM_GROUP = "Calm"
 CALM_MEMBERS = ("Calm - Purple", "Calm - Green", "Calm - Cyan")
 EVENING_GROUP = "Calm - Evening"
@@ -555,13 +550,8 @@ def _plan_modes(path: Path, cards: dict, scenes: dict, overwrite: bool) -> FileP
             updated.append(w.name)
         else:
             kept.append(w.name)
-    if not lib.settings.hue_excluded_lights:
-        lib.settings = lib.settings.model_copy(
-            update={"hue_excluded_lights": list(HUE_LEFT_ALONE)})
     after = json.dumps(lib.model_dump(), indent=2)
-    if before is not None and not (added or updated) and \
-            json.loads(before).get("settings", {}).get("hue_excluded_lights") \
-            == lib.settings.hue_excluded_lights:
+    if before is not None and not (added or updated):
         after = before
     return FilePlan(path, before, after, added, updated, kept)
 

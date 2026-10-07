@@ -44,9 +44,12 @@ data encodes. The short list of traps:
 | TV paused | TV paused | House Star / Calm - Evening | 6% | 35% | 60% | #ff9d31 29% / 2095 K 54% | ignore |
 
 "unknown"/"unavailable" are deliberately unmapped (an HA restart keeps the
-current mode). Hue skips his Loft Ceiling Uplight and the three Ledge
-lights (`HouseSettings.hue_excluded_lights`). Seeding never switches house
-lighting on (`HouseSettings.enabled`).
+current mode). The seeder writes no Hue exclusion
+(`HouseSettings.hue_excluded_lights` ships empty — every bulb, including
+the Loft Ceiling Uplight and the three Ledge lights, is an ordinary
+house-mode bulb; an earlier build seeded those four as excluded by
+default, a wrong assumption corrected 2026-10-06). Seeding never switches
+house lighting on (`HouseSettings.enabled`).
 
 ## Re-running the seeder
 

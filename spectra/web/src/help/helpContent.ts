@@ -772,11 +772,11 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         id: 'hue-scope-stream',
         title: 'A Hue area left out of the show (it holds a bulb Spectra may not light)',
-        keywords: 'hue scope allow-list allow list excluded bulbs loft ceiling uplight ledge left right center music group entertainment area session start switched on turned on restart not streamed left out refused home assistant hue_scope.json hue app remove bulb',
+        keywords: 'hue scope allow-list allow list excluded bulbs music group entertainment area session start switched on turned on restart not streamed left out refused home assistant hue_scope.json hue app remove bulb',
         body: [
           'WHAT YOU SEE: an amber strip at the top of every page — "⚠ 1 Hue area is not in the show — it holds bulbs Spectra may not light" — naming the area and the bulbs.',
-          'WHY: some Hue bulbs are Home Assistant\'s, not Spectra\'s — today the Loft Ceiling Uplight and the three Ledge bulbs, which sit in the living room\'s "Music Group" entertainment area. Spectra only ever writes the bulbs on its allow-list (storage/spectra/hue_scope.json), one at a time. But starting a Hue entertainment session (how the music show drives Hue) makes the bridge switch on EVERY bulb in that area, before a single colour is sent — that is how those four came on after a restart on 2026-10-06 with house lighting and Hue Hold both off. Leaving their channels dark cannot stop that, so Spectra does not start a session on an area that holds a bulb off the allow-list (or one the bridge will not identify) at all. The other areas stream as usual.',
-          'HOW TO GET IT BACK: take those bulbs out of the entertainment area in the Hue app (or move them to an area of their own). Spectra re-reads the area about once a minute, so the strip clears and the rest of the area joins the show without a restart. Hue Hold and house modes are not affected: they write the allowed bulbs one by one, as before.',
+          'WHY: Spectra only ever writes the bulbs on its allow-list (storage/spectra/hue_scope.json), one at a time — every bulb in his living room\'s "Music Group" area and his dining area is on it today, Loft Ceiling Uplight and the three Ledge bulbs included (an earlier build wrongly carved those four out as Home Assistant\'s; corrected 2026-10-06 — they are ordinary Spectra bulbs, driven like the rest). This strip is the generic safety net for a FUTURE bulb genuinely outside the room: starting a Hue entertainment session (how the music show drives Hue) makes the bridge switch on EVERY bulb in that area, before a single colour is sent, so Spectra does not start a session on an area that holds a bulb off the allow-list (or one the bridge will not identify) at all. The other areas stream as usual.',
+          'HOW TO GET IT BACK: add the bulb to Spectra\'s allow-list (scripts/seed_hue_scope.py) if it is genuinely his, or take it out of the entertainment area in the Hue app if it belongs to someone else. Spectra re-reads the area about once a minute, so the strip clears and the rest of the area joins the show without a restart. Hue Hold and house modes are not affected: they write the allowed bulbs one by one, as before.',
         ],
       },
       {
@@ -2325,11 +2325,11 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         id: 'house-hue-left-alone',
         title: 'Hue bulbs house lighting leaves alone',
-        keywords: 'hue bulbs excluded left alone loft ceiling uplight ledge left right center home assistant',
+        keywords: 'hue bulbs excluded left alone home assistant',
         body: [
-          'Some bulbs sit in Spectra\'s Hue entertainment areas but belong to the rest of the house — the Loft Ceiling Uplight and the three Ledge lights. A house mode never writes them: not held at its look, not switched off, not reported. They stay Home Assistant\'s outside music shows — and, because starting a music show\'s entertainment session would switch them on too, Spectra does not start one on their shared area at all. See "A Hue area left out of the show" for what that looks like and how to get the rest of the area back.',
-          'The list is part of house lighting\'s settings (hue_excluded_lights: the bridge\'s own bulb names). The Now panel shows them as "left to Home Assistant".',
-          'Underneath that, SPECTRA has a hard boundary for every Hue write it makes (house modes, the Hue Hold switch, a release): an explicit allow-list of its own bulbs — the living-room and dining bulbs only. A bulb not on it is never written, and SPECTRA never writes a Hue group, room or "all lights".',
+          'House lighting can leave a bulb entirely to Home Assistant — not held at its look, not switched off, not reported — but the list is empty by default: no bulb of his is left alone today. The Loft Ceiling Uplight and the three Ledge lights were briefly seeded into this list as "left to Home Assistant"; that was a wrong assumption, corrected 2026-10-06 — they are ordinary Spectra bulbs, driven by house lighting and the music show like every other bulb in his home.',
+          'This is the mechanism for a FUTURE bulb he genuinely wants Home Assistant to keep (hue_excluded_lights: the bridge\'s own bulb names). The Now panel shows any bulb on the list as "left to Home Assistant". See "A Hue area left out of the show" for the separate, generic case of a bulb Spectra may not light at all.',
+          'Underneath that, SPECTRA has a hard boundary for every Hue write it makes (house modes, the Hue Hold switch, a release): an explicit allow-list of its own bulbs — the living-room and dining bulbs. A bulb not on it is never written, and SPECTRA never writes a Hue group, room or "all lights".',
         ],
       },
       {
@@ -2448,7 +2448,7 @@ export const HELP_SECTIONS: HelpSection[] = [
           'Say a mode and what to change: "switch to Evening", "make Evening\'s crystal ten percent", "cap the singles at 10 fps in Standard", "hold every Hue area at 2000 kelvin in Evening", "Night light ignores music", "create a mode called Reading". Sonic never guesses a name you only approximated — it refuses and offers the closest spellings.',
           'A mode Sonic creates is always new and empty; deleting a mode stays the House page\'s button.',
           'House-WIDE settings, not just one mode\'s: Sonic can read everything (including the fields below it can\'t change) and switch THE CUTOVER SWITCH on or off — "turn house lighting off" / "turn house lighting on". It can also change the energy block — resting frame-rate caps per category or fixture (or remove one), parking idle fixtures, send-on-change, the keep-alive, and the audio-pause delay — and Serenity\'s voice colours (listening/processing/responding).',
-          'NOT reachable by Sonic, by name: the Hue bulbs a mode never touches (hue_excluded_lights — a safety fence around bulbs outside the room, like the loft uplight and the ledge lights), the TV strip and voice fixture names, and the owned-brightness fields — all seam wiring set once at cutover with River. Read them on the House page or GET /spectra/api/house/settings; changing them stays a direct PUT.',
+          'NOT reachable by Sonic, by name: the Hue bulbs a mode never touches (hue_excluded_lights — a safety fence for a bulb outside the room; empty by default, since every bulb in his Spectra home is an ordinary house-mode bulb), the TV strip and voice fixture names, and the owned-brightness fields — all seam wiring set once at cutover with River. Read them on the House page or GET /spectra/api/house/settings; changing them stays a direct PUT.',
         ],
       },
       {

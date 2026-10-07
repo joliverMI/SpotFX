@@ -36,8 +36,11 @@ worth knowing cold:
    house lighting on/off" actions — same end effect as the PUT, separate
    code path because Light Show runs in-process and has no body to PATCH.
 3. **TWO THINGS NEVER MOVE BY VOICE**: `hue_excluded_lights` (a safety
-   fence around bulbs OUTSIDE the room — the loft uplight, the ledge
-   lights) and the seam-wiring fields (`tv_strips`, `voice_fixtures`,
+   fence for a bulb a mode should never touch — empty by default; every
+   bulb in his Spectra home, loft uplight and ledge lights included, is
+   an ordinary house-mode bulb, and carving those four out as Home
+   Assistant's was a wrong assumption, corrected 2026-10-06) and the
+   seam-wiring fields (`tv_strips`, `voice_fixtures`,
    `own_brightness`, `owned_brightness`, set once at cutover with River).
    All five stay readable through `get_house_settings`; none is in
    `house_console.ENERGY_KEYS` or any other write op. Don't add a write
