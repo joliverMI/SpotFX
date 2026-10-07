@@ -13,6 +13,7 @@ import { LIGHT_SHOW_COLOR, lightShowCueMarkers, sceneChangeArms } from './lightS
 import AnalysedEventsStrip from './components/AnalysedEventsStrip';
 import { usePlayhead } from './hooks/usePlayhead';
 import { useFollowWindow } from './hooks/useFollowWindow';
+import { drawnPlayheadMs } from './hooks/followWindow';
 import TimelineCanvas from './canvas/TimelineCanvas';
 import { BUILDER_LAYERS } from './canvas/layers';
 import { BEAT_STRIP_H, snapRailHFor, stripCountFor, type IntensityBgMode, type LayerDataBag, type ViewState } from './canvas/frame';
@@ -121,16 +122,28 @@ export default function BuilderPage() {
 
   // Canvas playhead shows the AUDIBLE moment: raw progress minus the audio
   // chain latency (legacy: setPlayhead(p - audio_latency_ms)). The timeline
-  // bar and follow window intentionally use raw progress, matching legacy.
+  // bar uses raw progress, matching legacy. The playhead LAYER draws that
+  // audible moment shifted by the song's shape offset (view.offsetMs), so the
+  // FOLLOW WINDOW anchors on exactly that drawn position — never the raw
+  // clock, which on a song with a large stored offset (Pop Off: 14,450 ms)
+  // left the playhead drawn past the window's right edge for the whole
+  // song. See hooks/followWindow.ts.
   const audioLatencyRef = useRef(0);
   audioLatencyRef.current = Number(settings?.audio_latency_ms ?? 0);
+  const shapeOffsetRef = useRef(0);
+  shapeOffsetRef.current = Number(meta?.timestamp_offset_ms ?? 0);
   const getCanvasNowMs = useCallback(() => {
     const now = getNowMs();
     return now === null ? null : now - audioLatencyRef.current;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  const getPlayheadMs = useCallback(() => {
+    const now = getCanvasNowMs();
+    return now === null ? null : drawnPlayheadMs(now, shapeOffsetRef.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const followWin = useFollowWindow({
-    getNowMs,
+    getNowMs: getPlayheadMs,
     durationMs,
     seedWindowS: settings ? Number(settings.builder_zoom_window_s ?? 30) : undefined,
     seedFutureS: settings ? Number(settings.builder_future_buffer_s ?? 10) : undefined,

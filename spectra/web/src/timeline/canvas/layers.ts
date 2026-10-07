@@ -3,6 +3,7 @@
  * circles. Debug-only layers (live mirror, anchors, xcorr windows, spikes)
  * have data contracts in frame.ts and are implemented when debug migrates. */
 import type { CanvasFrame, CanvasLayer, Hit } from './frame';
+import { drawnPlayheadMs } from '../hooks/followWindow';
 import { AVG_COLORS, MARK_ABBR, MARK_COLOR, computeBlendSpans } from './data';
 import type { MarkType } from '../types';
 // Reused verbatim from the debug page (PR fm/planned-event-markers) — the
@@ -34,7 +35,8 @@ function maxRmsFor(f: CanvasFrame, idx: number[]): number {
 }
 
 /** Legacy semantics (shape_canvas.js): the shape offset shifts the PLAYHEAD
- * (playhead layer draws at nowMs + offsetMs); RMS data, triggers, marks and
+ * (playhead layer draws at drawnPlayheadMs(nowMs, offsetMs) — the follow
+ * window anchors on that same function, ../hooks/followWindow.ts); RMS data, triggers, marks and
  * librosa overlays all draw at their raw timestamps. */
 const dataX = (f: CanvasFrame, ms: number) => f.timeToX(ms);
 
@@ -516,7 +518,7 @@ export const playhead: CanvasLayer = {
   visible: (f) => f.nowMs !== null,
   draw(f) {
     const { ctx } = f;
-    const ms = f.nowMs! + f.view.offsetMs;
+    const ms = drawnPlayheadMs(f.nowMs!, f.view.offsetMs);
     if (ms >= f.win.startMs && ms <= f.win.endMs) {
       const x = f.timeToX(ms);
       ctx.save();
