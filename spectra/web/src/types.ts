@@ -521,17 +521,23 @@ export interface RoomControlState {
  * virtual whose read-back state didn't match what was requested (dark_lock
  * OR the light background). `restored` (default only) lists virtuals
  * repainted from the pre-dark snapshot — empty when there was nothing to
- * restore OR when `repaint_skipped: "music_playing"` is present: music was
- * actively playing, so the stale pre-dark snapshot was deliberately NOT
- * forced back (dark_lock still cleared) — the room's own live show repaints
- * it on its next natural fire instead of a frozen look overriding it. */
+ * restore OR when `repaint_skipped` is present: `"music_playing"` (music was
+ * actively playing) or `"house_mode"` (a house lighting mode governs the
+ * room right now, 2026-10-06) — either way the stale pre-dark snapshot was
+ * deliberately NOT forced back (dark_lock still cleared), left to whatever
+ * is live to repaint it on its next natural fire instead of a frozen look
+ * overriding it. `house_overridden` names every virtual this call withheld
+ * dark_lock/the light write from because a house mode governs it right
+ * now (spectra/services/dark_light.py's `_house_driving`) — present only
+ * while non-empty. */
 export interface DarkLightResult {
   status: 'default' | 'dark' | 'light' | 'no-devices' | 'handover-in-progress' | 'released' | 'failed';
   locked?: string[];
   shielded?: string[];
   restored?: string[];
   lit?: string[];
-  repaint_skipped?: 'music_playing';
+  repaint_skipped?: 'music_playing' | 'house_mode';
+  house_overridden?: string[];
   unconfirmed?: string[];
   error?: string;
 }

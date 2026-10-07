@@ -28,6 +28,18 @@ room_controls lazily everywhere instead of eagerly at construction time --
 tests/test_light_mode_cold_start.py is the regression proof for THAT half;
 this file is the feature proof only.
 
+2026-10-06 addendum (the Admiral's ruling: "house lighting modes should
+override dark mode"): write points #1/#2 (via fire_scene) and #4 now take
+an optional display_mode override that REPLACES the room's stored mode for
+one call -- house lighting's own fires/colour-only applies pass "default"
+through it (spectra/services/scene_sequencer.fire_scene_by_id's
+origin="house" branch, spectra/services/house.py's _default_apply_set) so
+an authored black background never takes Light's substitution just because
+the room happens to be in Light mode. Proofs for the override itself sit
+beside each write point's own test below; tests/test_house_overrides_dark.py
+covers the house-side wiring (house_overrides_display, dark_lock, the
+hooks) this addendum does not touch.
+
 No live storage, no LedFX I/O, no network -- RecordingExecutor only.
 """
 from __future__ import annotations
@@ -149,6 +161,39 @@ def test_fire_scene_entry_point_threads_room_display_mode(
     assert result["writes"][0]["config"]["background_color"] == "#000000"
 
 
+def test_fire_scene_display_mode_override_bypasses_the_rooms_stored_mode(
+        _isolated_room_controls, tmp_path):
+    """HOUSE LIGHTING (2026-10-06, the Admiral's ruling: "house lighting
+    modes should override dark mode") -- fire_scene's own display_mode
+    kwarg REPLACES the room's stored mode for this one compile, the same
+    way transition_ms already replaces the ramp chain. scene_sequencer.
+    fire_scene_by_id passes "default" here for origin="house" fires, so an
+    authored black background never takes Light's substitution just
+    because the room happens to be in Light mode."""
+    from spectra.models.scene import SceneDeviceConfig, SceneV2
+    from spectra.services import room_controls as rc
+    from spectra.services import scene_compiler
+    from spectra.services.color_sets import ColorSetCard, ColorSetEntry, SetScope
+
+    _categories_fixture(tmp_path)
+    scene = SceneV2(name="Set-driven", devices=[SceneDeviceConfig(
+        target_kind="virtual", target=VID, effect_type="concentric", params={})])
+    card = ColorSetCard(id="set-black", name="Black-authoring", entries=[
+        ColorSetEntry(scope=SetScope(virtual_ids=[VID]), color_kind="solid",
+                      color_value="#ff0000", bg_color="#000000",
+                      bg_mode="overwrite")])
+
+    rc.save_room_controls(rc.RoomControlState(
+        display_mode="light", display_light_bg_color="#7800be"))
+    # No override: the room's stored Light mode substitutes as usual.
+    result = _run(scene_compiler.fire_scene(scene, color_set=card, dry_run=True))
+    assert result["writes"][0]["config"]["background_color"] == "#7800be"
+    # With the override: a house-origin fire's authored black stays black.
+    result = _run(scene_compiler.fire_scene(scene, color_set=card, dry_run=True,
+                                            display_mode="default"))
+    assert result["writes"][0]["config"]["background_color"] == "#000000"
+
+
 # ── write point #3: scene_response.ResponseEngine._color_jump ────────────────
 
 def _black_card():
@@ -239,6 +284,37 @@ def test_write_point_4_apply_color_set(mode, expect, tmp_path):
     assert conductor.virtuals[VID].background_color == expect
     writes = [w for w in executor.writes if "background_color" in w["params"]]
     assert writes[-1]["params"]["background_color"] == expect
+
+
+def test_apply_color_set_display_mode_override_bypasses_the_rooms_stored_mode(tmp_path):
+    """HOUSE LIGHTING (2026-10-06) -- the same override as fire_scene's,
+    one axis over: a house mode's own colour-only apply
+    (spectra/services/house.py's _default_apply_set) passes
+    display_mode="default" so its authored black stays black regardless
+    of the room's stored Light mode."""
+    from spectra.models.scene import SceneDeviceConfig, SceneV2
+    from spectra.services import color_journey as cj
+    from spectra.services import room_controls as rc
+    from spectra.services.drift_conductor import DriftConductor
+    from spectra.services.fx_executor import RecordingExecutor
+
+    _categories_fixture(tmp_path)
+    black_card = _black_card()
+    scene = SceneV2(name="Applied", devices=[SceneDeviceConfig(
+        target_kind="virtual", target=VID, effect_type="concentric", params={})])
+    executor = RecordingExecutor()
+    conductor = DriftConductor(
+        executor=executor, room_load=lambda: cj.RoomColorState(),
+        room_save=lambda st: None,
+        room_controls=lambda: rc.RoomControlState(
+            display_mode="light", display_light_bg_color="#7800be"))
+    _fire(conductor, scene, {"background_color": "#000000"})
+
+    landed = _run(conductor.apply_color_set(black_card, display_mode="default"))
+    assert landed == 1
+    assert conductor.virtuals[VID].background_color == "#000000"
+    writes = [w for w in executor.writes if "background_color" in w["params"]]
+    assert writes[-1]["params"]["background_color"] == "#000000"
 
 
 # ── write point #5: drift_conductor.DriftConductor._journey_leg ──────────────

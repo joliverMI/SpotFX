@@ -51,6 +51,7 @@ import type {
   AmbientPhase, AmbientResult, DarkLightResult, DisplayMode, ForceColorResult, ForceSceneResult,
   RoomControlState, SceneChangeMode,
 } from '../types';
+import type { LightingStatus } from '../house/types';
 import SearchSelect from './forms/SearchSelect';
 
 /** His three-way display-mode control (spectra/services/dark_light.py).
@@ -299,18 +300,38 @@ export default function RoomControlsBar() {
       ? AMBIENT_MODE_DOT[ambientLive.mode]
       : null;
 
+  // HOUSE LIGHTING OVERRIDE (2026-10-06, the Admiral's ruling: "house
+  // lighting modes should override dark mode") — a house mode governing
+  // the room right now means Dark/Light simply doesn't apply, however the
+  // button/select is set. Only worth saying while that would otherwise be
+  // surprising (local mode isn't already "default").
+  const lighting = (engineStatus as { lighting?: LightingStatus } | undefined)?.lighting;
+  const houseOverridesDisplay = Boolean(lighting?.overrides_display_mode);
+  const houseOverrideNote = local.display_mode !== 'default' && houseOverridesDisplay;
+
   return (
     <div className="room-controls-bar">
       <TopBarGroupButton
         className="mode-group-btn"
-        title={`Mode: ${modeMeta.label} — tap to cycle, hold to open the colour/brightness options`}
-        ariaLabel={`Display mode: ${modeMeta.label}. Tap to cycle, hold to open options.`}
+        title={houseOverrideNote
+          ? `Mode: ${modeMeta.label} — not applied while a house mode is driving. Tap to cycle, hold to open the colour/brightness options`
+          : `Mode: ${modeMeta.label} — tap to cycle, hold to open the colour/brightness options`}
+        ariaLabel={`Display mode: ${modeMeta.label}${houseOverrideNote ? ', not applied while a house mode is driving' : ''}. Tap to cycle, hold to open options.`}
         style={modeStyle}
         holdToExpand
         onShortPress={cycleMode}
         panelTitle={<>Mode <HelpLink topic="dark-light-mode" /></>}
         panel={(
           <>
+            {houseOverrideNote && (
+              <div className="top-bar-group-field">
+                <span style={{ fontSize: '0.85em', opacity: 0.85 }}>
+                  Not applied while a house mode is driving — the house mode's own
+                  look stands. This switch applies again the moment music takes the
+                  room, or no mode drives. <HelpLink topic="house-overrides-dark" />
+                </span>
+              </div>
+            )}
             <div className="top-bar-group-field">
               <label>Mode</label>
               <select
@@ -368,10 +389,22 @@ export default function RoomControlsBar() {
                 repaint deferred to live show
               </span>
             )}
+            {darkLightResult?.status === 'default' && darkLightResult.repaint_skipped === 'house_mode' && (
+              <span
+                className="badge badge-gray"
+                title="A house lighting mode governs the room, so the stale pre-dark snapshot was not forced back — its own look stands"
+              >
+                repaint deferred to house mode
+              </span>
+            )}
           </>
         )}
       >
         {modeUnconfirmed && <span className="top-bar-group-btn-dot top-bar-group-btn-dot-red" title="unconfirmed" />}
+        {!modeUnconfirmed && houseOverrideNote && (
+          <span className="top-bar-group-btn-dot top-bar-group-btn-dot-gray"
+               title="Not applied while a house mode is driving" />
+        )}
       </TopBarGroupButton>
 
       <TopBarGroupButton

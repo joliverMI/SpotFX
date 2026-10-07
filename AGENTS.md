@@ -2659,6 +2659,43 @@ just those two fields back onto the CURRENT live config — only where the
 background still equals what Light painted (a scene repaint since wins), and
 not playback-gated (never a stale frame). Spec: `tests/test_dark_light.py`.
 
+**HOUSE LIGHTING IS THE ONE EXCEPTION (2026-10-06, the Admiral's ruling,
+verbatim: "house lighting modes should override dark mode") — the same
+shape as Force Colour's house exception above, one axis over.** While a
+house mode is actually governing the room's own look right now —
+`house.house_overrides_display()`, True exactly when `layer_active()` AND
+the mode is not currently handed to a music "show" phase (a "calm"/
+"ignore" mode counts as driving even while music plays, same as
+`scene_deferral`; standby does NOT count, deliberately differing from
+`scene_deferral`/`_live_mode` there) — `dark_light.py` withholds the
+dark_lock push, Light's forced background write, and the "default"-mode
+stale-snapshot repaint on EVERY virtual (`dark_light._house_driving()`,
+treated exactly like an extra, dynamically-computed shielded set for the
+one call). The STORED `display_mode` is never touched — it simply doesn't
+apply while a house mode drives. Because dark_lock is a PERSISTENT
+per-virtual clamp (unlike Force Colour's per-fire substitution), a PUT
+alone can't keep it in sync as the house's own driving state changes
+later — `house.py`'s own `_enter`/`_hand_in`/`_go_inactive` hooks call
+`dark_light.reconcile()` again, with the room's CURRENT stored
+display_mode, every time that state flips, via `house.
+_resync_dark_light_override()` (a no-op while stored mode is `"default"`).
+This is what makes dark_lock reassert itself the instant music takes the
+room back from a resting mode with no PUT required. Separately, a house
+fire's own authored `#000000` must never take Light's black→light
+substitution just because the room happens to be in Light mode:
+`scene_compiler.fire_scene`/`compile_scene` and `drift_conductor.
+apply_color_set`/`apply_set_directly` all gained an optional
+`display_mode` override that REPLACES the room's stored mode for one
+call, and `scene_sequencer.fire_scene_by_id`'s `origin="house"` branch
+(house.py's `_default_fire_scene`/`_default_apply_set`) passes `"default"`
+through it — mirroring Force Colour's own `origin != "house"` check one
+line above it. UI: a gray dot + a panel note on the Mode button, and
+`house.status_dict()`'s `overrides_display_mode` key
+(`GET /api/engine/status`'s `lighting` key). Spec:
+`tests/test_house_overrides_dark.py` (the predicate, the dynamic dark_lock/
+Light-write exclusion against a real headless host, the hook wiring) +
+`tests/test_light_mode_bg_clear.py`'s override-specific tests.
+
 **An authored black `bg_color` on a colour set is LOAD-BEARING in Hybrid
 mode — do not remove it as "redundant" next to a black effect colour.**
 `storage/color_sets.json` has 30 such entries across 22 colour sets (Black

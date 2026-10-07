@@ -232,7 +232,8 @@ def test_origin_house_ignores_the_pin_every_other_origin_still_wears_it(
     worn: list = []
 
     async def fake_fire_scene(sc, *, intensity=0.5, color_set=None,
-                              dry_run=True, rng=None, transition_ms=None):
+                              dry_run=True, rng=None, transition_ms=None,
+                              display_mode=None):
         worn.append(color_set.id if color_set is not None else None)
         return {"dry_run": dry_run, "intensity": intensity, "writes": [],
                 "resolved_bindings": {}, "dice_rolls": {}}

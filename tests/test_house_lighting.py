@@ -566,7 +566,8 @@ def test_fire_scene_by_id_defers_automatic_picks_but_passes_the_house_and_pins(w
                                                 transition_ms=1234,
                                                 dwell_tolerance_s=99999))
     assert fired[-1] == (fish, {"intensity": 0.5, "color_set": None,
-                                "dry_run": False, "transition_ms": 1234})
+                                "dry_run": False, "transition_ms": 1234,
+                                "display_mode": "default"})
     st = room_controls.load_room_controls()
     room_controls.save_room_controls(st.model_copy(update={
         "force_scene_enabled": True, "force_scene_scene_id": fish}))
