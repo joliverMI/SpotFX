@@ -351,3 +351,28 @@ def test_no_resync_call_when_the_stored_mode_is_default(world):
     _mode("Standard")
     _run(world.house.set_mode(mode="Standard", source="spectra"))
     assert world.calls == []
+
+
+def test_resync_fires_once_on_the_edge_into_inactive_not_every_tick(world):
+    # Reproduces the churn bug directly: with no mode ever configured (the
+    # layer starts, and stays, inactive) a supervisor tick must not re-run
+    # the dark/light reconcile on every pass — there is no edge to resync.
+    _run(world.house.tick())
+    _run(world.house.tick())
+    _run(world.house.tick())
+    assert world.calls == []
+
+
+def test_repeated_ticks_after_going_inactive_do_not_resync_again(world):
+    _mode("Standard")
+    _run(world.house.set_mode(mode="Standard", source="spectra"))
+    _run(world.house.set_mode(clear=True, source="spectra"))
+    after_clear = len(world.calls)
+    assert after_clear > 0
+    assert world.calls[-1] == "dark"
+    # The layer is now lastingly inactive (no mode). Every further
+    # supervisor tick must not re-fire the resync — only the edge did.
+    _run(world.house.tick())
+    _run(world.house.tick())
+    _run(world.house.tick())
+    assert len(world.calls) == after_clear

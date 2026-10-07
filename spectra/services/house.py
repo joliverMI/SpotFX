@@ -1077,10 +1077,13 @@ async def apply_settings_patch(body: dict) -> dict:
 
 async def _go_inactive(why: str, *, fade_s: float, write_motion: bool) -> None:
     # The layer is stepping down (off/refused/no mode) — it is no longer
-    # driving, so the room's stored display_mode governs again.
-    await _resync_dark_light_override()
+    # driving, so the room's stored display_mode governs again. Gated on
+    # the same transition check as _let_go below: resync only on the edge
+    # into inactive, never on every tick a lastingly-inactive layer is
+    # re-confirmed as inactive.
     if (_rt.phase != PHASE_INACTIVE or _rt.base_pushed or _rt.caps_pushed
             or _rt.motion_applied):
+        await _resync_dark_light_override()
         await _let_go(fade_s=fade_s, write_motion=write_motion)
         if _rt.phase != PHASE_INACTIVE:
             _record("inactive", {"reason": why})
