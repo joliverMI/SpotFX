@@ -2,11 +2,11 @@
 name: black-hole-v2-scene
 description: >
   The "Black Hole V2" SPECTRA scene — Matrix `blackhole`, Strips
-  `blackhole1d`, Singles `power`. Load before editing this scene's flare
-  bands/kinds, colour-set preference, or dwell curve. For the underlying
-  effect's own params/invariants, load the blackhole-effect skill first —
-  this skill is scene-level (bands, kinds, colour behaviour), not effect
-  internals.
+  `blackhole1d`, Singles `power` (`pulse` once
+  scripts/migrate_singles_to_pulse.py runs). Load before editing this scene's
+  flare bands/kinds, colour-set preference, or dwell curve. For the underlying
+  effect's own params/invariants, load the blackhole-effect skill first — this
+  skill is scene-level (bands, kinds, colour behaviour), not effect internals.
 ---
 
 # Black Hole V2 (scene)

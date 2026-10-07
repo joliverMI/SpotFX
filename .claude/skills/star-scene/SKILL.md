@@ -1,14 +1,14 @@
 ---
 name: star-scene
 description: >
-  The "STAR" SPECTRA scene — Matrix `radial`, Strips `melt` (always melt
-  now — an intensity-stepped `power` overlay at ⚡0.7+ was removed, see
-  below), Singles `power`. Load before editing this scene's flare
-  bands/kinds (especially anything Reverse-shaped), its Strips config, or
-  the `edges` param — this scene has the most edit-history and the most
-  "his own tuning got silently replaced by a rebuild" precedent of any
-  scene here. Load radial-effect and melt-effect first for the underlying
-  effects.
+  The "STAR" SPECTRA scene — Matrix `radial`, Strips `melt` (always melt now —
+  an intensity-stepped `power` overlay at ⚡0.7+ was removed, see below),
+  Singles `power` (`pulse` once scripts/migrate_singles_to_pulse.py runs).
+  Load before editing this scene's flare bands/kinds (especially anything
+  Reverse-shaped), its Strips config, or the `edges` param — this scene has
+  the most edit-history and the most "his own tuning got silently replaced by
+  a rebuild" precedent of any scene here. Load radial-effect and melt-effect
+  first for the underlying effects.
 ---
 
 # STAR (scene)

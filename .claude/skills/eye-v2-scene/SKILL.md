@@ -1,11 +1,12 @@
 ---
 name: eye-v2-scene
 description: >
-  The "Eye V2" SPECTRA scene — Matrix `eye`, Strips `blackhole1d`
-  (shares the Black Hole strip effect, not a distinct one), Singles
-  `power`. Load before editing this scene's flare bands/kinds or blink/
-  snap thresholds. Load the eye-effect skill first for the underlying
-  Matrix effect, and blackhole-effect for what its Strips entry runs.
+  The "Eye V2" SPECTRA scene — Matrix `eye`, Strips `blackhole1d` (shares the
+  Black Hole strip effect, not a distinct one), Singles `power` (`pulse` once
+  scripts/migrate_singles_to_pulse.py runs). Load before editing this scene's
+  flare bands/kinds or blink/ snap thresholds. Load the eye-effect skill first
+  for the underlying Matrix effect, and blackhole-effect for what its Strips
+  entry runs.
 ---
 
 # Eye V2 (scene)

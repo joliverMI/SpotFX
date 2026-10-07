@@ -3,13 +3,13 @@ name: pulse-effect
 description: >
   fx/effects/pulse.py (registry id `pulse`) — the Singles' one-colour light
   that pulses on hits, built to replace Power on the 17 Hue bulbs, the porch
-  rail and the dining table (single-led-power plan, phases 1-3; phase 4,
-  moving his scenes over, waits for his tuning). Bound today only in the
-  tuning scene "Pulse Test (Orbits V2)". Load before touching hit
+  rail and the dining table (single-led-power plan, phases 1-4). Tuned on
+  "Pulse Test (Orbits V2)"; phase 4 (scripts/migrate_singles_to_pulse.py, run
+  at deploy) moves every Power Singles scene onto it. Load before touching hit
   detection, the flash budget or its output guard, charge/lull/drop on the
   Singles, the rainbow walk, the pulse_flash / pulse_flip flares or a flare
-  kind's min_intensity, or a "the singles flash too much / don't move /
-  went white" report.
+  kind's min_intensity, or a "the singles flash too much / don't move / went
+  white" report.
 ---
 
 # Pulse
@@ -114,6 +114,23 @@ default; refuses any scene with no Pulse entry). Putting Pulse on a
 scene's Singles entry, or choosing its colour mode, is still NOT Sonic's
 (the Initial Set tab's job) — only copy_scene_device_entry reaches that,
 and only by copying a whole entry from another scene.
+
+## Phase 4 — moving his scenes over
+
+`scripts/migrate_singles_to_pulse.py` (dry run default, `--apply`,
+`--revert` from the manifest it writes beside its backup) switches every
+scene whose Singles category entry runs `power` to `pulse`. It READS what
+travels off the live tuning scene at run time, never a typed copy: the
+Singles params (today `{}` — his tuning is the schema defaults, PR 359)
+and every pulse_flash/pulse_flip kind verbatim with its attachment (every
+flare band, x1.0, no lane) — his trigger timing included (Flash -92 ms,
+Colour Flip -355 ms when written; seeded 0). A Pulse kind already on a
+scene (matched by TYPE) is retimed only from the seed 0; any other value
+is his per-scene timing and is kept. The colour flip's -355 ms becomes the
+band ANCHOR (min over every declared, enabled kind, min_intensity-gated
+ones included), so each flare band now starts 355 ms early and every other
+kind waits to its own moment (per-flare trigger moment) — exactly as on
+Pulse Test. Spec: `tests/test_migrate_singles_to_pulse.py`.
 
 ## Proofs
 

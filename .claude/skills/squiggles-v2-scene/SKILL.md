@@ -1,12 +1,12 @@
 ---
 name: squiggles-v2-scene
 description: >
-  The "Squiggles V2" SPECTRA scene — Matrix `squiggles`, Strips
-  `orbits1d` (NOT a Squiggles-specific strip effect), Singles `power`.
-  Load before editing this scene's flare bands/kinds or colour-set accept
-  list. Load the squiggles-effect skill first for the underlying Matrix
-  effect, and the orbits-effect skill for what its Strips entry actually
-  runs.
+  The "Squiggles V2" SPECTRA scene — Matrix `squiggles`, Strips `orbits1d`
+  (NOT a Squiggles-specific strip effect), Singles `power` (`pulse` once
+  scripts/migrate_singles_to_pulse.py runs). Load before editing this scene's
+  flare bands/kinds or colour-set accept list. Load the squiggles-effect skill
+  first for the underlying Matrix effect, and the orbits-effect skill for what
+  its Strips entry actually runs.
 ---
 
 # Squiggles V2 (scene)
