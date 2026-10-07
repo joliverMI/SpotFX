@@ -8759,18 +8759,24 @@ tunable, not tuned. Proof: `scripts/check_fish.py`,
 `tests/test_fish.py`, `tests/test_fish_camera.py`,
 `tests/test_fish_disperse.py`, `tests/test_fish_wall.py`.
 
-## Pulse (`fx/effects/pulse.py`) — the Singles' one-colour effect, phases 1-3 of 4
+## Pulse (`fx/effects/pulse.py`) — the Singles' one-colour effect, phases 1-4 built
 
 The single-led-power plan (`/home/javi/fleet-spotfx/data/single-led-power-plan/
 report.md`, approved by the Admiral "with all recommendations") replaces
 Power on the Singles in four phases: (1) the effect offline + a camera
 measurement, (2) engine wiring + a test scene and HIS TUNING GATE, (3)
-rainbow walk + two flare kinds, (4) scene migration, one scene first and
-undoable. Power stays installed throughout. **The module docstring is the
-binding statement** (hit detector, rise/fade, rest/depth, smallest pulse,
-`gamma`, no background, the flash budget, the hooks, the rainbow walk, the
-flare pokes); `.claude/skills/pulse-effect/SKILL.md` is the cold-start map.
-Eleven things:
+rainbow walk + two flare kinds, (4) scene migration — `scripts/
+migrate_singles_to_pulse.py` (dry run default, `--apply` at deploy,
+`--revert` from its own manifest) switches every Power Singles scene at
+once, on the Admiral's 2026-10-07 word ("push to the rest of the scenes"),
+carrying Pulse Test's own tuned Singles params and its two Pulse flare
+kinds along with his trigger timing changes — a per-scene timing he had
+already set is kept. Power stays installed throughout. **The module
+docstring is the binding statement** (hit detector, rise/fade, rest/depth,
+smallest pulse, `gamma`, no background, the flash budget, the hooks, the
+rainbow walk, the flare pokes); `.claude/skills/pulse-effect/SKILL.md` is
+the cold-start map, with its own "Phase 4" section for the migration
+detail. Eleven things:
 
 - **WIRED (phase 2) THROUGH TWO SETS IN `fx/device_model`.** `pulse` is in
   `PHASE_EFFECTS` (charge/lull/drop on the shared ramp — a lull reaches black
