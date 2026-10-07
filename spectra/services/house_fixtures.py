@@ -31,12 +31,19 @@ FIXTURES, and what Spectra then does to them:
              by `owned_brightness` if he has set that lower (default 255 =
              no extra cap). A power-on restores exactly that ceiling value,
              never a forced 255. The drift check (`_drift_check`) only ever
-             corrects DOWNWARD — a fixture read back ABOVE its ceiling (a
-             reboot landing on a brighter boot preset) is capped back to
-             it; a fixture read back AT OR BELOW its ceiling — including a
-             fresh, lower Home Assistant brightness write — is left alone
-             and is never fought back up. Each correction is still NAMED
-             (status, log, fire history).
+             corrects DOWNWARD, and only on a genuine reboot: a reading
+             ABOVE the ceiling is weighed against the fixture's own
+             `json/info` uptime (`_rt.uptime_ms`) to tell a brighter boot
+             preset apart from a deliberate Home Assistant write made while
+             nobody was watching — uptime dropping since the last check
+             means reboot, and that overshoot is capped back down; anything
+             else is HIS OWN new level, ADOPTED into `pre_take[did]["bri"]`
+             as the new ceiling rather than fought back down (nothing is
+             written for an adoption — there is nothing to correct). A
+             fixture read back AT OR BELOW its ceiling — including a fresh,
+             lower Home Assistant brightness write — is left alone either
+             way. Each correction is still NAMED (status, log, fire
+             history).
   RECHECK    "I just powered the sconce mains": re-find the named fixtures by
              identity (a mains cycle is when a WLED takes a new DHCP lease),
              re-init a driver that never resolved, and re-apply the power /
@@ -183,6 +190,19 @@ def _get_state_blocking(wled, timeout: float) -> dict:
     return body
 
 
+def _get_info_blocking(wled, timeout: float) -> dict:
+    """json/info, not json/state — `uptime` (ms since boot) only ever shows
+    up there, the same split dark_fixture_watch.py / live_host.py already
+    document for `live`."""
+    import requests
+    response = asyncio.run(wled._wled_request(
+        requests.get, wled.ip_address, "json/info", timeout=timeout))
+    body = response.json()
+    if not isinstance(body, dict):
+        raise TypeError(f"json/info returned {type(body).__name__}")
+    return body
+
+
 async def _default_post(device, payload: dict) -> None:
     wled = getattr(device, "wled", None)
     if wled is None:
@@ -198,6 +218,15 @@ async def _default_get(device) -> dict:
         raise RuntimeError("its driver never reached the fixture (no address)")
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, _get_state_blocking, wled,
+                                      HTTP_TIMEOUT_S)
+
+
+async def _default_get_info(device) -> dict:
+    wled = getattr(device, "wled", None)
+    if wled is None:
+        raise RuntimeError("its driver never reached the fixture (no address)")
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, _get_info_blocking, wled,
                                       HTTP_TIMEOUT_S)
 
 
@@ -278,6 +307,7 @@ async def _default_read_live(device_id: str) -> Optional[bool]:
 class Deps:
     post: Callable[[Any, dict], Awaitable[None]] = _default_post
     get_state: Callable[[Any], Awaitable[dict]] = _default_get
+    get_info: Callable[[Any], Awaitable[dict]] = _default_get_info
     host: Callable[[], Any] = _default_host
     relocate: Callable[[Any, Any], Awaitable[bool]] = _default_relocate
     reinit: Callable[[Any], Awaitable[bool]] = _default_reinit
@@ -332,6 +362,11 @@ class _Runtime:
     #: now (None = never confirmed either way — treated as "not streaming")
     hyperion_live: dict = field(default_factory=dict)
     hyperion_checked_at: dict = field(default_factory=dict)
+    #: device -> the last `json/info` uptime (ms since boot) seen for it —
+    #: the one signal that tells a reboot's brighter boot preset apart from
+    #: a deliberate Home Assistant brightness write (see _rebooted_since_
+    #: last_check). Seeded at the fixture's first remembered reading.
+    uptime_ms: dict = field(default_factory=dict)
 
 
 _rt = _Runtime()
@@ -1003,13 +1038,52 @@ async def _transition(did: str, dev, target: str, why: str, *, owned: bool,
     kick()
 
 
+async def _rebooted_since_last_check(did: str, dev) -> bool:
+    """Has this WLED's own `json/info` uptime reset or dropped since the
+    last time this module read it — the signal that tells a reboot's
+    brighter boot preset apart from a deliberate Home Assistant write made
+    while nobody was watching. Never checked before, or unreadable, is NOT
+    treated as a reboot — an overshoot defaults to his own deliberate
+    increase, the same direction the "unknown never acts" rule already
+    takes everywhere else in this module."""
+    try:
+        info = await deps.get_info(dev)
+    except Exception:                                    # noqa: BLE001
+        return False
+    uptime = info.get("uptime")
+    if not isinstance(uptime, (int, float)):
+        return False
+    prev = _rt.uptime_ms.get(did)
+    _rt.uptime_ms[did] = uptime
+    return prev is not None and uptime < prev
+
+
+def _adopt_higher_brightness(did: str, found_bri: int) -> None:
+    """A brightness ABOVE his preserved ceiling with no reboot evidence
+    behind it — HIS OWN new Home Assistant level, not an overshoot to fight.
+    `pre_take[did]["bri"]` is what `_brightness_ceiling` reads, so updating
+    it here is what makes every later check compare against the new, higher
+    level instead of the one captured at take-start."""
+    st = house_store.state()
+    pre = st.pre_take.get(did)
+    if pre is None:
+        return
+    pre["bri"] = found_bri
+    house_store.save_state()
+    logger.info("house fixtures: %s's brightness rose to %s with no reboot "
+               "evidence behind it — adopting it as his new ceiling (nothing "
+               "written)", did, found_bri)
+
+
 async def _drift_check(did: str, dev, target: str) -> None:
     """Read json/state back; re-assert power if something else moved it.
-    Brightness is corrected ONLY downward — a reading above the preserved
-    ceiling (a reboot landing on a brighter boot preset) is capped back to
-    it; a reading at or below the ceiling, including a fresh, lower Home
-    Assistant brightness write, is HIS and is never fought back up. An
-    unreadable fixture is left alone — unknown never acts."""
+    Brightness is corrected ONLY downward, and only on a genuine reboot
+    (`_rebooted_since_last_check`) — a reading above the preserved ceiling
+    with no such evidence is HIS OWN deliberate Home Assistant increase and
+    is ADOPTED as the new ceiling instead of being fought back down. A
+    reading at or below the ceiling, including a fresh, lower Home
+    Assistant brightness write, is HIS and is never fought back up either
+    way. An unreadable fixture is left alone — unknown never acts."""
     settings = _settings()
     try:
         try:
@@ -1025,6 +1099,10 @@ async def _drift_check(did: str, dev, target: str) -> None:
             ceiling = _brightness_ceiling(did, settings)
             over_ceiling = (ceiling is not None and isinstance(found_bri, int)
                            and found_bri > ceiling)
+            if over_ceiling and not await _rebooted_since_last_check(did, dev):
+                _adopt_higher_brightness(did, found_bri)
+                ceiling = _brightness_ceiling(did, settings)
+                over_ceiling = ceiling is not None and found_bri > ceiling
             if found_on is True and not over_ceiling:
                 return
             payload = {"on": True}
@@ -1074,6 +1152,18 @@ async def _remember_before(did: str, dev) -> None:
     st.pre_take[did] = {"on": on, "bri": bri if isinstance(bri, int) and bri > 0 else None,
                         "ip": str(ip), "at_ms": now_ms()}
     house_store.save_state()
+    # Seed the reboot baseline from the SAME take-start moment, so the
+    # first later overshoot already has something to compare against
+    # rather than defaulting to "never checked" (see _rebooted_since_
+    # last_check). Best-effort: a fixture that can't answer json/info
+    # still gets its on/bri ceiling above.
+    try:
+        info = await deps.get_info(dev)
+    except Exception:                                    # noqa: BLE001
+        return
+    uptime = info.get("uptime")
+    if isinstance(uptime, (int, float)):
+        _rt.uptime_ms[did] = uptime
 
 
 def _maybe_hand_back() -> None:

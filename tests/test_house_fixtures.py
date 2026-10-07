@@ -86,6 +86,7 @@ def seam(monkeypatch):
     w.refusal = [None]
     w.posts: list = []
     w.state = {d: {"on": True, "bri": 34, "live": True} for d in w.host.devices}
+    w.info = {d: {"uptime": 100000} for d in w.host.devices}
     w.gates: dict = {}            # did -> asyncio.Event blocking its posts
     w.unreadable: set = set()
 
@@ -113,6 +114,11 @@ def seam(monkeypatch):
         if dev.id in w.unreadable:
             raise TimeoutError("no answer")
         return dict(w.state[dev.id])
+
+    async def get_info(dev):
+        if dev.id in w.unreadable:
+            raise TimeoutError("no answer")
+        return dict(w.info[dev.id])
 
     async def no_sleep(_s):
         await asyncio.sleep(0)
@@ -161,7 +167,7 @@ def seam(monkeypatch):
         return w.hyperion_live.get(did)
 
     house_fixtures.deps = house_fixtures.Deps(
-        post=post, get_state=get_state, host=lambda: w.host,
+        post=post, get_state=get_state, get_info=get_info, host=lambda: w.host,
         relocate=relocate, reinit=reinit, reachable=reachable,
         report_refresh=report_refresh, clock=w.clock, sleep=no_sleep,
         post_ip=post_ip, get_ip=get_ip, released=lambda: w.released[0],
@@ -285,13 +291,15 @@ def test_a_lower_ha_brightness_write_is_never_fought_back_up(seam):
     assert seam.hf.status()["corrections"] == []
 
 
-def test_a_brightness_overshoot_above_his_ceiling_is_capped_down_and_named(seam):
-    """A reboot landing on a brighter boot preset is the one case still
-    corrected — and it is corrected DOWN to his ceiling, never up to 255."""
+def test_a_reboot_overshoot_is_capped_down_and_named(seam):
+    """A reboot landing on a brighter boot preset — his WLED's own uptime
+    (json/info) resetting since the last check — is the one case still
+    corrected, and it is corrected DOWN to his ceiling, never up to 255."""
     seam.set_mode()
     _run(_settle(seam.hf))
     seam.posts.clear()
     seam.state["crystal"]["bri"] = 200         # a brighter boot preset
+    seam.info["crystal"]["uptime"] = 5         # it rebooted: uptime reset
     seam.clock.now += seam.hf.DRIFT_CHECK_S + 1
     _run(_settle(seam.hf))
     assert ("crystal", {"on": True, "bri": 34}) in seam.posts
@@ -300,6 +308,32 @@ def test_a_brightness_overshoot_above_his_ceiling_is_capped_down_and_named(seam)
     assert any(c["device"] == "crystal" and c["found"]["bri"] == 200 for c in corr)
     # the fixtures that had not drifted were read, not written
     assert {d for d, _ in seam.posts} == {"crystal"}
+    # his preserved ceiling is unchanged — the reboot was never adopted
+    assert seam.store.state().pre_take["crystal"]["bri"] == 34
+
+
+def test_a_deliberate_higher_ha_brightness_write_is_adopted_not_fought(seam):
+    """A brightness above his preserved ceiling with NO reboot evidence
+    behind it (his own uptime kept climbing normally) is his own deliberate
+    Home Assistant increase — adopted as the new ceiling, nothing written,
+    and never corrected back down on a later check either."""
+    seam.set_mode()
+    _run(_settle(seam.hf))
+    seam.posts.clear()
+    seam.state["crystal"]["bri"] = 120         # he raised it in Home Assistant
+    seam.info["crystal"]["uptime"] = 200000    # the fixture never rebooted
+    seam.clock.now += seam.hf.DRIFT_CHECK_S + 1
+    _run(_settle(seam.hf))
+    assert {d for d, _ in seam.posts} == set(), "an adoption writes nothing"
+    assert seam.state["crystal"]["bri"] == 120
+    assert seam.store.state().pre_take["crystal"]["bri"] == 120
+    assert seam.hf.status()["corrections"] == []
+
+    # a later check at the SAME (now higher) level is still never fought
+    seam.clock.now += seam.hf.DRIFT_CHECK_S + 1
+    _run(_settle(seam.hf))
+    assert {d for d, _ in seam.posts} == set()
+    assert seam.state["crystal"]["bri"] == 120
 
 
 def test_an_unreadable_fixture_is_left_alone_on_a_drift_check(seam):
