@@ -8209,6 +8209,30 @@ dummy-swap is the general recipe for proving anything about his real config
 offline** — it is the only change made, so ordering, segments and pixel
 counts are all his.
 
+## A colour set's background MODE lands in ONE place: `Effect.get_pixels()`
+
+The Admiral's 2026-10-07 report ("the fish effect seems to not obey
+overwrite from colors. it may be same with other effects") was right and
+was never in `fish.py`: `Twod.render()` pre-filled the Matrix canvas with
+the background in overwrite mode, so every effect that paints ONTO that
+canvas (Fish, Orbits, Fireworks, Black Hole, Dancer, Eye) composed
+body + background and the base layer then doubled it on every dark pixel
+(`fx/VENDOR.md` #60, the canvas now always starts black); Black Hole's
+horizon disc and Eye's lids ALSO painted `_bg_color` themselves and were
+the one region still doubled after that (#61 — they paint black now).
+**The rule: an effect never paints `self._bg_color` into its own canvas.**
+Black is "shows the background" once `get_pixels()` has run — in BOTH
+modes, exactly once. `radial.py`'s explosion-fade bg term is the one
+deliberate self-painter (#62: it switches `bg_color_use` off while it
+paints, so the base layer never doubles it; bg-blocked in the registry
+anyway) and `pulse.py` opts out of backgrounds entirely. Before
+reasoning about any "effect X ignores overwrite/additive" report, run
+`.venv/bin/python scripts/check_effect_background_mode.py [effect]` — it
+renders every registered effect in both modes on the real pipeline and
+reads the lit-pixel blue against each mode's own curve;
+`tests/test_effect_background_mode.py` holds the same contract over every
+effect, with red controls for both defect shapes.
+
 ## Black Hole (`fx/effects/blackhole.py`) — four things that bite
 
 Everything below is recorded in `fx/VENDOR.md` (#12, #14, #18, #19, #20,
