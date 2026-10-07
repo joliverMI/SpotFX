@@ -128,6 +128,88 @@ trigger condition without re-running `scripts/check_fish_burst_bounds.py`
 and `scripts/check_fish_camera.py` §1b's ordinary-swimming kinematics
 guard.
 
+## The WALL is the panel's real lit shape, anticipated — and
+   `wall_lookahead = 0` is the old pond edge, bit for bit
+
+His 2026-10-06 ask: "the fish don't interact with the 'wall' naturally.
+Have them 'anticipate' the wall and start turning away." Before, the
+pond-edge steer only woke ~2px before the turn became infeasible, aimed at
+the pond's CENTRE, and watched only the fish's MIDDLE — a 21px House Fish
+swam its head into the dark (~8% of its light on cells the crystal cannot
+show, noses up to ~4.7px past the edge) and then pivoted. The WALL block
+at the top of `fish.py` is the binding statement; the traps:
+
+- **The wall is READ, not assumed**: `_real_cell_mask` walks the virtual's
+  own segments (a pixel on a `gap-` dummy, by `fx.utils.is_gap_device`, is
+  dark) through Twod's own flip/mirror/rotate; `_silhouette` fills the
+  lattice holes and tip-row crenels (on the crystal: the hexagon, every real
+  cell inside). A virtual with no gap device is the whole rectangle. The
+  field is cached BY THE MASK, so a glide's per-frame `do_once` does not
+  rebuild it. `fx.headless.write_headless_config(real_mask=...)` builds his
+  crystal's real/gap shape for any rig — a plain rectangle rig will never
+  show a hex-corner bug.
+- **Two bounds, deliberately**: the POND (`roam_scale`, his tuned number)
+  still bounds the fish's MIDDLE; the SILHOUETTE bounds its NOSE and its
+  widest part. At `roam_scale > 1` the wall grows with the pond (his choice
+  to swim off the panel).
+- **Look-ahead = turn room + `wall_lookahead` SECONDS x its current speed
+  (never under `WALL_LOOK_BODY` = half its own length), CAPPED at the
+  pond's short radius** (`_wall_look`). The body floor is what keeps his
+  21px House Fish (~8px/s) out of the hex's narrow side wedges: without it
+  a fresh boot trapped one there (nose 4.4px past the edge); 0.35 bodies
+  still trapped one at low strength, 0.5 never did. Without the cap a loud
+  passage (~3x cruise) grew the look-ahead taller than the pond, no heading
+  was ever clear, and the whole shoal collapsed into a spinning ball with a
+  wake as bright as the fish. Body-lengths units were tried first and
+  rejected: they make big slow fish timid and small fast ones late. The
+  shipped 0.35 s is measured, not picked: at 0.5 s the music scene's small
+  pond left one loop that cleared it and the shoal convoyed onto it
+  (spread 7.7px vs 12.4px before); 0.25-0.35 s keeps the old spread with a
+  quarter of the bumps. Under LOUD music the shoal still bunches more than
+  before — but before, those fish flew up to 28px off the panel.
+- **The steer is a fan search, not a push**: keep heading while a whole
+  look-ahead is free; else turn to the NEAREST heading with
+  `WALL_CLEAR_X` (1.25) look-aheads of free water — 1.0 let the music
+  scene ride the pond rim, 1.5 trapped a House Fish in a hex corner — at
+  the curvature that completes the turn in the room left. Two rules that
+  each fixed a measured clip: a heading only counts if every heading the
+  turn SWEEPS THROUGH keeps `WALL_SWEEP` of the present free water (a fish
+  by the top edge chose "up and over" over "left"), and a lazy
+  `wall_turn_strength` eases back to the plain turn past `WALL_LATE`
+  urgency. The applied turn is eased (`WALL_RISE_S` shrinking to 0 as the
+  wall nears, `WALL_FALL_S` 0.15s) — the 20-degree fan otherwise ends a
+  turn in one frame.
+- **Scope: ordinary swimming only.** The charge's school keeps the old
+  pond-edge steer (authored choreography — the same reason avoidance and
+  the thrust pulse stay out of it); the rush, ejecta and dispersing fish
+  were never bounded. Boot placement re-draws a fish until it is born with
+  a look-ahead of free water (wall on only — the RNG stream at
+  `wall_lookahead = 0` is untouched).
+- **Proofs that hold an OTHER mechanism must hold the wall at its hatch.**
+  `check_fish_camera.py` §1b / `test_fish_camera.py` (thrust dial),
+  `test_fish.py`'s clump test (school spacing from its tuned start state)
+  and its swim-burst brake test (built against the old edge), and
+  `check_fish_disperse.py` §2b (lone-fish hue sampling) all pass
+  `wall_lookahead = 0`. A new proof of something else should too.
+- **Honest limits**: a turn radius or a body nearly as tall as the panel
+  leaves no turn that fits — those configs still touch the edge (no worse
+  than before). Cost ~0.45 ms/frame at his scene sizes, ~1 ms at 16 fish
+  (`check_fish_wall.py` §5).
+
+## The SOLO BURST — one random fish dashes, now and then; default OFF
+
+His ask: "In house fish scene, give individual ones an occasional burst of
+speed." Not the Swim Burst flare (whole shoal, on a trigger). `solo_burst_
+rate` (per MINUTE across the shoal, a Poisson clock), `solo_burst_speed`
+(x its ordinary speed), `solo_burst_time` (hold, s); attack/hold/ease
+envelope `p_sb`/`p_sb_t`, stroke rate up with it. **The schema default
+rate is 0** — only House Fish turns it on, via its own params
+(`scripts/add_house_fish_solo_burst.py` owns the values; the house seeder
+imports them). Only an ordinary swimmer with the wall at most faintly in
+its look-ahead is picked; a due burst waits for one; none during a
+charge/lull/drop or an outgoing crossfade; a burst gives up its hold once
+the wall presses hard.
+
 ## Everything else worth knowing before a change
 
 - **Body follows the RECORDED PATH, not a bend model**: the front half of
@@ -159,21 +241,27 @@ guard.
 
 ## Sonic reach
 
-The "Fish Swim Burst" flare kind IS Sonic-editable via `set_flare_kind`
-(`trigger_offset_ms`, `hold_ms`, `params`, `gain` are all omit-means-keep)
-— this is the one fish control Sonic can reach directly, because it's a
-FlareKind, not a raw effect param. **`set_flare_kind` looks kinds up BY
-NAME: pass `name="Fish Swim Burst"`, never `name="swim_burst"`** — the
-latter is the effect param, and naming it would CREATE a duplicate kind
-instead of editing the existing one. Every other param here follows the
-usual rule: no direct edit, only through an attached FlareKind.
+The "Fish Swim Burst" flare kind is Sonic-editable via `set_flare_kind`
+(`trigger_offset_ms`, `hold_ms`, `params`, `gain` are all omit-means-keep).
+**`set_flare_kind` looks kinds up BY NAME: pass `name="Fish Swim Burst"`,
+never `name="swim_burst"`** — the latter is the effect param, and naming it
+would CREATE a duplicate kind instead of editing the existing one.
+
+Every REGISTERED fish param (`config/effect_params.json`) — the wall's
+`wall_lookahead`/`wall_turn_strength` and the solo burst's three included —
+is reachable per scene entry through `get_scene_entry_params` /
+`set_scene_entry_param` (e.g. scene "House Fish", target "Matrix"),
+validated against the registry's own range. A new fish param is only
+Sonic-reachable once it is registered there.
 
 ## Executable proofs
 
 `scripts/check_fish.py`, `check_fish_avoidance.py`, `check_fish_lunge.py`,
 `check_fish_camera.py`, `check_fish_wake.py`, `check_fish_charge_spread.py`,
 `check_fish_burst_bounds.py`, `check_fish_disperse.py`,
-`tests/test_fish.py`, `test_fish_camera.py`, `test_fish_disperse.py`.
+`check_fish_wall.py` (`--gifs DIR` writes before/after GIFs on his real
+crystal shape), `tests/test_fish.py`, `test_fish_camera.py`,
+`test_fish_disperse.py`, `test_fish_wall.py`.
 History: AGENTS.md's "Fish (fx/effects/fish.py) — Orbits' twin" section —
 read that in full before a non-trivial change; it documents ~8 more
 PR-scoped fixes (lunge envelope, charge spread, camera window centring,

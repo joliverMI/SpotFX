@@ -278,7 +278,13 @@ def section_one(ref=None):
     if master is None:
         return
     off = dict(HIS, particle_count=6, camera_follow=0.0, ripple_amount=0.0)
-    neutral = dict(off, min_drift_speed=1.0, stroke_speed_cap=0.0)
+    # the wall (fm/fish-wall-avoid) is a SEPARATE change to ordinary
+    # swimming with its own escape hatch, `wall_lookahead = 0` (proven bit
+    # for bit against its own pin in scripts/check_fish_wall.py §1). It is
+    # held at that hatch on the CURRENT side of both comparisons below, so
+    # this section keeps proving the thrust dial and only the thrust dial.
+    wall_off = {"wall_lookahead": 0.0}
+    neutral = dict(off, min_drift_speed=1.0, stroke_speed_cap=0.0, **wall_off)
 
     def positions_equal(a, b):
         if len(a) != len(b):
@@ -309,7 +315,8 @@ def section_one(ref=None):
     # ... and at the shipped DEFAULT dial the kinematics must NOT be
     # identical, or the feature this PR built would not exist
     a = asyncio.run(positions_of("m-default", off, 5, master, SWIM_ONLY))
-    b = asyncio.run(positions_of("z-default", off, 5, "fish", SWIM_ONLY))
+    b = asyncio.run(positions_of("z-default", dict(off, **wall_off), 5,
+                                 "fish", SWIM_ONLY))
     print("   control: at the shipped default dial, the kinematics differ "
           f"from the merge-base -> {not positions_equal(a, b)}")
     if positions_equal(a, b):
