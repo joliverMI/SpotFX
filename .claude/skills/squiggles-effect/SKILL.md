@@ -81,8 +81,14 @@ charge the next lull's progress sits at 1.0 for its whole length (the
 1 ms arm tween is retargeted before it renders), which also made the
 orphan watchdog release a long lull 12 s in; `lull_dark.watchdog_progress`
 fixes that for the opted-in effects. A write WITHOUT the two keys falls
-back to `CRT_SPLIT` (0.55) and pauses spawning for the whole lull. Told, the CRT squash completes at the dark point, the line pinches to its dot by the end of SpotFX's ramp (`after`), and ordinary chains KEEP SPAWNING until the dark point (`_lull_still_lit`, Black Hole's model) — without that, a long lull's walled-in chains collide themselves out within ~8 s and the squash has nothing left to squash, byte-identical to before. Read lull_dark.py's docstring
-before changing anything about when this lull goes dark.
+back to `CRT_SPLIT` (0.55) and pauses spawning for the whole lull. Told,
+the CRT squash completes at the dark point, the line pinches to its dot
+by the end of SpotFX's ramp (`after`), and ordinary chains KEEP SPAWNING
+until the dark point (`_lull_still_lit`, Black Hole's model) — without
+that, a long lull's walled-in chains collide themselves out within ~8 s
+and the squash has nothing left to squash, byte-identical to before.
+Read lull_dark.py's docstring before changing anything about when this
+lull goes dark.
 
 ## Sonic reach
 
@@ -91,7 +97,8 @@ No direct param edit — reachable only through an already-attached
 
 ## Executable proofs
 
-`tests/test_lull_dark.py` (the dark-point rule and this effect's lull on the real pipeline). 
+`tests/test_lull_dark.py` (the dark-point rule and this effect's lull on
+the real pipeline).
 `scripts/check_squiggles_drop_timing.py`,
 `tests/test_squiggles_drop_timing.py`,
 `tests/test_squiggles_colorset_widen.py`. The accept-list migration,

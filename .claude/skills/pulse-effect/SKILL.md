@@ -92,8 +92,12 @@ charge the next lull's progress sits at 1.0 for its whole length (the
 1 ms arm tween is retargeted before it renders), which also made the
 orphan watchdog release a long lull 12 s in; `lull_dark.watchdog_progress`
 fixes that for the opted-in effects. A write WITHOUT the two keys falls
-back to the end of the ramp (`LULL_LEGACY_DARK_AT`, 1.0). Told, Pulse fades to pitch black at the SAME moment as the crystal (`keep = 1 - smooth(approach)`) — earlier than before on a short lull (half of it, matching the crystal), so a 20 s lull is pitch black for exactly its last 3 s, byte-identical to before. Read lull_dark.py's docstring
-before changing anything about when this lull goes dark.
+back to the end of the ramp (`LULL_LEGACY_DARK_AT`, 1.0), byte-identical
+to Pulse's own pre-rule fade. Told, Pulse now reaches pitch black at the
+SAME dark point as the crystal (`keep = 1 - smooth(approach)`) — earlier
+than before on a short lull (half of it, matching the crystal), and a
+20 s lull is pitch black for exactly its last 3 s. Read lull_dark.py's
+docstring before changing anything about when this lull goes dark.
 
 ## Sonic reach
 
@@ -112,7 +116,8 @@ and only by copying a whole entry from another scene.
 
 ## Proofs
 
-`tests/test_lull_dark.py` (the dark-point rule and this effect's lull on the real pipeline). 
+`tests/test_lull_dark.py` (the dark-point rule and this effect's lull on
+the real pipeline).
 `tests/test_pulse_effect.py` (phase 1), `tests/test_pulse_engine_wiring.py`
 (phase 2), `tests/test_pulse_rainbow_flares.py` (phase 3: walk, flares,
 gating, real pipeline + device preview, his songs),

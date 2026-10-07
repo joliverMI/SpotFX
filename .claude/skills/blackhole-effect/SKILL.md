@@ -110,8 +110,10 @@ charge the next lull's progress sits at 1.0 for its whole length (the
 1 ms arm tween is retargeted before it renders), which also made the
 orphan watchdog release a long lull 12 s in; `lull_dark.watchdog_progress`
 fixes that for the opted-in effects. A write WITHOUT the two keys falls
-back to the old `LULL_FILL_PROGRESS` (0.5) — the horizon's fill, the halo cut-off, the forced-formation stop and the ambient-spawn pause all read `_lull_timing()`, byte-identical to before. Read lull_dark.py's docstring
-before changing anything about when this lull goes dark.
+back to the old `LULL_FILL_PROGRESS` (0.5) — the horizon's fill, the
+halo cut-off, the forced-formation stop and the ambient-spawn pause all
+read `_lull_timing()`, byte-identical to before. Read lull_dark.py's
+docstring before changing anything about when this lull goes dark.
 
 ## Sonic reach
 
@@ -124,7 +126,8 @@ Initial Set entry.
 
 ## Executable proofs
 
-`tests/test_lull_dark.py` (the dark-point rule and this effect's lull on the real pipeline). 
+`tests/test_lull_dark.py` (the dark-point rule and this effect's lull on
+the real pipeline).
 `scripts/check_blackhole_charge_lull.py`, `check_blackhole_charge_target.py`,
 `check_blackhole_explosion_and_gap.py`, `check_blackhole_explosion_speed.py`,
 `check_blackhole_hex_spawn.py`, `check_blackhole_reverse_fallback.py` +
