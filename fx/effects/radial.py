@@ -472,6 +472,7 @@ class Radial2d(Twod):
 
     def draw(self):
         self._ensure_source()
+        self._refresh_bg_render_state()
 
         if self._handoff_pending:
             self._handoff_pending = False

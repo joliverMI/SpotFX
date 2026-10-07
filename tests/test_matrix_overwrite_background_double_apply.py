@@ -69,6 +69,21 @@ scoped to just the frames where `draw()` has already supplied one).
 `test_radial_warp_background_*` below proves it on the real pipeline,
 at a partial `bg_alpha` (not just the pre-fix formula's one flat-double
 case the disc/lid residual above hits).
+
+The `bg_color_use = False` override above is only correct if something
+also puts it back once the warp ends — `self.bg_color_use` is normally
+refreshed every frame by the base class's own `_advance_bg_fade()`, but
+that call is a complete no-op once the background colour has settled
+(the common case: no fade in progress), so a radial instance that had
+EVER run a warp frame stayed permanently background-less afterward, on
+every later ordinary frame, until an unrelated config write happened to
+touch `background_color`/`background_brightness` again. Fixed by having
+`draw()` call `self._refresh_bg_render_state()` itself, unconditionally,
+every frame, before the warp logic runs — the warp branch's own override
+still applies on top of that for the one frame it's active.
+`test_radial_background_recovers_after_a_warp_ends` below renders a warp
+frame followed by several ordinary ones and proves both `bg_color_use`
+and the rendered background return to normal.
 """
 from __future__ import annotations
 
@@ -418,3 +433,58 @@ def test_radial_ordinary_background_unaffected_by_the_fix(tmp_path):
         assert effect.bg_color_use is True
         blue = frame[:, 2]
         assert int(round(float(blue.mean()))) == 51
+
+
+def test_radial_background_recovers_after_a_warp_ends(tmp_path):
+    """`self.bg_color_use = False` (set by the warp branch for the one
+    frame it's active) is only correct if something puts it back once the
+    warp ends. `_advance_bg_fade()` — the base class's own per-frame
+    refresh — is a no-op once the background colour has settled (the
+    common case, no fade in progress), so without draw() restoring it
+    itself an instance that ever ran a single warp frame would stay
+    background-less on every later ORDINARY frame. This renders one
+    mid-lull warp frame, then switches the SAME effect instance back to
+    phase="none" for several more frames, and proves both bg_color_use
+    and the rendered background recover — the sequence the other
+    "ordinary" test above (a fresh, never-warped instance) does not
+    exercise."""
+    async def main():
+        sub = "radial-recovers"
+        source_id = f"{sub}-source"
+        host = await headless.start_headless_host(
+            str(tmp_path / sub), device_id=sub
+        )
+        virtual = host.virtuals.get(sub)
+        host.virtuals._virtuals[source_id] = _FakeRadialSource(
+            rgb=(0.0, 0.0, 0.0)
+        )
+        try:
+            with headless.fake_clock() as clock:
+                effect = headless.attach_effect(
+                    host, virtual, "radial",
+                    dict(OVERWRITE_BG, reverse=False,
+                         source_virtual=source_id),
+                )
+                effect._phase = "lull"
+                effect.phase_progress = 0.5
+                headless.render_frames(virtual, 1, clock=clock, dt=1 / 60)
+                assert effect.bg_color_use is False, (
+                    "warp frame did not set bg_color_use False as expected"
+                )
+
+                effect._phase = "none"
+                effect.phase_progress = 0.0
+                frames = headless.render_frames(virtual, 5, clock=clock,
+                                                dt=1 / 60)
+        finally:
+            host.virtuals._virtuals.pop(source_id, None)
+            await host.shutdown()
+        return effect, frames[-1]
+
+    effect, frame = _run(main())
+    assert effect.bg_color_use is True, (
+        "bg_color_use stayed False after the warp ended — the background "
+        "is permanently suppressed on every later ordinary frame"
+    )
+    blue = frame[:, 2]
+    assert int(round(float(blue.mean()))) == 51
