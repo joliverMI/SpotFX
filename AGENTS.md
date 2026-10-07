@@ -8698,12 +8698,15 @@ Ten things:
 ## Radial (STAR) rotation is audio-lows-driven — a healthy `spin` can read as parked
 
 `fx/effects/radial.py`'s ONLY motion source is the audio callback:
-`spin_total += lows_impulse * spin_cfg²/10` per 60 Hz callback, i.e.
-**rev/s = 6 × lows_impulse × spin²** — `spin` is a gain on the LIVE
-captured lows power (snapcast.monitor melbank), NOT a motor speed, and NOT
-the bridge's "intensity" (that's stored librosa file analysis; the two
-diverge freely). During bass-light passages the lows impulse idles ~0.01,
-so a healthy spin 0.55 turns ~6°/s — reads as frozen while rendering fine.
+`spin_total += lows_impulse * spin_cfg²/10 * ROTATION_SPEED_SCALE` per
+60 Hz callback, i.e. **rev/s = 4.8 × lows_impulse × spin²**
+(`ROTATION_SPEED_SCALE=0.8`, the Admiral's 2026-10-06 20% cut — see "THE
+MAXIMUM ROTATION SPEED WAS CUT 20%" below for the full before/after across
+every rotation source) — `spin` is a gain on the LIVE captured lows power
+(snapcast.monitor melbank), NOT a motor speed, and NOT the bridge's
+"intensity" (that's stored librosa file analysis; the two diverge freely).
+During bass-light passages the lows impulse idles ~0.01, so a healthy spin
+0.55 turns ~5°/s — reads as frozen while rendering fine.
 Diagnosed live 2026-08-21 (his "star is not moving at any speed" — his own
 binding edit and #168's flip port both ruled out with evidence):
 `docs/spectra-star-motion-audio-idle.md`. Executable proof, real pipeline,
@@ -8732,6 +8735,36 @@ Registry-declared param help (`"help_topic"` on an entry in
 deep-link a param to a help topic; note such a topic id lives in the JSON
 registry, so the AGENTS.md orphan-audit grep over `.tsx`/`.ts` will not see
 it.
+
+**THE MAXIMUM ROTATION SPEED WAS CUT 20% (2026-10-06, Admiral order
+verbatim: "reduce the maximum speed of rotation of Star by 20 percent").**
+`fx/effects/radial.py`'s `ROTATION_SPEED_SCALE = 0.8` is the ONE constant
+applied to every source above that contributes to rotation speed, so the
+*ceiling* drops uniformly rather than just a default: the reactive
+ceiling (spin at its own unchanged max 1.0, full audio impulse) was
+6 rev/s, now 4.8 (`self.spin`'s own `/10.0` divisor gained the scale, so
+`spin`'s input range stays `[-1, 1]` — a binding already set to `spin`'s
+"max" reaches the new, lower ceiling automatically, nothing about how a
+binding reaches max changed); `CHARGE_SPIN_REV_S` (charge-phase spin-up)
+was 0.9 rev/s, now 0.72; `base_rotation`'s own schema/registry ceiling was
+2.0 rev/s, now 1.6 (`config/effect_params.json`'s `base_rotation.max`
+mirrors the schema literal — keep both in sync by hand, there is no
+shared source across the JSON/Python boundary). A stored scene or flare
+kind authored above the new `base_rotation` ceiling is CLAMPED ON LOAD
+(`spectra/models/scene.py`'s `_clamp_radial_base_rotation`, called from
+`SceneV2`'s `_flare_bands_shim` before-validator) rather than silently
+dropped — `fx`'s own `_apply_config(validate=True)` drops the WHOLE write
+on a schema mismatch, never just the one offending field (see the
+`spin_sign` entry above), so an un-clamped out-of-range value would have
+reverted the entry's whole config on its next fire, not just capped the
+speed. The clamp covers plain scalars, `ValueBinding` map-mode
+out_min/out_max/fallback, `ValueBinding` steps values, and a flare kind's
+absolute/random `ParamTarget` on this param name; an `offset`-mode
+`ParamTarget` is left alone (a signed delta off a runtime-carried
+baseline, not evaluable at load time). Unverified against his live room
+(standing order 35, no live test without his word) — specs:
+`tests/test_radial_base_rotation.py`'s rotation-speed-cap cases,
+`scripts/check_radial_base_rotation.py`.
 
 ## `crystal-mapper` (the hex Matrix virtual) — read the skill before touching it
 

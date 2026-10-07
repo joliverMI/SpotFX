@@ -1601,3 +1601,25 @@ against that commit.
     still-stale in-memory name) — the script's own module docstring has
     the full reasoning and the file-only `--apply` form for when the
     service is genuinely stopped.
+
+54. `effects/radial.py` (SpotFX-authored mechanism, #22): THE ROTATION
+    SPEED CEILING WAS CUT 20% (2026-10-06, Admiral order verbatim: "reduce
+    the maximum speed of rotation of Star by 20 percent"). A single new
+    constant, `ROTATION_SPEED_SCALE = 0.8`, is applied to every one of the
+    three sources that can turn the pattern: `self.spin`'s own squared
+    audio gain (so the reactive ceiling — spin config at its own unchanged
+    max 1.0, full audio impulse — drops from 6 rev/s to 4.8), the
+    `CHARGE_SPIN_REV_S` charge-phase spin-up (0.9 → 0.72 rev/s at full
+    charge), and the CONFIG_SCHEMA `Range` on #22's own `base_rotation`
+    param (max 2.0 → 1.6 rev/s — this schema `Range` is the source of
+    truth; `config/effect_params.json`'s `base_rotation.max` mirrors it by
+    hand, there being no shared source across that JSON/Python boundary).
+    The scale is applied to each source's OUTPUT, never to `spin`'s own
+    `[-1, 1]` input range, so a binding already set to spin's own "max"
+    reaches the new, lower ceiling automatically with no change to how it
+    gets there. Not in the fork source at `/home/javi/ledfx-src`
+    (SpotFX-authored tuning on top of #22's own SpotFX-authored
+    mechanism). Evidence: `scripts/check_radial_base_rotation.py`,
+    `scripts/check_star_spin_motion.py`, `tests/test_radial_base_rotation.py`.
+    Unverified against his live room (standing order 35, no live test
+    without his word).

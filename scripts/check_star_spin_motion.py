@@ -9,16 +9,19 @@ and zero live storage.
 
 The mechanism (fx/effects/radial.py):
 
-    audio_data_updated:  spin_total += impulse * spin_cfg**2 / 10
+    audio_data_updated:  spin_total += impulse * spin_cfg**2 / 10 * ROTATION_SPEED_SCALE
     where impulse = lows_power() — live captured audio power in the
     beat+bass mel bins, NOT the bridge's librosa "intensity" (that number
     is precomputed from the song FILE and stays high even when the live
     capture's lows are quiet).
 
-So at 60 audio callbacks/s:  rev/s = 6 * impulse * spin_cfg**2.
-At his spin 0.55 that is 1.815 * impulse — and the lows impulse of a real
-track idles near ~0.01 through bass-light passages, i.e. ~6 degrees/second:
-parked, to the eye, while the effect keeps rendering every frame.
+So at 60 audio callbacks/s:  rev/s = 6 * ROTATION_SPEED_SCALE * impulse * spin_cfg**2.
+ROTATION_SPEED_SCALE is 0.8 (Admiral order, 2026-10-06, "reduce the maximum
+speed of rotation of Star by 20 percent" — see AGENTS.md's Radial entry),
+so this is now rev/s = 4.8 * impulse * spin_cfg**2. At his spin 0.55 that is
+1.452 * impulse — and the lows impulse of a real track idles near ~0.01
+through bass-light passages, i.e. ~5 degrees/second: parked, to the eye,
+while the effect keeps rendering every frame.
 
 Sections:
   1. Silence           -> spin_total advance is EXACTLY zero at spin=0.55.
@@ -148,12 +151,12 @@ async def main() -> None:
             adv = _drive(melbank, effect, _bass_pulses(seconds))
             assert adv == 0.0, f"spin=0 advanced by {adv}"
             print("4. bass pulses, spin=0.0: advance exactly zero — "
-                  "rev/s = 6 × lows_impulse × spin², both terms required.")
+                  "rev/s = 4.8 × lows_impulse × spin², both terms required.")
         finally:
             fx_audio.AudioAnalysisSource = prev_cls
             await host.shutdown()
 
-    print("\nOK — radial rotation = 6 × lows_impulse × spin² rev/s; a healthy")
+    print("\nOK — radial rotation = 4.8 × lows_impulse × spin² rev/s; a healthy")
     print("spin with idle lows reads as 'not moving at any speed' by design.")
 
 

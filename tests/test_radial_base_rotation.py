@@ -158,7 +158,177 @@ def test_registry_declares_the_param_and_says_it_scales_unlike_speed():
     assert meta["default"] == 0.0
     assert meta["type"] == "numeric"
     assert meta["help_topic"] == "radial-base-rotation"
+    assert meta["max"] == 1.6
     note = meta["note"]
     assert "REVOLUTIONS PER SECOND" in note
     assert "LINEAR" in note
     assert "FLOOR, NOT A SUM" in note
+
+
+# ── 2026-10-06 rotation-speed-cap cut (Admiral order, "reduce the maximum
+#    speed of rotation of Star by 20 percent") ──────────────────────────
+
+
+def test_base_rotation_ceiling_is_1_6_rev_s_and_the_old_2_0_ceiling_is_rejected():
+    from fx.effects.radial import Radial2d
+    import voluptuous as vol
+
+    assert Radial2d.CONFIG_SCHEMA({"base_rotation": 1.6})["base_rotation"] == 1.6
+    try:
+        Radial2d.CONFIG_SCHEMA({"base_rotation": 2.0})
+    except vol.Invalid:
+        pass
+    else:
+        raise AssertionError("base_rotation=2.0 (the old ceiling) must now "
+                              "be rejected by the schema")
+
+
+def test_reactive_spin_ceiling_dropped_20_percent():
+    # at spin's own max (1.0) and full audio impulse, the reactive rev/s
+    # ceiling must be exactly 80% of its pre-change value (6 rev/s * 60Hz
+    # worth of audio_data_updated calls, independent of frame rendering).
+    # spin_total wraps mod 1.0, so unwrap PER CALL and sum — a single
+    # before/after over 60 calls can't unwrap a multi-revolution delta.
+    def body(host, virtual):
+        with headless.fake_clock() as clock:
+            eff = _attach(host, virtual, spin=1.0, base_rotation=0.0)
+            data = _Impulse(1.0)
+            total = 0.0
+            for _ in range(60):
+                before = eff.spin_total
+                eff.audio_data_updated(data)
+                total += _unwrapped(eff, before)
+            eff.deactivate()
+        return total
+
+    advance = asyncio.run(_with_host(body))
+    # pre-change this would be 6.0 rev in 60 callbacks (1 "second" of
+    # audio); post-change it must be 6.0 * ROTATION_SPEED_SCALE == 4.8
+    assert abs(advance - 4.8) < 1e-6
+
+
+def test_charge_spin_up_ceiling_dropped_20_percent():
+    from fx.effects import radial as r
+
+    assert abs(r.CHARGE_SPIN_REV_S - 0.9 * r.ROTATION_SPEED_SCALE) < 1e-12
+    assert abs(r.CHARGE_SPIN_REV_S - 0.72) < 1e-6
+
+
+def test_a_scene_authored_above_the_old_2_0_ceiling_is_clamped_on_load():
+    from spectra.models.scene import SceneV2, RADIAL_BASE_ROTATION_MAX
+
+    assert RADIAL_BASE_ROTATION_MAX == 1.6
+    scene = SceneV2(
+        name="Old STAR backup",
+        devices=[{
+            "target_kind": "virtual",
+            "target": "crystal-mapper",
+            "effect_type": "radial",
+            "params": {"base_rotation": 2.0, "spin": 0.55},
+        }],
+    )
+    dev = scene.devices[0]
+    assert dev.params["base_rotation"] == 1.6
+    # an in-range value must survive untouched
+    assert dev.params["spin"] == 0.55
+
+
+def test_a_scene_binding_authored_above_the_old_ceiling_is_clamped_on_load():
+    from spectra.models.scene import SceneV2
+
+    scene = SceneV2(
+        name="Old STAR with a binding",
+        devices=[{
+            "target_kind": "virtual",
+            "target": "crystal-mapper",
+            "effect_type": "radial",
+            "params": {
+                "base_rotation": {
+                    "bind": "signal",
+                    "signal": "trigger_intensity",
+                    "mode": "map",
+                    "out_min": 0.0,
+                    "out_max": 2.0,
+                    "fallback": 2.0,
+                },
+            },
+        }],
+    )
+    binding = scene.devices[0].params["base_rotation"]
+    assert binding.out_max == 1.6
+    assert binding.fallback == 1.6
+    assert binding.out_min == 0.0
+
+
+def test_an_effect_step_variant_above_the_old_ceiling_is_clamped_on_load():
+    from spectra.models.scene import SceneV2
+
+    scene = SceneV2(
+        name="Old STAR with a step",
+        devices=[{
+            "target_kind": "virtual",
+            "target": "crystal-mapper",
+            "effect_type": "noise",
+            "params": {},
+            "effect_steps": [{
+                "threshold": 0.7,
+                "effect_type": "radial",
+                "params": {"base_rotation": 2.0},
+            }],
+        }],
+    )
+    step = scene.devices[0].effect_steps[0]
+    assert step.params["base_rotation"] == 1.6
+
+
+def test_a_flare_kind_absolute_target_above_the_old_ceiling_is_clamped_on_load():
+    from spectra.models.scene import SceneV2
+
+    scene = SceneV2(
+        name="STAR with an old reverse-style patch",
+        flare_kinds=[{
+            "name": "Old patch",
+            "type": "permanent",
+            "params": {"base_rotation": {"mode": "absolute", "value": 2.0}},
+        }],
+    )
+    target = scene.flare_kinds[0].params["base_rotation"]
+    assert target.value == 1.6
+
+
+def test_a_flare_kind_bare_number_target_above_the_old_ceiling_is_clamped_on_load():
+    from spectra.models.scene import SceneV2
+
+    scene = SceneV2(
+        name="STAR with a bare-number patch",
+        flare_kinds=[{
+            "name": "Bare patch",
+            "type": "permanent",
+            "params": {"base_rotation": 2.0},
+        }],
+    )
+    target = scene.flare_kinds[0].params["base_rotation"]
+    assert target.mode == "absolute"
+    assert target.value == 1.6
+
+
+def test_a_legacy_param_patch_targeting_base_rotation_is_clamped_on_load():
+    from spectra.models.scene import SceneV2
+
+    scene = SceneV2(
+        name="STAR with a legacy param_patch",
+        responses={
+            "flare": {
+                "bands": [{
+                    "intensity_min": 0.7,
+                    "intensity_max": 1.0,
+                    "param_patch": {"base_rotation": 2.0},
+                }],
+            },
+        },
+    )
+    kind = next(k for k in scene.flare_kinds
+                if "base_rotation" in k.params)
+    target = kind.params["base_rotation"]
+    assert target.mode == "absolute"
+    assert target.value == 1.6
