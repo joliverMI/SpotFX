@@ -197,12 +197,11 @@ def _held_hex(device_id: str, device_type: Optional[str], device_cfg: dict,
     against this device's own AREA NAME (the original bug) can never
     match. There is no pixel-level membership to draw the held colour on
     just the genuinely-held bulbs, so a MIXED fixture (some held, some
-    excluded) has to pick one reading for the whole thing: this picks
-    HELD, the same trade every
-    whole-area look already makes for the colour of a bulb he dimmed by
-    hand — a fixture falls back to the live render only when EVERY one of
-    its own bulbs is confirmed excluded (an area wholly left to Home
-    Assistant), never merely because some of them are.
+    excluded) has to pick one reading for the whole thing: this picks HELD,
+    the same trade every whole-area look already makes for the colour of a
+    bulb he dimmed by hand — a fixture falls back to the live render only
+    when EVERY one of its own bulbs is confirmed excluded (an area wholly
+    left to Home Assistant), never merely because some of them are.
     `ambient.cached_light_names()` is the one thing that knows which
     bulbs actually belong to this device — a pure cache read, warmed by
     the SAME hold/verify that reported this exclusion in the first place,
