@@ -60,6 +60,17 @@ Deep links: `<HelpLink topic="<section-or-entry-id>" />` renders the small
 circled-"?" used across the UI. Don't rename an id in `helpContent.ts`
 without updating its `topic=` callers (grep `topic="`).
 
+**A single-quoted body string containing an apostrophe (`it's`, `panel's`,
+`fish's`) must escape it (`\'`) or the SPECTRA web app fails to build**
+(`spectra/web/src/help/helpContent.ts` specifically — found 2026-10-07, PR
+#368, when three such strings shipped unescaped and silently broke every
+subsequent deploy's `npm run build`). `tests/test_spectra_web_type_checks_cleanly`
+in `tests/test_spectra_web_typecheck.py` runs `tsc --noEmit` over
+`spectra/web` as an ordinary pytest test (skipped only when
+`spectra/web/node_modules` isn't installed) specifically to catch this and
+any other TypeScript syntax defect before merge — there was no such guard
+before.
+
 **A topic isn't done when it's written — it's done when something in the UI
 links to it.** Found 2026-08-21 (`fm/help-context-sensitive-question-mark`):
 65 of SPECTRA's 117 help topics had real, written content and were never
