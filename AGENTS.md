@@ -9143,7 +9143,15 @@ track.spotify_uri` explicitly; any other caller of `load_profile` (e.g.
 `services/guest_source.py`) that has no separate track identity omits it
 and falls back to `profile.spotify_uri`, which already equals the track
 for it. `apply_save` now logs every dropped snap instead of returning
-silently.
+silently. **The run() loop gates on the
+same identity** (`_loaded_track_uri()`), and it is the ONLY writer of
+`state.timing` — the block SPECTRA's bridge reads its `shape_offset_ms` off.
+Gating it on `profile.spotify_uri` (fixed 2026-10-06) skipped every tick for
+those songs, so the PREVIOUS song's lock stayed in the broadcast and SPECTRA
+fired the whole song off it (Caro on Greenlights' −1977 ms vs its own
+−525 ms: ~1.45 s late, playhead correct). `state.timing` now carries `uri`
+and `spectra/services/bridge.py::shape_offset_ms` refuses a block naming a
+different track. Spec: `tests/test_stale_timing_lateness.py`.
 
 **A hard lock can be a correct MEASUREMENT of a wrong SHAPE** — the same
 report's root finding. Two captures of the same recording can land in two

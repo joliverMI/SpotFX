@@ -420,6 +420,14 @@ class TriggerEngine:
             if cfg is not None and patch:
                 cfg.update(patch)
 
+    def _loaded_track_uri(self) -> str:
+        """The track this engine is loaded for — load_profile's track_uri,
+        falling back to the profile's own uri for a caller with no separate
+        track identity. See load_profile's docstring."""
+        if self._last_uri:
+            return self._last_uri
+        return self._profile.spotify_uri if self._profile is not None else ""
+
     def load_profile(self, profile: SongProfile, track_uri: Optional[str] = None) -> None:
         """track_uri: the Spotify URI of the track actually playing
         (state.current_track.spotify_uri), when the caller has one.
@@ -6791,16 +6799,27 @@ class TriggerEngine:
                 continue
             if not state.on_target_device:
                 continue
-            if self._profile is None or self._profile.spotify_uri != state.current_track.spotify_uri:
+            # The engine's identity is the TRACK it was loaded for
+            # (load_profile's track_uri -> _last_uri), never
+            # profile.spotify_uri: a title/artist-fallback profile carries
+            # a stale `ledfx:artist:title` pseudo-URI that never equals the
+            # playing `spotify:track:...`. Gating on the profile's own uri
+            # skipped this whole loop for those songs — including the
+            # state.timing refresh below — so SPECTRA's bridge kept firing
+            # against the PREVIOUS song's shape_offset_ms all play (2026-10-06:
+            # Caro ran on Greenlights' -1977ms instead of its own -525ms,
+            # every trigger ~1.45s late).
+            loaded_uri = self._loaded_track_uri()
+            if self._profile is None or loaded_uri != state.current_track.spotify_uri:
                 continue
 
             now_ms = state.current_track.interpolated_progress_ms()
-            if _first_tick_logged_uri != self._profile.spotify_uri:
-                _first_tick_logged_uri = self._profile.spotify_uri
+            if _first_tick_logged_uri != loaded_uri:
+                _first_tick_logged_uri = loaded_uri
                 logger.info(
                     "first tick for %s: now_ms=%d, fired=%d preselected, "
                     "effective_offset=%+dms (buffer=%d, rtt=%d, shape=%+d)",
-                    self._profile.spotify_uri, now_ms, len(self._fired),
+                    loaded_uri, now_ms, len(self._fired),
                     self._effective_offset_ms(),
                     settings.ledfx_trigger_buffer_ms,
                     int(state.ledfx_rtt_ms),
@@ -6870,7 +6889,13 @@ class TriggerEngine:
                 )
 
             # Keep live timing info in shared state for WS broadcast
+            # "uri" names the track these numbers belong to, so a reader
+            # (SPECTRA's bridge) can refuse a block left over from another
+            # song — this loop only refreshes it while a matching song
+            # plays, so between songs (or for a song with no profile at
+            # all) the previous song's values otherwise sit here unchanged.
             state.timing = {
+                "uri":                   loaded_uri,
                 "effective_offset_ms":   offset,
                 "shape_offset_ms":       self._shape_offset_ms,
                 "shape_offset_quality":  self._shape_offset_quality,
