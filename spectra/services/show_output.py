@@ -198,14 +198,14 @@ def suspension_reason() -> Optional[str]:
     2026-10-07: "when i preview a color set, it pushes to 100% brightness").
     The colour preview still stands everything else down — refusal() and
     house.gate() are unchanged, so Light Show fires stay refused and the
-    house writes nothing over it."""
-    refused = ownership_refusal()
-    if refused:
-        return refused
-    standdown = standdown_reason()
-    if standdown is None or _colour_preview_alone():
+    house writes nothing over it. Built FROM refusal(), never beside it, so
+    there is still one gate deciding what holds the room."""
+    reason = refusal()
+    if reason is None:
         return None
-    return standdown
+    if ownership_refusal() is None and _colour_preview_alone():
+        return None
+    return reason
 
 
 # ── targets ────────────────────────────────────────────────────────────────
