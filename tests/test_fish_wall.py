@@ -7,20 +7,24 @@ device profile — scripts/check_fish_wall.py's rig).
 HIS WORDS (2026-10-06): "the fish don't interact with the 'wall' naturally.
 Have them 'anticipate' the wall and start turning away. Do this on both fish
 scenes. In house fish scene, give individual ones an occasional burst of
-speed."
+speed." And (2026-10-07), on the first build: "The fish now get stuck in the
+middle. I still want them to go right up to the edge of the wall, but i want
+them to start turning so their bodies sides touch the walls, more than their
+heads. [...] It's okay for light to bleed off the fixture, I'm more
+interested in a natural look."
 
 scripts/check_fish_wall.py is the measured, printed version (and writes the
-before/after GIFs); this file pins what has to hold:
+before/after evidence); this file pins what has to hold:
 
   * the wall is the panel's real shape, read off the virtual's own segments
     through the effect's own flips;
-  * no swimming fish's nose or middle ever leaves the lit area, at both of
-    his scenes' live params — judged against a lit area computed HERE, not
-    the effect's own;
-  * the turn starts well before the wall and eases in, where the old one
-    started late and snapped;
+  * his House Fish reach the wall, lie along it when they touch, use the
+    panel and sweep rather than pivot — and PR 361 (the first build) is the
+    control that did not;
+  * his music fish glance along their own pond and never leave the panel;
+  * a single fish's turn starts further out than the old edge's, never
+    jolts, and lands its side on the wall;
   * `wall_lookahead = 0` is the old effect bit for bit (the escape hatch);
-  * a fast shoal keeps swimming its ring instead of collapsing into a ball;
   * solo bursts land at about the configured rate, reach their speed and
     ease back, are off by default, and never during a charge;
   * Sonic reaches all five settings with the effect's own bounds.
@@ -91,105 +95,101 @@ def test_the_wall_follows_the_effects_own_flip():
     assert np.array_equal(read, real[:, ::-1])
 
 
-# ── the wall held ───────────────────────────────────────────────────────
-@pytest.mark.parametrize("name,cfg", [
-    ("house-fish", W.HOUSE_FISH),
-    ("fish", W.MUSIC_FISH),
-])
-@pytest.mark.parametrize("seed", [0, 1])
-def test_no_fish_ever_swims_past_the_lit_area(name, cfg, seed):
-    lit = W.lit_area(W.crystal_real_mask())
-    worst, share = _run(W.wall_run(cfg, seed, 20.0, lit))
-    assert worst <= 0.0, (
-        f"{name} seed {seed}: a swimming fish's nose or middle got "
-        f"{worst:.2f}px past the lit edge"
+# ── his scenes: right up to the wall, side-on, not crowded in the middle ─
+def test_house_fish_reach_the_wall_side_on_and_use_the_panel():
+    """His 2026-10-07 words, measured on the House Fish scene's live params
+    (one seed, 20 s — scripts/check_fish_wall.py runs three for 30 s): its
+    fish reach the wall (the flank's light on the lit edge), lie along it
+    when they touch, use the panel instead of crowding its middle, sweep
+    rather than pivot, and never leave the panel. PR 361 — the first wall
+    build, loaded out of git at its merge — is run alongside as the control:
+    the regression he reported, which this bar must be able to see."""
+    pr = W.load_pr361()
+    assert pr is not None, f"git could not produce {W.PR361_REF}"
+    new = W.scene_metrics(_run(W.scene_run(W.HOUSE_FISH_LIVE, 0, 20.0)))
+    old = W.scene_metrics(_run(W.scene_run(
+        dict(W.HOUSE_FISH_LIVE, **W.OLD), 0, 20.0)))
+    first = W.scene_metrics(_run(W.scene_run(W.HOUSE_FISH_LIVE, 0, 20.0, pr)))
+    assert first["wall"] < 1.0 and first["cover"] < 35.0, (
+        f"control: PR 361 kept them off the wall, in the middle: {first}"
     )
-    assert share < 0.01, (
-        f"{name} seed {seed}: {100 * share:.2f}% of the fish light landed "
-        "where the panel cannot show it"
+    assert new["wall"] >= 35.0, f"right up to the wall: {new}"
+    assert new["cover"] >= 1.8 * first["cover"], (
+        f"uses the panel: {new['cover']:.1f}% against PR 361's "
+        f"{first['cover']:.1f}%"
     )
+    assert new["alongside"] >= 65.0, f"side-on when touching: {new}"
+    assert new["pointing"] <= 8.0, f"rarely nose-on: {new}"
+    assert new["tightest"] <= old["tightest"] / 2.0, (
+        f"sweeps, not pivots: new {new['tightest']:.1f}% at its tightest "
+        f"turn, old edge {old['tightest']:.1f}%"
+    )
+    assert new["off"] <= 0.5, f"no middle off the panel: {new}"
 
 
-def test_the_old_edge_turn_did_cross_it():
-    """The negative control: the same run with the wall off (the old pond
-    edge) puts a House Fish's nose into the dark, or the test above could
-    be passing on a rig that cannot see a crossing."""
-    lit = W.lit_area(W.crystal_real_mask())
-    worst, share = _run(W.wall_run(dict(W.HOUSE_FISH, **W.OLD), 0, 20.0, lit))
-    assert worst > 1.0 and share > 0.02, (worst, share)
+def test_the_music_fish_glide_their_own_pond_without_leaving_the_panel():
+    """His music Fish scene keeps its own pond (roam_scale 0.75): its fish
+    glance along that pond's rim the same way, use more of it than PR 361
+    did, and never leave the panel."""
+    pr = W.load_pr361()
+    new = W.scene_metrics(_run(W.scene_run(W.MUSIC_FISH, 0, 20.0)))
+    assert new["off"] == 0.0, new
+    if pr is not None:
+        m = W.scene_metrics(_run(W.scene_run(W.MUSIC_FISH, 0, 20.0, pr)))
+        assert new["cover"] > m["cover"], (new, m)
 
 
-# ── anticipation ────────────────────────────────────────────────────────
-def test_the_turn_starts_before_the_wall_and_eases_in():
-    after = W.onset_and_shape(_run(W.approach(W.HOUSE_FISH)))
-    before = W.onset_and_shape(
-        _run(W.approach(dict(W.HOUSE_FISH, **W.OLD)))
+# ── one fish at the wall ────────────────────────────────────────────────
+@pytest.mark.parametrize("heading,x0,y0", W.APPROACHES[1:3])
+def test_the_turn_is_anticipated_smooth_and_lands_the_side(heading, x0, y0):
+    old = _run(W.approach(dict(W.HOUSE_FISH, **W.OLD), heading, x0, y0))
+    new = _run(W.approach(W.HOUSE_FISH, heading, x0, y0))
+    assert new[0] > old[0] + 1.0, (
+        f"the turn starts further out: nose {new[0]:.1f}px from the wall "
+        f"(old edge {old[0]:.1f}px)"
     )
-    onset, peak, jump, nearest = after
-    assert onset > before[0] + 2.0, (
-        f"the turn must start well before the wall: nose {onset:.1f}px "
-        f"from it (the old edge turn: {before[0]:.1f}px)"
+    assert new[1] < 0.3 and new[1] < old[1] / 2.0, (
+        f"no jolt: one-frame change in curvature {new[1]:.2f} (old edge "
+        f"{old[1]:.2f})"
     )
-    assert jump < before[2], (
-        f"the turn must ease in: biggest one-frame change in curvature "
-        f"{jump:.2f} (old {before[2]:.2f})"
-    )
-    assert jump < 0.5, f"no snap: one frame changed curvature by {jump:.2f}"
-    assert nearest >= 0.0, f"the nose reached the wall ({nearest:.2f}px)"
+    assert new[3], "its side reaches the wall"
 
 
 @pytest.mark.parametrize("impulse", [0.3, 0.9])
 def test_a_loud_passage_keeps_every_fish_on_the_panel(impulse):
-    """A loud passage drives his music fish to 3-6x cruise. The old edge
-    steer could not turn them in time and flew them off the panel (measured
-    up to ~28px past it at full volume); the wall's look-ahead grows with
-    speed, so they stay on it — and, because that look-ahead is capped at
-    the pond's own short radius (`_wall_look`), they keep swimming instead
-    of every fish turning as tight as it can (found building this: the
-    uncapped look-ahead outgrew the pond and balled the shoal up, its wake
-    nearly as bright as the fish). His "the trail is always subtle" bar
-    still holds."""
+    """A loud passage drives his music fish to 3-6x cruise. The glance is a
+    CURVATURE (the same arc at any speed, and wider for a fast fish by
+    `wall_lookahead`), so no middle leaves the panel — and his "the trail
+    is always subtle" bar still holds."""
     worst, ratio = _run(W.loud_run(W.MUSIC_FISH, 1, impulse))
-    assert worst <= 0.0, f"a fish got {worst:.2f}px past the lit edge"
+    assert worst <= 0.0, f"a middle got {worst:.2f}px past the lit edge"
     assert ratio < 0.6, f"the wake must stay subtle (median {ratio:.2f})"
 
 
-def test_the_old_edge_steer_flew_loud_fish_off_the_panel():
-    """The negative control for the test above."""
-    worst, _ = _run(W.loud_run(dict(W.MUSIC_FISH, **W.OLD), 1, 0.9))
-    assert worst > 5.0, worst
-
-
-def test_the_look_ahead_grows_with_speed_and_stops_at_the_pond():
-    """Turn room, plus `wall_lookahead` seconds of the fish's own speed —
-    never under half its own length (a big slow fish's room to swing round)
-    and never past the pond's own short radius."""
+def test_the_glance_arc_widens_with_speed_and_eases_with_strength():
+    """The arc a fish sweeps in on: never tighter than its own turn radius
+    or the nose's own rule, wider for a fast fish (`wall_lookahead` seconds
+    of its swimming), and divided by `wall_turn_strength`."""
     async def main():
-        r = await W.rig("look", W.MUSIC_FISH)
+        r = await W.rig("arc", W.MUSIC_FISH)
         r.step(1)
         eff = r.effect
-        cruise = eff.cruise_px
-        look = eff._wall_look(np.array([0.0, cruise, 2 * cruise, 20 * cruise],
-                                       dtype=np.float32))
-        geometry = dict(
-            pond=eff.roam_bound * eff.s_min,
-            base=FX.WALL_LOOK_BASE_R * eff.turn_radius_px,
-            floor=FX.WALL_LOOK_BODY * eff._body_len_px(),
-            cruise=cruise, secs=eff.wall_lookahead,
-        )
+        steep = np.full(3, np.pi / 3, dtype=np.float32)
+        speeds = np.array([0.0, eff.cruise_px, 20 * eff.cruise_px],
+                          dtype=np.float32)
+        a = eff._glance_radius(steep, speeds)
+        eff.update_config({"wall_turn_strength": 2.0})
+        r.step(1)
+        b = eff._glance_radius(steep, speeds)
+        floor = eff.turn_radius_px
         await W.close(r)
-        return look, geometry
+        return a, b, floor
 
-    look, g = _run(main())
-    assert look[0] == pytest.approx(g["base"] + g["floor"], rel=1e-5), (
-        "a fish at rest still looks half its own length ahead"
-    )
-    assert look[1] == pytest.approx(
-        g["base"] + max(g["secs"] * g["cruise"], g["floor"]), rel=1e-5
-    )
-    assert look[2] > look[1], "a faster fish looks further"
-    assert look[3] == pytest.approx(g["base"] + g["pond"], rel=1e-5), (
-        "never further than the pond is wide"
+    a, b, floor = _run(main())
+    assert (a >= floor - 1e-4).all() and (b >= floor - 1e-4).all()
+    assert a[2] > a[0], "a fast fish sweeps wider"
+    assert b[2] == pytest.approx(max(a[2] / 2.0, floor), rel=1e-4), (
+        "strength 2 halves the arc (never under the turn radius)"
     )
 
 

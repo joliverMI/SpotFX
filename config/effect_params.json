@@ -2129,7 +2129,7 @@
           "min": 0.0,
           "max": 3.0,
           "aspect": "shape",
-          "note": "How far ahead of its nose a fish sees the wall coming, in SECONDS of its own swimming, on top of the room it needs to turn and never less than half its own length (a big slow fish needs room to swing its body round) - so the distance grows with its speed and a fish on a beat, a lunge or a burst starts turning sooner. The wall is the panel's real lit shape (the crystal's hexagon), and no part of a fish's body swims past it. 0 = the old late turn at the pond edge, exactly.",
+          "note": "How a fish meets the wall: it swims right up to it and curves in alongside it, so its side lies on the wall rather than its nose meeting it, then peels away. The curve is the widest that keeps its nose's light no deeper past the wall than its flank's, and never tighter than the distance it swims in this many SECONDS - so a faster fish (a beat, a lunge, a burst) starts sooner and sweeps wider. The wall is the panel's real lit shape (the crystal's hexagon) with its corners rounded; a little light past the edge is expected. 0 = the old late turn at the pond edge, exactly.",
           "help_topic": "fish-wall",
           "default": 0.35
         },
@@ -2140,7 +2140,7 @@
           "min": 0.2,
           "max": 3.0,
           "aspect": "shape",
-          "note": "How firmly a fish turns away once it sees the wall: lower is lazier, wider curves; higher turns earlier and keeps more water between it and the wall. However lazy, a fish still turns in time - the laziness only shapes the start of the curve.",
+          "note": "How tight the curve in along the wall is: lower is a lazier, wider sweep that starts further out (more of the side on the wall, less of the nose); higher is a tighter turn made closer to the wall, nose first. The arc is divided by this number.",
           "help_topic": "fish-wall",
           "default": 1.0
         },

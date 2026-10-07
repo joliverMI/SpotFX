@@ -1644,37 +1644,49 @@ against that commit.
     `scripts/check_star_spin_motion.py`, `tests/test_radial_base_rotation.py`.
     Unverified against his live room (standing order 35, no live test
     without his word).
-55. `effects/fish.py` (SpotFX-authored, #21): THE WALL IS ANTICIPATED, and
-    a SOLO BURST (2026-10-06, his words: "the fish don't interact with the
-    'wall' naturally. Have them 'anticipate' the wall and start turning
-    away. Do this on both fish scenes. In house fish scene, give individual
-    ones an occasional burst of speed"). The wall is read off the virtual's
-    own segments (`_real_cell_mask`: a pixel on a gap device, by
+55. `effects/fish.py` (SpotFX-authored, #21): THE WALL IS A GLANCING
+    LANDING, and a SOLO BURST (2026-10-06, his words: "the fish don't
+    interact with the 'wall' naturally. Have them 'anticipate' the wall and
+    start turning away. Do this on both fish scenes. In house fish scene,
+    give individual ones an occasional burst of speed" — then, 2026-10-07,
+    on what that first build did: "The fish now get stuck in the middle. I
+    still want them to go right up to the edge of the wall, but i want them
+    to start turning so their bodies sides touch the walls, more than their
+    heads ... It's okay for light to bleed off the fixture, I'm more
+    interested in a natural look"). The wall is read off the virtual's own
+    segments (`_real_cell_mask`: a pixel on a gap device, by
     `fx.utils.is_gap_device`, is dark, mapped through Twod's own
     flip/mirror/rotate) and filled into the lit silhouette (`_silhouette` —
     the crystal's hexagon), cached as a signed distance field
-    (`_wall_field`). Ordinary swimmers (not the charge's school, the rush,
-    ejecta or a dispersing fish) look `WALL_LOOK_BASE_R` turn radii plus
-    `wall_lookahead` seconds of their own speed ahead (never under half a
-    body length, capped at the pond's short radius, `_wall_look`), and when the wall — the pond for the
-    middle, the silhouette for the nose and the body's width — is inside
-    that, steer toward the nearest swimmable heading with
-    `WALL_CLEAR_X` look-aheads of free water, at the curvature that
-    completes the turn in the room left (`_wall_steer`), keeping the side
-    it chose unless the other is clearly freer, eased in and out, blended
-    over the other steering by urgency, under the existing turn-radius
-    clamp.
-    `wall_lookahead = 0` is the old pond-edge steer, kinematics bit for bit
-    (proven against the merge-base). Boot placement re-draws a fish until
-    its body fits (wall on only). The solo burst (`solo_burst_rate`, per
-    minute, Poisson; `solo_burst_speed`; `solo_burst_time`; schema default
-    rate 0 = never) multiplies one random ordinary swimmer's speed target
-    through an attack/hold/ease envelope (`p_sb`, `p_sb_t`) and its stroke
-    rate; never during a phase or a crossfade, never on a fish with the
-    wall close ahead. New SoA arrays `p_wsg`, `p_wurg`, `p_sb`, `p_sb_t`.
-    `headless.py` (SpotFX-authored) gained `real_mask` so a rig can be his
-    crystal's real/gap shape. Evidence: `scripts/check_fish_wall.py`,
-    `tests/test_fish_wall.py`. Unverified against his live room.
+    (`_wall_field`). An ordinary swimmer (not the charge's school, the rush,
+    ejecta or a dispersing fish) swims on until the one circular arc that
+    lands its middle `WALL_GRAZE` (0.3) half-widths in from the lit edge,
+    parallel to the wall — `R = f * cot(theta / 2)` — has shrunk to the arc
+    it wants (`_glance_radius`: the `R_nose` rule that keeps the nose's
+    light no deeper past the wall than the flank's own landing, never
+    tighter than the fish's own turn radius or `wall_lookahead` seconds of
+    its own speed, over `wall_turn_strength`); it then flies that arc in,
+    peels `WALL_PEEL` (12 deg) further alongside the wall and lets go
+    (`_wall_steer`), so the flank brushes the wall and the fish curves back
+    into the water instead of riding the rim. The landing line (`_landing`/
+    `_landing_field`) is the lit silhouette inset `WALL_GRAZE` half-widths,
+    its corners rounded to the glance radius (never past `WALL_ROUND_FIT`
+    of the room inside it, so a long fish can still round a hexagon's tip);
+    the pond (`roam_scale`) still bounds the middle, glanced the same way
+    when it is smaller than the panel.
+    `wall_lookahead = 0` is still the pre-wall pond-edge steer, kinematics
+    bit for bit (proven against the merge-base). Boot placement re-draws a
+    fish until its body fits (wall on only). The solo burst
+    (`solo_burst_rate`, per minute, Poisson; `solo_burst_speed`;
+    `solo_burst_time`; schema default rate 0 = never) multiplies one random
+    ordinary swimmer's speed target through an attack/hold/ease envelope
+    (`p_sb`, `p_sb_t`) and its stroke rate; never during a phase or a
+    crossfade, never on a fish mid-glance. SoA arrays: `p_wsg`, `p_wurg`,
+    `p_wcmd`, `p_wauth`, `p_sb`, `p_sb_t`, and, for the glance itself,
+    `p_wr`/`p_wph`. `headless.py` (SpotFX-authored) gained `real_mask` so a
+    rig can be his crystal's real/gap shape. Evidence:
+    `scripts/check_fish_wall.py`, `tests/test_fish_wall.py`. Unverified
+    against his live room.
 56. `facade.py` + `host.py` (SpotFX-authored): AN EFFECT WRITE PERSISTS
     COALESCED, NOT INLINE (2026-10-07, his report: "flares and transitions
     don't work well in the preview, it seems to jump past them"). The

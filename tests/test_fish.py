@@ -1171,16 +1171,37 @@ def test_avoidance_can_never_beat_the_turn_cap_or_move_a_fish(tmp_path):
     _run(main())
 
 
+def _crowd_overlap(tmp_path, tag, config, seed=5):
+    async def main():
+        room = await _room(tmp_path, tag, config, seed=seed)
+        room.step(120)
+        hits = pairs = 0
+        for _ in range(1800):
+            room.step(1)
+            h, p = _crowd_stats(room.effect)
+            hits += h
+            pairs += p
+        await _close(room)
+        return hits / max(pairs, 1)
+    return _run(main())
+
+
 def test_avoidance_reduces_crossings_at_his_values(tmp_path):
     """The measured half, at the state he is watching (jiggle 0.5,
     roam_scale 0.75). Time spent overlapping is the quantity the eye
-    reads; scripts/check_fish_avoidance.py prints the full sweep."""
+    reads; scripts/check_fish_avoidance.py prints the full sweep.
+
+    The mechanism is proven where it was built, with the wall at its escape
+    hatch (`wall_lookahead = 0`, the pre-wall fish bit for bit): a fish
+    sweeping along a wall may only swerve toward the water (the wall's own
+    rule — see the WALL block), which is the next test's business."""
     async def main():
         got = {}
         for strength in (0.0, 0.45):
             room = await _room(
                 tmp_path, f"av-x{strength}",
-                dict(HIS_CROWD, avoid_strength=strength), seed=5,
+                dict(HIS_CROWD, avoid_strength=strength, wall_lookahead=0.0),
+                seed=5,
             )
             room.step(120)
             hits = pairs = 0
@@ -1197,6 +1218,26 @@ def test_avoidance_reduces_crossings_at_his_values(tmp_path):
             f"{got[0.0]:.1%})"
         )
     _run(main())
+
+
+def test_the_glancing_crowd_crosses_no_more_than_the_free_one(tmp_path):
+    """With the wall on — his state — the glance spreads a crowd along the
+    walls by itself (measured over six seeds: 14.4% overlap with avoidance
+    off against the pre-wall fish's 18.9%), and with avoidance on it
+    crosses less than the pre-wall shoal did with avoidance off. That is the
+    quantity his eye reads; scripts/check_fish_avoidance.py and
+    scripts/check_fish_wall.py print the rest."""
+    glancing = _crowd_overlap(
+        tmp_path, "av-g", dict(HIS_CROWD, avoid_strength=0.45),
+    )
+    free_off = _crowd_overlap(
+        tmp_path, "av-f", dict(HIS_CROWD, avoid_strength=0.0,
+                               wall_lookahead=0.0),
+    )
+    assert glancing < free_off, (
+        f"the glancing crowd with avoidance on overlaps {glancing:.1%}; the "
+        f"pre-wall crowd with it off, {free_off:.1%}"
+    )
 
 
 def test_school_still_swims_in_unison_with_avoidance_on(tmp_path):

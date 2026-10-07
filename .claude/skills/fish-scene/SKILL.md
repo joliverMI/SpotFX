@@ -45,11 +45,12 @@ that is his ruling — see the fish-effect skill's note before changing it.
 
 ## The wall needs no scene data
 
-Since 2026-10-06 the fish anticipate the panel's real lit edge and turn
-away from it (`wall_lookahead`, the effect's own default — fish-effect
-skill). This scene's `roam_scale` 0.75 still bounds the fish's MIDDLES; the
-wall keeps their bodies on the crystal. Solo bursts are House Fish's, not
-this scene's (default off here).
+Since 2026-10-06 the fish glance alongside the panel's real lit edge
+instead of swimming past it (`wall_lookahead`/`wall_turn_strength`, both
+the effect's own defaults — see the fish-effect skill for the mechanism).
+This scene's `roam_scale` 0.75 still bounds the fish's MIDDLES; the wall
+keeps their bodies on the crystal. Solo bursts are House Fish's, not this
+scene's (default off here).
 
 ## Sonic reach
 
