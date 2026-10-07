@@ -401,10 +401,20 @@ class WLEDDevice(NetworkedDevice):
         wled_build = wled_config["vid"]
 
         wled_config = {
-            "name": wled_name,
             "pixel_count": wled_count,
             "rgbw_led": wled_rgbmode,
         }
+        # A friendly name he has already set (via a rename, or an earlier
+        # contact that already filled one in) always wins — the fixture's
+        # OWN reported `name` (its firmware default, "WLED" on every
+        # fixture he has never locally renamed on the WLED side) only
+        # fills in a name that is still missing. This method runs on
+        # EVERY host start, re-activation and activation-report recheck,
+        # not just first contact, so an unconditional overwrite here is
+        # what silently reverted every renamed fixture back to "WLED"
+        # across a restart.
+        if not self._config.get("name"):
+            wled_config["name"] = wled_name
 
         self._config.update(wled_config)
         self.setup_subdevice()

@@ -1558,3 +1558,41 @@ against that commit.
     said once at CRITICAL and exposed as `HueDevice.scope_refusal`. The
     DTLS socket setup moved into `_open_dtls()` unchanged. Proof:
     `tests/test_hue_stream_scope.py`.
+
+53. `devices/wled.py`: A FRIENDLY NAME HE SET ALWAYS WINS (2026-10-06).
+    `async_initialize()` used to copy the fixture's OWN reported `name`
+    (its firmware default, literally "WLED" on every fixture he has never
+    locally renamed on the WLED side) onto `self._config["name"]`
+    unconditionally — and this method runs on every host start,
+    re-activation (`FxHost.start()` → `async_initialize_devices()`) and
+    activation-report recheck (`spectra/services/activation_report.py`),
+    not just first contact. So a rename made through the device console
+    (persisted correctly at the moment he made it) silently reverted to
+    "WLED" on the next restart, because the live device object's own
+    `.name` — what every live-reading surface (`device_console.
+    list_devices`, `show_output.device_label`) actually shows — got
+    overwritten in memory the moment the stack came back up. Fixed: the
+    reported name now only fills in `self._config["name"]` when it is
+    currently falsy; an already-set name (which is the ordinary case —
+    every device is created with a name) is left untouched. Proof:
+    `tests/test_device_friendly_name_persists.py`.
+
+    THIS FIX ALONE DOES NOT RESTORE THE FOUR NAMES HE ALREADY RENAMED
+    TODAY (`crystal`/`tv-backlight`/`dining-table`/`porch-rail`) — the
+    bug above had every chance to already flush the clobbered "WLED"
+    value back to `storage/spectra/fx-live/config.json` on his several
+    restarts, and the new "already-set wins" rule cannot tell a
+    corrupted "WLED" apart from one he genuinely wants. One-time,
+    idempotent catch-up for the data side:
+    `scripts/repair_stale_wled_device_names.py` (only rewrites a device's
+    stored `config.name` when it is still exactly the stale "WLED").
+    POST-DEPLOY STEP, in order: restart `spectra.service` first (so this
+    fix is live before any name is re-asserted), then run the script —
+    **against the live service, not the file, if it is running**:
+    `.venv/bin/python scripts/repair_stale_wled_device_names.py
+    --spectra-url http://127.0.0.1:8010 --apply`. Writing the file
+    directly while the service is live would only be undone by its next
+    ordinary effect write (`save_config(host.config, ...)` re-flushes the
+    still-stale in-memory name) — the script's own module docstring has
+    the full reasoning and the file-only `--apply` form for when the
+    service is genuinely stopped.
