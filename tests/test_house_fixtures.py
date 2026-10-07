@@ -3,17 +3,18 @@
 
   1. INERT: no mode, the room released, or standby → nothing withheld and
      no WLED written; a request is still RECORDED.
-  2. BRIGHTNESS: a mode drives the room → every in-scope WLED is held on at
-     the owned brightness (confirmed by read-back); Hue and dummies are
-     never written; a drift read back later is re-asserted and NAMED; an
-     unreadable fixture is left alone.
+  2. BRIGHTNESS: a mode drives the room → every in-scope WLED is held on,
+     never above his own brightness (confirmed by read-back); Hue and
+     dummies are never written; an overshoot above his ceiling is capped
+     back down and NAMED, a lower HA write is never fought; an unreadable
+     fixture is left alone.
   3. LEND: TV Music off / a media source on → the TV strip is withheld and
      told {"live": false}; the sconces on the same virtual are untouched;
      return → power-on write FIRST, stream after.
   4. ON / OFF: off = withheld, then the SOFT dim {"bri": 1} (phase 3), then
      {"live": false}, then {"on": false}; on = {"on": true, "bri": 1} while
-     still withheld, stream after, THEN the owned {"bri": 255} — the WLED's
-     own preset is never seen at full between the steps.
+     still withheld, stream after, THEN his own preserved ceiling — the
+     WLED's own preset is never seen at full between the steps.
   5. SCOPE (PR 317): a fixture outside the take is recorded, never written.
   6. HAND-BACK: a fixture this process switched off is switched back on
      when the mode is cleared while SPECTRA still holds the room.
@@ -234,15 +235,18 @@ def test_standby_changes_nothing(seam):
 
 # ═══ 2. brightness ══════════════════════════════════════════════════════════
 
-def test_a_mode_holds_every_in_scope_wled_on_at_the_owned_brightness(seam):
+def test_a_mode_holds_every_in_scope_wled_on_without_raising_his_brightness(seam):
+    """His own brightness (whatever the fixture read before Spectra's
+    first write — 34 in this fixture world) is the ceiling: a take
+    switches a fixture ON, but never bumps bri above it."""
     seam.set_mode()
     _run(_settle(seam.hf))
     written = {did for did, p in seam.posts}
     assert written == WLEDS, "Hue / dummies must never be written"
     for did, payload in seam.posts:
-        assert payload == {"on": True, "bri": 255}
+        assert payload == {"on": True, "bri": 34}
     for did in WLEDS:
-        assert seam.state[did]["bri"] == 255
+        assert seam.state[did]["bri"] == 34
         assert seam.hf._rt.applied[did].outcome == "landed"
 
 
@@ -254,16 +258,46 @@ def test_own_brightness_off_writes_nothing(seam):
     assert seam.posts == []
 
 
-def test_a_drift_is_re_asserted_and_named(seam):
+def test_owned_brightness_still_caps_as_an_additional_safety_ceiling(seam):
+    """`owned_brightness` is now an ADDITIONAL hard cap (0-255), never a
+    value Spectra forces upward — set below his own level, it still
+    narrows the ceiling further."""
+    from spectra.models.house_mode import HouseSettings
+    seam.store.put_settings(HouseSettings(owned_brightness=20))
+    seam.set_mode()
+    _run(_settle(seam.hf))
+    assert ("crystal", {"on": True, "bri": 20}) in seam.posts
+    assert seam.state["crystal"]["bri"] == 20
+
+
+def test_a_lower_ha_brightness_write_is_never_fought_back_up(seam):
+    """The crystal-brightness-ceiling fix (2026-10-06): his own, lower
+    Home Assistant brightness write is never corrected back up — only an
+    overshoot above his ceiling is."""
     seam.set_mode()
     _run(_settle(seam.hf))
     seam.posts.clear()
-    seam.state["crystal"]["bri"] = 34          # Home Assistant wrote it
+    seam.state["crystal"]["bri"] = 10          # Home Assistant dimmed it further
     seam.clock.now += seam.hf.DRIFT_CHECK_S + 1
     _run(_settle(seam.hf))
-    assert ("crystal", {"on": True, "bri": 255}) in seam.posts
+    assert seam.posts == [], "a dimmer HA write must never be re-asserted upward"
+    assert seam.state["crystal"]["bri"] == 10
+    assert seam.hf.status()["corrections"] == []
+
+
+def test_a_brightness_overshoot_above_his_ceiling_is_capped_down_and_named(seam):
+    """A reboot landing on a brighter boot preset is the one case still
+    corrected — and it is corrected DOWN to his ceiling, never up to 255."""
+    seam.set_mode()
+    _run(_settle(seam.hf))
+    seam.posts.clear()
+    seam.state["crystal"]["bri"] = 200         # a brighter boot preset
+    seam.clock.now += seam.hf.DRIFT_CHECK_S + 1
+    _run(_settle(seam.hf))
+    assert ("crystal", {"on": True, "bri": 34}) in seam.posts
+    assert seam.state["crystal"]["bri"] == 34
     corr = seam.hf.status()["corrections"]
-    assert any(c["device"] == "crystal" and c["found"]["bri"] == 34 for c in corr)
+    assert any(c["device"] == "crystal" and c["found"]["bri"] == 200 for c in corr)
     # the fixtures that had not drifted were read, not written
     assert {d for d, _ in seam.posts} == {"crystal"}
 
@@ -314,7 +348,7 @@ def test_reclaim_powers_on_first_and_streams_after(seam):
         assert "tv-backlight" not in device_output.withheld()
         # SOFT POWER (phase 3): on at the soft brightness, stream, then full
         assert seam.posts[:2] == [("tv-backlight", {"on": True, "bri": 1}),
-                                  ("tv-backlight", {"on": True, "bri": 255})]
+                                  ("tv-backlight", {"on": True, "bri": 34})]
     _run(scenario())
     assert seam.hf.tv_strip_status()["owner"] == "spectra"
 
@@ -393,7 +427,7 @@ def test_the_admirals_tv_default_on_preference_is_unchanged(seam):
     default."""
     seam.set_mode()
     _run(_settle(seam.hf))
-    assert ("tv-backlight", {"on": True, "bri": 255}) in seam.posts
+    assert ("tv-backlight", {"on": True, "bri": 34}) in seam.posts
 
 
 def test_a_generically_lent_non_tv_strip_stays_lent_even_when_a_mode_powers_it_off(seam):
@@ -459,7 +493,7 @@ def test_a_plan_off_fixture_still_gets_power_once_the_music_show_has_the_room(se
         FixtureHook(target=HouseTarget(kind="fixture", id="crystal"), off=True)])
     seam.house._rt.phase = seam.house.PHASE_MUSIC
     _run(_settle(seam.hf))
-    assert ("crystal", {"on": True, "bri": 255}) in seam.posts
+    assert ("crystal", {"on": True, "bri": 34}) in seam.posts
     assert "crystal" not in device_output.withheld()
 
 
@@ -483,7 +517,7 @@ def test_a_mode_off_fixture_held_by_the_light_show_still_gets_power(seam):
     try:
         _run(_settle(seam.hf))
         assert "crystal" not in device_output.withheld()
-        assert ("crystal", {"on": True, "bri": 255}) in seam.posts
+        assert ("crystal", {"on": True, "bri": 34}) in seam.posts
     finally:
         show_store.state().holds.pop("crystal", None)
 
@@ -522,7 +556,7 @@ def test_on_writes_power_and_brightness_before_the_stream(seam):
         await _settle(seam.hf)
         assert "crystal" not in device_output.withheld()
         assert seam.posts == [("crystal", {"on": True, "bri": 1}),
-                              ("crystal", {"on": True, "bri": 255})]
+                              ("crystal", {"on": True, "bri": 34})]
     _run(scenario())
 
 
@@ -594,9 +628,10 @@ def test_recheck_refinds_and_reapplies_when_the_sconce_answers(seam):
     rc = seam.hf.status()["rechecks"]
     assert rc["sconce-kitchen-left"]["state"] == "found"
     assert "sconce-kitchen-left" in seam.relocated
-    # its boot-preset brightness was put back to the owned one
-    assert ("sconce-kitchen-left", {"on": True, "bri": 255}) in seam.posts
-    assert seam.state["sconce-kitchen-left"]["bri"] == 255
+    # its boot-preset brightness (128) is overwritten with his own ceiling,
+    # never raised to a forced 255
+    assert ("sconce-kitchen-left", {"on": True, "bri": 34}) in seam.posts
+    assert seam.state["sconce-kitchen-left"]["bri"] == 34
 
 
 def test_recheck_gives_up_after_its_window(seam):
@@ -648,7 +683,7 @@ def test_a_modes_off_is_withheld_and_powered_down_softly(seam, monkeypatch):
     _run(_settle(seam.hf))
     assert "porch-rail" not in device_output.withheld()
     assert [p for d, p in seam.posts if d == "porch-rail"] == [
-        {"on": True, "bri": 1}, {"on": True, "bri": 255}]
+        {"on": True, "bri": 1}, {"on": True, "bri": 34}]
 
 
 def test_a_light_show_steady_hold_wins_over_a_modes_off(seam, monkeypatch):
@@ -723,7 +758,7 @@ def test_mains_on_clears_it_and_refinds_the_fixture(seam):
         await _settle(seam.hf)
         assert "sconce-kitchen-left" not in device_output.withheld()
         assert seam.store.state().mains_off == {}
-        assert ("sconce-kitchen-left", {"on": True, "bri": 255}) in seam.posts
+        assert ("sconce-kitchen-left", {"on": True, "bri": 34}) in seam.posts
     _run(scenario())
 
 
@@ -803,14 +838,14 @@ def _release(seam):
 
 
 def test_a_fixture_that_was_off_before_the_take_is_off_after_the_release(seam):
-    """2026-10-05: a take switched his dining-table under-glow on at full
-    (owned brightness) and nothing switched it back off — River's restore
-    does not capture it. Spectra remembers what it found before its first
-    write and puts it back when the room is released."""
+    """2026-10-05: a take switched his dining-table under-glow on and
+    nothing switched it back off — River's restore does not capture it.
+    Spectra remembers what it found before its first write and puts it
+    back when the room is released."""
     seam.state["porch-rail"].update({"on": False, "bri": 40})
     seam.set_mode()
     _run(_settle(seam.hf))
-    assert seam.state["porch-rail"]["on"] is True          # owned: on at 255
+    assert seam.state["porch-rail"]["on"] is True          # owned: switched on
     before = seam.store.state().pre_take["porch-rail"]
     assert (before["on"], before["bri"]) == (False, 40)
     assert seam.store.state().pre_take["crystal"]["on"] is True

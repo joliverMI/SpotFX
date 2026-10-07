@@ -4170,13 +4170,26 @@ split). Six things:
   `Device.update_pixels`; suspension streams it anyway. `streaming_device_ids`
   and `device_gaps` leave withheld fixtures out, or the dark-fixture watch and
   the activation gate would call a switched-off fixture a fault. Off = no
-  stream, `{"live": false}`, `{"on": false}`; on = `{"on": true, "bri": 255}`
-  WHILE STILL WITHHELD, then the stream (`pending_on`).
-- **SPECTRA OWNS EVERY STREAMED WLED's MASTER BRIGHTNESS while a mode drives
-  the room** (255 + on, read back every `DRIFT_CHECK_S`, a drift re-asserted
-  and NAMED as a correction). So a mode's per-fixture `level` is the only
-  dimmer and the music show's brightness is `FixtureHook.music_level` (pushed
-  as the base on hand-in) — a mode without levels puts the crystal at FULL.
+  stream, `{"live": false}`, `{"on": false}`; on = `{"on": true, "bri":
+  <his own ceiling>}` WHILE STILL WITHHELD, then the stream (`pending_on`).
+- **HIS OWN BRIGHTNESS IS THE CEILING, NEVER FORCED UPWARD (REWORKED
+  2026-10-06 — Admiral order: the crystal kept landing at 100% in Home
+  Assistant, far too bright)**. `house_fixtures.py` used to hold every
+  streamed WLED's master brightness at a flat `owned_brightness` (255) and
+  RE-ASSERT it on drift — fighting and winning against his own HA
+  brightness writes (a live `corrections` log entry caught it: `bri=43`
+  forced back to 255). It now reads the fixture's brightness BEFORE its
+  first write this take (`HouseState.pre_take[did]["bri"]`, already
+  existed for hand-back) and treats that — his own last setting — as the
+  per-take ceiling (`house_fixtures._brightness_ceiling`), capped further
+  only by `owned_brightness` if he's set that lower (default 255 = no
+  extra cap). A drift check corrects DOWNWARD ONLY — an overshoot above
+  his ceiling (a reboot's brighter boot preset) is capped back to it; a
+  reading at or below it, including a fresh, LOWER HA brightness write, is
+  his and is never fought back up. A mode's per-fixture `level` (`show_
+  output`'s own output-brightness scaling, a SEPARATE mechanism from WLED's
+  hardware `bri`) is still the dimmer BELOW that hardware ceiling — a mode
+  without levels now puts the crystal at HIS level, never a forced FULL.
   Every WLED write runs on a worker thread (the transport is blocking).
 - **MEDIA IS AN OVERLAY**: `house.current_mode()` is the EFFECTIVE mode —
   the one answering to "TV" / "TV paused" (source-specific first) while a

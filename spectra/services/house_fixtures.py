@@ -16,16 +16,27 @@ FIXTURES, and what Spectra then does to them:
              the TV backlight incident).
   ON / OFF   a button (the crystal's paddle, the porch button) switches a
              WLED off: no stream, then {"on": false}. On: {"on": true} (and
-             the owned brightness), THEN the stream — the order a powered-off
-             WLED needs whatever its firmware does with a stream while off
-             (spectra/services/night_power.py says why that is unknown).
-  BRIGHTNESS Spectra owns every streamed WLED's master brightness while a
-             mode drives the room: `owned_brightness` (255) and power on,
-             written on entry and RE-ASSERTED when a read-back shows it
-             drifted — a Home Assistant brightness write, a sconce that
-             rebooted on its boot preset. Each correction is NAMED (status,
-             log, fire history), because a fight with a stray HA writer is
-             exactly what River's cutover needs to see.
+             the preserved ceiling brightness below), THEN the stream — the
+             order a powered-off WLED needs whatever its firmware does with
+             a stream while off (spectra/services/night_power.py says why
+             that is unknown).
+  BRIGHTNESS (REWORKED 2026-10-06, Admiral order: the crystal kept getting
+             set to 100% in Home Assistant, far too bright — HIS brightness
+             is the ceiling, nothing may raise it.) Spectra never WRITES a
+             WLED's master brightness upward. Before its first write to a
+             fixture this take it reads the brightness already there — his
+             own last setting, via Home Assistant or the fixture's own boot
+             preset — and that reading (`HouseState.pre_take[did]["bri"]`)
+             is the CEILING for the rest of the take, capped further only
+             by `owned_brightness` if he has set that lower (default 255 =
+             no extra cap). A power-on restores exactly that ceiling value,
+             never a forced 255. The drift check (`_drift_check`) only ever
+             corrects DOWNWARD — a fixture read back ABOVE its ceiling (a
+             reboot landing on a brighter boot preset) is capped back to
+             it; a fixture read back AT OR BELOW its ceiling — including a
+             fresh, lower Home Assistant brightness write — is left alone
+             and is never fought back up. Each correction is still NAMED
+             (status, log, fire history).
   RECHECK    "I just powered the sconce mains": re-find the named fixtures by
              identity (a mains cycle is when a WLED takes a new DHCP lease),
              re-init a driver that never resolved, and re-apply the power /
@@ -47,25 +58,25 @@ FIXTURES, and what Spectra then does to them:
              Light Show Steady/Freeze hold on the fixture wins (a higher
              layer): it stays powered and streamed.
 
-SOFT POWER (phase 3). Spectra owns the master brightness, so a switch-off
-first drops `bri` to SOFT_BRI under the (withheld, so frozen) last frame,
-then leaves realtime, then switches off — the WLED's own preset never shows
-at full brightness between the two. A power-on from withheld writes
+SOFT POWER (phase 3). Spectra manages the switch, so a switch-off first
+drops `bri` to SOFT_BRI under the (withheld, so frozen) last frame, then
+leaves realtime, then switches off — the WLED's own preset never shows at
+full brightness between the two. A power-on from withheld writes
 `{"on": true, "bri": SOFT_BRI}`, lets the stream resume, and only then
-raises `bri` to the owned brightness: the preset is never seen at full
-either. Both apply only while Spectra owns the brightness; with ownership
-off the phase 2 sequence is unchanged.
+raises `bri` back to the preserved CEILING (never a forced 255): the preset
+is never seen at full either. Both apply only while Spectra owns the
+brightness; with ownership off the phase 2 sequence is unchanged.
 
-HAND-BACK (phase 3). Owning the master brightness means Spectra switches
-fixtures ON (and to 255). Before its FIRST write to a WLED it reads the
-fixture's power and brightness (HouseState.pre_take, durable — it survives a
-restart that keeps the picture); when the room is RELEASED it writes them
-back (`{"on": …, "bri": …}`, read back) to the address it had, after the
-release's own `{"live": false}`. Found 2026-10-05: a take left his dining
-table under-glow ON at full — it had been off, and River's restore does not
-capture it. The rule: a fixture that was off before a take is off after.
-Only a release hands back: a handover to the older SpotFX process needs the
-fixtures on, and a restart keeps the picture.
+HAND-BACK (phase 3). Before its FIRST write to a WLED this take, Spectra
+reads the fixture's power and brightness (HouseState.pre_take, durable — it
+survives a restart that keeps the picture) — this reading is BOTH the
+ceiling above and what gets handed back; when the room is RELEASED it
+writes them back (`{"on": …, "bri": …}`, read back) to the address it had,
+after the release's own `{"live": false}`. Found 2026-10-05: a take left his
+dining table under-glow ON at full — it had been off, and River's restore
+does not capture it. The rule: a fixture that was off before a take is off
+after. Only a release hands back: a handover to the older SpotFX process
+needs the fixtures on, and a restart keeps the picture.
 
 ═══ INERT UNLESS A MODE DRIVES THE ROOM ═══
 
@@ -412,6 +423,24 @@ def _controllable(dev) -> bool:
     return str(getattr(dev, "type", "") or "").lower() in CONTROLLABLE_TYPES
 
 
+def _brightness_ceiling(did: str, settings) -> Optional[int]:
+    """The brightness Spectra may hold this fixture at for the rest of this
+    take — HIS OWN level (`pre_take`, read before Spectra's first write),
+    capped further only by `owned_brightness` if he has set that lower.
+
+    Never a value to force upward: `None` means "nothing captured yet, so
+    don't touch brightness at all" — the same "unknown never acts" rule
+    this module already applies to an unreadable fixture elsewhere."""
+    if not settings.own_brightness:
+        return None
+    st = house_store.state()
+    pre = st.pre_take.get(did)
+    his_level = pre.get("bri") if pre else None
+    if not isinstance(his_level, int) or his_level <= 0:
+        return None
+    return min(his_level, int(settings.owned_brightness))
+
+
 # ── what Home Assistant tells us ───────────────────────────────────────────
 
 def _record(kind: str, detail: dict) -> None:
@@ -650,8 +679,12 @@ def desired() -> dict[str, tuple[str, str]]:
             # switch a fixture from off to on as a side effect.
             continue
         elif _controllable(dev) and settings.own_brightness:
-            out[did] = (TARGET_ON, f"Spectra holds it on at brightness "
-                                   f"{settings.owned_brightness}")
+            ceiling = _brightness_ceiling(did, settings)
+            if ceiling is not None:
+                why = f"Spectra holds it on, never above his own brightness ({ceiling})"
+            else:
+                why = "Spectra holds it on"
+            out[did] = (TARGET_ON, why)
     return out
 
 
@@ -922,12 +955,14 @@ async def _transition(did: str, dev, target: str, why: str, *, owned: bool,
             detail = "; ".join(x for x in (detail, more) if x)
         else:   # TARGET_ON
             payload: dict = {"on": True}
-            if owned and settings.own_brightness:
-                payload["bri"] = int(settings.owned_brightness)
+            if owned:
+                ceiling = _brightness_ceiling(did, settings)
+                if ceiling is not None:
+                    payload["bri"] = ceiling
             want_bri = payload.get("bri")
             if soft:
                 # SOFT POWER: on at the soft brightness, let the stream back
-                # (pending_on cleared), and only then the owned brightness —
+                # (pending_on cleared), and only then the preserved ceiling —
                 # the WLED's own preset is never seen at full.
                 s_out, s_detail, _s = await _write_confirmed(
                     dev, {"on": True, "bri": SOFT_BRI},
@@ -969,9 +1004,12 @@ async def _transition(did: str, dev, target: str, why: str, *, owned: bool,
 
 
 async def _drift_check(did: str, dev, target: str) -> None:
-    """Read json/state back; re-assert power (and the owned brightness) if
-    something else moved it. An unreadable fixture is left alone — unknown
-    never acts."""
+    """Read json/state back; re-assert power if something else moved it.
+    Brightness is corrected ONLY downward — a reading above the preserved
+    ceiling (a reboot landing on a brighter boot preset) is capped back to
+    it; a reading at or below the ceiling, including a fresh, lower Home
+    Assistant brightness write, is HIS and is never fought back up. An
+    unreadable fixture is left alone — unknown never acts."""
     settings = _settings()
     try:
         try:
@@ -984,10 +1022,13 @@ async def _drift_check(did: str, dev, target: str) -> None:
                 return
             payload, check = {"on": False}, (lambda s: s.get("on") is False)
         else:
-            want_bri = int(settings.owned_brightness) if settings.own_brightness else None
-            if found_on is True and (want_bri is None or found_bri == want_bri):
+            ceiling = _brightness_ceiling(did, settings)
+            over_ceiling = (ceiling is not None and isinstance(found_bri, int)
+                           and found_bri > ceiling)
+            if found_on is True and not over_ceiling:
                 return
             payload = {"on": True}
+            want_bri = ceiling
             if want_bri is not None:
                 payload["bri"] = want_bri
             check = (lambda s: s.get("on") is True
