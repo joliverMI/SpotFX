@@ -270,8 +270,11 @@ async def _watch_intended(device_ids: list[str], *, sleep=None,
     """Follow-up for areas after_resume kept frozen on the hold's INTENT
     alone: once the hold has landed on an area it is the gate's again;
     if the intent goes away without landing (the hold never came), the
-    area is unfrozen so it streams — never left frozen by a hold that
-    does not exist. Returns the areas it unfroze. Never raises."""
+    area is unfrozen so it streams. If the intent is STILL there when
+    wait_s runs out, the area is left frozen — that is what the hold
+    wants, and the gate's own later transitions own it from there — and
+    it is named in a log so a stuck reconcile is not silently invisible.
+    Returns the areas it unfroze. Never raises."""
     import asyncio
     sleep = sleep or asyncio.sleep
     unfrozen: list[str] = []
@@ -302,6 +305,11 @@ async def _watch_intended(device_ids: list[str], *, sleep=None,
         if unfrozen:
             logger.warning("house restart: %s was kept frozen for a Hue Hold "
                            "that never landed — streaming again", unfrozen)
+        if pending:
+            logger.warning("house restart: %s still frozen after %ss — the "
+                           "Hue Hold still intends to hold them but has not "
+                           "landed; left frozen for the gate to resolve",
+                           sorted(pending), wait_s)
     except Exception:                                    # noqa: BLE001
         logger.exception("house restart: intent watch failed")
     return unfrozen

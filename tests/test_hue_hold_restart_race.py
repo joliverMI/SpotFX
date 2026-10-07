@@ -377,6 +377,31 @@ def test_the_watch_hands_a_landed_area_to_the_gate_and_unfreezes_a_hold_that_nev
     assert dining.calls == [] and living.calls == [False]
 
 
+def test_the_watch_times_out_with_the_intent_still_there_and_stays_frozen(
+        two_areas, monkeypatch, caplog):
+    """The hold never lands within the watch window (a stuck/erroring
+    reconcile), but the gate still INTENDS to hold the area — that is the
+    hold's own side, so the area is left frozen rather than unfrozen on a
+    timeout, and the still-pending areas are named in a warning so the
+    stuck reconcile is not silently invisible."""
+    from spectra.services import house_restart
+    gate, dining, living = two_areas
+    _in_flight_on(gate, monkeypatch, (True, "#ffe392", frozenset(), None))
+
+    async def fake_sleep(_s):
+        return None
+
+    with caplog.at_level("WARNING", logger="spectra.services.house_restart"):
+        out = asyncio.run(house_restart._watch_intended(
+            ["dining-hues", "hue-lights"], sleep=fake_sleep, wait_s=1.0))
+    assert out == []
+    assert dining.calls == [] and living.calls == []
+    assert dining.frozen and living.frozen
+    assert any("still frozen after" in r.getMessage() for r in caplog.records)
+    assert any("dining-hues" in r.getMessage() and "hue-lights" in r.getMessage()
+               for r in caplog.records)
+
+
 # ── 3. "held" sees a live stream ────────────────────────────────────────────
 
 NAMES = {"rid-nc": "Dining Hue NC", "rid-ne": "Dining Hue NE"}
