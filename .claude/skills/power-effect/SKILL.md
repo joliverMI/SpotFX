@@ -17,6 +17,12 @@ scene's Strips entry today (STAR's Strips `power` step was removed by the
 any effect on this list. Check `EFFECT_SCENE_MAP.json`'s scene entries before
 assuming a fix is scoped to one scene.
 
+**Being retired from the Singles (2026-10-07):** `scripts/
+migrate_singles_to_pulse.py` (pulse-effect skill, "Phase 4") switches every
+Power Singles entry to Pulse at deploy; its `--revert` puts Power and each
+scene's old params back. Check the live store before assuming a scene still
+runs Power here.
+
 ## `sparks_color` is an ACCENT param — force-written black unless the
    scene entry authored it
 
