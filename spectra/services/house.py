@@ -243,8 +243,13 @@ async def _default_fire_scene(scene_id: str, **kw) -> dict:
 
 
 async def _default_apply_set(card, glide_ms: int) -> dict:
+    # HOUSE LIGHTING (2026-10-06): a colour-only apply compiles as
+    # display_mode="default" too (see apply_color_set's own docstring) —
+    # the same reason _apply_scene_and_colour's scene fire passes
+    # origin="house" into scene_compiler.fire_scene.
     from spectra.services import engine
-    return await engine.conductor.apply_set_directly(card, glide_ms=glide_ms)
+    return await engine.conductor.apply_set_directly(
+        card, glide_ms=glide_ms, display_mode="default")
 
 
 def _default_conductor():
@@ -542,6 +547,66 @@ def response_deferral() -> Optional[str]:
     except Exception:                                    # noqa: BLE001
         logger.exception("house: response_deferral failed — not deferring")
         return None
+
+
+def house_overrides_display() -> bool:
+    """True while a house mode is actually governing the room's own look
+    RIGHT NOW: the layer may act (gate() is None — not standby/off/refused)
+    AND the mode isn't currently handed to a music "show" phase. The
+    Admiral's ruling, 2026-10-06: "house lighting modes should override
+    dark mode" — spectra/services/dark_light.py's global Default/Dark/
+    Light display mode must not alter a house mode's own authored look
+    while this is True, the same shape as Force Colour's `origin !=
+    "house"` exception one axis over (spectra/services/force_color.py).
+    Deliberately `layer_active()`, not `_live_mode()` — the latter also
+    answers during standby (its own look still "stands" there, frozen,
+    for a preview to judge against), which this predicate must NOT count
+    as driving, per the ruling's own "not standby" wording; `scene_deferral`
+    above intentionally differs here for that reason. A "calm"/"ignore"
+    mode is driving even while music plays (it keeps its look through
+    music exactly as `scene_deferral` already treats it); a "show" mode
+    only while it is actually resting (`_resting_now`). Never raises — an
+    unreadable state reads as "not overriding," so Dark/Light simply
+    applies as it always has."""
+    try:
+        if not layer_active():
+            return False
+        mode = current_mode()
+        if mode is None:
+            return False
+        return _resting_now(mode, deps.playing())
+    except Exception:                                    # noqa: BLE001
+        logger.exception("house: house_overrides_display failed — not overriding")
+        return False
+
+
+async def _resync_dark_light_override() -> None:
+    """Called right as the house layer's own driving state (above) is
+    about to flip — clears dark_lock/skips Light's forced write the
+    instant a mode starts resting (_enter), and reasserts the room's
+    STORED display_mode the instant music takes the room back (_hand_in)
+    or the layer stops acting at all (_go_inactive) — "switching from
+    house to music re-applies Dark," the Admiral's own acceptance line.
+    `dark_light.reconcile()` already consults `house_overrides_display()`
+    itself (spectra/services/dark_light.py's `_house_driving`), so simply
+    re-running it with the room's own current settings is enough; this
+    never touches the stored display_mode. A no-op while it's "default"
+    — nothing for Dark/Light to apply or withhold either way. Never
+    raises: a failed resync here must never abort the house tick that
+    called it."""
+    try:
+        from spectra.services.room_controls import load_room_controls
+        controls = load_room_controls()
+        if controls.display_mode == "default":
+            return
+        from spectra.services import dark_light
+        await dark_light.reconcile(controls.display_mode,
+                                   controls.dark_light_shield_categories,
+                                   controls.dark_light_shield_virtuals,
+                                   controls.display_light_bg_color,
+                                   controls.display_light_bg_brightness)
+    except Exception:                                    # noqa: BLE001
+        logger.exception("house: dark/light resync failed")
 
 
 def _expanded_set_ids(mode: HouseMode) -> frozenset:
@@ -1011,6 +1076,9 @@ async def apply_settings_patch(body: dict) -> dict:
 # ── phases ─────────────────────────────────────────────────────────────────
 
 async def _go_inactive(why: str, *, fade_s: float, write_motion: bool) -> None:
+    # The layer is stepping down (off/refused/no mode) — it is no longer
+    # driving, so the room's stored display_mode governs again.
+    await _resync_dark_light_override()
     if (_rt.phase != PHASE_INACTIVE or _rt.base_pushed or _rt.caps_pushed
             or _rt.motion_applied):
         await _let_go(fade_s=fade_s, write_motion=write_motion)
@@ -1080,6 +1148,10 @@ def music_levels(mode: HouseMode) -> dict:
 
 
 async def _hand_in(mode: HouseMode) -> None:
+    # Music is taking the room back — the house mode is no longer
+    # governing, so the room's stored display_mode (Dark/Light) resumes
+    # before the show's own writes start landing.
+    await _resync_dark_light_override()
     await _let_go(fade_s=HAND_IN_FADE_S, write_motion=True)
     # A resting look's "off" is the mode's, not the show's: every fixture is
     # powered and streamed for the music (house_fixtures reads this).
@@ -1107,6 +1179,10 @@ def _push_music_levels(mode: HouseMode) -> None:
 async def _enter(mode: HouseMode, glide_s: float, *, why: str,
                  refire: bool = False, prefer_remembered: bool = False) -> None:
     glide_s = max(0.0, float(glide_s))
+    # The house mode is about to (re)paint its own look — clear the global
+    # Dark/Light override BEFORE it fires, so its first write already
+    # lands unclamped instead of flashing black/light-biased for one frame.
+    await _resync_dark_light_override()
     plan = build_plan(mode)
     from fx import device_rate
     from spectra.services import show_output
@@ -1627,6 +1703,10 @@ def status_dict() -> dict:
     out["tv_music"] = st.tv_music
     out["seam_active"] = layer_active()
     out["seam_reason"] = inactive_reason()
+    # Surfaced so the Mode button can say "not applied while a house mode
+    # is driving" instead of silently disagreeing with what the lights
+    # are actually doing (spectra/services/dark_light.py's own exception).
+    out["overrides_display_mode"] = house_overrides_display()
     try:
         from spectra.services import house_fixtures
         out["fixtures_seam"] = house_fixtures.status()

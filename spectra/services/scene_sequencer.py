@@ -259,9 +259,15 @@ async def fire_scene_by_id(scene_id: str,
     # every existing caller — and every test double of fire_scene — keeps
     # the exact old call shape.
     glide = {} if transition_ms is None else {"transition_ms": transition_ms}
+    # HOUSE LIGHTING (2026-10-06, the Admiral's ruling: "house lighting
+    # modes should override dark mode") — a house fire compiles as
+    # display_mode="default" so an authored black background stays
+    # literal black, never Light's substitution; every other caller keeps
+    # the room's own stored mode (scene_compiler.fire_scene's default).
+    display_mode_kw = {} if origin != "house" else {"display_mode": "default"}
     result = await scene_compiler.fire_scene(scene, intensity=intensity,
                                              color_set=color_set, dry_run=False,
-                                             **glide)
+                                             **glide, **display_mode_kw)
     if overrode_disabled:
         result["overrode_disabled"] = True
     if overrode_dwell:

@@ -958,6 +958,17 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        id: 'house-overrides-dark',
+        title: 'House lighting modes override Dark/Light',
+        keywords: 'house mode overrides dark light display mode standard evening dim night away tv drive own look not applied',
+        body: [
+          'While a house lighting mode is actually driving the room\'s own look — set, SPECTRA holds the room, and the room isn\'t in the middle of a music show — the global Dark/Light display mode simply doesn\'t apply to it. The house mode\'s own authored colours/backgrounds render exactly as set, whatever the Mode button currently says.',
+          'This is the same exception Force Scene and Force Colour already have for house lighting: a house mode picks its own scene and colours, ignoring whatever else is pinned or forced, so its look is predictable regardless of other room-wide switches.',
+          'A gray dot on the Mode button, and a note in its panel, say "not applied while a house mode is driving" whenever this is in effect. Nothing about the Mode setting itself changes — it is remembered exactly as you left it, and resumes the instant a music show takes the room back, or no house mode is driving any more.',
+          'A "Calm" or "Ignore" house mode counts as driving even while music is playing (it keeps its own look through the song); a "Show" mode only counts while it is actually resting between songs.',
+        ],
+      },
+      {
         id: 'display-light-mode',
         title: 'Light mode — forced background',
         keywords: 'light mode forced background colour color brightness picker unconditional playing test before after watchable',

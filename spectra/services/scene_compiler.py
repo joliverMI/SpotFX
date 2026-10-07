@@ -371,7 +371,8 @@ async def fire_scene(scene: SceneV2, *, intensity: float = 0.5,
                      color_set: Optional[ColorSetCard] = None,
                      dry_run: bool = True,
                      rng: Random | None = None,
-                     transition_ms: Optional[int] = None) -> dict[str, Any]:
+                     transition_ms: Optional[int] = None,
+                     display_mode: Optional[str] = None) -> dict[str, Any]:
     """Resolve at the given intensity (effect selection included), compile,
     and (live only) send through the seam. The returned resolution report +
     writes are the test-fire display: dry and live runs share every step up
@@ -389,7 +390,16 @@ async def fire_scene(scene: SceneV2, *, intensity: float = 0.5,
     house lighting's mode glides (spectra/services/house.py: 90 s at a
     clock change, 5 s on a press). An effect-type switch still crossfades
     in at most the virtual's own transition cap; a same-effect change
-    glides the whole length."""
+    glides the whole length.
+
+    display_mode, when given, REPLACES the room's own stored display_mode
+    for THIS fire's compile only — house lighting's own fires pass
+    "default" (spectra/services/scene_sequencer.fire_scene_by_id's
+    origin="house" branch) so an authored #000000 background stays
+    literal black instead of taking Light's substitution (the Admiral's
+    ruling, 2026-10-06: house modes render exactly as authored, Dark/
+    Light does not apply to them). None (every other caller) is the
+    exact previous behaviour — the room's own stored mode, unchanged."""
     if color_set is None:
         color_set = room_active_set()
     # A LOCAL, lazy import — room_controls must never be a module-level
@@ -397,10 +407,11 @@ async def fire_scene(scene: SceneV2, *, intensity: float = 0.5,
     # entry): loaded once here, both branches below reuse `room`.
     from spectra.services import room_controls
     room = room_controls.load_room_controls()
+    effective_display_mode = display_mode if display_mode is not None else room.display_mode
     ctx = FireContext(intensity, rng=rng)
     resolved = resolve_scene(scene, ctx)
     writes = compile_scene(resolved, color_set,
-                           display_mode=room.display_mode,
+                           display_mode=effective_display_mode,
                            light_bg_color=room.display_light_bg_color)
     if not dry_run:
         # SAME-SCENE RE-FIRE keeps colour custody (owner ask 2026-09-25,

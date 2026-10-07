@@ -721,7 +721,8 @@ class DriftConductor:
             from_deg=from_deg,
             rung=pick.rung)
 
-    async def apply_color_set(self, card, *, glide_ms: Optional[int] = None) -> int:
+    async def apply_color_set(self, card, *, glide_ms: Optional[int] = None,
+                              display_mode: Optional[str] = None) -> int:
         """Land a colour-set card on the live scene's set-mode virtuals as
         a JUMP and move the palette/brightness baselines with it (the
         conductor owns the baselines drift resumes from). Returns virtuals
@@ -729,13 +730,24 @@ class DriftConductor:
         for the next fire to wear (scene_compiler.fire_scene).
 
         glide_ms (house lighting's mode glides) lands the same params as a
-        GLIDE over that long instead of a jump; None is the jump, unchanged."""
+        GLIDE over that long instead of a jump; None is the jump, unchanged.
+
+        display_mode, when given, REPLACES the room's own stored
+        display_mode for THIS apply only — house lighting's own
+        colour-only apply passes "default" (spectra/services/house.py's
+        _default_apply_set), mirroring scene_compiler.fire_scene's own
+        display_mode override, so an authored black background stays
+        literal black instead of taking Light's substitution. None (every
+        other caller: POST /room-color/apply, the sequencer/response-
+        engine colour picks) is the exact previous behaviour."""
         from spectra.services import scene_compiler
         from spectra.services.room_controls import resolve_authored_bg_color
         from fx import device_model
         by_vid = scene_compiler.set_entries_for(
             card, {vid: st.effect_type for vid, st in self.virtuals.items()})
         controls = self._room_controls()
+        effective_display_mode = (display_mode if display_mode is not None
+                                  else controls.display_mode)
         landed = 0
         for vid, state in self.virtuals.items():
             if not state.set_mode:
@@ -750,7 +762,7 @@ class DriftConductor:
             if entry.bg_color and not device_model.bg_color_blocked(
                     state.effect_type):
                 bg_color = resolve_authored_bg_color(
-                    entry.bg_color, controls.display_mode,
+                    entry.bg_color, effective_display_mode,
                     controls.display_light_bg_color)
                 params["background_color"] = bg_color
                 state.background_color = bg_color
@@ -772,7 +784,8 @@ class DriftConductor:
 
     async def apply_set_directly(self, card, *,
                                  forced_from: Optional[str] = None,
-                                 glide_ms: Optional[int] = None) -> dict:
+                                 glide_ms: Optional[int] = None,
+                                 display_mode: Optional[str] = None) -> dict:
         """The supported manual apply-this-set surface (owner defect fix,
         part b — reached via POST /api/room-color/apply): the card becomes
         the room's active set, the wheel anchors at its position (rainbow:
@@ -787,12 +800,19 @@ class DriftConductor:
         redirect is named there rather than looking like he authored a
         trigger for the pinned set, exactly the way fire_scene_by_id names
         its own forced_color. None (the default, every other caller) is
-        unchanged behaviour and writes no extra key."""
+        unchanged behaviour and writes no extra key.
+
+        display_mode is threaded straight to apply_color_set — see that
+        function's own docstring (house lighting's "default" override)."""
         position = self._set_position(card.id)
-        # glide_ms only when asked, so every existing caller (and test
-        # double) keeps the exact old call shape.
-        landed = await (self.apply_color_set(card, glide_ms=glide_ms)
-                        if glide_ms else self.apply_color_set(card))
+        # glide_ms/display_mode only when asked, so every existing caller
+        # (and test double) keeps the exact old call shape.
+        kw: dict[str, Any] = {}
+        if glide_ms:
+            kw["glide_ms"] = glide_ms
+        if display_mode is not None:
+            kw["display_mode"] = display_mode
+        landed = await self.apply_color_set(card, **kw)
         room = self._room_load()
         update: dict[str, Any] = {"active_set_id": card.id,
                                   "destination": None}

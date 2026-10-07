@@ -79,6 +79,10 @@ export interface LightingStatus {
   phase: HousePhase;
   reason: string;
   problems: string[];
+  /** True while this mode is governing the room's own look right now —
+   * the global Default/Dark/Light display mode does not apply to it
+   * (spectra/services/house.py's house_overrides_display, 2026-10-06). */
+  overrides_display_mode?: boolean;
   recent: { at_ms: number; kind: string; [k: string]: unknown }[];
   music?: { playing: boolean | null; policy: MusicPolicy; hue: MusicHue; returns_in_s: number | null };
   next_scene_in_s?: number | null;

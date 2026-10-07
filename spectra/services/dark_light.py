@@ -148,6 +148,26 @@ fx_seam.get_virtuals() read confirms the ACTUAL resulting dark_lock per
 virtual and, for Light, the actual background_color/background_brightness
 landed on each written virtual; anything that doesn't match comes back
 named in `unconfirmed`, never folded into a bigger "done" count.
+
+HOUSE LIGHTING IS THE ONE EXCEPTION (2026-10-06, the Admiral's ruling:
+"house lighting modes should override dark mode") — see `_house_driving()`'s
+own docstring for the mechanism. While a house mode (spectra/services/
+house.py) is actually governing the room's own look right now (not the
+music "show" phase, not standby/off/refused), this module withholds every
+active write it would otherwise make — the dark_lock push, Light's forced
+background, and the "default"-mode stale-snapshot repaint — on EVERY
+virtual, the same way it already withholds them on a shielded one. The
+STORED display_mode setting is never changed by this; it simply doesn't
+apply while a house mode drives, and house.py's own `_enter`/`_hand_in`/
+`_go_inactive` hooks call `reconcile()` again, with the room's current
+stored display_mode, every time its own driving state flips — which is
+what makes dark_lock reassert itself the instant music takes the room
+back from a resting mode, with no PUT required. Mirrors Force Colour's
+`origin != "house"` exception one axis over (spectra/services/
+force_color.py) — a "calm"/"ignore" house mode keeps its look through
+music exactly like it keeps its scene (house.scene_deferral), so it
+counts as driving even while music plays; a "show" mode only while it is
+actually resting.
 """
 from __future__ import annotations
 
@@ -300,6 +320,34 @@ def _shielded_set(shield_categories: list[str], shield_virtuals: list[str]) -> s
     return out
 
 
+def _house_driving() -> bool:
+    """True while a house lighting mode currently governs the room's own
+    look (spectra/services/house.py's `house_overrides_display`) — the
+    Admiral's ruling, 2026-10-06: "house lighting modes should override
+    dark mode." While this is True, every active write this module makes
+    (the dark_lock push, Light's forced background) and every restore it
+    would otherwise make (the "default" snapshot repaint) is withheld for
+    EVERY virtual, exactly as if the whole room were shielded — a house
+    mode's look is the room's authored content for as long as it drives,
+    the same reasoning `bridge.is_playing()` already uses to skip a stale
+    default-mode repaint below. The STORED display_mode setting is never
+    touched by this — it simply doesn't apply while a house mode drives,
+    and reasserts itself (dark_lock included) the instant house.py's own
+    `_enter`/`_hand_in`/`_go_inactive` hooks call `reconcile()` again as
+    its driving state flips. Lazy import, like every other cross-module
+    reference in this file (see AGENTS.md's light-mode-fix-import-crash
+    entry) — house.py has no reciprocal import of this module at module
+    scope either. Never raises: an unreadable house state is read as "not
+    driving", so Dark/Light simply applies as it always has."""
+    try:
+        from spectra.services import house
+        return house.house_overrides_display()
+    except Exception:
+        logger.exception("dark/light: could not read house state — not treating "
+                         "it as driving")
+        return False
+
+
 async def reconcile(mode: str, shield_categories: list[str], shield_virtuals: list[str],
                     light_bg_color: str = "#201830",
                     light_bg_brightness: float = 0.3) -> dict:
@@ -339,6 +387,10 @@ async def _reconcile_impl(mode: str, shield_categories: list[str],
     if not virtual_ids:
         return {"status": "no-devices"}
     shielded = _shielded_set(shield_categories, shield_virtuals)
+    # HOUSE LIGHTING OVERRIDE (2026-10-06) — see _house_driving()'s own
+    # docstring. Treated exactly like an extra, dynamically-computed
+    # shielded set for the duration of this one call.
+    house_held = set(virtual_ids) if _house_driving() else set()
 
     snapshot: dict = {}
     if mode == "dark":
@@ -357,7 +409,7 @@ async def _reconcile_impl(mode: str, shield_categories: list[str],
         snapshot = _load_snapshot()
 
     for vid in virtual_ids:
-        want = (mode == "dark") and vid not in shielded
+        want = (mode == "dark") and vid not in shielded and vid not in house_held
         try:
             await fx_seam.set_virtual_config(vid, {"dark_lock": want})
         except Exception:
@@ -383,7 +435,7 @@ async def _reconcile_impl(mode: str, shield_categories: list[str],
         writes = []
         pre_light = _load_light_snapshot()
         for vid in virtual_ids:
-            if vid in shielded:
+            if vid in shielded or vid in house_held:
                 continue
             effect = (live.get(vid) or {}).get("effect") or {}
             effect_type = effect.get("type")
@@ -415,7 +467,17 @@ async def _reconcile_impl(mode: str, shield_categories: list[str],
     elif mode == "default":
         if snapshot:
             from spectra.services.engine import bridge
-            if bridge.is_playing() is True:
+            if house_held:
+                # A house lighting mode governs the room right now — the
+                # same "something live is about to repaint it anyway"
+                # reasoning the music-playing check below already uses.
+                # Forcing the stale pre-dark snapshot back would stomp the
+                # house mode's own authored look with whatever was showing
+                # before Dark was ever engaged.
+                repaint_skipped = "house_mode"
+                logger.info("dark/light: a house lighting mode governs the room — "
+                           "skipping the stale pre-dark repaint, its own look stands")
+            elif bridge.is_playing() is True:
                 # Music is live right now — the snapshot is a still frame
                 # from the moment dark was engaged, already stale. Forcing
                 # it back is the same mistake as Ambient holding the room
@@ -432,7 +494,7 @@ async def _reconcile_impl(mode: str, shield_categories: list[str],
             else:
                 writes = [{"virtual_id": vid, "effect_type": snap["type"], "config": snap["config"]}
                          for vid, snap in snapshot.items()
-                         if vid in virtual_ids and vid not in shielded]
+                         if vid in virtual_ids and vid not in shielded and vid not in house_held]
                 if writes:
                     try:
                         await fx_seam.apply_writes(writes, transition_ms=0)
@@ -441,7 +503,7 @@ async def _reconcile_impl(mode: str, shield_categories: list[str],
                         logger.exception("dark/light: repaint after unlock failed")
             _clear_snapshot()
         # AFTER the pre-dark replay, which may itself carry Light's paint.
-        restored_pre_light = await _restore_pre_light(virtual_ids, shielded)
+        restored_pre_light = await _restore_pre_light(virtual_ids, shielded | house_held)
         restored = sorted(set(restored) | set(restored_pre_light))
 
     # Verify at the bridge — read the ACTUAL resulting state back rather
@@ -454,7 +516,7 @@ async def _reconcile_impl(mode: str, shield_categories: list[str],
     locked: list[str] = []
     unconfirmed: set[str] = set()
     for vid in virtual_ids:
-        want = (mode == "dark") and vid not in shielded
+        want = (mode == "dark") and vid not in shielded and vid not in house_held
         actual = bool((live_after.get(vid) or {}).get("config", {}).get("dark_lock", False))
         if actual == want:
             if want:
@@ -477,6 +539,8 @@ async def _reconcile_impl(mode: str, shield_categories: list[str],
         "locked": sorted(locked),
         "shielded": sorted(shielded & set(virtual_ids)),
     }
+    if house_held:
+        result["house_overridden"] = sorted(house_held)
     if mode == "default":
         result["restored"] = sorted(restored)
         if repaint_skipped:
