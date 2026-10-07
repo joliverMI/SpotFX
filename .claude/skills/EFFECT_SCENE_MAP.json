@@ -97,9 +97,11 @@
         "scripts/check_fish_disperse.py",
         "scripts/check_fish_lunge.py",
         "scripts/check_fish_wake.py",
+        "scripts/check_fish_wall.py",
         "tests/test_fish.py",
         "tests/test_fish_camera.py",
-        "tests/test_fish_disperse.py"
+        "tests/test_fish_disperse.py",
+        "tests/test_fish_wall.py"
       ]
     },
     "melt-effect": {
@@ -222,6 +224,7 @@
       "skill": ".claude/skills/house-scenes/SKILL.md",
       "files": [
         "scripts/seed_house_lighting.py",
+        "scripts/add_house_fish_solo_burst.py",
         "tests/test_seed_house_lighting.py"
       ]
     }

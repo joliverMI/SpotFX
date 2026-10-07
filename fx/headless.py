@@ -46,6 +46,7 @@ def write_headless_config(
     rows: int = 8,
     device_id: str = DEFAULT_DEVICE_ID,
     initial_effect: Optional[dict] = None,
+    real_mask=None,
 ) -> None:
     """Write an fx config.json describing one dummy device with a matching
     matrix virtual, the way LedFX persists a device+virtual pair. The virtual
@@ -55,30 +56,68 @@ def write_headless_config(
     initial_effect ({"type": ..., "config": {...}}) restores an effect at
     host start — the production reality every SpotFX-driven virtual lives in
     (the fork's effects PUT 400s on a virtual with no active effect). Note it
-    also ACTIVATES the virtual at start, i.e. spawns its render thread."""
+    also ACTIVATES the virtual at start, i.e. spawns its render thread.
+
+    real_mask (one bool per virtual pixel, True = a lit cell) builds the
+    shape his crystal-mapper actually has instead: the virtual spans TWO
+    dummy devices, `<device_id>-cells` for the real cells and
+    `gap-<device_id>` for the dark ones (`fx.utils.is_gap_device`'s own
+    rule), one segment per run of the mask, in pixel order. The virtual is
+    then a plain mapper (no is_device), still addressed as `device_id`."""
     os.makedirs(config_dir, exist_ok=True)
+    if real_mask is None:
+        devices = [
+            {
+                "id": device_id,
+                "type": "dummy",
+                "config": {"name": device_id, "pixel_count": pixel_count},
+            }
+        ]
+        segments = [[device_id, 0, pixel_count - 1, False]]
+        is_device = device_id
+    else:
+        mask = [bool(v) for v in real_mask]
+        if len(mask) != pixel_count:
+            raise ValueError(
+                f"real_mask has {len(mask)} cells, the virtual {pixel_count}"
+            )
+        real_id, gap_id = f"{device_id}-cells", f"gap-{device_id}"
+        counts = {real_id: 0, gap_id: 0}
+        segments = []
+        i = 0
+        while i < pixel_count:
+            j = i
+            while j < pixel_count and mask[j] == mask[i]:
+                j += 1
+            dev = real_id if mask[i] else gap_id
+            segments.append([dev, counts[dev], counts[dev] + (j - i) - 1, False])
+            counts[dev] += j - i
+            i = j
+        devices = [
+            {
+                "id": dev,
+                "type": "dummy",
+                "config": {"name": dev, "pixel_count": max(count, 1)},
+            }
+            for dev, count in counts.items()
+        ]
+        is_device = None
     virtual_entry = {
         "id": device_id,
-        "is_device": device_id,
+        "is_device": is_device,
         "auto_generated": False,
         "config": {
             "name": device_id,
             "mapping": "span",
             "rows": rows,
         },
-        "segments": [[device_id, 0, pixel_count - 1, False]],
+        "segments": segments,
     }
     if initial_effect is not None:
         virtual_entry["effect"] = initial_effect
     config = {
         "configuration_version": _current_config_version(),
-        "devices": [
-            {
-                "id": device_id,
-                "type": "dummy",
-                "config": {"name": device_id, "pixel_count": pixel_count},
-            }
-        ],
+        "devices": devices,
         "virtuals": [virtual_entry],
     }
     with open(os.path.join(config_dir, "config.json"), "w") as f:

@@ -1644,3 +1644,34 @@ against that commit.
     `scripts/check_star_spin_motion.py`, `tests/test_radial_base_rotation.py`.
     Unverified against his live room (standing order 35, no live test
     without his word).
+55. `effects/fish.py` (SpotFX-authored, #21): THE WALL IS ANTICIPATED, and
+    a SOLO BURST (2026-10-06, his words: "the fish don't interact with the
+    'wall' naturally. Have them 'anticipate' the wall and start turning
+    away. Do this on both fish scenes. In house fish scene, give individual
+    ones an occasional burst of speed"). The wall is read off the virtual's
+    own segments (`_real_cell_mask`: a pixel on a gap device, by
+    `fx.utils.is_gap_device`, is dark, mapped through Twod's own
+    flip/mirror/rotate) and filled into the lit silhouette (`_silhouette` —
+    the crystal's hexagon), cached as a signed distance field
+    (`_wall_field`). Ordinary swimmers (not the charge's school, the rush,
+    ejecta or a dispersing fish) look `WALL_LOOK_BASE_R` turn radii plus
+    `wall_lookahead` seconds of their own speed ahead (never under half a
+    body length, capped at the pond's short radius, `_wall_look`), and when the wall — the pond for the
+    middle, the silhouette for the nose and the body's width — is inside
+    that, steer toward the nearest swimmable heading with
+    `WALL_CLEAR_X` look-aheads of free water, at the curvature that
+    completes the turn in the room left (`_wall_steer`), keeping the side
+    it chose unless the other is clearly freer, eased in and out, blended
+    over the other steering by urgency, under the existing turn-radius
+    clamp.
+    `wall_lookahead = 0` is the old pond-edge steer, kinematics bit for bit
+    (proven against the merge-base). Boot placement re-draws a fish until
+    its body fits (wall on only). The solo burst (`solo_burst_rate`, per
+    minute, Poisson; `solo_burst_speed`; `solo_burst_time`; schema default
+    rate 0 = never) multiplies one random ordinary swimmer's speed target
+    through an attack/hold/ease envelope (`p_sb`, `p_sb_t`) and its stroke
+    rate; never during a phase or a crossfade, never on a fish with the
+    wall close ahead. New SoA arrays `p_wsg`, `p_wurg`, `p_sb`, `p_sb_t`.
+    `headless.py` (SpotFX-authored) gained `real_mask` so a rig can be his
+    crystal's real/gap shape. Evidence: `scripts/check_fish_wall.py`,
+    `tests/test_fish_wall.py`. Unverified against his live room.

@@ -66,9 +66,15 @@ async def charge_run(effect_type, seed):
             # letting the population drift between the two columns would
             # measure "more fish in the same panel" and call it a spacing
             # regression.
-            eff = headless.attach_effect(
-                host, virtual, effect_type, dict(HIS, school_count=12)
-            )
+            # The wall (fm/fish-wall-avoid) is held at its escape hatch on
+            # the AFTER side for the same reason: the school itself never
+            # feels it, but where the ordinary fish are heading when the
+            # charge starts does, and that moves how much of the grid the
+            # school sweeps — not something the spacing steer did.
+            cfg = dict(HIS, school_count=12)
+            if effect_type == "fish":
+                cfg["wall_lookahead"] = 0.0
+            eff = headless.attach_effect(host, virtual, effect_type, cfg)
             eff._rng = np.random.default_rng(seed)
 
             def step():

@@ -2039,7 +2039,7 @@
           "min": 0.3,
           "max": 1.4,
           "aspect": "shape",
-          "note": "How much of the panel the fish use before turning back. 1.0 is the panel's own inscribed ellipse, which on the crystal hex sits inside the lit silhouette.",
+          "note": "How much of the panel the fish's MIDDLES use before turning back; 1.0 is the panel's own inscribed ellipse. On the crystal that ellipse pokes past the hexagon's slanted edges, so the fish's BODIES are kept inside the real lit shape separately, by the wall (Wall Look-ahead). Above 1.0 the pond is bigger than the panel by choice, and the wall grows with it.",
           "default": 0.95
         },
         "camera_follow": {
@@ -2121,6 +2121,61 @@
           "aspect": "shape",
           "default": false,
           "note": "Driven by the Fish Swim Burst flare, not set by hand: while on, every fish dashes and strokes its fins much faster. The flare kind's hold_ms (300) is the burst's length and it fires on the trigger (trigger_offset_ms 0; negative = earlier), both Sonic-editable."
+        },
+        "wall_lookahead": {
+          "label": "Wall Look-ahead",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 3.0,
+          "aspect": "shape",
+          "note": "How far ahead of its nose a fish sees the wall coming, in SECONDS of its own swimming, on top of the room it needs to turn and never less than half its own length (a big slow fish needs room to swing its body round) - so the distance grows with its speed and a fish on a beat, a lunge or a burst starts turning sooner. The wall is the panel's real lit shape (the crystal's hexagon), and no part of a fish's body swims past it. 0 = the old late turn at the pond edge, exactly.",
+          "help_topic": "fish-wall",
+          "default": 0.35
+        },
+        "wall_turn_strength": {
+          "label": "Wall Turn Strength",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.2,
+          "max": 3.0,
+          "aspect": "shape",
+          "note": "How firmly a fish turns away once it sees the wall: lower is lazier, wider curves; higher turns earlier and keeps more water between it and the wall. However lazy, a fish still turns in time - the laziness only shapes the start of the curve.",
+          "help_topic": "fish-wall",
+          "default": 1.0
+        },
+        "solo_burst_rate": {
+          "label": "Solo Burst Rate",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 30.0,
+          "aspect": "shape",
+          "note": "How many times a minute ONE fish, picked at random, puts on a sudden burst of speed (irregularly, like a real tank). 0 = never, the default; the House Fish scene turns it on. Not the Swim Burst flare, which sends the whole shoal at once on a trigger.",
+          "help_topic": "fish-solo-burst",
+          "default": 0.0
+        },
+        "solo_burst_speed": {
+          "label": "Solo Burst Speed",
+          "type": "numeric",
+          "smooth": true,
+          "min": 1.2,
+          "max": 5.0,
+          "aspect": "shape",
+          "note": "A solo burst's top speed, as a multiple of that fish's ordinary swimming speed.",
+          "help_topic": "fish-solo-burst",
+          "default": 2.5
+        },
+        "solo_burst_time": {
+          "label": "Solo Burst Time",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.2,
+          "max": 3.0,
+          "aspect": "shape",
+          "note": "Seconds a solo burst holds its top speed before it eases back to the fish's ordinary pace.",
+          "help_topic": "fish-solo-burst",
+          "default": 0.8
         }
       },
       "defaults": {
@@ -2169,7 +2224,12 @@
         "turn_min_time": 0.4,
         "rush_count": 20,
         "rush_time": 1.0,
-        "rush_chaos": 0.5
+        "rush_chaos": 0.5,
+        "wall_lookahead": 0.35,
+        "wall_turn_strength": 1.0,
+        "solo_burst_rate": 0.0,
+        "solo_burst_speed": 2.5,
+        "solo_burst_time": 0.8
       }
     },
     "gifplayer": {
