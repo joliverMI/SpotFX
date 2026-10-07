@@ -2477,6 +2477,31 @@ transpiled real `compactPositions` against `layoutPositions` — no label
 row reserved, genuine reflow against a measured width rather than a
 two-preset switch, and identical per-fixture box shapes between the two).
 
+**HIS PREVIEW REACHES SPECTRA THROUGH TWO PROXIES, AND THE SECOND ONE IS
+THE SPOT-EFFECTS EVENT LOOP (2026-10-07, phase 4 of the same plan,
+`data/preview-p4-live-check/report.md`).** `tailscale serve` on
+`https://serenity.tailb5ca89.ts.net` sends `/` to :8000, whose
+`services/spectra_proxy.py` relays the WebSocket to :8010 — so his
+connections arrive as 127.0.0.1 sockets owned by tailscaled, never as
+100.x peers, and a probe keyed on Tailscale addresses sees nothing.
+Measured read-only under a real show with his browser on the preview
+(`scripts/preview_perf/live_probe.py`, two protocol-2 viewers from the
+host through :8000 and direct to :8010, exact one-way delay off the
+server's own send stamp): the proxy hop is 0.3 ms at the median and the
+whole cost is spot-effects' loop stalls (one 9.7 s freeze, p99 80 ms, 37
+rate step-downs against 4 direct); his Tailscale leg itself had zero
+retransmits. Change 7's answer is the serve route in
+`docs/SPECTRA_PROCESS_SPLIT.md` ("His remote path"), a deploy step, not
+code. **A newest-wins relay was ruled out on correctness**: a tick carries
+only the devices changed since the viewer's previous tick was BUILT and
+the next ack clears it from the window, so a tick dropped in a proxy
+strands a still device's last change (the report's §3). Found alongside,
+NOT change 7's and not fixed here: BOTH paths miss the 33 ms tick clock
+under a live show (~150 inter-arrival gaps over 100 ms a minute, server
+age p90 ~80 ms, 300-700 ms spikes on the direct path too) — that is the
+Spectra process's own loop, the thing a "preview jumps" report would see
+whichever route it took.
+
 **THE PREVIEW STREAM IS PROTOCOL 2 (2026-10-05, phase 1 of
 `data/preview-perf-plan/report.md`).** `spectra/services/preview_stream.py`'s
 docstring is the binding statement (wire format included); the paragraphs
@@ -7183,11 +7208,12 @@ levels (`av_sync_correlate.signed_edges` docstring has the measured why);
 (2) the ONLY file it writes is `storage/spectra/av_sync_measurements.json`
 (numbers + statement, last 100) — keep it that way, the privacy statement
 in help topic `av-sync-privacy` promises it; (3) **camera/mic need a
-secure context** and he reaches SPECTRA over plain http (Tailscale, no
-`tailscale serve`) — the page detects it and names the two fixes (Chrome's
-per-origin flag tonight; HTTPS in front of :8000 properly — which also
-unblocks the Settings voice mic, silently dead on his phone for the same
-reason). The vision/ArUco stage is deliberately NOT built — only its seam
+secure context** — since 2026-10 he reaches SPECTRA at
+`https://serenity.tailb5ca89.ts.net` (`tailscale serve` → :8000, see
+`docs/SPECTRA_PROCESS_SPLIT.md`'s "His remote path"), a secure context;
+the page still detects a plain-http origin and names the two fixes
+(Chrome's per-origin flag, or HTTPS in front of :8000 — which is what the
+serve route provides) for anyone reaching it another way. The vision/ArUco stage is deliberately NOT built — only its seam
 (`FrameRing`, frame tap OFF by default) is. Proof without a room:
 `scripts/check_av_sync.py` (simulated rooms through the real code);
 `tests/test_av_sync_*.py`.
