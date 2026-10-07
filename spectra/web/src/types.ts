@@ -482,6 +482,10 @@ export interface RoomControlState {
    * detector-found drops on the four reference songs, measured; 0.7
    * keeps 9 of 11). */
   drop_floor: number;
+  /** The longest a lull stays fully dark, in seconds, on the lull-dark
+   * effects (Black Hole, Squiggles, Pulse): a lull holds dark for half its
+   * length, never longer than this (fx/effects/lull_dark.py). Default 3. */
+  lull_dark_max_s: number;
   /** Legacy Now Playing "Force Scene" control, ported verbatim: while
    * enabled, every scene the system would otherwise pick automatically
    * (sequencer roll, trigger fire, or the automatic transition fire) fires

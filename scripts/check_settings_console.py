@@ -131,9 +131,11 @@ check(set(sc.SETTINGS_REGISTRY) == {
     "drop_confident_score", "drop_suggested_score",
     # the drop-floor setting (2026-10-06, the Admiral's own ask)
     "drop_floor",
+    # the lull-darkness cap (2026-10-07, the Admiral's own ask)
+    "lull_dark_max_s",
 }, "registry is the deliberate allowlist (eight room keys + the four "
    "analysed-transition knobs + the five 2026-10-06 widening keys + "
-   "drop_floor)")
+   "drop_floor + lull_dark_max_s)")
 check(sc.SETTINGS_REGISTRY["ambient_enabled"].kind == "bool"
       and sc.SETTINGS_REGISTRY["ambient_on_music_pause"].kind == "bool",
       "the ambient toggle is binary to Sonic too — no mode string to mis-say")

@@ -267,6 +267,18 @@ PHASE_EFFECTS = frozenset({
 #     right during a music show (scene_response._drive_phase).
 ONE_COLOUR_EFFECTS = frozenset({"pulse"})
 
+# The LULL-DARK effects (2026-10-07, the Admiral: "set a max time for that
+# portion to 3 seconds ... Do just these 3 effects for now"): phase effects
+# whose lull goes dark at a DARK POINT read through the shared rule in
+# fx/effects/lull_dark.py — dark for half the lull, never longer than the
+# room's lull_dark_max_s. Membership is what makes SpotFX push the lull's
+# own timing (`lull_ramp_s`, `lull_dark_s`) on the lull arm write
+# (spectra scene_response._drive_phase); an effect not listed here never
+# receives those keys. To opt an effect in, follow lull_dark.py's own
+# "HOW A LULL EFFECT OPTS IN". blackhole1d (Black Hole's strip) is the
+# natural next member.
+LULL_DARK_EFFECTS = frozenset({"blackhole", "squiggles", "pulse"})
+
 # The vendored effects carrying the flare-driven payoff burst: the
 # `burst_rockets` config key (an instant "explode N payoff rockets NOW"
 # count, edge-detected in config_updated, consumed per draw, self-reset to

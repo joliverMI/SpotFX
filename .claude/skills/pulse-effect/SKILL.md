@@ -78,6 +78,27 @@ Plan: `/home/javi/fleet-spotfx/data/single-led-power-plan/report.md`.
   disabled one (`resolve_lane_picks`), and `fire_kind` (the ▶ Preview)
   returns `below_min_intensity`.
 
+## The lull's dark point is the SHARED rule, not a constant here
+
+Since 2026-10-07 (the Admiral: "set a max time for that portion to 3
+seconds ... 17 seconds of expansion and 3 seconds of dark") this effect's
+lull goes dark at the dark point of `fx/effects/lull_dark.py` — dark for
+half the lull, never longer than the room's `lull_dark_max_s` (3 s by
+default, Sonic-editable via `set_setting`). SpotFX pushes `lull_ramp_s` /
+`lull_dark_s` on the lull arm (`scene_response._drive_phase`, only to
+`fx.device_model.LULL_DARK_EFFECTS`), and the effect measures the lull on
+its OWN seconds-in-phase, never `phase_progress` — after a completed
+charge the next lull's progress sits at 1.0 for its whole length (the
+1 ms arm tween is retargeted before it renders), which also made the
+orphan watchdog release a long lull 12 s in; `lull_dark.watchdog_progress`
+fixes that for the opted-in effects. A write WITHOUT the two keys falls
+back to the end of the ramp (`LULL_LEGACY_DARK_AT`, 1.0), byte-identical
+to Pulse's own pre-rule fade. Told, Pulse now reaches pitch black at the
+SAME dark point as the crystal (`keep = 1 - smooth(approach)`) — earlier
+than before on a short lull (half of it, matching the crystal), and a
+20 s lull is pitch black for exactly its last 3 s. Read lull_dark.py's
+docstring before changing anything about when this lull goes dark.
+
 ## Sonic reach
 
 Effect params: YES, as of the 2026-10-06 Sonic coverage audit build —
@@ -95,6 +116,8 @@ and only by copying a whole entry from another scene.
 
 ## Proofs
 
+`tests/test_lull_dark.py` (the dark-point rule and this effect's lull on
+the real pipeline).
 `tests/test_pulse_effect.py` (phase 1), `tests/test_pulse_engine_wiring.py`
 (phase 2), `tests/test_pulse_rainbow_flares.py` (phase 3: walk, flares,
 gating, real pipeline + device preview, his songs),

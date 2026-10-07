@@ -481,7 +481,13 @@ def _with_room(tmp_path, script):
     return _run(main())
 
 
-def test_a_lull_reaches_black_on_the_frame_the_strips_ramp_completes(tmp_path):
+def test_a_lull_reaches_black_at_the_shared_lull_dark_point(tmp_path):
+    """Pulse is pitch black from the lull's DARK POINT — the shared rule the
+    crystal uses (fx/effects/lull_dark.py, 2026-10-07): dark for half the
+    lull, never longer than lull_dark_max_s. A 3 s gap is short, so that is
+    half way: black from 1.5 s, while the strip's own ramp (orbits1d, not a
+    lull-dark effect) still runs to 90% of the gap, untouched. Before the
+    rule Pulse went black on the frame the strips' ramp completed."""
     GAP_MS = 3_000                    # ramp = 90% = 2700 ms, the shared rule
 
     async def script(room):
@@ -490,22 +496,27 @@ def test_a_lull_reaches_black_on_the_frame_the_strips_ramp_completes(tmp_path):
         rec = await room.responder.on_event("lull", 0.5, gap_ms=GAP_MS)
         assert set(rec["phase"]["targets"]) == {STRIP_V, SINGLE_V}
         assert rec["phase"]["ramp_ms"] == 2_700
+        assert rec["phase"]["lull_dark_s"] == pytest.approx(1.5)
         strip_done = pulse_black = None
         mid_level = None
+        blacks = []
         for i in range(1, 260):
             room.step()
-            if i == 80:
+            if i == 45:
                 mid_level = room.pulse.level
             if strip_done is None and room.strip_progress() >= 1.0 - 1e-9:
                 strip_done = i
             if pulse_black is None and room.pulse.level <= 1e-9:
                 pulse_black = i
-        return strip_done, pulse_black, mid_level, room
+            blacks.append(room.pulse.level <= 1e-9)
+        return strip_done, pulse_black, mid_level, blacks, room
 
-    strip_done, pulse_black, mid_level, room = _with_room(tmp_path, script)
+    strip_done, pulse_black, mid_level, blacks, room = _with_room(
+        tmp_path, script)
     assert strip_done is not None and pulse_black is not None
-    assert pulse_black == strip_done                 # the same frame
-    assert abs(strip_done - 2_700 / 1000 * FPS) <= 2  # ...at 90% of the gap
+    assert abs(pulse_black - 1.5 * FPS) <= 2         # half of the 3 s lull
+    assert all(blacks[pulse_black - 1:])             # and it stays black
+    assert abs(strip_done - 2_700 / 1000 * FPS) <= 2  # strip: 90% of the gap
     assert mid_level > 0.02                          # not black early
     assert np.all(room.single_frames[-1] == 0)       # true black at the light
 

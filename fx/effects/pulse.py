@@ -83,8 +83,14 @@ INPUTS THE ENGINE PUSHES (phase 2) — hooks with safe defaults:
   charge: the rest level climbs to `charge_top` (smoothstep of progress),
   hits keep landing on top (never less than CHARGE_MIN_DEPTH), fades
   shorten to CHARGE_FADE_X. lull: the level the light had at lull entry is
-  multiplied by 1 - smoothstep(progress), so it reaches black exactly when
-  the ramp completes (the same clock the other lights use). drop: begins ON
+  multiplied by 1 - smoothstep(approach), where `approach` runs 0 -> 1 from
+  the lull's start to its DARK POINT — the shared lull rule
+  (fx/effects/lull_dark.py, 2026-10-07: dark for half the lull, never
+  longer than the room's lull_dark_max_s, 3 s by default), the same dark
+  point the crystal's Black Hole and Squiggles use, so Pulse is pitch black
+  for exactly as long as they are (a 20 s lull: 17 s of fade, 3 s black).
+  Without SpotFX's lull timing on the write it falls back to the end of
+  the ramp, its pre-rule behaviour. drop: begins ON
   its first frame at `drop_burst` with a `drop_white` mix, settles over
   `drop_settle_beats`, then the phase key self-resets to "none" so an
   identical later write edges again. A charge or lull that ends without a
@@ -152,6 +158,7 @@ import math
 import numpy as np
 import voluptuous as vol
 
+import fx.effects.lull_dark as lull_dark
 import fx.effects.particle_handoff as particle_handoff
 from fx.effects.audio import AudioReactiveEffect
 from fx.effects.gradient import GradientEffect
@@ -199,6 +206,8 @@ CHARGE_DEPTH_ADD = 0.2       # pulses grow by this much over a charge ...
 CHARGE_MIN_DEPTH = 0.12      # ... and never shrink below this as rest climbs
 CHARGE_FADE_X = 0.55         # fades shorten to this fraction by charge end
 EXIT_BLEND_S = 1.0           # charge/lull ending without a drop eases back
+LULL_LEGACY_DARK_AT = 1.0    # lull reaches black here when SpotFX sends no
+                             # lull timing (fx/effects/lull_dark.py)
 BURST_DONE = 0.01            # drop burst below this = settled
 
 # rainbow walk
@@ -290,6 +299,7 @@ class PulseAudioEffect(AudioReactiveEffect, GradientEffect):
         "beat_ms",
         "phase",
         "phase_progress",
+        *lull_dark.KEYS,
         "flash",
         "flip",
     ]
@@ -451,6 +461,9 @@ class PulseAudioEffect(AudioReactiveEffect, GradientEffect):
                 description="Progress through the current phase (ramped by SpotFX)",
                 default=0.0,
             ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1.0)),
+            # the lull's dark point, pushed by SpotFX on the lull arm —
+            # fx/effects/lull_dark.py
+            **lull_dark.schema_fields(),
         }
     )
 
@@ -786,7 +799,14 @@ class PulseAudioEffect(AudioReactiveEffect, GradientEffect):
             )
             level = rest + env * d2
         elif ph == "lull":
-            keep = 1.0 - _smooth(self._progress())
+            # fades to black by the lull's DARK POINT — the shared rule the
+            # crystal's own lull darkness uses (fx/effects/lull_dark.py), so
+            # Pulse is pitch black for exactly as long as the crystal is.
+            # LULL_LEGACY_DARK_AT (the end of the ramp) when SpotFX did not
+            # say.
+            keep = 1.0 - _smooth(lull_dark.lull_timing(
+                self._config, self._progress(), self._phase_t,
+                LULL_LEGACY_DARK_AT).approach)
             level = (self._lull_from + self._pulse(env, depth)) * keep
             rest = self._lull_from * keep
         else:
@@ -853,7 +873,10 @@ class PulseAudioEffect(AudioReactiveEffect, GradientEffect):
             return
         self._phase_t += dt
         due, self._phase_done_t = particle_handoff.phase_release_due(
-            self._phase, self._progress(), self._phase_t, self._phase_done_t
+            self._phase,
+            lull_dark.watchdog_progress(
+                self._config, self._phase, self._progress(), self._phase_t),
+            self._phase_t, self._phase_done_t,
         )
         if due:
             _LOGGER.info(

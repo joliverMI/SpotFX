@@ -365,6 +365,7 @@ from random import Random
 from typing import Any, Awaitable, Callable, NamedTuple, Optional
 
 from fx import device_model
+from fx.effects import lull_dark
 from spectra.models.binding import ValueBinding
 from spectra.models.scene import (FlareBand, FlareKind, ParamTarget,
                                   ResponseClass, SceneV2)
@@ -682,6 +683,24 @@ def _phase_ramp_ms(event_class: str, gap_ms: Optional[int]) -> int:
         return max(PHASE_RAMP_MIN_MS,
                    round(gap_ms * (1.0 - PHASE_RAMP_HANG_FRACTION)))
     return PHASE_RAMP_MS[event_class]
+
+
+def _lull_dark_keys(ramp_ms: int, gap_ms: Optional[int],
+                    max_dark_s: float) -> dict:
+    """THE LULL'S DARK POINT (2026-10-07, the Admiral: "set a max time for
+    that portion to 3 seconds ... 17 seconds of expansion and 3 seconds of
+    dark"). The two keys a lull-dark effect (fx.device_model.
+    LULL_DARK_EFFECTS) is told on its lull arm so it can hold dark for half
+    the lull, never longer than `max_dark_s` — the rule itself is
+    fx/effects/lull_dark.py's, never re-derived here. The lull's length is
+    the real gap to its drop when known; with the gap UNKNOWABLE (see
+    _phase_ramp_ms) the flat ramp is all the lull there is, so the dark
+    point lands at half of it — exactly where it sat before the rule."""
+    if gap_ms is not None and gap_ms > 0:
+        lull_s = gap_ms / 1000.0
+    else:
+        lull_s = ramp_ms / 1000.0
+    return lull_dark.keys_for(lull_s, ramp_ms / 1000.0, max_dark_s)
 
 
 def _house_owns_the_look() -> Optional[str]:
@@ -2433,6 +2452,12 @@ class ResponseEngine:
         before. The house layer's levels, Hue Hold and off rules sit
         downstream of every effect and keep winning either way."""
         ramp_ms = _phase_ramp_ms(event_class, gap_ms)
+        lull_keys: dict = {}
+        if event_class == "lull" and any(
+                st.effect_type in device_model.LULL_DARK_EFFECTS
+                for st in self.conductor.virtuals.values()):
+            lull_keys = _lull_dark_keys(ramp_ms, gap_ms,
+                                        self._lull_dark_max_s())
         targets: list[str] = []
         withheld: list[str] = []
         house_reason: Optional[str] = None
@@ -2446,9 +2471,11 @@ class ResponseEngine:
                     and state.effect_type in device_model.ONE_COLOUR_EFFECTS):
                 withheld.append(vid)
                 continue
-            await self.executor.jump(
-                vid, state.effect_type,
-                {"phase": event_class, "phase_progress": 0.0})
+            arm = {"phase": event_class, "phase_progress": 0.0}
+            if (lull_keys
+                    and state.effect_type in device_model.LULL_DARK_EFFECTS):
+                arm.update(lull_keys)
+            await self.executor.jump(vid, state.effect_type, arm)
             await self.executor.glide(
                 vid, state.effect_type, {"phase_progress": 1.0}, ramp_ms)
             targets.append(vid)
@@ -2457,9 +2484,22 @@ class ResponseEngine:
                                  if event_class in ("charge", "lull")
                                  else None)
         record = {"targets": targets, "ramp_ms": ramp_ms, "gap_ms": gap_ms}
+        if lull_keys:
+            record["lull_dark_s"] = lull_keys[lull_dark.DARK_KEY]
         if withheld:
             record["withheld"] = {"virtuals": withheld, "reason": house_reason}
         return record
+
+    def _lull_dark_max_s(self) -> float:
+        """The room's lull darkness cap (RoomControlState.lull_dark_max_s).
+        Never raises: an unreadable room reads as the shipped default."""
+        try:
+            return float(getattr(self._room_controls(), "lull_dark_max_s",
+                                 lull_dark.DEFAULT_MAX_DARK_S))
+        except Exception:                                # noqa: BLE001
+            logger.exception("phase drive: room controls unreadable — "
+                             "lull dark cap at its default")
+            return lull_dark.DEFAULT_MAX_DARK_S
 
     async def release_phases(self, *, force: bool = False) -> int:
         """The lifecycle guard carried from the original program

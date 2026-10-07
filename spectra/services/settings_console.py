@@ -19,6 +19,8 @@ midsong_snap_to_beat, display_mode, rainbow_select_limit, and the drop
 detector's own drop_confident_score/drop_suggested_score. Widened again
 2026-10-06 with the drop detector's own drop_floor (the Admiral's own
 ask for a quiet-song energy gate).
+Widened again 2026-10-07 with lull_dark_max_s (the Admiral's own "make
+this something sonic can change": the longest a lull stays fully dark).
 
 force_scene_scene_id/force_color_target_id STAY OUT OF THIS REGISTRY —
 each targets a scene or colour SET/GROUP by OPAQUE ID, a poor fit for
@@ -133,7 +135,8 @@ def _spec(key: str, label: str, description: str) -> SettingSpec:
             "rainbow_select_limit": "fraction 0.0-1.0",
             "drop_confident_score": "detector score",
             "drop_suggested_score": "detector score",
-            "drop_floor": "top-bar displayed energy, fraction 0.0-1.0"}.get(key)
+            "drop_floor": "top-bar displayed energy, fraction 0.0-1.0",
+            "lull_dark_max_s": "seconds"}.get(key)
     return SettingSpec(key=key, label=label, kind=kind, description=description,
                        unit=unit, min=ge, max=le, choices=choices)
 
@@ -263,6 +266,17 @@ SETTINGS_REGISTRY: dict[str, SettingSpec] = {
         "factored in) — so quiet songs or sections don't get drops. "
         "Never removes a drop he has already confirmed, edited or added "
         "himself. Default 0.7."),
+    "lull_dark_max_s": _spec(
+        "lull_dark_max_s", "Lull darkness (max)",
+        "The longest a lull stays fully dark, in seconds, on the lull "
+        "effects that go dark (Black Hole, Squiggles, Pulse). A lull holds "
+        "dark for half its length, never longer than this — the rest is "
+        "its build-up (the black hole's event horizon expanding, "
+        "Squiggles' screen squashing, Pulse fading). So at the default 3 "
+        "a 20-second lull is 17 seconds of build-up and 3 of dark, and a "
+        "4-second lull is still 2 and 2. 0 = the lull only goes dark on "
+        "its drop. Takes effect on the very next lull. Convert spoken "
+        "minutes to seconds yourself."),
 }
 
 
