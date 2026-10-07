@@ -1,122 +1,132 @@
 """Regression coverage for the Matrix + overwrite double-background-apply
-bug (pixel-brightness-chain report, §3/§9).
+bug (pixel-brightness-chain report, §3/§9), on the REAL render pipeline
+(`fx.headless`, a dummy device, no network, no live storage).
 
-`fx/effects/twod.py`'s `Twod.render()` pre-fills the whole 2D canvas with
-the background colour BEFORE `draw()` runs, whenever `background_mode` is
-"overwrite" — so an unlit (background-only) pixel's own `self.pixels`
-already equals `self._bg_color` by the time `get_pixels()` runs. The base
-`Effect.get_pixels()`'s own overwrite blend used to run again on top of
-that, computing `effect_alpha` from the ALREADY-BACKGROUND pixel value (not
-0, since the pixel isn't black) and adding another `(1 - effect_alpha)`
-share of the background — `v*(2 - v/255)` instead of `v`. Measured on the
-real pipeline in the report: `#000080` at `background_brightness=0.4`
-(`_bg_color = (0, 0, 51.2)`) landed at `(0, 0, 92)`, not `(0, 0, 51.2)`.
+`fx/effects/twod.py`'s `Twod.render()` used to pre-fill the whole 2D
+canvas with the background colour BEFORE `draw()` runs, whenever
+`background_mode` is "overwrite" — so an effect whose own `draw()` paints
+onto that canvas rather than replacing it wholesale left an unlit pixel
+already equal to `self._bg_color` by the time `get_pixels()` ran. The base
+`Effect.get_pixels()`'s own overwrite blend then ran a second time on top
+of that, computing `effect_alpha` from the ALREADY-BACKGROUND pixel value
+(not 0) and adding another `(1 - effect_alpha)` share of the background —
+`v*(2 - v/255)` instead of `v`. Measured on the real pipeline in the
+report: `#000080` at `background_brightness=0.4` (`_bg_color = (0, 0,
+51.2)`) landed at `(0, 0, 92)`, not `(0, 0, 51.2)`.
 
-Fixed by `BG_PREFILLED_ON_OVERWRITE` (fx/effects/__init__.py): a class flag,
-False on the base `Effect`, True on `Twod`, that `get_pixels()`'s overwrite
-branch checks before blending a second time. The 1D path (no pre-fill, so
-`self.pixels` is still the EFFECT's own drawn value, 0 for an unlit pixel)
-is unaffected and keeps its single application.
+THE FIX IS NOT "skip get_pixels()'s blend for 2D effects" — an earlier
+draft did exactly that and broke every Matrix effect (Squiggles among
+them, see tests/test_squiggles_colorset_widen.py) whose own `draw()`
+rebuilds `self.matrix` from a fresh zeroed buffer rather than painting
+onto the pre-filled canvas: for those, get_pixels()'s blend was the ONLY
+place the background was ever applied, and skipping it left them with no
+background at all. The real fix removes the special-cased PRE-FILL in
+`Twod.render()` instead — the canvas now always starts black, in every
+`background_mode`, exactly like the 1D path (which never pre-fills
+either) — so `get_pixels()`'s existing single-application blend is the
+ONE place a 2D effect's background ever lands, uniformly, regardless of
+whether its own `draw()` paints over the canvas or replaces it.
+
+A direct `singleColor` (1D) probe, and a minimal test-only `Twod`
+subclass whose `draw()` is a no-op (so its canvas is pure, untouched
+background — the "flat_probe" shape the report's own probe used), both
+through the real `fx.headless` pipeline.
 """
 from __future__ import annotations
 
-import threading
-from contextlib import nullcontext
+import asyncio
+import sys
+from pathlib import Path
 
 import numpy as np
+import pytest
+import voluptuous as vol
 
-from fx.effects import Effect
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from fx import headless
 from fx.effects.twod import Twod
 
-
-class _FakeEffect:
-    """Carries exactly the attributes `Effect.get_pixels()` reads, so the
-    real method can be called directly against pixels shaped the way each
-    path (1D vs. 2D-prefilled) actually produces them — no registry, no
-    audio, no render thread."""
-
-    def __init__(self, pixels, *, bg_color, background_mode="overwrite",
-                brightness=1.0):
-        self.lock = nullcontext()
-        self.pixels = np.array(pixels, dtype=float)
-        self.flip = False
-        self.mirror = False
-        self.bg_color_use = True
-        self.background_mode = background_mode
-        self._bg_color = np.array(bg_color, dtype=float)
-        self.brightness = brightness
-        self._config = {"blur": 0.0}
+VID = headless.DEFAULT_VIRTUAL_ID
 
 
-class _Fake1D(_FakeEffect):
-    BG_PREFILLED_ON_OVERWRITE = False
+class FlatProbe(Twod):
+    """A no-op 2D effect: draw() never touches the canvas, so whatever
+    get_pixels() receives is exactly what render() left there — a direct
+    instrument for the pre-fill-vs-blend interaction, the same shape the
+    report's own probe script used."""
+    NAME = "Flat Probe"
+    CONFIG_SCHEMA = vol.Schema({})
+
+    def draw(self):
+        pass
 
 
-class _Fake2D(_FakeEffect):
-    BG_PREFILLED_ON_OVERWRITE = True
+def _run(coro):
+    return asyncio.run(coro)
 
 
-def test_class_flag_defaults_and_twod_override():
-    assert Effect.BG_PREFILLED_ON_OVERWRITE is False
-    assert Twod.BG_PREFILLED_ON_OVERWRITE is True
+def _render_last_frame(tmp_path, sub, effect_type, config, n_frames=5):
+    async def main():
+        host = await headless.start_headless_host(str(tmp_path / sub))
+        virtual = host.virtuals.get(VID)
+        try:
+            with headless.fake_clock() as clock:
+                headless.attach_effect(host, virtual, effect_type, config)
+                frames = headless.render_frames(virtual, n_frames, clock=clock,
+                                                dt=1 / 60)
+        finally:
+            await host.shutdown()
+        return frames[-1]
+    return _run(main())
 
 
-def test_2d_overwrite_background_applies_once_not_twice():
-    """The exact report numbers: #000080 @ background_brightness 0.4 ->
-    _bg_color (0, 0, 51.2). A 2D effect's pre-filled unlit pixel (already
-    equal to _bg_color, matching Twod.render()'s own pre-fill) must land
-    at that value unchanged — never doubled to ~92."""
-    bg_color = (0.0, 0.0, 51.2)
-    # The pre-filled canvas: an unlit pixel already carries the background,
-    # exactly as fx/effects/twod.py's render() leaves it before draw().
-    prefilled_pixel = [list(bg_color)]
-    fake = _Fake2D(prefilled_pixel, bg_color=bg_color)
-
-    result = Effect.get_pixels(fake)
-
-    assert result is not None
-    np.testing.assert_allclose(result[0], bg_color, atol=1e-6)
-    # Specifically: must NOT land near the pre-fix doubled value.
-    doubled = bg_color[2] * (2 - bg_color[2] / 255.0)
-    assert not np.isclose(result[0][2], doubled, atol=1.0)
-    assert int(result[0][2]) == 51
+# the exact report numbers: #000080 @ background_brightness 0.4
+OVERWRITE_BG = {"background_color": "#000080", "background_brightness": 0.4,
+                "background_mode": "overwrite"}
+ADDITIVE_BG = {"background_color": "#000080", "background_brightness": 0.4,
+              "background_mode": "additive"}
+DOUBLED_BLUE = 51.2 * (2 - 51.2 / 255.0)   # ~92.12, the pre-fix value
 
 
-def test_1d_overwrite_background_still_applies_once_unlit():
-    """The 1D path never pre-fills — an unlit pixel's own drawn value is
-    0, and get_pixels() is the ONLY place the background lands. Must be
-    byte-identical to before this fix (single application)."""
-    bg_color = (0.0, 0.0, 51.2)
-    unlit_pixel = [[0.0, 0.0, 0.0]]
-    fake = _Fake1D(unlit_pixel, bg_color=bg_color)
-
-    result = Effect.get_pixels(fake)
-
-    np.testing.assert_allclose(result[0], bg_color, atol=1e-6)
+def test_2d_overwrite_background_applies_once_not_twice(tmp_path):
+    frame = _render_last_frame(tmp_path, "2d-overwrite", "test_matrix_overwrite_background_double_apply", OVERWRITE_BG)
+    blue = frame[:, 2]
+    # every pixel is pure background (draw() drew nothing)
+    assert np.allclose(frame[:, 0], 0) and np.allclose(frame[:, 1], 0)
+    assert int(round(float(blue.mean()))) == 51
+    assert not np.any(np.isclose(blue, DOUBLED_BLUE, atol=1.0))
 
 
-def test_2d_overwrite_foreground_pixel_unaffected():
-    """A fully-lit foreground pixel reads the same with or without the
-    fix: effect_alpha was already ~1, so the (now-skipped) blend would
-    have added ~nothing anyway."""
-    bg_color = (0.0, 0.0, 51.2)
-    foreground_pixel = [[255.0, 120.0, 0.0]]
-    fake = _Fake2D(foreground_pixel, bg_color=bg_color)
-
-    result = Effect.get_pixels(fake)
-
-    np.testing.assert_allclose(result[0], foreground_pixel[0], atol=1e-6)
+def test_2d_additive_background_is_unaffected_by_the_fix(tmp_path):
+    """additive mode never pre-filled either way — byte-identical before
+    and after this fix."""
+    frame = _render_last_frame(tmp_path, "2d-additive", "test_matrix_overwrite_background_double_apply", ADDITIVE_BG)
+    blue = frame[:, 2]
+    assert int(round(float(blue.mean()))) == 51
 
 
-def test_2d_additive_mode_is_unaffected_by_the_flag():
-    """BG_PREFILLED_ON_OVERWRITE only gates the "overwrite" branch — a 2D
-    additive-mode effect starts its canvas BLACK (fx/effects/twod.py's own
-    render() only pre-fills for "overwrite"), so it still needs the single
-    additive application in get_pixels(), same as before this fix."""
-    bg_color = (0.0, 0.0, 51.2)
-    unlit_pixel = [[0.0, 0.0, 0.0]]
-    fake = _Fake2D(unlit_pixel, bg_color=bg_color, background_mode="additive")
+def test_1d_overwrite_background_matches_the_2d_result(tmp_path):
+    """The 1D path never pre-filled and was never doubled — single
+    overwrite application matches the fixed 2D result exactly."""
+    frame = _render_last_frame(tmp_path, "1d-overwrite", "singleColor",
+                               {"color": "#000000", **OVERWRITE_BG})
+    blue = frame[:, 2]
+    assert int(round(float(blue.mean()))) == 51
 
-    result = Effect.get_pixels(fake)
 
-    np.testing.assert_allclose(result[0], bg_color, atol=1e-6)
+def test_squiggles_still_receives_its_background_via_get_pixels(tmp_path):
+    """Squiggles discards Twod's canvas entirely in its own draw() (a
+    fresh np.zeros buffer), so it never saw the pre-fill either way — its
+    background has always come from get_pixels()'s single application
+    alone, and removing the pre-fill must not take that away. See
+    tests/test_squiggles_colorset_widen.py for the full flood proof; this
+    is the narrow "still gets a background at all" check."""
+    frame = _render_last_frame(
+        tmp_path, "squiggles-bg", "squiggles",
+        {"gradient": "linear-gradient(90deg, #ff0000 0%, #ff8f00 100%)",
+         "spawn_rate": 0.0, "max_blobs": 2, **OVERWRITE_BG},
+        n_frames=3)
+    blue = frame[:, 2]
+    # background-only region (no chains spawned): reaches ~51, not 0
+    assert blue.max() > 40

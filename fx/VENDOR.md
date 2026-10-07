@@ -1771,25 +1771,37 @@ against that commit.
     pipeline, plus the pre-fix retarget re-created as its red control).
     Unverified against his live room.
 
-60. `effects/__init__.py` (`Effect.get_pixels`, new `BG_PREFILLED_ON_OVERWRITE`
-    class flag, False on `Effect`, True on `effects/twod.py`'s `Twod`): A
-    MATRIX EFFECT IN "overwrite" BACKGROUND MODE APPLIED THE BACKGROUND
-    TWICE (pixel-brightness-chain report, §3/§9). `Twod.render()` already
-    pre-fills the whole 2D canvas with `_bg_color` before `draw()` runs
-    when `background_mode=="overwrite"`, so an unlit pixel's own
-    `self.pixels` already equals the background by the time `get_pixels()`
-    runs — but the base method's own overwrite blend (inherited from the
-    1D path, where there is no pre-fill) ran a second time on top of it,
-    computing `effect_alpha` from the already-background value and adding
-    another `(1 - effect_alpha)` share: `v*(2 - v/255)` instead of `v`. On
-    his real data, `#000080` at `background_brightness 0.4`
-    (`_bg_color = (0, 0, 51.2)`) landed at `(0, 0, 92)`. The flag gates
-    exactly the "overwrite" branch — additive mode (no pre-fill, canvas
-    starts black) and the 1D path (no `Twod`, no pre-fill either) are
-    unaffected and keep their single application. Matrix backgrounds in
-    overwrite mode now read dimmer than before this fix (e.g. the Hype
-    group's authored 0.4 reads as 0.4, not ~0.72). Evidence:
-    `tests/test_matrix_overwrite_background_double_apply.py` (direct
-    `get_pixels()` proof against the report's exact numbers, both the
-    doubled pre-fix value and the fixed single-application value, plus
-    the additive/1D/foreground-pixel controls).
+60. `effects/twod.py` (`Twod.render()`): A MATRIX EFFECT IN "overwrite"
+    BACKGROUND MODE APPLIED THE BACKGROUND TWICE (pixel-brightness-chain
+    report, §3/§9). `render()` used to pre-fill the whole 2D canvas with
+    `_bg_color` before `draw()` runs whenever `background_mode=="overwrite"`
+    — so an effect whose own `draw()` paints onto that canvas (rather than
+    replacing it wholesale) left an unlit pixel's `self.pixels` already
+    equal to the background by the time `effects/__init__.py`'s
+    `Effect.get_pixels()` ran — but that base method's own overwrite blend
+    (inherited unchanged from the 1D path, where there is no pre-fill) ran
+    a SECOND time on top of it, computing `effect_alpha` from the
+    already-background value and adding another `(1 - effect_alpha)`
+    share: `v*(2 - v/255)` instead of `v`. On his real data, `#000080` at
+    `background_brightness 0.4` (`_bg_color = (0, 0, 51.2)`) landed at
+    `(0, 0, 92)`. **The fix is NOT to skip `get_pixels()`'s blend for 2D** —
+    a first draft did exactly that and broke every Matrix effect (Squiggles
+    among them) whose own `draw()` discards the Twod canvas entirely and
+    rebuilds it from a fresh zeroed buffer: for those, `get_pixels()`'s
+    blend was the ONLY place the background was ever applied, and a
+    "skip it when BG was pre-filled" flag left them with none at all. The
+    fix instead REMOVES the pre-fill: `render()` now always starts the
+    canvas BLACK, in every `background_mode`, exactly like the 1D path
+    (which never pre-filled either) — `get_pixels()`'s existing
+    single-application blend is now the ONE place a 2D effect's background
+    ever lands, uniformly, regardless of whether its `draw()` paints over
+    the canvas or replaces it. Matrix backgrounds in overwrite mode now
+    read dimmer than before this fix (e.g. the Hype group's authored 0.4
+    reads as 0.4, not ~0.72). Evidence:
+    `tests/test_matrix_overwrite_background_double_apply.py` (real
+    `fx.headless` pipeline, a no-op "flat probe" `Twod` subclass proving
+    the exact report numbers both pre- and post-fix, plus additive/1D/
+    Squiggles-still-gets-a-background controls) and
+    `tests/test_squiggles_colorset_widen.py` (the pre-existing proof that
+    Squiggles' own background floods the frame — the red control the
+    flag-based first draft broke, now green again).
