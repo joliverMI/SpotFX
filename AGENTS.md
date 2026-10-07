@@ -8597,12 +8597,15 @@ Ten things:
 ## Radial (STAR) rotation is audio-lows-driven — a healthy `spin` can read as parked
 
 `fx/effects/radial.py`'s ONLY motion source is the audio callback:
-`spin_total += lows_impulse * spin_cfg²/10` per 60 Hz callback, i.e.
-**rev/s = 6 × lows_impulse × spin²** — `spin` is a gain on the LIVE
-captured lows power (snapcast.monitor melbank), NOT a motor speed, and NOT
-the bridge's "intensity" (that's stored librosa file analysis; the two
-diverge freely). During bass-light passages the lows impulse idles ~0.01,
-so a healthy spin 0.55 turns ~6°/s — reads as frozen while rendering fine.
+`spin_total += lows_impulse * spin_cfg²/10 * ROTATION_SPEED_SCALE` per
+60 Hz callback, i.e. **rev/s = 4.8 × lows_impulse × spin²**
+(`ROTATION_SPEED_SCALE=0.8`, the Admiral's 2026-10-06 20% cut — see "THE
+MAXIMUM ROTATION SPEED WAS CUT 20%" below for the full before/after across
+every rotation source) — `spin` is a gain on the LIVE captured lows power
+(snapcast.monitor melbank), NOT a motor speed, and NOT the bridge's
+"intensity" (that's stored librosa file analysis; the two diverge freely).
+During bass-light passages the lows impulse idles ~0.01, so a healthy spin
+0.55 turns ~5°/s — reads as frozen while rendering fine.
 Diagnosed live 2026-08-21 (his "star is not moving at any speed" — his own
 binding edit and #168's flip port both ruled out with evidence):
 `docs/spectra-star-motion-audio-idle.md`. Executable proof, real pipeline,
