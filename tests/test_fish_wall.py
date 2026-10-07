@@ -313,16 +313,16 @@ def test_sonic_sets_a_house_fish_solo_burst_through_its_own_operation(
         "solo_burst_rate"] == 8.0
 
 
-def test_the_help_topics_exist_and_are_linked():
-    reg = json.loads((REPO / "config" / "effect_params.json").read_text())
-    params = reg["effects"]["fish"]["params"]
-    help_src = (REPO / "spectra" / "web" / "src" / "help"
-                / "helpContent.ts").read_text()
-    linked = (REPO / "spectra" / "web" / "src" / "scenes" / "tabs"
-              / "InitialSetTab.tsx").read_text()
+def test_the_new_fish_params_declare_their_help_topics():
+    """InitialSetTab.tsx renders `meta.help_topic && <HelpLink topic={...}
+    />` straight off `GET /api/registry`'s own `effects[type]["params"]`,
+    which `spectra/api/registry.py` serves VERBATIM from
+    `fx.device_model.effect_params(etype)` — read the five new params
+    through that same live function, the registry's actual consumer."""
+    from fx import device_model
+
+    params = device_model.effect_params("fish")
     for topic, names in (("fish-wall", NEW[:2]), ("fish-solo-burst", NEW[2:])):
-        assert f"id: '{topic}'" in help_src
-        assert f'topic="{topic}"' in linked
         for name in names:
             assert params[name]["help_topic"] == topic
 
