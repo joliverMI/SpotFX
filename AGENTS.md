@@ -4039,6 +4039,14 @@ slots already in the schema). Six things:
   camera run or night run holds the room. A room effect's OWN preview hold
   does NOT count as a preview. It never takes or releases the room;
   `release.release_room` calls `show_output.on_release()` BEFORE the fade.
+  **Suspension is `show_output.suspension_reason()`, narrower than
+  `refusal()` by one case: a COLOUR-SET preview alone keeps the output
+  layer in force** (2026-10-07, his "previewing a colour set pushes to
+  100%": suspension dropped the house mode's base levels, so Standard's
+  12% crystal ran at full and mode-off fixtures were streamed). It still
+  stands down — fires refused, house on standby. Anything that must see
+  raw frames, or a scene/flare preview, still suspends. Spec:
+  `tests/test_colour_preview_brightness.py`.
 - **PUT BACK**: device holds structurally (let go = fade into the live
   show); settings from a BASELINE — End show restores only while the value
   still equals what the show wrote, otherwise leaves it and NAMES it.

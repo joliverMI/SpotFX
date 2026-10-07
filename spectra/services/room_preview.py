@@ -37,6 +37,16 @@ preview must never touch the room's persisted active_set_id/wheel
 position or fire_history (it isn't a real "fire", it's a look-and-decide),
 and going through the same seam dark_light.py already uses keeps revert
 byte-exact against what was truly live.
+
+A PREVIEW SHOWS HIS BRIGHTNESS (the Admiral, 2026-10-07: "when i preview a
+color set, it pushes to 100% brightness"). Two halves, both proven in
+tests/test_colour_preview_brightness.py: (1) the Light Show supervisor no
+longer suspends the per-device output layer for a colour preview on its own
+(show_output.suspension_reason) — that suspension had dropped the house
+mode's resting levels, so his Standard mode's crystal went from 12% to full
+for every preview, and streamed fixtures the mode has switched off; (2) the
+writes here take the room dimmer and display mode exactly as a real landing
+of the set does (drift_conductor.apply_color_set).
 """
 from __future__ import annotations
 
@@ -81,13 +91,20 @@ async def _writes_for(card: ColorSetCard, live: dict) -> tuple[list[dict], dict[
     touch and that `live` (an already-fetched fx_seam.get_virtuals() read)
     knows an effect type for. Pure given `live` — never reads/writes
     anything itself, so a caller can snapshot and apply from ONE read."""
-    from spectra.services import scene_compiler
+    from spectra.services import room_controls, scene_compiler
     resolved = await _resolve(card)
     if resolved is None:
         return [], {}
     by_vid = scene_compiler.set_entries_for(
         resolved, {vid: ((v or {}).get("effect") or {}).get("type")
                    for vid, v in live.items()})
+    # The same room settings a real landing of this set reads (drift_
+    # conductor.apply_color_set behind POST /room-color/apply, the button
+    # Preview replaced): the display mode's black->Light substitution, and
+    # the room dimmer. The dimmer scales ONLY what the set authors — every
+    # other value is copied from `live`, which the write seams already
+    # scaled; scaling it again would dim it twice.
+    controls = room_controls.load_room_controls()
     writes: list[dict] = []
     snapshot: dict[str, dict] = {}
     for vid, entry in by_vid.items():
@@ -97,7 +114,13 @@ async def _writes_for(card: ColorSetCard, live: dict) -> tuple[list[dict], dict[
             continue
         cfg = dict(effect.get("config") or {})
         snapshot[vid] = {"type": effect_type, "config": cfg}
-        new_cfg = scene_compiler._apply_set_colors(cfg, effect_type, entry)
+        new_cfg = scene_compiler._apply_set_colors(
+            cfg, effect_type, entry, controls.display_mode,
+            controls.display_light_bg_color)
+        authored = {k: new_cfg[k] for k in ("brightness", "background_brightness")
+                    if getattr(entry, k, None) is not None and k in new_cfg}
+        new_cfg.update(room_controls.apply_brightness(
+            authored, controls.brightness_multiplier))
         writes.append({"virtual_id": vid, "effect_type": effect_type, "config": new_cfg})
     return writes, snapshot
 

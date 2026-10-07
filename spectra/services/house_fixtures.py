@@ -154,7 +154,8 @@ nothing is on standby. With no mode set nothing is withheld and no WLED is
 written — the shipped state, byte-identical to phase 1. On standby (a
 preview, a camera run, a night run) nothing moves at all and the output
 layer's suspension streams every fixture (a capture must see what it
-drives). A fixture this process switched OFF is switched back ON when the
+drives) — except a colour-set preview on its own, which keeps the withheld
+set in force (show_output.suspension_reason). A fixture this process switched OFF is switched back ON when the
 mode is cleared while SPECTRA still holds the room — a streamed fixture that
 is powered off is a dark-fixture fault, not a resting state.
 
@@ -849,7 +850,8 @@ async def _tick() -> None:
     kind, _reason = house.gate()
     if kind == "standby":
         # Nothing moves while a preview / camera run / night run holds the
-        # room; the output layer's suspension already streams everything.
+        # room; the last withheld set stays as pushed (in force under a
+        # colour preview alone, streamed anyway under every other hold).
         _rt.last_reason = house.inactive_reason()
         return
     host = deps.host()
