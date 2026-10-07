@@ -8645,26 +8645,39 @@ Set tab and `backfill_param_defaults.py` read the registry, and nothing
 checks it against the schema. Proof: `scripts/check_fish_burst_bounds.py`,
 `tests/test_fish.py::test_swim_burst_stays_on_screen`.
 
-9. **THE WALL IS THE PANEL'S REAL LIT SHAPE, AND THE FISH SEE IT COMING
-   (2026-10-06, his ask: "anticipate the wall and start turning away ... on
-   both fish scenes"). The WALL block in `fish.py` and
-   `.claude/skills/fish-effect` are the binding statements.** The shape is
-   READ off the virtual's own segments (`is_gap_device`, through Twod's own
-   flips) — on the crystal, the hexagon — so no part of a fish swims into
-   a cell the panel cannot light; the pond (`roam_scale`) still bounds the
-   middle. `wall_lookahead` (0.35 s x its own speed, never under half its
-   body length, capped at the pond's short radius) and
-   `wall_turn_strength` are registered (Sonic reaches
-   them per scene entry); `wall_lookahead = 0` is the old pond-edge steer,
-   kinematics bit for bit against the pinned merge-base. Ordinary swimmers
-   only — the charge's school keeps the old edge. **A proof of some OTHER
-   fish mechanism that compares kinematics or positions against a pinned
-   ref must hold `wall_lookahead = 0`** (camera 1b, the clump and
-   burst-brake tests and disperse §2b already do). A rig that should see a
-   hex-corner bug needs `fx.headless`'s `real_mask` (his crystal's
-   real/gap segments) — a plain rectangle never shows one. The House Fish
-   scene's occasional SOLO BURST (`solo_burst_*`, default off) is that
-   scene's own data: `scripts/add_house_fish_solo_burst.py`.
+9. **THE WALL IS THE PANEL'S REAL LIT SHAPE, AND THE FISH GLANCE OFF IT
+   SIDE-ON (2026-10-06, his ask: "anticipate the wall and start turning
+   away ... on both fish scenes"; reworked 2026-10-07 after the first build
+   left them "stuck in the middle": "go right up to the edge of the wall
+   ... sides touch the walls, more than their heads ... okay for light to
+   bleed"). The WALL block in `fish.py` and `.claude/skills/fish-effect`
+   are the binding statements.** A fish swims on until the arc that lands
+   it PARALLEL to the wall with its flank over the last lit cells has
+   shrunk to the arc its nose allows, flies that arc in, and peels away —
+   never "keep clear water ahead", which on a 37 px panel was the
+   middle-crowding bug. The shape is READ off the virtual's own segments
+   (`is_gap_device`, through Twod's own flips) — on the crystal, the
+   hexagon, corners rounded to a curve a long fish can follow; the pond
+   (`roam_scale`) still bounds the middle and is glanced the same way.
+   **The measured limit, stated not hidden**: a straight-drawn head cannot
+   put the side on a short edge before the nose from a steep approach, so
+   some nose-first contact at corners is structural — three stricter
+   designs were built, measured and rejected in `fish-effect`'s skill
+   (they kept the fish off the wall). `wall_lookahead` (seconds of its own
+   swimming: widens the arc for a fast fish) and `wall_turn_strength`
+   (divides the arc) are registered (Sonic reaches them per scene entry);
+   `wall_lookahead = 0` is the old pond-edge steer, kinematics bit for bit
+   against the pinned merge-base. Ordinary swimmers only — the charge's
+   school keeps the old edge. **A proof of some OTHER fish mechanism that
+   compares kinematics or positions against a pinned ref must hold
+   `wall_lookahead = 0`** (camera 1b, the clump, burst-brake and
+   avoidance-mechanism tests and disperse §2b already do). A rig that
+   should see a hex-corner bug needs `fx.headless`'s `real_mask` (his
+   crystal's real/gap segments) — a plain rectangle never shows one.
+   `scripts/check_fish_wall.py` compares old edge / PR 361 / new against a
+   lit edge it computes itself. The House Fish scene's occasional SOLO
+   BURST (`solo_burst_*`, default off) is that scene's own data:
+   `scripts/add_house_fish_solo_burst.py`.
 
 Every new fish knob is a first guess pending his eye; the effect ships
 tunable, not tuned. Proof: `scripts/check_fish.py`,
