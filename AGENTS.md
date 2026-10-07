@@ -8605,7 +8605,7 @@ undoable. Power stays installed throughout. **The module docstring is the
 binding statement** (hit detector, rise/fade, rest/depth, smallest pulse,
 `gamma`, no background, the flash budget, the hooks, the rainbow walk, the
 flare pokes); `.claude/skills/pulse-effect/SKILL.md` is the cold-start map.
-Ten things:
+Eleven things:
 
 - **WIRED (phase 2) THROUGH TWO SETS IN `fx/device_model`.** `pulse` is in
   `PHASE_EFFECTS` (charge/lull/drop on the shared ramp — a lull reaches black
@@ -8701,7 +8701,10 @@ Ten things:
   migrated because nothing was stored. `spectra/services/flare_preview.py`'s
   `pulse_effect_ms` dropped its tempo lookup for the flip (no longer
   needed — fixed seconds). Proof: `tests/test_pulse_effect.py`,
-  `tests/test_pulse_rainbow_flares.py`, `scripts/check_pulse_effect.py`.
+  `tests/test_pulse_rainbow_flares.py`, `scripts/check_pulse_effect.py`,
+  `scripts/check_pulse_hit_source_bands.py` (reactivity evidence — hits
+  classified against his songs' own bass vs snare/other onset marks,
+  old default vs new).
 - **THE CAMERA MEASUREMENT DRIVES REAL FIXTURES** —
   `scripts/measure_singles_response.py` (dry run by default, `--simulate`
   proves the analysis against known answers) holds `porch-rail`,

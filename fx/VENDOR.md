@@ -1560,7 +1560,9 @@ against that commit.
     per-band arrays `scripts/check_pulse_effect.py` now also captures:
     `beat`/`bass`/`mids`/`high`, alongside the original `lows`/`bmean`).
     Proof: `tests/test_pulse_effect.py`, `tests/test_pulse_rainbow_flares.py`,
-    `scripts/check_pulse_effect.py`.
+    `scripts/check_pulse_effect.py`, `scripts/check_pulse_hit_source_bands.py`
+    (the reactivity evidence, old default vs new against his songs' own
+    onset marks).
 52. `devices/hue.py` + `hue_scope.py`: A SESSION IS NEVER STARTED ON AN
     ENTERTAINMENT AREA HOLDING A BULB OFF THE ALLOW-LIST (2026-10-06). After
     a restart with house lighting and Hue Hold both off, the Loft Ceiling

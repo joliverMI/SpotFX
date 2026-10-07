@@ -549,7 +549,7 @@ def get_param_info(effect_type: str, name: str) -> dict:
 # ═══ scene ENTRY PARAMETERS — his 2026-10-06 ask, "does Sonic have access
 # to all the settings for Pulse": list_scene_params/get_param_info above
 # only ever read the registry's NAMES/ranges, never a scene's own stored
-# VALUE, and nothing could WRITE one — so Pulse's 26 settings (and every
+# VALUE, and nothing could WRITE one — so Pulse's own settings (and every
 # other effect's own params) were read-only here even though flares,
 # scene-level settings and whole scenes were already Sonic's to edit.
 # PURELY ADDITIVE: nothing above is narrowed by this — a scalar effect

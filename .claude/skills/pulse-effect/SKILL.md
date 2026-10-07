@@ -98,7 +98,10 @@ and only by copying a whole entry from another scene.
 `tests/test_pulse_effect.py` (phase 1), `tests/test_pulse_engine_wiring.py`
 (phase 2), `tests/test_pulse_rainbow_flares.py` (phase 3: walk, flares,
 gating, real pipeline + device preview, his songs),
-`scripts/check_pulse_effect.py` (fixtures from his WAVs). Not yet measured:
+`scripts/check_pulse_effect.py` (fixtures from his WAVs),
+`scripts/check_pulse_hit_source_bands.py` (the 2026-10-06 tuning
+feedback's reactivity evidence: old vs new `hit_source` default against
+his songs' own bass vs snare/other onset marks). Not yet measured:
 the Singles' real gamma and delay (`scripts/measure_singles_response.py`,
 blocked on a camera pose that can see them). That script's `NEVER_STREAM`
 guard refuses `hue-lights` because its stream is the whole ten-bulb Music
