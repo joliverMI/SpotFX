@@ -703,5 +703,6 @@ class Radial2d(Twod):
                     rgb_array.astype(np.float32) * (edge * pat_alpha)
                     + bg[None, None, :] * (1.0 - edge) * bg_alpha
                 ).astype(np.uint8)
+                self.bg_color_use = False
             image = Image.fromarray(rgb_array, mode="RGB")
             self.matrix.paste(image)

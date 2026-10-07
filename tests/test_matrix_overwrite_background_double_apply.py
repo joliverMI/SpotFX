@@ -43,6 +43,32 @@ disc/eyelid region. Fixed the same way Squiggles already relied on:
 those regions now paint BLACK, letting `get_pixels()` supply the
 background exactly once. `test_blackhole_disc_*`/`test_eye_eyelid_*`
 below prove it on the real pipeline.
+
+A THIRD sibling, `radial.py`, has a genuinely different shape: its own
+`draw()` always pastes a FULL, freshly-computed image over the whole
+matrix every frame (never leaving anything for Twod's pre-fill or
+get_pixels() to fill in) — but during a lull-implode/drop-bloom warp or a
+crossfade handoff, that image itself already blends in `self._bg_color`
+scaled by its own `bg_alpha` (0..1, the warp's own fade) wherever the
+pattern doesn't cover (`edge < 1`). `get_pixels()` has no notion of
+`bg_alpha` — additive mode adds the FULL, unscaled `_bg_color` to every
+pixel unconditionally, and overwrite mode adds a full share wherever the
+pixel is dark — so it was adding a second, un-scaled copy of the
+background on top of radial's own already-complete, already-correctly-
+faded pixel, overshooting well past a flat double at partial `bg_alpha`
+(additive: `bg*(1+bg_alpha)`; at `bg_alpha=0.5` that is 1.5x, not 2x, but
+still wrong). Because the warp's own background contribution is a
+PER-PIXEL, EDGE-SHAPED value (not the single scalar `self._bg_color`
+`get_pixels()` can apply), it can't be expressed as "let get_pixels()
+apply it once" the way the disc/lid fix above does — radial's own
+already-blended array IS the complete, final pixel for that frame, so
+the fix is to stop `get_pixels()` from touching it at all for that frame
+(`self.bg_color_use = False`, the same per-effect override `pulse.py`
+already uses to opt a whole effect out of the background layer, here
+scoped to just the frames where `draw()` has already supplied one).
+`test_radial_warp_background_*` below proves it on the real pipeline,
+at a partial `bg_alpha` (not just the pre-fix formula's one flat-double
+case the disc/lid residual above hits).
 """
 from __future__ import annotations
 
@@ -259,3 +285,136 @@ def test_eye_eyelid_covered_region_applies_background_once_not_twice(tmp_path):
         "no non-background pixel survived — the fix must not suppress the "
         "eye's own iris/lid-edge rendering"
     )
+
+
+# ── Third sibling: radial.py's warp/crossfade background fade ───────────────
+
+class _FakeRadialSource:
+    """Stands in for the real `radial-dummy` source virtual radial.py reads
+    `assembled_frame` from — a plain object with that one attribute."""
+
+    def __init__(self, n=64, rgb=(255.0, 0.0, 0.0)):
+        self.assembled_frame = np.tile(
+            np.array(rgb, dtype=np.float32), (n, 1)
+        )
+
+
+def _render_radial_warp(tmp_path, sub, config, *, phase, phase_progress,
+                         pattern_rgb=(255.0, 0.0, 0.0), n_frames=1):
+    """Attaches radial with a fake pattern source registered under its
+    default `source_virtual` id, forces a charge/lull/drop phase directly
+    (the tests/test_blackhole_horizon_color.py precedent for poking phase
+    state without a full trigger-engine round trip), renders, and returns
+    (effect, last_frame).
+
+    `sub` must be UNIQUE per call and is used as BOTH the device id and
+    the fake source's virtual id — `headless.DEFAULT_VIRTUAL_ID` is a
+    fixed constant, and `particle_handoff`'s snapshot store is keyed by
+    virtual id and lives for the whole test process (not reset per host),
+    so reusing it lets an unrelated earlier test's incoming-bloom snapshot
+    get silently adopted here (`test_blackhole_horizon_color.py`'s own
+    docstring already names this hazard; it bit this exact test during
+    authoring — `_adopt_handoff` picked up a stale `{"mode": "timed"}`
+    reveal left by an earlier test on the shared default id, overriding
+    the standalone lull/drop warp this test means to drive). A unique
+    source-virtual id per call (`f"{sub}-source"`) sidesteps the same
+    hazard for the fake source's own registry slot.
+
+    The fake source is removed from the host's virtual registry before
+    shutdown — it has none of a real Virtual's attributes, and
+    FxHost.shutdown() iterates every registered virtual."""
+    source_id = f"{sub}-source"
+    async def main():
+        host = await headless.start_headless_host(
+            str(tmp_path / sub), device_id=sub
+        )
+        virtual = host.virtuals.get(sub)
+        host.virtuals._virtuals[source_id] = _FakeRadialSource(
+            rgb=pattern_rgb
+        )
+        try:
+            with headless.fake_clock() as clock:
+                effect = headless.attach_effect(
+                    host, virtual, "radial",
+                    dict(config, source_virtual=source_id),
+                )
+                effect._phase = phase
+                effect.phase_progress = phase_progress
+                frames = headless.render_frames(virtual, n_frames,
+                                                clock=clock, dt=1 / 60)
+        finally:
+            host.virtuals._virtuals.pop(source_id, None)
+            await host.shutdown()
+        return effect, frames[-1]
+    return _run(main())
+
+
+def test_radial_warp_background_applies_once_not_twice(tmp_path):
+    """Mid-lull (phase_progress=0.5, an ordinary standalone implode with no
+    crossfade sibling involved) is a deterministic point on the ramp where
+    the warp has opened a real "outside the pattern" region AND bg_alpha is
+    a genuine fraction (neither 0 nor 1) — exactly the partial-alpha case
+    the pre-fix formula overshot hardest (not a flat double: additive mode
+    added the FULL background unconditionally on top of radial's own
+    already bg_alpha-scaled copy, landing near bg*(1+bg_alpha) rather than
+    bg*bg_alpha). The farthest panel corner (0, 0) sits outside the pattern
+    at this progress in both modes."""
+    for mode in ("additive", "overwrite"):
+        config = dict(OVERWRITE_BG if mode == "overwrite" else ADDITIVE_BG,
+                      reverse=False)
+        effect, frame = _render_radial_warp(
+            tmp_path, f"radial-warp-{mode}", config,
+            phase="lull", phase_progress=0.5,
+        )
+        warp_and_alpha = effect._phase_warp()
+        assert warp_and_alpha is not None
+        _, bg_alpha = warp_and_alpha
+        expected_blue = float(effect._bg_color[2]) * bg_alpha
+
+        grid = frame.reshape(effect.r_height, effect.r_width, 3)
+        corner = grid[0, 0]
+        assert corner[0] == 0 and corner[1] == 0
+        assert abs(float(corner[2]) - expected_blue) <= 1.0, (
+            f"{mode}: corner pixel {corner[2]} does not match the single, "
+            f"bg_alpha-scaled application ({expected_blue})"
+        )
+        # the pre-fix overshoot at this exact progress (measured against
+        # the unfixed module): far above either the correct value or even
+        # a flat double of it — a real regression would land near there,
+        # not within 1.0 of the correct value asserted above.
+        assert float(corner[2]) < expected_blue * 1.5 + 5.0
+
+
+def test_radial_pattern_rendering_unaffected_during_warp(tmp_path):
+    """The same mid-lull frame must still show the pattern essentially
+    undimmed wherever the warp hasn't pushed it out of [0, 1] — the fix
+    must not suppress radial's own rendering, only get_pixels()'s second
+    application of the background on top of it."""
+    effect, frame = _render_radial_warp(
+        tmp_path, "radial-warp-pattern", dict(OVERWRITE_BG, reverse=False),
+        phase="lull", phase_progress=0.5,
+    )
+    red = frame[:, 0]
+    assert red.max() > 200, (
+        "no near-full-strength pattern pixel survived the warp frame"
+    )
+
+
+def test_radial_ordinary_background_unaffected_by_the_fix(tmp_path):
+    """With no charge/lull/drop phase and no crossfade (warp stays None
+    all frame), draw() never touches bg_color_use — ordinary background
+    behaviour (get_pixels()'s single application) must be exactly as
+    before this fix. A BLACK pattern source (rather than the other two
+    tests' saturated red) so overwrite mode's "fills dark areas" blend
+    also lands on the expected pure-background value, matching this
+    file's other background-only sanity checks."""
+    for mode in ("additive", "overwrite"):
+        config = dict(OVERWRITE_BG if mode == "overwrite" else ADDITIVE_BG,
+                      reverse=False)
+        effect, frame = _render_radial_warp(
+            tmp_path, f"radial-ordinary-{mode}", config,
+            phase="none", phase_progress=0.0, pattern_rgb=(0.0, 0.0, 0.0),
+        )
+        assert effect.bg_color_use is True
+        blue = frame[:, 2]
+        assert int(round(float(blue.mean()))) == 51
