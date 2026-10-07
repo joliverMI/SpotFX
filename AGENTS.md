@@ -2167,9 +2167,15 @@ engine.py::status`) — that combination, not the light resource, is what
 IS the right instrument for Ambient's own hold/release (`spectra/
 services/ambient.py`) and the panic-release path (`spectra/services/
 release.py`) — both write over plain REST, not the entertainment stream —
-so the same GET that lies during a streamed scene is correct there. Pick
-the wrong one for the case at hand and you get a confident wrong answer
-either way.
+so the same GET that lies during a streamed scene is correct there — but
+only once the area has actually STOPPED streaming, so `ambient.verify_held`/
+`verify_looks` also read each held area's `entertainment_configuration`
+status and count an `active` one as not held (re-freezing it when the
+streamer is ours, `ambient_music_gate._refreeze_if_streaming`; 2026-10-07,
+the dining area followed the show for ten minutes under "held, 17
+confirmed"). A freeze always wins over a stream still starting
+(`fx/VENDOR.md` #58). Pick the wrong instrument for the case at hand and
+you get a confident wrong answer either way.
 
 **Even for the correct instrument, a CLIP v2 light GET during an active
 `dynamics`-ramped transition reports the commanded/target state, not a
@@ -4307,10 +4313,16 @@ split). Six things:
   `prepare_for_resume()` re-installs the base/caps/withheld/Hue-held snapshot
   (`house_restart.json`) BEFORE `resume_own_room()`, so the first frame
   carries it; Hue areas come up frozen (VENDOR #46) and `after_resume()`
-  unfreezes any the gate no longer holds. The take scope (PR 317) holds
+  unfreezes any the gate neither holds NOR INTENDS to hold
+  (`_gate_intends_hold`: an ON transition in flight, a live/pending house
+  directive, or the stored toggle — the startup reconcile can return before
+  its hold lands, and reading only what LANDED is what let the dining area
+  stream the show under "held" on 2026-10-07; a kept area is watched and
+  released if the hold never comes). The take scope (PR 317) holds
   throughout: everything resolves through `show_output._real_devices` /
   `resolve_target`. Tests: `tests/test_house_{fixtures,voice,restart_hold,
-  withhold_landing,seam_api}.py`; help topic `house-ha-seam`.
+  withhold_landing,seam_api}.py`, `tests/test_hue_hold_restart_race.py`;
+  help topic `house-ha-seam`.
 
 **PHASE 3 — ENERGY (2026-10-05).** `spectra/services/house_energy.py`'s
 docstring is the binding statement; the settings are his data

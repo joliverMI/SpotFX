@@ -30,6 +30,11 @@ class HueStreamRefused(RuntimeError):
     cannot identify): no session is started. SpotFX deviation #52."""
 
 
+class _ActivationCancelled(RuntimeError):
+    """A freeze (or deactivate) arrived while this activation was queued or
+    in flight: no session is left running. SpotFX deviation #58."""
+
+
 class HueDevice(NetworkedDevice):
     """
     Philips Hue device support (Entertainment Mode UDP streaming)
@@ -287,6 +292,7 @@ class HueDevice(NetworkedDevice):
         loop stays responsive, then mark the stream ready on success. A failed
         attempt is retried a few times so a single timed-out handshake (e.g. a
         lost race against another bridge) self-heals instead of going dark."""
+        cancelled = False
         try:
             for attempt in range(1, self.ACTIVATION_MAX_ATTEMPTS + 1):
                 if not self._active or self._frozen:
@@ -297,6 +303,13 @@ class HueDevice(NetworkedDevice):
                     await self._ledfx.loop.run_in_executor(
                         self._ledfx.thread_executor, self._blocking_activate
                     )
+                except _ActivationCancelled:
+                    # A freeze/deactivate won the race (deviation #58): the
+                    # bridge's last word is already `stop`; never retry.
+                    self._stream_ready = False
+                    self._cleanup_socket()
+                    cancelled = True
+                    return
                 except HueStreamRefused as e:
                     # Not a transient failure: retrying would only re-read
                     # the same area. No session was started; flush() re-reads
@@ -340,13 +353,28 @@ class HueDevice(NetworkedDevice):
         finally:
             with self._reconnect_lock:
                 self._reconnecting = False
+            # A freeze cancelled this activation, then an unfreeze arrived
+            # while it was standing down (its own reconnect was debounced by
+            # this one): start the stream it asked for now.
+            if cancelled and self._active and not self._frozen:
+                self._trigger_reconnect()
 
     def _blocking_activate(self):
         """Blocking stream setup — runs in a worker thread, never the loop.
 
         Serialized across all Hue bridges via _activation_lock so concurrent
-        bridge activations don't contend and starve each other's handshake."""
+        bridge activations don't contend and starve each other's handshake.
+
+        SpotFX deviation #58 — A FREEZE ALWAYS WINS. A freeze's `stop` takes
+        this same lock (set_frozen), so it can never land between this
+        method's `start` and its end; and this method re-checks the freeze
+        both before `start` (a freeze that got here first: no session at
+        all) and after the session is up (a freeze that arrived while it was
+        being built: stop it again, under the lock, before anyone sees it).
+        Either way the bridge's last action is `stop`."""
         with HueDevice._activation_lock:
+            if self._activation_unwanted():
+                raise _ActivationCancelled("frozen or deactivated before start")
             # SpotFX deviation #52: starting a session switches on EVERY bulb
             # in the entertainment area, before any frame is sent. Read the
             # area from the bridge now — every start, so a change made in the
@@ -355,6 +383,10 @@ class HueDevice(NetworkedDevice):
             refusal = self._area_scope_refusal()
             if refusal:
                 raise HueStreamRefused(refusal)
+            if self._activation_unwanted():
+                # The area read takes three bridge round trips: a freeze can
+                # land during it — never send the start it no longer wants.
+                raise _ActivationCancelled("frozen or deactivated before start")
             # Tell the bridge to start streaming for this entertainment zone.
             request_data = {"action": "start"}
             self._hue_request(
@@ -363,7 +395,26 @@ class HueDevice(NetworkedDevice):
                 request_data,
                 ssl=True,
             )
-            self._sock = self._open_dtls()
+            sock = self._open_dtls()
+            if self._activation_unwanted():
+                # Frozen/deactivated while the session was being built: the
+                # caller's own stop may have reached the bridge BEFORE our
+                # start — stop again so the bridge's last word is `stop`.
+                try:
+                    sock.close()
+                except Exception:
+                    pass
+                try:
+                    self._blocking_stop()
+                except Exception as e:                    # noqa: BLE001
+                    _LOGGER.warning("Hue %s: could not stop a session a "
+                                    "freeze overtook: %s", self.name, e)
+                raise _ActivationCancelled("frozen or deactivated during start")
+            self._sock = sock
+
+    def _activation_unwanted(self) -> bool:
+        """Has a freeze or a deactivate made this activation unwanted?"""
+        return self._frozen or not self._active
 
     def _open_dtls(self):
         """The DTLS session to the bridge's entertainment port (blocking)."""
@@ -488,6 +539,12 @@ class HueDevice(NetworkedDevice):
         except Exception as e:
             _LOGGER.warning("Hue %s: failed to stop stream: %s", self.name, e)
 
+    def _blocking_stop_ordered(self):
+        """A freeze's stop (deviation #58): taken under _activation_lock so it
+        lands AFTER any start already being sent, never before it."""
+        with HueDevice._activation_lock:
+            self._blocking_stop()
+
     def _blocking_stop(self):
         request_data = {"action": "stop"}
         self._hue_request(
@@ -522,11 +579,19 @@ class HueDevice(NetworkedDevice):
         that re-armed via flush between calls)."""
         self._frozen = frozen
         if frozen:
+            # SpotFX deviation #58: an activation still queued or in flight is
+            # NOT forgotten here (the old `_reconnecting = False` let a second
+            # one start beside it) — it sees the freeze itself and stands down,
+            # and this stop waits for it (_blocking_stop_ordered), so the
+            # bridge's last action is `stop` whichever got there first.
             self._stream_ready = False
-            with self._reconnect_lock:
-                self._reconnecting = False   # cancel any in-flight reconnect intent
             self._cleanup_socket()
-            await self._async_stop_stream()
+            try:
+                await self._ledfx.loop.run_in_executor(
+                    self._ledfx.thread_executor, self._blocking_stop_ordered
+                )
+            except Exception as e:
+                _LOGGER.warning("Hue %s: failed to stop stream: %s", self.name, e)
             _LOGGER.info(
                 "Hue %s: frozen (stream stopped, holding REST state)", self.name
             )

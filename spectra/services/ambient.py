@@ -616,6 +616,59 @@ async def _hue_get(client: httpx.AsyncClient, endpoint: str) -> dict:
     return resp.json()
 
 
+async def _area_streaming(client: httpx.AsyncClient, cfg: dict) -> Optional[dict]:
+    """Is this device's entertainment area STREAMING right now? Read from the
+    bridge's own entertainment_configuration — the one resource that tells
+    the truth during a stream (AGENTS.md, "Reading real Hue bulb state": the
+    light resource reads the held colour while the bulbs follow the music).
+    Returns `{"ours": bool, "streamer": rid}` when the area is active, None
+    when it is not — or when the bridge would not say (unknown is logged and
+    never counted against a hold: a transient read failure must not turn
+    every hold "partial"). 2026-10-07, the dining area streamed the show for
+    ten minutes while every Spectra surface said "held, 17 confirmed"."""
+    eid = cfg.get("entertainment_id")
+    if not eid:
+        return None
+    try:
+        data = (await _hue_get(
+            client, f"/clip/v2/resource/entertainment_configuration/{eid}"))["data"][0]
+    except Exception:                                    # noqa: BLE001
+        logger.warning("Ambient verify: could not read the entertainment "
+                       "status of %s on %s", eid, cfg.get("ip_address"))
+        return None
+    if str(data.get("status") or "").lower() != "active":
+        return None
+    streamer = (data.get("active_streamer") or {}).get("rid")
+    ours = streamer is None or streamer == cfg.get("hue_application_id")
+    return {"ours": bool(ours), "streamer": streamer}
+
+
+async def refreeze_streaming(device_ids) -> list[str]:
+    """Re-assert the freeze on held Hue areas the verifier found STREAMING
+    our own show (a stream that started after the hold's stop). The
+    driver's freeze is ordered behind any activation in flight (fx/VENDOR.md
+    #58), so the bridge's last word is `stop`. Never raises; returns the
+    devices it re-froze."""
+    from spectra.services.live_host import live
+    done: list[str] = []
+    if not live.active or live.host is None:
+        return done
+    for did in sorted(device_ids):
+        dev = live.host.devices.get(did)
+        set_frozen = getattr(dev, "set_frozen", None)
+        if set_frozen is None:
+            continue
+        try:
+            await set_frozen(True)
+            done.append(did)
+        except Exception:                                # noqa: BLE001
+            logger.exception("Ambient: could not re-freeze %s", did)
+    if done:
+        logger.error("Ambient: %s was STREAMING the show under a Hue Hold — "
+                     "re-froze it", done)
+    return done
+
+
 class RoomNotOurs(AmbientCancelled):
     """A write reached the bridge boundary while the room was mid-release,
     mid-handover or released — refused, never sent. An AmbientCancelled, so
@@ -987,11 +1040,23 @@ async def verify_held(color: Optional[str],
     target_xy = _hex_to_xy(color_hex)
     lit: list[str] = []
     unlit: list[str] = []
+    streaming: list[str] = []
+    streaming_ours: list[str] = []
     for did, dev in sorted(hue_devices.items()):
         cfg = dev.config
         try:
             async with _bridge_client(cfg) as client:
-                for rid, name in await _resolve_lights_named(client, cfg):
+                named = await _resolve_lights_named(client, cfg)
+                stream = await _area_streaming(client, cfg)
+                if stream is not None:
+                    # Streaming: every bulb follows the stream, whatever the
+                    # light resource says — none of them is held.
+                    streaming.append(did)
+                    if stream["ours"]:
+                        streaming_ours.append(did)
+                    unlit.extend(name for _rid, name in named)
+                    continue
+                for rid, name in named:
                     try:
                         state = (await _hue_get(
                             client, f"/clip/v2/resource/light/{rid}"))["data"][0]
@@ -1011,8 +1076,12 @@ async def verify_held(color: Optional[str],
     total = len(lit) + len(unlit)
     if total == 0:
         return {"status": "no-hue-devices"}
-    return {"status": "verified", "lights_lit": len(lit), "lights_total": total,
-            "unlit": sorted(unlit)}
+    out = {"status": "verified", "lights_lit": len(lit), "lights_total": total,
+           "unlit": sorted(unlit)}
+    if streaming:
+        out["streaming"] = streaming
+        out["streaming_ours"] = streaming_ours
+    return out
 
 
 # ── device discovery ─────────────────────────────────────────────────────────
@@ -1514,6 +1583,8 @@ async def verify_looks(looks) -> dict:
     hue_devices = _hue_devices(live.host)
     lit: list[str] = []
     unlit: list[str] = []
+    streaming: list[str] = []
+    streaming_ours: list[str] = []
     for did, dev in sorted(hue_devices.items()):
         look = look_for(did, looks)
         if look is None or look[1] not in ("hold", "off"):
@@ -1522,9 +1593,17 @@ async def verify_looks(looks) -> dict:
         skip = skipped_lights(did, looks)
         try:
             async with _bridge_client(cfg) as client:
-                for rid, name in await _resolve_lights_named(client, cfg):
-                    if (name or "").strip().lower() in skip:
-                        continue
+                named = [(rid, name) for rid, name in
+                         await _resolve_lights_named(client, cfg)
+                         if (name or "").strip().lower() not in skip]
+                stream = await _area_streaming(client, cfg)
+                if stream is not None:
+                    streaming.append(did)
+                    if stream["ours"]:
+                        streaming_ours.append(did)
+                    unlit.extend(name for _rid, name in named)
+                    continue
+                for rid, name in named:
                     try:
                         state = (await _hue_get(
                             client, f"/clip/v2/resource/light/{rid}"))["data"][0]
@@ -1537,5 +1616,9 @@ async def verify_looks(looks) -> dict:
     total = len(lit) + len(unlit)
     if total == 0:
         return {"status": "no-hue-devices"}
-    return {"status": "verified", "lights_lit": len(lit), "lights_total": total,
-            "unlit": sorted(unlit)}
+    out = {"status": "verified", "lights_lit": len(lit), "lights_total": total,
+           "unlit": sorted(unlit)}
+    if streaming:
+        out["streaming"] = streaming
+        out["streaming_ours"] = streaming_ours
+    return out

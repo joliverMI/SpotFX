@@ -695,6 +695,28 @@ def _clear_verify() -> None:
     _last_verify = {}
 
 
+async def _refreeze_if_streaming(result: dict) -> None:
+    """A held area the bridge says is STREAMING is not held, whatever its
+    light resource reads (2026-10-07: the dining area followed the show for
+    ten minutes under "held, 17 confirmed"). verify_held/verify_looks
+    already count its bulbs as not held; here the hold's own freeze is
+    re-asserted on any area streaming OUR show, so the next confirmation
+    can be true. Someone else's stream (the Hue app's sync) is reported,
+    never stopped. Never raises."""
+    streaming = result.get("streaming") or []
+    if not streaming:
+        return
+    ours = result.get("streaming_ours") or []
+    others = sorted(set(streaming) - set(ours))
+    if others:
+        logger.error("Ambient: held Hue area(s) %s are streaming from another "
+                     "app — reported as not held, left alone", others)
+    try:
+        result["refrozen"] = await ambient.refreeze_streaming(ours)
+    except Exception:                                    # noqa: BLE001
+        logger.exception("Ambient: re-freezing a streaming area failed")
+
+
 async def verify_now() -> dict:
     """The independent periodic recheck (module docstring, "Status
     honesty"). Skips entirely when nothing is currently claimed held
@@ -724,6 +746,7 @@ async def verify_now() -> dict:
         # lighting yields to a bulb someone changed from Home Assistant or
         # the Hue app until the next mode change (plan D7).
         result = await ambient.verify_looks(_held_looks)
+        await _refreeze_if_streaming(result)
         if result.get("status") == "verified":
             _record_verify("verified", result.get("lights_lit", 0),
                            result.get("lights_total", 0), result.get("unlit"))
@@ -736,6 +759,9 @@ async def verify_now() -> dict:
     controls = load_room_controls()
     target_color = effective_ambient_color(controls)
     result = await ambient.verify_held(target_color, frozenset(controls.ambient_hue_group_ids))
+    # Re-freeze BEFORE the straggler repair: a REST write under a live
+    # stream is overwritten by the next frame.
+    await _refreeze_if_streaming(result)
     status_ = result.get("status")
     if status_ == "verified":
         unlit = result.get("unlit") or []
