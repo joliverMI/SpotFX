@@ -49,13 +49,17 @@ is resolved from `house.hue_directive()`'s own per-device look — the
 SAME tuple ambient.py sends to the bridge — converted through
 `hue_preview_colour.held_hex_for_look`; `None` means "not held, draw the
 live render exactly as before". A bulb left to Home Assistant
-(`HouseSettings.hue_excluded_lights`) still shares one fixture with every
-other bulb SPECTRA holds in the same area, so showing a single colour for
-the whole thing is a trade-off, not a bug: `_held_hex` falls back to the
-live render for the WHOLE fixture only once `ambient.cached_light_names()`
-(its own cached, per-device bulb list, never a fresh bridge call) confirms
-EVERY one of that device's bulbs is excluded — a mixed area (his real
-`hue-lights`, 6 held bulbs beside 4 excluded ones) keeps its held colour.
+(`HouseSettings.hue_excluded_lights`, empty by default — his real
+`hue-lights` area has none today, every one of its ten bulbs is an
+ordinary Spectra bulb) still shares one fixture with every other bulb
+SPECTRA holds in the same area, so showing a single colour for the whole
+thing is a trade-off, not a bug: `_held_hex` falls back to the live render
+for the WHOLE fixture only once `ambient.cached_light_names()` (its own
+cached, per-device bulb list, never a fresh bridge call) confirms EVERY
+one of that device's bulbs is excluded — a mixed area (some held, some
+excluded) keeps its held colour. This mechanism exists for a FUTURE bulb
+he genuinely wants left to Home Assistant, not an assumption about any
+bulb today.
 `build_layout`/`virtual_layout` stay PURE (no live read inside them) —
 `current_layout()` is the one caller that resolves the live directive via
 `current_hue_looks()`.
@@ -181,22 +185,23 @@ def _held_hex(device_id: str, device_type: Optional[str], device_cfg: dict,
     closes).
 
     One preview fixture is a WHOLE SPECTRA device (one Hue entertainment
-    area), lumping together every physical bulb it drives — his
-    `hue-lights` area mixes 6 bulbs the house mode holds with 4
-    (`HouseSettings.hue_excluded_lights`, e.g. Loft Ceiling Uplight, the
-    Ledge bulbs) it deliberately leaves alone. `ambient.skipped_lights()`
-    is GLOBAL by design (house.py names an excluded bulb under area "*",
-    since it has no idea which area a bulb lives in), so a non-empty
-    result says nothing about whether THIS device actually has one of
-    those bulbs — comparing it against this device's own AREA NAME (the
-    original bug) can never match. There is no pixel-level membership to
-    draw the held colour on just the genuinely-held bulbs, so a MIXED
-    fixture (his real `hue-lights`, 6 held + 4 excluded) has to pick one
-    reading for the whole thing: this picks HELD, the same trade every
-    whole-area look already makes for the colour of a bulb he dimmed by
-    hand — a fixture falls back to the live render only when EVERY one of
-    its own bulbs is confirmed excluded (an area wholly left to Home
-    Assistant), never merely because some of them are.
+    area), lumping together every physical bulb it drives — a mode CAN
+    leave some of a device's bulbs alone (`HouseSettings.
+    hue_excluded_lights`, empty by default; his real `hue-lights` area
+    excludes none today, all ten of its bulbs, Loft Ceiling Uplight and
+    the three Ledge bulbs included, are ordinary Spectra bulbs the mode
+    holds like the rest). `ambient.skipped_lights()` is GLOBAL by design
+    (house.py names an excluded bulb under area "*", since it has no idea
+    which area a bulb lives in), so a non-empty result says nothing about
+    whether THIS device actually has one of those bulbs — comparing it
+    against this device's own AREA NAME (the original bug) can never
+    match. There is no pixel-level membership to draw the held colour on
+    just the genuinely-held bulbs, so a MIXED fixture (some held, some
+    excluded) has to pick one reading for the whole thing: this picks HELD,
+    the same trade every whole-area look already makes for the colour of a
+    bulb he dimmed by hand — a fixture falls back to the live render only
+    when EVERY one of its own bulbs is confirmed excluded (an area wholly
+    left to Home Assistant), never merely because some of them are.
     `ambient.cached_light_names()` is the one thing that knows which
     bulbs actually belong to this device — a pure cache read, warmed by
     the SAME hold/verify that reported this exclusion in the first place,

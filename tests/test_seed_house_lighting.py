@@ -254,11 +254,13 @@ def test_it_refuses_a_file_not_in_the_stores_own_layout(root):
         seed.plan(root)
 
 
-def test_seeding_leaves_house_lighting_off_and_seeds_the_left_alone_bulbs(root):
+def test_seeding_leaves_house_lighting_off_and_touches_no_bulb_exclusion(root):
     seed.apply(seed.plan(root), root / "b")
     lib = json.loads((root / "storage/spectra/house_modes.json").read_text())
     assert lib["settings"]["enabled"] is False
-    assert lib["settings"]["hue_excluded_lights"] == list(seed.HUE_LEFT_ALONE)
+    assert lib["settings"]["hue_excluded_lights"] == [], \
+        "every Hue bulb in Spectra's entertainment areas is an ordinary bulb; " \
+        "the seeder never excludes one"
     night = next(m for m in lib["modes"] if m["name"] == "Night light")
     assert all(h["look"] == "off" for h in night["hue"]), "Night light lights no Hue at all"
     assert night["music"] == "ignore"

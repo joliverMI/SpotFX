@@ -339,9 +339,13 @@ class HouseSettings(BaseModel):
                      House tab's power button, or PUT /api/house/settings.
     hue_excluded_lights  Hue BULB names (his bridge's own names, any case)
                      a house mode never writes — not held, not switched off,
-                     not reported. The bulbs in Spectra's entertainment areas
-                     that stay Home Assistant's outside music shows (his
-                     Loft Ceiling Uplight and the three Ledge lights)."""
+                     not reported. Empty by default: every bulb in Spectra's
+                     entertainment areas is an ordinary house-mode bulb
+                     (the Loft Ceiling Uplight and the three Ledge lights
+                     included — carving them out as Home Assistant's was a
+                     wrong assumption, corrected 2026-10-06). This is the
+                     mechanism for a FUTURE bulb he genuinely wants Home
+                     Assistant to keep, never a standing exclusion."""
     model_config = ConfigDict(extra="ignore")
     enabled: bool = False
     hue_excluded_lights: list[str] = Field(default_factory=list)

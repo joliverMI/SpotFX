@@ -36,12 +36,22 @@ worth knowing cold:
    house lighting on/off" actions — same end effect as the PUT, separate
    code path because Light Show runs in-process and has no body to PATCH.
 3. **TWO THINGS NEVER MOVE BY VOICE**: `hue_excluded_lights` (a safety
-   fence around bulbs OUTSIDE the room — the loft uplight, the ledge
-   lights) and the seam-wiring fields (`tv_strips`, `voice_fixtures`,
+   fence for a bulb a mode should never touch — empty by default; every
+   bulb in his Spectra home, loft uplight and ledge lights included, is
+   an ordinary house-mode bulb, and carving those four out as Home
+   Assistant's was a wrong assumption, corrected 2026-10-06) and the
+   seam-wiring fields (`tv_strips`, `voice_fixtures`,
    `own_brightness`, `owned_brightness`, set once at cutover with River).
    All five stay readable through `get_house_settings`; none is in
    `house_console.ENERGY_KEYS` or any other write op. Don't add a write
-   path for them without going back to the Admiral.
+   path for them without going back to the Admiral. The 2026-10-06
+   correction only fixed what a FRESH `scripts/seed_hue_scope.py`/
+   `scripts/seed_house_lighting.py` run writes — a room that already ran
+   the old defaults needs the one-time
+   `scripts/fix_loft_ledge_bulb_scope.py` (dry-run default, `--apply`
+   with a required `--spectra-url`) to move the four bulbs out of
+   `hue_scope.json`'s `"excluded"` map and clear them from the live
+   `hue_excluded_lights` through this exact `apply_settings_patch` path.
 4. **A MODE IS A PERSON'S PICK; HOME ASSISTANT'S WORD IS A CLOCK.**
    `house.set_mode(mode=..., source="sonic")` behaves exactly like a
    House page press — it holds until HA's own `lighting_mode` next

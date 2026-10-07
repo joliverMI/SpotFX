@@ -2,14 +2,14 @@
 over the bridge's REST API, and the explicit per-bulb ALLOW-LIST it enforces
 (SpotFX-authored, not fork code; `fx/VENDOR.md` deviation #50).
 
-Found 2026-10-05 02:31 (a house-lighting proof take, his house asleep): two
-SPECTRA paths lit bulbs that belong to Home Assistant — the release fade's
-"dim to 1%" write and the room's Hue Hold, each of which wrote EVERY bulb in
-the Hue entertainment area: the Loft Ceiling Uplight and the three Ledge
-lights sit in the "Music Group" area but are his house's, not Spectra's. The
-fix is not "skip those names" in each writer — that is one more list per
-writer to keep in step. It is this module: every REST light write goes
-through `put()`, which refuses
+Found 2026-10-05 02:31 (a house-lighting proof take, his house asleep): a
+SPECTRA writer that resolves "the bulbs in this entertainment area" and
+writes every one of them is only as scoped as that resolution — the release
+fade's "dim to 1%" write and the room's Hue Hold each wrote EVERY bulb in
+the Hue entertainment area it was handed, with no check that every one of
+those bulbs was actually allow-listed yet. The fix is not "skip these names"
+in each writer — that is one more list per writer to keep in step. It is
+this module: every REST light write goes through `put()`, which refuses
 
   * any endpoint that is not ONE light (`/clip/v2/resource/light/<id>`) —
     never `grouped_light`, a room, a zone, the v1 `/groups/0` "all lights"
@@ -17,11 +17,16 @@ through `put()`, which refuses
   * any light whose resource id is not on the allow-list.
 
 THE ALLOW-LIST is his data: `storage/spectra/hue_scope.json`,
-`{"lights": {"<light resource id>": "<his name for it>"}}` — the living-room
-and dining bulbs only. Resource ids are the bridge's own UUIDs (stable when a
-bulb is renamed); the names are for people and refusal messages. A MISSING
-OR UNREADABLE FILE ALLOWS NOTHING: every Hue REST write is refused and named,
-never a guess. `scripts/seed_hue_scope.py` writes it from the bridges.
+`{"lights": {"<light resource id>": "<his name for it>"}}` — every bulb in
+his Spectra home's living-room and dining entertainment areas (17 bulbs,
+including the Loft Ceiling Uplight and the three Ledge bulbs — an earlier
+build wrongly carved those four out as "left to Home Assistant"; his own
+correction, 2026-10-06: they are ordinary bulbs of his Spectra home like
+every other one in the Music Group area, not treated differently).
+Resource ids are the bridge's own UUIDs (stable when a bulb is renamed);
+the names are for people and refusal messages. A MISSING OR UNREADABLE FILE
+ALLOWS NOTHING: every Hue REST write is refused and named, never a guess.
+`scripts/seed_hue_scope.py` writes it from the bridges.
 
 `allowed_pairs()` is for the RESOLVERS (each writer maps its entertainment
 area to bulbs first): filter there so an out-of-scope bulb is never even
@@ -35,18 +40,14 @@ spot-effects' legacy services/ambient_mode.py.
 THE ENTERTAINMENT STREAM IS IN SCOPE TOO (2026-10-06). A REST write is not
 the only way a bulb comes on: asking the bridge to START an entertainment
 session (`devices/hue.py`, `action: start`) switches on EVERY bulb in that
-entertainment area, whatever frames follow. His "Music Group" area carries
-the Loft Ceiling Uplight and the three Ledge bulbs, so every session start
-lit them — at 18:28 on 2026-10-06, after a restart with house lighting and
-Ambient both off, they came on one by one from 18:28:07, seventeen seconds
-before the stream's DTLS handshake had even completed (18:28:24), i.e.
-before a single frame could have been sent. Leaving those channels out of
-the frames cannot help with that, so the rule is the area-level one:
-`stream_refusal()` names an area that holds any bulb not on the allow-list
-(or a channel whose bulb cannot be identified), and `HueDevice` never
-starts a session on it. Removing those bulbs from the entertainment area in
-the Hue app is what lets Spectra stream the rest; this module never edits
-the bridge's configuration.
+entertainment area, whatever frames follow. This is the generic safety net
+for that: `stream_refusal()` names an area that holds any bulb not on the
+allow-list (or a channel whose bulb cannot be identified), and `HueDevice`
+never starts a session on it. It stays in place for any future bulb that
+is genuinely someone else's — it does not single out any bulb today, since
+every bulb in both of his streamed entertainment areas, Music Group
+included, is now allow-listed. This module never edits the bridge's
+configuration.
 """
 from __future__ import annotations
 

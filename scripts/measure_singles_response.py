@@ -29,10 +29,14 @@ every fixture released to its house state, THEN the Hue looks restored —
 on success, on error and on Ctrl-C.
 
 A HUE AREA IS STREAMED WHOLE. The entertainment stream drives every bulb
-in an area, so an area holding a bulb the house leaves alone can never be
-measured this way: `hue-lights` holds Loft Ceiling Uplight and the three
-Ledge bulbs (stream channels 0, 7, 8, 9, read off the bridge 2026-10-06)
-and is refused outright. `dining-hues` is seven allow-listed bulbs.
+in an area at once, so an area far larger than the pair of fixtures this
+protocol actually needs to isolate can never be measured this way:
+`hue-lights` is the full ten-bulb living-room "Music Group" (including the
+Loft Ceiling Uplight and the three Ledge bulbs — ordinary Spectra bulbs,
+not treated differently; streaming the whole group would needlessly light
+every one of them for a measurement this narrow) and is refused outright.
+`dining-hues` is the seven-bulb dining area this protocol is actually
+scoped to.
 
 Protocol, per run:
 
@@ -86,11 +90,13 @@ import numpy as np
 
 DEFAULT_FIXTURES = ["porch-rail", "dining-table", "dining-hues"]
 DEFAULT_LIFT = ["dining-hues"]
-#: Hue areas whose stream reaches a bulb the house leaves alone — never
-#: streamed by this tool (read off the bridges 2026-10-06).
+#: Hue areas far larger than this protocol's two-fixture isolation needs —
+#: never streamed by this tool (read off the bridges 2026-10-06).
 NEVER_STREAM = {
-    "hue-lights": "its stream drives Loft Ceiling Uplight and the three Ledge "
-                  "bulbs (channels 0, 7, 8, 9), which the house leaves alone",
+    "hue-lights": "its stream drives the whole ten-bulb Music Group, "
+                  "including Loft Ceiling Uplight and the three Ledge bulbs "
+                  "— ordinary Spectra bulbs, just far more than this "
+                  "measurement needs to light",
 }
 WINDOW = ((8, 30), (22, 30))   # --apply only between these local times
 HUE_FREE_WAIT_S = 40.0         # the gate's release ease, then unfreeze

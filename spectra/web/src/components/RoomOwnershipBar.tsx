@@ -109,8 +109,9 @@ export function DarkFixtureStrip({ dark }: { dark: DarkFixtureStatus | null | un
 }
 
 /** THE HUE SCOPE STRIP — a Hue area SPECTRA is deliberately NOT streaming,
- * because it holds a bulb Spectra may not light (fx/hue_scope.py's
- * allow-list; his Loft Ceiling Uplight and Ledge bulbs). Starting a Hue
+ * because it holds a bulb off fx/hue_scope.py's allow-list (a generic
+ * safety net for a bulb genuinely outside the room — today none of his
+ * real bulbs are excluded, his Music Group area included). Starting a Hue
  * entertainment session switches on every bulb in the area, so the whole
  * area stays out of the show until those bulbs are taken out of it in the
  * Hue app — and that has to be said, or the area just looks broken. */

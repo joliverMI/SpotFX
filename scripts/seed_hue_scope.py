@@ -2,15 +2,20 @@
 """Write SPECTRA's Hue allow-list (fx/hue_scope.py) from the bridges.
 
 The allow-list is HIS data: the Hue bulbs SPECTRA may write over the bridge
-REST API — his living-room and dining bulbs only. This reads both
-entertainment areas SPECTRA streams to (storage/spectra/fx-live/config.json's
-Hue devices) with GET requests only, takes every member bulb, drops the ones
-that are Home Assistant's (default: the Loft Ceiling Uplight and the three
-Ledge lights — his word via firstmate, 2026-10-05), and writes
+REST API — his living-room and dining bulbs. This reads both entertainment
+areas SPECTRA streams to (storage/spectra/fx-live/config.json's Hue devices)
+with GET requests only, takes every member bulb of each, and writes
 storage/spectra/hue_scope.json:
 
   {"lights": {"<light resource id>": "<bulb name>", ...},
    "excluded": {"<id>": "<name>", ...}, "written_at": "...", "source": "..."}
+
+Every bulb in a streamed entertainment area is allowed by default — they
+are ordinary bulbs of his Spectra home, not Home Assistant's (his own
+correction, 2026-10-06, after an earlier build wrongly carved the Loft
+Ceiling Uplight and the three Ledge lights out of the Music Group area as
+"left alone"). `--exclude` is still available for a FUTURE bulb he actually
+wants Home Assistant to keep, never a default.
 
 Dry run by default (prints the list); --apply writes, backing up any
 existing file to storage/spectra/backups/ first. A bulb name in --exclude
@@ -29,7 +34,7 @@ import urllib.request
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-DEFAULT_EXCLUDE = ("Loft Ceiling Uplight", "Ledge Left", "Ledge Right", "Ledge Center")
+DEFAULT_EXCLUDE: tuple[str, ...] = ()
 
 
 def _get(ip: str, key: str, path: str) -> list:

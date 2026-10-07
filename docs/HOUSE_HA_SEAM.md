@@ -196,7 +196,7 @@ levels, and held Hue areas stay held. The sconces' own realtime timeout is
 
 ```json
 {"enabled": false,
- "hue_excluded_lights": ["Loft Ceiling Uplight", "Ledge Left", "Ledge Right", "Ledge Center"],
+ "hue_excluded_lights": [],
  "tv_strips": ["tv-backlight"],
  "voice_fixtures": ["crystal", "sconce-kitchen-left", "sconce-kitchen-right"],
  "voice_looks": {"listening": {"color": "#0000ff", "level": 100},
@@ -207,6 +207,8 @@ levels, and held Hue areas stay held. The sconces' own realtime timeout is
 
 A partial `PUT` keeps everything it does not name (one voice state's colour
 can be changed alone). `enabled` is the cutover switch; `hue_excluded_lights`
-names the Hue bulbs a mode never writes (they stay Home Assistant's outside
-music shows). A `PUT` that changes either applies at once and answers with
+names the Hue bulbs a mode never writes — empty by default, since every bulb
+in his Spectra home is an ordinary house-mode bulb; it is the mechanism for
+a future bulb he genuinely wants left to Home Assistant, never a standing
+exclusion. A `PUT` that changes either applies at once and answers with
 the `lighting` status too.

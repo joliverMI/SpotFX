@@ -1,11 +1,11 @@
 """THE STREAM NEVER STARTS ON AN AREA HOLDING A BULB SPECTRA MAY NOT LIGHT
-(2026-10-06).
+(2026-10-06) — the generic safety net, and the correction that followed it.
 
-THE INCIDENT (DJ, reading the bridge): house lighting was switched OFF at
-17:35:29. After a deploy restart at 18:28:01 the Loft Ceiling Uplight and
-the three Ledge bulbs — the four bulbs left to Home Assistant, NOT on
-storage/spectra/hue_scope.json — turned on one by one from 18:28:07, with
-the rest of the living-room group. They were off at 18:28:05.
+THE ORIGINAL INCIDENT (DJ, reading the bridge): house lighting was switched
+OFF at 17:35:29. After a deploy restart at 18:28:01 the Loft Ceiling
+Uplight and the three Ledge bulbs — NOT yet on storage/spectra/
+hue_scope.json's allow-list — turned on one by one from 18:28:07, with the
+rest of the living-room group. They were off at 18:28:05.
 
 THE CAUSE, from the journal and the code, and it is not Ambient: Ambient
 had been switched off at 17:38:24 (room_controls.json, unchanged since)
@@ -15,20 +15,27 @@ music show's entertainment stream: on start-up HueDevice asked the
 "Music Group" bridge to START a session (`action: start`), and starting a
 session switches on every bulb in the area — 18:28:07 is seventeen seconds
 before the DTLS handshake completed (18:28:24), so before a single frame
-could have been sent. The Music Group area's ten channels are six
-allow-listed bulbs and those four.
-
-MASKING CONDITION: while a house mode (or Ambient) holds Hue the area is
-FROZEN and no session is ever started — PR 335 even kept the areas frozen
-across a restart. With house lighting and Ambient both off nothing freezes
-the area, so the restart started a session and lit them.
+could have been sent.
 
 THE FIX (fx/hue_scope.stream_refusal, fx/devices/hue.py): HueDevice reads
 its area's bulbs from the bridge immediately before every session start and
 never sends `action: start` for an area that holds a bulb off the
 allow-list. That does not depend on the house layer: it is the one door
 every path that streams Hue goes through (a take, a restart's resume,
-Ambient's or a house mode's release, a flush's reconnect).
+Ambient's or a house mode's release, a flush's reconnect). This is a
+GENERIC safety net — it refuses whatever area holds an unlisted bulb, it
+does not name any bulb by itself.
+
+THE CORRECTION (his own, 2026-10-06, relayed by firstmate): the four bulbs
+above were never Home Assistant's — they are ordinary bulbs of his Spectra
+home, like every other bulb in the Music Group area, and treating them
+differently was a wrong assumption. They are now on the allow-list with
+the rest of his living-room and dining bulbs (17 total), so the Music
+Group area streams in full and this guard never fires for it. The tests
+below prove that, and keep the generic safety-net mechanism covered
+against a HYPOTHETICAL future bulb that genuinely is not his, using a
+bridge shape distinct from his real Music Group area so neither proof
+implies the other bulbs are, or ever were, special.
 
 The bridge here is a MODEL of the behaviour the timeline shows: a PUT
 `action: start` switches every bulb in the area on. Each proof below has its
@@ -49,8 +56,22 @@ from fx.devices import hue as hue_mod
 from fx.devices.hue import HueDevice
 
 # ── his real bulbs (storage/spectra/hue_scope.json, read from the bridges) ──
+# Every bulb in both of his streamed entertainment areas is allow-listed —
+# the Music Group's ten and the dining area's seven, 17 in all.
 
-ALLOWED = {
+LIVING_ROOM = {
+    "9401f41b-8cd6-49dd-b237-69d531661c22": "Living Room Corner",
+    "d1c4fb0e-272f-4493-b4ea-152b72e18dae": "Media Ceiling Uplight",
+    "ede288be-9d2b-499f-8bbc-9ed946d31753": "Standing Lamp 1",
+    "e068daa2-0ff4-4eed-9e7d-0ed5b33662a5": "Standing Lamp 2",
+    "847cf0d1-9e97-413c-9174-ae0cb45ed184": "Standing Lamp Side",
+    "4b689967-4290-4982-9b77-5ae1cb12ebdf": "Under Spiral",
+    "f75d60db-e135-44f6-bd2e-f990eb337510": "Ledge Center",
+    "bcbd6860-bc67-4652-885f-c4b2499e76e0": "Ledge Left",
+    "f175b376-7907-4d5c-b942-5590403674a1": "Ledge Right",
+    "f3425ad2-5776-4d18-a413-83cbe4922996": "Loft Ceiling Uplight",
+}
+DINING = {
     "81abef5d-2fac-4ec9-b805-173ca0f855d6": "Dining Hue NC",
     "4a266388-e1ab-4c5c-b2e8-c98c20c62c88": "Dining Hue NE",
     "b8e8f00c-fc8c-402a-8935-8b9396f9c8b0": "Dining Hue NW",
@@ -58,23 +79,12 @@ ALLOWED = {
     "748798ec-1ec1-44b9-99ad-9e101cdc94a5": "Dining Hue SE",
     "8a1dada8-2ffb-4be4-b344-2bd792617f91": "Dining Hue SW",
     "46894b55-3923-4273-b67c-233d5da5c56d": "Kitchen Infuse",
-    "9401f41b-8cd6-49dd-b237-69d531661c22": "Living Room Corner",
-    "d1c4fb0e-272f-4493-b4ea-152b72e18dae": "Media Ceiling Uplight",
-    "ede288be-9d2b-499f-8bbc-9ed946d31753": "Standing Lamp 1",
-    "e068daa2-0ff4-4eed-9e7d-0ed5b33662a5": "Standing Lamp 2",
-    "847cf0d1-9e97-413c-9174-ae0cb45ed184": "Standing Lamp Side",
-    "4b689967-4290-4982-9b77-5ae1cb12ebdf": "Under Spiral",
 }
-EXCLUDED = {
-    "f75d60db-e135-44f6-bd2e-f990eb337510": "Ledge Center",
-    "bcbd6860-bc67-4652-885f-c4b2499e76e0": "Ledge Left",
-    "f175b376-7907-4d5c-b942-5590403674a1": "Ledge Right",
-    "f3425ad2-5776-4d18-a413-83cbe4922996": "Loft Ceiling Uplight",
-}
-EXCLUDED_NAMES = sorted(EXCLUDED.values())
+ALLOWED = {**LIVING_ROOM, **DINING}
 
 #: the "Music Group" area on the living-room bridge — ten channels, one bulb
-#: each (data/spectra-stuck-bulb-cause/report.md read it off the bridge)
+#: each (data/spectra-stuck-bulb-cause/report.md read it off the bridge).
+#: Every one of these is allow-listed.
 MUSIC_GROUP = ["Loft Ceiling Uplight", "Media Ceiling Uplight",
                "Living Room Corner", "Under Spiral", "Standing Lamp 1",
                "Standing Lamp 2", "Standing Lamp Side", "Ledge Left",
@@ -82,7 +92,17 @@ MUSIC_GROUP = ["Loft Ceiling Uplight", "Media Ceiling Uplight",
 DINING_MUSIC = ["Dining Hue NC", "Dining Hue NE", "Dining Hue NW",
                 "Dining Hue SC", "Dining Hue SE", "Dining Hue SW",
                 "Kitchen Infuse"]
-RID = {name: rid for rid, name in {**ALLOWED, **EXCLUDED}.items()}
+
+#: a HYPOTHETICAL bulb genuinely outside the allow-list — used only to keep
+#: the generic refusal mechanism covered. Not one of his real bulbs, and
+#: never his Music Group's: a separate, imagined area, so this proof never
+#: implies any of his real bulbs are treated differently.
+NOT_HIS_BULB_RID = "00000000-0000-0000-0000-000000000000"
+NOT_HIS_BULB_NAME = "Some Other House's Bulb"
+NOT_HIS_AREA = ["Living Room Corner", NOT_HIS_BULB_NAME]
+
+RID = {name: rid for rid, name in ALLOWED.items()}
+RID[NOT_HIS_BULB_NAME] = NOT_HIS_BULB_RID
 
 
 @pytest.fixture
@@ -90,7 +110,7 @@ def his_scope(tmp_path, monkeypatch):
     """The REAL allow-list reader over a copy of his hue_scope.json (the
     conftest default is permissive — every bulb allowed)."""
     path = tmp_path / "hue_scope.json"
-    path.write_text(json.dumps({"lights": ALLOWED, "excluded": EXCLUDED}))
+    path.write_text(json.dumps({"lights": ALLOWED}))
     monkeypatch.setattr(hue_scope, "SCOPE_FILE", path)
     monkeypatch.setattr(hue_scope, "load_allowed", hue_scope.read_allowed_file)
     return path
@@ -270,20 +290,17 @@ def _shipped_driver(monkeypatch):
     monkeypatch.setattr(HueDevice, "_blocking_activate", shipped)
 
 
-# ═══ 1. the judgement, on his real area ═══════════════════════════════════
+# ═══ 1. the judgement: his real areas may both stream ══════════════════════
 
-def test_his_music_group_area_is_refused_by_name(his_scope):
+def test_his_music_group_area_may_stream(his_scope):
+    """Every bulb of the Music Group — the Loft/Ledge four included — is
+    allow-listed, so the area is never refused."""
     bridge = ModelBridge("music", MUSIC_GROUP)
     area = hue_scope.area_lights(bridge.config(),
                                  bridge.request("GET", "/clip/v2/resource/entertainment")[0]["data"],
                                  bridge.request("GET", "/clip/v2/resource/light")[0]["data"])
     assert sorted(name for _c, _r, name in area) == sorted(MUSIC_GROUP)
-    reason = hue_scope.stream_refusal(area)
-    assert reason is not None
-    for name in EXCLUDED_NAMES:
-        assert name in reason
-    for name in set(MUSIC_GROUP) - set(EXCLUDED_NAMES):
-        assert name not in reason, f"{name} is allow-listed and was named"
+    assert hue_scope.stream_refusal(area) is None
 
 
 def test_his_dining_area_may_stream(his_scope):
@@ -292,6 +309,20 @@ def test_his_dining_area_may_stream(his_scope):
                                  bridge.request("GET", "/clip/v2/resource/entertainment")[0]["data"],
                                  bridge.request("GET", "/clip/v2/resource/light")[0]["data"])
     assert hue_scope.stream_refusal(area) is None
+
+
+def test_an_area_holding_a_bulb_outside_the_allow_list_is_refused_by_name(his_scope):
+    """The generic safety net itself, on a HYPOTHETICAL area that is not
+    his Music Group — proves the mechanism without implying any of his
+    real bulbs are, or ever were, treated differently."""
+    bridge = ModelBridge("not-his", NOT_HIS_AREA)
+    area = hue_scope.area_lights(bridge.config(),
+                                 bridge.request("GET", "/clip/v2/resource/entertainment")[0]["data"],
+                                 bridge.request("GET", "/clip/v2/resource/light")[0]["data"])
+    reason = hue_scope.stream_refusal(area)
+    assert reason is not None
+    assert NOT_HIS_BULB_NAME in reason
+    assert "Living Room Corner" not in reason, "allow-listed bulb was named"
 
 
 def test_a_bulb_that_cannot_be_identified_is_refused_even_when_everything_is_allowed():
@@ -315,55 +346,65 @@ def test_a_missing_scope_file_refuses_every_area(tmp_path, monkeypatch):
     assert hue_scope.stream_refusal(area) is not None
 
 
-# ═══ 2. the driver: the restart's activation, his real bulbs ════════════════
+# ═══ 2. the driver: a restart starts the Music Group and lights it ═════════
 
-def test_a_restart_never_starts_a_session_on_the_music_group(his_scope, caplog):
-    """The 18:28 restart, at the driver: the stack comes up, the Music Group
-    device activates. No `action: start` reaches the bridge, so no bulb is
-    switched on, and the refusal names the four bulbs at CRITICAL."""
+def test_a_restart_starts_a_session_on_the_music_group_and_lights_it(his_scope):
+    """The stack comes up, the Music Group device activates. Every bulb in
+    it — the Loft/Ledge four included — is allow-listed, so the session
+    starts and every bulb lights, the same as any other area."""
     bridge = ModelBridge("music", MUSIC_GROUP)
 
     async def main():
         dev = _device(asyncio.get_running_loop(), bridge)
-        with caplog.at_level(logging.CRITICAL, logger=hue_mod.__name__):
-            dev.activate()
-            await _settle(dev)
+        dev.activate()
+        await _settle(dev)
+        return await _close(dev)
+
+    dev = _run(main())
+    assert bridge.starts() == 1
+    assert bridge.lit() == sorted(MUSIC_GROUP)
+    assert dev.ready is True and dev.refusal is None
+
+
+def test_red_control_an_area_with_an_unlisted_bulb_is_refused_at_the_driver(his_scope):
+    """The mechanism itself, at the driver layer: an area holding a bulb
+    outside the allow-list is never started, even by the shipped code path
+    that otherwise starts every session."""
+    bridge = ModelBridge("not-his", NOT_HIS_AREA)
+
+    async def main():
+        dev = _device(asyncio.get_running_loop(), bridge)
+        dev.activate()
+        await _settle(dev)
         return await _close(dev)
 
     dev = _run(main())
     assert bridge.starts() == 0, f"a session was started: {bridge.actions}"
     assert bridge.lit() == [], f"bulbs switched on: {bridge.lit()}"
-    assert dev.ready is False and dev.refusal
-    for name in EXCLUDED_NAMES:
-        assert name in dev.refusal
-    criticals = [r for r in caplog.records if r.levelno == logging.CRITICAL]
-    assert len(criticals) == 1 and "Ledge Center" in criticals[0].getMessage()
+    assert dev.ready is False and dev.refusal and NOT_HIS_BULB_NAME in dev.refusal
 
 
-def test_red_control_the_shipped_driver_lights_all_four(his_scope):
-    """The shipped driver on the same restart: the session starts and the
-    bridge switches every bulb on — the four excluded ones with the rest."""
-    bridge = ModelBridge("music", MUSIC_GROUP)
-    mp = pytest.MonkeyPatch()
-    try:
-        _shipped_driver(mp)
+def test_without_the_scope_check_the_shipped_driver_starts_anyway(his_scope, monkeypatch):
+    """The red control for the mechanism: strip the scope check (the
+    pre-fix `_blocking_activate`) and the unlisted-bulb area starts its
+    session regardless."""
+    _shipped_driver(monkeypatch)
+    bridge = ModelBridge("not-his", NOT_HIS_AREA)
 
-        async def main():
-            dev = _device(asyncio.get_running_loop(), bridge)
-            dev.activate()
-            await _settle(dev)
-            await _close(dev)
-        _run(main())
-    finally:
-        mp.undo()
+    async def main():
+        dev = _device(asyncio.get_running_loop(), bridge)
+        dev.activate()
+        await _settle(dev)
+        await _close(dev)
+
+    _run(main())
     assert bridge.starts() == 1
-    for name in EXCLUDED_NAMES:
-        assert bridge.on[name] is True
+    assert bridge.on[NOT_HIS_BULB_NAME] is True
 
 
 def test_a_clean_area_still_streams(his_scope):
-    """The fix is not "no Hue": the dining area holds only allow-listed
-    bulbs, so its session starts and frames flow."""
+    """The dining area holds only allow-listed bulbs, so its session starts
+    and frames flow."""
     bridge = ModelBridge("dining", DINING_MUSIC)
 
     async def main():
@@ -380,11 +421,16 @@ def test_a_clean_area_still_streams(his_scope):
     assert dev.sent, "no frame reached the stream"
 
 
-def test_a_refused_area_sends_no_frame_and_rechecks_slowly(his_scope, monkeypatch):
-    """Frames keep arriving from the render thread; none is sent, and the
-    area is re-read at the slow cadence (so fixing it in the Hue app is
-    picked up without a restart), never every five seconds."""
-    bridge = ModelBridge("music", MUSIC_GROUP)
+def test_a_refused_area_sends_no_frame_and_rechecks_slowly(monkeypatch, tmp_path):
+    """The generic mechanism, on a hypothetical unlisted-bulb area: frames
+    keep arriving from the render thread; none is sent, and the area is
+    re-read at the slow cadence (so fixing it in the Hue app is picked up
+    without a restart), never every five seconds."""
+    path = tmp_path / "hue_scope.json"
+    path.write_text(json.dumps({"lights": ALLOWED}))
+    monkeypatch.setattr(hue_scope, "SCOPE_FILE", path)
+    monkeypatch.setattr(hue_scope, "load_allowed", hue_scope.read_allowed_file)
+    bridge = ModelBridge("not-his", NOT_HIS_AREA)
     reconnects = []
 
     async def main():
@@ -395,9 +441,9 @@ def test_a_refused_area_sends_no_frame_and_rechecks_slowly(his_scope, monkeypatc
                             lambda self: reconnects.append(1))
         clock = [dev._last_reconnect_attempt + HueDevice.RECONNECT_RETRY_INTERVAL + 1]
         monkeypatch.setattr(hue_mod.time, "monotonic", lambda: clock[0])
-        dev.flush([[255, 255, 255]] * len(MUSIC_GROUP))
+        dev.flush([[255, 255, 255]] * len(NOT_HIS_AREA))
         clock[0] = dev._last_reconnect_attempt + HueDevice.SCOPE_RECHECK_INTERVAL + 1
-        dev.flush([[255, 255, 255]] * len(MUSIC_GROUP))
+        dev.flush([[255, 255, 255]] * len(NOT_HIS_AREA))
         return await _close(dev)
 
     dev = _run(main())
@@ -406,17 +452,22 @@ def test_a_refused_area_sends_no_frame_and_rechecks_slowly(his_scope, monkeypatc
     assert bridge.lit() == []
 
 
-def test_fixing_the_area_in_the_hue_app_lets_the_rest_stream(his_scope):
-    """Once the four bulbs are taken out of the area, the next re-check
-    starts the session for the six that remain — and lights only them."""
-    bridge = ModelBridge("music", MUSIC_GROUP)
+def test_fixing_the_area_in_the_hue_app_lets_the_rest_stream(monkeypatch, tmp_path):
+    """The generic mechanism's recovery path, on a hypothetical unlisted
+    bulb: once it is taken out of the area, the next re-check starts the
+    session for the bulb that remains."""
+    path = tmp_path / "hue_scope.json"
+    path.write_text(json.dumps({"lights": ALLOWED}))
+    monkeypatch.setattr(hue_scope, "SCOPE_FILE", path)
+    monkeypatch.setattr(hue_scope, "load_allowed", hue_scope.read_allowed_file)
+    bridge = ModelBridge("not-his", list(NOT_HIS_AREA))
 
     async def main():
         dev = _device(asyncio.get_running_loop(), bridge)
         dev.activate()
         await _settle(dev)
         assert dev.scope_refusal
-        bridge.names = [n for n in MUSIC_GROUP if n not in EXCLUDED_NAMES]
+        bridge.names = [n for n in NOT_HIS_AREA if n != NOT_HIS_BULB_NAME]
         dev._trigger_reconnect()
         await _settle(dev)
         return await _close(dev)
@@ -424,7 +475,7 @@ def test_fixing_the_area_in_the_hue_app_lets_the_rest_stream(his_scope):
     dev = _run(main())
     assert bridge.starts() == 1
     assert dev.ready is True and dev.refusal is None
-    assert not any(bridge.on[n] for n in EXCLUDED_NAMES)
+    assert bridge.on[NOT_HIS_BULB_NAME] is False, "bulb was never put back in the area"
 
 
 def test_an_unreadable_area_never_starts_a_session(his_scope):
@@ -451,15 +502,15 @@ def test_an_unreadable_area_never_starts_a_session(his_scope):
 
 # ═══ 3. every way back to a stream goes through the same door ═══════════════
 
-def test_ambient_or_a_house_mode_letting_go_never_starts_the_music_group(his_scope):
+def test_ambient_or_a_house_mode_letting_go_starts_the_music_group(his_scope):
     """Ambient (or a house mode's Hue look) holds the area FROZEN; letting
-    go calls set_frozen(False), which re-engages the stream — at 17:38:45
-    on 2026-10-06 that is exactly what started the session. Refused."""
+    go calls set_frozen(False), which re-engages the stream. With every
+    bulb in the Music Group allow-listed, that session starts normally."""
     bridge = ModelBridge("music", MUSIC_GROUP)
 
     async def main():
         dev = _device(asyncio.get_running_loop(), bridge)
-        dev.activate()                       # comes up, refused
+        dev.activate()
         await _settle(dev)
         await dev.set_frozen(True)           # Ambient ON: session stopped
         await dev.set_frozen(False)          # Ambient released
@@ -467,25 +518,24 @@ def test_ambient_or_a_house_mode_letting_go_never_starts_the_music_group(his_sco
         return await _close(dev)
 
     dev = _run(main())
-    assert bridge.starts() == 0
-    assert bridge.lit() == []
+    assert bridge.starts() == 2, f"two sessions expected: {bridge.actions}"
+    assert bridge.lit() == sorted(MUSIC_GROUP)
 
 
-# ═══ 4. the incident, at the service: house off, Ambient, restart ═══════════
+# ═══ 4. the service: house off, Ambient, restart drive the four normally ══
 
 @pytest.fixture
 def incident(his_scope, monkeypatch):
-    """His room at 17:35-18:28 on 2026-10-06: house lighting switched OFF,
-    SPECTRA owns, the live host carries the REAL Hue driver for the Music
-    Group area, every bulb of which is off on the bridge."""
+    """His room with house lighting switched OFF, SPECTRA owns, the live
+    host carries the REAL Hue driver for the Music Group area, every bulb
+    of which is off on the bridge."""
     import httpx
     from fx import light_ownership as lo
     from spectra.models.house_mode import HouseLibrary, HouseSettings
     from spectra.services import ambient, house, house_store
     from spectra.services.live_host import live
 
-    house_store.save_library(HouseLibrary(settings=HouseSettings(
-        enabled=False, hue_excluded_lights=EXCLUDED_NAMES)))
+    house_store.save_library(HouseLibrary(settings=HouseSettings(enabled=False)))
     assert house.layer_active() is False
     bridge = ModelBridge("music", MUSIC_GROUP)
 
@@ -512,11 +562,11 @@ def _install(incident, monkeypatch, dev):
     monkeypatch.setattr(type(incident.live), "active", property(lambda self: True))
 
 
-def test_house_off_restart_then_ambient_never_lights_the_four(incident, monkeypatch):
+def test_house_off_restart_then_ambient_drives_the_four_like_the_rest(incident, monkeypatch):
     """House lighting off -> the restart's resume -> Ambient on -> Ambient
-    off. Through all of it no session is started on the Music Group, and
-    neither the stream nor a REST write ever switches on a bulb that was
-    off — the four excluded ones above all, which are never even written."""
+    off. The Loft/Ledge four are ordinary allow-listed bulbs, so the
+    restart's stream and Ambient's hold both reach them the same as every
+    other bulb in the room."""
     from spectra.services import house_restart
     bridge = incident.bridge
 
@@ -528,7 +578,6 @@ def test_house_off_restart_then_ambient_never_lights_the_four(incident, monkeypa
         dev.activate()
         await _settle(dev)
         after_restart = bridge.lit()
-        # Ambient on (the brief's reading of 18:28), then off (17:38's)
         on = await incident.ambient.reconcile(True, "#ffe392")
         await _settle(dev)
         off = await incident.ambient.reconcile(False, None)
@@ -537,32 +586,14 @@ def test_house_off_restart_then_ambient_never_lights_the_four(incident, monkeypa
         return after_restart, on, off, snap
 
     after_restart, on, off, snap = _run(main())
-    assert after_restart == [], f"the restart switched on {after_restart}"
-    assert on["status"] == "on" and on["lights_set"] == 6
+    assert after_restart == sorted(MUSIC_GROUP), \
+        f"the restart's stream should light every Music Group bulb: {after_restart}"
+    assert on["status"] == "on" and on["lights_set"] == len(LIVING_ROOM)
     assert off["status"] == "off"
-    assert bridge.starts() == 0, f"a session was started: {bridge.actions}"
-    for name in EXCLUDED_NAMES:
-        assert bridge.on[name] is False, f"{name} was switched on"
-        assert name not in bridge.rest_writes, f"{name} was written over REST"
-    assert snap.refusal and all(n in snap.refusal for n in EXCLUDED_NAMES)
-
-
-def test_red_control_house_off_restart_with_the_shipped_driver(incident, monkeypatch):
-    """The same restart on the shipped driver: the session starts and the
-    four excluded bulbs come on with the rest — 18:28:07."""
-    _shipped_driver(monkeypatch)
-    bridge = incident.bridge
-
-    async def main():
-        dev = _device(asyncio.get_running_loop(), bridge)
-        _install(incident, monkeypatch, dev)
-        dev.activate()
-        await _settle(dev)
-        await _close(dev)
-
-    _run(main())
-    assert bridge.starts() == 1
-    assert [n for n in EXCLUDED_NAMES if bridge.on[n]] == EXCLUDED_NAMES
+    # one start from the restart's own activation, one more once Ambient's
+    # unfreeze hands the device back to the entertainment stream
+    assert bridge.starts() == 2, f"two sessions expected: {bridge.actions}"
+    assert snap.refusal is None
 
 
 # ═══ 5. it is said where he looks ══════════════════════════════════════════
@@ -572,7 +603,7 @@ def test_the_refusal_reaches_ownership_and_liveness(monkeypatch):
     from spectra.services.live_host import live
 
     class Refused:
-        scope_refusal = "refused to start the Hue entertainment stream: Ledge Left"
+        scope_refusal = "refused to start the Hue entertainment stream: Some Bulb"
 
     class Streaming:
         scope_refusal = None

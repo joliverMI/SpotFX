@@ -225,8 +225,9 @@ def _record_json() -> dict:
         # cadence, and the room bar renders both.
         "dark_fixtures": dark_fixture_watch.status(),
         # A Hue area whose entertainment session is NOT started because it
-        # holds a bulb Spectra may not light (fx/hue_scope.py — his Loft
-        # Ceiling Uplight and Ledge bulbs): {device_id: the sentence}.
+        # holds a bulb Spectra may not light (fx/hue_scope.py — a generic
+        # safety net; empty in the ordinary case, since every bulb in his
+        # Music Group area is allow-listed): {device_id: the sentence}.
         "hue_stream_refusals": live.hue_stream_refusals(),
     }
     if record.handover:

@@ -355,9 +355,10 @@ async def _op_set_house_mode_pool(mode: str, pool: str, names: list[str],
 # same reasoning as force_scene_*/force_color_* staying out of the room
 # settings registry plus its own safety note (AGENTS.md's "What should
 # stay off-limits to Sonic" table): hue_excluded_lights — the Hue bulbs a
-# mode never touches, outside the room (Loft Ceiling Uplight, the Ledge
-# lights) — a dropped name here could light or switch off a bulb nobody
-# meant to touch; tv_strips/voice_fixtures/own_brightness/owned_
+# mode never touches — a dropped name here could light or switch off a
+# bulb nobody meant to touch; the list is empty by default (every bulb,
+# Loft Ceiling Uplight and the three Ledge lights included, is an
+# ordinary house-mode bulb) — tv_strips/voice_fixtures/own_brightness/owned_
 # brightness — seam wiring set once at cutover with River, not a
 # standing setting. All four stay READABLE via get_house_settings; none
 # is writable from here. enabled is BOTH directions (his ruling,

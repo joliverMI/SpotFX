@@ -4294,7 +4294,10 @@ Five things:
 after a 02:31 proof take lit his Loft Ceiling Uplight and Ledge lights).**
 `fx/hue_scope.py` is the binding statement. Every Hue light write in either
 process goes through `hue_scope.put`: one light at a time, only ids on
-`storage/spectra/hue_scope.json` (his 13 living-room + dining bulbs;
+`storage/spectra/hue_scope.json` (his 17 living-room + dining bulbs — the
+Loft Ceiling Uplight and the three Ledge bulbs included; an earlier build
+wrongly carved those four out as Home Assistant's, corrected 2026-10-06,
+see "THE FOUR BULBS ARE ORDINARY" below;
 `scripts/seed_hue_scope.py` writes it, GET-only, from the bridges), never a
 group/room/zone/"all lights"; a missing file allows NOTHING. Resolvers filter
 with `allowed_pairs` so out-of-scope bulbs are never attempted or reported.
@@ -4308,24 +4311,64 @@ and `ambient._hue_put` re-checks it per bulb so a hold in flight stops; the
 release fade dims only bulbs that READ ON (its dim write carries on:true) and
 sends an unreadable bulb the off write only.
 
-**THE STREAM IS IN SCOPE TOO (2026-10-06, after a restart with house
-lighting AND Hue Hold off lit the Loft/Ledge bulbs).** Starting a Hue
-entertainment session (`action: start`) makes the bridge switch on EVERY
-bulb in the area before any frame is sent, so the REST allow-list alone
-never covered them: the Music Group area holds the four. `HueDevice.
-_blocking_activate` reads the area from the bridge before every start and
-refuses (`hue_scope.stream_refusal`, `fx/VENDOR.md` #52) an area holding a
-bulb off the allow-list or one it cannot identify; the area is then simply
-not streamed, re-read every `SCOPE_RECHECK_INTERVAL` (60 s), and named on
-`/ownership` + `/liveness` (`hue_stream_refusals`) and the room bar
-(help `hue-scope-stream`). The remedy is his: take the bulbs out of that
-entertainment area in the Hue app. Nothing here depends on the house
-layer — the start is the one door every Hue stream goes through. Spec:
-`tests/test_hue_stream_scope.py` (a model bridge that powers the area on
-start, with the shipped driver as red control).
+**THE STREAM IS IN SCOPE TOO (2026-10-06).** Starting a Hue entertainment
+session (`action: start`) makes the bridge switch on EVERY bulb in the
+area before any frame is sent, so the REST allow-list alone cannot cover
+it — a bulb can be lit by a session start without a single REST write ever
+touching it. `HueDevice._blocking_activate` reads the area from the bridge
+before every start and refuses (`hue_scope.stream_refusal`, `fx/VENDOR.md`
+#52) an area holding a bulb off the allow-list or one it cannot identify;
+the area is then simply not streamed, re-read every
+`SCOPE_RECHECK_INTERVAL` (60 s), and named on `/ownership` + `/liveness`
+(`hue_stream_refusals`) and the room bar (help `hue-scope-stream`). This
+is a GENERIC safety net for a bulb genuinely outside the room, not a rule
+about any bulb of his today: see "THE FOUR BULBS ARE ORDINARY" below for
+why it does not fire for his Music Group. Nothing here depends on the
+house layer — the start is the one door every Hue stream goes through.
+Spec: `tests/test_hue_stream_scope.py` (a model bridge that powers the
+area on start, with the shipped driver as red control).
+
+**THE FOUR BULBS ARE ORDINARY (2026-10-06, the Admiral's own correction,
+verbatim: "i want the loft and ledge bulbs to be part of the living room
+hues, they should be part of the spectra home. they shouldn't be treated
+differently. that was an incorrect assumption yall made").** Built on
+2026-10-04/2026-10-05, the Loft Ceiling Uplight and the three Ledge bulbs
+(all four in his "Music Group" entertainment area, alongside six other
+living-room bulbs) were carved out as "left to Home Assistant" —
+`storage/spectra/hue_scope.json`'s allow-list excluded them,
+`HouseSettings.hue_excluded_lights` defaulted to naming them
+(`scripts/seed_house_lighting.py`'s `HUE_LEFT_ALONE`), and the stream-scope
+guard above refused to start the Music Group session at all because it
+held them. All of that was a wrong assumption, not a standing design: they
+are ordinary bulbs of his Spectra home, driven exactly like the other six
+in that area and the seven in the dining area — the music show's
+entertainment stream, house modes and Hue looks, Ambient (Hue Hold),
+preview, the room map, and Sonic all reach them like any other Hue bulb.
+`scripts/seed_hue_scope.py`'s `DEFAULT_EXCLUDE` is now empty (every bulb
+in a streamed area is allowed by default) and
+`scripts/seed_house_lighting.py` seeds no exclusion at all —
+`HouseSettings.hue_excluded_lights` stays available (default `[]`) as the
+mechanism for a FUTURE bulb he genuinely wants left to Home Assistant,
+never a default. The stream-scope guard above is unchanged and stays a
+generic safety net; it simply never fires for the Music Group now that
+every bulb in it is allow-listed. Spec: `tests/test_hue_stream_scope.py`,
+`tests/test_hue_scope.py`, `tests/test_house_phase4.py`,
+`tests/test_seed_house_lighting.py`.
+
+**The fixed defaults only govern a FRESH seeder run — his own already-
+persisted `storage/spectra/hue_scope.json` and `HouseSettings.
+hue_excluded_lights` are untouched by a deploy restart alone**, since
+neither file is migrated on load. `scripts/fix_loft_ledge_bulb_scope.py`
+(dry-run default, `--apply`, `--spectra-url` required with `--apply`) is
+the one-time catch-up: it moves the four bulbs out of `hue_scope.json`'s
+`"excluded"` map by direct backed-up file edit, and clears their names
+out of `hue_excluded_lights` through the live service's own
+`PUT /api/house/settings` — never a direct edit to `house_modes.json`,
+which would race `apply_settings_patch`'s own reconcile tick. Idempotent.
+Spec: `tests/test_fix_loft_ledge_bulb_scope.py`.
 
 **A RESTART MUST NOT LAND THE ROOM TOGGLE BEFORE THE MODE (2026-10-06).**
-Every restart under Away lit his 13 allow-listed Hue bulbs for ~20 s: the
+Every restart under Away lit his allow-listed Hue bulbs for ~20 s: the
 resume sets `live.host` (so `live.active` reads True) ~16 s before the
 engine goes live, the house gate refuses while the engine is on paper, so
 `house.hue_directive()` was None and the first bridge broadcast landed the
@@ -8624,9 +8667,12 @@ Ten things:
   `dining-table`, `dining-hues` through Light Show device holds, reads the
   capture frame tap, and frees `dining-hues` from the house mode's Hue hold
   by editing ONLY that area's look (restored in a `finally`, from a record
-  written first). **A Hue area is streamed whole**: `hue-lights` carries
-  Loft Ceiling Uplight and the three Ledge bulbs, so it is refused outright.
-  `--apply` only with firstmate's go, and only 08:30-22:30. **Its first live
+  written first). **A Hue area is streamed whole**: `hue-lights` is the
+  full ten-bulb Music Group (Loft Ceiling Uplight and the three Ledge
+  bulbs included — ordinary Spectra bulbs, just far more than this
+  measurement needs), so it is refused outright as out of scope for a
+  two-fixture isolation, never because any of its bulbs are treated
+  differently. `--apply` only with firstmate's go, and only 08:30-22:30. **Its first live
   run (2026-10-06 08:45) measured nothing: the kitchen-kiosk camera pose sees
   none of the three Singles fixtures at full white** — the measurement stays
   pending until a different pose or a light sensor; gamma ships at 2.2.

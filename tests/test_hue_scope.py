@@ -329,3 +329,33 @@ def test_the_seed_leaves_the_named_bulbs_to_home_assistant(monkeypatch, tmp_path
     assert out["lights"] == ALLOWED and out["excluded"] == LEFT_ALONE
     with pytest.raises(SystemExit):
         seed.build(cfg, ["Ledge Lefty"])                  # a typo must not allow a bulb
+
+
+def test_the_default_exclude_is_empty_so_every_bulb_in_a_streamed_area_is_allowed(monkeypatch, tmp_path):
+    """His own correction, 2026-10-06: the Loft Ceiling Uplight and the
+    three Ledge bulbs are ordinary Spectra bulbs, not Home Assistant's —
+    carving them out as excluded by default was a wrong assumption. With
+    no --exclude at all (the seeder's own default), every bulb the real
+    bridges report — his 17 living-room + dining bulbs — lands allowed."""
+    import scripts.seed_hue_scope as seed
+    assert seed.DEFAULT_EXCLUDE == ()
+    cfg = tmp_path / "config.json"
+    cfg.write_text(json.dumps({"devices": [
+        {"id": "hue-lights", "type": "hue", "config": Dev().config},
+        {"id": "dining-hues", "type": "hue", "config": Dev().config},
+    ]}))
+    music_group = {
+        "l-corner": "Living Room Corner", "l-media": "Media Ceiling Uplight",
+        "l-stand1": "Standing Lamp 1", "l-stand2": "Standing Lamp 2",
+        "l-standside": "Standing Lamp Side", "l-spiral": "Under Spiral",
+        "l-loft": "Loft Ceiling Uplight", "l-ledge-l": "Ledge Left",
+        "l-ledge-r": "Ledge Right", "l-ledge-c": "Ledge Center",
+    }  # his real 10-bulb Music Group, Loft/Ledge included
+    dining = {f"d-{i}": f"Dining {i}" for i in range(7)}
+    calls = iter([list(music_group.items()), list(dining.items())])
+    monkeypatch.setattr(seed, "area_members", lambda c: next(calls))
+    out = seed.build(cfg, list(seed.DEFAULT_EXCLUDE))
+    assert out["excluded"] == {}
+    assert len(out["lights"]) == 17
+    assert set(out["lights"].values()) >= {
+        "Loft Ceiling Uplight", "Ledge Left", "Ledge Right", "Ledge Center"}

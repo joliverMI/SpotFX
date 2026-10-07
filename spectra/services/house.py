@@ -725,8 +725,8 @@ def take_frozen_areas(config_dir=None) -> list[str]:
     the stack up (handover.SpectraSide.activate), so they come up frozen and
     are never streamed. Without it a take streamed the current scene to
     every bulb in the area for the seconds before the Hue Hold gate froze
-    it, lighting the bulbs a mode leaves alone (his loft and ledge lights)
-    and every bulb a Night light / Away mode holds off. Empty when house
+    it, lighting any bulb a mode leaves alone (`hue_excluded_lights`, empty
+    by default) and every bulb a Night light / Away mode holds off. Empty when house
     lighting is off, no mode is set, the mode holds no Hue, or music is
     playing under a show mode whose Hue does not stay held. Never raises."""
     try:

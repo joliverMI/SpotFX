@@ -1330,8 +1330,11 @@ async def _reconcile_impl(enabled: bool, color: Optional[str],
 # colour. `area` is a Hue device id or "*" (every area); an exact id wins.
 # kind "skip" (phase 4) names ONE BULB the house leaves alone, area
 # "<device id or *>/<bulb name>" — skipped_lights() reads them; the bulb is
-# never held, switched off or reported (his Loft Ceiling Uplight and Ledge
-# lights stay Home Assistant's outside music shows).
+# never held, switched off or reported. The list is empty by default (every
+# bulb in his Spectra home, Loft Ceiling Uplight and the three Ledge bulbs
+# included, is an ordinary house-mode bulb) — this is the mechanism for a
+# future bulb he actually wants Home Assistant to keep, not a standing
+# exclusion of any bulb today.
 #
 # THE RAMP is the mode's own glide (90 s at a clock change), carried as
 # `dynamics.duration`: the bulbs fade on the mesh; the bridge's resource
@@ -1356,8 +1359,9 @@ def look_for(device_id: str, looks) -> Optional[tuple]:
 def skipped_lights(device_id: str, looks) -> frozenset:
     """Bulb names (lower-cased) a house mode leaves alone in this area —
     SKIP looks for "<device_id>/<bulb>" or "*/<bulb>" (house.py adds one per
-    HouseSettings.hue_excluded_lights entry). Never held, never switched
-    off, never reported: they stay Home Assistant's."""
+    HouseSettings.hue_excluded_lights entry — empty by default; no bulb is
+    excluded unless he adds one). A skipped bulb is never held, never
+    switched off, never reported."""
     out = set()
     for lk in looks or ():
         if lk[1] != "skip" or "/" not in lk[0]:

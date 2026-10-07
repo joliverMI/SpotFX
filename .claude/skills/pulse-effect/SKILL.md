@@ -89,4 +89,9 @@ and only by copying a whole entry from another scene.
 gating, real pipeline + device preview, his songs),
 `scripts/check_pulse_effect.py` (fixtures from his WAVs). Not yet measured:
 the Singles' real gamma and delay (`scripts/measure_singles_response.py`,
-blocked on a camera pose that can see them).
+blocked on a camera pose that can see them). That script's `NEVER_STREAM`
+guard refuses `hue-lights` because its stream is the whole ten-bulb Music
+Group, far more than this protocol's two-fixture isolation needs — never
+because any of its bulbs (the Loft Ceiling Uplight and the three Ledge
+bulbs included) are treated differently; see AGENTS.md "THE FOUR BULBS ARE
+ORDINARY" (2026-10-06).

@@ -1556,7 +1556,12 @@ against that commit.
     re-reads at `SCOPE_RECHECK_INTERVAL` (60 s) instead of every 5 s, so
     fixing the area in the Hue app is picked up without a restart. It is
     said once at CRITICAL and exposed as `HueDevice.scope_refusal`. The
-    DTLS socket setup moved into `_open_dtls()` unchanged. Proof:
+    DTLS socket setup moved into `_open_dtls()` unchanged. This is a
+    GENERIC safety net, not a rule about the Loft/Ledge four specifically:
+    carving them out of the allow-list was itself a wrong assumption,
+    corrected 2026-10-06 (AGENTS.md "THE FOUR BULBS ARE ORDINARY") — they
+    are now allow-listed like every other bulb in the area, so this guard
+    does not fire for his real Music Group. Proof:
     `tests/test_hue_stream_scope.py`.
 
 53. `devices/wled.py`: A FRIENDLY NAME HE SET ALWAYS WINS (2026-10-06).
