@@ -1576,3 +1576,14 @@ against that commit.
     currently falsy; an already-set name (which is the ordinary case —
     every device is created with a name) is left untouched. Proof:
     `tests/test_device_friendly_name_persists.py`.
+
+    THIS FIX ALONE DOES NOT RESTORE THE FOUR NAMES HE ALREADY RENAMED
+    TODAY (`crystal`/`tv-backlight`/`dining-table`/`porch-rail`) — the
+    bug above had every chance to already flush the clobbered "WLED"
+    value back to `storage/spectra/fx-live/config.json` on his several
+    restarts, and the new "already-set wins" rule cannot tell a
+    corrupted "WLED" apart from one he genuinely wants. One-time,
+    idempotent catch-up for the data side:
+    `.venv/bin/python scripts/repair_stale_wled_device_names.py --apply`
+    (dry-run by default; only rewrites a device's stored `config.name`
+    when it is still exactly the stale "WLED").
