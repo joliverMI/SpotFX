@@ -295,7 +295,20 @@ button.danger:hover { border-color: var(--danger); color: var(--danger); }
   letter-spacing: 0.04em;
   line-height: 1.1;
 }
-.top-bar-group-btn-value { font-size: 12px; font-weight: 700; line-height: 1.1; }
+/* Scenes/Colour show a live name here (current scene / current-or-last-
+ * drifting colour set, his ask 2026-10-07) — names are his, length
+ * unbounded, so this must truncate rather than widen the button and wrap
+ * the bar. max-width is tuned to still read at phone width (390px) inside
+ * room-controls-bar's existing flex-wrap row. */
+.top-bar-group-btn-value {
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.1;
+  max-width: 100px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .top-bar-group-btn-dot {
   position: absolute;
   top: -3px;
@@ -309,6 +322,25 @@ button.danger:hover { border-color: var(--danger); color: var(--danger); }
 .top-bar-group-btn-dot-purple { background: var(--accent); }
 .top-bar-group-btn-dot-amber { background: var(--warning); }
 .top-bar-group-btn-dot-gray { background: var(--text-muted); }
+/* The "this is being forced" marker on Scenes/Colour (replaces the plain
+ * purple dot those two buttons used for the same state, his ask
+ * 2026-10-07: "show a lock icon if it's being forced, and nothing
+ * otherwise" — so there is deliberately no counterpart for the unforced
+ * case). Same corner position the dot used. */
+.top-bar-group-btn-lock {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--surface);
+  border: 1.5px solid var(--surface);
+  color: var(--accent);
+}
 
 /* Mode's fill IS the mode (white/black/grey, set inline per state in
  * RoomControlsBar.tsx) — this rule only reserves its width/border so an

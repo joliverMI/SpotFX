@@ -51,6 +51,13 @@ export const ICONS = {
    * preview window" ask, 2026-10-06, replaced the old "Open settings" text
    * button). */
   settings: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM19.4 13a7.4 7.4 0 0 0 0-2l2-1.5-2-3.4-2.3.9a7.4 7.4 0 0 0-1.7-1l-.3-2.5h-4l-.3 2.5a7.4 7.4 0 0 0-1.7 1l-2.3-.9-2 3.4L6.6 11a7.4 7.4 0 0 0 0 2l-2 1.5 2 3.4 2.3-.9c.5.4 1.1.75 1.7 1l.3 2.5h4l.3-2.5c.6-.25 1.2-.6 1.7-1l2.3.9 2-3.4Z',
+  /** Padlock outline — the Scenes/Colour top-bar buttons' "this is being
+   * forced" marker (his ask 2026-10-07: "show a lock icon if it's being
+   * forced, and nothing otherwise"), replacing the generic purple dot
+   * those two buttons used for the same state. Body + shackle, two
+   * subpaths in one `d` (legal SVG, keeps this file framework-free — see
+   * the module docstring above). */
+  lock: 'M5 11H19A2 2 0 0 1 21 13V20A2 2 0 0 1 19 22H5A2 2 0 0 1 3 20V13A2 2 0 0 1 5 11ZM7 11V7A5 5 0 0 1 17 7V11',
 } satisfies Record<string, string>;
 
 export type IconName = keyof typeof ICONS;

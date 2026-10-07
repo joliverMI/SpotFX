@@ -2003,6 +2003,30 @@ it (tokens.css carries the arithmetic) and `TopBarGroupButton` bounds each
 panel from its own computed top. User-facing behaviour: help topics
 `force-scene`/`force-color`.
 
+**The Scenes/Colour buttons' own collapsed FACE shows what is actually
+playing, not a setting (2026-10-07, his ask: "the scenes button the top
+bar that currently shows transitions + analyzed: change that to show the
+name of the current scene. Similarly, on the color button, show the
+current color set (or the last chosen one if it is drifting). Show a lock
+icon if it's being forced, and nothing otherwise").** `RoomControlsBar.tsx`
+reads `engineStatus.conductor.active_scene.name` (Scenes) and
+`engineStatus.conductor.journey.active_set_id` resolved against the
+fetched colour-set list (Colour) — the scene-change-mode select and the
+Force Scene/Force Colour pin panels above are unchanged, just moved out of
+the button face and into its tooltip. `journey.active_set_id` already
+answers "or the last chosen one if it is drifting" with no separate
+drift-state branch: per `color_journey.py`'s own DESTINATION model (above),
+it's the room's current destination, held steady while the journey steers
+toward it and replaced only on arrival. The purple "forced" dot on these
+two buttons is replaced by a dedicated padlock (`iconRegistry.ts`'s `lock`
+key, `.top-bar-group-btn-lock` in tokens.css) shown only while forced,
+nothing otherwise — the dot itself is untouched everywhere else (mode/
+ambient). `.top-bar-group-btn-value` now truncates with an ellipsis at a
+fixed max-width, since a scene/colour-set name is author-chosen and
+unbounded where the old mode labels were fixed strings. Spec: `scripts/
+check_topbar_scene_colour_names.mjs` (mounts the real `RoomControlsBar.tsx`
+under jsdom against a fixture data layer).
+
 **Temporary scene disable** (2026-08-18, his ask: "add an ability to
 disable a scene temporarily") — `SceneV2.disabled: bool` (default False),
 a manual reversible toggle, no timer/expiry. STRONGER than mode
