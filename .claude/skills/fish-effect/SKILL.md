@@ -274,3 +274,16 @@ History: AGENTS.md's "Fish (fx/effects/fish.py) — Orbits' twin" section —
 read that in full before a non-trivial change; it documents ~8 more
 PR-scoped fixes (lunge envelope, charge spread, camera window centring,
 wake replacement) each with its own measured-not-assumed proof.
+
+## Fish does NOT paint a background itself — "Fish ignores overwrite" (2026-10-07) was the Matrix pre-fill
+
+His report that Fish does not obey a colour set's `overwrite` background
+mode was true on master and was not in `fish.py`: `Twod.render()` pre-filled
+the canvas with the background in overwrite mode and Fish composes its
+bodies/trail/wake ON that canvas (`np.asarray(self.matrix) + body_out`), so
+a lit fish carried the full background under it — additive by construction
+— and `get_pixels()` then doubled it on every dark pixel. Fixed in `twod.py`
+(fx/VENDOR.md #60, the canvas always starts black); nothing in `fish.py`
+changed. If a background-mode report lands on this effect again, run
+`scripts/check_effect_background_mode.py fish` before reading fish.py —
+the probe measures the lit-pixel blue against each mode's own curve.
