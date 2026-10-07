@@ -934,10 +934,8 @@ class Squiggles2d(Twod, GradientEffect):
         # orphan watchdog: a charge/lull whose payoff never arrives
         # releases itself — walls open, the CRT snaps back on, no burst
         due, self._phase_done_t = particle_handoff.phase_release_due(
-            self._phase,
-            lull_dark.watchdog_progress(
-                self._config, self._phase, self.phase_progress, self._phase_t),
-            self._phase_t, self._phase_done_t,
+            self._phase, self.phase_progress, self._phase_t,
+            self._phase_done_t,
         )
         if due:
             _LOGGER.info(

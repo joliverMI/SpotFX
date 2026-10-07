@@ -8822,10 +8822,9 @@ never longer than `RoomControlState.lull_dark_max_s` (3 s default,
 Sonic-editable through the generic `set_setting`; Scenes panel field, help
 topic `lull-dark-cap`) — a 20 s lull is 17 s of approach + 3 s dark, a 4 s
 lull still 2 + 2. `fx/effects/lull_dark.py`'s docstring is the binding
-statement, including the four-step OPT-IN for an existing or future lull
+statement, including the three-step OPT-IN for an existing or future lull
 effect (schema fields, `fx.device_model.LULL_DARK_EFFECTS`, one
-`lull_timing()` call where the effect had a fixed dark fraction, and
-`watchdog_progress()` for its orphan watchdog). Opted in: Black Hole,
+`lull_timing()` call where the effect had a fixed dark fraction). Opted in: Black Hole,
 Squiggles, Pulse ONLY (his "just these 3 for now") — `blackhole1d`, Black
 Hole's own strip, is the obvious next one and still darkens at its old
 half-progress point. Three things:
@@ -8835,16 +8834,19 @@ half-progress point. Three things:
   `LULL_DARK_EFFECTS` virtuals (`_lull_dark_keys`); a write without them
   (tests, LedFX UI scrubs) falls back to each effect's legacy progress
   fraction, byte-identical.
-- **A LULL AFTER A COMPLETED CHARGE STARTS AT `phase_progress` 1.0** —
-  pre-existing, every phase effect, measured on the real facade: the arm's
-  1 ms `JUMP_MS` tween has not rendered a frame when the ramp's glide
-  retargets it (`start_param_transitions` starts from the prior tween's
-  CURRENT value), so the lull glides 1.0 -> 1.0, sits at its end state from
-  frame one, and the shared orphan watchdog sees a "completed" build and
-  releases it `PHASE_GRACE_S` (12 s) in. That is why opted-in effects read
-  the lull on their own seconds-in-phase and hand the watchdog
-  `watchdog_progress()`. The root (the jump/glide retarget) is NOT fixed —
-  it still hits Orbits, Fireworks, Eye, Fish and `blackhole1d`.
+- **A JUMP IS NOT UNDONE BY THE GLIDE WRITTEN RIGHT AFTER IT**
+  (`fx/VENDOR.md` #58, fixed at its root 2026-10-07). The phase arm is a
+  1 ms `JUMP_MS` tween to `phase_progress` 0 then a glide to 1; the tween
+  engine used to retarget the glide from the jump's CURRENT value (still
+  its start, no frame rendered), so a lull after a completed charge — and a
+  drop after a completed lull — glided 1.0 -> 1.0 on EVERY phase effect and
+  the orphan watchdog released a long lull 12 s in. `start_param_
+  transitions` now retargets a tween that would land by the next frame
+  from its TARGET. The told effects still read the lull on their own clock
+  — not as a workaround but because a lull over ten times the cap has its
+  dark point inside the progress hang. Spec:
+  `tests/test_lull_after_charge.py` (every `PHASE_EFFECTS` member, with the
+  pre-fix retarget as its red control).
 - **Squiggles now keeps spawning through a told lull until its dark
   point** (`_lull_still_lit`, Black Hole's own model) — otherwise a long
   lull's walled-in chains collide themselves out within ~8 s. Spec:

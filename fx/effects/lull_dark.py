@@ -40,20 +40,16 @@ changes for a write that does not carry the keys.
 SECONDS INTO THE LULL ARE THE EFFECT'S OWN CLOCK, NOT `phase_progress`.
 Once told, an effect measures the lull on its own seconds-in-phase (reset on
 the lull's edge, advanced every rendered frame), never by turning progress
-back into seconds. Two reasons, both measured, not argued:
-  1. A lull that follows a COMPLETED charge — the ordinary charge -> lull ->
-     drop sequence — starts its progress at 1.0, not 0: the arm's 1 ms
-     reset tween has not rendered a frame when the ramp's glide retargets
-     it, so the glide runs from the charge's finished 1.0 to 1.0 and the
-     lull sits at its end for its whole length (an fx tween property:
-     start_param_transitions retargets from the prior tween's current
-     value). Read off progress, Black Hole was dark and Pulse black from the
-     lull's first frame. The effect's own clock does not care.
-  2. A lull longer than ten times the cap has its dark point inside the
-     hang, where progress no longer moves (a 40 s lull's dark point sits at
-     37 s, after its 36 s ramp) — only a clock can find it.
+back into seconds: a lull longer than ten times the cap has its dark point
+inside the hang, where progress no longer moves (a 40 s lull's dark point
+sits at 37 s, after its 36 s ramp) — only a clock can find it. While the
+ramp runs the two agree. (PR #365 also leaned on the clock because a lull
+after a completed charge used to start its progress at 1.0; that was fixed
+at its root in the shared tween engine — fx/VENDOR.md #58 — so progress is
+honest again for every phase effect, and the orphan watchdog judges a told
+lull by its progress like any other.)
 
-HOW A LULL EFFECT OPTS IN (existing or future — two calls, plus two lines):
+HOW A LULL EFFECT OPTS IN (existing or future — one call, plus two lines):
   1. splice `**lull_dark.schema_fields()` into its CONFIG_SCHEMA (and
      `*lull_dark.KEYS` into ADVANCED_KEYS, beside `phase_progress`);
   2. add its registry name to `fx.device_model.LULL_DARK_EFFECTS`, which is
@@ -65,10 +61,7 @@ HOW A LULL EFFECT OPTS IN (existing or future — two calls, plus two lines):
      0 -> 1 from the lull's start to the dark point (an expansion, a fade, a
      squash), `dark` says the dark portion has begun, and `after` runs 0 -> 1
      from the dark point to the end of SpotFX's ramp (a second movement
-     inside the dark, e.g. Squiggles' line pinching to its dot);
-  4. hand its orphan watchdog `lull_dark.watchdog_progress(self._config,
-     phase, progress, phase_t)` instead of the raw progress, so a long told
-     lull is not released early (see that function).
+     inside the dark, e.g. Squiggles' line pinching to its dot).
 Only Black Hole, Squiggles and Pulse are opted in (his "just these 3 for
 now"); blackhole1d — Black Hole's own strip — is the natural next one.
 """
@@ -141,21 +134,6 @@ def told(config: Mapping) -> bool:
     """SpotFX pushed this lull's timing (the rule applies), rather than the
     effect falling back to its legacy progress fraction."""
     return float(config.get(RAMP_KEY, 0.0) or 0.0) > 0.0
-
-
-def watchdog_progress(config: Mapping, phase: str, progress: float,
-                      phase_t: float) -> float:
-    """The progress the shared orphan watchdog (particle_handoff.
-    phase_release_due) should judge a lull by. A told lull is measured on the
-    effect's own clock, so its build completes when SpotFX's ramp would have
-    (`lull_ramp_s` in) — never on its first frame, which is where a lull
-    following a completed charge reads progress 1.0 and would otherwise be
-    released PHASE_GRACE_S (12 s) in, cutting a long lull short. Anything
-    else is judged by its progress, exactly as before."""
-    if phase != "lull" or not told(config):
-        return progress
-    ramp_s = float(config.get(RAMP_KEY, 0.0) or 0.0)
-    return min(1.0, max(0.0, float(phase_t)) / ramp_s)
 
 
 def _clip01(x: float) -> float:
