@@ -3,25 +3,29 @@
  * against your marks on any song, so the two thresholds can be tuned by
  * eye before anything fires") — the two tier thresholds, PLUS the drop
  * floor (2026-10-06, the Admiral's own setting: a drop is only generated
- * where the music during or right after it reaches at least this section
- * energy). A pure module, the edgeKnobs.ts precedent, so
+ * where the top bar's own "⚡ Energy" number — exactly as displayed, NOT
+ * factoring in the adjacent "Mark" readout, a separate number the UI
+ * never multiplies in — reaches at least this during or right after it.
+ * Default 0.7, his own fallback number: 0.95 kept 0 of his 11
+ * detector-found real drops on the four reference songs, 0.7 keeps 9 of
+ * 11). A pure module, the edgeKnobs.ts precedent, so
  * scripts/check_testbed_drop_knobs.mjs can transpile and drive it with
  * no DOM.
  *
  * Bounds and defaults mirror RoomControlState.drop_confident_score /
  * drop_suggested_score (spectra/services/room_controls.py: Field(ge=0.3,
  * le=2.0), defaults 1.0 / 0.7 — the plan's measured operating points) and
- * drop_floor (Field(ge=0.0, le=1.0), default 0.95 — a DIFFERENT scale,
- * section energy_rms rather than a detector score). The backend's own
- * field validation is the enforced source of truth; this is only what
- * the sliders show. */
+ * drop_floor (Field(ge=0.0, le=1.0), default 0.7 — a DIFFERENT scale,
+ * the plain top-bar energy number rather than a detector score). The
+ * backend's own field validation is the enforced source of truth; this
+ * is only what the sliders show. */
 
 export const DEFAULT_CONFIDENT_SCORE = 1.0;
 export const DEFAULT_SUGGESTED_SCORE = 0.7;
 export const MIN_DROP_SCORE = 0.3;
 export const MAX_DROP_SCORE = 2.0;
 
-export const DEFAULT_DROP_FLOOR = 0.95;
+export const DEFAULT_DROP_FLOOR = 0.7;
 export const MIN_DROP_FLOOR = 0.0;
 export const MAX_DROP_FLOOR = 1.0;
 

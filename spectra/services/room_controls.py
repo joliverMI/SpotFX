@@ -615,20 +615,36 @@ class RoomControlState(BaseModel):
     # setting called drop floor and set it as a default to 0.95. drop
     # sequences only get generated if the final energy value for the post
     # drop or during drop section is at least the drop floor. so quiet
-    # songs or sections don't accidentally get drops"). Read as the
-    # containing librosa SECTION's own `energy_rms` at the drop's own
-    # moment (spectra/services/analysis_reader.py's section_energy_at —
-    # the same field/scale every other section-energy reader in this
-    # codebase uses: max-normalized per song, so 0.95 means "one of this
-    # song's loudest few sections," not "95% of full volume"). Gated ONLY
-    # in drop_detector.detect() — a sequence he confirmed, edited or added
+    # songs or sections don't accidentally get drops"). At 0.95 that
+    # removed every one of his 13 real drops on the four reference songs.
+    # Told so, his answer: "what about when we factor in the mark score?
+    # i want to match to the energy in the top bar shown. if that still
+    # needs 0.7 for my drops to land, do .7. otherwise, stay with .95 if
+    # that fixes the issue." A mark-factored composite (intensity_scale.
+    # combine_measured_and_scale over section_energy_at and the song's own
+    # scale) was tried and measured: it structurally capped every one of
+    # these songs' own ceiling at 0.40-0.44, so NEITHER 0.95 NOR 0.7 ever
+    # let a real drop through on that measure — a default that would have
+    # switched generated drops off, not what he asked for. Checking the
+    # actual top-bar component (LiveEnergyReadout.tsx) settled it: it
+    # renders `bridge.intensity()` (== section_energy_at) VERBATIM, with
+    # no mark factored in anywhere — the "Mark" readout next to it is a
+    # separate, un-multiplied number. His own final word: "match to the
+    # energy in the top bar shown" — the DISPLAYED number.
+    # `drop_detector.final_energy_at` therefore reads plain
+    # `section_energy_at`, exactly as the top bar shows it, with no
+    # scaling. Measured on that basis (scripts/check_drop_floor.py): at
+    # 0.95, 0 of his 11 detector-found drops survive; at 0.7, 9 of 11 do.
+    # His own fallback rule decides the default: 0.7, not 0.95, since 0.95
+    # keeps none of them and 0.7 keeps nearly all. Gated ONLY in
+    # drop_detector.detect() — a sequence he confirmed, edited or added
     # never goes away because of this floor (drop_sequences.py never
     # re-runs the detector over his own edits). A song with no section
     # energy yet (no librosa sections stored) is UNKNOWN, never gated —
     # "we can't tell" is not "below the floor". Folded into
     # drop_sequences.stamp_for's own stamp, so a change re-detects each
     # song the next time it plays.
-    drop_floor: float = Field(default=0.95, ge=0.0, le=1.0)
+    drop_floor: float = Field(default=0.7, ge=0.0, le=1.0)
 
     # THE A/V-SYNC LEAD (owner ask 2026-08-28) — LEAD family: positive =
     # fire EARLIER, negative = fire LATER. The value the /avsync

@@ -33,7 +33,7 @@ console.log('§1 defaults and bounds match RoomControlState.drop_confident_score
 ok(k.DEFAULT_CONFIDENT_SCORE === 1.0, 'confident defaults to 1.0 (the plan\'s operating point)');
 ok(k.DEFAULT_SUGGESTED_SCORE === 0.7, 'suggested defaults to 0.7');
 ok(k.MIN_DROP_SCORE === 0.3 && k.MAX_DROP_SCORE === 2.0, 'tier bounds are 0.3-2.0');
-ok(k.DEFAULT_DROP_FLOOR === 0.95, 'floor defaults to 0.95 (the Admiral\'s own number)');
+ok(k.DEFAULT_DROP_FLOOR === 0.7, 'floor defaults to 0.7 (his own fallback — 0.95 kept none of his real drops)');
 ok(k.MIN_DROP_FLOOR === 0.0 && k.MAX_DROP_FLOOR === 1.0, 'floor bounds are 0.0-1.0, a different scale');
 
 console.log('§2 clampDropScore/clampDropFloor keep a slider inside its own bounds');

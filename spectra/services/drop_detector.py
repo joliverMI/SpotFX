@@ -40,21 +40,49 @@ THE RULE, in plain words (report section 5, method B):
   THE DROP FLOOR (the Admiral, 2026-10-06: "drop sequences only get
   generated if the final energy value for the post drop or during drop
   section is at least the drop floor. so quiet songs or sections don't
-  accidentally get drops"). Applied AFTER a candidate clears a tier and
-  the EDGES guard, BEFORE it is placed: `final_energy_at` reads the
-  containing librosa section's own `energy_rms` (analysis_reader.
-  section_energy_at) at the drop's own moment — "during the drop", and in
-  practice also "post drop" since a drop sits on the first bass spike of
-  the hit that follows the break, i.e. the start of what comes after. A
-  song with no section energy yet (no stored librosa sections) is
-  UNKNOWN and never gated — "we can't tell" is not "below the floor".
-  The floor is a room setting (drop_floor, default 0.95 — his own number)
-  folded into drop_sequences.stamp_for's own stamp, so a change re-detects
-  each song the next time it plays. It only ever REMOVES a candidate from
-  what the detector proposes (listed in `excluded`, named); it never
-  touches a sequence he has confirmed, edited or added — those live in
-  drop_sequences.py's own overrides/added and are never re-derived from a
-  fresh detect() call.
+  accidentally get drops" — then, told 0.95 removes every one of his real
+  drops on the four reference songs: "what about when we factor in the
+  mark score? i want to match to the energy in the top bar shown. if that
+  still needs 0.7 for my drops to land, do .7. otherwise, stay with .95 if
+  that fixes the issue" — then, asked to check exactly what the top bar
+  displays, his final word: "match to the energy in the top bar shown",
+  i.e. the DISPLAYED number, not a mark-factored composite). `final_energy_
+  at` is THE OFFLINE EQUIVALENT of the top bar's own "⚡ Energy" reading
+  — `analysis_reader.section_energy_at`, the SAME value LiveEnergyReadout.
+  tsx shows verbatim via `bridge.intensity()` (bridge.py's own `intensity()`
+  IS `section_energy_at`), rendered with NO rescaling, NO division by
+  `HEADROOM_RESERVE`, and NOT a percent of the track's own maximum — read
+  the component before assuming otherwise, this was checked, not guessed.
+  **The MARK (IntensityMarkControl.tsx, the adjacent "Mark" readout) is a
+  SEPARATE number — the per-song scale as a percentage — and the UI never
+  multiplies the two together anywhere; there is no single top-bar number
+  that already factors it in.** A first pass of this floor DID build that
+  composite (intensity_scale.combine_measured_and_scale over energy and
+  the song's own scale) on the theory that "factor in the mark" meant
+  computing it — measured, it structurally capped every one of his four
+  reference songs' own ceiling at 0.40-0.44 (their auto scale is
+  0.68-0.74, so `HEADROOM_RESERVE`(0.6) x scale never reaches 0.7 even at
+  energy=1.0), so NEITHER 0.95 nor 0.7 ever let a real drop through on
+  that measure — a default that would have switched generated drops off
+  entirely, not what he asked for. Reverted once the top bar itself was
+  checked and found NOT to factor the mark in at all. Applied AFTER a
+  candidate clears a tier and the EDGES guard, BEFORE it is placed, at the
+  drop's own moment — "during the drop", and in practice also "post drop"
+  since a drop sits on the first bass spike of the hit that follows the
+  break, i.e. the start of what comes after. A song with no section
+  energy yet (no stored librosa sections) is UNKNOWN and never gated —
+  "we can't tell" is not "below the floor". **Measured against his real
+  four-song set, this plain displayed-energy measure (scripts/
+  check_drop_floor.py): at 0.95, 0 of his 11 detector-found drops survive;
+  at 0.7, 9 of 11 do.** His own fallback rule decides the default: 0.7,
+  not 0.95, since 0.95 keeps none of them and 0.7 keeps nearly all. The
+  floor is a room setting (drop_floor, default 0.7 — his own fallback
+  number) folded into drop_sequences.stamp_for's own stamp, so a change
+  re-detects each song the next time it plays. It only ever REMOVES a
+  candidate from what the detector proposes (listed in `excluded`,
+  named); it never touches a sequence he has confirmed, edited or added
+  — those live in drop_sequences.py's own overrides/added and are never
+  re-derived from a fresh detect() call.
 
   THE LULL ("right after the last beat spike leading into the drop") —
   rule `tail`: find where the bass goes quiet before the drop; if the last
@@ -121,7 +149,7 @@ NMS_BEATS = 6.0               # drops closer than this keep the strongest
 
 CONFIDENT_SCORE = 1.0         # report section 5: "confident", may fire alone
 SUGGESTED_SCORE = 0.7         # report section 5: "suggested", waits for him
-DROP_FLOOR = 0.95             # the Admiral's own number — see module docstring
+DROP_FLOOR = 0.7              # his own fallback number — see module docstring
 
 EDGE_MS = 15_000
 CAP_SECONDS_PER_CONFIDENT = 45
@@ -690,12 +718,18 @@ def place_sequence(p: Prep, drop_ms: int) -> tuple[Optional[int], Optional[int],
 
 
 def final_energy_at(uri: str, drop_ms: int) -> Optional[float]:
-    """THE DROP FLOOR's own reading: the containing librosa section's
-    `energy_rms` (analysis_reader.section_energy_at) at the drop's own
-    moment — "during the drop", and in practice also "post drop" since a
-    drop sits on the first bass spike of the hit that follows the break.
-    `None` when this song has no stored section energy yet — UNKNOWN,
-    never "below the floor"."""
+    """THE DROP FLOOR's own reading: the offline equivalent of the top
+    bar's "⚡ Energy" number exactly as displayed — `analysis_reader.
+    section_energy_at`, the SAME value LiveEnergyReadout.tsx shows
+    verbatim via `bridge.intensity()`, with NO mark factored in (checked
+    against that component directly: it renders the raw number, never
+    rescaled by the adjacent "Mark" readout — see the module docstring's
+    DROP FLOOR section for why this isn't the mark-factored composite a
+    first pass of this feature built). At the drop's own moment ("during
+    the drop", and in practice also "post drop" since a drop sits on the
+    first bass spike of the hit that follows the break). `None` when this
+    song has no stored section energy yet — UNKNOWN, never "below the
+    floor"."""
     return analysis_reader.section_energy_at(uri, drop_ms)
 
 

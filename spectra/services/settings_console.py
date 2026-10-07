@@ -133,7 +133,7 @@ def _spec(key: str, label: str, description: str) -> SettingSpec:
             "rainbow_select_limit": "fraction 0.0-1.0",
             "drop_confident_score": "detector score",
             "drop_suggested_score": "detector score",
-            "drop_floor": "section energy_rms, fraction 0.0-1.0"}.get(key)
+            "drop_floor": "top-bar displayed energy, fraction 0.0-1.0"}.get(key)
     return SettingSpec(key=key, label=label, kind=kind, description=description,
                        unit=unit, min=ge, max=le, choices=choices)
 
@@ -257,10 +257,12 @@ SETTINGS_REGISTRY: dict[str, SettingSpec] = {
     "drop_floor": _spec(
         "drop_floor", "Drop detection — energy floor",
         "A drop sequence is only generated where the music during or "
-        "right after the drop reaches at least this section energy "
-        "(0.0-1.0, the loudest section of the song = 1.0), so quiet "
-        "songs or sections don't get drops. Never removes a drop he has "
-        "already confirmed, edited or added himself. Default 0.95."),
+        "right after the drop reaches at least this value on the same "
+        "0.0-1.0 energy number the top bar's '⚡ Energy' readout shows "
+        "(the Mark readout next to it is a separate number and is not "
+        "factored in) — so quiet songs or sections don't get drops. "
+        "Never removes a drop he has already confirmed, edited or added "
+        "himself. Default 0.7."),
 }
 
 

@@ -79,9 +79,12 @@ edited the song since), `redetect_drop_sequences`,
 `drop_detection_summary`. The two detection thresholds
 (`drop_confident_score`/`drop_suggested_score`) AND the drop floor
 (`drop_floor`, 2026-10-06, the Admiral's own ask — a candidate is only
-generated where the containing librosa section's `energy_rms` during or
-right after the drop reaches at least this, default 0.95; never removes
-a sequence he has confirmed, edited or added) are plain
+generated where the top bar's own "⚡ Energy" number, EXACTLY AS
+DISPLAYED (the adjacent "Mark" readout is separate and never factored
+in), during or right after the drop reaches at least this, default 0.7
+(his own fallback — 0.95 kept 0 of his 11 detector-found drops, 0.7
+keeps 9 of 11); never removes a sequence he has confirmed, edited or
+added) are plain
 `settings_console.SETTINGS_REGISTRY` keys, not drop ops. A sequence
 numbered by Sonic is the SAME numbering the Timeline review list shows
 (song order among non-dismissed sequences) — never a raw store key.
