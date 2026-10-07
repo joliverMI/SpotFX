@@ -1678,6 +1678,23 @@ follow curve) — product judgement: limits/boundary are agent-tellable by
 nature, but they're what the lights visibly do, so they get a compact
 editable row instead. Spec: `scripts/check_drift.py`.
 
+**The Timeline's follow window anchors on the DRAWN playhead, not the raw
+Spotify clock (2026-10-07, his report on Pop Off: "the playhead appears to
+be ahead of the scrolling view").** The playhead layer draws at the audible
+clock + the song's stored `timestamp_offset_ms` (shape offset); follow mode
+used to window on the raw clock, so on a song whose offset exceeds the
+future buffer (Pop Off: 14,450 ms vs 10 s — 26 of his songs are over 10 s,
+226 over 2 s) the line sat past the right edge all song. `spectra/web/src/
+timeline/hooks/followWindow.ts` (byte-identical twin in `web/src/builder/
+hooks/`) is the one definition both the hook and the layer call; the Now
+Playing page always did this. Spec: `node scripts/
+check_timeline_follow_playhead.mjs` (run by `tests/
+test_timeline_follow_playhead.py`), red control included. A quick visual
+repro needs no live app: mount the real `TimelineCanvas` + `BUILDER_LAYERS`
++ `useFollowWindow` in a throwaway vite dev harness with a frozen
+`getNowMs` (the `preview-harness.html` recipe in memory) — `chrome-devtools-
+axi`'s page commands fail here (pageId), raw CDP over `websockets` works.
+
 SPECTRA frontend notes: `/spectra/timeline` is the SpotFX Profile
 Builder ported whole (`spectra/web/src/timeline/`, reads/writes the
 SpotFX `/api` + `/ws` same-origin via `api/spotfx.ts` + `api/ws.ts`);

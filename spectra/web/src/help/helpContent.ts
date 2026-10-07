@@ -1262,6 +1262,7 @@ export const HELP_SECTIONS: HelpSection[] = [
             keywords: 'middle drag scroll window playhead resume auto',
             body: [
               'In Live mode, follow resumes automatically (zoomed to the sticky window size) when the page opens, when Live mode turns on, and when the song changes; within one song your pan/zoom choice sticks. In song-search mode there is no playhead, so the view stays where you leave it.',
+              'Follow mode scrolls so the white playhead line itself sits a fixed look-ahead from the right edge. That line is drawn where the song\'s stored shape offset puts it (the same shift the lights fire against), so on a song whose offset is large the view keeps the line in sight rather than scrolling on the raw Spotify clock and leaving the playhead past the edge — that was the 2026-10-07 "playhead ahead of the scrolling view" report on Pop Off, whose offset is over 14 seconds.',
             ],
             table: [
               ['Middle-drag', 'Pan the zoom window (drag right → window moves right). Panning switches follow off.'],
