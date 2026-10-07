@@ -57,7 +57,10 @@ is a separate implementation); `snap_hold` is the dwell after a snap.
 `background_brightness` defaults to 0.0 here (dark canvas by default,
 same as Dancer) — there is no `no_background_color` registry flag on this
 effect, so an authored background DOES reach the wire, unlike radial/
-pacman.
+pacman. The eyelid-covered region (`Eye2d.draw()`'s `out[covered] = ...`)
+paints literal BLACK, not `_bg_color` — painting the background colour
+there would double it against `get_pixels()`'s own overwrite blend
+(`fx/VENDOR.md` #61).
 
 ## Sonic reach
 
@@ -66,10 +69,14 @@ No direct param edit — reachable only through an already-attached
 
 ## Executable proofs
 
-No dedicated `check_eye_*.py`/`test_eye_*.py` exists yet — a named gap,
-not an oversight (see AGENTS.md's rule for adding one when this effect's
-behaviour is next touched with enough weight to warrant it). The nearest
-proof of the shared machinery this effect uses is
+No dedicated `check_eye_*.py`/`test_eye_*.py` covering this effect's own
+behaviour (snap/blink/gaze) exists yet — a named gap, not an oversight
+(see AGENTS.md's rule for adding one when this effect's behaviour is next
+touched with enough weight to warrant it). The one exception is the
+eyelid's single-application background, proven in
+`tests/test_matrix_overwrite_background_double_apply.py`
+(`test_eye_eyelid_covered_region_applies_background_once_not_twice`). The
+nearest proof of the other shared machinery this effect uses is
 `tests/test_blackhole_orphan_drop_none_crash.py` (the watchdog pattern)
 and `tests/test_lead_time_alignment.py` (the transition-anchor system
 `particle_handoff` feeds).

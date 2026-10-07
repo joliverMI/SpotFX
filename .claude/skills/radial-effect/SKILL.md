@@ -62,6 +62,23 @@ END. Its direction is `spin`'s sign if it has one, else `twist`'s, else
 clockwise. So a star that visibly spins up before a drop, even in a quiet
 passage, is this choreography, not `spin` or `base_rotation` misbehaving.
 
+## The lull-implode/drop-bloom warp's own background blend — `bg_color_use`, not a value fix
+
+During a warp frame (`draw()`'s crossfade/implode-bloom branch), the
+pasted image already blends `self._bg_color` scaled by its own per-pixel
+`bg_alpha` — a value `get_pixels()`'s single-scalar background blend
+can't see, so it was adding a second, unscaled copy on top (worse than a
+flat double at partial `bg_alpha`: additive `bg*(1 + bg_alpha)`). Fixed by
+having `draw()` set `self.bg_color_use = False` for the one frame the warp
+branch runs, so `get_pixels()` skips its own blend entirely that frame —
+the warp's already-complete pixel stands as rendered. `draw()` now also
+calls `self._refresh_bg_render_state()` unconditionally at the top of
+every frame — without it, an instance that ever ran one warp frame stayed
+background-less FOREVER afterward, since that base-class refresh is a
+no-op once the background colour has settled (`fx/VENDOR.md` #62). This
+is unrelated to `no_background_color` above — that gates colour-set
+WRITES; this is the effect's own per-frame render-state flag.
+
 ## `spin_sign` — a real sign-flip control, ported for STAR's Reverse kinds
 
 `spin_sign` (toggle) maps to the REAL param `spin` via
@@ -84,5 +101,9 @@ Sonic write access.
 ## Executable proofs
 
 `scripts/check_star_spin_motion.py`, `scripts/check_radial_base_rotation.py`,
-`tests/test_radial_base_rotation.py`. History: AGENTS.md's "Radial (STAR)
-rotation is audio-lows-driven" section, `fx/VENDOR.md` #22.
+`tests/test_radial_base_rotation.py`. The warp background fix is proven in
+`tests/test_matrix_overwrite_background_double_apply.py`
+(`test_radial_warp_background_applies_once_not_twice`,
+`test_radial_background_recovers_after_a_warp_ends`). History: AGENTS.md's
+"Radial (STAR) rotation is audio-lows-driven" section, `fx/VENDOR.md`
+#22, #62.
