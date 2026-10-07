@@ -24,6 +24,10 @@ own cause and its own fix here:
      unfrozen and start an entertainment session before the Hue Hold gate
      re-freezes them. The areas held at the last snapshot are named to
      fx/hue_freeze.py and come up frozen — no session, the held look stays.
+     `after_resume` must not undo that while the hold is still landing
+     (2026-10-07: it read only what had LANDED, unfroze both areas, and the
+     dining area's stream start overtook the hold's freeze) — so an area
+     the gate intends to hold is kept frozen and watched.
      (Phase 4: an ordinary TAKE does the same — handover.SpectraSide.
      activate names house.take_frozen_areas(), and `after_take` is this
      module's `after_resume` once the gate's post-commit transition ends.)
@@ -188,26 +192,140 @@ def prepare_for_resume() -> dict:
         return {"installed": False, "why": "error"}
 
 
+def _looks_hold(looks, device_id: str) -> bool:
+    areas = {lk[0] for lk in looks if lk[1] in ("hold", "off")}
+    return "*" in areas or device_id in areas
+
+
 def _gate_holds(device_id: str) -> bool:
     """Does the Hue Hold gate hold this Hue device right now (what LANDED)?"""
     from spectra.services import ambient_music_gate as gate
     looks = gate._held_looks
     if looks is not None:
-        areas = {lk[0] for lk in looks if lk[1] in ("hold", "off")}
-        return "*" in areas or device_id in areas
+        return _looks_hold(looks, device_id)
     if gate._held:
         return device_id in gate._held_resolved_groups
     return False
 
 
-async def after_resume() -> list[str]:
-    """The stack is up and the Hue Hold gate has had its startup pass. Any
-    name not consumed by an activation is dropped (one-shot), and a Hue
-    area that came up frozen but the gate does NOT hold now (the room moved
-    on while SPECTRA was down — music playing with Hue joining the show)
-    is unfrozen, so it streams again instead of sitting static. Returns the
-    areas it unfroze. Never raises."""
+def _target_holds(target: tuple, device_id: str) -> bool:
+    """Does a gate target (desired, colour, group ids[, looks]) hold this
+    device? Empty group ids = every Hue area (the gate's own default)."""
+    desired, _color, group_ids, looks = (*target, None)[:4] if len(target) == 3 else target
+    if looks is not None:
+        return _looks_hold(looks, device_id)
+    if not desired:
+        return False
+    return not group_ids or device_id in group_ids
+
+
+def _gate_intends_hold(device_id: str) -> bool:
+    """Is the Hue Hold gate HOLDING THIS AREA, or on its way to? 2026-10-07:
+    the startup reconcile can return before its hold lands (a transition a
+    bridge broadcast already started, or a stack still assembling), and
+    reading only what LANDED then unfroze both areas a moment before the
+    hold re-froze them — the dining area's stream start overtook the
+    freeze and it followed the show under "held". So: an ON transition in
+    flight, a house mode (live or pending) holding the area, or the room
+    toggle that will hold it all count as holding. Never raises (an
+    unreadable answer keeps the area frozen — the hold's side)."""
+    try:
+        from spectra.services import ambient_music_gate as gate
+        if _gate_holds(device_id):
+            return True
+        tr = gate._transition
+        if tr is not None and tr.in_flight:
+            return _target_holds(tr.target, device_id)
+        directive = gate._house_directive() or gate._house_pending()
+        if directive is not None:
+            return _looks_hold(directive.looks, device_id)
+        from spectra.services.room_controls import load_room_controls
+        controls = load_room_controls()
+        try:
+            from spectra.services.engine import bridge
+            playing = bridge.is_playing()
+        except Exception:                                # noqa: BLE001
+            playing = None
+        desired = gate._desired_hold(controls.ambient_enabled,
+                                     controls.ambient_on_music_pause,
+                                     playing, gate._held)
+        return _target_holds(
+            (desired, None, frozenset(controls.ambient_hue_group_ids), None),
+            device_id)
+    except Exception:                                    # noqa: BLE001
+        logger.exception("house restart: could not read the Hue Hold's intent "
+                         "for %s — leaving it frozen", device_id)
+        return True
+
+
+#: After a restart, an area kept frozen because the Hue Hold was still on
+#: its way is re-checked until the hold lands (or the intent goes away).
+INTENT_WATCH_S = 90.0
+INTENT_POLL_S = 0.5
+_intent_watch: Optional["object"] = None
+
+
+async def _watch_intended(device_ids: list[str], *, sleep=None,
+                          wait_s: float = INTENT_WATCH_S) -> list[str]:
+    """Follow-up for areas after_resume kept frozen on the hold's INTENT
+    alone: once the hold has landed on an area it is the gate's again;
+    if the intent goes away without landing (the hold never came), the
+    area is unfrozen so it streams. If the intent is STILL there when
+    wait_s runs out, the area is left frozen — that is what the hold
+    wants, and the gate's own later transitions own it from there — and
+    it is named in a log so a stuck reconcile is not silently invisible.
+    Returns the areas it unfroze. Never raises."""
+    import asyncio
+    sleep = sleep or asyncio.sleep
     unfrozen: list[str] = []
+    pending = set(device_ids)
+    waited = 0.0
+    try:
+        from spectra.services import ambient_music_gate as gate
+        from spectra.services.live_host import live
+        while pending and waited < wait_s:
+            await sleep(INTENT_POLL_S)
+            waited += INTENT_POLL_S
+            if gate.transition_in_flight():
+                continue
+            host = live.host
+            for did in sorted(pending):
+                dev = host.devices.get(did) if host is not None else None
+                if dev is None or not getattr(dev, "frozen", False):
+                    pending.discard(did)
+                    continue
+                if _gate_holds(did):
+                    pending.discard(did)
+                    continue
+                if _gate_intends_hold(did):
+                    continue
+                await dev.set_frozen(False)
+                unfrozen.append(did)
+                pending.discard(did)
+        if unfrozen:
+            logger.warning("house restart: %s was kept frozen for a Hue Hold "
+                           "that never landed — streaming again", unfrozen)
+        if pending:
+            logger.warning("house restart: %s still frozen after %ss — the "
+                           "Hue Hold still intends to hold them but has not "
+                           "landed; left frozen for the gate to resolve",
+                           sorted(pending), wait_s)
+    except Exception:                                    # noqa: BLE001
+        logger.exception("house restart: intent watch failed")
+    return unfrozen
+
+
+async def after_resume() -> list[str]:
+    """The stack is up. Any name not consumed by an activation is dropped
+    (one-shot), and a Hue area that came up frozen but the gate neither
+    holds nor INTENDS to hold now (the room moved on while SPECTRA was down
+    — music playing with Hue joining the show) is unfrozen, so it streams
+    again instead of sitting static. An area the hold is still on its way
+    to is kept frozen (_gate_intends_hold) and watched until it lands.
+    Returns the areas it unfroze. Never raises."""
+    global _intent_watch
+    unfrozen: list[str] = []
+    kept: list[str] = []
     try:
         from fx import hue_freeze
         from spectra.services.live_host import live
@@ -220,11 +338,20 @@ async def after_resume() -> list[str]:
                 continue
             if _gate_holds(did):
                 continue
+            if _gate_intends_hold(did):
+                kept.append(did)
+                continue
             await dev.set_frozen(False)
             unfrozen.append(did)
         if unfrozen:
             logger.warning("house restart: %s came up frozen but nothing "
                            "holds it now — streaming again", unfrozen)
+        if kept:
+            import asyncio
+            logger.warning("house restart: %s came up frozen and the Hue Hold "
+                           "is still landing on it — kept frozen", kept)
+            _intent_watch = asyncio.create_task(
+                _watch_intended(kept), name="house-restart-intent-watch")
     except Exception:                                    # noqa: BLE001
         logger.exception("house restart: after-resume Hue check failed")
     return unfrozen

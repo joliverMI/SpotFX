@@ -1717,3 +1717,22 @@ against that commit.
     spawning through a told lull until its dark point (`_lull_still_lit`).
     Untold writes are byte-identical to before. Evidence:
     `tests/test_lull_dark.py`. Unverified against his live room.
+58. `devices/hue.py` (SpotFX-authored): A FREEZE ALWAYS WINS OVER A STREAM
+    STILL STARTING (2026-10-07, his report: "dining hues are reacting even
+    tho ambient is set for them"). A restart unfroze both Hue areas, the Hue
+    Hold re-froze them a moment later, and the dining area's activation —
+    still queued behind the class-wide `_activation_lock` — sent `action:
+    start` AFTER the freeze's `action: stop`: the bridge streamed the show
+    to the dining bulbs while Spectra reported them held. Now the freeze's
+    stop takes `_activation_lock` (`_blocking_stop_ordered`), and
+    `_blocking_activate` re-checks the freeze (or a deactivate) under that
+    lock before `start` and again once the session is up — stopping it
+    itself if a freeze overtook it (`_ActivationCancelled`, never retried).
+    Whichever gets there first, the bridge's last action is `stop` and no
+    frame is sent. `set_frozen(True)` no longer clears `_reconnecting`
+    (that let a second activation start beside the first); a cancelled
+    activation re-triggers itself if an unfreeze arrived while it stood
+    down. Deactivate's stop is unchanged (not under the lock), but an
+    activation it overtakes stands down the same way. Evidence:
+    `tests/test_hue_hold_restart_race.py` (with the pre-fix driver as its
+    red control).
