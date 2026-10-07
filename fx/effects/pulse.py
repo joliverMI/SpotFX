@@ -8,16 +8,26 @@ one light of ONE colour and moves its brightness on purpose.
 
 WHAT IT DOES, frame by frame
 
-- HIT DETECTOR (live audio, causal, per audio frame). Signal = lows power +
-  2 x the mean of the virtual's own melbank ("bass weighted": bass first, but
-  piano and voice still make hits so calm songs move), or lows power alone
-  ("bass only"). A slow follower tracks the recent level, a decaying peak
-  (PEAK_MEMORY_S) tracks the recent hit size. A hit fires when the signal is
-  more than `hit_sensitivity` x the recent peak above the recent level and
-  still rising, at most once per REFRACTORY_S. Each hit gets a STRENGTH
-  (excess / recent peak) and a SHARPNESS (one-frame rise / SHARP_REF of the
-  recent peak). Hits are measured against the music's own recent level, not
-  against full volume — that is what keeps quiet songs visible.
+- HIT DETECTOR (live audio, causal, per audio frame). `hit_source` picks the
+  signal: "kick and bass" (the default, tuning feedback 2026-10-06) weights
+  AudioAnalysisSource's own beat/bass/mids/high bands (20-100 / 100-250 /
+  250-3000 / 3000-10000 Hz) KICK_BAND_WEIGHT/BASS_BAND_WEIGHT near full and
+  MIDS_BAND_WEIGHT/HIGH_BAND_WEIGHT falling off above the bass band's own
+  250 Hz edge — built to react to kicks and bass and much less to hats and
+  cymbals (his own report: "too reactive to higher frequencies and not
+  reactive enough at low frequencies"); "bass weighted" (the original
+  default) is lows power + 2 x the mean of the virtual's own melbank (bass
+  first, but piano and voice still make hits, at the cost of the virtual's
+  whole listening band — including the hat/cymbal content above 250 Hz —
+  leaning the signal higher than the kick/bass band alone); "bass only" is
+  lows power alone. Whichever signal is chosen, a slow follower tracks the
+  recent level, a decaying peak (PEAK_MEMORY_S) tracks the recent hit size.
+  A hit fires when the signal is more than `hit_sensitivity` x the recent
+  peak above the recent level and still rising, at most once per
+  REFRACTORY_S. Each hit gets a STRENGTH (excess / recent peak) and a
+  SHARPNESS (one-frame rise / SHARP_REF of the recent peak). Hits are
+  measured against the music's own recent level, not against full volume —
+  that is what keeps quiet songs visible, whichever source is chosen.
 - RISE. Linear in eye scale, from the level at the hit to its peak, over
   lerp(rise_soft_ms, rise_sharp_ms, sharpness x sqrt(strength)). The sharp
   end (16 ms) is one frame at 60 fps. Peak = strength ** PEAK_EXP. A hit
@@ -25,7 +35,10 @@ WHAT IT DOES, frame by frame
   rise time is the rise time, however the peak moves.
 - FADE. Exponential, reaching 10% in `fade_beats x beat`, with fade_beats =
   lerp(fade_beats_calm, fade_beats_intense, energy). Counted in BEATS so it
-  follows tempo.
+  follows tempo. Defaults raised 4x (tuning feedback 2026-10-06: "too
+  strobey... longer decays by about four times") — 1.6->6.4 calm,
+  0.5->2.0 intense — scaled through the same two settings, so he can still
+  tune them; the flash-rate limit (below) is untouched by this.
 - LEVEL (eye scale, 0 = black, 1 = full) = rest(energy) + depth(energy) x
   envelope, with rest = lerp(rest_calm, rest_intense, energy) and depth =
   lerp(depth_calm, depth_intense, energy ** DEPTH_EXP), and a pulse never
@@ -100,13 +113,20 @@ a fresh instance.
   Spent from the SAME flash budget as hits: a flash that would overspend
   is shrunk to what is left. Scaled down by a lull's own fade so a lull
   still reaches black on time.
-- `flip` (a count): the colour's hue turns `flip_degrees` (180) at once
-  and swings back over `flip_beats` (0.75 beat), eased to land exactly at
-  zero. The swing is a HUE rotation of the shown colour (saturation and
-  value held), so it travels round the colour wheel and never through
-  grey or white, which a Hue bulb would show as white. Whether a flip
-  fires at all (only above intensity 0.4 by default) is decided by the
-  flare kind's minimum intensity before the write.
+- `flip` (a count): the colour's hue turns `flip_degrees` (180) at once,
+  HOLDS there for `flip_hold_s` (0.5 s default — tuning feedback
+  2026-10-06: "the color rotation effect is way too fast... at least half
+  a second and then fade out"), then fades back over `flip_fade_s` (1.0 s
+  default), eased (smoothstep) to land exactly at zero — never a snap,
+  either at the landing (held, not instant-reversed) or at the end (eased,
+  not cut off). Fixed SECONDS, not beats: unlike the rest of the effect's
+  timing, a colour flip's hold/fade no longer follows tempo, by design —
+  a fast song must not strobe the flip as short as the old beat-scaled
+  0.75 beat could. The swing is a HUE rotation of the shown colour
+  (saturation and value held), so it travels round the colour wheel and
+  never through grey or white, which a Hue bulb would show as white.
+  Whether a flip fires at all (only above intensity 0.4 by default) is
+  decided by the flare kind's minimum intensity before the write.
 
 THE OUTPUT GUARD backs the budget up on the light actually delivered: the
 rises really sent in the last second may not pass `max_flash_rate` either
@@ -151,6 +171,18 @@ RISE_MIN_FRAC = 0.05         # a hit must still be rising by this x peak
 SHARP_REF = 0.6              # one-frame rise of SHARP_REF x peak = sharpest
 REFRACTORY_S = 0.110         # at most one hit per this
 PEAK_EXP = 0.7               # envelope peak = strength ** PEAK_EXP
+
+# "kick and bass" hit source (the default, tuning feedback 2026-10-06): a
+# weighted sum of AudioAnalysisSource's own beat/bass/mids/high bands (20-
+# 100 / 100-250 / 250-3000 / 3000-10000 Hz — fx.effects.audio.
+# AudioReactiveEffect.freq_max_mels), weight falling off above the bass
+# band's own 250 Hz edge so hats and cymbals (which live in mids/high) move
+# the signal far less than kicks and bass (beat/bass). A small mids weight
+# is kept (not zero) so piano/vocal-driven passages still make some hits.
+KICK_BAND_WEIGHT = 1.0
+BASS_BAND_WEIGHT = 1.0
+MIDS_BAND_WEIGHT = 0.15
+HIGH_BAND_WEIGHT = 0.0
 
 # envelope -> level
 DEPTH_EXP = 1.2              # depth = lerp(calm, intense, energy ** DEPTH_EXP)
@@ -287,12 +319,12 @@ class PulseAudioEffect(AudioReactiveEffect, GradientEffect):
             vol.Optional(
                 "fade_beats_calm",
                 description="Beats for a pulse to fall to a tenth, calm music",
-                default=1.6,
+                default=6.4,
             ): vol.All(vol.Coerce(float), vol.Range(min=0.05, max=8.0)),
             vol.Optional(
                 "fade_beats_intense",
                 description="Beats for a pulse to fall to a tenth, intense music",
-                default=0.5,
+                default=2.0,
             ): vol.All(vol.Coerce(float), vol.Range(min=0.05, max=8.0)),
             vol.Optional(
                 "rise_soft_ms",
@@ -312,8 +344,8 @@ class PulseAudioEffect(AudioReactiveEffect, GradientEffect):
             vol.Optional(
                 "hit_source",
                 description="Which sound makes hits",
-                default="bass weighted",
-            ): vol.In(["bass weighted", "bass only"]),
+                default="kick and bass",
+            ): vol.In(["kick and bass", "bass weighted", "bass only"]),
             vol.Optional(
                 "min_pulse",
                 description="Smallest visible pulse (eye scale)",
@@ -380,10 +412,15 @@ class PulseAudioEffect(AudioReactiveEffect, GradientEffect):
                 default=180.0,
             ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=360.0)),
             vol.Optional(
-                "flip_beats",
-                description="Beats for a colour flip to swing back round the wheel",
-                default=0.75,
-            ): vol.All(vol.Coerce(float), vol.Range(min=0.05, max=8.0)),
+                "flip_hold_s",
+                description="Seconds a colour flip holds the turned hue before it fades back",
+                default=0.5,
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=10.0)),
+            vol.Optional(
+                "flip_fade_s",
+                description="Seconds for a colour flip to fade back round the wheel, eased",
+                default=1.0,
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.05, max=10.0)),
             vol.Optional(
                 "flash",
                 description="Flash flare poke: strength 0..1 (written by SpotFX, self-resets)",
@@ -525,22 +562,35 @@ class PulseAudioEffect(AudioReactiveEffect, GradientEffect):
         self.ingest_signal(x, 1.0 / max(1.0, rate))
 
     def _hit_signal(self, data):
+        source = self._config["hit_source"]
+        if source == "bass only":
+            return self._band_value(data.lows_power)
+        if source == "bass weighted":
+            lows = self._band_value(data.lows_power)
+            try:
+                mel = self.melbank(filtered=False)
+                mean = float(np.mean(mel)) if len(mel) else 0.0
+            except (AttributeError, TypeError, IndexError):
+                mean = 0.0  # a source with no melbank (headless synthetic audio)
+            if not math.isfinite(mean):
+                mean = 0.0
+            return lows + 2.0 * mean
+        # "kick and bass" (default): weight toward the kick/bass band,
+        # falling off above ~250 Hz — see the module/constants docstring.
+        return (
+            KICK_BAND_WEIGHT * self._band_value(data.beat_power)
+            + BASS_BAND_WEIGHT * self._band_value(data.bass_power)
+            + MIDS_BAND_WEIGHT * self._band_value(data.mids_power)
+            + HIGH_BAND_WEIGHT * self._band_value(data.high_power)
+        )
+
+    @staticmethod
+    def _band_value(fn):
         try:
-            lows = float(np.max(data.lows_power(filtered=False)))
+            v = float(np.max(fn(filtered=False)))
         except Exception:
-            lows = 0.0
-        if not math.isfinite(lows):
-            lows = 0.0
-        if self._config["hit_source"] == "bass only":
-            return lows
-        try:
-            mel = self.melbank(filtered=False)
-            mean = float(np.mean(mel)) if len(mel) else 0.0
-        except (AttributeError, TypeError, IndexError):
-            mean = 0.0  # a source with no melbank (headless synthetic audio)
-        if not math.isfinite(mean):
-            mean = 0.0
-        return lows + 2.0 * mean
+            v = 0.0
+        return v if math.isfinite(v) else 0.0
 
     @staticmethod
     def _read_live_bpm(data):
@@ -860,13 +910,19 @@ class PulseAudioEffect(AudioReactiveEffect, GradientEffect):
 
     def _flip_offset(self, dt):
         """The colour flip's hue offset this frame (degrees), then advance
-        its clock. Full angle on the frame it lands, back to exactly 0 at
-        flip_beats x beat, eased (smoothstep) so it lingers on the flipped
-        colour for the onset and settles gently onto the original."""
+        its clock. Full angle on the frame it lands, HELD for flip_hold_s
+        (fixed seconds, not beats — a fast song must not strobe the hold
+        short), then eased (smoothstep) back to exactly 0 over flip_fade_s
+        so it never snaps at either end."""
         if self._flip_t is None:
             return 0.0
-        span = max(1e-3, self._config["flip_beats"] * self.beat_s())
-        s = self._flip_t / span
+        t = self._flip_t
+        hold = max(0.0, self._config["flip_hold_s"])
+        if t < hold:
+            self._flip_t += dt
+            return self._config["flip_degrees"]
+        fade = max(1e-3, self._config["flip_fade_s"])
+        s = (t - hold) / fade
         if s >= 1.0:
             self._flip_t = None
             return 0.0

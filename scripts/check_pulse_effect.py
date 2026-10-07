@@ -81,6 +81,10 @@ async def pipeline_run(stem: str, shapes_dir: str, meta: dict, scale: float) -> 
         n = (len(audio) - HOP) // HOP
         lows = np.zeros(n)
         bmean = np.zeros(n)
+        beat = np.zeros(n)
+        bass = np.zeros(n)
+        mids = np.zeros(n)
+        high = np.zeros(n)
         fired = np.zeros(n, dtype=bool)
         level = np.zeros(n)
         out = np.zeros(n)
@@ -97,10 +101,17 @@ async def pipeline_run(stem: str, shapes_dir: str, meta: dict, scale: float) -> 
                 if fired[i]:
                     lows[i] = float(np.max(mel.lows_power(filtered=False)))
                     bmean[i] = float(np.mean(effect.melbank(filtered=False)))
+                    # the band powers "kick and bass" (the default hit
+                    # source since the 2026-10-06 tuning feedback) needs
+                    beat[i] = float(np.max(mel.beat_power(filtered=False)))
+                    bass[i] = float(np.max(mel.bass_power(filtered=False)))
+                    mids[i] = float(np.max(mel.mids_power(filtered=False)))
+                    high[i] = float(np.max(mel.high_power(filtered=False)))
                 frame = headless.render_frames(virtual, 1, clock=clock)
                 level[i] = effect.level
                 out[i] = float(np.max(frame[0][0])) / 255.0 if frame else 0.0
-        return dict(lows=lows, bmean=bmean, fired=fired, level=level, out=out)
+        return dict(lows=lows, bmean=bmean, beat=beat, bass=bass, mids=mids,
+                    high=high, fired=fired, level=level, out=out)
 
 
 def check(slug: str, shapes_dir: str, triggers: str, write: bool) -> list[str]:
@@ -108,7 +119,9 @@ def check(slug: str, shapes_dir: str, triggers: str, write: bool) -> list[str]:
     meta, onsets = h.build_meta(spec["stem"], shapes_dir, triggers)
     pipe = asyncio.run(pipeline_run(spec["stem"], shapes_dir, meta, spec["scale"]))
     if write:
-        h.write_fixture(slug, meta, onsets, pipe["lows"], pipe["bmean"], pipe["fired"])
+        h.write_fixture(slug, meta, onsets, pipe["lows"], pipe["bmean"], pipe["fired"],
+                         beat=pipe["beat"], bass=pipe["bass"], mids=pipe["mids"],
+                         high=pipe["high"])
         print(f"  wrote {os.path.relpath(h.FIXTURE_DIR, REPO)}/{slug}.{{npz,json}}")
     problems = []
     try:

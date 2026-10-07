@@ -1541,7 +1541,26 @@ against that commit.
     no audio, and the window must still expire); and an OUTPUT GUARD
     (`_guard_output`) that holds the budget on the light actually
     delivered, which never engages on his four fixture songs without
-    flares. Proof: `tests/test_pulse_rainbow_flares.py`.
+    flares. Proof: `tests/test_pulse_rainbow_flares.py`. His first live
+    tuning feedback (2026-10-06, same day) changed three things: (1)
+    `hit_source` gained a third, now-default option "kick and bass" —
+    AudioAnalysisSource's own beat/bass/mids/high bands weighted toward
+    the kick/bass band and falling off above ~250 Hz (his report: "too
+    reactive to higher frequencies and not reactive enough at low
+    frequencies"); "bass weighted" (the original default) and "bass only"
+    stay selectable. (2) `fade_beats_calm`/`fade_beats_intense` defaults
+    raised 4x (1.6->6.4, 0.5->2.0 — "too strobey... longer decays by about
+    four times"); the flash-rate limit is unchanged. (3) the colour flip's
+    `flip_beats` field is RETIRED, replaced by `flip_hold_s` (0.5 s
+    default) + `flip_fade_s` (1.0 s default) — fixed SECONDS, not
+    beat-scaled, so a fast song can't shorten the flip to a strobe ("way
+    too fast... at least half a second and then fade out"); the hold is
+    flat, the fade is still eased (smoothstep) to exactly 0, never a snap.
+    `tests/fixtures/pulse/` was regenerated (the new hit source needs
+    per-band arrays `scripts/check_pulse_effect.py` now also captures:
+    `beat`/`bass`/`mids`/`high`, alongside the original `lows`/`bmean`).
+    Proof: `tests/test_pulse_effect.py`, `tests/test_pulse_rainbow_flares.py`,
+    `scripts/check_pulse_effect.py`.
 52. `devices/hue.py` + `hue_scope.py`: A SESSION IS NEVER STARTED ON AN
     ENTERTAINMENT AREA HOLDING A BULB OFF THE ALLOW-LIST (2026-10-06). After
     a restart with house lighting and Hue Hold both off, the Loft Ceiling

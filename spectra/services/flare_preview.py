@@ -233,17 +233,15 @@ def _scratch_engine(scene: SceneV2, intensity: float,
     return conductor, responder, writes
 
 
-PULSE_DEFAULT_BEAT_MS = 500.0   # the effect's own no-tempo fallback (120 bpm)
-
-
 def pulse_effect_ms(kind: FlareKind, conductor: DriftConductor) -> float | None:
     """How long a Pulse flare's own animation runs on the scene's Pulse
     virtual(s) — the flash's fade to a tenth (flash_ms) or the colour
-    flip's swing back (flip_beats x the beat) — read off the scene's own
-    Pulse config over the effect's schema defaults; the beat is the one the
-    Pulse feed is pushing now, else the effect's 120 bpm fallback. None for
-    any other kind, or when no Pulse virtual is in the scene (the flare
-    then writes nothing)."""
+    flip's hold-then-fade (flip_hold_s + flip_fade_s) — read off the
+    scene's own Pulse config over the effect's schema defaults. Unlike
+    flash_ms, the flip's own duration is FIXED SECONDS (tuning feedback
+    2026-10-06), not beat-scaled, so no tempo lookup is needed here. None
+    for any other kind, or when no Pulse virtual is in the scene (the
+    flare then writes nothing)."""
     if kind.type not in ("pulse_flash", "pulse_flip"):
         return None
     from fx import device_model
@@ -257,19 +255,9 @@ def pulse_effect_ms(kind: FlareKind, conductor: DriftConductor) -> float | None:
         if kind.type == "pulse_flash":
             ms = float(cfg["flash_ms"])
         else:
-            beat_ms = float(cfg.get("beat_ms") or 0.0) or _live_beat_ms()
-            ms = float(cfg["flip_beats"]) * beat_ms
+            ms = (float(cfg["flip_hold_s"]) + float(cfg["flip_fade_s"])) * 1000.0
         longest = ms if longest is None else max(longest, ms)
     return None if longest is None else round(longest, 1)
-
-
-def _live_beat_ms() -> float:
-    try:
-        from spectra.services import pulse_feed
-        beat = pulse_feed.feed.status().get("beat_ms")
-    except Exception:                                    # noqa: BLE001
-        beat = None
-    return float(beat) if beat else PULSE_DEFAULT_BEAT_MS
 
 
 async def build_timeline(scene: SceneV2, kind: FlareKind,

@@ -10,8 +10,10 @@ placement: a flash on every flare, the colour flip only above 0.4.
   "Pulse Flash"        type pulse_flash — the light jumps and fades back in
                        about 180 ms (Pulse's flash_size / flash_ms)
   "Pulse Colour Flip"  type pulse_flip, min_intensity 0.4 — the colour turns
-                       180 degrees and swings back round the wheel over 0.75
-                       beat (Pulse's flip_degrees / flip_beats)
+                       180 degrees at once, holds, and swings back round the
+                       wheel (Pulse's flip_degrees / flip_hold_s / flip_fade_s,
+                       0.5s hold + 1.0s fade by default — fixed seconds, not
+                       beats)
 
 Both are attached at x1.0 directly to every band of the scene's "flare"
 response — NOT in a lane, so they fire alongside the band's other kinds

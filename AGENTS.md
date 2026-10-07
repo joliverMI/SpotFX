@@ -2917,7 +2917,7 @@ is deliberately NOT in scope, still true after the widening below.
 **Reversed for VALUES only, 2026-10-06 (his own ruling: "yes, as long as
 it doesn't limit more than we currently have")**: `get_scene_entry_params`/
 `set_scene_entry_param` read and write any registered effect param's
-CURRENT value on one scene's one device entry — the 26 Pulse settings
+CURRENT value on one scene's one device entry — the 27 Pulse settings
 among them — validated against the real effect registry (type/range/
 options), with a ⚡-bound value REPLACED (and named as such) rather than
 refused. **The property that protects his authored
@@ -8678,7 +8678,30 @@ Ten things:
   the real pipeline from his WAVs; `scripts/check_pulse_effect.py
   [--write-fixtures]` reruns the whole pipeline and fails if the fixture-
   driven run (the pytest path, `tests/pulse_song_harness.py`) lands on a
-  different light. Regenerate after any change to the hit signal.
+  different light. Regenerate after any change to the hit signal — the
+  fixture carries the per-band arrays (`beat`/`bass`/`mids`/`high`,
+  alongside the original `lows`/`bmean`) that any new `hit_source` needs.
+- **HIS FIRST LIVE TUNING FEEDBACK, THREE CHANGES (2026-10-06, same day):**
+  (1) `hit_source` gained a third, now-DEFAULT option, "kick and bass" —
+  weights `AudioAnalysisSource`'s own beat/bass bands near full and its
+  mids/high bands falling off above ~250 Hz (his report: "too reactive to
+  higher frequencies and not reactive enough at low frequencies"); "bass
+  weighted" (the original default, `lows_power + 2 x melbank mean` — the
+  melbank mean leans toward the virtual's upper listening band, i.e.
+  hats/cymbals) and "bass only" stay selectable. (2) `fade_beats_calm`/
+  `fade_beats_intense` defaults raised 4x (1.6->6.4, 0.5->2.0 — "too
+  strobey... longer decays by about four times"); `max_flash_rate`
+  untouched. (3) the colour flip's `flip_beats` (tempo-scaled) is RETIRED
+  for `flip_hold_s` (0.5s default) + `flip_fade_s` (1.0s default) — FIXED
+  SECONDS, never beat-scaled, so a fast song can't strobe the flip short
+  ("way too fast... at least half a second and then fade out"); held flat,
+  then eased (smoothstep) to exactly 0, never a snap. The test scene's
+  Pulse entry and its two flare kinds all store empty `params`/`{}` (he
+  tunes from schema defaults, by the seeder's own design) — nothing was
+  migrated because nothing was stored. `spectra/services/flare_preview.py`'s
+  `pulse_effect_ms` dropped its tempo lookup for the flip (no longer
+  needed — fixed seconds). Proof: `tests/test_pulse_effect.py`,
+  `tests/test_pulse_rainbow_flares.py`, `scripts/check_pulse_effect.py`.
 - **THE CAMERA MEASUREMENT DRIVES REAL FIXTURES** —
   `scripts/measure_singles_response.py` (dry run by default, `--simulate`
   proves the analysis against known answers) holds `porch-rail`,

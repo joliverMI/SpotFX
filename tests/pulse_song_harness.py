@@ -11,7 +11,10 @@ Shared by two callers that must never measure different things:
   fixtures, and proves the fixture-driven run lands on the same light.
 
 A FIXTURE IS THE EFFECT'S OWN AUDIO INPUT, not audio: per audio frame, the
-lows power and the mean of the virtual's own melbank exactly as the real
+lows power and the mean of the virtual's own melbank (the two inputs the
+original "bass weighted"/"bass only" sources need), PLUS the beat/bass/
+mids/high band powers the "kick and bass" default needs (2026-10-06 tuning
+feedback — see fx/effects/pulse.py's module docstring), exactly as the real
 pipeline handed them to the effect (plus whether that audio frame reached
 the effect at all — the resampler swallows the priming chunk). The rest is
 the song's stored analysis and his own authored marks, which stand in for
@@ -97,15 +100,22 @@ def build_meta(stem: str, shapes_dir: str, triggers_path: str) -> tuple[dict, np
 
 
 def write_fixture(slug: str, meta: dict, onsets: np.ndarray, lows: np.ndarray,
-                  bmean: np.ndarray, fired: np.ndarray, out_dir: str = FIXTURE_DIR) -> None:
+                  bmean: np.ndarray, fired: np.ndarray, out_dir: str = FIXTURE_DIR,
+                  beat: np.ndarray | None = None, bass: np.ndarray | None = None,
+                  mids: np.ndarray | None = None, high: np.ndarray | None = None) -> None:
     os.makedirs(out_dir, exist_ok=True)
-    np.savez_compressed(
-        os.path.join(out_dir, slug + ".npz"),
+    arrays = dict(
         lows=lows.astype(np.float32),
         bmean=bmean.astype(np.float32),
         fired=fired.astype(bool),
         onsets=onsets.astype(np.float32),
     )
+    # beat/bass/mids/high: the band powers "kick and bass" needs. Optional
+    # for callers that only ever drive "bass weighted"/"bass only".
+    for name, arr in (("beat", beat), ("bass", bass), ("mids", mids), ("high", high)):
+        if arr is not None:
+            arrays[name] = arr.astype(np.float32)
+    np.savez_compressed(os.path.join(out_dir, slug + ".npz"), **arrays)
     with open(os.path.join(out_dir, slug + ".json"), "w") as f:
         json.dump(meta, f, indent=1)
 
@@ -118,13 +128,22 @@ def load_fixture(slug: str, fixture_dir: str = FIXTURE_DIR) -> tuple[dict, dict]
     return meta, arrays
 
 
-def hit_signal(arrays: dict, source: str = "bass weighted") -> np.ndarray:
+def hit_signal(arrays: dict, source: str = "kick and bass") -> np.ndarray:
     """The detector's input, built exactly as PulseAudioEffect._hit_signal
     builds it (in float64, as the live callback does)."""
-    lows = arrays["lows"].astype(np.float64)
     if source == "bass only":
-        return lows
-    return lows + 2.0 * arrays["bmean"].astype(np.float64)
+        return arrays["lows"].astype(np.float64)
+    if source == "bass weighted":
+        lows = arrays["lows"].astype(np.float64)
+        return lows + 2.0 * arrays["bmean"].astype(np.float64)
+    from fx.effects.pulse import (BASS_BAND_WEIGHT, HIGH_BAND_WEIGHT,
+                                   KICK_BAND_WEIGHT, MIDS_BAND_WEIGHT)
+    return (
+        KICK_BAND_WEIGHT * arrays["beat"].astype(np.float64)
+        + BASS_BAND_WEIGHT * arrays["bass"].astype(np.float64)
+        + MIDS_BAND_WEIGHT * arrays["mids"].astype(np.float64)
+        + HIGH_BAND_WEIGHT * arrays["high"].astype(np.float64)
+    )
 
 
 # ── the engine stand-in ─────────────────────────────────────────────────────
@@ -235,7 +254,7 @@ def run(meta: dict, arrays: dict, *, scale: float, config: dict | None = None,
     from fx import headless
 
     cfg = base_config(meta, scale, config)
-    x = hit_signal(arrays, cfg.get("hit_source", "bass weighted"))
+    x = hit_signal(arrays, cfg.get("hit_source", "kick and bass"))
     fired = arrays["fired"]
     n = len(x)
     level = np.zeros(n)
@@ -308,13 +327,24 @@ def isolated_hits(tr: Trace, gap_s: float) -> list:
 
 
 def rise_times_ms(tr: Trace) -> np.ndarray:
-    """From the OUTPUT: frames from the hit until the level stops rising."""
+    """From the OUTPUT: frames from the hit until the level stops rising.
+    Scans the PULSE above rest (level - rest), the same convention
+    fade_times() already uses — raw level can keep creeping for a few
+    frames after the pulse itself has peaked and started to fade, from
+    `rest` easing toward a new `energy` over its own ENERGY_SLEW_S; with
+    the longer fades (task 2, 2026-10-06) that creep can transiently
+    outrun the envelope's own gentler decay and read as "still rising" if
+    measured on raw level."""
+    pulse = tr.level - tr.rest
     res = []
     for _k, h, i in isolated_hits(tr, 0.3):
-        if tr.level[i] <= tr.level[i - 1] + 1e-6:
+        if pulse[i] <= pulse[i - 1] + 1e-6:
             continue  # no visible rise (light already high, or budget spent)
         j = i
-        while j + 1 < len(tr.level) and tr.level[j + 1] > tr.level[j] + 1e-9:
+        # 1e-4, not 1e-9: a residual sub-frame tick from rest/energy easing
+        # can otherwise read as "still rising" for one more frame right at
+        # the attack's own completion, past what the real attack covers.
+        while j + 1 < len(pulse) and pulse[j + 1] > pulse[j] + 1e-4:
             j += 1
         res.append((j - i + 1) * 1000.0 * DT)
     return np.asarray(res)
@@ -323,9 +353,11 @@ def rise_times_ms(tr: Trace) -> np.ndarray:
 def fade_times(tr: Trace, beat_s: float, cfg: dict) -> list:
     """From the OUTPUT: for isolated hits, the time from the peak until the
     pulse above rest is back to a tenth, against the nominal fade (beats from
-    the effect's own eased energy x the beat)."""
+    the effect's own eased energy x the beat). The isolation window scales
+    with the CONFIGURED calm fade (not a hardcoded old default) — a longer
+    fade needs more room before a later hit can interrupt it."""
     res = []
-    for _k, h, i in isolated_hits(tr, 1.6 * beat_s * 1.5):
+    for _k, h, i in isolated_hits(tr, cfg["fade_beats_calm"] * beat_s * 1.5):
         j = i
         while j + 1 < len(tr.level) and tr.level[j + 1] > tr.level[j] + 1e-9:
             j += 1

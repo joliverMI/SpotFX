@@ -358,8 +358,9 @@ class FlareKind(BaseModel):
       pulse_flip  the COLOUR FLIP flare (same plan, goal 7: "a temporary
                   color rotation by 180 for the beat onset and fade out,
                   but only at intensities greater than .4"): Pulse's colour
-                  turns its flip_degrees (180) at once and swings back over
-                  its flip_beats (0.75 beat) ROUND THE COLOUR WHEEL (a hue
+                  turns its flip_degrees (180) at once, holds for its
+                  flip_hold_s (0.5 s default), then swings back over its
+                  flip_fade_s (1.0 s default) ROUND THE COLOUR WHEEL (a hue
                   rotation, never a straight line through grey, which a Hue
                   bulb shows as white). min_intensity defaults to 0.4 for
                   this type, so it never fires at or below 0.4. Like
@@ -496,7 +497,8 @@ class FlareKind(BaseModel):
                 raise ValueError(
                     f"kind '{self.name}' is {self.type} — its size, angle "
                     f"and timing are the Pulse effect's own settings "
-                    f"(flash_size/flash_ms, flip_degrees/flip_beats — see "
+                    f"(flash_size/flash_ms, "
+                    f"flip_degrees/flip_hold_s/flip_fade_s — see "
                     f"FlareKind's own docstring); params/gain/hold_ms "
                     f"don't apply here and would silently do nothing")
             return self
