@@ -349,6 +349,13 @@ class Effect(BaseRegistry):
     # (squiggles, pacman) set True so shape-mapped virtuals identity-sample
     # instead of kernel-resampling their output (see Virtual.flush).
     LATTICE_EXACT = False
+    # True for effects (Twod) that already pre-fill their own canvas with
+    # the background colour BEFORE get_pixels() runs, when background_mode
+    # is "overwrite" (fx/effects/twod.py Twod.render()). get_pixels()'s own
+    # overwrite blend below must then be skipped for those pixels, or the
+    # background is applied a second time — v*(2 - v/255) instead of v —
+    # see fx/effects/twod.py's own BG_PREFILLED_ON_OVERWRITE for the detail.
+    BG_PREFILLED_ON_OVERWRITE = False
     # over ride in effect children to allow edit and show others
     PERMITTED_KEYS = None
     _config = None
@@ -1017,10 +1024,16 @@ class Effect(BaseRegistry):
                     elif (
                         self.bg_color_use
                         and self.background_mode == "overwrite"
+                        and not type(self).BG_PREFILLED_ON_OVERWRITE
                     ):
                         # Background fills dark areas of the effect; bright
                         # effect pixels are shown as-is without color mixing.
                         # Equivalent to the 2D pre-fill approach for 1D effects.
+                        # Skipped for effects that already pre-filled their
+                        # own canvas with the background (Twod, overwrite
+                        # mode) — applying this blend on top of that too
+                        # would double the background: v*(2 - v/255) instead
+                        # of v. See BG_PREFILLED_ON_OVERWRITE's own comment.
                         effect_alpha = np.clip(
                             np.max(pixels, axis=1, keepdims=True) / 255.0,
                             0,

@@ -12,6 +12,12 @@ _LOGGER = logging.getLogger(__name__)
 
 @Effect.no_registration
 class Twod(AudioReactiveEffect):
+    # render() below pre-fills self.matrix with the background colour
+    # whenever background_mode is "overwrite" (before draw() runs), so
+    # get_pixels()'s own overwrite blend must not run a second time on top
+    # of it — doing so doubled a dark pixel's background from v to
+    # v*(2 - v/255) (pixel-brightness-chain report, §3/§9).
+    BG_PREFILLED_ON_OVERWRITE = True
     # hiding dump by default, a dev can turn it on explicitily via removal
     HIDDEN_KEYS = ["mirror", "flip", "blur", "dump"]
     ADVANCED_KEYS = AudioReactiveEffect.ADVANCED_KEYS + [
