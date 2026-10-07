@@ -196,11 +196,32 @@ class SpotEffectsBridge:
         """spot-effects' audio-alignment xcorr correction for the current
         song (services/trigger_engine.py's _shape_offset_ms, mirrored onto
         state.timing every tick) — None when unknown (no broadcast yet,
-        older spot-effects, or bridge down)."""
+        older spot-effects, or bridge down).
+
+        Also None when the timing block names a DIFFERENT track than the
+        one playing: spot-effects refreshes state.timing only while its
+        engine has a matching song loaded, so between songs (or for a song
+        it holds no profile for) the previous song's lock sits in the
+        broadcast unchanged. Applying it moves the whole show by the
+        difference between two songs' locks — 2026-10-06, Caro fired on
+        Greenlights' -1977ms instead of its own -525ms, ~1.45s late with
+        the playhead correct. A block with no "uri" (an older
+        spot-effects) cannot be checked and is used as before."""
         if not self._timing:
+            return None
+        timing_uri = self._timing.get("uri")
+        if timing_uri and timing_uri != self.track_uri():
             return None
         value = self._timing.get("shape_offset_ms")
         return int(value) if isinstance(value, (int, float)) else None
+
+    def refused_timing_uri(self) -> Optional[str]:
+        """The track named by a timing block shape_offset_ms() refused
+        because it belongs to a different song; None otherwise."""
+        timing_uri = (self._timing or {}).get("uri")
+        if timing_uri and timing_uri != self.track_uri():
+            return timing_uri
+        return None
 
     def effective_position_ms(self) -> Optional[int]:
         """track_position_ms() corrected the same way spot-effects' own
@@ -375,6 +396,10 @@ class SpotEffectsBridge:
                 "position_ms": self.track_position_ms(),
                 "effective_position_ms": self.effective_position_ms(),
                 "shape_offset_ms": self.shape_offset_ms(),
+                # The track a REFUSED timing block belonged to (see
+                # shape_offset_ms) — None when the block is this track's or
+                # cannot be checked. Visible so "no lock" is never silent.
+                "timing_refused_for_uri": self.refused_timing_uri(),
             } if self._track else None),
             "deferral": self.sequencer_deferral(),
             "intensity": self.intensity(),
