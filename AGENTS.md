@@ -4183,10 +4183,15 @@ split). Six things:
   existed for hand-back) and treats that — his own last setting — as the
   per-take ceiling (`house_fixtures._brightness_ceiling`), capped further
   only by `owned_brightness` if he's set that lower (default 255 = no
-  extra cap). A drift check corrects DOWNWARD ONLY — an overshoot above
-  his ceiling (a reboot's brighter boot preset) is capped back to it; a
-  reading at or below it, including a fresh, LOWER HA brightness write, is
-  his and is never fought back up. A mode's per-fixture `level` (`show_
+  extra cap). A drift check corrects DOWNWARD ONLY, and only on a genuine
+  reboot: an overshoot above his ceiling is weighed against the fixture's
+  own `json/info` uptime (`_rebooted_since_last_check`) — uptime dropping
+  since the last check means a reboot's brighter boot preset, capped back
+  down; anything else is HIS OWN new level, ADOPTED into
+  `pre_take[did]["bri"]` as the new ceiling rather than fought back down
+  (nothing is written for an adoption). A reading at or below the ceiling,
+  including a fresh, LOWER HA brightness write, is his and is never fought
+  back up either way. A mode's per-fixture `level` (`show_
   output`'s own output-brightness scaling, a SEPARATE mechanism from WLED's
   hardware `bri`) is still the dimmer BELOW that hardware ceiling — a mode
   without levels now puts the crystal at HIS level, never a forced FULL.
