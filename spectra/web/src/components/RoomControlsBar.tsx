@@ -214,6 +214,19 @@ export default function RoomControlsBar() {
     [colorCards],
   );
 
+  // Plain (undecorated) id -> name, for the Colour button's own face —
+  // the Admiral's ask, 2026-10-07: show the colour set CURRENTLY SHOWING,
+  // not a pin-picker label. `engineStatus.conductor.journey.active_set_id`
+  // is exactly that (and, while the journey is drifting between sets,
+  // stays the last one it committed to — see spectra/services/
+  // color_journey.py's own "destination-driven" docstring — so this one
+  // field already answers "or the last chosen one if it is drifting"
+  // with no separate drift-state branch needed).
+  const colorSetNameById = useMemo(
+    () => new Map((colorCards ?? []).map((c) => [c.id, c.name] as const)),
+    [colorCards],
+  );
+
   // Hoisted function declaration (not a `const`) so it's fully defined
   // for every render's closures — including modeApply's callback below,
   // which is created before local's null-check and must never reference
@@ -249,6 +262,16 @@ export default function RoomControlsBar() {
   }, [data, save.isPending]);
 
   if (!local) return null;
+
+  // Scenes/Colour button faces (his ask, 2026-10-07: show the thing that's
+  // actually playing, not the setting that governs it) — the setting
+  // itself (scene-change mode) isn't dropped, just moved into the
+  // button's own tooltip below.
+  const activeSceneName = engineStatus?.conductor.active_scene?.name ?? null;
+  const activeColorSetId = engineStatus?.conductor.journey.active_set_id ?? null;
+  const activeColorSetName = activeColorSetId ? colorSetNameById.get(activeColorSetId) ?? null : null;
+  const sceneChangeModeLabel = SCENE_CHANGE_MODES.find((m) => m.value === local.scene_change_mode)?.label
+    ?? local.scene_change_mode;
 
   const cycleMode = () => {
     const idx = DISPLAY_MODES.findIndex((m) => m.value === local.display_mode);
@@ -540,7 +563,8 @@ export default function RoomControlsBar() {
 
       <TopBarGroupButton
         className={`scenes-group-btn${local.force_scene_enabled ? ' scenes-group-btn-forced' : ''}`}
-        title="Scene changes, Force Scene, transition pace — tap to open"
+        title={`${activeSceneName ? `Now playing: ${activeSceneName}. ` : ''}Scene changes: ${sceneChangeModeLabel}.${
+          local.force_scene_enabled ? ' Force Scene is on.' : ''} Tap to open.`}
         holdToExpand={false}
         panelTitle="Scenes"
         panel={(
@@ -741,10 +765,14 @@ export default function RoomControlsBar() {
         )}
       >
         <span className="top-bar-group-btn-label">Scenes</span>
-        <span className="top-bar-group-btn-value">
-          {SCENE_CHANGE_MODES.find((m) => m.value === local.scene_change_mode)?.label ?? local.scene_change_mode}
-        </span>
-        {local.force_scene_enabled && <span className="top-bar-group-btn-dot top-bar-group-btn-dot-purple" title="Force Scene is on" />}
+        {activeSceneName && (
+          <span className="top-bar-group-btn-value" title={activeSceneName}>{activeSceneName}</span>
+        )}
+        {local.force_scene_enabled && (
+          <span className="top-bar-group-btn-lock" title="Force Scene is on">
+            <Icon name="lock" size={10} />
+          </span>
+        )}
       </TopBarGroupButton>
 
       {/* FORCE COLOUR (owner ask 2026-08-27) — the deliberately MINIMAL
@@ -755,7 +783,8 @@ export default function RoomControlsBar() {
         * independent (either, both, or neither). */}
       <TopBarGroupButton
         className={`scenes-group-btn${local.force_color_enabled ? ' scenes-group-btn-forced' : ''}`}
-        title="Force Colour — pin the room's colour set or group, tap to open"
+        title={`${activeColorSetName ? `Showing: ${activeColorSetName}. ` : ''}Force Colour ${
+          local.force_color_enabled ? 'is on' : 'is off'} — tap to open`}
         holdToExpand={false}
         panelTitle="Colour"
         panel={(
@@ -831,13 +860,14 @@ export default function RoomControlsBar() {
         )}
       >
         <span className="top-bar-group-btn-label">Colour</span>
-        <span className="top-bar-group-btn-value">
-          {local.force_color_enabled
-            ? (colorTargetOptions.find((o) => o.value === local.force_color_target_id)?.label
-               ?? 'none picked')
-            : 'free'}
-        </span>
-        {local.force_color_enabled && <span className="top-bar-group-btn-dot top-bar-group-btn-dot-purple" title="Force Colour is on" />}
+        {activeColorSetName && (
+          <span className="top-bar-group-btn-value" title={activeColorSetName}>{activeColorSetName}</span>
+        )}
+        {local.force_color_enabled && (
+          <span className="top-bar-group-btn-lock" title="Force Colour is on">
+            <Icon name="lock" size={10} />
+          </span>
+        )}
       </TopBarGroupButton>
 
       <DriftGradientBar />
