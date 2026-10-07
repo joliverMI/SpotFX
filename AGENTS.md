@@ -4220,19 +4220,35 @@ split). Six things:
   existed for hand-back) and treats that — his own last setting — as the
   per-take ceiling (`house_fixtures._brightness_ceiling`), capped further
   only by `owned_brightness` if he's set that lower (default 255 = no
-  extra cap). A drift check corrects DOWNWARD ONLY, and only on a genuine
-  reboot: an overshoot above his ceiling is weighed against the fixture's
-  own `json/info` uptime (`_rebooted_since_last_check`) — uptime dropping
-  since the last check means a reboot's brighter boot preset, capped back
-  down; anything else is HIS OWN new level, ADOPTED into
-  `pre_take[did]["bri"]` as the new ceiling rather than fought back down
-  (nothing is written for an adoption). A reading at or below the ceiling,
-  including a fresh, LOWER HA brightness write, is his and is never fought
-  back up either way. A mode's per-fixture `level` (`show_
+  extra cap). A mode's per-fixture `level` (`show_
   output`'s own output-brightness scaling, a SEPARATE mechanism from WLED's
   hardware `bri`) is still the dimmer BELOW that hardware ceiling — a mode
   without levels now puts the crystal at HIS level, never a forced FULL.
   Every WLED write runs on a worker thread (the transport is blocking).
+  **BRIGHTNESS IS NEVER ADOPTED (fixed the SAME night, PR
+  fm/crystal-255-followup)** — the paragraph above originally continued:
+  a drift check corrected DOWNWARD ONLY on a genuine reboot
+  (`_rebooted_since_last_check`'s uptime comparison), and any OTHER
+  overshoot was treated as HIS OWN new deliberate HA raise and ADOPTED
+  into `pre_take[did]["bri"]`, nothing written. Three minutes into this
+  very fix's own deploy, the crystal's bri rose from his 34 to 255 with
+  no reboot — and it was adopted. River's own HA trace proved Home
+  Assistant never made that write (empty logbook, silent pretake
+  endpoint, no scene/automation); a grep of Spectra's own `house
+  fixtures:` log showed no write of any kind from this process landed on
+  the fixture in that window either. So "no reboot evidence" was never
+  evidence of a deliberate raise — adoption is now REMOVED entirely:
+  `_drift_check` corrects EVERY overshoot straight back down, reboot
+  -explained or not. `_looks_like_our_own_echo`/`_rt.written_bri` track
+  every bri value Spectra itself has written this take, purely so the
+  correction's log line can name an overshoot that looks like Spectra's
+  own lingering value (e.g. a prior ceiling now above a freshly
+  tightened `owned_brightness`) — diagnostic only, never a behavior gate.
+  A reading at or below the ceiling, including a fresh, LOWER HA
+  brightness write, is still his and is never fought back up.
+  `scripts/fix_crystal_brightness_ceiling.py` is the one-time correction
+  for the ceiling the pre-fix adoption already wrote to disk (255, needs
+  restoring to 34) — run while `spectra.service` is stopped.
 - **MEDIA IS AN OVERLAY**: `house.current_mode()` is the EFFECTIVE mode —
   the one answering to "TV" / "TV paused" (source-specific first) while a
   source is on AND a clock mode is set — with the clock's pick kept
