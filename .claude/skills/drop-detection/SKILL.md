@@ -41,7 +41,10 @@ to avoid — route through `apply_edit`.
   memory, keyed per uri) are built from.
 - A sequence sitting on his own authored charge/lull/drop triggers reads
   `matches_yours` and is NOT editable through any of this — edit the
-  SPECTRA triggers strip instead.
+  SPECTRA triggers strip instead. `matches_yours` is mode-INDEPENDENT (it
+  is a fact about proximity to his marks, not about whether those marks
+  can currently fire) — see "Firing" below for what a `matches_yours`
+  sequence actually does under the room's scene-change mode.
 
 ## Detection is cheap to re-run and never touches his edits
 
@@ -64,6 +67,23 @@ what makes it count as "his" for that gate — it does not, by itself, make
 anything fire differently without going through `drop_firing`'s own
 rules. See AGENTS.md's "DROP DETECTION — the detector and its file" and
 "PHASE 5 — FIRING" sections for the full mechanism.
+
+**A `matches_yours` sequence stands down only when his own trigger
+actually fires in a mode that fires his triggers** (2026-10-07,
+data/popoff-drops-not-firing/report.md: Pop Off's three detections each
+sat on one of his own authored drops and stood down as `matches_yours`,
+but the room's scene-change mode was "analysed", which never fires a
+hand-authored trigger — so BOTH doors went silent). `drop_firing.
+his_applies(effective_mode)` is true only for "full"/"triggers_only" —
+NOT "analysed" — and `fires_here` consults it: standing down only when
+it's true, otherwise falling back to the sequence's own tier exactly as
+an unmatched one of the same kind would (confident fires as the analysed
+show, suggested still waits for his confirm). `firing_sequences` stays
+mode-independent (the trigger clock memoises it without the room's mode)
+by flagging a matched sequence `matches_his=True` rather than excluding
+it outright — `_recovered_state` is what lets `_candidates` tell a
+confident/edited match apart from a bare, unconfirmed suggested one it
+still must not fire.
 
 ## Sonic reach
 

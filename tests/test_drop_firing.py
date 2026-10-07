@@ -144,14 +144,21 @@ def test_with_his_triggers_only_what_the_rules_allow_fires(song, mode):
     rec = _run(uri, his, mode)
     view = drop_sequences.view(uri, triggers=his)
     by_state = {s["drop_ms"]: s["state"] for s in view["sequences"]}
+    by_tier = {s["drop_ms"]: s.get("tier") for s in view["sequences"]}
+    # a matched confident drop ("matches_yours" over a confident detection,
+    # the Pop Off shape) is still allowed through the sequence's own door —
+    # just not under full/triggers_only, where his own trigger takes it
     for drop in _fired_drops(rec):
         state = next(st for d, st in by_state.items() if _near(drop, d, 200))
-        assert state == "confident", (song, mode, drop, state)
+        assert state in ("confident", "matches_yours"), (song, mode, drop, state)
     if mode == "analysed":
-        expected = sorted(d for d, st in by_state.items() if st == "confident")
+        expected = sorted(d for d, st in by_state.items()
+                          if st == "confident"
+                          or (st == "matches_yours" and by_tier.get(d) == "confident"))
     else:
         # "full" / "triggers_only" on a song carrying his triggers: the
         # analysed show is off for it; nothing of his is confirmed yet.
+        # "transitions" never plays the analysed show at all.
         expected = []
     got = _fired_drops(rec)
     assert len(got) == len(expected), (song, mode, got, expected)
@@ -162,6 +169,23 @@ def test_with_his_triggers_only_what_the_rules_allow_fires(song, mode):
         assert len(rec.resp) == len(his)
     else:
         assert rec.resp == []
+    # every matched confident drop fires by EXACTLY ONE door in every
+    # mode — the sequence under "analysed" (his own trigger cannot fire
+    # there), his own trigger under "full"/"triggers_only" (the sequence
+    # stands down instead) — never both, never neither where one of the
+    # two doors is open (data/popoff-drops-not-firing/report.md).
+    matched_confident = sorted(d for d, st in by_state.items()
+                               if st == "matches_yours" and by_tier.get(d) == "confident")
+    reach = 2 * _beat(uri) + 200
+    for d in matched_confident:
+        seq_fired = any(_near(p, d, 200) for p in _fired_drops(rec))
+        his_fired = any(c == "drop" and _near(p, d, reach) for p, c, *_ in rec.resp)
+        if mode in ("full", "triggers_only"):
+            assert his_fired and not seq_fired, (song, mode, d, "his trigger should fire, the sequence should stand down")
+        elif mode == "analysed":
+            assert seq_fired and not his_fired, (song, mode, d, "the sequence should fire; his trigger cannot in this mode")
+        else:
+            assert not seq_fired and not his_fired, (song, mode, d, "neither door is open under transitions")
 
 
 @pytest.mark.parametrize("song", SONGS)
@@ -191,6 +215,61 @@ def test_the_four_songs_fire_something_somewhere():
         assert _confident_drops(URI[song]), song
 
 
+def test_a_pop_off_shaped_matches_yours_fixture_fires_by_its_own_tier_under_analysed():
+    """data/popoff-drops-not-firing/report.md: three detected sequences —
+    two confident, one suggested at 0.8 — each stands down as
+    `matches_yours` because its drop sits within two beats of one of his
+    own authored charge/lull/drop triggers. The room is in "analysed" mode,
+    which never fires a hand-authored trigger — so before the fix, BOTH
+    doors were silent on all three. Fixed: the two confident ones fire by
+    their own door (his trigger cannot fire there in this mode); the
+    suggested one still waits for his confirm, matched or not."""
+    view = {
+        "song": {"beat_ms": 417.973},
+        "sequences": [
+            {"key": "drop:59570", "origin": "detected", "state": "matches_yours",
+             "tier": "confident", "drop_ms": 59570, "lull_ms": 56400, "charge_ms": 49874,
+             "step": 1.211, "moved": {}, "lull_off": False, "charge_off": False},
+            {"key": "drop:100983", "origin": "detected", "state": "matches_yours",
+             "tier": "suggested", "drop_ms": 100983, "lull_ms": 99948, "charge_ms": 94247,
+             "step": 0.8, "moved": {}, "lull_off": False, "charge_off": False},
+            {"key": "drop:178753", "origin": "detected", "state": "matches_yours",
+             "tier": "confident", "drop_ms": 178753, "lull_ms": 177140, "charge_ms": 175100,
+             "step": 1.309, "moved": {}, "lull_off": False, "charge_off": False},
+        ],
+        "authored": [
+            {"charge": {"id": "a", "kind": "charge", "timestamp_ms": 49874},
+             "lull": {"id": "b", "kind": "lull", "timestamp_ms": 56400},
+             "drop": {"id": "c", "kind": "drop", "timestamp_ms": 59603}},
+            {"charge": {"id": "d", "kind": "charge", "timestamp_ms": 94247},
+             "lull": {"id": "e", "kind": "lull", "timestamp_ms": 99948},
+             "drop": {"id": "f", "kind": "drop", "timestamp_ms": 101020}},
+            {"charge": {"id": "g", "kind": "charge", "timestamp_ms": 175100},
+             "lull": {"id": "h", "kind": "lull", "timestamp_ms": 177140},
+             "drop": {"id": "i", "kind": "drop", "timestamp_ms": 178740}},
+        ],
+        "authored_lone": [],
+    }
+    on = drop_firing.annotate(view, "analysed", True)
+    by_drop = {s["drop_ms"]: s for s in on["sequences"]}
+    assert by_drop[59570]["fires"] is True
+    assert by_drop[59570]["fires_reason"] == "analysed_show"
+    assert by_drop[178753]["fires"] is True
+    assert by_drop[178753]["fires_reason"] == "analysed_show"
+    assert by_drop[100983]["fires"] is False
+    assert sum(1 for s in on["sequences"] if s["fires"]) == 2
+    # and "full"/"triggers_only" still stand all three down to his own
+    # trigger there, which DOES fire in those modes
+    for mode in ("full", "triggers_only"):
+        gated = drop_firing.annotate(view, mode, True)
+        assert all(not s["fires"] for s in gated["sequences"]), mode
+        assert {s["fires_reason"] for s in gated["sequences"]} <= {
+            "matches_yours", "transitions_only", "analysed_show_off"}
+    # "transitions" never plays the analysed show either
+    off = drop_firing.annotate(view, "transitions", True)
+    assert all(not s["fires"] for s in off["sequences"])
+
+
 # ═══ 2. nothing double-fires against his own triggers ═════════════════════
 
 @pytest.mark.parametrize("song", SONGS)
@@ -208,10 +287,17 @@ def test_no_member_fires_on_top_of_his_own_trigger(song, mode):
     his = _his(uri)
     rec = _run(uri, his, mode)
     reach = 2 * _beat(uri)
+    # nothing that actually fired via the sequence door (rec.seq) landed
+    # where something actually fired via his own trigger door (rec.resp)
+    # — checked against what ACTUALLY FIRED, not the static `his` list:
+    # his own trigger only fires under "full"/"triggers_only"
+    # (trigger_engine._trigger_allowed), so rec.resp is empty under any
+    # other mode and there is nothing to clash with there — a confirmed,
+    # matched sequence firing on its own in that case is the one open
+    # door, not a double (data/popoff-drops-not-firing/report.md).
     for pos, cls, *_ in rec.seq:
-        clash = [t for t in his if t.action.event_class == cls
-                 and _near(pos, t.timestamp_ms, reach + 200)]
-        assert not clash, (song, mode, cls, pos, [t.timestamp_ms for t in clash])
+        clash = [p for p, c, *_ in rec.resp if c == cls and _near(pos, p, reach + 200)]
+        assert not clash, (song, mode, cls, pos, clash)
 
 
 def test_confirming_a_suggestion_makes_it_his_under_my_triggers_only():
@@ -475,9 +561,19 @@ def test_the_annotated_view_says_what_fires_here():
     v = drop_sequences.view(uri, triggers=his)
     on = drop_firing.annotate(v, "analysed", True)
     off = drop_firing.annotate(v, "triggers_only", True)
-    fires_on = {s["drop_ms"]: s["fires"] for s in on["sequences"]}
-    assert fires_on[87070] is True and fires_on[59194] is False
+    on_by = {s["drop_ms"]: s for s in on["sequences"]}
+    # 59194 is confident AND matches_yours (his own drop trigger sits at
+    # 59260): under "analysed" his own trigger cannot fire there
+    # (trigger_engine._trigger_allowed), so it now falls back to firing by
+    # its own tier, same as an unmatched confident drop would —
+    # data/popoff-drops-not-firing/report.md.
+    assert on_by[87070]["fires"] is True and on_by[87070]["fires_reason"] == "analysed_show"
+    assert on_by[59194]["fires"] is True and on_by[59194]["fires_reason"] == "analysed_show"
     assert all(not s["fires"] for s in off["sequences"])
+    # ...but under "triggers_only" his own trigger DOES fire there, so the
+    # matched sequence stands down to it as before.
+    off_by = {s["drop_ms"]: s for s in off["sequences"]}
+    assert off_by[59194]["fires_reason"] == "matches_yours"
     reasons = {s["fires_reason"] for s in off["sequences"]}
     assert reasons <= {"analysed_show_off", "matches_yours", "waits_for_confirm"}
     assert off["firing"] == {"effective_mode": "triggers_only", "has_authored": True,

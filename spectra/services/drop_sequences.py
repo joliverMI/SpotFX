@@ -61,8 +61,17 @@ touched it plus his own handle times (`detection_lost`, `needs_review`).
 HIS OWN TRIGGERS WIN (report section 7.2). A detected sequence whose drop
 sits within MATCH_BEATS of one of his own enabled charge, lull or drop
 triggers stands down as `matches_yours` — even when confirmed, because his
-own trigger already fires there. An added sequence is his and never stands
-down.
+own trigger fires there in a mode that fires his triggers. An added
+sequence is his and never stands down. That LAST CLAUSE is load-bearing
+(data/popoff-drops-not-firing/report.md): "analysed" never fires a
+hand-authored trigger (trigger_engine._trigger_allowed only lets one
+through under "full"/"triggers_only"), so a `matches_yours` sequence on a
+song in "analysed" mode would otherwise stand down to a trigger that never
+actually fires, going silent on both doors. This module still only marks
+the state — mode-independent, as the rest of this docstring says — the
+mode-aware fallback (confident fires anyway, suggested still waits,
+confirmed/edited fire wherever the analysed show plays) is
+spectra/services/drop_firing.py's `fires_here`, not here.
 
 STATES, in precedence order: dismissed > matches_yours > edited >
 confirmed > confident | suggested; and added. This module only says what
