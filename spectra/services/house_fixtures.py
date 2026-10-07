@@ -22,28 +22,88 @@ FIXTURES, and what Spectra then does to them:
              that is unknown).
   BRIGHTNESS (REWORKED 2026-10-06, Admiral order: the crystal kept getting
              set to 100% in Home Assistant, far too bright — HIS brightness
-             is the ceiling, nothing may raise it.) Spectra never WRITES a
-             WLED's master brightness upward. Before its first write to a
-             fixture this take it reads the brightness already there — his
-             own last setting, via Home Assistant or the fixture's own boot
-             preset — and that reading (`HouseState.pre_take[did]["bri"]`)
-             is the CEILING for the rest of the take, capped further only
-             by `owned_brightness` if he has set that lower (default 255 =
-             no extra cap). A power-on restores exactly that ceiling value,
-             never a forced 255. The drift check (`_drift_check`) only ever
-             corrects DOWNWARD, and only on a genuine reboot: a reading
-             ABOVE the ceiling is weighed against the fixture's own
-             `json/info` uptime (`_rt.uptime_ms`) to tell a brighter boot
-             preset apart from a deliberate Home Assistant write made while
-             nobody was watching — uptime dropping since the last check
-             means reboot, and that overshoot is capped back down; anything
-             else is HIS OWN new level, ADOPTED into `pre_take[did]["bri"]`
-             as the new ceiling rather than fought back down (nothing is
-             written for an adoption — there is nothing to correct). A
+             is the ceiling, nothing may raise it. REWORKED AGAIN the SAME
+             night: see "BRIGHTNESS IS NEVER ADOPTED" below.) Spectra never
+             WRITES a WLED's master brightness upward. Before its first
+             write to a fixture this take it reads the brightness already
+             there — his own last setting, via Home Assistant or the
+             fixture's own boot preset — and that reading
+             (`HouseState.pre_take[did]["bri"]`) is the CEILING for the rest
+             of the take, capped further only by `owned_brightness` if he
+             has set that lower (default 255 = no extra cap). A power-on
+             restores exactly that ceiling value, never a forced 255. A
              fixture read back AT OR BELOW its ceiling — including a fresh,
-             lower Home Assistant brightness write — is left alone either
-             way. Each correction is still NAMED (status, log, fire
+             lower Home Assistant brightness write — is left alone. A
+             reading ABOVE the ceiling is always corrected back down
+             (`_drift_check`) — never adopted as a new ceiling, whatever its
+             cause. Each correction is still NAMED (status, log, fire
              history).
+
+  BRIGHTNESS IS NEVER ADOPTED (fixed 2026-10-06, the night of the
+             crystal-255 incident — PR fm/crystal-255-followup). The FIRST
+             version of this rework (above) adopted an overshoot with "no
+             reboot evidence" as his own deliberate Home Assistant raise,
+             on the theory that absence of a reboot proves deliberate
+             intent. The very first night it shipped, the crystal's bri
+             rose from his 34 to 255 with no reboot — and River's own HA
+             trace proved Home Assistant never touched it (no scene, no
+             automation, an empty logbook, a silent pretake endpoint) while
+             a grep of Spectra's own `house fixtures:` log showed no
+             `_transition`/`_write_confirmed` write of any kind landed on
+             the fixture in that window either. So "no reboot evidence" is
+             not evidence of a deliberate raise — it is silence, from
+             EITHER side, and silence must never be read as his word.
+             `_drift_check` now corrects EVERY overshoot back down,
+             reboot-explained or not — there is no third path that adopts
+             anything. `_looks_like_our_own_echo`/`_rt.written_bri` track
+             every bri value Spectra itself has written this take purely so
+             the correction's own log line can say whether the overshoot
+             looks like Spectra's own lingering value (e.g. a ceiling that
+             was fine until `owned_brightness` tightened under it) or a
+             value nobody here ever asked for — diagnostic only, it changes
+             nothing about the correction itself.
+
+             SPECTRA HAS NO HA READ PATH — checked, not assumed, before
+             shipping the always-correct-down rule above. Spectra talks to
+             Home Assistant in exactly one direction: HA calls IN
+             (`PUT /api/house/mode`, the fixture/mains/tv_music reports
+             above) — grep-confirmed zero references anywhere in this repo
+             to an outbound HA client, token, or base URL. So a genuinely
+             deliberate HA brightness raise cannot be told apart from
+             anything else here; adopting ANY raise as his automatically,
+             the way the first rework did, is what adopted the one HA
+             never made. A later follow-up that lets a real HA raise stand
+             without waiting on the next reboot needs Spectra to read
+             `light.crystal_dining_room`'s (etc.) own HA state back —
+             not built here.
+
+             THE REMAINING CANDIDATES for the 2026-10-06 21:45:49 raise,
+             and what each would have left behind: a WLED-side PRESET
+             (button/IR remote/macro) would show as `json/state`'s `"ps"`
+             holding a non -1 id at the moment, but WLED keeps no log of a
+             preset firing and clearing itself, so this is unprovable after
+             the fact either way. The NIGHTLIGHT timer (`"nl"`) ramps
+             TOWARD its own configured target (`tbri`), which is 0 on this
+             fixture — it dims, it does not explain a rise to 255,
+             regardless of whether it ever fired. A UDP SYNC PEER (WLED's
+             native port-21324 broadcast, `recv.bri` on this fixture) was
+             checked live: crystal's own sync group (1) has no peer with
+             `send.en` true — `porch-rail`/`tv-backlight` (its only
+             group-1 peers) both have sync sending off; the sconces DO
+             send but sit in group 2, which WLED's group bitmask keeps
+             from reaching a group-1 receiver — ruled out as far as the
+             CURRENT config can show (WLED keeps no received-sync log
+             either). The external LedFX SERVICE was ruled out directly:
+             `ledfx.service` is disabled, was `inactive` with no
+             `ActiveEnterTimestamp` and has zero journal entries across
+             the whole incident window — and `ownership_reconciler.py`
+             would have CRITICAL-logged a foreign writer on this device,
+             which never appears. What is left, matching firstmate's own
+             "or the user's" phrasing and leaving zero forensic trace on
+             either HA's or Spectra's side by construction (WLED's JSON
+             API keeps no request log or client IP at all): THE WLED APP
+             OR ITS OWN WEB UI, used directly on the LAN, bypassing both
+             Home Assistant and Spectra.
   RECHECK    "I just powered the sconce mains": re-find the named fixtures by
              identity (a mains cycle is when a WLED takes a new DHCP lease),
              re-init a driver that never resolved, and re-apply the power /
@@ -363,10 +423,15 @@ class _Runtime:
     hyperion_live: dict = field(default_factory=dict)
     hyperion_checked_at: dict = field(default_factory=dict)
     #: device -> the last `json/info` uptime (ms since boot) seen for it —
-    #: the one signal that tells a reboot's brighter boot preset apart from
-    #: a deliberate Home Assistant brightness write (see _rebooted_since_
-    #: last_check). Seeded at the fixture's first remembered reading.
+    #: diagnostic only (`_rebooted_since_last_check`'s docstring says why it
+    #: no longer gates adoption). Seeded at the fixture's first remembered
+    #: reading.
     uptime_ms: dict = field(default_factory=dict)
+    #: device -> set of bri values SPECTRA ITSELF has written this take
+    #: (`_remember_written_bri`) — so a drift correction can tell its own
+    #: lingering echo apart from a value it never authored, in the log
+    #: only; brightness is never adopted either way (see `_drift_check`).
+    written_bri: dict = field(default_factory=dict)
 
 
 _rt = _Runtime()
@@ -994,6 +1059,7 @@ async def _transition(did: str, dev, target: str, why: str, *, owned: bool,
                 ceiling = _brightness_ceiling(did, settings)
                 if ceiling is not None:
                     payload["bri"] = ceiling
+                    _remember_written_bri(did, ceiling)
             want_bri = payload.get("bri")
             if soft:
                 # SOFT POWER: on at the soft brightness, let the stream back
@@ -1040,19 +1106,14 @@ async def _transition(did: str, dev, target: str, why: str, *, owned: bool,
 
 async def _rebooted_since_last_check(did: str, dev) -> bool:
     """Has this WLED's own `json/info` uptime reset or dropped since the
-    last time this module read it — the signal that tells a reboot's
-    brighter boot preset apart from a deliberate Home Assistant write made
-    while nobody was watching. Never checked before, or unreadable, is NOT
-    treated as a reboot — an overshoot defaults to his own deliberate
-    increase, the same direction the "unknown never acts" rule already
-    takes everywhere else in this module.
+    last time this module read it. DIAGNOSTIC ONLY — see the 2026-10-06
+    night correction below for why it no longer gates anything. Never
+    checked before, or unreadable, reads as "no reboot seen" (the weaker
+    claim), not as evidence either way.
 
     Called on EVERY drift check for a fixture Spectra holds on, not only
-    when an overshoot is found — a reboot whose boot preset happens to land
-    at or below the ceiling causes no overshoot, so without this the
-    baseline would go stale for the rest of the take and a later deliberate
-    increase would be misjudged against ancient uptime. Refreshing every
-    check instead bounds the staleness to one `DRIFT_CHECK_S` interval."""
+    when an overshoot is found, so the baseline never goes stale for the
+    rest of the take."""
     try:
         info = await deps.get_info(dev)
     except Exception:                                    # noqa: BLE001
@@ -1065,32 +1126,44 @@ async def _rebooted_since_last_check(did: str, dev) -> bool:
     return prev is not None and uptime < prev
 
 
-def _adopt_higher_brightness(did: str, found_bri: int) -> None:
-    """A brightness ABOVE his preserved ceiling with no reboot evidence
-    behind it — HIS OWN new Home Assistant level, not an overshoot to fight.
-    `pre_take[did]["bri"]` is what `_brightness_ceiling` reads, so updating
-    it here is what makes every later check compare against the new, higher
-    level instead of the one captured at take-start."""
-    st = house_store.state()
-    pre = st.pre_take.get(did)
-    if pre is None:
-        return
-    pre["bri"] = found_bri
-    house_store.save_state()
-    logger.info("house fixtures: %s's brightness rose to %s with no reboot "
-               "evidence behind it — adopting it as his new ceiling (nothing "
-               "written)", did, found_bri)
+def _looks_like_our_own_echo(did: str, found_bri: int) -> bool:
+    """Is `found_bri` a value SPECTRA ITSELF is on record having written to
+    this fixture this take (`_rt.written_bri`, populated by every landed
+    bri write in `_transition`/`_drift_check`) — our own prior ceiling,
+    lingering after `owned_brightness` tightened, or any other value we
+    ourselves are the author of. This is NEVER evidence of a deliberate
+    outside (Home Assistant or his own) action; a correction must not
+    read our own echo back to ourselves as his word."""
+    return found_bri in _rt.written_bri.get(did, ())
+
+
+def _remember_written_bri(did: str, value: int) -> None:
+    seen = _rt.written_bri.setdefault(did, set())
+    seen.add(value)
 
 
 async def _drift_check(did: str, dev, target: str) -> None:
     """Read json/state back; re-assert power if something else moved it.
-    Brightness is corrected ONLY downward, and only on a genuine reboot
-    (`_rebooted_since_last_check`) — a reading above the preserved ceiling
-    with no such evidence is HIS OWN deliberate Home Assistant increase and
-    is ADOPTED as the new ceiling instead of being fought back down. A
-    reading at or below the ceiling, including a fresh, lower Home
-    Assistant brightness write, is HIS and is never fought back up either
-    way. An unreadable fixture is left alone — unknown never acts."""
+
+    BRIGHTNESS IS NEVER ADOPTED — fixed 2026-10-06, the night of the
+    crystal-255 incident. The earlier shape ("no reboot evidence behind an
+    overshoot means it is his own deliberate Home Assistant raise, adopt
+    it") was proven, the same evening, to adopt a raise HOME ASSISTANT DID
+    NOT MAKE (River's own HA trace: no scene, no automation, the logbook
+    silent, the pretake endpoint silent) and that SPECTRA'S OWN logged
+    write path never made either (grepped against the live journal: no
+    `_transition`/`_write_confirmed` write of any kind landed on the
+    fixture in the window the overshoot appeared in). With no channel that
+    can tell "Home Assistant/the user changed this" from "something else
+    did", the absence of a reboot is not evidence of EITHER — it is
+    silence, and silence must not be read as his word. So an overshoot
+    above the preserved ceiling is ALWAYS corrected back down, whether or
+    not a reboot explains it; the two are distinguished only in the log
+    and in `_looks_like_our_own_echo`'s diagnostic note, never in the
+    action taken. A reading AT OR BELOW the ceiling, including a fresh,
+    lower Home Assistant brightness write, is still his and is never
+    fought back up. An unreadable fixture is left alone — unknown never
+    acts."""
     settings = _settings()
     try:
         try:
@@ -1107,18 +1180,25 @@ async def _drift_check(did: str, dev, target: str) -> None:
             ceiling = _brightness_ceiling(did, settings)
             over_ceiling = (ceiling is not None and isinstance(found_bri, int)
                            and found_bri > ceiling)
-            if over_ceiling and not rebooted:
-                _adopt_higher_brightness(did, found_bri)
-                ceiling = _brightness_ceiling(did, settings)
-                over_ceiling = ceiling is not None and found_bri > ceiling
             if found_on is True and not over_ceiling:
                 return
             payload = {"on": True}
             want_bri = ceiling
             if want_bri is not None:
                 payload["bri"] = want_bri
+                _remember_written_bri(did, want_bri)
             check = (lambda s: s.get("on") is True
                      and (want_bri is None or s.get("bri") == want_bri))
+            if over_ceiling:
+                echo = _looks_like_our_own_echo(did, found_bri)
+                logger.warning(
+                    "house fixtures: %s read %s above its ceiling (%s) — %s; "
+                    "correcting it back down, never adopting it", did,
+                    found_bri, ceiling,
+                    "a value Spectra itself wrote earlier this take, now "
+                    "past a tightened cap" if echo else
+                    ("no reboot evidence behind it" if not rebooted
+                     else "a reboot's own boot preset"))
         outcome, detail, _last = await _write_confirmed(dev, payload, check)
         entry = {"at_ms": now_ms(), "device": did, "target": target,
                  "found": {"on": found_on, "bri": found_bri},
