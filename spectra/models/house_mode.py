@@ -327,13 +327,15 @@ class HouseSettings(BaseModel):
                      prior setting (Home Assistant or the fixture itself)
                      had it at — that captured level is the ceiling
                      (house_fixtures.py's `pre_take`), and the per-fixture
-                     Levels dimmer only ever scales within it. The ceiling
-                     can still RISE during the take — a later reading above
-                     it with no reboot evidence behind it (its own uptime
-                     never dropped) is HIS OWN deliberate increase and is
-                     adopted into `pre_take` as the new ceiling, never
-                     corrected back down; only a genuine reboot's brighter
-                     boot preset is capped back to the prior ceiling.
+                     Levels dimmer only ever scales within it. A later
+                     reading ABOVE that ceiling is ALWAYS corrected back
+                     down (fixed 2026-10-06 — an earlier build adopted an
+                     un-rebooted overshoot as his own deliberate increase,
+                     and adopted a raise the night proved Home Assistant
+                     never made; see house_fixtures.py's module docstring,
+                     "BRIGHTNESS IS NEVER ADOPTED"). The ceiling itself only
+                     ever moves at take-start capture or a hand-back —
+                     never via a drift-check reading.
                      Off = leave both power and brightness alone.
     owned_brightness an ADDITIONAL hard cap (0-255) on top of the preserved
                      ceiling above — never a value Spectra forces upward.

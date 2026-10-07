@@ -136,18 +136,21 @@ the WLEDs report `live: false`. Re-assert the mode (R1) when it comes back.
 
 While a mode drives the room Spectra manages every streamed WLED's power
 switch, and caps its master brightness at **HIS OWN last-set level** — what
-the fixture held before Spectra's first write that take, or whatever a later
-HA brightness write raises it to. It never writes a flat `bri: 255`; that
-value is only `owned_brightness`'s default, an additional cap that imposes
-no extra limit unless set lower. Each fixture is re-read every minute: a
-reading ABOVE the ceiling is corrected back down only when the fixture's own
-uptime shows it rebooted since the last check (a brighter boot preset);
-any other above-ceiling reading is HIS OWN deliberate HA brightness write
-and is adopted as the new ceiling — nothing is written back. A reading at or
-below the ceiling, including a fresh, lower HA write, is always his and is
-never corrected upward. So every HA brightness write to these fixtures can
-go (R4) and stands, reboot aside. Corrections (power re-asserted, or a
-post-reboot brightness pulled back down) are listed in `GET /house/fixtures`.
+the fixture held before Spectra's first write that take. It never writes a
+flat `bri: 255`; that value is only `owned_brightness`'s default, an
+additional cap that imposes no extra limit unless set lower. Each fixture is
+re-read every minute: a reading ABOVE the ceiling is ALWAYS corrected back
+down (fixed 2026-10-06 — an earlier build adopted an un-rebooted overshoot as
+his own deliberate HA raise, and the very first night it shipped it adopted a
+raise HA never made; with no channel that can tell "HA changed this" from
+"something else did", the absence of a reboot is never read as his word). A
+reading at or below the ceiling, including a fresh, lower HA write, is always
+his and is never corrected upward. So a LOWER HA brightness write to these
+fixtures always stands; a HIGHER one is corrected back to his last-set level
+within the minute — Spectra does not currently distinguish a deliberate HA
+raise from anything else, so it cannot be made to stand automatically.
+Corrections (power re-asserted, or an above-ceiling brightness pulled back
+down) are listed in `GET /house/fixtures`.
 The mode's per-fixture `level` dims the rest, below that ceiling; the music
 show's brightness is each fixture's `music_level`.
 `PUT /house/settings {"own_brightness": false}` turns ownership off.

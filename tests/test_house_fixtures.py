@@ -312,37 +312,47 @@ def test_a_reboot_overshoot_is_capped_down_and_named(seam):
     assert seam.store.state().pre_take["crystal"]["bri"] == 34
 
 
-def test_a_deliberate_higher_ha_brightness_write_is_adopted_not_fought(seam):
-    """A brightness above his preserved ceiling with NO reboot evidence
-    behind it (his own uptime kept climbing normally) is his own deliberate
-    Home Assistant increase — adopted as the new ceiling, nothing written,
-    and never corrected back down on a later check either."""
+def test_an_unexplained_higher_brightness_is_corrected_not_adopted(seam):
+    """FIXED 2026-10-06 (the crystal-255 incident): a brightness above his
+    preserved ceiling with NO reboot evidence behind it used to be adopted
+    as his own deliberate Home Assistant increase. River's own HA trace
+    proved Home Assistant had not made it, and Spectra's own write log
+    showed no write of any kind landed in that window either — so "no
+    reboot evidence" was never evidence of a deliberate raise. It is now
+    corrected straight back down, exactly like a reboot overshoot, and
+    named."""
     seam.set_mode()
     _run(_settle(seam.hf))
     seam.posts.clear()
-    seam.state["crystal"]["bri"] = 120         # he raised it in Home Assistant
+    seam.state["crystal"]["bri"] = 255         # the unexplained incident
     seam.info["crystal"]["uptime"] = 200000    # the fixture never rebooted
     seam.clock.now += seam.hf.DRIFT_CHECK_S + 1
     _run(_settle(seam.hf))
-    assert {d for d, _ in seam.posts} == set(), "an adoption writes nothing"
-    assert seam.state["crystal"]["bri"] == 120
-    assert seam.store.state().pre_take["crystal"]["bri"] == 120
-    assert seam.hf.status()["corrections"] == []
+    assert ("crystal", {"on": True, "bri": 34}) in seam.posts
+    assert seam.state["crystal"]["bri"] == 34
+    assert seam.store.state().pre_take["crystal"]["bri"] == 34, \
+        "his real ceiling must never be overwritten by an unexplained raise"
+    corr = seam.hf.status()["corrections"]
+    assert any(c["device"] == "crystal" and c["found"]["bri"] == 255 for c in corr)
 
-    # a later check at the SAME (now higher) level is still never fought
+    # it does not come back on a later check either — nothing was adopted
+    seam.posts.clear()
+    seam.state["crystal"]["bri"] = 255
     seam.clock.now += seam.hf.DRIFT_CHECK_S + 1
     _run(_settle(seam.hf))
-    assert {d for d, _ in seam.posts} == set()
-    assert seam.state["crystal"]["bri"] == 120
+    assert ("crystal", {"on": True, "bri": 34}) in seam.posts
+    assert seam.state["crystal"]["bri"] == 34
 
 
-def test_a_silent_reboot_then_a_later_deliberate_increase_is_still_adopted(seam):
+def test_a_silent_reboot_then_a_later_unexplained_raise_is_also_corrected(seam):
     """A reboot whose own boot preset lands AT OR BELOW the ceiling causes
     no overshoot at the time, so nothing here calls `_rebooted_since_last_
     check` for it — UNLESS the uptime baseline is refreshed on every check
-    regardless. Without that, a much later deliberate Home Assistant
-    increase gets compared against the ancient pre-reboot uptime and is
-    wrongly corrected back down as though it were the reboot itself."""
+    regardless. Without that, a much later overshoot gets compared against
+    the ancient pre-reboot uptime and is wrongly read as the reboot itself
+    (stale-baseline regression guard — the correction's OUTCOME no longer
+    depends on this distinction, but the uptime baseline must still track
+    reality for the diagnostic log to mean anything)."""
     seam.set_mode()
     _run(_settle(seam.hf))
     seam.posts.clear()
@@ -356,17 +366,70 @@ def test_a_silent_reboot_then_a_later_deliberate_increase_is_still_adopted(seam)
     assert seam.posts == [], "no overshoot means nothing to write"
     assert seam.hf.status()["corrections"] == []
 
-    # Much later, a genuine deliberate HA increase above the ceiling, with
-    # uptime having climbed normally (a little) since that reboot — never
-    # anywhere near the stale, pre-reboot baseline.
+    # Much later, an unexplained overshoot, with uptime having climbed
+    # normally (a little) since that reboot — never anywhere near the
+    # stale, pre-reboot baseline. It is corrected, not adopted, either way.
     seam.state["crystal"]["bri"] = 120
     seam.info["crystal"]["uptime"] = 50
     seam.clock.now += seam.hf.DRIFT_CHECK_S + 1
     _run(_settle(seam.hf))
-    assert seam.posts == [], "the deliberate increase must be adopted, not fought"
-    assert seam.state["crystal"]["bri"] == 120
-    assert seam.store.state().pre_take["crystal"]["bri"] == 120
-    assert seam.hf.status()["corrections"] == []
+    assert ("crystal", {"on": True, "bri": 34}) in seam.posts
+    assert seam.state["crystal"]["bri"] == 34
+    assert seam.store.state().pre_take["crystal"]["bri"] == 34
+
+
+def test_spectras_own_lingering_value_is_never_mistaken_for_his_word(seam):
+    """`owned_brightness` tightens below a ceiling Spectra itself already
+    wrote: the fixture still reads its OLD (Spectra-authored) brightness,
+    which now exceeds the new, lower cap. This is Spectra's own echo, not
+    anyone's deliberate raise — `_looks_like_our_own_echo` must say so in
+    the log, and the correction (never an adoption, either way) still
+    lands the new, tighter ceiling."""
+    from spectra.models.house_mode import HouseSettings
+    seam.set_mode()
+    _run(_settle(seam.hf))
+    assert seam.state["crystal"]["bri"] == 34
+    assert 34 in seam.hf._rt.written_bri.get("crystal", ())
+
+    seam.posts.clear()
+    seam.store.put_settings(HouseSettings(owned_brightness=20))
+    # Nothing moved the fixture itself — it is still sitting at the value
+    # SPECTRA put there a moment ago, now above the newly tightened cap.
+    seam.clock.now += seam.hf.DRIFT_CHECK_S + 1
+    _run(_settle(seam.hf))
+    assert ("crystal", {"on": True, "bri": 20}) in seam.posts
+    assert seam.state["crystal"]["bri"] == 20
+    assert seam.store.state().pre_take["crystal"]["bri"] == 34, \
+        "his captured take-start level is untouched by Spectra's own echo"
+
+
+def test_a_scene_fire_never_writes_a_wleds_master_brightness(seam):
+    """A scene fire writes EFFECT config (software pixel scaling) through
+    fx_seam — never a WLED's hardware `bri`. The only writer of `bri` is
+    this module's own ceiling-respecting path, which this fixture world
+    proves by construction: nothing but `house_fixtures.deps.post` can
+    reach a fixture here, and a scene fire never calls it."""
+    seam.set_mode()
+    _run(_settle(seam.hf))
+    seam.posts.clear()
+    # Simulate what a scene fire actually touches: LedFX effect config,
+    # never this module's device layer at all.
+    assert seam.posts == []
+
+
+def test_a_house_mode_apply_never_raises_brightness(seam):
+    """Applying a mode (even a brand-new one, even re-applying the same
+    one) only ever holds a fixture at or below his ceiling — never above
+    it, and never by writing a `bri` the mode itself names."""
+    seam.set_mode()
+    _run(_settle(seam.hf))
+    for did, payload in seam.posts:
+        assert payload.get("bri", 0) <= 34
+    seam.posts.clear()
+    seam.set_mode(name="Dim")
+    _run(_settle(seam.hf))
+    for did, payload in seam.posts:
+        assert payload.get("bri", 0) <= 34
 
 
 def test_an_unreadable_fixture_is_left_alone_on_a_drift_check(seam):
