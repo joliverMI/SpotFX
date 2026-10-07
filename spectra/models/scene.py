@@ -740,6 +740,113 @@ def _as_dict(value) -> dict:
     return value.model_dump() if hasattr(value, "model_dump") else dict(value)
 
 
+# Admiral order, 2026-10-06 ("reduce the maximum speed of rotation of Star
+# by 20 percent"): Radial's `base_rotation` ceiling dropped from 2.0 to
+# 1.6 rev/s (fx/effects/radial.py's own CONFIG_SCHEMA Range is the source
+# of truth; config/effect_params.json's registry entry mirrors it for
+# Sonic/UI). A stored value authored above the new ceiling would otherwise
+# reach fx's `_apply_config(validate=True)`, which DROPS THE WHOLE WRITE on
+# a schema mismatch rather than raising or clamping (see AGENTS.md's
+# "spin_sign" entry for that mechanism) — silently reverting the whole
+# entry's config to the effect's prior/default state, not just this one
+# field. Clamped here, on load, instead: scalar values, `ValueBinding`
+# map-mode bounds/fallback, `ValueBinding` steps values, and a flare kind's
+# absolute/random `ParamTarget` on this param name are all capped at
+# RADIAL_BASE_ROTATION_MAX. `offset`-mode ParamTargets are left alone —
+# they are a signed delta off a runtime-carried baseline, not a value this
+# clamp can evaluate at load time.
+RADIAL_BASE_ROTATION_MAX = 1.6
+_RADIAL_SPEED_PARAM = "base_rotation"
+
+
+def _clamp_numeric(value, cap: float):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return value
+    return cap if value > cap else value
+
+
+def _clamp_base_rotation_value(value, cap: float):
+    """Clamp one `base_rotation` value, whatever shape it's stored in: a
+    plain scalar, or a `ValueBinding`-shaped dict (map mode's out_min/
+    out_max/fallback, steps mode's per-step values)."""
+    if isinstance(value, dict) and value.get("bind") == "signal":
+        value = dict(value)
+        for field in ("out_min", "out_max", "fallback"):
+            if field in value:
+                value[field] = _clamp_numeric(value[field], cap)
+        steps = value.get("steps")
+        if isinstance(steps, list):
+            new_steps = []
+            for step in steps:
+                if isinstance(step, dict):
+                    step = dict(step)
+                    if "value" in step:
+                        step["value"] = _clamp_numeric(step["value"], cap)
+                new_steps.append(step)
+            value["steps"] = new_steps
+        return value
+    return _clamp_numeric(value, cap)
+
+
+def _clamp_base_rotation_params(params, cap: float):
+    if not isinstance(params, dict) or _RADIAL_SPEED_PARAM not in params:
+        return params
+    params = dict(params)
+    params[_RADIAL_SPEED_PARAM] = _clamp_base_rotation_value(
+        params[_RADIAL_SPEED_PARAM], cap)
+    return params
+
+
+def _clamp_radial_base_rotation(data: dict) -> dict:
+    """Clamp every `base_rotation` value in a raw scene dict — device entry
+    params, effect_steps variants, and flare-kind absolute/random
+    ParamTargets — down to RADIAL_BASE_ROTATION_MAX. See that constant's
+    own comment for why this runs on load instead of relying on fx's own
+    schema validation."""
+    cap = RADIAL_BASE_ROTATION_MAX
+    devices = data.get("devices")
+    if isinstance(devices, list):
+        new_devices = []
+        for dev in devices:
+            dev = _as_dict(dev) if dev is not None else dev
+            if isinstance(dev, dict):
+                if "params" in dev:
+                    dev = {**dev, "params":
+                           _clamp_base_rotation_params(dev.get("params"), cap)}
+                steps = dev.get("effect_steps")
+                if isinstance(steps, list):
+                    new_steps = []
+                    for step in steps:
+                        step = _as_dict(step) if step is not None else step
+                        if isinstance(step, dict) and "params" in step:
+                            step = {**step, "params": _clamp_base_rotation_params(
+                                step.get("params"), cap)}
+                        new_steps.append(step)
+                    dev = {**dev, "effect_steps": new_steps}
+            new_devices.append(dev)
+        data["devices"] = new_devices
+
+    kinds = data.get("flare_kinds")
+    if isinstance(kinds, list):
+        new_kinds = []
+        for kind in kinds:
+            kind = _as_dict(kind) if kind is not None else kind
+            if isinstance(kind, dict):
+                params = kind.get("params")
+                if isinstance(params, dict) and _RADIAL_SPEED_PARAM in params:
+                    target = _as_dict(params[_RADIAL_SPEED_PARAM])
+                    new_target = dict(target)
+                    for field in ("value", "hi", "lo"):
+                        if field in new_target:
+                            new_target[field] = _clamp_numeric(
+                                new_target[field], cap)
+                    kind = {**kind, "params": {
+                        **params, _RADIAL_SPEED_PARAM: new_target}}
+            new_kinds.append(kind)
+        data["flare_kinds"] = new_kinds
+    return data
+
+
 def _migrate_flare_kinds(data: dict) -> dict:
     """AUTO-NAMED KINDS — the binding load-unchanged guarantee: everything
     already authored (per-band param_patch as a permanent kind, per-band
@@ -990,6 +1097,8 @@ class SceneV2(BaseModel):
             data["responses"] = responses
         if isinstance(data, dict):
             data = _migrate_flare_kinds(dict(data))
+        if isinstance(data, dict):
+            data = _clamp_radial_base_rotation(dict(data))
         return data
 
     @model_validator(mode="after")

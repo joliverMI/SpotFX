@@ -21,9 +21,22 @@ DEFAULT_SOURCE_VIRTUAL = "radial-dummy"
 # narrowest band the implode warp compresses the pattern into (norm radius)
 IMPLODE_MIN_W = 0.10
 
+# Admiral order, 2026-10-06 ("reduce the maximum speed of rotation of Star
+# by 20 percent"): ONE scale applied to every source that contributes to
+# Star's rotation speed, so the *ceiling* — not just a default — drops by
+# a uniform 20% everywhere it can be reached. Before this change the
+# reactive ceiling (spin config at its own max 1.0, full audio impulse)
+# was 6 rev/s (see radial-effect skill / AGENTS.md: rev/s = 6 × impulse ×
+# spin²); after, 4.8 rev/s. A binding/config already set to spin's own
+# max (1.0) reaches the new, lower ceiling automatically — the scale is
+# applied to the OUTPUT, never to spin's own [-1, 1] input range, so
+# nothing about how a binding reaches "max" needs to change.
+ROTATION_SPEED_SCALE = 0.8
+
 # charge/lull/drop choreography (SpotFX drives `phase` + ramps
 # `phase_progress`; see _phase_step)
-CHARGE_SPIN_REV_S = 0.9  # extra rev/s at full charge
+# extra rev/s at full charge — scaled by ROTATION_SPEED_SCALE (was 0.9)
+CHARGE_SPIN_REV_S = 0.9 * ROTATION_SPEED_SCALE
 LULL_IMPLODE_S = 1.2     # implode fallback when no lull ramp arrives
 DROP_BLOOM_S = 0.5       # bloom fallback when no drop ramp arrives
 
@@ -92,10 +105,15 @@ class Radial2d(Twod):
                     "gain on live audio). The pattern never turns slower "
                     "than this; whenever the audio's own drive is faster, "
                     "the reactive spin takes over unchanged. 0 disables it "
-                    "(the vendored behaviour)."
+                    "(the vendored behaviour). Max reduced 2026-10-06 (see "
+                    "ROTATION_SPEED_SCALE above) from 2.0 to 1.6 rev/s — "
+                    "config/effect_params.json's own declared max must "
+                    "stay in sync with this literal."
                 ),
                 default=0.0,
-            ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=2.0)),
+            ): vol.All(
+                vol.Coerce(float), vol.Range(min=0.0, max=2.0 * ROTATION_SPEED_SCALE)
+            ),
             vol.Optional(
                 "frequency_range",
                 description="Frequency range for the spin impulse",
@@ -144,7 +162,13 @@ class Radial2d(Twod):
         self.polygon = self._config.get("polygon")
         self.rotation = self._config.get("rotation")
         # bring impulse spin injection into a reasonable range of control
-        self.spin = nonlinear_log(self._config.get("spin"), 2) / 10.0
+        # — scaled by ROTATION_SPEED_SCALE so the reactive ceiling (spin at
+        # its own max 1.0, full audio impulse) drops by the same 20% as
+        # every other rotation-speed source, without narrowing spin's own
+        # [-1, 1] input range.
+        self.spin = (
+            nonlinear_log(self._config.get("spin"), 2) / 10.0 * ROTATION_SPEED_SCALE
+        )
         # LINEAR rev/s, deliberately NOT put through nonlinear_log: this is an
         # absolute floor a human sets in a plain unit, not a gain to shape.
         self.base_rotation = float(self._config.get("base_rotation", 0.0) or 0.0)
