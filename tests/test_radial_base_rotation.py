@@ -294,3 +294,41 @@ def test_a_flare_kind_absolute_target_above_the_old_ceiling_is_clamped_on_load()
     )
     target = scene.flare_kinds[0].params["base_rotation"]
     assert target.value == 1.6
+
+
+def test_a_flare_kind_bare_number_target_above_the_old_ceiling_is_clamped_on_load():
+    from spectra.models.scene import SceneV2
+
+    scene = SceneV2(
+        name="STAR with a bare-number patch",
+        flare_kinds=[{
+            "name": "Bare patch",
+            "type": "permanent",
+            "params": {"base_rotation": 2.0},
+        }],
+    )
+    target = scene.flare_kinds[0].params["base_rotation"]
+    assert target.mode == "absolute"
+    assert target.value == 1.6
+
+
+def test_a_legacy_param_patch_targeting_base_rotation_is_clamped_on_load():
+    from spectra.models.scene import SceneV2
+
+    scene = SceneV2(
+        name="STAR with a legacy param_patch",
+        responses={
+            "flare": {
+                "bands": [{
+                    "intensity_min": 0.7,
+                    "intensity_max": 1.0,
+                    "param_patch": {"base_rotation": 2.0},
+                }],
+            },
+        },
+    )
+    kind = next(k for k in scene.flare_kinds
+                if "base_rotation" in k.params)
+    target = kind.params["base_rotation"]
+    assert target.mode == "absolute"
+    assert target.value == 1.6

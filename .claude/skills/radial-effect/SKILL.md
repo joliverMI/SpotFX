@@ -30,7 +30,7 @@ full audio impulse), now 4.8 rev/s. `spin` is a GAIN on the live captured
 lows power (snapcast.monitor melbank), NOT the bridge's "intensity"
 (stored librosa analysis — the two diverge freely). During bass-light
 passages the lows impulse idles ~0.01, so a healthy `spin=0.55`
-turns ~4.8°/s (post-scale) and reads as parked while rendering fine.
+turns ~5.2°/s (post-scale) and reads as parked while rendering fine.
 Before diagnosing "effect X ignores its speed param" on ANY effect, check
 whether the param is tagged `"aspect": "reactivity"` in
 `config/effect_params.json` and measure the LIVE impulse before blaming
