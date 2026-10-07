@@ -336,6 +336,39 @@ def test_a_deliberate_higher_ha_brightness_write_is_adopted_not_fought(seam):
     assert seam.state["crystal"]["bri"] == 120
 
 
+def test_a_silent_reboot_then_a_later_deliberate_increase_is_still_adopted(seam):
+    """A reboot whose own boot preset lands AT OR BELOW the ceiling causes
+    no overshoot at the time, so nothing here calls `_rebooted_since_last_
+    check` for it — UNLESS the uptime baseline is refreshed on every check
+    regardless. Without that, a much later deliberate Home Assistant
+    increase gets compared against the ancient pre-reboot uptime and is
+    wrongly corrected back down as though it were the reboot itself."""
+    seam.set_mode()
+    _run(_settle(seam.hf))
+    seam.posts.clear()
+
+    # A silent reboot: the boot preset happens to land at the ceiling (no
+    # overshoot to react to), but the fixture's own uptime resets.
+    seam.state["crystal"]["bri"] = 34
+    seam.info["crystal"]["uptime"] = 3
+    seam.clock.now += seam.hf.DRIFT_CHECK_S + 1
+    _run(_settle(seam.hf))
+    assert seam.posts == [], "no overshoot means nothing to write"
+    assert seam.hf.status()["corrections"] == []
+
+    # Much later, a genuine deliberate HA increase above the ceiling, with
+    # uptime having climbed normally (a little) since that reboot — never
+    # anywhere near the stale, pre-reboot baseline.
+    seam.state["crystal"]["bri"] = 120
+    seam.info["crystal"]["uptime"] = 50
+    seam.clock.now += seam.hf.DRIFT_CHECK_S + 1
+    _run(_settle(seam.hf))
+    assert seam.posts == [], "the deliberate increase must be adopted, not fought"
+    assert seam.state["crystal"]["bri"] == 120
+    assert seam.store.state().pre_take["crystal"]["bri"] == 120
+    assert seam.hf.status()["corrections"] == []
+
+
 def test_an_unreadable_fixture_is_left_alone_on_a_drift_check(seam):
     seam.set_mode()
     _run(_settle(seam.hf))

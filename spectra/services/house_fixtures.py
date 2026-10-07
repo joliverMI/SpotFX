@@ -1045,7 +1045,14 @@ async def _rebooted_since_last_check(did: str, dev) -> bool:
     while nobody was watching. Never checked before, or unreadable, is NOT
     treated as a reboot — an overshoot defaults to his own deliberate
     increase, the same direction the "unknown never acts" rule already
-    takes everywhere else in this module."""
+    takes everywhere else in this module.
+
+    Called on EVERY drift check for a fixture Spectra holds on, not only
+    when an overshoot is found — a reboot whose boot preset happens to land
+    at or below the ceiling causes no overshoot, so without this the
+    baseline would go stale for the rest of the take and a later deliberate
+    increase would be misjudged against ancient uptime. Refreshing every
+    check instead bounds the staleness to one `DRIFT_CHECK_S` interval."""
     try:
         info = await deps.get_info(dev)
     except Exception:                                    # noqa: BLE001
@@ -1096,10 +1103,11 @@ async def _drift_check(did: str, dev, target: str) -> None:
                 return
             payload, check = {"on": False}, (lambda s: s.get("on") is False)
         else:
+            rebooted = await _rebooted_since_last_check(did, dev)
             ceiling = _brightness_ceiling(did, settings)
             over_ceiling = (ceiling is not None and isinstance(found_bri, int)
                            and found_bri > ceiling)
-            if over_ceiling and not await _rebooted_since_last_check(did, dev):
+            if over_ceiling and not rebooted:
                 _adopt_higher_brightness(did, found_bri)
                 ceiling = _brightness_ceiling(did, settings)
                 over_ceiling = ceiling is not None and found_bri > ceiling
