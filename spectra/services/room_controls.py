@@ -646,6 +646,21 @@ class RoomControlState(BaseModel):
     # song the next time it plays.
     drop_floor: float = Field(default=0.7, ge=0.0, le=1.0)
 
+    # THE LULL'S DARK CAP (the Admiral, 2026-10-07, verbatim: "Instead of
+    # always setting the dark point to half way through the lull, set a max
+    # time for that portion to 3 seconds (make this something sonic can
+    # change). So if we have a 20 second lull ... Now it would be 17 seconds
+    # of expansion and 3 seconds of dark. Pulse should match"). A lull
+    # effect (fx.device_model.LULL_DARK_EFFECTS — Black Hole, Squiggles,
+    # Pulse) holds dark for half the lull, never longer than this many
+    # seconds; the rest of the lull is its approach (the event horizon's
+    # expansion, the CRT squash, Pulse's fade). The rule itself is ONE
+    # function, fx/effects/lull_dark.py's dark_hold_s; SpotFX applies it on
+    # every lull arm (scene_response._drive_phase), so a change reaches the
+    # very next lull — nothing is re-planned. 0 = the lull only goes dark on
+    # its drop.
+    lull_dark_max_s: float = Field(default=3.0, ge=0.0, le=30.0)
+
     # THE A/V-SYNC LEAD (owner ask 2026-08-28) — LEAD family: positive =
     # fire EARLIER, negative = fire LATER. The value the /avsync
     # instrument's Apply button writes, and the ONLY authored term in

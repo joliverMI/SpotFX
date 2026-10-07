@@ -579,6 +579,20 @@ export default function RoomControlsBar() {
               <span style={{ fontSize: '0.85em', opacity: 0.75 }}>ms</span>
             </div>
             <div className="top-bar-group-field">
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}
+                title="The longest a lull stays fully dark on Black Hole, Squiggles and Pulse. A lull is dark for half its length, never longer than this.">
+                Lull darkness (max)
+                <HelpLink topic="lull-dark-cap" />
+              </label>
+              <input
+                type="number" min={0} max={30} step={0.5}
+                value={local.lull_dark_max_s}
+                onChange={(e) => setLocal({ ...local, lull_dark_max_s: Number(e.target.value) })}
+                onBlur={() => commit(local)}
+              />
+              <span style={{ fontSize: '0.85em', opacity: 0.75 }}>s</span>
+            </div>
+            <div className="top-bar-group-field">
               <label>Scene changes</label>
               <select
                 value={local.scene_change_mode}

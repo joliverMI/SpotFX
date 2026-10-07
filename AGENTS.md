@@ -8664,7 +8664,8 @@ Eleven things:
 
 - **WIRED (phase 2) THROUGH TWO SETS IN `fx/device_model`.** `pulse` is in
   `PHASE_EFFECTS` (charge/lull/drop on the shared ramp — a lull reaches black
-  on the frame the strips' ramp completes) and in `ONE_COLOUR_EFFECTS`, which
+  at the shared lull dark point, see "THE LULL'S DARK POINT" below) and in
+  `ONE_COLOUR_EFFECTS`, which
   keys exactly three things: the feed, the colour fill and the house guard
   below. Its tunable params are in `config/effect_params.json` (help topic
   `pulse-effect`); `energy`/`beat_ms`/`phase`/`phase_progress` are
@@ -8775,6 +8776,42 @@ Eleven things:
   run (2026-10-06 08:45) measured nothing: the kitchen-kiosk camera pose sees
   none of the three Singles fixtures at full white** — the measurement stays
   pending until a different pose or a light sensor; gamma ships at 2.2.
+
+## THE LULL'S DARK POINT — one rule, opted into per effect (`fx/effects/lull_dark.py`)
+
+2026-10-07, the Admiral: a lull effect goes fully dark for HALF the lull,
+never longer than `RoomControlState.lull_dark_max_s` (3 s default,
+Sonic-editable through the generic `set_setting`; Scenes panel field, help
+topic `lull-dark-cap`) — a 20 s lull is 17 s of approach + 3 s dark, a 4 s
+lull still 2 + 2. `fx/effects/lull_dark.py`'s docstring is the binding
+statement, including the four-step OPT-IN for an existing or future lull
+effect (schema fields, `fx.device_model.LULL_DARK_EFFECTS`, one
+`lull_timing()` call where the effect had a fixed dark fraction, and
+`watchdog_progress()` for its orphan watchdog). Opted in: Black Hole,
+Squiggles, Pulse ONLY (his "just these 3 for now") — `blackhole1d`, Black
+Hole's own strip, is the obvious next one and still darkens at its old
+half-progress point. Three things:
+
+- **SpotFX tells, the effect measures.** `scene_response._drive_phase` adds
+  `lull_ramp_s`/`lull_dark_s` to the lull ARM write, only for
+  `LULL_DARK_EFFECTS` virtuals (`_lull_dark_keys`); a write without them
+  (tests, LedFX UI scrubs) falls back to each effect's legacy progress
+  fraction, byte-identical.
+- **A LULL AFTER A COMPLETED CHARGE STARTS AT `phase_progress` 1.0** —
+  pre-existing, every phase effect, measured on the real facade: the arm's
+  1 ms `JUMP_MS` tween has not rendered a frame when the ramp's glide
+  retargets it (`start_param_transitions` starts from the prior tween's
+  CURRENT value), so the lull glides 1.0 -> 1.0, sits at its end state from
+  frame one, and the shared orphan watchdog sees a "completed" build and
+  releases it `PHASE_GRACE_S` (12 s) in. That is why opted-in effects read
+  the lull on their own seconds-in-phase and hand the watchdog
+  `watchdog_progress()`. The root (the jump/glide retarget) is NOT fixed —
+  it still hits Orbits, Fireworks, Eye, Fish and `blackhole1d`.
+- **Squiggles now keeps spawning through a told lull until its dark
+  point** (`_lull_still_lit`, Black Hole's own model) — otherwise a long
+  lull's walled-in chains collide themselves out within ~8 s. Spec:
+  `tests/test_lull_dark.py` (rule, arm write, and all three effects on the
+  real pipeline through a 20 s lull after a completed charge).
 
 ## Radial (STAR) rotation is audio-lows-driven — a healthy `spin` can read as parked
 

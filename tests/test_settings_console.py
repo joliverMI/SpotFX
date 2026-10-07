@@ -72,6 +72,8 @@ def test_registry_is_an_explicit_allowlist_matching_room_control_bounds():
         "drop_confident_score", "drop_suggested_score",
         # 2026-10-06, the Admiral's own drop-floor ask:
         "drop_floor",
+        # 2026-10-07, the Admiral's own lull-darkness cap:
+        "lull_dark_max_s",
     }
     # force_scene_* deliberately excluded — see settings_console.py docstring
     assert "force_scene_enabled" not in sc.SETTINGS_REGISTRY

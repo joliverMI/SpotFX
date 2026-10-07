@@ -31,6 +31,7 @@ import numpy as np
 import voluptuous as vol
 from PIL import Image
 
+import fx.effects.lull_dark as lull_dark
 import fx.effects.particle_handoff as particle_handoff
 from fx.color import validate_gradient
 from fx.effects.audio import AudioReactiveEffect
@@ -57,7 +58,13 @@ START_SEGS = 3  # segments pre-laid inward at spawn (visible immediately)
 CHARGE_RATE = 7.0    # extra chains/s at full charge
 CHARGE_MAX_X = 1.6   # max_chains growth factor at full charge
 LULL_CRT_S = 2.2     # CRT collapse fallback when no lull ramp arrives
-CRT_SPLIT = 0.55     # lull fraction where the vertical squash completes
+# The vertical squash completes — the picture is gone, only a line is left —
+# at the lull's DARK POINT. Since 2026-10-07 that is the shared lull rule
+# (fx/effects/lull_dark.py: dark for half the lull, never longer than the
+# room's lull_dark_max_s, 3 s by default), told by SpotFX on the lull arm;
+# CRT_SPLIT is the LEGACY dark point, used when a write does not carry the
+# lull's timing (and by the lost-ramp wall-clock fallback).
+CRT_SPLIT = 0.55     # legacy lull fraction where the vertical squash completes
 DROP_BURST_N = 9     # chains erupting from the center on the drop
 # The burst fires on the phase's first frame — drop anchors its START to
 # the trigger mark (his ruling, 2026-08-20, superseding the end-anchored
@@ -97,6 +104,7 @@ class Squiggles2d(Twod, GradientEffect):
         "impulse_decay",
         "phase",
         "phase_progress",
+        *lull_dark.KEYS,
     ]
 
     CONFIG_SCHEMA = vol.Schema(
@@ -206,6 +214,9 @@ class Squiggles2d(Twod, GradientEffect):
                 description="Progress through the current phase (ramped by SpotFX)",
                 default=0.0,
             ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1.0)),
+            # the lull's dark point, pushed by SpotFX on the lull arm —
+            # fx/effects/lull_dark.py
+            **lull_dark.schema_fields(),
         }
     )
 
@@ -923,8 +934,10 @@ class Squiggles2d(Twod, GradientEffect):
         # orphan watchdog: a charge/lull whose payoff never arrives
         # releases itself — walls open, the CRT snaps back on, no burst
         due, self._phase_done_t = particle_handoff.phase_release_due(
-            self._phase, self.phase_progress, self._phase_t,
-            self._phase_done_t,
+            self._phase,
+            lull_dark.watchdog_progress(
+                self._config, self._phase, self.phase_progress, self._phase_t),
+            self._phase_t, self._phase_done_t,
         )
         if due:
             _LOGGER.info(
@@ -1024,27 +1037,44 @@ class Squiggles2d(Twod, GradientEffect):
                 self._walk_one(c)
             self.chains.append(c)
 
+    def _lull_still_lit(self):
+        """A told lull before its dark point (spawning carries on)."""
+        return lull_dark.told(self._config) and not lull_dark.lull_timing(
+            self._config, self.phase_progress, self._phase_t, CRT_SPLIT
+        ).dark
+
     def _phase_crt(self, buf):
         """Lull post-process: CRT switch-off. Vertical squash to a bright
-        line over the first CRT_SPLIT of the lull, then the line pinches
-        horizontally into a held white dot at the center."""
+        line by the lull's dark point (fx/effects/lull_dark.py — CRT_SPLIT
+        of the ramp when SpotFX did not say), then the line pinches
+        horizontally into a held white dot at the center by the end of the
+        ramp."""
         if self._phase != "lull":
             return buf
         p = float(np.clip(self.phase_progress, 0.0, 1.0))
-        # progress-driven once it moves (hand-scrubbable in the LedFX UI);
-        # the wall-clock fallback only runs while progress sits at 0
-        f = p if p > 0.0 else min(self._phase_t / LULL_CRT_S, 1.0)
-        if f <= 0.0:
-            return buf
+        if p > 0.0 or lull_dark.told(self._config):
+            # SpotFX's lull timing when it sent it (the effect's own clock),
+            # else progress-driven once it moves (hand-scrubbable in the
+            # LedFX UI)
+            timing = lull_dark.lull_timing(
+                self._config, p, self._phase_t, CRT_SPLIT)
+        else:
+            # the wall-clock fallback only runs while progress sits at 0
+            f = min(self._phase_t / LULL_CRT_S, 1.0)
+            if f <= 0.0:
+                return buf
+            timing = lull_dark.lull_timing({}, f, 0.0, CRT_SPLIT)
         h, w = buf.shape[:2]
         cy, cx = (h - 1) / 2.0, (w - 1) / 2.0
-        if f < CRT_SPLIT:
-            s = f / CRT_SPLIT
+        if not timing.dark:
+            s = timing.approach
+            if s <= 0.0:
+                return buf
             fy = 1.0 - 0.96 * (s * s * (3.0 - 2.0 * s))
             fx = 1.0
             dot = 0.0
         else:
-            s = (f - CRT_SPLIT) / (1.0 - CRT_SPLIT)
+            s = timing.after
             fy = 0.04
             fx = 1.0 - 0.96 * (s * s * (3.0 - 2.0 * s))
             dot = min(1.0, 0.3 + s)
@@ -1130,8 +1160,14 @@ class Squiggles2d(Twod, GradientEffect):
         steps_target = self._steps_target()
 
         # spawn pacing (blackhole model); the lull owns a dark screen, the
-        # charge adds a steady progress-driven influx on top
-        if self._phase != "lull":
+        # charge adds a steady progress-driven influx on top. A lull SpotFX
+        # has told its timing (fx/effects/lull_dark.py) is not dark until
+        # its dark point, so — like Black Hole's own lull — ordinary chains
+        # keep forming until then: in a long lull the walled-in population
+        # otherwise collides itself out within seconds and the squash has
+        # nothing left to squash. An untold lull pauses for its whole
+        # length, as before.
+        if self._phase != "lull" or self._lull_still_lit():
             self.spawn_acc += (
                 self.spawn_rate * (1.0 + self.spawn_audio * self.impulse)
                 + self._phase_rate

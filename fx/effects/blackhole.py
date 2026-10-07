@@ -5,6 +5,7 @@ import numpy as np
 import voluptuous as vol
 from PIL import Image
 
+import fx.effects.lull_dark as lull_dark
 import fx.effects.particle_handoff as particle_handoff
 from fx.color import parse_color, validate_color, validate_gradient
 from fx.effects.audio import AudioReactiveEffect
@@ -138,13 +139,16 @@ CHARGE_HALO_W_MIN = 0.05       # ring half-thickness at p=0 …
 CHARGE_HALO_W_MAX = 0.34       # … and at p=1 ("increase the thickness of
                                # the event horizon slowly")
 
-# LULL: the horizon expands from its baseline to exactly FILL THE HEX at
-# this phase_progress, then HOLDS — so the rest of the lull is fully dark.
-# TIMING HONESTY: SpotFX ramps phase_progress over ~90% of the real gap and
-# then hangs at 1.0 (scene_response._phase_ramp_ms), so p=0.5 lands at
-# ~45% of the lull's true wall-clock duration, not exactly half. That is
-# the closest an effect can get to "half way through the duration of the
-# lull" without a duration it is never told.
+# LULL: the horizon expands from its baseline to exactly FILL THE HEX at the
+# lull's DARK POINT, then HOLDS — so the rest of the lull is fully dark.
+# Since 2026-10-07 the dark point is the shared lull rule
+# (fx/effects/lull_dark.py): dark for half the lull, never longer than the
+# room's lull_dark_max_s (3 s by default), so a 20 s lull is 17 s of
+# expansion and 3 s of dark. SpotFX tells the effect the lull's timing on
+# the arm write; LULL_FILL_PROGRESS is now only the LEGACY dark point used
+# when a write does not carry that timing (a hand-written test, a LedFX UI
+# scrub) — p=0.5, which lands at ~45% of the lull's true duration because
+# SpotFX ramps phase_progress over ~90% of the gap and hangs at 1.0.
 LULL_FILL_PROGRESS = 0.5
 # A hair past that bound, so the painted disc's own inner edge (_disc_radius
 # minus the 1-cell antialias margin draw() applies) still covers the
@@ -347,6 +351,7 @@ class Blackhole2d(Twod, GradientEffect):
         "impulse_decay",
         "phase",
         "phase_progress",
+        *lull_dark.KEYS,
         "blob_rush",
         "horizon_follow_blobs",
     ]
@@ -508,6 +513,9 @@ class Blackhole2d(Twod, GradientEffect):
                 description="Progress through the current phase (ramped by SpotFX)",
                 default=0.0,
             ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1.0)),
+            # the lull's dark point, pushed by SpotFX on the lull arm —
+            # fx/effects/lull_dark.py
+            **lull_dark.schema_fields(),
         }
     )
 
@@ -1097,8 +1105,10 @@ class Blackhole2d(Twod, GradientEffect):
         # orphan watchdog: a charge/lull whose payoff never arrives
         # releases itself as a silent drop (pinch + reset, no burst)
         due, self._phase_done_t = particle_handoff.phase_release_due(
-            self._phase, self.phase_progress, self._phase_t,
-            self._phase_done_t,
+            self._phase,
+            lull_dark.watchdog_progress(
+                self._config, self._phase, self.phase_progress, self._phase_t),
+            self._phase_t, self._phase_done_t,
         )
         if due:
             _LOGGER.info(
@@ -1150,6 +1160,14 @@ class Blackhole2d(Twod, GradientEffect):
                         fire_event=False,
                     )
 
+    def _lull_timing(self):
+        """Where the lull is relative to its dark point — the shared rule
+        (fx/effects/lull_dark.py), LULL_FILL_PROGRESS when SpotFX did not
+        say. Every lull reading of "dark yet?" goes through here."""
+        return lull_dark.lull_timing(
+            self._config, self.phase_progress,
+            getattr(self, "_phase_t", 0.0), LULL_FILL_PROGRESS)
+
     def _phase_spawn_rate(self):
         """Blobs per second the charge/lull FORCES into being, on top of
         whatever the ambient/beat spawn is already doing (his ask, 2026-08-24:
@@ -1167,7 +1185,7 @@ class Blackhole2d(Twod, GradientEffect):
         the point where the event horizon has fully taken the screen"
         (2026-09-10) and is deliberately UNCHANGED by that calibration: the
         charge's own final rate carries across the phase seam with no step,
-        and stops exactly at LULL_FILL_PROGRESS, which IS the moment the
+        and stops exactly at the lull's dark point (_lull_timing), which IS the moment the
         horizon has taken the screen (_horizon_radius reaches
         HEX_FILL_RADIUS there). What the lull CANNOT do is keep the visible
         count climbing: a free blob lives from the hex boundary down to the
@@ -1181,7 +1199,7 @@ class Blackhole2d(Twod, GradientEffect):
         p = float(np.clip(self.phase_progress, 0.0, 1.0))
         if phase == "charge":
             return CHARGE_SPAWN_RATE_MAX * p ** CHARGE_SPAWN_CURVE
-        if phase == "lull" and p < LULL_FILL_PROGRESS:
+        if phase == "lull" and not self._lull_timing().dark:
             return CHARGE_SPAWN_RATE_MAX
         return 0.0
 
@@ -1203,7 +1221,7 @@ class Blackhole2d(Twod, GradientEffect):
         swallowed. Since 2026-08-24 that is a LULL-ONLY, LATE-ONLY state:
         the charge no longer swallows anything (its radius holds — see
         _horizon_radius), and the lull only goes dark once the horizon has
-        reached the hex at LULL_FILL_PROGRESS, so blobs keep forming and
+        reached the hex at the lull's dark point (_lull_timing), so blobs keep forming and
         falling into it for the whole first half ("continue the fast blob
         falling"). The drop clause is a defensive no-op in the current
         design (burst_t lands in the same _phase_step call that enters
@@ -1212,8 +1230,7 @@ class Blackhole2d(Twod, GradientEffect):
         the burst fires doesn't silently let ambient spawn clutter the
         payoff's very first frame again."""
         if self._phase == "lull":
-            return float(np.clip(self.phase_progress, 0.0, 1.0)) >= (
-                LULL_FILL_PROGRESS)
+            return self._lull_timing().dark
         if self._phase == "drop":
             drop = self._drop
             return drop is None or drop["burst_t"] is None
@@ -1224,7 +1241,7 @@ class Blackhole2d(Twod, GradientEffect):
         (grows with sound when horizon_audio is positive). The charge/lull/
         drop phases override it: charge HOLDS the baseline (only the ring's
         thickness grows — see _phase_halo), the lull expands it to fill the
-        hex silhouette by LULL_FILL_PROGRESS and holds it there, the drop
+        hex silhouette by the lull's dark point (_lull_timing) and holds it there, the drop
         pinches + resets."""
         base = float(
             np.clip(
@@ -1246,10 +1263,9 @@ class Blackhole2d(Twod, GradientEffect):
             return base
         if phase == "lull":
             # expand from the baseline to exactly fill the hex silhouette at
-            # LULL_FILL_PROGRESS, then HOLD (so the rest of the lull is
+            # the lull's dark point (_lull_timing), then HOLD (so the rest of the lull is
             # fully dark). HEX_FILL_RADIUS, never r_max: see that constant.
-            p = float(np.clip(self.phase_progress, 0.0, 1.0))
-            fill = min(p / LULL_FILL_PROGRESS, 1.0)
+            fill = self._lull_timing().approach
             top = max(HEX_FILL_RADIUS + LULL_FILL_MARGIN, base)
             return base + (top - base) * fill
         # drop: the burst fires (and the horizon starts easing back from
@@ -1301,9 +1317,8 @@ class Blackhole2d(Twod, GradientEffect):
             # fill the hex; once filled it stops painting entirely, because
             # "half of the lull should be dark" means nothing lights a real
             # cell — not even this ring's own outer tail
-            p = float(np.clip(self.phase_progress, 0.0, 1.0))
             w = CHARGE_HALO_W_MAX
-            b = 1.0 if p < LULL_FILL_PROGRESS else 0.0
+            b = 0.0 if self._lull_timing().dark else 1.0
         elif phase == "drop":
             # post-burst fade only — the burst fires on the phase's first
             # frame (see _phase_step), so there is no pre-burst pinch state

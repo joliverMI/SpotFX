@@ -1700,3 +1700,20 @@ against that commit.
     `scripts/check_preview_flare_skip.py` (the preview against the lights,
     with the inline save as its own red control),
     `tests/test_facade_coalesced_save.py`, `tests/test_preview_flare_skip.py`.
+57. `effects/lull_dark.py` (NEW, SpotFX-authored) + `effects/blackhole.py`,
+    `effects/squiggles.py`, `effects/pulse.py` + `device_model.py`: THE
+    LULL'S DARK POINT (2026-10-07, the Admiral: "set a max time for that
+    portion to 3 seconds ... 17 seconds of expansion and 3 seconds of
+    dark. Pulse should match"). One shared rule — dark for half the lull,
+    never longer than SpotFX's `lull_dark_max_s` — replaces each effect's
+    fixed dark fraction (Black Hole `LULL_FILL_PROGRESS` 0.5, Squiggles
+    `CRT_SPLIT` 0.55, Pulse the ramp's end). SpotFX pushes two new config
+    keys on the lull arm (`lull_ramp_s`, `lull_dark_s`, spliced into each
+    schema by `lull_dark.schema_fields()`, never in the param registry),
+    only to `device_model.LULL_DARK_EFFECTS`; told, an effect measures the
+    lull on its OWN seconds-in-phase (a lull after a completed charge
+    starts its `phase_progress` at 1.0 — see lull_dark.py) and hands its
+    orphan watchdog `lull_dark.watchdog_progress()`. Squiggles also keeps
+    spawning through a told lull until its dark point (`_lull_still_lit`).
+    Untold writes are byte-identical to before. Evidence:
+    `tests/test_lull_dark.py`. Unverified against his live room.

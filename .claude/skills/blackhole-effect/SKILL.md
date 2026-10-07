@@ -96,6 +96,23 @@ watchdog path) MUST happen only after that sentinel is resolved, or
 (fixed once, `tests/test_blackhole_orphan_drop_none_crash.py` — the
 general pattern to check before touching `squiggles.py`/`eye.py` too).
 
+## The lull's dark point is the SHARED rule, not a constant here
+
+Since 2026-10-07 (the Admiral: "set a max time for that portion to 3
+seconds ... 17 seconds of expansion and 3 seconds of dark") this effect's
+lull goes dark at the dark point of `fx/effects/lull_dark.py` — dark for
+half the lull, never longer than the room's `lull_dark_max_s` (3 s by
+default, Sonic-editable via `set_setting`). SpotFX pushes `lull_ramp_s` /
+`lull_dark_s` on the lull arm (`scene_response._drive_phase`, only to
+`fx.device_model.LULL_DARK_EFFECTS`), and the effect measures the lull on
+its OWN seconds-in-phase, never `phase_progress` — after a completed
+charge the next lull's progress sits at 1.0 for its whole length (the
+1 ms arm tween is retargeted before it renders), which also made the
+orphan watchdog release a long lull 12 s in; `lull_dark.watchdog_progress`
+fixes that for the opted-in effects. A write WITHOUT the two keys falls
+back to the old `LULL_FILL_PROGRESS` (0.5) — the horizon's fill, the halo cut-off, the forced-formation stop and the ambient-spawn pause all read `_lull_timing()`, byte-identical to before. Read lull_dark.py's docstring
+before changing anything about when this lull goes dark.
+
 ## Sonic reach
 
 Sonic cannot edit these params directly (device/effect editing is out of
@@ -107,6 +124,7 @@ Initial Set entry.
 
 ## Executable proofs
 
+`tests/test_lull_dark.py` (the dark-point rule and this effect's lull on the real pipeline). 
 `scripts/check_blackhole_charge_lull.py`, `check_blackhole_charge_target.py`,
 `check_blackhole_explosion_and_gap.py`, `check_blackhole_explosion_speed.py`,
 `check_blackhole_hex_spawn.py`, `check_blackhole_reverse_fallback.py` +
