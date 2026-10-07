@@ -48,6 +48,14 @@ section for the mechanism. The pin keeps governing everything else
 (music/trigger-driven colour selection, an explicit human press) — only a
 resting house mode's own colours are unaffected by it.
 
+SO IS THE GLOBAL DARK/LIGHT DISPLAY MODE (2026-10-06, the Admiral's
+ruling: "house lighting modes should override dark mode") — not a layer
+in this table either. While this module governs the room, it renders its
+own look exactly as authored; `dark_light.py` does not dim it or force a
+background onto it. See `house_overrides_display()`'s own docstring and
+`dark_light.py`'s "HOUSE LIGHTING IS THE ONE EXCEPTION" section for the
+mechanism.
+
 The base layer is pushed into show_output (not fx/device_output directly):
 the output layer keeps ONE target per device, so two writers would clobber
 each other. End show therefore fades back to the mode, not to an undimmed
