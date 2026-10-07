@@ -13,7 +13,8 @@
 import HelpLink from '../../help/HelpLink';
 import type { TestbedDropReferenceSet } from '../../types';
 import {
-  DEFAULT_CONFIDENT_SCORE, DEFAULT_SUGGESTED_SCORE, MAX_DROP_SCORE, MIN_DROP_SCORE,
+  DEFAULT_CONFIDENT_SCORE, DEFAULT_DROP_FLOOR, DEFAULT_SUGGESTED_SCORE,
+  MAX_DROP_FLOOR, MAX_DROP_SCORE, MIN_DROP_FLOOR, MIN_DROP_SCORE,
   dropDefaultsDiffer,
 } from '../dropKnobs';
 import type { DropKnobValues } from '../dropKnobs';
@@ -23,9 +24,10 @@ function ms(v: number | null | undefined): string {
 }
 
 function Slider({
-  id, label, value, onChange, fallback,
+  id, label, value, onChange, fallback, min, max,
 }: {
   id: string; label: string; value: number; onChange: (v: number) => void; fallback: number;
+  min: number; max: number;
 }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -35,8 +37,8 @@ function Slider({
       <input
         id={id}
         type="range"
-        min={MIN_DROP_SCORE}
-        max={MAX_DROP_SCORE}
+        min={min}
+        max={max}
         step={0.05}
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
@@ -52,20 +54,22 @@ function Slider({
 }
 
 export default function DropKnobsPanel({
-  confident, suggested, onConfidentChange, onSuggestedChange,
+  confident, suggested, floor, onConfidentChange, onSuggestedChange, onFloorChange,
   roomDefaults, onUseAsRoomDefault, useAsRoomDefaultPending, referenceSet, referenceSetLoading,
 }: {
   confident: number;
   suggested: number;
+  floor: number;
   onConfidentChange: (v: number) => void;
   onSuggestedChange: (v: number) => void;
+  onFloorChange: (v: number) => void;
   roomDefaults: DropKnobValues | null | undefined;
   onUseAsRoomDefault: () => void;
   useAsRoomDefaultPending: boolean;
   referenceSet: TestbedDropReferenceSet | undefined;
   referenceSetLoading: boolean;
 }) {
-  const differs = dropDefaultsDiffer({ confident, suggested }, roomDefaults);
+  const differs = dropDefaultsDiffer({ confident, suggested, floor }, roomDefaults);
   const edm = referenceSet?.edm_total;
   const total = referenceSet?.total;
   return (
@@ -75,16 +79,22 @@ export default function DropKnobsPanel({
       </div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginBottom: 6 }}>
         <Slider id="testbed-drop-confident" label="Confident from" value={confident}
-                onChange={onConfidentChange} fallback={DEFAULT_CONFIDENT_SCORE} />
+                onChange={onConfidentChange} fallback={DEFAULT_CONFIDENT_SCORE}
+                min={MIN_DROP_SCORE} max={MAX_DROP_SCORE} />
         <Slider id="testbed-drop-suggested" label="Suggested from" value={suggested}
-                onChange={onSuggestedChange} fallback={DEFAULT_SUGGESTED_SCORE} />
+                onChange={onSuggestedChange} fallback={DEFAULT_SUGGESTED_SCORE}
+                min={MIN_DROP_SCORE} max={MAX_DROP_SCORE} />
+        <Slider id="testbed-drop-floor" label="Energy floor" value={floor}
+                onChange={onFloorChange} fallback={DEFAULT_DROP_FLOOR}
+                min={MIN_DROP_FLOOR} max={MAX_DROP_FLOOR} />
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 8 }}>
         <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-          Room's current thresholds:{' '}
+          Room's current settings:{' '}
           {roomDefaults ? (
             <span style={differs ? { color: 'var(--warn, #b45309)', fontWeight: 600 } : undefined}>
               confident {roomDefaults.confident.toFixed(2)} · suggested {roomDefaults.suggested.toFixed(2)}
+              {' '}· energy floor {roomDefaults.floor.toFixed(2)}
             </span>
           ) : 'loading…'}
           {differs && ' — differs from the sliders above'}
@@ -93,8 +103,8 @@ export default function DropKnobsPanel({
           onClick={onUseAsRoomDefault}
           disabled={useAsRoomDefaultPending || !differs}
           title={differs
-            ? 'Write these two thresholds as the room\'s own; each song is detected again the next time it plays'
-            : 'The sliders already match the room\'s current thresholds'}
+            ? 'Write these settings as the room\'s own; each song is detected again the next time it plays'
+            : 'The sliders already match the room\'s current settings'}
           style={{ fontSize: 11 }}
         >
           {useAsRoomDefaultPending ? 'Saving…' : 'Use as room default'}

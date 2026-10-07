@@ -46,8 +46,9 @@ to avoid — route through `apply_edit`.
 ## Detection is cheap to re-run and never touches his edits
 
 `ensure_detected(uri, force=False)` re-detects only when the stored
-stamp is stale (detector version + the two thresholds + the song's own
-analysis inputs) or `force=True`; `his overrides and added sequences are
+stamp is stale (detector version + the two tier thresholds + the drop
+floor + the song's own analysis inputs) or `force=True`; `his overrides
+and added sequences are
 never touched by a re-detection` — stated in that function's own
 docstring, and asserted by tests. Bump `drop_detector.DETECTOR_VERSION`
 whenever the detection logic changes, or an unchanged song never
@@ -76,7 +77,14 @@ shows, not just state/times), `confirm_drop_sequence`, `dismiss_drop_sequence`,
 `undo_drop_edit` (Sonic's own last edit only, refused if the Timeline
 edited the song since), `redetect_drop_sequences`,
 `drop_detection_summary`. The two detection thresholds
-(`drop_confident_score`/`drop_suggested_score`) are plain
+(`drop_confident_score`/`drop_suggested_score`) AND the drop floor
+(`drop_floor`, 2026-10-06, the Admiral's own ask — a candidate is only
+generated where the top bar's own "⚡ Energy" number, EXACTLY AS
+DISPLAYED (the adjacent "Mark" readout is separate and never factored
+in), during or right after the drop reaches at least this, default 0.7
+(his own fallback — 0.95 kept 0 of his 11 detector-found drops, 0.7
+keeps 9 of 11); never removes a sequence he has confirmed, edited or
+added) are plain
 `settings_console.SETTINGS_REGISTRY` keys, not drop ops. A sequence
 numbered by Sonic is the SAME numbering the Timeline review list shows
 (song order among non-dismissed sequences) — never a raw store key.
@@ -90,4 +98,5 @@ that.
 
 `tests/test_drop_detector.py`, `tests/test_drop_sequences.py`,
 `tests/test_drop_console.py`, `tests/test_drop_firing.py`,
-`scripts/check_drop_detector.py`, `scripts/check_drop_firing.py`.
+`tests/test_drop_floor.py`, `scripts/check_drop_detector.py`,
+`scripts/check_drop_firing.py`.

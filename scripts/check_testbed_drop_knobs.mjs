@@ -29,15 +29,19 @@ execFileSync('npx', ['esbuild', TS, '--format=esm', `--outfile=${js}`], {
 });
 const k = await import(js);
 
-console.log('§1 defaults and bounds match RoomControlState.drop_confident_score / drop_suggested_score');
+console.log('§1 defaults and bounds match RoomControlState.drop_confident_score / drop_suggested_score / drop_floor');
 ok(k.DEFAULT_CONFIDENT_SCORE === 1.0, 'confident defaults to 1.0 (the plan\'s operating point)');
 ok(k.DEFAULT_SUGGESTED_SCORE === 0.7, 'suggested defaults to 0.7');
-ok(k.MIN_DROP_SCORE === 0.3 && k.MAX_DROP_SCORE === 2.0, 'bounds are 0.3-2.0');
+ok(k.MIN_DROP_SCORE === 0.3 && k.MAX_DROP_SCORE === 2.0, 'tier bounds are 0.3-2.0');
+ok(k.DEFAULT_DROP_FLOOR === 0.7, 'floor defaults to 0.7 (his own fallback — 0.95 kept none of his real drops)');
+ok(k.MIN_DROP_FLOOR === 0.0 && k.MAX_DROP_FLOOR === 1.0, 'floor bounds are 0.0-1.0, a different scale');
 
-console.log('§2 clampDropScore keeps a slider inside its bounds');
+console.log('§2 clampDropScore/clampDropFloor keep a slider inside its own bounds');
 ok(k.clampDropScore(1.234, 1) === 1.23, 'rounds to hundredths');
 ok(k.clampDropScore(0, 1) === 0.3 && k.clampDropScore(9, 1) === 2.0, 'clamps both ends');
 ok(k.clampDropScore(NaN, 0.7) === 0.7, 'NaN falls back, never NaN');
+ok(k.clampDropFloor(1.5, 0.95) === 1.0 && k.clampDropFloor(-1, 0.95) === 0.0, 'floor clamps to 0.0-1.0');
+ok(k.clampDropFloor(NaN, 0.95) === 0.95, 'floor NaN falls back, never NaN');
 
 console.log('§3 the sliders show only for a drops lane');
 ok(k.dropKnobsRelevant([{ engine: 'drops', kind: 'lull' }, null]), 'a drops lane in slot A shows them');
@@ -54,19 +58,32 @@ ok(k.oneBeatToleranceMs(null, 100, 3000) === 500, 'no tempo -> 500 ms');
 ok(k.oneBeatToleranceMs(10, 100, 3000) === 3000, 'clamped to the slider\'s ceiling');
 
 console.log('§5 "Use as room default" writes and names only what moved');
-const room = { confident: 1.0, suggested: 0.7 };
-ok(!k.dropDefaultsDiffer({ confident: 1.0, suggested: 0.7 }, room), 'synced sliders do not differ');
-ok(!k.dropDefaultsDiffer({ confident: 1.5, suggested: 0.7 }, null), 'room still loading reads as no difference');
-const moved = { confident: 1.1, suggested: 0.7 };
+const room = { confident: 1.0, suggested: 0.7, floor: 0.95 };
+ok(!k.dropDefaultsDiffer({ confident: 1.0, suggested: 0.7, floor: 0.95 }, room), 'synced sliders do not differ');
+ok(!k.dropDefaultsDiffer({ confident: 1.5, suggested: 0.7, floor: 0.95 }, null), 'room still loading reads as no difference');
+const moved = { confident: 1.1, suggested: 0.7, floor: 0.95 };
 ok(k.dropDefaultsDiffer(moved, room), 'a moved slider differs');
 ok(JSON.stringify(k.dropRoomControlsPatch(moved, room)) === JSON.stringify({ drop_confident_score: 1.1 }),
   'the patch carries only the moved threshold');
 const msg = k.dropUseAsRoomDefaultConfirmMessage(moved, room);
-ok(msg.includes('confident from 1.10') && !msg.includes('suggested from'),
+ok(msg.includes('confident from 1.10') && !msg.includes('suggested from') && !msg.includes('energy floor from'),
   'the confirmation names only the moved threshold');
 ok(msg.includes('next time it plays') && msg.includes('Nothing fires'),
   'the confirmation says when it takes effect and that nothing fires');
 ok(Object.keys(k.dropRoomControlsPatch(room, room)).length === 0, 'nothing moved -> empty patch');
+
+console.log('§6 the energy floor moves independently of the two tier thresholds');
+const movedFloor = { confident: 1.0, suggested: 0.7, floor: 0.5 };
+ok(k.dropDefaultsDiffer(movedFloor, room), 'a moved floor differs');
+ok(JSON.stringify(k.dropRoomControlsPatch(movedFloor, room)) === JSON.stringify({ drop_floor: 0.5 }),
+  'the patch carries only the moved floor');
+const floorMsg = k.dropUseAsRoomDefaultConfirmMessage(movedFloor, room);
+ok(floorMsg.includes('energy floor from 0.50') && !floorMsg.includes('confident from') && !floorMsg.includes('suggested from'),
+  'the confirmation names only the moved floor');
+const movedBoth = { confident: 1.1, suggested: 0.7, floor: 0.5 };
+ok(JSON.stringify(k.dropRoomControlsPatch(movedBoth, room))
+  === JSON.stringify({ drop_confident_score: 1.1, drop_floor: 0.5 }),
+  'two moved knobs both land in the patch');
 
 if (failures) {
   console.log(`\n${failures} check(s) FAILED`);

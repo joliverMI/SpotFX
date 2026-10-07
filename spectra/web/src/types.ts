@@ -473,6 +473,15 @@ export interface RoomControlState {
   drop_confident_score: number;
   /** ...and at least this, SUGGESTED (waits for his confirm). Default 0.7. */
   drop_suggested_score: number;
+  /** A drop sequence is only generated where the top bar's own "⚡
+   * Energy" number (exactly as displayed — the adjacent "Mark" readout is
+   * a separate number, never factored in) reaches at least this during
+   * or right after the drop (0.0-1.0) — so quiet songs or sections don't
+   * get drops. Never removes a sequence he has confirmed, edited or
+   * added. Default 0.7 (his own fallback — 0.95 kept 0 of his 11
+   * detector-found drops on the four reference songs, measured; 0.7
+   * keeps 9 of 11). */
+  drop_floor: number;
   /** Legacy Now Playing "Force Scene" control, ported verbatim: while
    * enabled, every scene the system would otherwise pick automatically
    * (sequencer roll, trigger fire, or the automatic transition fire) fires
@@ -1700,6 +1709,7 @@ export interface TestbedDropReferenceRow {
 export interface TestbedDropReferenceSet {
   confident_score: number;
   suggested_score: number;
+  floor_score: number;
   songs: TestbedDropReferenceRow[];
   total: Partial<TestbedDropScore> | null;
   edm_total: Partial<TestbedDropScore> | null;

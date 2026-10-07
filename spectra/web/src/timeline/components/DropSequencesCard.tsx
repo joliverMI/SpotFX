@@ -340,12 +340,11 @@ export default function DropSequencesCard({
           </div>
           {(excluded.length > 0 || lone.length > 0) && (
             <ul className="drop-review-notes">
-              {excluded.length > 0 && (
-                <li>
-                  {excluded.length} drop{excluded.length === 1 ? '' : 's'} in the song&apos;s first or last 15 s
-                  {' '}left out ({excluded.map((e) => fmtTenths(e.drop_ms)).join(', ')}).
+              {excluded.map((e, i) => (
+                <li key={`excluded-${e.drop_ms}-${i}`}>
+                  Left out at {fmtTenths(e.drop_ms)}: {e.reason}.
                 </li>
-              )}
+              ))}
               {lone.length > 0 && (
                 <li>
                   {lone.length} of your phase triggers belong{lone.length === 1 ? 's' : ''} to no drop

@@ -10099,8 +10099,43 @@ Plan: `/home/javi/fleet-spotfx/data/drop-detection-plan/report.md` (approved
   (read-only against live storage, on temp copies) holds its raw output
   identical to the testbed's on Contra / Dopamine / Pop Off / 100 Millones
   and the plan's numbers (11 of 13; 9 of 13 confident, 0 false on the EDM
-  songs). Change a rule and that script tells you what moved; bump
-  `DETECTOR_VERSION` whenever an unchanged song would detect differently.
+  songs — that script now detects at `drop_floor=0.0` so the floor below
+  doesn't move this acceptance). Change a rule and that script tells you
+  what moved; bump `DETECTOR_VERSION` whenever an unchanged song would
+  detect differently.
+- **THE DROP FLOOR (2026-10-06, the Admiral's own setting, default 0.7):
+  a candidate is only kept if the TOP BAR'S OWN "⚡ Energy" NUMBER,
+  EXACTLY AS DISPLAYED, clears it at the drop's moment** —
+  `drop_detector.final_energy_at` is plain `analysis_reader.
+  section_energy_at`, the SAME value `LiveEnergyReadout.tsx` renders
+  verbatim via `bridge.intensity()`, with NO rescaling. His first ask was
+  0.95 against this same raw section energy — told that removed every one
+  of his 13 real drops on the four reference songs, his follow-up: "what
+  about when we factor in the mark score? i want to match to the energy
+  in the top bar shown. if that still needs 0.7 for my drops to land, do
+  .7. otherwise, stay with .95 if that fixes the issue." **A MARK-
+  FACTORED COMPOSITE WAS BUILT, MEASURED, AND REVERTED** —
+  `intensity_scale.combine_measured_and_scale` over the section energy
+  and the song's own `song_scaling_factor` (genres from the capture
+  sidecar): it structurally capped every one of these four songs' own
+  ceiling at 0.40-0.44 (their auto scale is 0.68-0.74, so
+  `HEADROOM_RESERVE`(0.6) x scale never reaches 0.7 even at energy=1.0),
+  so NEITHER 0.95 NOR 0.7 ever let a real drop through on that measure —
+  it would have switched generated drops off entirely. Checking
+  `LiveEnergyReadout.tsx` directly settled it: the "⚡ Energy" readout
+  shows the raw number with no mark factored in anywhere — the adjacent
+  "Mark" readout (`IntensityMarkControl.tsx`) is a SEPARATE, un-multiplied
+  number. His final word, "match to the energy in the top bar shown", is
+  the DISPLAYED number, so the floor reverted to it. Room setting
+  `drop_floor`, folded into `drop_sequences.stamp_for`'s own stamp so a
+  change re-detects each song the next time it plays. Gated ONLY inside
+  `detect()`, so a sequence he has confirmed, edited or added is never
+  removed by it. A song with no stored section energy is UNKNOWN, never
+  gated. **Measured, not assumed**: `scripts/check_drop_floor.py` scores
+  the same four songs at 0.0/0.7/0.95 on this plain measure — at 0.95, 0
+  of his 11 detector-found drops survive; at 0.7, 9 of 11 do. His own
+  fallback rule decided the default: 0.7, since 0.95 keeps none of them
+  and 0.7 keeps nearly all.
 - **IT READS ONLY THE STORED AUDIO SHAPE AND THE BEATS, AND EVERY TIME IS
   SONG TIME** (the `.npz` is captured in song time; beats shift by its first
   timestamp). The test bed's `_estimate_for` must NOT shift the Drops lane

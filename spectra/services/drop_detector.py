@@ -37,6 +37,53 @@ THE RULE, in plain words (report section 5, method B):
   his confirm). Both thresholds are room settings (drop_confident_score /
   drop_suggested_score) so the test bed's Drops lane can tune them by eye.
 
+  THE DROP FLOOR (the Admiral, 2026-10-06: "drop sequences only get
+  generated if the final energy value for the post drop or during drop
+  section is at least the drop floor. so quiet songs or sections don't
+  accidentally get drops" — then, told 0.95 removes every one of his real
+  drops on the four reference songs: "what about when we factor in the
+  mark score? i want to match to the energy in the top bar shown. if that
+  still needs 0.7 for my drops to land, do .7. otherwise, stay with .95 if
+  that fixes the issue" — then, asked to check exactly what the top bar
+  displays, his final word: "match to the energy in the top bar shown",
+  i.e. the DISPLAYED number, not a mark-factored composite). `final_energy_
+  at` is THE OFFLINE EQUIVALENT of the top bar's own "⚡ Energy" reading
+  — `analysis_reader.section_energy_at`, the SAME value LiveEnergyReadout.
+  tsx shows verbatim via `bridge.intensity()` (bridge.py's own `intensity()`
+  IS `section_energy_at`), rendered with NO rescaling, NO division by
+  `HEADROOM_RESERVE`, and NOT a percent of the track's own maximum — read
+  the component before assuming otherwise, this was checked, not guessed.
+  **The MARK (IntensityMarkControl.tsx, the adjacent "Mark" readout) is a
+  SEPARATE number — the per-song scale as a percentage — and the UI never
+  multiplies the two together anywhere; there is no single top-bar number
+  that already factors it in.** A first pass of this floor DID build that
+  composite (intensity_scale.combine_measured_and_scale over energy and
+  the song's own scale) on the theory that "factor in the mark" meant
+  computing it — measured, it structurally capped every one of his four
+  reference songs' own ceiling at 0.40-0.44 (their auto scale is
+  0.68-0.74, so `HEADROOM_RESERVE`(0.6) x scale never reaches 0.7 even at
+  energy=1.0), so NEITHER 0.95 nor 0.7 ever let a real drop through on
+  that measure — a default that would have switched generated drops off
+  entirely, not what he asked for. Reverted once the top bar itself was
+  checked and found NOT to factor the mark in at all. Applied AFTER a
+  candidate clears a tier and the EDGES guard, BEFORE it is placed, at the
+  drop's own moment — "during the drop", and in practice also "post drop"
+  since a drop sits on the first bass spike of the hit that follows the
+  break, i.e. the start of what comes after. A song with no section
+  energy yet (no stored librosa sections) is UNKNOWN and never gated —
+  "we can't tell" is not "below the floor". **Measured against his real
+  four-song set, this plain displayed-energy measure (scripts/
+  check_drop_floor.py): at 0.95, 0 of his 11 detector-found drops survive;
+  at 0.7, 9 of 11 do.** His own fallback rule decides the default: 0.7,
+  not 0.95, since 0.95 keeps none of them and 0.7 keeps nearly all. The
+  floor is a room setting (drop_floor, default 0.7 — his own fallback
+  number) folded into drop_sequences.stamp_for's own stamp, so a change
+  re-detects each song the next time it plays. It only ever REMOVES a
+  candidate from what the detector proposes (listed in `excluded`,
+  named); it never touches a sequence he has confirmed, edited or added
+  — those live in drop_sequences.py's own overrides/added and are never
+  re-derived from a fresh detect() call.
+
   THE LULL ("right after the last beat spike leading into the drop") —
   rule `tail`: find where the bass goes quiet before the drop; if the last
   hit before that quiet is short (the quiet starts within 1.25 beats of
@@ -102,6 +149,7 @@ NMS_BEATS = 6.0               # drops closer than this keep the strongest
 
 CONFIDENT_SCORE = 1.0         # report section 5: "confident", may fire alone
 SUGGESTED_SCORE = 0.7         # report section 5: "suggested", waits for him
+DROP_FLOOR = 0.7              # his own fallback number — see module docstring
 
 EDGE_MS = 15_000
 CAP_SECONDS_PER_CONFIDENT = 45
@@ -574,6 +622,7 @@ class SongDetection:
     detector_version: str
     confident_score: float
     suggested_score: float
+    drop_floor: float
     tempo_bpm: float
     beat_ms: float
     captured_from_ms: int
@@ -587,6 +636,7 @@ class SongDetection:
             "uri": self.uri, "detector_version": self.detector_version,
             "confident_score": self.confident_score,
             "suggested_score": self.suggested_score,
+            "drop_floor": self.drop_floor,
             "tempo_bpm": self.tempo_bpm, "beat_ms": self.beat_ms,
             "captured_from_ms": self.captured_from_ms,
             "captured_to_ms": self.captured_to_ms,
@@ -601,6 +651,7 @@ class SongDetection:
             uri=d["uri"], detector_version=str(d.get("detector_version")),
             confident_score=float(d.get("confident_score", CONFIDENT_SCORE)),
             suggested_score=float(d.get("suggested_score", SUGGESTED_SCORE)),
+            drop_floor=float(d.get("drop_floor", DROP_FLOOR)),
             tempo_bpm=float(d.get("tempo_bpm") or 120.0),
             beat_ms=float(d.get("beat_ms") or 500.0),
             captured_from_ms=int(d.get("captured_from_ms") or 0),
@@ -666,6 +717,22 @@ def place_sequence(p: Prep, drop_ms: int) -> tuple[Optional[int], Optional[int],
     return L, C, round((drop_ms - min(bs_low, bs_tot)) / p.song.beat_len, 2)
 
 
+def final_energy_at(uri: str, drop_ms: int) -> Optional[float]:
+    """THE DROP FLOOR's own reading: the offline equivalent of the top
+    bar's "⚡ Energy" number exactly as displayed — `analysis_reader.
+    section_energy_at`, the SAME value LiveEnergyReadout.tsx shows
+    verbatim via `bridge.intensity()`, with NO mark factored in (checked
+    against that component directly: it renders the raw number, never
+    rescaled by the adjacent "Mark" readout — see the module docstring's
+    DROP FLOOR section for why this isn't the mark-factored composite a
+    first pass of this feature built). At the drop's own moment ("during
+    the drop", and in practice also "post drop" since a drop sits on the
+    first bass spike of the hit that follows the break). `None` when this
+    song has no stored section energy yet — UNKNOWN, never "below the
+    floor"."""
+    return analysis_reader.section_energy_at(uri, drop_ms)
+
+
 def first_beat_at_or_after(song: SongData, t_ms: float) -> int:
     after = song.beat_ms[song.beat_ms >= t_ms]
     return int(after[0]) if len(after) else int(round(t_ms))
@@ -704,7 +771,8 @@ def apply_spacing(seqs: list[DetectedSequence], beat_len: float,
 
 
 def detect(analysis: SongAnalysis, *, confident_score: float = CONFIDENT_SCORE,
-           suggested_score: float = SUGGESTED_SCORE) -> SongDetection:
+           suggested_score: float = SUGGESTED_SCORE,
+           drop_floor: float = DROP_FLOOR) -> SongDetection:
     """Drop sequences for one analysed song at these thresholds, with the
     guards applied. Cheap: all the audio work is in `analysis`."""
     song = analysis.song
@@ -713,11 +781,12 @@ def detect(analysis: SongAnalysis, *, confident_score: float = CONFIDENT_SCORE,
     out = SongDetection(
         uri=song.uri, detector_version=DETECTOR_VERSION,
         confident_score=float(confident_score), suggested_score=float(suggested_score),
+        drop_floor=float(drop_floor),
         tempo_bpm=round(song.tempo, 3), beat_ms=round(B, 3),
         captured_from_ms=int(song.t[0]), captured_to_ms=int(song.t[-1]),
         duration_ms=int(song.duration_ms))
-    floor = min(confident_score, suggested_score)
-    for drop_ms, cand in raw_drops(analysis, floor):
+    score_floor = min(confident_score, suggested_score)
+    for drop_ms, cand in raw_drops(analysis, score_floor):
         tier = tier_for(cand.score, confident_score, suggested_score)
         if tier is None:
             continue
@@ -725,6 +794,13 @@ def detect(analysis: SongAnalysis, *, confident_score: float = CONFIDENT_SCORE,
             out.excluded.append(Excluded(
                 drop_ms=int(drop_ms), score=round(cand.score, 3),
                 reason="in the song's first or last 15 s"))
+            continue
+        energy = final_energy_at(song.uri, drop_ms)
+        if energy is not None and energy < drop_floor:
+            out.excluded.append(Excluded(
+                drop_ms=int(drop_ms), score=round(cand.score, 3),
+                reason=f"post-drop energy {energy:.2f} is below the drop "
+                       f"floor {drop_floor:.2f}"))
             continue
         lull, charge, brk = place_sequence(p, drop_ms)
         out.sequences.append(DetectedSequence(
@@ -757,7 +833,8 @@ def _apply_cap(seqs: list[DetectedSequence], duration_ms: int) -> None:
 
 
 def detect_uri(uri: str, *, confident_score: float = CONFIDENT_SCORE,
-               suggested_score: float = SUGGESTED_SCORE) -> SongDetection:
+               suggested_score: float = SUGGESTED_SCORE,
+               drop_floor: float = DROP_FLOOR) -> SongDetection:
     """analyse + detect for one song (raises Unavailable)."""
     return detect(analyse(uri), confident_score=confident_score,
-                  suggested_score=suggested_score)
+                  suggested_score=suggested_score, drop_floor=drop_floor)

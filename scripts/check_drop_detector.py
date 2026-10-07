@@ -155,17 +155,25 @@ def main() -> int:
     try:
         _isolate(live_root, tmp)
         from spectra.services import (drop_detector, drop_scoring, drop_sequences,
-                                      trigger_store)
+                                      room_controls, trigger_store)
         _check_port(problems)
 
+        # This script holds the PLAN's own acceptance (report section
+        # 5.1), which predates the drop floor (2026-10-06) — a room-wide
+        # energy gate scored separately by scripts/check_drop_floor.py.
+        # Detecting at drop_floor=0.0 isolates the tier/guard logic this
+        # script is actually about from that later, independent gate.
+        no_floor = room_controls.RoomControlState(drop_floor=0.0)
+
         rows, edm = [], []
-        print("## 2. The plan's four-song table (shipped code, guards on)\n")
+        print("## 2. The plan's four-song table (shipped code, guards on, "
+              "drop_floor=0.0)\n")
         print("| Song | His drops | Found | Extra | Confident found | Confident extra "
               "| Median miss | Worst | Within 50 ms | Lull within 1 beat | Charge within 2 beats |")
         print("|---|---|---|---|---|---|---|---|---|---|---|")
         for name, uri, is_edm in SONGS:
-            first = drop_sequences.ensure_detected(uri)
-            second = drop_sequences.ensure_detected(uri)
+            first = drop_sequences.ensure_detected(uri, no_floor)
+            second = drop_sequences.ensure_detected(uri, no_floor)
             if first.get("status") != "detected" or second.get("status") != "fresh":
                 problems.append(f"{name}: store did not detect then hold "
                                 f"({first.get('status')}, {second.get('status')})")

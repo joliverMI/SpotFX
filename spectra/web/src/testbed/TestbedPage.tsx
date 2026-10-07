@@ -32,8 +32,9 @@ import {
 } from './edgeKnobs';
 import type { Direction, TransitionKnobValues } from './edgeKnobs';
 import {
-  clampDropScore, DEFAULT_CONFIDENT_SCORE, DEFAULT_SUGGESTED_SCORE, dropKnobsRelevant,
-  dropRoomControlsPatch, dropUseAsRoomDefaultConfirmMessage, isDropKind, oneBeatToleranceMs,
+  clampDropFloor, clampDropScore, DEFAULT_CONFIDENT_SCORE, DEFAULT_DROP_FLOOR,
+  DEFAULT_SUGGESTED_SCORE, dropKnobsRelevant, dropRoomControlsPatch,
+  dropUseAsRoomDefaultConfirmMessage, isDropKind, oneBeatToleranceMs,
 } from './dropKnobs';
 import type { DropKnobValues } from './dropKnobs';
 import { matchMarks } from './metrics';
@@ -170,11 +171,12 @@ export default function TestbedPage() {
   // edgeKnobs.ts's own header comment) — same held-regardless-of-active-
   // engine shape as the three above.
   const [transitionsPerMinute, setTransitionsPerMinute] = useState(DEFAULT_TRANSITIONS_PER_MINUTE);
-  // The Drops lane's two thresholds (dropKnobs.ts) — same shape as the
-  // knobs above: held regardless of the active engine, synced ONCE from
-  // the room's own drop_confident_score / drop_suggested_score.
+  // The Drops lane's controls (dropKnobs.ts) — same shape as the knobs
+  // above: held regardless of the active engine, synced ONCE from the
+  // room's own drop_confident_score / drop_suggested_score / drop_floor.
   const [confidentScore, setConfidentScore] = useState(DEFAULT_CONFIDENT_SCORE);
   const [suggestedScore, setSuggestedScore] = useState(DEFAULT_SUGGESTED_SCORE);
+  const [floorScore, setFloorScore] = useState(DEFAULT_DROP_FLOOR);
   // True once he has touched the slider himself for the CURRENT song — the
   // default below stops re-asserting itself over his own choice, but a new
   // song (or a mark-kind change on either lane) still gets its own honest
@@ -207,11 +209,11 @@ export default function TestbedPage() {
   const { data: waveform } = useTestbedWaveform(uri);
   const { data: engineMarksA } = useTestbedEngineMarks(
     uri, engineA.engine, engineA.kind, windowBeats, sensitivity, direction, transitionsPerMinute,
-    confidentScore, suggestedScore,
+    confidentScore, suggestedScore, floorScore,
   );
   const { data: engineMarksB } = useTestbedEngineMarks(
     uri, engineB?.engine ?? null, engineB?.kind ?? null, windowBeats, sensitivity, direction, transitionsPerMinute,
-    confidentScore, suggestedScore,
+    confidentScore, suggestedScore, floorScore,
   );
   const { data: promotions } = useTestbedPromotions(uri);
 
@@ -247,6 +249,7 @@ export default function TestbedPage() {
     setTransitionsPerMinute(clampTransitionsPerMinute(roomControls.transitions_per_minute));
     setConfidentScore(clampDropScore(roomControls.drop_confident_score, DEFAULT_CONFIDENT_SCORE));
     setSuggestedScore(clampDropScore(roomControls.drop_suggested_score, DEFAULT_SUGGESTED_SCORE));
+    setFloorScore(clampDropFloor(roomControls.drop_floor, DEFAULT_DROP_FLOOR));
   }, [roomControls]);
 
   const currentTransitionKnobs: TransitionKnobValues = { windowBeats, sensitivity, transitionsPerMinute };
@@ -265,12 +268,15 @@ export default function TestbedPage() {
     );
   };
   // The Drops lane's own "Use as room default" — the same ONE write, for
-  // the two drop thresholds only.
+  // the drop thresholds and the drop floor.
   const roomDropDefaults: DropKnobValues | null = roomControls ? {
     confident: roomControls.drop_confident_score,
     suggested: roomControls.drop_suggested_score,
+    floor: roomControls.drop_floor,
   } : null;
-  const currentDropKnobs: DropKnobValues = { confident: confidentScore, suggested: suggestedScore };
+  const currentDropKnobs: DropKnobValues = {
+    confident: confidentScore, suggested: suggestedScore, floor: floorScore,
+  };
   const useDropsAsRoomDefault = () => {
     if (!roomControls || !roomDropDefaults) return;
     const patch = dropRoomControlsPatch(currentDropKnobs, roomDropDefaults);
@@ -279,15 +285,15 @@ export default function TestbedPage() {
     saveRoomControls.mutate(
       { ...roomControls, ...patch },
       {
-        onSuccess: () => toast(`Room drop thresholds updated — confident ${confidentScore.toFixed(2)}, `
-          + `suggested ${suggestedScore.toFixed(2)}.`, 'success'),
-        onError: () => toast('Could not update the room drop thresholds.', 'error'),
+        onSuccess: () => toast(`Room drop settings updated — confident ${confidentScore.toFixed(2)}, `
+          + `suggested ${suggestedScore.toFixed(2)}, energy floor ${floorScore.toFixed(2)}.`, 'success'),
+        onError: () => toast('Could not update the room drop settings.', 'error'),
       },
     );
   };
   const showDropKnobs = dropKnobsRelevant([engineA, engineB]);
   const { data: dropReferenceSet, isLoading: dropReferenceSetLoading } = useTestbedDropReferenceSet(
-    confidentScore, suggestedScore, showDropKnobs,
+    confidentScore, suggestedScore, floorScore, showDropKnobs,
   );
   // The plan's own four-song table, recomputed at the current knobs on
   // every drag — shown regardless of which song is currently selected,
@@ -593,8 +599,10 @@ export default function TestbedPage() {
               <DropKnobsPanel
                 confident={confidentScore}
                 suggested={suggestedScore}
+                floor={floorScore}
                 onConfidentChange={(v) => setConfidentScore(clampDropScore(v, DEFAULT_CONFIDENT_SCORE))}
                 onSuggestedChange={(v) => setSuggestedScore(clampDropScore(v, DEFAULT_SUGGESTED_SCORE))}
+                onFloorChange={(v) => setFloorScore(clampDropFloor(v, DEFAULT_DROP_FLOOR))}
                 roomDefaults={roomDropDefaults}
                 onUseAsRoomDefault={useDropsAsRoomDefault}
                 useAsRoomDefaultPending={saveRoomControls.isPending}
