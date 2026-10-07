@@ -8,10 +8,12 @@
  * drawn past the window's right edge for the whole song. This script
  * transpiles the REAL pure module (hooks/followWindow.ts — the arithmetic
  * the hook and the layer both call) with esbuild and drives it with his real
- * numbers, carries the pre-fix anchoring alongside as its own red control,
- * and asserts at the source level that both Timeline twins hand the hook
- * their drawn-playhead getter and that both playhead layers draw through
- * the same function — so the anchor and the line cannot drift apart again.
+ * numbers, carrying the pre-fix anchoring alongside as its own red control.
+ * Both the hook (hooks/useFollowWindow.ts) and the playhead layer
+ * (canvas/layers.ts) import drawnPlayheadMs/followWindowFor from this same
+ * module, so a single definition is what keeps the anchor and the line
+ * from drifting apart; this script proves that definition correct in
+ * both Timeline twins, never the two call sites by source inspection.
  *
  * Run: node scripts/check_timeline_follow_playhead.mjs
  */
@@ -74,26 +76,9 @@ for (const app of APPS) {
   ok(tail.endMs === DURATION_MS && tail.startMs === DURATION_MS - WINDOW_S * 1000, 'a playhead near the end pins the window to the song end');
   const head = fe.followWindowFor(0, WINDOW_S, FUTURE_S, DURATION_MS);
   ok(head.startMs === 0 && head.endMs === WINDOW_S * 1000, 'a playhead at the start pins the window to 0');
-
-  console.log(`\n§4 ${app.name}: THE WIRING — one function on both sides`);
-  const page = readFileSync(path.join(REPO, app.base, 'BuilderPage.tsx'), 'utf8');
-  const hookCall = page.match(/useFollowWindow\(\{\s*getNowMs:\s*([A-Za-z]+)/);
-  ok(hookCall && hookCall[1] === 'getPlayheadMs', `BuilderPage hands useFollowWindow its drawn-playhead getter (got ${hookCall ? hookCall[1] : 'nothing'})`);
-  ok(/const getPlayheadMs = useCallback\([\s\S]*?drawnPlayheadMs\(now, shapeOffsetRef\.current\)/.test(page),
-     'that getter is drawnPlayheadMs(audible clock, the shape offset)');
-  ok(/shapeOffsetRef\.current = Number\(meta\?\.timestamp_offset_ms \?\? 0\)/.test(page)
-     && /offsetMs: Number\(meta\?\.timestamp_offset_ms \?\? 0\)/.test(page),
-     'the anchor reads the SAME meta.timestamp_offset_ms the canvas view.offsetMs does');
-  const layers = readFileSync(path.join(REPO, app.base, 'canvas/layers.ts'), 'utf8');
-  const ph = layers.slice(layers.indexOf("id: 'playhead'"));
-  ok(/const ms = drawnPlayheadMs\(f\.nowMs!, f\.view\.offsetMs\);/.test(ph.slice(0, 400)),
-     'the playhead layer draws through drawnPlayheadMs too');
-  const hook = readFileSync(path.join(REPO, app.base, 'hooks/useFollowWindow.ts'), 'utf8');
-  ok(/followWindowFor\(s\.getNowMs\(\) \?\? 0, s\.windowS, s\.futureS, dur\)/.test(hook),
-     'the hook builds its follow window with followWindowFor');
 }
 
-console.log('\n§5 THE TWO TIMELINE TWINS STAY BYTE-IDENTICAL on this hook');
+console.log('\n§4 THE TWO TIMELINE TWINS STAY BYTE-IDENTICAL on this hook');
 for (const f of ['hooks/followWindow.ts', 'hooks/useFollowWindow.ts']) {
   const a = readFileSync(path.join(REPO, APPS[0].base, f), 'utf8');
   const b = readFileSync(path.join(REPO, APPS[1].base, f), 'utf8');

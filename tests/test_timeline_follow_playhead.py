@@ -7,8 +7,9 @@ the raw progress clock, so on a song whose offset exceeds the look-ahead
 (Pop Off: 14,450 ms against 10 s) the line sat past the right edge for the
 whole song. `scripts/check_timeline_follow_playhead.mjs` transpiles the real
 frontend arithmetic, drives it with his numbers, carries the pre-fix anchor
-as a red control and pins the wiring in both Timeline twins; this test runs
-it so the proof fires on every full test run.
+as a red control, and asserts the two Timeline twins' copies of the hook
+are byte-identical; this test runs it so the proof fires on every full
+test run.
 
 Skipped (not failed) when the frontend toolchain isn't installed — the same
 posture as tests/test_spectra_web_typecheck.py.
