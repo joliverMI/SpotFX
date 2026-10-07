@@ -9,6 +9,16 @@ warning, not an error), and writes a verbatim copy. It never touches
 ~/.ledfx itself and never starts a host — starting real devices is the
 handover orchestrator's job, behind the ownership gate.
 
+ONE EXCEPTION TO "VERBATIM": `global_brightness` is always written as
+1.0 (`fx/config.py`'s own schema default — nothing in the live render
+code wants it below 1.0), regardless of what the source holds. The
+source LedFX install's own value is a pre-SPECTRA leftover with no UI or
+API anywhere in SPECTRA to change it afterward (pixel-brightness-chain
+report, §5/§9) — a go-day seed copying it verbatim silently dims every
+fixture, and a FUTURE re-seed carrying this script forward must not be
+able to reintroduce that even after `scripts/fix_global_brightness.py`
+has corrected it once.
+
 Dry-run by default; --apply writes. Idempotent (a re-run overwrites with the
 fresh source state).
 
@@ -54,6 +64,12 @@ def main() -> None:
         print(f"  WARNING: device types outside the vendored set (skipped at "
               f"host start): {foreign}")
     print(f"  schema: valid ({len(validated)} top-level keys)")
+
+    source_gb = raw.get("global_brightness")
+    if source_gb != 1.0:
+        print(f"  global_brightness: source has {source_gb!r} — writing "
+              f"1.0 (not a verbatim copy, see this script's own docstring)")
+        raw["global_brightness"] = 1.0
 
     dest = scfg.FX_LIVE_CONFIG_DIR / "config.json"
     if not args.apply:

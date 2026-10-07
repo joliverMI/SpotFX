@@ -1971,11 +1971,16 @@ class Blackhole2d(Twod, GradientEffect):
         # (disc suppressed while collapsing — it would black out exactly
         # where the particles are converging)
         if horizon_on and col is None:
-            # The inside of the black hole shows the background color —
-            # a flat disc just inside the horizon ring (covers trails too).
+            # The inside of the black hole is a flat disc just inside the
+            # horizon ring (covers trails too) — painted BLACK, not the
+            # background color: get_pixels()'s own overwrite blend already
+            # supplies the background exactly once for an unlit (black)
+            # pixel, so painting _bg_color here directly would double it
+            # (the same v*(2 - v/255) doubling Twod.render()'s pre-fill
+            # removal fixed for the rest of the frame).
             # During a charge the disc lags the halo, which sweeps ahead.
             inside = self.grid_r < (self._disc_radius(rh) - 0.01)
-            out[inside] = getattr(self, "_bg_color", np.zeros(3))
+            out[inside] = 0.0
         self.matrix = Image.fromarray(
             np.clip(out, 0, 255).astype(np.uint8), "RGB"
         )

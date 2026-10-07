@@ -1053,9 +1053,12 @@ class Eye2d(Twod, GradientEffect):
             lid_rgb = self.get_gradient_color_vectorized1d(
                 np.zeros(1, dtype=np.float32)
             ).astype(np.float32)[0]
-            bg = getattr(self, "_bg_color", np.zeros(3)).astype(np.float32)
             covered = (dyp <= up_edge) | (dyp >= lo_edge)
-            out[covered] = bg
+            # Lids show as BLACK here, not the background color —
+            # get_pixels()'s own overwrite blend already supplies the
+            # background exactly once for an unlit (black) pixel, so
+            # painting _bg_color here directly would double it.
+            out[covered] = 0.0
             lw_half = max(1.8 / self.s_min, 0.06 * iris_r)
             for edge in (up_edge, lo_edge):
                 line = np.clip(

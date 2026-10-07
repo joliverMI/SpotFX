@@ -62,7 +62,10 @@ downstream of that geometry, not independent tuning.
   black `bg_color` on a colour set is LOAD-BEARING here in Hybrid mode —
   it's what resets the background to black on every fire. Never strip it
   as "redundant" (`docs/SPECTRA_SPEC.md` §72, also referenced in
-  AGENTS.md's own prose, has the full colour-bleed proof).
+  AGENTS.md's own prose, has the full colour-bleed proof). The event-horizon
+  disc (`Blackhole2d.draw()`'s `out[inside] = ...`) paints literal BLACK,
+  not `_bg_color` — painting the background colour there would double it
+  against `get_pixels()`'s own overwrite blend (`fx/VENDOR.md` #61).
 
 ## Particle-flag vocabulary (don't conflate these two)
 
@@ -132,5 +135,7 @@ the real pipeline).
 `scripts/check_blackhole_charge_lull.py`, `check_blackhole_charge_target.py`,
 `check_blackhole_explosion_and_gap.py`, `check_blackhole_explosion_speed.py`,
 `check_blackhole_hex_spawn.py`, `check_blackhole_reverse_fallback.py` +
-matching `tests/test_blackhole_*.py`. Full history: `AGENTS.md`'s "Black
-Hole" section and `fx/VENDOR.md` deviations #12, #14, #18, #19, #20, #38.
+matching `tests/test_blackhole_*.py`. The disc's single-application
+background is proven in `tests/test_matrix_overwrite_background_double_apply.py`
+(`test_blackhole_disc_*`). Full history: `AGENTS.md`'s "Black
+Hole" section and `fx/VENDOR.md` deviations #12, #14, #18, #19, #20, #38, #61.

@@ -224,12 +224,16 @@ class Twod(AudioReactiveEffect):
             except Exception:
                 pass
 
-        if self.bg_color_use and self.background_mode == "overwrite":
-            self.matrix = Image.new(
-                "RGB", (self.r_width, self.r_height), self._bg_color_pil
-            )
-        else:
-            self.matrix = Image.new("RGB", (self.r_width, self.r_height))
+        # Always start black, in EVERY background_mode. Pre-filling with
+        # the background colour here (the old "overwrite" branch) made
+        # get_pixels()'s own overwrite blend below double it for any
+        # effect whose draw() paints onto this canvas rather than
+        # replacing it wholesale — a dark pixel landed at v*(2 - v/255)
+        # instead of v (pixel-brightness-chain report, §3/§9). get_pixels()
+        # already applies the background exactly once for an unlit pixel
+        # (effect_alpha == 0) in both modes; this is what makes the 2D
+        # path match the 1D path, which never pre-fills either.
+        self.matrix = Image.new("RGB", (self.r_width, self.r_height))
 
         self.m_draw = ImageDraw.Draw(self.matrix)
 
