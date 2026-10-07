@@ -670,7 +670,13 @@ class Effect(BaseRegistry):
         over `duration_ms`, advanced each render frame. duration_ms <= 0 applies
         instantly. Called from the event loop (the REST handler). Params that
         can't be interpolated are applied instantly. A param already mid-tween
-        is retargeted from its current interpolated value (no snap).
+        is retargeted from its current interpolated value (no snap) — unless
+        that tween would LAND by the very next rendered frame (a jump, i.e.
+        a 1 ms tween, written just before this call), in which case it is
+        retargeted from its TARGET: that is the value the next frame would
+        have shown. Without this, a jump immediately followed by a glide on
+        the same key undid the jump (fx/VENDOR.md #58: a lull armed after a
+        completed charge glided 1.0 -> 1.0 instead of 0.0 -> 1.0).
 
         blend: how colour/gradient params travel — "rgb" (straight per-channel
         lerp; complementary colours pass through grey) or "hue" (HSV
@@ -693,6 +699,7 @@ class Effect(BaseRegistry):
                     tweens.pop(key, None)
                     continue
                 prior = tweens.get(key)
+                landed = prior is not None and self._lands_next_frame(prior)
                 tw = {
                     "elapsed": 0.0,
                     "duration": duration,
@@ -705,7 +712,7 @@ class Effect(BaseRegistry):
                     # between calls — reuse prior's live value only when its
                     # kind actually matches (spectra-room-fault-diagnosis,
                     # KeyError: 'current', 2026-08-14).
-                    start = (prior["current"]
+                    start = (prior["target" if landed else "current"]
                              if prior and prior.get("kind") != "gradient"
                              else self._config.get(key))
                     tw["start"] = float(start)
@@ -713,7 +720,7 @@ class Effect(BaseRegistry):
                     tw["current"] = float(start)
                     tw["integer"] = key in int_keys
                 elif kind == "color":
-                    start = (prior["current"]
+                    start = (prior["target" if landed else "current"]
                              if prior and prior.get("kind") != "gradient"
                              else self._config.get(key))
                     tw["start"] = str(start)
@@ -740,7 +747,8 @@ class Effect(BaseRegistry):
                             and prior.get("kind") == "gradient"
                             and prior.get("current_curve") is not None
                         ):
-                            start_curve = prior["current_curve"]
+                            start_curve = prior[
+                                "target_curve" if landed else "current_curve"]
                         else:
                             start_curve = self._build_gradient_curve(
                                 self._config.get(key), n
@@ -765,6 +773,23 @@ class Effect(BaseRegistry):
             if instant:
                 self._apply_config(instant, validate=True, fire_event=True)
             self._tweens = tweens or None
+
+    def _lands_next_frame(self, tween):
+        """Whether an in-flight tween will complete on the next rendered
+        frame anyway — a jump (fx_executor.JUMP_MS, a 1 ms tween) that has
+        not rendered yet, or the last sliver of a glide. Retargeting such a
+        tween from its current value would discard the write that created
+        it; its target is what the next frame shows. One frame is the
+        virtual's own refresh interval (1/60 s when it cannot say), the
+        SHORTEST a frame can be here (device caps only lengthen it), so a
+        tween judged landed always would have landed."""
+        rate = 60.0
+        try:
+            rate = float(self._virtual.refresh_rate) or 60.0
+        except Exception:
+            pass
+        remaining = float(tween["duration"]) - float(tween["elapsed"])
+        return remaining <= 1.0 / max(rate, 1.0)
 
     def _tween_ease(self, easing, t):
         """Map linear progress 0..1 through an easing curve for param tweens.

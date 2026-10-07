@@ -1711,9 +1711,10 @@ against that commit.
     keys on the lull arm (`lull_ramp_s`, `lull_dark_s`, spliced into each
     schema by `lull_dark.schema_fields()`, never in the param registry),
     only to `device_model.LULL_DARK_EFFECTS`; told, an effect measures the
-    lull on its OWN seconds-in-phase (a lull after a completed charge
-    starts its `phase_progress` at 1.0 — see lull_dark.py) and hands its
-    orphan watchdog `lull_dark.watchdog_progress()`. Squiggles also keeps
+    lull on its OWN seconds-in-phase (a long lull's dark point sits inside
+    the progress hang — see lull_dark.py). The watchdog workaround this
+    entry first shipped (`lull_dark.watchdog_progress()`) was removed by
+    #59, which fixed its cause for every phase effect. Squiggles also keeps
     spawning through a told lull until its dark point (`_lull_still_lit`).
     Untold writes are byte-identical to before. Evidence:
     `tests/test_lull_dark.py`. Unverified against his live room.
@@ -1736,3 +1737,24 @@ against that commit.
     activation it overtakes stands down the same way. Evidence:
     `tests/test_hue_hold_restart_race.py` (with the pre-fix driver as its
     red control).
+59. `effects/__init__.py` (`Effect.start_param_transitions` +
+    `_lands_next_frame`): A JUMP IS NOT UNDONE BY THE GLIDE WRITTEN RIGHT
+    AFTER IT. A tween retargeted mid-flight restarted from the prior
+    tween's CURRENT value — right for a glide, wrong for a jump (a 1 ms
+    tween, spectra `fx_executor.JUMP_MS`) that has not rendered a frame
+    yet, whose current value is still its START. SpotFX's phase arm is
+    exactly that pair (jump `phase_progress` to 0, glide it to 1), so a
+    lull after a completed charge — and a drop after a completed lull —
+    glided 1.0 -> 1.0 on EVERY phase effect: it sat at its end state from
+    its first frame and the shared orphan watchdog released a long lull
+    `PHASE_GRACE_S` (12 s) in. A prior tween that would land by the next
+    rendered frame anyway (remaining <= one frame of the virtual's own
+    refresh rate, the shortest a frame can be) is now retargeted from its
+    TARGET, the value that frame would show; a genuine mid-glide retarget
+    still continues from where it is. Spectra-side only: the external
+    LedFX fork's engine is untouched (the retired legacy engine drained
+    its bus between the two writes for the same reason). Removes #57's
+    `lull_dark.watchdog_progress()` workaround. Evidence:
+    `tests/test_lull_after_charge.py` (all 12 phase effects on the real
+    pipeline, plus the pre-fix retarget re-created as its red control).
+    Unverified against his live room.

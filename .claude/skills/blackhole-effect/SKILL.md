@@ -105,11 +105,12 @@ half the lull, never longer than the room's `lull_dark_max_s` (3 s by
 default, Sonic-editable via `set_setting`). SpotFX pushes `lull_ramp_s` /
 `lull_dark_s` on the lull arm (`scene_response._drive_phase`, only to
 `fx.device_model.LULL_DARK_EFFECTS`), and the effect measures the lull on
-its OWN seconds-in-phase, never `phase_progress` — after a completed
-charge the next lull's progress sits at 1.0 for its whole length (the
-1 ms arm tween is retargeted before it renders), which also made the
-orphan watchdog release a long lull 12 s in; `lull_dark.watchdog_progress`
-fixes that for the opted-in effects. A write WITHOUT the two keys falls
+its OWN seconds-in-phase, never `phase_progress` — a long lull's dark
+point sits inside the progress hang, where only a clock can find it. (A
+lull after a completed charge used to start its progress at 1.0 and be
+released by the orphan watchdog 12 s in; that is fixed for every phase
+effect in the shared tween engine, `fx/VENDOR.md` #58, and the watchdog
+reads plain progress again.) A write WITHOUT the two keys falls
 back to the old `LULL_FILL_PROGRESS` (0.5) — the horizon's fill, the
 halo cut-off, the forced-formation stop and the ambient-spawn pause all
 read `_lull_timing()`, byte-identical to before. Read lull_dark.py's

@@ -15,10 +15,10 @@ What is proven here, each on the real code it names:
   ResponseEngine + FacadeExecutor, one clock), through a 20 s lull that
   follows a completed charge: Black Hole's real crystal cells, Squiggles'
   CRT line and Pulse's single light all go dark at 17 s and stay dark for
-  the last 3 s — not at the old half-way point. A completed charge first
-  matters: its finished phase_progress is what the next lull's ramp starts
-  from (lull_dark.py's own docstring), so a progress-read dark point would
-  land on the lull's first frame.
+  the last 3 s — not at the old half-way point. A completed charge first is
+  the ordinary sequence, and the case that once started a lull's
+  phase_progress at 1.0 (fixed at its root for every phase effect —
+  tests/test_lull_after_charge.py).
 """
 from __future__ import annotations
 
@@ -72,7 +72,8 @@ def test_the_cap_is_the_setting():
 def test_timing_runs_on_the_effects_own_clock_once_told():
     cfg = lull_dark.keys_for(20.0, 18.0, 3.0)
     assert cfg == {lull_dark.RAMP_KEY: 18.0, lull_dark.DARK_KEY: 17.0}
-    # progress is deliberately ignored once told (it can sit at 1.0)
+    # progress is deliberately ignored once told: the clock rules, because
+    # progress sits at 1.0 through the hang (see the very-long-lull test)
     for p in (0.0, 0.5, 1.0):
         early = lull_dark.lull_timing(cfg, p, 16.9, 0.5)
         assert not early.dark and early.approach == pytest.approx(16.9 / 17)
