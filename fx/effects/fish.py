@@ -179,6 +179,32 @@ BURST_SPEED_TAU = 0.04     # speed ease while the burst envelope is live, so
                            # the dash lands inside 300 ms and ENDS with it
 SPIKE_COOL_S = 0.12  # min gap between beat turn-kicks
 
+# ── the solo burst (his 2026-10-06 ask, for the House Fish scene) ───────────
+# HIS WORDS: "In house fish scene, give individual ones an occasional burst
+# of speed." Not the swim burst above — that is a flare that sends the WHOLE
+# shoal at once, on a trigger. This is one fish at a time, at random, on its
+# own clock: now and then a fish picked at random accelerates hard, holds
+# that speed for `solo_burst_time`, then eases back to its ordinary pace.
+# `solo_burst_rate` is how many a minute across the whole shoal (a Poisson
+# clock, so they are irregular the way a real tank is), and it SHIPS AT 0 —
+# the effect's own default is "never"; only the House Fish scene's own
+# params turn it on, so the music Fish scene is untouched.
+#
+# Only an ordinary swimmer that is not already bursting and has the wall at
+# most faintly in its look-ahead is picked (a fish does not sprint into a
+# wall); a burst that is due while nobody qualifies waits for someone who
+# does, so the rate holds. Nothing bursts during a charge, lull, drop or an
+# outgoing crossfade — those moments are authored. A burst gives up its hold
+# and eases back the moment the wall presses hard on it; and since the
+# look-ahead grows with speed, a bursting fish already sees the wall sooner.
+SOLO_ATTACK_S = 0.15     # the envelope's rise to full
+SOLO_FALL_S = 0.35       # half-life of the ease back once the hold is over
+SOLO_SPEED_TAU = 0.1     # speed ease while rising, so the dash reads as one
+SOLO_FLAP_X = 1.0        # extra fin-stroke frequency at full (x2)
+SOLO_WALL_CUT = 0.5      # wall urgency at which a burst gives up its hold
+SOLO_WALL_FREE = 0.15    # ... and below which a fish may start one
+SOLO_DUE_MAX = 2.0       # bursts owed while nobody qualifies, at most
+
 # ── the lunge ───────────────────────────────────────────────────────────────
 # A strong beat used to raise the swim speed for tens of milliseconds — the
 # ripple correctly sized itself off that speed, so a big ring rode a tiny
@@ -391,6 +417,135 @@ BOUND_BRAKE_TAU = 1.0 / 60.0  # s over which that brake takes back its own
                         # it holds the same at any frame rate. Measured: a
                         # linear ease slow enough to be dt-scaled (0.05 s)
                         # let the overshoot back in, 7.9px past the panel
+
+# ── the wall: anticipated, not bounced off (his 2026-10-06 ask) ────────────
+# HIS WORDS: "the fish don't interact with the 'wall' naturally. Have them
+# 'anticipate' the wall and start turning away. Do this on both fish
+# scenes." What they did before (still reachable at `wall_lookahead = 0`,
+# the BOUND_* block above): the pond-edge steer only woke up inside the
+# last ~2 px before the turn became infeasible, went from nothing to full
+# weight across that sliver, aimed at the CENTRE of the pond rather than
+# away from the wall, and only ever watched the fish's MIDDLE — so a long
+# fish (his House Fish is 21 px nose to tail on a 37 px panel) swam its
+# head straight into the dark and then pivoted on its own tight turn
+# circle. Measured on the crystal: ~8% of all House Fish light landed on
+# cells the panel cannot show, noses up to ~4.7 px past the lit edge.
+#
+# THE WALL IS THE PANEL'S REAL SHAPE. It is read off the virtual's own
+# segment list once (`_real_cell_mask`): a cell whose pixel lands on a gap
+# device (`fx.utils.is_gap_device`, the render path's own rule) is dark,
+# and the lit silhouette (`_silhouette`) is the outline of the real cells
+# with the lattice's holes filled — on his crystal-mapper, the hexagon (see
+# .claude/skills/crystal-hex-grid). A virtual with no gap devices has the
+# whole rectangle as its silhouette. `_wall_field` turns it into a signed
+# distance field in SCREEN px, cached by the mask itself. The pond
+# (`roam_scale`) is unchanged and still bounds the fish's MIDDLE; the
+# silhouette bounds its BODY — its nose and its widest part — so no part
+# of a fish swims into a cell the panel cannot light.
+#
+# ANTICIPATION (`_wall_steer`): a fish looks ahead of itself for room to
+# turn (WALL_LOOK_BASE_R turn radii) plus `wall_lookahead` SECONDS of its
+# own swimming — so the distance grows with its speed, and a fish on a
+# beat, a lunge or a solo burst sees the wall sooner — but never less than
+# WALL_LOOK_BODY of its own length, which is what lets a big slow fish (his
+# 21 px House Fish, ~8 px a second at its own pace) see a narrowing hex
+# corner in time to swing its length round. The shipped 0.35 s is
+# MEASURED (scripts/check_fish_wall.py, his two scenes): at 0.5 s his music
+# fish's small pond (roam 0.75) left only one loop that cleared it and the
+# shoal settled onto it as a convoy (median spread 7.7 px against 12.4 px
+# before); at 0.25-0.35 s it swims as spread as before, bumps into itself a
+# quarter as often, and still starts its turns 8-11 px out. While that whole
+# look-ahead is free water it is left alone. Once the wall is inside it,
+# the fish weighs the headings either side of its own (WALL_FAN) and picks
+# the NEAREST one with more free water than it is asking for
+# (WALL_CLEAR_X — so it turns AWAY from the wall rather than settling into
+# gliding along it), then turns toward that heading at the CURVATURE that
+# would complete the turn within the free water it actually has, with
+# WALL_TURN_K to spare. Far from the wall that curvature is small — a
+# gentle curve that starts early; it tightens only as the free water runs
+# out, and never past the fish's own turn radius (the clamp every steer
+# obeys). A curvature, not a turn rate, so the shape of the curve is the
+# same at any speed. As the wall nears it takes authority from the other
+# steering (wander, home pull, the current's swirl, a beat kick) in
+# proportion, so none of them can turn a fish back into it.
+#
+# THE TURN HAS TO BE SWIMMABLE, not just its destination: a heading only
+# counts if every heading the turn sweeps through on the way keeps
+# WALL_SWEEP of the free water the fish has now. Measured: a fish heading
+# up-left near the top edge found "up and over" nearer than "left" and
+# drove its nose through the wall on the way round.
+#
+# THE SIDE IS KEPT: a turn under way keeps turning the way it chose until
+# the other side has clearly more free water (WALL_FREEST_KEEP), so neither
+# the hex's corners nor a bursting fish's swinging look-ahead can flip it
+# left/right/left (measured: under repeated swim bursts a side picked
+# frame by frame chattered until it was too late to turn). With no free
+# heading at all it turns toward the freest one, the same planned curvature.
+#
+# THE LOOK-AHEAD IS CAPPED at the pond's own short radius (`_wall_look`).
+# Measured without it: a loud passage drove his music fish to ~3x cruise,
+# the look-ahead grew taller than the pond, no heading was ever clear, and
+# the shoal collapsed into a tight spinning ball in the middle.
+#
+# SCOPE: ordinary swimming. While the charge's school is formed, every fish
+# keeps the old pond-edge steer — the school is authored choreography whose
+# shared heading and window travel he tuned against that edge, the same
+# reason mutual avoidance and the thrust pulse stay out of it. The drop's
+# rush, the ejecta and a dispersing fish were never bounded by the pond and
+# are not by the wall.
+WALL_STEP_PX = 2.0       # spacing of the points the projected path is
+                         # checked at
+WALL_FAN = np.deg2rad(np.array(
+    [d for k in range(1, 10) for d in (20.0 * k, -20.0 * k)],
+    dtype=np.float32,
+))                       # the headings a fish weighs when its own is not
+                         # free: every 20 degrees either side, to 180
+WALL_FAN_ALL = np.concatenate([np.zeros(1, dtype=np.float32), WALL_FAN])
+WALL_LOOK_BASE_R = 1.0   # the look-ahead always includes this many turn
+                         # radii of room to turn in, on top of the seconds
+                         # of swimming `wall_lookahead` asks for
+WALL_LOOK_BODY = 0.5     # ... and never less than this many of its own
+                         # body lengths of it, so a big slow fish has room to
+                         # swing its length round before a narrowing corner
+                         # (measured: his 21 px House Fish, seeing ~8 px at
+                         # its slow speed, wandered into a hex wedge it could
+                         # no longer turn in)
+WALL_BAND_R = 0.5        # the comfort band, in turn radii: water a fish
+                         # prefers to keep between its body and the wall
+WALL_CLEAR_X = 1.25      # the heading it turns to must have this many
+                         # look-aheads of free water, not just one. Swept
+                         # (scripts/check_fish_wall.py): 1.0 lets the music
+                         # scene settle into riding the pond rim; 1.5 still
+                         # trapped one House Fish in a hex corner
+WALL_SWEEP = 0.5         # the share of its present free water every heading
+                         # a turn sweeps through must keep
+WALL_TURN_K = 1.3        # the curvature asked for, over the bare minimum
+                         # that would get the turn done in the free water
+                         # left, so it is done with some to spare
+WALL_AUTH_K = 1.5        # authority over the other steering terms per unit
+                         # urgency squared, before strength
+WALL_LATE = 0.5          # urgency past which a lazy `wall_turn_strength`
+                         # (below 1) eases back to the plain turn, so
+                         # laziness shapes the curve but never becomes contact
+WALL_RISE_S = 0.06       # the turn and authority the wall applies ease up
+WALL_FALL_S = 0.15       # ... and back down over these time constants: the
+                         # target heading is picked from a 20-degree fan, so
+                         # its last step would otherwise end a turn in one
+                         # frame. The rise shrinks to nothing as the wall
+                         # gets close (the ease never makes a turn late);
+                         # the fall is slower (a curve straightens, it does
+                         # not snap)
+WALL_HEADON = np.deg2rad(25.0)  # the dead-on band in which a fish already
+                         # past the wall turns back in on the side it chose
+WALL_FREEST_KEEP = 0.75  # a turn under way keeps its side unless the other
+                         # side has this much more free water (as a ratio)
+WALL_BODY_W = 0.9        # the body's widest half-width kept inside the wall,
+                         # as a fraction of the fish's half-width
+WALL_FIELD_PAD = 12      # px of field kept past the panel edge, so a fish
+                         # arriving from off-panel still has a gradient
+WALL_SMOOTH_PASSES = 2   # [1,2,1] blurs on the field: smooths the lattice's
+                         # 1-px staircase into a wall a fish can follow
+
 HOME_W = 0.35
 HOME_FREE = 0.5         # no home pull inside this fraction of the pond
 WANDER_W = 1.0
@@ -637,12 +792,197 @@ _SOA_NAMES = (
     "p_nf1", "p_nf2", "p_np1", "p_np2", "p_wf", "p_wp", "p_gf", "p_gp",
     "p_grad", "p_grad_from", "p_scatter", "p_bright",
     "p_trail_x", "p_trail_y", "p_trail_acc",
+    "p_wsg", "p_wurg", "p_wcmd", "p_wauth", "p_sb", "p_sb_t",
 )
 
 
 def _wrap_pi(a):
     """Wrap an angle (or array) into (-pi, pi]."""
     return (a + np.pi) % (2 * np.pi) - np.pi
+
+
+def _real_cell_mask(effect):
+    """(r_height, r_width) bool: True where a matrix cell lands on a real
+    fixture, False where it lands on a gap device (dark) or past the end of
+    the virtual. Read off the virtual's own segments with the render path's
+    own gap rule, through the SAME flip/mirror/rotate Twod applies on the
+    way out, so a cell here is the cell the effect draws. Anything this
+    cannot read (no virtual, copy mapping, a malformed segment) is the
+    whole rectangle — never a guess at a smaller shape."""
+    h, w = int(effect.r_height), int(effect.r_width)
+    full = np.ones((h, w), dtype=bool)
+    virtual = getattr(effect, "_virtual", None)
+    ledfx = getattr(effect, "_ledfx", None)
+    try:
+        if virtual is None or ledfx is None:
+            return full
+        if virtual._config.get("mapping") != "span":
+            return full
+        from fx.utils import is_gap_device
+
+        devices = ledfx.devices
+        runs = []
+        any_gap = False
+        for seg in virtual.segments:
+            dev_id, start, end = seg[0], int(seg[1]), int(seg[2])
+            dev = devices.get(dev_id)
+            gap = is_gap_device(dev) or (
+                dev is None and str(dev_id).startswith("gap-")
+            )
+            any_gap = any_gap or gap
+            runs.append(np.full(max(end - start + 1, 0), not gap))
+        if not any_gap or not runs:
+            return full
+        phys = np.concatenate(runs)
+        group = int(getattr(virtual, "group_size", 1) or 1)
+        if group > 1:
+            k = int(np.ceil(phys.size / group))
+            padded = np.zeros(k * group, dtype=bool)
+            padded[: phys.size] = phys
+            phys = padded.reshape(k, group).any(axis=1)
+        idx = np.arange(h * w, dtype=np.int32).reshape(h, w)
+        img = Image.fromarray(idx)
+        if effect.flip2d:
+            img = img.transpose(Image.Transpose.FLIP_TOP_BOTTOM)
+        if effect.mirror2d:
+            img = img.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+        if effect.rotate_t != 0:
+            img = img.transpose(effect.rotate_t)
+        order = np.asarray(img, dtype=np.int64).ravel()
+        real = np.zeros(h * w, dtype=bool)
+        count = min(order.size, phys.size)
+        real[order[:count]] = phys[:count]
+        mask = real.reshape(h, w)
+        return mask if mask.any() else full
+    except Exception:
+        _LOGGER.debug("fish: wall shape unreadable, using the rectangle",
+                      exc_info=True)
+        return full
+
+
+def _silhouette(real):
+    """The lit silhouette of a real-cell mask: the row-span fill of the real
+    cells intersected with the column-span fill, then each row closed. The
+    crystal's real cells sit on a checkerboard lattice inside a hexagon,
+    and its tip rows come in pairs with one-cell crenels between them; this
+    is that hexagon's own outline, with the lattice's holes and crenels
+    filled, because a fish is wider than either."""
+    rows = np.zeros_like(real)
+    cols = np.zeros_like(real)
+    # the lattice alternates columns row by row, so a column's own span is
+    # read across it and its neighbours
+    wide = real.copy()
+    wide[:, 1:] |= real[:, :-1]
+    wide[:, :-1] |= real[:, 1:]
+    for r in range(real.shape[0]):
+        c = np.flatnonzero(real[r])
+        if c.size:
+            rows[r, c[0]: c[-1] + 1] = True
+    for c in range(real.shape[1]):
+        r = np.flatnonzero(wide[:, c])
+        if r.size:
+            cols[r[0]: r[-1] + 1, c] = True
+    both = rows & cols
+    out = np.zeros_like(real)
+    for r in range(real.shape[0]):
+        c = np.flatnonzero(both[r])
+        if c.size:
+            out[r, c[0]: c[-1] + 1] = True
+    return out
+
+
+_WALL_FIELDS = {}
+
+
+def _wall_field(real):
+    """Signed distance (px, positive inside) to the lit silhouette's edge,
+    on the cell grid padded by WALL_FIELD_PAD, plus its gradient. Cached by
+    the mask itself, so every fish on the same panel shares one. The edge
+    sits half a cell beyond the outermost lit cell centres."""
+    key = (real.shape, real.tobytes())
+    hit = _WALL_FIELDS.get(key)
+    if hit is not None:
+        return hit
+    pad = WALL_FIELD_PAD
+    inside = np.zeros(
+        (real.shape[0] + 2 * pad, real.shape[1] + 2 * pad), dtype=bool
+    )
+    inside[pad:-pad, pad:-pad] = _silhouette(real)
+    nb = np.zeros_like(inside)          # any 4-neighbour of the other class
+    nb_in = np.zeros_like(inside)
+    for axis, step in ((0, 1), (0, -1), (1, 1), (1, -1)):
+        moved = np.roll(inside, step, axis=axis)
+        nb |= moved != inside
+        nb_in |= moved
+    in_edge = np.argwhere(inside & nb)
+    out_edge = np.argwhere(~inside & nb_in)
+    cells = np.argwhere(np.ones_like(inside))
+    dist = np.full(cells.shape[0], np.inf, dtype=np.float32)
+    for edge, want in ((out_edge, True), (in_edge, False)):
+        if edge.size == 0:
+            continue
+        pick = inside.ravel() == want
+        pts = cells[pick].astype(np.float32)
+        best = np.full(pts.shape[0], np.inf, dtype=np.float32)
+        for lo in range(0, edge.shape[0], 256):
+            e = edge[lo: lo + 256].astype(np.float32)
+            d = np.hypot(
+                pts[:, None, 0] - e[None, :, 0], pts[:, None, 1] - e[None, :, 1]
+            ).min(axis=1)
+            best = np.minimum(best, d)
+        dist[pick] = best
+    dist = np.where(np.isfinite(dist), dist, float(max(inside.shape)))
+    field = np.where(
+        inside.ravel(), dist - 0.5, -(dist - 0.5)
+    ).reshape(inside.shape).astype(np.float32)
+    for _ in range(WALL_SMOOTH_PASSES):
+        for axis in (0, 1):
+            ext = np.concatenate(
+                [np.take(field, [0], axis=axis), field,
+                 np.take(field, [-1], axis=axis)], axis=axis,
+            )
+            a = np.take(ext, range(0, field.shape[axis]), axis=axis)
+            b = np.take(ext, range(1, field.shape[axis] + 1), axis=axis)
+            c = np.take(ext, range(2, field.shape[axis] + 2), axis=axis)
+            field = (a + 2.0 * b + c) * 0.25
+    gy, gx = np.gradient(field)
+    gx = gx.astype(np.float32)
+    gy = gy.astype(np.float32)
+    out = (field, gx, gy, pad, np.stack([field, gx, gy]))
+    if len(_WALL_FIELDS) > 16:
+        _WALL_FIELDS.clear()
+    _WALL_FIELDS[key] = out
+    return out
+
+
+def _sample_field(wall, x, y):
+    """Bilinear (distance, unit inward normal) at SCREEN points. Past the
+    padded grid the distance keeps falling with the distance to it and the
+    normal points back at it, so a fish far off-panel is still steered in."""
+    stack, pad = wall[4], wall[3]
+    gh, gw = stack.shape[1], stack.shape[2]
+    u = np.asarray(x, dtype=np.float32) + pad
+    v = np.asarray(y, dtype=np.float32) + pad
+    uc = np.clip(u, 0.0, gw - 1.001)
+    vc = np.clip(v, 0.0, gh - 1.001)
+    i0 = uc.astype(np.int32)
+    j0 = vc.astype(np.int32)
+    fu = uc - i0
+    fv = vc - j0
+    flat = stack.reshape(3, -1)
+    k = j0 * gw + i0
+    top = flat[:, k] * (1 - fu) + flat[:, k + 1] * fu
+    bot = flat[:, k + gw] * (1 - fu) + flat[:, k + gw + 1] * fu
+    d, nx, ny = top * (1 - fv) + bot * fv
+    ox, oy = uc - u, vc - v
+    off = np.hypot(ox, oy)
+    far = off > 1e-6
+    if far.any():
+        d = np.where(far, d - off, d)
+        nx = np.where(far, ox, nx)
+        ny = np.where(far, oy, ny)
+    norm = np.maximum(np.hypot(nx, ny), 1e-6)
+    return d, nx / norm, ny / norm
 
 
 class Fish2d(Twod, GradientEffect):
@@ -944,6 +1284,51 @@ class Fish2d(Twod, GradientEffect):
                 ),
                 default=False,
             ): bool,
+            vol.Optional(
+                "wall_lookahead",
+                description=(
+                    "How far ahead of its nose a fish sees the wall coming, "
+                    "in seconds of its own swimming on top of the room it "
+                    "needs to turn (never less than half its own length) — "
+                    "so the distance grows with its speed and a faster fish "
+                    "starts turning sooner. 0 = the old late turn at the "
+                    "pond edge"
+                ),
+                default=0.35,
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=3.0)),
+            vol.Optional(
+                "wall_turn_strength",
+                description=(
+                    "How firmly a fish turns away once it sees the wall: "
+                    "lower is lazier, wider curves; higher turns earlier "
+                    "and keeps more water between it and the wall"
+                ),
+                default=1.0,
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.2, max=3.0)),
+            vol.Optional(
+                "solo_burst_rate",
+                description=(
+                    "How many times a minute one fish, picked at random, "
+                    "puts on a sudden burst of speed. 0 = never"
+                ),
+                default=0.0,
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=30.0)),
+            vol.Optional(
+                "solo_burst_speed",
+                description=(
+                    "A solo burst's top speed, as a multiple of that fish's "
+                    "ordinary swimming speed"
+                ),
+                default=2.5,
+            ): vol.All(vol.Coerce(float), vol.Range(min=1.2, max=5.0)),
+            vol.Optional(
+                "solo_burst_time",
+                description=(
+                    "Seconds a solo burst holds its top speed before it "
+                    "eases back"
+                ),
+                default=0.8,
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.2, max=3.0)),
             # ── SpotFX-driven choreography ───────────────────────────────
             vol.Optional(
                 "phase",
@@ -1012,6 +1397,18 @@ class Fish2d(Twod, GradientEffect):
         self.p_trail_x = np.full((CAP, BODY_TRAIL_LEN), np.nan, dtype=np.float32)
         self.p_trail_y = np.full((CAP, BODY_TRAIL_LEN), np.nan, dtype=np.float32)
         self.p_trail_acc = np.zeros(CAP, dtype=np.float32)
+        # the wall: which way this fish is turning away from it (+1/-1), or
+        # 0 when no wall is in its look-ahead — see WALL_HEADON
+        self.p_wsg = np.zeros(CAP, dtype=np.float32)
+        self.p_wurg = np.zeros(CAP, dtype=np.float32)  # ... and how hard
+        # ... and the turn and authority it is actually applying, eased
+        # (WALL_RISE_S / WALL_FALL_S) so a turn eases out as it eased in
+        self.p_wcmd = np.zeros(CAP, dtype=np.float32)
+        self.p_wauth = np.zeros(CAP, dtype=np.float32)
+        # a solo burst: its envelope (0..1) and the seconds it still holds
+        # top speed — see the SOLO BURST block
+        self.p_sb = np.zeros(CAP, dtype=np.float32)
+        self.p_sb_t = np.zeros(CAP, dtype=np.float32)
         self._soa = tuple(getattr(self, name) for name in _SOA_NAMES)
         self.n = 0
 
@@ -1044,6 +1441,10 @@ class Fish2d(Twod, GradientEffect):
         self._burst = 0.0        # the swim burst envelope, 0..1
         self._burst_tail = 0.0   # s of fast speed-ease left after a burst
         self._scatter = None     # outgoing-crossfade latch (see draw)
+        self._wall = None        # the lit silhouette's distance field
+        self._wall_key = None    # ... and what it was read from
+        self._solo_due = 0.0     # solo bursts owed but not yet placed
+        self.solo_bursts = 0     # solo bursts started, ever (a count)
         self._school_turn_t = 0.0
         # the water's own current, world px/s: whatever fraction of the
         # school's travel the clamp still removes from the fish is expressed
@@ -1114,6 +1515,11 @@ class Fish2d(Twod, GradientEffect):
         self.rush_time = self._config["rush_time"]
         self.rush_chaos = self._config["rush_chaos"]
         self.swim_burst = bool(self._config.get("swim_burst", False))
+        self.wall_lookahead = self._config["wall_lookahead"]
+        self.wall_turn_strength = self._config["wall_turn_strength"]
+        self.solo_burst_rate = self._config["solo_burst_rate"]
+        self.solo_burst_speed = self._config["solo_burst_speed"]
+        self.solo_burst_time = self._config["solo_burst_time"]
 
         self.power_func = self.POWER_FUNCS_MAPPING[
             self._config["frequency_range"]
@@ -1186,6 +1592,19 @@ class Fish2d(Twod, GradientEffect):
                 (self.r_height, self.r_width, 3), dtype=np.float32
             )
             self._wake_ox = self._wake_oy = 0.0
+        # the wall: re-read only when what it is read from changes, since
+        # do_once also runs on every config patch (a glide is one a frame)
+        virtual = getattr(self, "_virtual", None)
+        segments = getattr(virtual, "segments", None) if virtual else None
+        key = (
+            id(segments), len(segments or ()), self.r_width, self.r_height,
+            getattr(self, "rotate_t", 0), getattr(self, "flip2d", False),
+            getattr(self, "mirror2d", False),
+            getattr(virtual, "group_size", 1) if virtual else 1,
+        )
+        if self._wall is None or key != self._wall_key:
+            self._wall = _wall_field(_real_cell_mask(self))
+            self._wall_key = key
 
     # ── derived geometry ────────────────────────────────────────────────
     @property
@@ -1201,10 +1620,12 @@ class Fish2d(Twod, GradientEffect):
 
     @property
     def roam_bound(self):
-        """Pond radius in NORMALIZED units. roam_scale=1 is the panel's own
-        inscribed ellipse, which on the crystal hex sits comfortably inside
-        the lit silhouette (the rectangle's corners are pure gap — see
-        .claude/skills/crystal-hex-grid/SKILL.md)."""
+        """Pond radius in NORMALIZED units — it bounds the fish's MIDDLE.
+        roam_scale=1 is the panel's own inscribed ellipse, which on the
+        crystal hex pokes past the slanted edges by a pixel or two (the
+        rectangle's corners are pure gap — see
+        .claude/skills/crystal-hex-grid/SKILL.md); the BODY is kept inside
+        the real lit shape by the wall instead (see the WALL block)."""
         return max(self.roam_scale / max(self.radius_scale, 1e-6), 1e-3)
 
     @property
@@ -1286,6 +1707,12 @@ class Fish2d(Twod, GradientEffect):
         self.p_trail_x[s] = np.nan
         self.p_trail_y[s] = np.nan
         self.p_trail_acc[s] = 0.0
+        self.p_wsg[s] = 0.0
+        self.p_wurg[s] = 0.0
+        self.p_wcmd[s] = 0.0
+        self.p_wauth[s] = 0.0
+        self.p_sb[s] = 0.0
+        self.p_sb_t[s] = 0.0
         for freq, phase in (
             (self.p_nf1, self.p_np1),
             (self.p_nf2, self.p_np2),
@@ -1316,6 +1743,8 @@ class Fish2d(Twod, GradientEffect):
             self.p_y[s] = cny + rr * np.sin(ang)
             self.p_hd[s] = rng.uniform(0.0, 2 * np.pi, k)
             self.p_enter[s] = 1.0
+            if self.wall_lookahead > 0.0 and self._wall is not None:
+                self._place_inside_the_wall(s)
         else:
             er = self.entry_radius
             self.p_x[s] = cnx + er * np.cos(ang)
@@ -1328,6 +1757,43 @@ class Fish2d(Twod, GradientEffect):
             )
             self.p_hd[s] = inward + rng.uniform(-0.5, 0.5, k)
         return s
+
+    def _place_inside_the_wall(self, s, tries=24):
+        """A fish that appears already swimming (first boot, an effect
+        restart) is placed with its whole body inside the wall — re-drawn,
+        position and heading, until it fits; one that never fits keeps its
+        last draw and the wall steer brings it in. Only ever runs while the
+        wall is on, so `wall_lookahead = 0` draws exactly what it always
+        did."""
+        rng = self._rng
+        idx = np.arange(s.start, s.stop)
+        # born with a whole look-ahead of free water in front of it, so its
+        # first turn is never already a late one
+        look = float(self._wall_look(np.float32(self.cruise_px)))
+        steps = max(int(np.ceil(look / WALL_STEP_PX)), 2)
+        ahead = np.linspace(0.0, look, steps + 1).astype(np.float32)
+        for _ in range(tries):
+            px = self.cx + self.p_x[idx] * self.sx - self.cam_px
+            py = self.cy + self.p_y[idx] * self.sy - self.cam_py
+            free, _, _ = self._wall_free(
+                px, py, self.p_hd[idx][:, None], ahead
+            )
+            # ... and its tail in the light too (the trail is seeded
+            # straight back along its heading)
+            tail, _, _ = self._wall_free(
+                px, py, self.p_hd[idx][:, None] + np.pi,
+                np.array([0.0, 1e-3], dtype=np.float32),
+            )
+            bad = idx[(free[:, 0] < look) | (tail[:, 0] <= 0.0)]
+            if bad.size == 0:
+                return
+            k = bad.size
+            ang = rng.uniform(0.0, 2 * np.pi, k)
+            rr = rng.uniform(0.0, self.roam_bound * 0.9, k)
+            self.p_x[bad] = self.cam_nx + rr * np.cos(ang)
+            self.p_y[bad] = self.cam_ny + rr * np.sin(ang)
+            self.p_hd[bad] = rng.uniform(0.0, 2 * np.pi, k)
+            idx = bad
 
     def _manage_population(self):
         """Keep the ORDINARY (non-nocap) swimming population equal to
@@ -2025,6 +2491,289 @@ class Fish2d(Twod, GradientEffect):
                 validate=False,
                 fire_event=False,
             )
+
+    def _solo_burst_step(self, n, dt, mode):
+        """THE SOLO BURST (see the block at the top of the module): advance
+        every live envelope, then, on the Poisson clock, start one on a
+        random fish that qualifies."""
+        sb = self.p_sb[:n]
+        held = self.p_sb_t[:n] > 0.0
+        if held.any() or sb.any():
+            self.p_sb_t[:n] = np.maximum(self.p_sb_t[:n] - dt, 0.0)
+            rise = np.minimum(sb + dt / SOLO_ATTACK_S, 1.0)
+            fall = sb * np.float32(0.5 ** (dt / SOLO_FALL_S))
+            sb = np.where(held, rise, np.where(fall < 0.01, 0.0, fall))
+            self.p_sb[:n] = sb
+        quiet = self._phase == "none" and self._scatter is None
+        if self.solo_burst_rate <= 0.0 or not quiet:
+            self._solo_due = 0.0
+            return
+        if self._rng.random() < self.solo_burst_rate / 60.0 * dt:
+            self._solo_due = min(self._solo_due + 1.0, SOLO_DUE_MAX)
+        if self._solo_due < 1.0:
+            return
+        ok = np.flatnonzero(
+            (mode == 0) & (self.p_nocap[:n] == 0) & (sb <= 0.0)
+            & (self.p_sb_t[:n] <= 0.0) & (self.p_wurg[:n] < SOLO_WALL_FREE)
+        )
+        if ok.size == 0 or self._school_on:
+            return
+        pick = int(self._rng.choice(ok))
+        self.p_sb_t[pick] = float(self.solo_burst_time)
+        self._solo_due -= 1.0
+        self.solo_bursts += 1
+
+    def _pond_distance(self, x, y):
+        """Signed distance (SCREEN px, positive inside) from points to the
+        pond's own ellipse (`roam_scale`), and its unit inward normal. The
+        pond is centred on the window, which in screen space never moves.
+        First-order (the algebraic distance over its gradient): exact on the
+        ellipse itself, which is the only place a steer reads it closely."""
+        a = max(self.roam_bound * self.sx, 1e-3)
+        b = max(self.roam_bound * self.sy, 1e-3)
+        ex = x - self.cx
+        ey = y - self.cy
+        r = np.sqrt((ex / a) ** 2 + (ey / b) ** 2)
+        gx = ex / (a * a)
+        gy = ey / (b * b)
+        g = np.maximum(np.hypot(gx, gy), 1e-9)
+        d = np.where(r > 1e-4, (1.0 - r) * r / g, min(a, b))
+        return d, -gx / g, -gy / g
+
+    def _wall_look(self, speed):
+        """Each fish's look-ahead in px: room to turn, plus `wall_lookahead`
+        seconds of its own swimming — capped at the pond's own short radius,
+        so a fish racing through a loud passage does not look further than
+        the water is wide (past that, no heading is ever clear and every
+        fish would turn as tight as it can, forever)."""
+        pond_px = max(self.roam_bound * self.s_min, 1e-3)
+        body = 2.0 * self._half_width_px() * self.body_aspect
+        ahead = np.minimum(
+            np.maximum(self.wall_lookahead * np.maximum(speed, 0.0),
+                       WALL_LOOK_BODY * body),
+            pond_px,
+        )
+        return (WALL_LOOK_BASE_R * self.turn_radius_px + ahead).astype(
+            np.float32
+        )
+
+    def _wall_free(self, px, py, ang, s):
+        """How far each fish can swim along each candidate heading before
+        it breaks the wall: SCREEN px from its middle, for middles at
+        (px, py) (shape k), headings `ang` (shape k x J) and path samples
+        `s` (shape M, ascending, starting at 0). A path breaks the wall
+        where its middle leaves the pond or comes within the body's own
+        half-width of the lit edge, or where its NOSE comes within the
+        nose's own half-width of it — each with WALL_BAND_R of comfort on
+        top, except at the fish's own position, which only the hard margins
+        judge (a fish already in the band can still find a way out of it).
+        Returns (free k x J, and the inward normal at each middle — of the
+        pond or the body margin, whichever is nearer breaking — for a fish
+        that has no free heading at all)."""
+        radius = self.turn_radius_px
+        band = max(WALL_BAND_R * radius, 0.5)
+        hw = self._half_width_px()
+        nose_off = hw * self.body_aspect   # half a body length
+        m_nose = float(SPINE_PROFILE[0]) * hw
+        m_body = WALL_BODY_W * hw
+        ca = np.cos(ang)[:, :, None]
+        sa = np.sin(ang)[:, :, None]
+        mx = px[:, None, None] + ca * s[None, None, :]
+        my = py[:, None, None] + sa * s[None, None, :]
+        grow = max(float(self.roam_scale), 1.0)
+        ox = (self.r_width - 1) / 2.0
+        oy = (self.r_height - 1) / 2.0
+
+        def silhouette(x, y):
+            d, nx, ny = _sample_field(
+                self._wall, ox + (x - ox) / grow, oy + (y - oy) / grow
+            )
+            return d * grow, nx, ny
+
+        d_pond, pnx, pny = self._pond_distance(mx, my)
+        both, bn_x, bn_y = silhouette(
+            np.stack([mx, mx + ca * nose_off]),
+            np.stack([my, my + sa * nose_off]),
+        )
+        d_body, d_nose = both[0], both[1]
+        bnx, bny = bn_x[0], bn_y[0]
+        slack = np.minimum(
+            np.minimum(d_pond, d_body - m_body), d_nose - m_nose
+        )
+        need = np.full(s.shape, band, dtype=np.float32)
+        need[0] = 0.0
+        broke = slack < need[None, None, :]
+        first = np.where(broke.any(axis=2), broke.argmax(axis=2), s.size)
+        ext = np.concatenate([s, [s[-1]]]).astype(np.float32)
+        free = ext[first]
+        # the middle already past the pond or the body margin: which way is in
+        c_pond = d_pond[:, 0, 0]
+        c_body = d_body[:, 0, 0] - m_body
+        use_pond = c_pond < c_body
+        in_x = np.where(use_pond, pnx[:, 0, 0], bnx[:, 0, 0])
+        in_y = np.where(use_pond, pny[:, 0, 0], bny[:, 0, 0])
+        return free, in_x, in_y
+
+    def _wall_steer(self, n, hd, active, dt=1.0 / 60.0):
+        """THE WALL (see the block at the top of the module). For each of
+        the first `n` fish, returns:
+          urgency    0..1 — how much of its look-ahead the wall has eaten
+          turn       signed curvature command, as a fraction of the fish's
+                     own tightest turn (+ = counter-clockwise)
+          authority  0..1 — how much of the other steering it overrides
+          toward     True where the wall is in its look-ahead at all
+        A fish keeps its heading while it has a whole look-ahead of free
+        water; otherwise it picks the NEAREST swimmable heading with more
+        than that (its side kept, see WALL_HEADON), or the freest one if
+        none has, and turns toward it at the curvature that gets it there
+        within the free water it actually has — gentle while the wall is
+        far, its tightest turn only when it is late."""
+        urgency = np.zeros(n, dtype=np.float32)
+        turn = np.zeros(n, dtype=np.float32)
+        authority = np.zeros(n, dtype=np.float32)
+        toward = np.zeros(n, dtype=bool)
+        idx = np.flatnonzero(active)
+        self.p_wurg[:n] = 0.0
+        if idx.size == 0 or self._wall is None:
+            self.p_wsg[:n] = 0.0
+            eased_turn, eased_auth = self._wall_ease(n, turn, authority, dt)
+            return urgency, eased_turn, eased_auth, toward
+        return self._wall_plan(n, hd, idx, dt, urgency, turn, authority,
+                               toward)
+
+    def _wall_ease(self, n, turn, authority, dt, urgency=None):
+        """The turn and authority the wall APPLIES: its plan, eased per fish
+        — WALL_FALL_S down; WALL_RISE_S up while the wall is still far,
+        shrinking to nothing as it gets close (WALL_LATE), so the ease can
+        smooth a turn but never make one late."""
+        if urgency is None:
+            urgency = np.zeros(n, dtype=np.float32)
+        far = np.clip((1.0 - urgency) / (1.0 - WALL_LATE), 0.0, 1.0)
+        rise = np.maximum(WALL_RISE_S * far, 1e-4)
+        out = []
+        for applied, want in ((self.p_wcmd, turn), (self.p_wauth, authority)):
+            cur = applied[:n]
+            rising = np.abs(want) > np.abs(cur)
+            tau = np.where(rising, rise, WALL_FALL_S)
+            cur += (want - cur) * np.minimum(dt / tau, 1.0)
+            out.append(cur.copy())
+        return tuple(out)
+
+    def _wall_plan(self, n, hd, idx, dt, urgency, turn, authority, toward):
+        radius = self.turn_radius_px
+        look = self._wall_look(self.p_spd[idx])
+        px = self.cx + self.p_x[idx] * self.sx - self.cam_px
+        py = self.cy + self.p_y[idx] * self.sy - self.cam_py
+        reach = float(look.max()) * WALL_CLEAR_X
+        steps = max(int(np.ceil(reach / WALL_STEP_PX)), 2)
+        s = np.linspace(0.0, reach, steps + 1).astype(np.float32)
+
+        # straight ahead and the whole fan in ONE pass: the per-call cost of
+        # the lookups dominates at this size, not the number of points
+        ang = hd[idx][:, None] + WALL_FAN_ALL[None, :]
+        free_all, in_x, in_y = self._wall_free(px, py, ang, s)
+        free0 = free_all[:, 0]
+        hit = free0 < look
+        keep = np.zeros(n, dtype=bool)
+        keep[idx[hit]] = True
+        self.p_wsg[:n] = np.where(keep, self.p_wsg[:n], 0.0)
+        if not hit.any():
+            eased_turn, eased_auth = self._wall_ease(n, turn, authority, dt)
+            return urgency, eased_turn, eased_auth, toward
+        sub = np.flatnonzero(hit)
+        fi = idx[sub]
+        free = free_all[sub, 1:]
+        lk = look[sub][:, None]
+        # a heading is only reachable if every heading the turn sweeps
+        # through on the way keeps at least WALL_SWEEP of the free water the
+        # fish has now — otherwise the turn itself drives its nose through
+        # the wall (heading up-left by the top edge, turning "up and over"
+        # is nearer than turning left, and wrong). If neither side has a
+        # reachable heading at all, reachability is set aside.
+        floor = (WALL_SWEEP * free0[sub])[:, None]
+        reach_ok = np.empty_like(free, dtype=bool)
+        for half in (WALL_FAN > 0, WALL_FAN < 0):
+            cols = np.flatnonzero(half)          # in order of |delta|
+            run = np.minimum.accumulate(free[:, cols], axis=1)
+            reach_ok[:, cols] = run >= floor
+        none = ~reach_ok.any(axis=1)
+        reach_ok[none] = True
+        ok = (free >= lk * WALL_CLEAR_X) & reach_ok
+        mag = np.abs(WALL_FAN)[None, :]
+        big = np.float32(10.0)
+        left, right = WALL_FAN > 0, WALL_FAN < 0
+        left_ok = np.where(ok & left, mag, big).min(axis=1)
+        right_ok = np.where(ok & right, mag, big).min(axis=1)
+        lfree = np.where(left & reach_ok, free, -1.0)
+        rfree = np.where(right & reach_ok, free, -1.0)
+        lbest = lfree.max(axis=1)
+        rbest = rfree.max(axis=1)
+        l_at = np.abs(WALL_FAN)[lfree.argmax(axis=1)]
+        r_at = np.abs(WALL_FAN)[rfree.argmax(axis=1)]
+        any_ok = (left_ok < big) | (right_ok < big)
+        # THE SIDE. A fresh turn takes the side with the nearest free
+        # heading (else the freer side). A turn already under way KEEPS its
+        # side — remembered through a brief gap by the sign of the turn it
+        # is still easing out of — and gives it up only when the other side
+        # has clearly more free water (WALL_FREEST_KEEP), judged on the free
+        # water itself: whether a heading passes the WALL_CLEAR_X bar
+        # flickers frame to frame as a bursting fish's speed (and so its
+        # look-ahead) swings, and a side picked by that bar chattered
+        # left-right-left until it was too late to turn at all (measured on
+        # repeated swim bursts).
+        prev = self.p_wsg[fi]
+        held = self.p_wcmd[fi]
+        prev = np.where(prev != 0.0, prev,
+                        np.where(np.abs(held) > 0.05, np.sign(held), 0.0))
+        fresh_left = np.where(
+            any_ok, left_ok <= right_ok, lbest >= rbest
+        )
+        go_left = np.where(
+            prev > 0, lbest >= rbest * WALL_FREEST_KEEP,
+            np.where(prev < 0, lbest * WALL_FREEST_KEEP > rbest, fresh_left),
+        )
+        # on the chosen side: its nearest free heading, else its freest one
+        delta = np.where(
+            go_left,
+            np.where(left_ok < big, left_ok, l_at),
+            -np.where(right_ok < big, right_ok, r_at),
+        ).astype(np.float32)
+        any_ok = np.where(go_left, left_ok < big, right_ok < big)
+        # a middle already past the pond or the body margin, with nowhere
+        # free to go: straight back in along the wall's own normal
+        stuck = (~any_ok) & (free.max(axis=1) <= 0.0)
+        if stuck.any():
+            back = _wrap_pi(
+                np.arctan2(in_y[sub], in_x[sub]) - hd[fi]
+            ).astype(np.float32)
+            back = np.where(
+                (np.abs(back) > np.pi - WALL_HEADON) & (prev != 0),
+                prev * np.abs(back), back,
+            )
+            delta = np.where(stuck, back, delta)
+        side = np.where(delta >= 0.0, 1.0, -1.0).astype(np.float32)
+        room = np.maximum(free0[sub], WALL_STEP_PX)
+        urg = np.clip(1.0 - free0[sub] / look[sub], 0.0, 1.0)
+        # strength shapes how EARLY and how firmly a fish turns; once the
+        # wall is inside the last part of its look-ahead a lazy setting
+        # gives way to the plain turn, so laziness can never become contact
+        lazy = float(self.wall_turn_strength)
+        late = np.clip((urg - WALL_LATE) / (1.0 - WALL_LATE), 0.0, 1.0)
+        strength = np.where(lazy < 1.0, lazy + (1.0 - lazy) * late, lazy)
+        need = np.abs(delta) / room          # radians per px
+        cmd = np.clip(WALL_TURN_K * strength * need * radius, 0.0, 1.0)
+        auth = np.clip(WALL_AUTH_K * strength * urg * urg, 0.0, 1.0)
+        auth = np.maximum(auth, cmd)
+        self.p_wsg[fi] = side
+        self.p_wurg[fi] = urg
+        urgency[fi] = urg
+        turn[fi] = cmd * side
+        authority[fi] = auth
+        toward[fi] = True
+        eased_turn, eased_auth = self._wall_ease(
+            n, turn, authority, dt, urgency
+        )
+        return urgency, eased_turn, eased_auth, toward
 
     def _disperse_speed(self, n, cruise):
         """The swim speed a leaking fish needs to be off the panel by its
@@ -2844,6 +3593,13 @@ class Fish2d(Twod, GradientEffect):
             tau = np.where(dispersing, DISPERSE_TAU, tau)
         if self._burst > 0.0:
             want = want * (1.0 + SWIM_BURST_SPEED_X * self._burst)
+        self._solo_burst_step(n, dt, mode)
+        solo = self.p_sb[:n]
+        if solo.any():
+            want = want * (1.0 + (self.solo_burst_speed - 1.0) * solo)
+            tau = np.where(
+                self.p_sb_t[:n] > 0.0, np.minimum(tau, SOLO_SPEED_TAU), tau
+            )
         if self._burst_tail > 0.0:
             tau = np.minimum(tau, BURST_SPEED_TAU)
         # ejecta hold whatever they left with
@@ -2906,27 +3662,51 @@ class Fish2d(Twod, GradientEffect):
         desired_x += np.cos(to_home) * w_home
         desired_y += np.sin(to_home) * w_home
 
-        # the pond edge — how much water is left straight ahead, in px
-        # (ray/ellipse intersection in normalized space, read back as a
-        # distance the fish would actually swim)
         bound = self.roam_bound
-        spd = np.maximum(self.p_spd[:n], 1e-3)
-        dxn = np.cos(hd) * spd / self.sx
-        dyn = np.sin(hd) * spd / self.sy
-        aa = dxn * dxn + dyn * dyn
-        bb = rel_x * dxn + rel_y * dyn
-        cc = rel_x ** 2 + rel_y ** 2 - bound * bound
-        disc = np.maximum(bb * bb - aa * cc, 0.0)
-        t_hit = np.where(
-            cc >= 0.0, 0.0, (-bb + np.sqrt(disc)) / np.maximum(aa, 1e-12)
-        )
-        ahead_px = np.maximum(t_hit, 0.0) * spd
-        need = TURN_CLEAR * 2.0 * self.turn_radius_px
-        w_bound = np.clip(
-            (need * BOUND_SOFT - ahead_px) / max(need * (BOUND_SOFT - 1.0), 1e-3),
-            0.0, 1.0,
-        ) * BOUND_W
-        w_bound = np.where(swimming, w_bound, 0.0)
+        # the charge's school is authored choreography — it keeps the edge
+        # it was tuned against, the same scope avoidance and the thrust
+        # pulse already keep out of it (see the WALL block)
+        wall_on = self.wall_lookahead > 0.0 and not self._school_on
+        if wall_on:
+            # THE WALL, anticipated (see the block at the top of the module).
+            # It steers through the turn law below, not through this sum;
+            # `w_bound`/`bb` are re-expressed from it only so the swim
+            # burst's brake keeps reading what it always read: how hard the
+            # edge is pressing, and whether the fish is heading into it.
+            w_urg, w_turn, w_auth, w_toward = self._wall_steer(
+                n, hd, swimming, dt
+            )
+            w_bound = w_urg * BOUND_W
+            bb = np.where(w_toward, 1.0, -1.0)
+            # a solo burst gives up its hold (and eases back) once the wall
+            # presses hard — a fish does not sprint into a wall
+            self.p_sb_t[:n] = np.where(
+                w_urg >= SOLO_WALL_CUT, 0.0, self.p_sb_t[:n]
+            )
+        else:
+            # the old pond edge — how much water is left straight ahead, in
+            # px (ray/ellipse intersection in normalized space, read back as
+            # a distance the fish would actually swim)
+            for name in ("p_wsg", "p_wurg", "p_wcmd", "p_wauth"):
+                getattr(self, name)[:n] = 0.0
+            spd = np.maximum(self.p_spd[:n], 1e-3)
+            dxn = np.cos(hd) * spd / self.sx
+            dyn = np.sin(hd) * spd / self.sy
+            aa = dxn * dxn + dyn * dyn
+            bb = rel_x * dxn + rel_y * dyn
+            cc = rel_x ** 2 + rel_y ** 2 - bound * bound
+            disc = np.maximum(bb * bb - aa * cc, 0.0)
+            t_hit = np.where(
+                cc >= 0.0, 0.0, (-bb + np.sqrt(disc)) / np.maximum(aa, 1e-12)
+            )
+            ahead_px = np.maximum(t_hit, 0.0) * spd
+            need = TURN_CLEAR * 2.0 * self.turn_radius_px
+            w_bound = np.clip(
+                (need * BOUND_SOFT - ahead_px)
+                / max(need * (BOUND_SOFT - 1.0), 1e-3),
+                0.0, 1.0,
+            ) * BOUND_W
+            w_bound = np.where(swimming, w_bound, 0.0)
         # THE SWIM BURST'S BOUNDARY BRAKE - live only while a burst is
         # (self._burst / self._burst_tail), so ordinary swimming never
         # reaches it and is bit-for-bit what it always was. The steer above
@@ -2971,8 +3751,9 @@ class Fish2d(Twod, GradientEffect):
                     self.p_spd[:n],
                 )
         inward = np.arctan2(-rel_y * self.sy, -rel_x * self.sx)
-        desired_x += np.cos(inward) * w_bound
-        desired_y += np.sin(inward) * w_bound
+        if not wall_on:
+            desired_x += np.cos(inward) * w_bound
+            desired_y += np.sin(inward) * w_bound
 
         # mutual avoidance: a turn-away term, and ONLY a turn-away term.
         # It lands in the same desired-heading sum as every other steer and
@@ -3135,6 +3916,11 @@ class Fish2d(Twod, GradientEffect):
             d_hd * TURN_GAIN
             + np.where(steered, swirl + self.p_jog[:n], 0.0)
         )
+        if wall_on:
+            # the wall takes over in proportion to how hard it presses, and
+            # turns the fish at a CURVATURE (a fraction of its own tightest
+            # turn), so the curve is the same shape at any speed
+            omega = omega * (1.0 - w_auth) + w_turn * omega_max
         # THE turn-circle guarantee: no steering term, kick or phase can
         # turn a fish faster than its own radius allows, so an about-face
         # is always an arc and never a flip.
@@ -3260,7 +4046,7 @@ class Fish2d(Twod, GradientEffect):
         flap_amp = self.flap_amount * half_w * self.body_aspect * flap_scale
         flap_freq = self.flap_rate * (0.4 + 0.6 * speed_norm) * (
             1.0 + FLAP_BURST_X * self._burst
-        )
+        ) * (1.0 + SOLO_FLAP_X * self.p_sb[:n])
         self.p_flap[:n] = (
             self.p_flap[:n] + 2 * np.pi * flap_freq * dt
         ) % (2 * np.pi * 64)

@@ -337,7 +337,11 @@ def test_swimming_with_the_wake_off_is_the_merge_base_bit_for_bit(
         expect_no_wake=False,
     )
     off = dict(HIS, particle_count=6, camera_follow=0.0, ripple_amount=0.0)
-    neutral = dict(off, min_drift_speed=1.0, stroke_speed_cap=0.0)
+    # the wall has its own escape hatch, held on the current side so this
+    # proves the thrust dial alone (scripts/check_fish_wall.py §1 proves
+    # the hatch itself against its own pin)
+    neutral = dict(off, min_drift_speed=1.0, stroke_speed_cap=0.0,
+                   wall_lookahead=0.0)
 
     async def main():
         a = await _positions(tmp_path, f"m{seed}", off, seed, master,
@@ -365,7 +369,8 @@ def test_the_shipped_default_dial_actually_changes_the_kinematics(
     async def main():
         a = await _positions(tmp_path, "m-default", off, 5, master,
                              script=_SWIM_ONLY)
-        b = await _positions(tmp_path, "z-default", off, 5, "fish",
+        b = await _positions(tmp_path, "z-default",
+                             dict(off, wall_lookahead=0.0), 5, "fish",
                              script=_SWIM_ONLY)
         assert not _positions_equal(a, b), (
             "the shipped dial defaults changed nothing — the thrust "
@@ -497,9 +502,15 @@ def test_the_wake_streams_past_the_window_and_is_never_carried(tmp_path):
     lands in the buffer to drag the centroid around.
     """
     async def main():
+        # the wall is held at its escape hatch: it changes where the fish
+        # are heading when the charge starts, hence which way the school
+        # (and the window) travels — and a planted patch that travels far
+        # enough vertically rolls part-way off the 37-row panel, which moves
+        # its centroid for a reason that has nothing to do with anchoring
         room = await _room(tmp_path, "wake",
                            dict(HIS, camera_follow=1.0, ripple_life=4.0,
-                                ripple_amount=0.0, ripple_spread=0.0),
+                                ripple_amount=0.0, ripple_spread=0.0,
+                                wall_lookahead=0.0),
                            seed=5)
         eff = room.effect
         room.step(int(4.0 / DT))

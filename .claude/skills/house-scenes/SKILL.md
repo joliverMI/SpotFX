@@ -51,6 +51,21 @@ house-mode bulb; an earlier build seeded those four as excluded by
 default, a wrong assumption corrected 2026-10-06). Seeding never switches
 house lighting on (`HouseSettings.enabled`).
 
+## House Fish's solo burst (2026-10-06)
+
+His ask: "In house fish scene, give individual ones an occasional burst of
+speed." The fish effect's `solo_burst_rate`/`_speed`/`_time` ship OFF
+(rate 0), so this is HOUSE FISH's own data: `scripts/add_house_fish_
+solo_burst.py` owns the values (4/min across the shoal, 2.5x, 0.8 s) and is
+the narrow migration for his live scene — he saved House Fish himself
+(5 fish, size 6, speed 0.16), so the seeder would leave it alone. It adds
+the three keys to that one Matrix entry's params (raw-dict patch, backup,
+dry run first) and KEEPS any value he already set. The seeder imports the
+same values for a fresh seed. Sonic can retune them per scene with
+`set_scene_entry_param` (scene "House Fish", target "Matrix"). The wall
+the fish now anticipate (`wall_lookahead`) is the effect's own default and
+needs no scene data — see the fish-effect skill.
+
 ## Re-running the seeder
 
 Dry run first (prints whole-file diffs). It upserts by deterministic id;
@@ -61,4 +76,6 @@ looks, the switch) is deployed. Backups land in `storage/spectra/backups/`.
 
 ## Executable proofs
 
-`tests/test_seed_house_lighting.py` (synthetic storage shaped like his).
+`tests/test_seed_house_lighting.py` (synthetic storage shaped like his);
+the House Fish solo-burst migration and seeded params:
+`tests/test_fish_wall.py`.

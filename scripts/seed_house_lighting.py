@@ -90,6 +90,11 @@ from typing import Any, Optional
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
+# the House Fish's occasional solo burst (his 2026-10-06 ask) — one
+# definition, owned by the narrow migration that turns it on in his live
+# scene
+from scripts.add_house_fish_solo_burst import SOLO_BURST_PARAMS  # noqa: E402
+
 NS = uuid.UUID("3c0f4f1e-6c1a-5d4e-9a7b-6f0e2b1d9a55")
 
 #: input_select.lighting_mode's options, read from his Home Assistant
@@ -261,13 +266,14 @@ def scene_entries() -> dict[str, dict]:
         "accept_all_sets": True,
         "devices": [
             {"target_kind": "category", "target": "Matrix", "effect_type": "fish",
-             # Three large, slow fish that do not react to music.
+             # Three large, slow fish that do not react to music — and, now
+             # and then, one of them puts on a burst of speed.
              "params": {"particle_count": 3, "blob_size": 4.0, "base_speed": 0.08,
                         "reactivity_scale": 0.0, "brightness_audio": 0.0,
                         "size_audio": 0.0, "speed_jump": 0.0, "speed_jog": 0.0,
                         "jiggle": 0.05, "spin": 0.1, "flap_rate": 1.0,
                         "camera_follow": 0.0, "color_shift": 0,
-                        "tether_scatter": 0.0},
+                        "tether_scatter": 0.0, **SOLO_BURST_PARAMS},
              "color": {"mode": "set"}},
             _melt(0.08),
             _breathing(0.5),

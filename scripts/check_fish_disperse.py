@@ -441,8 +441,16 @@ async def hue_run(seed, per_channel_clip, seconds=0.5):
     pre-switch colour, through his Add 0.5 s crossfade into black.
     `per_channel_clip` puts back the clip this change replaced (each channel
     clipped on its own) — the red control."""
+    # The wall (fm/fish-wall-avoid) is held at its escape hatch here: it
+    # only changes WHERE the ordinary fish are when the crossfade starts (a
+    # dispersing fish never feels it), and which fish happen to sit "lone"
+    # at that moment is all this section's sampling depends on — measured,
+    # seed 5 found no lone fish at all with it on. This section proves the
+    # scatter's clip, from the start state it was calibrated on;
+    # scripts/check_fish_wall.py proves the wall.
     r = await room(f"hue{seed}{int(per_channel_clip)}", "fish",
-                   dict(HIS, gradient=HUE_GRADIENT), seed=seed)
+                   dict(HIS, gradient=HUE_GRADIENT, wall_lookahead=0.0),
+                   seed=seed)
     fish = r.effect
     v = r.virtual
     if per_channel_clip:

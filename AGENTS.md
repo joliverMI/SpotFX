@@ -8586,13 +8586,35 @@ Set tab and `backfill_param_defaults.py` read the registry, and nothing
 checks it against the schema. Proof: `scripts/check_fish_burst_bounds.py`,
 `tests/test_fish.py::test_swim_burst_stays_on_screen`.
 
+9. **THE WALL IS THE PANEL'S REAL LIT SHAPE, AND THE FISH SEE IT COMING
+   (2026-10-06, his ask: "anticipate the wall and start turning away ... on
+   both fish scenes"). The WALL block in `fish.py` and
+   `.claude/skills/fish-effect` are the binding statements.** The shape is
+   READ off the virtual's own segments (`is_gap_device`, through Twod's own
+   flips) — on the crystal, the hexagon — so no part of a fish swims into
+   a cell the panel cannot light; the pond (`roam_scale`) still bounds the
+   middle. `wall_lookahead` (0.35 s x its own speed, never under half its
+   body length, capped at the pond's short radius) and
+   `wall_turn_strength` are registered (Sonic reaches
+   them per scene entry); `wall_lookahead = 0` is the old pond-edge steer,
+   kinematics bit for bit against the pinned merge-base. Ordinary swimmers
+   only — the charge's school keeps the old edge. **A proof of some OTHER
+   fish mechanism that compares kinematics or positions against a pinned
+   ref must hold `wall_lookahead = 0`** (camera 1b, the clump and
+   burst-brake tests and disperse §2b already do). A rig that should see a
+   hex-corner bug needs `fx.headless`'s `real_mask` (his crystal's
+   real/gap segments) — a plain rectangle never shows one. The House Fish
+   scene's occasional SOLO BURST (`solo_burst_*`, default off) is that
+   scene's own data: `scripts/add_house_fish_solo_burst.py`.
+
 Every new fish knob is a first guess pending his eye; the effect ships
 tunable, not tuned. Proof: `scripts/check_fish.py`,
 `scripts/check_fish_avoidance.py`, `scripts/check_fish_lunge.py`,
 `scripts/check_fish_camera.py`, `scripts/check_fish_wake.py`,
 `scripts/check_fish_charge_spread.py`, `scripts/check_fish_burst_bounds.py`,
-`scripts/check_fish_disperse.py`, `tests/test_fish.py`,
-`tests/test_fish_camera.py`, `tests/test_fish_disperse.py`.
+`scripts/check_fish_disperse.py`, `scripts/check_fish_wall.py`,
+`tests/test_fish.py`, `tests/test_fish_camera.py`,
+`tests/test_fish_disperse.py`, `tests/test_fish_wall.py`.
 
 ## Pulse (`fx/effects/pulse.py`) — the Singles' one-colour effect, phases 1-3 of 4
 

@@ -522,7 +522,14 @@ def test_the_charge_school_does_not_clump(tmp_path):
         orig = FX.SCHOOL_SPACING_W
         FX.SCHOOL_SPACING_W = weight
         try:
-            room = await _room(tmp_path, f"clump{weight}", seed=5)
+            # the school itself never feels the wall (it is authored
+            # choreography — see fish.py's WALL block), but the ordinary
+            # fish swimming BEFORE the charge do, and where they happen to
+            # be when it starts moves this ratio a few percent. Held at the
+            # wall's escape hatch so this measures the spacing steer alone,
+            # from the start state it was tuned on.
+            room = await _room(tmp_path, f"clump{weight}",
+                               dict(HIS_MATRIX, wall_lookahead=0.0), seed=5)
             eff = room.effect
             room.step(240)
             panel = (eff.r_height, eff.r_width)
@@ -1337,14 +1344,15 @@ def test_quiet_swimming_is_untouched_by_the_lunge(tmp_path):
 
 
 # ── the swim burst, held on screen ──────────────────────────────────────
-async def _burst_excursion(tmp_path, name, seed, burst_on):
+async def _burst_excursion(tmp_path, name, seed, burst_on, extra=None):
     """(worst px any fish CENTRE lands past the panel edge, fastest speed
     of a fish more than 8px clear of it while bursting) over 12s of a
     300ms burst every 400ms, at his Matrix entry's own pond (the schema's
     roam_scale) with a full population — the shape that reproduced his
     report."""
     room = await _room(tmp_path, name,
-                       dict(HIS_MATRIX, particle_count=12), seed=seed)
+                       dict(HIS_MATRIX, particle_count=12, **(extra or {})),
+                       seed=seed)
     eff = room.effect
     room.step(120)
     worst_off = -1e9
@@ -1384,22 +1392,34 @@ def test_swim_burst_stays_on_screen(tmp_path):
     nothing) and no burst at all (the soft steer's own resting overshoot).
     The fixed burst must land within a pixel of the no-burst baseline, and
     — the "not a soft no-op" half — a fish clear of the edge must still
-    reach well above cruise while bursting."""
+    reach well above cruise while bursting.
+
+    The brake was built against the old pond-edge steer, so that is where
+    it is proven: the three runs hold the wall at its escape hatch
+    (`wall_lookahead = 0`). The wall that replaced that steer
+    (fm/fish-wall-avoid) looks further ahead the faster a fish swims, so
+    with it on a bursting fish stays on the panel with or without the
+    brake — `test_the_wall_alone_keeps_a_burst_on_screen` below."""
+    old_edge = {"wall_lookahead": 0.0}
+
     async def main():
         for seed in (3, 7):
             base, _, _ = await _burst_excursion(
-                tmp_path, f"burst-none-{seed}", seed, burst_on=False
+                tmp_path, f"burst-none-{seed}", seed, burst_on=False,
+                extra=old_edge,
             )
             orig = FX.BOUND_BRAKE_AT
             FX.BOUND_BRAKE_AT = 1.0
             try:
                 unbraked, _, _ = await _burst_excursion(
-                    tmp_path, f"burst-unbraked-{seed}", seed, burst_on=True
+                    tmp_path, f"burst-unbraked-{seed}", seed, burst_on=True,
+                    extra=old_edge,
                 )
             finally:
                 FX.BOUND_BRAKE_AT = orig
             held, clear_speed, cruise = await _burst_excursion(
-                tmp_path, f"burst-held-{seed}", seed, burst_on=True
+                tmp_path, f"burst-held-{seed}", seed, burst_on=True,
+                extra=old_edge,
             )
             assert unbraked > base + 3.0, (
                 f"seed {seed}: the negative control must overshoot, saw "
@@ -1415,6 +1435,29 @@ def test_swim_burst_stays_on_screen(tmp_path):
                 f"the edge: fastest clear-of-edge speed {clear_speed:.1f} "
                 f"px/s against cruise {cruise:.1f} px/s"
             )
+    _run(main())
+
+
+def test_the_wall_alone_keeps_a_burst_on_screen(tmp_path):
+    """With the wall on (the shipped default) and the brake switched off,
+    repeated bursts still never carry a fish's centre past the panel edge:
+    the wall's look-ahead grows with speed, so a dashing fish starts its
+    turn sooner. And the burst is still a burst away from the edge."""
+    async def main():
+        for seed in (3, 7):
+            orig = FX.BOUND_BRAKE_AT
+            FX.BOUND_BRAKE_AT = 1.0
+            try:
+                worst, clear_speed, cruise = await _burst_excursion(
+                    tmp_path, f"burst-wall-{seed}", seed, burst_on=True
+                )
+            finally:
+                FX.BOUND_BRAKE_AT = orig
+            assert worst < 0.0, (
+                f"seed {seed}: a bursting fish's centre left the panel by "
+                f"{worst:.2f}px"
+            )
+            assert clear_speed >= 2.0 * cruise, (clear_speed, cruise)
     _run(main())
 
 
