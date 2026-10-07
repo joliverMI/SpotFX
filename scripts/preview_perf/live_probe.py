@@ -20,6 +20,17 @@ Beside both, every `--http-period` seconds it times one GET of the liveness
 endpoint through each port, which shows an event-loop stall in either
 process as a latency spike independent of the preview stream.
 
+HIS REAL PATH (measured 2026-10-07): the browser reaches
+https://serenity.tailb5ca89.ts.net, which is `tailscale serve` proxying
+`/` to http://127.0.0.1:8000 — so his connections arrive as 127.0.0.1
+sockets owned by tailscaled (`--loopback-peers`), never as 100.x peers,
+and the kernel sees only the loopback leg of his link. `--extra-url` adds
+a third viewer against any URL (e.g. the serve hostname itself) so a
+routing change can be verified from this host after it is applied:
+
+  .venv/bin/python scripts/preview_perf/live_probe.py --out <dir> \
+      --duration 60 --extra-url serve=wss://serenity.tailb5ca89.ts.net/spectra/api/device-preview/ws
+
 Usage (from the repo root, the live services up):
 
   .venv/bin/python scripts/preview_perf/live_probe.py --out <dir> \
@@ -77,10 +88,20 @@ def percentile(values: list[float], p: float) -> Optional[float]:
 
 # ── the kernel's view of his socket ──────────────────────────────────────
 
+LOOPBACK_PEERS = False
+OWN_PEERS: set[str] = set()
+
+
 def tailscale_sockets(ports: tuple[int, ...] = (8000, 8010)) -> list[dict]:
     """`ss -tin` rows for established sockets on `ports` whose peer is a
-    Tailscale address. Each row: port, peer, send_q, recv_q and the parsed
-    info line (rtt, minrtt, retrans, unacked, notsent, busy, ...)."""
+    Tailscale address — or, with `LOOPBACK_PEERS` (his path through
+    `tailscale serve`: https://<host>.ts.net -> tailscaled -> 127.0.0.1:8000),
+    whose peer is 127.0.0.1 and is not one of this probe's own connections.
+    Each row: port, peer, send_q, recv_q and the parsed info line (rtt,
+    minrtt, retrans, unacked, notsent, busy, ...). On the serve path the
+    kernel sees only the loopback leg; his Tailscale link lives inside
+    tailscaled, so Send-Q/notsent there mean "tailscaled has not read it
+    yet", i.e. backpressure from his link."""
     filt = " or ".join(f"sport = :{p}" for p in ports)
     try:
         out = subprocess.run(["ss", "-tin", "state", "established", f"( {filt} )"],
@@ -98,7 +119,10 @@ def tailscale_sockets(ports: tuple[int, ...] = (8000, 8010)) -> list[dict]:
             info = lines[i + 1] if i + 1 < len(lines) and lines[i + 1].startswith("\t") else ""
             i += 2 if info else 1
             peer_ip = peer.rsplit(":", 1)[0]
-            if not TAILSCALE_RE.match(peer_ip):
+            if LOOPBACK_PEERS:
+                if peer_ip != "127.0.0.1" or peer in OWN_PEERS:
+                    continue
+            elif not TAILSCALE_RE.match(peer_ip):
                 continue
             port = int(local.rsplit(":", 1)[1])
             rows.append({"port": port, "peer": peer, "send_q": send_q, "recv_q": recv_q,
@@ -185,6 +209,11 @@ async def run_viewer(rec: ViewerRecord, stop_at: float, level: str, scope: str) 
         async with websockets.connect(rec.url, open_timeout=5, max_size=2 ** 24,
                                       ping_interval=None) as ws:
             rec.opened_at = time.time()
+            try:
+                sock = ws.transport.get_extra_info("sockname")
+                OWN_PEERS.add(f"{sock[0]}:{sock[1]}")
+            except Exception:
+                pass
             await ws.send(json.dumps({"type": "hello", "protocol": 2,
                                       "level": level, "scope": scope}))
             last_rate: Optional[int] = None
@@ -271,7 +300,7 @@ def readiness() -> dict:
                                 for s in tailscale_sockets()]
     prev = out.get("preview") or {}
     out["viewer_connected"] = bool(prev.get("connected")) and not prev.get("paused") \
-        and bool(out["tailscale_sockets"])
+        and (LOOPBACK_PEERS or bool(out["tailscale_sockets"]))
     out["ready"] = bool(out["is_playing"]) and out["viewer_connected"]
     return out
 
@@ -279,10 +308,12 @@ def readiness() -> dict:
 # ── the measurement ────────────────────────────────────────────────────
 
 async def measure(out_dir: Path, duration: float, level: str, scope: str,
-                  ss_period: float, http_period: float) -> dict:
+                  ss_period: float, http_period: float,
+                  extra_urls: Optional[list[tuple[str, str]]] = None) -> dict:
     stop_at = time.time() + duration
     proxied = ViewerRecord("proxy :8000", f"ws://127.0.0.1:8000{WS_PATH}")
     direct = ViewerRecord("direct :8010", f"ws://127.0.0.1:8010{WS_PATH}")
+    extras = [ViewerRecord(name, url) for name, url in (extra_urls or [])]
     sockets: list[dict] = []
     http: list[dict] = []
     engine: list[dict] = []
@@ -290,6 +321,7 @@ async def measure(out_dir: Path, duration: float, level: str, scope: str,
     await asyncio.gather(
         run_viewer(proxied, stop_at, level, scope),
         run_viewer(direct, stop_at, level, scope),
+        *[run_viewer(x, stop_at, level, scope) for x in extras],
         sample_sockets(sockets, stop_at, ss_period),
         sample_http(http, stop_at, http_period, (8000, 8010)),
         sample_engine(engine, stop_at, 5.0),
@@ -298,7 +330,8 @@ async def measure(out_dir: Path, duration: float, level: str, scope: str,
         "started": datetime.fromtimestamp(started).isoformat(timespec="seconds"),
         "duration_s": round(time.time() - started, 1),
         "level": level, "scope": scope,
-        "viewers": {"proxy": proxied.summary(), "direct": direct.summary()},
+        "viewers": {"proxy": proxied.summary(), "direct": direct.summary(),
+                    **{x.name: x.summary() for x in extras}},
         "proxy_hop_ms": hop_summary(proxied, direct),
         "his_sockets": socket_summary(sockets),
         "liveness_ms": http_summary(http),
@@ -377,7 +410,7 @@ def render_md(r: dict) -> str:
              "| path | msgs | fps | delay p50 | p95 | p99 | max | interval p95 | max | gaps>100ms "
              "| server age p95 | srtt p50 | rate share | rate changes | seq gaps | kbit/s |",
              "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
-    for key in ("proxy", "direct"):
+    for key in v:
         s = v[key]
         d, i, a = s["delay_ms"], s["interval_ms"], s["server_age_ms"]
         lines.append(f"| {s['name']} | {s['messages']} | {_f(s['delivered_fps'], 2)} | {_f(d['p50'])} | "
@@ -422,9 +455,15 @@ def main() -> int:
     ap.add_argument("--http-period", type=float, default=2.0)
     ap.add_argument("--require-viewer", action="store_true", default=True)
     ap.add_argument("--no-require-viewer", dest="require_viewer", action="store_false")
+    ap.add_argument("--extra-url", action="append", default=[], metavar="NAME=URL",
+                    help="one more viewer against this WebSocket URL (repeatable)")
+    ap.add_argument("--loopback-peers", action="store_true",
+                    help="his browser arrives via tailscale serve: watch 127.0.0.1 peers on :8000")
     a = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
     logging.getLogger("httpx").setLevel(logging.WARNING)
+    global LOOPBACK_PEERS
+    LOOPBACK_PEERS = a.loopback_peers
     out_dir = Path(a.out)
     out_dir.mkdir(parents=True, exist_ok=True)
     give_up = datetime.fromisoformat(a.wait_until).timestamp() if a.wait_until else None
@@ -444,7 +483,9 @@ def main() -> int:
                 return 3
             time.sleep(a.poll)
     logger.info("measuring for %.0f s", a.duration)
-    result = asyncio.run(measure(out_dir, a.duration, a.level, a.scope, a.ss_period, a.http_period))
+    extras = [tuple(x.split("=", 1)) for x in a.extra_url if "=" in x]
+    result = asyncio.run(measure(out_dir, a.duration, a.level, a.scope, a.ss_period,
+                                 a.http_period, extra_urls=extras))
     print(render_md(result))
     return 0
 

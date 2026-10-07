@@ -71,6 +71,42 @@ Direct-port caveat: browsing the UI at `:8010/spectra/` works except for
 the colour-set/gradient pickers, which call spot-effects' `/api/*` on the
 same origin — the UI's canonical address remains `:8000/spectra/`.
 
+### His remote path, and the `/spectra` route straight to :8010
+
+He views over Tailscale in a browser at `https://serenity.tailb5ca89.ts.net`
+— `tailscale serve` proxying `/` to `http://127.0.0.1:8000`. Measured under
+a real show (2026-10-07, `data/preview-p4-live-check/report.md`, phase 4 of
+the preview plan): the hop through spot-effects' reverse proxy costs
+nothing at the median but inherits that process's event-loop stalls — one
+9.7 s freeze of the preview in ten minutes, 400-700 ms extra on several
+others, and the stream stepping its rate down 37 times against 4 direct.
+The deploy step that settles the plan's change 7 is a second serve route,
+so everything under `/spectra/` reaches the Spectra process without
+crossing the spot-effects loop while `/` (the Timeline's same-origin
+spot-effects `/api` and `/ws` calls) stays on :8000:
+
+```bash
+sudo tailscale serve --bg --set-path /spectra http://127.0.0.1:8010/spectra
+tailscale serve status        # expect /spectra -> :8010/spectra beside / -> :8000
+```
+
+Serve strips the mount path and joins the backend URL's own path
+(`ipn/ipnlocal/serve.go`: `http.StripPrefix(mountPoint)` then
+`SetURL(rp.url)`), so the backend must be given WITH `/spectra`; its
+`httputil.ReverseProxy` carries the preview WebSocket upgrade exactly as
+the `/` route already does today. Verify from the host, read-only, with a
+viewer through the serve hostname beside the two local ones:
+
+```bash
+.venv/bin/python scripts/preview_perf/live_probe.py --out /tmp/p4-verify --duration 60 \
+    --extra-url serve=wss://serenity.tailb5ca89.ts.net/spectra/api/device-preview/ws
+```
+
+The `serve` row's delay tail should now track the `direct :8010` row, not
+the `proxy :8000` one. The :8000 proxy route is unchanged and every
+port-8000 address still works; this only moves where the tailnet hostname
+sends `/spectra/*`.
+
 ## Rollback
 
 Stop and disable `spectra.service`, restore the previous `spotfx.service`,
