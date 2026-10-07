@@ -16,16 +16,34 @@ FIXTURES, and what Spectra then does to them:
              the TV backlight incident).
   ON / OFF   a button (the crystal's paddle, the porch button) switches a
              WLED off: no stream, then {"on": false}. On: {"on": true} (and
-             the owned brightness), THEN the stream — the order a powered-off
-             WLED needs whatever its firmware does with a stream while off
-             (spectra/services/night_power.py says why that is unknown).
-  BRIGHTNESS Spectra owns every streamed WLED's master brightness while a
-             mode drives the room: `owned_brightness` (255) and power on,
-             written on entry and RE-ASSERTED when a read-back shows it
-             drifted — a Home Assistant brightness write, a sconce that
-             rebooted on its boot preset. Each correction is NAMED (status,
-             log, fire history), because a fight with a stray HA writer is
-             exactly what River's cutover needs to see.
+             the preserved ceiling brightness below), THEN the stream — the
+             order a powered-off WLED needs whatever its firmware does with
+             a stream while off (spectra/services/night_power.py says why
+             that is unknown).
+  BRIGHTNESS (REWORKED 2026-10-06, Admiral order: the crystal kept getting
+             set to 100% in Home Assistant, far too bright — HIS brightness
+             is the ceiling, nothing may raise it.) Spectra never WRITES a
+             WLED's master brightness upward. Before its first write to a
+             fixture this take it reads the brightness already there — his
+             own last setting, via Home Assistant or the fixture's own boot
+             preset — and that reading (`HouseState.pre_take[did]["bri"]`)
+             is the CEILING for the rest of the take, capped further only
+             by `owned_brightness` if he has set that lower (default 255 =
+             no extra cap). A power-on restores exactly that ceiling value,
+             never a forced 255. The drift check (`_drift_check`) only ever
+             corrects DOWNWARD, and only on a genuine reboot: a reading
+             ABOVE the ceiling is weighed against the fixture's own
+             `json/info` uptime (`_rt.uptime_ms`) to tell a brighter boot
+             preset apart from a deliberate Home Assistant write made while
+             nobody was watching — uptime dropping since the last check
+             means reboot, and that overshoot is capped back down; anything
+             else is HIS OWN new level, ADOPTED into `pre_take[did]["bri"]`
+             as the new ceiling rather than fought back down (nothing is
+             written for an adoption — there is nothing to correct). A
+             fixture read back AT OR BELOW its ceiling — including a fresh,
+             lower Home Assistant brightness write — is left alone either
+             way. Each correction is still NAMED (status, log, fire
+             history).
   RECHECK    "I just powered the sconce mains": re-find the named fixtures by
              identity (a mains cycle is when a WLED takes a new DHCP lease),
              re-init a driver that never resolved, and re-apply the power /
@@ -47,25 +65,25 @@ FIXTURES, and what Spectra then does to them:
              Light Show Steady/Freeze hold on the fixture wins (a higher
              layer): it stays powered and streamed.
 
-SOFT POWER (phase 3). Spectra owns the master brightness, so a switch-off
-first drops `bri` to SOFT_BRI under the (withheld, so frozen) last frame,
-then leaves realtime, then switches off — the WLED's own preset never shows
-at full brightness between the two. A power-on from withheld writes
+SOFT POWER (phase 3). Spectra manages the switch, so a switch-off first
+drops `bri` to SOFT_BRI under the (withheld, so frozen) last frame, then
+leaves realtime, then switches off — the WLED's own preset never shows at
+full brightness between the two. A power-on from withheld writes
 `{"on": true, "bri": SOFT_BRI}`, lets the stream resume, and only then
-raises `bri` to the owned brightness: the preset is never seen at full
-either. Both apply only while Spectra owns the brightness; with ownership
-off the phase 2 sequence is unchanged.
+raises `bri` back to the preserved CEILING (never a forced 255): the preset
+is never seen at full either. Both apply only while Spectra owns the
+brightness; with ownership off the phase 2 sequence is unchanged.
 
-HAND-BACK (phase 3). Owning the master brightness means Spectra switches
-fixtures ON (and to 255). Before its FIRST write to a WLED it reads the
-fixture's power and brightness (HouseState.pre_take, durable — it survives a
-restart that keeps the picture); when the room is RELEASED it writes them
-back (`{"on": …, "bri": …}`, read back) to the address it had, after the
-release's own `{"live": false}`. Found 2026-10-05: a take left his dining
-table under-glow ON at full — it had been off, and River's restore does not
-capture it. The rule: a fixture that was off before a take is off after.
-Only a release hands back: a handover to the older SpotFX process needs the
-fixtures on, and a restart keeps the picture.
+HAND-BACK (phase 3). Before its FIRST write to a WLED this take, Spectra
+reads the fixture's power and brightness (HouseState.pre_take, durable — it
+survives a restart that keeps the picture) — this reading is BOTH the
+ceiling above and what gets handed back; when the room is RELEASED it
+writes them back (`{"on": …, "bri": …}`, read back) to the address it had,
+after the release's own `{"live": false}`. Found 2026-10-05: a take left his
+dining table under-glow ON at full — it had been off, and River's restore
+does not capture it. The rule: a fixture that was off before a take is off
+after. Only a release hands back: a handover to the older SpotFX process
+needs the fixtures on, and a restart keeps the picture.
 
 ═══ INERT UNLESS A MODE DRIVES THE ROOM ═══
 
@@ -172,6 +190,19 @@ def _get_state_blocking(wled, timeout: float) -> dict:
     return body
 
 
+def _get_info_blocking(wled, timeout: float) -> dict:
+    """json/info, not json/state — `uptime` (ms since boot) only ever shows
+    up there, the same split dark_fixture_watch.py / live_host.py already
+    document for `live`."""
+    import requests
+    response = asyncio.run(wled._wled_request(
+        requests.get, wled.ip_address, "json/info", timeout=timeout))
+    body = response.json()
+    if not isinstance(body, dict):
+        raise TypeError(f"json/info returned {type(body).__name__}")
+    return body
+
+
 async def _default_post(device, payload: dict) -> None:
     wled = getattr(device, "wled", None)
     if wled is None:
@@ -187,6 +218,15 @@ async def _default_get(device) -> dict:
         raise RuntimeError("its driver never reached the fixture (no address)")
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, _get_state_blocking, wled,
+                                      HTTP_TIMEOUT_S)
+
+
+async def _default_get_info(device) -> dict:
+    wled = getattr(device, "wled", None)
+    if wled is None:
+        raise RuntimeError("its driver never reached the fixture (no address)")
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, _get_info_blocking, wled,
                                       HTTP_TIMEOUT_S)
 
 
@@ -267,6 +307,7 @@ async def _default_read_live(device_id: str) -> Optional[bool]:
 class Deps:
     post: Callable[[Any, dict], Awaitable[None]] = _default_post
     get_state: Callable[[Any], Awaitable[dict]] = _default_get
+    get_info: Callable[[Any], Awaitable[dict]] = _default_get_info
     host: Callable[[], Any] = _default_host
     relocate: Callable[[Any, Any], Awaitable[bool]] = _default_relocate
     reinit: Callable[[Any], Awaitable[bool]] = _default_reinit
@@ -321,6 +362,11 @@ class _Runtime:
     #: now (None = never confirmed either way — treated as "not streaming")
     hyperion_live: dict = field(default_factory=dict)
     hyperion_checked_at: dict = field(default_factory=dict)
+    #: device -> the last `json/info` uptime (ms since boot) seen for it —
+    #: the one signal that tells a reboot's brighter boot preset apart from
+    #: a deliberate Home Assistant brightness write (see _rebooted_since_
+    #: last_check). Seeded at the fixture's first remembered reading.
+    uptime_ms: dict = field(default_factory=dict)
 
 
 _rt = _Runtime()
@@ -410,6 +456,24 @@ def _in_scope_devices(host) -> list[str]:
 
 def _controllable(dev) -> bool:
     return str(getattr(dev, "type", "") or "").lower() in CONTROLLABLE_TYPES
+
+
+def _brightness_ceiling(did: str, settings) -> Optional[int]:
+    """The brightness Spectra may hold this fixture at for the rest of this
+    take — HIS OWN level (`pre_take`, read before Spectra's first write),
+    capped further only by `owned_brightness` if he has set that lower.
+
+    Never a value to force upward: `None` means "nothing captured yet, so
+    don't touch brightness at all" — the same "unknown never acts" rule
+    this module already applies to an unreadable fixture elsewhere."""
+    if not settings.own_brightness:
+        return None
+    st = house_store.state()
+    pre = st.pre_take.get(did)
+    his_level = pre.get("bri") if pre else None
+    if not isinstance(his_level, int) or his_level <= 0:
+        return None
+    return min(his_level, int(settings.owned_brightness))
 
 
 # ── what Home Assistant tells us ───────────────────────────────────────────
@@ -650,8 +714,12 @@ def desired() -> dict[str, tuple[str, str]]:
             # switch a fixture from off to on as a side effect.
             continue
         elif _controllable(dev) and settings.own_brightness:
-            out[did] = (TARGET_ON, f"Spectra holds it on at brightness "
-                                   f"{settings.owned_brightness}")
+            ceiling = _brightness_ceiling(did, settings)
+            if ceiling is not None:
+                why = f"Spectra holds it on, never above his own brightness ({ceiling})"
+            else:
+                why = "Spectra holds it on"
+            out[did] = (TARGET_ON, why)
     return out
 
 
@@ -922,12 +990,14 @@ async def _transition(did: str, dev, target: str, why: str, *, owned: bool,
             detail = "; ".join(x for x in (detail, more) if x)
         else:   # TARGET_ON
             payload: dict = {"on": True}
-            if owned and settings.own_brightness:
-                payload["bri"] = int(settings.owned_brightness)
+            if owned:
+                ceiling = _brightness_ceiling(did, settings)
+                if ceiling is not None:
+                    payload["bri"] = ceiling
             want_bri = payload.get("bri")
             if soft:
                 # SOFT POWER: on at the soft brightness, let the stream back
-                # (pending_on cleared), and only then the owned brightness —
+                # (pending_on cleared), and only then the preserved ceiling —
                 # the WLED's own preset is never seen at full.
                 s_out, s_detail, _s = await _write_confirmed(
                     dev, {"on": True, "bri": SOFT_BRI},
@@ -968,10 +1038,59 @@ async def _transition(did: str, dev, target: str, why: str, *, owned: bool,
     kick()
 
 
+async def _rebooted_since_last_check(did: str, dev) -> bool:
+    """Has this WLED's own `json/info` uptime reset or dropped since the
+    last time this module read it — the signal that tells a reboot's
+    brighter boot preset apart from a deliberate Home Assistant write made
+    while nobody was watching. Never checked before, or unreadable, is NOT
+    treated as a reboot — an overshoot defaults to his own deliberate
+    increase, the same direction the "unknown never acts" rule already
+    takes everywhere else in this module.
+
+    Called on EVERY drift check for a fixture Spectra holds on, not only
+    when an overshoot is found — a reboot whose boot preset happens to land
+    at or below the ceiling causes no overshoot, so without this the
+    baseline would go stale for the rest of the take and a later deliberate
+    increase would be misjudged against ancient uptime. Refreshing every
+    check instead bounds the staleness to one `DRIFT_CHECK_S` interval."""
+    try:
+        info = await deps.get_info(dev)
+    except Exception:                                    # noqa: BLE001
+        return False
+    uptime = info.get("uptime")
+    if not isinstance(uptime, (int, float)):
+        return False
+    prev = _rt.uptime_ms.get(did)
+    _rt.uptime_ms[did] = uptime
+    return prev is not None and uptime < prev
+
+
+def _adopt_higher_brightness(did: str, found_bri: int) -> None:
+    """A brightness ABOVE his preserved ceiling with no reboot evidence
+    behind it — HIS OWN new Home Assistant level, not an overshoot to fight.
+    `pre_take[did]["bri"]` is what `_brightness_ceiling` reads, so updating
+    it here is what makes every later check compare against the new, higher
+    level instead of the one captured at take-start."""
+    st = house_store.state()
+    pre = st.pre_take.get(did)
+    if pre is None:
+        return
+    pre["bri"] = found_bri
+    house_store.save_state()
+    logger.info("house fixtures: %s's brightness rose to %s with no reboot "
+               "evidence behind it — adopting it as his new ceiling (nothing "
+               "written)", did, found_bri)
+
+
 async def _drift_check(did: str, dev, target: str) -> None:
-    """Read json/state back; re-assert power (and the owned brightness) if
-    something else moved it. An unreadable fixture is left alone — unknown
-    never acts."""
+    """Read json/state back; re-assert power if something else moved it.
+    Brightness is corrected ONLY downward, and only on a genuine reboot
+    (`_rebooted_since_last_check`) — a reading above the preserved ceiling
+    with no such evidence is HIS OWN deliberate Home Assistant increase and
+    is ADOPTED as the new ceiling instead of being fought back down. A
+    reading at or below the ceiling, including a fresh, lower Home
+    Assistant brightness write, is HIS and is never fought back up either
+    way. An unreadable fixture is left alone — unknown never acts."""
     settings = _settings()
     try:
         try:
@@ -984,10 +1103,18 @@ async def _drift_check(did: str, dev, target: str) -> None:
                 return
             payload, check = {"on": False}, (lambda s: s.get("on") is False)
         else:
-            want_bri = int(settings.owned_brightness) if settings.own_brightness else None
-            if found_on is True and (want_bri is None or found_bri == want_bri):
+            rebooted = await _rebooted_since_last_check(did, dev)
+            ceiling = _brightness_ceiling(did, settings)
+            over_ceiling = (ceiling is not None and isinstance(found_bri, int)
+                           and found_bri > ceiling)
+            if over_ceiling and not rebooted:
+                _adopt_higher_brightness(did, found_bri)
+                ceiling = _brightness_ceiling(did, settings)
+                over_ceiling = ceiling is not None and found_bri > ceiling
+            if found_on is True and not over_ceiling:
                 return
             payload = {"on": True}
+            want_bri = ceiling
             if want_bri is not None:
                 payload["bri"] = want_bri
             check = (lambda s: s.get("on") is True
@@ -1033,6 +1160,18 @@ async def _remember_before(did: str, dev) -> None:
     st.pre_take[did] = {"on": on, "bri": bri if isinstance(bri, int) and bri > 0 else None,
                         "ip": str(ip), "at_ms": now_ms()}
     house_store.save_state()
+    # Seed the reboot baseline from the SAME take-start moment, so the
+    # first later overshoot already has something to compare against
+    # rather than defaulting to "never checked" (see _rebooted_since_
+    # last_check). Best-effort: a fixture that can't answer json/info
+    # still gets its on/bri ceiling above.
+    try:
+        info = await deps.get_info(dev)
+    except Exception:                                    # noqa: BLE001
+        return
+    uptime = info.get("uptime")
+    if isinstance(uptime, (int, float)):
+        _rt.uptime_ms[did] = uptime
 
 
 def _maybe_hand_back() -> None:

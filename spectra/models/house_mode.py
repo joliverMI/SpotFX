@@ -321,12 +321,23 @@ class HouseSettings(BaseModel):
     voice_fixtures   where Serenity's listening/processing/responding colours
                      show (Home Assistant used the crystal and both sconces)
     voice_looks      one colour + level per voice state
-    own_brightness   while a mode drives the room, Spectra holds every WLED's
-                     master brightness at `owned_brightness` and its power
-                     switch where the mode says, re-asserting a drift it
-                     reads back (house_fixtures.py). Off = leave both alone.
-    owned_brightness the master brightness Spectra holds (0-255). 255 makes
-                     the per-fixture Levels the only dimmer.
+    own_brightness   while a mode drives the room, Spectra manages every
+                     WLED's power switch where the mode says. Its master
+                     brightness is NEVER raised above the level HIS OWN
+                     prior setting (Home Assistant or the fixture itself)
+                     had it at — that captured level is the ceiling
+                     (house_fixtures.py's `pre_take`), and the per-fixture
+                     Levels dimmer only ever scales within it. The ceiling
+                     can still RISE during the take — a later reading above
+                     it with no reboot evidence behind it (its own uptime
+                     never dropped) is HIS OWN deliberate increase and is
+                     adopted into `pre_take` as the new ceiling, never
+                     corrected back down; only a genuine reboot's brighter
+                     boot preset is capped back to the prior ceiling.
+                     Off = leave both power and brightness alone.
+    owned_brightness an ADDITIONAL hard cap (0-255) on top of the preserved
+                     ceiling above — never a value Spectra forces upward.
+                     255 (the default) imposes no extra limit.
 
     PHASE 4:
     enabled          THE CUTOVER SWITCH. Off (the default) = house lighting
