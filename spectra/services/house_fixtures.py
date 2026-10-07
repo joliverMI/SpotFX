@@ -155,9 +155,10 @@ written — the shipped state, byte-identical to phase 1. On standby (a
 preview, a camera run, a night run) nothing moves at all and the output
 layer's suspension streams every fixture (a capture must see what it
 drives) — except a colour-set preview on its own, which keeps the withheld
-set in force (show_output.suspension_reason). A fixture this process switched OFF is switched back ON when the
-mode is cleared while SPECTRA still holds the room — a streamed fixture that
-is powered off is a dark-fixture fault, not a resting state.
+set in force (show_output.suspension_reason). A fixture this process
+switched OFF is switched back ON when the mode is cleared while SPECTRA
+still holds the room — a streamed fixture that is powered off is a
+dark-fixture fault, not a resting state.
 
 ═══ THE TAKE SCOPE HOLDS (PR 317) ═══
 
