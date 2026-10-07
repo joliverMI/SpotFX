@@ -62,6 +62,48 @@ FIXTURES, and what Spectra then does to them:
              was fine until `owned_brightness` tightened under it) or a
              value nobody here ever asked for — diagnostic only, it changes
              nothing about the correction itself.
+
+             SPECTRA HAS NO HA READ PATH — checked, not assumed, before
+             shipping the always-correct-down rule above. Spectra talks to
+             Home Assistant in exactly one direction: HA calls IN
+             (`PUT /api/house/mode`, the fixture/mains/tv_music reports
+             above) — grep-confirmed zero references anywhere in this repo
+             to an outbound HA client, token, or base URL. So a genuinely
+             deliberate HA brightness raise cannot be told apart from
+             anything else here; adopting ANY raise as his automatically,
+             the way the first rework did, is what adopted the one HA
+             never made. A later follow-up that lets a real HA raise stand
+             without waiting on the next reboot needs Spectra to read
+             `light.crystal_dining_room`'s (etc.) own HA state back —
+             not built here.
+
+             THE REMAINING CANDIDATES for the 2026-10-06 21:45:49 raise,
+             and what each would have left behind: a WLED-side PRESET
+             (button/IR remote/macro) would show as `json/state`'s `"ps"`
+             holding a non -1 id at the moment, but WLED keeps no log of a
+             preset firing and clearing itself, so this is unprovable after
+             the fact either way. The NIGHTLIGHT timer (`"nl"`) ramps
+             TOWARD its own configured target (`tbri`), which is 0 on this
+             fixture — it dims, it does not explain a rise to 255,
+             regardless of whether it ever fired. A UDP SYNC PEER (WLED's
+             native port-21324 broadcast, `recv.bri` on this fixture) was
+             checked live: crystal's own sync group (1) has no peer with
+             `send.en` true — `porch-rail`/`tv-backlight` (its only
+             group-1 peers) both have sync sending off; the sconces DO
+             send but sit in group 2, which WLED's group bitmask keeps
+             from reaching a group-1 receiver — ruled out as far as the
+             CURRENT config can show (WLED keeps no received-sync log
+             either). The external LedFX SERVICE was ruled out directly:
+             `ledfx.service` is disabled, was `inactive` with no
+             `ActiveEnterTimestamp` and has zero journal entries across
+             the whole incident window — and `ownership_reconciler.py`
+             would have CRITICAL-logged a foreign writer on this device,
+             which never appears. What is left, matching firstmate's own
+             "or the user's" phrasing and leaving zero forensic trace on
+             either HA's or Spectra's side by construction (WLED's JSON
+             API keeps no request log or client IP at all): THE WLED APP
+             OR ITS OWN WEB UI, used directly on the LAN, bypassing both
+             Home Assistant and Spectra.
   RECHECK    "I just powered the sconce mains": re-find the named fixtures by
              identity (a mains cycle is when a WLED takes a new DHCP lease),
              re-init a driver that never resolved, and re-apply the power /
