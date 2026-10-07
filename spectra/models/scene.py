@@ -834,12 +834,16 @@ def _clamp_radial_base_rotation(data: dict) -> dict:
             if isinstance(kind, dict):
                 params = kind.get("params")
                 if isinstance(params, dict) and _RADIAL_SPEED_PARAM in params:
-                    target = _as_dict(params[_RADIAL_SPEED_PARAM])
-                    new_target = dict(target)
-                    for field in ("value", "hi", "lo"):
-                        if field in new_target:
-                            new_target[field] = _clamp_numeric(
-                                new_target[field], cap)
+                    raw_target = params[_RADIAL_SPEED_PARAM]
+                    if isinstance(raw_target, dict) or hasattr(
+                            raw_target, "model_dump"):
+                        new_target = _as_dict(raw_target)
+                        for field in ("value", "hi", "lo"):
+                            if field in new_target:
+                                new_target[field] = _clamp_numeric(
+                                    new_target[field], cap)
+                    else:
+                        new_target = _clamp_numeric(raw_target, cap)
                     kind = {**kind, "params": {
                         **params, _RADIAL_SPEED_PARAM: new_target}}
             new_kinds.append(kind)
