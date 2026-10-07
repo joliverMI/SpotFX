@@ -1,12 +1,15 @@
 """The pure parts of scripts/preview_perf/live_probe.py (the read-only
 live measurement behind data/preview-p4-live-check/report.md): the `ss`
 info parser, the percentile, the proxy-hop subtraction and the viewer
-summary. The live halves (sockets, HTTP, the stream) are not driven here —
-no live access from tests, ever."""
+summary — plus `sample_sockets()`'s own event-loop scheduling, driven
+against fakes rather than a real `ss`/socket. No real socket, subprocess
+or HTTP call is ever made — no live access from tests, ever."""
 from __future__ import annotations
 
+import asyncio
 import importlib.util
 import sys
+import time
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
@@ -77,6 +80,95 @@ def test_viewer_summary_counts_gaps_seq_holes_and_rate_share():
     assert s["rate_fps_share"] == {"20": 0.6, "30": 0.4}
     assert s["delivered_fps"] == round(5 / 0.333, 2)
     assert s["kbit_s"] == round(5000 * 8 / 0.333 / 1000, 1)
+
+
+def test_sample_sockets_never_blocks_the_event_loop(monkeypatch):
+    """`tailscale_sockets()` is a stand-in for the real `ss` subprocess call,
+    made deliberately slow. A sibling coroutine ticking on its own short
+    `asyncio.sleep` must keep making progress at roughly its own pace while
+    the sampler runs — if `sample_sockets` called the slow function inline
+    on the loop instead of via `asyncio.to_thread`, the ticker would stall
+    for the whole duration of each call."""
+    slow_s = 0.08
+
+    def slow_tailscale_sockets():
+        time.sleep(slow_s)
+        return []
+
+    monkeypatch.setattr(live_probe, "tailscale_sockets", slow_tailscale_sockets)
+
+    ticks: list[float] = []
+
+    async def ticker(stop_at):
+        while time.time() < stop_at:
+            ticks.append(time.time())
+            await asyncio.sleep(0.01)
+
+    async def run():
+        samples: list[dict] = []
+        stop_at = time.time() + 0.3
+        await asyncio.gather(
+            live_probe.sample_sockets(samples, stop_at, 0.1),
+            ticker(stop_at),
+        )
+        return samples
+
+    samples = asyncio.run(run())
+    assert len(samples) >= 2
+    gaps = [b - a for a, b in zip(ticks, ticks[1:])]
+    assert gaps and max(gaps) < slow_s
+
+
+def test_sample_sockets_waits_for_every_viewer_before_its_first_sample(monkeypatch):
+    """Under `--loopback-peers`, a sample taken before a viewer's own
+    connect has registered its socket in `OWN_PEERS` could count that
+    viewer's own loopback connection as his. `sample_sockets` must not take
+    its first sample until every passed-in readiness event is set."""
+    call_times: list[float] = []
+
+    def tailscale_sockets_stub():
+        call_times.append(time.time())
+        return []
+
+    monkeypatch.setattr(live_probe, "tailscale_sockets", tailscale_sockets_stub)
+
+    async def run():
+        samples: list[dict] = []
+        events = [asyncio.Event(), asyncio.Event()]
+        stop_at = time.time() + 0.3
+
+        async def resolve(ev, delay):
+            await asyncio.sleep(delay)
+            ev.set()
+
+        await asyncio.gather(
+            live_probe.sample_sockets(samples, stop_at, 0.05, ready_events=events),
+            resolve(events[0], 0.02),
+            resolve(events[1], 0.12),
+        )
+
+    start = time.time()
+    asyncio.run(run())
+    assert call_times
+    assert call_times[0] - start >= 0.1
+
+
+def test_sample_sockets_gives_up_waiting_if_a_viewer_never_resolves(monkeypatch):
+    """A readiness event that is never set (a viewer wedged on a connect
+    that never raises) must not stall the sampler forever — it still
+    starts sampling once `VIEWER_READY_TIMEOUT_S` passes."""
+    monkeypatch.setattr(live_probe, "VIEWER_READY_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(live_probe, "tailscale_sockets", lambda: [])
+
+    async def run():
+        samples: list[dict] = []
+        never = asyncio.Event()
+        stop_at = time.time() + 0.3
+        await live_probe.sample_sockets(samples, stop_at, 0.05, ready_events=[never])
+        return samples
+
+    samples = asyncio.run(run())
+    assert len(samples) >= 2
 
 
 def test_render_md_lists_every_viewer_including_extras():

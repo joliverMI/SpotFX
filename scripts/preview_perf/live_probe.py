@@ -204,7 +204,8 @@ class ViewerRecord:
         }
 
 
-async def run_viewer(rec: ViewerRecord, stop_at: float, level: str, scope: str) -> None:
+async def run_viewer(rec: ViewerRecord, stop_at: float, level: str, scope: str,
+                     connected: Optional[asyncio.Event] = None) -> None:
     try:
         async with websockets.connect(rec.url, open_timeout=5, max_size=2 ** 24,
                                       ping_interval=None) as ws:
@@ -214,6 +215,8 @@ async def run_viewer(rec: ViewerRecord, stop_at: float, level: str, scope: str) 
                 OWN_PEERS.add(f"{sock[0]}:{sock[1]}")
             except Exception:
                 pass
+            if connected is not None:
+                connected.set()
             await ws.send(json.dumps({"type": "hello", "protocol": 2,
                                       "level": level, "scope": scope}))
             last_rate: Optional[int] = None
@@ -240,13 +243,32 @@ async def run_viewer(rec: ViewerRecord, stop_at: float, level: str, scope: str) 
                 last_rate = msg["rate_fps"]
     except Exception as exc:      # the measurement reports, it never raises
         rec.closed_reason = repr(exc)
+    finally:
+        if connected is not None:
+            connected.set()
 
 
 # ── the side samplers ──────────────────────────────────────────────────
 
-async def sample_sockets(samples: list[dict], stop_at: float, period: float) -> None:
+VIEWER_READY_TIMEOUT_S = 10.0
+
+
+async def sample_sockets(samples: list[dict], stop_at: float, period: float,
+                         ready_events: Optional[list[asyncio.Event]] = None) -> None:
+    """Waits for every viewer's own connect (success or failure) to finish —
+    so its socket is in `OWN_PEERS` before the first sample under
+    `--loopback-peers` — then samples off the event loop (`ss` shells out
+    and can cost tens of ms, which would otherwise delay every viewer's
+    `ws.recv()` for the duration of the call)."""
+    if ready_events:
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(*(e.wait() for e in ready_events)),
+                timeout=VIEWER_READY_TIMEOUT_S)
+        except asyncio.TimeoutError:
+            pass
     while time.time() < stop_at:
-        samples.append({"at": time.time(), "sockets": tailscale_sockets()})
+        samples.append({"at": time.time(), "sockets": await asyncio.to_thread(tailscale_sockets)})
         await asyncio.sleep(period)
 
 
@@ -314,15 +336,16 @@ async def measure(out_dir: Path, duration: float, level: str, scope: str,
     proxied = ViewerRecord("proxy :8000", f"ws://127.0.0.1:8000{WS_PATH}")
     direct = ViewerRecord("direct :8010", f"ws://127.0.0.1:8010{WS_PATH}")
     extras = [ViewerRecord(name, url) for name, url in (extra_urls or [])]
+    all_viewers = [proxied, direct, *extras]
+    ready_events = [asyncio.Event() for _ in all_viewers]
     sockets: list[dict] = []
     http: list[dict] = []
     engine: list[dict] = []
     started = time.time()
     await asyncio.gather(
-        run_viewer(proxied, stop_at, level, scope),
-        run_viewer(direct, stop_at, level, scope),
-        *[run_viewer(x, stop_at, level, scope) for x in extras],
-        sample_sockets(sockets, stop_at, ss_period),
+        *[run_viewer(rec, stop_at, level, scope, connected=ev)
+          for rec, ev in zip(all_viewers, ready_events)],
+        sample_sockets(sockets, stop_at, ss_period, ready_events=ready_events),
         sample_http(http, stop_at, http_period, (8000, 8010)),
         sample_engine(engine, stop_at, 5.0),
     )
