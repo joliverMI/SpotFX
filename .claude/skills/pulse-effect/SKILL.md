@@ -54,14 +54,25 @@ Plan: `/home/javi/fleet-spotfx/data/single-led-power-plan/report.md`.
   1/7 on hits stronger than 0.35, at most one per 0.45 beat; drift 2% a
   bar; 70 ms glide. Samples the same RGB gradient curve the strips render.
 - **Colour flip is a HUE rotation** (`rotate_hue`, saturation and value
-  held) easing back to exactly 0 at `flip_beats` — never an RGB lerp,
-  which passes through grey and shows as WHITE on Hue (the test carries
-  that as its red control).
+  held), HELD at full angle for `flip_hold_s` (fixed seconds, not beats —
+  tuning feedback 2026-10-06, his report: "way too fast... at least half a
+  second and then fade out"), then eased back to exactly 0 over
+  `flip_fade_s` — never an RGB lerp, which passes through grey and shows
+  as WHITE on Hue (the test carries that as its red control).
 - **Flare pokes** follow the burst_rockets pattern (`fx/VENDOR.md` #15):
   edge-detected in `config_updated`, consumed in `render`, self-reset to 0;
   `_init_state` zeroes a stale persisted value. `flash`/`flip` are NOT in
   the registry; the sizes/timings they produce (`flash_size`, `flash_ms`,
-  `flip_degrees`, `flip_beats`) ARE, so he tunes them on the Initial Set tab.
+  `flip_degrees`, `flip_hold_s`, `flip_fade_s`) ARE, so he tunes them on
+  the Initial Set tab.
+- **Hit source** (`hit_source`, three options): "kick and bass" (default,
+  tuning feedback 2026-10-06 — weights `beat_power`/`bass_power` near full
+  and `mids_power`/`high_power` falling off above ~250 Hz, so hats/cymbals
+  move it far less than kicks/bass); "bass weighted" (the original default,
+  `lows_power + 2 x melbank mean`); "bass only" (`lows_power` alone).
+  Regenerating `tests/fixtures/pulse/` after any change to the hit signal
+  needs the new per-band arrays `scripts/check_pulse_effect.py` captures
+  (`beat`/`bass`/`mids`/`high`, alongside the original `lows`/`bmean`).
 - **min_intensity** (`FlareKind`, any type; pulse_flip defaults to 0.4) is
   STRICT: fires only above. Below it a kind leaves its lane pool like a
   disabled one (`resolve_lane_picks`), and `fire_kind` (the ▶ Preview)
@@ -71,7 +82,7 @@ Plan: `/home/javi/fleet-spotfx/data/single-led-power-plan/report.md`.
 
 Effect params: YES, as of the 2026-10-06 Sonic coverage audit build —
 `get_scene_entry_params`/`set_scene_entry_param` (spectra/services/
-scene_console.py) read and write any of the 26 Pulse settings' current
+scene_console.py) read and write any of the 27 Pulse settings' current
 value on one scene's one device entry (e.g. "set Resting Level (calm) to
 0.3 on Pulse Test's Singles entry"). A value held by a ⚡ binding is
 replaced, named as such. Flares: `set_flare_kind` creates/updates
@@ -87,7 +98,10 @@ and only by copying a whole entry from another scene.
 `tests/test_pulse_effect.py` (phase 1), `tests/test_pulse_engine_wiring.py`
 (phase 2), `tests/test_pulse_rainbow_flares.py` (phase 3: walk, flares,
 gating, real pipeline + device preview, his songs),
-`scripts/check_pulse_effect.py` (fixtures from his WAVs). Not yet measured:
+`scripts/check_pulse_effect.py` (fixtures from his WAVs),
+`scripts/check_pulse_hit_source_bands.py` (the 2026-10-06 tuning
+feedback's reactivity evidence: old vs new `hit_source` default against
+his songs' own bass vs snare/other onset marks). Not yet measured:
 the Singles' real gamma and delay (`scripts/measure_singles_response.py`,
 blocked on a camera pose that can see them). That script's `NEVER_STREAM`
 guard refuses `hue-lights` because its stream is the whole ten-bulb Music

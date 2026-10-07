@@ -150,8 +150,9 @@ Per event, fed by the bridge with the fire's intensity:
                   is Pulse, a FLASH (the light jumps by the effect's own
                   flash_size x a strength of 0.4 + 0.6 x intensity, back to
                   a tenth in its flash_ms) or a COLOUR FLIP (the hue turns
-                  flip_degrees at once and swings back round the wheel over
-                  flip_beats). Same shape as firework_burst in every
+                  flip_degrees at once, holds for flip_hold_s, and swings
+                  back round the wheel over flip_fade_s). Same shape as
+                  firework_burst in every
                   structural respect — an instant, self-resetting,
                   deliberately-unregistered poke key, no carry, no release,
                   no lead — see _pulse_flash/_pulse_flip.
@@ -2028,8 +2029,9 @@ class ResponseEngine:
         intensities greater than .4"): one instant jump of Pulse's own
         `flip` poke key on every Pulse virtual. The effect edge-detects it,
         turns the shown colour's hue by its own flip_degrees (180) on the
-        frame it lands and swings it back over its flip_beats (0.75 beat)
-        as a HUE ROTATION — saturation and value held, so the return goes
+        frame it lands, holds it for flip_hold_s (0.5 s default), then
+        swings it back over flip_fade_s (1.0 s default) as a HUE ROTATION
+        — saturation and value held, so the return goes
         round the colour wheel and never through grey or white. The ">.4"
         is the kind's own min_intensity (0.4 by default for this type),
         applied before this runs; `intensity` is recorded, not consulted.

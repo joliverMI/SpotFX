@@ -296,8 +296,9 @@ def test_a_flip_turns_180_at_once_and_returns_round_the_wheel():
     assert offs[0] == pytest.approx(180.0)            # the frame it lands
     assert r.e._config["flip"] == 0                    # self-reset
     assert np.all(np.diff(offs) <= 1e-9)               # one way back, no bounce
-    span = int(np.ceil(0.75 * 0.5 * FPS))
-    assert offs[span] == 0.0 and offs[span - 2] > 0.0  # done at 0.75 beat
+    schema = pulse_mod.PulseAudioEffect.schema()({})
+    span = int(round((schema["flip_hold_s"] + schema["flip_fade_s"]) * FPS))
+    assert offs[span] == 0.0 and offs[span - 2] > 0.0  # done at hold + fade
     base_h, base_s, base_v = _hsv(r.colours[i0 - 1])
     h0, _s, _v = _hsv(r.colours[i0])
     assert (h0 - base_h) % 1.0 == pytest.approx(0.5, abs=1e-6)   # complement
@@ -322,10 +323,19 @@ def test_the_wheel_path_control_a_straight_return_would_go_through_grey():
     assert min(sats) > 0.99
 
 
-def test_the_flip_return_follows_the_tempo():
-    r, i0 = _flip_run(beat_ms=1000.0, flip_beats=1.0)
-    offs = np.asarray(r.offsets[i0:])
-    assert offs[int(0.95 * FPS)] > 0.0 and offs[int(1.02 * FPS)] == 0.0
+def test_the_flip_hold_and_fade_are_fixed_seconds_not_beats():
+    """Task 3 (2026-10-06 tuning feedback): the flip's hold+fade are FIXED
+    SECONDS, unlike the rest of the effect's timing — two wildly different
+    tempos must land the flip's own end at the SAME wall-clock moment."""
+    r_fast, i0_fast = _flip_run(beat_ms=250.0)    # 240 bpm
+    r_slow, i0_slow = _flip_run(beat_ms=2000.0)   # 30 bpm
+    offs_fast = np.asarray(r_fast.offsets[i0_fast:])
+    offs_slow = np.asarray(r_slow.offsets[i0_slow:])
+    schema = pulse_mod.PulseAudioEffect.schema()({})
+    span = int(round((schema["flip_hold_s"] + schema["flip_fade_s"]) * FPS))
+    assert offs_fast[span - 2] > 0.0 and offs_fast[span] == 0.0
+    assert offs_slow[span - 2] > 0.0 and offs_slow[span] == 0.0
+    assert offs_fast[:span].tolist() == pytest.approx(offs_slow[:span].tolist())
 
 
 def test_a_flip_turns_the_rainbow_walk_colour():
@@ -493,7 +503,9 @@ def test_the_flare_preview_ruler_shows_the_effects_own_animation(monkeypatch):
     assert flash["animation_end_s"] == pytest.approx(0.18, abs=1e-3)
     flip = _run(flare_preview.build_timeline(
         scene, FlareKind(name="Pulse Colour Flip", type="pulse_flip"), 0.8))
-    assert flip["effect_animation_ms"] == pytest.approx(0.75 * 400.0)
+    # fixed seconds (task 3, 2026-10-06), not beat-scaled: the monkeypatched
+    # beat_ms above has no effect on this one
+    assert flip["effect_animation_ms"] == pytest.approx((0.5 + 1.0) * 1000.0)
     low = _run(flare_preview.build_timeline(
         scene, FlareKind(name="Pulse Colour Flip", type="pulse_flip"), 0.2))
     assert low["result"] == "below_min_intensity" and low["writes"] == []
@@ -583,8 +595,10 @@ def test_pulse_flares_land_on_the_light_and_in_the_device_preview(tmp_path, monk
                     layout=preview_stream.DeviceLayout(rows=1, cols=1,
                                                        cell_index=None, cells=1))
                 assert list(sf.full()) == list(np.clip(tapped[0], 0, 255).astype(np.uint8))
-                # and it settles back: flash gone, colour home
-                headless.render_frames(virtual, 60, clock=clock)
+                # and it settles back: flash gone, colour home (100 frames,
+                # not 60 — the flip's hold+fade (1.5s default) is longer
+                # than 60 frames/1s, task 3, 2026-10-06)
+                headless.render_frames(virtual, 100, clock=clock)
                 assert effect.level == pytest.approx(rest, abs=1e-3)
                 assert effect.hue_offset == 0.0
         finally:
@@ -679,8 +693,20 @@ def test_his_flares_flip_only_above_0_4_and_flash_every_time(slug):
     starts = [i for i in range(1, len(off)) if off[i] == 180.0 and off[i - 1] < 180.0]
     started_t = [tr.t[i] for i in starts]
     expect = [t for t, i, _p in flares if i > 0.4 and t <= tr.t[-1]]
-    assert len(started_t) == len(expect)
+    # A re-trigger landing WHILE the previous flip is still HELD flat at the
+    # full angle (flip_hold_s, 0.5s default — task 3, 2026-10-06) never
+    # produces a fresh <180->180 edge: the offset was already 180. One
+    # landing during the FADE instead (offset already <180, easing back)
+    # DOES still show a fresh jump back up to 180 — it restarts the clock,
+    # which reads t=0 < hold on the very next frame.
+    flip_hold_s = pulse_mod.PulseAudioEffect.schema()({})["flip_hold_s"]
+    visible_expect = []
     for t in expect:
+        if visible_expect and t - visible_expect[-1] < flip_hold_s:
+            continue
+        visible_expect.append(t)
+    assert len(started_t) == len(visible_expect)
+    for t in visible_expect:
         assert any(abs(s - t) <= 2 * DT for s in started_t)
     assert len(tr.flashes) == len([f for f in flares if f[0] <= tr.t[-1]])
 

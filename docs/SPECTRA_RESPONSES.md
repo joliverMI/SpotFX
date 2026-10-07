@@ -254,8 +254,9 @@ Pulse also answers two flare kinds of its own (phase 3): **pulse_flash**
 (the level jumps by `flash_size` x a strength of 0.4 + 0.6 x intensity and
 falls back to a tenth in `flash_ms`, spent from the flash budget; inside a
 lull it is scaled by the lull's fade, so the lull still lands black) and
-**pulse_flip** (the hue turns `flip_degrees` and swings back round the
-wheel over `flip_beats`; fires only above intensity 0.4 by default —
+**pulse_flip** (the hue turns `flip_degrees`, holds for `flip_hold_s`
+(0.5s), then swings back round the wheel over `flip_fade_s` (1.0s); fires
+only above intensity 0.4 by default —
 `FlareKind.min_intensity`). Both are instant, self-resetting pokes with no
 lead, carry or release.
 
