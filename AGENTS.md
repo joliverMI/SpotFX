@@ -4034,11 +4034,11 @@ slots already in the schema). Six things:
   (`tests/test_device_output_landing.py`, real pipeline, neighbour-on-the-
   same-virtual untouched, red with the seam bypassed).
 - **THE GATE (`show_output.refusal()`)**: acts only while SPECTRA owns,
-  the stack is up and the engine is live; stands down (output layer
-  suspended, fires refused by name) while a preview, colour preview,
-  camera run or night run holds the room. A room effect's OWN preview hold
-  does NOT count as a preview. It never takes or releases the room;
-  `release.release_room` calls `show_output.on_release()` BEFORE the fade.
+  the stack is up and the engine is live; stands down (fires refused by
+  name) while a preview, colour preview, camera run or night run holds
+  the room. A room effect's OWN preview hold does NOT count as a preview.
+  It never takes or releases the room; `release.release_room` calls
+  `show_output.on_release()` BEFORE the fade.
   **Suspension is `show_output.suspension_reason()`, narrower than
   `refusal()` by one case: a COLOUR-SET preview alone keeps the output
   layer in force** (2026-10-07, his "previewing a colour set pushes to
