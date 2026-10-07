@@ -44,7 +44,14 @@ worth knowing cold:
    `own_brightness`, `owned_brightness`, set once at cutover with River).
    All five stay readable through `get_house_settings`; none is in
    `house_console.ENERGY_KEYS` or any other write op. Don't add a write
-   path for them without going back to the Admiral.
+   path for them without going back to the Admiral. The 2026-10-06
+   correction only fixed what a FRESH `scripts/seed_hue_scope.py`/
+   `scripts/seed_house_lighting.py` run writes — a room that already ran
+   the old defaults needs the one-time
+   `scripts/fix_loft_ledge_bulb_scope.py` (dry-run default, `--apply`
+   with a required `--spectra-url`) to move the four bulbs out of
+   `hue_scope.json`'s `"excluded"` map and clear them from the live
+   `hue_excluded_lights` through this exact `apply_settings_patch` path.
 4. **A MODE IS A PERSON'S PICK; HOME ASSISTANT'S WORD IS A CLOCK.**
    `house.set_mode(mode=..., source="sonic")` behaves exactly like a
    House page press — it holds until HA's own `lighting_mode` next

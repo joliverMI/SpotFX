@@ -4318,6 +4318,18 @@ every bulb in it is allow-listed. Spec: `tests/test_hue_stream_scope.py`,
 `tests/test_hue_scope.py`, `tests/test_house_phase4.py`,
 `tests/test_seed_house_lighting.py`.
 
+**The fixed defaults only govern a FRESH seeder run — his own already-
+persisted `storage/spectra/hue_scope.json` and `HouseSettings.
+hue_excluded_lights` are untouched by a deploy restart alone**, since
+neither file is migrated on load. `scripts/fix_loft_ledge_bulb_scope.py`
+(dry-run default, `--apply`, `--spectra-url` required with `--apply`) is
+the one-time catch-up: it moves the four bulbs out of `hue_scope.json`'s
+`"excluded"` map by direct backed-up file edit, and clears their names
+out of `hue_excluded_lights` through the live service's own
+`PUT /api/house/settings` — never a direct edit to `house_modes.json`,
+which would race `apply_settings_patch`'s own reconcile tick. Idempotent.
+Spec: `tests/test_fix_loft_ledge_bulb_scope.py`.
+
 **A RESTART MUST NOT LAND THE ROOM TOGGLE BEFORE THE MODE (2026-10-06).**
 Every restart under Away lit his allow-listed Hue bulbs for ~20 s: the
 resume sets `live.host` (so `live.active` reads True) ~16 s before the
