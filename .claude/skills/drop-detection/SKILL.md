@@ -109,6 +109,30 @@ matching the same authored mark fire on top of each other; `matches_his`
 decides which of two sequences near one drop wins (his sort order), never
 whether the dedup applies at all.
 
+## What a LULL is TOLD about its drop — the lull hand-off hook (2026-10-08)
+
+A drop sequence's lull can be told how many pieces to leave on the panel
+for the drop and which effect the drop will land on. That is ONE hook, and
+it already exists — do not build a second: `fx/effects/lull_handoff.py`
+(the keys `lull_keep`/`lull_next`/`lull_s` on every lull arm,
+`drop_intensity` on every drop arm, membership
+`fx.device_model.LULL_HANDOFF_EFFECTS`/`DROP_INTENSITY_EFFECTS`) and
+`scene_response`'s "THE LULL HAND-OFF HOOK" docstring section (the
+`LullContext` -> `LullHandoff` RESOLVER). Drop-led scene switching and the
+fireworks melds plug in by `scene_response.install_lull_handoff_resolver
+(fn)`, once, from `spectra/services/engine.py` — process-wide on purpose so
+the drop-sequence preview's scratch responders ask the same resolver the
+room does. The resolver must be pure and cheap (the preview runs it per
+lap), never raise into the fire (a failure falls back to keep 1, named in
+the record as "default (resolver failed)"), and answer per virtual
+(`next_effect` absent = the same effect). `LullContext.uri`/`position_ms`
+are the live song, so a resolver can find the sequence the lull belongs to.
+With nothing installed every lull keeps 1 (the Admiral's fish ask). Fish is
+the first adopter: told `lull_keep = 3, lull_next = "fireworks"` it leaves
+three spaced keepers whose positions are exactly what Fireworks' adopt path
+reads from `_handoff_snapshot`. Proofs: `tests/test_lull_handoff.py`,
+`tests/test_fish_lull_searcher.py`.
+
 ## Sonic reach
 
 `spectra/services/drop_console.py`, domain `"drops"`. The full edit set
