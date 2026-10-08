@@ -1901,12 +1901,13 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         id: 'sonic-light-show',
         title: 'Sonic on the Light Show page: fire, arm, disarm, hold, dim, move High/Low',
-        keywords: 'sonic light show chat popup pop-up fire set arm disarm whats armed hold device dim level create set move high low trigger end show',
+        keywords: 'sonic light show chat popup pop-up fire set arm disarm whats armed hold device dim level create set move high low trigger end show pulse reactivity flares off hues',
         body: [
           'The Light Show page has the same floating 💬 button, scoped to a third domain. Say a set\'s name and what to do: "fire Crystal Steady", "arm Blackout for the next High Trigger", "disarm Blackout", "what\'s armed right now", "hold the TV backlight dark", "dim everything to 40% for ten seconds", "create a set called Encore", "move the Low Trigger to 1:15", or "end the show."',
           'Sonic never guesses a name you only approximated — if it doesn\'t match a set, fixture, or category exactly, it refuses and offers the closest spellings rather than picking one. Every reply says plainly what actually ran (or why it refused), read from the same structured result the page itself shows, never from Sonic\'s own prose.',
           'A new set Sonic creates is always empty and brand-new — it can never overwrite one of your existing sets, even given the exact same name (the name is rejected instead). Adding steps to a set, and editing an existing one\'s steps, stays the Build view\'s job — Sonic can fire, arm and create, not author.',
           'A set holding a room-effect step fires and arms exactly like any other set — there is no separate "room effect" command.',
+          'Pulse and flares too: "turn flares off for the hues", "flares back on for the Singles", "Pulse reactivity to 0.3 on the Singles", "keep the Hue bulbs\' Pulse between 0.2 and 0.6", "end that Pulse hold". These run the same Pulse reactivity, Pulse brightness and Flares on / off steps the Build view offers, held until released unless you give a time.',
         ],
       },
       {
@@ -2629,6 +2630,26 @@ export const HELP_SECTIONS: HelpSection[] = [
         body: [
           'Level multiplies a fixture\'s light: 50% halves it, 150% brightens it (clipped at full). It fades in, lasts for a number of seconds, until the next scene change, or until released, then fades out by itself.',
           'Levels stack — two 50% levels on one fixture give 25% — and they multiply on top of the room dimmer and any room effect rather than fighting them.',
+        ],
+      },
+      {
+        id: 'show-pulse',
+        title: 'Pulse reactivity and brightness floor / ceiling',
+        keywords: 'pulse reactivity react hits singles hue brightness floor ceiling minimum maximum dim calm modulate',
+        body: [
+          'Pulse reactivity turns how strongly the Pulse effect (the Singles: Hue bulbs, porch rail, dining table) answers the music. 1 is full — exactly how it behaves without the step — and 0 is no reaction to the music\'s hits: the light sits at its resting glow for the section and, on a rainbow colour set, no longer steps along the rainbow on hits (its slow drift carries on). Values in between scale both linearly. Flash and colour-flip flares and the charge / lull / drop are not reactivity — Flares on / off is their switch. Two reactivity steps on the same lights multiply.',
+          'Pulse brightness floor / ceiling keeps the effect between two brightnesses, 0 to 1 on the effect\'s own brightness scale (the same scale as its resting and depth settings — how bright it looks, not the raw value sent). The floor is how dark it may get, the ceiling how bright — through hits, drops, lulls and flares alike. With two steps on one light the highest floor and the lowest ceiling win.',
+          'Both fade in, then hold until released (the End button under Right now, or End show), for a time, or until the next scene change, and fade back out. Only Pulse listens: a target that is not running Pulse right now is unaffected, and picks the setting up if Pulse runs there while it holds. The room dimmer and Levels still apply on top.',
+        ],
+      },
+      {
+        id: 'show-flares',
+        title: 'Flares on / off',
+        keywords: 'flares off on hue hues bulbs category fixture steady no flares switch',
+        body: [
+          'Flares on / off stops flares reaching a fixture, a category, or everything — e.g. keep the Hue bulbs out of every flare while the rest of the room flares. It also takes those lights out of the charge / lull / drop: no climb in a charge, no going dark in a lull, no burst on a drop — they keep playing their normal look straight through the sequence (a charge or lull already under way there lets go when you switch flares off). The scene, its colour journey and the colour change on an analysed scene cue carry on as normal.',
+          'It works per virtual, because a flare writes to a virtual\'s effect: the Hue bulbs all share one virtual, so switching flares off for one Hue area switches them off for every Hue bulb, and the step\'s result names the fixtures that came along.',
+          'A "Flares on" step lifts every flares-off on those lights; the step also ends by itself after a time or at the next scene change if you chose that, and End show switches flares back on. A flare already in the air when flares go off still finishes and returns as normal.',
         ],
       },
       {

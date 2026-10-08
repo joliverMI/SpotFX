@@ -93,6 +93,13 @@ conductor = DriftConductor(
 )
 
 
+def _show_flare_blocked():
+    """The Light Show's flares-off switches (spectra/services/show_mods.py).
+    Lazy: built at import time, read per flare fire."""
+    from spectra.services import show_mods
+    return show_mods.blocked_virtuals()
+
+
 def _house_journey():
     """HOUSE LIGHTING's colour pool and pace while a mode rests (spectra/
     services/house.py journey_override). Lazy: house imports this module."""
@@ -110,6 +117,7 @@ responses = ResponseEngine(
     # exists) reads it to find the drop sequence a lull belongs to.
     song_position=lambda: (bridge.track_uri(),
                            bridge.effective_position_ms()),
+    flare_blocked=_show_flare_blocked,
 )
 
 # THE DROP-LED SCENE SWITCH (spectra/services/drop_switch.py) supplies the

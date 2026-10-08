@@ -1124,8 +1124,13 @@ class ResponseEngine:
         room_save: Callable[[color_journey.RoomColorState], None] | None = None,
         room_controls: Callable[[], Any] | None = None,
         song_position: Callable[[], tuple[Optional[str], Optional[int]]] | None = None,
+        flare_blocked: Callable[[], frozenset] | None = None,
     ) -> None:
         self.conductor = conductor
+        # FLARES OFF (the Light Show, spectra/services/show_mods.py): the
+        # virtuals no flare kind may write to right now. engine.py wires the
+        # show's switches; None (scratch engines — the previews) = none.
+        self._flare_blocked = flare_blocked or (lambda: frozenset())
         # THE LULL HAND-OFF HOOK: the live song for a resolver's LullContext
         # (engine.py wires the bridge); a per-instance resolver override for
         # tests (production installs one process-wide —
@@ -1680,6 +1685,25 @@ class ResponseEngine:
 
     # ── batched actions ──────────────────────────────────────────────────────
 
+    def _flare_states(self) -> dict:
+        """The virtuals a FLARE KIND — or the charge/lull/drop choreography —
+        may write to: every conductor virtual except those the Light Show
+        has flares switched off on (the Admiral, 2026-10-08: "turning off
+        flares should also turn off drop effect. so it shouldn't get dark on
+        a drop, or burst"). Every flare kind's loop and _drive_phase/
+        rearm_phase read this instead of conductor.virtuals; releases (of a
+        spike or a phase already landed) and the analysed scene-cue colour
+        moment do not."""
+        try:
+            blocked = self._flare_blocked()
+        except Exception:                                # noqa: BLE001
+            logger.exception("flare switches could not be read — flares go out")
+            blocked = frozenset()
+        if not blocked:
+            return self.conductor.virtuals
+        return {vid: st for vid, st in self.conductor.virtuals.items()
+                if vid not in blocked}
+
     def _reroll(self, scene: SceneV2, intensity: float,
                 jumps: dict, glides: dict, carry: dict) -> list[dict]:
         """Fresh dice: every signal="random" binding re-resolves in one new
@@ -1706,7 +1730,7 @@ class ResponseEngine:
         write in this module already lands (_gain, colour jump, release)."""
         ctx = FireContext(intensity, rng=self._rng)
         entry_vids: dict[str, list[str]] = {}
-        for vid, state in self.conductor.virtuals.items():
+        for vid, state in self._flare_states().items():
             entry_vids.setdefault(state.entry_id, []).append(vid)
         rolled: list[dict] = []
         for dev in scene.devices:
@@ -1846,7 +1870,7 @@ class ResponseEngine:
                   else PULSE_HOLD_S)
         out: dict[str, dict[str, float]] = {}
         forced_instant: set[tuple[str, str]] = set()
-        for vid, state in self.conductor.virtuals.items():
+        for vid, state in self._flare_states().items():
             moves: dict[str, float] = {}
             for pname, target in kind.params.items():
                 meta = device_model.get_param_meta(state.effect_type, pname)
@@ -2025,7 +2049,7 @@ class ResponseEngine:
         fade_ms = color_rotate_fade_ms(intensity)
         dwell_s = dwell_ms / 1000.0
         rotated_count = 0
-        for vid, state in self.conductor.virtuals.items():
+        for vid, state in self._flare_states().items():
             if not state.set_mode or not state.gradient:
                 continue
             original = state.gradient
@@ -2081,7 +2105,7 @@ class ResponseEngine:
         no band of his does this today."""
         rockets = firework_burst_rockets(intensity)
         targets = 0
-        for vid, state in self.conductor.virtuals.items():
+        for vid, state in self._flare_states().items():
             if state.effect_type not in device_model.FIREWORK_BURST_EFFECTS:
                 continue
             await self.executor.jump(vid, state.effect_type,
@@ -2121,7 +2145,7 @@ class ResponseEngine:
         structural. LEAD: none, same reasoning as firework_burst — the
         write is instant and the arrival is the animation."""
         targets = 0
-        for vid, state in self.conductor.virtuals.items():
+        for vid, state in self._flare_states().items():
             if state.effect_type not in device_model.BLOB_RUSH_EFFECTS:
                 continue
             await self.executor.jump(vid, state.effect_type,
@@ -2150,7 +2174,7 @@ class ResponseEngine:
         LEAD: none — the write is instant and the jump IS the animation."""
         strength = pulse_flash_strength(intensity)
         targets = 0
-        for vid, state in self.conductor.virtuals.items():
+        for vid, state in self._flare_states().items():
             if state.effect_type not in device_model.PULSE_FLARE_EFFECTS:
                 continue
             await self.executor.jump(vid, state.effect_type,
@@ -2173,7 +2197,7 @@ class ResponseEngine:
         Same structural shape as _pulse_flash: no carry, no release, no
         lead, unregistered key."""
         targets = 0
-        for vid, state in self.conductor.virtuals.items():
+        for vid, state in self._flare_states().items():
             if state.effect_type not in device_model.PULSE_FLARE_EFFECTS:
                 continue
             await self.executor.jump(vid, state.effect_type, {"flip": 1})
@@ -2254,7 +2278,7 @@ class ResponseEngine:
         hold_s = (kind.hold_ms / 1000.0 if kind.hold_ms is not None
                   else PULSE_HOLD_S)
         out: list[dict] = []
-        for vid, state in self.conductor.virtuals.items():
+        for vid, state in self._flare_states().items():
             baseline = carry.get((vid, "brightness"),
                                  state.brightness_baseline)
             peak = max(0.0, min(1.0, float(baseline) * effective))
@@ -2627,8 +2651,16 @@ class ResponseEngine:
         if any(st.effect_type in device_model.ONE_COLOUR_EFFECTS
                for st in self.conductor.virtuals.values()):
             house_reason = _house_owns_the_look()
+        allowed = self._flare_states()
+        flares_off: list[str] = []
         for vid, state in self.conductor.virtuals.items():
             if state.effect_type not in device_model.PHASE_EFFECTS:
+                continue
+            if vid not in allowed:
+                # FLARES OFF (the Light Show): this virtual keeps its normal
+                # look through the whole sequence — no charge climb, no
+                # lull darkness, no drop burst.
+                flares_off.append(vid)
                 continue
             if (house_reason is not None
                     and state.effect_type in device_model.ONE_COLOUR_EFFECTS):
@@ -2671,6 +2703,8 @@ class ResponseEngine:
             record["drop_intensity"] = drop_keys[lull_handoff.DROP_KEY]
         if withheld:
             record["withheld"] = {"virtuals": withheld, "reason": house_reason}
+        if flares_off:
+            record["flares_off"] = flares_off
         return record
 
     async def rearm_phase(self, event_class: str, progress: float,
@@ -2689,7 +2723,7 @@ class ResponseEngine:
         if any(st.effect_type in device_model.ONE_COLOUR_EFFECTS
                for st in self.conductor.virtuals.values()):
             house_reason = _house_owns_the_look()
-        for vid, state in self.conductor.virtuals.items():
+        for vid, state in self._flare_states().items():
             if state.effect_type not in device_model.PHASE_EFFECTS:
                 continue
             if (house_reason is not None
@@ -2790,6 +2824,23 @@ class ResponseEngine:
             count += 1
         return count
 
+    async def release_phase_on(self, virtual_ids) -> list[str]:
+        """Flares were just switched OFF on these virtuals (the Light Show):
+        a charge or lull already under way there lets go now, so they return
+        to their normal look rather than finishing the climb or going dark.
+        Nothing to do when no charge/lull is armed (a drop is one-shot)."""
+        if self._phase_armed is None:
+            return []
+        out = []
+        for vid in virtual_ids:
+            state = self.conductor.virtuals.get(vid)
+            if state is None or state.effect_type not in device_model.PHASE_EFFECTS:
+                continue
+            await self.executor.jump(vid, state.effect_type,
+                                     {"phase": "none", "phase_progress": 0.0})
+            out.append(vid)
+        return out
+
     async def analysed_color_jump(self, intensity: float,
                                   ramp_ms: int) -> dict:
         """ANALYSED COLOUR (owner ask 2026-09-25, "colour jump on every
@@ -2856,7 +2907,8 @@ class ResponseEngine:
         carry: dict[tuple[str, str], Any] = {}
         record["color_jump"] = await self._color_jump(
             scene, intensity, carry, ramp_ms=ramp_ms,
-            picked_id=timed.set_id if timed is not None else None)
+            picked_id=timed.set_id if timed is not None else None,
+            flare=False)
         self.conductor.on_surge(carry)
         record["result"] = record["color_jump"].get("result")
         return record
@@ -2864,7 +2916,8 @@ class ResponseEngine:
     async def _color_jump(self, scene: SceneV2, intensity: float,
                           carry: dict, *,
                           ramp_ms: Optional[int] = None,
-                          picked_id: Optional[str] = None) -> dict:
+                          picked_id: Optional[str] = None,
+                          flare: bool = True) -> dict:
         """The flare colour jump: the shipped selector picks (curve × genre
         × wheel-travel, terminal KEEP), the pick lands on set-mode virtuals
         with the intensity-scaled RAMP-IN (color_jump_ramp_ms — a hue-arc
@@ -2943,7 +2996,10 @@ class ResponseEngine:
         if ramp_ms is None:
             ramp_ms = color_jump_ramp_ms(intensity)
         landed = 0
-        for vid, state in self.conductor.virtuals.items():
+        # A flare's jump skips virtuals the Light Show has flares off on;
+        # the analysed scene-cue colour moment (flare=False) is no flare.
+        states = self._flare_states() if flare else self.conductor.virtuals
+        for vid, state in states.items():
             if not state.set_mode:
                 continue
             entry = by_vid.get(vid)

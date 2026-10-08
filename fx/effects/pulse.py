@@ -134,6 +134,20 @@ a fresh instance.
   Whether a flip fires at all (only above intensity 0.4 by default) is
   decided by the flare kind's minimum intensity before the write.
 
+THE LIGHT SHOW's MODULATION (fx/pulse_modulation.py, read once per
+rendered frame from this effect's virtual; the Admiral, 2026-10-08). With no
+modulation for the virtual nothing below happens and the effect is
+byte-identical. REACTIVITY r (0..1) multiplies what LIVE AUDIO drives: the
+hit pulse term (depth x envelope, min_pulse included; the charge's hits
+too) and the rainbow walk's step on a solid hit — r=1 is today, r=0 is the
+resting glow with no hit pulses and no hit steps. Deliberately NOT scaled
+(his choice of option A): the energy-driven resting level, the slow
+per-bar rainbow drift, the flash/flip flares (the Light Show's flares
+on/off is their switch) and the charge/lull/drop choreography. FLOOR and
+CEILING clamp the final eye-scale level (the same scale as rest/depth),
+before the output guard; the guard only slows rises, so a floor is
+re-asserted after it. Where two cross, the ceiling wins.
+
 THE OUTPUT GUARD backs the budget up on the light actually delivered: the
 rises really sent in the last second may not pass `max_flash_rate` either
 (a hit's attack under a flash, or a charge's climb under hits, deliver more
@@ -160,6 +174,7 @@ import voluptuous as vol
 
 import fx.effects.lull_dark as lull_dark
 import fx.effects.particle_handoff as particle_handoff
+from fx import pulse_modulation
 from fx.effects.audio import AudioReactiveEffect
 from fx.effects.gradient import GradientEffect
 
@@ -534,6 +549,9 @@ class PulseAudioEffect(AudioReactiveEffect, GradientEffect):
         self.hits = collections.deque(maxlen=HIT_LOG_LEN)
         self.steps = collections.deque(maxlen=HIT_LOG_LEN)    # (audio_t, target)
         self.flashes = collections.deque(maxlen=HIT_LOG_LEN)  # (render_t, wanted, landed)
+        # the Light Show's modulation (fx/pulse_modulation.py), read once
+        # per rendered frame; None = untouched (the idle path)
+        self._mod = None
 
     def config_updated(self, config):
         if not hasattr(self, "_env"):
@@ -686,7 +704,9 @@ class PulseAudioEffect(AudioReactiveEffect, GradientEffect):
         if self._render_t - self._last_step < RAINBOW_MIN_GAP_BEATS * self.beat_s():
             return
         self._last_step = self._render_t
-        self._walk_target += self._config["rainbow_step"]
+        # a hit's step is a reaction to the music: the Light Show's
+        # reactivity scales it like the hit pulse (option A, 2026-10-08)
+        self._walk_target += self._react(self._config["rainbow_step"])
         self.steps.append((self._audio_t, self._walk_target))
 
     # ── flash-rate budget ────────────────────────────────────────────────
@@ -773,7 +793,17 @@ class PulseAudioEffect(AudioReactiveEffect, GradientEffect):
         p = depth * env
         if env > MIN_PULSE_ENV:
             p = max(p, self._config["min_pulse"] * min(1.0, env * 3.0))
-        return p
+        return self._react(p)
+
+    def _react(self, hit_term):
+        """The live-audio hit term scaled by the Light Show's reactivity
+        (fx/pulse_modulation.py). Untouched with no modulation."""
+        mod = self._mod
+        return hit_term if mod is None else hit_term * mod.reactivity
+
+    def _virtual_id(self):
+        v = getattr(self, "_virtual", None)
+        return getattr(v, "id", None) if v is not None else None
 
     # ── level ────────────────────────────────────────────────────────────
 
@@ -797,7 +827,7 @@ class PulseAudioEffect(AudioReactiveEffect, GradientEffect):
                 CHARGE_MIN_DEPTH,
                 min(depth + CHARGE_DEPTH_ADD * prog, 1.0 - rest),
             )
-            level = rest + env * d2
+            level = rest + self._react(env * d2)
         elif ph == "lull":
             # fades to black by the lull's DARK POINT — the shared rule the
             # crystal's own lull darkness uses (fx/effects/lull_dark.py), so
@@ -1000,6 +1030,7 @@ class PulseAudioEffect(AudioReactiveEffect, GradientEffect):
     def render(self):
         dt = min(max(float(self.passed), 0.0), DT_MAX)
         self._render_t += dt
+        self._mod = pulse_modulation.get(self._virtual_id())
         target_e = float(self._config["energy"])
         self._energy_live += (target_e - self._energy_live) * (
             1.0 - math.exp(-dt / ENERGY_SLEW_S)
@@ -1029,9 +1060,19 @@ class PulseAudioEffect(AudioReactiveEffect, GradientEffect):
         if offset:
             colour = rotate_hue(colour, offset)
         g = self._config["gamma"]
+        mod = self._mod
+        if mod is not None:
+            # THE LIGHT SHOW's brightness floor and ceiling (eye scale):
+            # the ceiling wins if two holds cross.
+            level = min(max(level, mod.floor), mod.ceiling)
         lin = self._guard_output(level ** g)
         if lin < level ** g:
             level = lin ** (1.0 / g)
+        if mod is not None and level < min(mod.floor, mod.ceiling):
+            # the guard only ever slows a rise; a floor still holds
+            level = min(mod.floor, mod.ceiling)
+            lin = level ** g
+            self._lin_prev = lin
         self.level = level
         self.white = white
         self.hue_offset = offset

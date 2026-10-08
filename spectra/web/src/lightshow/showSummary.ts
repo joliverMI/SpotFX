@@ -11,6 +11,8 @@ export function stripLine(b: ShowBrief | null | undefined): string | null {
   if (b.running_sets) parts.push(`${b.running_sets} running`);
   if (b.holds) parts.push(`${b.holds} holding`);
   if (b.levels) parts.push(`${b.levels} level${b.levels === 1 ? '' : 's'}`);
+  if (b.pulse_mods) parts.push(`${b.pulse_mods} Pulse hold${b.pulse_mods === 1 ? '' : 's'}`);
+  if (b.flare_blocks) parts.push(`flares off ×${b.flare_blocks}`);
   if (b.room_effect) parts.push(b.room_effect);
   if (b.changed_settings) parts.push(`${b.changed_settings} setting${b.changed_settings === 1 ? '' : 's'} changed`);
   let line = `Show: ${parts.length ? parts.join(', ') : 'on'}`;
@@ -38,6 +40,8 @@ export function endShowSummary(r: EndShowReport): string {
   if (r.restored.length) parts.push(`put back: ${r.restored.join(', ')}`);
   if (r.released_devices.length) parts.push(`${r.released_devices.length} fixture(s) back to the show`);
   if (r.room_effect_stopped) parts.push('room effect stopped');
+  if (r.ended_pulse_mods) parts.push(`${r.ended_pulse_mods} Pulse hold(s) ended`);
+  if (r.ended_flare_blocks) parts.push('flares back on');
   if (r.left_alone.length) parts.push(`left as you have it: ${r.left_alone.map((x) => x.label).join(', ')}`);
   if (r.failed.length) parts.push(`could not put back: ${r.failed.map((x) => x.label).join(', ')}`);
   return parts.length ? `Show ended — ${parts.join('; ')}` : 'Show ended — nothing to put back';
@@ -50,6 +54,7 @@ export function endShowSummary(r: EndShowReport): string {
 export const SHOW_KIND_HELP_TOPICS = [
   'show-actions', 'show-device-states', 'show-level', 'show-room-effects', 'show-sets',
   'show-arming', 'show-high-low-triggers', 'show-run-view', 'sonic-light-show',
+  'show-pulse', 'show-flares',
 ] as const;
 
 // ── PHASE 2: arms and the High/Low Triggers ───────────────────────────────

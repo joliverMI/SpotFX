@@ -115,6 +115,27 @@ scene's Singles entry, or choosing its colour mode, is still NOT Sonic's
 (the Initial Set tab's job) — only copy_scene_device_entry reaches that,
 and only by copying a whole entry from another scene.
 
+## The Light Show's hand on Pulse (2026-10-08)
+
+Three Light Show actions reach this effect WITHOUT writing its config
+(a config write would fight scene fires, the Pulse feed and the param
+watchdog): `pulse_reactivity` and `pulse_brightness` push per-VIRTUAL
+values into `fx/pulse_modulation.py`, which `render()` reads once a frame
+(`self._mod`; None = no entry = byte-identical). Reactivity multiplies
+`_react()` — the hit term (`_pulse`, the charge's `env * d2`) and the
+rainbow walk's hit STEP — and nothing else, by the Admiral's choice
+(option A): rest level, slow drift, flash/flip flares and charge/lull/drop
+are untouched. Floor/ceiling clamp the final eye-scale level before the
+output guard, and the floor is re-asserted after it (the guard only slows
+rises); crossed, the ceiling wins. Holds stack (reactivities multiply,
+highest floor / lowest ceiling) in `spectra/services/show_mods.py`. The
+third action, `flares` off, stops every flare kind AND charge/lull/drop on
+its virtuals (ResponseEngine `_flare_states`) — for this effect that means
+no flash, no flip, no lull darkness and no drop burst on the Hues.
+Sonic: `set_pulse_reactivity` / `set_pulse_brightness` / `set_flares` /
+`end_effect_hold` (show_console). Spec: `tests/test_pulse_modulation.py`,
+`tests/test_show_flares_off.py`.
+
 ## Phase 4 — moving his scenes over
 
 `scripts/migrate_singles_to_pulse.py` (dry run default, `--apply`,

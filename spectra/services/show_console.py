@@ -1,6 +1,10 @@
 """SONIC'S LIGHT SHOW AUTHORITY (phase 3, the Admiral's own ask: "Sonic
 commands for fire / arm / disarm / what's armed / device hold or dim /
-create set / move High-Low / end show").
+create set / move High-Low / end show"; widened 2026-10-08 with his Pulse
+reactivity, Pulse brightness floor/ceiling and flares on/off actions —
+`set_pulse_reactivity`/`set_pulse_brightness`/`set_flares`/
+`end_effect_hold`, each one ad-hoc step through the same
+`show_actions.fire()`).
 
 WHAT IS IN SCOPE, and it is exactly that list: firing an already-saved set
 now, arming/disarming a set (or disarming everything), reading the armed
@@ -225,6 +229,85 @@ async def _op_dim_device(level: float, target_kind: str = "everything",
             "summary": f"set {who} to {level:.0f}% for {duration_s:.0f}s"}
 
 
+UNTIL_CHOICES = ("released", "time", "scene_change")
+FLARES_CHOICES = ("off", "on")
+
+
+async def _fire_one(kind: str, params: dict, name: str) -> dict:
+    """One ad-hoc step through show_actions.fire — the SAME path the Build
+    view's steps run, never a second write path."""
+    reason = show_output.refusal()
+    if reason:
+        return {"status": "refused", "reason": reason,
+                "summary": f"did not run — the show is standing down: {reason}"}
+    try:
+        show_actions.validate(kind, params)
+    except show_actions.ActionError as exc:
+        return {"status": "rejected", "reason": str(exc)}
+    run = await show_actions.fire([ShowAction(kind=kind, params=params)],
+                                  name=name, source="sonic")
+    step = run["steps"][0]
+    status = "applied" if step.get("status") in ("applied", "skipped") else "rejected"
+    out = {"status": status, "run": run, "summary": step.get("detail") or step.get("status")}
+    if status == "rejected":
+        out["reason"] = step.get("detail")
+    return out
+
+
+def _timing(until: str, duration_s: float) -> dict:
+    return {"until": until, "duration_s": duration_s}
+
+
+async def _op_set_pulse_reactivity(reactivity: float, target_kind: str = "everything",
+                                   target_name: Optional[str] = None,
+                                   until: str = "released", duration_s: float = 30,
+                                   fade_in_ms: int = 1000, fade_out_ms: int = 1000) -> dict:
+    target, rejection = _resolve_target(target_kind, target_name)
+    if rejection is not None:
+        return rejection
+    return await _fire_one("pulse_reactivity", {
+        "target": target, "reactivity": reactivity, "fade_in_ms": fade_in_ms,
+        "fade_out_ms": fade_out_ms, **_timing(until, duration_s)}, "Sonic: Pulse reactivity")
+
+
+async def _op_set_pulse_brightness(floor: float = 0.0, ceiling: float = 1.0,
+                                   target_kind: str = "everything",
+                                   target_name: Optional[str] = None,
+                                   until: str = "released", duration_s: float = 30,
+                                   fade_in_ms: int = 1000, fade_out_ms: int = 1000) -> dict:
+    target, rejection = _resolve_target(target_kind, target_name)
+    if rejection is not None:
+        return rejection
+    return await _fire_one("pulse_brightness", {
+        "target": target, "floor": floor, "ceiling": ceiling, "fade_in_ms": fade_in_ms,
+        "fade_out_ms": fade_out_ms, **_timing(until, duration_s)}, "Sonic: Pulse brightness")
+
+
+async def _op_set_flares(flares: str, target_kind: str = "everything",
+                         target_name: Optional[str] = None, until: str = "released",
+                         duration_s: float = 30) -> dict:
+    if flares not in FLARES_CHOICES:
+        return {"status": "rejected", "reason": "flares must be 'off' or 'on'"}
+    target, rejection = _resolve_target(target_kind, target_name)
+    if rejection is not None:
+        return rejection
+    return await _fire_one("flares", {"target": target, "flares": flares,
+                                      **_timing(until, duration_s)}, "Sonic: flares")
+
+
+def _op_end_effect_hold(hold_id: str) -> dict:
+    from spectra.services import show_mods
+    if show_mods.end_pulse_mod(hold_id):
+        return {"status": "applied", "ended": hold_id, "summary": "ended that Pulse hold"}
+    if show_mods.end_flare_block(hold_id):
+        return {"status": "applied", "ended": hold_id, "summary": "flares back on there"}
+    held = show_mods.status()
+    return {"status": "rejected",
+            "reason": f"no Pulse hold or flares-off called {hold_id!r}",
+            "pulse_holds": [m["id"] for m in held["pulse_mods"]],
+            "flares_off": [b["id"] for b in held["flare_blocks"]]}
+
+
 async def _op_move_high_low(level: str, seconds_into_song: float) -> dict:
     if level not in CUE_LEVEL_CHOICES:
         return {"status": "rejected", "reason": "level must be 'high' or 'low'"}
@@ -366,6 +449,82 @@ OPERATIONS: dict[str, SonicOperation] = {
                          "enum": ["time", "scene_change", "released"]}},
             "required": ["level"], "additionalProperties": False},
         handler=_op_dim_device),
+    "set_pulse_reactivity": SonicOperation(
+        name="set_pulse_reactivity", domain="show", kind="write",
+        summary="Turn how strongly the Pulse effect reacts to the music "
+                "(0 = no reaction to hits, 1 = full) on a fixture, a "
+                "category or everything, as a Light Show hold.",
+        instructions="reactivity 0..1. Scales Pulse's live-audio hit pulses "
+                    "and its rainbow hit-steps only — not flares (use "
+                    "set_flares) nor charge/lull/drop. Holds stack "
+                    "(multiply). until: 'released' (default — ends with "
+                    "end_effect_hold or end_show) | 'time' (duration_s) | "
+                    "'scene_change'. A target not running Pulse is "
+                    "unaffected until it does.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "reactivity": {"type": "number", "minimum": 0, "maximum": 1},
+                "target_kind": {"type": "string", "enum": list(TARGET_KIND_CHOICES)},
+                "target_name": {"type": "string"},
+                "until": {"type": "string", "enum": list(UNTIL_CHOICES)},
+                "duration_s": {"type": "number", "minimum": 0, "maximum": 3600},
+                "fade_in_ms": {"type": "number"},
+                "fade_out_ms": {"type": "number"}},
+            "required": ["reactivity"], "additionalProperties": False},
+        handler=_op_set_pulse_reactivity),
+    "set_pulse_brightness": SonicOperation(
+        name="set_pulse_brightness", domain="show", kind="write",
+        summary="Keep the Pulse effect between a brightness floor and "
+                "ceiling (0..1) on a fixture, a category or everything, as "
+                "a Light Show hold.",
+        instructions="floor/ceiling are 0..1 on Pulse's own (perceived) "
+                    "brightness scale; floor 0 = none, ceiling 1 = none, and "
+                    "at least one must be set; floor may not exceed "
+                    "ceiling. Clamps hits, drops, lulls and flares alike. "
+                    "until as for set_pulse_reactivity.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "floor": {"type": "number", "minimum": 0, "maximum": 1},
+                "ceiling": {"type": "number", "minimum": 0, "maximum": 1},
+                "target_kind": {"type": "string", "enum": list(TARGET_KIND_CHOICES)},
+                "target_name": {"type": "string"},
+                "until": {"type": "string", "enum": list(UNTIL_CHOICES)},
+                "duration_s": {"type": "number", "minimum": 0, "maximum": 3600},
+                "fade_in_ms": {"type": "number"},
+                "fade_out_ms": {"type": "number"}},
+            "additionalProperties": False},
+        handler=_op_set_pulse_brightness),
+    "set_flares": SonicOperation(
+        name="set_flares", domain="show", kind="write",
+        summary="Switch flares off (or back on) for a fixture, a category "
+                "or everything — off also takes them out of charge/lull/drop.",
+        instructions="flares 'off' | 'on'. It works per virtual: one Hue "
+                    "fixture takes every Hue bulb with it (the reply names "
+                    "who came along). 'on' lifts every flares-off on those "
+                    "lights. until as for set_pulse_reactivity (default "
+                    "'released'). show_status lists what is off "
+                    "(output.flare_blocks).",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "flares": {"type": "string", "enum": list(FLARES_CHOICES)},
+                "target_kind": {"type": "string", "enum": list(TARGET_KIND_CHOICES)},
+                "target_name": {"type": "string"},
+                "until": {"type": "string", "enum": list(UNTIL_CHOICES)},
+                "duration_s": {"type": "number", "minimum": 0, "maximum": 3600}},
+            "required": ["flares"], "additionalProperties": False},
+        handler=_op_set_flares),
+    "end_effect_hold": SonicOperation(
+        name="end_effect_hold", domain="show", kind="write",
+        summary="End one Pulse hold or flares-off switch by its id.",
+        instructions="Ids are in show_status's output.pulse_mods / "
+                    "output.flare_blocks. end_show ends all of them.",
+        input_schema={"type": "object",
+                     "properties": {"hold_id": {"type": "string"}},
+                     "required": ["hold_id"], "additionalProperties": False},
+        handler=_op_end_effect_hold),
     "move_high_low": SonicOperation(
         name="move_high_low", domain="show", kind="write",
         summary="Move this song's High or Low Trigger to a specific "

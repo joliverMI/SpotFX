@@ -4261,6 +4261,35 @@ room-effect compatibility proof), `tests/test_light_show_arms.py`'s own
 dwell-floor test, `tests/test_scene_console.py`'s widened operation-set
 proof.
 
+**EFFECT MODIFIERS — Pulse reactivity, Pulse brightness floor/ceiling,
+flares on/off (2026-10-08).** `spectra/services/show_mods.py`'s docstring
+is the binding statement. Four things:
+
+- **THEY HOLD PER VIRTUAL, NOT PER FIXTURE** — Pulse is an effect on a
+  virtual and a flare is a write to one. A fixture target takes every
+  fixture sharing its virtual (one Hue fixture = all of `hues`), and the
+  step's outcome names them. Holds live in `LightShowState.pulse_mods`/
+  `flare_blocks`; show_output's tick/repush/release_all/on_scene_change/
+  on_release/reset carry them, so End show and a room release end them.
+- **PULSE IS MODULATED THROUGH `fx/pulse_modulation.py`, never a config
+  write** (VENDOR #66) — a config write would fight scene fires, the Pulse
+  feed and the param watchdog. Reactivity scales only the live-audio hit
+  term and the rainbow hit-step (the Admiral's option A).
+- **FLARES OFF IS `ResponseEngine._flare_states()`** (wired as
+  `flare_blocked` in engine.py; scratch preview engines are unfiltered):
+  every flare kind's loop AND `_drive_phase`/`rearm_phase` read it, so a
+  flares-off target gets no flare and no charge climb / lull darkness /
+  drop burst (his ruling). Releases and the analysed scene-cue colour
+  moment (`_color_jump(flare=False)`) are deliberately NOT filtered. A NEW
+  flare kind or phase path must iterate `_flare_states()`, not
+  `conductor.virtuals`, or it leaks onto the Hues.
+- **Every entity picker in the editor is `SearchSelect`**, labelled by
+  `spectra/web/src/lib/pickerOptions.ts` (shared with the top bar's Force
+  Scene/Colour); only short fixed enums stay `<select>`. Proofs:
+  `tests/test_show_flares_off.py` (real headless pipeline, red control),
+  `tests/test_pulse_modulation.py`, `node scripts/check_light_show_pickers.mjs`
+  (needs the dev-only jsdom). Help: `show-pulse`, `show-flares`.
+
 ## HOUSE LIGHTING (`/house`) — the room's always-on resting look (phases 1–2)
 
 Plan: `/home/javi/fleet-spotfx/data/standard-lighting-plan/report.md` (his

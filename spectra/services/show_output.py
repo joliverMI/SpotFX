@@ -598,6 +598,9 @@ def release_all(fade_ms: int = DEFAULT_RELEASE_FADE_MS) -> list[str]:
         device_output.set_level(did, _combined_level(did, []),
                                 fade_s=_fade_s(fade_ms))
     show_store.save_state()
+    # Pulse modulations and flare switches (show_mods.py) end with them.
+    from spectra.services import show_mods
+    show_mods.release_all(fade_ms)
     return sorted(devices)
 
 
@@ -610,6 +613,11 @@ def on_release() -> None:
     _base_levels.clear()
     _base_states.clear()
     _overlay.clear()
+    try:
+        from spectra.services import show_mods
+        show_mods.on_release()
+    except Exception:                                    # noqa: BLE001
+        logger.exception("light show: dropping Pulse/flare holds on release failed")
     try:
         from spectra.services import show_arms
         show_arms.on_release()
@@ -628,7 +636,8 @@ def on_scene_change() -> list[str]:
     ending = [lv.id for lv in st.levels if lv.until == "scene_change"]
     for lid in ending:
         end_level(lid)
-    return ending
+    from spectra.services import show_mods
+    return ending + show_mods.on_scene_change()
 
 
 def _mark_started() -> None:
@@ -664,7 +673,10 @@ def repush() -> dict:
         device_output.set_level(did, _combined_level(did, st.levels))
     if dropped:
         show_store.save_state()
-    return {"holds": sorted(st.holds), "levels": len(st.levels), "dropped": dropped}
+    from spectra.services import show_mods
+    mods = show_mods.repush()
+    return {"holds": sorted(st.holds), "levels": len(st.levels), "dropped": dropped,
+            **mods}
 
 
 # ── the supervisor ─────────────────────────────────────────────────────────
@@ -698,6 +710,8 @@ def tick() -> None:
     # `suspension_reason()` covers an engine on paper and every stand-down
     # except a colour preview on its own (see its docstring).
     device_output.suspend(suspension_reason() is not None)
+    from fx import pulse_modulation
+    pulse_modulation.suspend(device_output.suspended())
     try:
         from spectra.services import show_arms
         show_arms.tick()
@@ -721,6 +735,11 @@ def tick() -> None:
         if lv.until == "time" and lv.ends_at_ms is not None and lv.ends_at_ms <= t:
             end_level(lv.id)
     device_output.prune()
+    try:
+        from spectra.services import show_mods
+        show_mods.tick()
+    except Exception:                                    # noqa: BLE001
+        logger.exception("light show: Pulse/flare hold pass failed")
 
 
 async def run_supervised() -> None:
@@ -745,6 +764,8 @@ def reset() -> None:
     device_output.clear_all()
     device_output.clear_withheld()
     device_output.suspend(False)
+    from spectra.services import show_mods
+    show_mods.reset()
 
 
 device_output.set_scale_provider(steady_scale)
@@ -764,7 +785,8 @@ def status() -> dict:
                                if lv.ends_at_ms is not None else None),
                "source": lv.source}
               for lv in st.levels]
-    return {"holds": holds, "levels": levels,
+    from spectra.services import show_mods
+    return {"holds": holds, "levels": levels, **show_mods.status(),
             "suspended": device_output.suspended(),
             "standdown": standdown_reason(),
             "refusal": ownership_refusal(),

@@ -107,6 +107,42 @@ class LevelHold(BaseModel):
     source: str = ""
 
 
+class PulseModHold(BaseModel):
+    """A Light Show modulation of the Pulse effect on some virtuals
+    (spectra/services/show_mods.py; fx/pulse_modulation.py). A field left
+    None is not this hold's business. Several stack: reactivities
+    multiply, the highest floor and the lowest ceiling win."""
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=_id)
+    virtual_ids: list[str]
+    #: his words for what was targeted ("Singles", "Hue Living Room")
+    label: str = ""
+    reactivity: Optional[float] = None
+    floor: Optional[float] = None
+    ceiling: Optional[float] = None
+    fade_in_ms: int = 0
+    fade_out_ms: int = 0
+    #: "time" (ends_at_ms) | "scene_change" | "released"
+    until: str = "released"
+    ends_at_ms: Optional[int] = None
+    since_ms: int = Field(default_factory=now_ms)
+    source: str = ""
+
+
+class FlareBlock(BaseModel):
+    """Flares switched OFF on some virtuals: while it holds, no flare kind
+    writes to them (spectra/services/show_mods.py, scene_response's
+    `_flare_states`)."""
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=_id)
+    virtual_ids: list[str]
+    label: str = ""
+    until: str = "released"
+    ends_at_ms: Optional[int] = None
+    since_ms: int = Field(default_factory=now_ms)
+    source: str = ""
+
+
 class SettingBaseline(BaseModel):
     """What a setting was before the show first changed it, and what the
     show last wrote. End show writes `original` back ONLY while the current
@@ -154,3 +190,6 @@ class LightShowState(BaseModel):
     room_effect: Optional[dict] = None
     arms: list[ShowArm] = Field(default_factory=list)
     started_ms: Optional[int] = None
+    #: the Pulse modulations and flare switches the show is holding
+    pulse_mods: list[PulseModHold] = Field(default_factory=list)
+    flare_blocks: list[FlareBlock] = Field(default_factory=list)

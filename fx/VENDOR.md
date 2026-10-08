@@ -1943,3 +1943,21 @@ against that commit.
     ordinary fish do not avoid it yet. Evidence:
     `tests/test_fish_big_fish.py`, `scripts/render_fish_big_fish.py`.
     Unverified against his live room.
+66. `pulse_modulation.py` (NEW, SpotFX-authored) + `effects/pulse.py`
+    (`render()` reads `pulse_modulation.get(<its virtual id>)` once a
+    frame; `_react()` scales the hit term and the rainbow hit-step; the
+    floor/ceiling clamp around `_guard_output`): THE LIGHT SHOW's PULSE
+    MODULATION (2026-10-08; the Admiral: "modulate a few things on the
+    'pulse' effect. 1. Overall reactivity ... 2. the brightness floor and
+    ceiling"). A per-virtual side channel SPECTRA pushes (spectra/services/
+    show_mods.py), never a config write — a config write would fight every
+    scene fire, the Pulse feed and the param watchdog. With no entry for the
+    virtual (every frame until a Light Show step asks) `get()` returns None
+    and the effect renders byte-identically; an entry AT identity
+    (reactivity 1, floor 0, ceiling 1) is byte-identical too. Suspended with
+    the per-device output layer (preview / capture / night run). Evidence:
+    `tests/test_pulse_modulation.py` (idle and identity bit-identical on
+    the real class; reactivity linear on hits and hit-steps, flares/drop
+    untouched; floor/ceiling through hits, a flash, a drop and a lull),
+    `tests/test_show_flares_off.py::test_pulse_actions_reach_the_rendering_
+    effect` (through the real Light Show action on the headless pipeline).
