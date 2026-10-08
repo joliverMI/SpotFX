@@ -101,7 +101,9 @@
         "tests/test_fish.py",
         "tests/test_fish_camera.py",
         "tests/test_fish_disperse.py",
-        "tests/test_fish_wall.py"
+        "tests/test_fish_lull_searcher.py",
+        "tests/test_fish_wall.py",
+        "scripts/render_fish_lull_searcher.py"
       ]
     },
     "melt-effect": {

@@ -54,6 +54,9 @@ from fx.effects import fish as FX  # noqa: E402
 # controls. Pinned, never a moving ref (scripts/check_fish_camera.py records
 # what a moving reference silently does to an instrument).
 BASELINE_REF = "4795fd3a69391e0577bdfc8a2bc8e597e4fd1910"
+# ... and the commit the 2026-10-08 SEARCHING LULL was built on: the fish
+# whose lull still left nothing (section 1b's red control). Pinned too.
+PRE_SEARCH_REF = "17f263223b8334024aef5b99c4090b35c3e448cf"
 DT = 1.0 / 60.0
 ROWS, COLS = 37, 72
 
@@ -158,12 +161,15 @@ def on_panel(eff):
 
 
 # ── 1. the lull ─────────────────────────────────────────────────────────
-async def lull_run(effect_type, gap_s, seed):
+async def lull_run(effect_type, gap_s, seed, told=None):
+    """`told`: the lull hand-off hook's keys on the lull's arm write
+    (fx/effects/lull_handoff.py); None = an untold lull."""
     r = await room(f"lull{seed}{effect_type[-3:]}", effect_type, seed=seed)
     eff = r.effect
     r.step(240)
     r.ramp("charge", 4.0, beats_every=12)
-    rec = {"f": [], "vis": [], "minb": [], "tang": [], "order": []}
+    rec = {"f": [], "vis": [], "minb": [], "tang": [], "order": [],
+           "t": [], "keep": [], "others": []}
     B = float(np.max(eff.p_bright[: eff.n]))
     # the charge's own ordering, as a heading coherence (1 = all one way)
     live = on_panel(eff)
@@ -171,6 +177,10 @@ async def lull_run(effect_type, gap_s, seed):
 
     def watch():
         vis = on_panel(eff)
+        keepers = np.flatnonzero(eff.p_mode[: eff.n] == 5)
+        rec["t"].append(eff._phase_t)
+        rec["keep"].append(keepers.size)
+        rec["others"].append(np.setdiff1d(vis, keepers).size)
         rec["f"].append(eff.phase_progress)
         rec["vis"].append(vis.size)
         rec["minb"].append(
@@ -190,6 +200,8 @@ async def lull_run(effect_type, gap_s, seed):
             rec["order"].append(np.nan)
 
     ramp_s = 0.9 * gap_s
+    if told:
+        eff.update_config(dict(told))
     r.ramp("lull", ramp_s, watch=watch, hang=0.1 * gap_s)
     rec["B"] = B
     await close(r)
@@ -198,12 +210,14 @@ async def lull_run(effect_type, gap_s, seed):
 
 
 def section_lull(base):
-    print("\n1. THE LULL — school -> chaotic swirl -> leak off screen, "
-          "never a fade, all gone by the third")
+    print("\n1a. THE LULL TOLD lull_keep = 0 (his 2026-08-28 clock) — school "
+          "-> chaotic swirl -> leak off screen, never a fade, all gone by "
+          "the third")
     third = FX.LULL_GONE_AT
     for gap in (0.9, 2.5, 6.04):
         for seed in (3, 11):
-            rec = asyncio.run(lull_run("fish", gap, seed))
+            rec = asyncio.run(lull_run("fish", gap, seed,
+                                       told={"lull_keep": 0}))
             f, vis, minb = rec["f"], rec["vis"], rec["minb"]
             before = f < third
             last_before = int(vis[before][-1]) if before.any() else -1
@@ -260,6 +274,62 @@ def section_lull(base):
               f"brightness while on panel {rec['minb'].min():.3f}")
         check(rec["minb"].min() < 0.5, "red control: the pre-change lull "
               "DOES fade fish out on the panel (the instrument can see it)")
+    section_searching_lull()
+
+
+def section_searching_lull():
+    """1b. HIS 2026-10-08 LULL, which REVERSES section 1a's "no lone fish"
+    on his own word: "have all the fish leave over time except for one, so
+    one is left at the half way mark ... then on the drop, all the missing
+    fish come back". Told the lull's length as SpotFX tells it, the half is
+    a moment in seconds. Every NON-keeper is off the panel before the
+    half's backstop runs — STRICT, the same == 0 the old third holds, and
+    for the same reason (the backstop compacts at full brightness) — the
+    keepers (1, and 3 — what a Fireworks drop will ask for) are on the
+    panel from the half to the drop, and no fish ever dims on the panel."""
+    from fx.effects import lull_handoff as lh
+    print("\n1b. THE SEARCHING LULL (default lull_keep = 1, and 3) — all but "
+          "the keepers leak out by the HALF, the keepers stay, never a fade")
+    for keep in (1, 3):
+        for gap in (0.9, 2.5, 6.04):
+            for seed in (3, 11):
+                rec = asyncio.run(lull_run(
+                    "fish", gap, seed, told=lh.keys_for(keep, "", gap)))
+                t, others, keep_n = rec["t"], rec["others"], rec["keep"]
+                vis = rec["vis"]
+                half = gap / 2.0
+                before = t < half
+                last_before = int(others[before][-1]) if before.any() else -1
+                after = t >= half
+                print(f"   keep {keep} gap {gap:>4}s seed {seed:>2}: start "
+                      f"{int(vis[0])} fish  non-keepers on panel at the "
+                      f"half's last frame {last_before}  on panel after the "
+                      f"half {sorted(set(vis[after].tolist()))}  min "
+                      f"brightness {rec['minb'].min():.3f}")
+                tag = f"keep {keep} gap {gap}s seed {seed}"
+                check(vis[0] > keep, f"{tag}: the lull starts with a school")
+                check(last_before == 0, f"{tag}: every non-keeper is OFF the "
+                      "panel before the half's backstop runs")
+                check(int(others[after].max(initial=0)) == 0,
+                      f"{tag}: none but the keepers after the half")
+                check(bool(after.any()) and (keep_n[after] == keep).all()
+                      and (vis[after] == keep).all(),
+                      f"{tag}: exactly {keep} keeper(s) on the panel from "
+                      "the half to the drop")
+                check(rec["minb"].min() >= 0.99,
+                      f"{tag}: no fish dims while it is on the panel")
+    try:
+        pre = load_baseline(ref=PRE_SEARCH_REF, name="fish_presearch")
+    except Exception as exc:                       # noqa: BLE001
+        print(f"   (red control SKIPPED: cannot read {PRE_SEARCH_REF}: {exc})")
+        return
+    rec = asyncio.run(lull_run(pre, 6.04, 3))
+    after = rec["t"] >= 6.04 / 2.0
+    print(f"   RED CONTROL (pre-search {PRE_SEARCH_REF[:10]}): on panel "
+          f"after the half {sorted(set(rec['vis'][after].tolist()))}")
+    check(int(rec["vis"][after].max(initial=0)) == 0, "red control: the "
+          "pre-search lull leaves NOTHING at the half (the instrument can "
+          "see the keeper)")
 
 
 # ── 2. the outgoing crossfade ───────────────────────────────────────────

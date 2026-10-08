@@ -117,6 +117,11 @@ MUSIC_FISH = {
     "rush_chaos": 0.3, "roam_scale": 0.75, "reverse": False,
 }
 OLD = {"wall_lookahead": 0.0}
+# The bit-for-bit escape hatch below runs a whole arc THROUGH A LULL against
+# a pinned module that predates the 2026-10-08 searching lull, so it holds
+# that lull at its own old clock too (told `lull_keep = 0` — fx/effects/
+# lull_handoff.py): it isolates the WALL, the one mechanism it is about.
+HOLD_LULL = {"lull_keep": 0}
 
 FAILURES: list[str] = []
 
@@ -653,8 +658,9 @@ def section_escape_hatch():
             for seed in (3, 11):
                 a = asyncio.run(kinematics(f"b{seed}", cfg, seed, base,
                                            crystal))
-                b = asyncio.run(kinematics(f"n{seed}", dict(cfg, **OLD), seed,
-                                           "fish", crystal))
+                b = asyncio.run(kinematics(f"n{seed}",
+                                           dict(cfg, **OLD, **HOLD_LULL),
+                                           seed, "fish", crystal))
                 check(same_kinematics(a, b),
                       f"{where:7s} {cfg_name:10s} seed {seed:>2}: "
                       f"{len(a)} frames identical through swim/charge/lull/"

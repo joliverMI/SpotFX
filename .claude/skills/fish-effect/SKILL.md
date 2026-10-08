@@ -5,7 +5,8 @@ description: >
   effect behind the Fish scene, built as a wholesale copy of Orbits V2's
   bands/kinds but with completely different kinematics. Load before
   touching swim speed, avoidance, the camera window, wake/trail rendering,
-  dispersal, or the swim-burst flare — every one of these has a shipped
+  dispersal, the lull's searching keeper / the intensity-scaled drop, or
+  the swim-burst flare — every one of these has a shipped
   invariant that isn't visible from reading the code cold.
 ---
 
@@ -112,6 +113,62 @@ to the drop's ejecta. The lull's own duration is `phase_progress`'s real
 gap to its own drop under the PHASE PARTNER rule (`spectra/services/
 phase_partner.py`), else the next trigger with no drop ahead — see
 `_lull_step`'s own docstring in `fish.py`.
+
+## The lull leaves ONE fish that SEARCHES (2026-10-08) — and the drop
+   follows the music. This reversed his 2026-08-28 "no lone fish" clock
+
+His words: "have all the fish leave over time except for one, so one is
+left at the half way mark. then have that last fish move slowly and look
+like it's searching ... then on the drop, all the missing fish come back in
+the rush we currently have. also, make the length of the drop and how fast
+the fish swirl depend on the inensity of the music". The module's
+2026-10-08 LULL block is the binding statement; six things not visible
+cold:
+
+- **The lull is TOLD how many to keep** through the LULL HAND-OFF HOOK
+  (`fx/effects/lull_handoff.py`, `fish` is its first member): `lull_keep`
+  (default 1), `lull_next`, `lull_s` on every lull arm, `drop_intensity` on
+  every drop arm. **`lull_keep = 0` is his 2026-08-28 clock bit for bit**
+  (gone by a third, dark after two thirds) — proven against the pinned
+  pre-change module. Any OTHER proof that compares against a pinned
+  pre-2026-10-08 fish through a lull must tell it `lull_keep = 0`
+  (`scripts/check_fish_wall.py::HOLD_LULL` is the shape), the
+  `wall_lookahead = 0` rule one mechanism over.
+- **Keepers are mode 5**: never counted by the population, never swirled,
+  never retired, never followed by the window. The `keep` fish nearest the
+  centre of view are chosen at the lull's edge; a lull with fewer fish
+  calls the shortfall in from off-panel (fading up like any arrival). Every
+  other fish leaks out before the HALF (`KEEP_LEAK_*`, `KEEP_EXIT_BY`), a
+  backstop at the half retires anything that is not a keeper. The half is
+  SECONDS (`lull_s / 2`) when told, progress 0.5 when not.
+- **The search** (`_keep_targets`/`_start_leg`): a short first leg to the
+  side it already faces (`SEARCH_LEG_SHARE` of the time left), a PAUSE
+  (hover at `SEARCH_PAUSE_X`, head swinging `SEARCH_LOOK_SWING` — drawing
+  only, the travel heading never moves), then a leg to the other side, to
+  `search_reach` of the pond, at `search_speed` x cruise. About-faces are
+  arcs (the turn clamp); `KEEP_LEVEL_W` pulls a keeper back to mid-height so
+  an about-face arcs away from the nearer top/bottom wall — keepers are kept
+  OFF the wall glance on purpose (its authority took a turning keeper over
+  and ran it along the wall).
+- **Keepers RIDE THE WINDOW**: the window eases home after the charge at up
+  to 1.4x cruise, faster than a searching fish — so keepers are shifted by
+  the window's own step and hold their place on screen (the water slides
+  under them). Without it a keeper was dragged off the panel.
+- **Several keepers** (`lull_keep` N — 3 is what a Fireworks drop asks for)
+  hold a loose ROW, spaced `KEEP_SPACING_BODIES` (wider,
+  `KEEP_SPACING_NEXT_BODIES`, when `lull_next` names another effect, so an
+  adopter gets distinct origins — `_handoff_snapshot` carries exactly the
+  keepers), with a separation steer (`KEEP_SEP_W`) so an about-face cannot
+  fold the row up. They rejoin the population (mode 0) on the frame the
+  lull ends, however it ends.
+- **The scaled drop**: `lull_handoff.drop_scale` (0.75 = the old drop
+  exactly, 1.0 = 1.2x, quiet songs down to `drop_scale_min`) multiplies the
+  settle horizon (the swirl follows), the boost and the rush's entry speed
+  (by half). Untold (`drop_intensity` 0) = the fixed constants, expression
+  for expression; the self-reset forgets a told intensity.
+
+`search_speed`/`search_pause_s`/`search_reach`/`drop_scale_min` are
+registered (help topic `fish-lull-search`) — FIRST GUESSES, pending his eye.
 
 ## The swim burst can push a fish off-screen — a boundary SPEED BRAKE
    exists specifically for burst speed, and it's scoped tightly
@@ -257,6 +314,8 @@ would CREATE a duplicate kind instead of editing the existing one.
 Every REGISTERED fish param (`config/effect_params.json`) — the wall's
 `wall_lookahead`/`wall_turn_strength` (the glance's speed widening and its
 arc divisor) and the solo burst's three included —
+— and the lull search's `search_speed`/`search_pause_s`/`search_reach`
+and the scaled drop's `drop_scale_min` —
 is reachable per scene entry through `get_scene_entry_params` /
 `set_scene_entry_param` (e.g. scene "House Fish", target "Matrix"),
 validated against the registry's own range. A new fish param is only
@@ -269,7 +328,11 @@ Sonic-reachable once it is registered there.
 `check_fish_burst_bounds.py`, `check_fish_disperse.py`,
 `check_fish_wall.py` (`--gifs DIR` writes old-edge / PR 361 / new GIFs and
 track plots on his real crystal shape), `tests/test_fish.py`, `test_fish_camera.py`,
-`test_fish_disperse.py`, `test_fish_wall.py`.
+`test_fish_disperse.py`, `test_fish_wall.py`,
+`test_fish_lull_searcher.py` (the searching lull, keep N, the scaled drop,
+and keep 0 + an untold drop bit for bit against the pinned pre-change
+module), `test_lull_handoff.py` (the hook); `scripts/
+render_fish_lull_searcher.py` writes the before/after GIFs.
 History: AGENTS.md's "Fish (fx/effects/fish.py) — Orbits' twin" section —
 read that in full before a non-trivial change; it documents ~8 more
 PR-scoped fixes (lunge envelope, charge spread, camera window centring,
