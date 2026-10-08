@@ -10,7 +10,8 @@ plan was built by. Scene changes are the song's enabled stored GENERATED
 fire_scene triggers (what actually fires), falling back to the plan's kept
 cues while none are stored (the first play, before auto-generation lands,
 or a song carrying his own triggers, which is never auto-generated) — the
-trigger engine fires those kept cues itself, so the markers are what fires. Both lists are empty, with `applies: false` and the reason, when
+trigger engine fires those kept cues itself, so the markers are what
+fires. Both lists are empty, with `applies: false` and the reason, when
 the room's per-song mode does not let analysed events fire
 (analysed_flares.analysed_flares_allowed — the same rule tick() applies).
 

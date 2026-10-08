@@ -187,8 +187,9 @@ def scene_change_moments(
     first play before auto-generation lands, or a song carrying his own
     triggers, which auto-generation never touches — the plan's kept cues,
     read through `planned` (called only in that case: it may read the
-    analysis from disk), which trigger_engine fires itself. Returns (chronological moments, "stored" | "planned" |
-    None). Read by GET /api/analysed-plan's markers and by
+    analysis from disk), which trigger_engine fires itself. Returns
+    (chronological moments, "stored" | "planned" | None). Read by
+    GET /api/analysed-plan's markers and by
     trigger_engine.next_colour_cue (the trigger-timed colour journey), so
     the two can never disagree about when the next scene change is.
     `protected` (drop_firing.Window) leaves out a stored cue the trigger
