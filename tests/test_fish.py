@@ -569,9 +569,13 @@ def test_the_charge_school_does_not_clump(tmp_path):
 
 
 # ── 6. the lull clock ───────────────────────────────────────────────────
-def _lull_clock(room, eff, seconds=3.6):
-    """Drive a full lull and report what was alive and lit at each third."""
-    eff.update_config({"phase": "lull", "phase_progress": 0.0})
+def _lull_clock(room, eff, seconds=3.6, told=None):
+    """Drive a full lull and report what was alive and lit at each third.
+    `told` is extra keys on the lull's arm write (the hand-off hook)."""
+    arm = {"phase": "lull", "phase_progress": 0.0}
+    if told:
+        arm.update(told)
+    eff.update_config(arm)
     frames = int(seconds / DT)
     marks = {}
     for i in range(1, frames + 1):
@@ -583,23 +587,25 @@ def _lull_clock(room, eff, seconds=3.6):
         alive = int(eff.n)
         lit = float(np.asarray(eff.matrix, dtype=np.float32).max())
         wake = float(eff.wake.max())
-        marks[i] = (f, alive, lit, wake)
+        keepers = int(np.count_nonzero(eff.p_mode[: eff.n] == 5))
+        marks[i] = (f, alive, lit, wake, keepers)
     at = lambda frac: marks[max(1, int(frames * frac))]      # noqa: E731
     return marks, at
 
 
-def test_the_lull_clock_empties_then_ripples_then_goes_dark(tmp_path):
-    """His 2026-08-28 ruling, in thirds of the lull's own duration:
+def test_the_lull_leaves_one_fish_at_the_half_and_is_never_dark(tmp_path):
+    """His 2026-10-08 lull (the Admiral: "have all the fish leave over time
+    except for one, so one is left at the half way mark"), which REVERSES
+    his 2026-08-28 "no lone fish" clock on his own word. Untold (no hook
+    keys — an older SpotFX, a hand scrub) the half is phase_progress 0.5:
 
-        0 -> 1/3    every fish disperses and is GONE by the end of it
-        1/3 -> 2/3  ripples only — the wake, with no fish anywhere
-        2/3 -> end  fully dark, until the drop
+        0 -> 1/2    every fish but ONE leaves, over time
+        1/2 -> end  that one fish stays, searching; the panel is never dark
 
-    This REPLACES the old lull (disperse to one fish, held at the centre by
-    half way, then a rush at 60%). That behaviour is superseded, not
-    weakened: there is no lone fish and no survivor of any kind, and the
-    rush moved into the drop.
-    """
+    The full searching behaviour (legs, pauses, keep N, the scaled drop) is
+    tests/test_fish_lull_searcher.py, with the pinned pre-change module as
+    its red control. The old clock is still the lull when the hook tells it
+    `lull_keep = 0` — the next test."""
     async def main():
         room = await _room(tmp_path, "lullclock", seed=11)
         eff = room.effect
@@ -607,10 +613,44 @@ def test_the_lull_clock_empties_then_ripples_then_goes_dark(tmp_path):
         room.ramp("charge", 4.0, beats_every=12)
         marks, at = _lull_clock(room, eff)
 
+        assert at(0.10)[1] > 1, "the lull must start with a school in it"
+        early = [v[1] for v in marks.values() if v[0] < 0.5]
+        assert len(set(early)) >= 3, "the school must thin out over time"
+        for frac in (0.5, FX.LULL_DARK_AT, 0.9, 1.0):
+            f, alive, lit, wake, keepers = at(frac)
+            assert alive == 1 and keepers == 1, (
+                f"exactly one fish past the half (progress {f:.2f}, "
+                f"{alive} alive, {keepers} keepers)")
+            assert lit > 0.0 and wake > 0.0, (
+                f"the lull went dark at progress {f:.2f}")
+        await _close(room)
+    _run(main())
+
+
+def test_told_keep_zero_the_lull_clock_empties_then_ripples_then_goes_dark(
+        tmp_path):
+    """His 2026-08-28 clock, in thirds of the lull's own duration — now
+    only when the lull hand-off hook tells the lull `lull_keep = 0` (the
+    drop-scene-variety work may, for a drop that wants nothing left):
+
+        0 -> 1/3    every fish disperses and is GONE by the end of it
+        1/3 -> 2/3  ripples only — the wake, with no fish anywhere
+        2/3 -> end  fully dark, until the drop
+
+    Bit for bit the pre-change lull: tests/test_fish_lull_searcher.py::
+    test_keep_zero_and_an_untold_drop_are_the_pre_change_fish_bit_for_bit.
+    """
+    async def main():
+        room = await _room(tmp_path, "lullclock0", seed=11)
+        eff = room.effect
+        room.step(240)
+        room.ramp("charge", 4.0, beats_every=12)
+        marks, at = _lull_clock(room, eff, told={"lull_keep": 0})
+
         # 0 -> 1/3: gone. No exceptions.
         assert at(0.10)[1] > 0, "the lull must start with fish in it"
         for frac in (FX.LULL_GONE_AT, 0.5, FX.LULL_DARK_AT, 0.9, 1.0):
-            f, alive, _lit, _w = at(frac)
+            f, alive, _lit, _w, _k = at(frac)
             assert alive == 0, (
                 f"a fish survived past the first third (progress {f:.2f}, "
                 f"{alive} alive)"
@@ -638,7 +678,8 @@ def test_the_lull_clock_empties_then_ripples_then_goes_dark(tmp_path):
 
 
 def test_the_lull_window_eases_home_once_there_is_nothing_to_follow(tmp_path):
-    """With no fish after the first third there is no school to follow, so
+    """Once the school breaks there is nothing to follow — the dispersing
+    fish leave and the searching keeper is deliberately NOT followed — so
     the window must ease home rather than hold wherever it had got to."""
     async def main():
         room = await _room(tmp_path, "lullcam",
@@ -705,10 +746,11 @@ def test_the_drop_rushes_in_swirls_and_leaves_the_blob_count_behind(tmp_path):
         room = await _room(tmp_path, "droprush", seed=4)
         eff = room.effect
         room.step(240)
-        # the lull leaves NOTHING behind now, so the drop is what has to
-        # bring the room back
+        # the lull leaves only its one searching KEEPER (his 2026-10-08
+        # lull), so the drop is what has to bring the room back
         room.ramp("lull", 3.0)
-        assert eff.n == 0, "the lull must have emptied the panel"
+        assert eff.n == 1 and eff.p_mode[0] == 5, (
+            "the lull must have left exactly its keeper")
 
         born = [0]
         orig = eff._spawn_rush
@@ -779,7 +821,8 @@ def test_the_drop_rushes_in_swirls_and_leaves_the_blob_count_behind(tmp_path):
 def test_the_drop_is_unchanged_when_the_rush_is_switched_off(tmp_path):
     """The rush is an ADDITION to the drop, not a redesign of it: with
     `rush_count` at 0 the drop repopulates from its own centre burst
-    exactly as it always did."""
+    exactly as it always did — the burst fills the population up to the
+    blob count, and the lull's returning keeper is one of that count."""
     async def main():
         room = await _room(tmp_path, "droprush0",
                            dict(HIS_MATRIX, rush_count=0), seed=4)
@@ -795,9 +838,11 @@ def test_the_drop_is_unchanged_when_the_rush_is_switched_off(tmp_path):
             burst[0] += eff.n - before
         eff._spawn_center_burst = counted
 
+        keepers = int(np.count_nonzero(eff.p_mode[: eff.n] == 5))
+        assert keepers == 1
         eff.update_config({"phase": "drop", "phase_progress": 0.0})
         room.step(1)
-        assert burst[0] == eff._config["particle_count"], (
+        assert burst[0] + keepers == eff._config["particle_count"], (
             "with no rush, the centre burst must still repopulate the drop",
             burst[0],
         )

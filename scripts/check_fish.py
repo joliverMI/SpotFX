@@ -23,9 +23,13 @@ silenced), never a re-derivation of the effect's own arithmetic:
      changing directions on every beat, minimum 400ms in unison. Fish in
      school should move almost identically, but should have some minor
      variation."
-  6. LULL (his 2026-08-28 ruling, REPLACING the lone-fish version): every
-     fish is gone by 1/3 of the lull, ripples only to 2/3, dark after that
-     until the drop. The rush moved into the DROP — see section 7.
+  6. LULL (his 2026-10-08 ruling, REVERSING the 2026-08-28 one below):
+     "have all the fish leave over time except for one, so one is left at
+     the half way mark. then have that last fish move slowly and look like
+     it's searching" — one fish from the half to the drop, never dark. The
+     2026-08-28 clock (every fish gone by 1/3, ripples to 2/3, dark after)
+     is still the lull when the hook tells it `lull_keep = 0`, and is
+     checked as such. The rush moved into the DROP — see section 7.
      SUPERSEDED: "Fish start dispersing until the center one is all alone,
      swimming but staying in center of view by half way through the lull.
      A rush of fish come in ... up to 20 and zoom past ... It should last
@@ -378,8 +382,8 @@ async def section_charge(stack):
 
 # ── 6. the lull clock ───────────────────────────────────────────────────
 async def section_lull(stack):
-    print("\n6. LULL — his clock, in thirds: gone by 1/3, ripples to 2/3, "
-          "dark after")
+    print("\n6. LULL — one fish left at the half, searching, never dark "
+          "(and told lull_keep = 0: his old clock in thirds)")
     room = await _room(stack, "lull", dict(HIS_MATRIX, camera_follow=0.8),
                        seed=11)
     eff = room.effect
@@ -420,29 +424,52 @@ async def section_lull(stack):
         f, alive, lit, wk = at(frac)
         print(f"       {f:5.2f}    {alive:>5}      {lit:9.2f}   {wk:9.2f}")
 
-    check(at(0.10)[1] > 0, "the lull starts with fish in it")
-    gone = [m for m in marks if m[0] >= FX.LULL_GONE_AT]
-    check(all(m[1] == 0 for m in gone),
-          "every fish is GONE by the first third — no lone fish, no "
-          "survivor of any kind",
-          f"worst {max(m[1] for m in gone)} alive after "
-          f"progress {FX.LULL_GONE_AT:.2f}")
-    mid = [m for m in marks
-           if FX.LULL_GONE_AT < m[0] < FX.LULL_DARK_AT * 0.95]
-    check(any(m[3] > 0.0 for m in mid) and all(m[1] == 0 for m in mid),
-          "between the thirds it is ripples ONLY — the wake still there, "
-          "no fish anywhere",
-          f"peak wake {max(m[3] for m in mid):.2f} with "
-          f"{max(m[1] for m in mid)} fish")
-    last = [m for m in marks if m[0] >= FX.LULL_DARK_AT]
-    check(max(m[2] for m in last) == 0.0,
-          "the last third is fully DARK, until the drop",
-          f"brightest pixel {max(m[2] for m in last):.2f}")
+    check(at(0.10)[1] > 1, "the lull starts with a school in it")
+    past = [m for m in marks if m[0] >= 0.5]
+    check(all(m[1] == 1 for m in past),
+          "every fish but ONE is gone by the half, and that one stays to "
+          "the drop", f"alive past the half: {sorted({m[1] for m in past})}")
+    check(min(m[2] for m in past) > 0.0 and min(m[3] for m in past) > 0.0,
+          "the lull is never dark — the searching fish and its wake",
+          f"dimmest brightest-px {min(m[2] for m in past):.2f}")
     print(f"     the window: {cam_away:.1f}px out of home at the end of the "
           f"charge -> {cam_home:.1f}px at the end of the lull")
     check(cam_away > 2.0 and cam_home < cam_away * 0.5,
-          "with no school left to follow, the window eases home",
+          "with no school left to follow (the searching fish is not "
+          "followed), the window eases home",
           f"{cam_away:.1f}px -> {cam_home:.1f}px")
+    await _close(room)
+
+    # ... and told `lull_keep = 0`, his 2026-08-28 clock in thirds
+    room = await _room(stack, "lull0", dict(HIS_MATRIX), seed=11)
+    eff = room.effect
+    room.step(240)
+    eff.update_config({"phase": "charge", "phase_progress": 0.0})
+    for i in range(1, cf + 1):
+        eff.update_config({"phase_progress": i / cf})
+        room.step(1)
+    eff.update_config({"phase": "lull", "phase_progress": 0.0,
+                       "lull_keep": 0})
+    marks = []
+    for i in range(1, lf + 1):
+        f = i / lf
+        eff.update_config({"phase_progress": f})
+        room.step(1)
+        marks.append((f, int(eff.n),
+                      float(np.asarray(eff.matrix, dtype=np.float32).max()),
+                      float(eff.wake.max())))
+    gone = [m for m in marks if m[0] >= FX.LULL_GONE_AT]
+    check(all(m[1] == 0 for m in gone),
+          "told lull_keep = 0: every fish GONE by the first third",
+          f"worst {max(m[1] for m in gone)} alive")
+    mid = [m for m in marks
+           if FX.LULL_GONE_AT < m[0] < FX.LULL_DARK_AT * 0.95]
+    check(any(m[3] > 0.0 for m in mid) and all(m[1] == 0 for m in mid),
+          "told lull_keep = 0: ripples ONLY between the thirds")
+    last = [m for m in marks if m[0] >= FX.LULL_DARK_AT]
+    check(max(m[2] for m in last) == 0.0,
+          "told lull_keep = 0: the last third fully DARK",
+          f"brightest pixel {max(m[2] for m in last):.2f}")
     await _close(room)
 
 
@@ -470,9 +497,9 @@ async def section_drop(stack):
     rush_born = [0]
     orig_rush = eff._spawn_rush
 
-    def counted_rush(count, _orig=orig_rush):
+    def counted_rush(count, speed_x=None, _orig=orig_rush):
         before = eff.n
-        _orig(count)
+        _orig(count) if speed_x is None else _orig(count, speed_x=speed_x)
         rush_born[0] += eff.n - before
     eff._spawn_rush = counted_rush
 

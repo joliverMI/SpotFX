@@ -279,6 +279,21 @@ ONE_COLOUR_EFFECTS = frozenset({"pulse"})
 # natural next member.
 LULL_DARK_EFFECTS = frozenset({"blackhole", "squiggles", "pulse"})
 
+# THE LULL HAND-OFF HOOK (2026-10-08, fish-lull plan phase 1): phase effects
+# whose lull can be TOLD how many pieces to leave on the panel at its
+# half-way mark (`lull_keep`), which effect the drop will land on
+# (`lull_next`) and the lull's real length (`lull_s`) — all three pushed on
+# EVERY lull arm (spectra scene_response._drive_phase). fx/effects/
+# lull_handoff.py is the binding statement, including how an effect opts in;
+# the drop-scene-variety work supplies the RESOLVER that decides the values
+# (scene_response.install_lull_handoff_resolver), never a second hook.
+LULL_HANDOFF_EFFECTS = frozenset({"fish"})
+
+# ... and its drop-side half: effects told the fire's intensity on every
+# drop arm (`drop_intensity`) so the drop's length and speed scale with the
+# music (lull_handoff.drop_scale).
+DROP_INTENSITY_EFFECTS = frozenset({"fish"})
+
 # The vendored effects carrying the flare-driven payoff burst: the
 # `burst_rockets` config key (an instant "explode N payoff rockets NOW"
 # count, edge-detected in config_updated, consumed per draw, self-reset to

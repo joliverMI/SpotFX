@@ -353,19 +353,49 @@ every batch's outcome — landed, skipped (stale scene / a show gate) or
 error — lands in `kind_batch_log`, so a held room and a broken one never
 look the same.
 
-Executable specs: scripts/check_spectra.py, tests/test_spectra_engine.py.
+THE LULL HAND-OFF HOOK (2026-10-08, fish-lull plan phase 1;
+fx/effects/lull_handoff.py is the binding statement for the KEYS). Every
+lull arm tells each fx.device_model.LULL_HANDOFF_EFFECTS virtual how many
+pieces to leave at the lull's half-way mark (`lull_keep`), which effect the
+drop will land on (`lull_next`) and the lull's real length (`lull_s`); every
+drop arm tells each DROP_INTENSITY_EFFECTS virtual the fire's intensity
+(`drop_intensity`). WHO DECIDES is a RESOLVER: `LullHandoffResolver`, called
+with a `LullContext` (the scene, the fire's intensity, the gap, every
+virtual's current effect, the song and position when known) and answering a
+`LullHandoff` (keep, a per-virtual next-effect map, lull_s). Four rules for
+anyone supplying one (the drop-scene-variety work is the intended
+consumer — dsv drop-led switching and the fireworks melds plug in HERE
+rather than building a second hook):
+  - INSTALL IT ONCE, PROCESS-WIDE: install_lull_handoff_resolver(fn), from
+    spectra/services/engine.py beside the other wiring. It is module-level
+    on purpose, so the scrubbing sequence preview's scratch responders
+    (phase_preview / flare_preview._scratch_engine) ask the SAME resolver
+    the room does — a per-instance attribute (`ResponseEngine.
+    lull_handoff_resolver`) overrides it for tests only.
+  - PURE AND CHEAP: the preview runs it per lap.
+  - IT NEVER RAISES INTO THE FIRE: an exception is logged and the default
+    hand-off is used (keep DEFAULT_KEEP, no next effect, lull_s = the gap).
+  - The answer is RECORDED: the phase record carries `lull_handoff`
+    ({keep, next, lull_s, resolver}) and, on a drop, `drop_intensity`, so
+    the fire log, the sequence preview and the Review page can say why a
+    lull kept three fish.
+With no resolver installed the default answer is the Admiral's own ("one is
+left at the half way mark"): keep 1, same effect, the real gap.
+
+Executable specs: scripts/check_spectra.py, tests/test_spectra_engine.py,
+tests/test_lull_handoff.py.
 """
 from __future__ import annotations
 
 import logging
 import time
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from random import Random
-from typing import Any, Awaitable, Callable, NamedTuple, Optional
+from typing import Any, Awaitable, Callable, Mapping, NamedTuple, Optional
 
 from fx import device_model
-from fx.effects import lull_dark
+from fx.effects import lull_dark, lull_handoff
 from spectra.models.binding import ValueBinding
 from spectra.models.scene import (FlareBand, FlareKind, ParamTarget,
                                   ResponseClass, SceneV2)
@@ -703,6 +733,67 @@ def _lull_dark_keys(ramp_ms: int, gap_ms: Optional[int],
     return lull_dark.keys_for(lull_s, ramp_ms / 1000.0, max_dark_s)
 
 
+# ── THE LULL HAND-OFF HOOK (module docstring) ─────────────────────────────
+
+@dataclass(frozen=True)
+class LullContext:
+    """Everything a lull hand-off resolver may read. `virtuals` maps every
+    virtual the conductor tracks to the effect type currently showing on
+    it; `uri`/`position_ms` are the live song when known (None from a
+    preview's scratch responder or a manual test-fire)."""
+    scene: Optional[SceneV2]
+    intensity: Optional[float]
+    gap_ms: Optional[int]
+    lull_s: float
+    virtuals: Mapping[str, str]
+    uri: Optional[str] = None
+    position_ms: Optional[int] = None
+
+
+@dataclass(frozen=True)
+class LullHandoff:
+    """What a lull is told (fx/effects/lull_handoff.py): `keep` pieces left
+    at the half-way mark, `next_effect` per virtual id (absent = the same
+    effect / unknown), and the lull's real length in seconds."""
+    keep: int = lull_handoff.DEFAULT_KEEP
+    next_effect: Mapping[str, str] = field(default_factory=dict)
+    lull_s: float = 0.0
+
+
+LullHandoffResolver = Callable[[LullContext], LullHandoff]
+
+# The process-wide resolver (module docstring: install once, from engine.py,
+# so the sequence preview's scratch responders ask the same one).
+_installed_resolver: Optional[LullHandoffResolver] = None
+
+
+def install_lull_handoff_resolver(
+        resolver: Optional[LullHandoffResolver]) -> None:
+    """Install (or, with None, remove) the process-wide lull hand-off
+    resolver. The drop-scene-variety work's plug-in point."""
+    global _installed_resolver
+    _installed_resolver = resolver
+
+
+def installed_lull_handoff_resolver() -> Optional[LullHandoffResolver]:
+    return _installed_resolver
+
+
+def _lull_seconds(ramp_ms: int, gap_ms: Optional[int]) -> float:
+    """The lull's real length: the gap to its drop when known, else the flat
+    ramp — the same reading _lull_dark_keys makes."""
+    if gap_ms is not None and gap_ms > 0:
+        return gap_ms / 1000.0
+    return ramp_ms / 1000.0
+
+
+def default_lull_handoff(ctx: LullContext) -> LullHandoff:
+    """The hand-off with no resolver installed: the Admiral's own "one is
+    left at the half way mark", the same effect, the real lull length."""
+    return LullHandoff(keep=lull_handoff.DEFAULT_KEEP, next_effect={},
+                       lull_s=ctx.lull_s)
+
+
 def _house_owns_the_look() -> Optional[str]:
     """Why a house mode's resting look owns the room right now (so this is
     not a music show), or None. house.scene_deferral is the one statement
@@ -1026,8 +1117,15 @@ class ResponseEngine:
         room_load: Callable[[], color_journey.RoomColorState] | None = None,
         room_save: Callable[[color_journey.RoomColorState], None] | None = None,
         room_controls: Callable[[], Any] | None = None,
+        song_position: Callable[[], tuple[Optional[str], Optional[int]]] | None = None,
     ) -> None:
         self.conductor = conductor
+        # THE LULL HAND-OFF HOOK: the live song for a resolver's LullContext
+        # (engine.py wires the bridge); a per-instance resolver override for
+        # tests (production installs one process-wide —
+        # install_lull_handoff_resolver).
+        self._song_position = song_position or (lambda: (None, None))
+        self.lull_handoff_resolver: Optional[LullHandoffResolver] = None
         self.executor = executor
         self._rng = rng or Random()
         self._clock = clock
@@ -1120,7 +1218,8 @@ class ResponseEngine:
             return record
         phase_driven = False
         if event_class in PHASE_RAMP_MS:
-            record["phase"] = await self._drive_phase(event_class, gap_ms)
+            record["phase"] = await self._drive_phase(event_class, gap_ms,
+                                                      intensity)
             phase_driven = bool(record["phase"]["targets"])
         spec = scene.responses.get(event_class)
         band = select_band(spec.bands, intensity) if spec else None
@@ -2429,7 +2528,8 @@ class ResponseEngine:
         return len(released)
 
     async def _drive_phase(self, event_class: str,
-                           gap_ms: Optional[int] = None) -> dict:
+                           gap_ms: Optional[int] = None,
+                           intensity: Optional[float] = None) -> dict:
         """Arm + ramp the vendored phase machinery on every phase-capable
         virtual — the exact drive the original program used: the instant
         arm write must land before the ramp (jump, then glide — in-process
@@ -2450,7 +2550,13 @@ class ResponseEngine:
         no music plays) the choreography is withheld from those virtuals
         and NAMED in the record; every other phase effect is driven as
         before. The house layer's levels, Hue Hold and off rules sit
-        downstream of every effect and keep winning either way."""
+        downstream of every effect and keep winning either way.
+
+        THE LULL HAND-OFF HOOK (module docstring): a lull arm also tells
+        every LULL_HANDOFF_EFFECTS virtual what the resolver decided
+        (`lull_keep`/`lull_next`/`lull_s` — every key, every arm, even at
+        the default), and a drop arm tells every DROP_INTENSITY_EFFECTS
+        virtual the fire's `intensity`. Both are named in the record."""
         ramp_ms = _phase_ramp_ms(event_class, gap_ms)
         lull_keys: dict = {}
         if event_class == "lull" and any(
@@ -2458,6 +2564,16 @@ class ResponseEngine:
                 for st in self.conductor.virtuals.values()):
             lull_keys = _lull_dark_keys(ramp_ms, gap_ms,
                                         self._lull_dark_max_s())
+        handoff: Optional[LullHandoff] = None
+        handoff_by: Optional[str] = None
+        if event_class == "lull" and any(
+                st.effect_type in device_model.LULL_HANDOFF_EFFECTS
+                for st in self.conductor.virtuals.values()):
+            handoff, handoff_by = self._resolve_lull_handoff(
+                ramp_ms, gap_ms, intensity)
+        drop_keys: dict = {}
+        if event_class == "drop" and intensity is not None:
+            drop_keys = lull_handoff.drop_keys_for(intensity)
         targets: list[str] = []
         withheld: list[str] = []
         house_reason: Optional[str] = None
@@ -2475,6 +2591,14 @@ class ResponseEngine:
             if (lull_keys
                     and state.effect_type in device_model.LULL_DARK_EFFECTS):
                 arm.update(lull_keys)
+            if (handoff is not None and state.effect_type
+                    in device_model.LULL_HANDOFF_EFFECTS):
+                arm.update(lull_handoff.keys_for(
+                    handoff.keep, handoff.next_effect.get(vid, ""),
+                    handoff.lull_s))
+            if (drop_keys and state.effect_type
+                    in device_model.DROP_INTENSITY_EFFECTS):
+                arm.update(drop_keys)
             await self.executor.jump(vid, state.effect_type, arm)
             await self.executor.glide(
                 vid, state.effect_type, {"phase_progress": 1.0}, ramp_ms)
@@ -2486,9 +2610,58 @@ class ResponseEngine:
         record = {"targets": targets, "ramp_ms": ramp_ms, "gap_ms": gap_ms}
         if lull_keys:
             record["lull_dark_s"] = lull_keys[lull_dark.DARK_KEY]
+        if handoff is not None:
+            record["lull_handoff"] = {
+                "keep": lull_handoff.clamp_keep(handoff.keep),
+                "next": {vid: eff for vid, eff in handoff.next_effect.items()
+                         if eff},
+                "lull_s": round(max(0.0, float(handoff.lull_s)), 3),
+                "resolver": handoff_by,
+            }
+        if drop_keys and any(
+                st.effect_type in device_model.DROP_INTENSITY_EFFECTS
+                for st in self.conductor.virtuals.values()):
+            record["drop_intensity"] = drop_keys[lull_handoff.DROP_KEY]
         if withheld:
             record["withheld"] = {"virtuals": withheld, "reason": house_reason}
         return record
+
+    def _resolve_lull_handoff(self, ramp_ms: int, gap_ms: Optional[int],
+                              intensity: Optional[float]
+                              ) -> tuple[LullHandoff, str]:
+        """Ask the resolver what this lull is told (module docstring, "THE
+        LULL HAND-OFF HOOK"): the instance override, else the process-wide
+        install, else the default. Never raises into the fire — a resolver
+        that throws (or answers something that is not a LullHandoff) is
+        logged and the default is used, NAMED as such in the record."""
+        lull_s = _lull_seconds(ramp_ms, gap_ms)
+        try:
+            uri, position_ms = self._song_position()
+        except Exception:                                # noqa: BLE001
+            uri, position_ms = None, None
+        ctx = LullContext(
+            scene=getattr(self.conductor, "scene", None),
+            intensity=intensity,
+            gap_ms=gap_ms,
+            lull_s=lull_s,
+            virtuals={vid: st.effect_type
+                      for vid, st in self.conductor.virtuals.items()},
+            uri=uri,
+            position_ms=position_ms,
+        )
+        resolver = self.lull_handoff_resolver or _installed_resolver
+        if resolver is None:
+            return default_lull_handoff(ctx), "default"
+        try:
+            answer = resolver(ctx)
+            if not isinstance(answer, LullHandoff):
+                raise TypeError(f"resolver answered {type(answer).__name__},"
+                                " not a LullHandoff")
+            return answer, getattr(resolver, "__name__", "resolver")
+        except Exception:                                # noqa: BLE001
+            logger.exception("lull hand-off: resolver failed — the lull "
+                             "gets the default hand-off")
+            return default_lull_handoff(ctx), "default (resolver failed)"
 
     def _lull_dark_max_s(self) -> float:
         """The room's lull darkness cap (RoomControlState.lull_dark_max_s).

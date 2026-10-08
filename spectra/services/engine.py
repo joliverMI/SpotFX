@@ -104,6 +104,12 @@ responses = ResponseEngine(
     executor=executor,
     genre_bucket=lambda: bridge.genre_bucket(),
     broadcast=ws_manager.broadcast,
+    # THE LULL HAND-OFF HOOK's LullContext: which song, where in it. A
+    # resolver (scene_response.install_lull_handoff_resolver — the
+    # drop-scene-variety work's plug-in point, installed HERE once it
+    # exists) reads it to find the drop sequence a lull belongs to.
+    song_position=lambda: (bridge.track_uri(),
+                           bridge.effective_position_ms()),
 )
 
 # Two-dimensional drift gradient retarget hook (owner ask 2026-08-20) — wired

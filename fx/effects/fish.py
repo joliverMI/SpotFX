@@ -5,6 +5,7 @@ import voluptuous as vol
 from PIL import Image
 
 import fx.effects.particle_handoff as particle_handoff
+from fx.effects import lull_handoff
 from fx.color import validate_gradient
 from fx.effects.audio import AudioReactiveEffect
 from fx.effects.gradient import GradientEffect
@@ -736,9 +737,88 @@ CHARGE_TURN_MIN = (np.pi / 3.0, 2.2)  # turn magnitude range, radians
 # true wall-clock duration, not exactly half. That is the closest an effect
 # can get to his "by half way through the lull" without ever being told the
 # duration.
-# HIS LULL CLOCK (2026-08-28), in THIRDS of the lull's own duration — and
-# the duration is the dynamic ramp gap SpotFX drives `phase_progress` over,
-# never a wall-clock constant:
+# HIS 2026-10-08 LULL — ONE FISH STAYS AND SEARCHES (the Admiral, verbatim:
+# "have all the fish leave over time except for one, so one is left at the
+# half way mark. then have that last fish move slowly and look like it's
+# searching. have it move to one side, pause, then move to the other. then
+# on the drop, all the missing fish come back in the rush we currently
+# have"). This REVERSES, on his own word, the 2026-08-28 "no lone fish"
+# clock described just below; that clock is still the lull when the lull
+# is told `lull_keep = 0` (fx/effects/lull_handoff.py — the hand-off hook
+# the drop-scene-variety work drives), byte for byte, and only then.
+#   lull edge        the school breaks into the swirl exactly as before,
+#                    except the `lull_keep` fish nearest the centre of view
+#                    (default 1) — the KEEPERS (mode 5) — which ease toward
+#                    the centre and slow down instead of swirling.
+#   -> half way      everyone else leaks out of the swirl in rank order,
+#                    furthest first, across KEEP_LEAK_FROM..KEEP_LEAK_TO of
+#                    the way to the half-way mark, aimed off the panel by
+#                    KEEP_EXIT_BY of it; a backstop at the mark retires
+#                    anything that is not a keeper. The half-way mark is
+#                    SECONDS (lull_s / 2) when SpotFX told the lull its
+#                    length, else phase_progress 0.5 (~45% of the clock).
+#   half way -> drop THE SEARCH: a slow leg (`search_speed` x cruise) toward
+#                    one side of the pond (`search_reach`) — first the side
+#                    it already faces, no about-face — a PAUSE at a hover
+#                    with its head swinging as if looking (`search_pause_s`
+#                    at most, shorter on a short lull), then a leg to the
+#                    other side, and so on until the drop lands, usually
+#                    mid-leg. The lull is never dark: the keeper's wake
+#                    keeps rippling. The window does not follow a keeper,
+#                    so the search plays out against a settled view.
+#   the drop         the keepers rejoin the population (mode 0) and are
+#                    boosted with everyone into the existing rush.
+# More than one keeper (`lull_keep` N, e.g. 3 for a drop that lands on
+# Fireworks) holds a loose, evenly spaced group that searches together;
+# told a different `lull_next` effect, the group spaces itself further
+# apart so the arriving effect adopts N distinct origins.
+KEEP_LEAK_FROM = 0.15     # of the way to the keep mark: first leak ...
+KEEP_LEAK_TO = 0.8        # ... last leak ...
+KEEP_EXIT_BY = 0.95       # ... every leaver aimed off the panel by here
+KEEP_SPACING_BODIES = 1.6       # keeper-to-keeper spacing, body lengths
+KEEP_SPACING_NEXT_BODIES = 3.0  # ... when the drop lands on another effect
+KEEP_GROUP_MAX = 0.6      # the group row never spans more of the pond's
+                          # width than this either side
+KEEP_SEEK_W = 14.0        # how hard a keeper steers for its target
+KEEP_SEP_W = 20.0          # ... and away from a keeper closer than the
+                          # group's own spacing (several keepers only), so
+                          # an about-face's arc cannot fold the row up
+KEEP_LEVEL_W = 6.0        # a keeper's pull back toward the window's middle
+                          # height: its legs run side to side, so it is the
+                          # only containment a keeper needs, and it is what
+                          # picks which way an about-face arcs (away from
+                          # the nearer top/bottom wall). Keepers are kept
+                          # off the wall glance: its authority would take a
+                          # searching fish over mid-turn and run it along
+                          # the wall instead of back across the pond.
+KEEP_LEVEL_SPAN = 0.25    # ... at full weight this far off the middle, as
+                          # a fraction of the panel's height
+KEEP_SPEED_TAU = 0.2      # a keeper's speed ease: it settles into a pause's
+                          # hover in a fraction of a second, not a drift
+SEARCH_PAUSE_X = 0.12     # hover speed in a pause, x cruise (fins breathe)
+SEARCH_PAUSE_MIN_S = 0.5  # a pause is never shorter than this ...
+SEARCH_PAUSE_FRAC = 0.18  # ... and otherwise this share of the time left,
+                          # capped by `search_pause_s`
+SEARCH_LEG_SHARE = 0.25   # the FIRST leg is budgeted this share of the time
+SEARCH_LEG_MIN_S = 0.35   # left (never less than this), so even a short
+                          # lull fits a leg, a pause and the turn back before
+                          # the drop; every later leg runs to the reach (the
+                          # drop usually lands mid-leg)
+SEARCH_LEG_SLACK = 1.6    # a leg that has not arrived within this many times
+SEARCH_LEG_SLACK_S = 0.5  # its own travel time (+ this) pauses anyway: a
+                          # turn arc can make the straight-line time a lie
+SEARCH_Y_WANDER = 0.15    # each leg's target strays this much of the pond
+                          # up or down, so the search is not a ruled line
+SEARCH_LOOK_SWING = 0.5   # radians the head swings either way in a pause
+SEARCH_LOOK_HZ = 0.9      # ... this many times a second
+SEARCH_LOOK_EASE_S = 0.15  # ... eased in and out
+PHASE_RAMP_SHARE = 0.9    # SpotFX's ramp covers this much of the gap (scene_
+                          # response.PHASE_RAMP_HANG_FRACTION's complement):
+                          # how an UNTOLD lull's length is read off its ramp
+#
+# HIS LULL CLOCK (2026-08-28) — now only `lull_keep = 0` — in THIRDS of the
+# lull's own duration, and the duration is the dynamic ramp gap SpotFX
+# drives `phase_progress` over, never a wall-clock constant:
 #   0 -> 1/3    every fish disperses and is GONE by the end of it. None
 #               survive: no lone fish, no exceptions, and a hard backstop
 #               retires anything the paced dispersal has not already sent
@@ -1088,6 +1168,8 @@ class Fish2d(Twod, GradientEffect):
         "color_shift",
         "phase",
         "phase_progress",
+        *lull_handoff.KEYS,
+        lull_handoff.DROP_KEY,
     ]
 
     CONFIG_SCHEMA = vol.Schema(
@@ -1390,6 +1472,41 @@ class Fish2d(Twod, GradientEffect):
                 ),
                 default=0.8,
             ): vol.All(vol.Coerce(float), vol.Range(min=0.2, max=3.0)),
+            # ── the lull's searching keeper, and the scaled drop ─────────
+            vol.Optional(
+                "search_speed",
+                description=(
+                    "Lull: how fast the fish left behind swims while it "
+                    "searches, as a fraction of its ordinary cruise"
+                ),
+                default=0.45,
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.1, max=1.0)),
+            vol.Optional(
+                "search_pause_s",
+                description=(
+                    "Lull: the longest the searching fish pauses at the end "
+                    "of a leg, looking about, before it heads the other way "
+                    "(a short lull pauses less)"
+                ),
+                default=1.2,
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.2, max=4.0)),
+            vol.Optional(
+                "search_reach",
+                description=(
+                    "Lull: how far toward each side the searching fish "
+                    "goes, as a fraction of the pond"
+                ),
+                default=0.7,
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.1, max=1.0)),
+            vol.Optional(
+                "drop_scale_min",
+                description=(
+                    "Drop: how short and gentle the rush gets on the "
+                    "quietest song, as a fraction of the full rush (a song "
+                    "at the automatic ceiling gets the full rush)"
+                ),
+                default=lull_handoff.DEFAULT_DROP_SCALE_MIN,
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.1, max=1.0)),
             # ── SpotFX-driven choreography ───────────────────────────────
             vol.Optional(
                 "phase",
@@ -1401,6 +1518,10 @@ class Fish2d(Twod, GradientEffect):
                 description="Progress through the current phase (ramped by SpotFX)",
                 default=0.0,
             ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1.0)),
+            # the lull hand-off hook (fx/effects/lull_handoff.py): ride ONLY
+            # the lull/drop arm writes, like the phase keys above
+            **lull_handoff.schema_fields(),
+            **lull_handoff.drop_schema_fields(),
         }
     )
 
@@ -1410,6 +1531,7 @@ class Fish2d(Twod, GradientEffect):
         # patches — do_once re-runs on every config change.
         # 0 swim 1 enter 2 ejecta (the drop's explosion only) 3 rush
         # 4 DISPERSING — see the dispersal block at the top of the module
+        # 5 KEEPER — the lull's searching fish (the 2026-10-08 LULL block)
         self.p_mode = np.zeros(CAP, dtype=np.int8)
         self.p_nocap = np.zeros(CAP, dtype=np.int8)  # spawned past the cap
         # the lull's dispersal RANK (NaN = not scheduled). A rank, not an
@@ -1507,6 +1629,7 @@ class Fish2d(Twod, GradientEffect):
         self._burst = 0.0        # the swim burst envelope, 0..1
         self._burst_tail = 0.0   # s of fast speed-ease left after a burst
         self._scatter = None     # outgoing-crossfade latch (see draw)
+        self._keep = None        # the lull keepers' targets (_keep_targets)
         self._wall = None        # the lit silhouette's distance field
         self._wall_key = None    # ... and what it was read from
         self._solo_due = 0.0     # solo bursts owed but not yet placed
@@ -1586,6 +1709,10 @@ class Fish2d(Twod, GradientEffect):
         self.solo_burst_rate = self._config["solo_burst_rate"]
         self.solo_burst_speed = self._config["solo_burst_speed"]
         self.solo_burst_time = self._config["solo_burst_time"]
+        self.search_speed = self._config["search_speed"]
+        self.search_pause_s = self._config["search_pause_s"]
+        self.search_reach = self._config["search_reach"]
+        self.drop_scale_min = self._config["drop_scale_min"]
 
         self.power_func = self.POWER_FUNCS_MAPPING[
             self._config["frequency_range"]
@@ -2176,7 +2303,7 @@ class Fish2d(Twod, GradientEffect):
         self.p_hd[s] = hd + self.p_var[s] * self.school_variation
         self.p_erate[s] = max(1.0, self.enter_time / HANDOFF_ENTER_S)
 
-    def _spawn_rush(self, count):
+    def _spawn_rush(self, count, speed_x=None):
         """THE DROP'S RUSH (his 2026-08-28 addendum: "I want the rush to be
         part of the drop. All the fish rush in, swirl around and some stay
         behind per the blob count parameter after the drop is done").
@@ -2191,6 +2318,9 @@ class Fish2d(Twod, GradientEffect):
         an explosion at the centre, not a shoal sweeping past one fish.
 
         Tagged `p_nocap` — the ONE drop-scoped bypass of the population cap.
+
+        `speed_x` scales the entry speed for an INTENSITY-SCALED drop (see
+        _drop_step); None is the fixed rush, expression for expression.
         """
         base = self.n
         s = self._spawn(count, mode=3, nocap=True)
@@ -2218,9 +2348,14 @@ class Fish2d(Twod, GradientEffect):
         self.p_hd[s] = (
             ang + np.pi + rng.uniform(-1.0, 1.0, k) * chaos * (np.pi / 3.0)
         )
-        self.p_spd[s] = self.cruise_px * (
-            2.2 + rng.uniform(-1.0, 1.0, k) * chaos * 1.1
-        )
+        if speed_x is None:
+            self.p_spd[s] = self.cruise_px * (
+                2.2 + rng.uniform(-1.0, 1.0, k) * chaos * 1.1
+            )
+        else:
+            self.p_spd[s] = self.cruise_px * float(speed_x) * (
+                2.2 + rng.uniform(-1.0, 1.0, k) * chaos * 1.1
+            )
         self.p_enter[s] = 1.0
 
     def _enter_phase(self, phase):
@@ -2252,8 +2387,64 @@ class Fish2d(Twod, GradientEffect):
             self._release_nocap()
 
     def _start_lull(self):
+        """The lull's edge. Told (or defaulting to) `lull_keep` >= 1: the
+        2026-10-08 searching lull (_start_lull_keep). Told 0: his
+        2026-08-28 clock, byte for byte (_start_lull_gone)."""
+        keep = lull_handoff.keep(self._config)
+        if keep <= 0:
+            self._start_lull_gone()
+            return
+        self._start_lull_keep(keep)
+
+    def _start_lull_keep(self, keep):
+        """Break the school into the swirl, except the `keep` fish nearest
+        the centre of view, which become KEEPERS (mode 5). Every other fish
+        is ranked to leak out before the half-way mark exactly the way the
+        old lull ranked them for the third. A lull with fewer fish than it
+        was told to keep calls the shortfall in from off-panel (they swim
+        in and fade up like any arrival — never appear from nothing)."""
+        n = self.n
+        self.p_disp[:n] = np.nan
+        nxt = lull_handoff.next_effect(self._config)
+        self._lull_state = {
+            "dark": 1.0, "keep": keep, "search": None,
+            "spacing": (KEEP_SPACING_NEXT_BODIES
+                        if nxt and nxt != "fish" else KEEP_SPACING_BODIES),
+            "look_phase": float(self._rng.uniform(0.0, 2 * np.pi)),
+        }
+        live = np.flatnonzero(
+            (self.p_mode[:n] < 2) | (self.p_mode[:n] == 3)
+        )
+        d = np.hypot(
+            (self.p_x[live] - self.cam_nx) * self.sx,
+            (self.p_y[live] - self.cam_ny) * self.sy,
+        )
+        near = live[np.argsort(d, kind="stable")]
+        keepers = near[:keep]
+        leavers = near[keep:]
+        if keepers.size:
+            self.p_mode[keepers] = 5
+            self.p_nocap[keepers] = 0
+            self.p_lk[keepers] = np.inf
+            self.p_dl[keepers] = np.inf
+        if leavers.size:
+            self.p_mode[leavers] = 4
+            self.p_nocap[leavers] = 0
+            self.p_lk[leavers] = np.inf
+            self.p_dl[leavers] = np.inf
+            # furthest from the centre of view leaves first
+            order = leavers[::-1]
+            self.p_disp[order] = (
+                np.arange(1, order.size + 1, dtype=np.float32) / order.size
+            )
+        short = keep - int(keepers.size)
+        if short > 0:
+            s = self._spawn_swimmers(short, active=False)
+            self.p_mode[s] = 5
+
+    def _start_lull_gone(self):
         """Break the school into the SWIRL and schedule every fish to leak
-        out of it across the lull's first third.
+        out of it across the lull's first third (`lull_keep = 0` only).
 
         His 2026-08-28 ruling: no lone fish and no survivor of any kind. His
         2026-09-16 one: they leave by swirling and leaking off the screen,
@@ -2264,7 +2455,7 @@ class Fish2d(Twod, GradientEffect):
         """
         n = self.n
         self.p_disp[:n] = np.nan
-        self._lull_state = {"dark": 1.0}
+        self._lull_state = {"dark": 1.0, "keep": 0}
         live = np.flatnonzero(
             (self.p_mode[:n] < 2) | (self.p_mode[:n] == 3)
         )
@@ -2308,6 +2499,16 @@ class Fish2d(Twod, GradientEffect):
             )
             if circling.size:
                 self._depart(circling)
+            # ... and its KEEPERS belong to it too: whatever ended the lull
+            # (the drop — "all the missing fish come back" with the keeper
+            # among them — a watchdog release, a reset), they rejoin the
+            # ordinary population on the very next frame
+            self._keep = None
+            keepers = np.flatnonzero(self.p_mode[:n] == 5)
+            if keepers.size:
+                self.p_mode[keepers] = np.where(
+                    self.p_enter[keepers] < 1.0, 1, 0)
+                self.p_nocap[keepers] = 0
         if self._phase == "none":
             return
         self._phase_t += dt
@@ -2377,8 +2578,214 @@ class Fish2d(Twod, GradientEffect):
                 )
 
     def _lull_step(self, p, dt):
+        """Advance the lull: the searching lull (_lull_keep_step) unless it
+        was told `lull_keep = 0`, which runs his 2026-08-28 clock."""
+        st = self._lull_state
+        if st is None:
+            self._start_lull()
+            st = self._lull_state
+        if st.get("keep", 0) > 0:
+            self._lull_keep_step(p, dt)
+            return
+        self._lull_gone_step(p, dt)
+
+    def _lull_clock(self, p):
+        """(f, h, h_rate, lull_s) for the searching lull: `f` the progress
+        (or its wall-clock fallback while progress sits at 0), `h` how far
+        toward the half-way keep mark (lull_handoff.keep_mark), `h_rate` how
+        fast `h` moves per second, and the lull's length in seconds — TOLD
+        when SpotFX pushed `lull_s`, else read back off the progress ramp
+        (which covers PHASE_RAMP_SHARE of the gap), None until it moves."""
+        f = p if p > 0.0 else min(self._phase_t / LULL_FALL_S, 1.0)
+        cfg = self._config
+        if lull_handoff.told(cfg):
+            total = lull_handoff.lull_s(cfg)
+            h = lull_handoff.keep_mark(cfg, f, self._phase_t)
+            return f, h, 2.0 / max(total, 1e-6), total
+        h = lull_handoff.keep_mark(cfg, f, self._phase_t)
+        rate = (f / self._phase_t if self._phase_t > 1e-3 and f > 0.0
+                else 1.0 / LULL_FALL_S)
+        total = (1.0 / max(rate, 1e-6)) / PHASE_RAMP_SHARE if f > 0.0 else None
+        return f, h, rate / lull_handoff.LEGACY_KEEP_MARK, total
+
+    def _lull_keep_step(self, p, dt):
+        """THE SEARCHING LULL (the 2026-10-08 block at the top of the
+        module): leak every non-keeper out before the half-way mark, then
+        let the keepers search side to side until the drop. Never dark."""
+        st = self._lull_state
+        f, h, h_rate, total = self._lull_clock(p)
+        n = self.n
+
+        # ── edge -> half way: swirl, leak out in rank order ─────────────
+        disp = np.flatnonzero(self.p_mode[:n] == 4)
+        if disp.size:
+            rank = self.p_disp[disp]
+            ranked = np.isfinite(rank)
+            leak_h = np.minimum(
+                KEEP_LEAK_FROM
+                + np.where(ranked, rank, 0.0) * (KEEP_LEAK_TO - KEEP_LEAK_FROM),
+                KEEP_EXIT_BY - LULL_EXIT_MIN_S * h_rate,
+            )
+            due = disp[ranked & (h >= leak_h)]
+            if due.size:
+                self.p_lk[due] = self.t
+                self.p_disp[due] = np.nan
+            self.p_dl[disp] = self.t + max(KEEP_EXIT_BY - h, 0.0) / max(
+                h_rate, 1e-6)
+        # the backstop that makes "one left at the half way mark" a
+        # guarantee: past the mark, only keepers remain
+        if h >= 1.0 and n:
+            alive = self.p_mode[:n] == 5
+            if not alive.all():
+                self._compact(alive)
+            if st["search"] is None:
+                st["search"] = {"stage": None}
+
+        st["dark"] = 1.0
+        self.particle_count = 0
+        self._keep_targets(h, total)
+
+    def _keeper_offsets(self, k):
+        """Each keeper's place in its group, normalized units relative to
+        the group's centre, and the group's half-width in px: a loose ROW
+        across the panel's long axis, neighbours `spacing` body lengths
+        apart (closer if the row would span more than KEEP_GROUP_MAX of the
+        pond either side), every other one a little up or down so it never
+        reads as a ruled line. A row, not a ring: the search runs side to
+        side, and a ring would park a keeper against the top or bottom wall.
+        One keeper: the centre itself."""
+        if k <= 1:
+            z = np.zeros(max(k, 0))
+            return z, z, 0.0
+        st = self._lull_state
+        pond_px = max(self.roam_bound * self.sx, 1e-3)   # across, not up
+        gap = min(st["spacing"] * self._body_len_px(),
+                  2.0 * KEEP_GROUP_MAX * pond_px / (k - 1))
+        col = np.arange(k) - (k - 1) / 2.0
+        x_px = col * gap
+        y_px = np.where(np.arange(k) % 2 == 0, 0.3, -0.3) * gap
+        st["spacing_px"] = float(gap)
+        return x_px / self.sx, y_px / self.sy, float(np.max(np.abs(x_px)))
+
+    def _keep_targets(self, h, total):
+        """Where every keeper is heading, how fast, and which way its head
+        is looking — written into `self._keep` for draw() to steer by.
+        Before the mark: the centre of view, slowing toward search speed.
+        After it: the search legs and pauses (the module's LULL block)."""
+        st = self._lull_state
+        n = self.n
+        keepers = np.flatnonzero(self.p_mode[:n] == 5)
+        self._keep = None
+        if keepers.size == 0:
+            return
+        k = keepers.size
+        ox, oy, half_px = self._keeper_offsets(k)
+        # who takes which place in the row: by where they are across the
+        # panel, so no two keepers cross to reach their places. Settled at
+        # the lull's first frame, and again at the start of every leg.
+        cruise = self.cruise_px
+        cnx, cny = self.cam_nx, self.cam_ny
+        gx = float(np.mean(self.p_x[keepers]))
+        gy = float(np.mean(self.p_y[keepers]))
+        search = st["search"]
+        look = 0.0
+        if search is None:
+            # approach: ease in to the centre of view, slowing as the mark
+            # nears
+            w = min(max(h, 0.0), 1.0)
+            tx, ty = cnx, cny
+            speed = cruise * (1.0 + (self.search_speed - 1.0) * w)
+            seek = True
+        else:
+            left = (None if total is None
+                    else max(total - self._phase_t, 0.0))
+            v = max(self.search_speed * cruise, 1e-3)
+            if search["stage"] is None:
+                # the first leg goes the way the keepers already face
+                hx = float(np.mean(np.cos(self.p_hd[keepers])))
+                search["side"] = 1.0 if hx >= 0.0 else -1.0
+                self._start_leg(search, gx, gy, left, v, half_px, first=True)
+                st["slot_of"] = None
+            elif search["stage"] == "go":
+                d_px = float(np.hypot((search["tx"] - gx) * self.sx,
+                                      (search["ty"] - gy) * self.sy))
+                over = self._phase_t - search["t0"] > search["limit"]
+                if d_px <= max(0.5 * self._body_len_px(), 1.5) or over:
+                    search["stage"] = "pause"
+                    search["t0"] = self._phase_t
+                    hi = float(self.search_pause_s)
+                    lo = min(SEARCH_PAUSE_MIN_S, hi)
+                    search["limit"] = (hi if left is None else float(
+                        np.clip(SEARCH_PAUSE_FRAC * left, lo, hi)))
+            elif self._phase_t - search["t0"] >= search["limit"]:
+                search["side"] = -search["side"]
+                self._start_leg(search, gx, gy, left, v, half_px,
+                                first=False)
+                st["slot_of"] = None
+            if search["stage"] == "go":
+                tx, ty = search["tx"], search["ty"]
+                speed = v
+                seek = True
+            else:
+                tx, ty = gx, gy
+                speed = SEARCH_PAUSE_X * cruise
+                seek = False
+                el = self._phase_t - search["t0"]
+                ease = min(el / SEARCH_LOOK_EASE_S,
+                           (search["limit"] - el) / SEARCH_LOOK_EASE_S, 1.0)
+                look = max(ease, 0.0)
+        slot_of = st.get("slot_of")
+        if slot_of is None or len(slot_of) != k:
+            slot_of = st["slot_of"] = np.argsort(
+                np.argsort(self.p_x[keepers], kind="stable"), kind="stable")
+        ox, oy = ox[slot_of], oy[slot_of]
+        idx = np.arange(k, dtype=np.float64)
+        swing = (
+            SEARCH_LOOK_SWING * look
+            * np.sin(2 * np.pi * SEARCH_LOOK_HZ * self._phase_t
+                     + st["look_phase"] + 0.9 * idx)
+        )
+        self._keep = {
+            "idx": keepers,
+            "spacing_px": float(st.get("spacing_px", 0.0)),
+            "tx": tx + ox, "ty": ty + oy,
+            "speed": float(speed), "seek": seek,
+            "look": swing.astype(np.float32),
+        }
+
+    def _start_leg(self, search, gx, gy, left, v, half_px, first):
+        """A search leg toward `search["side"]`: the reach point on that
+        side of the pond (a little up or down). The first leg goes no
+        further than its share of the time left lets a slow fish swim; a
+        later one turns round first, so its time allowance carries the
+        about-face's own arc (half a turn circle at search speed). A group's
+        centre reaches its own half-width less far, so its outermost keeper
+        reaches the same point a lone fish would."""
+        cnx, cny = self.cam_nx, self.cam_ny
+        reach = max(self.search_reach * self.roam_bound
+                    - half_px / max(self.sx, 1e-6), 0.0)
+        rx = cnx + search["side"] * reach
+        ry = cny + float(self._rng.uniform(-1.0, 1.0)) * (
+            SEARCH_Y_WANDER * self.roam_bound)
+        dx_px, dy_px = (rx - gx) * self.sx, (ry - gy) * self.sy
+        dist = float(np.hypot(dx_px, dy_px))
+        if first and left is not None:
+            cap = v * max(SEARCH_LEG_SHARE * left, SEARCH_LEG_MIN_S)
+            if dist > cap > 0.0:
+                k = cap / dist
+                rx, ry = gx + (rx - gx) * k, gy + (ry - gy) * k
+                dist = cap
+        turn_s = 0.0 if first else np.pi * self.turn_radius_px / v
+        search.update({
+            "stage": "go", "t0": self._phase_t, "tx": rx, "ty": ry,
+            "limit": (dist / v + turn_s) * SEARCH_LEG_SLACK
+            + SEARCH_LEG_SLACK_S,
+        })
+
+    def _lull_gone_step(self, p, dt):
         """His clock, in thirds of the lull's own duration: everything gone
-        by 1/3, ripples only to 2/3, dark after that until the drop.
+        by 1/3, ripples only to 2/3, dark after that until the drop
+        (`lull_keep = 0` only — the 2026-10-08 block).
 
         The thirds are of `phase_progress`, which SpotFX ramps over the real
         gap to the lull's own drop, else the next trigger with no drop ahead
@@ -2390,9 +2797,6 @@ class Fish2d(Twod, GradientEffect):
         closest an effect can get without ever being told the duration.
         """
         st = self._lull_state
-        if st is None:
-            self._start_lull()
-            st = self._lull_state
         # progress-driven once the ramp moves (hand-scrubbable in the LedFX
         # UI); the wall-clock fallback only runs while progress sits at 0
         f = p if p > 0.0 else min(self._phase_t / LULL_FALL_S, 1.0)
@@ -2494,13 +2898,29 @@ class Fish2d(Twod, GradientEffect):
         """The drop he likes, plus his addendum's three beats — RUSH IN,
         SWIRL AROUND, STAY BEHIND. Nothing about the existing payoff (the
         boost, the ejecta explosion, the settle horizon, the self-reset)
-        is changed; the rush is laid on top of it."""
+        is changed; the rush is laid on top of it.
+
+        THE DROP FOLLOWS THE MUSIC (2026-10-08, his ask: "make the length of
+        the drop and how fast the fish swirl depend on the intensity of the
+        music so that lower intensity songs don't have such a prolonged
+        rush"). SpotFX tells the drop arm the fire's intensity
+        (`drop_intensity`, fx/effects/lull_handoff.py); `lull_handoff.
+        drop_scale` turns it into one multiple — the automatic ceiling 0.75
+        is exactly the fixed drop, a marked track at 1.0 runs 20% longer, a
+        quiet song shrinks toward `drop_scale_min` — applied to the settle
+        horizon (so the swirl, which decays over it, follows), the boost and
+        the rush's entry speed (by half). Not told: the fixed constants,
+        expression for expression. The ejecta keep their fixed fade."""
         drop = self._drop_state
         if drop is None:
             drop = self._drop_state = {"burst_done": False, "settled": False}
         drop.setdefault("settled", False)
         if not drop["burst_done"]:
             drop["burst_done"] = True
+            drop["scale"] = lull_handoff.drop_scale(
+                lull_handoff.drop_intensity(self._config),
+                self.drop_scale_min,
+            )
             self._release_nocap()
             self.particle_count = int(self._config["particle_count"])
             n = self.n
@@ -2515,7 +2935,11 @@ class Fish2d(Twod, GradientEffect):
                 # repopulating from nothing"), so the centre burst stands
                 # down while it runs. With the rush turned off the drop is
                 # exactly what it was.
-                self._spawn_rush(rush)
+                scale = drop.get("scale")
+                if scale is None:
+                    self._spawn_rush(rush)
+                else:
+                    self._spawn_rush(rush, speed_x=0.5 + 0.5 * scale)
             elif missing > 0:
                 self._spawn_center_burst(
                     self.cam_nx, self.cam_ny, missing
@@ -2523,8 +2947,13 @@ class Fish2d(Twod, GradientEffect):
             # the explosion: 2x more fish that DON'T stay — they bolt
             # straight off the panel during the boost window
             self._spawn_drop_ejecta(DROP_EJECTA_X * self.particle_count)
-        self._speed_scale = 1.0 + DROP_BOOST * max(
-            1.0 - self._phase_t / DROP_SETTLE_S, 0.0
+        scale = drop.get("scale")
+        if scale is None:
+            settle_s, boost = DROP_SETTLE_S, DROP_BOOST
+        else:
+            settle_s, boost = DROP_SETTLE_S * scale, DROP_BOOST * scale
+        self._speed_scale = 1.0 + boost * max(
+            1.0 - self._phase_t / settle_s, 0.0
         )
         # BEAT 2 — SWIRL AROUND, for the drop's own duration. `_rush_swirl`
         # is read by the steering block; it is a tangential bias on the
@@ -2532,9 +2961,9 @@ class Fish2d(Twod, GradientEffect):
         # steering term, so it can never flip one on the spot.
         surge = min(self._phase_t / max(self.rush_time, 0.05), 1.0)
         self._rush_swirl = surge * (
-            1.0 - min(self._phase_t / DROP_SETTLE_S, 1.0)
+            1.0 - min(self._phase_t / settle_s, 1.0)
         )
-        if self._phase_t >= DROP_SETTLE_S:
+        if self._phase_t >= settle_s:
             if not drop["settled"]:
                 # BEAT 3 — STAY BEHIND, per the blob count. See
                 # _settle_rush for how that hands over to the
@@ -2547,8 +2976,11 @@ class Fish2d(Twod, GradientEffect):
             self._speed_scale = 1.0
             # sanctioned in-render config path (under the effect lock);
             # self-reset so an identical later drop write edges again
+            # (the told intensity is forgotten with it, so a later drop
+            # that is not told runs the fixed drop, never this one's scale)
             self._apply_config(
-                {"phase": "none", "phase_progress": 0.0},
+                {"phase": "none", "phase_progress": 0.0,
+                 lull_handoff.DROP_KEY: 0.0},
                 validate=False,
                 fire_event=False,
             )
@@ -3579,7 +4011,18 @@ class Fish2d(Twod, GradientEffect):
         swimming = mode < 2
         rushing = mode == 3
         dispersing = mode == 4
-        steered = swimming | rushing | dispersing
+        # the lull's searching KEEPERS (mode 5): steered toward the targets
+        # _keep_targets set, never by the population, the pond or the swirl
+        keeping = mode == 5
+        kst = self._keep
+        if keeping.any():
+            kidx = np.flatnonzero(keeping)
+            if kst is None or len(kst["idx"]) != kidx.size:
+                kst = None
+        else:
+            kidx = None
+            kst = None
+        steered = swimming | rushing | dispersing | keeping
         # a dispersing fish is SWIRLING until its leak time, then heading out
         swirling = dispersing & (self.p_lk[:n] > self.t)
         leaking = dispersing & ~swirling
@@ -3681,6 +4124,9 @@ class Fish2d(Twod, GradientEffect):
             if leaking.any():
                 want = np.where(leaking, self._disperse_speed(n, cruise), want)
             tau = np.where(dispersing, DISPERSE_TAU, tau)
+        if kst is not None:
+            want = np.where(keeping, np.float32(kst["speed"]), want)
+            tau = np.where(keeping, KEEP_SPEED_TAU, tau)
         if self._burst > 0.0:
             want = want * (1.0 + SWIM_BURST_SPEED_X * self._burst)
         self._solo_burst_step(n, dt, mode)
@@ -3984,6 +4430,36 @@ class Fish2d(Twod, GradientEffect):
                 desired_x += np.cos(outward) * w_out
                 desired_y += np.sin(outward) * w_out
 
+        # THE LULL'S KEEPERS: each steers for its own place in the search
+        # (a leg's target, or the centre of view before the half-way mark);
+        # in a pause it only drifts on its wander. Summed like every other
+        # steer and bounded by the same turn clamp — the search's about-
+        # faces are arcs too.
+        if kst is not None and kst["seek"]:
+            to_t = np.arctan2(
+                (kst["ty"] - self.p_y[kidx]) * self.sy,
+                (kst["tx"] - self.p_x[kidx]) * self.sx,
+            )
+            desired_x[kidx] += np.cos(to_t) * KEEP_SEEK_W
+            desired_y[kidx] += np.sin(to_t) * KEEP_SEEK_W
+        if kst is not None and kidx.size > 1:
+            kx_px = self.p_x[kidx] * self.sx
+            ky_px = self.p_y[kidx] * self.sy
+            dx = kx_px[:, None] - kx_px[None, :]   # neighbour -> me
+            dy = ky_px[:, None] - ky_px[None, :]
+            d = np.hypot(dx, dy)
+            np.fill_diagonal(d, np.inf)
+            sep = max(kst["spacing_px"], 1e-3)
+            close = np.clip(1.0 - d / sep, 0.0, 1.0)
+            inv = 1.0 / np.maximum(d, 1e-3)
+            desired_x[kidx] += (dx * inv * close).sum(axis=1) * KEEP_SEP_W
+            desired_y[kidx] += (dy * inv * close).sum(axis=1) * KEEP_SEP_W
+        if kst is not None:
+            off_px = rel_y[kidx] * self.sy
+            desired_y[kidx] -= KEEP_LEVEL_W * np.clip(
+                off_px / max(KEEP_LEVEL_SPAN * self.r_height, 1e-3),
+                -1.0, 1.0)
+
         desired = np.arctan2(desired_y, desired_x)
         d_hd = _wrap_pi(desired - hd)
 
@@ -4007,7 +4483,7 @@ class Fish2d(Twod, GradientEffect):
         omega_max = self.p_spd[:n] / self.turn_radius_px
         omega = (
             d_hd * TURN_GAIN
-            + np.where(steered, swirl + self.p_jog[:n], 0.0)
+            + np.where(steered & ~keeping, swirl + self.p_jog[:n], 0.0)
         )
         if wall_on:
             # the wall takes over the steering while it turns a fish, at a
@@ -4101,9 +4577,10 @@ class Fish2d(Twod, GradientEffect):
             self.p_trail_acc[pidx] -= BODY_TRAIL_STEP_PX
 
         entering = mode == 1
-        if (entering | dispersing).any():
+        if (entering | dispersing | keeping).any():
             self.p_enter[:n] = np.where(
-                entering | (dispersing & (self.p_enter[:n] < 1.0)),
+                entering
+                | ((dispersing | keeping) & (self.p_enter[:n] < 1.0)),
                 self.p_enter[:n]
                 + dt * self.p_erate[:n] / max(self.enter_time, 0.05),
                 self.p_enter[:n],
@@ -4122,6 +4599,22 @@ class Fish2d(Twod, GradientEffect):
 
         # the window moves last, once the water it is looking at has moved
         self._step_camera(dt, cruise)
+        if kidx is not None:
+            # THE LULL'S KEEPERS RIDE THE WINDOW. It eases home from wherever
+            # the charge left it (up to 1.4x cruise) while a keeper swims at
+            # search speed, so a keeper left in the world would be dragged
+            # across — and off — the panel by the view's own motion. They
+            # hold their place ON SCREEN instead (their recorded path moves
+            # with them, so the body does not stretch); the water and its
+            # wake slide past underneath, which is what the window moving
+            # looks like.
+            dcx = (self.cam_px - self._cam_px_prev) / max(self.sx, 1e-6)
+            dcy = (self.cam_py - self._cam_py_prev) / max(self.sy, 1e-6)
+            if dcx or dcy:
+                self.p_x[kidx] += dcx
+                self.p_y[kidx] += dcy
+                self.p_trail_x[kidx] += dcx
+                self.p_trail_y[kidx] += dcy
 
         # ── flap ────────────────────────────────────────────────────────
         speed_norm = np.clip(self.p_spd[:n] / max(cruise, 1e-3), 0.0, 3.0)
@@ -4183,7 +4676,7 @@ class Fish2d(Twod, GradientEffect):
         # a fish caught mid-arrival by a dispersal keeps the fade-in it had
         # reached (and keeps rising): nothing about leaving ever dims it
         fade_in = np.where(
-            entering | dispersing,
+            entering | dispersing | keeping,
             np.clip(self.p_enter[:n] * 3.3, 0.0, 1.0), 1.0,
         )
         fade_out = np.where(
@@ -4285,11 +4778,17 @@ class Fish2d(Twod, GradientEffect):
         # from the true value alone, so it cannot compound.
         frame = np.zeros_like(self.trail)
         visible = np.flatnonzero(bright > 0.0)
+        # a pausing keeper LOOKS about: its head swings, its path does not
+        # (drawing only — the travel heading above is untouched)
+        hd_draw = hd
+        if kst is not None and np.any(kst["look"]):
+            hd_draw = hd.copy()
+            hd_draw[kidx] = hd[kidx] + kst["look"]
         if visible.size:
             self._draw_bodies(
                 frame, visible,
                 self.p_x[:n][visible], self.p_y[:n][visible],
-                hd[visible], bright[visible], half_w[visible],
+                hd_draw[visible], bright[visible], half_w[visible],
                 flap_amp[visible], self.p_grad[:n][visible],
             )
         np.maximum(self.trail, self._clip_body_layer(frame), out=self.trail)
@@ -4301,7 +4800,7 @@ class Fish2d(Twod, GradientEffect):
             self._draw_bodies(
                 gained_frame, visible,
                 self.p_x[:n][visible], self.p_y[:n][visible],
-                hd[visible], gained[visible], half_w[visible],
+                hd_draw[visible], gained[visible], half_w[visible],
                 flap_amp[visible], self.p_grad[:n][visible],
             )
             body_out = np.maximum(

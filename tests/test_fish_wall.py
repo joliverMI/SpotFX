@@ -200,7 +200,8 @@ def test_wall_lookahead_zero_is_the_old_effect_bit_for_bit():
         f"git could not produce the pinned merge-base {W.WALL_BASELINE_REF}"
     )
     a = _run(W.kinematics("b", W.HOUSE_FISH, 3, base, True))
-    b = _run(W.kinematics("n", dict(W.HOUSE_FISH, **W.OLD), 3, "fish", True))
+    b = _run(W.kinematics("n", dict(W.HOUSE_FISH, **W.OLD, **W.HOLD_LULL),
+                          3, "fish", True))
     assert W.same_kinematics(a, b), (
         "wall_lookahead=0 must reproduce the pre-wall fish exactly, through "
         "swim, charge, lull and drop"

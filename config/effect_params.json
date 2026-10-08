@@ -2176,6 +2176,50 @@
           "note": "Seconds a solo burst holds its top speed before it eases back to the fish's ordinary pace.",
           "help_topic": "fish-solo-burst",
           "default": 0.8
+        },
+        "search_speed": {
+          "label": "Search Speed",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.1,
+          "max": 1.0,
+          "aspect": "shape",
+          "note": "The lull's searching fish: how fast the fish left behind swims while it searches side to side, as a fraction of its ordinary cruise. First guess, pending his eye.",
+          "help_topic": "fish-lull-search",
+          "default": 0.45
+        },
+        "search_pause_s": {
+          "label": "Search Pause",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.2,
+          "max": 4.0,
+          "aspect": "shape",
+          "note": "The lull's searching fish: the longest it pauses at the end of a leg, looking about, before heading the other way. A short lull pauses less.",
+          "help_topic": "fish-lull-search",
+          "default": 1.2
+        },
+        "search_reach": {
+          "label": "Search Reach",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.1,
+          "max": 1.0,
+          "aspect": "shape",
+          "note": "The lull's searching fish: how far toward each side it goes, as a fraction of the pond.",
+          "help_topic": "fish-lull-search",
+          "default": 0.7
+        },
+        "drop_scale_min": {
+          "label": "Quiet Drop Scale",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.1,
+          "max": 1.0,
+          "aspect": "shape",
+          "note": "How short and gentle the drop's rush gets on the quietest song, as a fraction of the full rush. A song at the automatic intensity ceiling (0.75) gets the full rush; a marked track at 1.0 runs 20% longer.",
+          "help_topic": "fish-lull-search",
+          "default": 0.4
         }
       },
       "defaults": {
@@ -2229,7 +2273,11 @@
         "wall_turn_strength": 1.0,
         "solo_burst_rate": 0.0,
         "solo_burst_speed": 2.5,
-        "solo_burst_time": 0.8
+        "solo_burst_time": 0.8,
+        "search_speed": 0.45,
+        "search_pause_s": 1.2,
+        "search_reach": 0.7,
+        "drop_scale_min": 0.4
       }
     },
     "gifplayer": {

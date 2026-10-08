@@ -8786,6 +8786,25 @@ checks it against the schema. Proof: `scripts/check_fish_burst_bounds.py`,
    BURST (`solo_burst_*`, default off) is that scene's own data:
    `scripts/add_house_fish_solo_burst.py`.
 
+10. **THE LULL LEAVES ONE FISH THAT SEARCHES, AND THE DROP FOLLOWS THE
+   MUSIC (2026-10-08, fish-lull plan; the Admiral: "have all the fish
+   leave over time except for one, so one is left at the half way mark
+   ... move to one side, pause, then move to the other ... make the
+   length of the drop and how fast the fish swirl depend on the
+   intensity")** — this REVERSES item 7's "every fish gone by 1/3, dark
+   after" on his own word. The module's 2026-10-08 LULL block and the
+   `fish-effect` skill are the binding statements. Keepers are a new mode
+   (5): never counted, swirled, retired or followed by the window, and they
+   RIDE the window's ease-home so they hold their place on screen. The
+   number kept is TOLD by the lull hand-off hook ("THE LULL HAND-OFF HOOK"
+   section below; default 1). **Told `lull_keep = 0`, the lull is item
+   7's clock bit for bit**, proven against the pinned pre-change module —
+   so a proof of any OTHER fish mechanism that compares against a pinned
+   pre-2026-10-08 fish through a lull must tell it `lull_keep = 0`
+   (`scripts/check_fish_wall.py::HOLD_LULL`), exactly like
+   `wall_lookahead = 0` above. The drop scales by `lull_handoff.drop_scale`
+   (0.75 intensity = the old drop exactly); untold = the fixed constants.
+
 Every new fish knob is a first guess pending his eye; the effect ships
 tunable, not tuned. Proof: `scripts/check_fish.py`,
 `scripts/check_fish_avoidance.py`, `scripts/check_fish_lunge.py`,
@@ -8793,7 +8812,8 @@ tunable, not tuned. Proof: `scripts/check_fish.py`,
 `scripts/check_fish_charge_spread.py`, `scripts/check_fish_burst_bounds.py`,
 `scripts/check_fish_disperse.py`, `scripts/check_fish_wall.py`,
 `tests/test_fish.py`, `tests/test_fish_camera.py`,
-`tests/test_fish_disperse.py`, `tests/test_fish_wall.py`.
+`tests/test_fish_disperse.py`, `tests/test_fish_wall.py`,
+`tests/test_fish_lull_searcher.py`.
 
 ## Pulse (`fx/effects/pulse.py`) — the Singles' one-colour effect, phases 1-4 built
 
@@ -8966,6 +8986,37 @@ half-progress point. Three things:
   lull's walled-in chains collide themselves out within ~8 s. Spec:
   `tests/test_lull_dark.py` (rule, arm write, and all three effects on the
   real pipeline through a 20 s lull after a completed charge).
+
+## THE LULL HAND-OFF HOOK — how a lull is told what to leave for its drop (`fx/effects/lull_handoff.py`)
+
+2026-10-08 (fish-lull plan phase 1), lull_dark's sibling and built the same
+way. **It is the ONE interface between an effect's lull/drop choreography
+and whatever knows what the drop will be — the drop-scene-variety work
+(drop-led switching, the fireworks melds) plugs a RESOLVER into it and must
+not build a second.** `fx/effects/lull_handoff.py` (the keys and the
+opt-in) and `scene_response`'s "THE LULL HAND-OFF HOOK" docstring section
+(the resolver contract) are the binding statements. Four things:
+
+- Every lull arm tells each `fx.device_model.LULL_HANDOFF_EFFECTS` virtual
+  `lull_keep`/`lull_next`/`lull_s` (every key, every arm, even at the
+  default, so a previous lull's request is forgotten); every drop arm tells
+  each `DROP_INTENSITY_EFFECTS` virtual `drop_intensity` (the fire's
+  intensity, floored at 0.01 so 0 always means "not told"). Fish is the
+  first and only member. Phase-write keys only — never in the registry.
+- The RESOLVER (`LullContext` -> `LullHandoff`) is installed ONCE,
+  process-wide, with `scene_response.install_lull_handoff_resolver(fn)`
+  from `spectra/services/engine.py` — process-wide so the drop-sequence
+  preview's scratch responders ask the same one. With none installed every
+  lull keeps 1. A resolver must be pure and cheap and never raises into the
+  fire (a failure is logged and the default used, named in the record).
+- `LullContext` carries the scene, the fire's intensity, the gap, every
+  virtual's current effect and the live song/position (`song_position`,
+  wired from the bridge in engine.py). The phase record names what was
+  told (`lull_handoff`, `drop_intensity`), so the fire log and the
+  sequence preview can say why a lull kept three fish.
+- An effect that is in BOTH this set and `LULL_DARK_EFFECTS` goes dark at
+  its dark point only when told `keep == 0` (none is, today).
+Spec: `tests/test_lull_handoff.py`.
 
 ## Radial (STAR) rotation is audio-lows-driven — a healthy `spin` can read as parked
 

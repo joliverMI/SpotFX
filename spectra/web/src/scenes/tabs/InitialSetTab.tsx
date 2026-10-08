@@ -198,6 +198,7 @@ function EntryPanel({ dev, setDev, registry, onRemove }: {
         {effEffect === 'fish' && <HelpLink topic="fish-camera-window" />}
         {effEffect === 'fish' && <HelpLink topic="fish-wall" />}
         {effEffect === 'fish' && <HelpLink topic="fish-solo-burst" />}
+        {effEffect === 'fish' && <HelpLink topic="fish-lull-search" />}
         {steps.length === 0 && dev.effect_type && (
           <button style={{ fontSize: 11 }} onClick={addStep}
             title="Stepped effect: switch to a DIFFERENT effect at/above an ⚡ intensity threshold">

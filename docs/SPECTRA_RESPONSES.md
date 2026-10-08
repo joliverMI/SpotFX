@@ -127,23 +127,37 @@ separately at all.
   `CHARGE_FILL_AT`), every beat picks a new shared heading, never closer
   together than `turn_min_time` (his 400ms floor); the whole school banks
   onto it through a real arc, because nothing can out-turn the turn radius.
-- **Lull** — his clock, in thirds of `phase_progress` (TIMING HONESTY:
-  SpotFX ramps it over ~90% of the real gap and then hangs at 1.0, the same
-  convention `blackhole.py`'s `LULL_FILL_PROGRESS` records). 0 → 1/3: the
-  school breaks into a chaotic SWIRL round the centre of view, and the fish
-  leak out of it one by one, furthest first (between `LULL_LEAK_FROM` and
-  `LULL_LEAK_TO` of the third), swimming OFF the panel at full brightness
-  by `LULL_EXIT_BY`; a lull too short to swirl in scatters straight out
-  (`LULL_EXIT_MIN_S`), and a hard backstop at 1/3 guarantees nothing is
-  left. 1/3 → 2/3: ripples only. 2/3 → end: dark. No fish ever fades and
-  none survives.
+- **Lull** (REWORKED 2026-10-08, his own reversal of his 2026-08-28 "no
+  lone fish" ruling, on his own word) — the school breaks into its chaotic
+  SWIRL round the centre of view exactly as before, and every fish but
+  `lull_keep` (told by the LULL HAND-OFF HOOK, `fx/effects/lull_handoff.py`;
+  default 1) leaks out of it, furthest first, gone by the lull's HALF-WAY
+  mark (in seconds when told the real gap, else `phase_progress` 0.5). The
+  kept fish never leak, swirl, count toward the population, or get followed
+  by the camera window — from the half until the drop they SEARCH: a slow
+  leg to one side, a pause with its head swinging, a leg to the other side,
+  and so on; the lull is never dark. Told `lull_keep = 0`, this is
+  byte-identical to his original 2026-08-28 clock: thirds of
+  `phase_progress`, school swirls and leaks out entirely by 1/3,
+  ripples-only to 2/3, DARK after — no fish survives.
 - **Drop** — Orbits' own payoff: 2x population of ballistic ejecta bolt
   straight off the panel, swim speed boosted and decaying over
-  `DROP_SETTLE_S`. On top of it, a rush of `rush_count` (20) fish pours in
-  from every side (a centre burst stands in only when `rush_count` is 0),
-  swirls round the centre of view for the drop, and at the settle exactly
-  `particle_count` stay behind while the rest DISPERSE off the panel; the
-  phase self-resets so an identical later drop edges again.
+  `DROP_SETTLE_S`. On top of it, a rush of `rush_count` (20) fish — plus any
+  kept searcher, rejoining — pours in from every side (a centre burst
+  stands in only when `rush_count` is 0), swirls round the centre of view
+  for the drop, and at the settle exactly `particle_count` stay behind
+  while the rest DISPERSE off the panel; the phase self-resets so an
+  identical later drop edges again. REWORKED 2026-10-08: when told the
+  fire's intensity (`drop_intensity`), the settle horizon, the boost and
+  the rush's entry speed all scale by `lull_handoff.drop_scale` — the
+  automatic ceiling (0.75) is this fixed drop exactly, a marked track
+  (1.0) runs 20% longer, a quiet song shrinks toward `drop_scale_min`.
+  Not told: the fixed constants, unscaled.
+
+Full mechanism (the keeper's search, several keepers riding together for a
+drop that lands on another effect, the hand-off hook's resolver contract):
+AGENTS.md's Fish section (item 10) and the `fish-effect`/`drop-detection`
+skills — not restated here.
 
 A fish leaving for any reason — the lull, the settle, the population
 shrinking, an outgoing crossfade into an effect with no blobs of its own —
