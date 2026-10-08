@@ -8796,11 +8796,11 @@ checks it against the schema. Proof: `scripts/check_fish_burst_bounds.py`,
    `fish-effect` skill are the binding statements. Keepers are a new mode
    (5): never counted, swirled, retired or followed by the window, and they
    RIDE the window's ease-home so they hold their place on screen. The
-   number kept is TOLD by the lull hand-off hook (next section; default
-   1). **Told `lull_keep = 0`, the lull is item 7's clock bit for bit**,
-   proven against the pinned pre-change module — so a proof of any OTHER
-   fish mechanism that compares against a pinned pre-2026-10-08 fish
-   through a lull must tell it `lull_keep = 0`
+   number kept is TOLD by the lull hand-off hook ("THE LULL HAND-OFF HOOK"
+   section below; default 1). **Told `lull_keep = 0`, the lull is item
+   7's clock bit for bit**, proven against the pinned pre-change module —
+   so a proof of any OTHER fish mechanism that compares against a pinned
+   pre-2026-10-08 fish through a lull must tell it `lull_keep = 0`
    (`scripts/check_fish_wall.py::HOLD_LULL`), exactly like
    `wall_lookahead = 0` above. The drop scales by `lull_handoff.drop_scale`
    (0.75 intensity = the old drop exactly); untold = the fixed constants.
