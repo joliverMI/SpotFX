@@ -43,6 +43,22 @@ start early while every sibling at 0 still fires on the mark (bridge-
 classified flares still fire the band atomically). It stays at 0 because
 that is his ruling — see the fish-effect skill's note before changing it.
 
+## "Big Fish" sits in the Shape lane — one flare in three, not one in two
+
+`scripts/add_fish_big_fish_flare.py` declares the `big_fish` kind "Big
+Fish" (offset 0) and pools it into every flare band's existing "Shape"
+lane with "Fish Swim Burst" and "Reverse Momentarily (500ms)". His
+frequency words: "make it happen half the time", clarified as "just
+generally weight it so it's about as frequent as the other flares
+combined, don't build code to hit 50%". The engine's only weighting is the
+even pick-one lane, so it lands at ONE IN THREE (and the burst and the
+reverse each drop from one in two to one in three); exact one in two would
+need a per-member lane weight, which does not exist. The script refuses a
+band with no Shape lane (alone it would fire every flare), a non-Fish
+scene, and a "Big Fish" of another type. House Fish has no flare response,
+so the script says there is nothing to do there. Its look is the effect's
+own `big_fish_*` settings — see the fish-effect skill.
+
 ## The wall needs no scene data
 
 Since 2026-10-06 the fish glance alongside the panel's real lit edge
@@ -63,6 +79,11 @@ drop_switch.py` (and the drop-detection skill) is where the rule lives,
 including the hand-off table row for this effect; a lull leading into a switch is told the effect coming next through the lull hand-off hook (keep 1 for now — Fireworks' 3 keepers are phase 3).
 
 ## Sonic reach
+
+`set_flare_kind` takes `type="big_fish"` (name it "Big Fish" to edit the
+seeded one; it carries no params/gain/hold). Its brightness/size/crossing
+times are entry params: `set_scene_entry_param` on scene "Fish", target
+"Matrix".
 
 `set_flare_kind` on the "Fish Swim Burst" kind accepts
 `trigger_offset_ms`/`hold_ms`/`params`/`gain` with omit-means-keep

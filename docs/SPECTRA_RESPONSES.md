@@ -274,6 +274,15 @@ only above intensity 0.4 by default —
 `FlareKind.min_intensity`). Both are instant, self-resetting pokes with no
 lead, carry or release.
 
+Fish answers one flare kind of its own (2026-10-08): **big_fish** — one
+really large fish crosses the panel behind the ordinary fish, its speed
+following the fire's intensity (`big_fish_cross_slow_s` at 0 to
+`big_fish_cross_fast_s` at 1, speed linear) and its colour the gradient's
+centre turned 120 degrees (intensity 0.2 or less) to 180 (0.5 or more), at
+`big_fish_brightness` (0.6). The same instant, self-resetting poke shape:
+no lead (it enters on the mark), no carry, no release. The ordinary fish do
+not avoid it yet (phase 2).
+
 ## Where SPECTRA proves it
 
 - `scripts/check_spectra.py` — the drive: arm + ramp writes per class with

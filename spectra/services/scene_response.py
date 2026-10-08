@@ -145,6 +145,12 @@ Per event, fed by the bridge with the fire's intensity:
                   firework_burst in every structural respect: an instant,
                   self-resetting, deliberately-unregistered count key, no
                   carry, no release, no lead.
+       big_fish — the BIG FISH flare (2026-10-08): one really large fish
+                  crosses every live Fish panel behind the others, its
+                  speed and contrasting colour set by the fire's intensity
+                  — Fish's own `big_fish` poke key, the firework_burst
+                  shape exactly: instant, self-resetting, unregistered, no
+                  carry, no release, no lead — see _big_fish.
        pulse_flash / pulse_flip — the Singles' PULSE flares (single-led-
                   power plan, phase 3): on every virtual whose live effect
                   is Pulse, a FLASH (the light jumps by the effect's own
@@ -1403,6 +1409,7 @@ class ResponseEngine:
         rushes = [(k, s) for k, s in attached if k.type == "blob_rush"]
         flashes = [(k, s) for k, s in attached if k.type == "pulse_flash"]
         flips = [(k, s) for k, s in attached if k.type == "pulse_flip"]
+        bigs = [(k, s) for k, s in attached if k.type == "big_fish"]
 
         carry: dict[tuple[str, str], Any] = {}
         jumps: dict[str, dict[str, Any]] = {}    # vid → params, instant
@@ -1505,6 +1512,14 @@ class ResponseEngine:
             kind_records.append({
                 "name": kind.name, "type": kind.type,
                 "scale": scale, **result["pulse_flip"]})
+
+        if bigs:   # one big fish per batch — the intensity sets its swim
+            kind, scale = bigs[0]
+            sel_intensity = max(0.0, min(1.0, intensity * scale))
+            result["big_fish"] = await self._big_fish(sel_intensity)
+            kind_records.append({
+                "name": kind.name, "type": kind.type,
+                "scale": scale, **result["big_fish"]})
 
         result["kinds"] = kind_records
         self.conductor.on_surge(carry)
@@ -1656,6 +1671,8 @@ class ResponseEngine:
             record["pulse_flash"] = await self._pulse_flash(intensity)
         if kind.type == "pulse_flip":
             record["pulse_flip"] = await self._pulse_flip(intensity)
+        if kind.type == "big_fish":
+            record["big_fish"] = await self._big_fish(intensity)
         self.conductor.on_surge(carry)
         record["carried"] = [{"virtual_id": vid, "param": p} for (vid, p) in carry]
         record["result"] = "applied"
@@ -2162,6 +2179,36 @@ class ResponseEngine:
             await self.executor.jump(vid, state.effect_type, {"flip": 1})
             targets += 1
         return {"intensity": round(intensity, 4), "virtuals": targets}
+
+    async def _big_fish(self, intensity: float) -> dict:
+        """The BIG FISH flare (2026-10-08, his words in FlareKind's own
+        docstring): one instant jump of Fish's own `big_fish` poke key,
+        carrying the fire's intensity (floored at fish.BIG_FISH_POKE_FLOOR
+        so a fire at 0 still edges), on every virtual whose live effect is
+        in fx.device_model.BIG_FISH_EFFECTS — the membership-gate shape
+        _firework_burst uses. The effect edge-detects it, sends one really
+        large fish across the panel behind the ordinary ones — faster at
+        higher intensity, its colour the gradient's centre turned 120
+        degrees (intensity 0.2 or less) to 180 (0.5 or more) — and
+        self-resets the key so the next fire edges again.
+
+        Nothing carries and nothing releases — the fish swims off the far
+        side on its own, so like firework_burst there is NO release queue
+        for any of the four drain points. `big_fish` is deliberately absent
+        from the effect-parameter registry, so it never enters the param/
+        gain kinds' jumps/glides dicts: it composes with every other kind in
+        the band. LEAD: none — it ENTERS on the mark (the write is instant
+        and the crossing is the animation, the drop family's START rule)."""
+        from fx.effects.fish import BIG_FISH_POKE_FLOOR
+        strength = round(max(float(intensity), BIG_FISH_POKE_FLOOR), 4)
+        targets = 0
+        for vid, state in self.conductor.virtuals.items():
+            if state.effect_type not in device_model.BIG_FISH_EFFECTS:
+                continue
+            await self.executor.jump(vid, state.effect_type,
+                                     {"big_fish": strength})
+            targets += 1
+        return {"intensity": strength, "virtuals": targets}
 
     def pending_color_rotate_holds(self) -> list[float]:
         """Distinct DWELLS still pending for the colour rotate-and-back
