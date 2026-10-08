@@ -10590,8 +10590,9 @@ installed RESOLVER (never a second hook). Four things:
   `drop_switch.plans_for` (the Timeline strip's ⇄, Sonic's read-only
   `explain_drop_switch`) and the show log (`drop_sequence:switch`). A spec
   that builds a `TriggerEngine` with an injected `fire_scene` gets the cut
-  through that fake. Fireworks pairs are the phase-3 melds (below). The planner's protected windows are UNCHANGED — the early
-  switch is the resolver's act, not a planned cue (the revised plan's D).
+  through that fake. Fireworks pairs are the phase-3 melds (below). The
+  planner's protected windows are UNCHANGED — the early switch is the
+  resolver's act, not a planned cue (the revised plan's D).
   Specs: `tests/test_drop_switch.py` (FINA + 100 MILLONES real stores),
   `tests/test_drop_switch_cut.py`; help topic `drop-led-switch`.
 

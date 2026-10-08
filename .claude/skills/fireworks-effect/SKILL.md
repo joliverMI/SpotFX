@@ -105,7 +105,8 @@ are settings-registry keys.
 `tests/test_firework_burst.py`, `tests/test_fireworks_melds.py` (the
 keepers meld on the real pipeline, the pinned-module byte-identity, the
 swallow and implode adopts), `scripts/render_fireworks_melds.py` (offline
-GIFs, committed under `docs/evidence/fireworks-melds/`). The scene migration that attaches the kind,
-`scripts/add_fireworks_burst_flare.py` (dry-run default), belongs to the
-fireworks-v2-scene skill. History: `docs/SPECTRA_SPEC.md` §89 (also
+GIFs, committed under `docs/evidence/fireworks-melds/`). The scene
+migration that attaches the kind, `scripts/add_fireworks_burst_flare.py`
+(dry-run default), belongs to the fireworks-v2-scene skill. History:
+`docs/SPECTRA_SPEC.md` §89 (also
 referenced in AGENTS.md's own prose), `fx/VENDOR.md` #15, #17.
