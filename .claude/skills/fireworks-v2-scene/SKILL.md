@@ -53,7 +53,13 @@ may hard-cut into this one ON the drop, with this scene's own drop firing
 on the mark and adopting the outgoing pieces — or cut out of it the same
 way. Nothing in this scene's data opts in or out; `spectra/services/
 drop_switch.py` (and the drop-detection skill) is where the rule lives,
-including the hand-off table row for this effect; its pairs stay on the effects' GENERIC particle hand-off until the phase-3 melds.
+including the hand-off table row for this effect. Its pairs are the
+phase-3 FIREWORKS MELDS: a stale Fish/Orbits drop cuts INTO this scene
+with three keepers that each burst where they stand; leaving it, this
+scene plays its OWN drop first, then cuts to the Black Hole a second later
+(swallowed) or to Fish/Orbits/Squiggles/STAR on the next big analysed
+flare (or its deadline), the flare landing on the new scene. Help topic
+`fireworks-melds`.
 
 ## Sonic reach
 

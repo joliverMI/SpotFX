@@ -364,7 +364,7 @@ export interface SequencePreviewSwitch {
   to_scene_name: string | null;
   to_effect: string | null;
   handoff: string | null;
-  moment: 'drop' | 'charge_start' | 'charge_flare' | null;
+  moment: 'drop' | 'charge_start' | 'charge_flare' | 'after_drop' | 'next_hit' | null;
   cut_s: number | null;
   lull_told?: { keep: number; next: Record<string, string> };
 }

@@ -643,10 +643,21 @@ class TriggerEngine:
         self._switch_seqs: dict[str, tuple[drop_firing.FiringSequence, str]] = {}
         self._switch_done: set[str] = set()
         self._ride_ids: dict[str, str] = {}
+        # THE FIREWORKS MELDS' late switches (drop_switch.py): armed at the
+        # drop, cut swallow_delay_s after it ("after_drop") or on the next
+        # big bass hit / its deadline ("next_hit"). `_late_pending` maps a
+        # sequence key to its armed plan, `_hit_ids` the hit flare's
+        # trigger id to that key (its fire cuts first, like a ride).
+        self._late_pending: dict[str, drop_switch.SwitchPlan] = {}
+        self._hit_ids: dict[str, str] = {}
         self._drop_history = drop_switch.DropHistory()
         # (trigger id, song ms) of every flare this tick may fire — the
         # candidates a cut can RIDE inside a charge (drop_switch.find_ride).
         self._tick_flares: list[tuple[str, int]] = []
+        # (trigger id, song ms, intensity) of every ANALYSED flare this tick
+        # may fire — the candidates for the next big bass hit
+        # (drop_switch.next_big_hit).
+        self._tick_hits: list[tuple[str, int, float]] = []
 
         # THE LIGHT SHOW's HIGH / LOW TRIGGERS (spectra/services/show_arms.py
         # and show_cues.py). Two hooks, both no-ops by default and wired in
@@ -943,6 +954,14 @@ class TriggerEngine:
             and getattr(t.action, "event_class", None) == "flare"
             and t.id not in self._seq_meta
             and (t.id in self._flare_ids or self._trigger_allowed(t, mode))]
+        self._tick_hits = [
+            (t.id, t.timestamp_ms + t.trigger_offset_ms,
+             float(getattr(t.action, "intensity", 0.0) or 0.0))
+            for t in candidates if t.enabled and t.id in self._flare_ids]
+        # THE FIREWORKS MELDS: an armed late switch whose moment this tick
+        # crosses cuts before anything else fires on it
+        if self._late_pending:
+            await self._tick_late_switches(last, position_ms)
         fired: list[SpectraTrigger] = []
         for trig in candidates:
             if not trig.enabled:
@@ -1448,6 +1467,15 @@ class TriggerEngine:
             except Exception:
                 logger.exception("drop switch: riding %s failed — the flare "
                                  "fires on the showing scene", trig.id)
+        if trig.id in self._hit_ids:
+            # THE FIREWORKS MELD's next big bass hit: cut to the planned
+            # scene first, so this flare is the incoming scene's loud entry.
+            try:
+                await self._release_late(self._hit_ids[trig.id],
+                                         drop_switch.MOMENT_NEXT_HIT, loud=False)
+            except Exception:
+                logger.exception("drop switch: the hit %s failed to cut — the "
+                                 "flare fires on the showing scene", trig.id)
         try:
             if a.kind == "fire_scene":
                 scene_id = a.scene_id
@@ -1512,6 +1540,7 @@ class TriggerEngine:
                                               seq.gap_ms(cls, fire_mode))
                 if cls == "drop":
                     self._note_drop(seq, plan)
+                    self._arm_late_switch(seq)
             elif a.kind == "fire_response":
                 # OVERRIDE BLEND's dynamic half (2026-08-20, "fix the lull
                 # ramp"): only charge/lull stretch a ramp to the real gap
@@ -1577,6 +1606,8 @@ class TriggerEngine:
         self._switch_seqs = {}
         self._switch_done = set()
         self._ride_ids = {}
+        self._late_pending = {}
+        self._hit_ids = {}
 
     def _decide_switch(self, seq: drop_firing.FiringSequence, cls: str,
                        fire_mode: str) -> drop_switch.SwitchPlan:
@@ -1597,7 +1628,8 @@ class TriggerEngine:
                 record=record, settings=self._switch_settings(),
                 pick_target=self._switch_pick(seq.intensity), ride=ride,
                 can_go_early=can_go_early, blocker=self._switch_blocker(),
-                decided_at_ms=self._last_position_ms)
+                decided_at_ms=self._last_position_ms,
+                flares=self._tick_hits, beat_ms=seq.beat_ms)
         except Exception:
             logger.exception("drop switch: deciding %s failed — the drop "
                              "plays on the showing scene", seq.key)
@@ -1620,6 +1652,10 @@ class TriggerEngine:
                                     intensity: float) -> drop_switch.SwitchPlan:
         plan = self._switch_plans.get(seq.key)
         if plan is None:
+            # a Fireworks meld still pending from an EARLIER sequence cuts
+            # now, before this one is decided against a scene about to go
+            for key in [k for k in self._late_pending if k != seq.key]:
+                await self._release_late(key, "before_next_sequence", loud=False)
             plan = self._decide_switch(seq, cls, fire_mode)
         if not plan.switch or seq.key in self._switch_done:
             return self._switch_plans.get(seq.key, plan)
@@ -1707,6 +1743,62 @@ class TriggerEngine:
         if outcome["result"] == "switched":
             self._notify_colour_cue()
         return outcome
+
+    def _arm_late_switch(self, seq: drop_firing.FiringSequence) -> None:
+        """THE FIREWORKS MELDS (drop_switch.py): Fireworks has played its
+        own drop — arm the late cut, its moment recomputed now (the song's
+        analysed flares may have been planned since the decision)."""
+        plan = self._switch_plans.get(seq.key)
+        if (plan is None or not plan.late or seq.key in self._switch_done
+                or seq.key in self._late_pending):
+            return
+        try:
+            settings = self._switch_settings()
+        except Exception:
+            settings = drop_switch.SwitchSettings()
+        plan = drop_switch.late_release(plan, settings, self._tick_hits,
+                                        seq.beat_ms)
+        self._switch_plans[seq.key] = plan
+        drop_switch.record_plan(plan)
+        self._late_pending[seq.key] = plan
+        if plan.release_by == "hit" and plan.hit_trigger_id:
+            self._hit_ids[plan.hit_trigger_id] = seq.key
+        logger.info("drop sequence %s: %s → %s armed, released by %s at %sms",
+                    seq.key, plan.from_scene_name, plan.to_scene_name,
+                    plan.release_by, plan.release_ms)
+
+    async def _tick_late_switches(self, last: int, position_ms: int) -> None:
+        """Cut every armed late switch whose moment this tick reaches: the
+        swallow delay, or (for a next-hit plan) the deadline — the hit
+        itself cuts from _fire, just before its flare fires."""
+        for key, plan in list(self._late_pending.items()):
+            if plan.release_by == "hit":
+                due_ms = plan.deadline_ms
+                at, loud = "deadline", True
+            else:
+                due_ms = plan.release_ms
+                at = "deadline" if plan.release_by == "deadline" else plan.moment
+                loud = plan.moment == drop_switch.MOMENT_NEXT_HIT
+            if due_ms is None or position_ms < due_ms:
+                continue
+            await self._release_late(key, at, loud=loud)
+
+    async def _release_late(self, key: str, at: str, loud: bool) -> None:
+        plan = self._late_pending.pop(key, None)
+        if plan is None:
+            return
+        if plan.hit_trigger_id:
+            self._hit_ids.pop(plan.hit_trigger_id, None)
+        seq = (self._switch_seqs.get(key) or (None, None))[0]
+        intensity = self._render_intensity(seq.intensity if seq is not None else 0.5)
+        outcome = await self._execute_switch(plan, at, intensity)
+        if loud and outcome.get("result") == "switched":
+            # the incoming scene comes in loud: its own flare band, now
+            try:
+                await self._fire_analysed_flare(intensity)
+            except Exception:
+                logger.exception("drop switch %s: the incoming scene's flare "
+                                 "failed", key)
 
     def _note_drop(self, seq: drop_firing.FiringSequence,
                    plan: Optional[drop_switch.SwitchPlan]) -> None:

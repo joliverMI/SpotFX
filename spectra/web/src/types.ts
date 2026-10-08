@@ -494,6 +494,8 @@ export interface RoomControlState {
   drop_switch_after_previous_drop: boolean;
   drop_switch_stale_margin_s: number;
   drop_switch_drops_in_a_row: number;
+  drop_switch_swallow_delay_s: number;
+  drop_switch_hit_threshold: number;
   /** Legacy Now Playing "Force Scene" control, ported verbatim: while
    * enabled, every scene the system would otherwise pick automatically
    * (sequencer roll, trigger fire, or the automatic transition fire) fires

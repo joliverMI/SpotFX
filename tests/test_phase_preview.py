@@ -214,7 +214,9 @@ def test_cues_cover_every_step_with_server_computed_times():
     from spectra.services.phase_preview import PhaseSequenceProgram
     tl = _timeline(_scene())
     steps = {c["step"]: c["at_s"] for c in tl["cues"]}
-    assert set(steps) == set(PhaseSequenceProgram.steps)
+    # "switch" is a Fireworks meld's late cut — cued only when the
+    # previewed scene's switch is one (test_phase_preview's meld section)
+    assert set(steps) == set(PhaseSequenceProgram.steps) - {"switch"}
     for m in tl["marks"]:
         assert steps[m["event_class"]] == m["fire_at_s"]
     assert steps["release"] < tl["duration_s"]
@@ -262,3 +264,32 @@ def test_the_ruler_carries_the_drop_led_switch_the_resolver_would_make(monkeypat
     from spectra.services import phase_preview
     off = asyncio.run(phase_preview.build_timeline(scene, 0.7, drop_switch_enabled=False))
     assert off["drop_switch"] is None
+
+
+@pytest.mark.parametrize("to_effect,moment,after_s", [
+    ("blackhole", "after_drop", 1.0),
+    ("fish", "next_hit", None),
+])
+def test_a_fireworks_meld_cuts_after_the_drop_on_its_own_step(
+        monkeypatch, to_effect, moment, after_s):
+    """THE FIREWORKS MELDS (drop_switch.py): leaving Fireworks, the scene
+    plays its own drop and the cut is its own "switch" cue after it — the
+    swallow delay into the Black Hole, the preview's stand-in for the next
+    big hit (phase_preview.PREVIEW_HIT_AFTER_S) into the others."""
+    from spectra.services import drop_switch as dsw
+    from spectra.services import phase_preview, scene_store
+    target = _scene(effect_type=to_effect)
+    target.name = "Target"
+    scene_store.save(target)
+    monkeypatch.setattr(dsw, "default_pick_target",
+                        lambda intensity: (lambda sid, rng: dsw.SceneInfo(
+                            target.id, "Target", to_effect)))
+    tl = _timeline(_scene(effect_type="fireworks"))
+    sw = tl["drop_switch"]
+    assert sw["switch"] and sw["moment"] == moment
+    drop = next(m for m in tl["marks"] if m["event_class"] == "drop")
+    wait = after_s if after_s is not None else phase_preview.PREVIEW_HIT_AFTER_S
+    assert sw["cut_s"] == pytest.approx(drop["fire_at_s"] + wait)
+    cues = {c["step"]: c["at_s"] for c in tl["cues"]}
+    assert cues["switch"] == sw["cut_s"]
+    assert cues["release"] > cues["switch"] + phase_preview.LATE_CUT_SHOW_S - 0.5

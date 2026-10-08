@@ -174,14 +174,21 @@ def test_the_target_draw_is_deterministic_per_song_sequence_and_scene():
     assert a != ds.seeded_rng("u", "drop:1", "orbits").random()
 
 
-def test_every_drop_ready_pair_has_a_handoff_and_fireworks_stays_generic():
+def test_every_drop_ready_pair_has_a_handoff_and_the_fireworks_melds():
     from fx import device_model as dm
     for out in dm.DROP_SWITCH_EFFECTS:
         for inc in dm.DROP_SWITCH_EFFECTS:
             assert ds.handoff_kind(out, inc) is not None
-    for other in dm.DROP_SWITCH_EFFECTS - {"fireworks"}:
+    # THE FIREWORKS MELDS (phase 3): keepers into it from a lull that can
+    # keep them, swallowed by the Black Hole out of it, imploding into
+    # every other centre-burst effect on the next big hit
+    for keeper in ("fish", "orbits"):
+        assert ds.handoff_kind(keeper, "fireworks") == ds.HANDOFF_KEEPERS
+    for other in ("radial", "blackhole", "squiggles"):
         assert ds.handoff_kind(other, "fireworks") == ds.HANDOFF_GENERIC
-        assert ds.handoff_kind("fireworks", other) == ds.HANDOFF_GENERIC
+    assert ds.handoff_kind("fireworks", "blackhole") == ds.HANDOFF_SWALLOWED
+    for other in ("radial", "orbits", "squiggles", "fish"):
+        assert ds.handoff_kind("fireworks", other) == ds.HANDOFF_IMPLODE_ON_HIT
     for outside in ("eye", "dancer", "pacman", None):
         assert ds.handoff_kind(outside, "radial") is None
     assert ds.handoff_kind("radial", "blackhole") == ds.HANDOFF_CHOREOGRAPHED
@@ -416,7 +423,11 @@ def test_every_cut_is_in_the_show_log_under_its_sequence_key():
         assert d["result"] == "switched" and d["sentence"]
         assert d["to_scene"] and d["at"] in (ds.MOMENT_DROP, ds.MOMENT_CHARGE_START,
                                              ds.MOMENT_CHARGE_FLARE,
-                                             "charge_flare_missed")
+                                             "charge_flare_missed",
+                                             # the fireworks melds' late cuts
+                                             ds.MOMENT_AFTER_DROP,
+                                             ds.MOMENT_NEXT_HIT, "deadline",
+                                             "before_next_sequence")
     members = [e for e in fire_history.load_show_log(uri=fix["uri"])
                if (e.get("detail") or {}).get("member") == "drop"
                and (e.get("detail") or {}).get("drop_switch")]

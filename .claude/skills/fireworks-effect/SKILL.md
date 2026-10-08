@@ -63,16 +63,49 @@ deliberately absent from the param registry, gated by
 land on a trigger mark. It has NO release queue (nothing to schedule at
 the four drain points) — particles simply age out inside the effect.
 
+## THE KEEPERS MELD — a flagged keeper becomes a payoff rocket (2026-10-08)
+
+The drop-led switch's fireworks melds (`spectra/services/drop_switch.py`,
+drop-scene-variety plan phase 3, `fx/VENDOR.md` #64). A Fish/Orbits lull
+TOLD it leads into Fireworks (`lull_handoff`'s `lull_next`) flags its
+`lull_keep` (3) keepers in its snapshot (`"keepers"`); `_adopt_handoff`
+turns each flagged one into a HELD, stationary rocket (`_import_keepers`:
+`p_rocket` with no `_rocket_path`, `p_nocap`, at most
+`KEEPER_ROCKETS_MAX`) and the drop arm that follows the cut makes
+`_rocket_payoff` — the lull rockets' own payoff — explode every one where
+it stands, in its own colour, instead of six random near-centre bursts.
+Three things not visible cold:
+
+- **No flag, no change**: an unflagged snapshot adopts byte-identically
+  to before (proven against the pinned pre-change module). The flag only
+  exists when the outgoing lull was told a DIFFERENT effect is coming.
+- **Held keepers never hang**: no drop arm within `KEEPER_HOLD_S` (0.6 s)
+  and each bursts as an ordinary firework where it stands
+  (`_release_keepers`); a lull arriving meanwhile releases them first, so
+  `_phase_rockets` (which guides the first N rockets) can never grab them.
+- **Order**: `_adopt_handoff` runs before `_phase_step` in `draw()`, so a
+  drop arm that lands before the first frame still finds the keepers.
+
+Leaving Fireworks is spectra-side only (a cut 1 s after its own drop into
+the Black Hole; on the next big analysed flare into the others) — the
+incoming effects' generic adopts take the burst cloud; nothing here
+changed for it.
+
 ## Sonic reach
 
 No direct param edit — same rule as every effect here; reachable only
-through an already-attached `FlareKind` on Fireworks V2.
+through an already-attached `FlareKind` on Fireworks V2. The melds' two
+room tunables (`drop_switch_swallow_delay_s`, `drop_switch_hit_threshold`)
+are settings-registry keys.
 
 ## Executable proofs
 
 `scripts/check_fireworks_drop_tail.py`, `scripts/check_firework_burst.py`,
 `tests/test_fireworks_drop_tail.py`, `tests/test_fireworks_rocket_angles.py`,
-`tests/test_firework_burst.py`. The scene migration that attaches the kind,
+`tests/test_firework_burst.py`, `tests/test_fireworks_melds.py` (the
+keepers meld on the real pipeline, the pinned-module byte-identity, the
+swallow and implode adopts), `scripts/render_fireworks_melds.py` (offline
+GIFs, committed under `docs/evidence/fireworks-melds/`). The scene migration that attaches the kind,
 `scripts/add_fireworks_burst_flare.py` (dry-run default), belongs to the
 fireworks-v2-scene skill. History: `docs/SPECTRA_SPEC.md` §89 (also
 referenced in AGENTS.md's own prose), `fx/VENDOR.md` #15, #17.

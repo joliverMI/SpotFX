@@ -57,7 +57,12 @@ export function describeEvent(item: ReviewEventItem): string {
         const when = d.at === 'drop' ? 'on the drop'
           : d.at === 'charge_flare' ? 'on a flare in the charge'
             : d.at === 'charge_flare_missed' ? 'at the next member (the flare never fired)'
-              : 'at the charge';
+              // THE FIREWORKS MELDS: Fireworks played its own drop first
+              : d.at === 'after_drop' ? 'just after its own drop'
+                : d.at === 'next_hit' ? 'on the next big bass hit after its own drop'
+                  : d.at === 'deadline' ? 'at the deadline (no big hit came after its own drop)'
+                    : d.at === 'before_next_sequence' ? 'as the next drop sequence began'
+                      : 'at the charge';
         const res = d.result === 'switched' ? '' : ` — not cut (${(d.skipped as string | undefined) ?? d.result})`;
         return `Drop switched the scene to ${to}, a hard cut ${when}${res}`;
       }

@@ -91,6 +91,17 @@ and the squash has nothing left to squash, byte-identical to before.
 Read lull_dark.py's docstring before changing anything about when this
 lull goes dark.
 
+## A piece adopted on a HARD CUT skips its fade-in (2026-10-08)
+
+The drop-led switch cuts (`fx/VENDOR.md` #63) — and the fireworks melds
+cut Fireworks into Squiggles on the next big hit — leave no outgoing
+frames to hide a fade-in behind. `_adopt_handoff`'s generic path starts a
+chain adopted from the REGISTRY snapshot (the cut path, `live` False) at
+`age = FADE_IN_S`, so the panel does not go dark for ~80 ms while it fades
+up (measured: 189 lit cells -> 0 for five frames before; -> 42 on the cut
+frame after). A crossfade adoption (`live` True) is unchanged; so is the
+radial burst. `fx/VENDOR.md` #64.
+
 ## Sonic reach
 
 No direct param edit — reachable only through an already-attached
@@ -99,7 +110,7 @@ No direct param edit — reachable only through an already-attached
 ## Executable proofs
 
 `tests/test_lull_dark.py` (the dark-point rule and this effect's lull on
-the real pipeline).
+the real pipeline), `tests/test_fireworks_melds.py` (the cut-frame adopt).
 `scripts/check_squiggles_drop_timing.py`,
 `tests/test_squiggles_drop_timing.py`,
 `tests/test_squiggles_colorset_widen.py`. The accept-list migration,

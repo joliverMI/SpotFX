@@ -10590,11 +10590,42 @@ installed RESOLVER (never a second hook). Four things:
   `drop_switch.plans_for` (the Timeline strip's ⇄, Sonic's read-only
   `explain_drop_switch`) and the show log (`drop_sequence:switch`). A spec
   that builds a `TriggerEngine` with an injected `fire_scene` gets the cut
-  through that fake. Fireworks pairs ride the generic hand-off until phase
-  3 (the melds). The planner's protected windows are UNCHANGED — the early
+  through that fake. Fireworks pairs are the phase-3 melds (below). The planner's protected windows are UNCHANGED — the early
   switch is the resolver's act, not a planned cue (the revised plan's D).
   Specs: `tests/test_drop_switch.py` (FINA + 100 MILLONES real stores),
   `tests/test_drop_switch_cut.py`; help topic `drop-led-switch`.
+
+**PHASE 3 — THE FIREWORKS MELDS (2026-10-08, option C).** Rows of the same
+`drop_switch.HANDOFF` table and the same one-call cut — only the MOMENT
+moves; `drop_switch.py`'s THE FIREWORKS MELDS docstring is the binding
+statement. Four things:
+
+- **INTO FIREWORKS (`keepers`)**: the lull is told `lull_keep =
+  FIREWORKS_KEEP` (3); Orbits joined `LULL_HANDOFF_EFFECTS` to hold N
+  spaced blobs (told 1/untold: byte-identical). A lull told another effect
+  FLAGS its keepers in its snapshot (`"keepers"`), and Fireworks holds each
+  as a rocket the drop arm explodes where it stands (`fx/VENDOR.md` #64).
+  An unflagged snapshot adopts byte-identically to before.
+- **OUT OF FIREWORKS, LATE MOMENTS**: Fireworks plays its OWN drop, then
+  `after_drop` (into the Black Hole, `drop_switch_swallow_delay_s` after the
+  mark — swallowed) or `next_hit` (into Fish/Orbits/Squiggles/STAR). A late
+  plan is ARMED when the drop member fires (`TriggerEngine.
+  _arm_late_switch`, its moment recomputed then) and cut by
+  `_tick_late_switches` — or, for a hit, by the hit flare's own `_fire`
+  (`_hit_ids`, the ride pattern), so that flare lands on the new scene.
+- **THE NEXT BIG BASS HIT IS DEFINED ONCE** (`drop_switch.next_big_hit`):
+  the first ANALYSED flare past the drop's own reach (MATCH_BEATS, where a
+  flare is silenced anyway; >= HIT_MIN_AFTER_MS) at least
+  `drop_switch_hit_threshold`; else `hit_deadline_ms` (tail + a bar), where
+  the cut fires the incoming scene's flare itself. A switch still pending
+  when the next sequence's first member fires is cut then
+  (`before_next_sequence`) — on his dense FINA that is the common case.
+- **The sequence preview** gives a late cut its own `"switch"` cue
+  (`phase_preview.late_cut_after_s`; the next hit stood in by
+  `PREVIEW_HIT_AFTER_S`). Squiggles skips its fade-in for a piece adopted
+  on a cut (it went dark ~80 ms). Specs: `tests/test_fireworks_melds.py`;
+  GIFs `scripts/render_fireworks_melds.py` -> `docs/evidence/
+  fireworks-melds/`; help topic `fireworks-melds`.
 
 **SONIC'S FULL EDIT SET (2026-10-06, Sonic coverage audit build).**
 `spectra/services/drop_console.py` now covers every `apply_edit` op, AND

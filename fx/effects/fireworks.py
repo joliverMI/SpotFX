@@ -54,6 +54,24 @@ PAYOFF_LIFE = 1.35     # giant-firework life multiplier
 DROP_TAIL_RATE = 8.0   # launches/s right after the payoff
 DROP_TAIL_S = 2.5      # seconds for the tail to ease back to the ordinary show
 
+# THE KEEPERS MELD (2026-10-08, drop-scene-variety plan phase 3 — spectra/
+# services/drop_switch.py is the binding statement; fx/VENDOR.md #64). His
+# words: "fish and orbits could have 3 'particles' remain instead of just 1
+# and then they could explode into fireworks on the drop". A fish/orbits
+# lull TOLD it is leading into Fireworks (fx/effects/lull_handoff.py's
+# `lull_next`) leaves `lull_keep` KEEPERS and flags them in its particle
+# snapshot (`"keepers"`). When the drop-led switch cuts to Fireworks on the
+# drop mark, _adopt_handoff turns each flagged keeper into a stationary
+# ROCKET exactly where it stands, and the drop arm that lands on the same
+# frame (_rocket_payoff, the lull rockets' own payoff) explodes every one of
+# them into a giant firework in its own colour — the keepers ARE the
+# payoff's origins. A snapshot with no flagged keepers adopts exactly as
+# before (every particle bursts as its own ordinary firework).
+KEEPER_ROCKETS_MAX = 2 * LULL_ROCKETS  # never more payoff origins than this
+KEEPER_HOLD_S = 0.6    # held keepers with no drop arm by now burst on their
+                       # own (an ordinary switch in a lull, or a lost arm) —
+                       # never left hanging as dots
+
 # Every per-particle SoA array, in one place so compaction and the particle
 # handoff native snapshot can never drift out of sync with each other.
 _SOA_NAMES = (
@@ -245,6 +263,9 @@ class Fireworks2d(Twod, GradientEffect):
         self._handoff_pending = True
         # held eruption while a radial predecessor collapses
         self._erupt_hold = None
+        # THE KEEPERS MELD: seconds the adopted keeper rockets have waited
+        # for the drop arm (None = no keepers held)
+        self._keeper_hold_t = None
         # held pacman adoption while its maze fades out (phase 1)
         self._pacman_hold = None
         # outgoing-to-radial collapse state; None = normal physics
@@ -626,13 +647,26 @@ class Fireworks2d(Twod, GradientEffect):
                         bright[idx], ncx, ncy, speed_mult=mult,
                     )
             return
+        # THE KEEPERS MELD (module constants): a lull told it leads into
+        # Fireworks flagged the pieces it kept — each becomes a held rocket
+        # where it stands, for the drop's payoff to explode
+        keepers = snap.get("keepers")
+        if keepers is not None and len(keepers) == len(xs) and np.any(keepers):
+            keepers = np.asarray(keepers, dtype=bool)
+            kidx = np.flatnonzero(keepers)
+            self._import_keepers(
+                xs[kidx], ys[kidx], snap["grad"][kidx], snap["bright"][kidx]
+            )
+            rest = np.flatnonzero(~keepers)
+        else:
+            rest = np.arange(len(xs))
         # orbits: every particle explodes as its own firework, keeping
         # its color for the whole burst
-        m = len(xs)
+        m = rest.size
         if m <= 0:
             return
         per = int(np.clip(self.max_blobs // max(m, 1), 4, self.burst_size))
-        order = np.argsort(snap["bright"])[::-1]
+        order = rest[np.argsort(snap["bright"][rest])[::-1]]
         for i in order:
             if self._capacity() <= 0:
                 break
@@ -643,6 +677,51 @@ class Fireworks2d(Twod, GradientEffect):
                 grad=float(snap["grad"][i]),
                 bright=float(np.clip(snap["bright"][i], 0.4, 1.0)),
             )
+
+    def _import_keepers(self, xs, ys, grads, brights):
+        """THE KEEPERS MELD: hold each adopted keeper as a stationary rocket
+        at its own position and colour (p_rocket with no flight path — the
+        lull's guided-rocket machinery never moves it), so the drop arm's
+        _rocket_payoff explodes it where it stands. Uncapped like every
+        rocket (p_nocap); at most KEEPER_ROCKETS_MAX."""
+        k = int(min(len(xs), KEEPER_ROCKETS_MAX, CAP - self.n))
+        if k <= 0:
+            return
+        s = slice(self.n, self.n + k)
+        self.p_x[s] = xs[:k]
+        self.p_y[s] = ys[:k]
+        self.p_vx[s] = 0.0
+        self.p_vy[s] = 0.0
+        self.p_age[s] = 0.0
+        self.p_life[s] = 1e6  # held: the payoff (or the hold's end) ends it
+        self.p_grad[s] = grads[:k]
+        self.p_bright[s] = np.clip(brights[:k], 0.6, 1.0)
+        self.p_shown[s] = 0.0
+        self.p_rev[s] = 0.0
+        self.p_rocket[s] = 1.0
+        self.p_nocap[s] = 1.0
+        self.n += k
+        self._rocket_path = None
+        self._keeper_hold_t = 0.0
+
+    def _release_keepers(self):
+        """The keepers' hold ran out with no drop arm (or a lull is about
+        to launch its own rockets): each held keeper bursts as an ordinary
+        firework where it stands — the adopt path's generic shape."""
+        self._keeper_hold_t = None
+        n = self.n
+        idx = np.flatnonzero(self.p_rocket[:n] > 0.0)
+        if idx.size == 0:
+            return
+        origins = [(float(self.p_x[i]), float(self.p_y[i]),
+                    float(self.p_grad[i]), float(self.p_bright[i]))
+                   for i in idx]
+        self.p_life[idx] = 0.0
+        self.p_rocket[idx] = 0.0
+        per = int(np.clip(self.max_blobs // max(len(origins), 1), 4,
+                          self.burst_size))
+        for ox, oy, grad, bright in origins:
+            self._spawn_burst(per, ox=ox, oy=oy, grad=grad, bright=bright)
 
     def _grand_burst(self, ncx, ncy):
         """The big firework a collapsed radial turns into."""
@@ -804,8 +883,13 @@ class Fireworks2d(Twod, GradientEffect):
                 self._phase_t = 0.0
                 self._phase_done_t = None
                 if pend == "lull":
+                    if self._keeper_hold_t is not None:
+                        self._release_keepers()
                     self._launch_rockets()
                 elif pend == "drop":
+                    # held keepers (THE KEEPERS MELD) are rockets: the
+                    # payoff explodes each where it stands
+                    self._keeper_hold_t = None
                     self._rocket_payoff()
                     self._tail_t = 0.0
                 elif pend == "none" and prev == "lull":
@@ -820,6 +904,10 @@ class Fireworks2d(Twod, GradientEffect):
         self._pspeed = 1.0
         self._plife = 1.0
         self._tail_rate = self._drop_tail_step(dt)
+        if self._keeper_hold_t is not None:
+            self._keeper_hold_t += dt
+            if self._keeper_hold_t >= KEEPER_HOLD_S:
+                self._release_keepers()
         if self._phase == "none":
             return
         self._phase_t += dt

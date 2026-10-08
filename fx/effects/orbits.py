@@ -6,6 +6,7 @@ from PIL import Image
 
 import fx.effects.particle_handoff as particle_handoff
 from fx.color import validate_gradient
+from fx.effects import lull_handoff
 from fx.effects.audio import AudioReactiveEffect
 from fx.effects.gradient import GradientEffect
 from fx.effects.twod import Twod
@@ -30,6 +31,18 @@ ENTRY_R = 1.35      # normalized radius where new particles appear
 CHARGE_PEAK_N = 10   # population grows to this, then sheds to 1
 CHARGE_PEAK_AT = 0.45  # progress fraction where the shed begins
 LULL_FALL_S = 3.0    # fall-to-center fallback when no lull ramp arrives
+# THE LULL HAND-OFF HOOK (fx/effects/lull_handoff.py; drop-scene-variety
+# phase 3, fx/VENDOR.md #64). Told `lull_keep` N > 1 — a lull leading into
+# Fireworks asks for 3 — the lull keeps N blobs instead of its one, and the
+# whole geometry falls only this far toward the centre (the tether ring at
+# this fraction of its size) so the N blobs hold an evenly spaced ring: N
+# distinct origins for the arriving effect. Told 1 (the default, and every
+# untold lull) the lull is byte-identical to before; told 0, orbits keeps
+# its one blob anyway (its lull has no dark ending to fall back to). Each
+# kept blob's own orbit shrinks to LULL_KEEP_ORBIT of itself, so it sits by
+# its ring slot instead of swinging into a neighbour's.
+LULL_KEEP_RING = 0.8
+LULL_KEEP_ORBIT = 0.2
 DROP_FLY_S = 0.4     # seconds the payoff blobs take to fly back out
 DROP_SETTLE_S = 4.2  # drop boost decay / phase auto-reset horizon — raised
                       # in tandem with DROP_EJECTA_SPEED (see below) so the
@@ -77,6 +90,7 @@ class Orbits2d(Twod, GradientEffect):
         "color_shift",
         "phase",
         "phase_progress",
+        *lull_handoff.KEYS,
     ]
 
     CONFIG_SCHEMA = vol.Schema(
@@ -216,6 +230,9 @@ class Orbits2d(Twod, GradientEffect):
                 description="Progress through the current phase (ramped by SpotFX)",
                 default=0.0,
             ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1.0)),
+            # the lull hand-off hook (fx/effects/lull_handoff.py): ride ONLY
+            # the dedicated lull arm write, never the param registry
+            **lull_handoff.schema_fields(),
         }
     )
 
@@ -344,6 +361,7 @@ class Orbits2d(Twod, GradientEffect):
             self._pos_scale = 1.0
             self._lull_f = 0.0
             self._omega_scale = 1.0
+            self._orbit_scale = 1.0
             self._phase_done_t = None
         else:
             # non-creation pass: a changed phase key arms the edge
@@ -467,7 +485,7 @@ class Orbits2d(Twod, GradientEffect):
         py = self.cy + self.p_y0[:n] * self.sy
         px = np.where(np.isfinite(px), px, self.cx)
         py = np.where(np.isfinite(py), py, self.cy)
-        return {
+        snap = {
             "src": "orbits",
             "t": particle_handoff.now(),
             "dims": (self.r_width, self.r_height),
@@ -492,6 +510,14 @@ class Orbits2d(Twod, GradientEffect):
                 },
             },
         }
+        # THE KEEPERS MELD (fx/effects/fireworks.py's KEEPERS block): a lull
+        # TOLD it leads into another effect flags the blobs it kept, so the
+        # arriving effect can treat them as the drop's own pieces. Untold, or
+        # told its own effect: no flag — every successor adopts as before.
+        nxt = lull_handoff.next_effect(self._config)
+        if self._phase == "lull" and nxt and nxt != "orbits":
+            snap["keepers"] = self.p_mode[:n] < 2
+        return snap
 
     def deactivate(self):
         # Leave live state behind for a successor instance (effect switch or
@@ -758,6 +784,7 @@ class Orbits2d(Twod, GradientEffect):
                 self._enter_phase(pend)
         self._lull_f = 0.0
         self._omega_scale = 1.0
+        self._orbit_scale = 1.0
         if self._phase == "none":
             return
         self._phase_t += dt
@@ -795,11 +822,17 @@ class Orbits2d(Twod, GradientEffect):
             f = p if p > 0.0 else min(self._phase_t / LULL_FALL_S, 1.0)
             f = f * f * (3.0 - 2.0 * f)
             self._lull_f = f
-            # tiny residual radius: the blob keeps visibly swirling at the
-            # center instead of freezing on a point
-            self._pos_scale = 1.0 - 0.97 * f
+            keep = max(1, lull_handoff.keep(self._config))
+            if keep <= 1:
+                # tiny residual radius: the blob keeps visibly swirling at
+                # the center instead of freezing on a point
+                self._pos_scale = 1.0 - 0.97 * f
+            else:
+                # told to keep N (LULL_KEEP_RING): an evenly spaced ring
+                self._pos_scale = 1.0 - (1.0 - LULL_KEEP_RING) * f
+                self._orbit_scale = 1.0 - (1.0 - LULL_KEEP_ORBIT) * f
             self._omega_scale = 1.0 - 0.6 * f
-            self.particle_count = 1
+            self.particle_count = keep
         else:  # drop
             drop = self._drop_state
             if drop is None:
@@ -1174,6 +1207,7 @@ class Orbits2d(Twod, GradientEffect):
                 self.orbit_radius * 1.25,
             )
             * self._pos_scale
+            * self._orbit_scale
         )
         x = tx + r_orb * np.cos(self.p_phase[:n])
         y = ty + r_orb * np.sin(self.p_phase[:n])

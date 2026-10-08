@@ -158,9 +158,22 @@ reads from `_handoff_snapshot`. Proofs: `tests/test_lull_handoff.py`,
   Targets: sequencer-entry scenes whose Matrix effect is in
   `device_model.CENTRE_BURST_EFFECTS` or `DROP_FIREWORKS_EFFECTS`, drawn
   by the kernel with a Random seeded by (song, key, showing scene).
-- **Fireworks pairs stay on the generic hand-off**; the melds (keep 3,
-  swallowed a second after the drop, implode on the next hit) are phase 3
-  and refine `HANDOFF`/`KEEP_FOR`, not a second mechanism.
+- **The FIREWORKS MELDS (phase 3)** are rows of the same table, not a
+  second mechanism: Fish/Orbits -> Fireworks is `keepers` (the lull is told
+  keep `FIREWORKS_KEEP` 3; Fireworks explodes each keeper where it stands on
+  the drop cut); Fireworks -> Black Hole is `swallowed` (moment
+  `after_drop`: Fireworks plays its own drop, the cut lands
+  `drop_switch_swallow_delay_s` after the mark); Fireworks -> Fish/Orbits/
+  Squiggles/STAR is `implode_on_hit` (moment `next_hit`: armed at the drop
+  — `TriggerEngine._arm_late_switch` — and released by THE NEXT BIG BASS
+  HIT, `drop_switch.next_big_hit`, the first ANALYSED flare past the drop's
+  own reach at least `drop_switch_hit_threshold`; its `_fire` cuts first so
+  the flare lands on the new scene, the "comes in loud"; no hit by
+  `hit_deadline_ms` — tail + a bar — and the deadline cuts and fires the
+  flare itself). A late switch still pending when the next sequence's first
+  member fires is cut then (`before_next_sequence`). On his dense FINA the
+  next sequence usually arrives first. An overstayed Fireworks still
+  switches early, at the charge (rule B).
 - Recorded: `drop_switch.plans_for(uri)` (→ `drop_firing.annotate`'s
   `switch`, the Timeline strip's ⇄ mark), the show log
   (`drop_sequence:switch`), Sonic's `explain_drop_switch`. The sequence
@@ -168,7 +181,8 @@ reads from `_handoff_snapshot`. Proofs: `tests/test_lull_handoff.py`,
 
 Proofs: `tests/test_drop_switch.py` (FINA + 100 MILLONES real stores),
 `tests/test_drop_switch_cut.py` (the cut on the real pipeline),
-`tests/test_preview_programs_live.py`.
+`tests/test_preview_programs_live.py`, `tests/test_fireworks_melds.py`
+(the three melds: decision, effects, FINA trigger clock).
 
 ## Sonic reach
 
@@ -183,8 +197,9 @@ shows, not just state/times), `confirm_drop_sequence`, `dismiss_drop_sequence`,
 edited the song since), `redetect_drop_sequences`,
 `drop_detection_summary`, and (2026-10-08) the read-only
 `explain_drop_switch` — why a sequence did or did not change the scene
-this play. The switch's four tunables (`drop_switch_enabled`,
-`_after_previous_drop`, `_stale_margin_s`, `_drops_in_a_row`) are plain
+this play. The switch's six tunables (`drop_switch_enabled`,
+`_after_previous_drop`, `_stale_margin_s`, `_drops_in_a_row`, and the
+fireworks melds' `_swallow_delay_s`, `_hit_threshold`) are plain
 settings-registry keys; the switch itself (a light-driving act) has no
 write op, by the same boundary every other fire keeps. The two detection thresholds
 (`drop_confident_score`/`drop_suggested_score`) AND the drop floor

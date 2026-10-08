@@ -126,7 +126,7 @@ export interface DropSwitchPlan {
   to_scene_name: string | null;
   to_effect: string | null;
   handoff: string | null;
-  moment: 'drop' | 'charge_start' | 'charge_flare' | null;
+  moment: 'drop' | 'charge_start' | 'charge_flare' | 'after_drop' | 'next_hit' | null;
   cut_ms: number | null;
   outcome: { result: string; at: string; skipped?: string } | null;
   lull_handoff?: { keep: number; next: Record<string, string> } | null;
@@ -134,6 +134,8 @@ export interface DropSwitchPlan {
 
 const SWITCH_WHEN: Record<string, string> = {
   drop: 'on the drop', charge_start: 'at the charge', charge_flare: 'on a flare in the charge',
+  // THE FIREWORKS MELDS (drop_switch.py): Fireworks plays its own drop first
+  after_drop: 'after the drop', next_hit: 'on the next big hit',
 };
 
 /** The short chip for a switch ("⇄ STAR on the drop"), or null. */
