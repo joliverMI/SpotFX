@@ -21,6 +21,11 @@
   7. RECHECK: re-find, re-init, re-apply power/brightness when it answers;
      unknown / outside-the-take named; not acted on when the room is not
      SPECTRA's.
+  11. DUPLICATE HARDWARE (sconce-flicker-tv-mode, 2026-10-07): a device-
+     config row sharing its hardware_id with another in-scope row that
+     backs a virtual is never written to at all — not held on, not
+     switched off, no drift check — regardless of whether a mode also
+     names it.
 
 No network: the WLED transport, the host, relocation and the probe are
 fakes behind house_fixtures.deps.
@@ -36,13 +41,21 @@ from spectra.models.house_mode import FixtureHook, HouseMode, HouseTarget
 
 
 class FakeDev:
-    def __init__(self, did, name, kind="wled"):
+    def __init__(self, did, name, kind="wled", hardware_id=None):
         self.id = did
         self.name = name
         self.type = kind
         self.wled = SimpleNamespace(ip_address=f"ip-{did}") if kind == "wled" else None
         self._destination = "10.0.0.1" if kind == "wled" else None
         self.frozen = False
+        self.hardware_id = hardware_id
+
+
+class FakeVirtual:
+    """Just enough of a real Virtual for _virtual_ids_by_device's reverse
+    lookup: `_segments` is a list of (device_id, ...) tuples."""
+    def __init__(self, segments):
+        self._segments = segments
 
 
 class FakeHost:
@@ -1067,3 +1080,101 @@ def test_a_fixture_that_does_not_confirm_is_retried_then_dropped_and_named(seam)
         assert failed and failed[0]["outcome"] == "failed"
         assert len([p for d, p in seam.ip_posts if d == "porch-rail"]) == seam.hf.HANDBACK_ATTEMPTS
     _run(scenario())
+
+
+# ═══ 11. duplicate hardware (sconce-flicker-tv-mode, 2026-10-07) ════════════
+
+def _add_duplicate_sconce(seam, monkeypatch, *, mac="e08cfe5c3a78",
+                          in_mode_off=False):
+    """Mirrors his real fx-live config: the left sconce exists twice —
+    `sconce-kitchen-left` (the real row, backs a virtual, same MAC) and
+    `sconce-kitchen-left-1` (the duplicate row, backs nothing). The real
+    row's virtual is the room's own ground truth, so it is `in_use`; the
+    duplicate's own virtual is deliberately NOT in that ground truth."""
+    from spectra.services import room_topology
+
+    host = seam.host
+    host.devices["sconce-kitchen-left"].hardware_id = mac
+    host.devices["sconce-kitchen-left-1"] = FakeDev(
+        "sconce-kitchen-left-1", "Sconce, Kitchen, Left", hardware_id=mac)
+    host.virtuals["v-sconce-left"] = FakeVirtual(
+        [("sconce-kitchen-left", 0, 10)])
+    if not in_mode_off:
+        host.virtuals["v-sconce-left-1"] = FakeVirtual(
+            [("sconce-kitchen-left-1", 0, 10)])
+    seam.state["sconce-kitchen-left-1"] = {"on": True, "bri": 34, "live": True}
+    seam.info["sconce-kitchen-left-1"] = {"uptime": 100000}
+    monkeypatch.setattr(room_topology, "genuinely_driven_virtual_ids",
+                        lambda: {"v-sconce-left"})
+
+
+def test_the_duplicate_row_gets_no_write_while_the_real_row_is_mode_off(
+        seam, monkeypatch):
+    """The reproduction: TV mode's own off list names the REAL row only;
+    the duplicate — same hardware, backing no virtual — must never be
+    held on while its twin is switched off, and the mode must settle
+    with no further flicker (the drift check must not re-fight it)."""
+    from fx import device_output
+    _add_duplicate_sconce(seam, monkeypatch)
+    seam.set_mode("TV", fixtures=[
+        FixtureHook(target=HouseTarget(kind="fixture", id="sconce-kitchen-left"),
+                    off=True)])
+    seam.house._rt.off_ready["sconce-kitchen-left"] = seam.clock.now
+    seam.house._rt.phase = seam.house.PHASE_RESTING
+    _run(_settle(seam.hf))
+    assert all(did != "sconce-kitchen-left-1" for did, _p in seam.posts), \
+        "the duplicate must never be written to at all"
+    assert device_output.withheld().get("sconce-kitchen-left") == "switched off"
+    assert "sconce-kitchen-left-1" not in device_output.withheld()
+    assert seam.state["sconce-kitchen-left"]["on"] is False
+    # a drift pass later changes nothing for either row
+    seam.posts.clear()
+    seam.clock.now += seam.hf.DRIFT_CHECK_S + 1
+    _run(_settle(seam.hf))
+    assert all(did != "sconce-kitchen-left-1" for did, _p in seam.posts)
+
+
+def test_the_duplicate_stays_ignored_even_when_also_named_in_the_mode(
+        seam, monkeypatch):
+    """The interim TV-mode fix (already applied live) adds the duplicate
+    row to the SAME mode's off list — the code fix must still ignore it
+    (never write to it) rather than erroring or double-handling it, and
+    virtual membership must keep outranking being merely named in a
+    mode."""
+    from fx import device_output
+    _add_duplicate_sconce(seam, monkeypatch, in_mode_off=True)
+    seam.set_mode("TV", fixtures=[
+        FixtureHook(target=HouseTarget(kind="fixture", id="sconce-kitchen-left"),
+                    off=True),
+        FixtureHook(target=HouseTarget(kind="fixture", id="sconce-kitchen-left-1"),
+                    off=True)])
+    seam.house._rt.off_ready["sconce-kitchen-left"] = seam.clock.now
+    seam.house._rt.off_ready["sconce-kitchen-left-1"] = seam.clock.now
+    seam.house._rt.phase = seam.house.PHASE_RESTING
+    _run(_settle(seam.hf))
+    assert all(did != "sconce-kitchen-left-1" for did, _p in seam.posts)
+    assert "sconce-kitchen-left-1" not in device_output.withheld()
+
+
+def test_an_unrelated_fixture_sharing_no_hardware_id_or_name_is_unaffected(
+        seam, monkeypatch):
+    """A genuinely unrelated fixture elsewhere in the room — no shared MAC,
+    no shared name/type with the duplicate pair, backing its own virtual —
+    must still be held on normally while the duplicate is ignored."""
+    _add_duplicate_sconce(seam, monkeypatch)
+    seam.set_mode()
+    _run(_settle(seam.hf))
+    assert all(did != "sconce-kitchen-left-1" for did, _p in seam.posts)
+    assert ("porch-rail", {"on": True, "bri": 34}) in seam.posts
+
+
+def test_the_duplicate_warning_logs_once_not_every_tick(seam, monkeypatch, caplog):
+    import logging
+    from spectra.services import house_fixtures as hf_mod
+    _add_duplicate_sconce(seam, monkeypatch)
+    seam.set_mode()
+    with caplog.at_level(logging.WARNING, logger=hf_mod.logger.name):
+        _run(_settle(seam.hf, passes=3))
+    warnings = [r for r in caplog.records
+                if "sconce-kitchen-left-1 is a duplicate of" in r.getMessage()]
+    assert len(warnings) == 1

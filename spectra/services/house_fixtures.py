@@ -434,6 +434,10 @@ class _Runtime:
     #: lingering echo apart from a value it never authored, in the log
     #: only; brightness is never adopted either way (see `_drift_check`).
     written_bri: dict = field(default_factory=dict)
+    #: (ignored, winner) pairs already warned about this process life — see
+    #: `_log_duplicate_ignored`. A duplicate device never stops being one
+    #: tick to tick, so without this the warning would re-fire every pass.
+    duplicate_logged: set = field(default_factory=set)
 
 
 _rt = _Runtime()
@@ -742,6 +746,105 @@ def lend_reasons(st=None) -> dict[str, str]:
     return out
 
 
+def _virtual_ids_by_device(host) -> dict[str, list[str]]:
+    """device id -> every virtual id whose segments reach it, read off the
+    live host — the reverse of show_output._virtual_devices(). `virtuals`
+    is a registry (Virtuals), not a plain dict — iterate its ids, not
+    `.items()`, matching `host.devices` elsewhere in this module."""
+    out: dict[str, list[str]] = {}
+    virtuals = getattr(host, "virtuals", None)
+    if virtuals is None:
+        return out
+    for vid in list(virtuals):
+        v = virtuals.get(vid)
+        for seg in getattr(v, "_segments", None) or []:
+            did = str(seg[0])
+            out.setdefault(did, []).append(vid)
+    return out
+
+
+def _duplicate_ignore_map(host, scope_ids: list[str],
+                          plan_named: set[str]) -> dict[str, str]:
+    """did -> the in-scope device id it duplicates, for every row this seam
+    must never act on because another in-scope row already speaks for the
+    same physical fixture (sconce-flicker-tv-mode, 2026-10-07: the kitchen
+    left sconce existed twice in the fx-live config — same MAC, one row
+    backing a virtual and obeying TV mode's own off list, the other
+    backing nothing and falling to the "Spectra holds it on" branch below;
+    the two fought every 60 s drift check, and the right sconce followed
+    the left one's power-on over its WLED sync group).
+
+    A device WINS — is never the one skipped — when it backs a virtual the
+    room's scene engine can address (device_usage's own ground truth);
+    failing that (no device in the group backs anything), the device named
+    in the CURRENT mode's own off/power-off plan wins. A group where
+    neither applies is left alone: nothing here invents a preference that
+    doesn't already exist. Virtual membership always outranks being named
+    in a mode — an interim mode edit naming the duplicate too (the sconce's
+    own 2026-10-07 TV-mode fix) changes nothing, so the duplicate stays
+    skipped under every mode, not just the one that was hand-edited."""
+    from spectra.services import device_usage
+
+    virtuals_by_device = _virtual_ids_by_device(host)
+    entries = []
+    for did in scope_ids:
+        dev = host.devices.get(did)
+        entries.append({
+            "id": did,
+            "type": str(getattr(dev, "type", "") or "").lower(),
+            "config": {"name": getattr(dev, "name", None)},
+            "virtuals": virtuals_by_device.get(did, []),
+        })
+    annotated = {e["id"]: e for e in device_usage.annotate(entries)}
+
+    def _group_winner(ids: list[str]) -> Optional[str]:
+        used = sorted(d for d in ids if (annotated.get(d) or {}).get("in_use"))
+        if used:
+            return used[0]
+        named = sorted(d for d in ids if d in plan_named)
+        return named[0] if named else None
+
+    ignore: dict[str, str] = {}
+
+    groups: dict[str, list[str]] = {}
+    for did in scope_ids:
+        dev = host.devices.get(did)
+        mac = getattr(dev, "hardware_id", None) if dev is not None else None
+        if mac:
+            groups.setdefault(mac, []).append(did)
+    for ids in groups.values():
+        if len(ids) < 2:
+            continue
+        winner = _group_winner(ids)
+        if winner is None:
+            continue
+        for did in ids:
+            if did != winner:
+                ignore[did] = winner
+
+    for did, entry in annotated.items():
+        if did in ignore:
+            continue
+        dup = entry.get("duplicate_of")
+        if dup and dup in annotated:
+            ignore[did] = dup
+
+    return ignore
+
+
+def _log_duplicate_ignored(did: str, winner: str) -> None:
+    """Warn once per (duplicate, winner) pair, not every tick — a
+    duplicate device never stops being one, so logging it every pass would
+    just reproduce the 60 s drift-check noise this fix removes."""
+    key = (did, winner)
+    if key in _rt.duplicate_logged:
+        return
+    _rt.duplicate_logged.add(key)
+    logger.warning(
+        "house fixtures: %s is a duplicate of %s (same hardware) — "
+        "ignoring it; %s already speaks for this fixture", did, winner, winner)
+
+
 def desired() -> dict[str, tuple[str, str]]:
     """device -> (target, why) for every in-scope fixture the seam acts on
     RIGHT NOW. Empty when no mode drives the room."""
@@ -758,8 +861,15 @@ def desired() -> dict[str, tuple[str, str]]:
     power_off_pending = house.mode_power_off_scope()
     power_off_phase_active = house.mode_off_phase_active()
     strips = set(tv_strip_ids())
+    scope_ids = _in_scope_devices(host)
+    ignore = _duplicate_ignore_map(host, scope_ids,
+                                   set(mode_off) | set(power_off_pending))
     out: dict[str, tuple[str, str]] = {}
-    for did in _in_scope_devices(host):
+    for did in scope_ids:
+        winner = ignore.get(did)
+        if winner is not None:
+            _log_duplicate_ignored(did, winner)
+            continue
         dev = host.devices.get(did)
         ov = st.fixtures.get(did)
         wants_off = did in mode_off or did in power_off_pending
