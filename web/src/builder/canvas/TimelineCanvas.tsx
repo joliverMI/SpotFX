@@ -4,6 +4,7 @@
 import { useEffect, useRef } from 'react';
 import type { CanvasFrame, CanvasLayer, Hit, LayerDataBag, ViewState, Win } from './frame';
 import { BEAT_STRIP_H, stripCountFor } from './frame';
+import { panDeltaMs, resolveTouchPanLock } from './touchPan';
 
 export interface PointerHandlers {
   onHit?: (hit: Hit, ev: PointerEvent, frame: FrameGeom) => void;
@@ -139,7 +140,16 @@ export default function TimelineCanvas({
       return { x: ev.clientX - r.left, y: ev.clientY - r.top };
     };
     let dragging = false;
-    let panStart: { x: number; winStart: number; winEnd: number } | null = null;
+    // The pointer actually driving the current drag — a second, unrelated
+    // pointer's own move/up/cancel (a resting palm beside a panning finger)
+    // must never touch state that belongs to this one.
+    let draggingPointerId: number | null = null;
+    let panStart: { pointerId: number; x: number; winStart: number; winEnd: number } | null = null;
+    // A single-finger touch that lands on nothing draggable is a PAN
+    // CANDIDATE until it's moved enough to say which way (see touchPan.ts).
+    // Only ever armed when the hit test came back empty, so it can never
+    // fight a marker drag — that branch below never reaches this one.
+    let touchCandidate: { pointerId: number; x: number; y: number; winStart: number; winEnd: number } | null = null;
 
     const down = (ev: PointerEvent) => {
       const s = stateRef.current;
@@ -148,7 +158,7 @@ export default function TimelineCanvas({
       const { x, y } = rel(ev);
       if (ev.button === 1) {
         // middle-drag pan
-        panStart = { x, winStart: g.win.startMs, winEnd: g.win.endMs };
+        panStart = { pointerId: ev.pointerId, x, winStart: g.win.startMs, winEnd: g.win.endMs };
         canvas.setPointerCapture(ev.pointerId);
         ev.preventDefault();
         return;
@@ -159,6 +169,7 @@ export default function TimelineCanvas({
         const dragId = s.pointer?.onContextMenu?.(g.xToTime(x), hitTest(x, y), y, g);
         if (typeof dragId === 'string') {
           dragging = true;
+          draggingPointerId = ev.pointerId;
           canvas.setPointerCapture(ev.pointerId);
         }
         ev.preventDefault();
@@ -169,24 +180,51 @@ export default function TimelineCanvas({
       s.pointer?.onHit?.(hit, ev, g);
       if (hit && (hit.kind === 'trigger-intensity' || hit.kind === 'trigger-triangle' || hit.kind === 'ai-marker')) {
         dragging = true;
+        draggingPointerId = ev.pointerId;
         canvas.setPointerCapture(ev.pointerId);
+        // The canvas is touch-action: pan-y (so an empty-graph vertical
+        // swipe can scroll the page — see the touch pan candidate below);
+        // a marker drag must still own every move of ITS OWN gesture, or
+        // a vertical intensity drag would race the browser's native pan.
+        ev.preventDefault();
+        return;
+      }
+      if (ev.pointerType === 'touch' && !hit) {
+        touchCandidate = { pointerId: ev.pointerId, x, y, winStart: g.win.startMs, winEnd: g.win.endMs };
       }
     };
     const move = (ev: PointerEvent) => {
       const s = stateRef.current;
       const g = geom();
       if (!g) return;
-      if (panStart) {
+      if (panStart && ev.pointerId === panStart.pointerId) {
         const { x } = rel(ev);
-        const span = panStart.winEnd - panStart.winStart;
-        // Drag right → window moves right (reversed per user preference).
-        const deltaMs = ((x - panStart.x) / Math.max(1, g.w)) * span;
+        const deltaMs = panDeltaMs(x, panStart.x, g.w, panStart.winStart, panStart.winEnd);
         s.pointer?.onPan?.(deltaMs);
         panStart = { ...panStart, x };
         return;
       }
-      if (dragging) {
+      if (dragging && ev.pointerId === draggingPointerId) {
         s.pointer?.onDragMove?.(ev, g);
+        return;
+      }
+      if (touchCandidate && ev.pointerId === touchCandidate.pointerId) {
+        const { x, y } = rel(ev);
+        const lock = resolveTouchPanLock(x - touchCandidate.x, y - touchCandidate.y);
+        if (lock === 'pan') {
+          // Lock in: apply this move's own delta right away (no dead zone)
+          // and hand off to the ordinary panStart path from here on.
+          ev.preventDefault();
+          canvas.setPointerCapture(touchCandidate.pointerId);
+          const deltaMs = panDeltaMs(x, touchCandidate.x, g.w, touchCandidate.winStart, touchCandidate.winEnd);
+          s.pointer?.onPan?.(deltaMs);
+          panStart = { pointerId: touchCandidate.pointerId, x, winStart: touchCandidate.winStart, winEnd: touchCandidate.winEnd };
+          touchCandidate = null;
+        } else if (lock === 'vertical') {
+          // Resolved to a page scroll — never call preventDefault, and
+          // stop checking; the browser (touch-action: pan-y) takes it.
+          touchCandidate = null;
+        }
         return;
       }
       // idle hover (no buttons) — trigger name labels
@@ -198,12 +236,18 @@ export default function TimelineCanvas({
     const up = (ev: PointerEvent) => {
       const s = stateRef.current;
       const g = geom();
-      panStart = null;
-      if (dragging && g) {
+      if (panStart && ev.pointerId === panStart.pointerId) panStart = null;
+      if (touchCandidate && ev.pointerId === touchCandidate.pointerId) touchCandidate = null;
+      if (dragging && ev.pointerId === draggingPointerId && g) {
         dragging = false;
+        draggingPointerId = null;
         s.pointer?.onDragEnd?.(ev, g);
       }
     };
+    // A touch gesture the browser takes over (e.g. mid-drag, if it ever
+    // decides to) fires this instead of pointerup — without it `dragging`
+    // (or a pan) could stick forever with no pointerup to clear it.
+    const cancel = (ev: PointerEvent) => up(ev);
     const dbl = (ev: MouseEvent) => {
       const s = stateRef.current;
       const g = geom();
@@ -217,12 +261,14 @@ export default function TimelineCanvas({
     canvas.addEventListener('pointerdown', down);
     canvas.addEventListener('pointermove', move);
     canvas.addEventListener('pointerup', up);
+    canvas.addEventListener('pointercancel', cancel);
     canvas.addEventListener('dblclick', dbl);
     canvas.addEventListener('contextmenu', ctxMenu);
     return () => {
       canvas.removeEventListener('pointerdown', down);
       canvas.removeEventListener('pointermove', move);
       canvas.removeEventListener('pointerup', up);
+      canvas.removeEventListener('pointercancel', cancel);
       canvas.removeEventListener('dblclick', dbl);
       canvas.removeEventListener('contextmenu', ctxMenu);
     };
@@ -238,7 +284,13 @@ export default function TimelineCanvas({
         display: 'block',
         background: '#101010',
         borderRadius: 6,
-        touchAction: 'none',
+        // 'pan-y' (not 'none'): a single-finger touch on empty graph pans
+        // the window horizontally (JS, see touchPan.ts) OR is left to the
+        // browser's own vertical page scroll, decided by direction lock in
+        // move() above. Every drag branch (markers, the mouse pans) calls
+        // preventDefault() itself, so this never races an in-progress
+        // drag — it only ever governs an UNDECIDED empty-graph touch.
+        touchAction: 'pan-y',
       }}
     />
   );

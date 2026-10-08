@@ -36,6 +36,7 @@ import ShiftAllControl from './components/ShiftAllControl';
 import ImportDialog from './components/ImportDialog';
 import { useBuilderWs } from './hooks/useBuilderWs';
 import { useTriggerInteractions } from './hooks/useTriggerInteractions';
+import { useLightShowDrag } from './hooks/useLightShowDrag';
 import { useIntensityKeyboard } from './hooks/useIntensityKeyboard';
 import { usePaletteKeyboard } from './hooks/usePaletteKeyboard';
 import { usePalettes } from './queries';
@@ -261,6 +262,11 @@ export default function BuilderPage() {
     () => (showLightShow ? lightShowCueMarkers(analysedPlan?.show_cues, showArms, uri) : []),
     [showLightShow, analysedPlan, showArms, uri]);
   const armedSceneChangeSets = useMemo(() => sceneChangeArms(showArms, uri), [showArms, uri]);
+  const lightShowUi = useLightShowDrag({
+    uri, durationMs,
+    getBeats: () => librosaRef.current?.beats ?? null,
+    onChanged: () => void refetchAnalysedPlan(),
+  });
 
   // ── drop sequences (drop-detection plan, phases 3–4) ────────────────────
   // ./dropSequences.ts decides what each sequence IS (its look, whether it
@@ -325,9 +331,10 @@ export default function BuilderPage() {
     plannedEvents: analysedMarkers,
     dropSeq: dropLayer,
     lightShow: lightShowCues,
+    lightShowDrag: lightShowUi.liveMs,
   }), [shape, averages, meta, librosa, mfccDistances, workingTriggers, events,
        calibrationTargetsMs, draggingIntensity, selectedIds, hoverTriggerId, analysedMarkers, dropLayer,
-       lightShowCues]);
+       lightShowCues, lightShowUi.liveMs]);
 
   const stripCount = stripCountFor(data, librosaFilters);
   // The drop-sequence snap rails get their own band under the main area, so
@@ -406,6 +413,7 @@ export default function BuilderPage() {
         />
         {uri && (
           <ShowCueBar uri={uri} durationMs={durationMs} cues={analysedPlan?.show_cues} arms={showArms}
+            beats={librosa?.beats ?? null}
             onChanged={() => void refetchAnalysedPlan()} />
         )}
       </CollapsibleCard>
@@ -541,14 +549,17 @@ export default function BuilderPage() {
             // on a double-click).
             onHit: (hit, ev, g) => {
               if (showDropSeqs && dropUi.onHit(hit, ev, g)) return;
+              if (lightShowUi.pointer.onHit(hit, ev, g)) return;
               triggerPointer.onHit?.(hit, ev, g);
             },
             onDragMove: (ev, g) => {
               if (dropUi.onDragMove(ev, g)) return;
+              if (lightShowUi.pointer.onDragMove(ev, g)) return;
               triggerPointer.onDragMove?.(ev, g);
             },
             onDragEnd: (ev, g) => {
               if (dropUi.onDragEnd(ev, g)) return;
+              if (lightShowUi.pointer.onDragEnd(ev, g)) return;
               triggerPointer.onDragEnd?.(ev, g);
             },
             onIdleMove: showDropSeqs ? dropUi.onIdleMove : undefined,

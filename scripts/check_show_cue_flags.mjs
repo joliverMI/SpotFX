@@ -3,9 +3,15 @@
  * (spectra/web/src/lightshow/cueFlags.ts). Transpiles the REAL module with
  * esbuild, zero network.
  *
- *   ONE — one flag per level, automatic / drop-seeded / moved told apart,
- *         and the automatic position kept for the "auto" ghost.
- *   TWO — a drag snaps to 20 ms and never leaves the song.
+ *   ONE   — one flag per level, automatic / drop-seeded / moved told apart,
+ *           and the automatic position kept for the "auto" ghost.
+ *   TWO   — a drag snaps to 20 ms and never leaves the song.
+ *   THREE — a drag snaps to the nearest beat within its pixel radius
+ *           first, falling back to the 20 ms grid (2026-10-08, the
+ *           Admiral: "snap-to-beat as the mouse has"), and a caller whose
+ *           pixel width spans a narrower window than the full song (the
+ *           Timeline canvas, zoomed in) scales the radius to THAT window.
+ *   FOUR  — rawMsAt is unsnapped (the "no jump" grab-offset arithmetic).
  */
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
@@ -25,7 +31,7 @@ const js = path.join(tmp, 'cueFlags.mjs');
 execFileSync('npx', ['esbuild', TS, '--format=esm', `--outfile=${js}`], {
   cwd: path.join(REPO, 'spectra/web'), stdio: ['ignore', 'ignore', 'inherit'],
 });
-const { cueFlags, dragMs } = await import(js);
+const { cueFlags, dragMs, rawMsAt, snapCueMs } = await import(js);
 
 console.log('ONE — the flags');
 const cue = (level, extra) => ({ level, timestamp_ms: 60_000, source: 'auto', shift: 0.3,
@@ -45,6 +51,52 @@ const rect = { left: 100, width: 1000 };
 ok(dragMs(600, rect, 200_000) === 100_000, 'middle of the bar is the middle of the song');
 ok(dragMs(50, rect, 200_000) === 0 && dragMs(5000, rect, 200_000) === 200_000, 'clamped to the song');
 ok(dragMs(601, rect, 200_000) % 20 === 0, 'snapped to 20 ms');
+
+console.log('THREE — beat snap');
+const beats = [{ ms: 100_050 }, { ms: 100_550 }]; // ~500ms apart
+// width 1000px over 200_000ms span = 200ms/px; BEAT_SNAP_PX=10 -> 2000ms
+// radius at THIS bar's zoomed-all-the-way-out scale (a full-song bar, not
+// the zoomed canvas window — the same formula canvas/data.ts's
+// snapTimestamp uses, just at a very different span/width ratio).
+ok(snapCueMs(100_070, 200_000, 1000, beats) === 100_050,
+  'within the pixel-radius-converted-to-ms snaps to the nearest beat');
+ok(snapCueMs(100_070, 200_000, 1000) === 100_080,
+  'with no beats given, falls back to the flat 20ms grid (unchanged)');
+ok(snapCueMs(150_011, 200_000, 1000, beats) === 150_020,
+  'far outside the radius: falls back to the grid, never a wrong beat');
+ok(snapCueMs(-500, 200_000, 1000, beats) >= 0 && snapCueMs(500_000, 200_000, 1000, beats) <= 200_000,
+  'still clamped to the song either way');
+
+// A 4-minute song (240_000ms) viewed through a 1000px canvas spanning
+// only a 10s window: widthPx covers the WINDOW, not the whole song, so
+// the radius must scale off the window's own span (passed as the 5th
+// arg) — never off durationMs, which would inflate it ~24x and snap to
+// a beat far outside the window's own touch radius.
+const farBeat = [{ ms: 100_250 }]; // 250ms from the raw position below
+ok(snapCueMs(100_000, 240_000, 1000, farBeat, 10_000) === 100_000,
+  'a window-scoped radius leaves a beat outside the WINDOW\'s own touch radius alone');
+ok(snapCueMs(100_000, 240_000, 1000, farBeat) === 100_250,
+  'omitting the window span (the pre-fix canvas call shape) wrongly reaches that same far beat');
+
+console.log('FOUR — rawMsAt is unsnapped (the no-jump grab-offset arithmetic)');
+ok(rawMsAt(601, rect, 200_000) === 100_200, 'not rounded to any grid');
+ok(rawMsAt(50, rect, 200_000) === 0 && rawMsAt(5000, rect, 200_000) === 200_000,
+  'still clamped to the song');
+{
+  // The actual "no jump" property: grab 30ms off-centre from a flag at
+  // 100_000, drag the pointer by +200ms worth of pixels, and the flag's
+  // new position must be ITS OWN old position plus that same +200ms —
+  // never the pointer's raw position (which would read as 100_000 + 30 +
+  // 200 = different only by construction here, but a snap-sensitive case
+  // like this one is exactly where a jump used to show up).
+  const flagMs = 100_000;
+  const grabX = 620; // rawMsAt(620, rect, 200_000) = 104_000, i.e. +4000ms off
+  const grabMs = flagMs - rawMsAt(grabX, rect, 200_000);
+  const moveX = grabX + 40; // +40px = +8000ms at this scale
+  const tracked = rawMsAt(moveX, rect, 200_000) + grabMs;
+  ok(Math.round(tracked) === flagMs + 8000,
+    'the flag tracks the finger by the drag delta, not the finger\'s raw position');
+}
 
 if (failures) { console.log(`\n${failures} FAILED`); process.exit(1); }
 console.log('\nall passed');

@@ -12,19 +12,39 @@
  * with a ring, when an action set is currently armed to fire on it, and
  * muted/outlined otherwise — see ../lightShowMarkers.ts for the exact
  * armed-matching rule (the same one the audio-shape canvas's own light-
- * show layer uses, ./lightShowLayer.ts). */
+ * show layer uses, ./lightShowLayer.ts).
+ *
+ * TOUCH PRECISION (2026-10-08, the Admiral: "I'm having trouble precisely
+ * moving the trigger on the large bar") — three fixes: (1) the drag grabs
+ * wherever the finger actually lands and keeps that offset for the whole
+ * gesture (cueFlags.rawMsAt), instead of snapping the flag to the raw
+ * pointer position on the very first move; (2) the pointer-capturing hit
+ * target (`.show-cue-bar-handle`) is wider than the drawn glyph — a bigger
+ * invisible touch zone around the same visible ▲/▼, the CIRCLE_HIT_R
+ * convention one surface over; (3) a drag now snaps to the nearest beat
+ * first (cueFlags.snapCueMs), falling back to the flat 20ms grid, and a
+ * live mm:ss readout plus ←/→ keyboard nudge (Shift = finer) give a
+ * fine-adjust path a finger alone can't. */
 import { useRef, useState } from 'react';
 import { apiDel, apiPut } from '../../api/client';
 import HelpLink from '../../help/HelpLink';
-import { cueFlags, dragMs } from '../../lightshow/cueFlags';
+import { cueFlags, rawMsAt, snapCueMs } from '../../lightshow/cueFlags';
+import { mmss } from '../../lightshow/showSummary';
 import type { ArmsStatus, SongCues } from '../../lightshow/types';
 import { LIGHT_SHOW_COLOR as COLOR, armAppliesToCue } from '../lightShowMarkers';
 
-export default function ShowCueBar({ uri, durationMs, cues, arms, onChanged }: {
+/** ←/→ nudge step; Shift = the fine step — mirrors dropEdit.ts's own
+ *  NUDGE_MS convention for a keyboard fine-adjust. */
+const NUDGE_MS = 20;
+const FINE_NUDGE_MS = 5;
+
+export default function ShowCueBar({ uri, durationMs, cues, arms, beats, onChanged }: {
   uri: string;
   durationMs: number;
   cues: SongCues | null | undefined;
   arms: ArmsStatus | null | undefined;
+  /** song-time beats, for the drag's own beat-snap — absent = grid-only. */
+  beats?: { ms: number }[] | null;
   onChanged: () => void;
 }) {
   const barRef = useRef<HTMLDivElement>(null);
@@ -47,11 +67,20 @@ export default function ShowCueBar({ uri, durationMs, cues, arms, onChanged }: {
   const startDrag = (level: 'high' | 'low') => (ev: React.PointerEvent) => {
     if (ev.button !== 0 || !barRef.current) return;
     ev.preventDefault();
+    ev.stopPropagation();
     (ev.target as HTMLElement).setPointerCapture(ev.pointerId);
     const bar = barRef.current;
+    const flag = flags.find((f) => f.level === level);
+    const startMs = flag?.ms ?? 0;
+    // The grab offset: where the finger landed vs. the flag's own current
+    // position — kept constant for the whole drag so the flag never jumps
+    // to the raw touch point on the first move.
+    const grabMs = startMs - rawMsAt(ev.clientX, bar.getBoundingClientRect(), dur);
     let last: number | null = null;
     const move = (e: PointerEvent) => {
-      last = dragMs(e.clientX, bar.getBoundingClientRect(), dur);
+      const rect = bar.getBoundingClientRect();
+      const raw = rawMsAt(e.clientX, rect, dur) + grabMs;
+      last = snapCueMs(raw, dur, rect.width, beats);
       setDrag({ level, ms: last });
     };
     const up = () => {
@@ -62,6 +91,13 @@ export default function ShowCueBar({ uri, durationMs, cues, arms, onChanged }: {
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
+  };
+
+  const nudge = (level: 'high' | 'low', flagMs: number) => (ev: React.KeyboardEvent) => {
+    if (ev.key !== 'ArrowLeft' && ev.key !== 'ArrowRight') return;
+    ev.preventDefault();
+    const step = (ev.shiftKey ? FINE_NUDGE_MS : NUDGE_MS) * (ev.key === 'ArrowLeft' ? -1 : 1);
+    void save(level, Math.max(0, Math.min(dur, flagMs + step)));
   };
 
   return (
@@ -92,18 +128,32 @@ export default function ShowCueBar({ uri, durationMs, cues, arms, onChanged }: {
                   borderLeft: `1px dashed ${COLOR[f.level]}`, opacity: 0.5, pointerEvents: 'none' }} />
               )}
               <span role="slider" aria-label={`${f.level} trigger${isArmed ? ' — armed' : ''}`}
-                aria-valuenow={f.ms}
-                title={title} onPointerDown={startDrag(f.level)}
+                aria-valuenow={f.ms} tabIndex={0}
+                title={title} onPointerDown={startDrag(f.level)} onKeyDown={nudge(f.level, f.ms)}
+                className="show-cue-bar-handle"
                 style={{ position: 'absolute', left: pct(drag?.level === f.level ? drag.ms : f.ms),
-                         top: 0, bottom: 0, width: 14, marginLeft: -7, cursor: 'ew-resize',
+                         top: 0, bottom: 0,
+                         // A touch-sized grab zone (wider than the drawn glyph —
+                         // the CIRCLE_HIT_R convention one surface over) centred
+                         // on the same visible ▲/▼; the glyph's own size/position
+                         // is unchanged (lineHeight centres it within the box).
+                         width: 32, marginLeft: -16, cursor: 'ew-resize',
                          color: COLOR[f.level], fontSize: 13, lineHeight: '20px', textAlign: 'center',
                          fontWeight: f.moved || isArmed ? 700 : 400,
                          opacity: isArmed ? 1 : (f.moved || f.fromDrop ? 0.85 : 0.6),
                          textShadow: isArmed ? `0 0 5px ${COLOR[f.level]}` : 'none',
-                         borderRadius: 7,
+                         borderRadius: 7, touchAction: 'none',
                          boxShadow: isArmed ? `0 0 0 1.5px ${COLOR[f.level]}66` : 'none' }}>
                 {f.level === 'high' ? '▲' : '▼'}
               </span>
+              {drag?.level === f.level && (
+                <span style={{ position: 'absolute', left: pct(drag.ms), bottom: '100%',
+                               transform: 'translate(-50%, -2px)', background: 'rgba(0,0,0,0.85)',
+                               color: '#fff', fontSize: 11, padding: '2px 6px', borderRadius: 4,
+                               whiteSpace: 'nowrap', pointerEvents: 'none', zIndex: 5 }}>
+                  {mmss(drag.ms)}
+                </span>
+              )}
             </span>
           );
         })}

@@ -75,6 +75,11 @@ export interface LayerDataBag {
    *  ./lightShowLayer.ts, ../lightShowMarkers.ts) — shown whether or not
    *  anything is armed on them; empty/absent = the layer draws nothing. */
   lightShow?: import('../lightShowMarkers').LightShowCueMarker[];
+  /** A Light Show flag being dragged directly on the canvas right now
+   *  (hooks/useLightShowDrag.ts) — the live ghost position, drawn in place
+   *  of the flag's stored ms until the drag ends and it saves. Null/absent
+   *  = nothing is being dragged on the canvas. */
+  lightShowDrag?: { level: 'high' | 'low'; ms: number } | null;
 }
 
 /** What a hand on the drop-sequence layer is doing RIGHT NOW (phase 4) —
@@ -146,6 +151,7 @@ export type Hit =
   | { kind: 'ai-marker'; index: number }
   | { kind: 'beat'; beatMs: number; values: Record<string, number> }
   | { kind: 'drop-seq'; key: string; handle: Handle; chip?: boolean }
+  | { kind: 'light-show-flag'; level: 'high' | 'low'; ms: number }
   | null;
 
 export interface CanvasLayer {

@@ -10716,6 +10716,109 @@ the Timeline edited the same song since), re-detecting now
 for the cold-start detail and `tests/test_drop_console.py::
 test_every_apply_edit_op_has_a_sonic_operation_or_is_acknowledged`.
 
+## Touch panning + Light Show flag touch precision (2026-10-08)
+
+The Admiral: "i want to be able to drag the audio shape graph somehow on a
+tablet or phone... single finger if it would work well." The canvas's own
+pointer wiring already unified mouse/touch (Pointer Events), and empty-
+canvas hit-testing already ran before any drag decision — so single-finger
+pan never conflicts with marker drag/scrub: no scrub-by-click existed on
+this canvas, and a hit on a marker (trigger/flare/drop-seq) still wins at
+`down()`, same as before. No pinch-zoom was added — no mouse-wheel zoom
+exists to mirror (zoom is still minimap-edge-drag only, `TimelineBar.tsx`).
+
+`spectra/web/src/timeline/canvas/touchPan.ts` (byte-identical twin
+`web/src/builder/canvas/touchPan.ts`) is the pure direction-lock + delta
+arithmetic — `resolveTouchPanLock(dx,dy)` (6px threshold, ties resolve to
+pan) and `panDeltaMs` (the SAME formula the pre-existing middle-mouse pan
+already used, factored out so both paths can't diverge). `TimelineCanvas.tsx`
+(both twins) wires it: an empty-canvas touch arms a `touchCandidate`
+(no `preventDefault` yet — undecided); the first move resolving to 'pan'
+locks in and hands off to the ordinary `panStart` path; resolving to
+'vertical' clears the candidate and lets the browser's own page scroll
+take over. The canvas's `touchAction` changed from `'none'` to `'pan-y'`
+to let that vertical scroll through — which meant every marker-drag branch
+now needs its own explicit `ev.preventDefault()` (added at the hit-branch
+in `down()`) so a vertical intensity drag can't race the browser's native
+pan. A `pointercancel` listener was added too (there wasn't one) — without
+it a touch gesture the browser takes over could leave `dragging`/`panStart`
+stuck forever with no `pointerup` to clear them.
+
+**Hardened for multi-touch same day** (`dragging`/`panStart`/`touchCandidate`
+all now carry the owning pointer's own id, checked on every `move()`/`up()`
+in both twins): before this, `dragging`/`panStart` were pointer-agnostic, so
+a second, unrelated pointer — a resting palm beside a panning or dragging
+finger — could drive or end the FIRST pointer's drag/pan with its own
+move/up. Covers every drag branch (marker drag, context-menu drag, mouse/
+touch pan), not just the Light Show flag below. Exec spec: `scripts/
+check_timeline_canvas_pointer_isolation.mjs` (+ `tests/
+test_timeline_canvas_pointer_isolation.py`) — mounts the real component
+(both twins) under jsdom via react-dom/client and dispatches real
+multi-pointer `PointerEvent`s, asserting on the `pointer` prop's own
+callback invocations.
+
+Exec spec: `scripts/check_timeline_touch_pan.mjs` (+ `tests/
+test_timeline_touch_pan.py`), the `followWindow.ts`-style pure-module
+pattern — transpiles the twin files and proves byte-identity + the lock/
+delta arithmetic. Manual proof: a raw-CDP Python driver against a
+throwaway Vite harness (`chrome-devtools-axi` has the known `pageId`
+bug on this host — see the memory note on driving raw CDP instead),
+`Input.dispatchTouchEvent` + `Emulation.setDeviceMetricsOverride`, at
+phone (390×844) and tablet (1024×768); confirmed visually both sizes.
+**One false alarm worth recording**: a harness debug `<p>` that grew to a
+second line of text on `pointerdown` reflowed the canvas down ~18px before
+the first `pointermove` landed, so a horizontal-only synthetic touch
+"measured" as vertical-dominant and got the wrong lock — not a bug in the
+touch-pan code, a layout-shift artifact from the DEBUG TEXT ITSELF sitting
+above the canvas in the harness page. Any future manual proof that reads
+live `getBoundingClientRect()` deltas between a down and a move needs a
+fixed-height (or no) status readout above the canvas, or it will
+reproduce this same false reading.
+
+**The Light Show High/Low Trigger flag is now draggable directly on the
+audio-shape canvas** (his second ask, same session: "i can't seem to move
+the marker on the audio shape"). `canvas/lightShowLayer.ts`'s `hitTest`
+(previously absent — the flag was tooltip-only, "never a click target so
+a trigger under it still drags") now returns a `'light-show-flag'` Hit at
+a touch-sized radius (14px, matching the `triggers` layer's own line-hit
+convention) along the flag's WHOLE scan-line, not just the small glyph —
+but since the `triggers` layer (z=60) is checked first in `TimelineCanvas`'s
+z-descending hit order and `lightShowMarkers` is z=41, a SPECTRA trigger
+under the flag still wins and still drags, unchanged. `hooks/
+useLightShowDrag.ts` is the drag controller (grab-offset preserved so the
+flag tracks the finger without jumping, beat-snap via `cueFlags.
+snapCueMs`, live ms readout drawn on the canvas) — `snapCueMs`'s own
+pixel-radius-to-ms conversion takes the canvas's own current WINDOW span
+as an optional 5th argument now, not just `durationMs`: the canvas can be
+zoomed narrower than the whole song, and scaling the radius off the full
+song duration (the full-song `ShowCueBar.tsx` bar's own correct
+assumption, below) inflated it by however far zoomed in, reaching a beat
+well outside the window's own touch radius. Wired into
+`BuilderPage.tsx`'s pointer chain ahead of `triggerPointer` the same way
+`dropUi` already is. `frame.ts` grew `lightShowDrag` on `LayerDataBag` (the
+live ghost position) and the `'light-show-flag'` `Hit` kind. SPECTRA-only
+(no twin in `web/src/builder/` — Light Show postdates that frozen fork).
+
+**`ShowCueBar.tsx`** (the full-song "large bar," his words: "trouble
+precisely moving the trigger on the large bar") got the same three fixes:
+a grab-offset ("no jump" — `cueFlags.rawMsAt` is the new UNSNAPPED
+position-at-pointer function, captured once at drag start and reapplied
+every move, instead of snapping the flag straight to the raw touch
+point); a wider invisible touch target (32px vs the drawn 14px handle,
+same glyph, same `CIRCLE_HIT_R`-style split between drawn size and hit
+size); and a beat-snap (`cueFlags.snapCueMs`, same two-tier pixel-radius-
+converted-to-ms convention the canvas trigger editor's `snapTimestamp`
+uses) falling back to the pre-existing flat 20ms grid when no beats are
+given. A fine-adjust path was added where none existed: ←/→ nudges the
+flag 20ms (Shift = 5ms) when its handle is focused, plus a live mm:ss
+readout while dragging — mirroring `dropEdit.ts`'s `NUDGE_MS` convention
+on the canvas's drop-sequence editor, the strongest existing precedent for
+keyboard fine-adjust in this codebase.
+
+Exec spec: `scripts/check_show_cue_flags.mjs` sections THREE/FOUR (+
+`tests/test_show_cue_flags.py`) prove the beat-snap radius arithmetic and
+the no-jump grab-offset property directly.
+
 ## Maintaining this file
 
 Keep this file for knowledge useful to almost every future agent session in this project.
