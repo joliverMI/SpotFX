@@ -71,7 +71,14 @@ actually fires, going silent on both doors. This module still only marks
 the state — mode-independent, as the rest of this docstring says — the
 mode-aware fallback (confident fires anyway, suggested still waits,
 confirmed/edited fire wherever the analysed show plays) is
-spectra/services/drop_firing.py's `fires_here`, not here.
+spectra/services/drop_firing.py's `fires_here`, not here. The SAME
+mode-aware fallback governs a single stood-down member one level down
+(a sequence's own charge/lull sitting on a same-class authored mark, even
+when the whole sequence fires) — `drop_firing.FiringSequence.members`/
+`gap_ms` take the mode and only exclude that member when his trigger can
+actually fire in it, never unconditionally. Two sequences kept near one
+authored mark always dedupe to one of them (his own `matches_his` sort
+order decides WHICH, never WHETHER the dedup runs).
 
 STATES, in precedence order: dismissed > matches_yours > edited >
 confirmed > confident | suggested; and added. This module only says what

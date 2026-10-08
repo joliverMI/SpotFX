@@ -85,6 +85,30 @@ it outright — `_recovered_state` is what lets `_candidates` tell a
 confident/edited match apart from a bare, unconfirmed suggested one it
 still must not fire.
 
+**The same mode-aware fallback applies one level down, to a single
+stood-down member, and the dedup is now unconditional (2026-10-07,
+same report).** `firing_sequences` only ever FLAGS a charge/lull within
+reach of a same-class authored mark (`FiringSequence.stood_down`) — it
+never nulls `charge_ms`/`lull_ms`. `FiringSequence.members(effective_mode)`/
+`gap_ms(cls, effective_mode)` are what actually exclude a stood-down
+member, and only when `his_applies(effective_mode)` is true for the mode
+they're given; with no mode, or a mode where his trigger can't fire there
+("analysed"), every declared member comes back — the Pop Off shape one
+level down (drop:178753's own charge/lull sat exactly on his authored
+charge/lull, so the old unconditional null silenced both under "analysed"
+too). `resolved_stood_down(effective_mode)` is the same rule for
+`annotate()`'s own display field, so the Timeline never shows a member as
+standing down in a mode where it's actually firing. `trigger_engine.
+_sequence_triggers` calls `seq.members(mode)` and stores `(seq, cls, mode)`
+in `_seq_meta` so `_fire` resolves the identical member set at fire time
+(`seq.gap_ms(cls, fire_mode)`, the fire-history detail's own `members`
+list). Separately, the "another firing sequence owns this drop" dedup in
+`firing_sequences` now runs UNCONDITIONALLY — it used to skip whenever the
+candidate `matches_his`, letting two independently-kept sequences both
+matching the same authored mark fire on top of each other; `matches_his`
+decides which of two sequences near one drop wins (his sort order), never
+whether the dedup applies at all.
+
 ## Sonic reach
 
 `spectra/services/drop_console.py`, domain `"drops"`. The full edit set

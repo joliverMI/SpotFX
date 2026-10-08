@@ -268,6 +268,19 @@ def test_a_pop_off_shaped_matches_yours_fixture_fires_by_its_own_tier_under_anal
     # "transitions" never plays the analysed show either
     off = drop_firing.annotate(view, "transitions", True)
     assert all(not s["fires"] for s in off["sequences"])
+    # the fix one level down: drop:59570 and drop:178753's own charge/lull
+    # sit exactly on his authored charge/lull too, so the per-member
+    # stand-down must obey the same mode-aware fallback the whole-sequence
+    # one does — firing the full charge->lull->drop build under "analysed"
+    # (where his own trigger can't cover charge/lull either), and standing
+    # every member down to his own trigger under "full"/"triggers_only".
+    seqs = {s.key: s for s in drop_firing.firing_sequences(view)}
+    for key in ("drop:59570", "drop:178753"):
+        seq = seqs[key]
+        assert seq.matches_his and set(seq.stood_down) == {"charge", "lull"}, key
+        assert [c for c, _ms in seq.members("analysed")] == ["charge", "lull", "drop"], key
+        for mode in ("full", "triggers_only"):
+            assert [c for c, _ms in seq.members(mode)] == ["drop"], (key, mode)
 
 
 # ═══ 2. nothing double-fires against his own triggers ═════════════════════
@@ -343,8 +356,56 @@ def test_a_member_on_his_own_lull_stands_down_alone():
             "authored": [], "authored_lone": [{"id": "his-lull", "kind": "lull",
                                                "timestamp_ms": 58300}]}
     (seq,) = drop_firing.firing_sequences(view)
-    assert [c for c, _ms in seq.members()] == ["charge", "drop"]
     assert seq.stood_down == {"lull": "his-lull"}
+    # "full"/"triggers_only" (his trigger actually fires there): the lull
+    # stands down alone, same as before this fix.
+    assert [c for c, _ms in seq.members("full")] == ["charge", "drop"]
+    assert [c for c, _ms in seq.members("triggers_only")] == ["charge", "drop"]
+    # "analysed" (his trigger cannot fire there): nothing stands down —
+    # the sequence fires its full charge->lull->drop build, or the lull
+    # would go silent on both doors (data/popoff-drops-not-firing/report.md).
+    assert [c for c, _ms in seq.members("analysed")] == ["charge", "lull", "drop"]
+    # with no mode given at all, every declared member comes back too.
+    assert [c for c, _ms in seq.members()] == ["charge", "lull", "drop"]
+
+
+def test_a_matched_sequences_stood_down_members_fire_through_exactly_one_door():
+    """The real fixture's own shapes (data/popoff-drops-not-firing/
+    report.md): Pop Off's drop:178753 sits on his own charge AND lull as
+    well as his own drop; 100 Millones' drop:59194 sits on his own lull
+    (its charge does not, by a wide margin — a genuinely separate moment of
+    his). Through the real TriggerEngine, in every mode, every member his
+    phase trigger stands down must fire through EXACTLY ONE door: his own
+    trigger (rec.resp) wherever it actually fires there ("full"/
+    "triggers_only"), the sequence's own build (rec.seq) wherever it
+    doesn't ("analysed", where before this fix both doors went silent) —
+    never both, never neither under "transitions" either, since no door is
+    open there for a confident detection."""
+    cases = [(URI["Pop Off"], 178753, {"charge", "lull"}),
+             (URI["100 Millones"], 59194, {"lull"})]
+    for uri, drop_ms, expect_stood in cases:
+        _seed(uri)
+        his = _his(uri)
+        view = drop_sequences.view(uri, triggers=his)
+        seq = next(s for s in drop_firing.firing_sequences(view) if s.drop_ms == drop_ms)
+        assert seq.matches_his and set(seq.stood_down) == expect_stood, (uri, drop_ms)
+        member_ms = {"charge": seq.charge_ms, "lull": seq.lull_ms, "drop": seq.drop_ms}
+        reach = 2 * _beat(uri) + 200
+        for mode in MODES:
+            rec = _run(uri, his, mode)
+            for cls in seq.stood_down:
+                target = member_ms[cls]
+                his_mark = next(t for t in his if t.id == seq.stood_down[cls])
+                seq_fired = any(c == cls and _near(p, target, 200)
+                               for p, c, *_ in rec.seq)
+                his_fired = any(c == cls and _near(p, his_mark.timestamp_ms, reach)
+                               for p, c, *_ in rec.resp)
+                if mode in ("full", "triggers_only"):
+                    assert his_fired and not seq_fired, (uri, drop_ms, cls, mode)
+                elif mode == "analysed":
+                    assert seq_fired and not his_fired, (uri, drop_ms, cls, mode)
+                else:
+                    assert not seq_fired and not his_fired, (uri, drop_ms, cls, mode)
 
 
 def test_his_sequence_wins_over_a_detection_on_the_same_drop():
@@ -357,6 +418,25 @@ def test_his_sequence_wins_over_a_detection_on_the_same_drop():
             "authored": [], "authored_lone": []}
     (seq,) = drop_firing.firing_sequences(view)
     assert seq.key == "added:y"
+
+
+def test_two_sequences_matching_the_same_mark_still_dedupe():
+    """The dedup ("another firing sequence owns this drop") must run
+    unconditionally — not skip just because a kept sequence `matches_his`.
+    An ADDED sequence and a confident detection ~100ms apart, both within
+    reach of the SAME authored drop mark, must still keep only his (added
+    sorts first), never both — matching_his is not a license for two kept
+    sequences to fire on top of each other."""
+    view = {"song": {"beat_ms": 500.0},
+            "sequences": [
+                {"key": "drop:60100", "origin": "detected", "state": "confident",
+                 "drop_ms": 60100, "lull_ms": 58100, "charge_ms": 52100, "step": 0.8},
+                {"key": "added:z", "origin": "added", "state": "added",
+                 "drop_ms": 60000, "lull_ms": None, "charge_ms": None, "step": None}],
+            "authored": [], "authored_lone": [{"id": "his-drop", "kind": "drop",
+                                               "timestamp_ms": 60050}]}
+    kept = drop_firing.firing_sequences(view)
+    assert [s.key for s in kept] == ["added:z"]
 
 
 # ═══ 3. each member is the ordinary response, building to its partner ═════
