@@ -753,6 +753,187 @@ register(ActionKind(
     apply=_apply_flash, help_topic="show-device-states"))
 
 
+# ── effect modifiers: Pulse modulation and flares on/off (show_mods.py) ────
+
+_UNTIL = Param("until", "enum", "Ends", default="released",
+               choices=["released", "time", "scene_change"],
+               help="Until released (its End button or End show), after a "
+                    "time, or at the next scene change.")
+_FOR = Param("duration_s", "number", "For", default=30, min=0, max=3600, unit="s",
+             help="Only when it ends after a time.")
+
+
+def _resolve_virtuals(p: dict) -> tuple[list[str], str, list[str], Optional[Outcome]]:
+    from spectra.services import show_mods
+    vids, label, shared, problems = show_mods.resolve_virtuals(p["target"])
+    if not vids:
+        return [], label, [], Outcome("failed", "; ".join(problems) or "no virtual resolved")
+    return vids, label, shared, None
+
+
+def _check_timed(p: dict) -> dict:
+    if p.get("until") == "time" and not p.get("duration_s"):
+        raise ActionError("a timed hold needs a duration (or choose "
+                          "'until released' / 'until the next scene change')")
+    return p
+
+
+def _pulse_note(vids: list[str]) -> str:
+    """Which of these virtuals run Pulse right now, said plainly."""
+    from spectra.services.live_host import live
+    host = live.host
+    if host is None:
+        return ""
+    running, idle = [], []
+    for vid in vids:
+        v = host.virtuals.get(vid)
+        eff = getattr(v, "active_effect", None) if v is not None else None
+        (running if getattr(eff, "type", None) == "pulse" else idle).append(vid)
+    if not running:
+        return (" — nothing there runs Pulse right now; it applies the moment "
+                "Pulse runs there while this holds")
+    return f" (Pulse on {', '.join(running)})"
+
+
+def _ends_word(p: dict) -> str:
+    return {"time": f"for {p['duration_s']:g} s",
+            "scene_change": "until the next scene change",
+            "released": "until released"}.get(p["until"], "")
+
+
+async def _apply_pulse_reactivity(p: dict, ctx: "RunContext") -> Outcome:
+    from spectra.services import show_mods
+    vids, label, _shared, bad = _resolve_virtuals(p)
+    if bad:
+        return bad
+    m = show_mods.add_pulse_mod(vids, label=label, reactivity=float(p["reactivity"]),
+                                fade_in_ms=int(p["fade_in_ms"]),
+                                fade_out_ms=int(p["fade_out_ms"]),
+                                until=p["until"], duration_s=p["duration_s"],
+                                source=ctx.source)
+    return Outcome("applied", f"Pulse reactivity {p['reactivity']:g} on {label} "
+                              f"{_ends_word(p)}{_pulse_note(vids)}",
+                   {"virtuals": vids, "pulse_mod_id": m.id})
+
+
+def _check_pulse_brightness(p: dict) -> dict:
+    p = _check_timed(p)
+    if p["floor"] > p["ceiling"]:
+        raise ActionError(f"Pulse brightness: the floor ({p['floor']:g}) is above "
+                          f"the ceiling ({p['ceiling']:g})")
+    if p["floor"] <= 0.0 and p["ceiling"] >= 1.0:
+        raise ActionError("Pulse brightness: set a floor above 0 or a ceiling "
+                          "below 1 — 0 and 1 change nothing")
+    return p
+
+
+async def _apply_pulse_brightness(p: dict, ctx: "RunContext") -> Outcome:
+    from spectra.services import show_mods
+    vids, label, _shared, bad = _resolve_virtuals(p)
+    if bad:
+        return bad
+    floor = float(p["floor"]) if p["floor"] > 0.0 else None
+    ceiling = float(p["ceiling"]) if p["ceiling"] < 1.0 else None
+    m = show_mods.add_pulse_mod(vids, label=label, floor=floor, ceiling=ceiling,
+                                fade_in_ms=int(p["fade_in_ms"]),
+                                fade_out_ms=int(p["fade_out_ms"]),
+                                until=p["until"], duration_s=p["duration_s"],
+                                source=ctx.source)
+    return Outcome("applied", f"Pulse brightness {p['floor']:g}–{p['ceiling']:g} on "
+                              f"{label} {_ends_word(p)}{_pulse_note(vids)}",
+                   {"virtuals": vids, "pulse_mod_id": m.id})
+
+
+async def _release_phase_on(vids: list[str]) -> list[str]:
+    from spectra.services import engine
+    return await engine.responses.release_phase_on(vids)
+
+
+#: Flares going off lets go of a charge/lull already under way there. The
+#: seam to the production response engine; replaced in tests.
+phase_releaser = _release_phase_on
+
+
+async def _apply_flares(p: dict, ctx: "RunContext") -> Outcome:
+    from spectra.services import show_mods
+    vids, label, shared, bad = _resolve_virtuals(p)
+    if bad:
+        return bad
+    if p["flares"] == "on":
+        ended = show_mods.lift_flares(vids)
+        if not ended:
+            return Outcome("skipped", f"flares were already on for {label}",
+                           {"virtuals": vids})
+        return Outcome("applied", f"flares back on for {label}",
+                       {"virtuals": vids, "ended": ended})
+    b = show_mods.add_flare_block(vids, label=label, until=p["until"],
+                                  duration_s=p["duration_s"], source=ctx.source)
+    released: list[str] = []
+    try:
+        released = await phase_releaser(vids)
+    except Exception:                                    # noqa: BLE001
+        logger.exception("light show: letting go of a charge/lull on flares-off failed")
+    also = f" — also {', '.join(shared)}, which share{'s' if len(shared) == 1 else ''} " \
+           f"its virtual" if shared else ""
+    let_go = f"; let go of the charge/lull on {', '.join(released)}" if released else ""
+    return Outcome("applied", f"flares off for {label} {_ends_word(p)}{also}{let_go}",
+                   {"virtuals": vids, "flare_block_id": b.id, "shared_with": shared,
+                    "phase_released": released})
+
+
+register(ActionKind(
+    name="pulse_reactivity", label="Pulse reactivity", group="effect",
+    params=[_TARGET,
+            Param("reactivity", "number", "Reactivity", default=0.5, required=True,
+                  min=0.0, max=1.0,
+                  help="1 = as reactive as it is now (full), 0 = no reaction "
+                       "to the music's hits."),
+            Param("fade_in_ms", "number", "Fade in", default=1000, min=0, max=60000, unit="ms"),
+            _UNTIL, _FOR,
+            Param("fade_out_ms", "number", "Fade out", default=1000, min=0, max=60000, unit="ms")],
+    help="Turn how strongly the Pulse effect reacts to the music up or down "
+         "on a fixture, a category or everything. Only Pulse listens; holds "
+         "stack (they multiply).",
+    restore="Ends by itself (after its time, at the next scene change), its "
+            "End button, or End show.",
+    apply=_apply_pulse_reactivity, check=_check_timed, help_topic="show-pulse"))
+
+register(ActionKind(
+    name="pulse_brightness", label="Pulse brightness floor / ceiling", group="effect",
+    params=[_TARGET,
+            Param("floor", "number", "Floor", default=0.0, min=0.0, max=1.0,
+                  help="Pulse never goes darker than this (0 = no floor)."),
+            Param("ceiling", "number", "Ceiling", default=1.0, min=0.0, max=1.0,
+                  help="Pulse never goes brighter than this (1 = no ceiling)."),
+            Param("fade_in_ms", "number", "Fade in", default=1000, min=0, max=60000, unit="ms"),
+            _UNTIL, _FOR,
+            Param("fade_out_ms", "number", "Fade out", default=1000, min=0, max=60000, unit="ms")],
+    help="Keep the Pulse effect between a brightness floor and ceiling "
+         "(0..1, the effect's own brightness scale) — through hits, drops, "
+         "lulls and flares alike.",
+    restore="Ends by itself (after its time, at the next scene change), its "
+            "End button, or End show.",
+    apply=_apply_pulse_brightness, check=_check_pulse_brightness,
+    help_topic="show-pulse"))
+
+register(ActionKind(
+    name="flares", label="Flares on / off", group="effect",
+    params=[_TARGET,
+            Param("flares", "enum", "Flares", default="off", required=True,
+                  choices=["off", "on"],
+                  help="Off: flares stop reaching these lights. On: lift any "
+                       "flares-off on them."),
+            _UNTIL, _FOR],
+    help="Switch flares off (or back on) for a fixture, a category or "
+         "everything — e.g. keep the Hue bulbs steady while everything else "
+         "flares. Off also skips the charge/lull/drop there (no climb, no "
+         "lull darkness, no drop burst); the scene and its colour journey "
+         "carry on.",
+    restore="Ends by itself (after its time, at the next scene change), a "
+            "'Flares on' step, its End button, or End show.",
+    apply=_apply_flares, check=_check_timed, help_topic="show-flares"))
+
+
 # ── room effects ───────────────────────────────────────────────────────────
 
 class RoomEffectRunner:
@@ -1160,6 +1341,12 @@ def preview(actions: list[ShowAction]) -> list[dict]:
             changes = [f"{k}: {current.get(k)!r} → {v!r}"
                        for k, v in kind.room_patch(p).items() if current.get(k) != v]
             out.append({**row, "change": "; ".join(changes) or "already so — no change"})
+        elif kind.name in ("pulse_reactivity", "pulse_brightness", "flares"):
+            from spectra.services import show_mods
+            vids, label, shared, problems = show_mods.resolve_virtuals(p["target"])
+            extra = f" (also {', '.join(shared)})" if shared else ""
+            out.append({**row, "change": f"{kind.label} on {label}{extra}" if vids
+                        else "; ".join(problems)})
         elif kind.name in ("device_state", "level", "flash"):
             devices, problems = show_output.resolve_target(p["target"])
             names = ", ".join(show_output.device_label(d) for d in devices)
@@ -1218,8 +1405,10 @@ async def end_show(*, fade_ms: int = show_output.DEFAULT_RELEASE_FADE_MS) -> dic
         effect = await _stop_show_room_effect()
     except Exception as exc:                             # noqa: BLE001
         effect = {"error": str(exc)}
-    released = show_output.release_all(fade_ms)
     st = show_store.state()
+    effect_holds = {"pulse_mods": len(st.pulse_mods),
+                    "flare_blocks": len(st.flare_blocks)}
+    released = show_output.release_all(fade_ms)
     restored, left_alone, failed = [], [], []
     room_patch: dict = {}
     for key, b in list(st.baselines.items()):
@@ -1276,6 +1465,8 @@ async def end_show(*, fade_ms: int = show_output.DEFAULT_RELEASE_FADE_MS) -> dic
         pass
     return {"cancelled_runs": cancelled, "room_effect_stopped": effect is not None,
             "released_devices": released, "restored": restored,
+            "ended_pulse_mods": effect_holds["pulse_mods"],
+            "ended_flare_blocks": effect_holds["flare_blocks"],
             "left_alone": left_alone, "failed": failed}
 
 
@@ -1284,7 +1475,8 @@ def status() -> dict:
     running = [r.as_dict() for r in _runs if r.state == "running"]
     armed = any(a.status == "armed" for a in st.arms)
     return {"active": bool(st.started_ms or st.holds or st.levels or st.baselines
-                           or st.room_effect or running or armed),
+                           or st.room_effect or running or armed
+                           or st.pulse_mods or st.flare_blocks),
             "started_ms": st.started_ms,
             "baselines": [{"key": b.key, "label": b.label, "original": b.original,
                            "written": b.written} for b in st.baselines.values()],
@@ -1300,6 +1492,8 @@ def brief() -> dict:
     act = status()
     return {"active": act["active"] or bool(out["holds"] or out["levels"]),
             "holds": len(out["holds"]), "levels": len(out["levels"]),
+            "pulse_mods": len(out["pulse_mods"]),
+            "flare_blocks": len(out["flare_blocks"]),
             "running_sets": len(act["running_sets"]),
             "room_effect": (act["room_effect"] or {}).get("name"),
             "changed_settings": len(act["baselines"]),

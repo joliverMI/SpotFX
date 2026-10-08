@@ -25,6 +25,8 @@ import { apiDel, apiGet, apiPost } from '../api/client';
 import HelpLink from '../help/HelpLink';
 import { useToast } from '../components/Toast';
 import SonicChatPopover from '../components/SonicChatPopover';
+import SearchSelect, { type SearchOption } from '../components/forms/SearchSelect';
+import { colorCardOptions, namedOptions, sceneOptions } from '../lib/pickerOptions';
 import useIsPhone from '../lib/useIsPhone';
 import { useAmbientHueGroups, useGradient2dProfiles, useScenes, useSpotColorSets } from '../queries';
 import { ArmBoard, ArmControl } from './ArmBoard';
@@ -185,6 +187,9 @@ export default function LightShowPage() {
   const endLevel = async (id: string) => {
     await apiPost(`/light-show/levels/${id}/end`).catch((e) => toast(String(e), 'error'));
   };
+  const endHold = async (kind: 'pulse-mods' | 'flare-blocks', id: string) => {
+    await apiPost(`/light-show/${kind}/${id}/end`).catch((e) => toast(String(e), 'error'));
+  };
 
   const gate = status?.output.refusal ?? status?.output.standdown ?? null;
 
@@ -223,7 +228,7 @@ export default function LightShowPage() {
       <>
       <ArmBoard arms={arms} onChange={reloadArms} toast={toast} />
 
-      <ShowNowPanel status={status} onRelease={release} onEndLevel={endLevel} />
+      <ShowNowPanel status={status} onRelease={release} onEndLevel={endLevel} onEndHold={endHold} />
 
       <div className="light-show-layout">
         <div className="card light-show-sets">
@@ -309,17 +314,23 @@ export default function LightShowPage() {
   );
 }
 
-export function ShowNowPanel({ status, onRelease, onEndLevel }: {
+export function ShowNowPanel({ status, onRelease, onEndLevel, onEndHold }: {
   status: ShowStatus | null;
   onRelease: (device: string) => void;
   onEndLevel: (id: string) => void;
+  /** end a Pulse hold or a flares-off switch (spectra/services/show_mods.py) */
+  onEndHold: (kind: 'pulse-mods' | 'flare-blocks', id: string) => void;
 }) {
   if (!status) return null;
   const { holds, levels } = status.output;
+  const pulseMods = status.output.pulse_mods ?? [];
+  const flareBlocks = status.output.flare_blocks ?? [];
   if (!holds.length && !levels.length && !status.baselines.length && !status.room_effect
-      && !status.running_sets.length) {
+      && !status.running_sets.length && !pulseMods.length && !flareBlocks.length) {
     return null;
   }
+  const ends = (until: string, remaining: number | null) =>
+    (remaining !== null ? ` · ${remaining}s left` : ` · until ${until.replace('_', ' ')}`);
   return (
     <div className="card light-show-now">
       <strong>Right now</strong> <HelpLink topic="show-device-states" />
@@ -337,6 +348,25 @@ export function ShowNowPanel({ status, onRelease, onEndLevel }: {
             {l.names.join(', ')}: level <b>{Math.round(l.level * 100)}%</b>
             {l.remaining_s !== null ? ` · ${l.remaining_s}s left` : ` · until ${l.until.replace('_', ' ')}`}
             <button onClick={() => onEndLevel(l.id)}>End</button>
+          </li>
+        ))}
+        {pulseMods.map((m) => (
+          <li key={m.id}>
+            Pulse on {m.label || m.virtual_ids.join(', ')}:{' '}
+            <b>{[
+              m.reactivity !== null ? `reactivity ${m.reactivity}` : null,
+              m.floor !== null ? `floor ${m.floor}` : null,
+              m.ceiling !== null ? `ceiling ${m.ceiling}` : null,
+            ].filter(Boolean).join(', ')}</b>
+            {ends(m.until, m.remaining_s)}
+            <button onClick={() => onEndHold('pulse-mods', m.id)}>End</button>
+          </li>
+        ))}
+        {flareBlocks.map((b) => (
+          <li key={b.id}>
+            Flares <b>off</b> for {b.label || b.virtual_ids.join(', ')}
+            {ends(b.until, b.remaining_s)}
+            <button onClick={() => onEndHold('flare-blocks', b.id)}>Flares on</button>
           </li>
         ))}
         {status.room_effect && <li>Room effect: <b>{status.room_effect.name}</b></li>}
@@ -369,21 +399,17 @@ function AddStep({ catalogue, onAdd }: { catalogue: ShowCatalogue; onAdd: (k: Sh
   const groups: [string, string][] = [
     ['setting', 'Settings'], ['device', 'Devices'], ['effect', 'Room effects'], ['control', 'Control'],
   ];
+  const options: SearchOption[] = groups.flatMap(([g, label]) =>
+    catalogue.kinds.filter((k) => k.group === g).map((k) => ({
+      value: k.kind, label: k.label, group: label, keywords: k.help,
+    })));
   return (
-    <div className="light-show-add">
-      <select value="" aria-label="Add a step" onChange={(e) => {
-        const k = catalogue.kinds.find((x) => x.kind === e.target.value);
-        if (k) onAdd(k);
-      }}>
-        <option value="">+ Add a step…</option>
-        {groups.map(([g, label]) => (
-          <optgroup key={g} label={label}>
-            {catalogue.kinds.filter((k) => k.group === g).map((k) => (
-              <option key={k.kind} value={k.kind}>{k.label}</option>
-            ))}
-          </optgroup>
-        ))}
-      </select>
+    <div className="light-show-add" aria-label="Add a step">
+      <SearchSelect value="" options={options} placeholder="+ Add a step…" allowEmpty={false}
+        onChange={(v) => {
+          const k = catalogue.kinds.find((x) => x.kind === v);
+          if (k) onAdd(k);
+        }} />
       <HelpLink topic="show-actions" />
     </div>
   );
@@ -468,6 +494,27 @@ function Chips({ options, value, onChange }: {
   );
 }
 
+/** A long multi-pick (scenes, colour sets): the chosen ones as removable
+ * chips, plus the same searchable picker to add another. */
+function SearchChips({ options, value, onChange, placeholder }: {
+  options: SearchOption[]; value: string[]; onChange: (v: string[]) => void; placeholder: string;
+}) {
+  const byId = new Map(options.map((o) => [o.value, o]));
+  const rest = options.filter((o) => !value.includes(o.value));
+  return (
+    <span className="light-show-chips">
+      {value.map((id) => (
+        <button key={id} className="active" type="button" title="Remove"
+          onClick={() => onChange(value.filter((x) => x !== id))}>
+          {byId.get(id)?.label ?? id} ✕
+        </button>
+      ))}
+      <SearchSelect value="" options={rest} placeholder={placeholder} allowEmpty={false} width={220}
+        onChange={(v) => { if (v && !value.includes(v)) onChange([...value, v]); }} />
+    </span>
+  );
+}
+
 function ParamField({ p, value, onChange, catalogue, targets, action }: {
   p: ShowParam; value: unknown; onChange: (v: unknown) => void;
   catalogue: ShowCatalogue; targets: ShowTargets | null; action: ShowAction;
@@ -476,6 +523,9 @@ function ParamField({ p, value, onChange, catalogue, targets, action }: {
   const colorSets = useSpotColorSets().data ?? [];
   const gradients = useGradient2dProfiles().data ?? {};
   const hueAreas = useAmbientHueGroups().data?.groups ?? [];
+  const pick = (options: SearchOption[], placeholder = '— choose —') => wrap(
+    <SearchSelect value={String(value ?? '')} options={options} placeholder={placeholder}
+      width={240} onChange={(v) => onChange(v || undefined)} />);
   const label = <span className="light-show-param-label" title={p.help}>{p.label}{p.unit ? ` (${p.unit})` : ''}</span>;
   const wrap = (input: JSX.Element) => <label className="light-show-param">{label}{input}</label>;
 
@@ -502,39 +552,22 @@ function ParamField({ p, value, onChange, catalogue, targets, action }: {
             : <span className="muted"> default</span>}
         </span>);
     case 'scene':
-      return wrap(
-        <select value={String(value ?? '')} onChange={(e) => onChange(e.target.value || undefined)}>
-          <option value="">— choose —</option>
-          {scenes.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-        </select>);
+      return pick(sceneOptions(scenes), '— pick scene —');
     case 'scenes':
-      return wrap(<Chips options={scenes.map((s) => ({ id: s.id, name: s.name }))}
+      return wrap(<SearchChips options={sceneOptions(scenes)} placeholder="+ add a scene…"
         value={(value as string[]) ?? []} onChange={onChange} />);
     case 'color_set':
-      return wrap(
-        <select value={String(value ?? '')} onChange={(e) => onChange(e.target.value || undefined)}>
-          <option value="">— choose —</option>
-          {colorSets.map((c) => <option key={c.id} value={c.id}>{c.kind === 'group' ? '▣ ' : ''}{c.name}</option>)}
-        </select>);
+      return pick(colorCardOptions(colorSets), '— pick colour set —');
     case 'color_sets':
-      return wrap(<Chips options={colorSets.map((c) => ({ id: c.id, name: c.name }))}
+      return wrap(<SearchChips options={colorCardOptions(colorSets)} placeholder="+ add a colour set…"
         value={(value as string[]) ?? []} onChange={onChange} />);
     case 'gradient':
-      return wrap(
-        <select value={String(value ?? '')} onChange={(e) => onChange(e.target.value || undefined)}>
-          <option value="">— choose —</option>
-          {Object.entries(gradients).map(([id, g]) => (
-            <option key={id} value={id}>{(g as { name?: string }).name ?? id}</option>
-          ))}
-        </select>);
+      return pick(namedOptions(Object.entries(gradients).map(([id, g]) => (
+        { id, name: (g as { name?: string }).name ?? id }))), '— pick gradient —');
     case 'hue_areas':
       return wrap(<Chips options={hueAreas} value={(value as string[]) ?? []} onChange={onChange} />);
     case 'house_mode':
-      return wrap(
-        <select value={String(value ?? '')} onChange={(e) => onChange(e.target.value || undefined)}>
-          <option value="">— choose —</option>
-          {catalogue.house_modes.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-        </select>);
+      return pick(namedOptions(catalogue.house_modes), '— pick house mode —');
     case 'target': {
       const t = (value as { kind: string; id: string | null }) ?? { kind: 'everything', id: null };
       return wrap(
@@ -545,28 +578,25 @@ function ParamField({ p, value, onChange, catalogue, targets, action }: {
             <option value="fixture">Fixture</option>
           </select>
           {t.kind === 'category' && (
-            <select value={t.id ?? ''} onChange={(e) => onChange({ kind: 'category', id: e.target.value || null })}>
-              <option value="">— choose —</option>
-              {(targets?.categories ?? []).map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
-            </select>
+            <SearchSelect value={t.id ?? ''} width={200} placeholder="— pick category —"
+              options={namedOptions((targets?.categories ?? []).map((c) => ({ id: c.name, name: c.name })))}
+              onChange={(v) => onChange({ kind: 'category', id: v || null })} />
           )}
           {t.kind === 'fixture' && (
-            <select value={t.id ?? ''} onChange={(e) => onChange({ kind: 'fixture', id: e.target.value || null })}>
-              <option value="">— choose —</option>
-              {(targets?.fixtures ?? []).map((f) => (
-                <option key={f.id} value={f.id}>{f.name}{f.held_by_ambient ? ' (held by Hue Hold)' : ''}</option>
-              ))}
-            </select>
+            <SearchSelect value={t.id ?? ''} width={220} placeholder="— pick fixture —"
+              options={(targets?.fixtures ?? []).map((f) => ({
+                value: f.id, label: `${f.name}${f.held_by_ambient ? ' (held by Hue Hold)' : ''}`,
+                keywords: f.type,
+              }))}
+              onChange={(v) => onChange({ kind: 'fixture', id: v || null })} />
           )}
           {targets && !targets.live && <span className="muted"> live stack down — fixtures unknown</span>}
         </span>);
     }
     case 'room_effect':
-      return wrap(
-        <select value={String(value ?? '')} onChange={(e) => onChange(e.target.value || undefined)}>
-          <option value="">— choose —</option>
-          {catalogue.room_effects.map((e) => <option key={e.id} value={e.name}>{e.name} ({e.kind.replace(/_/g, ' ')})</option>)}
-        </select>);
+      return pick(catalogue.room_effects.map((e) => ({
+        value: e.name, label: `${e.name} (${e.kind.replace(/_/g, ' ')})`,
+      })), '— pick room effect —');
     case 'overrides': {
       const props = catalogue.room_effect_schema?.properties ?? {};
       const numeric = Object.entries(props).filter(([, s]) => s.type === 'number' || s.type === 'integer');

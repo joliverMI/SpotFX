@@ -79,6 +79,9 @@ export default function RunView({ sets, status, arms, onChangeArms, onEndShowDon
   const endLevel = async (id: string) => {
     await apiPost(`/light-show/levels/${id}/end`).catch((e) => toast(String(e), 'error'));
   };
+  const endHold = async (kind: 'pulse-mods' | 'flare-blocks', id: string) => {
+    await apiPost(`/light-show/${kind}/${id}/end`).catch((e) => toast(String(e), 'error'));
+  };
 
   const gate = status?.output.refusal ?? status?.output.standdown ?? null;
 
@@ -98,7 +101,7 @@ export default function RunView({ sets, status, arms, onChangeArms, onEndShowDon
 
       <ArmBoard arms={arms} onChange={onChangeArms} toast={toast} />
 
-      <ShowNowPanel status={status} onRelease={release} onEndLevel={endLevel} />
+      <ShowNowPanel status={status} onRelease={release} onEndLevel={endLevel} onEndHold={endHold} />
 
       <div className="card light-show-run-sets">
         <strong>Sets — tap to run</strong> <HelpLink topic="show-sets" />

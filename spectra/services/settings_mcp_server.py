@@ -115,6 +115,8 @@ _ArmTriggerEnum = Literal[tuple(show_console.TRIGGER_CHOICES)]
 _TargetKindEnum = Literal[tuple(show_console.TARGET_KIND_CHOICES)]
 _DeviceStateEnum = Literal[tuple(show_console.STATE_CHOICES)]
 _CueLevelEnum = Literal[tuple(show_console.CUE_LEVEL_CHOICES)]
+_ShowUntilEnum = Literal[tuple(show_console.UNTIL_CHOICES)]
+_FlaresEnum = Literal[tuple(show_console.FLARES_CHOICES)]
 _HouseKeyEnum = Literal[tuple(sorted(house_console.MODE_SETTINGS))]
 _HouseTargetEnum = Literal[tuple(house_console.TARGET_KIND_CHOICES)]
 _HueLookEnum = Literal[tuple(house_console.HUE_LOOK_CHOICES)]
@@ -555,6 +557,49 @@ async def dim_device(level: float, target_kind: _TargetKindEnum = "everything",
     return await _call("dim_device", level=level, target_kind=target_kind,
                        target_name=target_name, duration_s=duration_s,
                        fade_in_ms=fade_in_ms, fade_out_ms=fade_out_ms, until=until)
+
+
+@mcp.tool()
+async def set_pulse_reactivity(reactivity: float, target_kind: _TargetKindEnum = "everything",
+                               target_name: Optional[str] = None,
+                               until: _ShowUntilEnum = "released", duration_s: float = 30,
+                               fade_in_ms: int = 1000, fade_out_ms: int = 1000) -> dict:
+    """Turn how strongly Pulse reacts to the music's hits (0 none .. 1 full)
+    on a fixture, a category or everything, as a Light Show hold."""
+    return await _call("set_pulse_reactivity", reactivity=reactivity,
+                       target_kind=target_kind, target_name=target_name, until=until,
+                       duration_s=duration_s, fade_in_ms=fade_in_ms,
+                       fade_out_ms=fade_out_ms)
+
+
+@mcp.tool()
+async def set_pulse_brightness(floor: float = 0.0, ceiling: float = 1.0,
+                               target_kind: _TargetKindEnum = "everything",
+                               target_name: Optional[str] = None,
+                               until: _ShowUntilEnum = "released", duration_s: float = 30,
+                               fade_in_ms: int = 1000, fade_out_ms: int = 1000) -> dict:
+    """Keep Pulse between a brightness floor and ceiling (0..1) on a
+    fixture, a category or everything, as a Light Show hold."""
+    return await _call("set_pulse_brightness", floor=floor, ceiling=ceiling,
+                       target_kind=target_kind, target_name=target_name, until=until,
+                       duration_s=duration_s, fade_in_ms=fade_in_ms,
+                       fade_out_ms=fade_out_ms)
+
+
+@mcp.tool()
+async def set_flares(flares: _FlaresEnum, target_kind: _TargetKindEnum = "everything",
+                     target_name: Optional[str] = None,
+                     until: _ShowUntilEnum = "released", duration_s: float = 30) -> dict:
+    """Switch flares off (also charge/lull/drop) or back on for a fixture,
+    a category or everything."""
+    return await _call("set_flares", flares=flares, target_kind=target_kind,
+                       target_name=target_name, until=until, duration_s=duration_s)
+
+
+@mcp.tool()
+async def end_effect_hold(hold_id: str) -> dict:
+    """End one Pulse hold or flares-off switch by its id."""
+    return await _call("end_effect_hold", hold_id=hold_id)
 
 
 @mcp.tool()

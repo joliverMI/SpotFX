@@ -79,6 +79,9 @@ export interface ShowBrief {
   active: boolean;
   holds: number;
   levels: number;
+  /** Pulse modulations / flares-off switches held (show_mods.py) */
+  pulse_mods?: number;
+  flare_blocks?: number;
   running_sets: number;
   room_effect: string | null;
   changed_settings: number;
@@ -98,6 +101,13 @@ export interface ShowStatus {
   output: {
     holds: { device: string; name: string; state: string; held_by_ambient: boolean }[];
     levels: { id: string; names: string[]; level: number; until: string; remaining_s: number | null }[];
+    pulse_mods?: {
+      id: string; virtual_ids: string[]; label: string; reactivity: number | null;
+      floor: number | null; ceiling: number | null; until: string; remaining_s: number | null;
+    }[];
+    flare_blocks?: {
+      id: string; virtual_ids: string[]; label: string; until: string; remaining_s: number | null;
+    }[];
     suspended: boolean;
     standdown: string | null;
     refusal: string | null;
@@ -110,6 +120,8 @@ export interface EndShowReport {
   room_effect_stopped: boolean;
   released_devices: string[];
   restored: string[];
+  ended_pulse_mods?: number;
+  ended_flare_blocks?: number;
   left_alone: { key: string; label: string; reason: string }[];
   failed: { key: string; label: string; reason: string }[];
 }

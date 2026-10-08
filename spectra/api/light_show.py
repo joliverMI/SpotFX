@@ -165,6 +165,24 @@ async def end_level(level_id: str):
     return {"ended": level_id}
 
 
+@router.post("/pulse-mods/{mod_id}/end")
+async def end_pulse_mod(mod_id: str):
+    from spectra.services import show_mods
+    if not show_mods.end_pulse_mod(mod_id):
+        return JSONResponse(status_code=404, content={"detail": "no such Pulse hold"})
+    await _broadcast()
+    return {"ended": mod_id}
+
+
+@router.post("/flare-blocks/{block_id}/end")
+async def end_flare_block(block_id: str):
+    from spectra.services import show_mods
+    if not show_mods.end_flare_block(block_id):
+        return JSONResponse(status_code=404, content={"detail": "no such flares-off hold"})
+    await _broadcast()
+    return {"ended": block_id}
+
+
 @router.post("/end")
 async def end_show(fade_ms: int = show_output.DEFAULT_RELEASE_FADE_MS):
     result = await show_actions.end_show(fade_ms=fade_ms)

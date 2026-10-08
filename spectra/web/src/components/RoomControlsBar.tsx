@@ -53,6 +53,7 @@ import type {
 } from '../types';
 import type { LightingStatus } from '../house/types';
 import SearchSelect from './forms/SearchSelect';
+import { colorCardOptions, sceneOptions as sceneOptionsFor } from '../lib/pickerOptions';
 
 /** His three-way display-mode control (spectra/services/dark_light.py).
  * "default" is his word "hybrid" — labelled that way here per his standing
@@ -200,10 +201,7 @@ export default function RoomControlsBar() {
 
   useEffect(() => { localRef.current = local; }, [local]);
 
-  const sceneOptions = useMemo(
-    () => (scenes ?? []).map((s) => ({ value: s.id, label: s.disabled ? `⛔ ${s.name}` : s.name })),
-    [scenes],
-  );
+  const sceneOptions = useMemo(() => sceneOptionsFor(scenes), [scenes]);
 
   // FORCE COLOUR's picker (owner ask 2026-08-27) — SETS AND GROUPS in one
   // list, because the pin genuinely accepts either (a Group pins the pool
@@ -211,13 +209,7 @@ export default function RoomControlsBar() {
   // Groups are prefixed rather than split into a second control: this is
   // the deliberately minimal functional control he asked for ("focus on
   // fucntion and we will work on UI later"), not the finished shape.
-  const colorTargetOptions = useMemo(
-    () => (colorCards ?? []).map((c) => ({
-      value: c.id,
-      label: `${c.disabled ? '⛔ ' : ''}${c.kind === 'group' ? '▤ ' : ''}${c.name}`,
-    })),
-    [colorCards],
-  );
+  const colorTargetOptions = useMemo(() => colorCardOptions(colorCards), [colorCards]);
 
   // Plain (undecorated) id -> name, for the Colour button's own face —
   // the Admiral's ask, 2026-10-07: show the colour set CURRENTLY SHOWING,
