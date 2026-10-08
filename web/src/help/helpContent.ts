@@ -292,12 +292,13 @@ export const HELP_SECTIONS: HelpSection[] = [
           {
             id: 'builder-pan-zoom',
             title: 'Pan, zoom & follow',
-            keywords: 'middle drag scroll window playhead resume auto',
+            keywords: 'middle drag scroll window playhead resume auto touch tablet phone finger swipe',
             body: [
               'In Live mode, follow resumes automatically (zoomed to the sticky window size) when the page opens, when Live mode turns on, and when the song changes; within one song your pan/zoom choice sticks. In song-search mode there is no playhead, so the view stays where you leave it.',
             ],
             table: [
               ['Middle-drag', 'Pan the zoom window (drag right → window moves right). Panning switches follow off.'],
+              ['Single-finger drag (touch)', 'On empty canvas, pans the zoom window the same way a horizontal drag does; a mostly-vertical drag instead scrolls the page. Switches follow off, same as middle-drag. Dragging a marker still drags the marker.'],
               ['` (backtick)', 'Toggle follow mode (auto-scroll with playback) vs. manual zoom. Turning follow off freezes the current view in place; use Full Song to zoom out.'],
               ['Ctrl+F', 'Also toggles follow mode.'],
               ['Full-song bar', 'Drag the zoom region\'s center to pan — this switches follow off. Drag its edges to resize; in follow mode edge drags adjust the window size and look-ahead instead.'],

@@ -1271,13 +1271,14 @@ export const HELP_SECTIONS: HelpSection[] = [
           {
             id: 'builder-pan-zoom',
             title: 'Pan, zoom & follow',
-            keywords: 'middle drag scroll window playhead resume auto',
+            keywords: 'middle drag scroll window playhead resume auto touch tablet phone finger swipe',
             body: [
               'In Live mode, follow resumes automatically (zoomed to the sticky window size) when the page opens, when Live mode turns on, and when the song changes; within one song your pan/zoom choice sticks. In song-search mode there is no playhead, so the view stays where you leave it.',
               'Follow mode scrolls so the white playhead line itself sits a fixed look-ahead from the right edge. That line is drawn where the song\'s stored shape offset puts it (the same shift the lights fire against), so on a song whose offset is large the view keeps the line in sight rather than scrolling on the raw Spotify clock and leaving the playhead past the edge — that was the 2026-10-07 "playhead ahead of the scrolling view" report on Pop Off, whose offset is over 14 seconds.',
             ],
             table: [
               ['Middle-drag', 'Pan the zoom window (drag right → window moves right). Panning switches follow off.'],
+              ['Single-finger drag (touch)', 'On empty canvas, pans the zoom window the same way a horizontal drag does; a mostly-vertical drag instead scrolls the page. Switches follow off, same as middle-drag. Dragging a marker still drags the marker.'],
               ['` (backtick)', 'Toggle follow mode (auto-scroll with playback) vs. manual zoom.'],
               ['Ctrl+F', 'Also toggles follow mode.'],
               ['Full-song bar', 'Drag the zoom region\'s center to pan (switches follow off); drag its edges to resize — in follow mode edge drags adjust window size and look-ahead.'],
@@ -2645,12 +2646,12 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         id: 'show-high-low-triggers',
         title: 'High and Low Triggers',
-        keywords: 'high trigger low trigger biggest rise biggest fall section energy drop mark move drag automatic runner up timeline flag armed muted active shape canvas',
+        keywords: 'high trigger low trigger biggest rise biggest fall section energy drop mark move drag automatic runner up timeline flag armed muted active shape canvas touch beat snap nudge',
         body: [
           'Every analysed song has ONE High Trigger, at its biggest rise in section energy, and ONE Low Trigger, at its biggest fall — the same score the scene-change planner ranks moments by, and placed on exactly the moment that boundary\'s scene change or flare fires. The first and last 15 seconds of a song never hold one.',
           'Where you have placed your own drop mark on a song, the High sits on it instead (the one nearest the biggest rise, if you placed several).',
-          'On the Timeline, under the trigger bar: the white ▲ is the High and the indigo ▼ the Low (kept off the charge, lull and drop colours, so a flag never reads as a phase). Drag a flag to move it — the move is saved for that song and always wins. A moved flag shows a faint dashed line where the analysis puts it, and an "auto" button to put it back. Faint dots are the runners-up; a brighter one is within 10% of the winner — tap a dot to move the flag there.',
-          'Both flags are shown even when NOTHING is armed on them — the position is worked out fresh on each play, whether or not an action set is waiting for it. A flag glows solid with a ring when something IS armed to fire there (hover it for which set); it sits muted/dim otherwise. The "Light Show" toggle on the Audio Shape header draws the same solid-or-muted ▲/▼ on the big graph, so you can see them against the waveform too. An arm whose trigger is the next scene change has no fixed song position to mark — it is named in words in the graph\'s own legend line instead, since it could fire on any upcoming scene change.',
+          'On the Timeline, under the trigger bar: the white ▲ is the High and the indigo ▼ the Low (kept off the charge, lull and drop colours, so a flag never reads as a phase). Drag a flag to move it — it snaps to the nearest beat, falling back to a 20 ms grid where none is close, and tracks wherever you grabbed it rather than jumping to the pointer; with its handle focused, ←/→ nudge it 20 ms (Shift = 5 ms). The move is saved for that song and always wins. A moved flag shows a faint dashed line where the analysis puts it, and an "auto" button to put it back. Faint dots are the runners-up; a brighter one is within 10% of the winner — tap a dot to move the flag there.',
+          'Both flags are shown even when NOTHING is armed on them — the position is worked out fresh on each play, whether or not an action set is waiting for it. A flag glows solid with a ring when something IS armed to fire there (hover it for which set); it sits muted/dim otherwise. The "Light Show" toggle on the Audio Shape header draws the same solid-or-muted ▲/▼ on the big graph, so you can see them against the waveform too — and it\'s draggable there too, directly on the graph, with the same beat-snap precision. An arm whose trigger is the next scene change has no fixed song position to mark — it is named in words in the graph\'s own legend line instead, since it could fire on any upcoming scene change.',
           'Nothing here writes a trigger: High and Low are worked out fresh on each play, and only your moves are stored, so moving one never changes which of your own triggers a song has.',
         ],
       },

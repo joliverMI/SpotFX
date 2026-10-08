@@ -10678,6 +10678,19 @@ pan. A `pointercancel` listener was added too (there wasn't one) — without
 it a touch gesture the browser takes over could leave `dragging`/`panStart`
 stuck forever with no `pointerup` to clear them.
 
+**Hardened for multi-touch same day** (`dragging`/`panStart`/`touchCandidate`
+all now carry the owning pointer's own id, checked on every `move()`/`up()`
+in both twins): before this, `dragging`/`panStart` were pointer-agnostic, so
+a second, unrelated pointer — a resting palm beside a panning or dragging
+finger — could drive or end the FIRST pointer's drag/pan with its own
+move/up. Covers every drag branch (marker drag, context-menu drag, mouse/
+touch pan), not just the Light Show flag below. Exec spec: `scripts/
+check_timeline_canvas_pointer_isolation.mjs` (+ `tests/
+test_timeline_canvas_pointer_isolation.py`) — mounts the real component
+(both twins) under jsdom via react-dom/client and dispatches real
+multi-pointer `PointerEvent`s, asserting on the `pointer` prop's own
+callback invocations.
+
 Exec spec: `scripts/check_timeline_touch_pan.mjs` (+ `tests/
 test_timeline_touch_pan.py`), the `followWindow.ts`-style pure-module
 pattern — transpiles the twin files and proves byte-identity + the lock/
@@ -10708,7 +10721,13 @@ z-descending hit order and `lightShowMarkers` is z=41, a SPECTRA trigger
 under the flag still wins and still drags, unchanged. `hooks/
 useLightShowDrag.ts` is the drag controller (grab-offset preserved so the
 flag tracks the finger without jumping, beat-snap via `cueFlags.
-snapCueMs`, live ms readout drawn on the canvas), wired into
+snapCueMs`, live ms readout drawn on the canvas) — `snapCueMs`'s own
+pixel-radius-to-ms conversion takes the canvas's own current WINDOW span
+as an optional 5th argument now, not just `durationMs`: the canvas can be
+zoomed narrower than the whole song, and scaling the radius off the full
+song duration (the full-song `ShowCueBar.tsx` bar's own correct
+assumption, below) inflated it by however far zoomed in, reaching a beat
+well outside the window's own touch radius. Wired into
 `BuilderPage.tsx`'s pointer chain ahead of `triggerPointer` the same way
 `dropUi` already is. `frame.ts` grew `lightShowDrag` on `LayerDataBag` (the
 live ghost position) and the `'light-show-flag'` `Hit` kind. SPECTRA-only
