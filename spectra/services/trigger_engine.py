@@ -577,14 +577,18 @@ class TriggerEngine:
         # store's revision plus his own phase triggers, so a tick costs one
         # stat. Each firing member becomes a synthetic fire_response trigger
         # ("drop-seq:<key>:<class>") fed into tick() beside the stored ones;
-        # `_seq_meta` maps those ids back to (sequence, class) for _fire.
+        # `_seq_meta` maps those ids back to (sequence, class, mode) for
+        # _fire — the mode is the tick's own effective mode at the moment
+        # the synthetic trigger was built, so `_fire` can resolve the SAME
+        # mode-gated member set (`seq.members(mode)`/`seq.gap_ms(cls,
+        # mode)`) the tick that fired it already decided on.
         # `_drop_windows` are the protected windows tick() holds analysed
         # scene changes and flares out of.
         self._drop_view = drop_view or self._default_drop_view
         self._drop_revision = drop_revision or drop_sequences.revision
         self._fire_sequence = fire_sequence or self._default_fire_sequence
         self._drop_memo: Optional[tuple[tuple, tuple[list, list]]] = None
-        self._seq_meta: dict[str, tuple[drop_firing.FiringSequence, str]] = {}
+        self._seq_meta: dict[str, tuple[drop_firing.FiringSequence, str, str]] = {}
         self._drop_windows: list[drop_firing.Window] = []
 
         # THE LIGHT SHOW's HIGH / LOW TRIGGERS (spectra/services/show_arms.py
@@ -1075,18 +1079,20 @@ class TriggerEngine:
                            mode: str, has_authored: bool) -> list[SpectraTrigger]:
         """This song's firing drop-sequence members as synthetic
         fire_response triggers — only the sequences the room's gate lets
-        fire right now (drop_firing.fires_here). Also refreshes
-        `_seq_meta` and `_drop_windows`."""
+        fire right now (drop_firing.fires_here), with `mode` resolving
+        which members stand down alone (seq.members(mode) — a member
+        within reach of a same-class authored mark that fires in THIS
+        mode). Also refreshes `_seq_meta` and `_drop_windows`."""
         seqs, windows = self._drop_state(uri, triggers)
         self._drop_windows = windows
         out: list[SpectraTrigger] = []
-        meta: dict[str, tuple[drop_firing.FiringSequence, str]] = {}
+        meta: dict[str, tuple[drop_firing.FiringSequence, str, str]] = {}
         for seq in seqs:
             if not drop_firing.fires_here(seq, mode, has_authored):
                 continue
-            for cls, ms in seq.members():
+            for cls, ms in seq.members(mode):
                 tid = seq.trigger_id(cls)
-                meta[tid] = (seq, cls)
+                meta[tid] = (seq, cls, mode)
                 out.append(SpectraTrigger(
                     id=tid, timestamp_ms=ms,
                     source="authored" if seq.his else "generated",
@@ -1379,9 +1385,9 @@ class TriggerEngine:
                 # A DROP SEQUENCE member (drop_firing.py): the same charge/
                 # lull/drop response his own triggers fire, building to its
                 # OWN partner in the sequence (the phase-partner rule).
-                seq, cls = self._seq_meta[trig.id]
+                seq, cls, fire_mode = self._seq_meta[trig.id]
                 await self._fire_sequence(cls, self._render_intensity(a.intensity),
-                                          seq.gap_ms(cls))
+                                          seq.gap_ms(cls, fire_mode))
             elif a.kind == "fire_response":
                 # OVERRIDE BLEND's dynamic half (2026-08-20, "fix the lull
                 # ramp"): only charge/lull stretch a ramp to the real gap
@@ -1413,8 +1419,8 @@ class TriggerEngine:
             key = "analysed:flare"
         seq_meta = self._seq_meta.get(trig.id)
         if seq_meta is not None:
-            seq, cls = seq_meta
-            members = [c for c, _ms in seq.members()]
+            seq, cls, fire_mode = seq_meta
+            members = [c for c, _ms in seq.members(fire_mode)]
             detail.update({"drop_sequence": seq.key, "member": cls,
                            "state": seq.state, "origin": seq.origin,
                            "his": seq.his, "members": members,

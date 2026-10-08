@@ -25,15 +25,44 @@ I/O, the view is handed in):
                          kept sequences out of triggers.json at all).
     suggested            never — it waits for his confirm.
     dismissed            never.
-    matches yours        never — his own trigger fires there (the view's
-                         rule: one of his charge/lull/drop within two beats
-                         of the drop). An ADDED sequence sitting on one of
-                         his own phase triggers stands down the same way
-                         here, and so does a single member of any firing
-                         sequence that lands within two beats of his own
-                         trigger of the same class: nothing double-fires.
-                         Two firing sequences on one drop keep his (added,
-                         confirmed, edited) over a detection.
+    matches yours        stands down ONLY when his own trigger can actually
+                         fire there — `his_applies(effective_mode)`, true
+                         under "full"/"triggers_only" (the view's rule: one
+                         of his charge/lull/drop within two beats of the
+                         drop). Under any other mode — "analysed" is the
+                         real case, report data/popoff-drops-not-firing/
+                         report.md: his hand-authored trigger never fires
+                         there under that mode either, so BOTH doors were
+                         silent — it falls back to the sequence's OWN
+                         classification instead: a confident detection
+                         fires exactly as an unmatched confident one would
+                         (as the analysed show); a suggestion still waits
+                         for his confirm, matched or not; a confirmed/
+                         edited/added sequence fires wherever the analysed
+                         show plays (decision 3's own rule — see
+                         `fires_here`; the fallback and decision 3 agree
+                         here, both land on `analysed`, so a matched
+                         confirmed/edited sequence needs no separate case).
+                         An ADDED sequence sitting on one of his own phase
+                         triggers stands down the same way (and falls back
+                         the same way), and so does a single member of any
+                         firing sequence that lands within two beats of his
+                         own trigger of the same class — gated by the
+                         SAME `his_applies(effective_mode)` rule, in
+                         `FiringSequence.members`/`gap_ms` rather than in
+                         `firing_sequences` itself (that function only ever
+                         FLAGS a member in `stood_down`, mode-independent,
+                         so it can stay memoisable without the room's
+                         mode): nothing double-fires where his trigger
+                         genuinely fires there, and nothing goes silent
+                         where it can't (the same Pop Off shape one level
+                         down — a matched charge/lull used to be excluded
+                         unconditionally, even under "analysed", where his
+                         trigger was never going to cover it either). Two
+                         firing sequences on one drop keep his (added,
+                         confirmed, edited) over a detection — deduped
+                         unconditionally, never only when neither of them
+                         `matches_his`.
 
   HOW EACH MEMBER FIRES
     as the existing charge, lull and drop responses — the same
@@ -64,7 +93,7 @@ Every time is SONG time, the frame his triggers and the view are in.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Iterable, Optional
 
 from spectra.services import analysed_flares, drop_detector, drop_sequences, phase_partner
@@ -82,7 +111,14 @@ HIS_STATES = (drop_sequences.STATE_CONFIRMED, drop_sequences.STATE_EDITED,
 ANALYSED_STATES = (drop_sequences.STATE_CONFIDENT,)
 PROTECTED_STATES = HIS_STATES + ANALYSED_STATES
 
-HIS_MODES = ("analysed", "full", "triggers_only")
+HIS_MODES = ("full", "triggers_only")
+"""The modes a hand-authored phase trigger of his actually fires under
+(trigger_engine._trigger_allowed) — NOT "analysed": an authored charge,
+lull or drop never fires there, which is exactly why a detection that
+stood down to one under "analysed" used to go silent on both doors (the
+Pop Off report). `analysed` show-plays-the-drop-anyway is a SEPARATE
+condition (`analysed_flares.analysed_flares_allowed`), already ORed in
+wherever this is consulted — see `fires_here`."""
 
 # THE INTENSITY a sequence fires at, from the drop's measured step up (the
 # detector's `step`, its contrast). Mapped linearly so the range his own
@@ -118,7 +154,24 @@ def beat_ms_of(view: dict) -> float:
 @dataclass(frozen=True)
 class FiringSequence:
     """One sequence that may fire, with the members that survive the
-    stand-down rules. `his` is True for confirmed, edited and added."""
+    stand-down rules. `his` is True for confirmed, edited and added.
+
+    `matches_his` is True when this sequence's DROP sits within two beats
+    of one of his own enabled charge/lull/drop triggers — computed here
+    unconditionally (mode-independent, like the rest of this function), so
+    `firing_sequences` stays safe to memoise without the room's mode (the
+    trigger clock does exactly that). The MODE-DEPENDENT decision — stand
+    down because his trigger actually fires there, or fall back to this
+    sequence's own tier because it doesn't — lives in `fires_here` for the
+    sequence as a whole, and in `members`/`gap_ms`'s own `effective_mode`
+    argument for one member standing down alone (a same-class authored
+    mark near a member of a sequence that otherwise still fires): a member
+    in `stood_down` is excluded ONLY when `effective_mode` is given and
+    `his_applies(effective_mode)` is True — his own trigger can actually
+    fire there. Without a mode (or whenever his trigger can't fire there),
+    every declared member comes back, because nothing else will cover it.
+    `charge_ms`/`lull_ms`/`drop_ms` always carry the sequence's OWN
+    unmodified values — `stood_down` is a flag, never a mutation of them."""
     key: str
     state: str
     origin: str
@@ -128,29 +181,46 @@ class FiringSequence:
     charge_ms: Optional[int]
     intensity: float
     beat_ms: float
-    # members dropped because one of his own triggers of that class fires
-    # within two beats of it: {"charge": his trigger id, ...}
+    # a member standing down alone because one of his own triggers of that
+    # class fires within two beats of it: {"charge": his trigger id, ...}.
+    # Only excluded from `members()`/`gap_ms()` when the caller names a
+    # mode his trigger actually fires under — see the class docstring.
     stood_down: dict = field(default_factory=dict)
+    matches_his: bool = False
 
-    def members(self) -> list[tuple[str, int]]:
+    def members(self, effective_mode: Optional[str] = None) -> list[tuple[str, int]]:
+        exclude = (set(self.stood_down)
+                  if effective_mode is not None and his_applies(effective_mode)
+                  else set())
         out = []
         for cls, ms in (("charge", self.charge_ms), ("lull", self.lull_ms),
                         ("drop", self.drop_ms)):
-            if ms is not None:
+            if ms is not None and cls not in exclude:
                 out.append((cls, int(ms)))
         return out
 
     def trigger_id(self, cls: str) -> str:
         return f"{ID_PREFIX}{self.key}:{cls}"
 
-    def gap_ms(self, cls: str) -> Optional[int]:
+    def gap_ms(self, cls: str, effective_mode: Optional[str] = None) -> Optional[int]:
         """How long `cls`'s build runs: to its own partner in this sequence
-        (phase_partner's rule and reach). None for the drop."""
-        start = dict(self.members()).get(cls)
+        (phase_partner's rule and reach). None for the drop. `effective_mode`
+        resolves the same mode-aware member set `members()` does, so a
+        stood-down neighbour never counts as `cls`'s partner in a mode
+        where that neighbour isn't actually firing alongside it."""
+        members = self.members(effective_mode)
+        start = dict(members).get(cls)
         if start is None or cls not in phase_partner.BUILD_CLASSES:
             return None
-        later = [(ms, c) for c, ms in self.members() if c != cls]
+        later = [(ms, c) for c, ms in members if c != cls]
         return phase_partner.build_target(cls, start, later).gap_ms(start)
+
+    def resolved_stood_down(self, effective_mode: str) -> dict:
+        """`stood_down`, but only when his own trigger actually fires in
+        `effective_mode` — the display-field twin of `members()`'s own
+        exclusion rule, for `annotate()`: a member the Timeline should show
+        as standing down only when it genuinely isn't firing here."""
+        return dict(self.stood_down) if his_applies(effective_mode) else {}
 
 
 @dataclass(frozen=True)
@@ -196,12 +266,46 @@ def _his_phase_marks(view: dict) -> list[tuple[str, int, str]]:
     return out
 
 
+def _recovered_state(s: dict) -> Optional[str]:
+    """For a sequence the view marked `matches_yours` (drop_sequences.py's
+    own "even when confirmed" rule), what it would be WITHOUT that
+    override — the fallback `_candidates` and `firing_sequences` need so a
+    mode that does not actually fire his own trigger there (`his_applies`
+    False) can still let the sequence fire by its own tier, instead of
+    going silent on both doors (the Pop Off report). Recovered from fields
+    the view already carries, never a second read of the store: a moved
+    handle or a switched-off lull/charge means EDITED (his); otherwise a
+    confident detector tier stands in for "fires via the analysed show".
+    Returns None for a plain, unconfirmed, unedited SUGGESTED detection
+    that happens to match one of his marks — it still only waits for his
+    confirm, matched or not.
+
+    THE ONE GAP, named rather than hidden: a bare `confirm` with no handle
+    edit on a tier-SUGGESTED detection that also matches one of his own
+    marks cannot be told apart here from an unconfirmed suggestion (the
+    view exposes no "confirmed" flag once `matches_yours` has overwritten
+    `state`). It is treated as the unconfirmed case — it waits — which is
+    the conservative direction (it costs him a redundant confirm press on
+    a sequence his own hand-authored trigger already covers in every mode
+    that fires that trigger; it never double-fires)."""
+    moved = s.get("moved") or {}
+    if any(moved.values()) or s.get("lull_off") or s.get("charge_off"):
+        return drop_sequences.STATE_EDITED
+    if s.get("tier") == drop_detector.TIER_CONFIDENT:
+        return drop_sequences.STATE_CONFIDENT
+    return None
+
+
 def _candidates(view: dict) -> list[FiringSequence]:
     beat = beat_ms_of(view)
     out = []
     for s in (view or {}).get("sequences") or []:
         state = s.get("state")
-        if state not in PROTECTED_STATES:
+        if state == drop_sequences.STATE_MATCHES_YOURS:
+            state = _recovered_state(s)
+            if state is None:
+                continue
+        elif state not in PROTECTED_STATES:
             continue
         try:
             out.append(FiringSequence(
@@ -217,28 +321,44 @@ def _candidates(view: dict) -> list[FiringSequence]:
 
 def firing_sequences(view: dict) -> list[FiringSequence]:
     """Every sequence in the view that may fire on its own terms (module
-    docstring's WHAT FIRES, before the room's mode), with the stand-down
-    rules applied, in drop order. The mode gate is `fires_here`."""
+    docstring's WHAT FIRES, before the room's mode), flagged for the
+    stand-down rules, in drop order. The mode gate is `fires_here`;
+    `FiringSequence.members`/`gap_ms` resolve the per-member stand-down for
+    a given mode.
+
+    A sequence whose drop coincides with one of his own phase marks is
+    KEPT here, flagged `matches_his=True`, never excluded outright — this
+    function must stay mode-independent (the trigger clock memoises its
+    result without the room's mode in the key), so the actual stand-down-
+    or-fall-back decision is `fires_here`'s alone, not this one's. The SAME
+    rule applies one level down: a single member within reach of a
+    same-class authored mark is only ever FLAGGED in `stood_down` here,
+    never excluded from `charge_ms`/`lull_ms` — excluding it unconditionally
+    would silence it in every mode, including one where his own trigger
+    can't fire there either (the Pop Off report's own shape: "analysed"
+    stood a matched charge/lull down to a door that was never open).
+
+    Two kept sequences near the same drop are deduped UNCONDITIONALLY
+    (never skipped just because one of them `matches_his`) — his own
+    authored mark only decides which of them wins when his sort already
+    put it first (`kept` never holds two near one drop); it is not a
+    license to let two independently-kept sequences fire on top of each
+    other because they happen to both sit near the same mark."""
     reach = MATCH_BEATS * beat_ms_of(view)
     marks = _his_phase_marks(view)
     kept: list[FiringSequence] = []
     # his first, so a detection on the same drop yields to his
     for seq in sorted(_candidates(view), key=lambda s: (not s.his, s.drop_ms)):
-        if any(abs(seq.drop_ms - ms) <= reach for _cls, ms, _id in marks):
-            continue                     # his own phase trigger is here
         if any(abs(seq.drop_ms - k.drop_ms) <= reach for k in kept):
             continue                     # another firing sequence owns this drop
+        matches_his = any(abs(seq.drop_ms - ms) <= reach for _cls, ms, _id in marks)
         stood = {}
-        lull, charge = seq.lull_ms, seq.charge_ms
         for cls, ms, tid in marks:
-            if cls == "lull" and lull is not None and abs(lull - ms) <= reach:
-                stood["lull"], lull = tid, None
-            if cls == "charge" and charge is not None and abs(charge - ms) <= reach:
-                stood["charge"], charge = tid, None
-        kept.append(FiringSequence(
-            key=seq.key, state=seq.state, origin=seq.origin, his=seq.his,
-            drop_ms=seq.drop_ms, lull_ms=lull, charge_ms=charge,
-            intensity=seq.intensity, beat_ms=seq.beat_ms, stood_down=stood))
+            if cls == "lull" and seq.lull_ms is not None and abs(seq.lull_ms - ms) <= reach:
+                stood["lull"] = tid
+            if cls == "charge" and seq.charge_ms is not None and abs(seq.charge_ms - ms) <= reach:
+                stood["charge"] = tid
+        kept.append(replace(seq, stood_down=stood, matches_his=matches_his))
     return sorted(kept, key=lambda s: s.drop_ms)
 
 
@@ -250,8 +370,20 @@ def fires_here(seq: FiringSequence, effective_mode: str, song_has_authored: bool
     """The room's gate for one sequence (module docstring's WHAT FIRES).
     `effective_mode` is trigger_engine._effective_mode_for_song's answer;
     `song_has_authored` is whether the song carries any authored trigger
-    (sequences of his never count toward it)."""
+    (sequences of his never count toward it).
+
+    A sequence that matches one of his own marks (`matches_his`) stands
+    down ONLY while his own trigger actually fires there
+    (`his_applies(effective_mode)`); otherwise it falls back to firing on
+    its own terms, same as an unmatched sequence of the same kind — which
+    is exactly `analysed` here, since `his_applies` is false in that
+    branch by construction (`seq.his`'s own `analysed or his_applies`
+    reduces to plain `analysed` the moment `his_applies` is false), so a
+    matched confident, confirmed, edited or added sequence all land on the
+    identical boolean once standing down is off the table."""
     analysed = analysed_flares.analysed_flares_allowed(effective_mode, song_has_authored)
+    if seq.matches_his and his_applies(effective_mode):
+        return False
     if seq.his:
         return analysed or his_applies(effective_mode)
     return analysed
@@ -306,7 +438,16 @@ def protected_windows(uri: str, triggers: Optional[list] = None) -> list[Window]
 def annotate(view: dict, effective_mode: str, song_has_authored: bool) -> dict:
     """The view with what fires HERE, for the Timeline: each sequence gains
     `fires` (bool) and `fires_reason`; the body gains `firing` (the room's
-    gate for the two kinds) and `windows`. Returns a new dict."""
+    gate for the two kinds) and `windows`. Returns a new dict.
+
+    A `matches_yours` sequence is no longer an automatic "never": it looks
+    itself up in `firing_sequences` (which now recovers one, flagged
+    `matches_his`, whenever its own tier/edit would otherwise make it a
+    candidate — `_recovered_state`) and lets `fires_here` decide. Only a
+    `matches_yours` sequence `firing_sequences` could not recover (a bare,
+    unconfirmed, unedited SUGGESTED one — `f is None`) or one `fires_here`
+    stood down because his trigger genuinely fires there this mode
+    (`f.matches_his` and not firing) still reports `"matches_yours"`."""
     seqs = {s.key: s for s in firing_sequences(view)}
     analysed = analysed_flares.analysed_flares_allowed(effective_mode, song_has_authored)
     his = analysed or his_applies(effective_mode)
@@ -319,14 +460,14 @@ def annotate(view: dict, effective_mode: str, song_has_authored: bool) -> dict:
             fires, why = False, "dismissed"
         elif state == drop_sequences.STATE_SUGGESTED:
             fires, why = False, "waits_for_confirm"
-        elif state == drop_sequences.STATE_MATCHES_YOURS:
-            fires, why = False, "matches_yours"
         elif f is None:
             fires, why = False, "matches_yours"
         elif fires_here(f, effective_mode, song_has_authored):
             fires, why = True, "his" if f.his else "analysed_show"
-            s["stood_down"] = dict(f.stood_down)
+            s["stood_down"] = f.resolved_stood_down(effective_mode)
             s["intensity"] = f.intensity
+        elif f.matches_his:
+            fires, why = False, "matches_yours"
         else:
             fires, why = False, ("transitions_only" if effective_mode == "transitions"
                                  else "analysed_show_off")

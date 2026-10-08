@@ -22,6 +22,12 @@ scene cues the protected windows held back. It FAILS (non-zero) when:
 
   - anything fires under "Transitions only";
   - a suggested or dismissed detection fires;
+  - a matches_yours sequence fires while his own trigger can ACTUALLY
+    fire there (drop_firing.his_applies — "full"/"triggers_only") — one
+    whose own tier is confident, falling back because his trigger cannot
+    fire there in THIS mode (e.g. "analysed", the Pop Off fix,
+    data/popoff-drops-not-firing/report.md) is not a problem, since that
+    is the one open door;
   - a sequence member fires within two beats of one of his own triggers
     of the same class (a double fire);
   - an analysed scene change fires inside a protected window, or an
@@ -108,7 +114,7 @@ def main() -> int:
     cdd._isolate(Path(args.live_root), tmp)
     from spectra import config as scfg
     scfg.INTENSITY_SCALE_MARKS_FILE = tmp / "spectra" / "marks.json"
-    from spectra.services import drop_firing, drop_sequences, midsong_generator as mg
+    from spectra.services import drop_detector, drop_firing, drop_sequences, midsong_generator as mg
     from spectra.services import trigger_store
 
     problems: list[str] = []
@@ -131,6 +137,7 @@ def main() -> int:
             view = drop_sequences.view(uri, triggers=trigs)
             windows = drop_firing.windows_from_view(view)
             states = {s["drop_ms"]: s["state"] for s in view["sequences"]}
+            tiers = {s["drop_ms"]: s.get("tier") for s in view["sequences"]}
             for mode in MODES:
                 rec = _sweep(uri, trigs, mode, duration)
                 drops = [p for p, c in rec.seq if c == "drop"]
@@ -144,7 +151,15 @@ def main() -> int:
                     problems.append(f"{name} {label}: fired under transitions only")
                 for d in drops:
                     st = next((s for ms, s in states.items() if abs(ms - d) <= 200), None)
-                    if st not in drop_firing.PROTECTED_STATES:
+                    tier = next((tiers.get(ms) for ms in states if abs(ms - d) <= 200), None)
+                    # a matches_yours/confident sequence may legitimately fire
+                    # by its own door whenever his own trigger cannot — the
+                    # fix for data/popoff-drops-not-firing/report.md
+                    # (drop_firing.fires_here's own fallback)
+                    recovered = (st == drop_sequences.STATE_MATCHES_YOURS
+                                and tier == drop_detector.TIER_CONFIDENT
+                                and not drop_firing.his_applies(mode))
+                    if st not in drop_firing.PROTECTED_STATES and not recovered:
                         problems.append(f"{name} {label} {mode}: a {st} sequence fired at {d}")
                 for pos, cls in rec.seq:
                     if label == "as stored" and mode in ("full", "triggers_only"):
