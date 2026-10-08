@@ -15,7 +15,7 @@ plus DECLARED MECHANISMS:
   drift      — per-param creep/follow declarations (named profile with an
                inline one-off escape hatch, decision-4 pattern)
   flare_kinds — NAMED FLARE KINDS (the owner's item-8 shape, judged and
-               accepted): each kind is one of eight types —
+               accepted): each kind is one of nine types —
                  drift_jump  jumps the drift: the colour-set jump through
                              the shipped selector, or a 🎲 re-roll for shape
                  momentary   a parameter spike that RETURNS to where it was
