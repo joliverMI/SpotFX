@@ -77,7 +77,8 @@ async def fire_scene_by_id(scene_id: str,
                            dwell_tolerance_s: float = 0.0,
                            *,
                            transition_ms: Optional[int] = None,
-                           origin: str = "auto") -> dict:
+                           origin: str = "auto",
+                           cut: bool = False) -> dict:
     """The ONE scene-fire choke point for anything that picks a scene by id
     outside the editor's own test-fire — the sequencer's own rolls and
     SPECTRA-native triggers (spectra.services.trigger_engine) both call
@@ -172,7 +173,17 @@ async def fire_scene_by_id(scene_id: str,
     "deferred" bucket, never an update flare — the mode owns the room's
     scene). Checked AFTER Force Scene resolves, so a pin still outranks the
     mode exactly as it outranks music. origin="house" is the house layer's
-    own fires, which pass with transition_ms carrying the mode's glide."""
+    own fires, which pass with transition_ms carrying the mode's glide.
+
+    THE DROP-LED SWITCH (2026-10-08, spectra/services/drop_switch.py):
+    origin="drop" is a drop sequence switching the scene ON its drop (or,
+    as the stated exception, early in its charge). The drop IS the moment,
+    so the showing scene's minimum dwell never defers it — but it is
+    NAMED, never silent: the result and the scenes log carry
+    overrode_dwell_for_drop (the seconds still owed), the overrode_dwell
+    shape. cut=True lands it as a hard cut (scene_compiler.fire_scene's
+    cut). Every other gate (preview, house mode, disabled, mode
+    availability) applies exactly as to any automatic pick."""
     from spectra.services import (color_set_groups, color_sets, dwell,
                                   fire_history, force_color, mode_availability,
                                   preview_pause, scene_compiler, scene_store)
@@ -214,8 +225,12 @@ async def fire_scene_by_id(scene_id: str,
                "scene_name": scene.name}
     remaining_dwell = dwell.remaining_s()
     overrode_dwell = forced and remaining_dwell > 0
-    tolerated = (not forced and 0 < remaining_dwell <= max(0.0, dwell_tolerance_s))
-    if not forced and remaining_dwell > 0 and not tolerated:
+    drop_led = origin == "drop"
+    overrode_dwell_for_drop = (not forced and drop_led and remaining_dwell > 0)
+    tolerated = (not forced and not drop_led
+                 and 0 < remaining_dwell <= max(0.0, dwell_tolerance_s))
+    if (not forced and not drop_led and remaining_dwell > 0
+            and not tolerated):
         from spectra.services.engine import fire_scene_update_event
         update_result = await fire_scene_update_event(intensity)
         fire_history.record_fire("deferred", scene_id, {
@@ -265,9 +280,12 @@ async def fire_scene_by_id(scene_id: str,
     # literal black, never Light's substitution; every other caller keeps
     # the room's own stored mode (scene_compiler.fire_scene's default).
     display_mode_kw = {} if origin != "house" else {"display_mode": "default"}
+    cut_kw = {"cut": True} if cut else {}
     result = await scene_compiler.fire_scene(scene, intensity=intensity,
                                              color_set=color_set, dry_run=False,
-                                             **glide, **display_mode_kw)
+                                             **glide, **display_mode_kw, **cut_kw)
+    if overrode_dwell_for_drop:
+        result["overrode_dwell_for_drop"] = round(remaining_dwell, 2)
     if overrode_disabled:
         result["overrode_disabled"] = True
     if overrode_dwell:
@@ -286,6 +304,11 @@ async def fire_scene_by_id(scene_id: str,
     }
     if tolerated:
         detail["dwell_tolerance_used_s"] = round(remaining_dwell, 2)
+    if drop_led:
+        detail["origin"] = "drop"
+        detail["cut"] = bool(cut)
+    if overrode_dwell_for_drop:
+        detail["overrode_dwell_for_drop"] = round(remaining_dwell, 2)
     fire_history.record_fire("scenes", scene_id, detail)
     return result
 

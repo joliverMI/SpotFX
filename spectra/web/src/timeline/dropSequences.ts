@@ -109,6 +109,49 @@ export interface DropSequenceView {
   stood_down?: Partial<Record<Handle, string>>;
   /** the intensity it fires at (before the room's render scaling) */
   intensity?: number;
+  /** THE DROP-LED SCENE SWITCH (spectra/services/drop_switch.py): this
+   * play's decision for the sequence — whether it changes the scene, to
+   * what, when (a hard cut on the drop, or early in the charge) and why.
+   * Absent until the trigger clock has reached the sequence. */
+  switch?: DropSwitchPlan;
+}
+
+export interface DropSwitchPlan {
+  key: string;
+  switch: boolean;
+  reason: string;
+  sentence: string;
+  stale_by: string[];
+  from_scene_name: string | null;
+  to_scene_name: string | null;
+  to_effect: string | null;
+  handoff: string | null;
+  moment: 'drop' | 'charge_start' | 'charge_flare' | null;
+  cut_ms: number | null;
+  outcome: { result: string; at: string; skipped?: string } | null;
+  lull_handoff?: { keep: number; next: Record<string, string> } | null;
+}
+
+const SWITCH_WHEN: Record<string, string> = {
+  drop: 'on the drop', charge_start: 'at the charge', charge_flare: 'on a flare in the charge',
+};
+
+/** The short chip for a switch ("⇄ STAR on the drop"), or null. */
+export function switchChip(plan: DropSwitchPlan | undefined | null): string | null {
+  if (!plan || !plan.switch || !plan.to_scene_name) return null;
+  return `⇄ ${plan.to_scene_name} ${SWITCH_WHEN[plan.moment ?? 'drop'] ?? ''}`.trim();
+}
+
+/** One line on what this sequence did (or will do) to the scene — the
+ * server's own sentence plus what actually happened. */
+export function switchLine(plan: DropSwitchPlan | undefined | null): string | null {
+  if (!plan) return null;
+  const o = plan.outcome;
+  let done = '';
+  if (o?.result === 'switched') done = ' Done: the cut landed.';
+  else if (o?.result === 'superseded') done = ' Not cut: the scene had already changed by then.';
+  else if (o?.result === 'skipped') done = ` Not cut: ${o.skipped ?? 'held back'}.`;
+  return `${plan.sentence}${done}`;
 }
 
 /** The trigger clock's gate for this song now (drop_firing.annotate). */
@@ -526,5 +569,6 @@ export function handleRows(s: DisplaySeq): HandleRow[] {
 /** The strip's hover text for one sequence. */
 export function stripTitle(s: DisplaySeq): string {
   const head = s.number != null ? `${s.number} · ` : '';
-  return `${head}${fmtTenths(s.drop)} · ${LOOK_CHIP[s.look]} · ${reviewStatus(s)}`;
+  const sw = switchChip(s.view?.switch);
+  return `${head}${fmtTenths(s.drop)} · ${LOOK_CHIP[s.look]} · ${reviewStatus(s)}${sw ? ` · ${sw}` : ''}`;
 }

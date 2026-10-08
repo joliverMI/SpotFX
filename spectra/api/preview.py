@@ -81,6 +81,9 @@ class SequenceRequest(BaseModel):
     charge_gap_ms: Optional[int] = Field(default=None, ge=200, le=60_000)
     lull_gap_ms: Optional[int] = Field(default=None, ge=200, le=60_000)
     step: str = "charge"
+    # THE DROP-LED SWITCH: show (and perform, live) the cut the resolver
+    # would make for this scene at a stale drop (phase_preview.switch_for).
+    drop_switch: bool = True
 
     def gaps(self) -> dict[str, int]:
         out: dict[str, int] = {}
@@ -116,7 +119,8 @@ async def fire_transition(body: TransitionRequest):
 async def open_sequence(body: SequenceRequest):
     scene = _scene(body.scene_id)
     timeline = await phase_preview.build_timeline(
-        scene, body.intensity, gaps=body.gaps())
+        scene, body.intensity, gaps=body.gaps(),
+        drop_switch_enabled=body.drop_switch)
     flare_preview_hold.clear_ceiling_lock()
     _arm_pause()
     return timeline
@@ -125,7 +129,9 @@ async def open_sequence(body: SequenceRequest):
 @router.post("/sequence/fire")
 async def fire_sequence(body: SequenceRequest):
     scene = _scene(body.scene_id)
-    program = phase_preview.PhaseSequenceProgram(scene, body.gaps())
+    program = phase_preview.PhaseSequenceProgram(
+        scene, body.gaps(),
+        switch=phase_preview.switch_for(scene, body.intensity, body.drop_switch))
     return await _fire(program, body.intensity, body.step)
 
 

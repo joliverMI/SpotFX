@@ -50,6 +50,17 @@ export function describeEvent(item: ReviewEventItem): string {
       return `Colour set: ${name}${d.via === 'analysed_cue' ? ' (analysed moment)' : ''}`;
     }
     case 'triggers': {
+      if (d.drop_sequence && d.member === 'switch') {
+        // THE DROP-LED SCENE SWITCH (spectra/services/drop_switch.py): the
+        // cut a drop sequence made, or why it did not.
+        const to = (d.to_scene as string | undefined) ?? 'another scene';
+        const when = d.at === 'drop' ? 'on the drop'
+          : d.at === 'charge_flare' ? 'on a flare in the charge'
+            : d.at === 'charge_flare_missed' ? 'at the next member (the flare never fired)'
+              : 'at the charge';
+        const res = d.result === 'switched' ? '' : ` — not cut (${(d.skipped as string | undefined) ?? d.result})`;
+        return `Drop switched the scene to ${to}, a hard cut ${when}${res}`;
+      }
       if (d.drop_sequence) {
         // A drop-sequence member (spectra/services/drop_firing.py) — the
         // ordinary charge/lull/drop response, not a stored trigger.

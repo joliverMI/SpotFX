@@ -10563,6 +10563,39 @@ window). Four things:
   `scripts/check_drop_firing.py` (temp copies of live storage). Help topic
   `drop-sequence-firing`.
 
+**PHASE 2 OF THE DROP-SCENE-VARIETY PLAN — A DROP CAN BE THE SCENE CHANGE
+(2026-10-08, the Admiral: "just switch at the drop", early in the charge
+only "if it doesn't fit well at the drop").** `spectra/services/
+drop_switch.py` is the binding statement and the lull hand-off hook's
+installed RESOLVER (never a second hook). Four things:
+
+- **ONE DECISION PER SEQUENCE, at the first member the trigger clock
+  fires** (`TriggerEngine._decide_switch`), cut in the SAME `_fire` call
+  just before the planned member — the drop, or (early) the charge start /
+  the first flare inside the charge — so that member's phase arm lands on
+  the NEW scene. Never split the cut into its own trigger.
+- **A HARD CUT IS A ONE-CALL OVERRIDE**: `fire_scene_by_id(origin="drop",
+  cut=True)` → `scene_compiler.fire_scene(cut=)` → `fx_seam.apply_writes
+  (cut=)` → the facade's `"cut": true` → `Virtual.set_effect(cut=True)`
+  (`fx/VENDOR.md` #63). Without it every switch rides the virtual's stored
+  0.5 s Add crossfade; the stored value must never be changed for this.
+  `origin="drop"` is never deferred by dwell and is NAMED
+  (`overrode_dwell_for_drop`).
+- **An effect born with a `phase` key never edge-fires it** (every phase
+  effect's creation baseline), so the drop arm is the response's own write
+  right after the cut, not a key in the scene write.
+- **Tunables are room settings** (`drop_switch_enabled`,
+  `_after_previous_drop`, `_stale_margin_s`, `_drops_in_a_row`;
+  Sonic-editable, room bar's Scenes panel); decisions are in
+  `drop_switch.plans_for` (the Timeline strip's ⇄, Sonic's read-only
+  `explain_drop_switch`) and the show log (`drop_sequence:switch`). A spec
+  that builds a `TriggerEngine` with an injected `fire_scene` gets the cut
+  through that fake. Fireworks pairs ride the generic hand-off until phase
+  3 (the melds). The planner's protected windows are UNCHANGED — the early
+  switch is the resolver's act, not a planned cue (the revised plan's D).
+  Specs: `tests/test_drop_switch.py` (FINA + 100 MILLONES real stores),
+  `tests/test_drop_switch_cut.py`; help topic `drop-led-switch`.
+
 **SONIC'S FULL EDIT SET (2026-10-06, Sonic coverage audit build).**
 `spectra/services/drop_console.py` now covers every `apply_edit` op, AND
 reads what fires: `list_drop_sequences` runs `drop_firing.

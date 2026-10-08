@@ -71,6 +71,16 @@ below). His 2026-08-25 ruling "always do melt" removed that step.
 `seed_star_strips.py` is the ORIGINAL, now-superseded seeder — re-running
 it would silently put the power step back. See the melt-effect skill.
 
+## Drops can switch INTO or OUT OF this scene (2026-10-08)
+
+This scene is drop-switch-ready (its Matrix effect is in
+`fx.device_model.CENTRE_BURST_EFFECTS`): once a scene has grown stale, a drop sequence
+may hard-cut into this one ON the drop, with this scene's own drop firing
+on the mark and adopting the outgoing pieces — or cut out of it the same
+way. Nothing in this scene's data opts in or out; `spectra/services/
+drop_switch.py` (and the drop-detection skill) is where the rule lives,
+including the hand-off table row for this effect (radial blooms out of a particle effect's pieces — a choreographed hand-off).
+
 ## Sonic reach
 
 Scene settings and flare kinds only via the scene console.

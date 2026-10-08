@@ -261,18 +261,21 @@ def test_the_sequence_preview_carries_what_the_lull_was_told():
     assert _told(ex)["m"][lh.KEEP_KEY] == 3
 
 
-def test_the_live_engine_installs_no_resolver_so_a_fish_lull_keeps_one():
-    """The default the Admiral sees: the production engine module wires no
-    resolver, so an ordinary lull fire (on_event, the path the trigger clock
-    and the bridge both reach) tells a fish `lull_keep = 1` — the searcher.
-    Keep 0 (the old lull) only ever arrives when something TELLS it."""
+def test_the_live_engine_installs_the_drop_switch_resolver_and_a_lull_with_no_plan_keeps_one():
+    """The default the Admiral sees: the production engine module wires the
+    drop-led switch's resolver (spectra/services/drop_switch.py — the hook's
+    intended plug-in, 2026-10-08), and a lull with no switch planned for it
+    gets the hook's own default: a fish keeps `lull_keep = 1` — the
+    searcher. Keep 0 (the old lull) only ever arrives when something TELLS
+    it."""
     import subprocess
     # a FRESH interpreter, so the import-time wiring is what is observed
     # (this process's autouse fixture clears any install)
     probe = subprocess.run(
         [sys.executable, "-c",
          "from spectra.services import engine, scene_response as sr;"
-         "print(sr.installed_lull_handoff_resolver() is None,"
+         "from spectra.services import drop_switch as ds;"
+         "print(sr.installed_lull_handoff_resolver() is ds.lull_handoff_resolver,"
          " engine.responses.lull_handoff_resolver is None)"],
         cwd=Path(__file__).resolve().parent.parent,
         capture_output=True, text=True, timeout=120,

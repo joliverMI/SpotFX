@@ -127,11 +127,45 @@ def default_gaps() -> dict[str, int]:
     return dict(DEFAULT_GAP_MS)
 
 
+def switch_for(scene: SceneV2, intensity: float, enabled: bool = True
+               ) -> Optional[tuple[Any, Optional[SceneV2]]]:
+    """THE DROP-LED SWITCH, as the preview shows it (spectra/services/
+    drop_switch.py): the resolver's own decision for this scene at a drop
+    where it has grown stale by repetition — deterministic for the scene,
+    so open and every lap's fire agree — and the scene it would cut to.
+    None when he asked the preview not to show it."""
+    if not enabled:
+        return None
+    from spectra.services import drop_switch, scene_store
+    try:
+        settings = drop_switch.default_settings()
+    except Exception:                                    # noqa: BLE001
+        settings = drop_switch.SwitchSettings()
+    plan = drop_switch.preview_plan(scene, intensity, settings=settings)
+    target = scene_store.get_by_id(plan.to_scene_id) if plan.switch else None
+    if plan.switch and target is None:
+        return None
+    return plan, target
+
+
+def _switch_class(plan) -> Optional[str]:
+    """Which mark the cut lands on: the drop, or (early) the charge."""
+    from spectra.services import drop_switch
+    if plan is None or not plan.switch:
+        return None
+    return "drop" if plan.moment == drop_switch.MOMENT_DROP else "charge"
+
+
 async def build_timeline(scene: SceneV2, intensity: float, *,
-                         gaps: Optional[dict[str, int]] = None) -> dict[str, Any]:
+                         gaps: Optional[dict[str, int]] = None,
+                         drop_switch_enabled: bool = True) -> dict[str, Any]:
     """The three-mark sequence timeline. `gaps` is how far each stretching
     class's next mark sits ahead of it — the very thing the ramp stretches
-    to fill, so it is the one control that changes the drawn shape."""
+    to fill, so it is the one control that changes the drawn shape.
+
+    `drop_switch` in the result is the drop-led switch the resolver would
+    make here (switch_for): the target, the moment, the hand-off, what the
+    lull is told, and `cut_s` — where on this ruler the cut lands."""
     resolved_gaps = {**DEFAULT_GAP_MS, **(gaps or {})}
 
     # A scratch pair, purely so the lead functions can read the effect
@@ -194,9 +228,28 @@ async def build_timeline(scene: SceneV2, intensity: float, *,
     # inheriting a charge that never ended.
     cues.append({"step": "release", "at_s": round(duration_s - 0.25, 4),
                  "label": "release the phase"})
+    switch = switch_for(scene, intensity, drop_switch_enabled)
+    switch_out: Optional[dict[str, Any]] = None
+    if switch is not None:
+        from spectra.services import drop_switch
+        from spectra.services.scene_response import LullContext
+        plan, _target = switch
+        switch_out = plan.as_dict()
+        cls = _switch_class(plan)
+        mark = next((m for m in marks if m["event_class"] == cls), None)
+        switch_out["cut_s"] = mark["fire_at_s"] if mark else None
+        lull_gap = resolved_gaps.get("lull")
+        told = drop_switch.handoff_for(plan, LullContext(
+            scene=scene, intensity=intensity, gap_ms=lull_gap,
+            lull_s=(lull_gap or 0) / 1000.0,
+            virtuals={vid: st.effect_type for vid, st in virtuals.items()}),
+            target_scene=_target)
+        switch_out["lull_told"] = {"keep": told.keep,
+                                   "next": dict(told.next_effect)}
     return {
         "scene_id": scene.id, "scene_name": scene.name,
         "intensity": round(intensity, 4),
+        "drop_switch": switch_out,
         "duration_s": round(duration_s, 4),
         "gaps": resolved_gaps,
         "hang_fraction": PHASE_RAMP_HANG_FRACTION,
@@ -241,9 +294,21 @@ class PhaseSequenceProgram(flare_preview_hold.PreviewProgram):
 
     steps = SEQUENCE + ("release",)
 
-    def __init__(self, scene: SceneV2, gaps: Optional[dict[str, int]] = None) -> None:
+    def __init__(self, scene: SceneV2, gaps: Optional[dict[str, int]] = None,
+                 switch: Optional[tuple[Any, Optional[SceneV2]]] = None) -> None:
         self.hold_scene = scene
         self.gaps = {**DEFAULT_GAP_MS, **(gaps or {})}
+        # THE DROP-LED SWITCH (switch_for): (plan, target scene) or None.
+        self.switch = switch if (switch and switch[0].switch and switch[1]) else None
+
+    def _target_writes(self, intensity: float) -> list[dict]:
+        from spectra.services import transition_preview
+        return transition_preview._compile(self.switch[1], intensity, rng_seed=17)
+
+    def extra_snapshot_writes(self, intensity: float) -> list[dict]:
+        # the scene the cut lands on can reach virtuals the held one never
+        # does — they must be in the snapshot too
+        return self._target_writes(intensity) if self.switch else []
 
     async def execute(self, step: str, ctx) -> dict:
         if ctx.first_open:
@@ -251,7 +316,33 @@ class PhaseSequenceProgram(flare_preview_hold.PreviewProgram):
             # live to drive; later laps must NOT re-fire it, or every lap
             # would restart the effect underneath the sequence.
             await ctx.apply_scene()
+        switched_at = _switch_class(self.switch[0]) if self.switch else None
+        cut = None
+        if switched_at is not None and step in SEQUENCE:
+            plan, target = self.switch
+            here = SEQUENCE.index(step)
+            at = SEQUENCE.index(switched_at)
+            if here >= at:
+                writes = self._target_writes(ctx.intensity)
+                if here == at:
+                    # THE CUT, exactly as the trigger clock lands it: the
+                    # target scene with no blend, then this member's own
+                    # phase arm on the NEW effects
+                    await ctx.apply_scene(writes=writes, transition_ms=0, cut=True)
+                    cut = {"to_scene": target.name, "moment": plan.moment,
+                           "handoff": plan.handoff}
+                # every step on a fresh scratch pair: point it at the scene
+                # the room now shows (the cut already put it there)
+                ctx.conductor.on_scene_fire(target, writes)
+            elif step == "lull" and plan.moment == "drop":
+                from spectra.services import drop_switch
+                ctx.responder.lull_handoff_resolver = (
+                    lambda c: drop_switch.handoff_for(plan, c, target_scene=target))
         if step == "release":
+            if switched_at is not None:
+                # hand the next lap back its own scene (a cut, so the reset
+                # never reads as a second transition)
+                await ctx.apply_scene(transition_ms=0, cut=True)
             # force=True: each preview step runs on a fresh scratch pair, so
             # no _phase_armed state survives the step that armed it — and a
             # DROP arms nothing by production's own rule (_drive_phase only
@@ -265,5 +356,8 @@ class PhaseSequenceProgram(flare_preview_hold.PreviewProgram):
         gap_ms = self.gaps.get(step) if step in PHASE_RAMP_STRETCH_CLASSES else None
         record = await ctx.responder.on_event(step, ctx.intensity, gap_ms,
                                               anchor_relocated=True)
-        return {"result": "phase_fired", "event_class": step,
-                "gap_ms": gap_ms, "record": record}
+        out = {"result": "phase_fired", "event_class": step,
+               "gap_ms": gap_ms, "record": record}
+        if cut is not None:
+            out["drop_switch"] = cut
+        return out

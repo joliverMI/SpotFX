@@ -320,6 +320,58 @@ async def _op_summary() -> dict:
             "summary": f"{len(songs)} song{'s' if len(songs) != 1 else ''} with drop data"}
 
 
+async def _op_explain_switch(sequence: Any = None, uri: Optional[str] = None) -> dict:
+    """THE DROP-LED SCENE SWITCH, read only (spectra/services/drop_switch.py):
+    why a drop sequence did — or did not — change the scene this play. The
+    decision is made by the trigger clock when it reaches the sequence, so
+    a sequence the song has not reached yet says so rather than guessing."""
+    from spectra.services import drop_switch
+    from spectra.services.room_controls import load_room_controls
+    uri, rej = _song(uri)
+    if rej:
+        return rej
+    view = await asyncio.to_thread(ds.view, uri)
+    numbered = _numbered(view)
+    number_of = {s["key"]: i + 1 for i, s in enumerate(numbered)}
+    settings = drop_switch.SwitchSettings.from_room(load_room_controls())
+
+    def row(p) -> dict:
+        d = p.as_dict()
+        return {"number": number_of.get(p.key), "drop_s": _secs(p.drop_ms),
+                "switched": bool(p.switch), "why": p.sentence,
+                "from_scene": p.from_scene_name, "to_scene": p.to_scene_name,
+                "moment": p.moment, "handoff": p.handoff,
+                "stale_by": d["stale_by"], "cut_s": _secs(d["cut_ms"]),
+                "outcome": p.outcome}
+
+    plans = drop_switch.plans_for(uri)
+    out = {"status": "ok", "settings": {
+        "enabled": settings.enabled,
+        "after_previous_drop": settings.after_previous_drop,
+        "stale_margin_s": settings.stale_margin_s,
+        "drops_in_a_row": settings.drops_in_a_row}}
+    if sequence is not None:
+        if (not isinstance(sequence, int) or isinstance(sequence, bool)
+                or not 1 <= sequence <= len(numbered)):
+            return {"status": "rejected",
+                    "reason": f"there is no drop sequence #{sequence} on this song "
+                              f"(it has {len(numbered)})",
+                    "sequences": [_describe(i + 1, x) for i, x in enumerate(numbered)]}
+        key = numbered[sequence - 1]["key"]
+        hit = next((p for p in plans if p.key == key), None)
+        out["decision"] = None if hit is None else row(hit)
+        out["summary"] = (hit.sentence if hit is not None else
+                          f"#{sequence} has not been reached this play yet — the switch "
+                          "is decided when the song gets to its charge.")
+        return out
+    out["decisions"] = [row(p) for p in plans]
+    n = sum(1 for p in plans if p.switch)
+    out["summary"] = (f"{len(plans)} drop sequence{'s' if len(plans) != 1 else ''} decided "
+                      f"this play, {n} changed the scene" if plans
+                      else "no drop sequence has been reached on this song this play")
+    return out
+
+
 _URI = {"type": "string", "description": "A spotify:track: URI; omit for the song playing now."}
 _SEQ = {"type": "integer", "minimum": 1,
         "description": "The sequence's number in song order (#1 is the earliest), as "
@@ -463,6 +515,22 @@ OPERATIONS: dict[str, SonicOperation] = {
         input_schema={"type": "object", "properties": {"uri": _URI},
                       "additionalProperties": False},
         handler=_op_redetect),
+    "explain_drop_switch": SonicOperation(
+        name="explain_drop_switch", domain="drops", kind="read",
+        summary="Why a drop sequence did — or did not — change the scene this play (the "
+                "drop-led scene switch), or every decision on the song so far.",
+        instructions=(
+            "Read only. Use for 'why did the scene change on that drop', 'why did it stay "
+            "on Fish', 'when does a drop switch'. Give sequence (its number from "
+            "list_drop_sequences) for one, omit it for every decision this play. A drop "
+            "switches with a hard cut ON the drop when the scene showing is stale (it "
+            "played the previous drop, carried drops_in_a_row drops, or overstayed its "
+            "dwell by stale_margin_s); early, at the charge or on a flare inside it, only "
+            "when there is no good drop hand-off or it has overstayed. The thresholds are "
+            "ordinary settings (drop_switch_*) — change them with set_setting, not here."),
+        input_schema={"type": "object", "properties": {"sequence": _SEQ, "uri": _URI},
+                      "additionalProperties": False},
+        handler=_op_explain_switch),
     "drop_detection_summary": SonicOperation(
         name="drop_detection_summary", domain="drops", kind="read",
         summary="How many songs have drop detection, and how many of his "

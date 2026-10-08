@@ -20,6 +20,7 @@
       "mcp__settings-console__dismiss_drop_sequence",
       "mcp__settings-console__drop_detection_summary",
       "mcp__settings-console__end_show",
+      "mcp__settings-console__explain_drop_switch",
       "mcp__settings-console__fire_show_set",
       "mcp__settings-console__get_device_params",
       "mcp__settings-console__get_flare_kind",

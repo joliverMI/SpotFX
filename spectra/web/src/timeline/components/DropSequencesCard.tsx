@@ -18,7 +18,7 @@ import HelpLink from '../../help/HelpLink';
 import { fmtAgo } from '../../lib/time';
 import {
   PHASE_COLOR, fireLine, fmtHundredths, fmtTenths, handleRows, reviewStatus, roomLines,
-  sequenceFires, whyFound, type DisplaySeq, type DropSequencesResponse, type Handle,
+  sequenceFires, switchLine, whyFound, type DisplaySeq, type DropSequencesResponse, type Handle,
 } from '../dropSequences';
 import { editable } from '../dropEdit';
 import type { DropEditor } from '../hooks/useDropEditor';
@@ -149,6 +149,10 @@ function Detail({ s, confidentScore, onJump, onClose, editor, selHandle, onSelec
       )}
       <p className="drop-detail-p"><b>Fires?</b> {fireLine(s)}
         {' '}<HelpLink topic="drop-sequence-firing" title="When drop sequences fire" /></p>
+      {switchLine(s.view?.switch) && (
+        <p className="drop-detail-p"><b>Scene switch:</b> {switchLine(s.view?.switch)}
+          {' '}<HelpLink topic="drop-led-switch" title="When a drop changes the scene" /></p>
+      )}
       <div className="drop-detail-p">
         <b>What the room does</b>
         {roomLines(s).map((l) => <div key={l}>{l}</div>)}

@@ -426,6 +426,16 @@ def _isolated_night_run(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolated_drop_switch():
+    """spectra/services/drop_switch.py keeps its decisions in a process-wide
+    registry (the Timeline and Sonic read it) — reset per test."""
+    from spectra.services import drop_switch
+    drop_switch.forget()
+    yield
+    drop_switch.forget()
+
+
+@pytest.fixture(autouse=True)
 def _isolated_dwell():
     """spectra/services/dwell.py (minimum dwell, 2026-08-20) tracks the
     active scene's own latched entry time/seconds as bare module globals —

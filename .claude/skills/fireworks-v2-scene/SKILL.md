@@ -45,6 +45,16 @@ per-effect skill and AGENTS.md's "per-scene colour-set PREFERENCE" section
 for the additive-match rule (a declared preference matches its own mode
 plus every UNMARKED set, never leaves a scene with zero eligible sets).
 
+## Drops can switch INTO or OUT OF this scene (2026-10-08)
+
+This scene is drop-switch-ready (its Matrix effect is in
+`fx.device_model.DROP_FIREWORKS_EFFECTS`): once a scene has grown stale, a drop sequence
+may hard-cut into this one ON the drop, with this scene's own drop firing
+on the mark and adopting the outgoing pieces — or cut out of it the same
+way. Nothing in this scene's data opts in or out; `spectra/services/
+drop_switch.py` (and the drop-detection skill) is where the rule lives,
+including the hand-off table row for this effect; its pairs stay on the effects' GENERIC particle hand-off until the phase-3 melds.
+
 ## Sonic reach
 
 Scene settings and flare kinds only via the scene console.

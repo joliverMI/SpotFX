@@ -26,6 +26,13 @@
  * marker. This preview SHOWS where each class's fire begins, so the ruler
  * still tells the truth about where the show will fire.
  *
+ * THE DROP-LED SCENE SWITCH (spectra/services/drop_switch.py): the preview
+ * runs the room's own resolver for this scene as if it had grown stale, and
+ * — with "Show the drop switch" on — performs the cut it would make, live,
+ * on the same hold: a hard cut on the drop (or, early, at the charge) into
+ * the scene it names, the lull told what is coming. The cut's moment is the
+ * server's cut_s.
+ *
  * Every time here is server-computed (marks[].mark_s / fire_at_s /
  * ramp_*_s, cues[].at_s); this file derives none of them. */
 import { useEffect, useState } from 'react';
@@ -49,6 +56,7 @@ export default function SequencePreviewOverlay({ scene, onClose }: {
   const [intensity, setIntensity] = useState(1.0);
   const [chargeGapMs, setChargeGapMs] = useState(DEFAULT_CHARGE_GAP_MS);
   const [lullGapMs, setLullGapMs] = useState(DEFAULT_LULL_GAP_MS);
+  const [dropSwitch, setDropSwitch] = useState(true);
   const [timeline, setTimeline] = useState<PhasePreviewTimeline | null>(null);
   const [error, setError] = useState<string | null>(null);
   const { holdExpired, onHoldExpired, clearExpired } = useHeartbeat();
@@ -56,7 +64,7 @@ export default function SequencePreviewOverlay({ scene, onClose }: {
   useEffect(() => {
     let cancelled = false;
     const t = setTimeout(() => {
-      openSequencePreview(scene.id, intensity, chargeGapMs, lullGapMs)
+      openSequencePreview(scene.id, intensity, chargeGapMs, lullGapMs, dropSwitch)
         .then((tl) => {
           if (cancelled) return;
           setTimeline(tl);
@@ -67,11 +75,12 @@ export default function SequencePreviewOverlay({ scene, onClose }: {
     }, 200);
     return () => { cancelled = true; clearTimeout(t); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scene.id, intensity, chargeGapMs, lullGapMs]);
+  }, [scene.id, intensity, chargeGapMs, lullGapMs, dropSwitch]);
 
   const { playheadS, playing, setPlaying, scrubTo } = useCueLoop({
     timeline,
-    fire: (step) => fireSequencePreview(scene.id, intensity, chargeGapMs, lullGapMs, step)
+    fire: (step) => fireSequencePreview(scene.id, intensity, chargeGapMs, lullGapMs, step,
+      dropSwitch)
       .then((res) => { if (res.expired) onHoldExpired(); })
       .catch((e) => setError(String(e))),
   });
@@ -93,6 +102,10 @@ export default function SequencePreviewOverlay({ scene, onClose }: {
                    label: 'hang', tone: 'muted' });
     }
     marks.push({ at_s: m.mark_s, label: m.event_class, tone: 'hot' });
+  }
+  const sw = timeline?.drop_switch ?? null;
+  if (sw?.switch && sw.cut_s != null) {
+    marks.push({ at_s: sw.cut_s, label: `⇄ ${sw.to_scene_name ?? 'switch'}`, tone: 'accent' });
   }
 
   return (
@@ -127,6 +140,24 @@ export default function SequencePreviewOverlay({ scene, onClose }: {
           <span style={{ fontVariantNumeric: 'tabular-nums', width: 56 }}>{lullGapMs} ms</span>
         </label>
 
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, margin: '4px 0' }}>
+          <input type="checkbox" checked={dropSwitch}
+            onChange={(e) => setDropSwitch(e.target.checked)} />
+          <span>Show the drop switch — the scene change this drop would make once the scene has grown stale</span>
+          <HelpLink topic="drop-led-switch" title="When a drop changes the scene" />
+        </label>
+        {sw && (
+          <div style={{ fontSize: 12, padding: '6px 8px', borderRadius: 6, marginBottom: 4,
+                        background: 'var(--panel-bg, #1a1024)' }}>
+            <b>Drop switch:</b> {sw.sentence}
+            {sw.switch && sw.lull_told && sw.moment === 'drop' && (
+              <> The lull is told to leave {sw.lull_told.keep} piece{sw.lull_told.keep === 1 ? '' : 's'}
+                {Object.keys(sw.lull_told.next).length > 0 && (
+                  <> for {[...new Set(Object.values(sw.lull_told.next))].join(', ')}</>
+                )}.</>
+            )}
+          </div>
+        )}
         {holdExpired && (
           <div style={{ fontSize: 12, padding: '6px 8px', borderRadius: 6, marginBottom: 4,
                         background: 'var(--accent)', color: '#1a1024' }}>

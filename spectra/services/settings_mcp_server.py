@@ -673,6 +673,14 @@ async def redetect_drop_sequences(uri: Optional[str] = None) -> dict:
 
 
 @mcp.tool()
+async def explain_drop_switch(sequence: Optional[int] = None,
+                              uri: Optional[str] = None) -> dict:
+    """Why a drop sequence did -- or did not -- change the scene this play
+    (the drop-led scene switch); omit sequence for every decision so far."""
+    return await _call("explain_drop_switch", sequence=sequence, uri=uri)
+
+
+@mcp.tool()
 async def drop_detection_summary() -> dict:
     """How many songs have drop detection, and how many edits each one
     carries -- library-wide, not one song."""

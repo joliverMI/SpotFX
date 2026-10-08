@@ -446,3 +446,52 @@ def test_a_flare_refire_still_cancels_its_own_pending_release(tmp_path, monkeypa
             await host.shutdown()
 
     _run(main())
+
+
+def test_the_sequence_preview_performs_the_drop_led_cut_on_the_hold(
+        tmp_path, monkeypatch):
+    """THE DROP-LED SWITCH in the preview (spectra/services/drop_switch.py,
+    phase_preview.switch_for): with a switch planned ON the drop, the
+    charge and lull run on the held scene, the drop step CUTS to the target
+    (no crossfade on the virtual) with the target's own drop armed, and the
+    lap's release hands the held scene back for the next lap."""
+    from spectra.services import drop_switch as dsw
+    from spectra.services import flare_preview_hold as fph
+    from spectra.services import phase_preview
+    _own(monkeypatch, tmp_path)
+    held = _scene("Orbits", "orbits", {"reverse": False})
+    target = _scene("Black Hole", "blackhole", {"reverse": False})
+    plan = dsw.decide(
+        key="preview", uri=None, members={"charge": 0, "lull": 1, "drop": 2},
+        showing=dsw.Showing(dsw.SceneInfo(held.id, held.name, "orbits"), ("h", 0), None, None),
+        record=dsw.StintRecord(drops_carried=1, carried_previous_drop=True),
+        settings=dsw.SwitchSettings(),
+        pick_target=lambda sid, rng: dsw.SceneInfo(target.id, target.name, "blackhole"))
+    assert plan.switch and plan.moment == dsw.MOMENT_DROP
+
+    async def main():
+        host, virtual = await _start_host(tmp_path, "orbits", {"reverse": False})
+        virtual._config["transition_mode"] = "Add"
+        virtual._config["transition_time"] = 0.5
+        try:
+            program = phase_preview.PhaseSequenceProgram(held, switch=(plan, target))
+            for cls in ("charge", "lull"):
+                await fph.open_program_hold(program, 0.8, step=cls,
+                                            heartbeat_timeout_s=30.0)
+                await _pump_frames_for(virtual, 0.05)
+                assert virtual.active_effect.type == "orbits"
+            res = await fph.open_program_hold(program, 0.8, step="drop",
+                                              heartbeat_timeout_s=30.0)
+            assert virtual.active_effect.type == "blackhole"
+            assert virtual._transition_effect is None, "the switch blended"
+            await _pump_frames_for(virtual, 0.05)
+            assert virtual.active_effect.config["phase"] == "drop"
+            await fph.open_program_hold(program, 0.8, step="release",
+                                        heartbeat_timeout_s=30.0)
+            assert virtual.active_effect.type == "orbits"
+            return res
+        finally:
+            facade.set_host(None)
+            await host.shutdown()
+
+    _run(main())
