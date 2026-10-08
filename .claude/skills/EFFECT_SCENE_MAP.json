@@ -103,7 +103,9 @@
         "tests/test_fish_disperse.py",
         "tests/test_fish_lull_searcher.py",
         "tests/test_fish_wall.py",
-        "scripts/render_fish_lull_searcher.py"
+        "scripts/render_fish_lull_searcher.py",
+        "tests/test_fish_big_fish.py",
+        "scripts/render_fish_big_fish.py"
       ]
     },
     "melt-effect": {
@@ -221,7 +223,8 @@
       "skill": ".claude/skills/fish-scene/SKILL.md",
       "files": [
         "scripts/seed_fish_scene.py",
-        "scripts/add_fish_swim_burst_flare.py"
+        "scripts/add_fish_swim_burst_flare.py",
+        "scripts/add_fish_big_fish_flare.py"
       ]
     },
     "house-scenes": {

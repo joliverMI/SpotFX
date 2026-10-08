@@ -43,6 +43,25 @@ start early while every sibling at 0 still fires on the mark (bridge-
 classified flares still fire the band atomically). It stays at 0 because
 that is his ruling — see the fish-effect skill's note before changing it.
 
+## "Big Fish" sits in the Shape lane TWICE — half the flares, by data
+
+`scripts/add_fish_big_fish_flare.py` declares two identical `big_fish`
+kinds, "Big Fish" and "Big Fish 2" (offset 0), and pools both into every
+flare band's existing "Shape" lane with "Fish Swim Burst" and "Reverse
+Momentarily (500ms)". His frequency words: "make it happen half the time",
+clarified as "just generally weight it so it's about as frequent as the
+other flares combined, don't build code to hit 50%". The engine's only
+weighting is the even pick-one lane, and a lane's members are kind NAMES,
+so the weight is the second copy: each flare picks one of four, a big fish
+on half of them (as often as the other two combined), and the burst and the
+reverse each drop from one in two to one in four. **The two copies differ
+only in name — an edit to one (an offset, switching it off) belongs on
+both**, or the frequency silently halves. The script refuses a band with no
+Shape lane (alone it would fire every flare), a non-Fish scene, and a "Big
+Fish"/"Big Fish 2" of another type. House Fish has no flare response, so
+the script says there is nothing to do there. Its look is the effect's own
+`big_fish_*` settings — see the fish-effect skill.
+
 ## The wall needs no scene data
 
 Since 2026-10-06 the fish glance alongside the panel's real lit edge
@@ -63,6 +82,11 @@ drop_switch.py` (and the drop-detection skill) is where the rule lives,
 including the hand-off table row for this effect; a lull leading into a switch is told the effect coming next through the lull hand-off hook (keep 1 for now — Fireworks' 3 keepers are phase 3).
 
 ## Sonic reach
+
+`set_flare_kind` takes `type="big_fish"` (the seeded kinds are "Big Fish"
+AND "Big Fish 2" — edit both; they carry no params/gain/hold). Its brightness/size/crossing
+times are entry params: `set_scene_entry_param` on scene "Fish", target
+"Matrix".
 
 `set_flare_kind` on the "Fish Swim Burst" kind accepts
 `trigger_offset_ms`/`hold_ms`/`params`/`gain` with omit-means-keep

@@ -260,6 +260,30 @@ def pulse_effect_ms(kind: FlareKind, conductor: DriftConductor) -> float | None:
     return None if longest is None else round(longest, 1)
 
 
+def big_fish_effect_ms(kind: FlareKind, conductor: DriftConductor,
+                       intensity: float) -> float | None:
+    """How long a big_fish flare's fish takes to cross the scene's Fish
+    panel at `intensity` — fx/effects/fish.big_fish_cross_s over the
+    scene's own Fish config (schema defaults beneath). None for any other
+    kind, or when no Fish virtual is in the scene (the flare then writes
+    nothing)."""
+    if kind.type != "big_fish":
+        return None
+    from fx import device_model
+    from fx.effects import fish as fish_fx
+    defaults = fish_fx.Fish2d.schema()({})
+    longest = None
+    for state in conductor.virtuals.values():
+        if state.effect_type not in device_model.BIG_FISH_EFFECTS:
+            continue
+        cfg = {**defaults, **state.param_baseline}
+        ms = 1000.0 * fish_fx.big_fish_cross_s(
+            max(float(intensity), fish_fx.BIG_FISH_POKE_FLOOR),
+            cfg["big_fish_cross_slow_s"], cfg["big_fish_cross_fast_s"])
+        longest = ms if longest is None else max(longest, ms)
+    return None if longest is None else round(longest, 1)
+
+
 async def build_timeline(scene: SceneV2, kind: FlareKind,
                          intensity: float) -> dict[str, Any]:
     """The isolated single-kind execution timeline: every write fire_kind
@@ -307,6 +331,8 @@ async def build_timeline(scene: SceneV2, kind: FlareKind,
 
     writes = list(responder.executor.writes)
     effect_ms = pulse_effect_ms(kind, conductor)
+    if effect_ms is None:
+        effect_ms = big_fish_effect_ms(kind, conductor, intensity)
     if not writes:
         anchor_s = animation_anchor_s(MIN_TIMELINE_S)
         return {
@@ -330,9 +356,10 @@ async def build_timeline(scene: SceneV2, kind: FlareKind,
     start_s = min(w["at"] for w in writes)
     end_s = max(w["at"] + w["duration_ms"] / 1000.0 for w in writes)
     if effect_ms is not None:
-        # A Pulse flare's write is one instant poke; the animation is the
-        # effect's own (the flash's fade, the flip's swing back), so the
-        # ruler's end marker is where that animation finishes.
+        # A Pulse or big-fish flare's write is one instant poke; the
+        # animation is the effect's own (the flash's fade, the flip's swing
+        # back, the big fish's crossing), so the ruler's end marker is
+        # where that animation finishes.
         end_s = max(end_s, start_s + effect_ms / 1000.0)
     duration_s = max(MIN_TIMELINE_S, (end_s - start_s) + TAIL_PAD_S + 2.0)
     anchor_s = animation_anchor_s(duration_s)

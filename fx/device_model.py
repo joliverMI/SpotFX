@@ -344,6 +344,16 @@ BLOB_RUSH_EFFECTS = frozenset({"blackhole"})
 # Pulse's own registered settings.
 PULSE_FLARE_EFFECTS = frozenset({"pulse"})
 
+# The effects carrying the BIG FISH flare poke (2026-10-08): `big_fish` (the
+# fire's intensity — one really large fish swims across the panel behind
+# the others, its speed and colour set by that intensity; see
+# fx/effects/fish.py's BIG FISH block). Same edge-detected, self-resetting
+# shape as the sets above and, like them, absent from the registry: it
+# rides ONLY the big_fish flare write (spectra scene_response._big_fish).
+# Its brightness, size and crossing times are Fish's own registered
+# settings.
+BIG_FISH_EFFECTS = frozenset({"fish"})
+
 
 # ── effect-parameter registry ────────────────────────────────────────────────
 

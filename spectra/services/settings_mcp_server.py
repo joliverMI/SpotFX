@@ -105,7 +105,7 @@ from fx import device_schema  # noqa: E402
 _KeyEnum = Literal[tuple(sorted(settings_console.SETTINGS_REGISTRY))]
 _SceneKeyEnum = Literal[tuple(sorted(scene_console.SCENE_SETTINGS_REGISTRY))]
 _FlareTypeEnum = Literal["drift_jump", "momentary", "permanent",
-                         "pulse_flash", "pulse_flip"]
+                         "pulse_flash", "pulse_flip", "big_fish"]
 _JumpEnum = Literal["color_set", "dice"]
 _CopyFieldEnum = Literal[tuple(scene_console.COPYABLE_DEVICE_ENTRY_FIELDS)]
 _DeviceTypeEnum = Literal[tuple(device_schema.device_types())]
@@ -315,6 +315,8 @@ async def set_flare_kind(scene_id: str, name: str, type: _FlareTypeEnum,  # noqa
     hold_ms is a momentary kind's spike length. min_intensity (0..1) fires
     the kind only ABOVE that intensity (pulse_flip defaults to 0.4).
     pulse_flash / pulse_flip are the Singles' Pulse flash and colour flip.
+    big_fish sends one really large fish across the Fish panel behind the
+    others (its look is Fish's own big_fish_* settings).
     On an update, params, gain, jump, hold_ms and min_intensity are
     omit-means-keep too: send only what changes."""
     return await _call("set_flare_kind", scene_id=scene_id, name=name, type=type,

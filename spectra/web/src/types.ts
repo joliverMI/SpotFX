@@ -131,9 +131,13 @@ export interface FlareKind {
    * pulse_flash / pulse_flip: the Singles' Pulse flares — a brightness
    *   flash that fades back in ~180 ms, and a 180° colour flip that swings
    *   back round the wheel over 0.75 beat; size/angle/timing are Pulse's own
+   *   settings, so no knobs on the kind.
+   * big_fish: one really large fish crosses every live Fish panel behind
+   *   the others — faster at higher intensity, its colour the scene's centre
+   *   colour turned 120-180°; brightness/size/crossing times are Fish's own
    *   settings, so no knobs on the kind. */
   type: 'drift_jump' | 'momentary' | 'permanent' | 'color_rotate' | 'firework_burst' | 'blob_rush'
-    | 'pulse_flash' | 'pulse_flip';
+    | 'pulse_flash' | 'pulse_flip' | 'big_fish';
   jump: 'color_set' | 'dice' | null;
   params: Record<string, ParamTarget>;
   gain: number;

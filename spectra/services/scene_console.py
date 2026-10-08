@@ -1570,7 +1570,14 @@ OPERATIONS: dict[str, SonicOperation] = {
             "colour turns 180 degrees at once, holds for ~0.5s, then swings "
             "back round the colour wheel over ~1s — no jump/params/gain/ "
             "hold_ms; angle, hold and return are Pulse's flip_degrees/ "
-            "flip_hold_s/flip_fade_s). "
+            "flip_hold_s/flip_fade_s), big_fish (one really large fish "
+            "swims across the Fish panel behind the ordinary fish, faster "
+            "at higher intensity, its colour the scene's centre colour "
+            "turned 120-180 degrees — no jump/params/gain/hold_ms; its "
+            "brightness, size and crossing times are Fish's own "
+            "big_fish_brightness/big_fish_size/big_fish_cross_slow_s/ "
+            "big_fish_cross_fast_s settings, reached with "
+            "set_scene_entry_param). "
             "min_intensity (0..1, any type) makes the kind fire only when "
             "the fire's intensity is ABOVE it; pulse_flip defaults to 0.4 "
             "(never fires at or below 0.4). Like enabled, OMIT it to keep "
@@ -1614,7 +1621,8 @@ OPERATIONS: dict[str, SonicOperation] = {
                 "scene_id": {"type": "string"},
                 "name": {"type": "string"},
                 "type": {"type": "string", "enum": ["drift_jump", "momentary", "permanent",
-                                                    "pulse_flash", "pulse_flip"]},
+                                                    "pulse_flash", "pulse_flip",
+                                                    "big_fish"]},
                 "jump": {"type": "string", "enum": ["color_set", "dice"]},
                 "params": {"type": "object", "additionalProperties": True},
                 "gain": {"type": "number"},

@@ -8805,6 +8805,19 @@ checks it against the schema. Proof: `scripts/check_fish_burst_bounds.py`,
    `wall_lookahead = 0` above. The drop scales by `lull_handoff.drop_scale`
    (0.75 intensity = the old drop exactly); untold = the fixed constants.
 
+11. **THE BIG FISH FLARE IS A BACKGROUND LAYER, NOT A PARTICLE (2026-10-08,
+   `big_fish` flare kind; phase 1 — the ordinary fish do not avoid it
+   yet).** The module's BIG FISH block, `fx/VENDOR.md` #65 and the
+   `fish-effect` skill are the binding statements. It lives in `self._big`
+   (screen space, no SoA slot) and `_big_fish_layer` composites it behind
+   the ordinary fish — **every path that writes `self.matrix` must call it
+   once a frame** (draw, `_fade_only`, `_draw_collapse` today) or a big
+   fish freezes there. Its frequency on the Fish scene is weighted by DATA,
+   not code: a lane picks evenly among member NAMES, so
+   `scripts/add_fish_big_fish_flare.py` pools TWO identical kinds ("Big
+   Fish", "Big Fish 2") in the "Shape" lane with its two other shape
+   flares — a big fish on half the flares. Edit both copies together.
+
 Every new fish knob is a first guess pending his eye; the effect ships
 tunable, not tuned. Proof: `scripts/check_fish.py`,
 `scripts/check_fish_avoidance.py`, `scripts/check_fish_lunge.py`,

@@ -15,7 +15,7 @@ plus DECLARED MECHANISMS:
   drift      — per-param creep/follow declarations (named profile with an
                inline one-off escape hatch, decision-4 pattern)
   flare_kinds — NAMED FLARE KINDS (the owner's item-8 shape, judged and
-               accepted): each kind is one of eight types —
+               accepted): each kind is one of nine types —
                  drift_jump  jumps the drift: the colour-set jump through
                              the shipped selector, or a 🎲 re-roll for shape
                  momentary   a parameter spike that RETURNS to where it was
@@ -34,6 +34,9 @@ plus DECLARED MECHANISMS:
                              and fades back in ~180 ms
                  pulse_flip  the Singles' Pulse colour turns 180° at once and
                              swings back round the wheel over 0.75 beat
+                 big_fish    one really large fish crosses every live Fish
+                             panel behind the others, its speed and
+                             contrasting colour set by the intensity
                Any kind may carry a min_intensity: it fires only ABOVE it
                (pulse_flip defaults to 0.4) — see FlareKind's own docstring.
                A momentary/permanent kind's params are ParamTarget
@@ -288,7 +291,7 @@ DEFAULT_MIN_INTENSITY: dict[str, float] = {"pulse_flip": 0.4}
 
 class FlareKind(BaseModel):
     """One NAMED flare kind — a first-class concept the scene declares and
-    its bands select. Eight types, binding semantics:
+    its bands select. Nine types, binding semantics:
       drift_jump  jump the drift — jump="color_set" rolls the shipped
                   colour-set selector and JUMPS to the pick; jump="dice"
                   re-rolls the scene's 🎲 bindings (fresh shape). Both
@@ -366,6 +369,22 @@ class FlareKind(BaseModel):
                   this type, so it never fires at or below 0.4. Like
                   pulse_flash: no jump/params/gain/hold_ms, nothing
                   carries, nothing releases.
+      big_fish    the BIG FISH flare (2026-10-08, his words: "a really
+                  large fish swims directly across the screen, in the
+                  background of the others, and at 60% brightness
+                  (tuneable). ... The speed it goes at is dependant on
+                  intensity. the color should be the 120 to 180 degree
+                  rotation of the central color of the scene"): on every
+                  virtual whose live effect is Fish (fx.device_model.
+                  BIG_FISH_EFFECTS) one big fish crosses the panel behind
+                  the ordinary fish, faster at higher intensity, its colour
+                  the gradient's centre turned 120 degrees (intensity 0.2
+                  or less) to 180 (0.5 or more). Brightness, size and the
+                  two crossing times are Fish's own settings
+                  (big_fish_brightness/big_fish_size/big_fish_cross_slow_s/
+                  big_fish_cross_fast_s), so like pulse_flash this type
+                  carries no jump/params/gain/hold_ms; nothing carries and
+                  nothing releases — the fish swims off on its own.
     min_intensity (any type; None = no gate, except pulse_flip, which
     defaults to 0.4) — the kind fires only when the fire's intensity is
     strictly ABOVE it ("only at intensities greater than .4"). Gated where
@@ -434,7 +453,8 @@ class FlareKind(BaseModel):
     is unaffected."""
     name: str = Field(min_length=1)
     type: Literal["drift_jump", "momentary", "permanent", "color_rotate",
-                  "firework_burst", "blob_rush", "pulse_flash", "pulse_flip"]
+                  "firework_burst", "blob_rush", "pulse_flash", "pulse_flip",
+                  "big_fish"]
     jump: Optional[Literal["color_set", "dice"]] = None
     params: dict[str, ParamTarget] = Field(default_factory=dict)
     gain: float = Field(default=1.0, ge=0.0)
@@ -525,6 +545,19 @@ class FlareKind(BaseModel):
                     f"ramp-in, dwell, and fade-back all scale from the "
                     f"fire's own intensity (scene_response.color_rotate_* — "
                     f"see FlareKind's own docstring); params/gain/hold_ms "
+                    f"don't apply here and would silently do nothing")
+        elif self.type == "big_fish":
+            if self.jump is not None:
+                raise ValueError(
+                    f"kind '{self.name}' is big_fish — jump belongs on a "
+                    f"drift_jump kind")
+            if self.params or self.gain != 1.0 or self.hold_ms is not None:
+                raise ValueError(
+                    f"kind '{self.name}' is big_fish — its brightness, size "
+                    f"and speed are the Fish effect's own settings "
+                    f"(big_fish_brightness/big_fish_size/"
+                    f"big_fish_cross_slow_s/big_fish_cross_fast_s — see "
+                    f"FlareKind's own docstring); params/gain/hold_ms "
                     f"don't apply here and would silently do nothing")
         elif self.type == "blob_rush":
             if self.jump is not None:

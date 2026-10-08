@@ -5,8 +5,8 @@ description: >
   effect behind the Fish scene, built as a wholesale copy of Orbits V2's
   bands/kinds but with completely different kinematics. Load before
   touching swim speed, avoidance, the camera window, wake/trail rendering,
-  dispersal, the lull's searching keeper / the intensity-scaled drop, or
-  the swim-burst flare — every one of these has a shipped
+  dispersal, the lull's searching keeper / the intensity-scaled drop, the
+  swim-burst flare or the big-fish flare — every one of these has a shipped
   invariant that isn't visible from reading the code cold.
 ---
 
@@ -281,6 +281,39 @@ its look-ahead is picked; a due burst waits for one; none during a
 charge/lull/drop or an outgoing crossfade; a burst gives up its hold once
 the wall presses hard.
 
+## The BIG FISH flare (2026-10-08) — a background layer, phase 1 only
+
+His words: "a really large fish swims directly across the screen, in the
+background of the others, and at 60% brightness (tuneable) ... The speed it
+goes at is dependant on intensity. the color should be the 120 to 180
+degree rotation of the central color of the scene". The BIG FISH block at
+the top of `fish.py` is the binding statement; what is not visible cold:
+
+- **It is NOT a particle.** No SoA slot, no steering, no wall, no camera:
+  `self._big` is a short list of dicts swimming straight across in SCREEN
+  space, drawn by `_big_fish_layer` into its OWN buffer. That is what makes
+  it "background": the layer is hidden wherever the ordinary fish's body
+  layer is lit (fully at `BIG_FISH_OCCLUDE_AT`), then added — so it must be
+  composited at EVERY path that writes `self.matrix` (the main draw,
+  `_fade_only`, `_draw_collapse`), each calling it exactly once a frame.
+  A new compositing path needs the same call or a big fish freezes there.
+- **The silhouette is a MAX over discs, never a sum of splats** — that is
+  why 0.6 brightness is the level that actually shows (the ordinary fish's
+  `_splat_many` adds, and would over-brighten a long dense spine).
+- **Colour is re-read every frame** from the gradient's centre (0.5,
+  unrolled by `gradient_spin`), turned by `big_fish_hue_degrees` (120 at
+  ≤0.2, 180 at ≥0.5, linear) in a coin-flipped direction. Hue only — an
+  achromatic centre stays white/grey.
+- **Speed is linear in SPEED, not time**: `big_fish_cross_s` interpolates
+  1/T between `big_fish_cross_slow_s` (intensity 0) and `_fast_s`.
+- **The poke** `big_fish` (the fire's intensity, floored at
+  `BIG_FISH_POKE_FLOOR` so 0 still edges) is unregistered and self-resets,
+  the fireworks `burst_rockets` shape; `BIG_FISH_MAX` (3) cross at once.
+- **PHASE 2 (not built): the ordinary fish avoiding it** — he approves the
+  look first. The big fish's `x`/`y`/`length`/`half_w` per entry are what
+  an avoidance steer would read (screen px: subtract nothing, it ignores
+  the camera — convert the ordinary fish's world position to screen first).
+
 ## Everything else worth knowing before a change
 
 - **Body follows the RECORDED PATH, not a bend model**: the front half of
@@ -322,7 +355,9 @@ Every REGISTERED fish param (`config/effect_params.json`) — the wall's
 `wall_lookahead`/`wall_turn_strength` (the glance's speed widening and its
 arc divisor) and the solo burst's three included —
 — and the lull search's `search_speed`/`search_pause_s`/`search_reach`
-and the scaled drop's `drop_scale_min` —
+and the scaled drop's `drop_scale_min` — and the big fish's
+`big_fish_brightness`/`big_fish_size`/`big_fish_cross_slow_s`/
+`big_fish_cross_fast_s` —
 is reachable per scene entry through `get_scene_entry_params` /
 `set_scene_entry_param` (e.g. scene "House Fish", target "Matrix"),
 validated against the registry's own range. A new fish param is only
@@ -340,6 +375,10 @@ track plots on his real crystal shape), `tests/test_fish.py`, `test_fish_camera.
 and keep 0 + an untold drop bit for bit against the pinned pre-change
 module), `test_lull_handoff.py` (the hook); `scripts/
 render_fish_lull_searcher.py` writes the before/after GIFs.
+`test_fish_big_fish.py` (the big fish: both curves, crossing time, colour
+at 60%, behind the others, the lull dark, the engine poke, the preview
+ruler, the migration script); `scripts/render_fish_big_fish.py --out DIR`
+writes its speed/colour GIFs.
 History: AGENTS.md's "Fish (fx/effects/fish.py) — Orbits' twin" section —
 read that in full before a non-trivial change; it documents ~8 more
 PR-scoped fixes (lunge envelope, charge spread, camera window centring,

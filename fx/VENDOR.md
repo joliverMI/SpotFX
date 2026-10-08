@@ -1914,3 +1914,32 @@ against that commit.
     the untold orbits lull frame-for-frame and an unflagged fireworks adopt
     array-for-array against the PINNED pre-change modules; the Black Hole
     swallowing the cloud; Fish/Orbits/Squiggles lit on the cut frame).
+65. `effects/fish.py` (SpotFX-authored, #21): THE BIG FISH FLARE
+    (2026-10-08, his words: "add a flare to fish, where a really large fish
+    swims directly across the screen, in the background of the others, and
+    at 60% brightness (tuneable). ... The speed it goes at is dependant on
+    intensity. the color should be the 120 to 180 degree rotation of the
+    central color of the scene, so it contrasts. at .5 intensity or higher
+    180 degrees, scale linearly to .2 insesity = 120 degrees (either
+    direction)"). A new, unregistered, self-resetting poke key `big_fish`
+    (the fire's intensity, floored at `BIG_FISH_POKE_FLOOR`; written ONLY by
+    SpotFX's `big_fish` flare kind, `fx.device_model.BIG_FISH_EFFECTS`) is
+    edge-detected in `config_updated` like fireworks' `burst_rockets`; each
+    poke sends one large fish (`big_fish_size` of the panel width long, the
+    ordinary spine profile at `BIG_FISH_ASPECT` with a forked tail fin)
+    straight across in SCREEN space from fully off one side to fully off the
+    other (side a coin flip, height near the middle), crossing in
+    `big_fish_cross_s` (speed linear in intensity between
+    `big_fish_cross_slow_s` and `_fast_s`), coloured by the gradient's
+    centre turned `big_fish_hue_degrees` (120 at <=0.2, 180 at >=0.5) in a
+    coin-flipped direction, at `big_fish_brightness` (0.6). It is NOT a
+    particle (no SoA slot): `_big_fish_layer` draws it into its own buffer
+    as a soft-edged MAX over discs and hides it wherever the ordinary
+    fish's body layer is lit (fully at `BIG_FISH_OCCLUDE_AT`), so it reads
+    BEHIND them; the lull's dark multiplies it too. Composited at all three
+    paths that write `self.matrix` (draw, `_fade_only`, `_draw_collapse`).
+    With no poke the layer is never built, so every existing render is
+    unchanged. At most `BIG_FISH_MAX` (3) at once. Phase 1 only: the
+    ordinary fish do not avoid it yet. Evidence:
+    `tests/test_fish_big_fish.py`, `scripts/render_fish_big_fish.py`.
+    Unverified against his live room.

@@ -2220,6 +2220,50 @@
           "note": "How short and gentle the drop's rush gets on the quietest song, as a fraction of the full rush. A song at the automatic intensity ceiling (0.75) gets the full rush; a marked track at 1.0 runs 20% longer.",
           "help_topic": "fish-lull-search",
           "default": 0.4
+        },
+        "big_fish_brightness": {
+          "label": "Big Fish Brightness",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 1.0,
+          "aspect": "shape",
+          "note": "The big fish flare: how bright the big background fish is (0.6 = 60%). Its colour is the scene's centre colour turned 120-180 degrees by the flare's intensity.",
+          "help_topic": "fish-big-fish",
+          "default": 0.6
+        },
+        "big_fish_size": {
+          "label": "Big Fish Size",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.2,
+          "max": 1.2,
+          "aspect": "shape",
+          "note": "The big fish flare: its body length as a fraction of the panel width.",
+          "help_topic": "fish-big-fish",
+          "default": 0.65
+        },
+        "big_fish_cross_slow_s": {
+          "label": "Big Fish Cross Time (quiet)",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.5,
+          "max": 30.0,
+          "aspect": "shape",
+          "note": "The big fish flare: seconds to cross the panel at intensity 0. The speed rises evenly with intensity toward the loud time.",
+          "help_topic": "fish-big-fish",
+          "default": 7.0
+        },
+        "big_fish_cross_fast_s": {
+          "label": "Big Fish Cross Time (loud)",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.5,
+          "max": 30.0,
+          "aspect": "shape",
+          "note": "The big fish flare: seconds to cross the panel at intensity 1.",
+          "help_topic": "fish-big-fish",
+          "default": 2.5
         }
       },
       "defaults": {
@@ -2277,7 +2321,11 @@
         "search_speed": 0.45,
         "search_pause_s": 1.2,
         "search_reach": 0.7,
-        "drop_scale_min": 0.4
+        "drop_scale_min": 0.4,
+        "big_fish_brightness": 0.6,
+        "big_fish_size": 0.65,
+        "big_fish_cross_slow_s": 7.0,
+        "big_fish_cross_fast_s": 2.5
       }
     },
     "gifplayer": {
