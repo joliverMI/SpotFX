@@ -95,6 +95,7 @@ export function useSaveRoomControls() { return { mutate: () => {}, isPending: fa
 export function useScenes() { return { data: FIXTURE.scenes }; }
 export function useEngineStatus() { return { data: FIXTURE.engineStatus }; }
 export function useAmbientStatusPush() {}
+export function useRoomControlsForcePush() {}
 export function useAmbientHueGroups() { return { data: { groups: [] } }; }
 export function useSpotColorSets() { return { data: FIXTURE.colorCards }; }
 export function useOwnership() { return { data: { owner: 'spectra' } }; }

@@ -661,6 +661,25 @@ export function useSaveRoomControls() {
   });
 }
 
+/** Force Scene/Force Colour's own state can change without this browser
+ * having made the PUT — the Light Show, Sonic, or another tab can all
+ * flip the pin (every one of them goes through room_controls.apply_patch,
+ * the one choke point that broadcasts this). useRoomControls() above has
+ * no poll (only a staleTime, refetched on focus/invalidation), so without
+ * this the top bar's lock icon kept showing a pin that had already been
+ * turned off elsewhere — his 2026-10-08 report. Folds the pushed fields
+ * straight into the SAME cache entry useRoomControls() reads, the
+ * useAmbientStatusPush() precedent. Mount once, high in the tree. */
+export function useRoomControlsForcePush() {
+  const qc = useQueryClient();
+  useEffect(() => onSpectraMessage((msg) => {
+    if (msg.type !== 'room_controls_force') return;
+    const { type: _type, ...force } = msg as Record<string, unknown>;
+    qc.setQueryData<RoomControlState>(['spectra-room-controls'], (prev) => (
+      prev ? { ...prev, ...force } as RoomControlState : prev));
+  }), [qc]);
+}
+
 /** The ambient_hue_group_ids picker's data source — every live Hue area
  * Ambient can be scoped to (spectra/services/ambient.py's list_groups()).
  * Topology is stable once the room is up, so this doesn't need the 3s

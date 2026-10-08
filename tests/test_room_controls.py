@@ -586,3 +586,94 @@ def test_api_ambient_groups_lists_every_live_hue_device(monkeypatch):
         {"id": "dining-hues", "name": "Dining Hues"},
         {"id": "hue-lights", "name": "Hue Lights"},
     ]}
+
+
+# ── apply_patch broadcasts a force-state change so every browser hears it ──
+#
+# His report, 2026-10-08: a Light Show step turning Force Colour off didn't
+# update the top bar's lock icon. Root cause: RoomControlsBar.tsx's
+# useRoomControls() has no poll of its own (only a staleTime), so a change
+# made by anything other than this browser's own PUT — the Light Show,
+# Sonic, another tab — never reached its cache. apply_patch is the ONE
+# writer all three paths share (the human PUT handler, show_actions.py,
+# and settings_console.apply_force_scene/apply_force_color), so it is the
+# one place a broadcast closes this for every writer at once.
+#
+# Deliberately keyed off a direct previous/state field comparison, NOT off
+# reconcile_force_scene_if_changed/reconcile_force_color_if_changed's own
+# return value — both intentionally return None on a release (see each
+# docstring's "RELEASE... intentionally does nothing live" /
+# test_reconcile_force_scene_if_changed_ignores_disable above), which is
+# exactly the edit this broadcast must not miss.
+
+@pytest.fixture
+def force_pushes(monkeypatch):
+    """Collect every room_controls_force message apply_patch broadcasts
+    over the SPECTRA websocket, without a socket."""
+    from spectra.services import ws
+    seen: list = []
+
+    async def fake_broadcast(payload):
+        seen.append(payload)
+
+    monkeypatch.setattr(ws.ws_manager, "broadcast", fake_broadcast)
+    return seen
+
+
+def test_apply_patch_broadcasts_when_force_colour_turns_off(force_pushes):
+    from spectra.services import room_controls as rc
+
+    rc.save_room_controls(rc.RoomControlState(
+        force_color_enabled=True, force_color_target_id="set-1"))
+    _run(rc.apply_patch({"force_color_enabled": False}))
+
+    assert force_pushes == [{
+        "type": "room_controls_force",
+        "force_scene_enabled": False, "force_scene_scene_id": None,
+        "force_color_enabled": False, "force_color_target_id": "set-1",
+    }]
+
+
+def test_apply_patch_broadcasts_when_force_scene_turns_off(force_pushes):
+    from spectra.services import room_controls as rc
+
+    rc.save_room_controls(rc.RoomControlState(
+        force_scene_enabled=True, force_scene_scene_id="scene-1"))
+    _run(rc.apply_patch({"force_scene_enabled": False}))
+
+    assert force_pushes == [{
+        "type": "room_controls_force",
+        "force_scene_enabled": False, "force_scene_scene_id": "scene-1",
+        "force_color_enabled": False, "force_color_target_id": None,
+    }]
+
+
+def test_apply_patch_broadcasts_when_force_colour_turns_on(force_pushes):
+    """The broadcast fires on the field diff alone, independent of what
+    reconcile_force_color_if_changed itself resolves to (here, a pinned id
+    that doesn't exist — "skipped", not an error) — the same shape covers
+    the Light Show pinning a real set, which needs no further mocking to
+    prove this half."""
+    from spectra.services import room_controls as rc
+
+    rc.save_room_controls(rc.RoomControlState(force_color_enabled=False))
+    _run(rc.apply_patch({"force_color_enabled": True, "force_color_target_id": "set-1"}))
+
+    assert force_pushes == [{
+        "type": "room_controls_force",
+        "force_scene_enabled": False, "force_scene_scene_id": None,
+        "force_color_enabled": True, "force_color_target_id": "set-1",
+    }]
+
+
+def test_apply_patch_does_not_broadcast_on_an_unrelated_edit(force_pushes):
+    """A brightness nudge while a pin stays exactly as it was must not
+    flood every open tab with a no-op force-state push."""
+    from spectra.services import room_controls as rc
+
+    rc.save_room_controls(rc.RoomControlState(
+        force_scene_enabled=True, force_scene_scene_id="scene-1",
+        brightness_multiplier=1.0))
+    _run(rc.apply_patch({"brightness_multiplier": 0.5}))
+
+    assert force_pushes == []
