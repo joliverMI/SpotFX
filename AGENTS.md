@@ -4618,6 +4618,25 @@ fm/house-handover-polish)** — all found the same cutover afternoon:
   while in flight, then `owner`/`activation` once it lands) for the
   outcome. Spec: `tests/test_handover.py` ("proof 9").
 
+**A DUPLICATE DEVICE ROW IS A SECOND WRITER, AND THIS SEAM CANNOT SEE IT
+(sconce-flicker-tv-mode, 2026-10-07, the Admiral: "The two sconces keep
+turning on while I'm watching TV").** His kitchen left sconce existed
+TWICE in `fx-live/config.json` (same MAC, one row backing a virtual and
+obeying TV mode's own off list, the stray duplicate backing nothing and
+falling into `desired()`'s own default-everything-ON fallback) — the two
+rows fought every 60 s drift check, and the right sconce followed the
+left one's power-on over its WLED UDP sync group. `device_usage.py`
+already named the duplicate (`duplicate_of`), but `desired()` never
+consulted it. `house_fixtures._duplicate_ignore_map` (its own docstring is
+the binding statement) now skips — never writes, withholds, or drift-
+checks — any in-scope row whose hardware_id matches another in-scope row
+that backs a virtual, or that `device_usage` flags `duplicate_of`; virtual
+membership always outranks merely being named in a mode's plan, so an
+interim mode edit naming the duplicate too (as this incident's own
+same-night workaround did) changes nothing — the duplicate stays skipped
+under every mode. Logged once per (duplicate, winner) pair, not every
+tick. Spec: `tests/test_house_fixtures.py` §11.
+
 **THE ROOM MAP VIEW (Devices → Live → Room map; 2026-10-06, phase 3 of the
 same plan).** `spectra/services/room_view.py`'s docstring is the binding
 statement (server); `spectra/web/src/live/roomMap.ts`'s is the client's. Six
