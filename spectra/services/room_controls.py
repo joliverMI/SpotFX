@@ -1392,6 +1392,16 @@ async def reconcile_force_color_if_changed(previous: RoomControlState,
     return result
 
 
+#: The four fields the top bar's lock icons read (RoomControlsBar.tsx).
+#: Compared directly against `previous`/`state` below rather than keyed off
+#: reconcile_force_scene_if_changed/reconcile_force_color_if_changed's own
+#: return value — both of those intentionally return None on a release
+#: (True -> False, see each docstring's own "RELEASE... intentionally does
+#: nothing live"), which is exactly the edit this broadcast must not miss.
+FORCE_STATE_FIELDS = ("force_scene_enabled", "force_scene_scene_id",
+                     "force_color_enabled", "force_color_target_id")
+
+
 async def apply_patch(body: object, *, ambient_snap: bool = False) -> dict:
     """THE ONE ROOM-CONTROLS WRITER: merge a partial body onto the stored
     state, save it, and run every reconciler a save owes — the body of
@@ -1399,6 +1409,19 @@ async def apply_patch(body: object, *, ambient_snap: bool = False) -> dict:
     Show (spectra/services/show_actions.py) are the same write and can never
     diverge on which reconcilers a change runs. Raises RoomControlsPatchError
     on a body that does not validate (the handler maps it to 422).
+
+    A Force Scene/Force Colour edit made HERE — by the human PUT handler,
+    by the Light Show, or by Sonic (settings_console.apply_force_scene/
+    apply_force_color both call this, never room_controls.save_room_
+    controls directly) — is the ONE place all three writers agree a pin
+    flipped. The top bar's lock icons (RoomControlsBar.tsx) read
+    force_scene_enabled/force_color_enabled from a plain poll-free query
+    (useRoomControls), so a browser that didn't make this PUT itself would
+    otherwise never hear about the change (found live, 2026-10-08: a Light
+    Show step turning Force Colour off left the top bar still showing the
+    lock). Broadcasting here, rather than teaching the top bar to poll,
+    keeps the fix at the one choke point every real writer already funnels
+    through.
 
     Returns the response dict the PUT handler has always returned:
     {"status": "saved", **state, plus any *_result keys that fired}."""
@@ -1421,6 +1444,15 @@ async def apply_patch(body: object, *, ambient_snap: bool = False) -> dict:
     force_color_result = await reconcile_force_color_if_changed(previous, state)
     if force_color_result is not None:
         response["force_color_result"] = force_color_result
+    if any(getattr(previous, f) != getattr(state, f) for f in FORCE_STATE_FIELDS):
+        from spectra.services.ws import ws_manager
+        await ws_manager.broadcast({
+            "type": "room_controls_force",
+            "force_scene_enabled": state.force_scene_enabled,
+            "force_scene_scene_id": state.force_scene_scene_id,
+            "force_color_enabled": state.force_color_enabled,
+            "force_color_target_id": state.force_color_target_id,
+        })
     # THE A/V LEAD APPLY RE-BASES THE KNOWN BUFFER's reference (spectra/
     # services/known_buffer.py). That measurement was taken with the buffer
     # AS IT STOOD, so it already absorbed whatever the buffer was at that

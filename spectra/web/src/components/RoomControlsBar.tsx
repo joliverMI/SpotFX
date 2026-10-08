@@ -44,7 +44,7 @@ import { useDebouncedApply } from '../lib/useDebouncedApply';
 import { useRecentChoices } from '../lib/useRecentChoices';
 import {
   useAmbientHueGroups, useAmbientStatusPush, useEngineStatus, useRoomControls,
-  useSaveRoomControls, useScenes,
+  useRoomControlsForcePush, useSaveRoomControls, useScenes,
   useSpotColorSets,
 } from '../queries';
 import type {
@@ -175,6 +175,11 @@ export default function RoomControlsBar() {
   // 3s poll above cannot promise — this folds the gate's own pushed
   // ambient_status straight into that same cache entry.
   useAmbientStatusPush();
+  // Force Scene/Force Colour can flip from the Light Show, Sonic, or
+  // another tab — this folds that push into the room-controls cache so
+  // the lock icon below never shows a stale pin (useRoomControls has no
+  // poll of its own).
+  useRoomControlsForcePush();
   const { data: hueGroupsData } = useAmbientHueGroups();
   const ambientLive = engineStatus?.ambient;
   const hueGroups = hueGroupsData?.groups ?? [];

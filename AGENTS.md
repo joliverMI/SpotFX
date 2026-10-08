@@ -2044,6 +2044,30 @@ unbounded where the old mode labels were fixed strings. Spec: `scripts/
 check_topbar_scene_colour_names.mjs` (mounts the real `RoomControlsBar.tsx`
 under jsdom against a fixture data layer).
 
+**The lock icon didn't update when something OTHER THAN this browser's own
+PUT flipped the pin (2026-10-08, his report: turning off Force Colour from
+the Light Show "didn't seem to update the icon/button on the top bar").**
+`useRoomControls()` (`spectra/web/src/queries.ts`) has no poll of its own —
+only a 10s `staleTime`, refetched on mount/window-refocus/this-browser's-
+own-save — so a Light Show step, Sonic, or another tab flipping
+`force_scene_enabled`/`force_color_enabled` through `room_controls.
+apply_patch` (the one choke point all three share) never reached a
+different tab's cache. `apply_patch` now broadcasts `{"type":
+"room_controls_force", ...the four force fields...}` on the SPECTRA
+websocket whenever any of them actually changed — compared directly
+against `previous`/`state`, NOT keyed off `reconcile_force_scene_if_
+changed`/`reconcile_force_color_if_changed`'s own return value, since both
+of those intentionally return `None` on a release (turning OFF is exactly
+the miss this exists to close). `useRoomControlsForcePush()` is the client
+half (mounted once in `RoomControlsBar.tsx`, next to `useAmbientStatusPush`,
+same precedent: fold the push straight into the SAME `['spectra-room-
+controls']` cache entry `useRoomControls()` reads). Spec:
+`tests/test_room_controls.py` (the broadcast fires on a release, fires on
+an enable/repin, and stays silent on an unrelated field) + `scripts/
+check_room_controls_force_push.mjs` (the real `queries.ts` hooks under a
+real `@tanstack/react-query` client, proving the push lands with no
+refetch).
+
 **Temporary scene disable** (2026-08-18, his ask: "add an ability to
 disable a scene temporarily") — `SceneV2.disabled: bool` (default False),
 a manual reversible toggle, no timer/expiry. STRONGER than mode
