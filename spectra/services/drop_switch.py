@@ -507,6 +507,11 @@ def scene_virtual_effects(scene: Any) -> dict[str, str]:
                 vids = device_model.get_virtuals_for_category(e.target)
             except Exception:                            # noqa: BLE001
                 vids = []
+        elif e.target_kind == "all":
+            try:
+                vids = device_model.get_all_virtual_ids()
+            except Exception:                            # noqa: BLE001
+                vids = []
         else:
             continue
         for vid in vids:

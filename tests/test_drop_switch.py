@@ -194,6 +194,22 @@ def _ctx(virtuals, lull_s=2.0):
                        position_ms=14_000)
 
 
+def test_scene_virtual_effects_resolves_an_all_kind_entry(monkeypatch):
+    from fx import device_model as dm
+    from types import SimpleNamespace as NS
+    monkeypatch.setattr(dm, "get_all_virtual_ids", lambda: ["crystal", "strip", "single"])
+    monkeypatch.setattr(dm, "get_virtuals_for_category",
+                        lambda c: {"Strips": ["strip"]}.get(c, []))
+    scene = NS(devices=[
+        NS(target_kind="all", target=None, effect_type="power"),
+        NS(target_kind="category", target="Strips", effect_type="melt"),
+        NS(target_kind="virtual", target="crystal", effect_type="radial"),
+    ])
+    assert ds.scene_virtual_effects(scene) == {
+        "crystal": "radial", "strip": "melt", "single": "power",
+    }
+
+
 def test_the_lull_is_told_what_the_drop_will_install(monkeypatch):
     from fx import device_model as dm
     monkeypatch.setattr(dm, "get_virtuals_for_category",
