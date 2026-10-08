@@ -66,7 +66,7 @@ export function useLightShowDrag(opts: {
       if (!d) return false;
       const { x } = rel(ev);
       const raw = g.xToTime(x) + d.grabMs;
-      const ms = snapCueMs(raw, opts.durationMs, g.w, opts.getBeats());
+      const ms = snapCueMs(raw, opts.durationMs, g.w, opts.getBeats(), g.win.endMs - g.win.startMs);
       lastMs.current = ms;
       setLiveMs({ level: d.level, ms });
       return true;

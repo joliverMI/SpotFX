@@ -8,7 +8,9 @@
  *   TWO   — a drag snaps to 20 ms and never leaves the song.
  *   THREE — a drag snaps to the nearest beat within its pixel radius
  *           first, falling back to the 20 ms grid (2026-10-08, the
- *           Admiral: "snap-to-beat as the mouse has").
+ *           Admiral: "snap-to-beat as the mouse has"), and a caller whose
+ *           pixel width spans a narrower window than the full song (the
+ *           Timeline canvas, zoomed in) scales the radius to THAT window.
  *   FOUR  — rawMsAt is unsnapped (the "no jump" grab-offset arithmetic).
  */
 import { execFileSync } from 'node:child_process';
@@ -64,6 +66,17 @@ ok(snapCueMs(150_011, 200_000, 1000, beats) === 150_020,
   'far outside the radius: falls back to the grid, never a wrong beat');
 ok(snapCueMs(-500, 200_000, 1000, beats) >= 0 && snapCueMs(500_000, 200_000, 1000, beats) <= 200_000,
   'still clamped to the song either way');
+
+// A 4-minute song (240_000ms) viewed through a 1000px canvas spanning
+// only a 10s window: widthPx covers the WINDOW, not the whole song, so
+// the radius must scale off the window's own span (passed as the 5th
+// arg) — never off durationMs, which would inflate it ~24x and snap to
+// a beat far outside the window's own touch radius.
+const farBeat = [{ ms: 100_250 }]; // 250ms from the raw position below
+ok(snapCueMs(100_000, 240_000, 1000, farBeat, 10_000) === 100_000,
+  'a window-scoped radius leaves a beat outside the WINDOW\'s own touch radius alone');
+ok(snapCueMs(100_000, 240_000, 1000, farBeat) === 100_250,
+  'omitting the window span (the pre-fix canvas call shape) wrongly reaches that same far beat');
 
 console.log('FOUR — rawMsAt is unsnapped (the no-jump grab-offset arithmetic)');
 ok(rawMsAt(601, rect, 200_000) === 100_200, 'not rounded to any grid');

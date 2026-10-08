@@ -63,13 +63,20 @@ export function rawMsAt(clientX: number, rect: { left: number; width: number },
 
 /** Snap a raw drag position to the nearest beat within BEAT_SNAP_PX of
  *  the drag surface's current scale, else the flat SNAP_MS grid. `beats`
- *  absent/empty = grid-only (today's behaviour, unchanged). */
+ *  absent/empty = grid-only (today's behaviour, unchanged).
+ *
+ *  `widthPx` is assumed to span `durationMs` — true for the full-song bar
+ *  (ShowCueBar.tsx) but NOT for a zoomed canvas view, whose pixel width
+ *  spans only the current window. `scaleDurationMs`, when given, is the
+ *  span `widthPx` actually covers, used for the snap-radius conversion
+ *  only; `durationMs` still governs the clamp (the song's real length). */
 export function snapCueMs(rawMs: number, durationMs: number, widthPx: number,
-                          beats?: { ms: number }[] | null): number {
+                          beats?: { ms: number }[] | null, scaleDurationMs?: number): number {
   const dur = Math.max(1, durationMs);
   const clamped = Math.max(0, Math.min(dur, rawMs));
   if (beats?.length) {
-    const radiusMs = (BEAT_SNAP_PX / Math.max(1, widthPx)) * dur;
+    const scaleDur = Math.max(1, scaleDurationMs ?? dur);
+    const radiusMs = (BEAT_SNAP_PX / Math.max(1, widthPx)) * scaleDur;
     let best: number | null = null;
     let bestD = radiusMs;
     for (const b of beats) {
