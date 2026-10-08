@@ -580,6 +580,32 @@ def test_FINA_fireworks_implodes_into_fish_on_the_next_big_hit(monkeypatch):
     assert by_hit == 1
 
 
+def test_FINA_a_hit_landing_in_the_deadline_tick_still_fires_once(monkeypatch):
+    """next_big_hit admits a hit up to AND INCLUDING the deadline (`ms <=
+    until_ms`), so a hit's own release_ms can land in the SAME tick-crossing
+    window as the deadline safety net in _tick_late_switches — which used
+    to fire the deadline release (loud=True, its own direct call to
+    _fire_analysed_flare) AND let the hit's own ordinary _fire() crossing
+    fire the same flare a second time. Fireworks' drop at 158_208 (its next
+    sequence's own charge sits at 176_912, far enough away that no
+    "before_next_sequence" cut pre-empts this one) with beat_ms 476.002
+    deadlines at 163_920; a flare at 163_900 sits 20ms before it, both
+    inside the same STEP=200 tick bucket."""
+    fix, room, plans = _meld_sweep(monkeypatch, "fish", extra_flares=[(163_900, 0.99)])
+    out = [p for p in plans.values() if p.switch and p.handoff == ds.HANDOFF_IMPLODE_ON_HIT
+           and p.drop_ms == 158_208]
+    assert out
+    p = out[0]
+    assert p.release_by == "hit" and p.release_ms == 163_900
+    # both moments really do land in one tick's (last, position_ms] window
+    assert 0 < p.deadline_ms - p.release_ms < STEP
+    assert p.outcome and p.outcome["at"] == ds.MOMENT_NEXT_HIT
+    assert sum(1 for e in room.log if e[0] == "flare"
+               and abs(e[1] - p.release_ms) <= STEP) == 1
+    assert sum(1 for e in room.log if e[0] == "switch" and e[2] == "fish"
+               and abs(e[1] - p.release_ms) <= STEP) == 1
+
+
 def test_FINA_with_no_hit_strong_enough_the_deadline_cuts_and_fires_the_flare(monkeypatch):
     fix, room, plans = _meld_sweep(monkeypatch, "fish",
                                    settings=ds.SwitchSettings(hit_threshold=0.999))

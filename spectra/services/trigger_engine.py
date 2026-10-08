@@ -1770,11 +1770,18 @@ class TriggerEngine:
     async def _tick_late_switches(self, last: int, position_ms: int) -> None:
         """Cut every armed late switch whose moment this tick reaches: the
         swallow delay, or (for a next-hit plan) the deadline — the hit
-        itself cuts from _fire, just before its flare fires."""
+        itself cuts from _fire, just before its flare fires. A `hit` plan's
+        own release_ms is always <= its deadline_ms (drop_switch.next_big_hit),
+        so the two can land in the SAME tick's (last, position_ms] crossing
+        window — if so, defer to the hit's own _fire() crossing instead of
+        releasing here too, or the incoming scene's flare fires twice."""
         for key, plan in list(self._late_pending.items()):
             if plan.release_by == "hit":
                 due_ms = plan.deadline_ms
                 at, loud = "deadline", True
+                if (plan.release_ms is not None
+                        and last < plan.release_ms <= position_ms):
+                    continue
             else:
                 due_ms = plan.release_ms
                 at = "deadline" if plan.release_by == "deadline" else plan.moment
