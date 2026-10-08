@@ -52,6 +52,16 @@ This scene's `roam_scale` 0.75 still bounds the fish's MIDDLES; the wall
 keeps their bodies on the crystal. Solo bursts are House Fish's, not this
 scene's (default off here).
 
+## Drops can switch INTO or OUT OF this scene (2026-10-08)
+
+This scene is drop-switch-ready (its Matrix effect is in
+`fx.device_model.CENTRE_BURST_EFFECTS`): once a scene has grown stale, a drop sequence
+may hard-cut into this one ON the drop, with this scene's own drop firing
+on the mark and adopting the outgoing pieces — or cut out of it the same
+way. Nothing in this scene's data opts in or out; `spectra/services/
+drop_switch.py` (and the drop-detection skill) is where the rule lives,
+including the hand-off table row for this effect; a lull leading into a switch is told the effect coming next through the lull hand-off hook (keep 1 for now — Fireworks' 3 keepers are phase 3).
+
 ## Sonic reach
 
 `set_flare_kind` on the "Fish Swim Burst" kind accepts

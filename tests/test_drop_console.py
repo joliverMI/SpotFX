@@ -314,3 +314,30 @@ def test_drops_domain_appears_in_the_meta_domain_enum():
     assert "drops" in sa._DOMAIN_NAMES
     schema = sa.ALL_OPERATIONS["list_operations"].tool_schema()
     assert "drops" in schema["input_schema"]["properties"]["domain"]["enum"]
+
+
+def test_explain_drop_switch_names_each_decision_and_refuses_a_bad_number():
+    """THE DROP-LED SCENE SWITCH, read only (drop_switch.py): what the trigger
+    clock decided for a sequence this play — and a sequence the song has
+    not reached yet says so rather than guessing."""
+    from spectra.services import drop_switch as dsw
+    _detected([(44_000, 40_000, 35_000, "confident"), (90_000, 86_000, 80_000, "confident")])
+    out = _run("explain_drop_switch")
+    assert out["status"] == "ok" and out["decisions"] == []
+    assert "no drop sequence has been reached" in out["summary"]
+    assert out["settings"]["drops_in_a_row"] == 2
+    dsw.record_plan(dsw.decide(
+        key="drop:44000", uri=URI,
+        members={"charge": 35_000, "lull": 40_000, "drop": 44_000},
+        showing=dsw.Showing(dsw.SceneInfo("o", "Orbits V2", "orbits"), ("o", 0), 5.0, 8.0),
+        record=dsw.StintRecord(drops_carried=1, carried_previous_drop=True),
+        settings=dsw.SwitchSettings(),
+        pick_target=lambda sid, rng: dsw.SceneInfo("s", "STAR", "radial")))
+    one = _run("explain_drop_switch", sequence=1)
+    assert one["decision"]["switched"] is True
+    assert one["decision"]["to_scene"] == "STAR" and one["decision"]["moment"] == "drop"
+    assert one["decision"]["cut_s"] == 44.0 and "hard cut on the drop" in one["summary"]
+    two = _run("explain_drop_switch", sequence=2)
+    assert two["decision"] is None and "not been reached" in two["summary"]
+    bad = _run("explain_drop_switch", sequence=7)
+    assert bad["status"] == "rejected" and "no drop sequence #7" in bad["reason"]

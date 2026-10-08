@@ -602,17 +602,21 @@ class PreviewContext:
         self.first_open = first_open
 
     async def apply_scene(self, writes: list[dict] | None = None,
-                          transition_ms: int | None = None) -> None:
+                          transition_ms: int | None = None,
+                          cut: bool = False) -> None:
         """Land the held scene's compiled writes (or another set of writes
         the program compiled itself — a transition's incoming scene) at the
-        real blend duration. The ONE way a program reaches the lights."""
+        real blend duration. The ONE way a program reaches the lights.
+        cut=True lands them as the drop-led switch's hard cut (fx_seam.
+        apply_writes' cut) — the sequence preview's switch."""
         payload = self.writes if writes is None else writes
         if not payload:
             return
-        await fx_seam.apply_writes(
-            payload,
-            transition_ms=(self.entry_ramp_ms if transition_ms is None
-                           else transition_ms))
+        ramp = self.entry_ramp_ms if transition_ms is None else transition_ms
+        if cut:
+            await fx_seam.apply_writes(payload, transition_ms=0, cut=True)
+        else:
+            await fx_seam.apply_writes(payload, transition_ms=ramp)
 
 
 class PreviewProgram:

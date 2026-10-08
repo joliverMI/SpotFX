@@ -9,7 +9,7 @@
  * from two bars before the charge to two bars after the drop. Read-only:
  * nothing here moves or edits a sequence. */
 import type { Win } from '../canvas/frame';
-import { PHASE_COLOR, stripTitle, type DisplaySeq } from '../dropSequences';
+import { PHASE_COLOR, stripTitle, switchChip, switchLine, type DisplaySeq } from '../dropSequences';
 
 export default function DropSequenceStrip({
   seqs, durationMs, capturedFromMs, selectedKey, getWin, getNowMs, onPick,
@@ -51,6 +51,18 @@ export default function DropSequenceStrip({
           )}
         </span>
       ))}
+      {seqs.map((s) => {
+        // THE DROP-LED SCENE SWITCH: where this sequence cuts to another
+        // scene (drop_switch.py), named on hover
+        const plan = s.view?.switch;
+        const chip = switchChip(plan);
+        if (!chip || plan?.cut_ms == null) return null;
+        return (
+          <span key={`sw-${s.key}`} className="drop-strip-switch"
+            style={{ left: pct(plan.cut_ms) }} title={switchLine(plan) ?? chip}
+            aria-label={chip}>⇄</span>
+        );
+      })}
       {seqs.map((s) => (
         <button
           key={s.key}

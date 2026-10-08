@@ -1867,3 +1867,24 @@ against that commit.
     on the SAME instance and proves both `bg_color_use` and the rendered
     background return to normal, the sequence the sticky-False defect
     needed to show up in).
+63. `virtuals.py` (`Virtual.set_effect(..., cut=False)`) + `facade.py`
+    (`_effects_put` reads `"cut": true` off the body): THE ONE-CALL HARD
+    CUT (2026-10-08, the drop-led scene switch — spectra/services/
+    drop_switch.py; the Admiral: "just switch at the drop ... switching at
+    the drop should be clean"). `set_effect` applies the VIRTUAL's own
+    stored crossfade (`transition_mode`/`transition_time` — his matrices
+    carry Add / 0.5 s) to every effect switch, whatever the write asked
+    for, so a scene switch could never be a cut through the seam. `cut=True`
+    skips that branch for THIS call only — the outgoing effect is cleared
+    now, so its deactivate() leaves its particle snapshot and the incoming
+    effect adopts it on its first draw (particle_handoff's existing
+    no-transition path) — and leaves the stored transition untouched, so
+    every later write blends exactly as before. Off by default: no caller
+    but the drop-led switch (and its sequence preview) passes it, so every
+    existing path is byte-identical. Evidence: `tests/
+    test_drop_switch_cut.py` — on a frame-stepped 72x37 matrix the stored
+    blend keeps a solid red outgoing effect for 26 frames where the cut
+    leaves none from the first, Black Hole's own drop burst is live on the
+    cut frame, the orbits snapshot reaches the registry only on the cut
+    path, and through the real `fx_seam` an ordinary switch still blends
+    before and after a cut.

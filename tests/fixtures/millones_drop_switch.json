@@ -1,0 +1,1744 @@
+{
+ "_about": "100 MILLONES \u2014 captured 2026-10-08 from a temp copy of the live SPECTRA stores (SPECTRA_STORAGE_DIR repointed, audio_shapes read in place): trigger_store.list_for_song (his authored triggers), the drop_sequences.json entry (detection + his edits), and analysed_flares.plan_for_song's output under his live room settings. Read by tests/test_drop_switch.py.",
+ "uri": "spotify:track:4Ixc50wY5pbUvNEogTQ2wL",
+ "name": "100 MILLONES",
+ "room": {
+  "scene_change_mode": "analysed",
+  "transitions_per_minute": 20.0,
+  "drop_floor": 0.1
+ },
+ "triggers": [
+  {
+   "id": "08b4e8a6-b2ef-4130-97a0-6930a6dd8747",
+   "timestamp_ms": 0,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_scene",
+    "scene_id": null,
+    "intensity": 0.89,
+    "color_set_id": null,
+    "scene_pool": null
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "205fb824-4edb-45bd-b4bc-5e922a95f9b6",
+   "timestamp_ms": 30280,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_scene",
+    "scene_id": null,
+    "intensity": 0.89,
+    "color_set_id": null,
+    "scene_pool": null
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "57a1c39d-978b-438f-bada-9fb2b6fd8dcb",
+   "timestamp_ms": 32436,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "flare",
+    "intensity": 0.89
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "bdd98561-4899-4882-8f3e-2adf952f3c06",
+   "timestamp_ms": 35443,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "flare",
+    "intensity": 0.89
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "8195042e-a547-4aad-9a6e-3d0ddd2e5af1",
+   "timestamp_ms": 37544,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "flare",
+    "intensity": 0.89
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "c3673070-da6f-491c-b537-aa8ad5a76b24",
+   "timestamp_ms": 41608,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "flare",
+    "intensity": 0.93
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "1ad5b78e-9c88-41d8-a747-0ac1f1d77e02",
+   "timestamp_ms": 44440,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "flare",
+    "intensity": 0.78
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "37083d36-b08e-49d3-afa0-bc63e712fe01",
+   "timestamp_ms": 46420,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "charge",
+    "intensity": 0.968
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "1a9a62d8-7453-4ff7-8306-caba8b4e9f56",
+   "timestamp_ms": 47900,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "lull",
+    "intensity": 0.78
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "c82f2ac7-6d98-4f84-878b-58f3e5cf3adf",
+   "timestamp_ms": 59260,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "drop",
+    "intensity": 0.923
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "6eb7fdb7-c2c8-4223-ad47-83a6ccd65c8f",
+   "timestamp_ms": 61890,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "flare",
+    "intensity": 0.923
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "6aa45ab8-8e78-408e-885b-d55a96c7bd1e",
+   "timestamp_ms": 64189,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "flare",
+    "intensity": 0.787
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "786323b4-1370-41a3-97f4-975e6d153d1b",
+   "timestamp_ms": 66040,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "flare",
+    "intensity": 0.89
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "97629221-0231-4a03-8356-6c2acc10bf64",
+   "timestamp_ms": 67140,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "flare",
+    "intensity": 0.787
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "e54a9aa8-51e4-4c42-b10c-004a94ea517f",
+   "timestamp_ms": 69240,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "flare",
+    "intensity": 1.0
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "c8986289-0acf-4e68-a135-0223d564f158",
+   "timestamp_ms": 73000,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "flare",
+    "intensity": 1.0
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "51b8b5d0-fe4e-4c26-a2df-7928fb3ffd4d",
+   "timestamp_ms": 75381,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "flare",
+    "intensity": 0.6
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "e98d68bb-d3d1-4bc1-b0e1-06ff747f633e",
+   "timestamp_ms": 78620,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "flare",
+    "intensity": 0.6
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "5b99cd16-5a0b-4f08-90eb-78b5fcfba611",
+   "timestamp_ms": 81920,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_scene",
+    "scene_id": null,
+    "intensity": 0.62,
+    "color_set_id": null,
+    "scene_pool": null
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "7c08f380-08cb-4ead-bf72-f7339defe302",
+   "timestamp_ms": 87080,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_scene_update",
+    "intensity": 0.501
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "92884696-a722-45c0-9e7e-fbbdc8664554",
+   "timestamp_ms": 88860,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "flare",
+    "intensity": 0.832
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "a1689c11-6e8c-4f2a-92c5-7d43e7ddd04c",
+   "timestamp_ms": 91182,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "flare",
+    "intensity": 0.832
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "24dd6d19-c0ea-40cc-a04a-7dd76bf0ec7e",
+   "timestamp_ms": 93841,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "flare",
+    "intensity": 0.854
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "8776be8f-dc00-49c3-962f-4342cfb34e47",
+   "timestamp_ms": 95954,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "flare",
+    "intensity": 0.854
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "f8535991-318b-4bbb-872e-73658d92713e",
+   "timestamp_ms": 97742,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "flare",
+    "intensity": 0.854
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "2837d875-d303-4aeb-9584-e4604adf5fb4",
+   "timestamp_ms": 100412,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_scene",
+    "scene_id": null,
+    "intensity": 0.35,
+    "color_set_id": null,
+    "scene_pool": null
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "f9e2b949-bb7c-4aa2-aa9d-55f8658fff02",
+   "timestamp_ms": 102014,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "flare",
+    "intensity": 0.81
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "0d59a559-7036-4117-bbd5-b7b55f9c70c0",
+   "timestamp_ms": 103942,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "flare",
+    "intensity": 0.81
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "104387b5-f4ec-4732-adbe-f4aa38f3ab67",
+   "timestamp_ms": 106531,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "flare",
+    "intensity": 0.312
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "14bd3569-8b78-41a3-a3cb-d370b36d76b0",
+   "timestamp_ms": 109166,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "flare",
+    "intensity": 0.312
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "1563d164-a908-4fbf-955a-3e48f0fcf791",
+   "timestamp_ms": 110954,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "flare",
+    "intensity": 0.285
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "0eca92d2-9d3c-478c-bd6a-2a76e8ca66ca",
+   "timestamp_ms": 114112,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "flare",
+    "intensity": 0.285
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "e1dffda3-e434-41b5-b439-bab6988349fe",
+   "timestamp_ms": 116080,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_scene",
+    "scene_id": null,
+    "intensity": 0.309,
+    "color_set_id": null,
+    "scene_pool": null
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "6ea64e9f-35ca-4fe2-9120-b7b7b82e1250",
+   "timestamp_ms": 119139,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "flare",
+    "intensity": 0.802
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "a85399c9-7a82-42d8-ab7f-50f3c4fdd46b",
+   "timestamp_ms": 121531,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "flare",
+    "intensity": 0.802
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "8b97f107-77e6-4b0d-b4e8-8b887eebe2c0",
+   "timestamp_ms": 123574,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "flare",
+    "intensity": 0.802
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "8b39cd3a-005d-41ff-8d53-58d057f15d91",
+   "timestamp_ms": 125664,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "flare",
+    "intensity": 0.802
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "f6d680bd-9911-463c-aedb-d575d8ce562c",
+   "timestamp_ms": 127440,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_scene",
+    "scene_id": null,
+    "intensity": 0.35,
+    "color_set_id": null,
+    "scene_pool": null
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "bf74acea-a7a8-49a0-ae80-cd33015c72a0",
+   "timestamp_ms": 133257,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "flare",
+    "intensity": 0.798
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "3dcbcf71-b30a-46ed-b8d9-8826791399b8",
+   "timestamp_ms": 136066,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "flare",
+    "intensity": 0.24
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "1ba02198-c21d-4ea4-a854-0dbb08360080",
+   "timestamp_ms": 138203,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "flare",
+    "intensity": 0.24
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "72d1ec57-1126-419f-b4e4-951ea7aeed26",
+   "timestamp_ms": 140734,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "flare",
+    "intensity": 0.24
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "cd50718b-8fff-4fd2-a376-b0d470b9e4af",
+   "timestamp_ms": 142881,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "flare",
+    "intensity": 0.24
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "7dcebe0f-31ec-4386-a711-55d7befb6cbc",
+   "timestamp_ms": 144751,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "flare",
+    "intensity": 0.24
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "7229e0b6-87ef-4c78-905a-84cab793e07f",
+   "timestamp_ms": 150160,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_scene",
+    "scene_id": null,
+    "intensity": 0.918,
+    "color_set_id": null,
+    "scene_pool": null
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "3d279beb-f208-4c88-a936-7489f384ccf5",
+   "timestamp_ms": 151914,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "flare",
+    "intensity": 0.918
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "118c5a4e-c2a4-460f-8073-3cae93d19b0a",
+   "timestamp_ms": 154793,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "flare",
+    "intensity": 0.175
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "c5b1591b-7253-41f9-85d5-1738d5af0520",
+   "timestamp_ms": 155840,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "flare",
+    "intensity": 0.175
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "25ed61f9-6f84-432f-870f-24b4a308c84b",
+   "timestamp_ms": 158200,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "flare",
+    "intensity": 0.175
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "e65c38da-be74-429c-9ba5-644245c6ef9b",
+   "timestamp_ms": 160563,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "flare",
+    "intensity": 0.175
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "ec08494f-21b2-4bbb-89d8-30569eadd054",
+   "timestamp_ms": 162560,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "flare",
+    "intensity": 0.248
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "76003dd3-409e-4ec4-8479-d11a66ce8faa",
+   "timestamp_ms": 164673,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "flare",
+    "intensity": 0.248
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "1fb9fa8a-d42d-4ca0-b3c1-34dadd6c594e",
+   "timestamp_ms": 166600,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_scene",
+    "scene_id": null,
+    "intensity": 0.637,
+    "color_set_id": null,
+    "scene_pool": null
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "1c9b891a-a1a3-4d66-9db0-cad3209266d9",
+   "timestamp_ms": 168737,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "flare",
+    "intensity": 0.637
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "e547e359-abd4-4669-9bee-c2a60b8f60be",
+   "timestamp_ms": 170513,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "flare",
+    "intensity": 0.637
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "85a18085-7023-4272-aa56-e907138a10fe",
+   "timestamp_ms": 172115,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "flare",
+    "intensity": 0.637
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "31f8b6b9-0fd2-4b21-8bc2-c4c8c26307da",
+   "timestamp_ms": 174426,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "flare",
+    "intensity": 0.941
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "de3a8f97-4c60-4478-9b78-ea635f2a290d",
+   "timestamp_ms": 176539,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "flare",
+    "intensity": 0.941
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "f18577c3-d57f-437e-8341-1bb28f94712d",
+   "timestamp_ms": 182228,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "flare",
+    "intensity": 0.32
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "860bb4f0-8958-4a66-808f-e8cc2b58b217",
+   "timestamp_ms": 183400,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_scene",
+    "scene_id": null,
+    "intensity": 0.27,
+    "color_set_id": null,
+    "scene_pool": null
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "5cf672bf-3272-48ad-80e7-350b360d169c",
+   "timestamp_ms": 188625,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "flare",
+    "intensity": 0.898
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "8d66f47c-119b-4bdc-aab3-bf7ade12861e",
+   "timestamp_ms": 192491,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "flare",
+    "intensity": 0.559
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "9beeed07-6a7d-4948-bff5-a84f83b09065",
+   "timestamp_ms": 194151,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "flare",
+    "intensity": 0.559
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "680e3f55-c1c0-4246-823f-75d440149ca9",
+   "timestamp_ms": 196670,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "flare",
+    "intensity": 0.559
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "75793072-b53d-47fc-8e82-66d5e09b9c39",
+   "timestamp_ms": 198400,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "flare",
+    "intensity": 0.559
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "f1ead1a1-0607-41c0-8497-4dd8c75be88d",
+   "timestamp_ms": 200580,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_scene",
+    "scene_id": null,
+    "intensity": 0.335,
+    "color_set_id": null,
+    "scene_pool": null
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "7aef058d-1267-4b24-ad5e-bcc0d9a15acb",
+   "timestamp_ms": 201640,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "flare",
+    "intensity": 0.64
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "e0d8f369-b0fd-4ae1-8ad9-98a1b6183155",
+   "timestamp_ms": 203706,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "flare",
+    "intensity": 0.335
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "b173e1d8-a507-4a20-8962-7fd59deb6a6e",
+   "timestamp_ms": 205459,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "flare",
+    "intensity": 0.126
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "a2971958-cb64-41d8-bc69-55392f8f8449",
+   "timestamp_ms": 208315,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "flare",
+    "intensity": 0.126
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "2b9869e5-43da-4a09-9dcd-f3a74463e41b",
+   "timestamp_ms": 211671,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "flare",
+    "intensity": 0.126
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "f69e12b8-913a-44ff-86c3-b63f7f98c39a",
+   "timestamp_ms": 215037,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "flare",
+    "intensity": 0.126
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "d16dc3af-a742-4410-a0b7-7cedb5bddd15",
+   "timestamp_ms": 217870,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_scene",
+    "scene_id": null,
+    "intensity": 0.126,
+    "color_set_id": null,
+    "scene_pool": null
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "5ea86912-5a34-4871-9af8-7e60163ad7c6",
+   "timestamp_ms": 218776,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "flare",
+    "intensity": 0.126
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "a48d7b48-51d2-48f8-ba46-34b95de0e5b0",
+   "timestamp_ms": 221527,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "flare",
+    "intensity": 0.42
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "49abc535-81a6-4d40-846f-f1667573094e",
+   "timestamp_ms": 223060,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_scene",
+    "scene_id": null,
+    "intensity": 0.126,
+    "color_set_id": null,
+    "scene_pool": null
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "ecfcac08-0e0d-47cf-bab2-45fa83b4c4e2",
+   "timestamp_ms": 225661,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "flare",
+    "intensity": 0.126
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "e722e38e-e767-4a5b-a35f-8ee93dc57d78",
+   "timestamp_ms": 227657,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "flare",
+    "intensity": 0.126
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "e1034adc-6dab-44f5-8de1-fcef69fe2348",
+   "timestamp_ms": 229387,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "flare",
+    "intensity": 0.126
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "17330646-66f1-4a5f-ae48-c53cb8918e88",
+   "timestamp_ms": 231140,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_response",
+    "event_class": "flare",
+    "intensity": 0.126
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  },
+  {
+   "id": "976c61c4-eb5b-4b69-92fa-2627b7692a21",
+   "timestamp_ms": 232952,
+   "enabled": true,
+   "source": "authored",
+   "generator_key": null,
+   "action": {
+    "kind": "fire_scene",
+    "scene_id": null,
+    "intensity": 0.126,
+    "color_set_id": null,
+    "scene_pool": null
+   },
+   "trigger_offset_ms": 0,
+   "snap_grid": null,
+   "snap_moved_ms": null,
+   "generator_stamp": null
+  }
+ ],
+ "drop_sequences_store": {
+  "detected": {
+   "uri": "spotify:track:4Ixc50wY5pbUvNEogTQ2wL",
+   "detector_version": "1",
+   "confident_score": 1.0,
+   "suggested_score": 0.7,
+   "drop_floor": 0.1,
+   "tempo_bpm": 112.35,
+   "beat_ms": 534.045,
+   "captured_from_ms": 29882,
+   "captured_to_ms": 235792,
+   "duration_ms": 237459,
+   "sequences": [
+    {
+     "key": "drop:39314",
+     "drop_ms": 39314,
+     "lull_ms": 37939,
+     "charge_ms": 32497,
+     "score": 0.773,
+     "tier": "suggested",
+     "break_beats": 2.57,
+     "step": 0.567,
+     "rise": 0.782,
+     "path": "step",
+     "loud_before": true,
+     "capped": false,
+     "notes": []
+    },
+    {
+     "key": "drop:59194",
+     "drop_ms": 59194,
+     "lull_ms": 47873,
+     "charge_ms": 43918,
+     "score": 1.101,
+     "tier": "confident",
+     "break_beats": 21.2,
+     "step": 0.781,
+     "rise": 0.436,
+     "path": "step",
+     "loud_before": true,
+     "capped": false,
+     "notes": [
+      "charge moved from 39314 ms to 43918 ms: it started inside the previous drop's two bars"
+     ]
+    },
+    {
+     "key": "drop:87070",
+     "drop_ms": 87070,
+     "lull_ms": 81962,
+     "charge_ms": 77306,
+     "score": 1.014,
+     "tier": "confident",
+     "break_beats": 9.56,
+     "step": 0.694,
+     "rise": 0.404,
+     "path": "step",
+     "loud_before": true,
+     "capped": false,
+     "notes": []
+    },
+    {
+     "key": "drop:96114",
+     "drop_ms": 96114,
+     "lull_ms": 94733,
+     "charge_ms": 91705,
+     "score": 0.793,
+     "tier": "suggested",
+     "break_beats": 2.59,
+     "step": 0.586,
+     "rise": 0.797,
+     "path": "step",
+     "loud_before": true,
+     "capped": false,
+     "notes": [
+      "charge moved from 87070 ms to 91705 ms: it started inside the previous drop's two bars"
+     ]
+    },
+    {
+     "key": "drop:116002",
+     "drop_ms": 116002,
+     "lull_ms": 104682,
+     "charge_ms": 100412,
+     "score": 0.944,
+     "tier": "suggested",
+     "break_beats": 21.2,
+     "step": 0.624,
+     "rise": 0.583,
+     "path": "step",
+     "loud_before": true,
+     "capped": false,
+     "notes": [
+      "charge moved from 96114 ms to 100412 ms: it started inside the previous drop's two bars"
+     ]
+    },
+    {
+     "key": "drop:127357",
+     "drop_ms": 127357,
+     "lull_ms": 125267,
+     "charge_ms": 120834,
+     "score": 1.132,
+     "tier": "confident",
+     "break_beats": 3.91,
+     "step": 0.819,
+     "rise": 0.587,
+     "path": "step",
+     "loud_before": true,
+     "capped": false,
+     "notes": [
+      "charge moved from 118835 ms to 120834 ms: it started inside the previous drop's two bars"
+     ]
+    },
+    {
+     "key": "drop:150084",
+     "drop_ms": 150084,
+     "lull_ms": 137267,
+     "charge_ms": 133860,
+     "score": 1.147,
+     "tier": "confident",
+     "break_beats": 24.0,
+     "step": 0.827,
+     "rise": 0.578,
+     "path": "step",
+     "loud_before": true,
+     "capped": false,
+     "notes": []
+    },
+    {
+     "key": "drop:155819",
+     "drop_ms": 155819,
+     "lull_ms": null,
+     "charge_ms": null,
+     "score": 0.905,
+     "tier": "suggested",
+     "break_beats": 4.0,
+     "step": 0.585,
+     "rise": 0.306,
+     "path": "step",
+     "loud_before": true,
+     "capped": false,
+     "notes": [
+      "lull and charge left out: they fell inside the previous drop's two bars (until 154356 ms)"
+     ]
+    },
+    {
+     "key": "drop:166594",
+     "drop_ms": 166594,
+     "lull_ms": 161485,
+     "charge_ms": 160587,
+     "score": 1.004,
+     "tier": "suggested",
+     "break_beats": 9.57,
+     "step": 0.684,
+     "rise": 0.41,
+     "path": "step",
+     "loud_before": true,
+     "capped": true,
+     "notes": [
+      "suggested, not confident: this song allows 5 confident sequences (one per 45 s) and stronger ones took them",
+      "charge moved from 153242 ms to 160587 ms: it started inside the previous drop's two bars"
+     ]
+    },
+    {
+     "key": "drop:221442",
+     "drop_ms": 221442,
+     "lull_ms": 217030,
+     "charge_ms": 212926,
+     "score": 1.029,
+     "tier": "confident",
+     "break_beats": 6.57,
+     "step": 0.709,
+     "rise": 0.54,
+     "path": "step",
+     "loud_before": true,
+     "capped": false,
+     "notes": []
+    }
+   ],
+   "excluded": [],
+   "stamp": "6dd3afc526a12dc6",
+   "detected_at": 1791416014809
+  },
+  "overrides": {
+   "drop:87070": {
+    "detected": {
+     "drop_ms": 87070,
+     "lull_ms": 81962,
+     "charge_ms": 77306,
+     "score": 1.014,
+     "tier": "confident"
+    },
+    "state": "confirmed",
+    "at": 1791332967024
+   },
+   "drop:96114": {
+    "detected": {
+     "drop_ms": 96114,
+     "lull_ms": 94733,
+     "charge_ms": 91705,
+     "score": 0.793,
+     "tier": "suggested"
+    },
+    "state": "confirmed",
+    "at": 1791332968110
+   },
+   "drop:116002": {
+    "detected": {
+     "drop_ms": 116002,
+     "lull_ms": 104682,
+     "charge_ms": 100412,
+     "score": 0.944,
+     "tier": "suggested"
+    },
+    "state": "confirmed",
+    "at": 1791332968907
+   },
+   "drop:127357": {
+    "detected": {
+     "drop_ms": 127357,
+     "lull_ms": 125267,
+     "charge_ms": 120834,
+     "score": 1.132,
+     "tier": "confident"
+    },
+    "state": "confirmed",
+    "at": 1791332970803
+   },
+   "drop:150084": {
+    "detected": {
+     "drop_ms": 150084,
+     "lull_ms": 137267,
+     "charge_ms": 133860,
+     "score": 1.147,
+     "tier": "confident"
+    },
+    "state": "confirmed",
+    "at": 1791332970803
+   },
+   "drop:221442": {
+    "detected": {
+     "drop_ms": 221442,
+     "lull_ms": 217030,
+     "charge_ms": 212926,
+     "score": 1.029,
+     "tier": "confident"
+    },
+    "state": "confirmed",
+    "at": 1791332970803
+   },
+   "drop:155819": {
+    "detected": {
+     "drop_ms": 155819,
+     "lull_ms": null,
+     "charge_ms": null,
+     "score": 0.905,
+     "tier": "suggested"
+    },
+    "state": "confirmed",
+    "at": 1791332991519
+   },
+   "drop:166594": {
+    "detected": {
+     "drop_ms": 166594,
+     "lull_ms": 161485,
+     "charge_ms": 160587,
+     "score": 1.004,
+     "tier": "suggested"
+    },
+    "state": "confirmed",
+    "at": 1791332992928
+   },
+   "drop:39314": {
+    "detected": {
+     "drop_ms": 39314,
+     "lull_ms": 37939,
+     "charge_ms": 32497,
+     "score": 0.773,
+     "tier": "suggested"
+    },
+    "state": "confirmed",
+    "at": 1791416509243
+   }
+  }
+ },
+ "plan": {
+  "scene_cues": [
+   {
+    "timestamp_ms": 68473,
+    "intensity": 0.964,
+    "generator_key": "section:39102",
+    "snap_grid": "librosa",
+    "snap_moved_ms": -511,
+    "strength": 0.07830000000000004,
+    "rank": 12,
+    "rank_of": 17
+   },
+   {
+    "timestamp_ms": 183284,
+    "intensity": 0.05,
+    "generator_key": "section:154436",
+    "snap_grid": "edge:down",
+    "snap_moved_ms": -1034,
+    "strength": 0.7432,
+    "rank": 1,
+    "rank_of": 17
+   },
+   {
+    "timestamp_ms": 203706,
+    "intensity": 0.932,
+    "generator_key": "section:173825",
+    "snap_grid": "edge:down",
+    "snap_moved_ms": -1,
+    "strength": 0.3043,
+    "rank": 7,
+    "rank_of": 17
+   },
+   {
+    "timestamp_ms": 228877,
+    "intensity": 0.193,
+    "generator_key": "section:198461",
+    "snap_grid": "edge:up",
+    "snap_moved_ms": 534,
+    "strength": 0.2247,
+    "rank": 8,
+    "rank_of": 17
+   }
+  ],
+  "flares": [
+   {
+    "timestamp_ms": 42478,
+    "intensity": 0.729,
+    "generator_key": "section:13595",
+    "snap_grid": "edge:down",
+    "snap_moved_ms": -999,
+    "rank": 10,
+    "rank_of": 17
+   },
+   {
+    "timestamp_ms": 76461,
+    "intensity": 0.981,
+    "generator_key": "section:44977",
+    "snap_grid": "edge:down",
+    "snap_moved_ms": 1602,
+    "rank": 17,
+    "rank_of": 17
+   },
+   {
+    "timestamp_ms": 122506,
+    "intensity": 0.832,
+    "generator_key": "section:93147",
+    "snap_grid": "edge:up",
+    "snap_moved_ms": -523,
+    "rank": 16,
+    "rank_of": 17
+   },
+   {
+    "timestamp_ms": 130494,
+    "intensity": 0.782,
+    "generator_key": "section:100612",
+    "snap_grid": "librosa",
+    "snap_moved_ms": 0,
+    "rank": 15,
+    "rank_of": 17
+   },
+   {
+    "timestamp_ms": 133860,
+    "intensity": 0.208,
+    "generator_key": "section:105059",
+    "snap_grid": "edge:down",
+    "snap_moved_ms": -1081,
+    "rank": 2,
+    "rank_of": 17
+   },
+   {
+    "timestamp_ms": 161481,
+    "intensity": 0.767,
+    "generator_key": "section:133190",
+    "snap_grid": "edge:down",
+    "snap_moved_ms": -1591,
+    "rank": 14,
+    "rank_of": 17
+   },
+   {
+    "timestamp_ms": 173183,
+    "intensity": 0.906,
+    "generator_key": "section:143836",
+    "snap_grid": "edge:down",
+    "snap_moved_ms": -535,
+    "rank": 11,
+    "rank_of": 17
+   },
+   {
+    "timestamp_ms": 191469,
+    "intensity": 0.134,
+    "generator_key": "section:161054",
+    "snap_grid": "edge:up",
+    "snap_moved_ms": 533,
+    "rank": 13,
+    "rank_of": 17
+   },
+   {
+    "timestamp_ms": 196218,
+    "intensity": 0.582,
+    "generator_key": "section:166766",
+    "snap_grid": "edge:down",
+    "snap_moved_ms": -430,
+    "rank": 4,
+    "rank_of": 17
+   }
+  ],
+  "rank_of": 17
+ }
+}

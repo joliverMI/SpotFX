@@ -185,6 +185,29 @@ def note_fired(scene: "SceneV2", intensity: float, *,
     _dwell_seconds = dwell_seconds(scene, intensity)
 
 
+def stint() -> Optional[tuple[str, int]]:
+    """The showing scene's run as an identity — (scene id, the ms it
+    latched) — or None when nothing is tracked. A re-fire of the same scene
+    is a NEW stint (it re-latches), which is exactly what the drop-led
+    switch's history wants (spectra/services/drop_switch.py)."""
+    if _active_scene_id is None or _entered_at_ms is None:
+        return None
+    return (_active_scene_id, _entered_at_ms)
+
+
+def shown_s(now_ms: Optional[int] = None) -> Optional[float]:
+    """Seconds the showing scene has been on since it latched, or None."""
+    if _entered_at_ms is None:
+        return None
+    now_ms = now_ms if now_ms is not None else int(time.time() * 1000)
+    return max(0.0, (now_ms - _entered_at_ms) / 1000.0)
+
+
+def latched_dwell_s() -> Optional[float]:
+    """The showing scene's own latched minimum hold, or None."""
+    return _dwell_seconds if _entered_at_ms is not None else None
+
+
 def reset() -> None:
     """Test/executable-spec seam for this module's process-global state —
     the same shape preview_pause.clear()/color_set_groups' cursor reset

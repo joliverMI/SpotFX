@@ -237,3 +237,28 @@ def test_a_scene_with_no_phase_capable_effect_says_so_rather_than_pretending():
     tl = _timeline(_scene(effect_type="concentric"))
     assert tl["phase_targets"] == []
     assert _timeline(_scene())["phase_targets"] == [VID]
+
+
+def test_the_ruler_carries_the_drop_led_switch_the_resolver_would_make(monkeypatch):
+    """THE DROP-LED SWITCH (spectra/services/drop_switch.py): the preview
+    asks the room's own resolver what it would do here once the scene has
+    grown stale, and draws the cut where it lands — on the drop's own fire
+    moment for a pair with a good hand-off. Off on request."""
+    from spectra.services import drop_switch as dsw
+    from spectra.services import scene_store
+    target = _scene(effect_type="radial")
+    target.name = "STAR"
+    scene_store.save(target)
+    monkeypatch.setattr(dsw, "default_pick_target",
+                        lambda intensity: (lambda sid, rng: dsw.SceneInfo(
+                            target.id, "STAR", "radial")))
+    scene = _scene(effect_type="orbits")
+    tl = _timeline(scene)
+    sw = tl["drop_switch"]
+    assert sw["switch"] and sw["to_scene_name"] == "STAR" and sw["moment"] == "drop"
+    drop = next(m for m in tl["marks"] if m["event_class"] == "drop")
+    assert sw["cut_s"] == drop["fire_at_s"]
+    assert sw["handoff"] == dsw.HANDOFF_CHOREOGRAPHED
+    from spectra.services import phase_preview
+    off = asyncio.run(phase_preview.build_timeline(scene, 0.7, drop_switch_enabled=False))
+    assert off["drop_switch"] is None

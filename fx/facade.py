@@ -627,6 +627,9 @@ async def _effects_put(host, virtual_id: str, body: dict) -> FacadeResponse:
     effect_config = body.get("config") or {}
     effect_type = body.get("type")
     fallback = _process_fallback(body.get("fallback", None))
+    # THE ONE-CALL CUT (deviation #63): `"cut": true` switches this write
+    # instantly, skipping the virtual's stored crossfade for this call only.
+    cut = bool(body.get("cut"))
 
     transition_ms = body.get("transition_ms")
     easing = body.get("easing", "linear")
@@ -700,7 +703,7 @@ async def _effects_put(host, virtual_id: str, body: dict) -> FacadeResponse:
                     type=effect_type,
                     config={**virtual.active_effect.config, **effect_config},
                 )
-                virtual.set_effect(effect, fallback=fallback)
+                virtual.set_effect(effect, fallback=fallback, cut=cut)
             else:
                 effect = virtual.active_effect
                 virtual.active_effect.update_config(effect_config)
@@ -708,7 +711,7 @@ async def _effects_put(host, virtual_id: str, body: dict) -> FacadeResponse:
             effect = host.effects.create(
                 ledfx=host, type=effect_type, config=effect_config
             )
-            virtual.set_effect(effect, fallback=fallback)
+            virtual.set_effect(effect, fallback=fallback, cut=cut)
     except (ValueError, RuntimeError) as msg:
         return _internal(f"Unable to set effect: {msg}")
 

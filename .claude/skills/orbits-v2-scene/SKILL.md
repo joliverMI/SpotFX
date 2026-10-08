@@ -55,6 +55,16 @@ config `scripts/check_orbits_drop_burst_and_persistence.py` measures
 against; check that script's own docstring before assuming a different
 `particle_count` value is safe to ship without re-measuring.
 
+## Drops can switch INTO or OUT OF this scene (2026-10-08)
+
+This scene is drop-switch-ready (its Matrix effect is in
+`fx.device_model.CENTRE_BURST_EFFECTS`): once a scene has grown stale, a drop sequence
+may hard-cut into this one ON the drop, with this scene's own drop firing
+on the mark and adopting the outgoing pieces — or cut out of it the same
+way. Nothing in this scene's data opts in or out; `spectra/services/
+drop_switch.py` (and the drop-detection skill) is where the rule lives,
+including the hand-off table row for this effect.
+
 ## Sonic reach
 
 Scene settings and flare kinds only via the scene console — never the

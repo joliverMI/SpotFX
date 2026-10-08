@@ -486,6 +486,14 @@ export interface RoomControlState {
    * effects (Black Hole, Squiggles, Pulse): a lull holds dark for half its
    * length, never longer than this (fx/effects/lull_dark.py). Default 3. */
   lull_dark_max_s: number;
+  /** THE DROP-LED SCENE SWITCH (spectra/services/drop_switch.py): a drop
+   * sequence may switch the scene with a hard cut on its drop when the
+   * showing scene is stale. The three stale thresholds are his to tune
+   * (Sonic-editable). */
+  drop_switch_enabled: boolean;
+  drop_switch_after_previous_drop: boolean;
+  drop_switch_stale_margin_s: number;
+  drop_switch_drops_in_a_row: number;
   /** Legacy Now Playing "Force Scene" control, ported verbatim: while
    * enabled, every scene the system would otherwise pick automatically
    * (sequencer roll, trigger fire, or the automatic transition fire) fires

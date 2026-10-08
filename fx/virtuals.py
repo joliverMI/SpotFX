@@ -659,6 +659,7 @@ class Virtual:
         effect,
         fallback: Optional[float] = None,
         activate: bool = True,
+        cut: bool = False,
     ):
         """
         Sets the active effect for the virtual device.
@@ -687,6 +688,15 @@ class Virtual:
                       was evicted and nothing ever brought it back. See
                       fx/VENDOR.md deviation #29 and
                       tests/test_cold_load_effect_restore.py.
+            cut: If True, THIS call skips the virtual's stored crossfade
+                      (`transition_mode`/`transition_time`) and switches
+                      instantly — the outgoing effect is deactivated now
+                      (so its deactivate() leaves its particle snapshot
+                      for the incoming effect, particle_handoff's
+                      no-transition path). The stored transition is NOT
+                      touched: every later call blends exactly as before.
+                      SpotFX deviation #63 (the drop-led scene switch's
+                      hard cut, spectra/services/drop_switch.py).
 
         Raises:
             ValueError: If no configured device segments are available.
@@ -717,6 +727,7 @@ class Virtual:
                 self._config["transition_mode"] != "None"
                 and self._config["transition_time"] > 0
                 and not self.fallback_suppress_transition
+                and not cut
             ):
                 self.transition_frame_total = (
                     self.refresh_rate * self._config["transition_time"]

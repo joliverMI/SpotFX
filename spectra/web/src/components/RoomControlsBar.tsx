@@ -617,6 +617,60 @@ export default function RoomControlsBar() {
               <span style={{ fontSize: '0.85em', opacity: 0.75 }}>s</span>
             </div>
             <div className="top-bar-group-field">
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                <PowerButton
+                  on={local.drop_switch_enabled}
+                  onChange={(on) => commit({ ...local, drop_switch_enabled: on })}
+                  size={22}
+                  ariaLabel="Drop-led scene switch"
+                  title={local.drop_switch_enabled
+                    ? 'On — a drop sequence switches the scene with a hard cut on its drop once the scene showing has grown stale. Tap to turn off.'
+                    : 'Off — every drop plays on whatever scene is showing. Tap to turn on.'}
+                />
+                Drops change stale scenes
+                <HelpLink topic="drop-led-switch" />
+              </label>
+            </div>
+            {local.drop_switch_enabled && (
+              <>
+                <div className="top-bar-group-field">
+                  <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                    <PowerButton
+                      on={local.drop_switch_after_previous_drop}
+                      onChange={(on) => commit({ ...local, drop_switch_after_previous_drop: on })}
+                      size={22}
+                      ariaLabel="Stale after repeating the previous drop"
+                      title="A scene that already played the previous drop (without arriving on it) counts as stale."
+                    />
+                    Stale after a repeated drop
+                  </label>
+                </div>
+                <div className="top-bar-group-field">
+                  <label title="Seconds beyond the scene's own minimum dwell after which it has overstayed — an overstayed scene switches early, at the charge.">
+                    Overstayed after dwell +
+                  </label>
+                  <input
+                    type="number" min={0} max={300} step={1}
+                    value={local.drop_switch_stale_margin_s}
+                    onChange={(e) => setLocal({ ...local, drop_switch_stale_margin_s: Number(e.target.value) })}
+                    onBlur={() => commit(local)}
+                  />
+                  <span style={{ fontSize: '0.85em', opacity: 0.75 }}>s</span>
+                </div>
+                <div className="top-bar-group-field">
+                  <label title="A scene that has carried this many drops in a row counts as stale. 0 turns the rule off.">
+                    Stale after drops in a row
+                  </label>
+                  <input
+                    type="number" min={0} max={16} step={1}
+                    value={local.drop_switch_drops_in_a_row}
+                    onChange={(e) => setLocal({ ...local, drop_switch_drops_in_a_row: Number(e.target.value) })}
+                    onBlur={() => commit(local)}
+                  />
+                </div>
+              </>
+            )}
+            <div className="top-bar-group-field">
               <label>Scene changes</label>
               <select
                 value={local.scene_change_mode}

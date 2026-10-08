@@ -112,6 +112,13 @@ responses = ResponseEngine(
                            bridge.effective_position_ms()),
 )
 
+# THE DROP-LED SCENE SWITCH (spectra/services/drop_switch.py) supplies the
+# lull hand-off hook's resolver — installed once, process-wide, so the
+# sequence preview's scratch responders ask the same one.
+from spectra.services import drop_switch as _drop_switch  # noqa: E402
+from spectra.services import scene_response as _scene_response  # noqa: E402
+_scene_response.install_lull_handoff_resolver(_drop_switch.lull_handoff_resolver)
+
 # Two-dimensional drift gradient retarget hook (owner ask 2026-08-20) — wired
 # explicitly here rather than left to a lazy default inside trigger_engine.py
 # (see TriggerEngine.__init__'s own comment for why): this module already
@@ -251,6 +258,18 @@ async def fire_response_event(event_class: str, intensity: float,
     fire_history.record_fire("responses", event_class,
                              {"event_class": event_class, "intensity": intensity})
     _schedule_fire_tail(lambda: _response_gate(via_trigger, analysed))
+
+
+async def rearm_phase_event(event_class: str, progress: float,
+                            remaining_ms: int) -> Optional[dict]:
+    """THE DROP-LED SWITCH's mid-charge re-arm (drop_switch.py): after a cut
+    riding a flare inside the charge, carry the build on on the new scene.
+    Gated exactly like a drop-sequence member (the analysed tier, relocated
+    by the trigger clock); a gated re-arm writes nothing and says why."""
+    reason = _response_gate(True, True)
+    if reason is not None:
+        return {"skipped": reason}
+    return await responses.rearm_phase(event_class, progress, remaining_ms)
 
 
 def _response_gate(via_trigger: bool, analysed: bool = False) -> Optional[str]:

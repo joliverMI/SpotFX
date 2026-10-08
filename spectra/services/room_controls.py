@@ -661,6 +661,28 @@ class RoomControlState(BaseModel):
     # its drop.
     lull_dark_max_s: float = Field(default=3.0, ge=0.0, le=30.0)
 
+    # THE DROP-LED SCENE SWITCH (2026-10-08, drop-scene-variety plan phase
+    # 2 — spectra/services/drop_switch.py is the binding statement). A drop
+    # sequence switches the scene with a HARD CUT ON ITS DROP when the
+    # showing scene is stale; early in the charge only when the pair has no
+    # good drop hand-off or the scene has already overstayed. The stale
+    # rule's three thresholds are first guesses for his eye (the plan's own
+    # words), all Sonic-tellable:
+    #   - drop_switch_after_previous_drop: stale when the showing scene
+    #     already played the previous drop sequence's drop without arriving
+    #     on it (a scene installed BY a drop is fresh for the next one);
+    #   - drop_switch_stale_margin_s: stale ("overstayed") once shown longer
+    #     than its own minimum dwell plus this many seconds — the reason
+    #     that switches EARLY, at the charge;
+    #   - drop_switch_drops_in_a_row: stale once it has carried this many
+    #     drops in a row (0 = off).
+    # drop_switch_enabled off = every drop plays on whatever is showing,
+    # exactly as before this existed.
+    drop_switch_enabled: bool = True
+    drop_switch_after_previous_drop: bool = True
+    drop_switch_stale_margin_s: float = Field(default=10.0, ge=0.0, le=300.0)
+    drop_switch_drops_in_a_row: int = Field(default=2, ge=0, le=16)
+
     # THE A/V-SYNC LEAD (owner ask 2026-08-28) — LEAD family: positive =
     # fire EARLIER, negative = fire LATER. The value the /avsync
     # instrument's Apply button writes, and the ONLY authored term in

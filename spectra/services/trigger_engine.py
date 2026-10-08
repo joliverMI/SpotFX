@@ -354,7 +354,8 @@ from typing import Any, Awaitable, Callable, Optional
 
 from spectra.models.trigger import FireResponseAction, FireSceneAction, SpectraTrigger
 from spectra.services import (analysed_flares, drop_firing, drop_sequences,
-                               phase_partner, transition_phases, trigger_store)
+                               drop_switch, phase_partner, transition_phases,
+                               trigger_store)
 
 logger = logging.getLogger(__name__)
 
@@ -494,6 +495,12 @@ class TriggerEngine:
         drop_view: Callable[[str, list], dict] | None = None,
         drop_revision: Callable[[], Any] | None = None,
         fire_sequence: Callable[[str, float, Optional[int]], Awaitable[Any]] | None = None,
+        switch_showing: Callable[[], Optional[drop_switch.Showing]] | None = None,
+        switch_settings: Callable[[], drop_switch.SwitchSettings] | None = None,
+        switch_blocker: Callable[[], Optional[str]] | None = None,
+        switch_pick: Callable[[float], Callable] | None = None,
+        fire_drop_switch: Callable[[str, float], Awaitable[Any]] | None = None,
+        rearm_phase: Callable[[str, float, int], Awaitable[Any]] | None = None,
         clock: Callable[[], float] | None = None,
         rng: Random | None = None,
     ) -> None:
@@ -610,6 +617,37 @@ class TriggerEngine:
         self._seq_meta: dict[str, tuple[drop_firing.FiringSequence, str, str]] = {}
         self._drop_windows: list[drop_firing.Window] = []
 
+        # THE DROP-LED SCENE SWITCH (2026-10-08, spectra/services/
+        # drop_switch.py is the binding statement): a drop sequence may be
+        # the scene change — a hard cut ON its drop, or, as the stated
+        # exception, early in its charge. Decided once per sequence at the
+        # first member the clock fires (_decide_switch), executed at the
+        # planned member or riding flare (_execute_switch), recorded per
+        # song (_drop_history: which stint played which drop). Injectables
+        # for the specs; production reads dwell, the room and the kernel.
+        # A spec that injects fire_scene alone has the switch's cut land
+        # through that fake (scene_id, None, intensity), never a real fire.
+        self._switch_showing = switch_showing or drop_switch.default_showing
+        self._switch_settings = switch_settings or drop_switch.default_settings
+        self._switch_blocker = switch_blocker or drop_switch.default_blocker
+        self._switch_pick = switch_pick or drop_switch.default_pick_target
+        if fire_drop_switch is not None:
+            self._fire_drop_switch = fire_drop_switch
+        elif fire_scene is not None:
+            self._fire_drop_switch = (
+                lambda scene_id, intensity: fire_scene(scene_id, None, intensity))
+        else:
+            self._fire_drop_switch = self._default_fire_drop_switch
+        self._rearm_phase = rearm_phase or self._default_rearm_phase
+        self._switch_plans: dict[str, drop_switch.SwitchPlan] = {}
+        self._switch_seqs: dict[str, tuple[drop_firing.FiringSequence, str]] = {}
+        self._switch_done: set[str] = set()
+        self._ride_ids: dict[str, str] = {}
+        self._drop_history = drop_switch.DropHistory()
+        # (trigger id, song ms) of every flare this tick may fire — the
+        # candidates a cut can RIDE inside a charge (drop_switch.find_ride).
+        self._tick_flares: list[tuple[str, int]] = []
+
         # THE LIGHT SHOW's HIGH / LOW TRIGGERS (spectra/services/show_arms.py
         # and show_cues.py). Two hooks, both no-ops by default and wired in
         # services/engine.py (the _intensity_event precedent — a forgotten
@@ -710,6 +748,8 @@ class TriggerEngine:
             self._plan_ranks = {}
             self._seq_meta = {}
             self._drop_windows = []
+            self._forget_switches()
+            self._drop_history = drop_switch.DropHistory()
         if uri is None or uri == self._last_transition_uri:
             return
         armed = self._last_transition_uri is not None
@@ -876,6 +916,8 @@ class TriggerEngine:
             # moment again fires it again" (module docstring).
             self._pins.clear()
             self._fired.clear()
+            # a sequence approached again is decided again
+            self._forget_switches()
             return []  # rewind/seek back: silently rearmed via the line above
         # Cues run BEFORE the stored triggers in the same tick, so a set that
         # forces a scene or a colour governs the scene change landing on
@@ -895,6 +937,12 @@ class TriggerEngine:
         if seq_trigs:
             candidates = candidates + seq_trigs
         windows = self._drop_windows
+        self._tick_flares = [
+            (t.id, t.timestamp_ms + t.trigger_offset_ms) for t in candidates
+            if t.enabled and t.action.kind == "fire_response"
+            and getattr(t.action, "event_class", None) == "flare"
+            and t.id not in self._seq_meta
+            and (t.id in self._flare_ids or self._trigger_allowed(t, mode))]
         fired: list[SpectraTrigger] = []
         for trig in candidates:
             if not trig.enabled:
@@ -1392,6 +1440,14 @@ class TriggerEngine:
     async def _fire(self, trig: SpectraTrigger) -> None:
         a = trig.action
         self._notify_intensity_event()
+        if trig.id in self._ride_ids:
+            # THE DROP-LED SWITCH riding a flare inside the charge: cut to
+            # the planned scene first, so this flare lands on its band.
+            try:
+                await self._switch_on_ride(trig)
+            except Exception:
+                logger.exception("drop switch: riding %s failed — the flare "
+                                 "fires on the showing scene", trig.id)
         try:
             if a.kind == "fire_scene":
                 scene_id = a.scene_id
@@ -1441,8 +1497,21 @@ class TriggerEngine:
                 # lull/drop response his own triggers fire, building to its
                 # OWN partner in the sequence (the phase-partner rule).
                 seq, cls, fire_mode = self._seq_meta[trig.id]
-                await self._fire_sequence(cls, self._render_intensity(a.intensity),
-                                          seq.gap_ms(cls, fire_mode))
+                render = self._render_intensity(a.intensity)
+                # THE DROP-LED SWITCH (drop_switch.py): decided at the first
+                # member, cut before the planned member (the drop, or the
+                # charge) in this same call, so the member's own phase arm
+                # lands on the NEW scene.
+                plan = await self._switch_before_member(seq, cls, fire_mode, render)
+                if cls == "lull":
+                    with drop_switch.lull_plan(plan):
+                        await self._fire_sequence(cls, render,
+                                                  seq.gap_ms(cls, fire_mode))
+                else:
+                    await self._fire_sequence(cls, render,
+                                              seq.gap_ms(cls, fire_mode))
+                if cls == "drop":
+                    self._note_drop(seq, plan)
             elif a.kind == "fire_response":
                 # OVERRIDE BLEND's dynamic half (2026-08-20, "fix the lull
                 # ramp"): only charge/lull stretch a ramp to the real gap
@@ -1484,6 +1553,12 @@ class TriggerEngine:
                            "state": seq.state, "origin": seq.origin,
                            "his": seq.his, "members": members,
                            "intensity": a.intensity})
+            plan = self._switch_plans.get(seq.key)
+            if plan is not None:
+                detail["drop_switch"] = {
+                    "switch": plan.switch, "reason": plan.reason,
+                    "to": plan.to_scene_name, "moment": plan.moment,
+                    "result": (plan.outcome or {}).get("result")}
             key = f"drop_sequence:{cls}"
         if trig.snap_grid is not None:
             # Phase 2 (spectra/services/beat_snap.py) — which grid this
@@ -1494,6 +1569,163 @@ class TriggerEngine:
         fire_history.record_fire(
             "triggers", key, detail,
             uri=self._uri, position_ms=self._last_position_ms)
+
+    # ── the drop-led scene switch (drop_switch.py) ───────────────────────
+
+    def _forget_switches(self) -> None:
+        self._switch_plans = {}
+        self._switch_seqs = {}
+        self._switch_done = set()
+        self._ride_ids = {}
+
+    def _decide_switch(self, seq: drop_firing.FiringSequence, cls: str,
+                       fire_mode: str) -> drop_switch.SwitchPlan:
+        """The one decision for `seq`, at the first member the clock fires.
+        Never raises into the fire: a failure is a named no-switch plan."""
+        members = dict(seq.members(fire_mode))
+        can_go_early = cls == "charge"
+        end_ms = members.get("lull", members.get("drop"))
+        ride = (drop_switch.find_ride(members.get("charge"), end_ms,
+                                      self._tick_flares)
+                if can_go_early else None)
+        try:
+            showing = self._switch_showing()
+            record = self._drop_history.record_for(
+                showing.stint if showing is not None else None)
+            plan = drop_switch.decide(
+                key=seq.key, uri=self._uri, members=members, showing=showing,
+                record=record, settings=self._switch_settings(),
+                pick_target=self._switch_pick(seq.intensity), ride=ride,
+                can_go_early=can_go_early, blocker=self._switch_blocker(),
+                decided_at_ms=self._last_position_ms)
+        except Exception:
+            logger.exception("drop switch: deciding %s failed — the drop "
+                             "plays on the showing scene", seq.key)
+            plan = drop_switch.SwitchPlan(
+                key=seq.key, uri=self._uri, switch=False, reason="error",
+                sentence="The drop switch could not decide (see the log) — "
+                         "the drop plays on the showing scene.",
+                charge_ms=members.get("charge"), lull_ms=members.get("lull"),
+                drop_ms=members.get("drop"))
+        self._switch_plans[seq.key] = plan
+        self._switch_seqs[seq.key] = (seq, fire_mode)
+        drop_switch.record_plan(plan)
+        if plan.switch and plan.moment == drop_switch.MOMENT_CHARGE_FLARE:
+            self._ride_ids[plan.ride_trigger_id] = seq.key
+        logger.info("drop sequence %s: %s", seq.key, plan.sentence)
+        return plan
+
+    async def _switch_before_member(self, seq: drop_firing.FiringSequence,
+                                    cls: str, fire_mode: str,
+                                    intensity: float) -> drop_switch.SwitchPlan:
+        plan = self._switch_plans.get(seq.key)
+        if plan is None:
+            plan = self._decide_switch(seq, cls, fire_mode)
+        if not plan.switch or seq.key in self._switch_done:
+            return self._switch_plans.get(seq.key, plan)
+        at = None
+        if plan.moment == drop_switch.MOMENT_CHARGE_START and cls == "charge":
+            at = drop_switch.MOMENT_CHARGE_START
+        elif plan.moment == drop_switch.MOMENT_DROP and cls == "drop":
+            at = drop_switch.MOMENT_DROP
+        elif (plan.moment == drop_switch.MOMENT_CHARGE_FLARE
+              and cls in ("lull", "drop")):
+            # the ride never fired (disabled, held, gated): never leave the
+            # switch hanging — this member cuts instead
+            at = "charge_flare_missed"
+        if at is not None:
+            await self._execute_switch(plan, at, intensity)
+        return self._switch_plans.get(seq.key, plan)
+
+    async def _switch_on_ride(self, trig: SpectraTrigger) -> None:
+        key = self._ride_ids.get(trig.id)
+        plan = self._switch_plans.get(key) if key else None
+        if plan is None or key in self._switch_done:
+            return
+        seq, fire_mode = self._switch_seqs[key]
+        outcome = await self._execute_switch(
+            plan, drop_switch.MOMENT_CHARGE_FLARE,
+            self._render_intensity(seq.intensity))
+        if outcome.get("result") != "switched":
+            return
+        # carry the build on on the new scene from where it is
+        from spectra.services.scene_response import _phase_ramp_ms
+        charge_ms = plan.charge_ms if plan.charge_ms is not None else trig.timestamp_ms
+        ramp = _phase_ramp_ms("charge", seq.gap_ms("charge", fire_mode))
+        now = (self._last_position_ms if self._last_position_ms is not None
+               else trig.timestamp_ms)
+        elapsed = max(0, now - charge_ms)
+        progress = min(1.0, elapsed / ramp) if ramp > 0 else 1.0
+        try:
+            await self._rearm_phase("charge", progress, max(0, ramp - elapsed))
+        except Exception:
+            logger.exception("drop switch %s: charge re-arm failed", key)
+
+    async def _execute_switch(self, plan: drop_switch.SwitchPlan, at: str,
+                              intensity: float) -> dict:
+        """The cut itself (drop_switch.py): only while the scene the plan
+        was decided against is still showing — a scene change in between
+        SUPERSEDES it. Every outcome is recorded on the plan and in the show
+        log under the sequence key."""
+        self._switch_done.add(plan.key)
+        if plan.ride_trigger_id:
+            self._ride_ids.pop(plan.ride_trigger_id, None)
+        try:
+            showing = self._switch_showing()
+        except Exception:
+            showing = None
+        showing_id = showing.scene.id if showing is not None else None
+        outcome: dict[str, Any] = {"at": at, "position_ms": self._last_position_ms}
+        if showing_id != plan.from_scene_id:
+            outcome.update(result="superseded", showing=showing_id)
+        else:
+            try:
+                result = await self._fire_drop_switch(plan.to_scene_id, intensity)
+            except Exception:
+                logger.exception("drop switch %s: the cut to %s failed",
+                                 plan.key, plan.to_scene_name)
+                result = {"skipped": "error"}
+            skipped = result.get("skipped") if isinstance(result, dict) else None
+            outcome["result"] = "skipped" if skipped else "switched"
+            if skipped:
+                outcome["skipped"] = skipped
+            if isinstance(result, dict) and result.get("overrode_dwell_for_drop"):
+                outcome["overrode_dwell_for_drop"] = result["overrode_dwell_for_drop"]
+        plan = drop_switch.note_outcome(plan, outcome)
+        self._switch_plans[plan.key] = plan
+        logger.info("drop sequence %s: switch %s at %s (%s → %s)", plan.key,
+                    outcome["result"], at, plan.from_scene_name, plan.to_scene_name)
+        from spectra.services import fire_history
+        fire_history.record_fire(
+            "triggers", "drop_sequence:switch",
+            {"drop_sequence": plan.key, "member": "switch", "at": at,
+             "moment": plan.moment, "from_scene": plan.from_scene_name,
+             "to_scene": plan.to_scene_name, "to_scene_id": plan.to_scene_id,
+             "handoff": plan.handoff, "stale_by": list(plan.stale_by),
+             "sentence": plan.sentence, **outcome},
+            uri=self._uri, position_ms=self._last_position_ms)
+        if outcome["result"] == "switched":
+            self._notify_colour_cue()
+        return outcome
+
+    def _note_drop(self, seq: drop_firing.FiringSequence,
+                   plan: Optional[drop_switch.SwitchPlan]) -> None:
+        """Which stint played this drop, and whether this sequence installed
+        it (a scene installed for a drop, at its charge or on it, is fresh
+        for the next one)."""
+        try:
+            showing = self._switch_showing()
+        except Exception:
+            return
+        plan = self._switch_plans.get(seq.key, plan)
+        arrived = bool(plan is not None and plan.switch
+                       and (plan.outcome or {}).get("result") == "switched")
+        self._drop_history.note_drop(
+            seq.key, showing.stint if showing is not None else None, arrived)
+
+    def switch_plans(self, uri: Optional[str]) -> list[drop_switch.SwitchPlan]:
+        """This play's drop-switch decisions for `uri` (the Timeline, Sonic)."""
+        return drop_switch.plans_for(uri)
 
     async def _fire_analysed_color(self, trig: SpectraTrigger,
                                    scene_id: Optional[str]) -> None:
@@ -1708,6 +1940,17 @@ class TriggerEngine:
         # gate (drop_firing.fires_here) before calling.
         await engine.fire_response_event(event_class, intensity, gap_ms=gap_ms,
                                          via_trigger=True, analysed=True)
+
+    async def _default_fire_drop_switch(self, scene_id: str,
+                                        intensity: float) -> dict:
+        from spectra.services.scene_sequencer import fire_scene_by_id
+        return await fire_scene_by_id(scene_id, None, intensity,
+                                      origin="drop", cut=True)
+
+    async def _default_rearm_phase(self, event_class: str, progress: float,
+                                   remaining_ms: int) -> Any:
+        from spectra.services import engine
+        return await engine.rearm_phase_event(event_class, progress, remaining_ms)
 
     @staticmethod
     def _default_drop_view(uri: str, triggers: list) -> dict:

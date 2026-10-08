@@ -372,7 +372,8 @@ async def fire_scene(scene: SceneV2, *, intensity: float = 0.5,
                      dry_run: bool = True,
                      rng: Random | None = None,
                      transition_ms: Optional[int] = None,
-                     display_mode: Optional[str] = None) -> dict[str, Any]:
+                     display_mode: Optional[str] = None,
+                     cut: bool = False) -> dict[str, Any]:
     """Resolve at the given intensity (effect selection included), compile,
     and (live only) send through the seam. The returned resolution report +
     writes are the test-fire display: dry and live runs share every step up
@@ -399,7 +400,14 @@ async def fire_scene(scene: SceneV2, *, intensity: float = 0.5,
     literal black instead of taking Light's substitution (the Admiral's
     ruling, 2026-10-06: house modes render exactly as authored, Dark/
     Light does not apply to them). None (every other caller) is the
-    exact previous behaviour — the room's own stored mode, unchanged."""
+    exact previous behaviour — the room's own stored mode, unchanged.
+
+    cut=True is the DROP-LED SWITCH's hard cut (spectra/services/
+    drop_switch.py): no entry ramp, and every effect-type switch skips the
+    virtual's own stored crossfade for this one fire (fx_seam.apply_writes'
+    cut, fx/VENDOR.md #63) — the outgoing effect's particles hand across
+    through particle_handoff's no-transition path. Every other fire keeps
+    the stored blend."""
     if color_set is None:
         color_set = room_active_set()
     # A LOCAL, lazy import — room_controls must never be a module-level
@@ -439,7 +447,13 @@ async def fire_scene(scene: SceneV2, *, intensity: float = 0.5,
         entry_ramp_ms = (int(transition_ms) if transition_ms is not None
                          else (scene.entry_ramp_ms or room.global_transition_ms
                                or room_controls.scene_transition_ms(room, intensity)))
-        await fx_seam.apply_writes(live_writes, transition_ms=entry_ramp_ms)
+        if cut:
+            # The hard cut: only this caller passes the flag, so every other
+            # fire (and every test double of apply_writes) keeps the exact
+            # old call shape.
+            await fx_seam.apply_writes(live_writes, transition_ms=0, cut=True)
+        else:
+            await fx_seam.apply_writes(live_writes, transition_ms=entry_ramp_ms)
         logger.info("SPECTRA scene '%s' fired at intensity %.2f: %d virtual "
                     "writes%s", scene.name, intensity, len(writes),
                     f" (colour set '{color_set.name}')" if color_set else "")

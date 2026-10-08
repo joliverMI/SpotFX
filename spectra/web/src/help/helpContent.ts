@@ -1424,6 +1424,25 @@ export const HELP_SECTIONS: HelpSection[] = [
             kbd: false,
           },
           {
+            id: 'drop-led-switch',
+            title: 'When a drop changes the scene',
+            keywords: 'drop led switch scene change stale hard cut crossfade lull charge flare star orbits black hole squiggles fish fireworks centre burst hand off adopt pieces dwell previous drop in a row overstayed sonic why switch',
+            body: [
+              'A drop sequence can BE the scene change. When the scene showing has grown stale, the charge and the lull still play on it, and on the drop mark the room switches with a hard cut — no crossfade — into a different scene that explodes from the centre (STAR, Orbits, Black Hole, Squiggles, Fish) or Fireworks. The new scene starts in its drop, firing its own explosion on the mark, and picks up the pieces the old one left on the panel.',
+              'Stale means any of: it already played the previous drop (a scene that arrived ON a drop is fresh for the next one, so switches tend to come every other drop); it has carried two drops in a row; or it has been showing longer than its own minimum dwell plus 10 seconds.',
+              'Early is the exception. It switches at the start of the charge instead — or on a flare that fires inside the charge, if there is one — only when the scene showing has no good hand-off into the next one at the drop (the Eye, the Dancer, Pac-Man, or nothing showing at all), or when it has already overstayed. The build then runs on the scene that will drop.',
+              'Nothing switches while Force Scene is on, while a house mode rests, or when no other drop-ready scene can be picked; the drop then plays on what is showing, and the Timeline says why. The cut never waits for the old scene\'s minimum dwell — the drop is the moment — and the log names it when it overrode one.',
+              'Where to see it: the ⇄ mark on the drop-sequence strip (hover for the reason), the "Scene switch" line in a sequence\'s detail, the Review page ("drop_sequence:switch"), and the sequence preview, which runs the same decision for a stale scene and performs the cut live. Ask Sonic "why did that drop switch?" for any sequence this play.',
+            ],
+            table: [
+              ['Drop-led scene switch', 'On by default. Off: every drop plays on whatever is showing.'],
+              ['Switch after a repeated drop', 'On by default: a scene that played the previous drop (without arriving on it) is stale.'],
+              ['Overstayed margin', '10 seconds beyond the scene\'s own minimum dwell. Overstaying is the reason that switches early.'],
+              ['Drops in a row', '2. A scene that has carried this many drops is stale. 0 turns the rule off.'],
+            ],
+            kbd: false,
+          },
+          {
             id: 'drop-sequence-keys',
             title: 'Drop-sequence keyboard',
             keywords: 'keyboard keys shortcuts c l d select handle arrow step nudge shift enter confirm delete dismiss n p next previous escape ctrl z undo y redo focus',

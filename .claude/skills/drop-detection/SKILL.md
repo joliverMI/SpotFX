@@ -133,6 +133,43 @@ three spaced keepers whose positions are exactly what Fireworks' adopt path
 reads from `_handoff_snapshot`. Proofs: `tests/test_lull_handoff.py`,
 `tests/test_fish_lull_searcher.py`.
 
+## A drop can BE the scene change — the drop-led switch (2026-10-08)
+
+`spectra/services/drop_switch.py`'s docstring is the binding statement
+(the Admiral's two rulings are quoted there). The short list:
+
+- **Decided once per sequence** by the trigger clock at the FIRST member
+  it fires (`TriggerEngine._decide_switch`), executed in the SAME `_fire`
+  call as the planned member, BEFORE it (`_switch_before_member`), so the
+  member's own phase arm lands on the NEW scene. Do not move the cut into
+  a separate trigger — that is the one-frame-early/late defect.
+- **The default is a hard cut ON the drop** (`fire_scene_by_id(origin=
+  "drop", cut=True)` → `fx_seam.apply_writes(cut=True)` → `set_effect(cut=
+  True)`, `fx/VENDOR.md` #63). The charge and lull run on the outgoing
+  scene; the lull is told what is coming through the hook below (this
+  module IS the installed resolver). A dwell is never waited on, but is
+  NAMED (`overrode_dwell_for_drop`).
+- **Early, at the charge start or riding the first flare inside it**, only
+  when the pair has no `HANDOFF` row (outgoing Eye/Dancer/Pac-Man, or
+  nothing showing) or the scene has OVERSTAYED (dwell + `drop_switch_
+  stale_margin_s`). A ride that never fires cuts at the next member.
+- **Stale**: repeated the previous drop without arriving on it / carried
+  `drop_switch_drops_in_a_row` drops / overstayed / nothing showing.
+  Targets: sequencer-entry scenes whose Matrix effect is in
+  `device_model.CENTRE_BURST_EFFECTS` or `DROP_FIREWORKS_EFFECTS`, drawn
+  by the kernel with a Random seeded by (song, key, showing scene).
+- **Fireworks pairs stay on the generic hand-off**; the melds (keep 3,
+  swallowed a second after the drop, implode on the next hit) are phase 3
+  and refine `HANDOFF`/`KEEP_FOR`, not a second mechanism.
+- Recorded: `drop_switch.plans_for(uri)` (→ `drop_firing.annotate`'s
+  `switch`, the Timeline strip's ⇄ mark), the show log
+  (`drop_sequence:switch`), Sonic's `explain_drop_switch`. The sequence
+  preview runs `preview_plan` and performs the cut live.
+
+Proofs: `tests/test_drop_switch.py` (FINA + 100 MILLONES real stores),
+`tests/test_drop_switch_cut.py` (the cut on the real pipeline),
+`tests/test_preview_programs_live.py`.
+
 ## Sonic reach
 
 `spectra/services/drop_console.py`, domain `"drops"`. The full edit set
@@ -144,7 +181,12 @@ shows, not just state/times), `confirm_drop_sequence`, `dismiss_drop_sequence`,
 "never there — place it"), `revert_drop_sequence`, `resolve_drop_review`,
 `undo_drop_edit` (Sonic's own last edit only, refused if the Timeline
 edited the song since), `redetect_drop_sequences`,
-`drop_detection_summary`. The two detection thresholds
+`drop_detection_summary`, and (2026-10-08) the read-only
+`explain_drop_switch` — why a sequence did or did not change the scene
+this play. The switch's four tunables (`drop_switch_enabled`,
+`_after_previous_drop`, `_stale_margin_s`, `_drops_in_a_row`) are plain
+settings-registry keys; the switch itself (a light-driving act) has no
+write op, by the same boundary every other fire keeps. The two detection thresholds
 (`drop_confident_score`/`drop_suggested_score`) AND the drop floor
 (`drop_floor`, 2026-10-06, the Admiral's own ask — a candidate is only
 generated where the top bar's own "⚡ Energy" number, EXACTLY AS

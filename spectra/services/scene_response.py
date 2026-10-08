@@ -2626,6 +2626,42 @@ class ResponseEngine:
             record["withheld"] = {"virtuals": withheld, "reason": house_reason}
         return record
 
+    async def rearm_phase(self, event_class: str, progress: float,
+                          remaining_ms: int) -> dict:
+        """THE DROP-LED SWITCH's mid-charge re-arm (spectra/services/
+        drop_switch.py, a cut riding a flare inside the charge): after the
+        hard cut installs the new scene, drive its phase effects into
+        `event_class` at the charge's CURRENT `progress` and glide the rest
+        over `remaining_ms`, so the build carries on on the scene that will
+        drop instead of idling. The new effects were born with no phase (the
+        creation baseline), so this arm is a genuine edge. House-withheld
+        one-colour virtuals are skipped exactly as _drive_phase skips them."""
+        progress = min(1.0, max(0.0, float(progress)))
+        targets: list[str] = []
+        house_reason: Optional[str] = None
+        if any(st.effect_type in device_model.ONE_COLOUR_EFFECTS
+               for st in self.conductor.virtuals.values()):
+            house_reason = _house_owns_the_look()
+        for vid, state in self.conductor.virtuals.items():
+            if state.effect_type not in device_model.PHASE_EFFECTS:
+                continue
+            if (house_reason is not None
+                    and state.effect_type in device_model.ONE_COLOUR_EFFECTS):
+                continue
+            await self.executor.jump(vid, state.effect_type,
+                                     {"phase": event_class,
+                                      "phase_progress": progress})
+            if remaining_ms > 0 and progress < 1.0:
+                await self.executor.glide(vid, state.effect_type,
+                                          {"phase_progress": 1.0},
+                                          int(remaining_ms))
+            targets.append(vid)
+        if targets and event_class in ("charge", "lull"):
+            self._phase_armed = event_class
+        return {"targets": targets, "event_class": event_class,
+                "progress": round(progress, 4),
+                "remaining_ms": int(remaining_ms)}
+
     def _resolve_lull_handoff(self, ramp_ms: int, gap_ms: Optional[int],
                               intensity: Optional[float]
                               ) -> tuple[LullHandoff, str]:

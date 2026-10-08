@@ -140,7 +140,8 @@ def _require_owner() -> str:
         "light handover in progress — fires are refused until it lands")
 
 
-async def apply_writes(writes: list[dict], *, transition_ms: int = 0) -> None:
+async def apply_writes(writes: list[dict], *, transition_ms: int = 0,
+                       cut: bool = False) -> None:
     """Send compiled writes as effect switches over the transport the
     ownership record grants. Raises on the first hard failure — the API
     surfaces it to the owner instead of half-applying a scene silently.
@@ -148,12 +149,24 @@ async def apply_writes(writes: list[dict], *, transition_ms: int = 0) -> None:
     transition_ms > 0 is the OVERRIDE BLEND entry-ramp equivalent
     (SceneV2.entry_ramp_ms): writes blend in (hue-arc for colour) instead of
     landing as an instant switch. 0 (the default) is today's unchanged
-    instant-jump behaviour."""
+    instant-jump behaviour.
+
+    cut=True is THE ONE-CALL HARD CUT (the drop-led scene switch, spectra/
+    services/drop_switch.py; fx/VENDOR.md #63): every write lands instantly
+    AND an effect-type switch skips the virtual's own stored crossfade
+    (his live matrices carry Add / 0.5 s, which every ordinary scene change
+    still rides) for THIS write only. In-process only — the external LedFX
+    (spot-effects owning) has no such flag, so there a cut lands as an
+    ordinary instant switch over the stored blend, and says so in the log."""
     owner = _require_owner()
     if owner == light_ownership.SPECTRA:
-        await _apply_via_facade(writes, transition_ms)
+        await _apply_via_facade(writes, 0 if cut else transition_ms, cut=cut)
     else:
-        await _apply_via_http(writes, transition_ms)
+        if cut:
+            logger.info("fx seam: a hard cut was asked for but the external "
+                        "LedFX owns the lights — it lands over the virtual's "
+                        "stored crossfade")
+        await _apply_via_http(writes, 0 if cut else transition_ms)
 
 
 async def get_virtuals() -> dict:
@@ -301,12 +314,14 @@ def _redirect_room_effect(writes: list[dict]) -> list[dict]:
     return out
 
 
-def _body(w: dict, transition_ms: int = 0) -> dict:
+def _body(w: dict, transition_ms: int = 0, cut: bool = False) -> dict:
     w = _compose_room_effect(w)
     body = {
         "type": w["effect_type"],
         "config": device_model.round_int_params(w["effect_type"], w["config"]),
     }
+    if cut:
+        body["cut"] = True
     if transition_ms > 0:
         # Same tween shape fx_executor uses for glides — hue-arc blend,
         # never through grey, never a colour-recreation crossfade.
@@ -374,7 +389,8 @@ def _carry_forward_brightness(config: dict, current_effect: dict | None) -> dict
     return {**config, **carried} if carried else config
 
 
-async def _apply_via_facade(writes: list[dict], transition_ms: int = 0) -> None:
+async def _apply_via_facade(writes: list[dict], transition_ms: int = 0,
+                            cut: bool = False) -> None:
     global _type_switches_landed, _last_type_switch, _out_of_scope_skipped
     from fx import facade
     # THE TAKE SCOPE IS A WRITE BOUNDARY (fx/VENDOR.md #42): a scene names
@@ -392,9 +408,10 @@ async def _apply_via_facade(writes: list[dict], transition_ms: int = 0) -> None:
     writes = _redirect_room_effect(writes)
     for w in writes:
         vid = w["virtual_id"]
-        current = await _current_effect(facade, vid) if transition_ms > 0 else None
+        current = (await _current_effect(facade, vid)
+                   if transition_ms > 0 or cut else None)
         current_type = (current or {}).get("type")
-        if transition_ms > 0 and current_type is not None \
+        if (transition_ms > 0 or cut) and current_type is not None \
                 and current_type != w["effect_type"]:
             # fx/facade.py's stale-tween-PUT guard (447-461) silently drops
             # a combined type-switch+transition PUT — a blend only makes
@@ -403,13 +420,13 @@ async def _apply_via_facade(writes: list[dict], transition_ms: int = 0) -> None:
             # config, so there is nothing left to tween.
             w = {**w, "config": _carry_forward_brightness(w["config"], current)}
             resp = await facade.handle(
-                "PUT", f"/api/virtuals/{vid}/effects", json=_body(w, 0))
+                "PUT", f"/api/virtuals/{vid}/effects", json=_body(w, 0, cut))
             _type_switches_landed += 1
             _last_type_switch = {"virtual_id": vid, "effect_type": w["effect_type"]}
         else:
             resp = await facade.handle(
                 "PUT", f"/api/virtuals/{vid}/effects",
-                json=_body(w, transition_ms))
+                json=_body(w, transition_ms, cut))
         resp.raise_for_status()
     logger.info("fx seam: %d writes applied in-process (spectra owns)",
                 len(writes))

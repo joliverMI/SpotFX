@@ -1882,6 +1882,8 @@ button.big { padding: 16px 18px; font-size: 1.05em; min-height: 52px; border-rad
 }
 .drop-strip-seg { position: absolute; top: 7px; height: 10px; opacity: 0.85; border-radius: 2px; pointer-events: none; }
 .drop-strip-seg.faded { opacity: 0.3; }
+.drop-strip-switch { position: absolute; top: -2px; margin-left: -6px; font-size: 11px; line-height: 12px;
+  color: #ffffff; text-shadow: 0 0 3px #000; z-index: 3; cursor: default; }
 .drop-strip-empty { position: absolute; left: 8px; top: 0; line-height: 24px; font-size: 11px; color: var(--text-muted); }
 .drop-pill, .drop-badge {
   width: 18px; height: 20px; border-radius: 9px; padding: 0;

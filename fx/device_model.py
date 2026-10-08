@@ -294,6 +294,20 @@ LULL_HANDOFF_EFFECTS = frozenset({"fish"})
 # music (lull_handoff.drop_scale).
 DROP_INTENSITY_EFFECTS = frozenset({"fish"})
 
+# THE DROP-LED SCENE SWITCH's families (2026-10-08, drop-scene-variety plan
+# phase 2 — spectra/services/drop_switch.py is the binding statement). A
+# scene can carry a drop-led switch when its Matrix effect is in one of
+# these: the CENTRE-BURST family explodes from the centre on its drop (his
+# own list: "star, orbits, and black hole explode from the center ...
+# include squiggles", plus the fish, whose lull already hands off), and
+# FIREWORKS is its own family (the melds are phase 3; until then its pairs
+# take the effects' generic particle hand-off). Every member's
+# _adopt_handoff takes any predecessor's particle snapshot.
+CENTRE_BURST_EFFECTS = frozenset({"radial", "orbits", "blackhole",
+                                  "squiggles", "fish"})
+DROP_FIREWORKS_EFFECTS = frozenset({"fireworks"})
+DROP_SWITCH_EFFECTS = CENTRE_BURST_EFFECTS | DROP_FIREWORKS_EFFECTS
+
 # The vendored effects carrying the flare-driven payoff burst: the
 # `burst_rockets` config key (an instant "explode N payoff rockets NOW"
 # count, edge-detected in config_updated, consumed per draw, self-reset to

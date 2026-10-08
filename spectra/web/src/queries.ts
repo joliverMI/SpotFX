@@ -350,6 +350,23 @@ export interface PhasePreviewTimeline {
    * means this scene has no phase-capable effect live and the sequence
    * would drive nothing — say so rather than loop an invisible preview. */
   phase_targets: string[];
+  /** THE DROP-LED SCENE SWITCH the resolver would make here, for a scene
+   * that has grown stale (spectra/services/drop_switch.py): target,
+   * moment, hand-off, what the lull is told, and where on this ruler the
+   * cut lands (cut_s). Null when the preview was asked not to show it. */
+  drop_switch: SequencePreviewSwitch | null;
+}
+
+export interface SequencePreviewSwitch {
+  switch: boolean;
+  reason: string;
+  sentence: string;
+  to_scene_name: string | null;
+  to_effect: string | null;
+  handoff: string | null;
+  moment: 'drop' | 'charge_start' | 'charge_flare' | null;
+  cut_s: number | null;
+  lull_told?: { keep: number; next: Record<string, string> };
 }
 
 export interface PreviewFireResult extends FlarePreviewFireResult {
@@ -367,15 +384,18 @@ export const fireTransitionPreview = (
     { to_scene_id: toSceneId, from_scene_id: fromSceneId, intensity, step });
 
 export const openSequencePreview = (
-  sceneId: string, intensity: number, chargeGapMs: number, lullGapMs: number) =>
+  sceneId: string, intensity: number, chargeGapMs: number, lullGapMs: number,
+  dropSwitch = true) =>
   apiPost<PhasePreviewTimeline>('/preview/sequence/open',
-    { scene_id: sceneId, intensity, charge_gap_ms: chargeGapMs, lull_gap_ms: lullGapMs });
+    { scene_id: sceneId, intensity, charge_gap_ms: chargeGapMs, lull_gap_ms: lullGapMs,
+      drop_switch: dropSwitch });
 
 export const fireSequencePreview = (
-  sceneId: string, intensity: number, chargeGapMs: number, lullGapMs: number, step: string) =>
+  sceneId: string, intensity: number, chargeGapMs: number, lullGapMs: number, step: string,
+  dropSwitch = true) =>
   apiPost<PreviewFireResult>('/preview/sequence/fire',
     { scene_id: sceneId, intensity, charge_gap_ms: chargeGapMs,
-      lull_gap_ms: lullGapMs, step });
+      lull_gap_ms: lullGapMs, step, drop_switch: dropSwitch });
 
 export const closeFlarePreviewBeacon = (): void => {
   try {

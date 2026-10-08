@@ -449,6 +449,12 @@ def annotate(view: dict, effective_mode: str, song_has_authored: bool) -> dict:
     stood down because his trigger genuinely fires there this mode
     (`f.matches_his` and not firing) still reports `"matches_yours"`."""
     seqs = {s.key: s for s in firing_sequences(view)}
+    # THE DROP-LED SWITCH's decisions this play (spectra/services/
+    # drop_switch.py) — what each sequence did or will do to the scene,
+    # named on the Timeline's drop strip. Absent until the clock decides.
+    from spectra.services import drop_switch
+    switches = {p.key: p.as_dict()
+                for p in drop_switch.plans_for((view or {}).get("uri"))}
     analysed = analysed_flares.analysed_flares_allowed(effective_mode, song_has_authored)
     his = analysed or his_applies(effective_mode)
     out_seqs = []
@@ -473,6 +479,8 @@ def annotate(view: dict, effective_mode: str, song_has_authored: bool) -> dict:
                                  else "analysed_show_off")
         s["fires"] = fires
         s["fires_reason"] = why
+        if s.get("key") in switches:
+            s["switch"] = switches[s["key"]]
         out_seqs.append(s)
     out = dict(view or {})
     out["sequences"] = out_seqs

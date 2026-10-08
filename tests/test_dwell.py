@@ -596,3 +596,32 @@ def test_manual_editor_fire_bypasses_dwell(monkeypatch):
     monkeypatch.setattr(scene_compiler, "fire_scene", orig_fire_scene)
     result = _run(scene_compiler.fire_scene(scene_b, intensity=0.5, dry_run=True))
     assert "skipped" not in result
+
+
+def test_a_drop_led_cut_never_waits_on_dwell_and_names_the_override(monkeypatch):
+    """THE DROP-LED SWITCH (spectra/services/drop_switch.py): the drop IS
+    the moment, so origin="drop" fires through the showing scene's minimum
+    hold — NAMED, never silent (overrode_dwell_for_drop, in the result and
+    the scenes log) — and lands as a hard cut (cut=True reaches the
+    compiler)."""
+    from spectra.services import scene_compiler
+    from spectra.services.scene_sequencer import fire_scene_by_id
+    scene_store.save(_scene("a"))
+    scene_store.save(_scene("b"))
+    calls: list = []
+
+    async def fake_fire_scene(scene, *, intensity=0.5, color_set=None,
+                              dry_run=True, rng=None, cut=False):
+        calls.append((scene.id, cut))
+        return {"dry_run": dry_run, "intensity": intensity, "writes": []}
+    monkeypatch.setattr(scene_compiler, "fire_scene", fake_fire_scene)
+    _fake_update_seam(monkeypatch, [])
+
+    _run(fire_scene_by_id("a", intensity=0.0))
+    result = _run(fire_scene_by_id("b", intensity=0.7, origin="drop", cut=True))
+    assert calls == [("a", False), ("b", True)]
+    assert result["overrode_dwell_for_drop"] > 0
+    assert dwell.active_scene_id() == "b"
+    log = [e for e in fire_history.load_show_log() if e.get("bucket") == "scenes"]
+    assert log[-1]["detail"]["origin"] == "drop"
+    assert log[-1]["detail"]["overrode_dwell_for_drop"] > 0

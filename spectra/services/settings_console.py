@@ -136,7 +136,9 @@ def _spec(key: str, label: str, description: str) -> SettingSpec:
             "drop_confident_score": "detector score",
             "drop_suggested_score": "detector score",
             "drop_floor": "top-bar displayed energy, fraction 0.0-1.0",
-            "lull_dark_max_s": "seconds"}.get(key)
+            "lull_dark_max_s": "seconds",
+            "drop_switch_stale_margin_s": "seconds beyond the scene's own dwell",
+            "drop_switch_drops_in_a_row": "drops, 0 = off"}.get(key)
     return SettingSpec(key=key, label=label, kind=kind, description=description,
                        unit=unit, min=ge, max=le, choices=choices)
 
@@ -277,6 +279,28 @@ SETTINGS_REGISTRY: dict[str, SettingSpec] = {
         "4-second lull is still 2 and 2. 0 = the lull only goes dark on "
         "its drop. Takes effect on the very next lull. Convert spoken "
         "minutes to seconds yourself."),
+    "drop_switch_enabled": _spec(
+        "drop_switch_enabled", "Drop-led scene switch",
+        "On (default): a drop sequence may change the scene — a hard cut "
+        "ON the drop into a different scene that explodes from the centre "
+        "(STAR, Orbits, Black Hole, Squiggles, Fish) or Fireworks, when "
+        "the scene showing has grown stale. Off: every drop plays on "
+        "whatever scene is showing, as before."),
+    "drop_switch_after_previous_drop": _spec(
+        "drop_switch_after_previous_drop", "Switch after a repeated drop",
+        "On (default): a scene that already played the previous drop "
+        "(without arriving on it) counts as stale, so the next drop "
+        "switches it."),
+    "drop_switch_stale_margin_s": _spec(
+        "drop_switch_stale_margin_s", "Drop switch: overstayed margin",
+        "Seconds beyond the showing scene's own minimum dwell after which "
+        "it counts as overstayed — and an overstayed scene is switched "
+        "EARLY, at the start of the charge (or on a flare inside the "
+        "charge) rather than on the drop. Default 10."),
+    "drop_switch_drops_in_a_row": _spec(
+        "drop_switch_drops_in_a_row", "Drop switch: drops in a row",
+        "A scene that has carried this many drops in a row counts as "
+        "stale. Default 2; 0 turns this rule off."),
 }
 
 
