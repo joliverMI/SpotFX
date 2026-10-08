@@ -16,17 +16,19 @@ crossing times are the Fish effect's own settings (fx/effects/fish.py's BIG
 FISH block, registered in config/effect_params.json). Offset 0: it enters
 ON the mark.
 
-FREQUENCY IS THE EXISTING LANE, NOTHING NEW. The only flare weighting the
-engine has is a lane: kinds sharing a lane name form a pick-one pool, EVEN
-weights (scene_response.resolve_lane_picks). Every Fish flare band already
-pools its momentary shape flares — "Fish Swim Burst" and "Reverse
-Momentarily (500ms)" — in a lane named "Shape" (scripts/
-add_fish_swim_burst_flare.py), so this script adds the big fish to THAT
-pool: each flare now picks one of three, so about one flare in three is a
-big fish (and each of the other two drops from one in two to one in
-three). Exactly "as frequent as the others combined" (one in two) would
-need a per-member lane weight, which the engine does not have — stated
-here rather than built.
+FREQUENCY IS THE EXISTING LANE, WEIGHTED BY DATA, NOTHING NEW. The only
+flare weighting the engine has is a lane: kinds sharing a lane name form a
+pick-one pool, EVEN weights per member (scene_response.resolve_lane_picks).
+Every Fish flare band already pools its momentary shape flares — "Fish Swim
+Burst" and "Reverse Momentarily (500ms)" — in a lane named "Shape" (scripts/
+add_fish_swim_burst_flare.py). A lane's members are kind NAMES, so the
+weight is expressed as data: TWO identical big_fish kinds, "Big Fish" and
+"Big Fish 2", both join that pool. Each flare then picks one of four, so a
+big fish lands on half the flares — as often as the other two combined —
+and the burst and the reverse each drop from one in two to one in four.
+The two copies carry no knobs (the look is the effect's settings); they
+differ only in name, and an edit to one (an offset, switching it off)
+should be made to both.
 
 A BAND WITHOUT A "Shape" LANE IS REFUSED BY NAME: attaching the big fish
 there alone would make it fire on EVERY flare of that band, which is not
@@ -39,8 +41,8 @@ NEVER OVERWRITES: an existing "Big Fish" kind of another type is refused; an
 identical one is left alone (idempotent). RAW-DICT PATCH, never
 scene_store.save() (the add_pulse_flares.py rule: a model round-trip
 re-serializes every field); SceneV2 is used only to READ. Mutates exactly:
-the scene's `flare_kinds` (+1) and each flare band's `kinds` (+1) and
-`kind_lanes` (+1). After --apply it re-reads the file and verifies nothing
+the scene's `flare_kinds` (+2) and each flare band's `kinds` (+2) and
+`kind_lanes` (+2). After --apply it re-reads the file and verifies nothing
 else changed.
 
 DEPLOY ORDER: only AFTER the code carrying the big_fish type and Fish's
@@ -73,6 +75,11 @@ KIND = {"name": "Big Fish", "type": "big_fish", "jump": None, "params": {},
         "gain": 1.0, "hold_ms": None, "trigger_offset_ms": 0,
         "min_intensity": None, "enabled": True}
 NAME = KIND["name"]
+# THE SECOND, IDENTICAL COPY IS THE WEIGHT (see the module docstring): a
+# lane picks evenly among member NAMES, so two big-fish members in a pool
+# with Fish's two other shape flares give the big fish half the picks.
+KINDS = [KIND, dict(KIND, name="Big Fish 2")]
+NAMES = [k["name"] for k in KINDS]
 
 
 def find_scene_id(store: dict, name: str) -> str:
@@ -110,47 +117,63 @@ def patch(raw: dict, *, revert: bool = False) -> list[str]:
     kinds = raw.setdefault("flare_kinds", [])
     lines: list[str] = []
     if revert:
-        have = [k for k in kinds if k.get("name") == NAME]
-        if have and have != [KIND]:
-            raise SystemExit(f"{NAME!r} no longer matches what this script "
-                             f"wrote ({have}) — refusing to remove it")
+        for spec in KINDS:
+            have = [k for k in kinds if k.get("name") == spec["name"]]
+            if have and have != [spec]:
+                raise SystemExit(f"{spec['name']!r} no longer matches what "
+                                 f"this script wrote ({have}) — refusing to "
+                                 "remove it")
         for i, band in enumerate(flare_bands(raw)):
-            if NAME in band.get("kinds", {}):
-                del band["kinds"][NAME]
-                band.get("kind_lanes", {}).pop(NAME, None)
-                lines.append(f"{_band_label(i, band)}: {NAME!r} detached")
-        if have:
-            kinds[:] = [k for k in kinds if k.get("name") != NAME]
-            lines.append(f"{NAME!r}: declaration removed")
+            for name in NAMES:
+                if name in band.get("kinds", {}):
+                    del band["kinds"][name]
+                    band.get("kind_lanes", {}).pop(name, None)
+                    lines.append(f"{_band_label(i, band)}: {name!r} detached")
+        for spec in KINDS:
+            if any(k.get("name") == spec["name"] for k in kinds):
+                kinds[:] = [k for k in kinds if k.get("name") != spec["name"]]
+                lines.append(f"{spec['name']!r}: declaration removed")
         return lines
-    have = [k for k in kinds if k.get("name") == NAME]
-    if have and have[0].get("type") != KIND["type"]:
-        raise SystemExit(f"{NAME!r} already exists as type "
-                         f"{have[0].get('type')!r} — refusing to overwrite it")
+    for spec in KINDS:
+        have = [k for k in kinds if k.get("name") == spec["name"]]
+        if have and have[0].get("type") != spec["type"]:
+            raise SystemExit(f"{spec['name']!r} already exists as type "
+                             f"{have[0].get('type')!r} — refusing to "
+                             "overwrite it")
     for i, band in enumerate(flare_bands(raw)):
-        if NAME in band.get("kinds", {}):
-            continue
         lanes = band.get("kind_lanes") or {}
-        pool = [k for k, lane in lanes.items() if lane == LANE_NAME]
+        pool = [k for k, lane in lanes.items()
+                if lane == LANE_NAME and k not in NAMES]
         if not pool:
             raise SystemExit(
                 f"{_band_label(i, band)} has no {LANE_NAME!r} lane to pool "
                 f"{NAME!r} into — refusing: attached alone it would fire on "
                 "every flare of that band")
-    if not have:
-        kinds.append(dict(KIND))
-        lines.append(f"{NAME!r}: declared (type=big_fish, offset 0)")
+    for spec in KINDS:
+        if not any(k.get("name") == spec["name"] for k in kinds):
+            kinds.append(dict(spec))
+            lines.append(f"{spec['name']!r}: declared (type=big_fish, "
+                         "offset 0)")
     for i, band in enumerate(flare_bands(raw)):
         band_kinds = band.setdefault("kinds", {})
-        if NAME in band_kinds:
-            continue
         lanes = band.setdefault("kind_lanes", {})
+        added = []
+        for name in NAMES:
+            if name in band_kinds:
+                continue
+            band_kinds[name] = 1.0
+            lanes[name] = LANE_NAME
+            added.append(name)
+        if not added:
+            continue
         pool = [k for k, lane in lanes.items() if lane == LANE_NAME]
-        band_kinds[NAME] = 1.0
-        lanes[NAME] = LANE_NAME
-        lines.append(f"{_band_label(i, band)}: {NAME!r} attached at x1.0 in "
-                     f"the {LANE_NAME!r} lane with {', '.join(pool)} — each "
-                     f"flare picks one of {len(pool) + 1}")
+        others = [k for k in pool if k not in NAMES]
+        mine = len(pool) - len(others)
+        lines.append(
+            f"{_band_label(i, band)}: {', '.join(repr(a) for a in added)} "
+            f"attached at x1.0 in the {LANE_NAME!r} lane with "
+            f"{', '.join(others)} — a big fish on {mine} of every "
+            f"{len(pool)} flares, each other shape flare on 1 of {len(pool)}")
     return lines
 
 
@@ -165,13 +188,14 @@ def verify_diff(before: dict, after: dict, sid: str) -> None:
     b, a = copy.deepcopy(before[sid]), copy.deepcopy(after[sid])
     for side in (b, a):
         side["flare_kinds"] = [k for k in side.get("flare_kinds", [])
-                               if k.get("name") != NAME]
+                               if k.get("name") not in NAMES]
         for band in flare_bands(side):
-            band.get("kinds", {}).pop(NAME, None)
-            band.get("kind_lanes", {}).pop(NAME, None)
+            for name in NAMES:
+                band.get("kinds", {}).pop(name, None)
+                band.get("kind_lanes", {}).pop(name, None)
     if b != a:
         raise SystemExit("UNEXPECTED: the scene differs beyond the big fish "
-                         "declaration and its band attachments")
+                         "declarations and their band attachments")
 
 
 def _atomic_write(path: Path, data: dict) -> None:
@@ -228,8 +252,8 @@ def main(argv: list[str] | None = None) -> int:
     _atomic_write(args.scenes_file, store)
     written = json.loads(args.scenes_file.read_text(encoding="utf-8"))
     verify_diff(json.loads(backup.read_text(encoding="utf-8")), written, sid)
-    print("written and verified: only the big fish declaration and its band "
-          "attachments changed")
+    print("written and verified: only the big fish declarations and their "
+          "band attachments changed")
     return 0
 
 

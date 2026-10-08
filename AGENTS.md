@@ -8812,9 +8812,11 @@ checks it against the schema. Proof: `scripts/check_fish_burst_bounds.py`,
    (screen space, no SoA slot) and `_big_fish_layer` composites it behind
    the ordinary fish — **every path that writes `self.matrix` must call it
    once a frame** (draw, `_fade_only`, `_draw_collapse` today) or a big
-   fish freezes there. Its frequency on the Fish scene is the existing
-   even "Shape" lane (one flare in three; `scripts/add_fish_big_fish_flare.py`)
-   — there is no per-member lane weight.
+   fish freezes there. Its frequency on the Fish scene is weighted by DATA,
+   not code: a lane picks evenly among member NAMES, so
+   `scripts/add_fish_big_fish_flare.py` pools TWO identical kinds ("Big
+   Fish", "Big Fish 2") in the "Shape" lane with its two other shape
+   flares — a big fish on half the flares. Edit both copies together.
 
 Every new fish knob is a first guess pending his eye; the effect ships
 tunable, not tuned. Proof: `scripts/check_fish.py`,

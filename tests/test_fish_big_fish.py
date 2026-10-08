@@ -411,14 +411,14 @@ def test_the_script_pools_it_in_the_shape_lane_and_reverts_exactly(tmp_path):
     assert script.main(["--scenes-file", str(path), "--apply"]) == 0
     stored = json.loads(path.read_text())
     written = SceneV2(**stored[scene.id])
-    big = [k for k in written.flare_kinds if k.name == "Big Fish"]
-    assert len(big) == 1 and big[0].type == "big_fish"
-    assert big[0].trigger_offset_ms == 0
+    big = [k for k in written.flare_kinds if k.type == "big_fish"]
+    assert [k.name for k in big] == ["Big Fish", "Big Fish 2"]
+    assert all(k.trigger_offset_ms == 0 for k in big)
     for band in written.responses["flare"].bands:
-        assert band.kinds["Big Fish"] == 1.0
+        assert band.kinds["Big Fish"] == band.kinds["Big Fish 2"] == 1.0
         pool = sorted(k for k, lane in band.kind_lanes.items()
                       if lane == "Shape")
-        assert pool == ["Big Fish", "Fish Swim Burst",
+        assert pool == ["Big Fish", "Big Fish 2", "Fish Swim Burst",
                         "Reverse Momentarily (500ms)"]
     assert stored[other.id] == json.loads(original)[other.id]
     # idempotent
@@ -428,7 +428,8 @@ def test_the_script_pools_it_in_the_shape_lane_and_reverts_exactly(tmp_path):
     assert json.loads(path.read_text()) == json.loads(original)
 
 
-def test_after_the_script_about_one_flare_in_three_is_a_big_fish(tmp_path):
+def test_after_the_script_a_big_fish_is_as_often_as_the_others_combined(
+        tmp_path):
     from spectra.models.scene import SceneV2
     from spectra.services.scene_response import resolve_lane_picks
     script = _script()
@@ -439,17 +440,19 @@ def test_after_the_script_about_one_flare_in_three_is_a_big_fish(tmp_path):
     band = written.responses["flare"].bands[1]
     declared = {k.name: k for k in written.flare_kinds}
     rng = Random(0)
-    counts = {"Big Fish": 0, "Fish Swim Burst": 0,
+    counts = {"big": 0, "Fish Swim Burst": 0,
               "Reverse Momentarily (500ms)": 0}
-    n = 3000
+    n = 4000
     for _ in range(n):
         picked, _rec = resolve_lane_picks(band, rng, declared, 0.5)
         assert "Colour Jump" in picked       # an unpooled kind still fires
-        hits = [p for p in picked if p in counts]
-        assert len(hits) == 1                # exactly one shape flare
-        counts[hits[0]] += 1
-    for name, c in counts.items():
-        assert c / n == pytest.approx(1 / 3, abs=0.04), name
+        shape = [p for p in picked
+                 if p in counts or p.startswith("Big Fish")]
+        assert len(shape) == 1               # exactly one shape flare
+        counts["big" if shape[0].startswith("Big Fish") else shape[0]] += 1
+    assert counts["big"] / n == pytest.approx(0.5, abs=0.03)
+    for name in ("Fish Swim Burst", "Reverse Momentarily (500ms)"):
+        assert counts[name] / n == pytest.approx(0.25, abs=0.03), name
 
 
 def test_the_script_refuses_a_band_with_no_shape_lane(tmp_path):
