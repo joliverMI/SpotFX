@@ -1888,3 +1888,29 @@ against that commit.
     cut frame, the orbits snapshot reaches the registry only on the cut
     path, and through the real `fx_seam` an ordinary switch still blends
     before and after a cut.
+64. `fireworks.py` (`_import_keepers`, `_release_keepers`, `KEEPER_*`, the
+    `"keepers"` branch of `_adopt_handoff`, `_phase_step`'s keeper hold) +
+    `fish.py`/`orbits.py` (`_handoff_snapshot`'s `"keepers"` flag) +
+    `orbits.py` (the lull hand-off keys, `LULL_KEEP_RING`/`LULL_KEEP_ORBIT`,
+    `_orbit_scale`) + `squiggles.py` (an adopted piece on a cut skips its
+    fade-in): THE FIREWORKS MELDS (2026-10-08, drop-scene-variety plan
+    phase 3 — spectra/services/drop_switch.py; his ask: "fish and orbits
+    could have 3 'particles' remain instead of just 1 and then they could
+    explode into fireworks on the drop"). A Fish/Orbits lull TOLD (fx/
+    effects/lull_handoff.py's `lull_next`) that another effect is coming
+    flags its `lull_keep` keepers in its particle snapshot; on the drop-led
+    hard cut (#63) Fireworks holds each flagged keeper as a stationary
+    rocket and the drop arm's `_rocket_payoff` explodes it where it stands
+    (held keepers with no drop arm burst on their own after KEEPER_HOLD_S).
+    Orbits opts into the hook: told `lull_keep` N > 1 it keeps N blobs on a
+    spaced ring (geometry falls to LULL_KEEP_RING, each orbit shrinks to
+    LULL_KEEP_ORBIT). Squiggles: a chain adopted from the REGISTRY snapshot
+    (a cut — no outgoing frames to hide a fade-in) starts at
+    `age = FADE_IN_S`, where before the panel went dark ~80 ms. Untold /
+    unflagged everything is byte-identical: no flag is emitted unless the
+    lull was told a different effect, and an untold orbits lull is the old
+    `1 - 0.97 f` branch verbatim. Evidence: `tests/test_fireworks_melds.py`
+    (each keeper's giant burst at its own position on the real pipeline;
+    the untold orbits lull frame-for-frame and an unflagged fireworks adopt
+    array-for-array against the PINNED pre-change modules; the Black Hole
+    swallowing the cloud; Fish/Orbits/Squiggles lit on the cut frame).

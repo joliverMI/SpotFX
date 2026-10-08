@@ -495,3 +495,48 @@ def test_the_sequence_preview_performs_the_drop_led_cut_on_the_hold(
             await host.shutdown()
 
     _run(main())
+
+
+def test_the_sequence_preview_performs_a_fireworks_meld_after_the_drop(
+        tmp_path, monkeypatch):
+    """THE FIREWORKS MELDS in the preview: the held Fireworks scene runs
+    charge, lull AND its own drop; the "switch" step then cuts (no blend)
+    to the Black Hole, and the release hands Fireworks back."""
+    from spectra.services import drop_switch as dsw
+    from spectra.services import flare_preview_hold as fph
+    from spectra.services import phase_preview
+    _own(monkeypatch, tmp_path)
+    held = _scene("Fireworks", "fireworks", {"reverse": False})
+    target = _scene("Black Hole", "blackhole", {"reverse": False})
+    plan = dsw.decide(
+        key="preview", uri=None, members={"charge": 0, "lull": 1, "drop": 2},
+        showing=dsw.Showing(dsw.SceneInfo(held.id, held.name, "fireworks"), ("h", 0), None, None),
+        record=dsw.StintRecord(drops_carried=1, carried_previous_drop=True),
+        settings=dsw.SwitchSettings(),
+        pick_target=lambda sid, rng: dsw.SceneInfo(target.id, target.name, "blackhole"))
+    assert plan.switch and plan.moment == dsw.MOMENT_AFTER_DROP
+
+    async def main():
+        host, virtual = await _start_host(tmp_path, "fireworks", {"reverse": False})
+        virtual._config["transition_mode"] = "Add"
+        virtual._config["transition_time"] = 0.5
+        try:
+            program = phase_preview.PhaseSequenceProgram(held, switch=(plan, target))
+            for cls in ("charge", "lull", "drop"):
+                await fph.open_program_hold(program, 0.8, step=cls,
+                                            heartbeat_timeout_s=30.0)
+                await _pump_frames_for(virtual, 0.05)
+                assert virtual.active_effect.type == "fireworks"
+            res = await fph.open_program_hold(program, 0.8, step="switch",
+                                              heartbeat_timeout_s=30.0)
+            assert virtual.active_effect.type == "blackhole"
+            assert virtual._transition_effect is None, "the switch blended"
+            await fph.open_program_hold(program, 0.8, step="release",
+                                        heartbeat_timeout_s=30.0)
+            assert virtual.active_effect.type == "fireworks"
+            return res
+        finally:
+            facade.set_host(None)
+            await host.shutdown()
+
+    _run(main())

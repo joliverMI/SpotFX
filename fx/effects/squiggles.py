@@ -785,6 +785,12 @@ class Squiggles2d(Twod, GradientEffect):
                 grad=float(snap["grad"][i]),
                 bright=float(np.clip(snap["bright"][i], 0.4, 1.0)),
             )
+            if not live:
+                # a HARD CUT (fx/VENDOR.md #63, #64) leaves no outgoing
+                # frames to hide a fade-in behind: an adopted piece is
+                # already on the panel, so it continues at full strength
+                # instead of the panel going dark while it fades up
+                c["age"] = FADE_IN_S
             for _ in range(2 * max(1, self.step_size)):
                 self._walk_one(c)
             self._trim(c, self.step_count)

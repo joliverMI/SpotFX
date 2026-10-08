@@ -1443,6 +1443,22 @@ export const HELP_SECTIONS: HelpSection[] = [
             kbd: false,
           },
           {
+            id: 'fireworks-melds',
+            title: 'Fireworks drops: the melds',
+            keywords: 'fireworks meld keepers three fish orbits burst drop swallow black hole implode next big bass hit flare deadline loud switch scene',
+            body: [
+              'Into Fireworks: when a stale Fish or Orbits scene switches to Fireworks on a drop, its lull is told what is coming and leaves three pieces instead of one — three searching fish, or three blobs on a small ring. On the drop the room cuts to Fireworks and each of those three explodes into a giant firework where it stands, in its own colour.',
+              'Out of Fireworks into the Black Hole: Fireworks plays its own drop first, and a second later (the swallow delay) the room cuts to the Black Hole, which pulls the whole burst cloud into its infall.',
+              'Out of Fireworks into Fish, Orbits, Squiggles or STAR: Fireworks plays its own drop first, and the switch waits for the next big bass hit — the next analysed flare at least as strong as the big-hit setting. The cut lands just before that flare fires, so the flare lands on the new scene and it comes in loud, taking the falling fireworks as its own pieces. If no big hit comes by one bar after the drop\'s tail, the cut lands there and the new scene fires its own flare anyway.',
+              'If the next drop sequence starts while a switch is still waiting, the cut lands then, so two drops never fight over the room. Every one of these shows on the drop-sequence strip (⇄ after the drop) and on the Review page.',
+            ],
+            table: [
+              ['Fireworks → Black Hole after', '1 second after the drop mark.'],
+              ['Fireworks: next big hit ≥', '0.6 — an analysed flare at least this strong (0-1) releases the switch.'],
+            ],
+            kbd: false,
+          },
+          {
             id: 'drop-sequence-keys',
             title: 'Drop-sequence keyboard',
             keywords: 'keyboard keys shortcuts c l d select handle arrow step nudge shift enter confirm delete dismiss n p next previous escape ctrl z undo y redo focus',

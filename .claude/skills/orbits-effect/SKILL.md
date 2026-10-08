@@ -60,6 +60,21 @@ UNCHANGED per-particle speed distribution. Measure over several RNG seeds
 and average; a single run is noisy (`scripts/
 check_orbits_drop_burst_and_persistence.py`).
 
+## The lull can be TOLD to keep N blobs (2026-10-08, the fireworks melds)
+
+Orbits joined `fx.device_model.LULL_HANDOFF_EFFECTS` (`fx/effects/
+lull_handoff.py`; `fx/VENDOR.md` #64) for the drop-led switch's keepers
+meld: a lull leading into Fireworks is told `lull_keep = 3`. Told N > 1,
+the lull keeps N blobs (the shortfall flies in from off-panel), the
+geometry falls only to `LULL_KEEP_RING` of itself and each blob's own
+orbit shrinks to `LULL_KEEP_ORBIT` (`_orbit_scale`), so the N sit on an
+evenly spaced ring — distinct origins for Fireworks to explode. Told
+`lull_next` another effect, `_handoff_snapshot` flags them (`"keepers"`).
+**Told 1 (the default) or untold, the lull is byte-identical to before** —
+proven frame for frame against the pinned pre-change module; told 0, it
+keeps its one blob anyway (it has no dark lull to fall back to). Orbits
+is NOT in `DROP_INTENSITY_EFFECTS` (its drop does not scale).
+
 ## Sonic reach
 
 Same rule as every effect here: no direct param edit. Sonic reaches these
@@ -69,7 +84,9 @@ effect.
 ## Executable proofs
 
 `scripts/check_orbits_drop_burst_and_persistence.py`,
-`scripts/smoke_orbits_params.py`, `tests/test_orbits_drop_persistence.py`.
+`scripts/smoke_orbits_params.py`, `tests/test_orbits_drop_persistence.py`,
+`tests/test_fireworks_melds.py` (keep-N ring, the keepers flag, untold
+byte-identity), `tests/test_lull_handoff.py`.
 History: AGENTS.md's "Fish (`fx/effects/fish.py`) — Orbits' twin,
 different kinematics" section (how Fish reuses Orbits' patterns but not its
 motion) and the drop-timing-reference withdrawal note

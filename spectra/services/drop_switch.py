@@ -95,18 +95,54 @@ has one, because every member's _adopt_handoff takes any predecessor's
 snapshot (report E6): "choreographed" where the incoming effect stages the
 arrival (radial's standalone bloom out of the particles; a particle effect
 erupting from STAR's imploded point), "generic" otherwise (the pieces join
-the incoming effect as its own particles). FIREWORKS PAIRS STAY ON THE
-GENERIC PATH IN THIS PHASE — the melds (keepers -> bursts, swallowed by the
-Black Hole a second after the drop, implode on the next bass hit) are phase
-3 and will refine these rows and `KEEP_FOR`. An outgoing effect outside
-the families (the Eye, the Dancer, Pac-Man) has no row: no good drop
-hand-off, so its switch goes early (A).
+the incoming effect as its own particles), and the three FIREWORKS MELDS
+below. An outgoing effect outside the families (the Eye, the Dancer,
+Pac-Man) has no row: no good drop hand-off, so its switch goes early (A).
+
+THE FIREWORKS MELDS (drop-scene-variety plan phase 3, option C — his ask:
+"fish and orbits could have 3 'particles' remain instead of just 1 and
+then they could explode into fireworks on the drop, but going from
+fireworks to others might need to have the standard effect followed by a
+transition into the other effects after the initial burst, but the other
+effect needs to come in loud to maintain the energy. So example could be
+the fireworks drops, then immediately those big fireworks get swallowed by
+the black hole, or they explode and then on the next big bass hit they
+implode into the fish, orbit particle, squiggle, etc."). All three are the
+SAME one-call hard cut every drop-led switch makes; only the moment moves.
+  INTO FIREWORKS ("keepers", fish/orbits -> fireworks): the lull is told
+    `lull_keep = FIREWORKS_KEEP` (3) and `lull_next = "fireworks"`; the
+    fish leaves three spaced searching keepers, orbits three spaced blobs,
+    and each flags them in its snapshot. The cut lands ON the drop mark as
+    usual; Fireworks turns every flagged keeper into a held rocket where it
+    stands and the drop arm that follows explodes each one (fx/effects/
+    fireworks.py's KEEPERS MELD). Every other pair into Fireworks keeps the
+    generic cut on the drop.
+  OUT 1, SWALLOWED ("swallowed", fireworks -> blackhole): Fireworks plays
+    its OWN drop, then `drop_switch_swallow_delay_s` (1 s) after the drop
+    mark the scene cuts to the Black Hole, whose generic adopt pulls the
+    whole burst cloud into its infall ("after_drop").
+  OUT 2, IMPLODE ON THE NEXT HIT ("implode_on_hit", fireworks -> fish /
+    orbits / squiggles / STAR): Fireworks plays its own drop; the switch is
+    ARMED at the drop and released by THE NEXT BIG BASS HIT, defined once
+    (`next_big_hit`): the first ANALYSED flare after the drop (past the
+    drop's own MATCH_BEATS reach, where a flare is silenced anyway) whose
+    intensity is at least `drop_switch_hit_threshold`. The cut lands just
+    before that flare fires, so the flare itself lands on the incoming
+    scene's own band — the "comes in loud". No hit by the DEADLINE (the
+    sequence's protected tail plus one bar, `hit_deadline_ms`) and the cut
+    lands there, firing the incoming scene's flare itself — a pending
+    switch is never left hanging. STAR is included beside his three named
+    effects (his "etc.": its adopt gathers the particles into its bloom).
+  A late switch still pending when the NEXT sequence's first member fires
+  is cut at that moment ("before_next_sequence"), so two decisions never
+  hold the room at once.
 
 THE LULL IS TOLD (`handoff_for`). A plan switching ON the drop answers the
 lull: `next_effect` per virtual = the effect the target scene will install
-there, `keep` = KEEP_FOR the target's family (1 for now — fireworks' 3 is
-phase 3). An early plan has already switched by the lull, so the lull is
-told the same effect (""), keep default. The trigger clock marks the plan
+there, `keep` = KEEP_FOR the target's family (Fireworks: FIREWORKS_KEEP).
+A late plan (Out 1/2) runs its lull on the showing scene, which is not
+told anything new. An early plan has already switched by the lull, so the
+lull is told the same effect (""), keep default. The trigger clock marks the plan
 current around the lull member's fire (`lull_plan`, a ContextVar — the
 resolver runs inside that same await chain), with a song-position lookup
 as the fallback; no plan -> the hook's own default.
@@ -139,6 +175,10 @@ MOMENT_DROP = "drop"
 MOMENT_CHARGE_START = "charge_start"
 MOMENT_CHARGE_FLARE = "charge_flare"
 EARLY_MOMENTS = (MOMENT_CHARGE_START, MOMENT_CHARGE_FLARE)
+# THE FIREWORKS MELDS' two moments AFTER the drop (module docstring)
+MOMENT_AFTER_DROP = "after_drop"
+MOMENT_NEXT_HIT = "next_hit"
+LATE_MOMENTS = (MOMENT_AFTER_DROP, MOMENT_NEXT_HIT)
 
 STALE_PREVIOUS_DROP = "previous_drop"
 STALE_DROPS_IN_A_ROW = "drops_in_a_row"
@@ -152,6 +192,21 @@ RIDE_EDGE_MS = 250
 HANDOFF_CHOREOGRAPHED = "choreographed"
 HANDOFF_GENERIC = "generic"
 HANDOFF_SAME_EFFECT = "same_effect"
+# THE FIREWORKS MELDS (module docstring)
+HANDOFF_KEEPERS = "keepers"
+HANDOFF_SWALLOWED = "swallowed"
+HANDOFF_IMPLODE_ON_HIT = "implode_on_hit"
+
+# How many keepers a lull leaves for a Fireworks drop (his "3 'particles'
+# remain instead of just 1").
+FIREWORKS_KEEP = 3
+
+# THE NEXT BIG BASS HIT (`next_big_hit`): never sooner than this after the
+# drop mark, whatever the beat (the payoff's own burst is the first ~second).
+HIT_MIN_AFTER_MS = 500
+# ... and the deadline: the sequence's protected tail plus one bar.
+BAR_BEATS = 4
+FALLBACK_BEAT_MS = 500.0
 
 
 def _handoff_table() -> dict[tuple[str, str], str]:
@@ -159,10 +214,21 @@ def _handoff_table() -> dict[tuple[str, str], str]:
     cross on a cut (module docstring, THE HAND-OFF TABLE)."""
     table: dict[tuple[str, str], str] = {}
     particles = device_model.CENTRE_BURST_EFFECTS - {"radial"}
+    fireworks = device_model.DROP_FIREWORKS_EFFECTS
     for out in device_model.DROP_SWITCH_EFFECTS:
         for inc in device_model.DROP_SWITCH_EFFECTS:
             if out == inc:
                 table[(out, inc)] = HANDOFF_SAME_EFFECT
+            elif inc in fireworks and out in device_model.LULL_HANDOFF_EFFECTS:
+                # the lull leaves FIREWORKS_KEEP keepers that burst on the drop
+                table[(out, inc)] = HANDOFF_KEEPERS
+            elif out in fireworks and inc == "blackhole":
+                # Fireworks drops, then the Black Hole swallows the cloud
+                table[(out, inc)] = HANDOFF_SWALLOWED
+            elif out in fireworks and inc in device_model.CENTRE_BURST_EFFECTS:
+                # Fireworks drops, then implodes into the next scene on the
+                # next big bass hit
+                table[(out, inc)] = HANDOFF_IMPLODE_ON_HIT
             elif inc == "radial" and out in particles:
                 # radial gathers the particles and blooms out of the centre
                 table[(out, inc)] = HANDOFF_CHOREOGRAPHED
@@ -176,12 +242,11 @@ def _handoff_table() -> dict[tuple[str, str], str]:
 
 HANDOFF: dict[tuple[str, str], str] = _handoff_table()
 
-# How many pieces the lull leaves for each target family. Fireworks wants 3
-# keepers as launch origins — phase 3 (the melds); until then every target
-# gets the hook's own default.
+# How many pieces the lull leaves for each target family: Fireworks wants
+# FIREWORKS_KEEP keepers as its payoff's origins (the KEEPERS meld).
 KEEP_FOR: dict[str, int] = {
     "centre_burst": lull_handoff.DEFAULT_KEEP,
-    "fireworks": lull_handoff.DEFAULT_KEEP,
+    "fireworks": FIREWORKS_KEEP,
 }
 
 
@@ -209,6 +274,9 @@ class SwitchSettings:
     after_previous_drop: bool = True
     stale_margin_s: float = 10.0
     drops_in_a_row: int = 2
+    # THE FIREWORKS MELDS (module docstring)
+    swallow_delay_s: float = 1.0
+    hit_threshold: float = 0.6
 
     @classmethod
     def from_room(cls, room: Any) -> "SwitchSettings":
@@ -220,7 +288,11 @@ class SwitchSettings:
             stale_margin_s=float(getattr(room, "drop_switch_stale_margin_s",
                                          d.stale_margin_s)),
             drops_in_a_row=int(getattr(room, "drop_switch_drops_in_a_row",
-                                       d.drops_in_a_row)))
+                                       d.drops_in_a_row)),
+            swallow_delay_s=float(getattr(room, "drop_switch_swallow_delay_s",
+                                          d.swallow_delay_s)),
+            hit_threshold=float(getattr(room, "drop_switch_hit_threshold",
+                                        d.hit_threshold)))
 
 
 @dataclass(frozen=True)
@@ -311,15 +383,28 @@ class SwitchPlan:
     decided_at_ms: Optional[int] = None
     outcome: Optional[dict] = None
     lull_handoff: Optional[dict] = None
+    # THE FIREWORKS MELDS' late moments: where the cut lands after the drop
+    # (`release_ms`), what releases it ("delay" | "hit" | "deadline"), the
+    # analysed flare that is the next big hit, and the hit's deadline.
+    release_ms: Optional[int] = None
+    release_by: Optional[str] = None
+    hit_trigger_id: Optional[str] = None
+    deadline_ms: Optional[int] = None
 
     @property
     def early(self) -> bool:
         return self.switch and self.moment in EARLY_MOMENTS
 
+    @property
+    def late(self) -> bool:
+        return self.switch and self.moment in LATE_MOMENTS
+
     def cut_ms(self) -> Optional[int]:
         """Where the cut is planned to land (song time)."""
         if not self.switch:
             return None
+        if self.moment in LATE_MOMENTS:
+            return self.release_ms
         if self.moment == MOMENT_CHARGE_FLARE:
             return self.ride_ms
         if self.moment == MOMENT_CHARGE_START:
@@ -357,6 +442,14 @@ _MOMENT_WORDS = {
     MOMENT_DROP: "a hard cut on the drop",
     MOMENT_CHARGE_START: "a hard cut at the start of the charge",
     MOMENT_CHARGE_FLARE: "a hard cut on the flare inside the charge",
+    MOMENT_AFTER_DROP: "a hard cut just after its own drop",
+    MOMENT_NEXT_HIT: "a hard cut on the next big bass hit after its own drop",
+}
+
+_HANDOFF_WORDS = {
+    HANDOFF_KEEPERS: "the lull leaves three keepers that burst on the drop",
+    HANDOFF_SWALLOWED: "the Black Hole swallows the burst",
+    HANDOFF_IMPLODE_ON_HIT: "the burst implodes into it, which comes in loud",
 }
 
 
@@ -378,8 +471,59 @@ def _sentence_yes(showing: Optional[Showing], target: SceneInfo,
         if parts:
             early_why = " — early because " + " and ".join(parts)
     hand = f" ({handoff} hand-off)" if handoff else ""
+    meld = _HANDOFF_WORDS.get(handoff or "")
+    meld = f" — {meld}" if meld else ""
     return (f"{frm} → {target.name}, {_MOMENT_WORDS[moment]}{hand}: "
-            f"{why}{early_why}.")
+            f"{why}{early_why}{meld}.")
+
+
+def hit_deadline_ms(drop_ms: int, beat_ms: Optional[float]) -> int:
+    """OUT 2's deadline: the sequence's protected tail (drop_detector.
+    TAIL_BEATS) plus one bar after the drop mark."""
+    from spectra.services import drop_detector
+    beat = float(beat_ms) if beat_ms and beat_ms > 0 else FALLBACK_BEAT_MS
+    return int(round(drop_ms + (drop_detector.TAIL_BEATS + BAR_BEATS) * beat))
+
+
+def next_big_hit(flares, drop_ms: int, beat_ms: Optional[float],
+                 threshold: float, until_ms: Optional[int] = None
+                 ) -> Optional[tuple[str, int]]:
+    """THE NEXT BIG BASS HIT, defined once: the first ANALYSED flare
+    (`flares` = (trigger id, song ms, intensity)) strictly after the drop's
+    own reach — MATCH_BEATS beats, where an analysed flare is silenced
+    anyway (drop_firing.Window.at_drop), and never sooner than
+    HIT_MIN_AFTER_MS — up to `until_ms`, whose intensity is at least
+    `threshold`. None when there is no such flare."""
+    from spectra.services import drop_firing
+    beat = float(beat_ms) if beat_ms and beat_ms > 0 else FALLBACK_BEAT_MS
+    after = drop_ms + max(HIT_MIN_AFTER_MS, drop_firing.MATCH_BEATS * beat)
+    hits = sorted((int(ms), tid) for tid, ms, inten in flares
+                  if ms > after and (until_ms is None or ms <= until_ms)
+                  and float(inten) >= float(threshold))
+    return (hits[0][1], hits[0][0]) if hits else None
+
+
+def late_release(plan: SwitchPlan, settings: SwitchSettings,
+                 flares=(), beat_ms: Optional[float] = None) -> SwitchPlan:
+    """Where a late plan's cut lands (module docstring, THE FIREWORKS
+    MELDS): `swallow_delay_s` after the drop, or the next big hit, or the
+    deadline. Recomputed when the drop arms it, since the song's analysed
+    flares may have been planned since the decision."""
+    if not plan.late or plan.drop_ms is None:
+        return plan
+    if plan.moment == MOMENT_AFTER_DROP:
+        return replace(plan, release_by="delay", hit_trigger_id=None,
+                       deadline_ms=None,
+                       release_ms=int(round(plan.drop_ms
+                                            + max(0.0, settings.swallow_delay_s) * 1000)))
+    deadline = hit_deadline_ms(plan.drop_ms, beat_ms)
+    hit = next_big_hit(flares, plan.drop_ms, beat_ms, settings.hit_threshold,
+                       until_ms=deadline)
+    if hit is not None:
+        return replace(plan, release_by="hit", hit_trigger_id=hit[0],
+                       release_ms=hit[1], deadline_ms=deadline)
+    return replace(plan, release_by="deadline", hit_trigger_id=None,
+                   release_ms=deadline, deadline_ms=deadline)
 
 
 def stale_reasons(showing: Optional[Showing], record: StintRecord,
@@ -412,12 +556,15 @@ def decide(*, key: str, uri: Optional[str], members: Mapping[str, int],
            ride: Optional[tuple[str, int]] = None,
            can_go_early: bool = True,
            blocker: Optional[str] = None,
-           decided_at_ms: Optional[int] = None) -> SwitchPlan:
+           decided_at_ms: Optional[int] = None,
+           flares=(), beat_ms: Optional[float] = None) -> SwitchPlan:
     """The resolver's one decision for one sequence (module docstring).
     Pure: everything live is handed in. `members` is {class: song ms} for
     the members that will fire; `ride` the first flare inside the charge;
     `can_go_early` False when the charge has already passed (the clock met
-    the sequence at its lull or drop)."""
+    the sequence at its lull or drop); `flares` the song's ANALYSED flares
+    as (trigger id, song ms, intensity) and `beat_ms` the sequence's beat,
+    for a late Fireworks meld (late_release)."""
     base = dict(key=key, uri=uri, charge_ms=members.get("charge"),
                 lull_ms=members.get("lull"), drop_ms=members.get("drop"),
                 decided_at_ms=decided_at_ms,
@@ -450,6 +597,10 @@ def decide(*, key: str, uri: Optional[str], members: Mapping[str, int],
     has_charge = members.get("charge") is not None
     if wants_early and has_charge and can_go_early:
         moment = MOMENT_CHARGE_FLARE if ride is not None else MOMENT_CHARGE_START
+    elif handoff == HANDOFF_SWALLOWED and members.get("drop") is not None:
+        moment = MOMENT_AFTER_DROP
+    elif handoff == HANDOFF_IMPLODE_ON_HIT and members.get("drop") is not None:
+        moment = MOMENT_NEXT_HIT
     else:
         moment = MOMENT_DROP
     plan = SwitchPlan(
@@ -461,7 +612,7 @@ def decide(*, key: str, uri: Optional[str], members: Mapping[str, int],
         ride_trigger_id=ride[0] if moment == MOMENT_CHARGE_FLARE else None,
         ride_ms=ride[1] if moment == MOMENT_CHARGE_FLARE else None,
         **base)
-    return plan
+    return late_release(plan, settings, flares, beat_ms)
 
 
 def find_ride(charge_ms: Optional[int], end_ms: Optional[int],

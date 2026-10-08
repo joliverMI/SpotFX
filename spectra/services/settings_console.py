@@ -138,7 +138,9 @@ def _spec(key: str, label: str, description: str) -> SettingSpec:
             "drop_floor": "top-bar displayed energy, fraction 0.0-1.0",
             "lull_dark_max_s": "seconds",
             "drop_switch_stale_margin_s": "seconds beyond the scene's own dwell",
-            "drop_switch_drops_in_a_row": "drops, 0 = off"}.get(key)
+            "drop_switch_drops_in_a_row": "drops, 0 = off",
+            "drop_switch_swallow_delay_s": "seconds after the drop",
+            "drop_switch_hit_threshold": "analysed flare intensity, 0.0-1.0"}.get(key)
     return SettingSpec(key=key, label=label, kind=kind, description=description,
                        unit=unit, min=ge, max=le, choices=choices)
 
@@ -301,6 +303,17 @@ SETTINGS_REGISTRY: dict[str, SettingSpec] = {
         "drop_switch_drops_in_a_row", "Drop switch: drops in a row",
         "A scene that has carried this many drops in a row counts as "
         "stale. Default 2; 0 turns this rule off."),
+    "drop_switch_swallow_delay_s": _spec(
+        "drop_switch_swallow_delay_s", "Fireworks meld: swallow delay",
+        "When a stale Fireworks scene hands over to the Black Hole, "
+        "Fireworks plays its own drop and the Black Hole cuts in this many "
+        "seconds after the drop mark, swallowing the burst. Default 1."),
+    "drop_switch_hit_threshold": _spec(
+        "drop_switch_hit_threshold", "Fireworks meld: big-hit strength",
+        "When a stale Fireworks scene hands over to Fish, Orbits, Squiggles "
+        "or STAR, Fireworks plays its own drop and the next scene cuts in "
+        "on the next analysed flare at least this strong (0-1, default "
+        "0.6) — or one bar after the drop's tail if none comes."),
 }
 
 

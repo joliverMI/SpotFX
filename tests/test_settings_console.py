@@ -77,6 +77,8 @@ def test_registry_is_an_explicit_allowlist_matching_room_control_bounds():
         # 2026-10-08, the drop-led scene switch's tunables:
         "drop_switch_enabled", "drop_switch_after_previous_drop",
         "drop_switch_stale_margin_s", "drop_switch_drops_in_a_row",
+        # 2026-10-08, the fireworks melds' two tunables:
+        "drop_switch_swallow_delay_s", "drop_switch_hit_threshold",
     }
     # force_scene_* deliberately excluded — see settings_console.py docstring
     assert "force_scene_enabled" not in sc.SETTINGS_REGISTRY

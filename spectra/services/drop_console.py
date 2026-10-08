@@ -342,6 +342,8 @@ async def _op_explain_switch(sequence: Any = None, uri: Optional[str] = None) ->
                 "from_scene": p.from_scene_name, "to_scene": p.to_scene_name,
                 "moment": p.moment, "handoff": p.handoff,
                 "stale_by": d["stale_by"], "cut_s": _secs(d["cut_ms"]),
+                # the fireworks melds' late cut: what releases it
+                "release_by": p.release_by,
                 "outcome": p.outcome}
 
     plans = drop_switch.plans_for(uri)
@@ -349,7 +351,9 @@ async def _op_explain_switch(sequence: Any = None, uri: Optional[str] = None) ->
         "enabled": settings.enabled,
         "after_previous_drop": settings.after_previous_drop,
         "stale_margin_s": settings.stale_margin_s,
-        "drops_in_a_row": settings.drops_in_a_row}}
+        "drops_in_a_row": settings.drops_in_a_row,
+        "swallow_delay_s": settings.swallow_delay_s,
+        "hit_threshold": settings.hit_threshold}}
     if sequence is not None:
         if (not isinstance(sequence, int) or isinstance(sequence, bool)
                 or not 1 <= sequence <= len(numbered)):
@@ -526,8 +530,13 @@ OPERATIONS: dict[str, SonicOperation] = {
             "switches with a hard cut ON the drop when the scene showing is stale (it "
             "played the previous drop, carried drops_in_a_row drops, or overstayed its "
             "dwell by stale_margin_s); early, at the charge or on a flare inside it, only "
-            "when there is no good drop hand-off or it has overstayed. The thresholds are "
-            "ordinary settings (drop_switch_*) — change them with set_setting, not here."),
+            "when there is no good drop hand-off or it has overstayed. Leaving Fireworks, "
+            "Fireworks plays its own drop first: into the Black Hole the cut lands "
+            "swallow_delay_s later; into Fish/Orbits/Squiggles/STAR on the next analysed "
+            "flare at least hit_threshold strong (release_by 'hit'), else at a deadline. "
+            "Into Fireworks from Fish/Orbits, three keepers burst where they stand. The "
+            "thresholds are ordinary settings (drop_switch_*) — change them with "
+            "set_setting, not here."),
         input_schema={"type": "object", "properties": {"sequence": _SEQ, "uri": _URI},
                       "additionalProperties": False},
         handler=_op_explain_switch),

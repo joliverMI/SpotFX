@@ -2049,7 +2049,7 @@ class Fish2d(Twod, GradientEffect):
         py = self.cy + self.p_y[:n] * self.sy - self.cam_py
         px = np.where(np.isfinite(px), px, self.cx)
         py = np.where(np.isfinite(py), py, self.cy)
-        return {
+        snap = {
             "src": "fish",
             "t": particle_handoff.now(),
             "dims": (self.r_width, self.r_height),
@@ -2076,6 +2076,16 @@ class Fish2d(Twod, GradientEffect):
                 },
             },
         }
+        # THE KEEPERS MELD (drop-scene-variety phase 3, fx/effects/
+        # fireworks.py's KEEPERS block): a lull TOLD it leads into another
+        # effect flags its keepers, so the arriving effect can treat them as
+        # the drop's own pieces (Fireworks explodes each where it stands).
+        # Untold, or told its own effect: no flag — every successor adopts
+        # exactly as before.
+        nxt = lull_handoff.next_effect(self._config)
+        if self._lull_state is not None and nxt and nxt != "fish":
+            snap["keepers"] = self.p_mode[:n] == 5
+        return snap
 
     def deactivate(self):
         virtual = self._virtual

@@ -161,7 +161,11 @@ def test_only_a_lull_and_only_a_lull_dark_effect_is_told():
         assert told[vid][lull_dark.DARK_KEY] == pytest.approx(17.0)
         assert told[vid][lull_dark.RAMP_KEY] == pytest.approx(18.0)
     for vid in ("orb", "bh1"):
-        assert told[vid] == {"phase": "lull", "phase_progress": 0.0}
+        # no lull-dark keys (orbits is told the lull HAND-OFF keys since the
+        # fireworks melds, a different hook — fx/effects/lull_handoff.py)
+        assert not {lull_dark.DARK_KEY, lull_dark.RAMP_KEY} & set(told[vid])
+        assert told[vid]["phase"] == "lull" and told[vid]["phase_progress"] == 0.0
+    assert told["bh1"] == {"phase": "lull", "phase_progress": 0.0}
     assert rec["lull_dark_s"] == pytest.approx(17.0)
 
     eng, ex = _responder({"bh": "blackhole"})

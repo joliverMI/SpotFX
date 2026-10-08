@@ -170,6 +170,13 @@ cold:
 `search_speed`/`search_pause_s`/`search_reach`/`drop_scale_min` are
 registered (help topic `fish-lull-search`) — FIRST GUESSES, pending his eye.
 
+**THE KEEPERS MELD (2026-10-08, drop-scene-variety phase 3)**: a lull told
+`lull_next` an effect other than fish flags its keepers in
+`_handoff_snapshot` (`"keepers"` = mode 5), and Fireworks explodes each one
+where it stands on the drop-led cut (`fx/effects/fireworks.py`'s KEEPERS
+MELD, `fx/VENDOR.md` #64). Untold or told fish: no flag, every successor
+adopts as before. Proof: `tests/test_fireworks_melds.py`.
+
 ## The swim burst can push a fish off-screen — a boundary SPEED BRAKE
    exists specifically for burst speed, and it's scoped tightly
 

@@ -149,11 +149,32 @@ def switch_for(scene: SceneV2, intensity: float, enabled: bool = True
 
 
 def _switch_class(plan) -> Optional[str]:
-    """Which mark the cut lands on: the drop, or (early) the charge."""
+    """Which mark the cut lands on: the drop, or (early) the charge. None
+    for a Fireworks meld's LATE cut, which is its own "switch" step after
+    the drop (late_cut_after_s)."""
     from spectra.services import drop_switch
-    if plan is None or not plan.switch:
+    if plan is None or not plan.switch or plan.late:
         return None
     return "drop" if plan.moment == drop_switch.MOMENT_DROP else "charge"
+
+
+# The preview has no music, so a Fireworks meld's "next big bass hit" is
+# stood in by this moment after the drop fires (the show's own is the next
+# analysed flare above drop_switch_hit_threshold, or its deadline).
+PREVIEW_HIT_AFTER_S = 1.5
+LATE_CUT_SHOW_S = 2.5   # how long the lap keeps running after a late cut
+
+
+def late_cut_after_s(plan) -> Optional[float]:
+    """Seconds after the drop fires that a late (Fireworks meld) cut lands
+    in the preview, or None for any other plan."""
+    from spectra.services import drop_switch
+    if plan is None or not plan.switch or not plan.late:
+        return None
+    if plan.moment == drop_switch.MOMENT_AFTER_DROP and plan.release_ms is not None \
+            and plan.drop_ms is not None:
+        return max(0.0, (plan.release_ms - plan.drop_ms) / 1000.0)
+    return PREVIEW_HIT_AFTER_S
 
 
 async def build_timeline(scene: SceneV2, intensity: float, *,
@@ -220,15 +241,25 @@ async def build_timeline(scene: SceneV2, intensity: float, *,
         m["hang_end_s"] = round(m["ramp_end_s"] + m["hang_ms"] / 1000.0, 4)
 
     end_s = max(m["hang_end_s"] for m in marks)
+    switch = switch_for(scene, intensity, drop_switch_enabled)
+    late_s = late_cut_after_s(switch[0]) if switch is not None else None
+    late_cut_s = None
+    if late_s is not None:
+        drop_mark = next(m for m in marks if m["event_class"] == "drop")
+        late_cut_s = round(drop_mark["fire_at_s"] + late_s, 4)
+        end_s = max(end_s, late_cut_s + LATE_CUT_SHOW_S)
     duration_s = max(MIN_TIMELINE_S, end_s + TAIL_PAD_S)
     cues = [{"step": m["event_class"], "at_s": m["fire_at_s"],
              "label": f"{m['event_class']} fires"} for m in marks]
+    if late_cut_s is not None:
+        # THE FIREWORKS MELD's late cut: its own step, after the drop
+        cues.append({"step": "switch", "at_s": late_cut_s,
+                     "label": "the scene switches"})
     # The lap's own reset: release the phase the way a track change does,
     # so the next lap starts from a clean, unarmed effect rather than
     # inheriting a charge that never ended.
     cues.append({"step": "release", "at_s": round(duration_s - 0.25, 4),
                  "label": "release the phase"})
-    switch = switch_for(scene, intensity, drop_switch_enabled)
     switch_out: Optional[dict[str, Any]] = None
     if switch is not None:
         from spectra.services import drop_switch
@@ -237,7 +268,8 @@ async def build_timeline(scene: SceneV2, intensity: float, *,
         switch_out = plan.as_dict()
         cls = _switch_class(plan)
         mark = next((m for m in marks if m["event_class"] == cls), None)
-        switch_out["cut_s"] = mark["fire_at_s"] if mark else None
+        switch_out["cut_s"] = (late_cut_s if late_cut_s is not None
+                               else mark["fire_at_s"] if mark else None)
         lull_gap = resolved_gaps.get("lull")
         told = drop_switch.handoff_for(plan, LullContext(
             scene=scene, intensity=intensity, gap_ms=lull_gap,
@@ -292,7 +324,7 @@ class PhaseSequenceProgram(flare_preview_hold.PreviewProgram):
     scene_response's colour-rotate note). release_phases() is a direct
     write, not a queue, so it adds nothing more to schedule."""
 
-    steps = SEQUENCE + ("release",)
+    steps = SEQUENCE + ("switch", "release")
 
     def __init__(self, scene: SceneV2, gaps: Optional[dict[str, int]] = None,
                  switch: Optional[tuple[Any, Optional[SceneV2]]] = None) -> None:
@@ -338,8 +370,28 @@ class PhaseSequenceProgram(flare_preview_hold.PreviewProgram):
                 from spectra.services import drop_switch
                 ctx.responder.lull_handoff_resolver = (
                     lambda c: drop_switch.handoff_for(plan, c, target_scene=target))
+        if step == "switch":
+            # THE FIREWORKS MELD's LATE cut (late_cut_after_s): the scene
+            # played its own drop; now the cut, exactly as the trigger clock
+            # lands it, and — on the next big hit — the incoming scene's own
+            # flare, so it comes in loud
+            if self.switch is None or not self.switch[0].late:
+                return {"result": "no_switch"}
+            from spectra.services import drop_switch
+            plan, target = self.switch
+            writes = self._target_writes(ctx.intensity)
+            await ctx.apply_scene(writes=writes, transition_ms=0, cut=True)
+            ctx.conductor.on_scene_fire(target, writes)
+            out = {"result": "switched",
+                   "drop_switch": {"to_scene": target.name,
+                                   "moment": plan.moment,
+                                   "handoff": plan.handoff}}
+            if plan.moment == drop_switch.MOMENT_NEXT_HIT:
+                out["record"] = await ctx.responder.on_event(
+                    "flare", ctx.intensity, None, anchor_relocated=True)
+            return out
         if step == "release":
-            if switched_at is not None:
+            if switched_at is not None or (self.switch and self.switch[0].late):
                 # hand the next lap back its own scene (a cut, so the reset
                 # never reads as a second transition)
                 await ctx.apply_scene(transition_ms=0, cut=True)

@@ -682,6 +682,16 @@ class RoomControlState(BaseModel):
     drop_switch_after_previous_drop: bool = True
     drop_switch_stale_margin_s: float = Field(default=10.0, ge=0.0, le=300.0)
     drop_switch_drops_in_a_row: int = Field(default=2, ge=0, le=16)
+    # THE FIREWORKS MELDS (drop-scene-variety plan phase 3 — the same
+    # module): when a stale Fireworks scene switches away it plays its OWN
+    # drop first, then
+    #   - drop_switch_swallow_delay_s: into the Black Hole, this many
+    #     seconds after the drop mark (the Black Hole swallows the burst);
+    #   - drop_switch_hit_threshold: into Fish / Orbits / Squiggles / STAR,
+    #     on the next ANALYSED flare at least this strong (the "next big
+    #     bass hit"), or at a deadline one bar past the sequence's tail.
+    drop_switch_swallow_delay_s: float = Field(default=1.0, ge=0.0, le=10.0)
+    drop_switch_hit_threshold: float = Field(default=0.6, ge=0.0, le=1.0)
 
     # THE A/V-SYNC LEAD (owner ask 2026-08-28) — LEAD family: positive =
     # fire EARLIER, negative = fire LATER. The value the /avsync

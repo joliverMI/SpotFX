@@ -668,6 +668,30 @@ export default function RoomControlsBar() {
                     onBlur={() => commit(local)}
                   />
                 </div>
+                <div className="top-bar-group-field">
+                  <label title="Leaving Fireworks for the Black Hole: Fireworks plays its own drop, then the Black Hole cuts in this many seconds after the drop and swallows the burst.">
+                    Fireworks → Black Hole after
+                  </label>
+                  <input
+                    type="number" min={0} max={10} step={0.1}
+                    value={local.drop_switch_swallow_delay_s}
+                    onChange={(e) => setLocal({ ...local, drop_switch_swallow_delay_s: Number(e.target.value) })}
+                    onBlur={() => commit(local)}
+                  />
+                  <span style={{ fontSize: '0.85em', opacity: 0.75 }}>s</span>
+                  <HelpLink topic="fireworks-melds" />
+                </div>
+                <div className="top-bar-group-field">
+                  <label title="Leaving Fireworks for Fish, Orbits, Squiggles or STAR: Fireworks plays its own drop, then the next scene cuts in on the next analysed flare at least this strong (0-1), or one bar after the drop's tail.">
+                    Fireworks: next big hit ≥
+                  </label>
+                  <input
+                    type="number" min={0} max={1} step={0.05}
+                    value={local.drop_switch_hit_threshold}
+                    onChange={(e) => setLocal({ ...local, drop_switch_hit_threshold: Number(e.target.value) })}
+                    onBlur={() => commit(local)}
+                  />
+                </div>
               </>
             )}
             <div className="top-bar-group-field">

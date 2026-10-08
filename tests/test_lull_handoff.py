@@ -89,12 +89,19 @@ def test_a_told_drop_intensity_is_never_zero():
 
 
 def test_the_fish_is_the_first_member_and_carries_every_key():
-    assert device_model.LULL_HANDOFF_EFFECTS == {"fish"}
+    # orbits joined in phase 3 of the drop-scene-variety plan (the
+    # fireworks melds: it keeps N blobs for a Fireworks drop) — lull keys
+    # only; its drop does not scale
+    assert device_model.LULL_HANDOFF_EFFECTS == {"fish", "orbits"}
     assert device_model.DROP_INTENSITY_EFFECTS == {"fish"}
     assert device_model.LULL_HANDOFF_EFFECTS <= device_model.PHASE_EFFECTS
     keys = {str(k) for k in fish_mod.Fish2d.CONFIG_SCHEMA.schema}
     assert set(lh.KEYS) | {lh.DROP_KEY} <= keys
     assert set(lh.KEYS) | {lh.DROP_KEY} <= set(fish_mod.Fish2d.ADVANCED_KEYS)
+    from fx.effects import orbits as orbits_mod
+    okeys = {str(k) for k in orbits_mod.Orbits2d.CONFIG_SCHEMA.schema}
+    assert set(lh.KEYS) <= okeys and lh.DROP_KEY not in okeys
+    assert set(lh.KEYS) <= set(orbits_mod.Orbits2d.ADVANCED_KEYS)
 
 
 def test_the_keys_never_reach_the_param_registry():
@@ -139,8 +146,8 @@ def test_a_lull_tells_every_member_every_key_at_the_default():
     assert told["m"][lh.KEEP_KEY] == 1
     assert told["m"][lh.NEXT_KEY] == ""
     assert told["m"][lh.LULL_S_KEY] == pytest.approx(6.0)
-    for vid in ("orb", "bh"):
-        assert not set(lh.KEYS) & set(told[vid]), vid
+    assert told["orb"][lh.KEEP_KEY] == 1 and told["orb"][lh.NEXT_KEY] == ""
+    assert not set(lh.KEYS) & set(told["bh"])
     assert rec["lull_handoff"] == {"keep": 1, "next": {}, "lull_s": 6.0,
                                    "resolver": "default"}
 
@@ -168,7 +175,7 @@ def test_a_drop_tells_the_fires_intensity_and_a_charge_tells_nothing():
 
 
 def test_no_member_no_handoff_record():
-    eng, ex = _responder({"orb": "orbits"})
+    eng, ex = _responder({"bh": "blackhole"})
     rec = asyncio.run(eng._drive_phase("lull", gap_ms=6_000, intensity=0.5))
     assert "lull_handoff" not in rec
     rec = asyncio.run(eng._drive_phase("drop", intensity=0.5))

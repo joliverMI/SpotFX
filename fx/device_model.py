@@ -287,7 +287,9 @@ LULL_DARK_EFFECTS = frozenset({"blackhole", "squiggles", "pulse"})
 # lull_handoff.py is the binding statement, including how an effect opts in;
 # the drop-scene-variety work supplies the RESOLVER that decides the values
 # (scene_response.install_lull_handoff_resolver), never a second hook.
-LULL_HANDOFF_EFFECTS = frozenset({"fish"})
+# Orbits joined in phase 3 (the fireworks melds): told `lull_keep` N it holds
+# N spaced blobs for a Fireworks drop instead of its one.
+LULL_HANDOFF_EFFECTS = frozenset({"fish", "orbits"})
 
 # ... and its drop-side half: effects told the fire's intensity on every
 # drop arm (`drop_intensity`) so the drop's length and speed scale with the
@@ -300,8 +302,9 @@ DROP_INTENSITY_EFFECTS = frozenset({"fish"})
 # these: the CENTRE-BURST family explodes from the centre on its drop (his
 # own list: "star, orbits, and black hole explode from the center ...
 # include squiggles", plus the fish, whose lull already hands off), and
-# FIREWORKS is its own family (the melds are phase 3; until then its pairs
-# take the effects' generic particle hand-off). Every member's
+# FIREWORKS is its own family (its pairs are the phase-3 melds — keepers
+# that burst on the drop, swallowed by the Black Hole a second after it,
+# imploding into the next scene on the next big bass hit). Every member's
 # _adopt_handoff takes any predecessor's particle snapshot.
 CENTRE_BURST_EFFECTS = frozenset({"radial", "orbits", "blackhole",
                                   "squiggles", "fish"})
