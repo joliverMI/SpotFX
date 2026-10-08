@@ -32,6 +32,11 @@ scene cues the protected windows held back. It FAILS (non-zero) when:
     of the same class (a double fire);
   - an analysed scene change fires inside a protected window, or an
     analysed flare fires in a lull or on a drop;
+  - "as stored" on a song carrying his triggers but no stored generated
+    cue, under "Transitions + analysed": no planned scene change fires
+    (data/drop-scene-variety-plan/report.md option A — the trigger clock
+    fires the plan's kept cues itself there), or one fires under "My
+    triggers only" (his own triggers govern that song);
   - the planner (midsong_generator.plan_moments, real analysis) keeps a
     scene change inside a window or a moment at a drop.
 
@@ -119,8 +124,9 @@ def main() -> int:
 
     problems: list[str] = []
     print("# Drop sequences fire — offline show run (phase 5)\n")
-    print("| Song | Triggers | Mode | Sequences fired | Members fired | Stored scene cues held |")
-    print("|---|---|---|---:|---:|---:|")
+    print("| Song | Triggers | Mode | Sequences fired | Members fired | Stored scene cues held "
+          "| Scene changes fired |")
+    print("|---|---|---|---:|---:|---:|---:|")
     notes: list[str] = []
     for name, uri, _is_edm in cdd.SONGS:
         drop_sequences.ensure_detected(uri)
@@ -145,8 +151,21 @@ def main() -> int:
                              if t.source == "generated" and t.action.kind == "fire_scene"]
                 held = [t for t in gen_scene
                         if drop_firing.holding_window(windows, t) is not None]
+                his_scene = [t.timestamp_ms + t.trigger_offset_ms for t in trigs
+                             if t.source == "authored" and t.enabled
+                             and t.action.kind == "fire_scene"]
+                analysed_scenes = [p for p in rec.scenes
+                                   if not any(abs(p - h) <= 200 for h in his_scene)]
                 print(f"| {name} | {label} | {mode} | {len(drops)} | {len(rec.seq)} "
-                      f"| {len(held) if mode in ('analysed', 'full') else 0} |")
+                      f"| {len(held) if mode in ('analysed', 'full') else 0} "
+                      f"| {len(rec.scenes)} |")
+                planned_case = (label == "as stored" and his and not generated)
+                if planned_case and mode == "analysed" and not analysed_scenes:
+                    problems.append(f"{name}: no planned scene change fired under "
+                                    f"analysed on his song (option A)")
+                if planned_case and mode == "triggers_only" and analysed_scenes:
+                    problems.append(f"{name}: a planned scene change fired under "
+                                    f"triggers_only on his song at {analysed_scenes}")
                 if mode == "transitions" and rec.seq:
                     problems.append(f"{name} {label}: fired under transitions only")
                 for d in drops:
@@ -168,7 +187,7 @@ def main() -> int:
                                 problems.append(f"{name} {mode}: {cls} at {pos} doubles his at {hms}")
                 for p in rec.scenes:
                     w = drop_firing.holding_window(windows, p)
-                    if w is not None and any(abs(p - g) <= 200 for g in gen_scene):
+                    if w is not None and not any(abs(p - h) <= 200 for h in his_scene):
                         problems.append(f"{name} {label} {mode}: scene change at {p} inside {w.key}")
                 for p in rec.flares:
                     w = drop_firing.silencing_window(windows, p)

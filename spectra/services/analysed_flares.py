@@ -50,6 +50,24 @@ is the one rule, used by both callers): the effective per-song mode is
 under "transitions", and never on a song carrying his own triggers under
 "triggers_only" (the effective mode stays "triggers_only" there) — the same
 scope as a deferred scene cue's double-intensity flare.
+
+THE PLANNED SCENE CHANGES FIRE TOO, WHEN NONE ARE STORED (2026-10-08,
+data/drop-scene-variety-plan/report.md option A). Auto-generation only ever
+runs on a song with NO stored trigger, so a song carrying his own triggers
+never gets stored generated cues — and under "Transitions + analysed" (his
+own triggers silenced) it used to play its whole length on the scene picked
+at song start while the markers drew the plan's kept cues and the colour
+journey steered toward them. Now trigger_engine fires the plan's KEPT cues
+itself, at play time, whenever the same rule above lets analysed events
+apply and the song holds no enabled stored generated fire_scene
+(has_stored_scene_cues — the one test scene_change_moments also uses, so
+the markers and the fires can never disagree about which list is live):
+synthetic generated fire_scene triggers (ids SCENE_CUE_ID_PREFIX + the
+generator key), fired through the planned-cue dwell tolerance, held by a
+drop sequence's protected window like a stored one, never stored. A cue he
+edited or deleted is claimed and never planned (analysed_claims). Under
+"My triggers only" on a song carrying his triggers, and under "Everything"
+on one, nothing here fires — the same scope as the flares.
 """
 from __future__ import annotations
 
@@ -63,6 +81,7 @@ SCENE_CUE_CLEARANCE_MS = 2000
 FLARE_MIN_SPACING_MS = 2000
 
 FLARE_ID_PREFIX = "analysed-flare:"
+SCENE_CUE_ID_PREFIX = "analysed-scene:"
 
 
 @dataclass(frozen=True)
@@ -148,6 +167,16 @@ class SceneCueMoment:
     generator_key: Optional[str] = None
 
 
+def has_stored_scene_cues(stored: Iterable[SpectraTrigger]) -> bool:
+    """True when the song holds an enabled stored GENERATED fire_scene
+    trigger — then those are the scene changes that fire, and the plan's
+    kept cues are not (neither drawn nor fired from the plan). The ONE test
+    behind both scene_change_moments' fallback and trigger_engine's planned
+    scene cues."""
+    return any(t.enabled and t.source == "generated"
+               and t.action.kind == "fire_scene" for t in stored)
+
+
 def scene_change_moments(
     stored: Iterable[SpectraTrigger],
     planned: Callable[[], Iterable[midsong_generator.CandidateMoment]],
@@ -155,22 +184,25 @@ def scene_change_moments(
 ) -> tuple[list[SceneCueMoment], Optional[str]]:
     """THE scene-change list for a song's analysed events: its enabled
     stored GENERATED fire_scene triggers (what actually fires), else — the
-    first play, before auto-generation lands — the plan's kept cues, read
-    through `planned` (called only in that case: it may read the analysis
-    from disk). Returns (chronological moments, "stored" | "planned" |
-    None). Read by GET /api/analysed-plan's markers and by
+    first play before auto-generation lands, or a song carrying his own
+    triggers, which auto-generation never touches — the plan's kept cues,
+    read through `planned` (called only in that case: it may read the
+    analysis from disk), which trigger_engine fires itself. Returns
+    (chronological moments, "stored" | "planned" | None). Read by
+    GET /api/analysed-plan's markers and by
     trigger_engine.next_colour_cue (the trigger-timed colour journey), so
     the two can never disagree about when the next scene change is.
     `protected` (drop_firing.Window) leaves out a stored cue the trigger
     clock will hold back because it lands inside a drop sequence's
     protected window — it will not fire, so it is not the next one."""
+    stored = list(stored)
     cues = [SceneCueMoment(t.timestamp_ms + t.trigger_offset_ms,
                            t.action.intensity, t.id, t.generator_key)
             for t in stored
             if t.enabled and t.source == "generated"
             and t.action.kind == "fire_scene"]
     source: Optional[str] = "stored"
-    if not cues:
+    if not has_stored_scene_cues(stored):
         cues = [SceneCueMoment(m.timestamp_ms, m.intensity,
                                "planned:" + m.generator_key, m.generator_key)
                 for m in planned()]

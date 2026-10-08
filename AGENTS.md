@@ -10319,6 +10319,20 @@ applied in `tick()`. Spacing: `SCENE_CUE_CLEARANCE_MS`/`FLARE_MIN_SPACING_MS`
 (2 s each, named in help topic `analysed-flares`). A settings change takes
 effect from the next play of a song. Spec: `tests/test_analysed_flares.py`.
 
+**THE PLAN'S KEPT SCENE CHANGES FIRE TOO WHEN NONE ARE STORED (2026-10-08,
+`data/drop-scene-variety-plan/report.md` option A).** Auto-generation never
+runs on a song carrying his triggers, so under "analysed" such a song had NO
+scene change after the song-start pick (FINA: one scene through 13 drops)
+while the markers drew the plan. `tick()` now fires the cached `_scene_cue_
+plan` as synthetic generated `fire_scene` triggers (`analysed-scene:<key>`)
+whenever `analysed_flares_allowed` holds and `analysed_flares.
+has_stored_scene_cues` is False — the ONE test `scene_change_moments` uses,
+so markers and fires agree; stored generated cues always win (never both).
+Planned-cue dwell tolerance, protected-window holds, pins and lead as a
+stored cue; show log detail `planned_scene_cue`. Spec: `tests/
+test_analysed_scene_cues_on_authored_song.py` (FINA's real data);
+`scripts/check_drop_firing.py` gains the "Scene changes fired" column.
+
 **The debug page's shape canvas marks them** (and the scene cues):
 `GET /api/analysed-plan?uri=` (`spectra/api/analysed_plan.py`) serves the
 trigger engine's own cached plan when the song is playing (else the same

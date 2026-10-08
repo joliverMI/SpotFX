@@ -173,6 +173,21 @@ generation lock serializes the actual file-writing bodies of concurrent
 generations for DIFFERENT songs, so two songs starting close together can't
 interleave their trigger_store read-modify-write cycles.
 
+PLANNED SCENE CHANGES WITHOUT STORAGE (2026-10-08, data/drop-scene-variety-
+plan/report.md option A): a song carrying his own triggers is never
+auto-generated, so under "Transitions + analysed" it used to hold no
+analysed scene change at all — one scene, picked at song start, for the
+whole song, while the markers drew the planner's kept cues. tick() now
+fires the cached plan's KEPT cues (_scene_cue_plan, the same list GET
+/api/analysed-plan draws) as synthetic generated fire_scene triggers
+whenever analysed events apply to the song and it holds no enabled stored
+generated scene cue (analysed_flares.has_stored_scene_cues) — the analysed
+flares' shape: derived at play time, never stored, the planned-cue dwell
+tolerance, the drop sequences' protected windows, the LOOKAHEAD pin and
+lead exactly as a stored cue gets them. A song that does hold stored
+generated cues fires those and never the plan, so the two never double-
+fire; "My triggers only" on a song of his is untouched.
+
 Edge-triggered: a trigger fires once, on the first tick whose
 (last_position, position] window crosses its timestamp — or, since
 2026-08-19 (see LEAD-TIME ALIGNMENT below), its timestamp minus a computed
@@ -337,7 +352,7 @@ from dataclasses import dataclass
 from random import Random
 from typing import Any, Awaitable, Callable, Optional
 
-from spectra.models.trigger import FireResponseAction, SpectraTrigger
+from spectra.models.trigger import FireResponseAction, FireSceneAction, SpectraTrigger
 from spectra.services import (analysed_flares, drop_firing, drop_sequences,
                                phase_partner, transition_phases, trigger_store)
 
@@ -561,10 +576,14 @@ class TriggerEngine:
         # re-analysis rewrote this song's stored cues is discarded on
         # arrival rather than cached over the fresher state.
         self._flare_epoch = 0
-        # The same plan's KEPT cues — the planned scene changes the colour
-        # journey times itself against before auto-generation has stored
-        # them (next_colour_cue; never fired from here).
+        # The same plan's KEPT cues — the planned scene changes. Read by the
+        # colour journey (next_colour_cue) and the markers, and FIRED by
+        # tick() as synthetic generated fire_scene triggers while the song
+        # holds no stored generated scene cue (the module docstring's
+        # PLANNED SCENE CHANGES WITHOUT STORAGE).
         self._scene_cue_plan: list = []
+        self._scene_cue_triggers: list[SpectraTrigger] = []
+        self._scene_cue_ids: set[str] = set()
         # generator_key -> (rank, rank_of) for the cached plan's actions —
         # read by GET /api/analysed-plan's rank markers (cached_plan_ranks).
         self._plan_ranks: dict = {}
@@ -686,6 +705,8 @@ class TriggerEngine:
             self._flare_triggers = []
             self._flare_ids = set()
             self._scene_cue_plan = []
+            self._scene_cue_triggers = []
+            self._scene_cue_ids = set()
             self._plan_ranks = {}
             self._seq_meta = {}
             self._drop_windows = []
@@ -818,6 +839,8 @@ class TriggerEngine:
         self._flare_triggers = []
         self._flare_ids = set()
         self._scene_cue_plan = []
+        self._scene_cue_triggers = []
+        self._scene_cue_ids = set()
         self._plan_ranks = {}
 
     async def _run_auto_generate(self, uri: str) -> None:
@@ -866,6 +889,8 @@ class TriggerEngine:
         candidates = triggers
         if analysed_flares.analysed_flares_allowed(mode, has_authored):
             candidates = triggers + self._analysed_flare_triggers(self._uri, triggers)
+            if not analysed_flares.has_stored_scene_cues(triggers):
+                candidates = candidates + self._planned_scene_triggers(self._uri)
         seq_trigs = self._sequence_triggers(self._uri, triggers, mode, has_authored)
         if seq_trigs:
             candidates = candidates + seq_trigs
@@ -1166,6 +1191,25 @@ class TriggerEngine:
             asyncio.create_task(self.plan_analysed_flares(uri, stored))
         return []
 
+    def _planned_scene_triggers(self, uri: str) -> list[SpectraTrigger]:
+        """The cached plan's KEPT scene cues as synthetic generated
+        fire_scene triggers (the module docstring's PLANNED SCENE CHANGES
+        WITHOUT STORAGE), or [] while the plan is still being computed —
+        _analysed_flare_triggers, called first on the same tick, schedules
+        that planning for both lists."""
+        if self._flare_plan_uri == uri:
+            return self._scene_cue_triggers
+        return []
+
+    def cached_scene_cues(self, uri: str) -> Optional[list]:
+        """The planned scene cues (CandidateMoment) tick() fires from for
+        `uri` when none are stored, or None when no plan for `uri` is
+        cached — GET /api/analysed-plan reads this first so the scene-change
+        markers it serves are the SAME list the engine fires."""
+        if self._flare_plan_uri == uri:
+            return list(self._scene_cue_plan)
+        return None
+
     def cached_flare_triggers(self, uri: str) -> Optional[list[SpectraTrigger]]:
         """The analysed flare moments tick() is firing from for `uri`, or
         None when no plan for `uri` is cached (not the current song, or
@@ -1214,11 +1258,21 @@ class TriggerEngine:
             for m in flares]
         self._flare_ids = {t.id for t in self._flare_triggers}
         self._scene_cue_plan = scene_cues
+        self._scene_cue_triggers = [
+            SpectraTrigger(
+                id=analysed_flares.SCENE_CUE_ID_PREFIX + m.generator_key,
+                timestamp_ms=m.timestamp_ms, source="generated",
+                generator_key=m.generator_key, snap_grid=m.snap_grid,
+                snap_moved_ms=m.snap_moved_ms,
+                action=FireSceneAction(intensity=m.intensity))
+            for m in scene_cues]
+        self._scene_cue_ids = {t.id for t in self._scene_cue_triggers}
         self._plan_ranks = {
             m.generator_key: (getattr(m, "rank", None), getattr(m, "rank_of", None))
             for m in [*scene_cues, *flares] if getattr(m, "generator_key", None)}
         self._flare_plan_uri = uri
-        logger.info("analysed flares: %d planned for %s", len(flares), uri)
+        logger.info("analysed flares: %d planned for %s (and %d scene "
+                    "changes)", len(flares), uri, len(scene_cues))
 
     @staticmethod
     def _trigger_allowed(trig: SpectraTrigger, mode: str) -> bool:
@@ -1257,8 +1311,9 @@ class TriggerEngine:
         fire_scene and select_color_set. On a song with his triggers under
         "triggers_only" that is his next authored scene/colour trigger; on
         a song without, the next analysed scene change. When no generated
-        cue is stored yet (first play, before auto-generation lands) the
-        analysed plan's own kept cues stand in — read through
+        cue is stored (first play before auto-generation lands, or a song
+        carrying his own triggers) the analysed plan's own kept cues stand
+        in — tick() fires exactly those — read through
         analysed_flares.scene_change_moments, the ONE list GET
         /api/analysed-plan's markers also use, never a second computation.
         Analysed FLARES are not colour cues (a flare fires the scene's own
@@ -1417,6 +1472,10 @@ class TriggerEngine:
         if trig.id in self._flare_ids:
             detail["analysed_flare"] = True
             key = "analysed:flare"
+        if trig.id in self._scene_cue_ids:
+            # A planned scene change fired from the plan itself (no stored
+            # generated cue on this song) — the Review page names it so.
+            detail["planned_scene_cue"] = True
         seq_meta = self._seq_meta.get(trig.id)
         if seq_meta is not None:
             seq, cls, fire_mode = seq_meta

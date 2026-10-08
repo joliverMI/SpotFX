@@ -63,6 +63,12 @@ export function describeEvent(item: ReviewEventItem): string {
         // (spectra/services/analysed_flares.py) — not a stored trigger.
         return 'Analysed flare (a transition that did not make the cut)';
       }
+      if (d.planned_scene_cue) {
+        // A planned analysed scene change fired from the plan itself — the
+        // song holds no stored generated cue (spectra/services/
+        // analysed_flares.py, PLANNED SCENE CHANGES FIRE TOO).
+        return 'Analysed scene change (planned, not a stored trigger)';
+      }
       const kind = (d.action_kind as string | undefined) ?? item.key;
       const source = d.source as string | undefined;
       const snapGrid = d.snap_grid as string | undefined;
