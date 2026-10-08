@@ -2703,7 +2703,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         title: 'Run view: a phone-first surface for standing in the room',
         keywords: 'run view build view mode tap phone big buttons disarm all end show holding',
         body: [
-          'Build and Run are two tap-mode tabs at the top of the Light Show page. Build is the editor above. Run is sized for a phone in the room: tap a set\'s name to open its own sheet — ▶ Fire now, or ⏱ Arm it for the next scene change, High Trigger, or Low Trigger — then the same Armed board (with the same countdowns), the same Holding list, and big Disarm all / End show buttons.',
+          'Build and Run are two tap-mode tabs at the top of the Light Show page. Build is the editor above. Run is sized for a phone in the room: each set\'s row has four icon buttons — ⚡ Fire now, 🐇 Arm for the next scene change, ▲ Arm for the next High Trigger, ▼ Arm for the next Low Trigger — one tap runs the action, no menu — then the same Armed board (with the same countdowns), the same Holding list, and big Disarm all / End show buttons.',
           'Run never edits a set — it only runs what the Build view already saved. On a phone it opens on Run by default; either tab is always a tap away on any screen size.',
         ],
       },
