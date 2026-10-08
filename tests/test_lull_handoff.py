@@ -259,3 +259,26 @@ def test_the_sequence_preview_carries_what_the_lull_was_told():
     assert handoff["keep"] == 3 and handoff["next"] == {"m": "fireworks"}
     assert handoff["lull_s"] == pytest.approx(5.0)
     assert _told(ex)["m"][lh.KEEP_KEY] == 3
+
+
+def test_the_live_engine_installs_no_resolver_so_a_fish_lull_keeps_one():
+    """The default the Admiral sees: the production engine module wires no
+    resolver, so an ordinary lull fire (on_event, the path the trigger clock
+    and the bridge both reach) tells a fish `lull_keep = 1` — the searcher.
+    Keep 0 (the old lull) only ever arrives when something TELLS it."""
+    from spectra.services import engine as live_engine
+
+    import ast
+    import inspect
+    calls = [n for n in ast.walk(ast.parse(inspect.getsource(live_engine)))
+             if isinstance(n, ast.Call)
+             and getattr(n.func, "attr", getattr(n.func, "id", ""))
+             == "install_lull_handoff_resolver"]
+    assert not calls, "engine.py installs a resolver — the default changed"
+    assert live_engine.responses.lull_handoff_resolver is None
+    eng, ex = _responder({"m": "fish"}, scene=SimpleNamespace(responses={}))
+    rec = asyncio.run(eng.on_event("lull", 0.5, gap_ms=6_000))
+    told = _told(ex)["m"]
+    assert told[lh.KEEP_KEY] == 1 and told[lh.KEEP_KEY] != 0
+    assert told[lh.LULL_S_KEY] == pytest.approx(6.0)
+    assert rec["phase"]["lull_handoff"]["resolver"] == "default"
