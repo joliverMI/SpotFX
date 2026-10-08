@@ -266,16 +266,19 @@ def test_the_live_engine_installs_no_resolver_so_a_fish_lull_keeps_one():
     resolver, so an ordinary lull fire (on_event, the path the trigger clock
     and the bridge both reach) tells a fish `lull_keep = 1` — the searcher.
     Keep 0 (the old lull) only ever arrives when something TELLS it."""
-    from spectra.services import engine as live_engine
-
-    import ast
-    import inspect
-    calls = [n for n in ast.walk(ast.parse(inspect.getsource(live_engine)))
-             if isinstance(n, ast.Call)
-             and getattr(n.func, "attr", getattr(n.func, "id", ""))
-             == "install_lull_handoff_resolver"]
-    assert not calls, "engine.py installs a resolver — the default changed"
-    assert live_engine.responses.lull_handoff_resolver is None
+    import subprocess
+    # a FRESH interpreter, so the import-time wiring is what is observed
+    # (this process's autouse fixture clears any install)
+    probe = subprocess.run(
+        [sys.executable, "-c",
+         "from spectra.services import engine, scene_response as sr;"
+         "print(sr.installed_lull_handoff_resolver() is None,"
+         " engine.responses.lull_handoff_resolver is None)"],
+        cwd=Path(__file__).resolve().parent.parent,
+        capture_output=True, text=True, timeout=120,
+    )
+    assert probe.returncode == 0, probe.stderr
+    assert probe.stdout.split()[-2:] == ["True", "True"], probe.stdout
     eng, ex = _responder({"m": "fish"}, scene=SimpleNamespace(responses={}))
     rec = asyncio.run(eng.on_event("lull", 0.5, gap_ms=6_000))
     told = _told(ex)["m"]
