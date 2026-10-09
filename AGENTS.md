@@ -9376,6 +9376,35 @@ activation/dark-fixture strips and the full-width released banner — its
 own always-reachable button is gone, moved here; the way back from
 `released` is unchanged.
 
+**Did not actually hold on his phone — fixed 2026-10-09.** His report:
+"I tried pressing and holding the release to home assistant button on my
+phone and it didn't seem to work." Both this button's `.release-hold-btn`
+and the Mode chip's `.mode-chip-link` (ModeChip.tsx, the other button
+built on this same `useHoldToConfirm.ts` hook) shipped with `touch-action:
+manipulation` — which still lets the browser claim an ordinary finger's
+small in-place drift as an intended pan/scroll and fire a native
+`pointercancel` at the element well before the hook's ~1s duration
+elapses, on a button this small (28-30px). Measured under real
+touch-emulated pointer events (chrome-devtools-axi's snapshot/eval tools
+hit the known `pageId` bug on this host — worked around with raw CDP over
+a locally-launched Playwright Chromium, per the standing memory note on
+that workaround): ~18px of drift was enough to cancel it, well within an
+ordinary held finger's wobble. Fixed by setting `touch-action: none` on
+both classes instead — the established pattern every drag-style control
+in this app already uses (`ShapeControls.tsx`, `PaletteCard.tsx`,
+`SpectraTriggerBar.tsx`, etc.) — which leaves the whole gesture to the
+hook's own pointer handlers; mouse/keyboard behaviour is unchanged
+(`touch-action` only affects touch). **Any future hold-to-act button
+built on `useHoldToConfirm.ts` (or any other pointer-driven hold/drag
+gesture) needs `touch-action: none` on the bound element, not
+`manipulation`** — the latter reads as "touch-safe" but only suppresses
+double-tap-zoom/pinch-zoom-delay, not the pan-gesture takeover that
+breaks a stationary hold. Spec: `scripts/check_touch_press_hold.mjs`
+(§1 is the direct CSS regression; jsdom can't synthesize a real browser's
+native `pointercancel`, so §2-§5 prove the hook's own pointer/keyboard/
+mouse contract is otherwise unchanged, against the real components under
+a hand-driven fake clock).
+
 ## SPECTRA spec, rendered for a phone: `GET /spectra/spec`
 
 He asked for a link three times and got a file path twice. `docs/

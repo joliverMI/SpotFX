@@ -215,7 +215,15 @@ button.danger:hover { border-color: var(--danger); color: var(--danger); }
   color: var(--danger);
   cursor: pointer;
   padding: 0;
-  touch-action: manipulation;
+  /* `none`, not `manipulation` — found 2026-10-09 against his real report
+   * ("tried pressing and holding ... didn't seem to work"): `manipulation`
+   * still lets the browser claim an ordinary finger's in-place drift as an
+   * intended pan, firing a native `pointercancel` on this small 28px
+   * button well before useHoldToConfirm's ~1s duration elapses (measured
+   * via real touch-emulated pointer events: ~18px of drift was enough).
+   * `none` keeps the whole gesture for the hook's own pointer handlers —
+   * verified under the same touch emulation that it no longer cancels. */
+  touch-action: none;
   -webkit-touch-callout: none;
   -webkit-user-select: none;
   user-select: none;
@@ -1711,7 +1719,10 @@ button.big { padding: 16px 18px; font-size: 1.05em; min-height: 52px; border-rad
 .mode-chip-music a { color: var(--accent2); border-color: var(--accent2); }
 .mode-chip-idle a { color: var(--warning); border-color: var(--warning); }
 .mode-chip-off a { color: var(--text-muted); }
-.mode-chip-link { position: relative; touch-action: manipulation; -webkit-touch-callout: none;
+/* `touch-action: none`, same reasoning as .release-hold-btn above (found
+ * 2026-10-09): `manipulation` let the browser cancel the hold on ordinary
+ * finger drift via a native `pointercancel`. */
+.mode-chip-link { position: relative; touch-action: none; -webkit-touch-callout: none;
   -webkit-user-select: none; user-select: none; }
 .mode-chip-hold-ring { position: absolute; top: 50%; left: 2px; transform: translateY(-50%);
   pointer-events: none; color: currentColor; opacity: 0.85; }
