@@ -460,6 +460,41 @@ async def set_device_categories(virtual_id: str, categories: list[str]) -> dict:
                        categories=categories)
 
 
+@mcp.tool()
+async def list_device_categories() -> dict:
+    """Every device category -- id, name, parent, its virtuals, its
+    curated effect list, and role. Call before creating/renaming/deleting
+    one, to match a spoken name against what already exists."""
+    return await _call("list_device_categories")
+
+
+@mcp.tool()
+async def create_device_category(name: str, virtuals: Optional[list[str]] = None,
+                                  effects: Optional[list[str]] = None,
+                                  parent: Optional[str] = None,
+                                  role: Optional[str] = None) -> dict:
+    """Create a new, empty-by-default device category. name must not
+    already be in use. virtuals optionally lists virtual ids to put in it
+    right away -- the same thing set_device_categories would do after."""
+    return await _call("create_device_category", name=name, virtuals=virtuals,
+                       effects=effects, parent=parent, role=role)
+
+
+@mcp.tool()
+async def rename_device_category(name: str, new_name: str) -> dict:
+    """Rename an existing device category. name is matched by id, exact
+    name, or a close match; new_name must not already be in use."""
+    return await _call("rename_device_category", name=name, new_name=new_name)
+
+
+@mcp.tool()
+async def delete_device_category(name: str) -> dict:
+    """Delete a device category outright. The virtuals it held are not
+    changed anywhere else -- they simply stop belonging to this (now-gone)
+    category. A category nested under this one moves to top-level."""
+    return await _call("delete_device_category", name=name)
+
+
 # ── room light-field effects ──────────────────────────────────────────────
 # The settable fields of the Room Effects page and nothing else: starting or
 # stopping an effect drives his fixtures and holds the room, and running a

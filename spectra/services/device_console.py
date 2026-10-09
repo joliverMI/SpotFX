@@ -52,6 +52,22 @@ storage/device_categories.json), which maps a CATEGORY to VIRTUAL ids. A
 device's grouping is therefore its virtuals' membership, edited here in
 place. The registry is read fresh on every write (no in-memory cache on
 either side of the process split) and written atomically.
+
+CATEGORY CRUD (create/rename/delete a whole category) is a SEPARATE job
+from `set_virtual_categories` above — that function only ever edits an
+EXISTING category's membership, deliberately, so a typo could never
+invent one. 2026-10-09 (the Admiral's ask: "add a device category called
+'Single WLED' and put the porch rail and dining table in it" — done by
+hand first, through the root process's own `POST /api/device-categories`,
+because Sonic had no operation for it): `create_device_category`/
+`rename_device_category`/`delete_device_category` close that gap,
+resolving an existing category BY NAME (`spectra.services.name_resolve`,
+the Force Scene/Force Colour precedent) so Sonic never needs an opaque
+id. A category NAME is kept unique case-insensitively — creating or
+renaming into a name already in use is refused, never a silent second
+category with the same name. `set_virtual_categories` is still the one
+function that adds/removes devices (virtuals) to/from a category; these
+three only create the container itself.
 """
 from __future__ import annotations
 
@@ -59,11 +75,12 @@ import json
 import logging
 import os
 import tempfile
+import uuid
 from typing import Any, Optional
 
 from fx import device_model, device_schema
 from spectra.models.device_settings import OFFSET_LIMIT_MS, DeviceSettings
-from spectra.services import device_settings, device_usage
+from spectra.services import device_settings, device_usage, name_resolve
 from spectra.services.sonic_ops import SonicOperation
 
 logger = logging.getLogger(__name__)
@@ -215,6 +232,101 @@ def set_virtual_categories(virtual_id: str, names: list[str]) -> dict:
             "categories": categories_for_virtual(virtual_id),
             "summary": f"{virtual_id} is now in "
                        f"{', '.join(wanted) if wanted else 'no category'}"}
+
+
+def _resolve_category_name(name: str) -> tuple[str, dict]:
+    """Exact id, exact/close name match, or a refusal naming the close
+    candidates -- never a guess between two plausible ones."""
+    raw = _categories_raw()
+    candidates = [(cid, cat.get("name", "")) for cid, cat in raw.items()]
+    match, rejection = name_resolve.resolve_name(name, candidates, noun="category")
+    if rejection is not None:
+        raise DeviceOpError(rejection["reason"],
+                            **{k: v for k, v in rejection.items()
+                               if k not in ("status", "reason")})
+    return match.id, raw[match.id]
+
+
+def list_device_categories() -> dict:
+    """Every category -- id, name, parent, its virtuals, its curated
+    effect list, sort order and role -- the whole picture needed before
+    creating, renaming or deleting one (list_devices already shows, per
+    device, which categories its virtuals are in; this is the category's
+    own side of that same registry)."""
+    cats = sorted(device_model.list_categories(),
+                  key=lambda c: (c.get("sort_order") or 0, c.get("name") or ""))
+    return {"categories": cats}
+
+
+def create_device_category(name: str, virtuals: Optional[list[str]] = None,
+                            effects: Optional[list[str]] = None,
+                            parent: Optional[str] = None,
+                            role: Optional[str] = None) -> dict:
+    """Creates a brand-new, empty-by-default category. A name already in
+    use (case-insensitive) is refused rather than minting a confusing
+    second category under the same name -- rename or delete the existing
+    one first if that's really what's wanted. `virtuals` may be given up
+    front (exactly what set_virtual_categories would add afterward); a
+    virtual id is not validated against the live device list here, the
+    same looseness set_virtual_categories already has."""
+    name = (name or "").strip()
+    if not name:
+        raise DeviceOpError("name the new category")
+    raw = _categories_raw()
+    existing = {(c.get("name") or "").strip().lower() for c in raw.values()}
+    if name.lower() in existing:
+        raise DeviceOpError(f"a category named {name!r} already exists")
+    parent_id = None
+    if parent:
+        parent_id, _ = _resolve_category_name(parent)
+    cid = str(uuid.uuid4())
+    wanted = list(dict.fromkeys(virtuals or []))
+    next_sort = max((c.get("sort_order") or 0 for c in raw.values()), default=-1) + 1
+    raw[cid] = {"id": cid, "name": name, "parent_id": parent_id,
+               "virtuals": wanted, "effects": list(dict.fromkeys(effects or [])),
+               "sort_order": next_sort, "role": role}
+    _write_categories(raw)
+    return {"status": "applied", "id": cid, "name": name, "virtuals": wanted,
+            "summary": f"created category {name!r}"
+                       + (f" with {', '.join(wanted)}" if wanted else "")}
+
+
+def rename_device_category(name: str, new_name: str) -> dict:
+    """Renames an existing category; its virtuals/effects/parent/role are
+    untouched. Refused if another category already carries the new name."""
+    cid, cat = _resolve_category_name(name)
+    new_name = (new_name or "").strip()
+    if not new_name:
+        raise DeviceOpError("name the category's new name")
+    raw = _categories_raw()
+    taken = {(c.get("name") or "").strip().lower()
+             for other_cid, c in raw.items() if other_cid != cid}
+    if new_name.lower() in taken:
+        raise DeviceOpError(f"a category named {new_name!r} already exists")
+    old_name = cat.get("name")
+    raw[cid]["name"] = new_name
+    _write_categories(raw)
+    return {"status": "applied", "id": cid, "old_name": old_name, "name": new_name,
+            "summary": f"renamed {old_name!r} to {new_name!r}"}
+
+
+def delete_device_category(name: str) -> dict:
+    """Deletes a category outright. Any category parented under it is
+    re-parented to top-level (never left pointing at a dead id) -- the
+    virtuals it contained are NOT removed from anywhere else; they simply
+    stop being members of this one, since it no longer exists."""
+    cid, cat = _resolve_category_name(name)
+    raw = _categories_raw()
+    for other in raw.values():
+        if other.get("parent_id") == cid:
+            other["parent_id"] = None
+    removed = raw.pop(cid)
+    _write_categories(raw)
+    held = removed.get("virtuals") or []
+    return {"status": "applied", "id": cid, "name": removed.get("name"),
+            "virtuals": held,
+            "summary": f"deleted category {removed.get('name')!r}"
+                       + (f" (it held {', '.join(held)})" if held else "")}
 
 
 # ── reading devices ─────────────────────────────────────────────────────────
@@ -496,6 +608,30 @@ def _op_set_device_categories(virtual_id: str, categories: list[str]) -> dict:
     return set_virtual_categories(virtual_id, categories)
 
 
+@_guarded
+def _op_list_device_categories() -> dict:
+    return list_device_categories()
+
+
+@_guarded
+def _op_create_device_category(name: str, virtuals: Optional[list[str]] = None,
+                                effects: Optional[list[str]] = None,
+                                parent: Optional[str] = None,
+                                role: Optional[str] = None) -> dict:
+    return create_device_category(name, virtuals=virtuals, effects=effects,
+                                  parent=parent, role=role)
+
+
+@_guarded
+def _op_rename_device_category(name: str, new_name: str) -> dict:
+    return rename_device_category(name, new_name)
+
+
+@_guarded
+def _op_delete_device_category(name: str) -> dict:
+    return delete_device_category(name)
+
+
 OPERATIONS: dict[str, SonicOperation] = {
     "list_devices": SonicOperation(
         name="list_devices", domain="device", kind="read",
@@ -622,4 +758,80 @@ OPERATIONS: dict[str, SonicOperation] = {
             "required": ["virtual_id", "categories"],
             "additionalProperties": False},
         handler=_op_set_device_categories),
+    "list_device_categories": SonicOperation(
+        name="list_device_categories", domain="device", kind="read",
+        summary="Every device category — id, name, parent, its virtuals, "
+                "its curated effect list, and role.",
+        instructions=(
+            "Call this before creating, renaming or deleting a category, "
+            "so a name can be matched against what already exists. "
+            "list_devices already shows each device's own categories; this "
+            "is the category-first view, for managing the categories "
+            "themselves."),
+        input_schema={"type": "object", "properties": {},
+                      "additionalProperties": False},
+        handler=_op_list_device_categories),
+    "create_device_category": SonicOperation(
+        name="create_device_category", domain="device", kind="write",
+        summary="Create a new, empty-by-default device category (grouping).",
+        instructions=(
+            "name must not already be in use (case-insensitive) — this "
+            "never overwrites or silently renames an existing category; "
+            "report the refusal if one already carries that name. "
+            "`virtuals` optionally lists the virtual ids to put in it right "
+            "away (the same thing set_device_categories would do "
+            "afterward) — list_devices shows each device's virtual id. "
+            "`parent` optionally names an existing category this one "
+            "nests under. `effects` and `role` are rarely needed — leave "
+            "them out unless asked for specifically."),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "virtuals": {"type": "array", "items": {"type": "string"},
+                             "description": "Virtual ids to put in the new "
+                                            "category immediately."},
+                "effects": {"type": "array", "items": {"type": "string"}},
+                "parent": {"type": "string",
+                           "description": "Name of an existing category to "
+                                          "nest this one under."},
+                "role": {"type": "string",
+                         "description": "Rarely set; 'ambient' is the only "
+                                        "value in real use today."},
+            },
+            "required": ["name"], "additionalProperties": False},
+        handler=_op_create_device_category),
+    "rename_device_category": SonicOperation(
+        name="rename_device_category", domain="device", kind="write",
+        summary="Rename an existing device category.",
+        instructions=(
+            "name is matched by exact id, exact name, or a close match "
+            "(a near-tie between two categories is refused rather than "
+            "guessed — ask which one). new_name must not already be in "
+            "use by another category. Its virtuals, effects, parent and "
+            "role are untouched."),
+        input_schema={
+            "type": "object",
+            "properties": {"name": {"type": "string"},
+                           "new_name": {"type": "string"}},
+            "required": ["name", "new_name"], "additionalProperties": False},
+        handler=_op_rename_device_category),
+    "delete_device_category": SonicOperation(
+        name="delete_device_category", domain="device", kind="write",
+        summary="Delete a device category outright.",
+        instructions=(
+            "name is matched the same way as rename_device_category. This "
+            "removes the category itself — the virtuals it held are not "
+            "deleted or changed anywhere else, they simply stop being "
+            "members of this (now-gone) category. Any category nested "
+            "under this one moves to top-level rather than being left "
+            "pointing at a dead parent. There is no undo for this beyond "
+            "creating the category again and re-adding its virtuals, so "
+            "confirm with him before calling it on a category that still "
+            "holds virtuals."),
+        input_schema={
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+            "required": ["name"], "additionalProperties": False},
+        handler=_op_delete_device_category),
 }

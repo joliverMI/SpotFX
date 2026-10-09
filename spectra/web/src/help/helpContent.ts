@@ -2184,11 +2184,12 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         id: 'devices-groupings',
         title: 'Groupings and naming',
-        keywords: 'grouping groupings category categories name rename virtual matrix strips singles hue',
+        keywords: 'grouping groupings category categories name rename virtual matrix strips singles hue create new category delete remove single wled',
         body: [
           'NAMING is the "name" field in the Base section — the friendly name shown everywhere else in SPECTRA. Renaming changes only that: the device\'s identity, its virtuals and its groupings all stay put.',
           'GROUPINGS are the categories (Matrix, Strips, Singles, Hue, …) that scenes and effects address. They belong to VIRTUALS — the things that render onto a device — so the page lists each of the device\'s virtuals with a tick box per category. Tick and untick freely; a change saves immediately.',
-          'Only categories that already exist are offered. The page will never create one from a typed name, because a mistyped category would file a light somewhere nothing ever looks for it.',
+          'Only categories that already exist are offered on this tick-box list, so a mistyped name can never silently file a light nowhere anything looks for it. To add a brand-new category — "add a device category called Single WLED and put the porch rail and dining table in it" is exactly this — ask Sonic (below); it creates the category, then this tick-box list offers it like any other.',
+          'A category can be renamed or deleted the same way, by asking Sonic. Deleting one never touches the virtuals it held or anything else that pointed at it — it simply stops existing, and anything nested under it moves back to the top level.',
         ],
       },
       {
@@ -2227,9 +2228,10 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         id: 'devices-sonic',
         title: 'Talking to Sonic about devices',
-        keywords: 'sonic agent chat voice device rename timing offset grouping create settings console',
+        keywords: 'sonic agent chat voice device rename timing offset grouping create settings console category categories add new delete rename single wled',
         body: [
           'Everything this page can set, Sonic can set too — "make the hue lights fire 80 ms earlier", "rename the back strip to Sofa", "put the tv mapper in Strips", "what parameters does a wled device have". Sonic reads the same driver definitions and writes through the same checks, and reports back whether the change reached the running room or was stored for the next activation.',
+          'This covers the CATEGORY ITSELF too, not only a device\'s membership in one that already exists — "add a device category called Single WLED and put the porch rail and dining table in it" creates the category and puts those two devices\' virtual in it in one go. Sonic can also rename or delete a whole category, and will refuse (and say so) rather than invent a second category under a name already in use, or guess between two similarly-named categories.',
         ],
       },
     ],

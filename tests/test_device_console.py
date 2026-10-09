@@ -274,6 +274,92 @@ def test_a_devices_listing_carries_its_virtuals_groupings():
     assert device["categories"] == {created["device_id"]: ["Matrix"]}
 
 
+# ── category CRUD (the Admiral's ask, 2026-10-09: "Single WLED") ───────────
+
+def test_create_device_category_is_reachable_by_name_right_after():
+    result = device_console.create_device_category(
+        "Single WLED", virtuals=["single-color-effect"])
+    assert result["status"] == "applied"
+    assert result["virtuals"] == ["single-color-effect"]
+    names = {c["name"] for c in device_console.list_device_categories()["categories"]}
+    assert "Single WLED" in names
+    assert device_console.categories_for_virtual("single-color-effect") == [
+        "Single WLED"]
+
+
+def test_create_device_category_refuses_a_duplicate_name_case_insensitive():
+    device_console.create_device_category("Single WLED")
+    with pytest.raises(device_console.DeviceOpError, match="already exists"):
+        device_console.create_device_category("single wled")
+    assert len([c for c in device_console.list_device_categories()["categories"]
+               if c["name"] == "Single WLED"]) == 1
+
+
+def test_create_device_category_accepts_a_parent_by_name():
+    result = device_console.create_device_category("Sub-Matrix", parent="Matrix")
+    assert result["status"] == "applied"
+    cats = {c["name"]: c for c in device_console.list_device_categories()["categories"]}
+    matrix_id = cats["Matrix"]["id"]
+    assert cats["Sub-Matrix"]["parent_id"] == matrix_id
+
+
+def test_create_device_category_rejects_an_unknown_parent():
+    with pytest.raises(device_console.DeviceOpError, match="category"):
+        device_console.create_device_category("Sub-Matrix", parent="Nope")
+
+
+def test_rename_device_category_by_name_or_close_match():
+    device_console.create_device_category("Single WLED")
+    result = device_console.rename_device_category("single wled", "Single LEDs")
+    assert result["status"] == "applied"
+    assert result["old_name"] == "Single WLED"
+    names = {c["name"] for c in device_console.list_device_categories()["categories"]}
+    assert "Single LEDs" in names and "Single WLED" not in names
+
+
+def test_rename_device_category_refuses_a_name_already_taken():
+    device_console.create_device_category("Single WLED")
+    with pytest.raises(device_console.DeviceOpError, match="already exists"):
+        device_console.rename_device_category("Single WLED", "Matrix")
+
+
+def test_delete_device_category_removes_it_and_names_what_it_held():
+    device_console.create_device_category("Single WLED",
+                                           virtuals=["single-color-effect"])
+    result = device_console.delete_device_category("Single WLED")
+    assert result["status"] == "applied"
+    assert result["virtuals"] == ["single-color-effect"]
+    names = {c["name"] for c in device_console.list_device_categories()["categories"]}
+    assert "Single WLED" not in names
+    # the virtual it held is never touched anywhere else
+    device_console.set_virtual_categories("single-color-effect", ["Strips"])
+    assert device_console.categories_for_virtual("single-color-effect") == ["Strips"]
+
+
+def test_delete_device_category_reparents_its_children_to_top_level():
+    device_console.create_device_category("Single WLED")
+    device_console.create_device_category("Single WLED Sub", parent="Single WLED")
+    device_console.delete_device_category("Single WLED")
+    cats = {c["name"]: c for c in device_console.list_device_categories()["categories"]}
+    assert cats["Single WLED Sub"]["parent_id"] is None
+
+
+def test_delete_device_category_refuses_an_unknown_name():
+    with pytest.raises(device_console.DeviceOpError, match="category"):
+        device_console.delete_device_category("No Such Category")
+
+
+def test_category_crud_reaches_sonics_one_dispatcher():
+    """The exact gap his ask found: set_device_categories alone could not
+    create 'Single WLED' because it refuses to invent an unknown
+    category. These three close it."""
+    from spectra.services import settings_agent as sa
+    for name in ("list_device_categories", "create_device_category",
+                "rename_device_category", "delete_device_category"):
+        assert name in device_console.OPERATIONS
+        assert name in sa.ALL_OPERATIONS
+
+
 # ── the timing field ────────────────────────────────────────────────────────
 
 def test_the_timing_field_carries_his_sign_convention_into_the_delay_map():
@@ -315,11 +401,14 @@ def test_the_timing_field_appears_on_every_listed_device():
 
 def test_every_field_the_page_can_set_has_a_sonic_operation():
     """His standing preference. The page can create, patch config, rename,
-    set the timing offset and set groupings — each of those is a declared
-    operation, so anything he can do by tapping he can also say."""
+    set the timing offset, set groupings, and create/rename/delete a
+    whole category — each of those is a declared operation, so anything
+    he can do by tapping he can also say."""
     assert set(device_console.OPERATIONS) == {
         "list_devices", "get_device_params", "create_device", "update_device",
-        "rename_device", "set_device_timing_offset", "set_device_categories"}
+        "rename_device", "set_device_timing_offset", "set_device_categories",
+        "list_device_categories", "create_device_category",
+        "rename_device_category", "delete_device_category"}
 
 
 def test_the_timing_operation_states_the_sign_convention_in_his_words():
