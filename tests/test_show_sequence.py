@@ -267,6 +267,60 @@ def test_song_list_wait_is_satisfied_by_a_listed_song_already_playing(world):
     run_async(go)
 
 
+def test_resume_onto_a_song_list_wait_checks_for_an_already_playing_song(world):
+    """Decision 6: a song-list Wait is satisfied at once by an already-
+    playing song whenever it BECOMES CURRENT — including re-entering it via
+    Resume after a Pause, not just on its first, fresh entry."""
+    s = seq("Show", W(kind="song_list", songs=[SongRef(uri="spotify:track:z")]),
+            S(world, "A"), S(world, "B", "high"))
+
+    async def go():
+        show_sequence.start(s.id)
+        assert cur().index == 0                             # "one" ≠ "z"
+        show_sequence.pause()
+        PLAYING["uri"] = "spotify:track:z"                   # starts while paused
+        show_sequence.resume()
+        await settle()
+        assert world["fired"] == ["A"] and cur().index == 2
+        assert any("already playing" in e["detail"] for e in cur().log)
+    run_async(go)
+
+
+def test_previous_onto_a_song_list_wait_checks_for_an_already_playing_song(world):
+    """Same decision 6 re-check, via Previous stepping back onto the Wait."""
+    s = seq("Show", W(kind="song_list", songs=[SongRef(uri="spotify:track:z")]),
+            S(world, "A", "high"))
+
+    async def go():
+        show_sequence.start(s.id)
+        assert cur().index == 0
+        show_sequence.on_track_change("spotify:track:z")     # satisfied the normal way
+        await settle()
+        assert cur().index == 1
+        PLAYING["uri"] = "spotify:track:z"                   # still playing it
+        show_sequence.previous_item()
+        await settle()
+        assert cur().index == 1                              # re-satisfied at once
+        assert any("already playing" in e["detail"] for e in cur().log)
+    run_async(go)
+
+
+def test_restart_onto_a_song_list_wait_checks_for_an_already_playing_song(world):
+    """Same decision 6 re-check, via a process restart resuming the run."""
+    s = seq("Show", W(kind="song_list", songs=[SongRef(uri="spotify:track:z")]),
+            S(world, "A", "high"))
+
+    async def go():
+        show_sequence.start(s.id)
+        assert cur().index == 0
+        PLAYING["uri"] = "spotify:track:z"                   # starts before the restart
+        _restart()
+        show_sequence.tick()
+        assert cur().index == 1
+        assert any("already playing" in e["detail"] for e in cur().log)
+    run_async(go)
+
+
 # ── the human override ─────────────────────────────────────────────────────
 
 def test_pause_freezes_and_resume_rearms(world, monkeypatch):
@@ -330,6 +384,23 @@ def test_next_skips_previous_rearms_and_fire_now(world):
         assert not show_arms.active_arms()
         with pytest.raises(show_sequence.SequenceError):
             show_sequence.next_item()
+    run_async(go)
+
+
+def test_fire_now_refuses_while_an_instant_fire_is_already_in_flight(world):
+    """An instant item's own `_fire_instant` sets `r.firing` synchronously
+    and only AWAITS show_actions.fire_set in a background task — a press
+    of Fire now (or Sonic's equivalent) landing before that task has run
+    must refuse rather than dispatch a second fire of the same set."""
+    s = seq("Show", S(world, "A"), S(world, "B", "high"))
+
+    async def go():
+        show_sequence.start(s.id)
+        assert cur().firing                                 # A's fire is in flight
+        with pytest.raises(show_sequence.SequenceError, match="already firing"):
+            await show_sequence.fire_now()
+        await settle()
+        assert world["fired"] == ["A"] and cur().index == 1  # fired exactly once
     run_async(go)
 
 

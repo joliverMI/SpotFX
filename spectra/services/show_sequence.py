@@ -323,8 +323,10 @@ def _disarm(r: SequenceRun, reason: str) -> None:
 
 def _enter(r: SequenceRun, *, manual_back: bool = False, keep_progress: bool = False) -> None:
     """Make item `r.index` current and start waiting for it. With
-    `keep_progress` (resume / restart) counts and the remaining time are
-    kept rather than started fresh."""
+    `keep_progress` (resume / restart / Previous) counts and the remaining
+    time are kept rather than started fresh — except a song-list Wait,
+    which always re-checks whether a listed song is already playing the
+    moment it becomes current again, keep_progress or not."""
     if r.index >= len(r.items):
         _end_of_sequence(r)
         return
@@ -355,7 +357,7 @@ def _enter(r: SequenceRun, *, manual_back: bool = False, keep_progress: bool = F
             r.wait_remaining_ms = None
         elif r.wait_deadline_ms is None:
             r.wait_deadline_ms = now_ms() + int(w.seconds * 1000)
-    elif w.kind == "song_list" and not keep_progress and SONG_LIST_ACCEPTS_PLAYING:
+    elif w.kind == "song_list" and SONG_LIST_ACCEPTS_PLAYING:
         uri = _playing_uri()
         if uri and any(s.uri == uri for s in w.songs):
             _complete(r, "a listed song was already playing", song=uri)
@@ -554,7 +556,9 @@ def previous_item() -> SequenceRun:
 
 async def fire_now() -> SequenceRun:
     """Run the current Set item at once, whatever its arming, and move on.
-    On a Wait it means "the wait is over"."""
+    On a Wait it means "the wait is over". Refused while the current item's
+    own instant fire is already in flight (`r.firing`) — never a second
+    dispatch of the same set."""
     from spectra.services import show_actions
     r = _require((RUNNING,))
     item = _current(r)
@@ -564,6 +568,8 @@ async def fire_now() -> SequenceRun:
         _complete(r, "ended by hand")
         _save()
         return r
+    if r.firing:
+        raise SequenceError("the current item is already firing")
     reason = _refusal()
     if reason:
         raise SequenceError(f"The Light Show is standing down: {reason}")
