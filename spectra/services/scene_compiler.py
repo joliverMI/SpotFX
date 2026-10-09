@@ -373,7 +373,8 @@ async def fire_scene(scene: SceneV2, *, intensity: float = 0.5,
                      rng: Random | None = None,
                      transition_ms: Optional[int] = None,
                      display_mode: Optional[str] = None,
-                     cut: bool = False) -> dict[str, Any]:
+                     cut: bool = False,
+                     requested_scene_id: Optional[str] = None) -> dict[str, Any]:
     """Resolve at the given intensity (effect selection included), compile,
     and (live only) send through the seam. The returned resolution report +
     writes are the test-fire display: dry and live runs share every step up
@@ -407,7 +408,16 @@ async def fire_scene(scene: SceneV2, *, intensity: float = 0.5,
     virtual's own stored crossfade for this one fire (fx_seam.apply_writes'
     cut, fx/VENDOR.md #63) — the outgoing effect's particles hand across
     through particle_handoff's no-transition path. Every other fire keeps
-    the stored blend."""
+    the stored blend.
+
+    requested_scene_id (2026-10-09) is the scene id a caller originally
+    asked for before Force Scene substituted the pinned `scene` in its
+    place — scene_sequencer.fire_scene_by_id is the only caller that ever
+    passes one. It rides through to engine.on_scene_fired unchanged, which
+    is what lets a Light Show "next scene change" arm (and a Show
+    Sequence wait) still release at the moment a scene change would have
+    happened, even though the room keeps wearing the pinned scene. `None`
+    (every other caller) means no substitution happened."""
     if color_set is None:
         color_set = room_active_set()
     # A LOCAL, lazy import — room_controls must never be a module-level
@@ -460,7 +470,13 @@ async def fire_scene(scene: SceneV2, *, intensity: float = 0.5,
         # Re-baseline the evolution engine: drift's declared life restarts
         # from these initial conditions. The ORIGINAL scene rides along —
         # the response engine re-rolls its intact 🎲 bindings.
+        # requested_scene_id is passed as a keyword, and only when a caller
+        # actually gave one, so every pre-existing fake of on_scene_fired
+        # (fixed 3-positional-arg signatures included) keeps working.
+        on_scene_fired_kw = ({} if requested_scene_id is None
+                             else {"requested_scene_id": requested_scene_id})
         engine.on_scene_fired(scene, writes,
-                              color_set.id if color_set else None)
+                              color_set.id if color_set else None,
+                              **on_scene_fired_kw)
     return {"dry_run": dry_run, "intensity": intensity, "writes": writes,
             "resolved_bindings": ctx.resolved, "dice_rolls": ctx.dice_rolls()}

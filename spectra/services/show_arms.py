@@ -12,6 +12,12 @@ THREE TRIGGERS, an open list:
                 same-scene re-fire never counts, and neither does a scene
                 change the Light Show caused itself (a Forced scene or
                 Fire-a-scene step) — a repeat arm would otherwise loop.
+                Under Force Scene, "scene_id" here is the scene a caller
+                actually asked for, not the pinned scene that actually
+                fired (engine.on_scene_fired's own requested_scene_id,
+                2026-10-09) — so an arm still releases at the moment a
+                scene change would have happened, even while the room
+                keeps wearing the pin.
   high / low    this song's High / Low Trigger (spectra/services/
                 show_cues.py), crossed on the trigger clock: TriggerEngine.
                 tick() asks `cue_plan()` for the song's cues and calls

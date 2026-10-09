@@ -620,9 +620,25 @@ async def _run_trigger_engine() -> None:
 
 
 def on_scene_fired(scene: SceneV2, writes: list[dict],
-                   color_set_id: str | None = None) -> None:
+                   color_set_id: str | None = None,
+                   requested_scene_id: str | None = None) -> None:
     """Any real scene fire re-baselines the engine (drift's declared life
-    restarts from the new initial conditions)."""
+    restarts from the new initial conditions).
+
+    requested_scene_id (2026-10-09, his report: a Light Show set armed on
+    "next scene change" kept resetting its "Scene change at least: xx"
+    readout and never fired) is the scene id the caller originally asked
+    for, BEFORE Force Scene's pin (scene_sequencer.fire_scene_by_id)
+    substituted the pinned scene in its place. Force Scene reasserts the
+    SAME pinned scene on every automatic pick, so `scene.id` never moves
+    and show_arms.on_scene_change's own previous-vs-new comparison always
+    reads "no change" — even though dwell.note_fired() below (inside
+    fire_scene_by_id) keeps re-latching, which is what was resetting the
+    countdown the whole time. His ruling: the arm still fires AT THE
+    MOMENT a scene change would have happened; the scene itself stays
+    pinned. `None` (every caller but fire_scene_by_id) means "no
+    substitution happened" and falls back to `scene.id`, so this is a
+    no-op everywhere Force Scene isn't redirecting."""
     # THE LIGHT SHOW: "armed for the next scene change" means the next REAL
     # change to a DIFFERENT scene — read the scene showing BEFORE the
     # conductor takes the new one (spectra/services/show_arms.py).
@@ -630,7 +646,9 @@ def on_scene_fired(scene: SceneV2, writes: list[dict],
     conductor.on_scene_fire(scene, writes, color_set_id)
     try:
         from spectra.services import show_arms
-        show_arms.on_scene_change(previous_id, scene.id)
+        show_arms.on_scene_change(
+            previous_id,
+            requested_scene_id if requested_scene_id is not None else scene.id)
     except Exception:                                    # noqa: BLE001
         logger.exception("light show: scene-change arm hook failed")
     # THE LIGHT SHOW: a Level authored to last "until the next scene change"
