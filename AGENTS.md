@@ -9434,11 +9434,13 @@ none, user-select: none, both -webkit- and plain), covers the three
 plain-inline-styled buttons (`TopBarGroupButton.tsx`'s own `.top-bar-
 group-btn` already had its own copy of the trio, just with the wrong
 `touch-action` value, fixed in place rather than switched to the shared
-class). Spec: `scripts/check_touch_press_hold.mjs` §5-§8 (CSS regression
+class). Spec: `scripts/check_touch_press_hold.mjs` §5-§8b (CSS regression
 for both classes, the hook's own pointer/keyboard contract including the
-two new wires, and — proportional to each component's own query
-dependency weight — a real mount for `ShapeControls.tsx` vs. a source-
-level class-presence check for `PaletteCard.tsx`/`ColorSetsPage.tsx`).
+two new wires, a real mount for `ShapeControls.tsx`, and real mounts for
+`PaletteCard.tsx`/`ColorSetsPage.tsx` driving a held pointer through
+their real query hooks — fetch intercepted, not a source-text check —
+to prove the editor/preview actually opens, not just that the className
+sits next to the binding).
 
 ## SPECTRA spec, rendered for a phone: `GET /spectra/spec`
 
