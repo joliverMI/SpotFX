@@ -4719,6 +4719,41 @@ bulbs outside the room) and the seam-wiring fields (`tv_strips`,
 `voice_fixtures`, `own_brightness`, `owned_brightness` — set once at
 cutover with River). See the `house-lighting` skill.
 
+**THE MUSIC-DEVICE GATE (the Admiral, 2026-10-09): "When I'm playing
+music on devices that aren't Serenity or Serenity guest the system
+should not change from the standard house lighting to the music reactive
+lighting ... otherwise it should be ignored."** `RoomControlState.
+music_device_allowlist` (`spectra/services/room_controls.py`, default
+`["Serenity", "Serenity guest"]` — his two real Spotify Connect device
+names, matched case-insensitively against `spectra/services/bridge.py`'s
+new `device_name()`, which reads the identical `track.device_name` field
+root's own `api/spotify_client.py`/`settings.spotify_device_names`
+already match against — the real reported device, never guessed, and
+never re-derived from a second source). Gated at exactly ONE choke
+point, `house.py`'s own `deps.playing`/`_default_playing` (its own "THE
+MUSIC-DEVICE GATE" docstring section is the binding statement) — every
+caller that already routed through it (the `mode.music=="show"`
+hand-in/hand-out, `scene_deferral()`, `response_deferral()`,
+`house_overrides_display()`) inherits the gate for free. Deliberately
+NOT a change to `bridge.is_playing()` itself, which Ambient/dark_light/
+Light Show arms/house_restart each read independently for their own
+broader "is music playing at all" question this ask never named. A
+device switch mid-song is handled both ways: switching onto an allowed
+device hands in immediately (the existing `playing is True` edge);
+switching OFF one hands out immediately too, via a new
+`deps.music_device_mismatch` seam, rather than waiting on
+`music_debounce_s` (tuned for a genuine stop/inter-song gap, not a
+deliberate device change). Visible in the UI (`RoomControlsBar.tsx`'s
+Scenes panel, a "Music devices" text field, comma-separated) and to
+Sonic (`settings_console.get_music_device_allowlist`/
+`set_music_device_allowlist` — a dedicated pair, same "a list is a poor
+fit for `set_setting`'s scalar shape" reason as Force Scene/Force
+Colour, NOT a `SETTINGS_REGISTRY` key). An emptied allowlist is refused
+— the house must always have at least one allowed device. Spec:
+`tests/test_bridge.py`, `tests/test_house_lighting.py`'s "THE
+MUSIC-DEVICE GATE" section, `tests/test_settings_console.py`,
+`tests/test_settings_agent_cli.py`. Help topic `music-device-gate`.
+
 **THREE DEFECTS FROM THE FIRST REAL HANDOVER, FIXED 2026-10-05 (PR
 fm/house-handover-polish)** — all found the same cutover afternoon:
 

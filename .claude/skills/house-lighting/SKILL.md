@@ -64,6 +64,20 @@ worth knowing cold:
    `fx/device_output.py`; an energy edit re-enters the current mode
    (`house.reapply()`) so a changed default lands now, not at the next
    mode switch.
+6. **"PLAYING" MEANS PLAYING ON AN ALLOWED DEVICE (the Admiral,
+   2026-10-09)** — `house.deps.playing`/`_default_playing` (NOT
+   `bridge.is_playing()` directly) is the one choke point `mode.music ==
+   "show"`'s hand-in/hand-out, `scene_deferral()`, `response_deferral()`
+   and `house_overrides_display()` all route through; it reads False
+   unless `bridge.device_name()` matches `RoomControlState.
+   music_device_allowlist` — a FIELD ON THE SETTINGS-CONSOLE ROOM MODEL
+   (`spectra/services/room_controls.py`), not `HouseSettings`, so it's
+   edited through `RoomControlsBar.tsx`'s "Music devices" field or
+   Sonic's `get_music_device_allowlist`/`set_music_device_allowlist`
+   (settings domain, NOT this module's `house_console.py`). A device
+   switch mid-song hands out immediately (`deps.music_device_mismatch`),
+   skipping `music_debounce_s`, which still governs a genuine stop. See
+   `house.py`'s own "THE MUSIC-DEVICE GATE" docstring section.
 
 ## Sonic reach
 

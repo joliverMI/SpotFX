@@ -204,16 +204,19 @@ def test_dispatch_recognizes_exactly_the_declared_settings_tools():
     """Sonic's tool set is now wider than settings alone (see
     tests/test_scene_console.py for the full merged-boundary proof, which
     is where the exhaustive full-set assertion now lives) — this file only
-    proves the settings domain is exactly these five ops: the original
-    get_settings/set_setting, plus the 2026-10-06 Force Scene/Force
-    Colour trio (set_force_scene/set_force_color/get_force_pins — by
-    NAME, not registry keys; see the module docstring)."""
+    proves the settings domain is exactly these seven ops: the original
+    get_settings/set_setting, the 2026-10-06 Force Scene/Force Colour
+    trio (set_force_scene/set_force_color/get_force_pins — by NAME, not
+    registry keys; see the module docstring), and the 2026-10-09
+    music-device-allowlist pair (get_music_device_allowlist/
+    set_music_device_allowlist — same "list, not a registry key" reason)."""
     from spectra.services import settings_agent as sa
     from spectra.services import settings_console as sc
 
     assert set(sc.OPERATIONS) == {
         "get_settings", "set_setting",
         "get_force_pins", "set_force_scene", "set_force_color",
+        "get_music_device_allowlist", "set_music_device_allowlist",
     }
     assert set(sc.OPERATIONS) <= {t["name"] for t in sa.TOOLS}
 
@@ -667,6 +670,58 @@ def test_force_scene_and_color_are_declared_and_discoverable():
     idx = _run(sa._dispatch("list_operations", {"domain": "settings"}))
     names = {o["name"] for o in idx["operations"]}
     assert {"get_force_pins", "set_force_scene", "set_force_color"} <= names
+
+
+def test_get_music_device_allowlist_reads_the_real_default():
+    from spectra.services import settings_console as sc
+
+    result = sc.get_music_device_allowlist()
+    assert result["devices"] == ["Serenity", "Serenity guest"]
+
+
+def test_set_music_device_allowlist_replaces_the_whole_list():
+    from spectra.services import room_controls as rc
+    from spectra.services import settings_console as sc
+
+    result = _run(sc.set_music_device_allowlist(["Kitchen Echo"]))
+    assert result["status"] == "applied"
+    assert result["devices"] == ["Kitchen Echo"]
+    assert "Kitchen Echo" in result["summary"]
+    assert rc.load_room_controls().music_device_allowlist == ["Kitchen Echo"]
+
+
+def test_set_music_device_allowlist_strips_blanks_and_rejects_an_empty_result():
+    from spectra.services import settings_console as sc
+
+    with pytest.raises(sc.SettingChangeError):
+        _run(sc.set_music_device_allowlist(["  ", ""]))
+
+
+def test_set_music_device_allowlist_rejects_non_string_items_without_writing():
+    from spectra.services import room_controls as rc
+    from spectra.services import settings_console as sc
+
+    with pytest.raises(sc.SettingChangeError):
+        _run(sc.set_music_device_allowlist(["Serenity", 7]))
+    # Nothing persisted — still the default.
+    assert rc.load_room_controls().music_device_allowlist == ["Serenity", "Serenity guest"]
+
+
+def test_music_device_allowlist_ops_wrap_errors_as_rejected_not_raise():
+    from spectra.services import settings_console as sc
+
+    assert _run(sc._op_set_music_device_allowlist([]))["status"] == "rejected"
+
+
+def test_music_device_allowlist_is_declared_and_discoverable():
+    from spectra.services import settings_agent as sa
+
+    for name in ("get_music_device_allowlist", "set_music_device_allowlist"):
+        assert name in sa.ALL_OPERATIONS
+        assert sa.ALL_OPERATIONS[name].domain == "settings"
+    idx = _run(sa._dispatch("list_operations", {"domain": "settings"}))
+    names = {o["name"] for o in idx["operations"]}
+    assert {"get_music_device_allowlist", "set_music_device_allowlist"} <= names
 
 
 def test_name_resolve_tiers_directly():

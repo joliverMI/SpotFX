@@ -810,6 +810,26 @@ class RoomControlState(BaseModel):
     gradient_x_period_s: float = Field(default=300.0, gt=0.0)
     gradient_y_slew_s: float = Field(default=45.0, gt=0.0)
 
+    # THE MUSIC-DEVICE GATE (the Admiral, 2026-10-09: "When I'm playing
+    # music on devices that aren't Serenity or Serenity guest the system
+    # should ... only [go music-reactive] when I am playing music on those
+    # specific devices otherwise it should be ignored"). Names are matched
+    # case-insensitively against the real Spotify Connect device name
+    # spot-effects' own playback poll reports (api/spotify_client.py's
+    # `device.name`, broadcast as `track.device_name` — spectra/services/
+    # bridge.py's `device_name()` reads the identical field root's own
+    # `on_target_device`/`settings.spotify_device_names` already match
+    # against, so this is the real reported name, not a guess at one).
+    # Gates ONLY house.py's own music-show hand-in (spectra/services/
+    # house.py's `deps.playing`/`_default_playing` — see that module's
+    # "THE MUSIC-DEVICE GATE" docstring entry) — never `bridge.is_playing()`
+    # itself, which Ambient/dark_light/Light Show arms/house_restart all
+    # read independently for a broader "is music playing at all" question
+    # this ask never named. His two real device names are the default, so
+    # nothing about an existing room changes until he edits this list.
+    music_device_allowlist: list[str] = Field(
+        default_factory=lambda: ["Serenity", "Serenity guest"])
+
     @field_validator("ambient_color", "ambient_color_dark", "display_light_bg_color")
     @classmethod
     def _validate_hex(cls, v: Optional[str]) -> Optional[str]:

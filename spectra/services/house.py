@@ -115,6 +115,20 @@ engine's response/update gates, the analysed colour event, the trigger
 engine's colour-set action. An UNKNOWN playback read (bridge down) never
 hands in or out on its own.
 
+THE MUSIC-DEVICE GATE (the Admiral, 2026-10-09) — "playing" above means
+playing on a device named in `RoomControlState.music_device_allowlist`
+(his real Spotify Connect device names, default ["Serenity", "Serenity
+guest"]), not merely playing anywhere. `deps.playing`/`_default_playing`
+is the one function this is enforced in (see its own docstring) — music
+on any other device (his phone, another speaker, the car) reads exactly
+like silence here: the room never hands in, and a device switch AWAY
+from an allowed device mid-song hands out immediately rather than
+waiting on `music_debounce_s` (`deps.music_device_mismatch`). This is
+scoped to house.py's own music-show switch only — it does not touch
+`bridge.is_playing()` itself, which Ambient/dark_light/Light Show
+arms/house_restart each read independently for their own, broader
+"is music playing at all" question.
+
 ═══ TRANSITIONS ═══
 
 A mode entered because Home Assistant's clock moved glides over
@@ -239,12 +253,72 @@ class Plan:
 
 # ── seams (tests replace them; production imports lazily) ──────────────────
 
+def _music_device_allowed(device_name: Optional[str]) -> bool:
+    """THE MUSIC-DEVICE GATE (the Admiral, 2026-10-09: "When I'm playing
+    music on devices that aren't Serenity or Serenity guest the system
+    should not change from the standard house lighting to the music
+    reactive lighting ... otherwise it should be ignored"). True iff
+    `device_name` case-insensitively matches one of `RoomControlState.
+    music_device_allowlist` — his two real device names by default (see
+    that field's own docstring for where the name comes from and why it
+    is never guessed). None/"" never matches: "we don't know the device"
+    is not "it's an allowed one"."""
+    if not device_name:
+        return False
+    try:
+        from spectra.services.room_controls import load_room_controls
+        allowlist = load_room_controls().music_device_allowlist
+    except Exception:                                    # noqa: BLE001
+        logger.exception("house: music device allowlist read failed — "
+                         "treating the device as not allowed")
+        return False
+    name = device_name.strip().lower()
+    return any(name == a.strip().lower() for a in allowlist
+              if isinstance(a, str) and a.strip())
+
+
 def _default_playing() -> Optional[bool]:
+    """`deps.playing()` answers "is music the thing that should be
+    driving the room right now", not merely "is spot-effects reporting a
+    playing track" — a confirmed-playing read on a device NOT in the
+    music-device allowlist above reads exactly as False here, so every
+    caller below (the mode.music=="show" hand-in/hand-out, scene_deferral,
+    response_deferral, house_overrides_display — ALL of which route
+    through this one function via `deps.playing`, never `bridge.
+    is_playing()` directly) treats music on his phone, another speaker, or
+    the car precisely like silence: the house stays on its mode, no music
+    show, no scene changes, no drop sequences. Deliberately scoped to
+    house.py's own choke point only — Ambient/dark_light/Light Show
+    arms/house_restart each read `bridge.is_playing()` independently for a
+    broader "is music playing anywhere" question this ask never named, and
+    stay untouched. None (bridge down, no signal yet) passes through
+    unchanged. Music on an allowed device is unaffected — byte-identical
+    to before this gate existed."""
     try:
         from spectra.services.engine import bridge
-        return bridge.is_playing()
+        is_playing = bridge.is_playing()
+        if is_playing is not True:
+            return is_playing
+        return _music_device_allowed(bridge.device_name())
     except Exception:                                    # noqa: BLE001
         return None
+
+
+def _default_music_device_mismatch() -> bool:
+    """True iff spot-effects confirms a track IS playing right now but on
+    a device outside the allowlist — a deliberate device switch, never a
+    pause or an inter-song gap. `_tick_locked`'s hand-out branch reads this
+    to skip `mode.transitions.music_debounce_s` (built for a genuine
+    stop/brief gap, up to a minute by default) so switching speakers
+    mid-song hands the room back to its house mode right away rather than
+    waiting on a debounce timed for silence, not a device change."""
+    try:
+        from spectra.services.engine import bridge
+        if bridge.is_playing() is not True:
+            return False
+        return not _music_device_allowed(bridge.device_name())
+    except Exception:                                    # noqa: BLE001
+        return False
 
 
 async def _default_fire_scene(scene_id: str, **kw) -> dict:
@@ -280,6 +354,7 @@ def _default_room_active_set_id() -> Optional[str]:
 @dataclass
 class Deps:
     playing: Callable[[], Optional[bool]] = _default_playing
+    music_device_mismatch: Callable[[], bool] = _default_music_device_mismatch
     fire_scene: Callable[..., Awaitable[dict]] = _default_fire_scene
     apply_set: Callable[[Any, int], Awaitable[dict]] = _default_apply_set
     conductor: Callable[[], Any] = _default_conductor
@@ -968,9 +1043,18 @@ async def _tick_locked() -> None:
             return
         if _rt.phase == PHASE_MUSIC:
             quiet_for = (now - _rt.quiet_since) if _rt.quiet_since is not None else 0.0
-            if playing is False and quiet_for >= mode.transitions.music_debounce_s:
+            # A device switch mid-song (deps.music_device_mismatch —
+            # confirmed STILL playing, just on a now-disallowed device)
+            # hands out right away: music_debounce_s exists to ride out a
+            # genuine stop/inter-song gap, not to keep the room reacting
+            # to a device he deliberately moved off of.
+            device_mismatch = deps.music_device_mismatch()
+            if playing is False and (device_mismatch
+                                     or quiet_for >= mode.transitions.music_debounce_s):
+                why = ("playing on a device outside the allowed list"
+                      if device_mismatch else "music stopped")
                 await _enter(mode, mode.transitions.music_return_glide_s,
-                             why="music stopped", refire=True,
+                             why=why, refire=True,
                              prefer_remembered=True)
             elif (_rt.music_mode_id != mode.id
                   or _rt.music_mode_updated_ms != mode.updated_ms):
@@ -1740,9 +1824,29 @@ def status_dict() -> dict:
                 and _rt.quiet_since is not None):
             returns_in = max(0.0, mode.transitions.music_debounce_s
                              - (deps.clock() - _rt.quiet_since))
+        # Device gate visibility ("say so in status" — never guess at a
+        # device the bridge hasn't reported). device/device_allowed read
+        # LIVE so a status poll always reflects this instant, not the
+        # tick's own cached _rt.playing above.
+        device_name = None
+        allowlist: list = []
+        try:
+            from spectra.services.engine import bridge
+            device_name = bridge.device_name()
+        except Exception:                                    # noqa: BLE001
+            logger.exception("house: music device read failed for status")
+        try:
+            from spectra.services.room_controls import load_room_controls
+            allowlist = list(load_room_controls().music_device_allowlist)
+        except Exception:                                    # noqa: BLE001
+            logger.exception("house: music device allowlist read failed for status")
         out["music"] = {"playing": playing, "policy": mode.music,
                         "hue": mode.music_hue,
-                        "returns_in_s": round(returns_in, 1) if returns_in is not None else None}
+                        "returns_in_s": round(returns_in, 1) if returns_in is not None else None,
+                        "device": device_name,
+                        "device_allowed": (_music_device_allowed(device_name)
+                                          if device_name else None),
+                        "device_allowlist": allowlist}
         nxt = None
         if (_rt.phase == PHASE_RESTING and mode.flow.scene_every_min > 0
                 and _rt.last_scene_at is not None):

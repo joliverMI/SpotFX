@@ -931,6 +931,19 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        id: 'music-device-gate',
+        title: 'Music devices — which Spotify Connect device goes music-reactive',
+        keywords: 'music device gate allowlist serenity guest spotify connect phone speaker car house lighting standard lighting reactive ignore mode show calm',
+        body: [
+          'A text field in the Scenes panel (room controls bar), just above "Scene changes": a comma-separated list of Spotify Connect device names. Default: "Serenity, Serenity guest" — the devices house lighting actually reacts to.',
+          'When a house mode is set and its music policy is "show", it only switches from standard house lighting to music-reactive lighting while Spotify reports playback on one of these devices (matched case-insensitively against the real device name Spotify itself reports). Music playing on any other device — his phone, another speaker, the car — is ignored: the house stays on its own mode\'s look, with no music show, no scene changes, and no drop sequences triggered by that playback.',
+          'Switching devices mid-song is handled both ways: moving onto an allowed device hands the room into the music show right away; moving off one hands it back to the house mode immediately too, rather than waiting on the usual "music stopped" debounce (which exists for a genuine pause or an inter-song gap, not a deliberate device change).',
+          'This only governs house lighting\'s own music-show switch — it does not affect Hue Hold, Dark/Light display mode, or the Light Show\'s arm-on-trigger behaviour, each of which reads "is music playing" on its own, independent of which device it\'s on.',
+          'The list can never be emptied — at least one device name is required, so the house can\'t be left permanently unable to go music-reactive.',
+          'Also reachable by voice: ask Sonic to read or change the music-device allowlist.',
+        ],
+      },
+      {
         id: 'transition-placement-rule',
         title: 'Transition placement rule — edge window, sensitivity, and how many',
         keywords: 'transition placement rule edge window sensitivity density total actions per minute transitions per minute rate strongest per song beat bass energy generator generated cue mid-song align alignment R3 intensity scale mark',

@@ -231,6 +231,23 @@ async def set_force_color(enabled: bool, target: Optional[str] = None) -> dict:
 
 
 @mcp.tool()
+async def get_music_device_allowlist() -> dict:
+    """Read which Spotify Connect device names let the house switch from
+    standard lighting to music-reactive lighting."""
+    return await _call("get_music_device_allowlist")
+
+
+@mcp.tool()
+async def set_music_device_allowlist(devices: list[str]) -> dict:
+    """Replace the WHOLE list of Spotify Connect device names that let the
+    house go music-reactive (his usual ones are "Serenity" and "Serenity
+    guest"); music on any other device is ignored. Call
+    get_music_device_allowlist first if you only need to add or remove one
+    name."""
+    return await _call("set_music_device_allowlist", devices=devices)
+
+
+@mcp.tool()
 async def list_scenes() -> dict:
     """List every scene's id, name, and labels -- never the full scene."""
     return await _call("list_scenes")

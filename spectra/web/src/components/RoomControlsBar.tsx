@@ -191,6 +191,11 @@ export default function RoomControlsBar() {
   const [forceColorResult, setForceColorResult] = useState<ForceColorResult | null>(null);
   const { data: colorCards } = useSpotColorSets();
   const [hueGroupsResetKey, setHueGroupsResetKey] = useState(0);
+  // The music-device allowlist is edited as a plain comma-separated
+  // string while typing; null means "show local's own list" — cleared
+  // after a commit (or whenever `local` is swapped in from the server)
+  // so the field never holds a stale draft across an external update.
+  const [musicDeviceAllowlistDraft, setMusicDeviceAllowlistDraft] = useState<string | null>(null);
   const localRef = useRef<RoomControlState | null>(null);
   // 6-most-recently-used, one list per picker (owner ask, card
   // force-colour-and-forced-trigger-dialogs-p99a) — a per-viewer
@@ -701,6 +706,30 @@ export default function RoomControlsBar() {
                   <option key={m.value} value={m.value} title={m.title}>{m.label}</option>
                 ))}
               </select>
+            </div>
+            <div className="top-bar-group-field" style={{ alignItems: 'flex-start' }}>
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                Music devices
+                <HelpLink topic="music-device-gate" />
+              </label>
+              <input
+                type="text"
+                style={{ minWidth: 160 }}
+                value={musicDeviceAllowlistDraft ?? local.music_device_allowlist.join(', ')}
+                onChange={(e) => setMusicDeviceAllowlistDraft(e.target.value)}
+                onBlur={() => {
+                  const parsed = (musicDeviceAllowlistDraft ?? '')
+                    .split(',').map((s) => s.trim()).filter(Boolean);
+                  setMusicDeviceAllowlistDraft(null);
+                  if (parsed.length === 0) return;      // an empty list is refused server-side
+                  if (parsed.join('|') === local.music_device_allowlist.join('|')) return;
+                  commit({ ...local, music_device_allowlist: parsed });
+                }}
+                title="Comma-separated Spotify Connect device names. Music playing on any device outside this list is ignored — the house stays on its own lighting."
+              />
+              <span style={{ fontSize: '0.85em', opacity: 0.75 }}>
+                playing here switches on music-reactive lighting; anywhere else is ignored
+              </span>
             </div>
             <div className="top-bar-group-field">
               <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>

@@ -508,6 +508,23 @@ def test_the_scene_entry_param_widening_parses_from_its_structured_tool_result()
     assert "Singles" in result["changes"][0]["summary"]
 
 
+def test_the_music_device_allowlist_widening_parses_from_its_structured_tool_result():
+    """The music-device-gate widening (the Admiral, 2026-10-09:
+    "it should only happen when I am playing music on those specific
+    devices") gets its own explicitly-synthetic fixture on the CURRENT
+    manifest, same precedent as the device/scene-entry-param widenings
+    above."""
+    from spectra.services import settings_agent_cli as sac
+
+    result = sac._parse_transcript(
+        _load("cli_transcript_synthetic_music_device_allowlist_applied.json"))
+    assert len(result["changes"]) == 1
+    change = result["changes"][0]
+    assert change["status"] == "applied"
+    assert change["devices"] == ["Serenity", "Serenity guest"]
+    assert "Serenity" in change["summary"]
+
+
 def test_every_declared_operation_including_the_device_domain_is_in_the_manifest():
     """--allowedTools and the live manifest check are both derived from
     ALL_OPERATIONS, so a new domain cannot be added without its tools
