@@ -17,6 +17,16 @@ than inventing a second write path), creating a brand-new empty set
 store's own unique-name rule, `show_store.put_set`'s `SetNameTaken`),
 moving this song's High or Low Trigger, and ending the show.
 
+SHOW SEQUENCES (2026-10-09, spectra/services/show_sequence.py): reading his
+sequences and the running one (`list_show_sequences`,
+`show_sequence_status`) and driving a run by name — start (optionally
+replacing the running one), pause, resume, stop, Next (skip the current
+item unfired), Previous (back one, re-armed) and Fire now (run the current
+Set item at once, or end the current Wait). AUTHORING a sequence — adding,
+ordering and arming items, building a song list — is the Sequence tab's
+Build view, deliberately excluded here for the same reason editing a set's
+steps is.
+
 WHAT IS DELIBERATELY EXCLUDED: editing an EXISTING set's own steps (that is
 a drag-and-drop authoring act on the Build view, not a settable field —
 the same line `room_effect_console.py` draws around starting/stopping an
@@ -109,6 +119,17 @@ def _resolve_target(target_kind: str, target_name: Optional[str]) -> tuple[Optio
                   "reason": f"no fixture called {target_name!r}",
                   "close_matches": _close(target_name, list(byname)),
                   "known_fixtures": list(byname)}
+
+
+def _resolve_sequence(name_or_id: str):
+    s = show_store.find_sequence(name_or_id)
+    if s is not None:
+        return s, None
+    names = [x.name for x in show_store.list_sequences()]
+    return None, {"status": "rejected",
+                  "reason": f"no sequence called {name_or_id!r}",
+                  "close_matches": _close(name_or_id, names),
+                  "known_sequences": names}
 
 
 # ── handlers ───────────────────────────────────────────────────────────────
@@ -329,6 +350,163 @@ async def _op_end_show() -> dict:
     report = await show_actions.end_show()
     return {"status": "applied", "report": report,
             "summary": "ended the show — put back every setting and released every fixture"}
+
+
+def _op_list_show_sequences() -> dict:
+    from spectra.services import show_sequence
+    out = []
+    for s in show_store.list_sequences():
+        out.append({"id": s.id, "name": s.name, "loop": s.loop,
+                    "items": [show_sequence.item_title(it) for it in s.items],
+                    "problems": show_sequence.problems(s)})
+    return {"sequences": out}
+
+
+def _op_show_sequence_status() -> dict:
+    from spectra.services import show_sequence
+    st = show_sequence.status()
+    r = st["run"]
+    if r is None:
+        return {"run": None, "summary": "no sequence has run yet"}
+    brief = {k: r[k] for k in ("name", "state", "index", "waiting_for", "loops_done",
+                               "paused_reason", "end_reason")}
+    brief["current"] = (r["items"][r["index"]]["title"]
+                        if 0 <= r["index"] < len(r["items"]) else None)
+    brief["upcoming"] = [it["title"] for it in r["items"][r["index"] + 1:]]
+    brief["recent_log"] = r["log"][:8]
+    return {"run": brief, "refusal": st["refusal"]}
+
+
+def _sequence_control(fn, done: str):
+    from spectra.services import show_sequence
+    try:
+        r = fn()
+    except show_sequence.SequenceError as exc:
+        return {"status": "rejected", "reason": str(exc)}
+    return {"status": "applied", "summary": done.format(name=r.name),
+            "now": show_sequence.waiting_for(r) or r.state, "index": r.index}
+
+
+def _op_start_show_sequence(sequence_name: str, replace: bool = False) -> dict:
+    from spectra.services import show_sequence
+    s, err = _resolve_sequence(sequence_name)
+    if err:
+        return err
+    return _sequence_control(
+        lambda: show_sequence.start(s.id, replace=replace, source="sonic"),
+        "started the sequence '{name}'")
+
+
+def _op_stop_show_sequence() -> dict:
+    from spectra.services import show_sequence
+    return _sequence_control(lambda: show_sequence.stop("stopped by Sonic"),
+                             "stopped the sequence '{name}'")
+
+
+def _op_pause_show_sequence() -> dict:
+    from spectra.services import show_sequence
+    return _sequence_control(lambda: show_sequence.pause("paused by Sonic"),
+                             "paused the sequence '{name}'")
+
+
+def _op_resume_show_sequence() -> dict:
+    from spectra.services import show_sequence
+    return _sequence_control(show_sequence.resume, "resumed the sequence '{name}'")
+
+
+def _op_next_show_sequence_step() -> dict:
+    from spectra.services import show_sequence
+    return _sequence_control(show_sequence.next_item,
+                             "skipped to the next item of '{name}'")
+
+
+def _op_previous_show_sequence_step() -> dict:
+    from spectra.services import show_sequence
+    return _sequence_control(show_sequence.previous_item,
+                             "stepped '{name}' back one item")
+
+
+async def _op_fire_show_sequence_step() -> dict:
+    from spectra.services import show_sequence
+    try:
+        r = await show_sequence.fire_now()
+    except show_sequence.SequenceError as exc:
+        return {"status": "rejected", "reason": str(exc)}
+    return {"status": "applied",
+            "summary": f"ran the current item of '{r.name}' now and moved on",
+            "now": show_sequence.waiting_for(r) or r.state, "index": r.index}
+
+
+_NO_ARGS = {"type": "object", "properties": {}, "additionalProperties": False}
+
+SEQUENCE_OPERATIONS: dict[str, SonicOperation] = {
+    "list_show_sequences": SonicOperation(
+        name="list_show_sequences", domain="show", kind="read",
+        summary="His Show Sequences: ordered lists of sets (each armed "
+                "instant / next scene change / next High / next Low) and Waits.",
+        instructions="Use it to find the exact name to pass to "
+                    "start_show_sequence. Building or editing a sequence is "
+                    "the Light Show page's Sequence tab — not something you can do.",
+        input_schema=_NO_ARGS, handler=_op_list_show_sequences),
+    "show_sequence_status": SonicOperation(
+        name="show_sequence_status", domain="show", kind="read",
+        summary="The running (or last) Show Sequence: its state, the current "
+                "item and what it is waiting for, what comes next, and the "
+                "recent log.",
+        instructions="No arguments. `waiting_for` is the plain sentence to "
+                    "repeat to him ('waiting for 2 more High Triggers').",
+        input_schema=_NO_ARGS, handler=_op_show_sequence_status),
+    "start_show_sequence": SonicOperation(
+        name="start_show_sequence", domain="show", kind="write",
+        summary="Start a Show Sequence by name. It runs its items strictly "
+                "in order, never skipping ahead.",
+        instructions="Only one sequence runs at a time: if one is running "
+                    "this is refused unless replace=true, which stops it "
+                    "first. Say which was replaced.",
+        input_schema={"type": "object",
+                      "properties": {"sequence_name": {"type": "string"},
+                                     "replace": {"type": "boolean"}},
+                      "required": ["sequence_name"], "additionalProperties": False},
+        handler=_op_start_show_sequence),
+    "stop_show_sequence": SonicOperation(
+        name="stop_show_sequence", domain="show", kind="write",
+        summary="Stop the running Show Sequence (its waiting arm is disarmed; "
+                "nothing it already did is undone — that is end_show).",
+        instructions="No arguments.", input_schema=_NO_ARGS,
+        handler=_op_stop_show_sequence),
+    "pause_show_sequence": SonicOperation(
+        name="pause_show_sequence", domain="show", kind="write",
+        summary="Pause the running Show Sequence: its arm is disarmed, a "
+                "timed Wait's clock stops, and triggers are not counted.",
+        instructions="No arguments. resume_show_sequence picks up where it was.",
+        input_schema=_NO_ARGS, handler=_op_pause_show_sequence),
+    "resume_show_sequence": SonicOperation(
+        name="resume_show_sequence", domain="show", kind="write",
+        summary="Resume a paused Show Sequence at its current item.",
+        instructions="No arguments.", input_schema=_NO_ARGS,
+        handler=_op_resume_show_sequence),
+    "next_show_sequence_step": SonicOperation(
+        name="next_show_sequence_step", domain="show", kind="write",
+        summary="Skip the current item of the running Show Sequence WITHOUT "
+                "running it, and move to the next.",
+        instructions="If he wants the current set to RUN and then move on, "
+                    "use fire_show_sequence_step instead.",
+        input_schema=_NO_ARGS, handler=_op_next_show_sequence_step),
+    "previous_show_sequence_step": SonicOperation(
+        name="previous_show_sequence_step", domain="show", kind="write",
+        summary="Step the running Show Sequence back one item and re-arm it "
+                "(nothing that item already did is undone).",
+        instructions="An instant item stepped back onto does not fire by "
+                    "itself; it waits for fire_show_sequence_step or Next.",
+        input_schema=_NO_ARGS, handler=_op_previous_show_sequence_step),
+    "fire_show_sequence_step": SonicOperation(
+        name="fire_show_sequence_step", domain="show", kind="write",
+        summary="Run the current Set item of the running Show Sequence now "
+                "(whatever its arming) and move on; on a Wait, end the Wait.",
+        instructions="No arguments. Refused while the Light Show is standing "
+                    "down — say why.",
+        input_schema=_NO_ARGS, handler=_op_fire_show_sequence_step),
+}
 
 
 OPERATIONS: dict[str, SonicOperation] = {
@@ -552,3 +730,5 @@ OPERATIONS: dict[str, SonicOperation] = {
         input_schema={"type": "object", "properties": {}, "additionalProperties": False},
         handler=_op_end_show),
 }
+
+OPERATIONS.update(SEQUENCE_OPERATIONS)

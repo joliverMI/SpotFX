@@ -189,3 +189,77 @@ export interface ArmsStatus {
   last_crossed: Record<string, { uri: string | null; cue_ms: number; at_ms: number }>;
   refusal: string | null;
 }
+
+// ── Show Sequences (spectra/services/show_sequence.py) ─────────────────────
+
+/** How a Set item is armed: the Run view's four one-tap timings. */
+export type SequenceArm = 'instant' | 'scene_change' | 'high' | 'low';
+export type WaitKind = 'duration' | 'trigger_count' | 'songs' | 'song_list';
+
+export interface SongRef { uri: string; title: string; artist: string }
+
+export interface SequenceWait {
+  kind: WaitKind;
+  seconds: number;
+  trigger: ArmTrigger;
+  count: number;
+  songs: SongRef[];
+}
+
+export interface SequenceItem {
+  id?: string;
+  kind: 'set' | 'wait';
+  set_id?: string | null;
+  arm: SequenceArm;
+  wait?: SequenceWait | null;
+  label?: string;
+  /** served only: one line naming the item, and what is wrong with it */
+  title?: string;
+  problems?: string[];
+}
+
+export interface ShowSequence {
+  id?: string;
+  name: string;
+  items: SequenceItem[];
+  loop: boolean;
+  notes?: string;
+  problems?: string[];
+}
+
+export interface SequenceLogEntry {
+  at_ms: number;
+  what: string;
+  index: number;
+  item: string;
+  detail: string;
+}
+
+export interface SequenceRun {
+  id: string;
+  sequence_id: string;
+  name: string;
+  items: SequenceItem[];
+  loop: boolean;
+  state: 'running' | 'paused' | 'finished' | 'stopped';
+  active: boolean;
+  index: number;
+  loops_done: number;
+  started_ms: number;
+  ended_ms: number | null;
+  end_reason: string;
+  paused_reason: string;
+  awaiting_fire: boolean;
+  firing: boolean;
+  waiting_reason: string;
+  wait_count: number;
+  wait_left_s?: number;
+  waiting_for: string;
+  log: SequenceLogEntry[];
+}
+
+export interface SequenceStatus {
+  run: SequenceRun | null;
+  refusal: string | null;
+  playing_uri: string | null;
+}

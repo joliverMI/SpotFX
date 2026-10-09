@@ -2710,6 +2710,37 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        id: 'show-sequences',
+        title: 'Sequences: a show built in advance',
+        keywords: 'sequence show sequence order pre-armed sets build run duplicate loop playlist',
+        body: [
+          'A Sequence is an ordered list of your sets, each pre-armed one of the same four ways as the Run view\'s icons — ⚡ instant, 🐇 next scene change, ▲ next High Trigger, ▼ next Low Trigger — plus Waits. The Sequence tab has its own Build and Run views.',
+          'It runs strictly in order and never skips ahead: only the current item is listening. The next item is armed only once the current one has run (its set fired, or its Wait was satisfied), so a trigger that would suit a later item is ignored until that item\'s turn. One trigger moves the sequence one step: a High that ends a Wait does not also fire the set after it.',
+          'An armed item is an ordinary arm on the Armed board, labelled with its set. Disarming it there pauses the sequence (it says why). A sequence\'s arm never expires on its own, and it never replaces — or is replaced by — an arm you made by hand.',
+          'Build: + New, rename in the name box, ⧉ Duplicate (an independent copy named "<name> copy", placed right after it), Delete. Add items with + Set (pick the set from the searchable list, then tap an arming icon) and + Wait. Reorder by dragging the ⠿ handle (mouse or finger) or with ↑/↓. Loop starts again from the top after the last item (it needs at least one item that waits for something). Edits made while a sequence runs apply the next time it starts — a running sequence keeps the version it started with.',
+        ],
+      },
+      {
+        id: 'show-sequence-waits',
+        title: 'Waits in a sequence',
+        keywords: 'wait time duration trigger count scene changes high low songs song list search',
+        body: [
+          'A Wait holds the sequence until something happens, then lets the next item start listening. It counts only while it is the current item — the trigger or song that finished the item before it never counts toward it.',
+          'A fixed time: minutes and seconds of wall time. A number of triggers: N scene changes, High Triggers or Low Triggers (each song has one High and one Low, so "2 High Triggers" spans two songs). A number of songs: N songs starting after the Wait becomes current — 1 means "until the next song starts". One of these songs: search the songs SPECTRA knows by title or artist, add them (or the song playing now) to the list; the Wait ends when one of them starts — or straight away if one of them is already playing when the Wait\'s turn comes.',
+          'While the Light Show is standing down (SPECTRA does not hold the room, or a preview, camera run or night run has it), triggers are not counted, because the sets they gate could not run either.',
+        ],
+      },
+      {
+        id: 'show-sequence-run',
+        title: 'Running a sequence',
+        keywords: 'run sequence start pause resume stop next previous fire now waiting for restart',
+        body: [
+          'Run: pick a sequence and tap Start. One sequence runs at a time — starting another asks before stopping the running one. The current item is highlighted with exactly what it is waiting for ("armed for the next High Trigger", "waiting for 2 more scene changes", "waiting for one of: …"); done items are ticked and the rest are listed in order.',
+          'Pause disarms the current item and stops a timed Wait\'s clock; nothing is counted while paused, and Resume picks up where it was. Next skips the current item without running it. Previous steps back one item and re-arms it — nothing it already did is undone, and an instant item does not fire by itself after a step back. Fire now runs the current set at once (whatever its arming) and moves on; on a Wait it ends the Wait. Stop ends the run (it does not undo anything — that is End show).',
+          'If SPECTRA restarts, a running sequence resumes at its current item: a timed Wait keeps its deadline, counts are kept and the item is re-armed. If the room is released the sequence pauses and says so. Every step is in History and the show log. Sonic can list your sequences and start, pause, resume, stop, step and fire them by name.',
+        ],
+      },
+      {
         id: 'show-strip',
         title: 'The Show line in the top bar',
         keywords: 'top bar strip show holding levels running',

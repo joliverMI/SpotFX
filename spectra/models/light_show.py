@@ -202,3 +202,105 @@ class LightShowState(BaseModel):
     #: the Pulse modulations and flare switches the show is holding
     pulse_mods: list[PulseModHold] = Field(default_factory=list)
     flare_blocks: list[FlareBlock] = Field(default_factory=list)
+    #: the Show Sequence that is running (or last ran), if any
+    #: (spectra/services/show_sequence.py) — one at a time
+    sequence_run: Optional["SequenceRun"] = None
+
+
+# ── Show Sequences (the Admiral, 2026-10-09: "a sequence of pre-armed sets")
+# spectra/services/show_sequence.py is the binding statement for how one
+# runs. Like the sets, the LIBRARY (light_show_sequences.json) is his and is
+# only written by an edit; the RUN lives in LightShowState above.
+
+SEQUENCE_ARMS = ("instant", "scene_change", "high", "low")
+"""How a Set item is armed — the same four timings the Run view's one-tap
+buttons offer: bolt (instant), bunny (next scene change), up (next High
+Trigger), down (next Low Trigger)."""
+
+WAIT_KINDS = ("duration", "trigger_count", "songs", "song_list")
+WAIT_TRIGGERS = ("scene_change", "high", "low")
+
+
+class SongRef(BaseModel):
+    """One song on a song-list Wait. Title/artist are carried so the list
+    still reads when the song is no longer in the library."""
+    model_config = ConfigDict(extra="ignore")
+    uri: str
+    title: str = ""
+    artist: str = ""
+
+
+class SequenceWait(BaseModel):
+    """A Wait item's settings. Only the fields its `kind` names are read."""
+    model_config = ConfigDict(extra="ignore")
+    kind: str = "duration"           # duration | trigger_count | songs | song_list
+    seconds: float = 60.0            # duration
+    trigger: str = "scene_change"    # trigger_count: scene_change | high | low
+    count: int = 1                   # trigger_count / songs
+    songs: list[SongRef] = Field(default_factory=list)   # song_list
+
+
+class SequenceItem(BaseModel):
+    """A step of a sequence: a Set armed one of four ways, or a Wait."""
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=_id)
+    kind: str = "set"                # set | wait
+    set_id: Optional[str] = None
+    arm: str = "instant"             # SEQUENCE_ARMS
+    wait: Optional[SequenceWait] = None
+    #: his own words for this step (optional)
+    label: str = ""
+
+
+class ShowSequence(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=_id)
+    name: str
+    items: list[SequenceItem] = Field(default_factory=list)
+    #: start again from the top after the last item (needs one item that
+    #: waits for something, or it would spin)
+    loop: bool = False
+    notes: str = ""
+    created_ms: int = Field(default_factory=now_ms)
+    updated_ms: int = Field(default_factory=now_ms)
+
+
+class SequenceLibrary(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    schema_version: int = SCHEMA_VERSION
+    sequences: list[ShowSequence] = Field(default_factory=list)
+
+
+class SequenceRun(BaseModel):
+    """A sequence being run. The items are a SNAPSHOT taken at start, so an
+    edit made mid-show never shifts the position under it."""
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=_id)
+    sequence_id: str
+    name: str
+    items: list[SequenceItem] = Field(default_factory=list)
+    loop: bool = False
+    state: str = "running"           # running | paused | finished | stopped
+    index: int = 0
+    loops_done: int = 0
+    started_ms: int = Field(default_factory=now_ms)
+    ended_ms: Optional[int] = None
+    end_reason: str = ""
+    paused_reason: str = ""
+    # the current item
+    item_entered_ms: Optional[int] = None
+    arm_id: Optional[str] = None     # a Set item's arm (show_arms)
+    fired: bool = False              # an instant Set item has fired
+    firing: bool = False             # an instant fire is in flight
+    awaiting_fire: bool = False      # a manual step back onto an instant item
+    waiting_reason: str = ""         # why the current item cannot act right now
+    wait_count: int = 0              # triggers/songs counted so far
+    wait_deadline_ms: Optional[int] = None
+    wait_remaining_ms: Optional[int] = None   # a duration Wait, while paused
+    #: the last song this run saw start — a restart re-sees the playing
+    #: song and must not count it as a new one
+    last_uri: Optional[str] = None
+    log: list[dict] = Field(default_factory=list)
+
+
+LightShowState.model_rebuild()

@@ -616,6 +616,64 @@ async def end_show() -> dict:
     return await _call("end_show")
 
 
+@mcp.tool()
+async def list_show_sequences() -> dict:
+    """His Show Sequences (ordered, pre-armed sets and Waits). Use this to
+    find the exact name for start_show_sequence."""
+    return await _call("list_show_sequences")
+
+
+@mcp.tool()
+async def show_sequence_status() -> dict:
+    """The running (or last) Show Sequence: state, current item, what it is
+    waiting for, what comes next, and the recent log."""
+    return await _call("show_sequence_status")
+
+
+@mcp.tool()
+async def start_show_sequence(sequence_name: str, replace: bool = False) -> dict:
+    """Start a Show Sequence by name; refused while another runs unless
+    replace=true (which stops it first)."""
+    return await _call("start_show_sequence", sequence_name=sequence_name, replace=replace)
+
+
+@mcp.tool()
+async def stop_show_sequence() -> dict:
+    """Stop the running Show Sequence."""
+    return await _call("stop_show_sequence")
+
+
+@mcp.tool()
+async def pause_show_sequence() -> dict:
+    """Pause the running Show Sequence (its arm is disarmed, timers stop)."""
+    return await _call("pause_show_sequence")
+
+
+@mcp.tool()
+async def resume_show_sequence() -> dict:
+    """Resume a paused Show Sequence at its current item."""
+    return await _call("resume_show_sequence")
+
+
+@mcp.tool()
+async def next_show_sequence_step() -> dict:
+    """Skip the current item of the running Show Sequence without running it."""
+    return await _call("next_show_sequence_step")
+
+
+@mcp.tool()
+async def previous_show_sequence_step() -> dict:
+    """Step the running Show Sequence back one item and re-arm it."""
+    return await _call("previous_show_sequence_step")
+
+
+@mcp.tool()
+async def fire_show_sequence_step() -> dict:
+    """Run the current Set item of the running Show Sequence now and move
+    on (on a Wait: end the Wait)."""
+    return await _call("fire_show_sequence_step")
+
+
 # The analysis domain: refreshing the analysed cues — see
 # spectra/services/analysis_console.py. Dry run first is enforced by the
 # mechanism (the apply needs the dry run's plan_id).

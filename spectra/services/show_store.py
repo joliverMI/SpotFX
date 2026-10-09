@@ -20,7 +20,8 @@ from typing import Optional
 
 from spectra import config
 from spectra.models.light_show import (ActionSet, LightShowLibrary,
-                                       LightShowState, now_ms)
+                                       LightShowState, SequenceLibrary,
+                                       ShowSequence, now_ms)
 
 logger = logging.getLogger(__name__)
 
@@ -135,6 +136,105 @@ def delete_set(set_id: str) -> bool:
             return False
         lib.sets = kept
         save_library(lib)
+        return True
+
+
+# ── Show Sequences (spectra/services/show_sequence.py runs them) ──────────
+
+class SequenceNameTaken(ValueError):
+    pass
+
+
+def load_sequences() -> SequenceLibrary:
+    raw = _read_json(config.LIGHT_SHOW_SEQUENCES_FILE)
+    if not raw:
+        return SequenceLibrary()
+    try:
+        return SequenceLibrary(**raw)
+    except Exception:                                    # noqa: BLE001
+        logger.exception("light show: sequence library did not validate")
+        return SequenceLibrary()
+
+
+def save_sequences(lib: SequenceLibrary) -> None:
+    _write_json(config.LIGHT_SHOW_SEQUENCES_FILE, lib.model_dump())
+
+
+def list_sequences() -> list[ShowSequence]:
+    return list(load_sequences().sequences)
+
+
+def get_sequence(seq_id: str) -> Optional[ShowSequence]:
+    return next((s for s in load_sequences().sequences if s.id == seq_id), None)
+
+
+def find_sequence(name_or_id: str) -> Optional[ShowSequence]:
+    """By id, then by exact name ignoring case."""
+    seqs = load_sequences().sequences
+    hit = next((s for s in seqs if s.id == name_or_id), None)
+    if hit is not None:
+        return hit
+    low = (name_or_id or "").strip().lower()
+    return next((s for s in seqs if s.name.strip().lower() == low), None)
+
+
+def put_sequence(new: ShowSequence, *, after_id: Optional[str] = None) -> ShowSequence:
+    """Create or update; names are unique ignoring case (he and Sonic refer
+    to a sequence by name). `after_id` places a NEW sequence right after
+    that one (Duplicate), exactly like `put_set`."""
+    with _lock:
+        lib = load_sequences()
+        low = new.name.strip().lower()
+        if not low:
+            raise SequenceNameTaken("a sequence needs a name")
+        clash = next((s for s in lib.sequences if s.id != new.id
+                      and s.name.strip().lower() == low), None)
+        if clash is not None:
+            raise SequenceNameTaken(f"a sequence called {clash.name!r} already exists")
+        existing = next((i for i, s in enumerate(lib.sequences) if s.id == new.id), None)
+        new = new.model_copy(update={"updated_ms": now_ms()})
+        if existing is None:
+            after = next((i for i, s in enumerate(lib.sequences) if s.id == after_id), None) \
+                if after_id else None
+            if after is None:
+                lib.sequences.append(new)
+            else:
+                lib.sequences.insert(after + 1, new)
+        else:
+            new = new.model_copy(update={"created_ms": lib.sequences[existing].created_ms})
+            lib.sequences[existing] = new
+        save_sequences(lib)
+        return new
+
+
+def duplicate_sequence(seq_id: str) -> Optional[ShowSequence]:
+    """An independent deep copy named "<name> copy" (uniqued: "copy 2", …),
+    every item given a fresh id, placed right after the original."""
+    from spectra.models.light_show import SequenceItem, _id
+    with _lock:
+        lib = load_sequences()
+        src = next((s for s in lib.sequences if s.id == seq_id), None)
+        if src is None:
+            return None
+        taken = {s.name.strip().lower() for s in lib.sequences}
+        name = f"{src.name} copy"
+        n = 2
+        while name.strip().lower() in taken:
+            name = f"{src.name} copy {n}"
+            n += 1
+        items = [SequenceItem(**{**it.model_dump(), "id": _id()}) for it in src.items]
+        copy = ShowSequence(name=name, items=items, loop=src.loop, notes=src.notes)
+        return put_sequence(copy, after_id=src.id)
+
+
+def delete_sequence(seq_id: str) -> bool:
+    with _lock:
+        lib = load_sequences()
+        kept = [s for s in lib.sequences if s.id != seq_id]
+        if len(kept) == len(lib.sequences):
+            return False
+        lib.sequences = kept
+        save_sequences(lib)
         return True
 
 
