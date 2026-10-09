@@ -76,14 +76,26 @@ def test_rotate_hue_keeps_saturation_and_value():
 def _cfg(**over):
     # his Orbits-copied Matrix entry, solid red, no wake: every pixel the
     # ordinary fish light is pure red, so green/blue belong to the big fish
-    return dict(HIS_MATRIX, gradient=RED, ripple_amount=0.0, **over)
+    return {**HIS_MATRIX, "gradient": RED, "ripple_amount": 0.0, **over}
 
 
-def _cross(tmp_path, intensity, seed=5, **cfg):
-    """Fire one big fish and render until it has gone; returns the effect,
-    its record and every frame (H, W, 3 float) of the crossing."""
+_RUNS = [0]
+
+
+def _cross(tmp_path, intensity, seed=5, linger=False, **cfg):
+    """Fire one big fish and render until it has crossed (with `linger`,
+    on until its smear has gone too); returns the effect, its record and
+    every frame (H, W, 3 float) of the crossing. `eff.crossed_frames` is
+    how many frames the fish itself was swimming."""
+    # every run its OWN virtual id: the fish store a particle-handoff
+    # snapshot under it when they shut down, and a later run reusing the id
+    # would adopt the previous run's shoal (so two runs compared frame for
+    # frame would not even swim the same fish)
+    _RUNS[0] += 1
+    name = f"m{_RUNS[0]}"
+
     async def main():
-        room = await _room(tmp_path, "m", _cfg(**cfg), seed=seed)
+        room = await _room(tmp_path, name, _cfg(**cfg), seed=seed)
         try:
             room.step(30)
             eff = room.effect
@@ -91,10 +103,15 @@ def _cross(tmp_path, intensity, seed=5, **cfg):
             eff.update_config(
                 {"big_fish": max(intensity, FX.BIG_FISH_POKE_FLOOR)})
             frames = []
+            eff.crossed_frames = None
             for _ in range(60 * 40):
                 room.step(1)
                 frames.append(np.asarray(eff.matrix, dtype=np.float32).copy())
-                if not eff._big:
+                if not eff._big and eff.crossed_frames is None:
+                    eff.crossed_frames = len(frames)
+                    if not linger:
+                        break
+                if not eff._big and eff._big_trail is None:
                     break
             return eff, dict(eff.big_fish_last), frames, dict(eff._config)
         finally:
@@ -103,14 +120,18 @@ def _cross(tmp_path, intensity, seed=5, **cfg):
 
 
 def test_a_poke_sends_one_big_fish_across_and_self_resets(tmp_path):
-    eff, fish, frames, config = _cross(tmp_path, 0.6)
+    eff, fish, frames, config = _cross(tmp_path, 0.6, linger=True)
     assert eff.big_fish_spawned == 1 and config["big_fish"] == 0.0
     big = [float(f[..., 1:].max()) for f in frames]
     # it ENTERS from off the panel and LEAVES off the other side: nothing of
-    # it on the first frame, nothing on the last, the panel crossed between
+    # it on the first frame, nothing once its smear has faded (the ordinary
+    # fish's own trail_decay), the panel crossed between
     assert big[0] < 5.0 and big[-1] < 5.0 and max(big) > 100.0
     # and it took its own crossing time to do it
-    assert len(frames) * DT == pytest.approx(fish["cross_s"], abs=3 * DT)
+    assert eff.crossed_frames * DT == pytest.approx(fish["cross_s"],
+                                                    abs=3 * DT)
+    # ... and its layer is let go of entirely once it has
+    assert eff._big_trail is None
     # really large: two thirds of the panel long, near the middle
     assert fish["length"] == pytest.approx(0.65 * 71, rel=1e-3)
     assert abs(fish["y"] - 18.0) <= FX.BIG_FISH_Y_SPREAD * 37 + 1e-6
@@ -133,20 +154,49 @@ def test_the_speed_follows_the_intensity(tmp_path, intensity):
     assert len(frames) * DT == pytest.approx(expect, abs=3 * DT)
 
 
+def _peak_gb(frames):
+    """The big fish's brightest pixel (green, blue — the ordinary fish here
+    are pure red, so those two channels are the big fish's alone)."""
+    gb = np.concatenate([f[..., 1:].reshape(-1, 2) for f in frames])
+    return gb[np.argmax(gb.sum(axis=1))]
+
+
 @pytest.mark.parametrize("intensity,degrees", [(0.2, 120.0), (0.35, 150.0),
                                                (0.5, 180.0)])
-def test_its_colour_is_the_centre_turned_and_60_percent(tmp_path, intensity,
-                                                        degrees):
+def test_its_colour_is_the_centre_turned(tmp_path, intensity, degrees):
     for seed in (5, 6, 7, 8):
         eff, fish, frames, _ = _cross(tmp_path / str(seed), intensity, seed=seed)
         assert fish["degrees"] == pytest.approx(degrees)
         expect = FX.rotate_hue(np.array([255.0, 0.0, 0.0]),
-                               fish["turn"] * degrees) * 0.6
-        # its brightest unoccluded pixel is exactly the turned colour at 60%
-        # (the silhouette is a MAX, never a sum, so 0.6 is what shows)
-        peak = max(frames, key=lambda f: f[..., 1:].sum())
-        gb = peak[..., 1:].reshape(-1, 2)
-        assert gb.max(axis=0) == pytest.approx(expect[1:], abs=1.5)
+                               fish["turn"] * degrees)
+        # its brightest pixel IS the turned colour: an ordinary fish's body
+        # is drawn at a level, and the 255 ceiling keeps the colour, so the
+        # green:blue balance of his rotation survives the bright middle
+        peak = _peak_gb(frames)
+        assert peak.max() > 60.0
+        assert peak / peak.max() == pytest.approx(
+            expect[1:] / expect[1:].max(), abs=0.02)
+
+
+def test_it_is_60_percent_of_the_same_fish_at_full(tmp_path):
+    """"at 60% brightness": the same crossing (same seed, same fish) at
+    big_fish_brightness 1 and at the default 0.6 — every pixel of it at
+    60%, its brightest included."""
+    _e, _f, full, _ = _cross(tmp_path / "a", 0.6, big_fish_brightness=1.0)
+    _e, _f, dim, _ = _cross(tmp_path / "b", 0.6)
+    assert len(full) == len(dim)
+    # (both frames are whole 0..255 levels, truncated: 1.6 is that rounding)
+    assert _peak_gb(dim) == pytest.approx(_peak_gb(full) * 0.6, abs=1.6)
+    for a, b in zip(full, dim):
+        assert np.allclose(b[..., 1:], a[..., 1:] * 0.6, atol=1.6)
+
+
+def test_it_is_dimmer_than_the_ordinary_fish(tmp_path):
+    """Drawn at an ordinary fish's own level and then at 60%, its brightest
+    pixel is under the ordinary fish's brightest."""
+    eff, _f, frames, _ = _cross(tmp_path, 0.6)
+    ordinary = max(float(f[..., 0].max()) for f in frames)
+    assert _peak_gb(frames).max() < 0.75 * ordinary
 
 
 def test_either_direction_both_ways_turn_up(tmp_path):
@@ -162,9 +212,10 @@ def test_either_direction_both_ways_turn_up(tmp_path):
 
 
 def test_the_brightness_is_tunable(tmp_path):
-    _eff, fish, frames, _ = _cross(tmp_path, 0.6, big_fish_brightness=0.3)
-    peak = max(frames, key=lambda f: f[..., 1:].sum())
-    assert peak[..., 1:].max() == pytest.approx(255 * 0.3, abs=1.5)
+    _eff, fish, frames, _ = _cross(tmp_path / "a", 0.6, big_fish_brightness=0.3)
+    _eff, fish, ref, _ = _cross(tmp_path / "b", 0.6)
+    assert _peak_gb(frames).max() == pytest.approx(
+        _peak_gb(ref).max() / 2.0, abs=1.0)
 
 
 def test_it_swims_behind_the_ordinary_fish(tmp_path):
@@ -192,6 +243,169 @@ def test_the_ordinary_fish_render_is_untouched_without_a_poke(tmp_path):
         finally:
             await _close(room)
     _run(main())
+
+
+# the commit carrying PR 381's big fish (this rework's merge-base), pinned:
+# with no poke, the ordinary fish render is byte-identical to it — the
+# refactor that lets the big fish share the ordinary body drawing changed no
+# ordinary pixel
+PR381_REF = "34719fd452aa1a2758efa4648e039a054220f405"
+
+
+def _load_pr381():
+    import importlib.util
+    import subprocess
+    import tempfile
+    name = "fish_pr381_bigfish_test"
+    if name in sys.modules:
+        return name
+    try:
+        src = subprocess.run(
+            ["git", "show", f"{PR381_REF}:fx/effects/fish.py"], cwd=ROOT,
+            capture_output=True, text=True, check=True).stdout
+    except Exception as exc:                       # noqa: BLE001
+        pytest.fail(f"cannot read {PR381_REF}:fx/effects/fish.py — {exc}")
+    path = Path(tempfile.mkdtemp()) / f"{name}.py"
+    path.write_text(src)
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return name
+
+
+def test_without_a_poke_every_frame_is_pr381s_exactly(tmp_path):
+    """The ordinary fish's body drawing was factored into `_spine_wave` /
+    `_splat_spines` so the big fish could be drawn by it; with no poke every
+    frame is bit for bit the frame PR 381's module drew, through a charge,
+    a lull and a drop."""
+    from fx import headless
+    old = _load_pr381()
+    cfg = dict(HIS_MATRIX, ripple_amount=0.35, lull_keep=0)
+
+    async def frames(effect_type, tag):
+        host = await headless.start_headless_host(
+            str(tmp_path / tag), pixel_count=72 * 37, rows=37, device_id=tag)
+        virtual = host.virtuals.get(tag)
+        cm = headless.fake_clock()
+        clock = cm.__enter__()
+        try:
+            eff = headless.attach_effect(host, virtual, effect_type, dict(cfg))
+            eff._rng = np.random.default_rng(5)
+            out = []
+            script = [(None, 120), ("charge", 120), ("lull", 90), ("drop", 120)]
+            for phase, n in script:
+                if phase:
+                    eff.update_config({"phase": phase, "phase_progress": 0.0})
+                for i in range(n):
+                    if phase in ("charge", "lull"):
+                        eff.update_config({"phase_progress": (i + 1) / n})
+                    clock.advance(DT)
+                    frame = virtual.assemble_frame()
+                    if frame is not None:
+                        virtual.flush(frame)
+                    out.append(np.asarray(eff.matrix, dtype=np.uint8).copy())
+            return out
+        finally:
+            cm.__exit__(None, None, None)
+            await host.shutdown()
+
+    a = _run(frames(old, "old"))
+    b = _run(frames("fish", "new"))
+    assert len(a) == len(b) == 450
+    for i, (x, y) in enumerate(zip(a, b)):
+        assert np.array_equal(x, y), f"frame {i} differs"
+
+
+def test_it_is_drawn_by_the_ordinary_fish_body(tmp_path, monkeypatch):
+    """No bespoke silhouette: the big fish goes through the same spine wave
+    and splat path every ordinary fish does."""
+    calls = {"wave": 0, "splat": 0}
+    wave, splat = FX.Fish2d._spine_wave, FX.Fish2d._splat_spines
+
+    def spy_wave(self, *a, **k):
+        if "u" in k:
+            calls["wave"] += 1
+        return wave(self, *a, **k)
+
+    def spy_splat(self, *a, **k):
+        if k.get("node_w") is not None:
+            calls["splat"] += 1
+        return splat(self, *a, **k)
+    monkeypatch.setattr(FX.Fish2d, "_spine_wave", spy_wave)
+    monkeypatch.setattr(FX.Fish2d, "_splat_spines", spy_splat)
+    eff, _f, frames, _ = _cross(tmp_path, 0.9)
+    assert calls["wave"] == calls["splat"] == eff.crossed_frames - 1
+    for gone in ("_big_fish_nodes", "_big_fish_coverage"):
+        assert not hasattr(FX.Fish2d, gone)
+
+
+def test_its_body_is_one_continuous_fish_not_beads(tmp_path):
+    """Along its spine, from just behind the head to just before the tail,
+    the body never dips: an ordinary fish's six splats magnified five times
+    would fall apart into six beads."""
+    _e, fish, frames, _ = _cross(tmp_path, 0.3)
+    mid = frames[len(frames) // 2]
+    level = mid[..., 1:].max(axis=2)
+    row = level[int(round(fish["y"]))]
+    lit = np.flatnonzero(row > 0.25 * row.max())
+    span = row[lit[0]:lit[-1] + 1]
+    assert lit[-1] - lit[0] > 0.6 * fish["length"]
+    inner = span[len(span) // 6: -len(span) // 6]
+    # nothing in the middle two thirds dips below its neighbours by more
+    # than a sliver
+    run_max = np.maximum.accumulate(inner)
+    back_max = np.maximum.accumulate(inner[::-1])[::-1]
+    dip = np.minimum(run_max, back_max) - inner
+    assert float(dip.max()) < 0.06 * float(row.max())
+
+
+def test_it_flaps_its_tail_like_an_ordinary_fish(tmp_path):
+    """The tail half swings across the run; the head barely does."""
+    _e, fish, frames, _ = _cross(tmp_path, 0.3)
+    head_y, tail_y = [], []
+    for f in frames[len(frames) // 3: 2 * len(frames) // 3]:
+        level = f[..., 1:].max(axis=2)
+        cols = np.flatnonzero(level.max(axis=0) > 20.0)
+        if cols.size < 20:
+            continue
+        lead = cols[-1] if fish["travel"] > 0 else cols[0]
+        trail = cols[0] if fish["travel"] > 0 else cols[-1]
+        step = -1 if fish["travel"] > 0 else 1
+        for col, out in ((lead + step * 4, head_y), (trail - step * 4, tail_y)):
+            c = level[:, col]
+            out.append(float((c * np.arange(c.size)).sum() / max(c.sum(), 1e-6)))
+    assert np.ptp(tail_y) > 1.0
+    assert np.ptp(tail_y) > 2.0 * np.ptp(head_y)
+
+
+def test_it_lays_a_large_dim_wake_of_its_own(tmp_path):
+    """With the scene's wake on, the big fish lays one: wider than an
+    ordinary fish's deposit, in its own colour, and dim — under half its
+    body. big_fish_ripple 0 lays none; the scene's own wake off lays none."""
+    def wake_of(**over):
+        eff, _f, frames, _ = _cross(tmp_path / str(len(over)) / str(over),
+                                    0.4, ripple_amount=0.35, **over)
+        return eff, frames
+
+    with_wake, frames = wake_of()
+    without, _ = wake_of(big_fish_ripple=0.0)
+    added = with_wake.wake - without.wake
+    gb = added[..., 1:].max(axis=2)
+    assert gb.max() > 5.0                       # it is there ...
+    assert np.count_nonzero(gb > 1.0) > 150     # ... large ...
+    body = _peak_gb(frames).max()
+    assert gb.max() < 0.5 * body                # ... and dim
+    # in the big fish's own colour: the ordinary fish here are pure red
+    assert added[..., 1:].max() > 0.0
+    louder, _ = wake_of(big_fish_ripple=2.0)
+    assert (louder.wake - without.wake)[..., 1:].max() > 1.5 * gb.max()
+    wider, _ = wake_of(big_fish_ripple_size=0.4)
+    assert np.count_nonzero(
+        (wider.wake - without.wake)[..., 1:].max(axis=2) > 1.0
+    ) < np.count_nonzero(gb > 1.0)
+    off, _f, _fr, _ = _cross(tmp_path / "off", 0.4, ripple_amount=0.0)
+    assert off.wake[..., 1:].max() == 0.0
 
 
 def test_a_stale_persisted_poke_never_swims(tmp_path):
@@ -336,14 +550,15 @@ def test_the_explicit_preview_fires_it_and_the_ruler_shows_the_crossing():
         assert timeline["lead_ms"] == 0
 
 
-def test_the_four_settings_are_registered_for_sonic_and_the_editor():
+def test_the_six_settings_are_registered_for_sonic_and_the_editor():
     params = device_model.effect_params("fish") if hasattr(
         device_model, "effect_params") else None
     registry = json.loads((ROOT / "config/effect_params.json").read_text())
     fish = registry["effects"]["fish"]
     schema = FX.Fish2d.schema()({})
     for key in ("big_fish_brightness", "big_fish_size",
-                "big_fish_cross_slow_s", "big_fish_cross_fast_s"):
+                "big_fish_cross_slow_s", "big_fish_cross_fast_s",
+                "big_fish_ripple", "big_fish_ripple_size"):
         assert fish["params"][key]["default"] == schema[key]
         assert fish["defaults"][key] == schema[key]
         assert fish["params"][key]["help_topic"] == "fish-big-fish"

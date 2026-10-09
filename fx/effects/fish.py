@@ -907,32 +907,51 @@ DROP_EJECTA_SPEED = (1.6, 2.9)  # ejecta speed, multiples of cruise
 #   Saturation and value are kept, so an achromatic (white/grey) centre has
 #   no hue to turn and the big fish wears that same white/grey.
 #   Re-read every frame, so a colour jump mid-crossing keeps it contrasting.
-#   BRIGHTNESS: `big_fish_brightness` (0.6 default, his number) scales that
-#   colour. The body is drawn as a soft-edged silhouette (max, not a sum of
-#   splats), so 0.6 is the level the body actually shows.
+#   THE BODY IS AN ORDINARY FISH, BIGGER (2026-10-08, his word on the first
+#   build: "the fish looks all wrong. it should be the same as the other
+#   fish in the effect, just bigger, in the background, and dimmer, with a
+#   dim but large ripple"). It is drawn through the very same spine layout,
+#   flap wave and splats as every ordinary fish (`_spine_wave`,
+#   `_splat_spines`, SPINE_PROFILE at the effect's own `body_aspect`), its
+#   stroke follows the ordinary flap rules read in body lengths a second
+#   (`_big_fish_motion`), it carries the ordinary fish's audio brightness
+#   and size swell, and it keeps the same persistent smear (`trail_decay`).
+#   A big fish crossing at the body-lengths/s an ordinary one cruises at
+#   strokes exactly like it. It still swims STRAIGHT across: a straight run
+#   is the one case where an ordinary fish's trailed body IS its
+#   all-heading layout, so nothing about its shape differs.
+#   BRIGHTNESS: `big_fish_brightness` (0.6 default, his number) scales the
+#   finished body, so 60% means 60% of what an ordinary fish of that colour
+#   would show. Overlapping splats are clipped to 255 KEEPING THE COLOUR
+#   (the scatter's clip), so his 120-180 degree rule survives the body's
+#   bright middle.
+#   THE WAKE: it lays the ordinary fish's own wake (at the tail, sized off
+#   the body and its tail throw, stronger when faster), scaled to its size
+#   and in its own colour, into the shared wake buffer — so it ripples
+#   through the water like theirs, LARGE because the rule scales with the
+#   body, and DIM because the rule is "stronger when faster" in body lengths
+#   a second, which a big slow fish barely is (measured: its wake peaks
+#   near a fifth of its body, a quarter of the ordinary fish's wakes).
+#   `big_fish_ripple` scales its level (1 = that rule; 0 = no wake) and
+#   `big_fish_ripple_size` its width (1 = in proportion to its body).
 #   BACKGROUND: its own layer, composited UNDER the ordinary fish: wherever
 #   the ordinary fish's body layer is lit, the big fish is hidden in
 #   proportion (fully at BIG_FISH_OCCLUDE_AT), so a fish swimming across it
-#   reads in front. It lays no trail and no wake, and the lull's dark
-#   applies to it like everything else.
+#   reads in front. The lull's dark applies to it and its wake like
+#   everything else.
 #   SIZE: `big_fish_size` is its body length as a fraction of the panel
-#   width; its shape is the ordinary fish's spine profile at
-#   BIG_FISH_ASPECT, with a forked tail fin and a tail stroke synced to its
-#   own travel. It swims in SCREEN space (the camera window never moves it).
+#   width. It swims in SCREEN space (the camera window never moves it).
 # At most BIG_FISH_MAX are on the panel at once; a poke past that is
 # counted (big_fish_dropped) and ignored.
 BIG_FISH_POKE_FLOOR = 0.001
 BIG_FISH_MAX = 3
-BIG_FISH_ASPECT = 3.2          # body length / body width
-BIG_FISH_NODES = 24            # spine samples (a long body needs more than 6)
 BIG_FISH_Y_SPREAD = 0.15       # of the panel height either side of middle
-BIG_FISH_EDGE_PX = 1.4         # soft edge of the silhouette, px
-BIG_FISH_STROKES_PER_LEN = 1.1  # tail strokes per body length travelled
-BIG_FISH_THROW = 0.22          # lateral tail throw at the tip, half-widths
-BIG_FISH_FIN_LEN = 0.22        # tail-fin lobe length, body lengths
-BIG_FISH_FIN_SPREAD = np.deg2rad(32.0)  # each lobe's angle off the spine
-BIG_FISH_FIN_W = 0.16          # tail-fin lobe half-width, body half-widths
+BIG_FISH_MARGIN_PX = 2.0       # past the widest splat, at both ends of a run
 BIG_FISH_OCCLUDE_AT = 48.0     # ordinary-fish level (0..255) that hides it
+BIG_FISH_GONE = 0.5            # its smear under this (0..255) has gone
+BIG_FISH_RIPPLE_DEFAULT = 1.0   # its wake level: 1 = the ordinary wake rule
+BIG_FISH_NODE_PX = 1.5         # its spine is sampled this often (px) ...
+BIG_FISH_NODES_MAX = 64        # ... up to this many nodes
 BIG_FISH_HUE_LO = (0.2, 120.0)  # (intensity, degrees) — his two points
 BIG_FISH_HUE_HI = (0.5, 180.0)
 
@@ -1628,6 +1647,23 @@ class Fish2d(Twod, GradientEffect):
                 default=2.5,
             ): vol.All(vol.Coerce(float), vol.Range(min=0.5, max=30.0)),
             vol.Optional(
+                "big_fish_ripple",
+                description=(
+                    "Big fish flare: how bright its wake is (1 = the "
+                    "ordinary fish's own wake rule at its size and speed, "
+                    "which a big slow fish leaves dim)"
+                ),
+                default=BIG_FISH_RIPPLE_DEFAULT,
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=4.0)),
+            vol.Optional(
+                "big_fish_ripple_size",
+                description=(
+                    "Big fish flare: its wake's width, against the ordinary "
+                    "wake rule scaled to its body (1 = in proportion)"
+                ),
+                default=1.0,
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.2, max=2.0)),
+            vol.Optional(
                 "big_fish",
                 description=(
                     "Big fish flare poke: the fire's intensity (written by "
@@ -1764,6 +1800,7 @@ class Fish2d(Twod, GradientEffect):
         # the big fish (see the BIG FISH block): the ones crossing now,
         # and counters the tests and check script read
         self._big = []
+        self._big_trail = None   # the big fish's own smear (trail_decay)
         self.big_fish_spawned = 0
         self.big_fish_dropped = 0
         self.big_fish_last = None
@@ -1851,6 +1888,8 @@ class Fish2d(Twod, GradientEffect):
         self.big_fish_size = self._config["big_fish_size"]
         self.big_fish_cross_slow_s = self._config["big_fish_cross_slow_s"]
         self.big_fish_cross_fast_s = self._config["big_fish_cross_fast_s"]
+        self.big_fish_ripple = self._config["big_fish_ripple"]
+        self.big_fish_ripple_size = self._config["big_fish_ripple_size"]
         # the big fish poke: edge-detected like fireworks' burst_rockets (a
         # write that changes the value arms; draw consumes it and self-
         # resets the key to 0 so an identical later write edges again)
@@ -3827,7 +3866,8 @@ class Fish2d(Twod, GradientEffect):
             self.p_y0[:k] = y
 
         out = np.asarray(self.matrix, dtype=np.float32) + self.trail
-        big = self._big_fish_layer(dt, self.trail)
+        # the collapse composites no wake, so the big fish lays none
+        big = self._big_fish_layer(dt, self.trail, wake=False)
         if big is not None:
             out = out + big
         self.matrix = Image.fromarray(
@@ -3929,16 +3969,9 @@ class Fish2d(Twod, GradientEffect):
                 idx, px, py, d
             )
 
-        lat = (
-            flap_amp[:, None]
-            * np.sin(
-                self.p_flap[idx][:, None] - SPINE_U[None, :] * SPINE_WAVE
-                * 2 * np.pi
-            )
-            * SPINE_THROW[None, :]
+        sx_, sy_ = self._spine_wave(
+            base_x, base_y, cos_h, sin_h, flap_amp, self.p_flap[idx]
         )
-        sx_ = base_x - lat * sin_h[:, None]
-        sy_ = base_y + lat * cos_h[:, None]
         sizes = np.clip(
             half_w[:, None] * SPINE_PROFILE[None, :], 0.4, float(KERNEL_R)
         )
@@ -3956,6 +3989,34 @@ class Fish2d(Twod, GradientEffect):
             np.isfinite(self.p_y0[idx]),
             self.cy + self.p_y0[idx] * self.sy - self._cam_py_prev, py,
         )
+        self._splat_spines(frame, sx_, sy_, sizes, rgb, bright, dx, dy)
+
+    def _spine_wave(self, base_x, base_y, cos_h, sin_h, flap_amp, flap,
+                    u=SPINE_U, throw=SPINE_THROW):
+        """The flap: a lateral throw travelling from head to tail, laid on
+        a backbone sampled at spine positions `u` (SPINE_U for an ordinary
+        fish). The ONE definition every fish body is drawn with — the
+        ordinary fish (`_draw_bodies`) and the big fish
+        (`_big_fish_bodies`)."""
+        lat = (
+            flap_amp[:, None]
+            * np.sin(
+                flap[:, None] - u[None, :] * SPINE_WAVE
+                * 2 * np.pi
+            )
+            * throw[None, :]
+        )
+        return base_x - lat * sin_h[:, None], base_y + lat * cos_h[:, None]
+
+    def _splat_spines(self, frame, sx_, sy_, sizes, rgb, bright, dx, dy,
+                      node_w=None):
+        """Splat laid-out spines (k fish x SPINE_U nodes) into `frame`, with
+        the substep smear along each fish's own screen travel `dx`/`dy` that
+        keeps a fast fish continuous instead of dotted. Shared by the
+        ordinary fish and the big fish, so the two are one body drawn at
+        two sizes. `node_w` (k x nodes) weights each node's splat (None:
+        every node at full)."""
+        nodes = sx_.shape[1]
         pts_x = []
         pts_y = []
         pts_rgb = []
@@ -3965,11 +4026,19 @@ class Fish2d(Twod, GradientEffect):
             pts_x.append((sx_ - dx[:, None] * back).ravel())
             pts_y.append((sy_ - dy[:, None] * back).ravel())
             pts_size.append(sizes.ravel())
-            pts_rgb.append(
-                np.repeat(
-                    rgb * (bright[:, None] / SUBSTEPS), SPINE_U.size, axis=0
+            if node_w is None:
+                pts_rgb.append(
+                    np.repeat(
+                        rgb * (bright[:, None] / SUBSTEPS), nodes, axis=0
+                    )
                 )
-            )
+            else:
+                pts_rgb.append(
+                    (
+                        (rgb * (bright[:, None] / SUBSTEPS))[:, None, :]
+                        * node_w[:, :, None]
+                    ).reshape(-1, 3)
+                )
         self._splat_many(
             frame,
             np.concatenate(pts_x),
@@ -3981,14 +4050,14 @@ class Fish2d(Twod, GradientEffect):
     # ── the big fish (the BIG FISH block at the top of the module) ──────
     def _spawn_big_fish(self, intensity):
         """One big fish for one poke: off one side of the panel (a coin
-        flip), nose first, at a height near the middle."""
+        flip), nose first, at a height near the middle. `x` is the body's
+        CENTRE in screen px, as an ordinary fish's position is."""
         if len(self._big) >= BIG_FISH_MAX:
             self.big_fish_dropped += 1
             return
         w = float(self.r_width)
         h = float(self.r_height)
         length = max(float(self.big_fish_size) * (w - 1.0), 4.0)
-        half_w = length / (2.0 * BIG_FISH_ASPECT)
         rng = self._rng
         travel = 1.0 if rng.random() < 0.5 else -1.0   # +1 = left to right
         turn = 1.0 if rng.random() < 0.5 else -1.0     # hue direction
@@ -3996,99 +4065,170 @@ class Fish2d(Twod, GradientEffect):
         cross_s = big_fish_cross_s(
             intensity, self.big_fish_cross_slow_s, self.big_fish_cross_fast_s
         )
-        # the whole fish (nose splat, body, tail fin and its soft edge) is
-        # off the panel at both ends of the run
-        margin = BIG_FISH_EDGE_PX + 1.0
-        nose_off = SPINE_PROFILE[0] * half_w + margin
-        tail_off = length * (1.0 + BIG_FISH_FIN_LEN) + half_w + margin
+        # the whole fish (half its length either side of the centre, and
+        # the widest splat `_big_fish_bodies` ever lays) is off the panel at
+        # both ends; its tail throw is sideways, across the run
+        off = 0.5 * length + float(SPLAT_KERNEL_R) + BIG_FISH_MARGIN_PX
         if travel > 0:
-            x0, x1 = -nose_off, (w - 1.0) + tail_off
+            x0, x1 = -off, (w - 1.0) + off
         else:
-            x0, x1 = (w - 1.0) + nose_off, -tail_off
+            x0, x1 = (w - 1.0) + off, -off
         y = (h - 1.0) / 2.0 + float(
             rng.uniform(-BIG_FISH_Y_SPREAD, BIG_FISH_Y_SPREAD)
         ) * h
         fish = {
-            "x": x0, "x_end": x1, "y": y, "travel": travel,
+            "x": x0, "x_prev": x0, "x_end": x1, "y": y, "travel": travel,
             "speed": abs(x1 - x0) / cross_s, "cross_s": cross_s,
-            "length": length, "half_w": half_w,
+            "length": length,
             "degrees": degrees, "turn": turn,
             "intensity": float(intensity),
-            "stroke": float(rng.uniform(0.0, 2.0 * np.pi)),
+            "flap": float(rng.uniform(0.0, 2.0 * np.pi)),
         }
         self._big.append(fish)
         self.big_fish_spawned += 1
         self.big_fish_last = dict(fish)
 
     def _big_fish_colour(self, fish):
-        """The gradient's centre, its hue turned by this fish's own angle,
-        at `big_fish_brightness` — re-read every frame."""
+        """The gradient's centre, its hue turned by this fish's own angle —
+        at FULL level; `big_fish_brightness` is applied when the layer is
+        composited. Re-read every frame."""
         centre = self.get_gradient_color_vectorized1d(
             np.array([0.5], dtype=np.float32)
         )[0]
-        rgb = rotate_hue(centre, fish["turn"] * fish["degrees"])
-        return rgb * np.float32(self.big_fish_brightness)
+        return rotate_hue(centre, fish["turn"] * fish["degrees"])
 
-    def _big_fish_nodes(self, fish):
-        """The silhouette as discs: x, y, radius (screen px). The spine is
-        the ordinary fish's profile, drawn with a travelling tail stroke,
-        and the tail ends in a forked fin."""
+    def _big_fish_motion(self, fish, swell=1.0):
+        """What an ordinary fish would be doing at this one's size and
+        speed: (scale, flap_amp, flap_freq, speed_norm). `scale` is its
+        length over an ordinary fish's. Speed is read in BODY LENGTHS a
+        second against an ordinary fish at cruise, so a big fish crossing at
+        the same body-lengths/s strokes exactly like an ordinary one, just
+        bigger — the same flap rules (FLAP_BASE, FLAP_SPEED_GAIN,
+        `flap_amount`, `flap_rate`) as `draw()`'s."""
         length = fish["length"]
-        half_w = fish["half_w"]
-        travel = fish["travel"]
-        u = np.linspace(0.0, 1.0, BIG_FISH_NODES, dtype=np.float32)
-        throw = (
-            BIG_FISH_THROW * half_w
-            * np.sin(fish["stroke"] - u * SPINE_WAVE * 2.0 * np.pi)
-            * u ** 1.6
-        )
-        xs = fish["x"] - travel * u * length
-        ys = fish["y"] + throw
-        rs = np.interp(u, SPINE_U, SPINE_PROFILE).astype(np.float32) * half_w
-        # the fin: two lobes swept back from the tail tip, the stroke's own
-        # sideways swing carried through so the fin flicks with the tail
-        tip_x, tip_y = float(xs[-1]), float(ys[-1])
-        back = float(np.arctan2(ys[-1] - ys[-2], xs[-1] - xs[-2]))
-        t = np.linspace(0.15, 1.0, 6, dtype=np.float32)
-        fin_len = BIG_FISH_FIN_LEN * length
-        fx_, fy_, fr_ = [xs], [ys], [rs]
-        for lobe in (-1.0, 1.0):
-            ang = back + lobe * BIG_FISH_FIN_SPREAD
-            fx_.append(tip_x + np.cos(ang) * fin_len * t)
-            fy_.append(tip_y + np.sin(ang) * fin_len * t)
-            fr_.append(BIG_FISH_FIN_W * half_w * (1.0 - 0.45 * t)
-                       + 0.35 * np.ones_like(t))
-        return (np.concatenate(fx_).astype(np.float32),
-                np.concatenate(fy_).astype(np.float32),
-                np.concatenate(fr_).astype(np.float32))
+        ord_len = max(self._body_len_px(), 1e-3)
+        scale = length / ord_len
+        speed_norm = float(np.clip(
+            (fish["speed"] / length) / (self.cruise_px / ord_len), 0.0, 3.0
+        ))
+        flap_scale = float(np.clip(
+            FLAP_BASE + FLAP_SPEED_GAIN * speed_norm, FLAP_MIN, FLAP_MAX
+        ))
+        half_w = swell * length / (2.0 * max(float(self.body_aspect), 1e-3))
+        flap_amp = self.flap_amount * half_w * self.body_aspect * flap_scale
+        flap_freq = self.flap_rate * (0.4 + 0.6 * speed_norm)
+        return scale, flap_amp, flap_freq, speed_norm
 
-    def _big_fish_coverage(self, xs, ys, rs):
-        """0..1 coverage of the union of discs, soft-edged over
-        BIG_FISH_EDGE_PX — a MAX over the discs, so overlapping nodes never
-        sum past the body's own level."""
-        h, w = int(self.r_height), int(self.r_width)
-        x0 = max(int(np.floor(np.min(xs - rs))) - 2, 0)
-        x1 = min(int(np.ceil(np.max(xs + rs))) + 3, w)
-        y0 = max(int(np.floor(np.min(ys - rs))) - 2, 0)
-        y1 = min(int(np.ceil(np.max(ys + rs))) + 3, h)
-        cover = np.zeros((h, w), dtype=np.float32)
-        if x0 >= x1 or y0 >= y1:
-            return cover
-        gy, gx = np.mgrid[y0:y1, x0:x1].astype(np.float32)
-        d = np.sqrt(
-            (gx[..., None] - xs[None, None, :]) ** 2
-            + (gy[..., None] - ys[None, None, :]) ** 2
-        ) - rs[None, None, :]
-        edge = np.float32(BIG_FISH_EDGE_PX)
-        cover[y0:y1, x0:x1] = np.clip(
-            0.5 - np.min(d, axis=2) / edge, 0.0, 1.0
-        )
-        return cover
+    def _big_fish_bodies(self, frame, fish, scale, swell, flap_amp, rgb,
+                         bright):
+        """Draw one big fish into `frame` through the ORDINARY fish's own
+        spine layout, flap and splats (`_spine_wave`, `_splat_spines`).
 
-    def _big_fish_layer(self, dt, occluder):
+        It is an ordinary fish SCALED, geometry and all: each splat's whole
+        reach — an ordinary fish's size (`_draw_bodies`' own clip of
+        half_w x SPINE_PROFILE) plus the 0.5 px `_splat_many` adds — is
+        multiplied by `scale`. And the SAME spine (SPINE_PROFILE, the throw,
+        the wave) is sampled at BIG_FISH_NODE_PX spacing instead of six
+        nodes: six soft splats blur into one body at an ordinary fish's few
+        pixels, but magnified five times they fall apart into six beads.
+        Each dense node is weighted by spacing / reach, so the level along
+        the spine is an ordinary fish's (about one splat's peak) — the
+        continuous body its six splats stand for.
+
+        Its run is straight, so its recorded path is the straight line
+        behind it and the all-heading layout IS its trailed body (the same
+        identity a straight-swimming ordinary fish reduces to)."""
+        length = fish["length"] * swell
+        hd = 0.0 if fish["travel"] > 0 else np.pi
+        cos_h = np.array([np.cos(hd)], dtype=np.float32)
+        sin_h = np.array([np.sin(hd)], dtype=np.float32)
+        nodes = int(np.clip(
+            np.ceil(length / BIG_FISH_NODE_PX) + 1, SPINE_U.size,
+            BIG_FISH_NODES_MAX,
+        ))
+        u = np.linspace(0.0, 1.0, nodes, dtype=np.float32)
+        along = (0.5 - u)[None, :] * np.float32(length)
+        base_x = (fish["x"] + along * cos_h[:, None]).astype(np.float32)
+        base_y = (fish["y"] + along * sin_h[:, None]).astype(np.float32)
+        sx_, sy_ = self._spine_wave(
+            base_x, base_y, cos_h, sin_h,
+            np.array([flap_amp], dtype=np.float32),
+            np.array([fish["flap"]], dtype=np.float32),
+            u=u, throw=(u ** 1.6).astype(np.float32),
+        )
+        profile = np.interp(u, SPINE_U, SPINE_PROFILE).astype(np.float32)
+        ordinary = np.clip(
+            np.float32(self._half_width_px() * swell) * profile[None, :],
+            0.4, float(KERNEL_R),
+        )
+        reach = np.minimum(
+            (ordinary + 0.5) * np.float32(scale), float(SPLAT_KERNEL_R) - 0.5
+        ).astype(np.float32)
+        spacing = np.float32(length / (nodes - 1))
+        self._splat_spines(
+            frame, sx_, sy_, reach - 0.5,
+            np.asarray(rgb, dtype=np.float32)[None, :],
+            np.array([bright], dtype=np.float32),
+            np.array([fish["x"] - fish["x_prev"]], dtype=np.float32),
+            np.zeros(1, dtype=np.float32),
+            node_w=np.minimum(spacing / reach, 1.0),
+        )
+        return sx_[0], sy_[0]
+
+    def _big_fish_wake(self, fish, length, flap_amp, speed_norm, rgb,
+                       bright, dt, sx_, sy_):
+        """Lay the big fish's own wake into the shared wake buffer: the
+        ordinary deposit rule (at the TAIL, sized off the body's length and
+        tail throw, stronger when faster, pulsing with the tail), scaled to
+        this fish's size and at the scene's own `ripple_amount` — then
+        `big_fish_ripple_size` on the radius and `big_fish_ripple` on the
+        level. It wears the big fish's own colour,
+        so it reads as that fish's water. Large, and dim."""
+        if (self.wake is None or self.big_fish_ripple <= 0.0
+                or self.ripple_amount <= 0.0):
+            return
+        size = (
+            min(
+                WAKE_R0_BODY * length + WAKE_R0_FLAP * flap_amp,
+                WAKE_R_MAX_BODY * length,
+            )
+            * max(float(self.ripple_width), 0.5)
+            * float(self.big_fish_ripple_size)
+        )
+        size = float(np.clip(size, 0.6, float(SPLAT_KERNEL_R) - 1.0))
+        pulse = WAKE_FLAP_FLOOR + WAKE_FLAP_GAIN * abs(np.sin(fish["flap"]))
+        amp = (
+            float(self.big_fish_ripple) * float(self.ripple_amount)
+            * (
+                RIPPLE_BASE
+                + RIPPLE_SPEED_GAIN
+                * float(np.clip(
+                    (speed_norm - RIPPLE_SPEED_FLOOR) / RIPPLE_SPEED_SPAN,
+                    0.0, 1.0,
+                ))
+            )
+            * pulse * bright * min(dt * WAKE_DEPOSIT_HZ, 1.0)
+        )
+        if self._phase == "lull" and self._lull_state is not None:
+            amp *= float(self._lull_state.get("dark", 1.0))
+        if amp <= 0.0:
+            return
+        self._splat_many(
+            self.wake,
+            np.array([sx_[-1]], dtype=np.float32),
+            np.array([sy_[-1]], dtype=np.float32),
+            (np.asarray(rgb, dtype=np.float32) * np.float32(amp))[None, :],
+            np.array([size], dtype=np.float32),
+        )
+
+    def _big_fish_layer(self, dt, occluder, wake=True):
         """Take any pending pokes, swim every big fish one frame and return
-        its layer (H, W, 3), already hidden behind `occluder` (the ordinary
-        fish's body layer) — or None when nothing is crossing. Called once
+        its layer (H, W, 3) — its body, with the ordinary fish's own
+        persistent smear (`trail_decay`), at `big_fish_brightness`, hidden
+        behind `occluder` (the ordinary fish's body layer) — or None when
+        nothing is crossing and its smear has gone. With `wake`, each big
+        fish also lays its own wake into the shared wake buffer, so the
+        caller must composite `self.wake` AFTER calling this. Called once
         per frame by whichever path composites it."""
         if self._big_pending or self._big_seen:
             pending, self._big_pending = self._big_pending, []
@@ -4098,34 +4238,68 @@ class Fish2d(Twod, GradientEffect):
             self._apply_config(
                 {"big_fish": 0.0}, validate=False, fire_event=False
             )
-        if not self._big:
+        if not self._big and self._big_trail is None:
             return None
         h, w = int(self.r_height), int(self.r_width)
-        layer = np.zeros((h, w, 3), dtype=np.float32)
+        if self._big_trail is None:
+            self._big_trail = np.zeros((h, w, 3), dtype=np.float32)
+        half_life = 0.02 + self.trail_decay * 0.5
+        self._big_trail *= np.float32(0.5 ** (dt / half_life))
+        frame = np.zeros((h, w, 3), dtype=np.float32)
+        # the ordinary fish's own audio brightness and size swell (no
+        # per-fish jiggle: there is one of it), so it is as lively as they are
+        rscale = self.reactivity_scale
+        impulse = min(self.impulse, 1.0)
+        br_eff = self.brightness_audio * rscale
+        bright = float(np.clip(
+            (1.0 - 0.45 * min(br_eff, 1.0)) * (1.0 + 1.2 * br_eff * impulse),
+            0.0, 1.0,
+        ))
+        swell = 1.0 + 0.8 * self.size_audio * rscale * impulse
         keep = []
         for fish in self._big:
+            fish["x_prev"] = fish["x"]
             fish["x"] += fish["travel"] * fish["speed"] * dt
-            fish["stroke"] += (
-                2.0 * np.pi * BIG_FISH_STROKES_PER_LEN
-                * fish["speed"] / fish["length"] * dt
-            )
             if (fish["x"] - fish["x_end"]) * fish["travel"] > 0.0:
                 continue   # the whole fish is off the far side: done
             keep.append(fish)
-            cover = self._big_fish_coverage(*self._big_fish_nodes(fish))
-            np.maximum(
-                layer, cover[..., None] * self._big_fish_colour(fish),
-                out=layer,
+            scale, flap_amp, flap_freq, speed_norm = self._big_fish_motion(
+                fish, swell
             )
+            fish["flap"] = (
+                fish["flap"] + 2 * np.pi * flap_freq * dt
+            ) % (2 * np.pi * 64)
+            rgb = self._big_fish_colour(fish)
+            sx_, sy_ = self._big_fish_bodies(
+                frame, fish, scale, swell, flap_amp, rgb, bright
+            )
+            if wake:
+                self._big_fish_wake(
+                    fish, fish["length"] * swell, flap_amp,
+                    speed_norm, rgb, bright, dt, sx_, sy_,
+                )
         self._big = keep
+        # the ceiling keeps its colour (the scatter's clip): his 120-180
+        # degree rule must survive a body's overlapping splats
+        peak = frame.max(axis=2, keepdims=True)
+        frame = np.where(
+            peak > 255.0,
+            frame * (np.float32(255.0) / np.maximum(peak, np.float32(1.0))),
+            frame,
+        )
+        np.maximum(self._big_trail, frame, out=self._big_trail)
         if self._phase == "lull" and self._lull_state is not None:
-            layer *= np.float32(self._lull_state.get("dark", 1.0))
+            self._big_trail *= np.float32(self._lull_state.get("dark", 1.0))
+        if not self._big and float(self._big_trail.max()) < BIG_FISH_GONE:
+            self._big_trail = None
+            return None
+        layer = self._big_trail * np.float32(self.big_fish_brightness)
         if occluder is not None:
             hide = np.clip(
                 occluder.max(axis=2) / np.float32(BIG_FISH_OCCLUDE_AT),
                 0.0, 1.0,
             )
-            layer *= (1.0 - hide)[..., None]
+            layer = layer * (1.0 - hide)[..., None]
         return layer
 
     # ── main ────────────────────────────────────────────────────────────
@@ -5149,10 +5323,12 @@ class Fish2d(Twod, GradientEffect):
             if dead.any():
                 self._compact(~dead)
 
+        # the big fish first: it lays its wake into self.wake, composited
+        # just below
+        big = self._big_fish_layer(dt, body_out)
         out = np.asarray(self.matrix, dtype=np.float32) + body_out
         if self.wake is not None:
             out = out + self.wake
-        big = self._big_fish_layer(dt, body_out)
         if big is not None:
             out = out + big
         self.matrix = Image.fromarray(
@@ -5201,10 +5377,10 @@ class Fish2d(Twod, GradientEffect):
         self._step_camera(dt, self.cruise_px)
         self._step_wake(dt)
         self._apply_lull_dark()
+        big = self._big_fish_layer(dt, self.trail)
         out = np.asarray(self.matrix, dtype=np.float32) + self.trail
         if self.wake is not None:
             out = out + self.wake
-        big = self._big_fish_layer(dt, self.trail)
         if big is not None:
             out = out + big
         self.matrix = Image.fromarray(

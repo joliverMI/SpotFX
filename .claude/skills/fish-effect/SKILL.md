@@ -281,25 +281,56 @@ its look-ahead is picked; a due burst waits for one; none during a
 charge/lull/drop or an outgoing crossfade; a burst gives up its hold once
 the wall presses hard.
 
-## The BIG FISH flare (2026-10-08) — a background layer, phase 1 only
+## The BIG FISH flare (2026-10-08) — an ordinary fish, bigger, behind
 
 His words: "a really large fish swims directly across the screen, in the
 background of the others, and at 60% brightness (tuneable) ... The speed it
 goes at is dependant on intensity. the color should be the 120 to 180
-degree rotation of the central color of the scene". The BIG FISH block at
-the top of `fish.py` is the binding statement; what is not visible cold:
+degree rotation of the central color of the scene". On the first build
+(PR 381, a bespoke silhouette with a forked tail fin): "the fish looks all
+wrong. it should be the same as the other fish in the effect, just bigger,
+in the background, and dimmer, with a dim but large ripple". The BIG FISH
+block at the top of `fish.py` is the binding statement; what is not
+visible cold:
 
-- **It is NOT a particle.** No SoA slot, no steering, no wall, no camera:
-  `self._big` is a short list of dicts swimming straight across in SCREEN
-  space, drawn by `_big_fish_layer` into its OWN buffer. That is what makes
-  it "background": the layer is hidden wherever the ordinary fish's body
-  layer is lit (fully at `BIG_FISH_OCCLUDE_AT`), then added — so it must be
-  composited at EVERY path that writes `self.matrix` (the main draw,
-  `_fade_only`, `_draw_collapse`), each calling it exactly once a frame.
-  A new compositing path needs the same call or a big fish freezes there.
-- **The silhouette is a MAX over discs, never a sum of splats** — that is
-  why 0.6 brightness is the level that actually shows (the ordinary fish's
-  `_splat_many` adds, and would over-brighten a long dense spine).
+- **It is NOT a particle, but its BODY IS AN ORDINARY FISH.** No SoA slot,
+  no steering, no wall, no camera: `self._big` is a short list of dicts
+  swimming straight across in SCREEN space. But it is drawn through the
+  ordinary fish's own `_spine_wave` / `_splat_spines` (factored out of
+  `_draw_bodies` — `test_without_a_poke_every_frame_is_pr381s_exactly`
+  holds ordinary frames bit for bit). **Do not bring back a bespoke
+  silhouette — that is what he rejected.**
+- **A literal scale-up beads.** Six soft splats blur into one body at an
+  ordinary fish's few pixels; magnified five times they are six beads, and
+  `_splat_many`'s +0.5 px reach does not scale. So `_big_fish_bodies`
+  scales each splat's WHOLE reach (size + 0.5) by length / ordinary length
+  and resamples the SAME spine (profile, throw, wave) every
+  BIG_FISH_NODE_PX, each node weighted spacing / reach so the level along
+  it is an ordinary fish's. `test_its_body_is_one_continuous_fish_not_
+  beads` goes red at six nodes.
+- **Its motion is read in BODY LENGTHS A SECOND** against an ordinary fish
+  at cruise (`_big_fish_motion`): the ordinary flap rules then give a big
+  slow fish a slow, gentle stroke, exactly what an ordinary fish crossing
+  at that many body lengths a second would do. It also carries the
+  ordinary audio brightness and size swell (no jiggle) and the ordinary
+  `trail_decay` smear (its own buffer, `self._big_trail`).
+- **"Background"**: its layer is hidden wherever the ordinary fish's body
+  layer is lit (fully at `BIG_FISH_OCCLUDE_AT`), then added — so it must
+  be composited at EVERY path that writes `self.matrix` (the main draw,
+  `_fade_only`, `_draw_collapse`), each calling it exactly once a frame,
+  and BEFORE `self.wake` is composited (it lays its wake there). A new
+  compositing path needs the same call or a big fish freezes there.
+- **"60%" is 60% of an ordinary fish of its colour**: drawn at the
+  ordinary level, clipped to 255 KEEPING ITS COLOUR (so the 120-180 degree
+  rule survives the bright middle), then `big_fish_brightness`.
+- **Its wake** is the ordinary deposit rule (tail point, sized off body
+  length and tail throw, "stronger when faster", pulsing with the tail) at
+  its size, in its own colour, into the shared wake buffer, times the
+  scene's `ripple_amount`. Large because the rule scales with the body;
+  dim because "faster" is body lengths a second — measured peak about a
+  fifth of its body, a quarter of the ordinary fish's wakes.
+  `big_fish_ripple` (1 = that rule, 0 = none) and `big_fish_ripple_size`
+  (1 = in proportion) tune it.
 - **Colour is re-read every frame** from the gradient's centre (0.5,
   unrolled by `gradient_spin`), turned by `big_fish_hue_degrees` (120 at
   ≤0.2, 180 at ≥0.5, linear) in a coin-flipped direction. Hue only — an
@@ -309,10 +340,14 @@ the top of `fish.py` is the binding statement; what is not visible cold:
 - **The poke** `big_fish` (the fire's intensity, floored at
   `BIG_FISH_POKE_FLOOR` so 0 still edges) is unregistered and self-resets,
   the fireworks `burst_rockets` shape; `BIG_FISH_MAX` (3) cross at once.
+- **A test comparing two runs must give each its own virtual id** — the
+  fish store a particle-handoff snapshot under it on shutdown, and a
+  second run on the same id adopts the first run's shoal (`_cross`'s
+  `_RUNS` counter).
 - **PHASE 2 (not built): the ordinary fish avoiding it** — he approves the
-  look first. The big fish's `x`/`y`/`length`/`half_w` per entry are what
-  an avoidance steer would read (screen px: subtract nothing, it ignores
-  the camera — convert the ordinary fish's world position to screen first).
+  look first. The big fish's `x` (body centre) / `y` / `length` per entry
+  are what an avoidance steer would read (screen px: it ignores the camera
+  — convert the ordinary fish's world position to screen first).
 
 ## Everything else worth knowing before a change
 
@@ -357,7 +392,7 @@ arc divisor) and the solo burst's three included —
 — and the lull search's `search_speed`/`search_pause_s`/`search_reach`
 and the scaled drop's `drop_scale_min` — and the big fish's
 `big_fish_brightness`/`big_fish_size`/`big_fish_cross_slow_s`/
-`big_fish_cross_fast_s` —
+`big_fish_cross_fast_s`/`big_fish_ripple`/`big_fish_ripple_size` —
 is reachable per scene entry through `get_scene_entry_params` /
 `set_scene_entry_param` (e.g. scene "House Fish", target "Matrix"),
 validated against the registry's own range. A new fish param is only
@@ -375,10 +410,11 @@ track plots on his real crystal shape), `tests/test_fish.py`, `test_fish_camera.
 and keep 0 + an untold drop bit for bit against the pinned pre-change
 module), `test_lull_handoff.py` (the hook); `scripts/
 render_fish_lull_searcher.py` writes the before/after GIFs.
-`test_fish_big_fish.py` (the big fish: both curves, crossing time, colour
-at 60%, behind the others, the lull dark, the engine poke, the preview
-ruler, the migration script); `scripts/render_fish_big_fish.py --out DIR`
-writes its speed/colour GIFs.
+`test_fish_big_fish.py` (the big fish: both curves, crossing time, colour,
+60% of the same fish, the ordinary body and no beads, its flap and wake,
+behind the others, the lull dark, ordinary frames bit for bit against PR
+381, the engine poke, the preview ruler, the migration script);
+`scripts/render_fish_big_fish.py --out DIR` writes PR 381 | rework GIFs.
 History: AGENTS.md's "Fish (fx/effects/fish.py) — Orbits' twin" section —
 read that in full before a non-trivial change; it documents ~8 more
 PR-scoped fixes (lunge envelope, charge spread, camera window centring,

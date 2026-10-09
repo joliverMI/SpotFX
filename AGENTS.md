@@ -8870,6 +8870,17 @@ checks it against the schema. Proof: `scripts/check_fish_burst_bounds.py`,
    `scripts/add_fish_big_fish_flare.py` pools TWO identical kinds ("Big
    Fish", "Big Fish 2") in the "Shape" lane with its two other shape
    flares — a big fish on half the flares. Edit both copies together.
+   **Its BODY IS AN ORDINARY FISH, SCALED** (reworked the same day, his
+   word on the first build: "the fish looks all wrong. it should be the
+   same as the other fish in the effect, just bigger, in the background,
+   and dimmer, with a dim but large ripple"): it goes through the ordinary
+   fish's own `_spine_wave`/`_splat_spines` (factored out of
+   `_draw_bodies`, ordinary frames proven bit for bit unchanged), with each
+   splat's whole reach — size plus `_splat_many`'s +0.5 px — scaled and
+   the same spine resampled densely, because a literal six-splat scale-up
+   falls apart into six beads. It lays its own wake into the shared buffer
+   (`big_fish_ripple`, `big_fish_ripple_size`). A bespoke silhouette for it
+   is what he rejected; do not go back to one.
 
 Every new fish knob is a first guess pending his eye; the effect ships
 tunable, not tuned. Proof: `scripts/check_fish.py`,
