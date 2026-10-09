@@ -931,6 +931,21 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        id: 'music-device-gate',
+        title: 'Music devices — which Spotify Connect device goes music-reactive',
+        keywords: 'music device gate allowlist serenity guest spotify connect phone speaker car house lighting standard lighting reactive ignore mode show calm',
+        body: [
+          'A text field in the Scenes panel (room controls bar), just above "Scene changes": a comma-separated list of Spotify Connect device names. Default: "Serenity, Serenity guest" — the devices house lighting actually reacts to.',
+          'While a house mode is set, music playing on any device outside this list — his phone, another speaker, the car — is ignored, matched case-insensitively against the real device name Spotify itself reports. The house stays on its own mode\'s look: no music show, no scene changes, no colour changes, no flares, no charge/lull/drop responses, and no drop sequences fire from that playback.',
+          'This silences flares and drop sequences from a disallowed device even under a "calm" house mode, which otherwise keeps flares playing through music on an allowed device while the scene and colours stay fixed — a device outside the list is treated the same as "ignored" regardless of the mode\'s own music policy.',
+          'It also silences the Light Show\'s High/Low Trigger arms, which otherwise fire independent of the "Scene changes" setting — a set armed on the next High or Low Trigger will not fire from a disallowed device either. A manual press — the Fire button, an armed set firing on a real scene change from any other source — is never affected by any of this.',
+          'Switching devices mid-song is handled both ways: moving onto an allowed device hands the room into the music show right away; moving off one hands it back to the house mode immediately too, rather than waiting on the usual "music stopped" debounce (which exists for a genuine pause or an inter-song gap, not a deliberate device change).',
+          'This governs house lighting only — it does not affect Hue Hold, Dark/Light display mode, or Ambient, each of which reads "is music playing" on its own, independent of which device it\'s on.',
+          'The list can never be emptied — at least one device name is required, so the house can\'t be left permanently unable to go music-reactive.',
+          'Also reachable by voice: ask Sonic to read or change the music-device allowlist.',
+        ],
+      },
+      {
         id: 'transition-placement-rule',
         title: 'Transition placement rule — edge window, sensitivity, and how many',
         keywords: 'transition placement rule edge window sensitivity density total actions per minute transitions per minute rate strongest per song beat bass energy generator generated cue mid-song align alignment R3 intensity scale mark',

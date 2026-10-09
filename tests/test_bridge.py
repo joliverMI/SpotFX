@@ -58,3 +58,46 @@ def test_is_playing_survives_a_transient_disconnect():
     }))
     bridge.connected = False
     assert bridge.is_playing() is True
+
+
+def test_device_name_is_none_with_no_track():
+    """No signal yet, or a state message reporting no track — never a
+    guessed empty string. The house music-device gate (spectra/services/
+    house.py) treats this as 'not an allowed device'."""
+    bridge = SpotEffectsBridge()
+    assert bridge.device_name() is None
+    _run(bridge.handle_message({"type": "state", "paused": False, "track": None}))
+    assert bridge.device_name() is None
+
+
+def test_device_name_reflects_the_broadcast_track():
+    """The exact field api/spotify_client.py's own `device.name` read off
+    Spotify's playback API lands on, broadcast as track.device_name —
+    root's own on_target_device/spotify_device_names match against the
+    identical field."""
+    bridge = SpotEffectsBridge()
+    _run(bridge.handle_message({
+        "type": "state", "paused": False,
+        "track": {"spotify_uri": "spotify:track:x", "is_playing": True,
+                 "progress_ms": 0, "device_name": "Serenity"},
+    }))
+    assert bridge.device_name() == "Serenity"
+
+    _run(bridge.handle_message({
+        "type": "state", "paused": False,
+        "track": {"spotify_uri": "spotify:track:x", "is_playing": True,
+                 "progress_ms": 0, "device_name": "Javi's iPhone"},
+    }))
+    assert bridge.device_name() == "Javi's iPhone"
+
+
+def test_device_name_empty_string_reads_as_none():
+    """An empty device name (a track dict with no device_name key, or an
+    empty string) is treated the same as 'unknown' — never a device that
+    happens to be named ''."""
+    bridge = SpotEffectsBridge()
+    _run(bridge.handle_message({
+        "type": "state", "paused": False,
+        "track": {"spotify_uri": "spotify:track:x", "is_playing": True, "progress_ms": 0},
+    }))
+    assert bridge.device_name() is None

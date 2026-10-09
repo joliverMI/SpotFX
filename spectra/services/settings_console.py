@@ -602,6 +602,48 @@ async def _op_set_force_color(enabled: bool, target: Optional[str] = None) -> di
         return exc.payload()
 
 
+# ═══ The music-device allowlist (the Admiral, 2026-10-09) — NOT a
+# SETTINGS_REGISTRY key, same reason as Force Scene/Force Colour above: a
+# list of device names is a poor fit for set_setting's scalar shape, so
+# this is its own small pair of ops writing through room_controls.
+# apply_patch like everything else here. See RoomControlState.
+# music_device_allowlist's own docstring and house.py's "THE MUSIC-DEVICE
+# GATE" section for the mechanism this configures. ═══════════════════════
+
+def get_music_device_allowlist() -> dict:
+    state = room_controls.load_room_controls()
+    return {"devices": list(state.music_device_allowlist)}
+
+
+async def set_music_device_allowlist(devices: list) -> dict:
+    if not isinstance(devices, list) or not all(isinstance(d, str) for d in devices):
+        raise SettingChangeError("devices must be a list of device-name strings")
+    cleaned = [d.strip() for d in devices if d.strip()]
+    if not cleaned:
+        raise SettingChangeError(
+            "devices must name at least one Spotify Connect device — "
+            "an empty allowlist would make the house never go music-reactive")
+    try:
+        result = await room_controls.apply_patch({"music_device_allowlist": cleaned})
+    except room_controls.RoomControlsPatchError as exc:
+        raise SettingChangeError(str(exc)) from exc
+    return {"status": "applied",
+            "summary": "Music-reactive lighting now only follows "
+                      + " or ".join(repr(d) for d in cleaned) + ".",
+            "devices": result["music_device_allowlist"]}
+
+
+def _op_get_music_device_allowlist() -> dict:
+    return get_music_device_allowlist()
+
+
+async def _op_set_music_device_allowlist(devices: list) -> dict:
+    try:
+        return await set_music_device_allowlist(devices)
+    except SettingChangeError as exc:
+        return exc.payload()
+
+
 # The one declaration that both enforces (settings_agent.ALL_OPERATIONS is
 # built from this dict) and documents (its catalogue_entry() is what the
 # "list operations" meta-tool shows Sonic) — see sonic_ops.py's docstring.
@@ -674,6 +716,31 @@ OPERATIONS: dict[str, SonicOperation] = {
             "properties": {"enabled": {"type": "boolean"}, "target": {"type": "string"}},
             "required": ["enabled"], "additionalProperties": False},
         handler=_op_set_force_color),
+    "get_music_device_allowlist": SonicOperation(
+        name="get_music_device_allowlist", domain="settings", kind="read",
+        summary="Read which Spotify Connect device names let the house "
+                "go music-reactive.",
+        instructions="No arguments.",
+        input_schema={"type": "object", "properties": {}, "additionalProperties": False},
+        handler=_op_get_music_device_allowlist),
+    "set_music_device_allowlist": SonicOperation(
+        name="set_music_device_allowlist", domain="settings", kind="write",
+        summary="Replace the list of Spotify Connect device names that "
+                "let the house switch from standard lighting to music-"
+                "reactive lighting; music on any other device is ignored.",
+        instructions=(
+            "devices is the WHOLE new list (replaces, never merges) — "
+            "call get_music_device_allowlist first if you only need to "
+            "add or remove one name. Names must match the real device "
+            "name Spotify reports (his usual ones are 'Serenity' and "
+            "'Serenity guest'); matching is case-insensitive. Refused if "
+            "empty — the house must always have at least one allowed "
+            "device."),
+        input_schema={
+            "type": "object",
+            "properties": {"devices": {"type": "array", "items": {"type": "string"}}},
+            "required": ["devices"], "additionalProperties": False},
+        handler=_op_set_music_device_allowlist),
 }
 
 

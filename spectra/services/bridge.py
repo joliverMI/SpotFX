@@ -273,6 +273,21 @@ class SpotEffectsBridge:
             return False
         return bool(self._track.get("is_playing"))
 
+    def device_name(self) -> Optional[str]:
+        """The Spotify Connect device currently playing, exactly as
+        Spotify's own playback API reports it (api/spotify_client.py's
+        `(data.get("device") or {}).get("name", "")`, broadcast on every
+        "state" message's `track.device_name` — the SAME field root's own
+        `on_target_device` gate already matches `settings.
+        spotify_device_names` against). None when there is no track (or no
+        signal at all yet) — never guessed, and never defaulted to "" so a
+        caller can't confuse "no track" with "a device with an empty name".
+        House lighting's own music-device gate (spectra/services/house.py)
+        is this field's only consumer today."""
+        if not self._track:
+            return None
+        return self._track.get("device_name") or None
+
     def track_genres(self) -> list[str]:
         return list((self._track or {}).get("genres") or [])
 
@@ -393,6 +408,7 @@ class SpotEffectsBridge:
                 "uri": self.track_uri(),
                 "title": (self._track or {}).get("title"),
                 "is_playing": (self._track or {}).get("is_playing"),
+                "device_name": self.device_name(),
                 "position_ms": self.track_position_ms(),
                 "effective_position_ms": self.effective_position_ms(),
                 "shape_offset_ms": self.shape_offset_ms(),

@@ -529,6 +529,12 @@ export interface RoomControlState {
   active_gradient_id: string | null;
   gradient_x_period_s: number;
   gradient_y_slew_s: number;
+  /** THE MUSIC-DEVICE GATE (the Admiral, 2026-10-09) — spotify Connect
+   * device names (case-insensitive) that let the house switch from
+   * standard lighting to music-reactive; music on any other device is
+   * ignored. Default ["Serenity", "Serenity guest"]. See
+   * spectra/services/house.py's "THE MUSIC-DEVICE GATE" section. */
+  music_device_allowlist: string[];
 }
 
 /** What actually happened to the room's virtuals on the last display-mode

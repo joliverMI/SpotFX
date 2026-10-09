@@ -914,3 +914,212 @@ def test_status_labels_are_unique_when_fixtures_share_a_name(monkeypatch):
     assert labels == {"crystal": "WLED (crystal)", "porch-rail": "WLED (porch-rail)",
                       "radial-dummy": "Radial Dummy", "x": "x"}
     assert house.show_output_label("nope", labels) == "nope"
+
+
+# ═══ 11. THE MUSIC-DEVICE GATE (the Admiral, 2026-10-09: "music on devices
+# that aren't Serenity or Serenity guest" must not switch the house from
+# standard lighting to music-reactive). ═══════════════════════════════════
+
+@pytest.fixture
+def _isolated_room_controls(tmp_path, monkeypatch):
+    from spectra import config as scfg
+    monkeypatch.setattr(scfg, "ROOM_CONTROLS_FILE", tmp_path / "room_controls.json")
+
+
+def test_music_device_allowed_matches_the_default_allowlist_case_insensitively(
+        _isolated_room_controls):
+    from spectra.services import house
+
+    assert house._music_device_allowed("Serenity") is True
+    assert house._music_device_allowed("SERENITY") is True
+    assert house._music_device_allowed("serenity guest") is True
+    assert house._music_device_allowed(" Serenity Guest ".strip()) is True
+    assert house._music_device_allowed("Javi's iPhone") is False
+    assert house._music_device_allowed(None) is False
+    assert house._music_device_allowed("") is False
+
+
+def test_music_device_allowed_reads_a_customised_allowlist(_isolated_room_controls):
+    from spectra.services import house, room_controls as rc
+
+    rc.save_room_controls(rc.RoomControlState(music_device_allowlist=["Kitchen Echo"]))
+    assert house._music_device_allowed("Kitchen Echo") is True
+    assert house._music_device_allowed("Serenity") is False, \
+        "the default is overridden, not merged with a customised list"
+
+
+def test_music_device_allowed_an_empty_allowlist_never_matches(_isolated_room_controls):
+    """His to configure wrong, not ours to guess around — an emptied
+    allowlist means nothing is an allowed device, never 'allow everything'."""
+    from spectra.services import house, room_controls as rc
+
+    rc.save_room_controls(rc.RoomControlState(music_device_allowlist=[]))
+    assert house._music_device_allowed("Serenity") is False
+
+
+def test_default_playing_is_true_only_on_an_allowed_device(_isolated_room_controls, monkeypatch):
+    from spectra.services import engine, house
+
+    monkeypatch.setattr(engine.bridge, "is_playing", lambda: True)
+    monkeypatch.setattr(engine.bridge, "device_name", lambda: "Serenity")
+    assert house._default_playing() is True
+
+    monkeypatch.setattr(engine.bridge, "device_name", lambda: "Javi's iPhone")
+    assert house._default_playing() is False, \
+        "confirmed playing on a disallowed device reads exactly like silence"
+
+    monkeypatch.setattr(engine.bridge, "device_name", lambda: None)
+    assert house._default_playing() is False, \
+        "confirmed playing with no reported device is not an allowed device either"
+
+
+def test_default_playing_passes_through_false_and_none_unchanged(_isolated_room_controls, monkeypatch):
+    """The device gate only narrows a confirmed True — it must never turn
+    a genuine 'not playing' or 'unknown' into something else."""
+    from spectra.services import engine, house
+
+    monkeypatch.setattr(engine.bridge, "is_playing", lambda: False)
+    monkeypatch.setattr(engine.bridge, "device_name", lambda: None)
+    assert house._default_playing() is False
+
+    monkeypatch.setattr(engine.bridge, "is_playing", lambda: None)
+    assert house._default_playing() is None
+
+
+def test_music_device_mismatch_true_only_when_confirmed_playing_on_the_wrong_device(
+        _isolated_room_controls, monkeypatch):
+    from spectra.services import engine, house
+
+    monkeypatch.setattr(engine.bridge, "is_playing", lambda: True)
+    monkeypatch.setattr(engine.bridge, "device_name", lambda: "Javi's iPhone")
+    assert house._default_music_device_mismatch() is True
+
+    monkeypatch.setattr(engine.bridge, "device_name", lambda: "Serenity")
+    assert house._default_music_device_mismatch() is False, \
+        "an allowed device is not a mismatch"
+
+    monkeypatch.setattr(engine.bridge, "is_playing", lambda: False)
+    assert house._default_music_device_mismatch() is False, \
+        "not playing at all is a stop, not a device mismatch"
+
+
+def test_music_never_hands_in_while_playing_on_a_disallowed_device(world):
+    """The core ask: music on his phone (or any device outside the
+    allowlist) must leave the house on its own mode — no music show."""
+    from spectra.services import show_output
+
+    world.house.deps.music_device_mismatch = lambda: False
+    _mode(world, "Standard",
+          fixtures=[FixtureHook(target=HouseTarget(kind="category", id="Matrix"),
+                                level=6, music_level=40)],
+          transitions={"music_debounce_s": 0, "music_return_glide_s": 1})
+    _run(world.house.set_mode(mode="Standard", source="spectra"))
+    world.state["playing"] = False          # "confirmed playing elsewhere" reads as False here
+    _run(world.house.tick())
+    assert world.house.status_dict()["phase"] == "resting", \
+        "a disallowed-device playback must never hand the room into the music show"
+    assert show_output.base_snapshot()["levels"] == {"dev-crystal": 0.06}
+
+
+def test_a_device_switch_mid_song_hands_out_immediately_not_after_the_debounce(world):
+    """Switching speakers mid-song is a deliberate act, not a brief gap —
+    it must not wait on music_debounce_s (set long here specifically to
+    prove the immediate path doesn't fall through to the debounced one)."""
+    from spectra.services import show_output
+
+    mismatch = {"value": False}
+    world.house.deps.music_device_mismatch = lambda: mismatch["value"]
+    _mode(world, "Standard",
+          fixtures=[FixtureHook(target=HouseTarget(kind="category", id="Matrix"),
+                                level=6, music_level=40)],
+          transitions={"music_debounce_s": 300, "music_return_glide_s": 1})
+    _run(world.house.set_mode(mode="Standard", source="spectra"))
+    world.state["playing"] = True
+    _run(world.house.tick())
+    assert world.house.status_dict()["phase"] == "music"
+    assert show_output.base_snapshot()["levels"] == {"dev-crystal": 0.40}
+
+    # He switches to a disallowed device mid-song: still "playing" at the
+    # transport level, but the device gate now reads it as device_mismatch.
+    world.state["playing"] = False
+    mismatch["value"] = True
+    _run(world.house.tick())
+    assert world.house.status_dict()["phase"] == "resting", \
+        "a device switch hands out right away, not after a 300s debounce"
+    assert show_output.base_snapshot()["levels"] == {"dev-crystal": 0.06}
+
+
+def test_switching_back_to_an_allowed_device_mid_song_hands_in_again(world):
+    from spectra.services import show_output
+
+    world.house.deps.music_device_mismatch = lambda: False
+    _mode(world, "Standard",
+          fixtures=[FixtureHook(target=HouseTarget(kind="category", id="Matrix"),
+                                level=6, music_level=40)],
+          transitions={"music_debounce_s": 0, "music_return_glide_s": 1})
+    _run(world.house.set_mode(mode="Standard", source="spectra"))
+    world.state["playing"] = False
+    _run(world.house.tick())
+    assert world.house.status_dict()["phase"] == "resting"
+
+    world.state["playing"] = True
+    _run(world.house.tick())
+    assert world.house.status_dict()["phase"] == "music", \
+        "playback resuming on an allowed device hands the room back into the show"
+    assert show_output.base_snapshot()["levels"] == {"dev-crystal": 0.40}
+
+
+def test_music_status_surfaces_the_device_and_allowlist(monkeypatch, world):
+    from spectra.services import engine
+
+    monkeypatch.setattr(engine.bridge, "device_name", lambda: "Javi's iPhone")
+    _mode(world, "Standard")
+    _run(world.house.set_mode(mode="Standard", source="spectra"))
+    status = world.house.status_dict()
+    assert status["music"]["device"] == "Javi's iPhone"
+    assert status["music"]["device_allowed"] is False
+    assert status["music"]["device_allowlist"] == ["Serenity", "Serenity guest"]
+
+
+def test_confirmed_wrong_device_requires_an_active_mode(monkeypatch, world):
+    from spectra.services import engine, house
+
+    monkeypatch.setattr(engine.bridge, "is_playing", lambda: True)
+    monkeypatch.setattr(engine.bridge, "device_name", lambda: "Javi's iPhone")
+    assert house.confirmed_wrong_device() is False, \
+        "no mode set yet — nothing to protect, so nothing is gated"
+
+    _mode(world, "Standard")
+    _run(world.house.set_mode(mode="Standard", source="spectra"))
+    assert house.confirmed_wrong_device() is True
+
+    monkeypatch.setattr(engine.bridge, "device_name", lambda: "Serenity")
+    assert house.confirmed_wrong_device() is False
+
+
+def test_response_deferral_defers_on_wrong_device_even_under_calm(monkeypatch, world):
+    """calm mode's own docstring keeps flares playing through music — but
+    not from a device he never authorised."""
+    from spectra.services import engine, house
+
+    _mode(world, "Chill", music="calm")
+    _run(world.house.set_mode(mode="Chill", source="spectra"))
+    monkeypatch.setattr(engine.bridge, "is_playing", lambda: True)
+    monkeypatch.setattr(engine.bridge, "device_name", lambda: "Serenity")
+    assert house.response_deferral() is None, \
+        "calm mode still lets flares play on an allowed device"
+
+    monkeypatch.setattr(engine.bridge, "device_name", lambda: "Javi's iPhone")
+    assert house.response_deferral() is not None, \
+        "a device outside the allowlist silences flares even under calm"
+
+
+def test_response_deferral_unaffected_by_device_while_show_plays_on_an_allowed_one(
+        monkeypatch, world):
+    from spectra.services import engine, house
+
+    _mode(world, "Standard")
+    _run(world.house.set_mode(mode="Standard", source="spectra"))
+    monkeypatch.setattr(engine.bridge, "is_playing", lambda: True)
+    monkeypatch.setattr(engine.bridge, "device_name", lambda: "Serenity")
+    assert house.response_deferral() is None

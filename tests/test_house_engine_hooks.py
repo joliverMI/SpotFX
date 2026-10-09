@@ -165,3 +165,39 @@ def test_a_holding_mode_defers_the_analysed_colour_event(monkeypatch):
     monkeypatch.setattr(house, "scene_deferral", lambda: "house mode 'Night' keeps its look")
     res = _run(engine.fire_analysed_color_event(0.5, 0.5, None))
     assert res["skipped"] == "house_mode"
+
+
+# ── the music-device gate reaches the Light Show's High/Low cue arms too ──
+# (the Admiral, 2026-10-09; firstmate's confirmation: cue crossings must
+# not arm a Light Show set from playback on a disallowed device, even
+# though they are otherwise independent of scene_change_mode/mode.music
+# by design.)
+
+def test_show_cue_is_gated_by_confirmed_wrong_device(monkeypatch):
+    from spectra.services import engine, house, show_arms
+    called = []
+
+    async def fake_on_cue(level, cue_ms, ahead_ms):
+        called.append((level, cue_ms, ahead_ms))
+        return ["arm-1"]
+    monkeypatch.setattr(show_arms, "on_cue", fake_on_cue)
+    monkeypatch.setattr(house, "confirmed_wrong_device", lambda: True)
+    result = _run(engine._show_cue("high", 10000, 0))
+    assert result == []
+    assert called == [], \
+        "a High/Low cue crossing must not arm a Light Show set while music " \
+        "is confirmed playing on a device outside the allowed list"
+
+
+def test_show_cue_fires_normally_when_the_device_is_allowed(monkeypatch):
+    from spectra.services import engine, house, show_arms
+    called = []
+
+    async def fake_on_cue(level, cue_ms, ahead_ms):
+        called.append((level, cue_ms, ahead_ms))
+        return ["arm-1"]
+    monkeypatch.setattr(show_arms, "on_cue", fake_on_cue)
+    monkeypatch.setattr(house, "confirmed_wrong_device", lambda: False)
+    result = _run(engine._show_cue("high", 10000, 0))
+    assert result == ["arm-1"]
+    assert called == [("high", 10000, 0)]
