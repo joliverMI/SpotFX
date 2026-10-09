@@ -955,6 +955,75 @@ BIG_FISH_NODES_MAX = 64        # ... up to this many nodes
 BIG_FISH_HUE_LO = (0.2, 120.0)  # (intensity, degrees) — his two points
 BIG_FISH_HUE_HI = (0.5, 180.0)
 
+# ── THE OTHER FISH AVOID IT (2026-10-08, phase 2; his approval of the look:
+# "Big fish looks right: build step 2 - the other fish steer around the big
+# fish while it crosses") ──────────────────────────────────────────────────
+# While a big fish is crossing, every ordinary swimmer (and the lull's
+# keepers) ANTICIPATES its path and gets out of its way, the way they already
+# handle the wall and each other: a term in the same desired-heading sum,
+# bounded by the same turn-rate clamp, so a dodge is always an arc and never
+# a snap. `_big_fish_threat` is the whole judgement:
+#
+#   THE BODY it keeps clear of is the big fish's OWN drawn body — its centre
+#   line, and at each point along it the reach of the splat the renderer
+#   lays there plus its tail throw (the tapering profile, not a box) — grown
+#   by the ordinary fish's own reach at five points along ITS body and
+#   `big_fish_avoid_margin` px. So "body size + a margin" is read off what
+#   is drawn, and a bigger ordinary fish keeps further off by construction.
+#   ANTICIPATION: both bodies are rolled forward BIG_AVOID_LOOK_S along their
+#   own velocities (the fish's current heading and speed) AND with the fish
+#   holding still in the water — the big fish is faster than a cruising fish
+#   at every intensity, so "where will its body sweep over the spot I am in"
+#   is the question that matters, and the heading rollout keeps a fish that
+#   has got out from turning straight back in. Urgency is how soon the
+#   first contact comes (1 = now), or how close the body already is.
+#   THE WAY OUT: vertically away from its centre line, keeping some of its
+#   own forward travel — to the side it is already on, if that side has the
+#   room for its whole body outside the margin INSIDE the wall (or pond); to
+#   the other side if it is still ahead of the nose and that side has it;
+#   and if it is already alongside with no room either way, it turns back
+#   against the big fish's travel and lets it slip past (their speeds add).
+#   It darts a little while it does (BIG_FLEE_X of its own speed at full
+#   urgency, on a short ease) — a startled fish, not a teleport.
+#   THE WALL WINS: the term rides the same "toward the water only" filter a
+#   neighbour's swerve does while the wall has a fish, so a crowd and a big
+#   fish together can never push one off the panel.
+#   SCOPE: ordinary swimmers (mode 0/1, the charge's school included — a big
+#   fish swimming through a school would overlap all of it) and the lull's
+#   keepers. The drop's rush and ejecta (authored chaos) and dispersing fish
+#   (on a deadline) are left alone. With no big fish crossing, nothing here
+#   runs: every frame is exactly the frame drawn before this existed.
+#   `big_fish_avoid` 0 turns it off (the escape hatch: the step-1 crossing
+#   bit for bit).
+BIG_AVOID_W = 20.0           # steer weight at urgency 1, big_fish_avoid 1:
+                             # above the school's 14, so a school bends
+                             # round it too
+BIG_AVOID_LOOK_S = 2.5       # how far ahead (s) both bodies are rolled
+BIG_AVOID_STEPS = 13         # ... in this many samples
+BIG_AVOID_NEAR_PX = 3.0      # inside this much clearance urgency rises with
+                             # closeness alone
+BIG_AVOID_ANGLES = 16        # the spots a fish weighs for its way out:
+BIG_AVOID_RADII_PX = (4.0, 8.0, 14.0, 20.0, 26.0)  # ... this many directions, at
+                             # these distances
+BIG_AVOID_WAY = np.array([0.25, 0.5, 0.75], dtype=np.float32)
+                             # ... and the way there is checked at these
+                             # shares of it, each when it would be there
+BIG_AVOID_GOOD_PX = 2.0      # clearance past which a spot is simply clear
+BIG_AVOID_DIST_COST = 0.15   # px of clearance a px further away is worth
+BIG_AVOID_FACING = 0.3       # px of clearance facing a spot is worth
+BIG_TURN_BOOST = 3.0         # its turn gain x (1 + this) at full urgency —
+                             # never past its own turn circle
+BIG_FLEE_X = 1.6             # its own speed x this at full urgency ...
+BIG_FLEE_TAU = 0.15          # ... eased in over this
+BIG_AVOID_CORE = 0.7         # the share of a splat's reach counted as BODY:
+                             # a splat's light falls off linearly to its
+                             # reach, so this is where it is still about a
+                             # quarter lit (measured on the big fish's own
+                             # cross-section) — the faint fringe past it is
+                             # glow, not body, for both fish
+BIG_AVOID_U = np.array([0.0, 0.25, 0.5, 0.75, 1.0], dtype=np.float32)
+                             # the ordinary fish's body, sampled nose to tail
+
 
 def big_fish_hue_degrees(intensity):
     """His colour rule: 120 degrees at intensity 0.2 or below, 180 at 0.5
@@ -1664,6 +1733,22 @@ class Fish2d(Twod, GradientEffect):
                 default=1.0,
             ): vol.All(vol.Coerce(float), vol.Range(min=0.2, max=2.0)),
             vol.Optional(
+                "big_fish_avoid",
+                description=(
+                    "Big fish flare: how hard the other fish steer out of "
+                    "its way (0 = they swim straight through it)"
+                ),
+                default=1.0,
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=2.0)),
+            vol.Optional(
+                "big_fish_avoid_margin",
+                description=(
+                    "Big fish flare: the gap (px) the other fish keep "
+                    "between their bodies and its body"
+                ),
+                default=2.0,
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=8.0)),
+            vol.Optional(
                 "big_fish",
                 description=(
                     "Big fish flare poke: the fire's intensity (written by "
@@ -1890,6 +1975,8 @@ class Fish2d(Twod, GradientEffect):
         self.big_fish_cross_fast_s = self._config["big_fish_cross_fast_s"]
         self.big_fish_ripple = self._config["big_fish_ripple"]
         self.big_fish_ripple_size = self._config["big_fish_ripple_size"]
+        self.big_fish_avoid = self._config["big_fish_avoid"]
+        self.big_fish_avoid_margin = self._config["big_fish_avoid_margin"]
         # the big fish poke: edge-detected like fireworks' burst_rockets (a
         # write that changes the value arms; draw consumes it and self-
         # resets the key to 0 so an identical later write edges again)
@@ -3232,12 +3319,14 @@ class Fish2d(Twod, GradientEffect):
         d = np.where(r > 1e-4, (1.0 - r) * r / g, min(a, b))
         return d, -gx / g, -gy / g
 
-    def _wall_landing(self, x, y):
+    def _wall_landing(self, x, y, free=None):
         """Where a glance lands, as a signed distance (SCREEN px, positive
         inside) at points (x, y) with its unit inward normal: the nearer of
         the pond (it bounds the middle) and the lit silhouette pulled in by
         WALL_GRAZE half-widths with its corners rounded (`_landing`; it
-        bounds the flank). See the WALL block."""
+        bounds the flank). See the WALL block. Where `free` (broadcast
+        against x) is True the pond is left out — a fish getting out of a
+        big fish's way may use the whole lit panel (the BIG_AVOID block)."""
         grow = max(float(self.roam_scale), 1.0)
         ox = (self.r_width - 1) / 2.0
         oy = (self.r_height - 1) / 2.0
@@ -3247,6 +3336,8 @@ class Fish2d(Twod, GradientEffect):
         d_sil = d_sil * grow
         d_pond, pnx, pny = self._pond_distance(x, y)
         pond = d_pond < d_sil
+        if free is not None:
+            pond = pond & ~free
         return (
             np.where(pond, d_pond, d_sil),
             np.where(pond, pnx, snx),
@@ -3288,13 +3379,14 @@ class Fish2d(Twod, GradientEffect):
         ) / max(float(self.wall_turn_strength), 1e-3)
         return np.maximum(want, self.turn_radius_px).astype(np.float32)
 
-    def _wall_run(self, px, py, dx, dy, s):
+    def _wall_run(self, px, py, dx, dy, s, free=None):
         """How far each middle at (px, py) can swim straight along (dx, dy)
         before it meets the landing line (px; the probe's own length when it
         never does)."""
         g, _, _ = self._wall_landing(
             px[:, None] + dx[:, None] * s[None, :],
             py[:, None] + dy[:, None] * s[None, :],
+            free=free,
         )
         below = g < 0.0
         first = np.where(below.any(axis=1), below.argmax(axis=1), s.size - 1)
@@ -3348,9 +3440,14 @@ class Fish2d(Twod, GradientEffect):
         reach = widest * WALL_HOLD + WALL_STEP_PX
         steps = max(int(np.ceil(reach / WALL_STEP_PX)), 2)
         s = np.linspace(0.0, reach, steps + 1).astype(np.float32)
+        # a fish getting out of a big fish's way glances off the lit panel
+        # only, not the pond (the BIG_AVOID block); None for everyone else
+        free = getattr(self, "_pond_free", None)
+        free = None if free is None else free[idx][:, None]
         g, nx, ny = self._wall_landing(
             px[:, None] + hx[:, None] * s[None, :],
             py[:, None] + hy[:, None] * s[None, :],
+            free=free,
         )
         below = g < 0.0
         hit = below.any(axis=1)
@@ -3420,8 +3517,9 @@ class Fish2d(Twod, GradientEffect):
             ti = np.flatnonzero(tie)
             tx = -n_y[ti]
             ty = n_x[ti]
-            room_a = self._wall_run(px[ti], py[ti], tx, ty, s)
-            room_b = self._wall_run(px[ti], py[ti], -tx, -ty, s)
+            fti = None if free is None else free[ti]
+            room_a = self._wall_run(px[ti], py[ti], tx, ty, s, free=fti)
+            room_b = self._wall_run(px[ti], py[ti], -tx, -ty, s, free=fti)
             # the + side ends on whichever tangent is counter-clockwise of
             # its heading
             a_is_plus = (hx[ti] * ty - hy[ti] * tx) >= 0.0
@@ -4302,6 +4400,183 @@ class Fish2d(Twod, GradientEffect):
             layer = layer * (1.0 - hide)[..., None]
         return layer
 
+    def _big_fish_profile(self, fish, swell):
+        """The big fish's drawn body as the avoidance reads it: (length px,
+        half-thickness at each SPINE_U node). The thickness is the reach of
+        the splat `_big_fish_bodies` lays there (its lit core,
+        BIG_AVOID_CORE of it) plus its tail throw."""
+        scale, flap_amp, _f, _s = self._big_fish_motion(fish, swell)
+        ordinary = np.clip(
+            np.float32(self._half_width_px() * swell) * SPINE_PROFILE,
+            0.4, float(KERNEL_R),
+        )
+        prof = (
+            np.minimum((ordinary + 0.5) * np.float32(scale),
+                       float(SPLAT_KERNEL_R) - 0.5) * np.float32(BIG_AVOID_CORE)
+            + np.float32(flap_amp) * SPINE_THROW
+        )
+        return float(fish["length"]) * swell, prof.astype(np.float32)
+
+    def _big_fish_threat(self, n, affected, hd, rscale, impulse):
+        """THE OTHER FISH AVOID IT (the block beside BIG_AVOID_W): for each
+        of the first `n` fish, (urgency 0..1, escape heading) against every
+        big fish crossing. Fish outside `affected` get urgency 0. Pure: it
+        reads the fish and the big fish and changes neither. Also returns
+        `away`: +1 / -1, the side of the big fish's line (screen y) each
+        threatened fish is getting out to (0 where none)."""
+        urg = np.zeros(n, dtype=np.float32)
+        esc = np.asarray(hd, dtype=np.float32).copy()
+        away = np.zeros(n, dtype=np.float32)
+        idx = np.flatnonzero(affected)
+        if idx.size == 0 or not self._big:
+            return urg, esc, away
+        swell = 1.0 + 0.8 * self.size_audio * rscale * min(impulse, 1.0)
+        # the ordinary fish's body: five points nose to tail, each with the
+        # reach of the splat drawn there (size swell and tail throw in)
+        hw = float(self._half_width_px()) * swell
+        half = hw * float(self.body_aspect)
+        u = BIG_AVOID_U
+        along = (0.5 - u) * np.float32(2.0 * half)          # + = toward nose
+        r_ord = (
+            (hw * np.interp(u, SPINE_U, SPINE_PROFILE).astype(np.float32)
+             + 0.5) * np.float32(BIG_AVOID_CORE)
+            + self.flap_amount * half * u ** 1.6
+        ).astype(np.float32)
+        margin = float(self.big_fish_avoid_margin)
+        px = self.cx + self.p_x[idx] * self.sx - self.cam_px
+        py = self.cy + self.p_y[idx] * self.sy - self.cam_py
+        h = hd[idx]
+        ch, sh = np.cos(h), np.sin(h)
+        spd = np.maximum(self.p_spd[idx], 0.0)
+        qx = px[:, None] + ch[:, None] * along[None, :]     # (fish, point)
+        qy = py[:, None] + sh[:, None] * along[None, :]
+        vx = (ch * spd)[:, None, None]
+        vy = (sh * spd)[:, None, None]
+        t = np.linspace(0.0, BIG_AVOID_LOOK_S, BIG_AVOID_STEPS,
+                        dtype=np.float32)[None, None, :]
+        best = np.zeros(idx.size, dtype=np.float32)
+        best_b = np.zeros(idx.size, dtype=np.int32)
+        profiles = []
+        for b, fish in enumerate(self._big):
+            lb, prof = self._big_fish_profile(fish, swell)
+            profiles.append((lb, prof))
+            vb = fish["travel"] * fish["speed"]
+            worst = np.zeros(idx.size, dtype=np.float32)
+            for moving in (True, False):
+                if moving:      # on its own heading and speed
+                    ox = qx[:, :, None] + vx * t
+                    oy = qy[:, :, None] + vy * t
+                else:           # holding still where it is
+                    ox = np.broadcast_to(qx[:, :, None], (*qx.shape, t.size))
+                    oy = np.broadcast_to(qy[:, :, None], ox.shape)
+                d = self._big_clearance(
+                    ox, oy, fish["x"] + vb * t, fish, lb, prof,
+                ) - r_ord[None, :, None] - margin
+                hit = (d < 0.0).any(axis=1)                 # (fish, t)
+                first = np.where(hit.any(axis=1), hit.argmax(axis=1),
+                                 BIG_AVOID_STEPS - 1)
+                soon = np.where(
+                    hit.any(axis=1),
+                    1.0 - first / (BIG_AVOID_STEPS - 1.0), 0.0)
+                if moving:
+                    near = np.clip(
+                        1.0 - d[:, :, 0].min(axis=1) / BIG_AVOID_NEAR_PX,
+                        0.0, 1.0)
+                    soon = np.maximum(soon, near)
+                worst = np.maximum(worst, soon)
+            take = worst > best
+            best = np.where(take, worst, best).astype(np.float32)
+            best_b = np.where(take, b, best_b)
+        live = np.flatnonzero(best > 0.0)
+        if live.size == 0:
+            return urg, esc, away
+        # THE WAY OUT: a spot nearby, inside the lit panel, that the big
+        # fish's body will stay clear of from when this fish could get there
+        # on to the end of the look-ahead (and the way to it with it). The
+        # crystal is a hexagon, so near its points there is no room above or
+        # below the big fish at all — a fish there has to make for where
+        # there is, which is why this searches rather than just turning off
+        # the big fish's line.
+        ang = np.linspace(0.0, 2.0 * np.pi, BIG_AVOID_ANGLES,
+                          endpoint=False).astype(np.float32)
+        rad = np.asarray(BIG_AVOID_RADII_PX, dtype=np.float32)
+        cdx = (np.cos(ang)[None, :] * rad[:, None]).ravel()
+        cdy = (np.sin(ang)[None, :] * rad[:, None]).ravel()
+        dist = np.hypot(cdx, cdy)
+        r_body = float(r_ord.max()) + margin
+        tt = np.linspace(0.0, BIG_AVOID_LOOK_S, BIG_AVOID_STEPS,
+                         dtype=np.float32)
+        for k in live:
+            x, y = float(px[k]), float(py[k])
+            cx_ = x + cdx
+            cy_ = y + cdy
+            t_arr = dist / max(float(spd[k]) * BIG_FLEE_X, 1e-3)
+            clear_end = np.full(cdx.size, np.inf, dtype=np.float32)
+            clear_way = np.full(cdx.size, np.inf, dtype=np.float32)
+            for (lb, prof), fish in zip(profiles, self._big):
+                vb = fish["travel"] * fish["speed"]
+                # parked at the spot from when it arrives ...
+                bxt = fish["x"] + vb * tt[None, :]
+                d = self._big_clearance(cx_[:, None], cy_[:, None], bxt,
+                                        fish, lb, prof) - r_body
+                d = np.where(tt[None, :] >= t_arr[:, None] - 1e-6, d, np.inf)
+                clear_end = np.minimum(clear_end, d.min(axis=1))
+                # ... and every step of the way there, when it is there
+                frac = BIG_AVOID_WAY[None, :]
+                bxw = fish["x"] + vb * (t_arr[:, None] * frac)
+                d = self._big_clearance(x + cdx[:, None] * frac,
+                                        y + cdy[:, None] * frac, bxw,
+                                        fish, lb, prof) - r_body
+                clear_way = np.minimum(clear_way, d.min(axis=1))
+            score = (
+                np.minimum(np.minimum(clear_end, clear_way), BIG_AVOID_GOOD_PX)
+                - BIG_AVOID_DIST_COST * dist
+                # among equally good spots, the one it is already facing:
+                # the least turning, never a bias to one side of the panel
+                + BIG_AVOID_FACING * (np.cos(h[k]) * cdx + np.sin(h[k]) * cdy)
+                / np.maximum(dist, 1e-3)
+            )
+            room = self._room_many(cx_, cy_)
+            score = np.where(room >= 0.0, score, -np.inf)
+            if not np.isfinite(score).any():
+                continue        # nowhere inside the panel: leave it be
+            j = int(np.argmax(score))
+            out = float(np.arctan2(cdy[j], cdx[j]))
+            near = self._big[int(best_b[k])]
+            esc[idx[k]] = out
+            urg[idx[k]] = best[k]
+            away[idx[k]] = 1.0 if cy_[j] >= near["y"] else -1.0
+        return urg, esc, away
+
+    @staticmethod
+    def _big_clearance(qx, qy, bx, fish, lb, prof):
+        """Distance (px) from points (qx, qy) to a big fish's body (its
+        drawn core, `prof` along its length `lb`) with its centre at `bx`
+        (all broadcast together); negative inside it."""
+        ra = (qx - bx) * fish["travel"]
+        ry = qy - fish["y"]
+        ul = np.clip(0.5 - ra / max(lb, 1e-3), 0.0, 1.0)
+        hb = np.interp(ul, SPINE_U, prof)
+        cap = np.where(ra > 0.0, prof[0], prof[-1])
+        return np.where(
+            np.abs(ra) > 0.5 * lb,
+            np.hypot(np.abs(ra) - 0.5 * lb, ry) - cap,
+            np.abs(ry) - hb,
+        )
+
+    def _room_many(self, x, y):
+        """Signed room (SCREEN px, positive inside) for a fish's MIDDLE at
+        points (x, y): the lit panel's own landing line (the pond left out —
+        a fish getting out of a big fish's way may use the whole panel),
+        else the pond when no wall has been read."""
+        xs = np.asarray(x, dtype=np.float32)
+        ys = np.asarray(y, dtype=np.float32)
+        if self._wall is not None:
+            d, _, _ = self._wall_landing(xs, ys, free=True)
+        else:
+            d, _, _ = self._pond_distance(xs, ys)
+        return d
+
     # ── main ────────────────────────────────────────────────────────────
     def draw(self):
         if self.test:
@@ -4514,6 +4789,16 @@ class Fish2d(Twod, GradientEffect):
         swirling = dispersing & (self.p_lk[:n] > self.t)
         leaking = dispersing & ~swirling
         m = int(np.count_nonzero(swimming))
+        # THE OTHER FISH AVOID THE BIG FISH (the block beside BIG_AVOID_W):
+        # read once a frame, before speed, so the dart and the swerve agree.
+        # With no big fish crossing (or big_fish_avoid 0) nothing here runs.
+        big_urg = big_esc = big_away = None
+        if self._big and self.big_fish_avoid > 0.0:
+            big_urg, big_esc, big_away = self._big_fish_threat(
+                n, swimming | keeping, self.p_hd[:n], rscale, impulse
+            )
+            if not big_urg.any():
+                big_urg = big_esc = big_away = None
 
         # home-anchor re-spacing ease (wrapped shortest way around the ring)
         target = self.p_slot[:n].astype(np.float32) / max(m, 1)
@@ -4614,6 +4899,10 @@ class Fish2d(Twod, GradientEffect):
         if kst is not None:
             want = np.where(keeping, np.float32(kst["speed"]), want)
             tau = np.where(keeping, KEEP_SPEED_TAU, tau)
+        if big_urg is not None:
+            # a startled fish darts out of the big fish's way
+            want = want * (1.0 + (BIG_FLEE_X - 1.0) * big_urg)
+            tau = np.where(big_urg > 0.0, np.minimum(tau, BIG_FLEE_TAU), tau)
         if self._burst > 0.0:
             want = want * (1.0 + SWIM_BURST_SPEED_X * self._burst)
         self._solo_burst_step(n, dt, mode)
@@ -4696,9 +4985,22 @@ class Fish2d(Twod, GradientEffect):
             # `w_bound`/`bb` are re-expressed from it only so the swim
             # burst's brake keeps reading what it always read: how hard the
             # edge is pressing, and whether the fish is heading into it.
-            w_urg, w_turn, w_auth, w_toward = self._wall_steer(
-                n, hd, swimming, dt
-            )
+            self._pond_free = None if big_urg is None else big_urg > 0.0
+            try:
+                w_urg, w_turn, w_auth, w_toward = self._wall_steer(
+                    n, hd, swimming, dt
+                )
+            finally:
+                self._pond_free = None
+            if big_urg is not None:
+                # a fish getting out of a big fish's way is steered by that
+                # (the spot it makes for is inside the lit panel) — except
+                # while the wall is turning it back from a wall it is heading
+                # into, late: that turn is what keeps it on the panel
+                relax = big_urg * np.where(
+                    w_toward & (w_urg >= WALL_LATE), 0.0, 1.0)
+                w_turn = w_turn * (1.0 - relax)
+                w_auth = w_auth * (1.0 - relax)
             w_bound = w_urg * BOUND_W
             bb = np.where(w_toward, 1.0, -1.0)
             # a solo burst gives up its hold (and eases back) once the wall
@@ -4731,6 +5033,10 @@ class Fish2d(Twod, GradientEffect):
                 0.0, 1.0,
             ) * BOUND_W
             w_bound = np.where(swimming, w_bound, 0.0)
+            if big_urg is not None:
+                # the pond gives way to a fish getting out of a big fish's
+                # way (its way out was chosen inside the lit panel)
+                w_bound = w_bound * (1.0 - big_urg)
         # THE SWIM BURST'S BOUNDARY BRAKE - live only while a burst is
         # (self._burst / self._burst_tail), so ordinary swimming never
         # reaches it and is bit-for-bit what it always was. The steer above
@@ -4827,6 +5133,19 @@ class Fish2d(Twod, GradientEffect):
                 desired_x += add_x
                 desired_y += add_y
                 avoid_x, avoid_y = add_x, add_y
+        if big_urg is not None:
+            # ... and out of the big fish's way: a heading term like the
+            # swerve above, through the same turn clamp — and, while the
+            # wall has a fish, the same toward-the-water-only filter
+            w_big = BIG_AVOID_W * self.big_fish_avoid * big_urg
+            big_x = (np.cos(big_esc) * w_big).astype(np.float32)
+            big_y = (np.sin(big_esc) * w_big).astype(np.float32)
+            desired_x += big_x
+            desired_y += big_y
+            if avoid_x is None:
+                avoid_x, avoid_y = big_x, big_y
+            else:
+                avoid_x, avoid_y = avoid_x + big_x, avoid_y + big_y
 
         # the school: everyone on the shared heading, plus minor variation
         if self._school_on:
@@ -4968,6 +5287,21 @@ class Fish2d(Twod, GradientEffect):
         swirl = direction * self.spin * 2 * np.pi * self.base_speed
 
         omega_max = self.p_spd[:n] / self.turn_radius_px
+        if big_urg is not None:
+            # a startled fish that has to come about turns the way that
+            # swings it AWAY from the big fish's line, never the shorter way
+            # through it ...
+            swing = big_away * np.cos(hd)       # + = turning that way is away
+            flip = (
+                (big_urg > 0.0) & (np.abs(d_hd) > np.pi / 2)
+                & (np.abs(swing) > 0.05) & (np.sign(swing) != np.sign(d_hd))
+            )
+            d_hd = np.where(
+                flip, d_hd - np.sign(d_hd) * 2.0 * np.pi, d_hd
+            )
+            # ... and as fast as its own turn circle allows (still clipped
+            # to it below)
+            d_hd = d_hd * (1.0 + BIG_TURN_BOOST * big_urg)
         omega = (
             d_hd * TURN_GAIN
             + np.where(steered & ~keeping, swirl + self.p_jog[:n], 0.0)

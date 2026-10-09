@@ -2286,6 +2286,28 @@
           "note": "The big fish flare: how wide its wake is, against the ordinary wake rule scaled to its body (1 = in proportion).",
           "help_topic": "fish-big-fish",
           "default": 1.0
+        },
+        "big_fish_avoid": {
+          "label": "Big Fish Avoidance",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 2.0,
+          "aspect": "shape",
+          "note": "The big fish flare: how hard the other fish steer out of its way while it crosses — they see it coming and swim clear, the way they handle the wall and each other, never through the wall. 0 = they swim straight through it.",
+          "help_topic": "fish-big-fish",
+          "default": 1.0
+        },
+        "big_fish_avoid_margin": {
+          "label": "Big Fish Avoid Gap",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 8.0,
+          "aspect": "shape",
+          "note": "The big fish flare: the gap (pixels) the other fish try to keep between their bodies and its body.",
+          "help_topic": "fish-big-fish",
+          "default": 2.0
         }
       },
       "defaults": {
@@ -2349,7 +2371,9 @@
         "big_fish_cross_slow_s": 7.0,
         "big_fish_cross_fast_s": 2.5,
         "big_fish_ripple": 1.0,
-        "big_fish_ripple_size": 1.0
+        "big_fish_ripple_size": 1.0,
+        "big_fish_avoid": 1.0,
+        "big_fish_avoid_margin": 2.0
       }
     },
     "gifplayer": {
