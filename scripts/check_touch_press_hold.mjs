@@ -39,7 +39,7 @@
 // move-out" still works); held through the full duration fires the real
 // mutation exactly once; and the mouse + keyboard paths are unchanged.
 //
-// §5-§8 cover the OTHER four real press-and-hold targets — found by a
+// §5-§8b cover the OTHER four real press-and-hold targets — found by a
 // broader grep for every `useHoldToConfirm`/`useLongPress(` call site, at
 // firstmate's own follow-up ask: TopBarGroupButton.tsx (Mode/Ambient's
 // hold-to-expand), PaletteCard.tsx (hold a palette key to edit it),
@@ -60,13 +60,14 @@
 // proves its pointer/keyboard contract plus the new onContextMenu and
 // onPointerCancel wiring. §7 mounts the real ShapeControls.tsx directly
 // (plain props, no query dependencies) to prove the class actually reaches
-// its two button kinds end to end. §8 mounts the real PaletteCard.tsx and
-// ColorSetsPage.tsx too (their real query hooks, intercepted at `fetch`,
-// the same precedent §2-§4 already established for a heavier dependency
-// graph than either of these) and drives a real held pointer through each
-// — proving the long-press binding actually reaches its handler (the
-// palette editor opens; the room-colour preview starts) rather than only
-// that a className string sits next to it in source.
+// its two button kinds end to end. §8a/§8b mount the real
+// PaletteCard.tsx and ColorSetsPage.tsx too (their real query hooks,
+// intercepted at `fetch`, the same precedent §2-§4 already established
+// for a heavier dependency graph than either of these) and drive a real
+// held pointer through each — proving the long-press binding actually
+// reaches its handler (the palette editor opens; the room-colour preview
+// starts) rather than only that a className string sits next to it in
+// source.
 //
 // Run: node scripts/check_touch_press_hold.mjs
 import { mkdtempSync, writeFileSync, readFileSync } from 'node:fs';

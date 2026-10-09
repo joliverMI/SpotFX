@@ -9401,9 +9401,9 @@ gesture) needs `touch-action: none` on the bound element, not
 double-tap-zoom/pinch-zoom-delay, not the pan-gesture takeover that
 breaks a stationary hold. Spec: `scripts/check_touch_press_hold.mjs`
 (§1 is the direct CSS regression; jsdom can't synthesize a real browser's
-native `pointercancel`, so §2-§5 prove the hook's own pointer/keyboard/
+native `pointercancel`, so §2-§4 prove the hook's own pointer/keyboard/
 mouse contract is otherwise unchanged, against the real components under
-a hand-driven fake clock).
+a hand-driven fake clock; §5 onward cover the other hold targets, below).
 
 **The same investigation widened to every OTHER hold/long-press button in
 the app (follow-up review, same day) — grep for `useLongPress(` and
