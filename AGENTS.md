@@ -9376,6 +9376,72 @@ activation/dark-fixture strips and the full-width released banner — its
 own always-reachable button is gone, moved here; the way back from
 `released` is unchanged.
 
+**Did not actually hold on his phone — fixed 2026-10-09.** His report:
+"I tried pressing and holding the release to home assistant button on my
+phone and it didn't seem to work." Both this button's `.release-hold-btn`
+and the Mode chip's `.mode-chip-link` (ModeChip.tsx, the other button
+built on this same `useHoldToConfirm.ts` hook) shipped with `touch-action:
+manipulation` — which still lets the browser claim an ordinary finger's
+small in-place drift as an intended pan/scroll and fire a native
+`pointercancel` at the element well before the hook's ~1s duration
+elapses, on a button this small (28-30px). Measured under real
+touch-emulated pointer events (chrome-devtools-axi's snapshot/eval tools
+hit the known `pageId` bug on this host — worked around with raw CDP over
+a locally-launched Playwright Chromium, per the standing memory note on
+that workaround): ~18px of drift was enough to cancel it, well within an
+ordinary held finger's wobble. Fixed by setting `touch-action: none` on
+both classes instead — the established pattern every drag-style control
+in this app already uses (`ShapeControls.tsx`, `PaletteCard.tsx`,
+`SpectraTriggerBar.tsx`, etc.) — which leaves the whole gesture to the
+hook's own pointer handlers; mouse/keyboard behaviour is unchanged
+(`touch-action` only affects touch). **Any future hold-to-act button
+built on `useHoldToConfirm.ts` (or any other pointer-driven hold/drag
+gesture) needs `touch-action: none` on the bound element, not
+`manipulation`** — the latter reads as "touch-safe" but only suppresses
+double-tap-zoom/pinch-zoom-delay, not the pan-gesture takeover that
+breaks a stationary hold. Spec: `scripts/check_touch_press_hold.mjs`
+(§1 is the direct CSS regression; jsdom can't synthesize a real browser's
+native `pointercancel`, so §2-§4 prove the hook's own pointer/keyboard/
+mouse contract is otherwise unchanged, against the real components under
+a hand-driven fake clock; §5 onward cover the other hold targets, below).
+
+**The same investigation widened to every OTHER hold/long-press button in
+the app (follow-up review, same day) — grep for `useLongPress(` and
+`useHoldToConfirm(` call sites before adding a new one, this is the
+complete list.** Four more targets share `spectra/web/src/lib/
+useLongPress.ts` (fire-after-N-ms, no visible progress — a different hook
+from `useHoldToConfirm.ts` above, but the same touch-safety requirement):
+`TopBarGroupButton.tsx` (Mode/Ambient's hold-to-expand — its own
+`.top-bar-group-btn` carried the identical `manipulation` bug, fixed the
+same way), `PaletteCard.tsx` (hold a palette key to edit it),
+`ShapeControls.tsx` (hold the ⚡ button to pick its intensity source), and
+`ColorSetsPage.tsx` (hold ▶ Preview to pause the room up to 60s — this one
+had **no touch protection at all**, not even `touch-action`, the most
+broken of the four). `ShapeControls.tsx`'s own hand-rolled band buttons
+(hold+drag to scale, a different gesture that rolls its own pointer
+handlers rather than using the hook) already had `touch-action: none` but
+were missing the other two.
+
+Two changes make this "one shared hook" rather than four separate
+patches: `useLongPress.ts` itself now binds `onContextMenu` (prevents the
+browser's own press-and-hold menu/callout) AND `onPointerCancel` (a real
+gap found here — only `onPointerUp`/`onPointerLeave` cancelled before;
+a native gesture takeover firing `pointercancel` left the timer running,
+risking a stale fire after the browser had already taken the touch away)
+— every current and future caller gets both for free. A new shared CSS
+class, `.long-press-target` (touch-action: none, -webkit-touch-callout:
+none, user-select: none, both -webkit- and plain), covers the three
+plain-inline-styled buttons (`TopBarGroupButton.tsx`'s own `.top-bar-
+group-btn` already had its own copy of the trio, just with the wrong
+`touch-action` value, fixed in place rather than switched to the shared
+class). Spec: `scripts/check_touch_press_hold.mjs` §5-§8b (CSS regression
+for both classes, the hook's own pointer/keyboard contract including the
+two new wires, a real mount for `ShapeControls.tsx`, and real mounts for
+`PaletteCard.tsx`/`ColorSetsPage.tsx` driving a held pointer through
+their real query hooks — fetch intercepted, not a source-text check —
+to prove the editor/preview actually opens, not just that the className
+sits next to the binding).
+
 ## SPECTRA spec, rendered for a phone: `GET /spectra/spec`
 
 He asked for a link three times and got a file path twice. `docs/

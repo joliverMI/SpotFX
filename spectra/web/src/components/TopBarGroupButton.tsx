@@ -15,13 +15,16 @@
  * - false (Scenes): every tap just opens/closes the panel — no cycle
  *   behaviour to protect, so no hold gesture is needed or bound.
  *
- * Touch safety: `touch-action: manipulation` + `-webkit-touch-callout:
+ * Touch safety: `touch-action: none` + `-webkit-touch-callout:
  * none` + `user-select: none` (CSS, .top-bar-group-btn) plus an
  * onContextMenu guard keep a real held finger from triggering the
  * browser's own text-selection / long-press context menu / iOS callout
  * instead of (or on top of) this button's own hold gesture — verified
  * under emulated touch input, not just a mouse-down, since that class of
- * bug only shows up on a real touch path. */
+ * bug only shows up on a real touch path. `touch-action: manipulation`
+ * was tried first and was the bug: it still lets the browser treat an
+ * ordinary finger's in-place drift as an intended pan and fire a native
+ * `pointercancel` well before the hold duration elapses. */
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useLongPress } from '../lib/useLongPress';
@@ -106,6 +109,14 @@ export default function TopBarGroupButton({
     setOpen((o) => !o);
   };
 
+  // Scenes (holdToExpand=false) binds no pointer gesture at all, so it
+  // still needs its own context-menu guard; Mode/Ambient get theirs from
+  // useLongPress.ts's own `bind` (one onContextMenu prop either way, never
+  // two — duplicating it is a TS error, and both do the same thing).
+  const gestureBind = holdToExpand
+    ? longPress(() => setOpen(true))
+    : { onContextMenu: (e: React.MouseEvent) => e.preventDefault() };
+
   return (
     <>
       <button
@@ -116,8 +127,7 @@ export default function TopBarGroupButton({
         aria-label={ariaLabel ?? title}
         style={style}
         onClick={handleClick}
-        onContextMenu={(e) => e.preventDefault()}
-        {...(holdToExpand ? longPress(() => setOpen(true)) : {})}
+        {...gestureBind}
       >
         {children}
       </button>

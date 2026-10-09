@@ -506,6 +506,7 @@ export default function ColorSetsPage() {
             <button className="primary" onClick={() => void save()}>Save{drafts[card.id] ? ' •' : ''}</button>
             <button style={{ fontSize: 12 }} onClick={duplicate}>⧉ Duplicate</button>
             <button
+              className="long-press-target"
               style={{ fontSize: 12, borderColor: 'var(--accent)',
                       color: previewingId === card.id ? 'var(--accent)' : undefined }}
               title={previewingId === card.id

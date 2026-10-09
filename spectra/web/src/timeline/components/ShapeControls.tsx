@@ -74,8 +74,7 @@ export default function ShapeControls({
     return (
       <button
         key={band}
-        className={`chip filter ${on ? 'active' : ''}`}
-        style={{ userSelect: 'none', touchAction: 'none' }}
+        className={`chip filter long-press-target ${on ? 'active' : ''}`}
         title={`${SCALE_LABELS[band]} — click: fill · right-click: avg line · hold+drag: scale (${view.scales[band].toFixed(2)}×)`}
         onPointerDown={onBandPointerDown(band)}
         onPointerMove={onBandPointerMove}
@@ -107,8 +106,7 @@ export default function ShapeControls({
       </button>
       <span style={{ position: 'relative' }}>
         <button
-          className={`chip filter ${view.intensityMode !== 'off' ? 'active' : ''}`}
-          style={{ touchAction: 'none' }}
+          className={`chip filter long-press-target ${view.intensityMode !== 'off' ? 'active' : ''}`}
           title="Intensity background — click: on/off · hold: pick source · scroll: cycle sources"
           onClick={() => setIntensityMode(view.intensityMode === 'off'
             ? (hasIntensityCurve ? 'total' : 'triggers') : 'off')}
