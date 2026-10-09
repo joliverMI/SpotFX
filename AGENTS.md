@@ -4357,6 +4357,34 @@ test_after_id_places_a_new_set_right_after_the_named_one` +
 `test_duplicate_set_via_the_api_is_independent_saves_fires_and_is_placed_
 right_after`, `check_light_show_duplicate_set.mjs`.
 
+**SHOW SEQUENCES — the Sequence tab (2026-10-09, his ask: "a sequence of
+pre-armed sets ... goes in order ... never skipping ahead").**
+`spectra/services/show_sequence.py`'s docstring is the binding statement.
+Four things:
+
+- **A SET ITEM ARMS THROUGH `show_arms.arm()`** (the Run view's own call),
+  `source="sequence:<run id>"`, and completes when that arm fires
+  (`show_arms._fire` → `show_sequence.on_arm_fired`); an instant item fires
+  through `show_actions.fire_set`. A sequence arm never expires on the
+  board's own clocks and never replaces (or is replaced by) a hand arm —
+  `show_arms.is_sequence_arm_source` is the one test.
+- **ONE TRIGGER, ONE STEP**: `show_arms.on_scene_change`/`on_cue` pick the
+  arms a trigger fires BEFORE telling the sequence (`_tell_sequence`), so a
+  Wait it completes cannot also fire the set armed after it; and the Wait
+  is told before those arms fire, so the trigger that completed a set never
+  counts for the Wait after it. Keep that order.
+- **THE RUN LIVES IN `LightShowState.sequence_run`** (a snapshot of the
+  items, so an edit never shifts a running position) and resumes at its
+  current item on the first supervisor tick of a new process
+  (`show_sequence.tick`); `last_uri` stops the still-playing song counting
+  as a new start. Songs are counted from `engine._on_track_uri`; a room
+  release PAUSES the run (`show_output.on_release`, before the arms expire).
+- **Song-list Waits search his profile library** (`spectra/services/
+  song_library.py`, `GET /api/light-show/songs`, `spotify:track:` URIs
+  only). Sonic: `show_console.SEQUENCE_OPERATIONS` (read + start/stop/
+  pause/resume/next/previous/fire by name; authoring excluded). Specs:
+  `tests/test_show_sequence.py`, `node scripts/check_show_sequence_ui.mjs`.
+
 ## HOUSE LIGHTING (`/house`) — the room's always-on resting look (phases 1–2)
 
 Plan: `/home/javi/fleet-spotfx/data/standard-lighting-plan/report.md` (his
