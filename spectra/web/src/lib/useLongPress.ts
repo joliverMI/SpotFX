@@ -1,7 +1,17 @@
 /** Long-press gesture factory. `bind(key, onLong)` returns pointer handlers;
  * onLong fires after `ms` if the pointer stays down and within 8px. The
  * click that follows a fired long-press is swallowed (onClickCapture), so
- * a button can keep its normal onClick for short presses. */
+ * a button can keep its normal onClick for short presses.
+ *
+ * `onContextMenu` is included here (not left to each caller) so every
+ * long-press target gets it uniformly — found missing on three of the
+ * four real callers 2026-10-09, same investigation as useHoldToConfirm.ts's
+ * own touch-action fix: a real held finger can trigger the browser's own
+ * press-and-hold context menu/callout on top of (or instead of) this
+ * gesture. The CSS trio that goes with it (`touch-action: none`,
+ * `-webkit-touch-callout: none`, `user-select: none`) is the caller's own
+ * job — see `.long-press-target` in tokens.css — since this hook has no
+ * element to attach a class/style to. */
 import { useRef } from 'react';
 
 export function useLongPress(ms = 500) {
@@ -31,6 +41,7 @@ export function useLongPress(ms = 500) {
     },
     onPointerUp: cancel,
     onPointerLeave: cancel,
+    onPointerCancel: cancel,
     onClickCapture: (e: React.MouseEvent) => {
       if (fired.current) {
         e.preventDefault();
@@ -38,5 +49,6 @@ export function useLongPress(ms = 500) {
         fired.current = false;
       }
     },
+    onContextMenu: (e: React.MouseEvent) => e.preventDefault(),
   });
 }

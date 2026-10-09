@@ -9405,6 +9405,41 @@ native `pointercancel`, so §2-§5 prove the hook's own pointer/keyboard/
 mouse contract is otherwise unchanged, against the real components under
 a hand-driven fake clock).
 
+**The same investigation widened to every OTHER hold/long-press button in
+the app (follow-up review, same day) — grep for `useLongPress(` and
+`useHoldToConfirm(` call sites before adding a new one, this is the
+complete list.** Four more targets share `spectra/web/src/lib/
+useLongPress.ts` (fire-after-N-ms, no visible progress — a different hook
+from `useHoldToConfirm.ts` above, but the same touch-safety requirement):
+`TopBarGroupButton.tsx` (Mode/Ambient's hold-to-expand — its own
+`.top-bar-group-btn` carried the identical `manipulation` bug, fixed the
+same way), `PaletteCard.tsx` (hold a palette key to edit it),
+`ShapeControls.tsx` (hold the ⚡ button to pick its intensity source), and
+`ColorSetsPage.tsx` (hold ▶ Preview to pause the room up to 60s — this one
+had **no touch protection at all**, not even `touch-action`, the most
+broken of the four). `ShapeControls.tsx`'s own hand-rolled band buttons
+(hold+drag to scale, a different gesture that rolls its own pointer
+handlers rather than using the hook) already had `touch-action: none` but
+were missing the other two.
+
+Two changes make this "one shared hook" rather than four separate
+patches: `useLongPress.ts` itself now binds `onContextMenu` (prevents the
+browser's own press-and-hold menu/callout) AND `onPointerCancel` (a real
+gap found here — only `onPointerUp`/`onPointerLeave` cancelled before;
+a native gesture takeover firing `pointercancel` left the timer running,
+risking a stale fire after the browser had already taken the touch away)
+— every current and future caller gets both for free. A new shared CSS
+class, `.long-press-target` (touch-action: none, -webkit-touch-callout:
+none, user-select: none, both -webkit- and plain), covers the three
+plain-inline-styled buttons (`TopBarGroupButton.tsx`'s own `.top-bar-
+group-btn` already had its own copy of the trio, just with the wrong
+`touch-action` value, fixed in place rather than switched to the shared
+class). Spec: `scripts/check_touch_press_hold.mjs` §5-§8 (CSS regression
+for both classes, the hook's own pointer/keyboard contract including the
+two new wires, and — proportional to each component's own query
+dependency weight — a real mount for `ShapeControls.tsx` vs. a source-
+level class-presence check for `PaletteCard.tsx`/`ColorSetsPage.tsx`).
+
 ## SPECTRA spec, rendered for a phone: `GET /spectra/spec`
 
 He asked for a link three times and got a file path twice. `docs/

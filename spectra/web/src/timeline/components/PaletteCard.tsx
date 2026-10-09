@@ -99,8 +99,8 @@ export default function PaletteCard({ events }: { events: EventOption[] }) {
         {(palettes ?? []).map((p) => (
           <button
             key={p.id}
-            className={p.id === activePaletteId ? 'primary' : ''}
-            style={{ borderLeft: `4px solid ${p.color}`, touchAction: 'none' }}
+            className={`long-press-target${p.id === activePaletteId ? ' primary' : ''}`}
+            style={{ borderLeft: `4px solid ${p.color}` }}
             title="Click: activate · hold: edit"
             onClick={() => pick(p.id)}
             onDoubleClick={() => openEdit(p)}

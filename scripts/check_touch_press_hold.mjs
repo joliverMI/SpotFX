@@ -24,7 +24,7 @@
 // This script covers what a real browser's touch-action gesture engine
 // cannot be reproduced in jsdom: §1 is the direct CSS regression (the
 // actual root cause — computed `touch-action` on both buttons' classes,
-// read off the REAL tokens.css cascade). §2-§5 mount the REAL
+// read off the REAL tokens.css cascade). §2-§4 mount the REAL
 // ReleaseButton.tsx/ModeChip.tsx (via esbuild + jsdom + react-dom/client,
 // the check_timeline_canvas_pointer_isolation.mjs precedent) under a FAKE
 // clock (requestAnimationFrame/performance.now stubbed and driven by hand,
@@ -38,6 +38,33 @@
 // duration elapses DOES cancel (visible progress resets, "cancel on
 // move-out" still works); held through the full duration fires the real
 // mutation exactly once; and the mouse + keyboard paths are unchanged.
+//
+// §5-§8 cover the OTHER four real press-and-hold targets — found by a
+// broader grep for every `useHoldToConfirm`/`useLongPress(` call site, at
+// firstmate's own follow-up ask: TopBarGroupButton.tsx (Mode/Ambient's
+// hold-to-expand), PaletteCard.tsx (hold a palette key to edit it),
+// ShapeControls.tsx (hold the ⚡ button to pick its intensity source, plus
+// its own hand-rolled hold+drag-to-scale band buttons), and ColorSetsPage.tsx
+// (hold ▶ Preview to pause the room up to 60s) — ALL FOUR built on the
+// shared `useLongPress.ts` hook except the band buttons, which roll their
+// own pointer handlers but share the same CSS fix. ColorSetsPage's Preview
+// button had NO touch protection at all (no touch-action, no CSS class);
+// the other three had `touch-action: none` already but were each missing
+// `-webkit-touch-callout`/`user-select` and (three of the four) the
+// `useLongPress` hook's own `onContextMenu` guard, which is now baked into
+// the hook itself so every current and future caller gets it for free. §5
+// is the same direct-CSS-cascade proof as §1, for `.top-bar-group-btn`
+// (its own copy of the trio, touch-action fixed the same way) and the new
+// shared `.long-press-target` class the other three now carry. §6 mounts
+// the real `useLongPress.ts` hook (trivial, no component dependencies) and
+// proves its pointer/keyboard contract plus the new onContextMenu and
+// onPointerCancel wiring. §7 mounts the real ShapeControls.tsx directly
+// (plain props, no query dependencies) to prove the class actually reaches
+// its two button kinds end to end. §8 is a lighter source-level check for
+// PaletteCard.tsx/ColorSetsPage.tsx specifically (both carry heavier query
+// dependency graphs that make a full mount disproportionate here, and §5
+// already proves what the class itself does) — asserting each file's own
+// hold button literally carries the `long-press-target` class.
 //
 // Run: node scripts/check_touch_press_hold.mjs
 import { mkdtempSync, writeFileSync, readFileSync } from 'node:fs';
@@ -408,6 +435,161 @@ export async function flush() {
   fireKey(link, 'keyup', { key: 'Enter' });
   await flush();
   ok(toggleCalls.length === 2, 'a short Enter press does not toggle');
+}
+
+/* ── §5 — the other three CSS targets (.top-bar-group-btn's own trio,
+ * plus the new shared .long-press-target class) ── */
+console.log('§5 the other long-press targets: touch-action on .top-bar-group-btn and .long-press-target');
+{
+  const css = readFileSync(join(webDir, 'src/styles/tokens.css'), 'utf8');
+  const cssDom = new JSDOM(
+    `<!doctype html><html><head><style>${css}</style></head><body>`
+    + `<button class="top-bar-group-btn"></button>`
+    + `<button class="long-press-target"></button>`
+    + `</body></html>`,
+    { pretendToBeVisual: true },
+  );
+  const groupBtn = cssDom.window.document.querySelector('.top-bar-group-btn');
+  const target = cssDom.window.document.querySelector('.long-press-target');
+  const groupTouchAction = cssDom.window.getComputedStyle(groupBtn).touchAction;
+  const targetTouchAction = cssDom.window.getComputedStyle(target).touchAction;
+  const targetUserSelect = cssDom.window.getComputedStyle(target).userSelect;
+  ok(groupTouchAction === 'none',
+    `.top-bar-group-btn computed touch-action is "${groupTouchAction}" (must be "none" — `
+    + `TopBarGroupButton.tsx's Mode/Ambient hold-to-expand gesture)`);
+  ok(targetTouchAction === 'none',
+    `.long-press-target computed touch-action is "${targetTouchAction}" (must be "none")`);
+  ok(targetUserSelect === 'none',
+    `.long-press-target computed user-select is "${targetUserSelect}" (must be "none", `
+    + `so a held finger can't select the button's own text)`);
+}
+
+/* ── §6 — the real useLongPress.ts hook's own pointer/keyboard contract,
+ * including the two new wires: onContextMenu and onPointerCancel ── */
+console.log('§6 useLongPress.ts: onContextMenu is bound, pointercancel cancels, the move/duration contract is unchanged');
+{
+  const entrySrc = `
+import React, { act } from 'react';
+import { createRoot } from 'react-dom/client';
+import { useLongPress } from ${JSON.stringify(join(webDir, 'src/lib/useLongPress.ts'))};
+
+const container = document.createElement('div');
+document.body.appendChild(container);
+let root = null;
+const calls = { long: 0 };
+
+function Test() {
+  const longPress = useLongPress(60);
+  return React.createElement('button', {
+    onClick: () => { calls.clicked = (calls.clicked || 0) + 1; },
+    ...longPress(() => { calls.long += 1; }),
+  }, 'hold me');
+}
+
+export async function mount() {
+  root = createRoot(container);
+  await act(async () => { root.render(React.createElement(Test)); });
+  return { btn: container.querySelector('button'), calls };
+}
+`;
+  const { mount } = await buildMount(entrySrc, 'use-long-press');
+  const { btn, calls } = await mount();
+  ok(!!btn, 'a trivial useLongPress consumer mounts a button');
+
+  // onContextMenu must be bound and must preventDefault — the real
+  // browser's own press-and-hold context menu/callout guard.
+  const cmEvent = new dom.window.MouseEvent('contextmenu', { bubbles: true, cancelable: true });
+  btn.dispatchEvent(cmEvent);
+  ok(cmEvent.defaultPrevented, 'onContextMenu is bound and calls preventDefault()');
+
+  // Held through the duration (via pointerdown+advance, no React act()
+  // wrapper needed here since nothing re-renders mid-hold in this hook).
+  fire(btn, 'pointerdown', { pointerId: 10, pointerType: 'touch', clientX: 0, clientY: 0 });
+  await new Promise((r) => setTimeout(r, 90));
+  ok(calls.long === 1, `a touch held through the duration fires onLong exactly once (got ${calls.long})`);
+
+  // The click that follows a fired long-press is swallowed.
+  const clickEvent = new dom.window.MouseEvent('click', { bubbles: true, cancelable: true });
+  Object.defineProperty(clickEvent, 'preventDefault', { value: () => { calls.clickPrevented = true; } });
+  btn.dispatchEvent(clickEvent);
+  ok(calls.clickPrevented === true, 'the trailing click after a fired long-press is swallowed (preventDefault called)');
+
+  // A move past the 8px threshold cancels before the duration — never
+  // fires onLong.
+  fire(btn, 'pointerdown', { pointerId: 11, pointerType: 'touch', clientX: 0, clientY: 0 });
+  fire(btn, 'pointermove', { pointerId: 11, pointerType: 'touch', clientX: 20, clientY: 0 });
+  await new Promise((r) => setTimeout(r, 90));
+  ok(calls.long === 1, 'a move past 8px cancels — still exactly 1 total fire');
+
+  // pointercancel (the new wire — previously missing entirely) must also
+  // cancel, so a native gesture takeover never leaves a stale timer that
+  // fires later.
+  fire(btn, 'pointerdown', { pointerId: 12, pointerType: 'touch', clientX: 0, clientY: 0 });
+  fire(btn, 'pointercancel', { pointerId: 12, pointerType: 'touch', clientX: 0, clientY: 0 });
+  await new Promise((r) => setTimeout(r, 90));
+  ok(calls.long === 1, 'a pointercancel mid-press cancels the long-press timer — still exactly 1 total fire');
+}
+
+/* ── §7 — ShapeControls.tsx, real component, plain props (no query
+ * dependencies — cheap to mount directly) ── */
+console.log('§7 ShapeControls.tsx: the real ⚡ button and band buttons carry .long-press-target');
+{
+  const entrySrc = `
+import React, { act } from 'react';
+import { createRoot } from 'react-dom/client';
+import ShapeControls from ${JSON.stringify(join(webDir, 'src/timeline/components/ShapeControls.tsx'))};
+
+const container = document.createElement('div');
+document.body.appendChild(container);
+let root = null;
+
+const view = {
+  filters: { total: false, bass: false, mid: false, high: false, marks: false },
+  avgFilters: { total: false, bass: false, mid: false, high: false },
+  markFilters: {},
+  librosaFilters: { sections: false, beats: false, onsets: false, harmonic: false, bass: false, snare: false, mfcc: false },
+  scales: { total: 1, bass: 1, mid: 1, high: 1 },
+  scaleOverall: 1,
+  offsetMs: 0, librosaOffsetMs: 0, triggerOffsetMs: 0, maxRms: null,
+  intensityMode: 'off', advanced: false,
+};
+
+export async function mount() {
+  root = createRoot(container);
+  await act(async () => {
+    root.render(React.createElement(ShapeControls, {
+      view, setFilters: () => {}, setAvgFilters: () => {}, setScales: () => {},
+      setLibrosaFilter: () => {}, setIntensityMode: () => {},
+      hasLibrosa: true, hasIntensityCurve: true,
+    }));
+  });
+  return container;
+}
+`;
+  const { mount } = await buildMount(entrySrc, 'shape-controls');
+  const container = await mount();
+  const lightningBtn = container.querySelector('button.chip.filter.long-press-target:not(.active)');
+  const bandBtns = [...container.querySelectorAll('button.long-press-target')];
+  ok(bandBtns.length >= 5, `at least the 4 band buttons + the ⚡ button carry .long-press-target (found ${bandBtns.length})`);
+  ok(!!lightningBtn, 'the ⚡ intensity-source button itself carries .long-press-target');
+}
+
+/* ── §8 — PaletteCard.tsx / ColorSetsPage.tsx: a lighter source-level
+ * check (both carry heavier query dependency graphs that make a full
+ * mount disproportionate here; §5 already proves what the class itself
+ * does once applied) — assert each file's own hold button literally
+ * carries the shared class. ── */
+console.log('§8 PaletteCard.tsx and ColorSetsPage.tsx: their hold buttons carry .long-press-target');
+{
+  const paletteSrc = readFileSync(join(webDir, 'src/timeline/components/PaletteCard.tsx'), 'utf8');
+  const colorSetsSrc = readFileSync(join(webDir, 'src/colorsets/ColorSetsPage.tsx'), 'utf8');
+  ok(/className=\{`long-press-target\$\{/.test(paletteSrc),
+    'PaletteCard.tsx\'s hold-to-edit palette button className includes "long-press-target"');
+  ok(/longPress\(openEdit/.test(paletteSrc) === false && /\{\.\.\.longPress\(\(\) => openEdit\(p\)\)\}/.test(paletteSrc),
+    'PaletteCard.tsx\'s palette button is still bound to useLongPress\'s own gesture');
+  const previewButtonMatch = colorSetsSrc.match(/<button\s+className="long-press-target"[\s\S]{0,700}previewLongPress\(onPreviewHold\)/);
+  ok(!!previewButtonMatch,
+    'ColorSetsPage.tsx\'s ▶ Preview button carries className="long-press-target" and is still bound to its hold gesture');
 }
 
 console.log(failures === 0 ? '\nPASS' : `\nFAIL (${failures})`);

@@ -228,6 +228,22 @@ button.danger:hover { border-color: var(--danger); color: var(--danger); }
   -webkit-user-select: none;
   user-select: none;
 }
+/* Shared touch-safety trio for every long-press target bound through
+ * useLongPress.ts (TopBarGroupButton's hold-to-expand has its own copy
+ * baked into `.top-bar-group-btn` above; this is for the plain inline-
+ * styled buttons — PaletteCard's edit-on-hold swatch, ShapeControls' ⚡
+ * source-chooser, ColorSetsPage's hold-to-preview button). `touch-action:
+ * none` is the one that matters (same reasoning as `.release-hold-btn`
+ * above — found missing ENTIRELY on ColorSetsPage's Preview button,
+ * 2026-10-09); the other two suppress iOS's press-and-hold callout and
+ * the hold selecting the button's own text. Apply alongside the button's
+ * own class — merge, don't replace. */
+.long-press-target {
+  touch-action: none;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
 .release-hold-btn:hover:not(:disabled) { background: rgba(248, 113, 113, 0.14); }
 .release-hold-btn:disabled { opacity: 0.5; cursor: default; }
 .release-hold-btn:focus-visible { outline: 2px solid var(--danger); outline-offset: 2px; }
@@ -256,13 +272,14 @@ button.danger:hover { border-color: var(--danger); color: var(--danger); }
 /* The three grouped press-and-hold buttons (Mode / Ambient / Scenes,
  * TopBarGroupButton.tsx) — Mode/Ambient short-press act directly (cycle
  * mode / toggle ambient), Scenes short-press only opens its panel. Touch
- * safety trio on the button itself: `touch-action: manipulation` skips
- * the browser's ~300ms double-tap-zoom wait and stops pinch/pan gestures
- * from hijacking the hold; `-webkit-touch-callout: none` suppresses
- * iOS's press-and-hold callout/magnifier; `user-select: none` (+
- * -webkit- prefix) stops the hold from selecting the button's own text —
- * all three are what let a real held finger reach this button's own hold
- * gesture instead of the browser's. */
+ * safety trio on the button itself: `touch-action: none` (changed from
+ * `manipulation` 2026-10-09, same finding as `.release-hold-btn` above —
+ * `manipulation` still lets the browser claim an ordinary finger's drift
+ * as a pan and cancel the hold via a native `pointercancel`); `-webkit-
+ * touch-callout: none` suppresses iOS's press-and-hold callout/magnifier;
+ * `user-select: none` (+ -webkit- prefix) stops the hold from selecting
+ * the button's own text — all three are what let a real held finger reach
+ * this button's own hold gesture instead of the browser's. */
 /* Fixed, uniform, measured — not eyeballed — height for all three grouped
  * buttons (2026-08-17, his ask: "make the icons all vertically the same
  * height... ideally make them shorter than they are now"). box-sizing:
@@ -290,7 +307,7 @@ button.danger:hover { border-color: var(--danger); color: var(--danger); }
   font-weight: 600;
   line-height: 1.1;
   cursor: pointer;
-  touch-action: manipulation;
+  touch-action: none;
   -webkit-touch-callout: none;
   -webkit-user-select: none;
   user-select: none;

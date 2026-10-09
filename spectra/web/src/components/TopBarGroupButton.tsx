@@ -106,6 +106,14 @@ export default function TopBarGroupButton({
     setOpen((o) => !o);
   };
 
+  // Scenes (holdToExpand=false) binds no pointer gesture at all, so it
+  // still needs its own context-menu guard; Mode/Ambient get theirs from
+  // useLongPress.ts's own `bind` (one onContextMenu prop either way, never
+  // two — duplicating it is a TS error, and both do the same thing).
+  const gestureBind = holdToExpand
+    ? longPress(() => setOpen(true))
+    : { onContextMenu: (e: React.MouseEvent) => e.preventDefault() };
+
   return (
     <>
       <button
@@ -116,8 +124,7 @@ export default function TopBarGroupButton({
         aria-label={ariaLabel ?? title}
         style={style}
         onClick={handleClick}
-        onContextMenu={(e) => e.preventDefault()}
-        {...(holdToExpand ? longPress(() => setOpen(true)) : {})}
+        {...gestureBind}
       >
         {children}
       </button>
