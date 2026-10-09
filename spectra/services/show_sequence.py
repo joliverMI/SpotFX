@@ -39,9 +39,11 @@ item k-1 has COMPLETED, and nothing about item k+1 exists until then:
 THE HUMAN OVERRIDE: pause / resume, stop, Next (skip the current item
 unfired), Previous (back one item, re-armed; an instant item stepped back
 onto waits for Fire now rather than firing by surprise), Fire now (run the
-current Set item at once, whatever its arming, and move on). Pause disarms
-the current arm and freezes a duration Wait's remaining time; triggers and
-songs that pass while paused are not counted.
+current Set item at once, whatever its arming, and move on — refused while
+the current item's own instant fire is already in flight, never a second
+dispatch of the same set). Pause disarms the current arm and freezes a
+duration Wait's remaining time; triggers and songs that pass while paused
+are not counted.
 
 END: the run FINISHES after its last item, or — with `loop` on and at least
 one item that waits for something — starts again from the top.
