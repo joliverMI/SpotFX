@@ -135,6 +135,33 @@ export default function LightShowPage() {
     }
   };
 
+  /** "Duplicate" (the Admiral, 2026-10-08): an identical, independent copy
+   * of a SAVED set, named "<name> copy" (uniqued if that's taken too),
+   * saved right after the original (`after_id`) and selected so it's
+   * immediately editable — never a local unsaved draft the way "+ New"
+   * is, since "right after the original" is a property of the saved
+   * list order. */
+  const duplicate = async () => {
+    if (!draft?.id) return;
+    const existingNames = new Set(sets.map((s) => s.name.trim().toLowerCase()));
+    let name = `${draft.name} copy`;
+    for (let n = 2; existingNames.has(name.trim().toLowerCase()); n++) name = `${draft.name} copy ${n}`;
+    const copy: ShowSet & { after_id?: string } = {
+      name, notes: draft.notes ?? '',
+      actions: draft.actions.map((a) => ({ ...a, id: newId() })),
+      after_id: draft.id,
+    };
+    try {
+      const saved = await apiPost<ShowSet>('/light-show/sets', copy);
+      await reloadSets();
+      setSelected(saved.id ?? null);
+      setDirty(false);
+      toast(`Duplicated as ${saved.name}`, 'success');
+    } catch (e) {
+      toast(String(e), 'error');
+    }
+  };
+
   const fireNow = async () => {
     let id = draft?.id;
     if (dirty || !id) {
@@ -269,6 +296,13 @@ export default function LightShowPage() {
                 <button disabled={!dirty} onClick={() => void save()}>Save</button>
                 <button disabled={!draft.id} onClick={() => void doPreview()}
                   title="What it would change against the room as it is now — writes nothing">Preview changes</button>
+                {draft.id && (
+                  <button disabled={dirty} onClick={() => void duplicate()}
+                    title={dirty ? 'Save this set before duplicating it'
+                      : 'An independent copy, named "<name> copy", right after this one'}>
+                    ⧉ Duplicate
+                  </button>
+                )}
                 {draft.id && <button className="danger" onClick={() => void remove()}>Delete</button>}
               </div>
               <ArmControl setId={draft.id} disabled={busy || dirty} onArmed={reloadArms} toast={toast} />
@@ -395,7 +429,33 @@ function RunReport({ run }: { run: ShowRun }) {
   );
 }
 
+/** "+ Add a step…" used to sit inline at the bottom of a long steps list —
+ * on a set with several steps already, that puts the control (and the
+ * SearchSelect dropdown it opens) right at the page's own bottom edge,
+ * with no room below to show or expand (his report, 2026-10-08: "it's so
+ * low on the page I can't see the options well, and it doesn't expand
+ * anywhere"). It is now a plain button that opens a DIALOG near the top
+ * of the viewport — the same fixed-overlay/centered-card shape every
+ * other dialog in this app uses (SpectraTriggerDialog.tsx,
+ * FlareKindEditDialog.tsx) — so the picker always has the viewport below
+ * it to open into, on any page length and at any scroll position. */
 function AddStep({ catalogue, onAdd }: { catalogue: ShowCatalogue; onAdd: (k: ShowKind) => void }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="light-show-add">
+      <button type="button" onClick={() => setOpen(true)}>+ Add a step…</button>
+      <HelpLink topic="show-actions" />
+      {open && (
+        <AddStepDialog catalogue={catalogue} onClose={() => setOpen(false)}
+          onAdd={(k) => { onAdd(k); setOpen(false); }} />
+      )}
+    </div>
+  );
+}
+
+function AddStepDialog({ catalogue, onAdd, onClose }: {
+  catalogue: ShowCatalogue; onAdd: (k: ShowKind) => void; onClose: () => void;
+}) {
   const groups: [string, string][] = [
     ['setting', 'Settings'], ['device', 'Devices'], ['effect', 'Room effects'], ['control', 'Control'],
   ];
@@ -404,13 +464,24 @@ function AddStep({ catalogue, onAdd }: { catalogue: ShowCatalogue; onAdd: (k: Sh
       value: k.kind, label: k.label, group: label, keywords: k.help,
     })));
   return (
-    <div className="light-show-add" aria-label="Add a step">
-      <SearchSelect value="" options={options} placeholder="+ Add a step…" allowEmpty={false}
-        onChange={(v) => {
-          const k = catalogue.kinds.find((x) => x.kind === v);
-          if (k) onAdd(k);
-        }} />
-      <HelpLink topic="show-actions" />
+    <div onClick={onClose}
+      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 100,
+               display: 'flex', alignItems: 'flex-start', justifyContent: 'center', paddingTop: '10vh' }}>
+      <div className="card" onClick={(e) => e.stopPropagation()}
+        style={{ width: 420, maxWidth: '92vw', margin: 0 }}>
+        <div className="card-title">
+          Add a step <HelpLink topic="show-actions" />
+        </div>
+        <SearchSelect value="" options={options} placeholder="Search action kinds…" allowEmpty={false}
+          autoFocus width="100%"
+          onChange={(v) => {
+            const k = catalogue.kinds.find((x) => x.kind === v);
+            if (k) onAdd(k);
+          }} />
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
+          <button onClick={onClose}>Cancel</button>
+        </div>
+      </div>
     </div>
   );
 }

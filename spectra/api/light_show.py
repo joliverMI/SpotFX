@@ -39,6 +39,9 @@ class SetBody(BaseModel):
     name: str
     actions: list[ShowAction] = Field(default_factory=list)
     notes: str = ""
+    #: a brand-new set only — place it right after this id (Duplicate);
+    #: ignored when `id` names an existing set.
+    after_id: Optional[str] = None
 
 
 class FireBody(BaseModel):
@@ -89,8 +92,9 @@ async def upsert_set(body: SetBody):
     data = body.model_dump()
     if not data.get("id"):
         data.pop("id", None)
+    after_id = data.pop("after_id", None)
     try:
-        s = show_store.put_set(ActionSet(**data))
+        s = show_store.put_set(ActionSet(**data), after_id=after_id)
     except show_store.SetNameTaken as exc:
         return JSONResponse(status_code=409, content={"detail": str(exc)})
     # Saved even with problems — a half-built set is his to finish — but the

@@ -26,6 +26,13 @@
 //           `.find` → `.filter`).
 //   FOUR  — each armed tag's own Cancel button disarms exactly that arm
 //           (DELETE /arms/<id>), not some other arm on the same set.
+//   FIVE  — the specific icon button a set is armed on (bunny/up/down)
+//           carries the `armed` class — filled/accent, clearly different
+//           from idle — driven by live `arms` status, not a local click
+//           flag: present on a FRESH render (no click at all) and gone
+//           the instant `arms` no longer lists it (his ask, 2026-10-08:
+//           "highlight" the armed button so it is right after a refresh
+//           or when armed from Sonic/another screen).
 //
 // Run: node scripts/check_light_show_run_icon_buttons.mjs
 import { mkdtempSync, writeFileSync } from 'node:fs';
@@ -255,6 +262,26 @@ const quietAfter = rowFor('Quiet Hues');
 const tagsAfter = [...quietAfter.querySelectorAll('.light-show-run-set-armed-tag')];
 ok(tagsAfter.length === 1 && tagsAfter[0].textContent.includes('next High Trigger'),
   `only the remaining arm (High Trigger) still shows a tag (${tagsAfter.map((t) => t.textContent).join(' | ')})`);
+
+console.log('FIVE — the armed icon itself is highlighted, driven by live arms status');
+// Fresh render (no clicks at all): Quiet Hues is armed on scene_change
+// AND high in the ORIGINAL fixture, proving the highlight comes from the
+// initial arms poll, not from a click earlier in this same script.
+await rerenderWithArms(ARMS);
+const [, quietBunny, quietUp, quietDown] = iconBtns(rowFor('Quiet Hues'));
+ok(quietBunny.classList.contains('armed') && quietUp.classList.contains('armed'),
+  'bunny (scene_change) and up arrow (high) are both marked armed');
+ok(!quietDown.classList.contains('armed'), 'down arrow (low) — not armed — carries no armed class');
+ok(quietBunny.getAttribute('aria-pressed') === 'true' && quietDown.getAttribute('aria-pressed') === 'false',
+  'aria-pressed reflects the same live state for assistive tech');
+const [blueBolt2, blueBunny2] = iconBtns(rowFor('Blues'));
+ok(!blueBolt2.classList.contains('armed') && !blueBunny2.classList.contains('armed'),
+  'an unarmed set\'s buttons carry no armed class at all');
+
+await rerenderWithArms({ ...ARMS, armed: ARMS.armed.filter((a) => a.id !== 'arm-high') });
+const [, quietBunny2, quietUp2] = iconBtns(rowFor('Quiet Hues'));
+ok(quietBunny2.classList.contains('armed') && !quietUp2.classList.contains('armed'),
+  'disarming the High arm clears ONLY that icon\'s highlight, scene_change stays lit');
 
 unmount();
 console.log(failures ? `\n${failures} FAILED` : '\nall passed');

@@ -2587,6 +2587,7 @@ export const HELP_SECTIONS: HelpSection[] = [
           'Left: your sets. Right: the chosen set\'s steps, in order — drag order with ↑ ↓, switch a step off with its tick box without deleting it, and add steps from "+ Add a step". Every step\'s form comes from the server\'s own catalogue, so a new kind of action appears here by itself.',
           '▶ Fire now saves the set if it has unsaved changes and runs it immediately. Underneath, a report lists EVERY step with what happened — applied, skipped, refused or failed, each with its reason — so a set that only partly ran tells you which step did not.',
           'Preview changes shows what each step would change against the room as it is right now, and writes nothing.',
+          '⧉ Duplicate (save your edits first) makes an independent copy with every step, named "<name> copy" (uniqued if that\'s taken too), saved right after the original in your list and opened for editing — editing the copy never changes the original.',
           'The Light Show never takes or releases the room. When SPECTRA does not own the lights, or a preview, a camera run or a night run is holding the room, a banner says so and a fire is refused with that reason — nothing half-runs.',
         ],
       },
@@ -2630,7 +2631,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         keywords: 'level dim brighten percent fade in fade out duration until scene change released stack',
         body: [
           'Level multiplies a fixture\'s light: 50% halves it, 150% brightens it (clipped at full). It fades in, lasts for a number of seconds, until the next scene change, or until released, then fades out by itself.',
-          'Levels stack — two 50% levels on one fixture give 25% — and they multiply on top of the room dimmer and any room effect rather than fighting them.',
+          'Levels on different targets stack — a 50% Level on the crystal and a separate 50% Level on everything give the crystal 25% combined — multiplying on top of the room dimmer and any room effect rather than fighting them. Firing the exact same Level step again on the exact same target restarts it with a fresh timer instead of adding a second, duplicate one.',
         ],
       },
       {
@@ -2638,8 +2639,8 @@ export const HELP_SECTIONS: HelpSection[] = [
         title: 'Pulse reactivity and brightness floor / ceiling',
         keywords: 'pulse reactivity react hits singles hue brightness floor ceiling minimum maximum dim calm modulate',
         body: [
-          'Pulse reactivity turns how strongly the Pulse effect (the Singles: Hue bulbs, porch rail, dining table) answers the music. 1 is full — exactly how it behaves without the step — and 0 is no reaction to the music\'s hits: the light sits at its resting glow for the section and, on a rainbow colour set, no longer steps along the rainbow on hits (its slow drift carries on). Values in between scale both linearly. Flash and colour-flip flares and the charge / lull / drop are not reactivity — Flares on / off is their switch. Two reactivity steps on the same lights multiply.',
-          'Pulse brightness floor / ceiling keeps the effect between two brightnesses, 0 to 1 on the effect\'s own brightness scale (the same scale as its resting and depth settings — how bright it looks, not the raw value sent). The floor is how dark it may get, the ceiling how bright — through hits, drops, lulls and flares alike. With two steps on one light the highest floor and the lowest ceiling win.',
+          'Pulse reactivity turns how strongly the Pulse effect (the Singles: Hue bulbs, porch rail, dining table) answers the music. 1 is full — exactly how it behaves without the step — and 0 is no reaction to the music\'s hits: the light sits at its resting glow for the section and, on a rainbow colour set, no longer steps along the rainbow on hits (its slow drift carries on). Values in between scale both linearly. Flash and colour-flip flares and the charge / lull / drop are not reactivity — Flares on / off is their switch. Two reactivity steps on different targets multiply; firing reactivity again on the exact same target restarts it with a fresh timer instead of adding a second, duplicate one.',
+          'Pulse brightness floor / ceiling keeps the effect between two brightnesses, 0 to 1 on the effect\'s own brightness scale (the same scale as its resting and depth settings — how bright it looks, not the raw value sent). The floor is how dark it may get, the ceiling how bright — through hits, drops, lulls and flares alike. With floor/ceiling steps on different (or overlapping) targets, the highest floor and the lowest ceiling win on any light they share; firing the step again on the exact same target restarts it instead of adding a second one.',
           'Both fade in, then hold until released (the End button under Right now, or End show), for a time, or until the next scene change, and fade back out. Only Pulse listens: a target that is not running Pulse right now is unaffected, and picks the setting up if Pulse runs there while it holds. The room dimmer and Levels still apply on top.',
         ],
       },
@@ -2651,6 +2652,7 @@ export const HELP_SECTIONS: HelpSection[] = [
           'Flares on / off stops flares reaching a fixture, a category, or everything — e.g. keep the Hue bulbs out of every flare while the rest of the room flares. It also takes those lights out of the charge / lull / drop: no climb in a charge, no going dark in a lull, no burst on a drop — they keep playing their normal look straight through the sequence (a charge or lull already under way there lets go when you switch flares off). The scene, its colour journey and the colour change on an analysed scene cue carry on as normal.',
           'It works per virtual, because a flare writes to a virtual\'s effect: the Hue bulbs all share one virtual, so switching flares off for one Hue area switches them off for every Hue bulb, and the step\'s result names the fixtures that came along.',
           'A "Flares on" step lifts every flares-off on those lights; the step also ends by itself after a time or at the next scene change if you chose that, and End show switches flares back on. A flare already in the air when flares go off still finishes and returns as normal.',
+          'Firing "Flares off" again on the exact same target restarts it with a fresh timer instead of adding a second, duplicate entry under "Right now".',
         ],
       },
       {
@@ -2703,7 +2705,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         title: 'Run view: a phone-first surface for standing in the room',
         keywords: 'run view build view mode tap phone big buttons disarm all end show holding',
         body: [
-          'Build and Run are two tap-mode tabs at the top of the Light Show page. Build is the editor above. Run is sized for a phone in the room: each set\'s row has four icon buttons — ⚡ Fire now, 🐇 Arm for the next scene change, ▲ Arm for the next High Trigger, ▼ Arm for the next Low Trigger — one tap runs the action, no menu — then the same Armed board (with the same countdowns), the same Holding list, and big Disarm all / End show buttons.',
+          'Build and Run are two tap-mode tabs at the top of the Light Show page. Build is the editor above. Run is sized for a phone in the room: each set\'s row has four icon buttons — ⚡ Fire now, 🐇 Arm for the next scene change, ▲ Arm for the next High Trigger, ▼ Arm for the next Low Trigger — one tap runs the action, no menu — then the same Armed board (with the same countdowns), the same Holding list, and big Disarm all / End show buttons. Whichever of the three arm icons is currently armed for that set lights up solid, live off the same Armed status everything else here reads — arming or disarming from Sonic or the Build view updates it too, with no tap needed here.',
           'Run never edits a set — it only runs what the Build view already saved. On a phone it opens on Run by default; either tab is always a tap away on any screen size.',
         ],
       },

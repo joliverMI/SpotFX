@@ -4302,6 +4302,61 @@ is the binding statement. Four things:
   `tests/test_pulse_modulation.py`, `node scripts/check_light_show_pickers.mjs`
   (needs the dev-only jsdom). Help: `show-pulse`, `show-flares`.
 
+**RE-FIRING THE SAME HOLD KIND ON THE SAME TARGETS RESTARTS IT, NEVER
+STACKS A DUPLICATE (2026-10-08, his report: two "Flares off until
+released" entries from firing the same set twice, and it "should just
+restart, not queue").** `show_mods.add_pulse_mod`/`add_flare_block` and
+`show_output.add_level` each remove any existing hold whose virtual/
+device id SET is an EXACT match (and, for Pulse, the same DIMENSION —
+`reactivity` vs `floor`/`ceiling`, since those genuinely compose on one
+target) before appending — so the newest fire wins outright (fresh
+timer/until) instead of a second, visually duplicate entry. A hold on a
+genuinely DIFFERENT target set, or the OTHER Pulse dimension on the same
+target, still composes exactly as before (`PulseModHold`/`LevelHold`'s
+own "several stack" docstrings, narrowed to say so). Spec: `tests/
+test_light_show.py::test_a_level_on_the_same_target_restarts_instead_of_
+stacking`, `tests/test_show_flares_off.py`'s `test_refiring_*`/
+`test_pulse_*` tests.
+
+**THE RUN VIEW'S ARMED ICON HIGHLIGHTS FROM LIVE `arms` STATUS, NEVER A
+LOCAL CLICK FLAG (2026-10-08).** Each of the four per-set icon buttons in
+`RunView.tsx` (bolt/bunny/up/down) computes its own `armed` class from
+`arms.armed.filter(a => a.set_id === s.id)`'s `on` values on every
+render — so a refresh, or an arm placed from Sonic/the Build view,
+lights the right icon with no click of this component's own involved.
+Spec: `check_light_show_run_icon_buttons.mjs` §FIVE.
+
+**"+ ADD A STEP…" IS A DIALOG, NOT AN INLINE PICKER (2026-10-08, his
+report: "it's so low on the page I can't see the options well, and it
+doesn't expand anywhere").** `SearchSelect`'s dropdown is `position:
+absolute` under its own input with nothing below it to clamp against but
+the viewport (see that component's own docstring) — on a set with
+several steps the "+ Add a step…" control used to sit inline at the
+BOTTOM of the steps list, so its dropdown opened with only
+`DROPDOWN_MIN_HEIGHT` (80px) of room, sometimes entirely below the fold.
+`LightShowPage.tsx`'s `AddStep` is now a plain button opening
+`AddStepDialog` — the same `position: fixed; inset: 0` centered-card
+shape every other dialog here uses (`SpectraTriggerDialog.tsx`,
+`FlareKindEditDialog.tsx`) — with its `SearchSelect` given a new
+`autoFocus` prop (`SearchSelect.tsx`) so the picker is already open the
+instant the dialog mounts, no second click. Reuse `autoFocus` for any
+future picker that IS a dialog's own content rather than re-deriving
+"open immediately" another way. Spec: `check_light_show_add_step_dialog.mjs`.
+
+**A SET HAS A "⧉ DUPLICATE" BUTTON, PLACED RIGHT AFTER THE ORIGINAL
+(2026-10-08, his ask).** `show_store.put_set` grew `after_id` (a
+brand-new set only — ignored on an update of an existing one): `POST
+/api/light-show/sets` accepts it on `SetBody`, and the frontend's
+`duplicate()` (`LightShowPage.tsx`) posts a fresh, independent copy
+(every step given a NEW id) named `"<name> copy"`, uniqued against the
+loaded sets (`"<name> copy 2"`, …) if that's taken too, with `after_id`
+set to the original — landing it immediately after the original in his
+list rather than appended at the end, and switching the editor to the
+already-saved copy. Spec: `tests/test_light_show.py::
+test_after_id_places_a_new_set_right_after_the_named_one` +
+`test_duplicate_set_via_the_api_is_independent_saves_fires_and_is_placed_
+right_after`, `check_light_show_duplicate_set.mjs`.
+
 ## HOUSE LIGHTING (`/house`) — the room's always-on resting look (phases 1–2)
 
 Plan: `/home/javi/fleet-spotfx/data/standard-lighting-plan/report.md` (his

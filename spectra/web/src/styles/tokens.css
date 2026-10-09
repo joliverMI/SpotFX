@@ -1626,6 +1626,11 @@ kbd {
 }
 .light-show-run-set-icon-btn:disabled { opacity: 0.5; cursor: default; }
 .light-show-run-set-icon-btn.fire { color: var(--warning); border-color: var(--warning); }
+/* Filled/accent while this trigger is actually armed — driven by live
+   arms status (arms.armed), not a local click flag, so it is right after
+   a refresh or when armed from Sonic/another screen (his ask, 2026-10-08).
+   Clearly different from idle: filled accent, not just a border tint. */
+.light-show-run-set-icon-btn.armed { background: var(--accent); color: #fff; border-color: var(--accent); }
 .light-show-run-set-armed-tag { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 0.9em; color: var(--muted); }
 .light-show-run-set-armed-tag button { padding: 4px 10px; }
 button.big { padding: 16px 18px; font-size: 1.05em; min-height: 52px; border-radius: var(--radius); }

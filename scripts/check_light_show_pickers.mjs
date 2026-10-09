@@ -21,7 +21,9 @@
 //           the id into the step.
 //   THREE — the multi-pick lists (scenes, colour sets) add through the same
 //           searchable picker and show what is chosen as removable chips.
-//   FOUR  — "+ Add a step…" is searchable too, and the new effect-modifier
+//   FOUR  — "+ Add a step…" opens a dialog whose picker is searchable too
+//           (check_light_show_add_step_dialog.mjs proves the dialog itself
+//           fixes his 2026-10-08 cutoff report), and the new effect-modifier
 //           kinds (Pulse reactivity, Pulse brightness, Flares on / off) are
 //           in it.
 //   FIVE  — "Right now" lists a Pulse hold and a flares-off switch with an
@@ -284,15 +286,26 @@ await type(fixInput, 'hue');
 ok(options().length === 1 && options()[0].endsWith('Hue Living Room'), 'fixtures filter by name and type');
 await choose('Hue Living Room');
 
-console.log('FOUR — "+ Add a step…" is searchable and has the new kinds');
-const add = container.querySelector('.light-show-add input');
-ok(add && !container.querySelector('.light-show-add select'), 'Add a step is a search input');
-await focus(add);
+console.log('FOUR — "+ Add a step…" opens a dialog whose picker is searchable and has the new kinds');
+// His 2026-10-08 report: the inline picker sat at the page's own bottom
+// edge on a set with several steps, with no room below to show or expand.
+// It is now a button that opens a dialog near the top of the viewport —
+// check_light_show_add_step_dialog.mjs proves that placement; this script
+// only re-proves the picker inside it is still the same searchable
+// SearchSelect with the same kinds, not a parallel one.
+const addBtn = [...container.querySelectorAll('.light-show-add button')]
+  .find((b) => b.textContent.includes('Add a step'));
+ok(addBtn && !container.querySelector('.light-show-add select'), 'Add a step is a button, not a <select>');
+await step(() => addBtn.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true })));
+const add = [...container.querySelectorAll('input')].find((i) => i.placeholder === 'Search action kinds…');
+ok(add, 'opening it mounts a search input (autoFocus opens its dropdown)');
 ok(['Pulse reactivity', 'Pulse brightness floor / ceiling', 'Flares on / off']
   .every((k) => options().some((t) => t.endsWith(k))), 'the three new kinds are offered');
 await type(add, 'flare');
 await choose('Flares on / off');
 ok(steps().length === SET.actions.length + 1, 'picking one adds the step');
+ok(!container.querySelector('.card-title')?.textContent.includes('Add a step'),
+  'picking closes the dialog');
 
 console.log('FIVE — Right now shows the Pulse hold and the flares-off switch');
 const now = container.querySelector('.light-show-now');

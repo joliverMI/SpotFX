@@ -393,6 +393,69 @@ def test_holds_end_by_scene_change_time_release_and_survive_a_restart(fake_host)
     assert pulse_modulation.get(HUES) is None
 
 
+def test_refiring_flares_off_on_the_same_target_restarts_not_queues(fake_host):
+    """His report, 2026-10-08: firing the same set twice left two "Flares
+    off until released" entries listed, as if it queued a second hold
+    instead of restarting the one he already had. Firing it again on the
+    exact same target must replace that hold, never add a second."""
+    _run(show_actions.fire([A("flares", target={"kind": "category", "id": "Singles"},
+                              flares="off", until="released")], name="t"))
+    assert len(show_store.state().flare_blocks) == 1
+    first_id = show_store.state().flare_blocks[0].id
+
+    _run(show_actions.fire([A("flares", target={"kind": "category", "id": "Singles"},
+                              flares="off", until="released")], name="t"))
+    blocks = show_store.state().flare_blocks
+    assert len(blocks) == 1, "a second fire restarted the hold, it did not queue a duplicate"
+    assert blocks[0].id != first_id, "the hold was replaced (restarted), not left in place"
+
+
+def test_refiring_pulse_reactivity_on_the_same_target_restarts_not_stacks(fake_host):
+    """Same rule as flares off: a pulse_reactivity hold on the SAME
+    virtual set restarts rather than stacking a duplicate reactivity
+    multiplier on top of itself."""
+    _run(show_actions.fire([A("pulse_reactivity", target={"kind": "category", "id": "Singles"},
+                              reactivity=0.5, fade_in_ms=0, until="released")], name="t"))
+    assert len(show_store.state().pulse_mods) == 1
+    assert pulse_modulation.get(HUES).reactivity == pytest.approx(0.5)
+
+    _run(show_actions.fire([A("pulse_reactivity", target={"kind": "category", "id": "Singles"},
+                              reactivity=0.3, fade_in_ms=0, until="released")], name="t"))
+    mods = show_store.state().pulse_mods
+    assert len(mods) == 1, "a second fire restarted the hold, it did not stack a duplicate"
+    assert pulse_modulation.get(HUES).reactivity == pytest.approx(0.3)
+
+
+def test_pulse_reactivity_and_brightness_on_the_same_target_still_compose(fake_host):
+    """Reactivity and floor/ceiling are a different DIMENSION of Pulse
+    modulation, so even on the exact same target both hold at once —
+    only a re-fire of the SAME dimension restarts."""
+    _run(show_actions.fire([
+        A("pulse_reactivity", target={"kind": "category", "id": "Singles"},
+          reactivity=0.5, fade_in_ms=0, until="released"),
+        A("pulse_brightness", target={"kind": "category", "id": "Singles"},
+          floor=0.2, ceiling=0.8, fade_in_ms=0, until="released"),
+    ], name="t"))
+    mods = show_store.state().pulse_mods
+    assert len(mods) == 2
+    m = pulse_modulation.get(HUES)
+    assert m.reactivity == pytest.approx(0.5)
+    assert (m.floor, m.ceiling) == pytest.approx((0.2, 0.8))
+
+
+def test_pulse_mods_on_different_targets_still_stack(fake_host):
+    """Different exact target sets still compose (the model's own
+    docstring) — only the SAME target set restarts."""
+    _run(show_actions.fire([
+        A("pulse_reactivity", target={"kind": "everything"},
+          reactivity=0.5, fade_in_ms=0, until="released"),
+        A("pulse_reactivity", target={"kind": "category", "id": "Singles"},
+          reactivity=0.4, fade_in_ms=0, until="released"),
+    ], name="t"))
+    assert len(show_store.state().pulse_mods) == 2
+    assert pulse_modulation.get(HUES).reactivity == pytest.approx(0.2)
+
+
 def test_flares_on_with_nothing_off_says_so(fake_host):
     run = _run(show_actions.fire([A("flares", target={"kind": "everything"},
                                     flares="on")], name="t"))

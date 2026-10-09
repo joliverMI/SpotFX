@@ -122,6 +122,12 @@ export default function RunView({ sets, status, arms, onChangeArms, onEndShowDon
         <ul className="light-show-run-set-list">
           {sets.map((s) => {
             const armedForSet = s.id ? arms?.armed.filter((a) => a.set_id === s.id) ?? [] : [];
+            // Live armed state, not a local click flag — right after a
+            // refresh, or when armed from Sonic/the Build view, the icon
+            // for whichever trigger is actually armed stays lit (his ask,
+            // 2026-10-08: "highlight" the armed button). Clears itself
+            // once `arms` no longer lists it (fired or cancelled).
+            const armedOn = new Set(armedForSet.map((a) => a.on));
             return (
               <li key={s.id} className="light-show-run-set-row">
                 <div className="light-show-run-set-main">
@@ -134,17 +140,23 @@ export default function RunView({ sets, status, arms, onChangeArms, onEndShowDon
                       title="Fire now" aria-label={`Fire ${s.name} now`} onClick={() => s.id && void fire(s.id)}>
                       <Icon name="bolt" size={22} />
                     </button>
-                    <button type="button" className="light-show-run-set-icon-btn" disabled={busy || !s.id}
+                    <button type="button"
+                      className={`light-show-run-set-icon-btn${armedOn.has('scene_change') ? ' armed' : ''}`}
+                      disabled={busy || !s.id} aria-pressed={armedOn.has('scene_change')}
                       title="Arm: next scene change" aria-label={`Arm ${s.name} for the next scene change`}
                       onClick={() => s.id && void arm(s.id, 'scene_change')}>
                       <Icon name="rabbit" size={22} />
                     </button>
-                    <button type="button" className="light-show-run-set-icon-btn" disabled={busy || !s.id}
+                    <button type="button"
+                      className={`light-show-run-set-icon-btn${armedOn.has('high') ? ' armed' : ''}`}
+                      disabled={busy || !s.id} aria-pressed={armedOn.has('high')}
                       title="Arm: next High Trigger" aria-label={`Arm ${s.name} for the next High Trigger`}
                       onClick={() => s.id && void arm(s.id, 'high')}>
                       <Icon name="arrowUp" size={22} />
                     </button>
-                    <button type="button" className="light-show-run-set-icon-btn" disabled={busy || !s.id}
+                    <button type="button"
+                      className={`light-show-run-set-icon-btn${armedOn.has('low') ? ' armed' : ''}`}
+                      disabled={busy || !s.id} aria-pressed={armedOn.has('low')}
                       title="Arm: next Low Trigger" aria-label={`Arm ${s.name} for the next Low Trigger`}
                       onClick={() => s.id && void arm(s.id, 'low')}>
                       <Icon name="arrowDown" size={22} />
