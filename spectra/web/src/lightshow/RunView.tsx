@@ -121,7 +121,7 @@ export default function RunView({ sets, status, arms, onChangeArms, onEndShowDon
         {sets.length === 0 && <p className="muted">No sets yet — build one on the Build view.</p>}
         <ul className="light-show-run-set-list">
           {sets.map((s) => {
-            const armedForSet = s.id ? arms?.armed.find((a) => a.set_id === s.id) ?? null : null;
+            const armedForSet = s.id ? arms?.armed.filter((a) => a.set_id === s.id) ?? [] : [];
             return (
               <li key={s.id} className="light-show-run-set-row">
                 <div className="light-show-run-set-main">
@@ -151,12 +151,12 @@ export default function RunView({ sets, status, arms, onChangeArms, onEndShowDon
                     </button>
                   </div>
                 </div>
-                {armedForSet && (
-                  <div className="light-show-run-set-armed-tag">
-                    <span>⏱ Armed for the {triggerLabel(armedForSet.on)}</span>
-                    <button type="button" onClick={() => void disarm(armedForSet.id)}>Cancel</button>
+                {armedForSet.map((a) => (
+                  <div key={a.id} className="light-show-run-set-armed-tag">
+                    <span>⏱ Armed for the {triggerLabel(a.on)}</span>
+                    <button type="button" onClick={() => void disarm(a.id)}>Cancel</button>
                   </div>
-                )}
+                ))}
               </li>
             );
           })}
