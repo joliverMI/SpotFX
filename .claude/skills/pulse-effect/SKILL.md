@@ -127,8 +127,11 @@ rainbow walk's hit STEP — and nothing else, by the Admiral's choice
 (option A): rest level, slow drift, flash/flip flares and charge/lull/drop
 are untouched. Floor/ceiling clamp the final eye-scale level before the
 output guard, and the floor is re-asserted after it (the guard only slows
-rises); crossed, the ceiling wins. Holds stack (reactivities multiply,
-highest floor / lowest ceiling) in `spectra/services/show_mods.py`. The
+rises); crossed, the ceiling wins. Holds on DIFFERENT targets stack
+(reactivities multiply, highest floor / lowest ceiling) in
+`spectra/services/show_mods.py`; re-firing the same action on the exact
+same target RESTARTS the matching hold instead of stacking a duplicate
+(his 2026-10-08 report of two "Flares off" entries from one re-fire). The
 third action, `flares` off, stops every flare kind AND charge/lull/drop on
 its virtuals (ResponseEngine `_flare_states`) — for this effect that means
 no flash, no flip, no lull darkness and no drop burst on the Hues.

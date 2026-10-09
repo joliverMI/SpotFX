@@ -456,8 +456,10 @@ OPERATIONS: dict[str, SonicOperation] = {
                 "category or everything, as a Light Show hold.",
         instructions="reactivity 0..1. Scales Pulse's live-audio hit pulses "
                     "and its rainbow hit-steps only — not flares (use "
-                    "set_flares) nor charge/lull/drop. Holds stack "
-                    "(multiply). until: 'released' (default — ends with "
+                    "set_flares) nor charge/lull/drop. A hold on a "
+                    "different target stacks (multiplies); the exact same "
+                    "target restarts it instead of adding a duplicate. "
+                    "until: 'released' (default — ends with "
                     "end_effect_hold or end_show) | 'time' (duration_s) | "
                     "'scene_change'. A target not running Pulse is "
                     "unaffected until it does.",
