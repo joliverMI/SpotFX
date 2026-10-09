@@ -22,6 +22,7 @@ export default function SearchSelect({
   placeholder = '— pick —',
   width = 260,
   allowEmpty = true,
+  autoFocus = false,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -29,6 +30,10 @@ export default function SearchSelect({
   placeholder?: string;
   width?: number | string;
   allowEmpty?: boolean;
+  /** Open the dropdown as soon as this mounts — for a picker that IS the
+   * content of a dialog/sheet (see LightShowPage.tsx's AddStep), where
+   * there is no separate "open" gesture to wait for. */
+  autoFocus?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
@@ -95,6 +100,7 @@ export default function SearchSelect({
       <input
         ref={inputRef}
         type="text"
+        autoFocus={autoFocus}
         value={open ? q : selected?.label ?? (value || '')}
         placeholder={selected?.label ?? placeholder}
         onFocus={() => {

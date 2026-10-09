@@ -244,12 +244,12 @@ def test_end_show_lets_every_fixture_go(room):
     assert device_output.snapshot() == {}
 
 
-def test_levels_stack_and_end_on_their_own(room, monkeypatch):
+def test_levels_on_different_targets_stack_and_end_on_their_own(room, monkeypatch):
     t = {"now": 1_000_000}
     monkeypatch.setattr(show_output, "now_ms", lambda: t["now"])
     fire([A("level", target={"kind": "fixture", "id": "cr"}, level=50,
             fade_in_ms=0, duration_s=10),
-          A("level", target={"kind": "fixture", "id": "cr"}, level=50,
+          A("level", target={"kind": "everything"}, level=50,
             fade_in_ms=0, until="scene_change")])
     assert device_output.target("cr").level == pytest.approx(0.25)
     show_output.on_scene_change()
@@ -257,6 +257,27 @@ def test_levels_stack_and_end_on_their_own(room, monkeypatch):
     t["now"] += 11_000
     show_output._was_live = True
     show_output.tick()
+    assert show_store.state().levels == []
+
+
+def test_a_level_on_the_same_target_restarts_instead_of_stacking(room, monkeypatch):
+    """His report, 2026-10-08: firing the same step twice left two holds
+    listed (compounding) instead of restarting the one. Re-firing a level
+    on the SAME exact target now RESTARTS it — the newest value/until
+    wins and there is never more than one."""
+    fire([A("level", target={"kind": "fixture", "id": "cr"}, level=50,
+            fade_in_ms=0, duration_s=10)])
+    assert device_output.target("cr").level == pytest.approx(0.5)
+    assert len(show_store.state().levels) == 1
+
+    fire([A("level", target={"kind": "fixture", "id": "cr"}, level=50,
+            fade_in_ms=0, until="scene_change")])
+    # restarted, never stacked: still 0.5 (not 0.25), and still one hold
+    assert device_output.target("cr").level == pytest.approx(0.5)
+    assert len(show_store.state().levels) == 1
+    assert show_store.state().levels[0].until == "scene_change"
+
+    show_output.on_scene_change()
     assert show_store.state().levels == []
 
 
@@ -311,6 +332,65 @@ def test_set_names_are_unique_ignoring_case(room):
     show_store.put_set(ActionSet(name="Blackout"))
     with pytest.raises(show_store.SetNameTaken):
         show_store.put_set(ActionSet(name="blackout"))
+
+
+def test_after_id_places_a_new_set_right_after_the_named_one(room):
+    """Duplicate (the Admiral, 2026-10-08): the copy lands right after the
+    original in his list, not appended at the end. An update of an
+    EXISTING set ignores after_id and keeps its own position; an
+    unresolvable after_id falls back to appending, like plain "+ New"."""
+    a = show_store.put_set(ActionSet(name="A"))
+    b = show_store.put_set(ActionSet(name="B"))
+    c = show_store.put_set(ActionSet(name="C"), after_id=a.id)
+    assert [s.name for s in show_store.list_sets()] == ["A", "C", "B"]
+
+    # updating an existing set never moves it, even with after_id set
+    show_store.put_set(b.model_copy(update={"notes": "x"}), after_id=c.id)
+    assert [s.name for s in show_store.list_sets()] == ["A", "C", "B"]
+
+    d = show_store.put_set(ActionSet(name="D"), after_id="no-such-id")
+    assert [s.name for s in show_store.list_sets()] == ["A", "C", "B", "D"]
+    assert d.name == "D"
+
+
+def test_duplicate_set_via_the_api_is_independent_saves_fires_and_is_placed_right_after(room):
+    """End to end over the real route (spectra/api/light_show.py): the
+    front end's "⧉ Duplicate" POSTs the whole set back with a fresh id
+    and `after_id`. Proves the wire contract, not just put_set()."""
+    from fastapi.testclient import TestClient
+    from spectra.app import create_app
+    client = TestClient(create_app())
+
+    original = client.post("/api/light-show/sets", json={
+        "name": "Dinner Party",
+        "actions": [{"kind": "device_state",
+                     "params": {"target": {"kind": "fixture", "id": "cr"}, "state": "dark"}}],
+    }).json()
+    other = client.post("/api/light-show/sets", json={"name": "Quiet", "actions": []}).json()
+
+    copy = client.post("/api/light-show/sets", json={
+        "name": "Dinner Party copy", "notes": "",
+        "actions": original["actions"],
+        "after_id": original["id"],
+    }).json()
+    assert copy["id"] != original["id"]
+    assert [s["name"] for s in client.get("/api/light-show/sets").json()["sets"]] == \
+        ["Dinner Party", "Dinner Party copy", "Quiet"]
+
+    # the copy fires on its own
+    run = client.post(f"/api/light-show/sets/{copy['id']}/fire").json()
+    assert run["steps"][0]["status"] == "applied"
+
+    # editing the copy never touches the original
+    client.post("/api/light-show/sets", json={
+        "id": copy["id"], "name": copy["name"],
+        "actions": [{"kind": "device_state",
+                     "params": {"target": {"kind": "fixture", "id": "cr"}, "state": "show"}}],
+    })
+    sets = {s["name"]: s for s in client.get("/api/light-show/sets").json()["sets"]}
+    assert sets["Dinner Party"]["actions"][0]["params"]["state"] == "dark"
+    assert sets["Dinner Party copy"]["actions"][0]["params"]["state"] == "show"
+    assert sets["Quiet"]["id"] == other["id"]
 
 
 def test_conflicts_inside_a_set_are_named_and_later_wins(room):

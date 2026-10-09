@@ -144,6 +144,11 @@ def _ends(until: str, duration_s: Optional[float]) -> tuple[str, Optional[int]]:
     return until, None
 
 
+def _pulse_dimension(reactivity: Optional[float], floor: Optional[float],
+                     ceiling: Optional[float]) -> str:
+    return "reactivity" if reactivity is not None else "brightness"
+
+
 def add_pulse_mod(virtual_ids: list[str], *, label: str = "",
                   reactivity: Optional[float] = None, floor: Optional[float] = None,
                   ceiling: Optional[float] = None, fade_in_ms: int = 0,
@@ -151,6 +156,18 @@ def add_pulse_mod(virtual_ids: list[str], *, label: str = "",
                   duration_s: Optional[float] = None, source: str = "") -> PulseModHold:
     st = show_store.state()
     until, ends = _ends(until, duration_s)
+    # RE-FIRING THE SAME HOLD KIND ON THE SAME TARGETS RESTARTS IT (the
+    # Admiral, 2026-10-08: firing the same step twice left two holds
+    # listed instead of resetting the one). A hold on the SAME exact
+    # virtual set and the SAME dimension (reactivity, or floor/ceiling)
+    # replaces the matching one outright — never a second entry. A
+    # DIFFERENT target set, or the OTHER dimension on the same targets,
+    # still composes (PulseModHold's own docstring: "several stack").
+    target = frozenset(virtual_ids)
+    dim = _pulse_dimension(reactivity, floor, ceiling)
+    st.pulse_mods = [m for m in st.pulse_mods
+                     if not (frozenset(m.virtual_ids) == target
+                             and _pulse_dimension(m.reactivity, m.floor, m.ceiling) == dim)]
     m = PulseModHold(virtual_ids=list(virtual_ids), label=label, reactivity=reactivity,
                      floor=floor, ceiling=ceiling, fade_in_ms=int(fade_in_ms or 0),
                      fade_out_ms=int(fade_out_ms or 0), until=until,
@@ -180,6 +197,11 @@ def add_flare_block(virtual_ids: list[str], *, label: str = "",
                     source: str = "") -> FlareBlock:
     st = show_store.state()
     until, ends = _ends(until, duration_s)
+    # Same rule as add_pulse_mod: a block on the SAME exact virtual set
+    # RESTARTS the matching one (resets until/ends_at) instead of stacking
+    # a second, visually-duplicate "flares off" entry.
+    target = frozenset(virtual_ids)
+    st.flare_blocks = [b for b in st.flare_blocks if frozenset(b.virtual_ids) != target]
     b = FlareBlock(virtual_ids=list(virtual_ids), label=label, until=until,
                    ends_at_ms=ends, source=source)
     st.flare_blocks.append(b)

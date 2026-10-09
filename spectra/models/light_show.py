@@ -93,7 +93,10 @@ class DeviceHold(BaseModel):
 
 
 class LevelHold(BaseModel):
-    """A temporary Level modifier. Several stack (they multiply)."""
+    """A temporary Level modifier. Several on DIFFERENT device sets stack
+    (they multiply) — show_output.add_level() replaces, rather than
+    stacking, a hold on the exact same device set (his 2026-10-08 report:
+    re-firing the same step must restart it, never queue a duplicate)."""
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=_id)
     device_ids: list[str]
@@ -110,8 +113,12 @@ class LevelHold(BaseModel):
 class PulseModHold(BaseModel):
     """A Light Show modulation of the Pulse effect on some virtuals
     (spectra/services/show_mods.py; fx/pulse_modulation.py). A field left
-    None is not this hold's business. Several stack: reactivities
-    multiply, the highest floor and the lowest ceiling win."""
+    None is not this hold's business. Two holds on DIFFERENT virtual sets,
+    or on the same set but a DIFFERENT dimension (reactivity vs floor/
+    ceiling), stack: reactivities multiply, the highest floor and the
+    lowest ceiling win. A hold on the SAME virtual set and dimension
+    REPLACES the matching one instead (his 2026-10-08 report: re-firing
+    the same step must restart it, never queue a duplicate)."""
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=_id)
     virtual_ids: list[str]
@@ -132,7 +139,9 @@ class PulseModHold(BaseModel):
 class FlareBlock(BaseModel):
     """Flares switched OFF on some virtuals: while it holds, no flare kind
     writes to them (spectra/services/show_mods.py, scene_response's
-    `_flare_states`)."""
+    `_flare_states`). Re-firing "flares off" on the exact same virtual set
+    REPLACES the matching block (fresh until/ends_at) instead of stacking
+    a second, visually-duplicate entry (his 2026-10-08 report)."""
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=_id)
     virtual_ids: list[str]

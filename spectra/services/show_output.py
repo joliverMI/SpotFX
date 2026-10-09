@@ -422,6 +422,12 @@ def add_level(device_ids: list[str], level: float, *, fade_in_ms: int = 0,
             until = "released"
         else:
             ends = now_ms() + int(float(duration_s) * 1000)
+    # Same rule as show_mods.add_pulse_mod/add_flare_block: a level on the
+    # SAME exact device set RESTARTS the matching one (fresh level/timer)
+    # instead of stacking a duplicate that would also multiply against it.
+    # A level on a DIFFERENT device set still composes (they multiply).
+    target = frozenset(device_ids)
+    st.levels = [lv for lv in st.levels if frozenset(lv.device_ids) != target]
     lv = LevelHold(device_ids=list(device_ids), level=float(level),
                    fade_in_ms=int(fade_in_ms or 0), fade_out_ms=int(fade_out_ms or 0),
                    until=until, ends_at_ms=ends, source=source)

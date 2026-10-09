@@ -96,7 +96,12 @@ def find_set(name_or_id: str) -> Optional[ActionSet]:
     return next((s for s in sets if s.name.strip().lower() == low), None)
 
 
-def put_set(new: ActionSet) -> ActionSet:
+def put_set(new: ActionSet, *, after_id: Optional[str] = None) -> ActionSet:
+    """`after_id` places a brand-new set right after that id in his list
+    (the Admiral, 2026-10-08: "Duplicate" puts the copy right after the
+    original, not at the end) — ignored for an update of an existing set,
+    whose position is untouched. An unresolvable `after_id` falls back to
+    appending, same as today's plain "+New"."""
     with _lock:
         lib = load_library()
         low = new.name.strip().lower()
@@ -109,7 +114,12 @@ def put_set(new: ActionSet) -> ActionSet:
         existing = next((i for i, s in enumerate(lib.sets) if s.id == new.id), None)
         new = new.model_copy(update={"updated_ms": now_ms()})
         if existing is None:
-            lib.sets.append(new)
+            after = next((i for i, s in enumerate(lib.sets) if s.id == after_id), None) \
+                if after_id else None
+            if after is None:
+                lib.sets.append(new)
+            else:
+                lib.sets.insert(after + 1, new)
         else:
             new = new.model_copy(update={"created_ms": lib.sets[existing].created_ms})
             lib.sets[existing] = new

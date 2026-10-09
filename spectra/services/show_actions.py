@@ -735,7 +735,9 @@ register(ActionKind(
                   choices=["time", "scene_change", "released"]),
             Param("duration_s", "number", "For", default=10, min=0, max=3600, unit="s"),
             Param("fade_out_ms", "number", "Fade out", default=1000, min=0, max=60000, unit="ms")],
-    help="Temporarily darken or brighten a fixture or category. Levels stack.",
+    help="Temporarily darken or brighten a fixture or category. A level on "
+         "a different target stacks — firing this step again on the same "
+         "target restarts its timer instead of a second level.",
     restore="Ends by itself (after its time, at the next scene change, or when released).",
     apply=_apply_level, check=_check_level, help_topic="show-level"))
 
@@ -892,8 +894,9 @@ register(ActionKind(
             _UNTIL, _FOR,
             Param("fade_out_ms", "number", "Fade out", default=1000, min=0, max=60000, unit="ms")],
     help="Turn how strongly the Pulse effect reacts to the music up or down "
-         "on a fixture, a category or everything. Only Pulse listens; holds "
-         "stack (they multiply).",
+         "on a fixture, a category or everything. Only Pulse listens; a "
+         "hold on a different target stacks (they multiply) — firing this "
+         "step again on the same target restarts its timer instead.",
     restore="Ends by itself (after its time, at the next scene change), its "
             "End button, or End show.",
     apply=_apply_pulse_reactivity, check=_check_timed, help_topic="show-pulse"))
