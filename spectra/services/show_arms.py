@@ -33,7 +33,11 @@ a fade this counts: it is the bulbs' physics, it STARTS on the trigger.
 QUEUE, NOT REPLACE — EXCEPT THE SAME SET ON THE SAME TRIGGER. Several arms
 wait side by side; arming the set that is already armed on that trigger
 replaces the earlier arm (a double tap never stacks). Two arms on one
-trigger fire in the order they were armed.
+trigger fire in the order they were armed. A SHOW SEQUENCE's arm
+(`source="sequence:<run>"`, spectra/services/show_sequence.py) and a
+hand-made arm never replace each other — the sequence must not lose its
+place to a tap, nor a tap to the sequence — and a sequence arm never
+expires on its own (no 12 h / idle expiry): the sequence owns it.
 
 ONE-SHOT OR REPEAT. One-shot fires once and is done; repeat stays armed and
 counts its fires.
@@ -117,6 +121,10 @@ class ArmError(ValueError):
     pass
 
 
+def is_sequence_arm_source(source: Optional[str]) -> bool:
+    return bool(source) and source.startswith("sequence:")
+
+
 # ── reading ────────────────────────────────────────────────────────────────
 
 def active_arms() -> list[ShowArm]:
@@ -188,14 +196,16 @@ def arm(*, set_id: Optional[str] = None, action: Optional[ShowAction] = None,
             raise ArmError("nothing is playing, so there is no song to scope this arm to")
     st = show_store.state()
     t = now_ms()
+    seq = is_sequence_arm_source(source)
     if set_id is not None:
         for old in st.arms:
-            if old.status == ACTIVE and old.set_id == set_id and old.on == on:
+            if old.status == ACTIVE and old.set_id == set_id and old.on == on \
+                    and is_sequence_arm_source(old.source) == seq:
                 _end(old, DISARMED, "replaced by a new arm of the same set on the same trigger")
     new = ShowArm(set_id=set_id, action=action, label=label, on=on,
                   repeat=bool(repeat), song_uri=song, source=source,
                   finish_on_mark=bool(finish_on_mark), created_ms=t,
-                  expires_ms=t + ARM_MAX_AGE_S * 1000)
+                  expires_ms=None if seq else t + ARM_MAX_AGE_S * 1000)
     st.arms.append(new)
     _touch_music()
     _save()
@@ -308,6 +318,12 @@ async def _fire(a: ShowArm, trigger: dict) -> None:
     if not a.repeat:
         _end(a, FIRED, f"fired on {a.on.replace('_', ' ')}")
     _save()
+    if is_sequence_arm_source(a.source):
+        try:
+            from spectra.services import show_sequence
+            show_sequence.on_arm_fired(a)
+        except Exception:                                # noqa: BLE001
+            logger.exception("light show: sequence advance after an arm fired failed")
 
 
 def _wait_or_fire(arms: list[ShowArm], trigger: dict) -> list[str]:
@@ -335,6 +351,7 @@ def on_scene_change(previous_scene_id: Optional[str], scene_id: Optional[str]) -
     arms = sorted((a for a in active_arms()
                    if a.on == "scene_change" and _applies_to_song(a, uri)),
                   key=lambda a: a.created_ms)
+    _tell_sequence("scene_change")
     trigger = {"trigger": "scene_change", "scene_id": scene_id}
     ids = _wait_or_fire(arms, trigger)
     if not ids:
@@ -350,6 +367,20 @@ def on_scene_change(previous_scene_id: Optional[str], scene_id: Optional[str]) -
                 await _fire(a, trigger)
     _spawn(loop, run_in_order())
     return ids
+
+
+def _tell_sequence(kind: str) -> None:
+    """A Show Sequence's Wait counts this trigger. ONE TRIGGER, ONE STEP:
+    the arms this trigger fires are chosen BEFORE the sequence is told, so a
+    Wait it completes can never also fire the set armed right after it on
+    the same trigger; and the sequence is told BEFORE those arms fire, so
+    the trigger that completes a sequence's armed set is never also counted
+    by the Wait that follows it."""
+    try:
+        from spectra.services import show_sequence
+        show_sequence.on_trigger(kind)
+    except Exception:                                    # noqa: BLE001
+        logger.exception("light show: sequence trigger hook failed")
 
 
 def cue_plan(uri: Optional[str]) -> list[tuple[str, int, int]]:
@@ -385,6 +416,7 @@ async def on_cue(level: str, cue_ms: int, ahead_ms: int) -> list[str]:
     arms = sorted((a for a in active_arms()
                    if a.on == level and _applies_to_song(a, uri)),
                   key=lambda a: a.created_ms)
+    _tell_sequence(level)
     trigger = {"trigger": level, "cue_ms": cue_ms}
     ids = _wait_or_fire(arms, trigger)
     if not ids:
@@ -436,6 +468,8 @@ def tick() -> None:
     idle = time.monotonic() - _last_music_mono >= ARM_IDLE_EXPIRY_S
     uri = current_uri()
     for a in arms:
+        if is_sequence_arm_source(a.source):
+            continue                     # the sequence owns its arm's life
         if a.expires_ms is not None and t >= a.expires_ms:
             _end(a, EXPIRED, "armed 12 hours ago")
         elif idle:

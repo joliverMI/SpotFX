@@ -269,6 +269,7 @@ def _isolated_light_show(tmp_path, monkeypatch):
     from spectra.services import show_actions, show_output, show_store
     monkeypatch.setattr(scfg, "LIGHT_SHOW_SETS_FILE", tmp_path / "light_show_sets.json")
     monkeypatch.setattr(scfg, "LIGHT_SHOW_STATE_FILE", tmp_path / "light_show_state.json")
+    monkeypatch.setattr(scfg, "LIGHT_SHOW_SEQUENCES_FILE", tmp_path / "light_show_sequences.json")
     monkeypatch.setattr(scfg, "SHOW_CUES_FILE", tmp_path / "show_cues.json")
     from spectra.services import show_arms, show_cues
     show_store.reset_memory()
@@ -276,12 +277,17 @@ def _isolated_light_show(tmp_path, monkeypatch):
     show_actions.reset()
     show_cues.reset()
     show_arms.reset()
+    from spectra.services import show_sequence, song_library
+    show_sequence.reset()
+    song_library.reset()
     yield
     show_store.reset_memory()
     show_output.reset()
     show_actions.reset()
     show_cues.reset()
     show_arms.reset()
+    show_sequence.reset()
+    song_library.reset()
     device_output.reset_clock()
 
 

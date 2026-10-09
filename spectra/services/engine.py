@@ -487,6 +487,13 @@ async def _on_track_uri(uri) -> None:
             # engine (spectra/services/drop_sequences.py).
             from spectra.services import drop_sequences
             drop_sequences.on_song_played(uri)
+            # THE SHOW SEQUENCE (spectra/services/show_sequence.py): a song
+            # starting counts for a "songs" / song-list Wait.
+            try:
+                from spectra.services import show_sequence
+                show_sequence.on_track_change(uri)
+            except Exception:                            # noqa: BLE001
+                logger.exception("light show: sequence song hook failed")
     from spectra.services.scene_sequencer import scene_sequencer
     await scene_sequencer.on_track_state(uri)
     await trigger_engine.on_track_state(uri)

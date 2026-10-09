@@ -287,3 +287,149 @@ async def delete_cue(uri: str = _Query(..., min_length=1),
     cleared = await _asyncio.to_thread(show_cues.clear_override, uri, level)
     await _broadcast()
     return {"uri": uri, "level": level, "reverted": cleared}
+
+
+# ── SHOW SEQUENCES — ordered, pre-armed sets and Waits ─────────────────────
+# spectra/services/show_sequence.py is the binding statement.
+#
+#   GET    /api/light-show/sequences                 his sequences (+ problems)
+#   POST   /api/light-show/sequences                 create / update one
+#   DELETE /api/light-show/sequences/{id}
+#   POST   /api/light-show/sequences/{id}/duplicate  "<name> copy", right after it
+#   GET    /api/light-show/sequence-run              the run: current item, what
+#                                                    it waits for, the log
+#   POST   /api/light-show/sequence-run/start        {sequence_id, replace}
+#   POST   /api/light-show/sequence-run/{pause|resume|stop|next|previous|fire-now}
+#   GET    /api/light-show/songs?q=&limit=           songs SPECTRA knows (a
+#                                                    song-list Wait's picker)
+
+from spectra.models.light_show import SequenceItem, ShowSequence
+from spectra.services import show_sequence, song_library
+
+
+class SequenceBody(BaseModel):
+    id: Optional[str] = None
+    name: str
+    items: list[SequenceItem] = Field(default_factory=list)
+    loop: bool = False
+    notes: str = ""
+
+
+class StartBody(BaseModel):
+    sequence_id: str
+    replace: bool = False
+
+
+def _sequence_row(s: ShowSequence) -> dict:
+    return {**s.model_dump(),
+            "items": [{**it.model_dump(), "title": show_sequence.item_title(it),
+                       "problems": show_sequence.item_problems(it)} for it in s.items],
+            "problems": show_sequence.problems(s)}
+
+
+async def _broadcast_sequence() -> None:
+    try:
+        from spectra.services.ws import ws_manager
+        await ws_manager.broadcast({"type": "light_show_sequence",
+                                    "run": show_sequence.status()["run"]})
+    except Exception:                                    # noqa: BLE001
+        pass
+
+
+@router.get("/sequences")
+async def list_sequences():
+    return {"sequences": [_sequence_row(s) for s in show_store.list_sequences()]}
+
+
+@router.post("/sequences")
+async def upsert_sequence(body: SequenceBody):
+    data = body.model_dump()
+    if not data.get("id"):
+        data.pop("id", None)
+    try:
+        s = show_store.put_sequence(ShowSequence(**data))
+    except show_store.SequenceNameTaken as exc:
+        return JSONResponse(status_code=409, content={"detail": str(exc)})
+    return _sequence_row(s)
+
+
+@router.delete("/sequences/{seq_id}")
+async def remove_sequence(seq_id: str):
+    r = show_sequence.run()
+    if r is not None and r.sequence_id == seq_id and r.state in show_sequence.ACTIVE_STATES:
+        return JSONResponse(status_code=409, content={
+            "detail": f"{r.name!r} is running — stop it before deleting it"})
+    if not show_store.delete_sequence(seq_id):
+        return JSONResponse(status_code=404, content={"detail": "no such sequence"})
+    return {"deleted": seq_id}
+
+
+@router.post("/sequences/{seq_id}/duplicate")
+async def duplicate_sequence(seq_id: str):
+    s = show_store.duplicate_sequence(seq_id)
+    if s is None:
+        return JSONResponse(status_code=404, content={"detail": "no such sequence"})
+    return _sequence_row(s)
+
+
+@router.get("/sequence-run")
+async def get_sequence_run():
+    return show_sequence.status()
+
+
+async def _control(fn, *args, **kwargs):
+    try:
+        res = fn(*args, **kwargs)
+        if _asyncio.iscoroutine(res):
+            await res
+    except show_sequence.SequenceError as exc:
+        return JSONResponse(status_code=409, content={"detail": str(exc)})
+    await _broadcast_sequence()
+    await _broadcast()
+    return show_sequence.status()
+
+
+@router.post("/sequence-run/start")
+async def start_sequence(body: StartBody):
+    return await _control(show_sequence.start, body.sequence_id, replace=body.replace)
+
+
+@router.post("/sequence-run/pause")
+async def pause_sequence():
+    return await _control(show_sequence.pause)
+
+
+@router.post("/sequence-run/resume")
+async def resume_sequence():
+    return await _control(show_sequence.resume)
+
+
+@router.post("/sequence-run/stop")
+async def stop_sequence():
+    return await _control(show_sequence.stop)
+
+
+@router.post("/sequence-run/next")
+async def next_sequence_item():
+    return await _control(show_sequence.next_item)
+
+
+@router.post("/sequence-run/previous")
+async def previous_sequence_item():
+    return await _control(show_sequence.previous_item)
+
+
+@router.post("/sequence-run/fire-now")
+async def fire_sequence_item_now():
+    return await _control(show_sequence.fire_now)
+
+
+@router.get("/songs")
+async def search_songs(q: str = "", limit: int = _Query(song_library.DEFAULT_LIMIT, ge=1, le=200)):
+    found = await _asyncio.to_thread(song_library.search, q, limit)
+    playing = show_sequence.status()["playing_uri"]
+    now = None
+    if playing:
+        hit = await _asyncio.to_thread(song_library.lookup, playing)
+        now = (hit.as_dict() if hit else {"uri": playing, "title": playing, "artist": ""})
+    return {"songs": [s.as_dict() for s in found], "playing": now}

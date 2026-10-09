@@ -625,6 +625,11 @@ def on_release() -> None:
     except Exception:                                    # noqa: BLE001
         logger.exception("light show: dropping Pulse/flare holds on release failed")
     try:
+        from spectra.services import show_sequence
+        show_sequence.on_release()
+    except Exception:                                    # noqa: BLE001
+        logger.exception("light show: pausing the sequence on release failed")
+    try:
         from spectra.services import show_arms
         show_arms.on_release()
     except Exception:                                    # noqa: BLE001
@@ -723,6 +728,11 @@ def tick() -> None:
         show_arms.tick()
     except Exception:                                    # noqa: BLE001
         logger.exception("light show: arm expiry pass failed")
+    try:
+        from spectra.services import show_sequence
+        show_sequence.tick()
+    except Exception:                                    # noqa: BLE001
+        logger.exception("light show: sequence pass failed")
     if is_live and not _was_live:
         _safe_refresh()
         try:
