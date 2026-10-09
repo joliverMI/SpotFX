@@ -60,11 +60,13 @@
 // proves its pointer/keyboard contract plus the new onContextMenu and
 // onPointerCancel wiring. §7 mounts the real ShapeControls.tsx directly
 // (plain props, no query dependencies) to prove the class actually reaches
-// its two button kinds end to end. §8 is a lighter source-level check for
-// PaletteCard.tsx/ColorSetsPage.tsx specifically (both carry heavier query
-// dependency graphs that make a full mount disproportionate here, and §5
-// already proves what the class itself does) — asserting each file's own
-// hold button literally carries the `long-press-target` class.
+// its two button kinds end to end. §8 mounts the real PaletteCard.tsx and
+// ColorSetsPage.tsx too (their real query hooks, intercepted at `fetch`,
+// the same precedent §2-§4 already established for a heavier dependency
+// graph than either of these) and drives a real held pointer through each
+// — proving the long-press binding actually reaches its handler (the
+// palette editor opens; the room-colour preview starts) rather than only
+// that a className string sits next to it in source.
 //
 // Run: node scripts/check_touch_press_hold.mjs
 import { mkdtempSync, writeFileSync, readFileSync } from 'node:fs';
@@ -574,22 +576,188 @@ export async function mount() {
   ok(!!lightningBtn, 'the ⚡ intensity-source button itself carries .long-press-target');
 }
 
-/* ── §8 — PaletteCard.tsx / ColorSetsPage.tsx: a lighter source-level
- * check (both carry heavier query dependency graphs that make a full
- * mount disproportionate here; §5 already proves what the class itself
- * does once applied) — assert each file's own hold button literally
- * carries the shared class. ── */
-console.log('§8 PaletteCard.tsx and ColorSetsPage.tsx: their hold buttons carry .long-press-target');
+/* ── §8a — PaletteCard.tsx, real component, real fetch intercepted: a
+ * held pointer must actually open the palette editor, not just carry the
+ * right className. ── */
+console.log('§8a PaletteCard.tsx: a real touch hold on a palette opens its editor (the long-press binding, not just the CSS class)');
 {
-  const paletteSrc = readFileSync(join(webDir, 'src/timeline/components/PaletteCard.tsx'), 'utf8');
-  const colorSetsSrc = readFileSync(join(webDir, 'src/colorsets/ColorSetsPage.tsx'), 'utf8');
-  ok(/className=\{`long-press-target\$\{/.test(paletteSrc),
-    'PaletteCard.tsx\'s hold-to-edit palette button className includes "long-press-target"');
-  ok(/longPress\(openEdit/.test(paletteSrc) === false && /\{\.\.\.longPress\(\(\) => openEdit\(p\)\)\}/.test(paletteSrc),
-    'PaletteCard.tsx\'s palette button is still bound to useLongPress\'s own gesture');
-  const previewButtonMatch = colorSetsSrc.match(/<button\s+className="long-press-target"[\s\S]{0,700}previewLongPress\(onPreviewHold\)/);
-  ok(!!previewButtonMatch,
-    'ColorSetsPage.tsx\'s ▶ Preview button carries className="long-press-target" and is still bound to its hold gesture');
+  dom.window.fetch = async (url, init = {}) => {
+    const method = (init.method || 'GET').toUpperCase();
+    if (url === '/api/palettes' && method === 'GET') {
+      return new Response(JSON.stringify([
+        { id: 'p1', name: 'Test Palette', color: '#a855f7', keys: {} },
+      ]), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    throw new Error(`unexpected fetch ${method} ${url}`);
+  };
+  globalThis.fetch = dom.window.fetch;
+
+  const entrySrc = `
+import React, { act } from 'react';
+import { createRoot } from 'react-dom/client';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { MemoryRouter } from 'react-router-dom';
+import { ToastProvider } from ${JSON.stringify(join(webDir, 'src/components/Toast.tsx'))};
+import PaletteCard from ${JSON.stringify(join(webDir, 'src/timeline/components/PaletteCard.tsx'))};
+
+const container = document.createElement('div');
+document.body.appendChild(container);
+const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+let root = null;
+
+export async function mount() {
+  root = createRoot(container);
+  await act(async () => {
+    root.render(React.createElement(QueryClientProvider, { client: qc },
+      React.createElement(MemoryRouter, null,
+        React.createElement(ToastProvider, null, React.createElement(PaletteCard, { events: [] })))));
+  });
+  for (let i = 0; i < 20 && !container.querySelector('.long-press-target'); i++) {
+    await act(async () => { await new Promise((r) => setTimeout(r, 5)); });
+  }
+  return container;
+}
+export async function flush() {
+  await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+}
+`;
+  const { mount, flush } = await buildMount(entrySrc, 'palette-card');
+  const container = await mount();
+  const btn = container.querySelector('.long-press-target');
+  ok(!!btn, 'PaletteCard mounts a .long-press-target palette button once the list resolves');
+  const savedButtonShowing = () => [...container.querySelectorAll('button')].some((b) => b.textContent === 'Save');
+
+  // A quick tap, released well before the real 500ms long-press duration,
+  // must not open the editor.
+  fire(btn, 'pointerdown', { pointerId: 20, pointerType: 'touch', clientX: 10, clientY: 10 });
+  await flush();
+  await new Promise((r) => setTimeout(r, 120));
+  fire(btn, 'pointerup', { pointerId: 20, pointerType: 'touch', clientX: 10, clientY: 10 });
+  await flush();
+  ok(!savedButtonShowing(), 'a quick tap (released before 500ms) does not open the palette editor');
+
+  // Held through the real ~500ms duration must open it — proves the
+  // longPress binding actually reaches openEdit(), not just the className.
+  fire(btn, 'pointerdown', { pointerId: 21, pointerType: 'touch', clientX: 10, clientY: 10 });
+  await flush();
+  await new Promise((r) => setTimeout(r, 650));
+  fire(btn, 'pointerup', { pointerId: 21, pointerType: 'touch', clientX: 10, clientY: 10 });
+  await flush();
+  ok(savedButtonShowing(), 'holding through the real long-press duration opens the palette editor (Save button appears)');
+}
+
+/* ── §8b — ColorSetsPage.tsx, real component, every real query + the
+ * room-preview start call intercepted: a held pointer on ▶ Preview must
+ * actually start the live preview, not just carry the right className. ── */
+console.log('§8b ColorSetsPage.tsx: a real touch hold on ▶ Preview starts the live colour preview');
+{
+  dom.window.matchMedia = dom.window.matchMedia
+    ?? (() => ({ matches: false, addEventListener() {}, removeEventListener() {},
+        addListener() {}, removeListener() {} }));
+  globalThis.matchMedia = dom.window.matchMedia;
+
+  const previewStartCalls = [];
+  dom.window.fetch = async (url, init = {}) => {
+    const method = (init.method || 'GET').toUpperCase();
+    if (url === '/api/color-sets' && method === 'GET') {
+      return new Response(JSON.stringify([
+        { id: 'c1', name: 'Test Set', kind: 'set', labels: [], entries: [], disabled: false },
+      ]), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    if (url === '/api/gradients' && method === 'GET') {
+      return new Response(JSON.stringify([]), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    if (url === '/spectra/api/registry' && method === 'GET') {
+      return new Response(JSON.stringify({ categories: {}, effects: {} }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    if (url === '/spectra/api/scenes/wheel-positions' && method === 'GET') {
+      return new Response(JSON.stringify({}), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    if (url === '/spectra/api/sequencer/curves' && method === 'GET') {
+      return new Response(JSON.stringify({}), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    if (url === '/spectra/api/sequencer/config' && method === 'GET') {
+      return new Response(JSON.stringify({ color_set_entries: {} }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    if (url === '/spectra/api/sequencer/intensity-histogram' && method === 'GET') {
+      return new Response(JSON.stringify({ bins: 0, counts: [], total: 0 }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    if (url === '/spectra/api/room-preview/start' && method === 'POST') {
+      previewStartCalls.push(JSON.parse(init.body));
+      return new Response(JSON.stringify({ applied: true, virtuals: ['v1'], hold: true, expires_in_s: 60 }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    throw new Error(`unexpected fetch ${method} ${url}`);
+  };
+  globalThis.fetch = dom.window.fetch;
+
+  const entrySrc = `
+import React, { act } from 'react';
+import { createRoot } from 'react-dom/client';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { MemoryRouter } from 'react-router-dom';
+import { ToastProvider } from ${JSON.stringify(join(webDir, 'src/components/Toast.tsx'))};
+import ColorSetsPage from ${JSON.stringify(join(webDir, 'src/colorsets/ColorSetsPage.tsx'))};
+
+const container = document.createElement('div');
+document.body.appendChild(container);
+const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+let root = null;
+
+export async function mount() {
+  root = createRoot(container);
+  await act(async () => {
+    root.render(React.createElement(QueryClientProvider, { client: qc },
+      React.createElement(MemoryRouter, null,
+        React.createElement(ToastProvider, null, React.createElement(ColorSetsPage)))));
+  });
+  for (let i = 0; i < 40 && !container.querySelector('.pane-row'); i++) {
+    await act(async () => { await new Promise((r) => setTimeout(r, 5)); });
+  }
+  return container;
+}
+export async function flush() {
+  await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+}
+`;
+  const { mount, flush } = await buildMount(entrySrc, 'color-sets-page');
+  const container = await mount();
+  const row = container.querySelector('.pane-row');
+  ok(!!row, 'ColorSetsPage lists the fetched colour set as a .pane-row');
+
+  // Selecting the row is a plain onClick — a native click event, not a
+  // pointer gesture.
+  row.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true, cancelable: true }));
+  await flush();
+
+  const previewBtn = container.querySelector('.long-press-target');
+  ok(!!previewBtn, 'selecting the colour set reveals its ▶ Preview button, carrying .long-press-target');
+
+  // A quick tap must not start the hold-preview (its own onClick, a
+  // 5s-then-revert tap preview, is a separate path this doesn't exercise).
+  fire(previewBtn, 'pointerdown', { pointerId: 31, pointerType: 'touch', clientX: 10, clientY: 10 });
+  await flush();
+  await new Promise((r) => setTimeout(r, 120));
+  fire(previewBtn, 'pointerup', { pointerId: 31, pointerType: 'touch', clientX: 10, clientY: 10 });
+  await flush();
+  ok(previewStartCalls.length === 0, 'a quick tap on ▶ Preview does not start the held preview');
+
+  // Held through the real ~500ms duration must call room-preview/start
+  // with hold:true and flip the button to "● Previewing…" — proves the
+  // longPress binding actually reaches onPreviewHold(), not just the
+  // className.
+  fire(previewBtn, 'pointerdown', { pointerId: 32, pointerType: 'touch', clientX: 10, clientY: 10 });
+  await flush();
+  await new Promise((r) => setTimeout(r, 650));
+  fire(previewBtn, 'pointerup', { pointerId: 32, pointerType: 'touch', clientX: 10, clientY: 10 });
+  await flush();
+  ok(previewStartCalls.length === 1 && previewStartCalls[0].hold === true,
+    `holding through the real long-press duration starts the held room preview (calls=${previewStartCalls.length})`);
+  ok([...container.querySelectorAll('button')].some((b) => b.textContent === '● Previewing…'),
+    'the button face flips to "● Previewing…" once the held preview is live');
 }
 
 console.log(failures === 0 ? '\nPASS' : `\nFAIL (${failures})`);
