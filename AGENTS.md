@@ -8954,8 +8954,8 @@ checks it against the schema. Proof: `scripts/check_fish_burst_bounds.py`,
    (0.75 intensity = the old drop exactly); untold = the fixed constants.
 
 11. **THE BIG FISH FLARE IS A BACKGROUND LAYER, NOT A PARTICLE (2026-10-08,
-   `big_fish` flare kind; phase 1 — the ordinary fish do not avoid it
-   yet).** The module's BIG FISH block, `fx/VENDOR.md` #65 and the
+   `big_fish` flare kind; phase 2, 2026-10-09: the ordinary fish steer out
+   of its way — item 12).** The module's BIG FISH block, `fx/VENDOR.md` #65 and the
    `fish-effect` skill are the binding statements. It lives in `self._big`
    (screen space, no SoA slot) and `_big_fish_layer` composites it behind
    the ordinary fish — **every path that writes `self.matrix` must call it
@@ -8977,15 +8977,33 @@ checks it against the schema. Proof: `scripts/check_fish_burst_bounds.py`,
    (`big_fish_ripple`, `big_fish_ripple_size`). A bespoke silhouette for it
    is what he rejected; do not go back to one.
 
+12. **THE OTHER FISH AVOID THE BIG FISH, AND THE WALL STILL WINS
+   (2026-10-09, his approval of the look: "Big fish looks right: build
+   step 2 - the other fish steer around the big fish while it crosses").**
+   The module's BIG_AVOID block and the `fish-effect` skill are the
+   binding statements. Three things learned the hard way: the body to keep
+   clear of is the splat's LIT CORE (`BIG_AVOID_CORE`), not its reach — the
+   reach needs more room than the panel has; the way out is a SEARCH for a
+   reachable spot inside the lit panel, because at the hexagon's two points
+   the big fish fills the whole lit height and "turn off its line" drives a
+   fish into the wall; and the wall keeps any fish it is late turning back
+   (handing those to the threat put fish up to 13 px past the lit edge).
+   The soft pond gives way for a threatened fish (`_wall_landing(free=)`).
+   Measured with `scripts/check_fish_big_fish_avoid.py`: in the middle
+   columns no fish's middle is ever on it; at the points some brushing
+   remains — that is the honest limit, not a bug to tune away. With no big
+   fish (or `big_fish_avoid` 0) every frame is the pre-avoidance module's.
+
 Every new fish knob is a first guess pending his eye; the effect ships
 tunable, not tuned. Proof: `scripts/check_fish.py`,
 `scripts/check_fish_avoidance.py`, `scripts/check_fish_lunge.py`,
 `scripts/check_fish_camera.py`, `scripts/check_fish_wake.py`,
 `scripts/check_fish_charge_spread.py`, `scripts/check_fish_burst_bounds.py`,
 `scripts/check_fish_disperse.py`, `scripts/check_fish_wall.py`,
+`scripts/check_fish_big_fish_avoid.py`,
 `tests/test_fish.py`, `tests/test_fish_camera.py`,
 `tests/test_fish_disperse.py`, `tests/test_fish_wall.py`,
-`tests/test_fish_lull_searcher.py`.
+`tests/test_fish_lull_searcher.py`, `tests/test_fish_big_fish_avoid.py`.
 
 ## Pulse (`fx/effects/pulse.py`) — the Singles' one-colour effect, phases 1-4 built
 

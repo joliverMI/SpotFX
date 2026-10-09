@@ -343,11 +343,55 @@ visible cold:
 - **A test comparing two runs must give each its own virtual id** — the
   fish store a particle-handoff snapshot under it on shutdown, and a
   second run on the same id adopts the first run's shoal (`_cross`'s
-  `_RUNS` counter).
-- **PHASE 2 (not built): the ordinary fish avoiding it** — he approves the
-  look first. The big fish's `x` (body centre) / `y` / `length` per entry
-  are what an avoidance steer would read (screen px: it ignores the camera
-  — convert the ordinary fish's world position to screen first).
+  `_RUNS` counter). The store is PROCESS-WIDE, so the id must be unique
+  across test FILES too: `test_fish_big_fish.py`'s bare `m3` once collided
+  with `test_fish_camera.py`'s `m3` and failed its seed-3 run whenever the
+  two files ran in one session — prefix ids with the file's own name.
+
+## THE OTHER FISH AVOID IT (phase 2, 2026-10-09) — the wall still wins
+
+His approval of the look: "Big fish looks right: build step 2 - the other
+fish steer around the big fish while it crosses." The BIG_AVOID block
+(beside `BIG_AVOID_W`) is the binding statement; what is not visible cold:
+
+- **Its "body" is the LIT CORE, not the splat reach.** A splat's light
+  falls off linearly to its reach; measured on the big fish's own
+  cross-section, it is a quarter lit at `BIG_AVOID_CORE` (0.7) of it. With
+  the full reach (±11.7 px at default size) the clearance needed is ~16 px
+  either side of its line — more than the panel has, so no steering could
+  meet it. The same core rule sizes the ordinary fish; the margin
+  (`big_fish_avoid_margin`, px) goes on top.
+- **The way out is a SEARCH, not "turn off its line".** His crystal is a
+  hexagon: at its two points the big fish fills the whole lit height, so a
+  vertical escape there drives a fish into the wall. `_big_fish_threat`
+  scores spots around each threatened fish (inside the lit panel) by
+  clearance from the big fish's MOVING body from arrival on AND along the
+  way there; it was a rule-based side choice first and that measured
+  worse at every step.
+- **The pond gives way, the wall does not.** His music Fish's pond
+  (roam_scale 0.75) is ~27 px tall: it cannot hold a fish beside a centred
+  big fish, so a threatened fish glances off the lit panel only
+  (`_wall_landing(free=)`, `self._pond_free` during `_wall_steer`). The
+  wall keeps any fish it is LATE turning back from a wall it is heading
+  into (`w_toward & w_urg >= WALL_LATE`); handing those to the threat too
+  measured fish up to 4-13 px past the lit edge. Kept, that is 0.
+- **A startled fish turns hard and the right way**: `BIG_TURN_BOOST`
+  multiplies the turn gain (proportional TURN_GAIN 3/s took ~0.7 s for a
+  120° dodge its turn circle allows in ~0.3 s), still clipped to the turn
+  circle; a near-U-turn swings AWAY from the big fish's line, never the
+  shorter way through it.
+- **The honest limit**: at the hexagon's points a fish caught by the wall
+  can brush it as it passes. Measured (`scripts/check_fish_big_fish_
+  avoid.py`, 6 seeds): fish middles on its lit body in the middle columns
+  103 → 0 (quiet) and 139 → 0 (loud); overlap pixels 4898 → ~2400 and
+  3413 → ~650; past the lit edge 0 before and after; the turn circle never
+  exceeded. Do not "fix" the residue by relaxing the wall.
+- **Scope**: ordinary swimmers (the charge's school included) and the
+  lull's keepers; never the rush, ejecta or dispersing fish. With no big
+  fish, nothing runs — bit for bit the pre-avoidance module
+  (`tests/test_fish_big_fish_avoid.py`, music / keepers-for-fireworks /
+  House Fish with solo bursts), and `big_fish_avoid` 0 is the step-1
+  crossing bit for bit.
 
 ## Everything else worth knowing before a change
 
@@ -392,7 +436,8 @@ arc divisor) and the solo burst's three included —
 — and the lull search's `search_speed`/`search_pause_s`/`search_reach`
 and the scaled drop's `drop_scale_min` — and the big fish's
 `big_fish_brightness`/`big_fish_size`/`big_fish_cross_slow_s`/
-`big_fish_cross_fast_s`/`big_fish_ripple`/`big_fish_ripple_size` —
+`big_fish_cross_fast_s`/`big_fish_ripple`/`big_fish_ripple_size` and the
+avoidance's `big_fish_avoid`/`big_fish_avoid_margin` —
 is reachable per scene entry through `get_scene_entry_params` /
 `set_scene_entry_param` (e.g. scene "House Fish", target "Matrix"),
 validated against the registry's own range. A new fish param is only
@@ -415,6 +460,9 @@ render_fish_lull_searcher.py` writes the before/after GIFs.
 behind the others, the lull dark, ordinary frames bit for bit against PR
 381, the engine poke, the preview ruler, the migration script);
 `scripts/render_fish_big_fish.py --out DIR` writes PR 381 | rework GIFs.
+`test_fish_big_fish_avoid.py` (the other fish avoiding it, and nothing
+changed without one); `scripts/check_fish_big_fish_avoid.py` measures it
+before/after and `--gifs DIR` writes the before | avoiding GIFs.
 History: AGENTS.md's "Fish (fx/effects/fish.py) — Orbits' twin" section —
 read that in full before a non-trivial change; it documents ~8 more
 PR-scoped fixes (lunge envelope, charge spread, camera window centring,

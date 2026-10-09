@@ -281,8 +281,10 @@ following the fire's intensity (`big_fish_cross_slow_s` at 0 to
 `big_fish_cross_fast_s` at 1, speed linear) and its colour the gradient's
 centre turned 120 degrees (intensity 0.2 or less) to 180 (0.5 or more), at
 `big_fish_brightness` (0.6). The same instant, self-resetting poke shape:
-no lead (it enters on the mark), no carry, no release. The ordinary fish do
-not avoid it yet (phase 2).
+no lead (it enters on the mark), no carry, no release. While it crosses the
+ordinary fish steer out of its way (`big_fish_avoid`, 0 = off;
+`big_fish_avoid_margin`, the gap in px) — inside the effect, nothing on the
+SpotFX side.
 
 ## Where SPECTRA proves it
 

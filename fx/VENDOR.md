@@ -1937,13 +1937,14 @@ against that commit.
     `BIG_FISH_OCCLUDE_AT`), so it reads BEHIND them; the lull's dark
     multiplies it too. Composited at all three paths that write
     `self.matrix` (draw, `_fade_only`, `_draw_collapse`). At most
-    `BIG_FISH_MAX` (3) at once. Phase 1 only: the ordinary fish do not avoid
-    it yet. REWORKED the same day (his word on the first build: "the fish
-    looks all wrong. it should be the same as the other fish in the effect,
-    just bigger, in the background, and dimmer, with a dim but large
-    ripple"): the first build's bespoke silhouette (a MAX over discs with a
-    forked tail fin) is gone. `_draw_bodies`' spine wave and splat loop are
-    factored into `_spine_wave`/`_splat_spines` (same arithmetic, ordinary
+    `BIG_FISH_MAX` (3) at once. Phase 1 only — the ordinary fish did not
+    avoid it yet (see PHASE 2 below). REWORKED the same day (his word on
+    the first build: "the fish looks all wrong. it should be the same as
+    the other fish in the effect, just bigger, in the background, and
+    dimmer, with a dim but large ripple"): the first build's bespoke
+    silhouette (a MAX over discs with a forked tail fin) is gone.
+    `_draw_bodies`' spine wave and splat loop are factored into
+    `_spine_wave`/`_splat_spines` (same arithmetic, ordinary
     frames bit for bit unchanged — proven against the pinned PR 381 module)
     and the big fish is drawn through them: an ordinary fish SCALED, each
     splat's whole reach (size + `_splat_many`'s 0.5 px) multiplied by its
@@ -1962,6 +1963,19 @@ against that commit.
     existing render is unchanged. Evidence: `tests/test_fish_big_fish.py`,
     `scripts/render_fish_big_fish.py` (PR 381 | rework side by side).
     Unverified against his live room.
+    PHASE 2 (2026-10-09, his approval: "Big fish looks right: build step 2 -
+    the other fish steer around the big fish while it crosses"): while a
+    big fish is crossing, the ordinary fish and the lull's keepers steer out
+    of its way (the module's BIG_AVOID block; `_big_fish_threat` reads the
+    big fish's drawn body's lit core, looks ahead, and searches for a spot
+    inside the lit panel to make for). Two new registered params,
+    `big_fish_avoid` (0 = off, the phase-1 crossing bit for bit) and
+    `big_fish_avoid_margin` (px). `_wall_landing`/`_wall_run` gained a
+    `free` argument (the soft pond left out for a threatened fish); the wall
+    still keeps a fish it is late turning back. With no big fish crossing
+    nothing runs and every frame is unchanged. Evidence:
+    `tests/test_fish_big_fish_avoid.py`, `scripts/check_fish_big_fish_
+    avoid.py`. Unverified against his live room.
 66. `pulse_modulation.py` (NEW, SpotFX-authored) + `effects/pulse.py`
     (`render()` reads `pulse_modulation.get(<its virtual id>)` once a
     frame; `_react()` scales the hit term and the rainbow hit-step; the

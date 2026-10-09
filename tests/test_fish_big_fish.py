@@ -1,5 +1,5 @@
-"""The BIG FISH flare (2026-10-08, phase 1 — the look only; the ordinary
-fish do not avoid it yet).
+"""The BIG FISH flare (2026-10-08, phase 1 — the look; the ordinary fish
+steering out of its way, phase 2, is tests/test_fish_big_fish_avoid.py).
 
 His ask, verbatim: "add a flare to fish, where a really large fish swims
 directly across the screen, in the background of the others, and at 60%
@@ -90,9 +90,12 @@ def _cross(tmp_path, intensity, seed=5, linger=False, **cfg):
     # every run its OWN virtual id: the fish store a particle-handoff
     # snapshot under it when they shut down, and a later run reusing the id
     # would adopt the previous run's shoal (so two runs compared frame for
-    # frame would not even swim the same fish)
+    # frame would not even swim the same fish). The prefix is this file's
+    # own: the snapshot store is process-wide, and a bare "m3" collided with
+    # test_fish_camera.py's own "m3" virtual whenever the two files ran in
+    # one session (its seed-3 run adopted this file's shoal)
     _RUNS[0] += 1
-    name = f"m{_RUNS[0]}"
+    name = f"bigfish{_RUNS[0]}"
 
     async def main():
         room = await _room(tmp_path, name, _cfg(**cfg), seed=seed)
