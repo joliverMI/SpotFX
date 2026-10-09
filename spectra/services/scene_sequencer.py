@@ -199,6 +199,13 @@ async def fire_scene_by_id(scene_id: str,
                "scene_name": scene_name}
     controls = load_room_controls()
     forced = False
+    # Captured BEFORE a Force Scene substitution overwrites scene_id below —
+    # this is the scene the caller actually asked for, and it's what a
+    # Light Show "next scene change" arm (and a Show Sequence wait) need to
+    # see a real change against, even while the room keeps wearing the
+    # pinned scene (2026-10-09, his report: see engine.on_scene_fired's own
+    # docstring for the full mechanism).
+    requested_scene_id = scene_id
     if controls.force_scene_enabled and controls.force_scene_scene_id:
         if scene_store.get_by_id(controls.force_scene_scene_id) is not None:
             scene_id = controls.force_scene_scene_id
@@ -281,9 +288,15 @@ async def fire_scene_by_id(scene_id: str,
     # the room's own stored mode (scene_compiler.fire_scene's default).
     display_mode_kw = {} if origin != "house" else {"display_mode": "default"}
     cut_kw = {"cut": True} if cut else {}
+    # Only passed when Force Scene actually substituted a different scene —
+    # every other caller (and every existing test double of fire_scene)
+    # keeps the exact old call shape.
+    requested_kw = ({} if requested_scene_id == scene_id
+                    else {"requested_scene_id": requested_scene_id})
     result = await scene_compiler.fire_scene(scene, intensity=intensity,
                                              color_set=color_set, dry_run=False,
-                                             **glide, **display_mode_kw, **cut_kw)
+                                             **glide, **display_mode_kw, **cut_kw,
+                                             **requested_kw)
     if overrode_dwell_for_drop:
         result["overrode_dwell_for_drop"] = round(remaining_dwell, 2)
     if overrode_disabled:

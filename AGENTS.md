@@ -4196,6 +4196,24 @@ first. Five things:
 - **"NEXT SCENE CHANGE" IS READ IN `engine.on_scene_fired` BEFORE the
   conductor takes the new scene** (a re-fire is not a change), and
   `show_actions.executing()` excludes a change the show itself caused.
+- **FORCE SCENE DOES NOT STARVE A SCENE-CHANGE ARM (2026-10-09, his report:
+  an arm armed on "next scene change" kept resetting its "Scene change at
+  least: xx" countdown and never fired).** Force Scene reasserts the SAME
+  pinned scene on every automatic pick (`scene_sequencer.fire_scene_by_id`),
+  so the scene `engine.on_scene_fired` saw never moved and the bullet
+  above's own comparison never saw a "real" change — even though that same
+  re-fire's `dwell.note_fired()` call was what kept resetting the readout
+  the whole time. His ruling: "do 1" — the arm still releases at the moment
+  a scene change would have happened; the room keeps wearing the pinned
+  scene. `fire_scene_by_id` now captures the scene id a caller actually
+  asked for BEFORE the pin substitutes, and threads it through
+  `scene_compiler.fire_scene`'s `requested_scene_id` kwarg (passed only
+  when it differs from the fired scene, so every pre-existing test double
+  of `fire_scene`/`on_scene_fired` keeps its old call shape) to
+  `engine.on_scene_fired`, which uses it — not the pinned `scene.id` — for
+  the comparison above and for `_tell_sequence`, so a Show Sequence's "wait
+  N scene changes" counts the suppressed moment too. Spec:
+  `tests/test_scene_arm_under_force.py`.
 - **FINISH ON THE MARK**: the clock fires a cue at the largest lead any
   armed set needs; each set waits the difference to its own
   (`show_arms.lead_ms`, longest fade before the first pause). The whole set

@@ -306,7 +306,7 @@ def test_force_scene_redirects_every_automatic_pick(monkeypatch):
     fired_ids = []
 
     async def fake_fire_scene(scene, *, intensity=0.5, color_set=None,
-                              dry_run=True, rng=None):
+                              dry_run=True, rng=None, requested_scene_id=None):
         fired_ids.append(scene.id)
         return {"dry_run": dry_run, "intensity": intensity, "writes": [],
                 "resolved_bindings": {}, "dice_rolls": {}}

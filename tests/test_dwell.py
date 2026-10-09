@@ -69,7 +69,7 @@ def _fake_scene_compiler(monkeypatch, fired: list):
     from spectra.services import scene_compiler
 
     async def fake_fire_scene(scene, *, intensity=0.5, color_set=None,
-                              dry_run=True, rng=None):
+                              dry_run=True, rng=None, requested_scene_id=None):
         fired.append((scene.id, intensity))
         return {"dry_run": dry_run, "intensity": intensity, "writes": [],
                 "resolved_bindings": {}, "dice_rolls": {}}
