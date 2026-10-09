@@ -2228,7 +2228,7 @@
           "min": 0.0,
           "max": 1.0,
           "aspect": "shape",
-          "note": "The big fish flare: how bright the big background fish is (0.6 = 60%). Its colour is the scene's centre colour turned 120-180 degrees by the flare's intensity.",
+          "note": "The big fish flare: how bright the big background fish is (0.6 = 60% of an ordinary fish of its colour; it is an ordinary fish, bigger). Its colour is the scene's centre colour turned 120-180 degrees by the flare's intensity.",
           "help_topic": "fish-big-fish",
           "default": 0.6
         },
@@ -2264,6 +2264,28 @@
           "note": "The big fish flare: seconds to cross the panel at intensity 1.",
           "help_topic": "fish-big-fish",
           "default": 2.5
+        },
+        "big_fish_ripple": {
+          "label": "Big Fish Ripple",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 4.0,
+          "aspect": "shape",
+          "note": "The big fish flare: how bright its wake is. 1 = the ordinary fish's own wake rule at its size and speed, which a big slow fish leaves large and dim; 0 = no wake. The scene's Ripple Wake scales it too.",
+          "help_topic": "fish-big-fish",
+          "default": 1.0
+        },
+        "big_fish_ripple_size": {
+          "label": "Big Fish Ripple Size",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.2,
+          "max": 2.0,
+          "aspect": "shape",
+          "note": "The big fish flare: how wide its wake is, against the ordinary wake rule scaled to its body (1 = in proportion).",
+          "help_topic": "fish-big-fish",
+          "default": 1.0
         }
       },
       "defaults": {
@@ -2325,7 +2347,9 @@
         "big_fish_brightness": 0.6,
         "big_fish_size": 0.65,
         "big_fish_cross_slow_s": 7.0,
-        "big_fish_cross_fast_s": 2.5
+        "big_fish_cross_fast_s": 2.5,
+        "big_fish_ripple": 1.0,
+        "big_fish_ripple_size": 1.0
       }
     },
     "gifplayer": {

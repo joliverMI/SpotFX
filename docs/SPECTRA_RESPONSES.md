@@ -275,7 +275,8 @@ only above intensity 0.4 by default —
 lead, carry or release.
 
 Fish answers one flare kind of its own (2026-10-08): **big_fish** — one
-really large fish crosses the panel behind the ordinary fish, its speed
+really large fish (an ordinary fish's own body, scaled up and dimmer, laying
+its own large, dim wake) crosses the panel behind the ordinary fish, its speed
 following the fire's intensity (`big_fish_cross_slow_s` at 0 to
 `big_fish_cross_fast_s` at 1, speed linear) and its colour the gradient's
 centre turned 120 degrees (intensity 0.2 or less) to 180 (0.5 or more), at

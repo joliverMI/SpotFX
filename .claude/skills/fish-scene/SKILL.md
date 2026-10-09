@@ -84,8 +84,9 @@ including the hand-off table row for this effect; a lull leading into a switch i
 ## Sonic reach
 
 `set_flare_kind` takes `type="big_fish"` (the seeded kinds are "Big Fish"
-AND "Big Fish 2" — edit both; they carry no params/gain/hold). Its brightness/size/crossing
-times are entry params: `set_scene_entry_param` on scene "Fish", target
+AND "Big Fish 2" — edit both; they carry no params/gain/hold). Its
+brightness/size/crossing times and its wake (`big_fish_ripple`,
+`big_fish_ripple_size`) are entry params: `set_scene_entry_param` on scene "Fish", target
 "Matrix".
 
 `set_flare_kind` on the "Fish Swim Burst" kind accepts
