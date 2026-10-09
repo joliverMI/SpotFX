@@ -4730,28 +4730,71 @@ new `device_name()`, which reads the identical `track.device_name` field
 root's own `api/spotify_client.py`/`settings.spotify_device_names`
 already match against — the real reported device, never guessed, and
 never re-derived from a second source). Gated at exactly ONE choke
-point, `house.py`'s own `deps.playing`/`_default_playing` (its own "THE
-MUSIC-DEVICE GATE" docstring section is the binding statement) — every
-caller that already routed through it (the `mode.music=="show"`
-hand-in/hand-out, `scene_deferral()`, `response_deferral()`,
-`house_overrides_display()`) inherits the gate for free. Deliberately
-NOT a change to `bridge.is_playing()` itself, which Ambient/dark_light/
-Light Show arms/house_restart each read independently for their own
-broader "is music playing at all" question this ask never named. A
-device switch mid-song is handled both ways: switching onto an allowed
-device hands in immediately (the existing `playing is True` edge);
-switching OFF one hands out immediately too, via a new
-`deps.music_device_mismatch` seam, rather than waiting on
-`music_debounce_s` (tuned for a genuine stop/inter-song gap, not a
-deliberate device change). Visible in the UI (`RoomControlsBar.tsx`'s
-Scenes panel, a "Music devices" text field, comma-separated) and to
-Sonic (`settings_console.get_music_device_allowlist`/
+point for the "show" policy's own hand-in/hand-out: `house.py`'s
+`deps.playing`/`_default_playing` (its own "THE MUSIC-DEVICE GATE"
+docstring section is the binding statement) — `scene_deferral()` and
+`house_overrides_display()` inherit it for free, since both already
+route through `deps.playing`. A device switch mid-song is handled both
+ways: switching onto an allowed device hands in immediately (the
+existing `playing is True` edge); switching OFF one hands out
+immediately too, via a new `deps.music_device_mismatch` seam, rather
+than waiting on `music_debounce_s` (tuned for a genuine stop/inter-song
+gap, not a deliberate device change).
+
+**Firstmate's confirmation the same day widened this past the "show"
+phase alone: "with music on a non-allowed device, NOTHING musical
+reaches the lights — no show frames, scene changes, flares, drop
+sequences or Light Show trigger arms firing from that playback."**
+Scene changes and analysed-colour jumps needed no further work —
+`scene_deferral()` already covers every automatic scene/colour choke
+point (sequencer rolls, `fire_scene` triggers, `select_color_set`
+triggers, the analysed colour event, drop-led switches), and a resting
+mode (including one resting BECAUSE of a wrong device) already owns
+them all. Two real gaps remained, both because the underlying mechanism
+reacts to "a track is playing" with no device awareness of its own:
+
+- **Flares, charge/lull/drop, drop-sequence members, and update
+  flares** — all route through `engine._response_gate`/`_update_gate` →
+  `house.response_deferral()`, which before this only deferred for an
+  "ignore" policy — a "show" mode resting because of a wrong device
+  (as opposed to genuinely nothing playing) was never covered, because
+  response_deferral predates any device concept and the underlying
+  trigger engine keeps ticking on the real position regardless of which
+  device reports it. Fixed with a new standalone predicate,
+  `house.confirmed_wrong_device()` (a mode is active AND spot-effects
+  confirms a track IS playing AND the device fails the allowlist) —
+  `response_deferral()` now defers on it UNCONDITIONALLY, regardless of
+  `mode.music` policy, so a device he never authorised silences flares
+  even under "calm" (whose own docstring otherwise keeps them playing
+  through music, by design, on an allowed device).
+- **The Light Show's High/Low Trigger cue arms** (`spectra/services/
+  show_arms.py`'s `on_cue`, reached through `engine.py`'s `_show_cue`
+  wiring) are deliberately independent of `scene_change_mode`/
+  `mode.music` by design (every analysed song has cues, his own
+  triggers or not) — so they had, and were meant to have, NO house gate
+  at all, including none for the wrong-device case. `engine._show_cue`
+  now checks `house.confirmed_wrong_device()` before calling
+  `show_arms.on_cue`; the crossing's own `_fired` bookkeeping
+  (`trigger_engine._tick_show_cues`) still consumes the mark either way,
+  so a gated cue is skipped once, never retried or stuck. A manual
+  scene-change arm (`show_arms.on_scene_change`, reached from ANY real
+  scene fire including his own Fire button) is deliberately NOT gated —
+  an explicit human action is never silenced by any of this, matching
+  Force Scene's own precedent.
+
+Visible in the UI (`RoomControlsBar.tsx`'s Scenes panel, a "Music
+devices" text field, comma-separated) and to Sonic
+(`settings_console.get_music_device_allowlist`/
 `set_music_device_allowlist` — a dedicated pair, same "a list is a poor
 fit for `set_setting`'s scalar shape" reason as Force Scene/Force
 Colour, NOT a `SETTINGS_REGISTRY` key). An emptied allowlist is refused
-— the house must always have at least one allowed device. Spec:
+— the house must always have at least one allowed device. Deliberately
+NOT touched: `bridge.is_playing()` itself, which Ambient/dark_light/
+house_restart each read independently for their own, broader "is music
+playing at all" question this ask never named. Spec:
 `tests/test_bridge.py`, `tests/test_house_lighting.py`'s "THE
-MUSIC-DEVICE GATE" section, `tests/test_settings_console.py`,
+MUSIC-DEVICE GATE" section, `tests/test_house_engine_hooks.py`'s
+`_show_cue` tests, `tests/test_settings_console.py`,
 `tests/test_settings_agent_cli.py`. Help topic `music-device-gate`.
 
 **THREE DEFECTS FROM THE FIRST REAL HANDOVER, FIXED 2026-10-05 (PR

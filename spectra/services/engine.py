@@ -147,7 +147,17 @@ def _show_cue_plan(uri):
 
 
 async def _show_cue(level, cue_ms, ahead_ms):
-    from spectra.services import show_arms
+    """Gated on house.confirmed_wrong_device() (the Admiral, 2026-10-09):
+    cue crossings are otherwise independent of scene_change_mode/
+    mode.music by design (AGENTS.md's drop-detection section), but a Light
+    Show set arming on a High/Low Trigger is still music-driven automation
+    — it must not fire from playback on a device he never authorised. The
+    crossing's own _fired bookkeeping (trigger_engine._tick_show_cues)
+    still consumes the mark either way, so a gated cue is skipped once,
+    never retried or stuck."""
+    from spectra.services import house, show_arms
+    if house.confirmed_wrong_device():
+        return []
     return await show_arms.on_cue(level, cue_ms, ahead_ms)
 
 

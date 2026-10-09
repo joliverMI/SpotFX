@@ -119,15 +119,35 @@ THE MUSIC-DEVICE GATE (the Admiral, 2026-10-09) — "playing" above means
 playing on a device named in `RoomControlState.music_device_allowlist`
 (his real Spotify Connect device names, default ["Serenity", "Serenity
 guest"]), not merely playing anywhere. `deps.playing`/`_default_playing`
-is the one function this is enforced in (see its own docstring) — music
-on any other device (his phone, another speaker, the car) reads exactly
-like silence here: the room never hands in, and a device switch AWAY
-from an allowed device mid-song hands out immediately rather than
-waiting on `music_debounce_s` (`deps.music_device_mismatch`). This is
-scoped to house.py's own music-show switch only — it does not touch
-`bridge.is_playing()` itself, which Ambient/dark_light/Light Show
-arms/house_restart each read independently for their own, broader
-"is music playing at all" question.
+is the function this is enforced in for the "show" hand-in/hand-out
+specifically (see its own docstring) — music on any other device (his
+phone, another speaker, the car) reads exactly like silence there: the
+room never hands in, and a device switch AWAY from an allowed device
+mid-song hands out immediately rather than waiting on `music_debounce_s`
+(`deps.music_device_mismatch`).
+
+THE SAME GATE ALSO SILENCES EVERYTHING ELSE MUSIC-DRIVEN, REGARDLESS OF
+`mode.music` POLICY (firstmate's confirmation, same day: "no show frames,
+scene changes, flares, drop sequences or Light Show trigger arms firing
+from that playback"). `confirmed_wrong_device()` is the standalone
+predicate both `response_deferral()` (flares, charge/lull/drop,
+drop-sequence members, update flares — via `engine._response_gate`/
+`_update_gate`) and `engine.py`'s own `_show_cue` wiring (the Light Show's
+High/Low Trigger arms — otherwise independent of `scene_change_mode`/
+`mode.music` by design) check. It fires regardless of whether the mode's
+policy is "show", "calm" or "ignore" — a device he never authorised must
+read the same as "ignored" even under "calm", which otherwise keeps
+flares playing through a fixed resting scene. Scene changes and
+analysed-colour jumps need no separate check: `scene_deferral()` already
+covers them (a resting mode — including one resting because of a wrong
+device, via `deps.playing`) owns the scene/colour, and every automatic
+scene/colour choke point already calls it. An explicit human action
+(the Fire button, Force Scene/Colour) is NEVER gated by any of this —
+only automatic, music-driven firing is.
+
+Deliberately NOT touched: `bridge.is_playing()` itself, which Ambient/
+dark_light/house_restart each read independently for their own, broader
+"is music playing at all" question that was never part of this ask.
 
 ═══ TRANSITIONS ═══
 
@@ -621,12 +641,46 @@ def scene_deferral() -> Optional[str]:
         return None
 
 
+def confirmed_wrong_device() -> bool:
+    """True iff a house mode is active (`_live_mode()` is not None — the
+    same precondition `scene_deferral()`/`response_deferral()` already
+    require) AND spot-effects confirms a track IS playing right now on a
+    device OUTSIDE `RoomControlState.music_device_allowlist`. Deliberately
+    independent of `mode.music` — a device he never authorised must not
+    drive a flare, a drop sequence, or a Light Show arm even under "calm",
+    which otherwise keeps flares playing through a fixed scene; see
+    `response_deferral()`'s own use of this. `deps.playing`/
+    `_default_playing` above answers a narrower question (is the "show"
+    policy's hand-in/out condition true) — this one applies regardless of
+    policy, which is why it is a function of its own rather than folded
+    into that one."""
+    try:
+        if _live_mode() is None:
+            return False
+        from spectra.services.engine import bridge
+        if bridge.is_playing() is not True:
+            return False
+        return not _music_device_allowed(bridge.device_name())
+    except Exception:                                    # noqa: BLE001
+        logger.exception("house: confirmed_wrong_device failed — not deferring")
+        return False
+
+
 def response_deferral() -> Optional[str]:
-    """Why a music response (flare, charge/lull/drop, update flare) must
-    not fire, or None. Only an "ignore" mode silences them."""
+    """Why a music response (flare, charge/lull/drop, update flare, a
+    drop-sequence member) must not fire, or None. An "ignore" mode
+    silences them unconditionally; ANY mode also silences them while
+    `confirmed_wrong_device()` — playback is real, just not on an allowed
+    device, so it must read the same as "ignored" regardless of what the
+    mode's own policy says about music otherwise (its own docstring)."""
     try:
         mode = _live_mode()
-        if mode is None or mode.music != "ignore":
+        if mode is None:
+            return None
+        if confirmed_wrong_device():
+            return (f"house mode {mode.name!r} — playing on a device "
+                    "outside the allowed list")
+        if mode.music != "ignore":
             return None
         return f"house mode {mode.name!r} ignores music"
     except Exception:                                    # noqa: BLE001

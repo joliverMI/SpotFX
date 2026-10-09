@@ -1079,3 +1079,47 @@ def test_music_status_surfaces_the_device_and_allowlist(monkeypatch, world):
     assert status["music"]["device"] == "Javi's iPhone"
     assert status["music"]["device_allowed"] is False
     assert status["music"]["device_allowlist"] == ["Serenity", "Serenity guest"]
+
+
+def test_confirmed_wrong_device_requires_an_active_mode(monkeypatch, world):
+    from spectra.services import engine, house
+
+    monkeypatch.setattr(engine.bridge, "is_playing", lambda: True)
+    monkeypatch.setattr(engine.bridge, "device_name", lambda: "Javi's iPhone")
+    assert house.confirmed_wrong_device() is False, \
+        "no mode set yet — nothing to protect, so nothing is gated"
+
+    _mode(world, "Standard")
+    _run(world.house.set_mode(mode="Standard", source="spectra"))
+    assert house.confirmed_wrong_device() is True
+
+    monkeypatch.setattr(engine.bridge, "device_name", lambda: "Serenity")
+    assert house.confirmed_wrong_device() is False
+
+
+def test_response_deferral_defers_on_wrong_device_even_under_calm(monkeypatch, world):
+    """calm mode's own docstring keeps flares playing through music — but
+    not from a device he never authorised."""
+    from spectra.services import engine, house
+
+    _mode(world, "Chill", music="calm")
+    _run(world.house.set_mode(mode="Chill", source="spectra"))
+    monkeypatch.setattr(engine.bridge, "is_playing", lambda: True)
+    monkeypatch.setattr(engine.bridge, "device_name", lambda: "Serenity")
+    assert house.response_deferral() is None, \
+        "calm mode still lets flares play on an allowed device"
+
+    monkeypatch.setattr(engine.bridge, "device_name", lambda: "Javi's iPhone")
+    assert house.response_deferral() is not None, \
+        "a device outside the allowlist silences flares even under calm"
+
+
+def test_response_deferral_unaffected_by_device_while_show_plays_on_an_allowed_one(
+        monkeypatch, world):
+    from spectra.services import engine, house
+
+    _mode(world, "Standard")
+    _run(world.house.set_mode(mode="Standard", source="spectra"))
+    monkeypatch.setattr(engine.bridge, "is_playing", lambda: True)
+    monkeypatch.setattr(engine.bridge, "device_name", lambda: "Serenity")
+    assert house.response_deferral() is None
