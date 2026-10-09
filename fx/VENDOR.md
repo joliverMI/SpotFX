@@ -1937,13 +1937,14 @@ against that commit.
     `BIG_FISH_OCCLUDE_AT`), so it reads BEHIND them; the lull's dark
     multiplies it too. Composited at all three paths that write
     `self.matrix` (draw, `_fade_only`, `_draw_collapse`). At most
-    `BIG_FISH_MAX` (3) at once. Phase 1 only: the ordinary fish do not avoid
-    it yet. REWORKED the same day (his word on the first build: "the fish
-    looks all wrong. it should be the same as the other fish in the effect,
-    just bigger, in the background, and dimmer, with a dim but large
-    ripple"): the first build's bespoke silhouette (a MAX over discs with a
-    forked tail fin) is gone. `_draw_bodies`' spine wave and splat loop are
-    factored into `_spine_wave`/`_splat_spines` (same arithmetic, ordinary
+    `BIG_FISH_MAX` (3) at once. Phase 1 only — the ordinary fish did not
+    avoid it yet (see PHASE 2 below). REWORKED the same day (his word on
+    the first build: "the fish looks all wrong. it should be the same as
+    the other fish in the effect, just bigger, in the background, and
+    dimmer, with a dim but large ripple"): the first build's bespoke
+    silhouette (a MAX over discs with a forked tail fin) is gone.
+    `_draw_bodies`' spine wave and splat loop are factored into
+    `_spine_wave`/`_splat_spines` (same arithmetic, ordinary
     frames bit for bit unchanged — proven against the pinned PR 381 module)
     and the big fish is drawn through them: an ordinary fish SCALED, each
     splat's whole reach (size + `_splat_many`'s 0.5 px) multiplied by its
