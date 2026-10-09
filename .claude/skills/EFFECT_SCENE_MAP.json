@@ -105,7 +105,9 @@
         "tests/test_fish_wall.py",
         "scripts/render_fish_lull_searcher.py",
         "tests/test_fish_big_fish.py",
-        "scripts/render_fish_big_fish.py"
+        "scripts/render_fish_big_fish.py",
+        "tests/test_fish_big_fish_avoid.py",
+        "scripts/check_fish_big_fish_avoid.py"
       ]
     },
     "melt-effect": {

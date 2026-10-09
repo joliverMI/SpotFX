@@ -1962,6 +1962,19 @@ against that commit.
     existing render is unchanged. Evidence: `tests/test_fish_big_fish.py`,
     `scripts/render_fish_big_fish.py` (PR 381 | rework side by side).
     Unverified against his live room.
+    PHASE 2 (2026-10-09, his approval: "Big fish looks right: build step 2 -
+    the other fish steer around the big fish while it crosses"): while a
+    big fish is crossing, the ordinary fish and the lull's keepers steer out
+    of its way (the module's BIG_AVOID block; `_big_fish_threat` reads the
+    big fish's drawn body's lit core, looks ahead, and searches for a spot
+    inside the lit panel to make for). Two new registered params,
+    `big_fish_avoid` (0 = off, the phase-1 crossing bit for bit) and
+    `big_fish_avoid_margin` (px). `_wall_landing`/`_wall_run` gained a
+    `free` argument (the soft pond left out for a threatened fish); the wall
+    still keeps a fish it is late turning back. With no big fish crossing
+    nothing runs and every frame is unchanged. Evidence:
+    `tests/test_fish_big_fish_avoid.py`, `scripts/check_fish_big_fish_
+    avoid.py`. Unverified against his live room.
 66. `pulse_modulation.py` (NEW, SpotFX-authored) + `effects/pulse.py`
     (`render()` reads `pulse_modulation.get(<its virtual id>)` once a
     frame; `_react()` scales the hit term and the rainbow hit-step; the

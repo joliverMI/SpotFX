@@ -884,8 +884,8 @@ DROP_EJECTA_SPEED = (1.6, 2.9)  # ejecta speed, multiples of cruise
 # degree rotation of the central color of the scene, so it contrasts. at .5
 # intensity or higher 180 degrees, scale linearly to .2 insesity = 120
 # degrees (either direction)") ─────────────────────────────────────────────
-# PHASE 1 ONLY: the look. The ordinary fish do NOT avoid it yet — he
-# approves the big fish first, then the avoidance is its own change.
+# PHASE 1 was the look; PHASE 2 (the block below, BIG_AVOID_W) is the
+# ordinary fish steering out of its way, built once he approved the look.
 #
 # SpotFX's `big_fish` flare kind (spectra scene_response._big_fish) pokes
 # the unregistered, self-resetting `big_fish` key with the fire's own
@@ -965,29 +965,46 @@ BIG_FISH_HUE_HI = (0.5, 180.0)
 # a snap. `_big_fish_threat` is the whole judgement:
 #
 #   THE BODY it keeps clear of is the big fish's OWN drawn body — its centre
-#   line, and at each point along it the reach of the splat the renderer
-#   lays there plus its tail throw (the tapering profile, not a box) — grown
-#   by the ordinary fish's own reach at five points along ITS body and
-#   `big_fish_avoid_margin` px. So "body size + a margin" is read off what
-#   is drawn, and a bigger ordinary fish keeps further off by construction.
-#   ANTICIPATION: both bodies are rolled forward BIG_AVOID_LOOK_S along their
-#   own velocities (the fish's current heading and speed) AND with the fish
+#   line, and at each point along it the LIT CORE of the splat the renderer
+#   lays there (BIG_AVOID_CORE of its reach: the faint fringe past it is
+#   glow, not body) plus its tail throw — the tapering profile, not a box —
+#   grown by the ordinary fish's own lit core at five points along ITS body
+#   and `big_fish_avoid_margin` px. So "body size + a margin" is read off
+#   what is drawn, and a bigger ordinary fish keeps further off by
+#   construction.
+#   ANTICIPATION (`_big_fish_threat`): both bodies are rolled forward
+#   BIG_AVOID_LOOK_S, the fish along its current heading and speed AND
 #   holding still in the water — the big fish is faster than a cruising fish
-#   at every intensity, so "where will its body sweep over the spot I am in"
-#   is the question that matters, and the heading rollout keeps a fish that
-#   has got out from turning straight back in. Urgency is how soon the
-#   first contact comes (1 = now), or how close the body already is.
-#   THE WAY OUT: vertically away from its centre line, keeping some of its
-#   own forward travel — to the side it is already on, if that side has the
-#   room for its whole body outside the margin INSIDE the wall (or pond); to
-#   the other side if it is still ahead of the nose and that side has it;
-#   and if it is already alongside with no room either way, it turns back
-#   against the big fish's travel and lets it slip past (their speeds add).
-#   It darts a little while it does (BIG_FLEE_X of its own speed at full
-#   urgency, on a short ease) — a startled fish, not a teleport.
-#   THE WALL WINS: the term rides the same "toward the water only" filter a
-#   neighbour's swerve does while the wall has a fish, so a crowd and a big
-#   fish together can never push one off the panel.
+#   at every intensity, so "will its body sweep over the spot I am in" is
+#   the question that matters, and the heading rollout keeps a fish that has
+#   got out from turning straight back in. Urgency is how soon the first
+#   contact comes (1 = now), or how close the body already is.
+#   THE WAY OUT is a small SEARCH, not a rule: spots around the fish
+#   (BIG_AVOID_ANGLES x BIG_AVOID_RADII_PX) inside the lit panel, each scored
+#   by how clear of the big fish's moving body it stays from when the fish
+#   could be there to the end of the look-ahead AND every step of the way
+#   there — less a little for distance, plus a little for the one it already
+#   faces (no bias to a side of the panel). The crystal is a hexagon: near
+#   its points there is no room above or below the big fish at all, so "turn
+#   off its line" alone sends a fish there into the wall; the search makes
+#   for where the room is (above, below, or behind it once it has passed).
+#   HOW IT MOVES: a heading term like the neighbour swerve, and the same
+#   turn-rate clamp — but a startled fish turns up to its turn circle
+#   (BIG_TURN_BOOST), comes about the way that swings it AWAY from the big
+#   fish's line (never the short way through it), and darts a little
+#   (BIG_FLEE_X of its own speed at full urgency, on a short ease). The soft
+#   pond (`roam_scale`) gives way for it (`_wall_landing(free=)`, the glance
+#   off the lit panel only): his music Fish's pond is too small to hold a
+#   fish beside a big fish centred on the panel.
+#   THE WALL WINS: while the wall is late turning a fish back from a wall it
+#   is heading into, the wall keeps it (the threat's term still rides the
+#   neighbour swerve's "toward the water only" filter); otherwise the threat
+#   steers, toward a spot already inside the panel. Measured
+#   (scripts/check_fish_big_fish_avoid.py): no fish goes further past the
+#   lit edge than without the big fish. THE HONEST LIMIT: at the hexagon's
+#   two points the big fish fills the whole lit height, so a fish caught
+#   there by the wall can brush it as it passes — in the middle columns,
+#   where there is room, no fish's middle is ever on it.
 #   SCOPE: ordinary swimmers (mode 0/1, the charge's school included — a big
 #   fish swimming through a school would overlap all of it) and the lull's
 #   keepers. The drop's rush and ejecta (authored chaos) and dispersing fish
@@ -3337,7 +3354,7 @@ class Fish2d(Twod, GradientEffect):
         d_pond, pnx, pny = self._pond_distance(x, y)
         pond = d_pond < d_sil
         if free is not None:
-            pond = pond & ~free
+            pond = pond & ~np.asarray(free, dtype=bool)
         return (
             np.where(pond, d_pond, d_sil),
             np.where(pond, pnx, snx),
