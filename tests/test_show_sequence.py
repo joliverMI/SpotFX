@@ -513,3 +513,89 @@ def test_every_step_is_in_the_show_log(world, monkeypatch):
     keys = [k for b, k in seen if b == "show"]
     assert {"sequence_started", "sequence_entered", "sequence_completed",
             "sequence_finished"} <= set(keys)
+
+
+# ── the wire ───────────────────────────────────────────────────────────────
+
+def test_routes_round_trip(world, tmp_path, monkeypatch):
+    import json
+    from fastapi.testclient import TestClient
+
+    from spectra import config as scfg
+    from spectra.app import create_app
+    from spectra.services import song_library
+    profiles = tmp_path / "profiles"
+    profiles.mkdir()
+    for i, (title, artist, uri) in enumerate([
+            ("El Apagón", "Bad Bunny", "spotify:track:apagon"),
+            ("Dopamine", "Purple Disco Machine", "spotify:track:dopa"),
+            ("Old one", "", "ledfx:old:one")]):
+        (profiles / f"p{i}.json").write_text(json.dumps(
+            {"title": title, "artist": artist, "spotify_uri": uri}))
+    monkeypatch.setattr(scfg, "PROFILES_DIR", profiles)
+    song_library.reset()
+    client = TestClient(create_app())
+
+    r = client.post("/api/light-show/sequences", json={
+        "name": "Party", "items": [
+            {"kind": "set", "set_id": world["ids"]["A"], "arm": "high"},
+            {"kind": "wait", "wait": {"kind": "duration", "seconds": 30}}]})
+    assert r.status_code == 200, r.text
+    sid = r.json()["id"]
+    assert r.json()["items"][0]["title"] == "A — next High Trigger"
+    assert client.post("/api/light-show/sequences", json={"name": "party"}).status_code == 409
+    dup = client.post(f"/api/light-show/sequences/{sid}/duplicate").json()
+    assert dup["name"] == "Party copy"
+    names = [s["name"] for s in client.get("/api/light-show/sequences").json()["sequences"]]
+    assert names == ["Party", "Party copy"]
+
+    st = client.post("/api/light-show/sequence-run/start", json={"sequence_id": sid}).json()
+    assert st["run"]["state"] == "running"
+    assert st["run"]["waiting_for"] == "armed for the next High Trigger"
+    assert client.post("/api/light-show/sequence-run/start",
+                       json={"sequence_id": dup["id"]}).status_code == 409
+    assert client.delete(f"/api/light-show/sequences/{sid}").status_code == 409
+    assert client.post("/api/light-show/sequence-run/next").json()["run"]["index"] == 1
+    assert client.post("/api/light-show/sequence-run/pause").json()["run"]["state"] == "paused"
+    assert client.post("/api/light-show/sequence-run/resume").json()["run"]["state"] == "running"
+    assert client.post("/api/light-show/sequence-run/previous").json()["run"]["index"] == 0
+    assert client.post("/api/light-show/sequence-run/stop").json()["run"]["state"] == "stopped"
+    assert client.post("/api/light-show/sequence-run/stop").status_code == 409
+
+    found = client.get("/api/light-show/songs", params={"q": "apagon"}).json()
+    assert [s["uri"] for s in found["songs"]] == ["spotify:track:apagon"]
+    every = client.get("/api/light-show/songs").json()["songs"]
+    assert {s["uri"] for s in every} == {"spotify:track:apagon", "spotify:track:dopa"}
+    assert client.get("/api/light-show/songs", params={"q": "purple disco"}).json()["songs"][0]["title"] == "Dopamine"
+
+
+# ── Sonic ──────────────────────────────────────────────────────────────────
+
+def test_sonic_reads_and_drives_a_sequence_by_name(world):
+    from spectra.services import settings_agent, show_console
+    for op in ("list_show_sequences", "show_sequence_status", "start_show_sequence",
+               "stop_show_sequence", "pause_show_sequence", "resume_show_sequence",
+               "next_show_sequence_step", "previous_show_sequence_step",
+               "fire_show_sequence_step"):
+        assert op in settings_agent.ALL_OPERATIONS
+    seq("Friday Night", S(world, "A", "high"), W(kind="songs", count=2))
+
+    async def go():
+        ops = show_console.OPERATIONS
+        assert ops["list_show_sequences"].handler()["sequences"][0]["items"] == [
+            "A — next High Trigger", "Wait for 2 songs"]
+        bad = ops["start_show_sequence"].handler(sequence_name="friday nite")
+        assert bad["status"] == "rejected" and "Friday Night" in bad["close_matches"]
+        ok = ops["start_show_sequence"].handler(sequence_name="friday night")
+        assert ok["status"] == "applied" and ok["now"] == "armed for the next High Trigger"
+        st = ops["show_sequence_status"].handler()["run"]
+        assert st["current"] == "A — next High Trigger" and st["upcoming"] == ["Wait for 2 songs"]
+        assert ops["next_show_sequence_step"].handler()["now"] == "waiting for 2 songs to start"
+        assert ops["pause_show_sequence"].handler()["status"] == "applied"
+        assert ops["resume_show_sequence"].handler()["status"] == "applied"
+        assert ops["previous_show_sequence_step"].handler()["index"] == 0
+        fired = await ops["fire_show_sequence_step"].handler()
+        assert fired["status"] == "applied" and world["fired"] == ["A"]
+        assert ops["stop_show_sequence"].handler()["status"] == "applied"
+        assert ops["stop_show_sequence"].handler()["status"] == "rejected"
+    run_async(go)
