@@ -19,7 +19,9 @@
  * phone-first surface for standing in the room: a big armed board,
  * per-arm Disarm, the Holding list, Disarm all and End show, with no
  * editing. Both read the same polled status/arms — one source of truth
- * for the countdowns, never two. */
+ * for the countdowns, never two. A third tab, Sequence (SequenceView.tsx),
+ * builds and runs Show Sequences: ordered sets, each pre-armed one of the
+ * same four ways, and Waits, run strictly in order. */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiDel, apiGet, apiPost } from '../api/client';
 import HelpLink from '../help/HelpLink';
@@ -31,6 +33,7 @@ import useIsPhone from '../lib/useIsPhone';
 import { useAmbientHueGroups, useGradient2dProfiles, useScenes, useSpotColorSets } from '../queries';
 import { ArmBoard, ArmControl } from './ArmBoard';
 import RunView from './RunView';
+import SequenceView from './SequenceView';
 import { endShowSummary, runSummary } from './showSummary';
 import type {
   ArmsStatus, EndShowReport, ShowAction, ShowCatalogue, ShowKind, ShowParam, ShowRun, ShowSet,
@@ -55,7 +58,7 @@ function newId() {
 export default function LightShowPage() {
   const toast = useToast();
   const isPhone = useIsPhone();
-  const [mode, setMode] = useState<'build' | 'run'>(() => (window.matchMedia('(max-width: 720px)').matches ? 'run' : 'build'));
+  const [mode, setMode] = useState<'build' | 'run' | 'sequence'>(() => (window.matchMedia('(max-width: 720px)').matches ? 'run' : 'build'));
   const [catalogue, setCatalogue] = useState<ShowCatalogue | null>(null);
   const [targets, setTargets] = useState<ShowTargets | null>(null);
   const [sets, setSets] = useState<ShowSet[]>([]);
@@ -224,11 +227,13 @@ export default function LightShowPage() {
     <div className="light-show-page">
       <div className="light-show-head">
         <h2>Light Show <HelpLink topic="light-show-page" /></h2>
-        <div className="light-show-mode-select" role="tablist" aria-label="Build or run the show">
+        <div className="light-show-mode-select" role="tablist" aria-label="Build, run or sequence the show">
           <button role="tab" aria-selected={mode === 'build'} className={mode === 'build' ? 'active' : ''}
             onClick={() => setMode('build')}>Build</button>
           <button role="tab" aria-selected={mode === 'run'} className={mode === 'run' ? 'active' : ''}
             onClick={() => setMode('run')}>Run{isPhone ? ' (recommended)' : ''}</button>
+          <button role="tab" aria-selected={mode === 'sequence'} className={mode === 'sequence' ? 'active' : ''}
+            onClick={() => setMode('sequence')}>Sequence</button>
           <HelpLink topic="show-run-view" />
         </div>
         {mode === 'build' && (
@@ -248,7 +253,9 @@ export default function LightShowPage() {
         </div>
       )}
 
-      {mode === 'run' ? (
+      {mode === 'sequence' ? (
+        <SequenceView sets={sets} toast={toast} />
+      ) : mode === 'run' ? (
         <RunView sets={sets} status={status} arms={arms} onChangeArms={reloadArms}
           onEndShowDone={() => void reloadSets()} toast={toast} />
       ) : (
