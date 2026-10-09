@@ -7485,13 +7485,33 @@ never deleted; the page deliberately has no delete. `/devices` and
 Spec: `tests/test_device_usage.py` (his real 21-device config shape, the
 10/11 split, and the liveness proof).
 
-**Sonic parity**: a `device` domain (`device_console.OPERATIONS`, 7 ops)
+**Sonic parity**: a `device` domain (`device_console.OPERATIONS`, 11 ops)
 merged into `settings_agent.ALL_OPERATIONS` — remember the hand-written
 `settings_mcp_server.py` wrapper per op AND the CLI fixture manifests
 (`tests/fixtures/cli_transcript_synthetic_*.json`), where the three
 `_scene_*` and the three original real captures are DELIBERATELY STALE
 (tests assert they are refused) and must not be "fixed". Help:
 `devices-page` (+ `device-timing-offset`, linked from the page).
+
+**Category CRUD was a real gap until 2026-10-09** (the Admiral asked
+Sonic to "add a device category called 'Single WLED' and put the porch
+rail and dining table in it" and it couldn't) — `set_device_categories`
+only ever edits an EXISTING category's membership, by design (a typo
+must never invent one), so there was no operation that could create the
+container itself. `create_device_category`/`rename_device_category`/
+`delete_device_category` (+ `list_device_categories`) close that gap,
+resolving a category BY NAME via `name_resolve.resolve_name` (the Force
+Scene/Force Colour precedent) rather than an opaque id; a name already in
+use (case-insensitive) is refused on create/rename rather than minting a
+silent duplicate. His actual ask was done by hand first (`POST
+/api/device-categories` on the root process, the app's own category
+CRUD API — categories live in `storage/device_categories.json`, read by
+`fx/device_model.py`, written by `services/device_category_service.py`
+on spot-effects' side): the "Single WLED" category holds the
+`single-color-effect` virtual, which — checked first, not assumed —
+backs ONLY the `porch-rail` and `dining-table` WLED devices and nothing
+else, so no virtual-routing change was needed to give those two their
+own category.
 
 ## SPECTRA phone A/V-sync instrument (`/avsync`) — MEASURE the audio/visual offset, don't argue it
 
