@@ -58,6 +58,17 @@ export const ICONS = {
    * subpaths in one `d` (legal SVG, keeps this file framework-free — see
    * the module docstring above). */
   lock: 'M5 11H19A2 2 0 0 1 21 13V20A2 2 0 0 1 19 22H5A2 2 0 0 1 3 20V13A2 2 0 0 1 5 11ZM7 11V7A5 5 0 0 1 17 7V11',
+  /** Lightning bolt — "fire now" (his ask, 2026-10-08: the Light Show
+   * Run view's "Sets — tap to run" row of per-timing icon buttons). */
+  bolt: 'M13 2L3 14H12L11 22L21 10H12L13 2Z',
+  /** Bunny — "at the next scene change" (his own named glyph for this
+   * timing, same ask). Two long ears plus a round head; stroke-only like
+   * every other icon here, not a literal rabbit illustration. */
+  rabbit: 'M9 10Q7 5 8 2Q10 2 10 6Q10 8 9 10Z M15 10Q17 5 16 2Q14 2 14 6Q14 8 15 10Z M7 15A5 5 0 1 0 17 15A5 5 0 1 0 7 15Z',
+  /** Up arrow — "on the next High Trigger" (same ask). */
+  arrowUp: 'M12 19V5M5 12L12 5L19 12',
+  /** Down arrow — "on the next Low Trigger" (same ask). */
+  arrowDown: 'M12 5V19M19 12L12 19L5 12',
 } satisfies Record<string, string>;
 
 export type IconName = keyof typeof ICONS;

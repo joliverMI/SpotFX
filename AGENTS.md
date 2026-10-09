@@ -4240,9 +4240,19 @@ docstring first (Sonic's authority boundary here, the same shape
   page head (`useIsPhone()` defaults the initial tab, never force-switches
   later). Run reuses `ArmBoard` and the exported `ShowNowPanel` verbatim
   (one countdown source, one Holding-list source — never a second copy
-  that could disagree), adds a tap-to-open-sheet per set (Fire now / Arm:
-  scene change / Arm: High / Arm: Low), and big Disarm all / End show
-  buttons. Run never edits a set.
+  that could disagree), and big Disarm all / End show buttons. Run never
+  edits a set. **Each set's own row is ONE TAP PER TIMING, no menu
+  (reworked 2026-10-08, his ask verbatim: "make each row instead have
+  buttons for each thing with an icon ... i just tap it and it happens")**
+  — the original tap-to-open-sheet (name button → a second screen of four
+  labeled buttons → Cancel) is gone; a row now shows the set's name plus
+  four inline-SVG icon buttons (`iconRegistry.ts`: ⚡ bolt = fire now,
+  🐇 bunny = arm on the next scene change, ▲ up arrow = arm on the next
+  High Trigger, ▼ down arrow = arm on the next Low Trigger), each already
+  the complete action for one of the four timings the backend has always
+  supported — no new backend semantics. A set armed for more than one
+  trigger at once shows an "Armed for the …" tag, with its own Cancel
+  button, for EVERY active arm, not just the first.
 - **DRAG REORDER ON THE BUILD VIEW** — native HTML5 DnD on each step's
   `⠿` handle (`dataTransfer` carries the source index as plain text; drop
   splices). The ↑/↓ buttons stay, for keyboard/no-pointer use — drag is
@@ -4259,7 +4269,9 @@ docstring first (Sonic's authority boundary here, the same shape
 Spec: `tests/test_show_console.py` (every op, the close-match refusals, the
 room-effect compatibility proof), `tests/test_light_show_arms.py`'s own
 dwell-floor test, `tests/test_scene_console.py`'s widened operation-set
-proof.
+proof, `scripts/check_light_show_run_icon_buttons.mjs` (the Run view's
+icon-button row: four real inline-SVG buttons, each a one-tap complete
+action, and every active arm on a set shown, not just the first).
 
 **EFFECT MODIFIERS — Pulse reactivity, Pulse brightness floor/ceiling,
 flares on/off (2026-10-08).** `spectra/services/show_mods.py`'s docstring
