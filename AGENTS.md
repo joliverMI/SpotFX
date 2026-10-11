@@ -4453,6 +4453,38 @@ things:
   `docs/evidence/lightshow-builder/`. Help: `show-builder-editing`,
   `show-set-references`.
 
+**SHOW PLAYLISTS — the Playlists tab (2026-10-11, phases 0-1 of
+`/home/javi/fleet-spotfx/data/playlist-plan/report.md`).**
+`spectra/services/show_playlists.py`'s docstring is the binding statement. A
+program is keyed to the Spotify context he plays (`ShowPlaylist.contexts`,
+one context per program) and maps song -> steps (set + `song_start` /
+`scene_change` / `high` / `low`). Four things:
+
+- **FOLLOW, NEVER DRIVE.** Nothing here starts, queues or skips playback
+  (Play-on-Serenity is phase 3, behind his word and a sleeping gate). The
+  context comes off the bridge (`bridge.context_uri()` / `next_track()` /
+  `context_name()` read fields SpotFX already broadcast); a name for any
+  other context is SpotFX's read-only `GET /api/spotify/context-name`
+  (`spectra/services/spotify_context.py`).
+- **A SONG'S ARMS EXIST BEFORE ITS OPENING SCENE CHANGE** (his answer to
+  Q2: a "next scene change" step counts the opening change).
+  `show_playlists.on_state` is the FIRST thing `engine._on_track_uri` does,
+  before any await; `song_start` fires are queued and spawned by
+  `after_track_state()` after `trigger_engine.on_track_state`, because a
+  set firing while the transition lands makes `show_actions.executing()`
+  true and the transition would not count. Keep both placements.
+- **PROGRAM ARMS ARE SCRIPTED** (`source="playlist:<run>"`,
+  `show_arms.is_scripted_arm_source`): no 12 h / idle expiry, never replace
+  or get replaced (`_replace_class` -> None), but song-scoped, so they go
+  MISSED at song end (the runner first, `show_arms.tick` as backstop).
+  Step outcomes are read back from the arms (`_sync`), never kept twice.
+- The run lives in `LightShowState.playlist_run`; the library in
+  `light_show_playlists.json` (conftest isolates it). Home Assistant starts
+  one with `POST /api/light-show/playlist-run/start {"name": ...}`. Sonic
+  reach is phase 3a (not built). Specs: `tests/test_show_playlists.py`
+  (incl. the opening-change proof through the real bridge -> engine ->
+  TriggerEngine, with a red control), `node scripts/check_show_playlist_ui.mjs`.
+
 ## HOUSE LIGHTING (`/house`) — the room's always-on resting look (phases 1–2)
 
 Plan: `/home/javi/fleet-spotfx/data/standard-lighting-plan/report.md` (his

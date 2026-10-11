@@ -420,6 +420,12 @@ def _wire_engine(world, monkeypatch, events):
                        transition_intensity=lambda: 0.5,
                        render_intensity=lambda i: i)
     monkeypatch.setattr(engine, "trigger_engine", te)
+    # the global bridge is shared by every test: put its state back after
+    for attr in ("_track", "_track_received_at", "_timing", "_next_track", "_context_name",
+                 "_last_message_at", "paused", "dinner_party", "ambient", "last_scene_id",
+                 "counts"):
+        monkeypatch.setattr(engine.bridge, attr, getattr(engine.bridge, attr))
+    monkeypatch.setattr(engine.bridge, "counts", dict(engine.bridge.counts))
     monkeypatch.setattr(engine, "_last_track_uri", None)
     te.maybe_auto_generate = lambda uri: None
     monkeypatch.setattr(ss_mod.scene_sequencer, "on_track_state", _anoop)

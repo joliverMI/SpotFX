@@ -25,15 +25,20 @@ import Icon from '../components/Icon';
 import HelpLink from '../help/HelpLink';
 import { ArmBoard } from './ArmBoard';
 import { ShowNowPanel } from './LightShowPage';
+import PlaylistRunCard from './PlaylistRunCard';
 import { endShowSummary, runSummary, triggerLabel } from './showSummary';
-import type { ArmsStatus, ArmTrigger, EndShowReport, ShowRun, ShowSet, ShowStatus } from './types';
+import type { ArmsStatus, ArmTrigger, EndShowReport, PlaylistStatus, ShowRun, ShowSet, ShowStatus } from './types';
 import { useState } from 'react';
 
-export default function RunView({ sets, status, arms, onChangeArms, onEndShowDone, toast }: {
+export default function RunView({ sets, status, arms, onChangeArms, playlistStatus = null,
+  onChangePlaylist, onEndShowDone, toast }: {
   sets: ShowSet[];
   status: ShowStatus | null;
   arms: ArmsStatus | null;
   onChangeArms: () => void;
+  /** the Show Playlist following (PlaylistRunCard), above the armed board */
+  playlistStatus?: PlaylistStatus | null;
+  onChangePlaylist?: () => void;
   onEndShowDone: () => void;
   toast: (msg: string, kind?: 'success' | 'error') => void;
 }) {
@@ -111,6 +116,9 @@ export default function RunView({ sets, status, arms, onChangeArms, onEndShowDon
         </button>
         <HelpLink topic="show-end-restore" />
       </div>
+
+      <PlaylistRunCard status={playlistStatus}
+        onChange={() => { onChangePlaylist?.(); onChangeArms(); }} toast={toast} />
 
       <ArmBoard arms={arms} onChange={onChangeArms} toast={toast} />
 
