@@ -154,10 +154,6 @@ class PlaylistError(ValueError):
     pass
 
 
-def is_playlist_source(source: Optional[str]) -> bool:
-    return bool(source) and source.startswith(SOURCE_PREFIX)
-
-
 # ── validation ─────────────────────────────────────────────────────────────
 
 def step_problems(step: PlaylistStep) -> list[str]:
@@ -539,7 +535,8 @@ def after_track_state() -> None:
     uri = _playing_uri()
     due = [p for p in _pending_song_start
            if r is not None and p[0] == r.id and r.state == FOLLOWING and p[1] == (uri or "")]
-    _pending_song_start.clear()
+    due_ids = {id(p) for p in due}
+    _pending_song_start[:] = [p for p in _pending_song_start if id(p) not in due_ids]
     for _run_id, _uri, o in due:
         _spawn_fire(_run_id, o)
 

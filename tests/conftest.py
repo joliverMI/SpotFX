@@ -278,10 +278,11 @@ def _isolated_light_show(tmp_path, monkeypatch):
     show_actions.reset()
     show_cues.reset()
     show_arms.reset()
-    from spectra.services import show_playlists, show_sequence, song_library
+    from spectra.services import show_playlists, show_sequence, song_library, spotify_context
     show_sequence.reset()
     show_playlists.reset()
     song_library.reset()
+    spotify_context.reset()
     yield
     show_store.reset_memory()
     show_output.reset()
@@ -291,6 +292,7 @@ def _isolated_light_show(tmp_path, monkeypatch):
     show_sequence.reset()
     show_playlists.reset()
     song_library.reset()
+    spotify_context.reset()
     device_output.reset_clock()
 
 
