@@ -809,7 +809,6 @@ class Orbits2d(Twod, GradientEffect):
             self._pos_scale = 1.0
             self.particle_count = int(self._config["particle_count"])
 
-
     def shock_rim(self):
         """The Shockwave's eye (fx/effects/phase_grammar.py): the tether ring at its resting
         radius (horizon_scale through the projection), in
