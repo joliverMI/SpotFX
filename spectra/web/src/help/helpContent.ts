@@ -1525,6 +1525,25 @@ export const HELP_SECTIONS: HelpSection[] = [
             kbd: false,
           },
           {
+            id: 'transition-programs',
+            title: 'Thematic transitions: Infall and Eruption',
+            keywords: 'transition program thematic infall eruption black hole orbits fish squiggles fireworks crossfade spiral implode bloom ignite horizon velocity hand off smooth cloud particles length anchor mark',
+            body: [
+              'A scene change between the Black Hole and a particle effect no longer crossfades for half a second. It runs a thematic transition with its own clock (1.4 seconds by default) and draws one picture at a time, never two half-bright ones added together.',
+              'Infall (Orbits, Fish, Squiggles or Fireworks into the Black Hole): every piece leaves on the motion it had, bends onto a spiral that speeds up as it falls, and lands on the event horizon, which lights up as it feeds. Over the last half second each piece\'s motion blends into the Black Hole\'s own, and the Black Hole takes the pieces over still moving — they never stop dead and start again.',
+              'Eruption (the Black Hole into Orbits, Fish or Squiggles): the ring and its blobs contract to the centre, a bloom in the colour set\'s brightest colour marks the moment, pieces spray out across the whole set and slow, and then each one implodes onto a moving orbit (or fish, or chain head) of the incoming effect, arriving with that piece\'s own speed and direction while the incoming effect fades up.',
+              'The payoff lands on the trigger: the Black Hole lighting up for an Infall, the bloom for an Eruption. The show fires the scene change early by exactly that much, and the transition preview draws the same length and anchor. When a drop changes the scene, the cut still lands on the drop and the transition runs from there, its payoff on the mark. Only the colour set\'s own colours are used — nothing is pushed to white.',
+            ],
+            table: [
+              ['Thematic transitions', 'On by default. Off: every scene change crossfades as before.'],
+              ['Transition length', '1400 ms (600-2500). The payoff still lands on the trigger.'],
+              ['Infall velocity blend', '500 ms — the last stretch, where each piece takes the Black Hole\'s own motion.'],
+              ['Infall spiral turns', '0.75 extra turns.'],
+              ['Eruption pieces · speed', '60 pieces · 1×.'],
+            ],
+            kbd: false,
+          },
+          {
             id: 'drop-sequence-keys',
             title: 'Drop-sequence keyboard',
             keywords: 'keyboard keys shortcuts c l d select handle arrow step nudge shift enter confirm delete dismiss n p next previous escape ctrl z undo y redo focus',

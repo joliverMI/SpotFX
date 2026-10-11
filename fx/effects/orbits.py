@@ -66,7 +66,7 @@ _SOA_NAMES = (
     "p_enter", "p_ex", "p_ey", "p_lvx", "p_lvy", "p_leave",
     "p_nf1", "p_nf2", "p_np1", "p_np2", "p_wf", "p_wp", "p_gf", "p_gp",
     "p_grad", "p_x0", "p_y0", "p_scatter", "p_bright", "p_grad_from",
-    "p_erate", "p_lfade",
+    "p_erate", "p_lfade", "p_vx", "p_vy",
 )
 
 
@@ -276,6 +276,11 @@ class Orbits2d(Twod, GradientEffect):
         self.p_erate = np.ones(CAP, dtype=np.float32)
         # per-particle departure fade duration
         self.p_lfade = np.full(CAP, LEAVE_FADE_S, dtype=np.float32)
+        # last frame's velocity, normalized units/s — the particle handoff
+        # exports it so a transition program continues each blob's motion
+        # (fx/effects/transition_program.py, VENDOR #68)
+        self.p_vx = np.zeros(CAP, dtype=np.float32)
+        self.p_vy = np.zeros(CAP, dtype=np.float32)
         self._soa = tuple(getattr(self, name) for name in _SOA_NAMES)
         self.n = 0
         self._booted = False
@@ -424,6 +429,8 @@ class Orbits2d(Twod, GradientEffect):
             self.p_y0[s] = self.p_ey[s]
         self.p_scatter[s] = rng.random(count, dtype=np.float32)
         self.p_bright[s] = 0.0
+        self.p_vx[s] = 0.0
+        self.p_vy[s] = 0.0
         self.p_grad_from[s] = np.nan
         self.p_erate[s] = 1.0
         self.p_lfade[s] = LEAVE_FADE_S
@@ -491,6 +498,11 @@ class Orbits2d(Twod, GradientEffect):
             "dims": (self.r_width, self.r_height),
             "px": px.astype(np.float32),
             "py": py.astype(np.float32),
+            # each blob's velocity (px/s) and how the form lets go — the
+            # transition program's RELEASE reads these (particle_handoff)
+            "vx": (self.p_vx[:n] * self.sx).astype(np.float32),
+            "vy": (self.p_vy[:n] * self.sy).astype(np.float32),
+            "gesture": "orbit",
             "grad": self.p_grad[:n].copy(),
             "bright": self.p_bright[:n].copy(),
             "gradient": self._config.get("gradient"),
@@ -518,6 +530,18 @@ class Orbits2d(Twod, GradientEffect):
         if self._phase == "lull" and nxt and nxt != "orbits":
             snap["keepers"] = self.p_mode[:n] < 2
         return snap
+
+    def _formation_points(self):
+        """The orbit blobs a transition program forms onto: pixel positions
+        of every tracked (orbiting or entering) blob, in a stable order —
+        read live each frame, so the cloud implodes onto MOVING orbit
+        points (fx/effects/transition_program.py's ERUPTION)."""
+        n = self.n
+        idx = np.flatnonzero(self.p_mode[:n] < 2)
+        x = self.p_x0[idx]
+        y = self.p_y0[idx]
+        ok = np.isfinite(x) & np.isfinite(y)
+        return (self.cx + x[ok] * self.sx, self.cy + y[ok] * self.sy)
 
     def deactivate(self):
         # Leave live state behind for a successor instance (effect switch or
@@ -1335,6 +1359,8 @@ class Orbits2d(Twod, GradientEffect):
         # Bright current particles over a fading history, bounded.
         np.maximum(self.trail, np.minimum(frame, 255.0), out=self.trail)
 
+        self.p_vx[:n] = (x - self.p_x0[:n]) / dt
+        self.p_vy[:n] = (y - self.p_y0[:n]) / dt
         self.p_x0[:n] = x
         self.p_y0[:n] = y
 

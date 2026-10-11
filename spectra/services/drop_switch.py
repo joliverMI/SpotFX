@@ -94,7 +94,12 @@ THE HAND-OFF TABLE (`HANDOFF`). Every ordered pair of drop-switch effects
 has one, because every member's _adopt_handoff takes any predecessor's
 snapshot (report E6): "choreographed" where the incoming effect stages the
 arrival (radial's standalone bloom out of the particles; a particle effect
-erupting from STAR's imploded point), "generic" otherwise (the pieces join
+erupting from STAR's imploded point), "program" where a THEMATIC
+TRANSITION PROGRAM is registered for the pair (fx/effects/transition_
+program.py — INFALL into the Black Hole, the Black Hole's ERUPTION into
+orbits / fish / squiggles; transitions-drop plan phase 3: the cut lands on
+the mark as always and runs the program `on_mark`, its payoff on the cut
+frame — scene_compiler.fire_scene asks for it), "generic" otherwise (the pieces join
 the incoming effect as its own particles), and the three FIREWORKS MELDS
 below. An outgoing effect outside the families (the Eye, the Dancer,
 Pac-Man) has no row: no good drop hand-off, so its switch goes early (A).
@@ -167,7 +172,7 @@ from random import Random
 from typing import Any, Callable, Mapping, Optional
 
 from fx import device_model
-from fx.effects import lull_handoff
+from fx.effects import lull_handoff, transition_program
 
 logger = logging.getLogger(__name__)
 
@@ -191,6 +196,8 @@ RIDE_EDGE_MS = 250
 
 HANDOFF_CHOREOGRAPHED = "choreographed"
 HANDOFF_GENERIC = "generic"
+# A thematic transition program carries the pieces across (module docstring)
+HANDOFF_PROGRAM = "program"
 HANDOFF_SAME_EFFECT = "same_effect"
 # THE FIREWORKS MELDS (module docstring)
 HANDOFF_KEEPERS = "keepers"
@@ -235,6 +242,9 @@ def _handoff_table() -> dict[tuple[str, str], str]:
             elif out == "radial" and inc in particles:
                 # the imploded point erupts as the incoming particles
                 table[(out, inc)] = HANDOFF_CHOREOGRAPHED
+            elif transition_program.program_name(out, inc) is not None:
+                # the cut runs the pair's transition program on the mark
+                table[(out, inc)] = HANDOFF_PROGRAM
             else:
                 table[(out, inc)] = HANDOFF_GENERIC
     return table
@@ -453,6 +463,14 @@ _HANDOFF_WORDS = {
 }
 
 
+_PROGRAM_WORDS = {
+    transition_program.INFALL:
+        "the pieces spiral into the Black Hole and ignite its horizon",
+    transition_program.ERUPTION:
+        "the Black Hole erupts and its pieces implode onto the incoming form",
+}
+
+
 def _sentence_yes(showing: Optional[Showing], target: SceneInfo,
                   stale_by: tuple[str, ...], moment: str,
                   handoff: Optional[str], drops: int) -> str:
@@ -472,6 +490,11 @@ def _sentence_yes(showing: Optional[Showing], target: SceneInfo,
             early_why = " — early because " + " and ".join(parts)
     hand = f" ({handoff} hand-off)" if handoff else ""
     meld = _HANDOFF_WORDS.get(handoff or "")
+    if handoff == HANDOFF_PROGRAM:
+        name = transition_program.program_name(
+            showing.scene.effect if showing is not None else None,
+            target.effect)
+        meld = _PROGRAM_WORDS.get(name or "")
     meld = f" — {meld}" if meld else ""
     return (f"{frm} → {target.name}, {_MOMENT_WORDS[moment]}{hand}: "
             f"{why}{early_why}{meld}.")

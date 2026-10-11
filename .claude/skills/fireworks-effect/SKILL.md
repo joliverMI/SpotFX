@@ -91,6 +91,14 @@ the Black Hole; on the next big analysed flare into the others) — the
 incoming effects' generic adopts take the burst cloud; nothing here
 changed for it.
 
+## Thematic transitions (2026-10-11, transitions-drop plan phase 3)
+
+Fireworks FEEDS the Infall into the Black Hole for now (`_handoff_snapshot`
+carries `vx`/`vy` = `p_vx`/`p_vy` in px/s + `gesture: "spray"`); Lensing
+replaces that row next task. Black Hole -> Fireworks has NO program (the
+Fountain, next task) and keeps its own adopt. A DROP-led Fireworks -> Black
+Hole switch is still the SWALLOWED meld, untouched. `fx/effects/transition_program.py`'s docstring is the binding statement; `tests/test_transition_programs.py` measures it on the real pipeline.
+
 ## Sonic reach
 
 No direct param edit — same rule as every effect here; reachable only

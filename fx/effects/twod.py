@@ -238,6 +238,18 @@ class Twod(AudioReactiveEffect):
         self.m_draw = ImageDraw.Draw(self.matrix)
 
         self.draw()
+        # SpotFX deviation #68: a TRANSITION PROGRAM running into this
+        # effect composes its cloud onto the matrix the draw just made
+        # (fx/effects/transition_program.py). None — every frame outside a
+        # program — is one attribute read: byte-identical to the fork.
+        program = getattr(self, "_transition_program", None)
+        if program is not None:
+            try:
+                program.compose(self)
+            except Exception:
+                _LOGGER.exception("transition program failed; dropped")
+                self._transition_program = None
+                program.done = True
         self.image_to_pixels()
 
         self.try_dump()

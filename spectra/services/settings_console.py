@@ -141,7 +141,12 @@ def _spec(key: str, label: str, description: str) -> SettingSpec:
             "drop_switch_stale_margin_s": "seconds beyond the scene's own dwell",
             "drop_switch_drops_in_a_row": "drops, 0 = off",
             "drop_switch_swallow_delay_s": "seconds after the drop",
-            "drop_switch_hit_threshold": "analysed flare intensity, 0.0-1.0"}.get(key)
+            "drop_switch_hit_threshold": "analysed flare intensity, 0.0-1.0",
+            "transition_program_ms": "ms",
+            "transition_velocity_blend_ms": "ms",
+            "transition_infall_spin": "extra turns",
+            "transition_eruption_count": "pieces",
+            "transition_eruption_speed": "multiplier"}.get(key)
     return SettingSpec(key=key, label=label, kind=kind, description=description,
                        unit=unit, min=ge, max=le, choices=choices)
 
@@ -327,6 +332,39 @@ SETTINGS_REGISTRY: dict[str, SettingSpec] = {
         "or STAR, Fireworks plays its own drop and the next scene cuts in "
         "on the next analysed flare at least this strong (0-1, default "
         "0.6) — or one bar after the drop's tail if none comes."),
+    "transition_programs_enabled": _spec(
+        "transition_programs_enabled", "Thematic transitions",
+        "On (default): a scene change between the Black Hole and the "
+        "particle effects (Orbits, Fish, Squiggles; Fireworks into the "
+        "Black Hole) runs a THEMATIC TRANSITION instead of the half-second "
+        "crossfade — the pieces spiral into the Black Hole and ignite its "
+        "horizon (Infall), or the Black Hole contracts, blooms and its "
+        "pieces implode onto the incoming orbits / fish / chains "
+        "(Eruption). The payoff lands on the trigger. Off: every switch "
+        "crossfades as before."),
+    "transition_program_ms": _spec(
+        "transition_program_ms", "Thematic transition length",
+        "How long a thematic transition takes, in milliseconds (600-2500, "
+        "default 1400). Its payoff — the Black Hole igniting, or the "
+        "eruption's bloom — still lands on the trigger; a longer program "
+        "simply starts earlier."),
+    "transition_velocity_blend_ms": _spec(
+        "transition_velocity_blend_ms", "Thematic transition: velocity blend",
+        "The last stretch of an Infall, in ms (default 500), over which "
+        "every piece's motion blends into the Black Hole's own so the hand-"
+        "off continues one motion. It also sets where the Infall's "
+        "ignition (its payoff) sits."),
+    "transition_infall_spin": _spec(
+        "transition_infall_spin", "Infall: spiral turns",
+        "Extra turns the pieces make as they spiral into the Black Hole "
+        "(0-3, default 0.75)."),
+    "transition_eruption_count": _spec(
+        "transition_eruption_count", "Eruption: pieces",
+        "How many pieces the Black Hole's eruption sprays before they "
+        "implode onto the incoming effect (10-150, default 60)."),
+    "transition_eruption_speed": _spec(
+        "transition_eruption_speed", "Eruption: speed",
+        "How fast the eruption's pieces fly out (0.5-2, default 1)."),
 }
 
 

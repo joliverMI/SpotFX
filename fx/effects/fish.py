@@ -2343,12 +2343,20 @@ class Fish2d(Twod, GradientEffect):
         py = self.cy + self.p_y[:n] * self.sy - self.cam_py
         px = np.where(np.isfinite(px), px, self.cx)
         py = np.where(np.isfinite(py), py, self.cy)
+        hd = self.p_hd[:n]
+        spd = np.where(np.isfinite(self.p_spd[:n]), self.p_spd[:n], 0.0)
         snap = {
             "src": "fish",
             "t": particle_handoff.now(),
             "dims": (self.r_width, self.r_height),
             "px": px.astype(np.float32),
             "py": py.astype(np.float32),
+            # each fish's velocity (px/s, its heading x its speed) and how
+            # the form lets go — the transition program's RELEASE reads
+            # these (particle_handoff)
+            "vx": (np.cos(hd) * spd).astype(np.float32),
+            "vy": (np.sin(hd) * spd).astype(np.float32),
+            "gesture": "swim",
             "grad": self.p_grad[:n].copy(),
             "bright": self.p_bright[:n].copy(),
             "gradient": self._config.get("gradient"),
@@ -2380,6 +2388,17 @@ class Fish2d(Twod, GradientEffect):
         if self._lull_state is not None and nxt and nxt != "fish":
             snap["keepers"] = self.p_mode[:n] == 5
         return snap
+
+    def _formation_points(self):
+        """The fish a transition program forms onto: the screen position
+        of every ordinary (swimming or entering) fish, in a stable order,
+        read live each frame (fx/effects/transition_program.py)."""
+        n = self.n
+        idx = np.flatnonzero(self.p_mode[:n] < 2)
+        x = self.cx + self.p_x[idx] * self.sx - self.cam_px
+        y = self.cy + self.p_y[idx] * self.sy - self.cam_py
+        ok = np.isfinite(x) & np.isfinite(y)
+        return (x[ok], y[ok])
 
     def deactivate(self):
         virtual = self._virtual
@@ -2513,6 +2532,23 @@ class Fish2d(Twod, GradientEffect):
                 self.p_hd[s] = np.arctan2(
                     ey * self.sy, ex * self.sx
                 ) + np.pi / 2.0
+                # THE SHOALING FIX (VENDOR #68): a predecessor that said how
+                # each piece was moving keeps that heading and speed — a
+                # re-heading to the tangent is a new direction and speed on
+                # the first real frame.
+                ivx, ivy = snap.get("vx"), snap.get("vy")
+                if ivx is not None and ivy is not None:
+                    ivx = np.asarray(ivx, dtype=np.float32)[idx]
+                    ivy = np.asarray(ivy, dtype=np.float32)[idx]
+                    ispd = np.hypot(ivx, ivy)
+                    moving = np.isfinite(ispd) & (ispd > 1e-3)
+                    self.p_hd[s] = np.where(
+                        moving, np.arctan2(ivy, ivx), self.p_hd[s])
+                    self.p_spd[s] = np.where(
+                        moving,
+                        np.clip(ispd, 0.2 * self.cruise_px,
+                                4.0 * self.cruise_px),
+                        self.p_spd[s])
                 self.p_erate[s] = max(1.0, self.enter_time / HANDOFF_ENTER_S)
                 self.p_grad[s] = snap["grad"][idx]
                 self.p_grad_from[s] = snap["grad"][idx]

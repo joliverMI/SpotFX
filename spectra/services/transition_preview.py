@@ -122,6 +122,17 @@ def transition_shape(from_scene: SceneV2, to_scene: SceneV2,
     crossfade_ms = scene_transition_lead.crossfade_ms_for(to_scene, room, intensity)
     to_writes = _compile(to_scene, intensity, rng_seed=13)
     from_types = _current_types(from_scene, intensity)
+    program_lead = scene_transition_lead.program_lead_ms(
+        from_types, to_writes, room)
+    if program_lead is not None:
+        # A THEMATIC TRANSITION PROGRAM runs instead of the crossfade
+        # (fx/effects/transition_program.py): the ruler draws its own
+        # length and payoff, the same numbers the firing path leads by.
+        program_ms = int(room.transition_program_ms)
+        return {"crossfade_ms": program_ms,
+                "anchor_frac": program_lead / max(program_ms, 1),
+                "lead_ms": program_lead, "writes": to_writes,
+                "anchor_source": "program", "ramp_ms": crossfade_ms}
     anchor_frac = scene_transition_lead.anchor_frac_for(from_types, to_writes)
     lead_ms = scene_transition_lead.lead_ms_for(anchor_frac, crossfade_ms)
     registered = any(
@@ -210,7 +221,9 @@ class TransitionProgram(flare_preview_hold.PreviewProgram):
             raise ValueError(f"unknown transition preview step: {step!r}")
         shape = transition_shape(self.hold_scene, self.to_scene, ctx.intensity)
         await ctx.apply_scene(writes=shape["writes"],
-                              transition_ms=shape["crossfade_ms"])
+                              transition_ms=shape.get("ramp_ms",
+                                                      shape["crossfade_ms"]),
+                              program=True)
         return {"result": "transitioned", "scene": self.to_scene.name,
                 "crossfade_ms": shape["crossfade_ms"],
                 "anchor_frac": shape["anchor_frac"]}

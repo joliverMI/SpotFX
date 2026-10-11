@@ -507,6 +507,15 @@ export interface RoomControlState {
   drop_switch_drops_in_a_row: number;
   drop_switch_swallow_delay_s: number;
   drop_switch_hit_threshold: number;
+  /** THE TRANSITION PROGRAMS (transitions-drop plan phase 3): a Black
+   * Hole <-> particles scene change runs a thematic transition instead of
+   * the stored crossfade (fx/effects/transition_program.py). */
+  transition_programs_enabled: boolean;
+  transition_program_ms: number;
+  transition_velocity_blend_ms: number;
+  transition_infall_spin: number;
+  transition_eruption_count: number;
+  transition_eruption_speed: number;
   /** Legacy Now Playing "Force Scene" control, ported verbatim: while
    * enabled, every scene the system would otherwise pick automatically
    * (sequencer roll, trigger fire, or the automatic transition fire) fires

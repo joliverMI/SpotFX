@@ -183,12 +183,18 @@ export default function TransitionPreviewOverlay({
 
             <div style={{ fontSize: 12, marginTop: 6, padding: '6px 8px', borderRadius: 6,
                           background: 'var(--panel-bg, #1a1024)' }}>
-              This transition crossfades over <strong>{fmtMs(timeline.crossfade_ms)}</strong>
-              {' '}at this intensity, and its payoff is anchored at{' '}
-              <strong>{Math.round(timeline.anchor_frac * 100)}%</strong> of the blend —{' '}
-              {timeline.anchor_source === 'phased_pair'
-                ? 'this pair of effects choreographs a phased handoff, so that phase is what lands on the mark'
-                : 'the plain mid-point, which is what every ordinary scene change uses'}
+              {timeline.anchor_source === 'program'
+                ? <>This switch runs a thematic transition program over{' '}
+                    <strong>{fmtMs(timeline.crossfade_ms)}</strong> instead of a crossfade, and its payoff
+                    is anchored at <strong>{Math.round(timeline.anchor_frac * 100)}%</strong> of it —{' '}
+                    the moment the cloud ignites the Black Hole, or the Black Hole's bloom before its
+                    pieces implode into the incoming effect</>
+                : <>This transition crossfades over <strong>{fmtMs(timeline.crossfade_ms)}</strong>
+                    {' '}at this intensity, and its payoff is anchored at{' '}
+                    <strong>{Math.round(timeline.anchor_frac * 100)}%</strong> of the blend —{' '}
+                    {timeline.anchor_source === 'phased_pair'
+                      ? 'this pair of effects choreographs a phased handoff, so that phase is what lands on the mark'
+                      : 'the plain mid-point, which is what every ordinary scene change uses'}</>}
               . The show therefore fires it <strong>{fmtMs(timeline.lead_ms)}</strong> early, so the
               anchor — not the start of the blend — lands on the trigger.
               <br />

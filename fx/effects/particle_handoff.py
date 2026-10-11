@@ -23,6 +23,14 @@ Snapshot format (built by each effect's ``_handoff_snapshot``)::
       "grad":   float32 (n,)              # gradient sample positions 0..1
       "bright": float32 (n,)              # brightness 0..1
       "trail":  float32 (H,W,3) | None    # trail history buffer
+      "vx","vy": float32 (n,)             # PIXEL-space velocity, px/s
+                                          # (transition programs; optional —
+                                          # a snapshot without one adopts
+                                          # exactly as before)
+      "gesture": str                      # how the form lets go ("unwind",
+                                          # "orbit", "swim", "spray",
+                                          # "spark") — fx/effects/
+                                          # transition_program.py
       "native": {...}                     # full effect-specific state for
                                           # same-type restore
     }

@@ -603,20 +603,36 @@ class PreviewContext:
 
     async def apply_scene(self, writes: list[dict] | None = None,
                           transition_ms: int | None = None,
-                          cut: bool = False) -> None:
+                          cut: bool = False,
+                          program: bool = False) -> None:
         """Land the held scene's compiled writes (or another set of writes
         the program compiled itself — a transition's incoming scene) at the
         real blend duration. The ONE way a program reaches the lights.
         cut=True lands them as the drop-led switch's hard cut (fx_seam.
-        apply_writes' cut) — the sequence preview's switch."""
+        apply_writes' cut) — the sequence preview's switch.
+
+        program=True asks for the THEMATIC TRANSITION PROGRAM production
+        would run for this switch (scene_compiler.transition_program_for,
+        the same decision fire_scene makes, against the held scene's own
+        effect types), so a preview shows the program, never a crossfade
+        the show no longer plays."""
         payload = self.writes if writes is None else writes
         if not payload:
             return
         ramp = self.entry_ramp_ms if transition_ms is None else transition_ms
+        kw = {}
+        if program and writes is not None:
+            from spectra.services import room_controls, scene_compiler
+            current = {w["virtual_id"]: w["effect_type"] for w in self.writes}
+            request = scene_compiler.transition_program_for(
+                payload, room_controls.load_room_controls(), on_mark=cut,
+                current_types=current)
+            if request is not None:
+                kw["program"] = request
         if cut:
-            await fx_seam.apply_writes(payload, transition_ms=0, cut=True)
+            await fx_seam.apply_writes(payload, transition_ms=0, cut=True, **kw)
         else:
-            await fx_seam.apply_writes(payload, transition_ms=ramp)
+            await fx_seam.apply_writes(payload, transition_ms=ramp, **kw)
 
 
 class PreviewProgram:

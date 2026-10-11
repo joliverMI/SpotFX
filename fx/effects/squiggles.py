@@ -530,6 +530,27 @@ class Squiggles2d(Twod, GradientEffect):
         hx, hy = c["path"][-1]
         return (float(hx), float(hy))
 
+    def _head_velocity(self, c):
+        """The head's velocity in px/s: the direction of its last lattice
+        move at the chain's walking speed (0 for a chain not yet moved)."""
+        path = c["path"]
+        if len(path) < 2:
+            return (0.0, 0.0)
+        dx = float(path[-1][0]) - float(path[-2][0])
+        dy = float(path[-1][1]) - float(path[-2][1])
+        d = (dx * dx + dy * dy) ** 0.5
+        if d <= 1e-6:
+            return (0.0, 0.0)
+        spd = float(getattr(self, "base_speed", 0.0) or 0.0)
+        return (dx / d * spd, dy / d * spd)
+
+    def _formation_points(self):
+        """The chain heads a transition program forms onto, read live each
+        frame (fx/effects/transition_program.py)."""
+        heads = [self._head_pos(c) for c in self.chains]
+        return (np.array([p[0] for p in heads], dtype=np.float32),
+                np.array([p[1] for p in heads], dtype=np.float32))
+
     def _steps_target(self):
         return int(
             min(
@@ -734,12 +755,19 @@ class Squiggles2d(Twod, GradientEffect):
             return None
         heads = [self._head_pos(c) for c in self.chains]
         n = len(heads)
+        vel = [self._head_velocity(c) for c in self.chains]
         return {
             "src": "squiggles",
             "t": particle_handoff.now(),
             "dims": (self.r_width, self.r_height),
             "px": np.array([p[0] for p in heads], dtype=np.float32),
             "py": np.array([p[1] for p in heads], dtype=np.float32),
+            # each head's velocity (px/s: its last lattice move at the
+            # walking speed) and how the form lets go — the transition
+            # program's RELEASE reads these (particle_handoff)
+            "vx": np.array([v[0] for v in vel], dtype=np.float32),
+            "vy": np.array([v[1] for v in vel], dtype=np.float32),
+            "gesture": "spark",
             "grad": np.array(
                 [c["grad"] for c in self.chains], dtype=np.float32
             ),

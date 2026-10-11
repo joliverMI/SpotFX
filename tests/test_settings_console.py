@@ -81,6 +81,11 @@ def test_registry_is_an_explicit_allowlist_matching_room_control_bounds():
         "drop_switch_swallow_delay_s", "drop_switch_hit_threshold",
         # 2026-10-11, the strip phase layer's master (strip phase plan):
         "strip_phase_strength",
+        # 2026-10-11, the thematic transition programs (transitions-drop
+        # plan phase 3):
+        "transition_programs_enabled", "transition_program_ms",
+        "transition_velocity_blend_ms", "transition_infall_spin",
+        "transition_eruption_count", "transition_eruption_speed",
     }
     # force_scene_* deliberately excluded — see settings_console.py docstring
     assert "force_scene_enabled" not in sc.SETTINGS_REGISTRY
