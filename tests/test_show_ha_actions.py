@@ -203,6 +203,20 @@ def test_sonic_can_fire_ha_volume_absolute(room, ha_calls):
                       "data": {"volume": 40}}]
 
 
+def test_sonic_ad_hoc_ha_action_needs_no_room(room, ha_calls):
+    """The same guarantee as test_volume_absolute_needs_no_room, proven
+    through Sonic's own ad-hoc path (_fire_one), not just the direct
+    show_actions.fire() path — the two must never disagree about which
+    action kinds require the room."""
+    room.gate["reason"] = "the room is released"
+    calls, _ = ha_calls
+    result = _run(show_console._op_set_ha_volume_absolute(volume=40))
+    assert result["status"] == "applied", \
+        "a Sonic-issued HA action must run even while the show may not touch the lights"
+    assert calls == [{"domain": "script", "service": "music_volume_set",
+                      "data": {"volume": 40}}]
+
+
 def test_sonic_can_fire_ha_volume_relative(room, ha_calls):
     calls, _ = ha_calls
     result = _run(show_console._op_set_ha_volume_relative(delta=-8))

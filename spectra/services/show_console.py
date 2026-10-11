@@ -276,11 +276,16 @@ FLARES_CHOICES = ("off", "on")
 
 async def _fire_one(kind: str, params: dict, name: str) -> dict:
     """One ad-hoc step through show_actions.fire — the SAME path the Build
-    view's steps run, never a second write path."""
-    reason = show_output.refusal()
-    if reason:
-        return {"status": "refused", "reason": reason,
-                "summary": f"did not run — the show is standing down: {reason}"}
+    view's steps run, never a second write path. Mirrors show_actions.py's
+    own `_run` gating exactly: the refusal check only applies when the
+    action kind actually needs the room (ACTION_KINDS[kind].needs_room),
+    so an HA-only kind still runs from a released or dark room."""
+    action_kind = show_actions.ACTION_KINDS.get(kind)
+    if action_kind is not None and action_kind.needs_room:
+        reason = show_output.refusal()
+        if reason:
+            return {"status": "refused", "reason": reason,
+                    "summary": f"did not run — the show is standing down: {reason}"}
     try:
         show_actions.validate(kind, params)
     except show_actions.ActionError as exc:
