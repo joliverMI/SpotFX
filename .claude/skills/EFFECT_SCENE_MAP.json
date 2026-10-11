@@ -130,6 +130,15 @@
         "tests/test_gradient_breathing.py"
       ]
     },
+    "sauron-effect": {
+      "skill": ".claude/skills/sauron-effect/SKILL.md",
+      "files": [
+        "fx/effects/sauron.py",
+        "scripts/check_sauron.py",
+        "scripts/render_sauron.py",
+        "tests/test_sauron.py"
+      ]
+    },
     "pulse-effect": {
       "skill": ".claude/skills/pulse-effect/SKILL.md",
       "files": [
@@ -227,6 +236,14 @@
         "scripts/seed_fish_scene.py",
         "scripts/add_fish_swim_burst_flare.py",
         "scripts/add_fish_big_fish_flare.py"
+      ]
+    },
+    "sauron-scene": {
+      "skill": ".claude/skills/sauron-scene/SKILL.md",
+      "note": "The scene does not exist yet: its seed script is written and gated on his live tuning session (docs/ADDING_EFFECTS.md).",
+      "files": [
+        "scripts/seed_sauron_scene.py",
+        "tests/test_seed_sauron_scene.py"
       ]
     },
     "house-scenes": {

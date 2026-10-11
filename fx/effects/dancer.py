@@ -1402,7 +1402,7 @@ class Dancer2d(Twod, GradientEffect):
             self._apply_config(
                 {"gradient": g}, validate=False, fire_event=False
             )
-        if snap["src"] in ("radial", "eye") and live:
+        if snap["src"] in ("radial", "eye", "sauron") and live:
             frac = particle_handoff.transition_progress(virtual)
             if frac is not None and frac < particle_handoff.BLOOM_START:
                 # radial owns phase 1 (collapse); the eye owns it too — it

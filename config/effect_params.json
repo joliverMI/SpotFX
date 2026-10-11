@@ -55,7 +55,8 @@
       "squiggles",
       "dancer",
       "eye",
-      "fish"
+      "fish",
+      "sauron"
     ],
     "aspect_labels": {
       "shape": "Shape",
@@ -4274,6 +4275,330 @@
         "brightness": 1.0,
         "spin_audio": 0.0,
         "gaze_depth": 0.6
+      }
+    },
+    "sauron": {
+      "params": {
+        "iris_size": {
+          "label": "Iris Size",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.1,
+          "max": 0.9,
+          "aspect": "shape",
+          "note": "Iris radius as a fraction of the panel's half-height; the shared Field Radius (radius_scale) shape sub-field lands here",
+          "default": 0.62,
+          "help_topic": "sauron-effect"
+        },
+        "pupil_size": {
+          "label": "Slit Height",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.1,
+          "max": 1.0,
+          "aspect": "shape",
+          "note": "The slit's height as a fraction of the iris radius (keeps Eye's name; NOT Eye's meaning — Eye's pupil_size is a fraction of the panel)",
+          "default": 0.8,
+          "help_topic": "sauron-effect"
+        },
+        "pupil_width": {
+          "label": "Slit Width",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.03,
+          "max": 0.6,
+          "aspect": "shape",
+          "note": "The slit's width as a fraction of the iris radius; under ~0.12 it shimmers on the hex lattice",
+          "default": 0.17,
+          "help_topic": "sauron-effect"
+        },
+        "pupil_beat": {
+          "label": "Slit Beat",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 2.0,
+          "aspect": "reactivity",
+          "aspect_scale": 0.6,
+          "note": "How much a beat dilates the slit: width by this x (0.55 + 0.45 x bass), height by 0.3 of that",
+          "default": 0.6,
+          "help_topic": "sauron-effect"
+        },
+        "core_white": {
+          "label": "White-Hot Rim",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 1.0,
+          "aspect": "shape",
+          "note": "How white the glow hugging the slit goes; 0 = the set's own hottest colour",
+          "default": 0.65,
+          "help_topic": "sauron-effect"
+        },
+        "streaks": {
+          "label": "Iris Streaks",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 1.0,
+          "aspect": "shape",
+          "note": "Depth of the iris's radial fire streaks",
+          "default": 0.55,
+          "help_topic": "sauron-effect"
+        },
+        "palette_sort": {
+          "label": "Palette Sort",
+          "type": "enum",
+          "smooth": false,
+          "options": [
+            "auto",
+            "authored",
+            "brightness",
+            "warm",
+            "angle"
+          ],
+          "aspect": "color",
+          "distribute": false,
+          "note": "Colour order along the fire's heat (tips 0 .. slit rim 1): auto = brightness (darkest at the tips, brightest at the rim), or cold-to-warm for a rainbow set (hue span over 180 degrees); authored = the set's stops as stored; angle = Eye's rainbow-by-angle. Re-orders only what this effect samples — never the colour set itself",
+          "default": "auto",
+          "help_topic": "sauron-effect"
+        },
+        "flames": {
+          "label": "Flames",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 1.0,
+          "aspect": "shape",
+          "note": "Flame reach at rest, as a fraction of each pixel's own gap from the iris to the crystal's edge; shape-flare target (Eye V2's Flare patch kinds set it)",
+          "default": 0.55,
+          "help_topic": "sauron-effect"
+        },
+        "flame_audio": {
+          "label": "Flame Audio",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 3.0,
+          "aspect": "reactivity",
+          "aspect_scale": 0.6,
+          "note": "How much bass lengthens the flames: reach x (1 + this x bass)",
+          "default": 1.0,
+          "help_topic": "sauron-effect"
+        },
+        "flame_speed": {
+          "label": "Flame Speed",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.1,
+          "max": 3.0,
+          "aspect": "reactivity",
+          "aspect_scale": 0.5,
+          "note": "Outward scroll speed of the flames; bass and a surge speed it up",
+          "default": 1.0,
+          "help_topic": "sauron-effect"
+        },
+        "tongues": {
+          "label": "Flame Licks",
+          "type": "numeric",
+          "smooth": true,
+          "min": 3.0,
+          "max": 24.0,
+          "aspect": "shape",
+          "note": "How many flame licks around the eye",
+          "default": 9.0,
+          "help_topic": "sauron-effect"
+        },
+        "sky": {
+          "label": "Ember Sky",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 0.6,
+          "aspect": "brightness",
+          "aspect_scale": 1.0,
+          "note": "The dim burning floor over the whole hex; 0 = black sky. A surge brightens it",
+          "default": 0.14,
+          "help_topic": "sauron-effect"
+        },
+        "gaze_radius": {
+          "label": "Gaze Radius",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.05,
+          "max": 0.6,
+          "aspect": "shape",
+          "note": "Radius of the 8-position ring the eye looks around (smaller than Eye's 0.5 so the bigger eye stays on the panel)",
+          "default": 0.36,
+          "help_topic": "sauron-effect"
+        },
+        "gaze_depth": {
+          "label": "Gaze Depth",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 1.0,
+          "aspect": "shape",
+          "note": "3D eyeball illusion: the iris foreshortens and the slit leads toward the gaze; 0 = flat",
+          "default": 0.6,
+          "help_topic": "sauron-effect"
+        },
+        "x_offset": {
+          "label": "X Offset",
+          "type": "numeric",
+          "smooth": true,
+          "min": -1,
+          "max": 1,
+          "flip_sign": true,
+          "scale_offset": true,
+          "aspect": "shape",
+          "default": 0.5
+        },
+        "y_offset": {
+          "label": "Y Offset",
+          "type": "numeric",
+          "smooth": true,
+          "min": -1,
+          "max": 1,
+          "flip_sign": true,
+          "scale_offset": true,
+          "aspect": "shape",
+          "default": 0.5
+        },
+        "drift_speed": {
+          "motion": true,
+          "label": "Drift Speed",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.05,
+          "max": 2.0,
+          "aspect": "reactivity",
+          "aspect_scale": 0.6,
+          "note": "Base gaze search speed; music multiplies it",
+          "default": 0.5,
+          "help_topic": "sauron-effect"
+        },
+        "speed_audio": {
+          "label": "Audio Speed",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 5.0,
+          "aspect": "reactivity",
+          "aspect_scale": 0.5,
+          "note": "How much the band boosts the gaze search speed",
+          "default": 2.9,
+          "help_topic": "sauron-effect"
+        },
+        "snap_threshold": {
+          "label": "Snap Threshold",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 1.0,
+          "aspect": "reactivity",
+          "distribute": false,
+          "note": "Impulse a beat needs to snap the gaze to a new ring position; 0 = every beat, 1 = never (the saturating->= defect Eye still has is fixed here)",
+          "default": 0.6,
+          "help_topic": "sauron-effect"
+        },
+        "snap_hold": {
+          "label": "Snap Hold",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 3.0,
+          "aspect": "reactivity",
+          "distribute": false,
+          "note": "Base seconds the gaze holds after a snap (bigger hits hold longer)",
+          "default": 0.2,
+          "help_topic": "sauron-effect"
+        },
+        "impulse_decay": {
+          "label": "Impulse Decay",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.01,
+          "max": 0.3,
+          "aspect": "reactivity",
+          "distribute": false,
+          "note": "Decay filter on the audio impulse",
+          "default": 0.06,
+          "help_topic": "sauron-effect"
+        },
+        "frequency_range": {
+          "label": "Audio Band",
+          "type": "enum",
+          "smooth": false,
+          "options": [
+            "Beat",
+            "Bass",
+            "Lows (beat+bass)",
+            "Mids",
+            "High"
+          ]
+        },
+        "gradient": {
+          "label": "Gradient",
+          "type": "gradient",
+          "smooth": true,
+          "aspect": "color",
+          "note": "The fire's colours, heat-mapped (see Palette Sort)"
+        },
+        "background_color": {
+          "label": "BG Color",
+          "type": "color",
+          "smooth": true,
+          "aspect": "bg_color"
+        },
+        "background_brightness": {
+          "label": "Background Brightness",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "aspect": "brightness",
+          "aspect_scale": 1.0,
+          "default": 0.0
+        },
+        "brightness": {
+          "label": "Effect Brightness",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "aspect": "brightness",
+          "aspect_scale": 1.0,
+          "default": 1.0
+        }
+      },
+      "defaults": {
+        "iris_size": 0.62,
+        "pupil_size": 0.8,
+        "pupil_width": 0.17,
+        "pupil_beat": 0.6,
+        "core_white": 0.65,
+        "streaks": 0.55,
+        "palette_sort": "auto",
+        "flames": 0.55,
+        "flame_audio": 1.0,
+        "flame_speed": 1.0,
+        "tongues": 9.0,
+        "sky": 0.14,
+        "gaze_radius": 0.36,
+        "gaze_depth": 0.6,
+        "x_offset": 0.5,
+        "y_offset": 0.5,
+        "drift_speed": 0.5,
+        "speed_audio": 2.9,
+        "snap_threshold": 0.6,
+        "snap_hold": 0.2,
+        "impulse_decay": 0.06,
+        "frequency_range": "Lows (beat+bass)",
+        "gradient": "linear-gradient(90deg, #ff0000 0.00%,#ff7800 14.00%,#ffc800 28.00%,#00ff00 42.00%,#00c78c 56.00%,#0000ff 70.00%,#800080 84.00%,#ff00b2 98.00%)",
+        "background_brightness": 0.0,
+        "brightness": 1.0,
+        "background_color": "#000000"
       }
     },
     "gradient": {

@@ -1577,7 +1577,11 @@ OPERATIONS: dict[str, SonicOperation] = {
             "brightness, size and crossing times are Fish's own "
             "big_fish_brightness/big_fish_size/big_fish_cross_slow_s/ "
             "big_fish_cross_fast_s settings, reached with "
-            "set_scene_entry_param). "
+            "set_scene_entry_param), sauron_surge (every live Sauron eye's "
+            "flames erupt toward the crystal's edge and burn back over "
+            "~0.55s, bigger at higher intensity — no jump/params/gain/ "
+            "hold_ms; the fire's own look is Sauron's flames/flame_audio/ "
+            "flame_speed/sky settings, reached with set_scene_entry_param). "
             "min_intensity (0..1, any type) makes the kind fire only when "
             "the fire's intensity is ABOVE it; pulse_flip defaults to 0.4 "
             "(never fires at or below 0.4). Like enabled, OMIT it to keep "
@@ -1622,7 +1626,7 @@ OPERATIONS: dict[str, SonicOperation] = {
                 "name": {"type": "string"},
                 "type": {"type": "string", "enum": ["drift_jump", "momentary", "permanent",
                                                     "pulse_flash", "pulse_flip",
-                                                    "big_fish"]},
+                                                    "big_fish", "sauron_surge"]},
                 "jump": {"type": "string", "enum": ["color_set", "dice"]},
                 "params": {"type": "object", "additionalProperties": True},
                 "gain": {"type": "number"},

@@ -135,9 +135,12 @@ export interface FlareKind {
    * big_fish: one really large fish crosses every live Fish panel behind
    *   the others — faster at higher intensity, its colour the scene's centre
    *   colour turned 120-180°; brightness/size/crossing times are Fish's own
-   *   settings, so no knobs on the kind. */
+   *   settings, so no knobs on the kind.
+   * sauron_surge: every live Sauron eye's flames erupt toward the crystal's
+   *   edge and burn back over ~0.55 s, scaled by the fire's intensity; no
+   *   knobs on the kind. */
   type: 'drift_jump' | 'momentary' | 'permanent' | 'color_rotate' | 'firework_burst' | 'blob_rush'
-    | 'pulse_flash' | 'pulse_flip' | 'big_fish';
+    | 'pulse_flash' | 'pulse_flip' | 'big_fish' | 'sauron_surge';
   jump: 'color_set' | 'dice' | null;
   params: Record<string, ParamTarget>;
   gain: number;

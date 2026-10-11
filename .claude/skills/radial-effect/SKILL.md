@@ -91,6 +91,14 @@ own `smooth: true` tag; that's the whole point of the control (see
 `config/effect_params.json`'s own notes on `spin`/`spin_sign`,
 AGENTS.md's "STAR reverse-flare-use-flip" entry).
 
+## A `"sauron"` hand-off snapshot is treated exactly like `"eye"`
+
+Sauron (fx/effects/sauron.py, 2026-10-10) is a copy of Eye with Eye's
+hand-off choreography verbatim, so wherever this effect special-cases an
+incoming `"eye"` snapshot it names `"sauron"` alongside it (the src gate in `_adopt_handoff` — radial blooms out of either eye). Keep
+the two together: a new `"eye"` special case here needs `"sauron"` too
+(sauron-effect skill).
+
 ## Sonic reach
 
 No direct param edit (same rule as every effect skill here). `spin`/

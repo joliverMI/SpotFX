@@ -286,6 +286,15 @@ ordinary fish steer out of its way (`big_fish_avoid`, 0 = off;
 `big_fish_avoid_margin`, the gap in px) — inside the effect, nothing on the
 SpotFX side.
 
+Sauron answers one flare kind of its own (2026-10-10): **sauron_surge** —
+the eye's flames erupt toward the crystal's edge (reach x1.6, heat x1.35,
+ember sky x1.6, scroll x2.5 at a full fire) and burn back with time
+constant 0.55 s, the eruption sized by the fire's intensity. The same
+instant, self-resetting poke shape (`surge`): no lead (it erupts on the
+mark), no carry, no release; a Light Show "flares off" target gets none.
+Sauron's charge/lull/drop are Eye's own, copied, until a Sauron-specific
+choreography is built.
+
 ## Where SPECTRA proves it
 
 - `scripts/check_spectra.py` — the drive: arm + ramp writes per class with

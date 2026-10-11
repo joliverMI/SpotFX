@@ -9121,6 +9121,35 @@ tunable, not tuned. Proof: `scripts/check_fish.py`,
 `tests/test_fish_disperse.py`, `tests/test_fish_wall.py`,
 `tests/test_fish_lull_searcher.py`, `tests/test_fish_big_fish_avoid.py`.
 
+## Sauron (`fx/effects/sauron.py`) — the Eye of Sauron, a COPY of Eye (phases 1-2 built)
+
+Plan: `/home/javi/fleet-spotfx/data/sauron-eye-plan/report.md` (v2, "go
+with all recs, approved", 2026-10-10). The module docstring and the
+`sauron-effect` / `sauron-scene` skills are the binding statements. Four
+things:
+
+- **A COPY, NOT A SHARE**: Eye's gaze, foreshortening, hand-off (src
+  `"sauron"`) and charge/lull/drop are copied verbatim; `eye.py` is
+  untouched. Every effect that special-cases an `"eye"` hand-off snapshot
+  (radial, dancer, fish's `TRANSITION_ADOPTERS`, spectra
+  `transition_phases`) names `"sauron"` too — a new one must as well. The
+  copied `snap_threshold` saturating `>=` is fixed here only.
+- **`palette_sort`** (default `auto`: dark -> bright, cold -> warm for a
+  set spanning > 180° of hue) re-orders the curve THIS effect samples, in
+  a `_generate_gradient_curve` override — on a config change, never per
+  frame, never his colour-set data.
+- **`sauron_surge`** is the tenth FlareKind type, the firework_burst /
+  pulse_flash / big_fish shape (`SAURON_SURGE_EFFECTS`, unregistered
+  self-resetting `surge` poke, no lead/carry/release), written over
+  `_flare_states()` so a Light Show flares-off target gets none.
+- **THE SCENE IS NOT SEEDED**: `scripts/seed_sauron_scene.py` (a copy of
+  Eye V2, dry-run default) waits for his live tuning session
+  (docs/ADDING_EFFECTS.md's gate); his values go into its `MATRIX_TUNED`
+  and the registry first. The strips (`sauron1d`) and a Sauron-own
+  charge/lull/drop are later phases. Proof: `scripts/check_sauron.py`
+  (run by `tests/test_sauron.py`); GIFs `scripts/render_sauron.py` ->
+  `docs/evidence/sauron/`.
+
 ## Pulse (`fx/effects/pulse.py`) — the Singles' one-colour effect, phases 1-4 built
 
 The single-led-power plan (`/home/javi/fleet-spotfx/data/single-led-power-plan/

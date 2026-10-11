@@ -48,6 +48,15 @@ a concrete `t: 0.0` directly rather than a `None` sentinel later code must
 resolve) — the pattern to copy in any NEW charge/lull/drop state machine,
 rather than blackhole's/squiggles' shape which needed a real fix.
 
+## Sauron is a COPY of this effect — a fix here does not reach it
+
+`fx/effects/sauron.py` (2026-10-10, the Eye of Sauron) copied this
+module's gaze model, foreshortening, hand-off choreography and
+charge/lull/drop state machine verbatim rather than sharing them, so Eye
+stays byte-for-byte untouched. A behavioural fix made here should be
+weighed for Sauron too (sauron-effect skill) — and the reverse: Sauron
+already FIXED the saturating `snap_threshold` `>=` above; Eye has not.
+
 ## Params
 
 `iris_size`/`pupil_size`/`gaze_radius`/`gaze_depth`/`spin` shape the

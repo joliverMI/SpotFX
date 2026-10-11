@@ -317,6 +317,7 @@ class Radial2d(Twod):
             "squiggles",
             "dancer",
             "eye",
+            "sauron",
         ):
             return
         if tuple(snap["dims"]) != (self.r_width, self.r_height):
