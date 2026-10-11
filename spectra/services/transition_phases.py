@@ -61,7 +61,10 @@ _PARTICLES = frozenset({"blackhole", "orbits", "fireworks", "fish"})
 # eye joins as well: eye->radial gathers the gaze to the radial's center
 # for the bloom; radial->eye explodes the iris back out of the pinch;
 # pacman->eye holds the infall until the maze has faded.
-_PARTICLES_AND_SQUIGGLES = _PARTICLES | {"squiggles", "dancer", "eye"}
+# sauron (2026-10-10) is a copy of eye with its hand-off choreography
+# verbatim, so it joins every pair eye is in.
+_PARTICLES_AND_SQUIGGLES = _PARTICLES | {"squiggles", "dancer", "eye",
+                                         "sauron"}
 
 # Keep anchor fractions in sync with fx/effects/particle_handoff.py:
 #   BLOOM_START = 0.45 (radial bloom / eruption burst)
@@ -84,13 +87,14 @@ TRANSITIONS: tuple[PhasedTransition, ...] = (
     # siblings use for pacman) and the body-points burst lands on the beat
     PhasedTransition(
         "dancer->particles (somersault, then burst)",
-        frozenset({"dancer"}), _PARTICLES | {"squiggles", "eye"}, 0.45,
+        frozenset({"dancer"}), _PARTICLES | {"squiggles", "eye", "sauron"},
+        0.45,
     ),
     # the eye closes its lids over phase 1; the lids reopen at the bloom
     # revealing the dancer (who assembles from the iris at that moment)
     PhasedTransition(
         "eye->dancer (blink, then reveal)",
-        frozenset({"eye"}), frozenset({"dancer"}), 0.45,
+        frozenset({"eye", "sauron"}), frozenset({"dancer"}), 0.45,
     ),
     # dancers run from the approaching chomp wipe; the maze reveal (the
     # wipe front crossing mid-panel) lands on the trigger

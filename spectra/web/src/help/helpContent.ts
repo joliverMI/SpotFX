@@ -240,6 +240,27 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        id: 'sauron-effect',
+        title: 'Sauron — the Eye of Sauron effect',
+        keywords: 'sauron eye of sauron slit pupil fire flames iris streaks ember sky palette sort colour order heat brightness warm rainbow angle authored beat dilate gaze snap crystal',
+        body: [
+          'Sauron is a Matrix effect for the crystal: the Eye of Sauron. A black vertical slit pupil with a white-hot rim, an iris of radial fire streaks, flames licking outward from the iris all the way toward the crystal’s edge, and a dim burning ember sky behind it all. It is a COPY of Eye with a new picture — the gaze model is Eye’s own: it looks around a ring of eight spots, searches faster when the music is busy, darts to a new spot on a big hit (Snap Threshold — and here 1.0 really means never), and holds there for Snap Hold. Eye itself is unchanged.',
+          'THE BEAT dilates the slit: its width by Slit Beat (and a little more with bass), its height by about a third as much, easing back within a fifth of a second. Slit Height and Slit Width set its resting size as a share of the iris; White-Hot Rim sets how white the glow around it goes.',
+          'THE FLAMES are a moving noise field shaped into licks (Flame Licks). Flames is their reach at rest, as a share of the gap from the iris to the crystal’s edge along each direction — so they fill the hexagon evenly whichever way the eye is looking. Bass lengthens them (Flame Audio) and speeds their outward scroll (Flame Speed). Ember Sky is the dim burning floor over the whole panel (0 = a black sky).',
+          'PALETTE SORT decides how the colour set becomes fire. Every point of the picture has a heat, from the flame tips (coolest) to the slit’s rim (hottest), and the colour comes from the set at that heat. Auto (the default) orders the set’s colours darkest-to-brightest along the heat, so the brightest colour is the white-hot rim; a rainbow set (one whose colours span more than half the colour wheel, like Hype 1) is ordered cold-to-warm instead — blue and teal tips, the warm colours at the slit. Authored uses the set’s stops in the order they are stored; Brightness and Warm force one ordering; Angle is Eye’s rainbow rule (colour by angle around the eye, heat only sets brightness). It only changes what this effect shows — never the colour set itself.',
+          'Charge, lull and drop are Eye’s own for now (a charge grows the iris and narrows the slit while the flames run inward; a lull closes the lids; the drop opens them with an eruption). A Sauron-specific choreography comes after you have tested the scene. A Sauron scene (a copy of Eye V2 with Sauron on the crystal) is written but not created until you have tuned the effect live; until then set it on the crystal by hand. Every number is a first guess — tune it.',
+        ],
+      },
+      {
+        id: 'sauron-surge',
+        title: 'Sauron — the surge flare',
+        keywords: 'sauron surge flare erupt flames fire burn intensity',
+        body: [
+          'The Sauron surge (🔥) is a flare kind: the eye’s flames erupt toward the crystal’s edge, the iris and the ember sky flare brighter, and the fire burns back over about half a second. A higher-intensity flare erupts harder. It lands on the mark — no lead.',
+          'It has no knobs of its own: how the fire looks is Sauron’s Flames, Flame Audio, Flame Speed and Ember Sky settings. It only does anything on a panel running Sauron, and a Light Show ‘flares off’ target gets none. Attach it to a flare band on the lane rack like any other kind, or ask Sonic to add one.',
+        ],
+      },
+      {
         id: 'radial-base-rotation',
         title: 'STAR / Radial — Speed vs Base Speed (they scale differently)',
         keywords: 'radial star spin speed base rotation quiet minimum floor revolutions per second rev/s silence parked audio reactive squared gain lows bass motor',

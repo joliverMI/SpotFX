@@ -251,7 +251,7 @@ def resolve_scope(virtual_ids: list[str] = (), categories: list[str] = (),
 PHASE_EFFECTS = frozenset({
     "blackhole", "blackhole1d", "orbits", "orbits1d", "radial",
     "fireworks", "fireworks1d", "squiggles", "dancer", "eye", "fish",
-    "pulse",
+    "pulse", "sauron",
 })
 
 # The ONE-COLOUR effects (single-led-power plan, phase 2): each pixel is one
@@ -353,6 +353,15 @@ PULSE_FLARE_EFFECTS = frozenset({"pulse"})
 # Its brightness, size and crossing times are Fish's own registered
 # settings.
 BIG_FISH_EFFECTS = frozenset({"fish"})
+
+# The effects carrying the SAURON SURGE flare poke (2026-10-10, the Sauron
+# eye plan): `surge` (the fire's intensity — the eye's flames erupt toward
+# the crystal's edge, the iris and the ember sky flare, and the fire burns
+# back over ~0.55 s; see fx/effects/sauron.py's module docstring). Same
+# edge-detected, self-resetting shape as the sets above and, like them,
+# absent from the registry: it rides ONLY the sauron_surge flare write
+# (spectra scene_response._sauron_surge).
+SAURON_SURGE_EFFECTS = frozenset({"sauron"})
 
 
 # ── effect-parameter registry ────────────────────────────────────────────────

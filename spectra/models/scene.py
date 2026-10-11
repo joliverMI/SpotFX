@@ -15,7 +15,7 @@ plus DECLARED MECHANISMS:
   drift      — per-param creep/follow declarations (named profile with an
                inline one-off escape hatch, decision-4 pattern)
   flare_kinds — NAMED FLARE KINDS (the owner's item-8 shape, judged and
-               accepted): each kind is one of nine types —
+               accepted): each kind is one of ten types —
                  drift_jump  jumps the drift: the colour-set jump through
                              the shipped selector, or a 🎲 re-roll for shape
                  momentary   a parameter spike that RETURNS to where it was
@@ -37,6 +37,8 @@ plus DECLARED MECHANISMS:
                  big_fish    one really large fish crosses every live Fish
                              panel behind the others, its speed and
                              contrasting colour set by the intensity
+                 sauron_surge every live Sauron eye's flames erupt toward
+                             the crystal's edge and burn back in ~0.55 s
                Any kind may carry a min_intensity: it fires only ABOVE it
                (pulse_flip defaults to 0.4) — see FlareKind's own docstring.
                A momentary/permanent kind's params are ParamTarget
@@ -291,7 +293,7 @@ DEFAULT_MIN_INTENSITY: dict[str, float] = {"pulse_flip": 0.4}
 
 class FlareKind(BaseModel):
     """One NAMED flare kind — a first-class concept the scene declares and
-    its bands select. Nine types, binding semantics:
+    its bands select. Ten types, binding semantics:
       drift_jump  jump the drift — jump="color_set" rolls the shipped
                   colour-set selector and JUMPS to the pick; jump="dice"
                   re-rolls the scene's 🎲 bindings (fresh shape). Both
@@ -385,6 +387,17 @@ class FlareKind(BaseModel):
                   big_fish_cross_fast_s), so like pulse_flash this type
                   carries no jump/params/gain/hold_ms; nothing carries and
                   nothing releases — the fish swims off on its own.
+      sauron_surge the SAURON SURGE flare (2026-10-10, the Sauron eye plan
+                  — his words: "Yes to the flaming surgers on the flares"):
+                  on every virtual whose live effect is Sauron
+                  (fx.device_model.SAURON_SURGE_EFFECTS) the eye's flames
+                  ERUPT toward the crystal's edge (reach x1.6, heat x1.35,
+                  ember sky x1.6, scroll x2.5 at a full fire) and burn back
+                  over ~0.55 s, the eruption scaled by the fire's intensity.
+                  The firework_burst / pulse_flash shape exactly: one
+                  instant poke of the effect's own self-resetting `surge`
+                  key, no jump/params/gain/hold_ms, nothing carries, nothing
+                  releases, no lead (it erupts ON the mark).
     min_intensity (any type; None = no gate, except pulse_flip, which
     defaults to 0.4) — the kind fires only when the fire's intensity is
     strictly ABOVE it ("only at intensities greater than .4"). Gated where
@@ -454,7 +467,7 @@ class FlareKind(BaseModel):
     name: str = Field(min_length=1)
     type: Literal["drift_jump", "momentary", "permanent", "color_rotate",
                   "firework_burst", "blob_rush", "pulse_flash", "pulse_flip",
-                  "big_fish"]
+                  "big_fish", "sauron_surge"]
     jump: Optional[Literal["color_set", "dice"]] = None
     params: dict[str, ParamTarget] = Field(default_factory=dict)
     gain: float = Field(default=1.0, ge=0.0)
@@ -559,6 +572,18 @@ class FlareKind(BaseModel):
                     f"big_fish_cross_slow_s/big_fish_cross_fast_s — see "
                     f"FlareKind's own docstring); params/gain/hold_ms "
                     f"don't apply here and would silently do nothing")
+        elif self.type == "sauron_surge":
+            if self.jump is not None:
+                raise ValueError(
+                    f"kind '{self.name}' is sauron_surge — jump belongs on a "
+                    f"drift_jump kind")
+            if self.params or self.gain != 1.0 or self.hold_ms is not None:
+                raise ValueError(
+                    f"kind '{self.name}' is sauron_surge — the eruption is "
+                    f"the Sauron effect's own (scaled by the fire's "
+                    f"intensity — see FlareKind's own docstring); params/"
+                    f"gain/hold_ms don't apply here and would silently do "
+                    f"nothing")
         elif self.type == "blob_rush":
             if self.jump is not None:
                 raise ValueError(

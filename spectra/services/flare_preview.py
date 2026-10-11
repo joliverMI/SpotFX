@@ -284,6 +284,23 @@ def big_fish_effect_ms(kind: FlareKind, conductor: DriftConductor,
     return None if longest is None else round(longest, 1)
 
 
+def sauron_surge_effect_ms(kind: FlareKind, conductor: DriftConductor,
+                           intensity: float) -> float | None:
+    """How long a sauron_surge flare's eruption stays visible on the
+    scene's Sauron panel at `intensity` (fx/effects/sauron.surge_visible_s
+    — the burn-back envelope down to 5% of a full surge). None for any
+    other kind, or when no Sauron virtual is in the scene (the flare then
+    writes nothing)."""
+    if kind.type != "sauron_surge":
+        return None
+    from fx import device_model
+    from fx.effects import sauron as sauron_fx
+    if not any(state.effect_type in device_model.SAURON_SURGE_EFFECTS
+               for state in conductor.virtuals.values()):
+        return None
+    return round(1000.0 * sauron_fx.surge_visible_s(intensity), 1)
+
+
 async def build_timeline(scene: SceneV2, kind: FlareKind,
                          intensity: float) -> dict[str, Any]:
     """The isolated single-kind execution timeline: every write fire_kind
@@ -333,6 +350,8 @@ async def build_timeline(scene: SceneV2, kind: FlareKind,
     effect_ms = pulse_effect_ms(kind, conductor)
     if effect_ms is None:
         effect_ms = big_fish_effect_ms(kind, conductor, intensity)
+    if effect_ms is None:
+        effect_ms = sauron_surge_effect_ms(kind, conductor, intensity)
     if not writes:
         anchor_s = animation_anchor_s(MIN_TIMELINE_S)
         return {
@@ -356,10 +375,11 @@ async def build_timeline(scene: SceneV2, kind: FlareKind,
     start_s = min(w["at"] for w in writes)
     end_s = max(w["at"] + w["duration_ms"] / 1000.0 for w in writes)
     if effect_ms is not None:
-        # A Pulse or big-fish flare's write is one instant poke; the
-        # animation is the effect's own (the flash's fade, the flip's swing
-        # back, the big fish's crossing), so the ruler's end marker is
-        # where that animation finishes.
+        # A Pulse, big-fish or Sauron-surge flare's write is one instant
+        # poke; the animation is the effect's own (the flash's fade, the
+        # flip's swing back, the big fish's crossing, the surge's burn-
+        # back), so the ruler's end marker is where that animation
+        # finishes.
         end_s = max(end_s, start_s + effect_ms / 1000.0)
     duration_s = max(MIN_TIMELINE_S, (end_s - start_s) + TAIL_PAD_S + 2.0)
     anchor_s = animation_anchor_s(duration_s)

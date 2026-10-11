@@ -43,6 +43,14 @@ value silences them; `burst_size = 0` is the other half of "off". Before
 claiming a knob turns flames off, enumerate every CALLER of the flame
 emitter, not just the one the knob's name suggests.
 
+## A `"sauron"` hand-off snapshot is treated exactly like `"eye"`
+
+Sauron (fx/effects/sauron.py, 2026-10-10) is a copy of Eye with Eye's
+hand-off choreography verbatim, so wherever this effect special-cases an
+incoming `"eye"` snapshot it names `"sauron"` alongside it (`_adopt_handoff`'s reveal hold — the dancers assemble from the iris at the bloom). Keep
+the two together: a new `"eye"` special case here needs `"sauron"` too
+(sauron-effect skill).
+
 ## Sonic reach
 
 No direct param edit — reachable only through an already-attached

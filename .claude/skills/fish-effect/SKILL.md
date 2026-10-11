@@ -393,6 +393,14 @@ fish steer around the big fish while it crosses." The BIG_AVOID block
   House Fish with solo bursts), and `big_fish_avoid` 0 is the step-1
   crossing bit for bit.
 
+## A `"sauron"` hand-off snapshot is treated exactly like `"eye"`
+
+Sauron (fx/effects/sauron.py, 2026-10-10) is a copy of Eye with Eye's
+hand-off choreography verbatim, so wherever this effect special-cases an
+incoming `"eye"` snapshot it names `"sauron"` alongside it (`TRANSITION_ADOPTERS`: an incoming Sauron adopts the fish, so they do not disperse). Keep
+the two together: a new `"eye"` special case here needs `"sauron"` too
+(sauron-effect skill).
+
 ## Everything else worth knowing before a change
 
 - **Body follows the RECORDED PATH, not a bend model**: the front half of

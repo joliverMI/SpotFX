@@ -1994,3 +1994,29 @@ against that commit.
     untouched; floor/ceiling through hits, a flash, a drop and a lull),
     `tests/test_show_flares_off.py::test_pulse_actions_reach_the_rendering_
     effect` (through the real Light Show action on the headless pipeline).
+67. `effects/sauron.py` (NEW, SpotFX-authored) + one-word additions to
+    `effects/radial.py` (the `_adopt_handoff` src gate), `effects/
+    dancer.py` (the reveal hold's src tuple) and `effects/fish.py`
+    (`TRANSITION_ADOPTERS`): THE EYE OF SAURON (2026-10-10; the Admiral:
+    "copy our current scene Effect called [Eye] and make it look a lot
+    more like the eye of Sauron and incorporate the flaminess of that eye
+    as a burning effect that uses the color set well"; the approved plan
+    v2, /home/javi/fleet-spotfx/data/sauron-eye-plan/report.md). A COPY of
+    `effects/eye.py` — gaze model, foreshortening, particle hand-off (src
+    "sauron") and charge/lull/drop state machine verbatim, Eye itself
+    untouched — with a new picture: a vertical slit pupil (beat dilates
+    width and height 1 : 0.3), a white-hot rim, a heat-mapped iris of
+    streaks, noise-field flames whose reach is a fraction of each pixel's
+    own gap to the crystal's hex edge (ray-cast through blackhole.py's
+    measured faces), and an ember sky. `palette_sort` re-orders the set's
+    colours along the heat by overriding `_generate_gradient_curve`, so it
+    runs only when GradientEffect regenerates its curve. The copied
+    `snap_threshold` saturating `>=` is fixed here (dancer.py's shape; Eye
+    keeps its own). A new unregistered, self-resetting poke key `surge`
+    (written ONLY by SpotFX's `sauron_surge` flare kind, `fx.device_model.
+    SAURON_SURGE_EFFECTS`) erupts the fire and burns back over SURGE_TAU.
+    The three other modules now treat a "sauron" hand-off snapshot
+    exactly as an "eye" one; with no Sauron on the panel nothing about
+    them changes. Evidence: `scripts/check_sauron.py` (run by
+    `tests/test_sauron.py`), `scripts/render_sauron.py`. Unverified
+    against his live room.

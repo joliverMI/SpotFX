@@ -151,6 +151,12 @@ Per event, fed by the bridge with the fire's intensity:
                   — Fish's own `big_fish` poke key, the firework_burst
                   shape exactly: instant, self-resetting, unregistered, no
                   carry, no release, no lead — see _big_fish.
+       sauron_surge — the SAURON SURGE flare (2026-10-10): every live
+                  Sauron eye's flames erupt toward the crystal's edge and
+                  burn back over ~0.55 s, scaled by the fire's intensity —
+                  Sauron's own `surge` poke key, the firework_burst shape
+                  exactly: instant, self-resetting, unregistered, no carry,
+                  no release, no lead — see _sauron_surge.
        pulse_flash / pulse_flip — the Singles' PULSE flares (single-led-
                   power plan, phase 3): on every virtual whose live effect
                   is Pulse, a FLASH (the light jumps by the effect's own
@@ -1415,6 +1421,7 @@ class ResponseEngine:
         flashes = [(k, s) for k, s in attached if k.type == "pulse_flash"]
         flips = [(k, s) for k, s in attached if k.type == "pulse_flip"]
         bigs = [(k, s) for k, s in attached if k.type == "big_fish"]
+        surges = [(k, s) for k, s in attached if k.type == "sauron_surge"]
 
         carry: dict[tuple[str, str], Any] = {}
         jumps: dict[str, dict[str, Any]] = {}    # vid → params, instant
@@ -1525,6 +1532,14 @@ class ResponseEngine:
             kind_records.append({
                 "name": kind.name, "type": kind.type,
                 "scale": scale, **result["big_fish"]})
+
+        if surges:   # one eruption per batch — the intensity sizes it
+            kind, scale = surges[0]
+            sel_intensity = max(0.0, min(1.0, intensity * scale))
+            result["sauron_surge"] = await self._sauron_surge(sel_intensity)
+            kind_records.append({
+                "name": kind.name, "type": kind.type,
+                "scale": scale, **result["sauron_surge"]})
 
         result["kinds"] = kind_records
         self.conductor.on_surge(carry)
@@ -1678,6 +1693,8 @@ class ResponseEngine:
             record["pulse_flip"] = await self._pulse_flip(intensity)
         if kind.type == "big_fish":
             record["big_fish"] = await self._big_fish(intensity)
+        if kind.type == "sauron_surge":
+            record["sauron_surge"] = await self._sauron_surge(intensity)
         self.conductor.on_surge(carry)
         record["carried"] = [{"virtual_id": vid, "param": p} for (vid, p) in carry]
         record["result"] = "applied"
@@ -2231,6 +2248,37 @@ class ResponseEngine:
                 continue
             await self.executor.jump(vid, state.effect_type,
                                      {"big_fish": strength})
+            targets += 1
+        return {"intensity": strength, "virtuals": targets}
+
+    async def _sauron_surge(self, intensity: float) -> dict:
+        """The SAURON SURGE flare (2026-10-10, the Sauron eye plan — his
+        words: "Yes to the flaming surgers on the flares"): one instant jump
+        of Sauron's own `surge` poke key, carrying the fire's intensity
+        (floored at sauron.SURGE_POKE_FLOOR so a fire at 0 still edges), on
+        every virtual whose live effect is in fx.device_model.
+        SAURON_SURGE_EFFECTS — the membership-gate shape _firework_burst
+        uses, over _flare_states() so a Light Show "flares off" target gets
+        none. The effect edge-detects it, raises its surge envelope to that
+        value — the flames erupt toward the crystal's edge, the iris and
+        the ember sky flare — and self-resets the key so the next fire
+        edges again; the envelope burns back on its own (SURGE_TAU).
+
+        Nothing carries and nothing releases, so like firework_burst there
+        is NO release queue for any of the four drain points. `surge` is
+        deliberately absent from the effect-parameter registry, so it never
+        enters the param/gain kinds' jumps/glides dicts: it composes with
+        every other kind in the band. LEAD: none — it erupts ON the mark
+        (the drop family's START rule; the plan rejected a heat-buffer fire
+        for landing 150-250 ms late)."""
+        from fx.effects.sauron import SURGE_POKE_FLOOR
+        strength = round(max(float(intensity), SURGE_POKE_FLOOR), 4)
+        targets = 0
+        for vid, state in self._flare_states().items():
+            if state.effect_type not in device_model.SAURON_SURGE_EFFECTS:
+                continue
+            await self.executor.jump(vid, state.effect_type,
+                                     {"surge": strength})
             targets += 1
         return {"intensity": strength, "virtuals": targets}
 

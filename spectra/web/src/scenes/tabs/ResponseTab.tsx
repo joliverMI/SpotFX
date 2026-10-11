@@ -52,6 +52,7 @@ const kindIcon = (k: FlareKind): string =>
       : k.type === 'pulse_flash' ? '⚡'
       : k.type === 'pulse_flip' ? '🌗'
       : k.type === 'big_fish' ? '🐋'
+      : k.type === 'sauron_surge' ? '🔥'
         : k.type === 'momentary' ? '↩' : '⚓';
 
 const kindTypeLabel = (k: FlareKind): string =>
@@ -80,6 +81,7 @@ const kindContent = (k: FlareKind): string => {
   if (k.type === 'pulse_flash') bits.push('Pulse flashes brighter and fades back');
   if (k.type === 'pulse_flip') bits.push('Pulse colour turns 180° and swings back');
   if (k.type === 'big_fish') bits.push('a big contrasting fish crosses behind the others');
+  if (k.type === 'sauron_surge') bits.push('the eye\'s flames erupt and burn back');
   if (k.min_intensity != null) bits.push(`only above intensity ${k.min_intensity}`);
   return bits.join(' · ');
 };
@@ -93,6 +95,7 @@ const TYPE_HINT: Record<string, string> = {
   pulse_flash: 'On the Singles\' Pulse light: an instant jump in brightness that fades back to normal in about 180 ms (Pulse\'s Flash Flare Size and Fade settings), bigger at higher intensity. Spent from the same flash budget as hits, so a run of flares never strobes.',
   pulse_flip: 'On the Singles\' Pulse light: the colour turns 180° at once and swings back round the colour wheel over three quarters of a beat — never through grey or white. Fires only above intensity 0.4 unless the kind sets its own minimum.',
   big_fish: 'On Fish: one really large fish swims straight across the panel, behind the ordinary fish, at 60% brightness (Fish\'s Big Fish Brightness setting). Faster at higher intensity; its colour is the scene\'s centre colour turned 120° (intensity 0.2 or less) up to 180° (0.5 or more), either way round, so it contrasts. No knobs on the kind — its brightness, size and crossing times are Fish\'s own settings.',
+  sauron_surge: 'On Sauron: the eye\'s flames erupt toward the crystal\'s edge, the iris and the ember sky flare, and the fire burns back over about half a second — bigger at higher intensity, landing on the mark. No knobs on the kind — the fire\'s own look is Sauron\'s Flames, Flame Audio, Flame Speed and Ember Sky settings.',
   firework_burst: 'Explodes extra payoff rockets the instant the flare fires, on every live fireworks effect — 3 rockets at intensity 0 up to 6 at intensity 1, on top of whatever the scene is already launching; no knobs of its own.',
 };
 
@@ -241,6 +244,9 @@ export default function ResponseTab({ scene, setScene, classes, helpTopic }: {
           )}
           {kinds.some((k) => k.type === 'big_fish') && (
             <HelpLink topic="fish-big-fish" title="Big fish flare" />
+          )}
+          {kinds.some((k) => k.type === 'sauron_surge') && (
+            <HelpLink topic="sauron-surge" title="Sauron surge flare" />
           )}
           {kinds.some((k) => k.type === 'pulse_flash' || k.type === 'pulse_flip') && (
             <HelpLink topic="pulse-flares" title="Pulse flash and colour flip" />

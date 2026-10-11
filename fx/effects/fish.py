@@ -151,7 +151,8 @@ TRANSITION_GAIN_FLOOR = 0.3  # the blend weight compensation never exceeds
 # blender, noise, keybeat2d, gifplayer, singleColor and everything else
 # likewise have no blob to merge into.
 TRANSITION_ADOPTERS = frozenset(
-    {"blackhole", "orbits", "fireworks", "squiggles", "eye", "dancer", "fish"}
+    {"blackhole", "orbits", "fireworks", "squiggles", "eye", "dancer", "fish",
+     "sauron"}
 )
 
 # ── the swim burst flare ────────────────────────────────────────────────────
