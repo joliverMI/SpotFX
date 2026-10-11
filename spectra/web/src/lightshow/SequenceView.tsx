@@ -8,8 +8,10 @@
  *           (the app's searchable picker) each armed with the same four
  *           icons as the Run view's one-tap row, add Waits (a fixed time, a
  *           number of triggers, a number of songs, or one of a list of
- *           songs — searched from the songs SPECTRA knows), reorder by drag
- *           (pointer events, so a finger works as well as a mouse) or ↑/↓.
+ *           songs — searched from the songs SPECTRA knows), reorder by
+ *           dragging each item's own ⠿ handle (`SortableList.tsx`,
+ *           `@dnd-kit` — a finger works as well as a mouse, and so does
+ *           the keyboard).
  *   Run   — start one, then the current item highlighted with what it is
  *           waiting for, what is done and what is next, and the human
  *           override: Pause / Resume, Stop, Previous, Next, Fire now.

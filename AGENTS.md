@@ -4271,10 +4271,11 @@ docstring first (Sonic's authority boundary here, the same shape
   supported — no new backend semantics. A set armed for more than one
   trigger at once shows an "Armed for the …" tag, with its own Cancel
   button, for EVERY active arm, not just the first.
-- **DRAG REORDER ON THE BUILD VIEW** — native HTML5 DnD on each step's
-  `⠿` handle (`dataTransfer` carries the source index as plain text; drop
-  splices). The ↑/↓ buttons stay, for keyboard/no-pointer use — drag is
-  additive, not a replacement.
+- **DRAG REORDER ON THE BUILD VIEW** — this phase's native HTML5 DnD
+  (`dataTransfer`, plus ↑/↓ buttons for keyboard/no-pointer use) is
+  SUPERSEDED, 2026-10-11, by `@dnd-kit` (`SortableList.tsx`) — the ↑/↓
+  buttons are gone, replaced by the same ⠿ handle's own keyboard-sortable
+  drag. See "SETS THAT RUN SETS, AND THE BUILDER V2" below.
 - **THE EXPECTED-SCENE-CHANGE COUNTDOWN IS A FLOOR, NAMED AS ONE** —
   `show_arms.status()`'s `song.expected_scene_change_s` is `dwell.
   status()["remaining_s"]`: the showing scene's own minimum-hold floor,
@@ -4361,8 +4362,10 @@ instant the dialog mounts, no second click. Reuse `autoFocus` for any
 future picker that IS a dialog's own content rather than re-deriving
 "open immediately" another way. Spec: `check_light_show_add_step_dialog.mjs`.
 
-**A SET HAS A "⧉ DUPLICATE" BUTTON, PLACED RIGHT AFTER THE ORIGINAL
-(2026-10-08, his ask).** `show_store.put_set` grew `after_id` (a
+**A SET HAS A DUPLICATE BUTTON, PLACED RIGHT AFTER THE ORIGINAL
+(2026-10-08, his ask; the button's own label moved from the "⧉ Duplicate"
+text glyph to an SVG icon + word in the 2026-10-11 Builder V2 rework, same
+as every other editor-head button).** `show_store.put_set` grew `after_id` (a
 brand-new set only — ignored on an update of an existing one): `POST
 /api/light-show/sets` accepts it on `SetBody`, and the frontend's
 `duplicate()` (`LightShowPage.tsx`) posts a fresh, independent copy
@@ -4433,11 +4436,14 @@ things:
   start; keyboard sortable. Cards are collapsed by default with a one-line
   summary (`builderOps.stepSummary`/`itemSummary`); copy/paste is a
   localStorage clipboard shared across tabs (`builderOps` CLIP_KEY), every
-  paste regenerating ids. A new action kind's param `type` renders in
-  `StepCard.ParamField`; type `set` is the call picker, which leaves out
-  any set that would loop (`builderOps.callableSets`). The Add-a-step
-  dialog lists any catalogue `group` it does not know (e.g. Home Assistant
-  kinds) under its own heading.
+  paste regenerating only the pasted step/item's OWN id
+  (`builderOps.cloneFresh`) — a nested reference (`set_id`, `params.set`, a
+  `target`'s own `{kind, id}`) is left untouched, or a paste would silently
+  retarget a different fixture/category/set. A new action kind's param
+  `type` renders in `StepCard.ParamField`; type `set` is the call picker,
+  which leaves out any set that would loop (`builderOps.callableSets`).
+  The Add-a-step dialog lists any catalogue `group` it does not know
+  (e.g. Home Assistant kinds) under its own heading.
 - Specs: `tests/test_show_set_references.py` (inline order, nesting,
   pauses, coalescing, cycles, deletes, preview, arms, Sonic) and
   `node scripts/check_light_show_builder.mjs` (via

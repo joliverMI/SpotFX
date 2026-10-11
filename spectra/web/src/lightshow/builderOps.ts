@@ -9,8 +9,11 @@
  *   * ONE-LINE SUMMARIES — what a collapsed step or item says.
  *   * THE CLIPBOARD — copy steps / sequence items / whole sets and paste
  *     them into any set or sequence, in this tab or another (localStorage,
- *     the legacy SpotFX editor's `spotfx.clipboard.v1` precedent). Every id
- *     is regenerated on paste, so two pastes are two independent steps. */
+ *     the legacy SpotFX editor's `spotfx.clipboard.v1` precedent). Only each
+ *     pasted step/item's OWN id is regenerated (`cloneFresh`, below), so two
+ *     pastes are two independent steps — a nested reference (a `target`'s
+ *     own `{kind, id}`, `set_id`, `params.set`) is never touched, or a paste
+ *     would silently retarget a different fixture/category/set. */
 import type { SequenceItem, ShowAction, ShowKind, ShowSet } from './types';
 import { ARM_LABEL, WAIT_LABEL, clock } from './sequenceOps';
 

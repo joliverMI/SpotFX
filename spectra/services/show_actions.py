@@ -43,7 +43,10 @@ HOW EACH FAMILY LANDS, and how it is put back:
                   heartbeated for the action's duration. A future room
                   effect kind registers in light_field_fields.KINDS and is
                   armable here with no Light Show change.
-  control         (pause) — waits inside a set.
+  control         (pause, run another set) — a pause waits inside a set; a
+                  call is EXPANDED into the called set's own steps before
+                  anything runs (spectra/services/show_refs.py is the
+                  binding statement) — it never applies anything itself.
 
 BASELINES. The first time the show changes a setting its value is saved.
 End show writes each one back ONLY while the current value still equals
