@@ -117,6 +117,17 @@ inside the lull's dark rule): the base render takes the frame to true black
 for that window. Help topics `drop-shockwave`, `drop-breath-hold`; proof
 `scripts/check_drop_shockwave.py` / `tests/test_phase_grammar.py`.
 
+**The Shockwave paints the drop frames, so a test of the lids' own drop
+geometry must hold it off** (`drop_shock: 0`), the way
+`tests/test_eye_lull_lids_upside_down.py`'s helper does by default — with it
+on, its rim bloom lights the rows the lid tests read, and a pinned pre-
+Shockwave Eye is no longer bit-identical on the drop. The two coexist: that
+file's `test_the_upside_down_lull_and_the_shockwave_coexist` runs Eye and
+Sauron with it on and proves the lids open in the identical sequence, turned
+the same way round, while the Shockwave changes the drop's light. Eye and
+Sauron draw their construction-time state from an UNSEEDED generator, so
+two runs compared frame for frame need a seeded construction.
+
 ## Sonic reach
 
 No direct param edit — reachable only through an already-attached
