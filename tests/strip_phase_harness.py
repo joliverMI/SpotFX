@@ -146,6 +146,10 @@ class Room:
         for vid, (et, n, _rows, cfg) in self.spec.items():
             eff = headless.attach_effect(self.host, self.virtuals[vid], et,
                                          dict(cfg))
+            if hasattr(eff, "_rng"):
+                # the particle strips draw from their own generator, which
+                # np.random.seed does not reach
+                eff._rng = np.random.default_rng(11)
             if not self.layer:
                 eff._strip_phase = False   # the effect exactly as before
             if hasattr(eff, "melbank"):

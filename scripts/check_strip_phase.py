@@ -19,7 +19,11 @@ then the output stage's own cost per frame (off-phase, charge, drop).
 
 Exit status 1 if any member with the layer fails his rule: a charge that
 does not build, a lull without ~3 s of black, a drop below its charge, or
-ANY charge/drop pixel whiter than the set. Offline only; touches nothing.
+ANY charge/drop pixel whiter than the set. A member whose own `lull_ember`
+default is above 0 (the Fireworks strip, his call 3: its rockets cross the
+dark as embers) is held to that instead of black: through the lull's last
+3 s every channel stays at or under the ember, and something is still lit.
+Offline only; touches nothing.
 
     .venv/bin/python scripts/check_strip_phase.py
 """
@@ -63,9 +67,13 @@ async def cycle(effect_type: str, layer: bool):
             return r.frames["s"], palette_of(r.effects["s"])
 
 
+DARK_SPAN = int(3.0 * FPS)
+
+
 def measure(frames, pal):
     L = [lum(f) for f in frames]
     dark = sum(1 for f in frames[LULL[0]:LULL[1]] if f.max() == 0.0) / FPS
+    span = frames[LULL[1] - DARK_SPAN + 1:LULL[1]]
     window = list(range(*CHARGE)) + list(range(DROP[0], DROP[0] + 90))
     white = max(whiter_than_set(frames[i], pal) for i in window)
     return {
@@ -75,6 +83,7 @@ def measure(frames, pal):
         "dark_s": dark,
         "drop_peak": max(L[DROP[0]:DROP[0] + 90]),
         "white": white,
+        "dark_max": max(float(f.max()) for f in span),
     }
 
 
@@ -131,7 +140,13 @@ def main() -> int:
                 problems = []
                 if m["charge_peak"] <= m["normal"] * 1.2:
                     problems.append("charge does not build")
-                if abs(m["dark_s"] - 3.0) > 0.05:
+                ember = float(device_model.schema_default(et, "lull_ember"))
+                if ember > 0.0:
+                    if not 0.0 < m["dark_max"] <= ember * 255.0 + 1e-6:
+                        problems.append(
+                            f"lull ember: brightest channel {m['dark_max']:.1f} "
+                            f"in the dark, want (0, {ember * 255.0:.1f}]")
+                elif abs(m["dark_s"] - 3.0) > 0.05:
                     problems.append(f"lull dark {m['dark_s']:.2f}s, want 3.0s")
                 if m["drop_peak"] < m["charge_peak"]:
                     problems.append("drop below its charge")

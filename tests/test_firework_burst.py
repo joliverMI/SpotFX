@@ -254,7 +254,7 @@ def test_burst_lands_next_frame_and_is_additive_1d(tmp_path):
                 pre_age = effect.f_age[:pre_n].copy()
                 pre_life = effect.f_life[:pre_n].copy()
                 pre_grad = effect.f_grad[:pre_n].copy()
-                pre_phase = effect._phase
+                pre_phase = (getattr(effect, "_sp_phase", None) or effect._phase)
 
                 record = await responder.on_event("flare", 1.0)
                 assert record["firework_burst"] == {"rockets": 6,
@@ -274,7 +274,7 @@ def test_burst_lands_next_frame_and_is_additive_1d(tmp_path):
                     pre_age + 2 / 60, abs=1e-4)
                 assert effect.f_life[:pre_n] == pytest.approx(pre_life)
                 assert effect.f_grad[:pre_n] == pytest.approx(pre_grad)
-                assert effect._phase == pre_phase
+                assert (getattr(effect, "_sp_phase", None) or effect._phase) == pre_phase
                 # the payoff shape: full-bright, PAYOFF_LIFE-stretched lives
                 from fx.effects.fireworks1d import PAYOFF_LIFE
                 fresh = slice(pre_n, effect.n)

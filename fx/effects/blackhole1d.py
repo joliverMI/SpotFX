@@ -3,7 +3,6 @@ import logging
 import numpy as np
 import voluptuous as vol
 
-import fx.effects.particle_handoff as particle_handoff
 from fx.color import validate_gradient
 from fx.effects import lull_dark, lull_handoff
 from fx.effects.audio import AudioReactiveEffect
@@ -30,7 +29,8 @@ BAND_ANCHORS = np.array([0.0, 1 / 3, 2 / 3], dtype=np.float32)
 BAND_JITTER = 0.06
 
 # charge/lull/drop choreography (SpotFX drives `phase` + ramps
-# `phase_progress`; see _phase_step).
+# `phase_progress`; the strip phase layer edge-detects it and calls
+# _strip_phase_enter).
 #
 # THE STRIP PHASE LAYER, 2026-10-11 (strip phase plan phase 2 — fx/effects/
 # strip_phase.py is the binding statement). The Admiral: "increase in
@@ -60,6 +60,10 @@ BAND_JITTER = 0.06
 # by the drop's intensity (PHASE_BURST_N at 0 -> PHASE_BURST_N_MAX at 1);
 # and a ring burst of PUNCH_BURST_N blobs when a flare punches through the
 # lull's dark, so the flare shows blobs of its own, not only a glow.
+# Since plan phase 3 the phase PLUMBING is the layer's too (edge detection,
+# the orphan watchdog, the drop's self-reset after DROP_RESET_S — fx/effects/
+# strip_phase.py, THE PARTICLE STRIPS' PLUMBING); this module keeps only its
+# choreography, started in _strip_phase_enter.
 # Constants are restated rather than imported from blackhole.py: the two
 # effect modules are independent vendored files.
 CHARGE_SPAWN_RATE_MAX = 24.0   # blobs/second at p=1 (strip phase plan)
@@ -93,6 +97,8 @@ class Blackhole1d(StripPhase, AudioReactiveEffect, GradientEffect):
     # rate, the beat burst and the density cap — and a faster fall
     STRIP_PHASE_ACTIVITY = {"spawn_rate": 1.0, "beat_burst": 1.0,
                             "max_blobs": 1.0, "base_speed": 0.6}
+    # the drop's own length: the layer self-resets the phase key after it
+    STRIP_PHASE_DROP_S = DROP_RESET_S
     # color_spin supersedes gradient_roll for this effect
     HIDDEN_KEYS = ["gradient_roll"]
     # phase/phase_progress are SpotFX-driven choreography; advanced (not
@@ -224,6 +230,11 @@ class Blackhole1d(StripPhase, AudioReactiveEffect, GradientEffect):
         self.spawn_acc = 0.0
         # charge/lull forced-formation accumulator (_phase_spawn_rate)
         self.phase_spawn_acc = 0.0
+        # config the charge overrides (reverse), put back on the drop
+        self._phase_saved = {}
+        # the drop's burst, armed on the drop's edge, fired on its first
+        # rendered frame (it needs the ring this frame computes)
+        self._burst_due = False
         self._punch_pending = False
         self.spin_total = 0.0
         self._beat_pending = False
@@ -266,34 +277,6 @@ class Blackhole1d(StripPhase, AudioReactiveEffect, GradientEffect):
             self.create_filter(alpha_decay=decay, alpha_rise=0.99)
             for _ in range(3)
         ]
-
-        self._own_phase_config(self._config)
-
-    def _passive_config_updated(self, config):
-        # a write carrying only the layer's keys (every phase arm and every
-        # per-frame phase_progress tween) skips the chain above — this
-        # effect's own choreography still has to see the phase edge
-        super()._passive_config_updated(config)
-        self._own_phase_config(config)
-
-    def _own_phase_config(self, config):
-        # charge/lull/drop: edge-detect the phase key. State is created here
-        # (not __init__) because config_updated runs first, during
-        # super().__init__; the pending flag is consumed in render.
-        new_phase = config.get("phase", "none")
-        self.phase_progress = float(config.get("phase_progress", 0.0))
-        if not hasattr(self, "_phase"):
-            # creation baseline: a stale persisted phase key must never
-            # edge-fire choreography on a fresh instance
-            self._phase = "none"
-            self._phase_t = 0.0
-            self._phase_pending = None
-            self._phase_saved = {}
-            self._drop = None
-            self._phase_done_t = None
-        else:
-            # non-creation pass: a changed phase key arms the edge
-            self._phase_pending = new_phase if new_phase != self._phase else None
 
     def audio_data_updated(self, data):
         impulse = self.impulse_filter.update(
@@ -396,12 +379,12 @@ class Blackhole1d(StripPhase, AudioReactiveEffect, GradientEffect):
         and whether it is dark — read off the strip layer's OWN timing for
         this frame (`_strip_phase_lull`), so the formation stops on exactly
         the frame the layer's fade reaches black. Should the layer not be
-        tracking this lull (its stage switched off on an instance), the same
-        shared rule is read on this effect's own lull clock instead."""
+        tracking this lull this frame, the same shared rule is read on the
+        layer's lull clock instead."""
         timing = self._strip_phase_lull()
         if timing is None:
             timing = lull_dark.lull_timing(self._config, self.phase_progress,
-                                           self._phase_t, LEGACY_DARK_AT)
+                                           self._sp_t, LEGACY_DARK_AT)
         return float(timing.approach), bool(timing.dark)
 
     def _phase_spawn_rate(self):
@@ -410,7 +393,7 @@ class Blackhole1d(StripPhase, AudioReactiveEffect, GradientEffect):
         the charge, then TAPERING through the lull's approach to nothing at
         the room's dark point. The 2D effect's _phase_spawn_rate is the same
         build; its docstring carries his words."""
-        phase = getattr(self, "_phase", "none")
+        phase = self._sp_phase
         p = float(np.clip(self.phase_progress, 0.0, 1.0))
         if phase == "charge":
             return CHARGE_SPAWN_RATE_MAX * p ** CHARGE_SPAWN_CURVE
@@ -425,7 +408,7 @@ class Blackhole1d(StripPhase, AudioReactiveEffect, GradientEffect):
     def _phase_speed_mult(self):
         """Fall-speed multiplier for the charge build, held through the
         lull; 1.0 everywhere else, so the drop is untouched."""
-        phase = getattr(self, "_phase", "none")
+        phase = self._sp_phase
         if phase == "charge":
             p = float(np.clip(self.phase_progress, 0.0, 1.0))
             return 1.0 + (CHARGE_FALL_SPEED_MAX - 1.0) * p
@@ -450,13 +433,13 @@ class Blackhole1d(StripPhase, AudioReactiveEffect, GradientEffect):
         if float(self._config.get("flare_punch_strength", 1.0) or 0.0) > 0.0:
             self._punch_pending = True
 
-    def _enter_phase(self, phase):
+    def _strip_phase_enter(self, phase, prev, released):
+        """The phase key edged (the strip layer's plumbing — fx/effects/
+        strip_phase.py). A watchdog release of an orphaned charge/lull is a
+        SILENT sweep back: the saved direction comes back, no burst."""
         self.phase_spawn_acc = 0.0
-        self._phase = phase
-        self._phase_t = 0.0
-        self._phase_done_t = None
         if phase == "charge":
-            self._drop = None
+            self._burst_due = False
             # charge always falls inward; remember the configured direction
             if self.reverse:
                 self._phase_saved.setdefault("reverse", True)
@@ -464,9 +447,9 @@ class Blackhole1d(StripPhase, AudioReactiveEffect, GradientEffect):
                     {"reverse": False}, validate=False, fire_event=False
                 )
         elif phase == "drop":
-            self._drop = {"burst_t": None}
+            self._burst_due = True
         elif phase == "none":
-            self._drop = None
+            self._burst_due = False
             self._restore_phase_overrides()
 
     def _restore_phase_overrides(self):
@@ -482,60 +465,16 @@ class Blackhole1d(StripPhase, AudioReactiveEffect, GradientEffect):
         n = self._phase_burst_count() if count is None else int(count)
         self._spawn(n, n, ring, ignore_cap=True)
 
-    def _phase_step(self, dt, ring):
-        pend = self._phase_pending
-        if pend is not None:
-            self._phase_pending = None
-            if pend != self._phase:
-                self._enter_phase(pend)
-        if self._phase == "none":
-            return
-        self._phase_t += dt
-        # orphan watchdog: a charge/lull whose payoff never arrives
-        # releases itself as a silent drop (sweep back, no burst)
-        due, self._phase_done_t = particle_handoff.phase_release_due(
-            self._phase, self.phase_progress, self._phase_t,
-            self._phase_done_t,
-        )
-        if due:
-            _LOGGER.info(
-                "blackhole1d: %s watchdog release after %.1fs",
-                self._phase, self._phase_t,
-            )
-            self._phase = "drop"
-            self._phase_t = 0.0
-            self.phase_progress = 0.0
-            self._drop = {"burst_t": None, "silent": True}
-            # No `return` here, unlike the other early-outs in this method:
-            # falling through into the "drop" branch below resolves burst_t
-            # out of its None sentinel on THIS SAME call, so it is never
-            # observable as None (a prior version returned here, and the
-            # since-retired _phase_post read it the next instant — see the
-            # identical fix and its rationale in blackhole.py's own
-            # _phase_step, TypeError: None / float).
-        if self._phase == "drop":
-            drop = self._drop
-            if drop is None:
-                drop = self._drop = {"burst_t": None}
-            if drop["burst_t"] is None:
-                # DROP ANCHORS ITS START TO THE MARK — same ruling and
-                # same shape as the 2D Blackhole's own _phase_step (see
-                # that module's docstring); the burst fires on the first
-                # frame of the phase, not gated to the ramp's end.
-                drop["burst_t"] = 0.0
-                self._restore_phase_overrides()
-                if not drop.get("silent"):
-                    self._phase_burst(ring)
-            else:
-                drop["burst_t"] += dt
-                if drop["burst_t"] >= DROP_RESET_S:
-                    self._phase = "none"
-                    self._drop = None
-                    self._apply_config(
-                        {"phase": "none", "phase_progress": 0.0},
-                        validate=False,
-                        fire_event=False,
-                    )
+    def _phase_step(self, ring):
+        """The drop's payoff, on the drop's first rendered frame. DROP
+        ANCHORS ITS START TO THE MARK — same ruling and same shape as the 2D
+        Blackhole's own _phase_step (see that module's docstring): the
+        burst fires on the first frame of the phase, not gated to the ramp's
+        end. The drop's end (DROP_RESET_S) is the layer's self-reset."""
+        if self._burst_due:
+            self._burst_due = False
+            self._restore_phase_overrides()
+            self._phase_burst(ring)
 
     def render(self):
         pixel_count = self.pixel_count
@@ -554,7 +493,7 @@ class Blackhole1d(StripPhase, AudioReactiveEffect, GradientEffect):
         inner, outer = self._bounds(ring)
         swirl_sign = np.sign(self.swirl) if self.swirl != 0 else 1.0
 
-        self._phase_step(dt, ring)
+        self._phase_step(ring)
 
         n = self.n
         # ── update ──────────────────────────────────────────────────────
@@ -597,7 +536,7 @@ class Blackhole1d(StripPhase, AudioReactiveEffect, GradientEffect):
         # unseen from there — the strip layer's fade is at its floor); up to
         # the room's dark point the ambient spawn keeps running underneath
         # the forced formation below
-        dark = self._phase == "lull" and self._lull_approach()[1]
+        dark = self._sp_phase == "lull" and self._lull_approach()[1]
         rate = 0.0 if dark else self.spawn_rate * (
             1.0 + self.spawn_audio * self.impulse * 3.0
         )
@@ -629,7 +568,7 @@ class Blackhole1d(StripPhase, AudioReactiveEffect, GradientEffect):
             # a flare punched through the lull's dark: a ring burst of this
             # effect's own blobs, so the flare shows more than a glow
             self._punch_pending = False
-            if self._phase == "lull":
+            if self._sp_phase == "lull":
                 self._phase_burst(ring, PUNCH_BURST_N)
         if self.n > prev_n:
             # Fresh spawns render as stationary points this frame

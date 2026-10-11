@@ -266,7 +266,7 @@ async def section_3_to_5(scene, tmp_dir: str) -> None:
                    "still first in the buffer")
             _check((fx1d.f_age[:own_1d] > own_age).all(),
                    "…and still aging normally — never restarted or reset")
-            _check(fx1d._phase == "none" and fx2d._phase == "none",
+            _check((getattr(fx1d, "_sp_phase", None) or fx1d._phase) == "none" and fx2d._phase == "none",
                    "phase choreography state untouched by every burst")
             new_1d = fx1d.f_life[own_1d:fx1d.n]
             _check(float(new_1d.min()) >= cfg_1d.get("burst_life", 1.2)

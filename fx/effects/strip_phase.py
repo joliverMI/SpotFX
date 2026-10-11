@@ -14,8 +14,12 @@ brightness."
 Plan: /home/javi/fleet-spotfx/data/strip-phase-plan/report.md (revision 3;
 its phase 1 is this module, Melt and Power joining it, the flare punch and
 the house-mode hold; its phase 2 is the Black Hole strip joining it — the
-first member with phase choreography of its own, see step 5 below). ONE
-layer, ONE line per effect to join, no SpotFX code change per effect.
+first member with phase choreography of its own, see step 5 below); its
+phase 3 is the Orbits and Fireworks strips joining it and the three particle
+strips' duplicated phase plumbing (edge detection, the orphan watchdog, the
+drop's self-reset) moving in here — see THE PARTICLE STRIPS' PLUMBING
+below). ONE layer, ONE line per effect to join, no SpotFX code change per
+effect.
 
 WHAT IT LISTENS TO — only keys SpotFX sends on a phase write (spectra
 scene_response._drive_phase): `phase`, `phase_progress`, the lull's
@@ -104,12 +108,10 @@ HOW AN EFFECT JOINS (existing or future — one line, plus one set):
   4. register the tunables in config/effect_params.json (registry_params()
      is the exact block) so they show on the Initial Set and Sonic reaches
      them through set_scene_entry_param.
-  5. AN EFFECT WITH ITS OWN PHASE CHOREOGRAPHY (the particle strips — the
-     Black Hole strip first, plan phase 2) needs three things more:
-     - every phase write is PASSIVE (only layer-owned keys), so it never
-       reaches the effect's own config_updated: override
-       `_passive_config_updated` (call super first) to run its own phase
-       edge detection there too, or it never sees a phase;
+  5. AN EFFECT WITH ITS OWN PHASE CHOREOGRAPHY (the particle strips: the
+     Black Hole strip since plan phase 2, the Orbits and Fireworks strips
+     since phase 3) keeps NO phase plumbing of its own — see THE PARTICLE
+     STRIPS' PLUMBING below — and needs three things more:
      - its config_updated must NOT call super(): Effect._apply_config
        already calls every direct base's own hook, and a second StripPhase
        pass on a creation write turns a stale persisted phase into a false
@@ -118,7 +120,31 @@ HOW AN EFFECT JOINS (existing or future — one line, plus one set):
        fraction of its own: read `_strip_phase_lull()` (the very timing the
        fade uses this frame). Its own drawn phase looks are retired in
        favour of the layer's; `_strip_phase_on_punch()` lets it answer a
-       flare punch with content of its own.
+       flare punch with content of its own, and `_strip_phase_punch()` says
+       how far open the punch is this frame;
+     - a per-effect default for a tunable (the Fireworks strip's
+       `lull_ember`): splice `tunable_fields(key=default)` into its own
+       CONFIG_SCHEMA (the most derived schema wins) and register
+       `registry_params({key: default})`.
+
+THE PARTICLE STRIPS' PLUMBING (plan phase 3). The edge detection, the
+orphan watchdog and the drop's self-reset used to be ~70 lines copied into
+each particle strip; they live here now, ONCE, on the layer's own clock:
+  - `_strip_phase_enter(phase, prev, released)` is called once per edge of
+    the phase key, before that frame's render() — the effect's own
+    choreography starts there (a charge saves an override, a lull launches
+    its rockets, a drop arms its burst). `released` is True when the edge
+    is the orphan watchdog letting go of a charge or lull whose payoff
+    never came (the effect decides what that looks like: a silent sweep
+    back, blobs re-adding, rockets burning out);
+  - STRIP_PHASE_DROP_S is the effect's own drop length: that many seconds
+    into a drop the layer writes the phase key back to "none" (SpotFX
+    never writes a drop's end) and calls the hook with ("none", "drop").
+    The layer's own drop look runs on its own clock and is never cut short
+    by it. None (Melt, Power) = the key is left alone;
+  - the phase itself is `self._sp_phase` (the one phase a member has —
+    no second copy of its own), seconds in it `self._sp_t`, and
+    `self.phase_progress` follows the key.
 tests/test_strip_phase.py's guard fails if a registered 1-D effect neither
 joins nor is a named exception (fx.device_model.STRIP_PHASE_EXCEPTIONS).
 
@@ -226,6 +252,23 @@ TUNABLES = (
 )
 TUNABLE_KEYS = tuple(t[0] for t in TUNABLES)
 
+def tunable_fields(**overrides) -> dict:
+    """CONFIG_SCHEMA entries for the tunables with an effect's own
+    defaults (HOW AN EFFECT JOINS, step 5) — e.g. the Fireworks strip's
+    `tunable_fields(lull_ember=0.12)`. Spliced into the effect's own schema,
+    they replace the layer's (the most derived schema wins)."""
+    unknown = set(overrides) - set(TUNABLE_KEYS)
+    if unknown:
+        raise KeyError(f"not strip phase tunables: {sorted(unknown)}")
+    fields = {}
+    for key, _label, default, lo, hi, desc in TUNABLES:
+        if key in overrides:
+            fields[vol.Optional(key, description=desc,
+                                default=overrides[key])] = vol.All(
+                vol.Coerce(float), vol.Range(min=lo, max=hi))
+    return fields
+
+
 # The keys SpotFX pushes (never in the registry).
 PUSHED_KEYS = ("phase", "phase_progress", *lull_dark.KEYS,
                lull_handoff.DROP_KEY, STRENGTH_KEY, PUNCH_KEY, PUNCH_HOLD_KEY)
@@ -252,13 +295,17 @@ class StripFrame(NamedTuple):
                 and abs(self.activity - 1.0) <= NEUTRAL_EPS)
 
 
-def registry_params() -> dict:
+def registry_params(defaults: Optional[dict] = None) -> dict:
     """The config/effect_params.json `params` entries for the tunables —
-    what a joining effect registers (HOW AN EFFECT JOINS, step 4)."""
+    what a joining effect registers (HOW AN EFFECT JOINS, step 4), with its
+    own `defaults` (an effect class's STRIP_PHASE_DEFAULTS) where it has
+    any."""
+    defaults = defaults or {}
     out = {}
     for key, label, default, lo, hi, _desc in TUNABLES:
         out[key] = {"label": label, "type": "numeric", "smooth": True,
-                    "min": lo, "max": hi, "default": default,
+                    "min": lo, "max": hi,
+                    "default": defaults.get(key, default),
                     "help_topic": HELP_TOPIC}
     return out
 
@@ -459,6 +506,11 @@ class StripPhase(Effect):
     PASSIVE_CONFIG_KEYS = frozenset(PUSHED_KEYS + TUNABLE_KEYS)
     # {"attr name on self": weight} — see HOW AN EFFECT JOINS, step 3.
     STRIP_PHASE_ACTIVITY: dict = {}
+    # the effect's own defaults for tunables (step 5) — what its schema's
+    # tunable_fields() and its registry_params() both carry
+    STRIP_PHASE_DEFAULTS: dict = {}
+    # the effect's own drop length (THE PARTICLE STRIPS' PLUMBING)
+    STRIP_PHASE_DROP_S: Optional[float] = None
 
     # ── config: edge detection (also the passive path) ──────────────────────
 
@@ -471,6 +523,7 @@ class StripPhase(Effect):
     def _strip_phase_config(self, config):
         new_phase = config.get("phase", "none")
         new_punch = int(config.get(PUNCH_KEY, 0) or 0)
+        self.phase_progress = _clip01(config.get("phase_progress", 0.0) or 0.0)
         if not hasattr(self, "_sp_phase"):
             # creation baseline: a stale persisted phase or punch must never
             # edge-fire on a fresh instance (the effect is born at "none";
@@ -494,6 +547,7 @@ class StripPhase(Effect):
             self._sp_guard_key = None
             self._sp_guard_allow = None
             self._sp_lull_timing = None
+            self._sp_punch_level = 0.0
             return
         self._sp_pending = new_phase if new_phase != self._sp_phase else None
         if new_punch != self._sp_punch_seen:
@@ -503,14 +557,28 @@ class StripPhase(Effect):
 
     # ── per frame ───────────────────────────────────────────────────────────
 
-    def _strip_phase_release(self):
-        """The orphan watchdog fired: go back to the effect's own look."""
-        _LOGGER.info("%s: strip %s watchdog release after %.1fs",
-                     type(self).__name__, self._sp_phase, self._sp_t)
+    def _strip_phase_to_none(self, released: bool):
+        """Back to the effect's own look: the orphan watchdog let go of a
+        charge or lull (`released`), or the effect's own drop length ran
+        out. Writes the key so an identical later arm edges again."""
+        prev = self._sp_phase
         self._sp_phase = "none"
         self._sp_punch_t = None
         self._apply_config({"phase": "none", "phase_progress": 0.0},
                            validate=False, fire_event=False)
+        self._strip_phase_enter("none", prev, released)
+
+    def _strip_phase_release(self):
+        """The orphan watchdog fired: go back to the effect's own look."""
+        _LOGGER.info("%s: strip %s watchdog release after %.1fs",
+                     type(self).__name__, self._sp_phase, self._sp_t)
+        self._strip_phase_to_none(released=True)
+
+    def _strip_phase_enter(self, phase: str, prev: str, released: bool):
+        """The phase key edged (THE PARTICLE STRIPS' PLUMBING): called once
+        per edge, before this frame's render(), after the layer's own edge.
+        An effect with choreography of its own starts it here. Default:
+        nothing (Melt, Power)."""
 
     def _strip_phase_edge(self, pend):
         prev = self._sp_phase
@@ -532,6 +600,7 @@ class StripPhase(Effect):
             self._sp_punch_t = None
         else:   # "none": the drop's own clock keeps running
             self._sp_punch_t = None
+        self._strip_phase_enter(pend, prev, False)
 
     def _strip_phase_compute(self, dt: float) -> Optional[StripFrame]:
         """Advance the layer's clocks one frame and return this frame's
@@ -562,6 +631,11 @@ class StripPhase(Effect):
             if due:
                 self._strip_phase_release()
                 phase = "none"
+            elif (phase == "drop" and self.STRIP_PHASE_DROP_S is not None
+                    and self._sp_t >= self.STRIP_PHASE_DROP_S):
+                # the effect's own drop has run its length: self-reset
+                self._strip_phase_to_none(released=False)
+                phase = "none"
         if self._sp_drop_t is not None:
             self._sp_drop_t += dt
             if self._sp_drop_t > drop_live_s(cfg["drop_settle_s"],
@@ -572,6 +646,7 @@ class StripPhase(Effect):
 
         gain, fill, act, wave, fade, guard = 1.0, 0.0, 1.0, 0.0, 1.0, 0.0
         in_lull = False
+        self._sp_punch_level = 0.0
         self._sp_lull_timing = None
         if phase == "charge":
             gain = 1.0 + (float(cfg["charge_brightness"]) - 1.0) * progress
@@ -617,6 +692,7 @@ class StripPhase(Effect):
                 float(cfg["flare_punch_min_hold_s"]),
                 float(cfg["flare_punch_release_s"]))
             p = float(cfg["flare_punch_strength"]) * env
+            self._sp_punch_level = p
             if p > 0.0:
                 taken = 1.0 - min(1.0, frame.fade)
                 act = frame.activity
@@ -636,6 +712,13 @@ class StripPhase(Effect):
         this frame's render()). The layer's own answer is the fade and glow
         in the output stage; an effect may add content of its own here (the
         Black Hole strip's ring burst). Default: nothing."""
+
+    def _strip_phase_punch(self) -> float:
+        """How far a flare punch is open this frame, 0..1 ("Flare punch" x
+        the envelope; 0 outside a lull) — for an effect whose content
+        answers the punch over its length (the Orbits strip's collapsed
+        blob springing back out)."""
+        return float(getattr(self, "_sp_punch_level", 0.0))
 
     def _strip_phase_lull(self) -> Optional[lull_dark.LullTiming]:
         """Where this frame's lull stands against the room's dark point —

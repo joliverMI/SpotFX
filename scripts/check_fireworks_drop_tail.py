@@ -58,8 +58,15 @@ CONFIGS = {
     # spawn_audio=0, beat_burst=0: the ONLY ordinary launch source is
     # spawn_rate * _pspawn, so the bins measure the multiplier directly
     "fireworks": {"spawn_rate": 4.0, "beat_burst": 0, "spawn_audio": 0.0},
-    "fireworks1d": {"spawn_rate": 4.0, "beat_burst": 0, "spawn_audio": 0.0},
+    "fireworks1d": {"spawn_rate": 4.0, "beat_burst": 0, "spawn_audio": 0.0,
+                    "strip_phase_strength": 0.0},
 }
+# The strip joined the strip phase layer (fx/effects/strip_phase.py, plan
+# phase 3), whose drop ACTIVITY also multiplies the ordinary launches for
+# ~1.6 s after the mark. This script measures the TAIL alone, so the strip
+# runs here at the room's strip phase strength 0 (the layer neutral, the
+# effect's own choreography untouched); the layer's drop on top is proven
+# by scripts/check_particle_strip_phase.py.
 # HIS REAL Fireworks V2 entries (read off the live scene store 2026-08-21:
 # spawn_rate 0 = beat bursts only, so _pspawn is inert there — this is why
 # the tail is a launch RATE, not a multiplier). burst_size/beat_burst are
@@ -68,7 +75,8 @@ REAL_CONFIGS = {
     "fireworks": {"spawn_rate": 0.0, "beat_burst": 6, "spawn_audio": 2.0,
                   "burst_size": 14, "max_blobs": 100, "burst_life": 1.9},
     "fireworks1d": {"spawn_rate": 0.0, "beat_burst": 2, "spawn_audio": 0.0,
-                    "max_blobs": 6, "burst_life": 1.2},
+                    "max_blobs": 6, "burst_life": 1.2,
+                    "strip_phase_strength": 0.0},
 }
 BEAT_S = 0.5  # ~120 bpm, a beat every half second
 SHAPES = {"fireworks": (72, 37), "fireworks1d": (17, 1)}
@@ -170,7 +178,7 @@ async def run(effect_type: str, *, with_lull: bool = True,
                         if i <= n_d:
                             effect.update_config({"phase_progress": i / n_d})
                         step(1)
-                        if phase_reset_t is None and effect._phase == "none":
+                        if phase_reset_t is None and (getattr(effect, "_sp_phase", None) or effect._phase) == "none":
                             phase_reset_t = t[0] - mark_t
 
                 post = [s - mark_t for (_f, s) in log if s > mark_t + 1e-9]

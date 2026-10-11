@@ -115,7 +115,7 @@ async def _drive(tmp_path, sub, effect_type="blackhole", config=None,
             snap("lull", where["p"])
 
         drop_entry = frame[0]
-        end_phase = effect._phase
+        end_phase = getattr(effect, "_sp_phase", None) or effect._phase
         if through_drop:
             where.update(phase="drop", p=0.0)
             effect.update_config({"phase": "drop", "phase_progress": 0.0})
@@ -124,7 +124,7 @@ async def _drive(tmp_path, sub, effect_type="blackhole", config=None,
                 effect.update_config({"phase_progress": i / n_d})
                 step(1)
             step(int(0.6 / DT))
-            end_phase = effect._phase
+            end_phase = getattr(effect, "_sp_phase", None) or effect._phase
         end_reverse = effect.reverse
         r_max = float(getattr(effect, "r_max", 0.0))
     await host.shutdown()

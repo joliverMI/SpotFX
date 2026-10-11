@@ -43,14 +43,44 @@ spawn pacing anywhere near a drop.
 
 Right after the payoff an EXTRA launch rate is ADDED on top of the ordinary
 show: `DROP_TAIL_RATE * (1 - t/DROP_TAIL_S)` launches/s — linear, additive,
-`DROP_TAIL_RATE = 8.0`, `DROP_TAIL_S = 2.5` (`_drop_tail_step`, identical
-constants in `fireworks.py` and `fireworks1d.py`). It eases to exactly
+`DROP_TAIL_RATE = 8.0`, `DROP_TAIL_S = 2.5` (`_drop_tail_step`; the same
+`DROP_TAIL_S` in `fireworks.py` and `fireworks1d.py`, but the strip's RATE
+is 12 since strip phase plan phase 3 — a heavier shower on the strip). It eases to exactly
 baseline by `DROP_TAIL_S`, never overshooting below it, and runs on its own
 clock (the drop phase itself self-resets earlier, at `DROP_SETTLE_S`). This
 covers a drop with NO preceding lull too (no rockets still grows a tail).
 An ordinary flare burst (`burst_rockets`) does NOT start a tail — the tail
 belongs to the drop specifically; a flare stays the additive volley it
 was authored as.
+
+## The STRIP (`fireworks1d`) draws its phases through the strip phase layer
+
+Since 2026-10-11 (strip phase plan phase 3; `fx/effects/strip_phase.py` is
+the binding statement, `fx/VENDOR.md` #74) the strip's charge/lull/drop
+LOOK comes from the shared layer, and so does its phase PLUMBING (edge
+detection, the orphan watchdog, the self-reset after `DROP_SETTLE_S`) —
+the module keeps `_strip_phase_enter` (a lull launches its rockets, a drop
+explodes them and starts the tail, leaving a lull any other way burns them
+out) and a per-frame `_phase_step`. The phase is `self._sp_phase`. Retuned:
+
+- the charge no longer slows or shortens its fireworks (`CHARGE_SLOW`,
+  `CHARGE_SHORT` 0);
+- his scene's `max_blobs` 6 clipped the charge's launch multiplier to 3
+  fireworks in flight, so the charge ADDS an uncapped launch rate rising
+  0 -> `CHARGE_LAUNCH_RATE_MAX` (8/s) (the tail's own `ignore_cap` shape);
+- the strip's drop tail is 12/s (the crystal's stays 8);
+- the lull is the ONE strip lull that is not black (his call 3): this
+  effect's own `lull_ember` default is `LULL_EMBER` (0.12, its schema via
+  `strip_phase.tunable_fields`, its registry entry via
+  `registry_params(STRIP_PHASE_DEFAULTS)`), so the rockets cross the dark
+  as 12% embers. Their own dimming (`LULL_ROCKET_FADE`) is retired — the
+  layer's fade is the one dimmer.
+- ACTIVITY (`STRIP_PHASE_ACTIVITY`): spawn_rate, beat_burst, burst_speed
+  (0.3) — never max_blobs, his density cap.
+
+A Firework Burst flare in the lull's dark is its own punch; nothing else
+answers it here. Off-phase frames are byte-identical to before. The 2-D
+Matrix `fireworks.py` is untouched.
 
 ## `firework_burst` flare kind: it jumps a phase key, it does not schedule
 
@@ -110,7 +140,10 @@ are settings-registry keys.
 
 `scripts/check_fireworks_drop_tail.py`, `scripts/check_firework_burst.py`,
 `tests/test_fireworks_drop_tail.py`, `tests/test_fireworks_rocket_angles.py`,
-`tests/test_firework_burst.py`, `tests/test_fireworks_melds.py` (the
+`tests/test_firework_burst.py`, `scripts/check_particle_strip_phase.py`
++ `tests/test_particle_strip_phase.py` (the strip on the strip phase
+layer, his own Fireworks V2 strip entry, the pinned pre-change module as
+red control), `tests/test_fireworks_melds.py` (the
 keepers meld on the real pipeline, the pinned-module byte-identity, the
 swallow and implode adopts), `scripts/render_fireworks_melds.py` (offline
 GIFs, committed under `docs/evidence/fireworks-melds/`). The scene

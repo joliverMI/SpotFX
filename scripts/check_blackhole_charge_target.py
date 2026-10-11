@@ -236,7 +236,7 @@ async def _run(tmp, sub, *, spawn_rate, charge_s, lull_s=2.5, warm_s=10.0,
         step(int(0.4 / DT))
         out["burst_frame"] = burst_frame[0]
         out["drop_entry_frame"] = drop_entry_frame
-        out["end_phase"] = effect._phase
+        out["end_phase"] = (getattr(effect, "_sp_phase", None) or effect._phase)
         out["end_reverse"] = effect.reverse
 
     await host.shutdown()

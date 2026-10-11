@@ -2195,3 +2195,53 @@ against that commit.
     before touching the frame. Evidence: `scripts/check_drop_shockwave.py`
     (run by `tests/test_phase_grammar.py`). Unverified against his live
     room.
+74. `effects/orbits1d.py`, `effects/fireworks1d.py`, `effects/blackhole1d.py`
+    + `effects/strip_phase.py` (THE PARTICLE STRIPS' PLUMBING): THE ORBITS
+    AND FIREWORKS STRIPS JOIN THE STRIP PHASE LAYER, AND THE THREE PARTICLE
+    STRIPS' PHASE PLUMBING MOVES INTO IT (2026-10-11, strip phase plan
+    phase 3, revision 3 — the Admiral's call 2: the Orbits strip's charge
+    "swell and hold"; call 3: every lull black at the room's dark point
+    except the Fireworks strip's rocket ember; and, binding, "i don't want
+    to raise the white in the charge, or on the drop … more orbiting blobs,
+    more fireworks, etc, to increase the perceived brightness"). Both
+    strips put `StripPhase` first in their bases and are in
+    `fx.device_model.STRIP_PHASE_EFFECTS`; their own `phase`/
+    `phase_progress` schema fields are retired (the layer's carry them) and
+    their `config_updated` no longer calls super(). THE FOLD: the edge
+    detection, the orphan watchdog (`particle_handoff.phase_release_due`)
+    and the drop's self-reset that each particle strip carried are gone
+    from all three; the layer calls `_strip_phase_enter(phase, prev,
+    released)` once per edge before render() (`released` = the watchdog let
+    go of an orphaned build), and self-resets the phase key after the
+    effect's own `STRIP_PHASE_DROP_S`. A member's own tunable defaults ride
+    `STRIP_PHASE_DEFAULTS` + `strip_phase.tunable_fields()` /
+    `registry_params(defaults)`. The Black Hole strip's looks did not
+    change: at strip phase strength 0 it is byte-identical to the module
+    before this change through a whole cycle and an orphaned lull's release;
+    at strength 1 the charge's FIRST frame now gets that frame's activity
+    (the old in-render edge rewrote its scaled counts for one frame).
+    ORBITS STRIP: `CHARGE_PEAK_N` 10 -> 16 (particle_count's own max), the
+    charge swells over `CHARGE_PEAK_AT` and HOLDS (it shed back to ONE blob
+    by the charge's end); the lull's one blob collapses to the middle on the
+    layer's own lull timing (`LULL_FALL_S`'s wall-clock fallback retired);
+    the drop re-adds all 16 (each an implosion) and sheds back to his count
+    when the drop settles; the fly-out runs on its own clock (`_fly`); a
+    flare punch springs the collapsed blob back out along the punch's
+    envelope with an own-colour implosion burst; on a phase the implosion
+    pair is drawn from the SET (the set rotated by a third) instead of the
+    hue wheel's ±120° — off-phase unchanged. ACTIVITY: base_speed 0.5,
+    spin 0.5. FIREWORKS STRIP: `CHARGE_SLOW`/`CHARGE_SHORT` 0.55/0.4 -> 0;
+    an UNCAPPED charge launch rate rising 0 -> `CHARGE_LAUNCH_RATE_MAX` (8/s)
+    — his scene's max_blobs 6 clipped the ×6 launch multiplier to 3
+    fireworks in flight; `DROP_TAIL_RATE` 8 -> 12 (the crystal's stays 8);
+    `lull_ember` defaults to `LULL_EMBER` (0.12) on this effect, and the
+    rockets' own dimming (`LULL_ROCKET_FADE`) is retired — the layer's fade
+    is the one dimmer, so they cross the dark as 12% embers. A lull left any
+    way but its drop now burns its rockets out (leaving it for a charge used
+    to leave them stranded with an endless life). ACTIVITY: spawn_rate,
+    beat_burst, burst_speed 0.3 — never max_blobs. Off-phase both strips are
+    byte-identical to the modules before this change (same seeds). Evidence:
+    `scripts/check_particle_strip_phase.py` (run whole by
+    `tests/test_particle_strip_phase.py`; the pinned pre-change modules as
+    red controls), `scripts/check_strip_phase.py`. Unverified against his
+    live room.

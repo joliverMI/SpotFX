@@ -102,6 +102,38 @@ inside the lull's dark rule): the base render takes the frame to true black
 for that window. Help topics `drop-shockwave`, `drop-breath-hold`; proof
 `scripts/check_drop_shockwave.py` / `tests/test_phase_grammar.py`.
 
+## The STRIP (`orbits1d`) draws its phases through the strip phase layer
+
+Since 2026-10-11 (strip phase plan phase 3; `fx/effects/strip_phase.py` is
+the binding statement, `fx/VENDOR.md` #74) the strip's charge/lull/drop
+LOOK — hue-kept colour gain, set-colour fill, the drop's set-colour
+shockwave, the lull's fade to black at the room's dark point, the white
+guard — comes from the shared layer, and so does its phase PLUMBING (edge
+detection, the orphan watchdog, the drop's self-reset after
+`DROP_SETTLE_S`): the module keeps only `_strip_phase_enter` and its
+per-frame `_phase_step`. The phase is `self._sp_phase`. What it owns:
+
+- **Swell and HOLD** (his call 2): the charge swells to `CHARGE_PEAK_N`
+  (16, `particle_count`'s own max) over `CHARGE_PEAK_AT` of progress and
+  holds there to the drop. It used to shed back to ONE blob by the
+  charge's end — do not bring the shed back.
+- The lull's one blob collapses to the middle on the layer's OWN lull
+  timing (`_strip_phase_lull()`), landing as the strip goes black.
+- The drop re-adds all 16 (each erupting through its implosion), the
+  fly-out on its own clock (`_fly`), and sheds back to the scene's own
+  `particle_count` on the "none" edge.
+- A flare punch in the dark springs the collapsed blob back out (size and
+  position follow `_strip_phase_punch()`) with an implosion burst in the
+  blob's OWN colour — the lull has no white guard.
+- On a phase the implosion pair comes from the SET (the set rotated by a
+  third, `_phase_fragment_colours`), never the hue wheel's ±120°, which
+  reaches hues the set does not have. Off-phase it is the ±120° pair, and
+  every off-phase frame is byte-identical to before.
+- ACTIVITY (`STRIP_PHASE_ACTIVITY`): `base_speed` and `spin`, 0.5 each —
+  never the count, which is the swell's.
+
+The 2-D Matrix `orbits.py` is untouched by all of this.
+
 ## Thematic transitions (2026-10-11, transitions-drop plan phase 3)
 
 The Black Hole's ERUPTION implodes onto Orbits' LIVE blobs (his comment:
@@ -117,14 +149,20 @@ and `gesture: "orbit"`. An incoming Orbits starts FRESH under a program
 
 Same rule as every effect here: no direct param edit. Sonic reaches these
 params only through an existing `FlareKind` on whichever scene binds this
-effect.
+effect — except that a registered param's current value on one scene
+entry is reachable through `set_scene_entry_param`, which includes the
+strip's strip-phase tunables (`charge_fill` … `flare_punch_glow`,
+registered on `orbits1d`).
 
 ## Executable proofs
 
 `scripts/check_orbits_drop_burst_and_persistence.py`,
 `scripts/smoke_orbits_params.py`, `tests/test_orbits_drop_persistence.py`,
 `tests/test_fireworks_melds.py` (keep-N ring, the keepers flag, untold
-byte-identity), `tests/test_lull_handoff.py`.
+byte-identity), `tests/test_lull_handoff.py`. The strip on the strip phase
+layer: `scripts/check_particle_strip_phase.py` (before/after on his own
+Orbits V2 strip entry, the pinned pre-change module as red control) +
+`tests/test_particle_strip_phase.py`, `scripts/check_strip_phase.py`.
 History: AGENTS.md's "Fish (`fx/effects/fish.py`) — Orbits' twin,
 different kinematics" section (how Fish reuses Orbits' patterns but not its
 motion) and the drop-timing-reference withdrawal note
