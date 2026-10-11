@@ -93,6 +93,13 @@ ok(ops.stepSummary(call('Z'), { kind: 'call_set', params: [] }, { sets: new Map(
   'a call to a deleted set says so');
 const fresh = ops.cloneFresh([call('C')]);
 ok(fresh[0].id !== 'c-C' && fresh[0].params.set === 'C', 'a paste gets a fresh id but still calls the same set');
+const levelStep = { id: 'lv1', kind: 'level', params: { target: { kind: 'fixture', id: 'porch' }, level: 0.4 }, enabled: true };
+const pastedLevel = ops.cloneFresh([levelStep])[0];
+ok(pastedLevel.id !== 'lv1' && pastedLevel.params.target.id === 'porch' && pastedLevel.params.target.kind === 'fixture',
+  `pasting a Fixture-targeted step keeps the target id, only the step id changes (step id ${pastedLevel.id}, target ${JSON.stringify(pastedLevel.params.target)})`);
+const duplicatedLevel = ops.cloneFresh(levelStep);
+ok(duplicatedLevel.id !== 'lv1' && duplicatedLevel.params.target.id === 'porch' && duplicatedLevel.params.target.kind === 'fixture',
+  'duplicating a single Fixture-targeted step (the duplicateAt shape) keeps the target id too');
 ok(ops.itemSummary({ kind: 'wait', arm: 'instant', wait: { kind: 'duration', seconds: 90, songs: [] } }, new Map()) === 'Wait 1:30',
   'a collapsed Wait says how long');
 ok(ops.itemSummary({ kind: 'set', set_id: 'C', arm: 'high' }, new Map([['C', 'Drop']])) === 'Drop — Next High Trigger',

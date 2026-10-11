@@ -156,21 +156,22 @@ export function itemSummary(it: SequenceItem, setNames: Map<string, string>): st
 
 // ── list edits ─────────────────────────────────────────────────────────────
 
-/** Deep copy with every `id` regenerated (`set_id`, `params.set` and other
- * references are untouched — a pasted call still calls the same set). */
+/** Deep copy with only each cloned list element's OWN top-level `id`
+ * regenerated — a step/item's identity, nothing nested inside it. `set_id`,
+ * `params.set` and every other reference (including a `target` param's own
+ * `{kind, id}`) are untouched: those name something ELSE a step points at,
+ * not the step itself, and must survive a duplicate/paste unchanged or the
+ * copy silently retargets at a different fixture/category/set. */
 export function cloneFresh<T>(data: T): T {
-  const walk = (v: unknown): unknown => {
-    if (Array.isArray(v)) return v.map(walk);
-    if (v && typeof v === 'object') {
-      const o: Record<string, unknown> = {};
-      for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
-        o[k] = k === 'id' && typeof val === 'string' ? newStepId() : walk(val);
-      }
-      return o;
+  const copy = JSON.parse(JSON.stringify(data));
+  const freshenId = (v: unknown): unknown => {
+    if (v && typeof v === 'object' && !Array.isArray(v) && typeof (v as Record<string, unknown>).id === 'string') {
+      (v as Record<string, unknown>).id = newStepId();
     }
     return v;
   };
-  return walk(JSON.parse(JSON.stringify(data))) as T;
+  if (Array.isArray(copy)) return (copy as unknown[]).map(freshenId) as T;
+  return freshenId(copy) as T;
 }
 
 /** Strip the server's per-item annotations before a copy or a save. */
