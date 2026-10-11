@@ -959,6 +959,21 @@ class Effect(BaseRegistry):
             fade = self._bg_fade
             if fade is None:
                 self._bg_live_rgb = target.copy()
+            elif not fade.get("following"):
+                # First frame an authored tween overtakes a still-running
+                # unauthored fade: re-anchor on the colour actually on
+                # screen now, not the stale start the old fade began from,
+                # or the path jumps to a value the live colour never
+                # passed through. Keep the old fade's REMAINING time so it
+                # still finishes on schedule; later frames (fade.get(
+                # "following") already True) just retarget this same
+                # anchor toward the tween's moving value, same as below.
+                start = self._bg_live_rgb.copy()
+                hsv_start, hsv_delta = background_fade.path(start, target)
+                remaining = max(fade["duration"] - fade["elapsed"], 1e-6)
+                self._bg_fade = {"start": start, "hsv_start": hsv_start,
+                                 "hsv_delta": hsv_delta, "elapsed": 0.0,
+                                 "duration": remaining, "following": True}
             else:
                 fade["hsv_start"], fade["hsv_delta"] = background_fade.path(
                     fade["start"], target)

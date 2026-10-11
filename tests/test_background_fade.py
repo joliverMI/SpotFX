@@ -237,6 +237,34 @@ def test_a_jump_tween_fades_like_an_instant_write(tmp_path):
     _run(main())
 
 
+def test_an_authored_glide_overtaking_a_running_fade_does_not_jump(tmp_path):
+    """A `follow`-eligible authored glide (a scene crossfade / flare colour
+    ramp) starting while an unauthored fade (Dark toggling, or any other
+    instant background write) is still mid-flight on the SAME virtual must
+    re-anchor on the colour actually on screen, not the stale colour the
+    older fade began from — or the live background jumps for one frame
+    instead of continuing smoothly (fx/VENDOR.md #68's "no jump" rule)."""
+    async def main():
+        host, virtual, effect = await _host(
+            tmp_path, {"background_color": "#ff0000", "background_brightness": 1.0})
+        with headless.fake_clock() as clock:
+            _frames(virtual, clock, 0.1)
+            effect.update_config({"background_color": "#000000"})  # dark
+            prev = _frames(virtual, clock, 0.3)[-1][0].astype(float)  # mid-fade
+            assert effect._bg_fade is not None, "fade finished too soon to overlap"
+            effect.start_param_transitions(
+                {"background_color": "#00ff00"}, 300, blend="hue")
+            worst = 0.0
+            for _ in range(40):  # the 300ms glide and a bit past it
+                cur = _frames(virtual, clock, DT)[-1][0].astype(float)
+                worst = max(worst, float(np.abs(cur - prev).max()))
+                prev = cur
+            assert worst < 30, f"background jumped {worst} in one frame"
+        await host.shutdown()
+
+    _run(main())
+
+
 # ── 3. dark / light, end to end through dark_light.reconcile ────────────────
 
 @pytest.fixture
