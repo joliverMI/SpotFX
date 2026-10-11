@@ -186,6 +186,75 @@ async def call_service(domain: str, service: str, data: Optional[dict] = None,
 
 
 @dataclass
+class HAEntityState:
+    """`get_state()`'s own outcome: one entity's current `state` string,
+    or why it could not be read. `state` is None whenever `ok` is False —
+    never a stale or guessed value."""
+
+    status: str = STATUS_UNCONFIGURED
+    http_status: Optional[int] = None
+    detail: str = ""
+    state: Optional[str] = None
+
+    @property
+    def ok(self) -> bool:
+        return self.status == STATUS_SENT
+
+
+async def get_state(entity_id: str, *, client: Optional[Any] = None) -> HAEntityState:
+    """`GET /api/states/<entity_id>` — one entity's current state, READ
+    ONLY. The THIRD call this module makes, added for the eased absolute
+    volume step (`ha_volume_ease.py`), which has to know where the volume
+    IS before it can walk it to where it should be. Never raises; the same
+    fail-soft shape as `list_scenes()`."""
+    url = ha_url()
+    if not url:
+        return HAEntityState(
+            status=STATUS_UNCONFIGURED,
+            detail="Home Assistant is not configured on this host "
+                   "(SPECTRA_HA_URL is unset)")
+
+    import httpx
+
+    headers = {}
+    token = ha_token()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    own = client is None
+    if own:
+        client = httpx.AsyncClient(timeout=httpx.Timeout(
+            connect=CONNECT_TIMEOUT_S, read=READ_TIMEOUT_S,
+            write=WRITE_TIMEOUT_S, pool=POOL_TIMEOUT_S))
+    try:
+        resp = await client.get(f"{url}/api/states/{entity_id}", headers=headers)
+        if not (200 <= resp.status_code < 300):
+            detail = f"Home Assistant answered {resp.status_code} for {entity_id}"
+            logger.error("ha_client: %s", detail)
+            return HAEntityState(status=STATUS_FAILED,
+                                 http_status=resp.status_code, detail=detail)
+        try:
+            body = resp.json()
+        except Exception:                                # noqa: BLE001
+            body = None
+        state = body.get("state") if isinstance(body, dict) else None
+        if not isinstance(state, str):
+            return HAEntityState(status=STATUS_FAILED,
+                                 http_status=resp.status_code,
+                                 detail=f"Home Assistant's state for "
+                                        f"{entity_id} carried no state")
+        return HAEntityState(status=STATUS_SENT, http_status=resp.status_code,
+                             state=state)
+    except Exception as exc:                             # noqa: BLE001
+        detail = (f"Home Assistant could not be reached for {entity_id} "
+                 f"({type(exc).__name__})")
+        logger.error("ha_client: %s", detail)
+        return HAEntityState(status=STATUS_FAILED, detail=detail)
+    finally:
+        if own:
+            await client.aclose()
+
+
+@dataclass
 class HAStates:
     """`list_scenes()`'s own outcome — the `HAResult` shape, plus the
     scenes themselves. `ok` is True only on a genuine 2xx; `scenes` is

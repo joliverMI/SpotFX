@@ -283,6 +283,8 @@ def _isolated_light_show(tmp_path, monkeypatch):
     show_playlists.reset()
     song_library.reset()
     spotify_context.reset()
+    from spectra.services import ha_volume_ease
+    ha_volume_ease.reset()
     yield
     show_store.reset_memory()
     show_output.reset()
@@ -293,6 +295,7 @@ def _isolated_light_show(tmp_path, monkeypatch):
     show_playlists.reset()
     song_library.reset()
     spotify_context.reset()
+    ha_volume_ease.reset()
     device_output.reset_clock()
 
 
