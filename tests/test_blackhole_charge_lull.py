@@ -231,18 +231,34 @@ def test_the_drop_is_unchanged(tmp_path):
     assert res["end_reverse"] == CFG["reverse"]
 
 
-def test_the_strip_mirrors_the_formation_and_the_half_dark_lull(tmp_path):
-    """blackhole1d: the same accelerating formation and the same
-    half-way-dark lull ("fills the hex" becomes "covers the strip"), with
-    its own drop untouched. The pre-existing lull phosphor dot stays."""
+def test_the_strip_builds_in_colour_and_goes_black_at_the_dark_point(tmp_path):
+    """blackhole1d on the strip phase layer (strip phase plan phase 2): the
+    same accelerating formation (now to its own 24/second), drawn in the
+    set's colours — the old white halo flood is retired (his call 1, "tinted
+    palette glow") — and a lull that goes FULLY black at the dark point (an
+    untold lull: the legacy half of the ramp; a told one: the room's dark
+    point, tests/test_blackhole_strip_phase.py), with no grey phosphor dot
+    left in the middle (his call 3). The forced formation tapers through the
+    lull's approach and stops once dark; the drop's burst still lands on the
+    drop's first frame."""
+    from fx.effects import strip_phase as sp
     res = asyncio.run(_drive(tmp_path, "strip", effect_type="blackhole1d",
                              config={"reverse": True}))
+    assert bh1d.CHARGE_SPAWN_RATE_MAX == 24.0
     late = _rate(res["forced"], "charge", 0.9, 1.0, CHARGE_S)
     assert late >= bh1d.CHARGE_SPAWN_RATE_MAX
+    ch = res["rows"]["charge"]
+    # no white flood: the build never runs the strip to near-white
+    assert max(float(r["frame"].min(axis=1).max()) for r in ch) < 200.0
     lu = res["rows"]["lull"]
-    after = [r for r in lu if r["p"] > bh1d.LULL_FILL_PROGRESS]
-    assert after and all(float(r["frame"].max()) <= 70.0 for r in after)
-    assert any(float(r["frame"].max()) > 70.0
-               for r in lu if r["p"] < bh1d.LULL_FILL_PROGRESS * 0.5)
+    dark_at = sp.LEGACY_DARK_AT
+    after = [r for r in lu if r["p"] > dark_at]
+    assert after and all(float(r["frame"].max()) == 0.0 for r in after)
+    assert any(float(r["frame"].max()) > 0.0
+               for r in lu if r["p"] < dark_at * 0.5)
+    first = _rate(res["forced"], "lull", 0.02, 0.2, LULL_S)
+    second = _rate(res["forced"], "lull", 0.3, 0.48, LULL_S)
+    assert first > second > 0.0, "the formation tapers into the dark"
+    assert _rate(res["forced"], "lull", dark_at + 0.02, 1.0, LULL_S) == 0.0
     assert res["burst_frames"]
     assert res["burst_frames"][0] - res["drop_entry"] <= 1

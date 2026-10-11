@@ -65,9 +65,9 @@ HOW A LULL EFFECT OPTS IN (existing or future — one call, plus two lines):
      line-to-dot pinch was retired with its CRT lull, 2026-10-11).
 Black Hole, Squiggles and Pulse were his three ("just these 3 for now");
 since 2026-10-11 every strip phase member (fx/effects/strip_phase.py,
-fx.device_model.STRIP_PHASE_EFFECTS — Melt and Power) reads the same rule
-through the shared strip layer, and blackhole1d joins it in the strip
-phase plan's phase 2. The FLARE PUNCH envelope at the end of this module
+fx.device_model.STRIP_PHASE_EFFECTS — Melt, Power and, since the strip
+phase plan's phase 2, blackhole1d) reads the same rule through the shared
+strip layer. The FLARE PUNCH envelope at the end of this module
 is the same kind of one-definition rule for "a flare in the dark".
 """
 

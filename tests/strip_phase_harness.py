@@ -39,7 +39,24 @@ class _AudioFrame:
     def lows_power(self, filtered: bool = True) -> float:
         return 0.18 + 0.12 * np.sin(self.i / 9.0)
 
+    # the other bands a particle strip reads (the Black Hole strip's band
+    # colouring and its frequency_range choice) — the same gentle swell
+    def beat_power(self, filtered: bool = True) -> float:
+        return self.lows_power(filtered)
+
+    def bass_power(self, filtered: bool = True) -> float:
+        return self.lows_power(filtered)
+
+    def mids_power(self, filtered: bool = True) -> float:
+        return 0.12 + 0.08 * np.sin(self.i / 7.0)
+
+    def high_power(self, filtered: bool = True) -> float:
+        return 0.08 + 0.05 * np.sin(self.i / 5.0)
+
     def onset(self) -> bool:
+        return self.i % 15 == 0
+
+    def bpm_beat_now(self) -> bool:
         return self.i % 15 == 0
 
 

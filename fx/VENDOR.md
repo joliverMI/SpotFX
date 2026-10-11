@@ -2136,3 +2136,37 @@ against that commit.
     Config values still change instantly — only the light travels.
     Evidence: `tests/test_background_fade.py` (assembled frames on
     `fx.headless`). Unverified against his live room.
+72. `effects/blackhole1d.py` (+ `effects/strip_phase.py`'s two hooks
+    `_strip_phase_lull` / `_strip_phase_on_punch`): THE BLACK HOLE STRIP
+    JOINS THE STRIP PHASE LAYER (2026-10-11, strip phase plan phase 2,
+    revision 3 — the Admiral's call 1: the strip's charge is a "tinted
+    palette glow", no white flood; call 3: black at the room's dark point;
+    and, binding, "i don't want to raise the white in the charge, or on the
+    drop"). `Blackhole1d` puts `StripPhase` first in its bases and is in
+    `fx.device_model.STRIP_PHASE_EFFECTS`, so the layer draws its phases.
+    RETIRED from this module: `_phase_post` whole — the charge's white
+    halo flood (a +235 grey added to every pixel near the ring, i.e. the
+    whole strip), the lull's own mask at `LULL_FILL_PROGRESS` and its grey
+    phosphor dot, and the drop's fade up from black over `DROP_RESET_S`
+    (the burst fired on the mark and was hidden there); `CHARGE_HALO_W_*`,
+    `LULL_FILL_PROGRESS` and the `phase`/`phase_progress` schema fields
+    (the layer's schema carries them). KEPT, re-pointed: the forced
+    formation (`CHARGE_SPAWN_RATE_MAX` 12 -> 24 blobs/s), tapering through
+    the lull's approach and stopping — with the ambient spawn — at the
+    layer's own dark point (`_strip_phase_lull`, never a progress fraction
+    of its own); the drop burst on the phase's first frame, now sized by
+    `drop_intensity` (`PHASE_BURST_N` 12 at 0 -> `PHASE_BURST_N_MAX` 36 at
+    1, untold = full); NEW: a `PUNCH_BURST_N` (6) ring burst when a flare
+    punches through the lull's dark. `STRIP_PHASE_ACTIVITY` scales
+    spawn_rate/beat_burst/max_blobs and (0.6) base_speed. Two plumbing
+    rules any effect with its own phase choreography needs to join:
+    `_passive_config_updated` is overridden to run its own phase edge
+    detection (every phase write is passive), and `config_updated` no
+    longer calls super() (the bases loop already runs StripPhase's; a
+    second pass would make a stale persisted phase a false edge). Off-phase
+    frames are byte-identical to the module before this change (same seed —
+    proven against the pinned pre-change file). Evidence: `scripts/
+    check_blackhole_strip_phase.py` (run whole by `tests/
+    test_blackhole_strip_phase.py`), `tests/test_blackhole_charge_lull.py`,
+    `tests/test_drop_visible_onset.py` (with a red control on the old
+    fade). Unverified against his live room.

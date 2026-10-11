@@ -390,22 +390,35 @@ def main() -> int:
     check(res["end_reverse"] == HIS_MATRIX["reverse"],
           "the saved reverse is still restored at the payoff")
 
-    print("\n§8 the strips (blackhole1d) mirror the same shape")
-    lu1 = [r for r in res1d["s"]["lull"] if "rh" in r]
-    late1 = _rate_at(res1d, "charge", 0.9, 1.0, CHARGE_S)
-    after1 = [r for r in lu1 if r["p"] > bh.LULL_FILL_PROGRESS]
+    print("\n§8 the strip (blackhole1d) — on the strip phase layer since "
+          "strip phase plan phase 2")
     # the strip has its OWN constants (fx/effects/blackhole1d.py restates
     # them deliberately — see its module comment); comparing its measured
-    # rate against the 2D module's ceiling is a cross-module mistake
+    # rate against the 2D module's ceiling is a cross-module mistake. Its
+    # phases are DRAWN by the shared strip layer (fx/effects/strip_phase.py)
+    # now: no white halo flood, black at the dark point (this untold lull:
+    # the legacy half of the ramp), no phosphor dot. The told, room-dark-
+    # point version and the before/after numbers are scripts/
+    # check_blackhole_strip_phase.py.
+    from fx.effects import strip_phase as sp1  # noqa: E402
+    lu1 = [r for r in res1d["s"]["lull"] if "rh" in r]
+    late1 = _rate_at(res1d, "charge", 0.9, 1.0, CHARGE_S)
     check(late1 >= bh1.CHARGE_SPAWN_RATE_MAX,
           f"charge formation reaches its own "
           f"{bh1.CHARGE_SPAWN_RATE_MAX:.0f}/second on the strip too "
           f"({late1:.1f}/s)")
+    after1 = [r for r in lu1 if r["p"] > sp1.LEGACY_DARK_AT]
     dot = max(r["lit"] for r in after1)
-    check(dot <= 70.0 + 1e-6,
-          f"the strip is dark for the whole second half of the lull "
+    check(after1 and dot == 0.0,
+          f"the strip is BLACK for the whole dark half of the lull "
           f"({len(after1)} sampled frames; brightest pixel {dot:.0f} — the "
-          "pre-existing lull phosphor dot at the strip middle, kept)")
+          "old grey phosphor dot is retired)")
+    taper_a = _rate_at(res1d, "lull", 0.02, 0.2, LULL_S)
+    taper_b = _rate_at(res1d, "lull", 0.3, 0.48, LULL_S)
+    stop = _rate_at(res1d, "lull", sp1.LEGACY_DARK_AT + 0.02, 1.0, LULL_S)
+    check(taper_a > taper_b > 0.0 and stop == 0.0,
+          f"its formation tapers into the dark ({taper_a:.1f}/s -> "
+          f"{taper_b:.1f}/s) and stops once dark ({stop:.1f}/s)")
     check(res1d["burst_frames"] and
           res1d["burst_frames"][0] - res1d["drop_entry"] <= 1,
           "and its drop payoff still fires on the drop's first frame")

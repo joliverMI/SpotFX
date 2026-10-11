@@ -31,6 +31,15 @@ frame 0 by construction; radial's continuous reveal crosses it wherever the
 smoothstep curve actually gets there, which this script measures rather
 than assumes.
 
+THE BLACK HOLE STRIP (blackhole1d), since strip phase plan phase 2: its
+burst is hooked the same way (`_phase_burst`, on the drop's first frame),
+and because the strip used to FADE UP FROM BLACK over DROP_RESET_S after
+that burst (the retired `_phase_post` mask), its onset is ALSO measured on
+the rendered frames themselves (`_strip_lit_onset`): the first frame after
+the drop write whose mean brightness crosses VISIBLE_FRACTION of the drop's
+own peak. A burst that fires on time under a mask that hides it is not a
+visible explosion — this is the instrument that can tell the two apart.
+
 Every number is read off the real engine (a real Effect.update_config
 charge->lull->drop sequence on a headless dummy host, the same call shape
 scene_response.py's _drive_phase uses) via an instrumented hook on the
@@ -127,6 +136,57 @@ async def _burst_onset(tmp_path, sub, effect_type, config, burst_attr):
     return {"onset_s": onset_s}
 
 
+# his live Black Hole V2 strip entry (storage/spectra/scenes.json, read-only)
+HIS_STRIP = {
+    "swirl": 3.1, "radius_scale": 1, "blob_size": 0.5, "reverse": True,
+    "x_offset": 0.5, "base_speed": 1, "accel": 5, "spawn_rate": 1,
+    "beat_burst": 2, "spawn_audio": 1, "speed_audio": 2.3,
+    "impulse_decay": 0.06, "max_blobs": 50, "edge_speed": 1,
+    "approach_width": 0.16,
+}
+
+
+async def _strip_lit_onset(tmp_path, effect_type="blackhole1d",
+                           sub="blackhole1d-lit"):
+    """The Black Hole strip: when does the RENDERED strip visibly light up
+    after the drop write — the first frame whose mean brightness crosses
+    VISIBLE_FRACTION of the drop's own peak (first 1.5 s), relative to the
+    first frame rendered after the write. Same production replay as the
+    burst instrument; the brightness is read off the frames the virtual
+    actually assembles, never inferred from the effect's state."""
+    import numpy as np
+    host = await headless.start_headless_host(str(tmp_path / sub),
+                                               device_id=sub, pixel_count=560)
+    virtual = host.virtuals.get(sub)
+    lums = []
+    with headless.fake_clock() as clock:
+        effect = headless.attach_effect(host, virtual, effect_type,
+                                        dict(HIS_STRIP))
+        frame_idx = [0]
+
+        def step(n_frames: int):
+            for _ in range(n_frames):
+                clock.advance(DT)
+                frame = virtual.assemble_frame()
+                if frame is not None:
+                    virtual.flush(frame)
+                    f = np.clip(np.asarray(frame, dtype=float), 0, 255) / 255
+                    lums.append(float((0.2126 * f[:, 0] + 0.7152 * f[:, 1]
+                                       + 0.0722 * f[:, 2]).mean()))
+                frame_idx[0] += 1
+
+        step.frame_idx = frame_idx
+        drop_entry_frame = await _drive_charge_lull_drop(effect, step)
+        step(int(1.0 / DT))
+    await host.shutdown()
+    drop = lums[drop_entry_frame:drop_entry_frame + int(1.5 / DT)]
+    peak = max(drop)
+    crossing = next((k for k, v in enumerate(drop)
+                     if v >= VISIBLE_FRACTION * peak), None)
+    return {"onset_s": None if crossing is None else crossing * DT,
+            "first": drop[0], "peak": peak}
+
+
 async def _radial_bloom_onset(tmp_path):
     """STAR/radial: no discrete burst — a continuous smoothstep reveal
     (_phase_warp's own `e`). Reads the REAL method's return value every
@@ -188,12 +248,20 @@ async def _main():
             tmp_path, "squiggles-onset", "squiggles",
             {"spawn_rate": 2.0, "beat_burst": 1, "max_blobs": 14,
              "base_speed": 38.0}, "_phase_burst")
+        strip_burst = await _burst_onset(
+            tmp_path, "blackhole1d-onset", "blackhole1d", dict(HIS_STRIP),
+            "_phase_burst")
+        strip_lit = await _strip_lit_onset(tmp_path)
         radial = await _radial_bloom_onset(tmp_path)
 
     print(f"{'effect':<12} {'onset (visible change begins)':<32} {'notes'}")
     print(f"{'blackhole':<12} {blackhole['onset_s']*1000:>6.1f} ms after drop entry")
     print(f"{'orbits':<12} {orbits['onset_s']*1000:>6.1f} ms after drop entry")
     print(f"{'squiggles':<12} {squiggles['onset_s']*1000:>6.1f} ms after drop entry")
+    print(f"{'bh strip':<12} {strip_burst['onset_s']*1000:>6.1f} ms after drop entry"
+          f"  (rendered strip lit at "
+          f"{(strip_lit['onset_s'] or 0)*1000:.1f} ms: first frame "
+          f"{strip_lit['first']:.3f} of peak {strip_lit['peak']:.3f})")
     if radial["onset_s"] is not None:
         print(f"{'radial/STAR':<12} {radial['onset_s']*1000:>6.1f} ms after drop entry"
               f"  (reveal e: {radial['e_at_entry']:.4f} at entry, "
@@ -213,6 +281,12 @@ async def _main():
           "Squiggles' burst lands within one frame of drop entry — the "
           "PR fm/spectra-squiggles-drop-timing-and-a-much-bigger-explosion "
           "end-anchor gate that used to delay this to ~ramp-end is gone")
+    check(strip_burst["onset_s"] < 2 * DT + 1e-9,
+          "the Black Hole strip's burst lands within one frame of drop entry")
+    check(strip_lit["onset_s"] is not None and strip_lit["onset_s"] < DT / 2,
+          "…and the rendered strip is visibly lit on the drop's FIRST frame "
+          "— the old fade up from black (the retired _phase_post mask) is "
+          "gone, so the explosion is seen on the mark, not after it")
     if radial["onset_s"] is not None:
         print(f"NOTE: radial/STAR's own bloom crosses {VISIBLE_FRACTION*100:.0f}% "
               f"reveal at {radial['onset_s']*1000:.1f}ms — this is a "

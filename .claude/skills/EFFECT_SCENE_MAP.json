@@ -12,6 +12,7 @@
         "scripts/check_blackhole_explosion_speed.py",
         "scripts/check_blackhole_hex_spawn.py",
         "scripts/check_blackhole_reverse_fallback.py",
+        "scripts/check_blackhole_strip_phase.py",
         "tests/test_blackhole_charge_lull.py",
         "tests/test_blackhole_charge_target.py",
         "tests/test_blackhole_explosion_and_gap.py",
@@ -19,7 +20,8 @@
         "tests/test_blackhole_horizon_color.py",
         "tests/test_blackhole_orphan_drop_none_crash.py",
         "tests/test_blackhole_reverse_fallback.py",
-        "tests/test_blackhole_spawn_radius.py"
+        "tests/test_blackhole_spawn_radius.py",
+        "tests/test_blackhole_strip_phase.py"
       ]
     },
     "orbits-effect": {

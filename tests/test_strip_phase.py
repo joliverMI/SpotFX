@@ -168,7 +168,7 @@ def test_every_one_d_effect_joins_or_is_a_named_exception():
 
 def test_membership_reaches_every_phase_set():
     m = device_model.STRIP_PHASE_EFFECTS
-    assert m == {"melt", "power"}
+    assert m == {"melt", "power", "blackhole1d"}
     assert m <= device_model.PHASE_EFFECTS
     assert m <= device_model.LULL_DARK_EFFECTS
     assert m <= device_model.DROP_INTENSITY_EFFECTS
@@ -191,7 +191,7 @@ def test_the_tunables_are_registered_exactly_as_the_schema_says():
 def test_a_non_member_never_reaches_the_layer():
     assert Effect._strip_phase is False
     assert Effect.PASSIVE_CONFIG_KEYS == frozenset()
-    for e in ("gradient", "pulse", "blackhole1d", "orbits1d", "fireworks1d"):
+    for e in ("gradient", "pulse", "orbits1d", "fireworks1d"):
         cls = device_model._effect_class(e)
         assert cls._strip_phase is False and not cls.PASSIVE_CONFIG_KEYS, e
 

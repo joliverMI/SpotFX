@@ -160,15 +160,16 @@ def test_only_a_lull_and_only_a_lull_dark_effect_is_told():
                           "sq": "squiggles", "bh1": "blackhole1d"})
     rec = asyncio.run(eng._drive_phase("lull", gap_ms=20_000))
     told = {vid: p for vid, _et, p in ex.jumps}
-    for vid in ("bh", "p", "sq"):
+    # the Black Hole strip reads the same rule through the strip phase
+    # layer since strip phase plan phase 2 (fx/effects/strip_phase.py)
+    for vid in ("bh", "p", "sq", "bh1"):
         assert told[vid][lull_dark.DARK_KEY] == pytest.approx(17.0)
         assert told[vid][lull_dark.RAMP_KEY] == pytest.approx(18.0)
-    for vid in ("orb", "bh1"):
+    for vid in ("orb",):
         # no lull-dark keys (orbits is told the lull HAND-OFF keys since the
         # fireworks melds, a different hook — fx/effects/lull_handoff.py)
         assert not {lull_dark.DARK_KEY, lull_dark.RAMP_KEY} & set(told[vid])
         assert told[vid]["phase"] == "lull" and told[vid]["phase_progress"] == 0.0
-    assert told["bh1"] == {"phase": "lull", "phase_progress": 0.0}
     assert rec["lull_dark_s"] == pytest.approx(17.0)
 
     eng, ex = _responder({"bh": "blackhole"})

@@ -140,23 +140,51 @@ TRANSITION PROGRAM (INFALL in, ERUPTION out). Three things here exist for it:
   other adoption replaces, as before.
 `fx/effects/transition_program.py`'s docstring is the binding statement; `tests/test_transition_programs.py` measures it on the real pipeline.
 
+## The STRIP (`blackhole1d`) draws its phases through the strip phase layer
+
+Since 2026-10-11 (strip phase plan phase 2; `fx/effects/strip_phase.py` is
+the binding statement, `fx/VENDOR.md` #70 the deviation) the strip's
+charge/lull/drop LOOK comes from the shared strip layer, not this module:
+a hue-kept colour gain, a set-colour fill, the drop's set-colour shockwave,
+the lull's fade to black at the room's dark point, and a white guard on
+charge and drop. His calls: the charge is a TINTED PALETTE GLOW — the old
+white halo flood (`_phase_post`, which ran every strip pixel to near-white)
+is retired and must not come back; the lull is black at the dark point
+with NO grey phosphor dot; the drop begins BRIGHT on its mark (the old
+fade up from black hid the burst). What the module still owns, its
+character: the charge's forced formation to `CHARGE_SPAWN_RATE_MAX`
+(24/s) past the cap and the faster fall; the formation tapering through
+the lull's approach and stopping (ambient spawn too) at the layer's OWN
+dark point — read `_strip_phase_lull()`, never a progress fraction; the
+drop burst sized by `drop_intensity` (12 → 36, ~32 at 0.85); a 6-blob
+ring burst when a flare punches through the dark (`_strip_phase_on_punch`,
+none when "Flare punch" is 0). Plumbing traps: every phase write is
+PASSIVE, so `_passive_config_updated` runs the module's own edge
+detection, and `config_updated` must not call `super()` (AGENTS.md's
+strip phase section). The 2-D Matrix module is untouched by all of this.
+
 ## Sonic reach
 
-Sonic cannot edit these params directly (device/effect editing is out of
-scope for the settings/scene console by design — see AGENTS.md's SPECTRA
-settings console section). A param here becomes Sonic-tunable only
-through an existing `FlareKind.params` target already wired on the
-Black Hole scenes — Sonic edits the KIND (`set_flare_kind`), never the
-Initial Set entry.
+Sonic reaches any registered param's CURRENT value on one scene's one
+device entry through `get_scene_entry_params`/`set_scene_entry_param`
+(since 2026-10-06), validated against `config/effect_params.json` — that
+includes the strip's strip-phase tunables (`charge_fill`,
+`charge_brightness`, `charge_activity`, `lull_activity`, `lull_ember`,
+`drop_shockwave`, `drop_brightness`, …, `flare_punch_strength`), which are
+registered on `blackhole1d`. Flare kinds go through `set_flare_kind`.
 
 ## Executable proofs
 
 `tests/test_lull_dark.py` (the dark-point rule and this effect's lull on
-the real pipeline).
+the real pipeline). The strip on the strip phase layer:
+`scripts/check_blackhole_strip_phase.py` (before/after on his own Black
+Hole V2 strip entry, the pinned pre-change module as red control) +
+`tests/test_blackhole_strip_phase.py`; the strip's drop onset on rendered
+frames: `scripts/check_drop_visible_onset.py`.
 `scripts/check_blackhole_charge_lull.py`, `check_blackhole_charge_target.py`,
 `check_blackhole_explosion_and_gap.py`, `check_blackhole_explosion_speed.py`,
 `check_blackhole_hex_spawn.py`, `check_blackhole_reverse_fallback.py` +
 matching `tests/test_blackhole_*.py`. The disc's single-application
 background is proven in `tests/test_matrix_overwrite_background_double_apply.py`
 (`test_blackhole_disc_*`). Full history: `AGENTS.md`'s "Black
-Hole" section and `fx/VENDOR.md` deviations #12, #14, #18, #19, #20, #38, #61.
+Hole" section and `fx/VENDOR.md` deviations #12, #14, #18, #19, #20, #38, #61, #70.

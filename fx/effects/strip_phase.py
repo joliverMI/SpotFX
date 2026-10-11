@@ -13,8 +13,9 @@ brightness."
 
 Plan: /home/javi/fleet-spotfx/data/strip-phase-plan/report.md (revision 3;
 its phase 1 is this module, Melt and Power joining it, the flare punch and
-the house-mode hold). ONE layer, ONE line per effect to join, no SpotFX code
-change per effect.
+the house-mode hold; its phase 2 is the Black Hole strip joining it — the
+first member with phase choreography of its own, see step 5 below). ONE
+layer, ONE line per effect to join, no SpotFX code change per effect.
 
 WHAT IT LISTENS TO — only keys SpotFX sends on a phase write (spectra
 scene_response._drive_phase): `phase`, `phase_progress`, the lull's
@@ -103,6 +104,21 @@ HOW AN EFFECT JOINS (existing or future — one line, plus one set):
   4. register the tunables in config/effect_params.json (registry_params()
      is the exact block) so they show on the Initial Set and Sonic reaches
      them through set_scene_entry_param.
+  5. AN EFFECT WITH ITS OWN PHASE CHOREOGRAPHY (the particle strips — the
+     Black Hole strip first, plan phase 2) needs three things more:
+     - every phase write is PASSIVE (only layer-owned keys), so it never
+       reaches the effect's own config_updated: override
+       `_passive_config_updated` (call super first) to run its own phase
+       edge detection there too, or it never sees a phase;
+     - its config_updated must NOT call super(): Effect._apply_config
+       already calls every direct base's own hook, and a second StripPhase
+       pass on a creation write turns a stale persisted phase into a false
+       edge;
+     - its content follows the layer's dark point, never a progress
+       fraction of its own: read `_strip_phase_lull()` (the very timing the
+       fade uses this frame). Its own drawn phase looks are retired in
+       favour of the layer's; `_strip_phase_on_punch()` lets it answer a
+       flare punch with content of its own.
 tests/test_strip_phase.py's guard fails if a registered 1-D effect neither
 joins nor is a named exception (fx.device_model.STRIP_PHASE_EXCEPTIONS).
 
@@ -477,6 +493,7 @@ class StripPhase(Effect):
             self._sp_clock = 0.0
             self._sp_guard_key = None
             self._sp_guard_allow = None
+            self._sp_lull_timing = None
             return
         self._sp_pending = new_phase if new_phase != self._sp_phase else None
         if new_punch != self._sp_punch_seen:
@@ -530,6 +547,7 @@ class StripPhase(Effect):
             if self._sp_phase == "lull":
                 self._sp_punch_t = 0.0
                 self._sp_punch_hold = float(cfg.get(PUNCH_HOLD_KEY, 0.0) or 0.0)
+                self._strip_phase_on_punch()
             # self-reset so an identical later poke edges again
             self._sp_punch_seen = 0
             self._config = {**self._config, PUNCH_KEY: 0}
@@ -554,6 +572,7 @@ class StripPhase(Effect):
 
         gain, fill, act, wave, fade, guard = 1.0, 0.0, 1.0, 0.0, 1.0, 0.0
         in_lull = False
+        self._sp_lull_timing = None
         if phase == "charge":
             gain = 1.0 + (float(cfg["charge_brightness"]) - 1.0) * progress
             fill = float(cfg["charge_fill"]) * progress
@@ -564,6 +583,7 @@ class StripPhase(Effect):
             in_lull = True
             timing = lull_dark.lull_timing(cfg, progress, self._sp_t,
                                            LEGACY_DARK_AT)
+            self._sp_lull_timing = timing
             a = 1.0 if timing.dark else _smoothstep(timing.approach)
             g0, fill0, act0 = self._sp_lull_from
             gain = g0 + (1.0 - g0) * a
@@ -610,6 +630,21 @@ class StripPhase(Effect):
             self._sp_punch_t = None
 
         return None if frame.neutral() else frame
+
+    def _strip_phase_on_punch(self):
+        """A flare punch just opened in a lull (called once per poke, before
+        this frame's render()). The layer's own answer is the fade and glow
+        in the output stage; an effect may add content of its own here (the
+        Black Hole strip's ring burst). Default: nothing."""
+
+    def _strip_phase_lull(self) -> Optional[lull_dark.LullTiming]:
+        """Where this frame's lull stands against the room's dark point —
+        the EXACT timing the layer fades by (computed before render() on the
+        layer's own clock), or None outside a lull. An effect that changes
+        its own content at the dark point (stops spawning, tapers a
+        formation) reads this, so its content and the fade can never
+        disagree about when the strip is dark."""
+        return getattr(self, "_sp_lull_timing", None)
 
     def _strip_phase_before_render(self):
         """Effect._render, before render(): advance the layer, then apply
