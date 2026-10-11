@@ -142,9 +142,16 @@ check(set(sc.SETTINGS_REGISTRY) == {
     "strip_phase_strength",
     # 2026-10-11, the background fade:
     "background_fade_s",
+    # 2026-10-11, the thematic transition programs (transitions-drop plan
+    # phase 3, PR #402) — six room settings, Sonic-reachable:
+    "transition_programs_enabled", "transition_program_ms",
+    "transition_velocity_blend_ms", "transition_infall_spin",
+    "transition_eruption_count", "transition_eruption_speed",
 }, "registry is the deliberate allowlist (eight room keys + the four "
    "analysed-transition knobs + the five 2026-10-06 widening keys + "
-   "drop_floor + lull_dark_max_s + the four drop-switch tunables + the two fireworks-meld tunables + strip_phase_strength + background_fade_s)")
+   "drop_floor + lull_dark_max_s + the four drop-switch tunables + the two "
+   "fireworks-meld tunables + strip_phase_strength + background_fade_s + "
+   "the six transition-program tunables)")
 check(sc.SETTINGS_REGISTRY["ambient_enabled"].kind == "bool"
       and sc.SETTINGS_REGISTRY["ambient_on_music_pause"].kind == "bool",
       "the ambient toggle is binary to Sonic too — no mode string to mis-say")
@@ -191,8 +198,10 @@ check(rc.load_room_controls().brightness_multiplier == 1.0, "undo's restore land
 check(set(sc.OPERATIONS) == {
     "get_settings", "set_setting",
     "get_force_pins", "set_force_scene", "set_force_color",
-}, "the settings domain is now five operations (Force Scene/Colour by "
-   "name, added 2026-10-06)")
+    "get_music_device_allowlist", "set_music_device_allowlist",
+}, "the settings domain is now seven operations (Force Scene/Colour by "
+   "name, added 2026-10-06; the music-device allowlist pair, same "
+   "dedicated-pair-not-a-SETTINGS_REGISTRY-key reason)")
 check(set(sc.OPERATIONS) <= {t["name"] for t in sa.TOOLS},
       "the merged tool set still carries every settings operation")
 
