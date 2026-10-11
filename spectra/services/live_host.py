@@ -378,6 +378,10 @@ class LiveLights:
             device_settings.push_offsets([d.id for d in host.devices.values()])
         except Exception:
             logger.exception("live stack: per-device timing offsets not applied")
+        # The room's background fade length (fx/background_fade.py) — pushed,
+        # never pulled; push_background_fade never raises.
+        from spectra.services import room_controls
+        room_controls.push_background_fade()
 
         # A device that answered ONCE is re-findable forever after: stamp
         # every hardware id the drivers just learned into the config, so the

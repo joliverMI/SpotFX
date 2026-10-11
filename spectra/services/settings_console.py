@@ -21,6 +21,8 @@ detector's own drop_confident_score/drop_suggested_score. Widened again
 ask for a quiet-song energy gate).
 Widened again 2026-10-07 with lull_dark_max_s (the Admiral's own "make
 this something sonic can change": the longest a lull stays fully dark).
+Widened again 2026-10-11 with background_fade_s (the Admiral's own
+background fade: how long a live background change takes to land).
 
 force_scene_scene_id/force_color_target_id STAY OUT OF THIS REGISTRY —
 each targets a scene or colour SET/GROUP by OPAQUE ID, a poor fit for
@@ -138,6 +140,7 @@ def _spec(key: str, label: str, description: str) -> SettingSpec:
             "drop_floor": "top-bar displayed energy, fraction 0.0-1.0",
             "lull_dark_max_s": "seconds",
             "strip_phase_strength": "multiplier 0.0-1.5, 0 = off",
+            "background_fade_s": "seconds, 0 = instant",
             "drop_switch_stale_margin_s": "seconds beyond the scene's own dwell",
             "drop_switch_drops_in_a_row": "drops, 0 = off",
             "drop_switch_swallow_delay_s": "seconds after the drop",
@@ -299,6 +302,15 @@ SETTINGS_REGISTRY: dict[str, SettingSpec] = {
         "charge, lull or drop. Per-scene details (charge fill, drop "
         "shockwave, flare punch, ...) are the strip effect's own settings "
         "on the scene (set_scene_entry_param)."),
+    "background_fade_s": _spec(
+        "background_fade_s", "Background fade",
+        "How long, in seconds, the background on the lights takes to fade "
+        "when it changes: Dark mode switching on or off, Light painting its "
+        "background, or a colour set landing a new background in Hybrid. "
+        "It fades round the colour wheel, never through grey or white. A "
+        "scene's own crossfade or a flare's colour ramp keeps its own "
+        "timing. Default 1; 0 = instant. A Light Show Display mode step "
+        "can set its own fade for that one switch."),
     "drop_switch_enabled": _spec(
         "drop_switch_enabled", "Drop-led scene switch",
         "On (default): a drop sequence may change the scene — a hard cut "
@@ -482,6 +494,8 @@ async def apply_change(key: str, value: Any, source: str = "agent") -> dict:
     previous, candidate = validate_change(key, value)
     room_controls.save_room_controls(candidate)
     ambient_result = await room_controls.reconcile_ambient_if_changed(previous, candidate)
+    if previous.background_fade_s != candidate.background_fade_s:
+        room_controls.push_background_fade(candidate)
 
     new_value = getattr(candidate, key)
     label = SETTINGS_REGISTRY[key].label

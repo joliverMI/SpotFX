@@ -1091,6 +1091,18 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        id: 'background-fade',
+        title: 'Background fade — the background never cuts',
+        keywords: 'background fade dark light hybrid mode switch abrupt cut colour wheel hue rotation seconds instant light show step',
+        body: [
+          'When the background on your lights changes — Dark switching on or off, Light painting its background, or a colour set landing a new background in Hybrid — it fades instead of cutting. The Background fade setting in the Mode panel is how long that takes (default 1 second; 0 = instant).',
+          'The fade walks round the colour wheel, the short way round, never in a straight line through grey or white. A fade to or from black is just the colour dimming in its own hue; a fade from white to a colour passes through the paler version of that colour.',
+          'A change that already has its own timing — a scene\'s crossfade, a flare\'s colour ramp — keeps it. Only a change that would otherwise land in one frame takes the Background fade.',
+          'A Light Show Display mode step has its own Fade field: leave it empty to use the room\'s Background fade, or give that one switch its own length.',
+          'If the background changes again while it is still fading, the new fade starts from the colour on the lights right now — the newest change wins, nothing jumps.',
+        ],
+      },
+      {
         id: 'ambient',
         title: 'Hue Hold (was "Ambient") — one on/off toggle, and what happens in between',
         keywords: 'ambient hue hold on off toggle turning on turning off transition interrupt snap cancel '
@@ -2703,6 +2715,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         body: [
           'Settings go through the same save the room bar uses, so every side effect (Ambient\'s transition, Dark/Light\'s repaint, a forced scene firing its pin) happens exactly as if you had pressed it there. Scene and colour-set on/off flip the same switch as their power buttons.',
           'Ambient is Hue only and physically slow: Eased takes ~15-22 s across the bulbs, Snap drops the ramps (~5 s — the 300 ms gap per bulb is zigbee physics). For an instant change, use Device state → Steady on the Hue areas instead.',
+          'Display mode fades the background into the new mode. Its Fade field sets how long for that one switch; leave it empty to use the room\'s Background fade (default 1 s), or 0 for an instant switch.',
           'Turn on house mode switches house lighting on (if it is off) and selects one of your house modes — the same as the House page\'s mode picker. Turn house lighting off/on flip the same switch as the top-bar Mode chip\'s long press, without touching which mode is set.',
           'The first time the show changes a setting, it remembers what it was. End show puts it back — unless you changed it yourself since, in which case it is left as you have it and named in the report. House lighting\'s switch and mode are both put back this way too.',
           'Fire a scene now and Apply a colour set now are presses, like their own buttons; there is nothing to put back.',

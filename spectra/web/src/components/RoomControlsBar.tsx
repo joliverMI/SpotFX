@@ -390,6 +390,20 @@ export default function RoomControlsBar() {
               />
               <span className="room-control-value">{Math.round(local.display_light_bg_brightness * 100)}%</span>
             </div>
+            <div className="top-bar-group-field">
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}
+                title="How long the background takes to fade when the mode switches, or when a colour set changes it instantly. It walks round the colour wheel. 0 = instant.">
+                Background fade
+                <HelpLink topic="background-fade" />
+              </label>
+              <input
+                type="number" min={0} max={10} step={0.1}
+                value={local.background_fade_s}
+                onChange={(e) => setLocal({ ...local, background_fade_s: Number(e.target.value) })}
+                onBlur={() => commit(local)}
+              />
+              <span style={{ fontSize: '0.85em', opacity: 0.75 }}>s</span>
+            </div>
             {darkLightResult && !['dark', 'light', 'default'].includes(darkLightResult.status) && (
               <span
                 className={`badge ${darkLightResult.status === 'failed' ? 'badge-red' : 'badge-gray'}`}

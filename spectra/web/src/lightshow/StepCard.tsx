@@ -231,8 +231,8 @@ export function ParamField({ p, value, onChange, catalogue, targets, action, set
           {(p.choices ?? []).map((c) => <option key={c} value={c}>{c.replace(/_/g, ' ')}</option>)}
         </select>);
     case 'number':
-      return wrap(<input type="number" value={value === undefined ? '' : String(value)}
-        placeholder={p.default !== null && p.default !== undefined ? String(p.default) : ''}
+      return wrap(<input type="number" value={value === undefined || value === null ? '' : String(value)}
+        placeholder={p.default !== null && p.default !== undefined ? String(p.default) : 'default'}
         min={p.min ?? undefined} max={p.max ?? undefined}
         step={p.step ?? (p.max !== null && p.max <= 1 ? 0.05 : 1)}
         onChange={(e) => onChange(e.target.value === '' ? undefined : Number(e.target.value))} />);

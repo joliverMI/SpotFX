@@ -2815,6 +2815,23 @@ just those two fields back onto the CURRENT live config — only where the
 background still equals what Light painted (a scene repaint since wins), and
 not playback-gated (never a stale frame). Spec: `tests/test_dark_light.py`.
 
+**THE BACKGROUND FADES, ROUND THE COLOUR WHEEL (2026-10-11).** Every live
+background change — Dark's clamp, Light's paint, the way back, and any
+instant background write in Hybrid — lands as a hue-path fade of the
+RENDERED background (colour x brightness) at the effect layer
+(`fx/background_fade.py` is the binding statement, `fx/VENDOR.md` #68).
+Length = `RoomControlState.background_fade_s` (1 s, 0 = instant), PUSHED to
+fx by `room_controls.push_background_fade` (every save + live stack
+activate), or a Light Show Display-mode step's own `fade_s`
+(`apply_patch(display_fade_s=)` → `dark_light.reconcile(fade_s=)` →
+`background_fade.fading`). A tween >= `FOLLOW_MIN_S` keeps its own timing.
+Two things not to undo: Light and the pre-Light/pre-dark restores write ONLY
+the two background keys when the effect type is unchanged (a write naming
+other colour keys RECREATES the effect on the facade and swaps the fade for
+the virtual's crossfade), and a proof that reads a background pixel right
+after a write must render past the fade (or set the default to 0). Spec:
+`tests/test_background_fade.py`; help topic `background-fade`.
+
 **HOUSE LIGHTING IS THE ONE EXCEPTION (2026-10-06, the Admiral's ruling,
 verbatim: "house lighting modes should override dark mode") — the same
 shape as Force Colour's house exception above, one axis over.** While a

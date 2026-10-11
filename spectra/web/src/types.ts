@@ -497,6 +497,11 @@ export interface RoomControlState {
    * strongly the strip effects answer charge/lull/drop. 0 = off (the strips
    * as before), 1 = as tuned (default), up to 1.5. */
   strip_phase_strength: number;
+  /** How long a live background change takes to fade round the colour
+   * wheel — Dark switching on/off, Light's paint, a colour set's instant
+   * write in Hybrid (fx/background_fade.py). Default 1; 0 = instant. A
+   * Light Show Display-mode step may set its own fade for that switch. */
+  background_fade_s: number;
   /** THE DROP-LED SCENE SWITCH (spectra/services/drop_switch.py): a drop
    * sequence may switch the scene with a hard cut on its drop when the
    * showing scene is stale. The three stale thresholds are his to tune
