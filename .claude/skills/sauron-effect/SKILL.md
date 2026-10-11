@@ -110,6 +110,28 @@ and `get_pixels()` paints it once for unlit cells. The effect never paints
 background MODE lands in ONE place"). With `sky` > 0 almost no real cell
 inside the hex is unlit.
 
+## The drop Shockwave and the breath-hold (2026-10-11, transitions-drop plan phase 1)
+
+This effect is a member of `fx.device_model.DROP_SHOCK_EFFECTS`. Its drop
+gets the shared Shockwave painted by `Twod.render` AFTER its own `draw()`
+(`fx/effects/phase_grammar.py` is the binding statement): a rim bloom, ONE
+wavefront born on the iris rim as drawn this frame (`_last_iris`), debris (burning out as flame licks) and a wall splash, all in the
+colour set's own colours, max-composed, never white (his ruling), with this
+effect's own frame held dark ahead of the front (`drop_reveal`). The effect
+calls `self._shock_begin()` exactly where its own drop payoff fires — never
+on a silent watchdog release — and `shock_rim()` names its eye.
+Eleven registered settings (`drop_shock` 0 = off, `drop_bloom_ms`,
+`drop_color_lean`, `drop_ring_speed`, `drop_ring_width`, `drop_wake`,
+`drop_debris_n`, `drop_debris_speed`, `drop_afterglow_beats`,
+`drop_reveal`, `drop_shock_scale_min`) are first guesses pending his eye;
+Sonic reaches them with `set_scene_entry_param`. The drop arm tells this
+effect `drop_intensity`, which scales the debris count and the front's life.
+The lull arm also tells it the BREATH-HOLD (`lull_breath_at_s`,
+`lull_breath_s`, from the room's `lull_breath_hold_s`, 0.4 s default, always
+inside the lull's dark rule): the base render takes the frame to true black
+for that window. Help topics `drop-shockwave`, `drop-breath-hold`; proof
+`scripts/check_drop_shockwave.py` / `tests/test_phase_grammar.py`.
+
 ## Sonic reach
 
 Every registered param through `set_scene_entry_param` (registry-driven,

@@ -9631,6 +9631,38 @@ opt-in) and `scene_response`'s "THE LULL HAND-OFF HOOK" docstring section
   its dark point only when told `keep == 0` (none is, today).
 Spec: `tests/test_lull_handoff.py`.
 
+## THE DROP SHOCKWAVE + THE BREATH-HOLD (`fx/effects/phase_grammar.py`)
+
+2026-10-11, the transitions-drop plan's phase 1 (crystal only; strips are
+separate work). `phase_grammar.py`'s docstring is the binding statement,
+including how an effect opts in. Four things:
+
+- **ONE SHARED PAINTER, IN THE BASE RENDER.** `Twod.render` calls
+  `_phase_grammar_post()` after `draw()` for a class with `DROP_SHOCK = True`
+  (`fx.device_model.DROP_SHOCK_EFFECTS`: Black Hole, Orbits, Sauron, Eye,
+  Fish — NEVER Fireworks, his word); a test holds the set equal to the
+  opted-in classes. The member names its eye (`shock_rim()`, render pixels)
+  and calls `_shock_begin()` where its own payoff fires — never on a silent
+  watchdog release. Not opted in, `drop_shock: 0`, or no breath told: the
+  frame is never touched.
+- **SET COLOURS ONLY, MAX-COMPOSED — NEVER WHITE** (his ruling: brighter
+  means more colour and more activity). Every layer is a set colour scaled;
+  the front's lean toward the brightest stop moves the GRADIENT POSITION,
+  never an RGB mix. Measure with `phase_grammar.white_cells` before adding
+  any layer.
+- **THE BREATH-HOLD** (`RoomControlState.lull_breath_hold_s`, 0.4 s,
+  Sonic-editable, 0 = off) rides every member's lull arm as
+  `lull_breath_at_s`/`lull_breath_s`, always inside `lull_dark.dark_hold_s`,
+  0 when the gap is unknowable; it ends on the drop's edge or
+  `BREATH_OVERRUN_S` after it was due.
+- `DROP_INTENSITY_EFFECTS` widened to every member: the drop scales the
+  debris and the front's life; Black Hole's own burst grows on a loud told
+  drop and is exactly `PHASE_BURST_N` untold. The eleven `drop_*` settings
+  are registered per member (`phase_grammar.registry_params()` is the one
+  shape) — schema keys may not contain "colour" (`fx/utils.py` refuses it).
+  Proof: `scripts/check_drop_shockwave.py`, `tests/test_phase_grammar.py`;
+  help `drop-shockwave`, `drop-breath-hold`.
+
 ## Radial (STAR) rotation is audio-lows-driven — a healthy `spin` can read as parked
 
 `fx/effects/radial.py`'s ONLY motion source is the audio callback:

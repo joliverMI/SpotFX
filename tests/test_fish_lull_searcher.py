@@ -121,8 +121,10 @@ async def _room(tmp_path, tag, config=None, seed=5, effect_type="fish"):
     virtual = host.virtuals.get(tag)
     cm = headless.fake_clock()
     clock = cm.__enter__()
+    # the drop Shockwave (fx/effects/phase_grammar.py) is held off: these
+    # proofs compare against a pinned fish that predates it
     eff = headless.attach_effect(host, virtual, effect_type,
-                                 dict(config or HIS))
+                                 dict(config or HIS, drop_shock=0.0))
     eff._rng = np.random.default_rng(seed)
     return _Room(host, virtual, clock, eff, cm)
 

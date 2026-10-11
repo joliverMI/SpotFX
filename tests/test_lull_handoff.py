@@ -93,15 +93,19 @@ def test_the_fish_is_the_first_member_and_carries_every_key():
     # fireworks melds: it keeps N blobs for a Fireworks drop) — lull keys
     # only; its drop does not scale
     assert device_model.LULL_HANDOFF_EFFECTS == {"fish", "orbits"}
+    # the drop side widened with the strip phase layer (every
+    # STRIP_PHASE_EFFECTS member) and with the drop Shockwave (fx/effects/
+    # phase_grammar.py — every Shockwave member is told the intensity too)
     assert device_model.DROP_INTENSITY_EFFECTS == (
-        {"fish"} | device_model.STRIP_PHASE_EFFECTS)
+        {"fish"} | device_model.STRIP_PHASE_EFFECTS
+        | device_model.DROP_SHOCK_EFFECTS)
     assert device_model.LULL_HANDOFF_EFFECTS <= device_model.PHASE_EFFECTS
     keys = {str(k) for k in fish_mod.Fish2d.CONFIG_SCHEMA.schema}
     assert set(lh.KEYS) | {lh.DROP_KEY} <= keys
     assert set(lh.KEYS) | {lh.DROP_KEY} <= set(fish_mod.Fish2d.ADVANCED_KEYS)
     from fx.effects import orbits as orbits_mod
     okeys = {str(k) for k in orbits_mod.Orbits2d.CONFIG_SCHEMA.schema}
-    assert set(lh.KEYS) <= okeys and lh.DROP_KEY not in okeys
+    assert set(lh.KEYS) <= okeys and lh.DROP_KEY in okeys
     assert set(lh.KEYS) <= set(orbits_mod.Orbits2d.ADVANCED_KEYS)
 
 
@@ -161,11 +165,13 @@ def test_an_unknowable_gap_tells_the_flat_ramp_as_the_lull():
 
 
 def test_a_drop_tells_the_fires_intensity_and_a_charge_tells_nothing():
-    eng, ex = _responder({"m": "fish", "orb": "orbits"})
+    eng, ex = _responder({"m": "fish", "orb": "orbits", "fw": "fireworks"})
     rec = asyncio.run(eng._drive_phase("drop", gap_ms=None, intensity=0.42))
     told = _told(ex)
     assert told["m"][lh.DROP_KEY] == pytest.approx(0.42)
-    assert lh.DROP_KEY not in told["orb"]
+    # orbits is a drop-Shockwave member now; fireworks never is
+    assert told["orb"][lh.DROP_KEY] == pytest.approx(0.42)
+    assert lh.DROP_KEY not in told["fw"]
     assert rec["drop_intensity"] == pytest.approx(0.42)
     assert not set(lh.KEYS) & set(told["m"])
 
@@ -176,7 +182,9 @@ def test_a_drop_tells_the_fires_intensity_and_a_charge_tells_nothing():
 
 
 def test_no_member_no_handoff_record():
-    eng, ex = _responder({"bh": "blackhole"})
+    # squiggles is in neither set (black hole joined the drop side with the
+    # drop Shockwave, fx/effects/phase_grammar.py)
+    eng, ex = _responder({"sq": "squiggles"})
     rec = asyncio.run(eng._drive_phase("lull", gap_ms=6_000, intensity=0.5))
     assert "lull_handoff" not in rec
     rec = asyncio.run(eng._drive_phase("drop", intensity=0.5))

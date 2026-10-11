@@ -502,6 +502,11 @@ export interface RoomControlState {
    * write in Hybrid (fx/background_fade.py). Default 1; 0 = instant. A
    * Light Show Display-mode step may set its own fade for that switch. */
   background_fade_s: number;
+  /** THE BREATH-HOLD before a drop (fx/effects/phase_grammar.py): how long
+   * the crystal goes to true black right before a drop lands, on the
+   * drop-Shockwave effects (Black Hole, Orbits, Sauron, Eye, Fish). Never
+   * longer than the lull's own darkness allows. 0 = none. Default 0.4. */
+  lull_breath_hold_s: number;
   /** THE DROP-LED SCENE SWITCH (spectra/services/drop_switch.py): a drop
    * sequence may switch the scene with a hard cut on its drop when the
    * showing scene is stale. The three stale thresholds are his to tune

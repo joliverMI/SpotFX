@@ -955,6 +955,27 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        id: 'drop-breath-hold',
+        title: 'Breath-hold before the drop',
+        keywords: 'breath hold breath-hold black true black pause before drop silence dark 0.4 seconds lull shockwave black hole orbits sauron eye fish sonic',
+        body: [
+          'Right before a drop lands, the crystal goes to TRUE BLACK for a moment, so the drop is born out of darkness. "Breath-hold before drop" in the Scenes panel (room controls bar) sets how long, 0.4 seconds by default; 0 turns it off. Sonic can read and change it too ("make the breath-hold half a second").',
+          'It applies to the effects with the drop Shockwave: Black Hole, Orbits, Sauron, Eye and Fish (never Fireworks). It is always inside the lull\'s own darkness rule — never longer than half the lull, and never longer than "Lull darkness (max)" — so on Black Hole, whose lull is already dark by then, nothing changes.',
+          'The breath only happens when the drop\'s moment is known (the lull has a drop of its own after it). If the drop never arrives, the lull\'s picture comes back half a second later rather than staying black. A change takes effect on the very next lull.',
+        ],
+      },
+      {
+        id: 'drop-shockwave',
+        title: 'The drop Shockwave',
+        keywords: 'drop shockwave shock wave wavefront ring bloom debris splash wall afterglow reveal bigger drop explosion black hole orbits sauron eye fish rim eye perimeter colour set no white intensity',
+        body: [
+          'On a drop, Black Hole, Orbits, Sauron, Eye and Fish now get a Shockwave on top of their own explosion (Fireworks keeps its own drop and gets none). It is born on the PERIMETER OF THE EYE — Black Hole\'s event horizon ring, Orbits\' ring, the Fish\'s home ring, Sauron\'s and the Eye\'s iris — never the centre of the screen.',
+          'Four parts, all in the colour set\'s own colours and never white: the eye\'s rim blooms in the set\'s brightest colour; ONE wavefront runs out from the rim past the crystal\'s edge, the effect\'s own explosion held dark ahead of it and revealed as it passes; debris flies out just inside the front, each piece in the set\'s colour at its angle (Black Hole flings the most, and its pieces curve back into the infall; Orbits\' and the Fish\'s curve back to their ring; Sauron\'s and the Eye\'s burn out as flame licks); and the crystal\'s edge glows where the wave strikes it, fading over about a beat and a half.',
+          'A bigger drop is more colour and more activity, not more white: the louder the drop, the more debris and the longer the wave stays lit. Black Hole\'s own burst of blobs also grows on a loud drop (never smaller than before).',
+          'Every part is a setting on each effect (Scenes page, Initial Set — "Drop Shockwave", "Drop Bloom", "Drop Colour Lean", "Drop Wave Speed/Width/Wake", "Drop Debris", "Drop Debris Speed", "Drop Wall Splash", "Drop Reveal", "Drop Quiet Scale"); Sonic can change them per scene ("turn the drop shockwave off on Fish", "more drop debris on Black Hole V2"). "Drop Shockwave" at 0 turns it off for that effect.',
+        ],
+      },
+      {
         id: 'midsong-snap-to-beat',
         title: 'Snap generated cues to beat',
         keywords: 'snap beat downbeat generate generated cue mid-song section boundary grid librosa beat_this phase 2 precision align alignment',

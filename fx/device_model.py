@@ -315,11 +315,27 @@ LULL_DARK_EFFECTS = frozenset({"blackhole", "squiggles", "pulse"}) \
 # N spaced blobs for a Fireworks drop instead of its one.
 LULL_HANDOFF_EFFECTS = frozenset({"fish", "orbits"})
 
+# THE DROP SHOCKWAVE (fx/effects/phase_grammar.py — the transitions-drop
+# plan, phase 1, the Admiral: the wave is born on "the perimeter of the eye,
+# not the center of the screen ... don't do the shockwave for fireworks"):
+# the Matrix effects whose drop gets the shared Shockwave overlay, each
+# naming its own eye (`shock_rim()`). Membership is what makes SpotFX push
+# the lull's BREATH-HOLD keys (`lull_breath_at_s`, `lull_breath_s` — a short
+# true black right before the drop) on every lull arm and the fire's
+# intensity on every drop arm (below). NEVER Fireworks — it keeps its own
+# drop. Must equal the set of effect classes with DROP_SHOCK = True
+# (tests/test_phase_grammar.py holds that).
+DROP_SHOCK_EFFECTS = frozenset({"blackhole", "orbits", "sauron", "eye",
+                                "fish"})
+
 # ... and its drop-side half: effects told the fire's intensity on every
 # drop arm (`drop_intensity`) so the drop's length and speed scale with the
 # music (lull_handoff.drop_scale). Every STRIP_PHASE_EFFECTS member too (the
-# strip layer sizes its drop shockwave by it).
-DROP_INTENSITY_EFFECTS = frozenset({"fish"}) | STRIP_PHASE_EFFECTS
+# strip layer sizes its drop shockwave by it), and every DROP_SHOCK_EFFECTS
+# member (the Fish's own drop, and every Shockwave member's wave and debris).
+DROP_INTENSITY_EFFECTS = (
+    frozenset({"fish"}) | STRIP_PHASE_EFFECTS | DROP_SHOCK_EFFECTS
+)
 
 # THE DROP-LED SCENE SWITCH's families (2026-10-08, drop-scene-variety plan
 # phase 2 — spectra/services/drop_switch.py is the binding statement). A

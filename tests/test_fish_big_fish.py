@@ -284,7 +284,9 @@ def test_without_a_poke_every_frame_is_pr381s_exactly(tmp_path):
     a lull and a drop."""
     from fx import headless
     old = _load_pr381()
-    cfg = dict(HIS_MATRIX, ripple_amount=0.35, lull_keep=0)
+    # the drop Shockwave (fx/effects/phase_grammar.py) is held off: PR 381's
+    # module predates it
+    cfg = dict(HIS_MATRIX, ripple_amount=0.35, lull_keep=0, drop_shock=0.0)
 
     async def frames(effect_type, tag):
         host = await headless.start_headless_host(

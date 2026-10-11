@@ -6,7 +6,7 @@ from PIL import Image
 
 import fx.effects.particle_handoff as particle_handoff
 from fx.color import validate_gradient
-from fx.effects import lull_handoff
+from fx.effects import lull_handoff, phase_grammar
 from fx.effects.audio import AudioReactiveEffect
 from fx.effects.gradient import GradientEffect
 from fx.effects.twod import Twod
@@ -79,6 +79,10 @@ class Orbits2d(Twod, GradientEffect):
     """
 
     NAME = "Orbits"
+    # THE DROP SHOCKWAVE (fx/effects/phase_grammar.py): born on the tether
+    # ring; its debris curves back onto the ring
+    DROP_SHOCK = True
+    SHOCK_DEBRIS_FATE = "return"
     CATEGORY = "Matrix"
     # gradient_spin supersedes gradient_roll for this effect; color_blend
     # stays hidden — colors update in place, recreation kills the particles.
@@ -91,6 +95,8 @@ class Orbits2d(Twod, GradientEffect):
         "phase",
         "phase_progress",
         *lull_handoff.KEYS,
+        *phase_grammar.BREATH_KEYS,
+        lull_handoff.DROP_KEY,
     ]
 
     CONFIG_SCHEMA = vol.Schema(
@@ -233,6 +239,12 @@ class Orbits2d(Twod, GradientEffect):
             # the lull hand-off hook (fx/effects/lull_handoff.py): ride ONLY
             # the dedicated lull arm write, never the param registry
             **lull_handoff.schema_fields(),
+            # THE PHASE GRAMMAR (fx/effects/phase_grammar.py): the drop's
+            # Shockwave settings (registered) and the breath-hold keys
+            # (ride ONLY the lull arm write)
+            **phase_grammar.shock_schema_fields(),
+            **phase_grammar.breath_schema_fields(),
+            **lull_handoff.drop_schema_fields(),
         }
     )
 
@@ -797,6 +809,14 @@ class Orbits2d(Twod, GradientEffect):
             self._pos_scale = 1.0
             self.particle_count = int(self._config["particle_count"])
 
+
+    def shock_rim(self):
+        """The Shockwave's eye (fx/effects/phase_grammar.py): the tether ring at its resting
+        radius (horizon_scale through the projection), in
+        render pixels."""
+        r = max(float(self.horizon_scale), 0.05)
+        return (self.cx, self.cy, r * self.sx, r * self.sy)
+
     def _phase_step(self, dt):
         """Advance the charge/lull/drop state machine. Runs every draw,
         before population management; sets the per-frame overrides
@@ -874,6 +894,7 @@ class Orbits2d(Twod, GradientEffect):
                 # the big explosion: 2× more blobs that DON'T stay — they
                 # blast straight off the panel during the boost window
                 self._spawn_drop_ejecta(DROP_EJECTA_X * self.particle_count)
+                self._shock_begin()
             # survivors of the lull fly back out to their orbits fast
             ps0 = drop["ps0"]
             self._pos_scale = ps0 + (1.0 - ps0) * min(

@@ -6,6 +6,7 @@ from PIL import Image
 
 import fx.effects.particle_handoff as particle_handoff
 from fx.color import validate_gradient
+from fx.effects import lull_handoff, phase_grammar
 from fx.effects.audio import AudioReactiveEffect
 from fx.effects.gradient import GradientEffect
 from fx.effects.twod import Twod
@@ -46,6 +47,10 @@ LID_PAUSE_END = 0.75       # progress where the final close begins
 
 class Eye2d(Twod, GradientEffect):
     NAME = "Eye"
+    # THE DROP SHOCKWAVE (fx/effects/phase_grammar.py): born on the iris
+    # rim; its debris burns out as flame licks
+    DROP_SHOCK = True
+    SHOCK_DEBRIS_FATE = "fade"
     CATEGORY = "Matrix"
     # spin supersedes gradient_roll; color_blend stays hidden — colors update
     # in place, recreation would reset the gaze. phase/phase_progress are
@@ -56,6 +61,8 @@ class Eye2d(Twod, GradientEffect):
         "impulse_decay",
         "phase",
         "phase_progress",
+        *phase_grammar.BREATH_KEYS,
+        lull_handoff.DROP_KEY,
     ]
 
     CONFIG_SCHEMA = vol.Schema(
@@ -165,6 +172,12 @@ class Eye2d(Twod, GradientEffect):
                 description="Progress through the current phase (ramped by SpotFX)",
                 default=0.0,
             ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1.0)),
+            # THE PHASE GRAMMAR (fx/effects/phase_grammar.py): the drop's
+            # Shockwave settings (registered) and the breath-hold keys
+            # (ride ONLY the lull arm write)
+            **phase_grammar.shock_schema_fields(),
+            **phase_grammar.breath_schema_fields(),
+            **lull_handoff.drop_schema_fields(),
         }
     )
 
@@ -499,6 +512,17 @@ class Eye2d(Twod, GradientEffect):
             self._drop = None
             self._drop_slam = False
 
+    def shock_rim(self):
+        """The Shockwave's eye (fx/effects/phase_grammar.py): the iris rim as
+        drawn this frame — a circle in the eye's own isotropic pixels."""
+        last = getattr(self, "_last_iris", None)
+        if last is None:
+            return (self.cx, self.cy, self.iris_size * self.s_min,
+                    self.iris_size * self.s_min)
+        ex, ey, iris_r = last
+        r = max(iris_r, 0.05) * self.s_min
+        return (ex, ey, r, r)
+
     def _phase_step(self, dt):
         pend = self._phase_pending
         if pend is not None:
@@ -536,6 +560,7 @@ class Eye2d(Twod, GradientEffect):
                 # shut — the explosion then rides the opening)
                 drop["fired"] = True
                 self._burst = 1.0
+                self._shock_begin()
                 # explosion randomness spike
                 self.fl_jit += self._rng.uniform(
                     0.3, 1.2, N_FLAME
@@ -800,6 +825,7 @@ class Eye2d(Twod, GradientEffect):
         # ── geometry ────────────────────────────────────────────────────
         eye_px = self.cx + float(self.gaze[0]) * self.sx
         eye_py = self.cy + float(self.gaze[1]) * self.sy
+        self._last_iris = (eye_px, eye_py, iris_r)  # the shock's rim
         dxp = (self.px_x - eye_px) / self.s_min
         dyp = (self.px_y - eye_py) / self.s_min
 
