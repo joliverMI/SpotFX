@@ -230,6 +230,18 @@ class Twod(AudioReactiveEffect):
     def _phase_grammar_post(self):
         from fx.effects import lull_handoff, phase_grammar
 
+        # A Shockwave's own life can outlast the "drop" phase it was born
+        # in (debris return/fade, the wall splash's afterglow beats) — fine
+        # while the phase has gone back to "none" (the drop's own
+        # afterglow), but a NEW charge/lull cycle completing before that
+        # old wave finishes must never let it light the new cycle, or
+        # defeat a told breath-hold's true black (Q2). Discard it the
+        # instant a new charge or lull is entered.
+        if getattr(self, "_phase", "none") in ("charge", "lull"):
+            self._shock = None
+            self._shock_pending = False
+            self._shock_fresh = False
+
         if getattr(self, "_shock_pending", False):
             self._shock_pending = False
             self._shock = None

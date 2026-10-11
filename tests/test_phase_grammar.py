@@ -296,6 +296,45 @@ def test_the_base_render_leaves_an_untouched_frame_alone():
     assert eff.matrix is before                 # not even re-encoded
 
 
+def test_a_stale_shock_from_an_earlier_drop_never_bleeds_into_the_next_breath_hold():
+    # His drop fired, a Shockwave began and is still alive (debris/afterglow
+    # can outlast the "drop" phase itself) when the room completes a whole
+    # new charge-lull cycle and tells THIS member a breath-hold for it — the
+    # stale wave must never light that true-black window.
+    from PIL import Image
+    from fx.effects.twod import Twod
+
+    f, sw = _wave()                       # a live, not-yet-done Shockwave
+    assert not sw.done
+    cfg = pg.breath_keys_for(4.0, 0.4, 3.0)      # told at 3.6s for 0.4s
+    eff = SimpleNamespace(_config=cfg, _phase="lull", _phase_t=3.8,
+                          _shock=sw, _shock_pending=False,
+                          _shock_fresh=False, passed=1 / 30)
+    eff.matrix = Image.new("RGB", (72, 37), (10, 20, 30))
+    Twod._phase_grammar_post(eff)
+    assert np.asarray(eff.matrix).max() == 0     # true black, not the stale wave
+    assert eff._shock is None                    # discarded, not merely hidden
+
+
+def test_a_stale_shock_is_discarded_on_a_new_charge_too():
+    # Charge has no breath-hold of its own, but a leftover wave from the
+    # previous drop must not paint over a new charge's own, untouched
+    # picture either — the fix clears it on entering EITHER phase.
+    from PIL import Image
+    from fx.effects.twod import Twod
+
+    f, sw = _wave()
+    assert not sw.done
+    eff = SimpleNamespace(_config={}, _phase="charge", _phase_t=0.1,
+                          _shock=sw, _shock_pending=False,
+                          _shock_fresh=False, passed=1 / 30)
+    eff.matrix = Image.new("RGB", (72, 37), (10, 20, 30))
+    before = eff.matrix
+    Twod._phase_grammar_post(eff)
+    assert eff.matrix is before                  # left untouched, not re-painted
+    assert eff._shock is None                     # discarded, not merely hidden
+
+
 # ── the real pipeline ──────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("effect", sorted(device_model.DROP_SHOCK_EFFECTS))
