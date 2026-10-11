@@ -654,11 +654,11 @@ class RoomControlState(BaseModel):
     # effect (fx.device_model.LULL_DARK_EFFECTS — Black Hole, Squiggles,
     # Pulse) holds dark for half the lull, never longer than this many
     # seconds; the rest of the lull is its approach (the event horizon's
-    # expansion, the CRT squash, Pulse's fade). The rule itself is ONE
-    # function, fx/effects/lull_dark.py's dark_hold_s; SpotFX applies it on
-    # every lull arm (scene_response._drive_phase), so a change reaches the
-    # very next lull — nothing is re-planned. 0 = the lull only goes dark on
-    # its drop.
+    # expansion, Squiggles' thinning chains, Pulse's fade). The rule itself
+    # is ONE function, fx/effects/lull_dark.py's dark_hold_s; SpotFX
+    # applies it on every lull arm (scene_response._drive_phase), so a
+    # change reaches the very next lull — nothing is re-planned. 0 = the
+    # lull only goes dark on its drop.
     lull_dark_max_s: float = Field(default=3.0, ge=0.0, le=30.0)
 
     # THE STRIP PHASE LAYER's master (2026-10-11, strip phase plan phase 1 —

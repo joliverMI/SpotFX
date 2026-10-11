@@ -9455,11 +9455,15 @@ things:
   dark point inside the progress hang. Spec:
   `tests/test_lull_after_charge.py` (every `PHASE_EFFECTS` member, with the
   pre-fix retarget as its red control).
-- **Squiggles now keeps spawning through a told lull until its dark
-  point** (`_lull_still_lit`, Black Hole's own model) — otherwise a long
-  lull's walled-in chains collide themselves out within ~8 s. Spec:
+- **Squiggles' lull THINS OUT on a schedule** (2026-10-11, his pick "A"
+  on the transitions/drop plan, replacing the CRT switch-off): spawning
+  eases out over `lull_entry_s`, then chains fizzle one at a time to a
+  population schedule ending before the dark point, head-on booms held
+  back so a long lull's walled-in chains do not collide themselves out
+  within ~8 s. The squiggles-effect skill is the binding statement. Spec:
   `tests/test_lull_dark.py` (rule, arm write, and all three effects on the
-  real pipeline through a 20 s lull after a completed charge).
+  real pipeline through a 20 s lull after a completed charge),
+  `tests/test_squiggles_lull_thinning.py`.
 
 ## THE STRIP PHASE LAYER — charge, lull and drop on the 1-D strips (`fx/effects/strip_phase.py`)
 

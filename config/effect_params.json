@@ -4044,6 +4044,50 @@
           "aspect": "reactivity",
           "distribute": false,
           "default": 0.06
+        },
+        "lull_entry_s": {
+          "label": "Lull Entry",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.3,
+          "max": 2.0,
+          "aspect": "shape",
+          "note": "Seconds the normal flow carries on at the start of a lull while new chains stop coming and the thinning eases in",
+          "default": 1.0,
+          "help_topic": "response-families"
+        },
+        "lull_fizzle_rate": {
+          "label": "Lull Fizzle Rate",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.3,
+          "max": 2.0,
+          "aspect": "shape",
+          "note": "How the lull's chains thin out to its dark point: 1 = evenly, lower keeps more of them for longer, higher thins them early",
+          "default": 0.9,
+          "help_topic": "response-families"
+        },
+        "lull_arc_rate": {
+          "label": "Lull Arc Rate",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 1.0,
+          "aspect": "shape",
+          "note": "Chance a head-on meeting still sparks as the lull's thinning starts; falls to none by the dark point (otherwise the two pass through)",
+          "default": 0.9,
+          "help_topic": "response-families"
+        },
+        "lull_color_slide": {
+          "label": "Lull Colour Slide",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 1.0,
+          "aspect": "color",
+          "note": "How far the chains' colour slides to the colour set's darkest colour by the lull's dark point",
+          "default": 1.0,
+          "help_topic": "response-families"
         }
       },
       "defaults": {
@@ -4066,7 +4110,11 @@
         "y_offset": 0.5,
         "frequency_range": "Lows (beat+bass)",
         "impulse_decay": 0.06,
-        "brightness": 1.0
+        "brightness": 1.0,
+        "lull_entry_s": 1.0,
+        "lull_fizzle_rate": 0.9,
+        "lull_arc_rate": 0.9,
+        "lull_color_slide": 1.0
       }
     },
     "dancer": {
@@ -4522,6 +4570,15 @@
           "aspect": "brightness",
           "aspect_scale": 1.0,
           "default": 1.0
+        },
+        "lull_lids_upside_down": {
+          "label": "Lull Lids Upside Down",
+          "type": "toggle",
+          "smooth": false,
+          "aspect": "shape",
+          "note": "The lull's lids close turned 180 degrees about the eye (meeting just above its centre); the drop opens them the same way round. Off = the old way round",
+          "default": true,
+          "help_topic": "response-families"
         }
       },
       "defaults": {
@@ -4544,7 +4601,8 @@
         "background_brightness": 0.0,
         "brightness": 1.0,
         "spin_audio": 0.0,
-        "gaze_depth": 0.6
+        "gaze_depth": 0.6,
+        "lull_lids_upside_down": true
       }
     },
     "sauron": {
@@ -4841,6 +4899,15 @@
           "aspect": "brightness",
           "aspect_scale": 1.0,
           "default": 1.0
+        },
+        "lull_lids_upside_down": {
+          "label": "Lull Lids Upside Down",
+          "type": "toggle",
+          "smooth": false,
+          "aspect": "shape",
+          "note": "The lull's lids close turned 180 degrees about the eye (meeting just above its centre); the drop opens them the same way round. Off = the old way round",
+          "default": true,
+          "help_topic": "response-families"
         }
       },
       "defaults": {
@@ -4869,7 +4936,8 @@
         "gradient": "linear-gradient(90deg, #ff0000 0.00%,#ff7800 14.00%,#ffc800 28.00%,#00ff00 42.00%,#00c78c 56.00%,#0000ff 70.00%,#800080 84.00%,#ff00b2 98.00%)",
         "background_brightness": 0.0,
         "brightness": 1.0,
-        "background_color": "#000000"
+        "background_color": "#000000",
+        "lull_lids_upside_down": true
       }
     },
     "gradient": {

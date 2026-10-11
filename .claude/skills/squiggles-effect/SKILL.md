@@ -3,9 +3,9 @@ name: squiggles-effect
 description: >
   fx/effects/squiggles.py (Matrix, crystal-mapper) — the segmented worm/
   chain effect behind Squiggles V2. Load before touching drop-burst
-  timing, background handling (his own reversal on this specific effect —
-  docs/SPECTRA_SPEC.md §85 then §87), or the `reverse` toggle's release
-  path.
+  timing, the thinning-out lull, background handling (his own reversal on
+  this specific effect — docs/SPECTRA_SPEC.md §85 then §87), or the
+  `reverse` toggle's release path.
 ---
 
 # Squiggles
@@ -67,6 +67,45 @@ Same shape as blackhole's watchdog crash: any `return` inside
 real value, not before. `squiggles.py` is named in AGENTS.md's list of
 modules sharing this state-machine shape (alongside `eye.py`).
 
+## The lull THINS OUT (2026-10-11) — the CRT switch-off is gone
+
+His pick on the transitions/drop plan: "I like A. Use that one" (option A,
+"Thinning out"; the old-TV squash to a line and the held WHITE dot were a
+one-time gag in no colour set's colours). The lull, all in squiggles.py's
+"the lull: thinning out" block:
+
+- THE ENTRY IS EASED: for `lull_entry_s` (1.0 s) the normal flow carries
+  on while spawning eases out (`1 - smoothstep`), nothing fizzles and the
+  colour has not moved, so the lull's first frame changes no more than an
+  ordinary frame (the plan's own complaint about its first sketch was
+  "jarringly abrupt").
+- No chain is born after the entry. The rest FIZZLE ONE AT A TIME (a random
+  one, into a small boom of `FIZZLE_SPARKS` in its own colour) on a
+  SCHEDULE: `ceil(n0 * (1 - u) ** lull_fizzle_rate)`, `n0` the population
+  when the thinning starts, `u` 0 -> 1 across a window on the approach
+  (`_thin_window`: from the entry's end, capped at 0.35 of the approach, to
+  `FIZZLE_LIFE_S` before the dark point, capped at 0.2). The schedule is
+  what keeps a long lull populated: walls stay solid in a lull, and a
+  walled room with no spawning collides itself out in ~8 s, so a head-on
+  meeting during the thinning booms only by chance
+  (`lull_arc_rate * (1 - u)`), never more than one boom ahead of the
+  schedule and never onto the last chain (`_arc_allowed`); otherwise the
+  two pass through each other. Outside the thinning every head-on meeting
+  booms as always (`self._arc is None`, no rng drawn).
+- The colour slides to the set's DARKEST stop (`_dark_stop`, by luminance
+  on the current gradient) by `lull_color_slide * entry * smoothstep(
+  approach)`.
+- THE DARK RULE IS THE LAW: from the dark point the chains and sparks are
+  cleared and the frame is black.
+
+The dark point itself is still the SHARED rule (next section). An untold
+lull (no `lull_ramp_s`) falls back to `LULL_LEGACY_DARK_AT` (0.55, the old
+CRT_SPLIT) of the progress ramp, or `LULL_FALLBACK_S` of wall clock while
+progress sits at 0, and thins over `LULL_UNTOLD_THIN_FROM/TO` of the
+approach. All four `lull_*` settings are registered (Sonic reaches them).
+Outside the lull the effect is the predecessor bit for bit
+(`tests/test_squiggles_lull_thinning.py` loads it out of git).
+
 ## The lull's dark point is the SHARED rule, not a constant here
 
 Since 2026-10-07 (the Admiral: "set a max time for that portion to 3
@@ -81,15 +120,26 @@ point sits inside the progress hang, where only a clock can find it. (A
 lull after a completed charge used to start its progress at 1.0 and be
 released by the orphan watchdog 12 s in; that is fixed for every phase
 effect in the shared tween engine, `fx/VENDOR.md` #58, and the watchdog
-reads plain progress again.) A write WITHOUT the two keys falls
-back to `CRT_SPLIT` (0.55) and pauses spawning for the whole lull. Told,
-the CRT squash completes at the dark point, the line pinches to its dot
-by the end of SpotFX's ramp (`after`), and ordinary chains KEEP SPAWNING
-until the dark point (`_lull_still_lit`, Black Hole's model) — without
-that, a long lull's walled-in chains collide themselves out within ~8 s
-and the squash has nothing left to squash, byte-identical to before.
-Read lull_dark.py's docstring before changing anything about when this
-lull goes dark.
+reads plain progress again.) Read lull_dark.py's docstring before
+changing anything about when this lull goes dark.
+
+## The drop after a lull lands on REAL cells — a chain never changes
+   parity
+
+Every ring move (`fx/effects/lattice.py` RING) keeps a cell's
+(col + row) parity, so a chain walks ONE sublattice for its whole life and
+`step_size` cannot change that (the plan's "odd stride" suspicion was
+wrong). The plan found the drop's fan lighting 0 real cells after a lull:
+its rig had no shape map, the lattice fell back to an all-live rectangle,
+and the fan born at the panel centre (35.5, 18) snapped to (36, 18) — the
+DEAD parity on his crystal — so every burst chain walked the dead cells
+(without a lull, edge-spawned chains of both parities hid it). His live
+crystal-mapper carries a shape map, so the room takes the real-shape path;
+the fallback now reads the real cells off the virtual's own gap segments
+(`lattice._segment_mask`, the render path's own gap rule, `fx/VENDOR.md`
+#69), which is what offline rigs and any virtual whose shape map is
+missing get. Proof + red control (the fallback removed reproduces 0 real
+lit): `tests/test_squiggles_lull_thinning.py`.
 
 ## A piece adopted on a HARD CUT skips its fade-in (2026-10-08)
 
@@ -110,7 +160,9 @@ No direct param edit — reachable only through an already-attached
 ## Executable proofs
 
 `tests/test_lull_dark.py` (the dark-point rule and this effect's lull on
-the real pipeline), `tests/test_fireworks_melds.py` (the cut-frame adopt).
+the real pipeline), `tests/test_squiggles_lull_thinning.py` (the thinning
+lull, the drop after it on real cells, bit-for-bit outside the lull),
+`tests/test_fireworks_melds.py` (the cut-frame adopt).
 `scripts/check_squiggles_drop_timing.py`,
 `tests/test_squiggles_drop_timing.py`,
 `tests/test_squiggles_colorset_widen.py`. The accept-list migration,

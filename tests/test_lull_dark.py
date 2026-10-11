@@ -14,7 +14,7 @@ What is proven here, each on the real code it names:
 - THE THREE EFFECTS on the real render pipeline (fx.headless, the real
   ResponseEngine + FacadeExecutor, one clock), through a 20 s lull that
   follows a completed charge: Black Hole's real crystal cells, Squiggles'
-  CRT line and Pulse's single light all go dark at 17 s and stay dark for
+  thinning chains and Pulse's single light all go dark at 17 s and stay dark for
   the last 3 s — not at the old half-way point. A completed charge first is
   the ordinary sequence, and the case that once started a lull's
   phase_progress at 1.0 (fixed at its root for every phase effect —
@@ -92,7 +92,7 @@ def test_a_very_long_lull_finds_its_dark_point_inside_the_hang():
     assert t.dark and t.after == 1.0
 
 
-@pytest.mark.parametrize("legacy", [bh.LULL_FILL_PROGRESS, sq.CRT_SPLIT,
+@pytest.mark.parametrize("legacy", [bh.LULL_FILL_PROGRESS, sq.LULL_LEGACY_DARK_AT,
                                     pulse_mod.LULL_LEGACY_DARK_AT])
 def test_untold_writes_keep_each_effects_old_progress_fraction(legacy):
     for p in np.linspace(0.0, 1.0, 41):
@@ -359,15 +359,16 @@ def test_black_hole_expands_for_seventeen_seconds_then_holds_dark_for_three(
     assert 16.0 < first_dark <= 17.0 + 2 * DT
 
 
-def test_squiggles_squashes_for_seventeen_seconds_then_holds_its_line(
+def test_squiggles_thins_out_for_seventeen_seconds_then_is_dark(
         twenty_second_lull):
     rows = twenty_second_lull
-    # the picture is still there, squashing, until the dark point — chains
-    # keep forming through a told lull until it is dark (Black Hole's model)
+    # chains are still crossing, thinning on a schedule, until the dark
+    # point — a long lull's walled-in population does not collide itself
+    # out in seconds
     for t in (5.0, 10.0, 12.0, 15.0):
         assert _at(rows, t)["sq_rows"] > 1, t
     late = _after(rows, 17.0)
-    assert late and all(r["sq_rows"] <= 1 for r in late)
+    assert late and all(r["sq_rows"] == 0 for r in late)
 
 
 def test_pulse_is_pitch_black_for_exactly_the_last_three_seconds(
@@ -390,4 +391,4 @@ def test_a_short_lull_is_still_half_and_half(tmp_path):
     assert all(r["bh_dark"] for r in _after(rows, 2.0))
     assert _at(rows, 1.5)["pulse"] > 0.0
     assert all(r["pulse"] <= 1e-9 for r in _after(rows, 2.0))
-    assert all(r["sq_rows"] <= 1 for r in _after(rows, 2.0))
+    assert all(r["sq_rows"] == 0 for r in _after(rows, 2.0))

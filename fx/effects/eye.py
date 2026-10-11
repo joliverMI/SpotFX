@@ -146,6 +146,11 @@ class Eye2d(Twod, GradientEffect):
                 default=0.06,
             ): vol.All(vol.Coerce(float), vol.Range(min=0.01, max=0.3)),
             vol.Optional(
+                "lull_lids_upside_down",
+                description="Lull: the lids close upside down (the lull turned 180 degrees about the eye; the drop opens them the same way)",
+                default=True,
+            ): bool,
+            vol.Optional(
                 "color_blend",
                 description="Restart effect on color change, for transitions",
                 default=False,
@@ -185,6 +190,10 @@ class Eye2d(Twod, GradientEffect):
         self._flow_t = 0.0
         self._burst = 0.0
         self._lid = 0.0        # 0 = open, 1 = fully closed
+        # the lids are drawn turned 180 degrees about the eye: set when a
+        # lull starts (lull_lids_upside_down), kept through the drop until
+        # the lids are open again
+        self._lids_rotated = False
         self._drop_slam = False  # drop caught the lids mid-close
         self._charge_amt = 0.0
         # per-tongue flicker oscillators + jitter accumulator (slow, lazy
@@ -229,6 +238,8 @@ class Eye2d(Twod, GradientEffect):
         self.spin_audio = self._config["spin_audio"]
         self.x_offset = self._config["x_offset"]
         self.y_offset = self._config["y_offset"]
+        self.lull_lids_upside_down = bool(
+            self._config["lull_lids_upside_down"])
 
         # position list: index 0 = center, 1..8 spread on the gaze ring
         ang = np.arange(GAZE_N) * (2 * np.pi / GAZE_N)
@@ -325,6 +336,7 @@ class Eye2d(Twod, GradientEffect):
                 "phase_t": self._phase_t,
                 "phase_progress": self.phase_progress,
                 "charge_amt": self._charge_amt,
+                "lids_rotated": self._lids_rotated,
             },
         }
 
@@ -382,6 +394,10 @@ class Eye2d(Twod, GradientEffect):
                 self.phase_progress = float(
                     native.get("phase_progress", self.phase_progress)
                 )
+                if ph == "lull":
+                    self._lids_rotated = bool(
+                        native.get("lids_rotated", self._lids_rotated)
+                    )
                 # keep a DIFFERENT pending edge (e.g. a drop written
                 # between creation and first draw); only drop a pending
                 # re-edge of the phase we just resumed
@@ -472,6 +488,8 @@ class Eye2d(Twod, GradientEffect):
         self._phase = phase
         self._phase_t = 0.0
         self._phase_done_t = None
+        if phase == "lull":
+            self._lids_rotated = self.lull_lids_upside_down
         if phase == "drop":
             self._drop = {"t": 0.0, "fired": False}
             # a short lull can leave the lids mid-close when the drop
@@ -1025,9 +1043,18 @@ class Eye2d(Twod, GradientEffect):
         else:
             self._lid = max(0.0, self._lid - dt / 0.25)
 
+        if self._lid <= 0.001 and self._phase != "lull":
+            self._lids_rotated = False
         if self._lid > 0.001:
             top_ny = (0.0 - eye_py) / self.s_min
             bot_ny = (float(self.r_height - 1) - eye_py) / self.s_min
+            ldx, ldy = dxp, dyp
+            if self._lids_rotated:
+                # the lull upside down: the same lids turned 180 degrees
+                # about the eye centre (the panel's bottom edge is the
+                # turned frame's top)
+                ldx, ldy = -dxp, -dyp
+                top_ny, bot_ny = -bot_ny, -top_ny
             sag = 0.30 * iris_r
             # both lids close together: the upper sweeps down, the lower
             # sweeps up, each pausing just past its iris edge, meeting at a
@@ -1043,7 +1070,7 @@ class Eye2d(Twod, GradientEffect):
             y_up = y_open + (y_meet - y_open) * f_up
             y_lo = y_lo_start + (y_meet + lw - y_lo_start) * f_lo
 
-            u = dxp / (self.sx / self.s_min)
+            u = ldx / (self.sx / self.s_min)
             curve = sag * (1.0 - np.clip(u * u, 0.0, 1.0))
             up_edge = y_up + curve
             lo_edge = y_lo + curve
@@ -1053,7 +1080,7 @@ class Eye2d(Twod, GradientEffect):
             lid_rgb = self.get_gradient_color_vectorized1d(
                 np.zeros(1, dtype=np.float32)
             ).astype(np.float32)[0]
-            covered = (dyp <= up_edge) | (dyp >= lo_edge)
+            covered = (ldy <= up_edge) | (ldy >= lo_edge)
             # Lids show as BLACK here, not the background color —
             # get_pixels()'s own overwrite blend already supplies the
             # background exactly once for an unlit (black) pixel, so
@@ -1062,7 +1089,7 @@ class Eye2d(Twod, GradientEffect):
             lw_half = max(1.8 / self.s_min, 0.06 * iris_r)
             for edge in (up_edge, lo_edge):
                 line = np.clip(
-                    1.0 - np.abs(dyp - edge) / lw_half, 0.0, 1.0
+                    1.0 - np.abs(ldy - edge) / lw_half, 0.0, 1.0
                 )
                 lmask = line > 0.0
                 if lmask.any():

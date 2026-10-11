@@ -209,9 +209,13 @@ clears the tag on the keepers and departs the rest, the drop and a return to
   back inward instead of exiting) while spawn rate (+7 chains/s at full
   ramp) and `max_chains` (×2.6) climb: the figure fills with trapped,
   thickening scribble.
-- **Lull** — an old-TV switch-off (`_phase_crt`): vertical squash to a
-  bright line over the first 55% of the ramp, then a horizontal pinch into
-  a single held white dot.
+- **Lull** — the chains thin out (2026-10-11, replacing the old-TV
+  switch-off): for `lull_entry_s` the normal flow carries on while new
+  chains stop coming, then the chains fizzle one by one into small booms
+  on a schedule, head-on meetings arc less and less often, the colour
+  slides to the set's darkest stop, and the panel is dark from the lull's
+  dark point (fx/effects/lull_dark.py). The squiggles-effect skill has the
+  detail.
 - **Drop** — once the drop ramp completes (gated on `phase_progress` the
   same way Blackhole gates its own payoff, not on the instant phase edge —
   fixed 2026-08-20, PR fm/spectra-squiggles-drop-timing-and-a-much-bigger-
@@ -239,13 +243,16 @@ beat clock, not this machinery)
 - **Charge** — the iris grows (+30%), the pupil constricts (×0.5), and
   the flames reverse to stream INWARD: the eye feeds. A flare recreation
   mid-charge continues the phase (it rides the native handoff snapshot).
-- **Lull** — the lids close emoji-style (`_lid_travel`): fast ease-out to
-  the iris edge, a near-still pause over the ramp's [0.50, 0.75], then the
-  final close (completing at 0.93 so end-of-ramp jitter can't strand a
-  slit-open lid); the gaze returns to center.
+- **Lull** — the lids are drawn upside down (`lull_lids_upside_down`, a
+  plain 180-degree turn about the eye — the panel's bottom edge becomes
+  the turned frame's top) while they close emoji-style (`_lid_travel`):
+  fast ease-out to the iris edge, a near-still pause over the ramp's
+  [0.50, 0.75], then the final close (completing at 0.93 so end-of-ramp
+  jitter can't strand a slit-open lid); the gaze returns to center.
 - **Drop** — if a short lull left the lids mid-close they SLAM shut first,
-  then the eye explodes open (0.18 s), a flame burst with a randomness
-  spike rides the opening, settling over 1.2 s.
+  then the eye explodes open the same way round (0.18 s), a flame burst
+  with a randomness spike rides the opening, settling over 1.2 s.
+  Sauron shares this lull/drop choreography — see below.
 
 ### Pulse (`pulse.py`, the Singles — a one-colour effect, not a particle
 one; single-led-power plan phase 2, 2026-10-06)

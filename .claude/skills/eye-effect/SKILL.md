@@ -57,6 +57,30 @@ stays byte-for-byte untouched. A behavioural fix made here should be
 weighed for Sauron too (sauron-effect skill) — and the reverse: Sauron
 already FIXED the saturating `snap_threshold` `>=` above; Eye has not.
 
+## The lull is UPSIDE DOWN (2026-10-11) — a 180-degree turn, not a flip
+
+His words on the transitions/drop plan, after its revision 3 had read "flip
+it vertically" as a quarter turn (lids closing from the sides): "no, i
+meant upside down. it's a simple 180 degree rotation." So the lull's lids
+are today's lids turned 180 degrees ABOUT THE EYE: the lid geometry is
+evaluated at (-dx, -dy) and the panel's bottom edge becomes the turned
+frame's top, so the lids meet just ABOVE the eye's centre and curve the
+other way; their timing (`_lid_travel`, the pause on the iris), colour and
+`_step_lid` are untouched. `_lids_rotated` is set when a lull starts
+(`lull_lids_upside_down`, registered, default True) and kept through the
+drop until the lids are open again, so the drop opens them the same way
+round; a blink-in/out with no lull is the ordinary way round. Off is the
+predecessor bit for bit. Sauron does the same (sauron-effect skill).
+`lids_rotated` rides the `_handoff_snapshot`'s `native` block alongside
+`phase`/`phase_progress`, so a same-type recreation mid-lull (a flare
+fallback POST rebuilding the instance) picks up the predecessor's
+rotation instead of silently resetting to the un-rotated default —
+caught and fixed after the orientation itself shipped, not obvious from
+reading `_adopt_handoff` cold. Proof: `tests/test_eye_lull_lids_upside_down.py`
+(the closed lull equals today's rot180 on a rectangle, the closing band
+mirrored, the drop opening turned, off = the pinned predecessor's frames,
+and a same-type hand-off mid-lull carrying the rotation through).
+
 ## Params
 
 `iris_size`/`pupil_size`/`gaze_radius`/`gaze_depth`/`spin` shape the

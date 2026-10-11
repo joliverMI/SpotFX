@@ -8,9 +8,13 @@ the effect's composited rotation/flips are inverted with the exact same PIL
 transpose chain Twod.image_to_pixels applies, so the view can never drift
 from the output convention.
 
-Without a shape map the view falls back to a full-rectangle mask with the
-classic crystal checkerboard ring — the behavior lattice-native effects
-already had on unmapped matrices.
+Without a shape map, a virtual whose segments include a gap device gets its
+real cells read off those segments (the render path's own gap rule) — a
+chain never changes (col + row) parity, so a view that cannot tell real
+cells from dead ones lets a chain born on the dead parity walk dead cells
+for its whole life (fx/VENDOR.md #69). Anything else falls back to a
+full-rectangle mask with the classic crystal checkerboard ring — the
+behavior lattice-native effects already had on unmapped matrices.
 """
 
 from __future__ import annotations
@@ -184,11 +188,57 @@ class LatticeView:
         return self._shells[t - 1]
 
 
+def _segment_key(effect, virtual):
+    """A cache key for the virtual's segment layout, or None when the
+    segments cannot describe a real-cell mask (no virtual, not span-mapped,
+    no gap segment, pixel grouping)."""
+    if virtual is None or getattr(effect, "_ledfx", None) is None:
+        return None
+    try:
+        cfg = getattr(virtual, "_config", {}) or {}
+        if cfg.get("mapping") != "span" or int(cfg.get("grouping") or 1) > 1:
+            return None
+        segs = tuple(
+            (str(s[0]), int(s[1]), int(s[2])) for s in (virtual.segments or ())
+        )
+        if not any(dev.startswith("gap-") for dev, _s, _e in segs):
+            return None
+        return (getattr(virtual, "id", None), int(cfg.get("rows") or 1), segs)
+    except Exception:
+        return None
+
+
+def _segment_mask(effect, virtual):
+    """(rows, cols) bool on the VIRTUAL's grid: True where the pixel lands
+    on a real device, False on a gap device (`fx.utils.is_gap_device`, or an
+    unknown `gap-` id). None when the segments do not tile the grid."""
+    try:
+        from fx.utils import is_gap_device
+
+        devices = effect._ledfx.devices
+        runs = []
+        for seg in virtual.segments:
+            dev_id, start, end = seg[0], int(seg[1]), int(seg[2])
+            dev = devices.get(dev_id)
+            gap = is_gap_device(dev) or (
+                dev is None and str(dev_id).startswith("gap-")
+            )
+            runs.append(np.full(max(end - start + 1, 0), not gap))
+        phys = np.concatenate(runs) if runs else np.zeros(0, dtype=bool)
+        rows = int(virtual._config.get("rows") or 1)
+        if rows < 1 or phys.size == 0 or phys.size % rows:
+            return None
+        return phys.reshape(rows, phys.size // rows)
+    except Exception:
+        return None
+
+
 def get_view(effect) -> LatticeView:
     """The device-lattice view for a Twod effect, in its render coordinates.
     Call from do_once() AFTER super().do_once() (so orientation attrs and
     r_width/r_height are current). Cached per (shape digest, orientation,
-    dims); unmapped virtuals get a full-rectangle fallback view."""
+    dims); an unmapped virtual with gap segments gets its real cells read
+    off them, anything else a full-rectangle fallback view."""
     virtual = getattr(effect, "_virtual", None)
     shape = getattr(virtual, "_shape", None) if virtual is not None else None
     w = getattr(effect, "r_width", 1)
@@ -198,6 +248,31 @@ def get_view(effect) -> LatticeView:
     mirror2d = bool(getattr(effect, "mirror2d", False))
 
     if shape is None:
+        # no shape map: the virtual's own gap segments still say which
+        # cells are real light (the render path's own gap rule). Without
+        # this a gap-segmented virtual got the all-live rectangle, and a
+        # chain born at the panel's centre (Squiggles' drop) snapped onto
+        # the dead sublattice and walked it for its whole flight — every
+        # ring move keeps a cell's (col + row) parity.
+        seg = _segment_key(effect, virtual)
+        if seg is not None:
+            key = ("segs", seg, int(rotate_t), flip2d, mirror2d, w, h)
+            view = _VIEW_CACHE.get(key)
+            if view is None:
+                vmask = _segment_mask(effect, virtual)
+                mask = None
+                if vmask is not None:
+                    mask = _render_mask(vmask, rotate_t, flip2d, mirror2d)
+                if mask is not None and mask.shape == (h, w) and mask.any():
+                    view = LatticeView(mask, has_real_shape=True)
+                else:
+                    view = LatticeView(
+                        np.ones((h, w), dtype=bool), has_real_shape=False
+                    )
+                if len(_VIEW_CACHE) > 32:
+                    _VIEW_CACHE.clear()
+                _VIEW_CACHE[key] = view
+            return view
         key = ("rect", w, h)
         if key not in _VIEW_CACHE:
             _VIEW_CACHE[key] = LatticeView(

@@ -2047,3 +2047,32 @@ against that commit.
     `_passive_config_updated` instead. Evidence: `tests/
     test_strip_phase.py`, `scripts/check_strip_phase.py`. Unverified
     against his live room.
+69. `effects/lattice.py` (`get_view`'s no-shape-map path, `_segment_key`,
+    `_segment_mask`) + `effects/squiggles.py` (the lull) + `effects/eye.py`
+    and `effects/sauron.py` (the lids): THE TRANSITIONS/DROP PLAN'S LULL
+    SLICE (2026-10-11; the Admiral on the plan's options: "I like A. Use
+    that one" for Squiggles, and for Eye/Sauron "i meant upside down. it's
+    a simple 180 degree rotation").
+    - Lattice: with no shape map, a virtual whose segments include a gap
+      device now gets its real cells read off those segments (the render
+      path's own gap rule, `fx.utils.is_gap_device`), through the same
+      inverse transpose chain the shape-map path uses; before, it got the
+      all-live rectangle, and Squiggles' drop fan — born at the panel
+      centre and snapped to the DEAD parity — walked the dead sublattice
+      (every ring move keeps a cell's (col + row) parity), lighting 0 real
+      cells after a lull. A virtual with a shape map (his live
+      crystal-mapper) or without gap segments is unchanged.
+    - Squiggles' lull THINS OUT instead of the old-TV switch-off
+      (`_phase_crt` removed; supersedes #57's `_lull_still_lit`): spawning
+      eases out over `lull_entry_s`, chains fizzle one at a time on a
+      population schedule ending before the dark point, head-on booms are
+      held back to that schedule, the colour slides to the set's darkest
+      stop, and the frame is black from the dark point. Four registered
+      `lull_*` params. Outside the lull the effect is bit for bit the
+      predecessor's.
+    - Eye/Sauron: the lull's lids are drawn turned 180 degrees about the
+      eye (`lull_lids_upside_down`, default on), held through the drop
+      until open; off is bit for bit the predecessor.
+    Evidence: `tests/test_squiggles_lull_thinning.py` (with the
+    rectangle-fallback red control), `tests/test_eye_lull_lids_upside_down.py`,
+    `tests/test_lull_dark.py`. Unverified against his live room.

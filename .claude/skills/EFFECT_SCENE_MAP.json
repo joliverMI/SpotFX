@@ -59,7 +59,8 @@
         "fx/effects/squiggles.py",
         "scripts/check_squiggles_drop_timing.py",
         "tests/test_squiggles_drop_timing.py",
-        "tests/test_squiggles_colorset_widen.py"
+        "tests/test_squiggles_colorset_widen.py",
+        "tests/test_squiggles_lull_thinning.py"
       ]
     },
     "dancer-effect": {
@@ -76,7 +77,8 @@
     "eye-effect": {
       "skill": ".claude/skills/eye-effect/SKILL.md",
       "files": [
-        "fx/effects/eye.py"
+        "fx/effects/eye.py",
+        "tests/test_eye_lull_lids_upside_down.py"
       ]
     },
     "pacman-effect": {
