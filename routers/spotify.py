@@ -2,8 +2,10 @@
 SpotFX — Spotify router.
 
 Endpoints:
-  GET /api/spotify/status   — current playback info
-  GET /api/spotify/callback  — OAuth redirect handler
+  GET /api/spotify/status        — current playback info
+  GET /api/spotify/callback      — OAuth redirect handler
+  GET /api/spotify/context-name  — a context URI's friendly name, read-only
+  GET /api/spotify/contexts      — the context playing now + recently observed ones
 """
 from fastapi import APIRouter
 from models.state import state
