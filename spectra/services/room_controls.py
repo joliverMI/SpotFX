@@ -704,6 +704,32 @@ class RoomControlState(BaseModel):
     drop_switch_swallow_delay_s: float = Field(default=1.0, ge=0.0, le=10.0)
     drop_switch_hit_threshold: float = Field(default=0.6, ge=0.0, le=1.0)
 
+    # THE TRANSITION PROGRAMS (transitions-drop plan phase 3 — fx/effects/
+    # transition_program.py is the binding statement). A scene change whose
+    # Matrix effect-type switch has a registered program (INFALL: orbits /
+    # fish / squiggles / fireworks -> Black Hole; ERUPTION: Black Hole ->
+    # orbits / fish / squiggles) runs that program instead of the virtual's
+    # stored 0.5 s crossfade: the outgoing particles become a cloud that
+    # flies into the incoming form, velocity-matched at the hand-off. His
+    # answer to Q4: "~1.4 s by default (1.2-2.5 s), anchored on the mark" —
+    # the trigger clock fires early so the program's payoff (the infall's
+    # ignition, the eruption's bloom) lands on the trigger
+    # (scene_transition_lead.program_lead_ms). All Sonic-tellable:
+    #   - transition_programs_enabled: off = every switch rides the stored
+    #     crossfade (and a drop-led cut stays a plain cut), as before;
+    #   - transition_program_ms: how long a program takes;
+    #   - transition_velocity_blend_ms: the infall's last stretch, over
+    #     which every piece's velocity blends into the Black Hole's own;
+    #   - transition_infall_spin: extra turns the infall's spiral makes;
+    #   - transition_eruption_count / _speed: how many ejecta the eruption
+    #     sprays and how fast, before they implode onto the incoming form.
+    transition_programs_enabled: bool = True
+    transition_program_ms: int = Field(default=1400, ge=600, le=2500)
+    transition_velocity_blend_ms: int = Field(default=500, ge=100, le=1500)
+    transition_infall_spin: float = Field(default=0.75, ge=0.0, le=3.0)
+    transition_eruption_count: int = Field(default=60, ge=10, le=150)
+    transition_eruption_speed: float = Field(default=1.0, ge=0.5, le=2.0)
+
     # THE A/V-SYNC LEAD (owner ask 2026-08-28) — LEAD family: positive =
     # fire EARLIER, negative = fire LATER. The value the /avsync
     # instrument's Apply button writes, and the ONLY authored term in
@@ -913,6 +939,25 @@ def effective_ambient_color(state: RoomControlState) -> Optional[str]:
     if state.display_mode == "dark" and state.ambient_color_dark is not None:
         return state.ambient_color_dark
     return state.ambient_color
+
+
+def transition_program_request(room: "RoomControlState", *,
+                               on_mark: bool = False) -> Optional[dict]:
+    """The room's transition-program settings as the effect write carries
+    them to fx/ (fx/effects/transition_program.ProgramSettings.from_request
+    reads exactly these keys), or None when programs are switched off.
+    on_mark=True is a drop-led cut: the program's payoff lands on its first
+    frame instead of being led into the mark."""
+    if not room.transition_programs_enabled:
+        return None
+    return {
+        "duration_ms": int(room.transition_program_ms),
+        "velocity_blend_ms": int(room.transition_velocity_blend_ms),
+        "infall_spin": float(room.transition_infall_spin),
+        "eruption_count": int(room.transition_eruption_count),
+        "eruption_speed": float(room.transition_eruption_speed),
+        "on_mark": bool(on_mark),
+    }
 
 
 def scene_transition_ms(state: RoomControlState, intensity: float) -> int:

@@ -2207,12 +2207,18 @@ class TriggerEngine:
         # live there now; this function's job is supplying the LIVE inputs.
         crossfade_ms = scene_transition_lead.crossfade_ms_for(
             scene, controls, intensity)
-        if crossfade_ms <= 0:
-            return 0
         resolved = scene_compiler.resolve_scene(scene, FireContext(intensity, rng=self._rng))
         writes = scene_compiler.compile_scene(resolved, color_set=None)
         current_types = {vid: getattr(st, "effect_type", None)
                          for vid, st in self._live_virtuals().items()}
+        # A TRANSITION PROGRAM (transitions-drop plan phase 3) runs its own
+        # clock, not the crossfade: its payoff is what lands on the mark.
+        program_lead = scene_transition_lead.program_lead_ms(
+            current_types, writes, controls)
+        if program_lead is not None:
+            return program_lead
+        if crossfade_ms <= 0:
+            return 0
         anchor = scene_transition_lead.anchor_frac_for(current_types, writes)
         return scene_transition_lead.lead_ms_for(anchor, crossfade_ms)
 

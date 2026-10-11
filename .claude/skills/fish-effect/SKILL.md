@@ -430,6 +430,19 @@ the two together: a new `"eye"` special case here needs `"sauron"` too
 - **`p_nocap`/school/rush exemptions are scoped**, same shape as
   blackhole's — don't widen without a fresh ask.
 
+## Thematic transitions + the Shoaling adoption fix (2026-10-11)
+
+- **THE ADOPTION FIX**: the generic (cross-type) adopt keeps a predecessor's
+  inherited heading and speed (`snap["vx"]`/`["vy"]`, clamped to 0.2-4x
+  cruise) instead of re-heading every fish to the tangent of where it sat —
+  that re-heading was a new direction and speed on the first real frame. A
+  snapshot with no velocity keeps the tangent, as before.
+- Fish receives the Black Hole's ERUPTION: `_formation_points()` (every
+  ordinary fish's screen position, read live) — the ejecta implode onto
+  swimming fish. Fish feeds an Infall: `_handoff_snapshot` carries `vx`/`vy`
+  (heading x speed) and `gesture: "swim"`.
+`fx/effects/transition_program.py`'s docstring is the binding statement; `tests/test_transition_programs.py` measures it on the real pipeline.
+
 ## Sonic reach
 
 The "Fish Swim Burst" flare kind is Sonic-editable via `set_flare_kind`

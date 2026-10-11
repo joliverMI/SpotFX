@@ -48,6 +48,16 @@ THE THREE QUANTITIES, in the order they compose:
                   authority on that collision; never add a lead to an
                   offset.
 
+A FOURTH, WHEN A PROGRAM RUNS (transitions-drop plan phase 3). A Matrix
+switch with a registered TRANSITION PROGRAM (fx/effects/transition_
+program.py) does not ride the crossfade at all: it runs the program's own
+clock (room transition_program_ms, ~1.4 s) and its payoff sits at the
+program's own anchor (the infall's ignition, the eruption's bloom).
+program_lead_ms answers that lead — the max across the fire's program
+switches, capped like every lead — and REPLACES lead_ms_for's answer when
+it applies; None means no program runs and the three quantities above
+govern exactly as before.
+
 Pure functions, no I/O, no live reads — the caller supplies the room state
 and the current effect types. That is what lets the preview ask about a
 pair the room is not currently showing.
@@ -96,3 +106,27 @@ def lead_ms_for(anchor_frac: float, crossfade_ms: int) -> int:
     if crossfade_ms <= 0:
         return 0
     return min(round(anchor_frac * crossfade_ms), transition_phases.MAX_LEAD_MS)
+
+
+def program_lead_ms(current_types: dict[str, Optional[str]],
+                    writes: list[dict], room: Any) -> Optional[int]:
+    """LEAD family — the lead that lands a TRANSITION PROGRAM's payoff on
+    the mark, or None when the room has programs off or no write switches
+    a registered pair (then lead_ms_for governs, unchanged). The program's
+    duration and anchor come from fx/effects/transition_program.py — the
+    same settings the facade builds the program from, so the lead and the
+    picture cannot disagree."""
+    from fx.effects import transition_program
+    from spectra.services import room_controls
+    request = room_controls.transition_program_request(room)
+    if request is None:
+        return None
+    settings = transition_program.ProgramSettings.from_request(request)
+    leads = [transition_program.lead_ms(name, settings)
+             for name in (transition_program.program_name(
+                 current_types.get(w["virtual_id"]), w["effect_type"])
+                 for w in writes)
+             if name is not None]
+    if not leads:
+        return None
+    return min(max(leads), transition_phases.MAX_LEAD_MS)

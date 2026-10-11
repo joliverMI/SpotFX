@@ -711,6 +711,83 @@ export default function RoomControlsBar() {
               </>
             )}
             <div className="top-bar-group-field">
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                <PowerButton
+                  on={local.transition_programs_enabled}
+                  onChange={(on) => commit({ ...local, transition_programs_enabled: on })}
+                  size={22}
+                  ariaLabel="Thematic transitions"
+                  title={local.transition_programs_enabled
+                    ? 'On — a Black Hole ↔ particles scene change runs a thematic transition (Infall / Eruption) instead of the crossfade. Tap to turn off.'
+                    : 'Off — every scene change crossfades. Tap to turn on.'}
+                />
+                Thematic transitions
+                <HelpLink topic="transition-programs" />
+              </label>
+            </div>
+            {local.transition_programs_enabled && (
+              <>
+                <div className="top-bar-group-field">
+                  <label title="How long a thematic transition takes; its payoff still lands on the trigger.">
+                    Transition length
+                  </label>
+                  <input
+                    type="number" min={600} max={2500} step={100}
+                    value={local.transition_program_ms}
+                    onChange={(e) => setLocal({ ...local, transition_program_ms: Number(e.target.value) })}
+                    onBlur={() => commit(local)}
+                  />
+                  <span style={{ fontSize: '0.85em', opacity: 0.75 }}>ms</span>
+                </div>
+                <div className="top-bar-group-field">
+                  <label title="The Infall's last stretch, over which every piece's motion blends into the Black Hole's own.">
+                    Infall velocity blend
+                  </label>
+                  <input
+                    type="number" min={100} max={1500} step={50}
+                    value={local.transition_velocity_blend_ms}
+                    onChange={(e) => setLocal({ ...local, transition_velocity_blend_ms: Number(e.target.value) })}
+                    onBlur={() => commit(local)}
+                  />
+                  <span style={{ fontSize: '0.85em', opacity: 0.75 }}>ms</span>
+                </div>
+                <div className="top-bar-group-field">
+                  <label title="Extra turns the pieces make spiralling into the Black Hole.">
+                    Infall spiral turns
+                  </label>
+                  <input
+                    type="number" min={0} max={3} step={0.05}
+                    value={local.transition_infall_spin}
+                    onChange={(e) => setLocal({ ...local, transition_infall_spin: Number(e.target.value) })}
+                    onBlur={() => commit(local)}
+                  />
+                </div>
+                <div className="top-bar-group-field">
+                  <label title="How many pieces the Black Hole's eruption sprays before they implode onto the incoming effect.">
+                    Eruption pieces
+                  </label>
+                  <input
+                    type="number" min={10} max={150} step={5}
+                    value={local.transition_eruption_count}
+                    onChange={(e) => setLocal({ ...local, transition_eruption_count: Number(e.target.value) })}
+                    onBlur={() => commit(local)}
+                  />
+                </div>
+                <div className="top-bar-group-field">
+                  <label title="How fast the eruption's pieces fly out.">
+                    Eruption speed
+                  </label>
+                  <input
+                    type="number" min={0.5} max={2} step={0.1}
+                    value={local.transition_eruption_speed}
+                    onChange={(e) => setLocal({ ...local, transition_eruption_speed: Number(e.target.value) })}
+                    onBlur={() => commit(local)}
+                  />
+                  <span style={{ fontSize: '0.85em', opacity: 0.75 }}>×</span>
+                </div>
+              </>
+            )}
+            <div className="top-bar-group-field">
               <label>Scene changes</label>
               <select
                 value={local.scene_change_mode}

@@ -367,6 +367,35 @@ def room_active_set() -> Optional[ColorSetCard]:
     return color_set_groups.resolve_for_fire(card)
 
 
+def current_effect_types() -> dict[str, Optional[str]]:
+    """The effect type each virtual is showing, as the evolution engine's
+    own record has it (the same map the trigger clock's lead reads)."""
+    from spectra.services import engine
+    return {vid: getattr(st, "effect_type", None)
+            for vid, st in engine.conductor.virtuals.items()}
+
+
+def transition_program_for(writes: list[dict], room: Any, *,
+                           on_mark: bool = False,
+                           current_types: Optional[dict] = None) -> Optional[dict]:
+    """The transition-program request for this fire (room_controls.
+    transition_program_request), or None when programs are off or no write
+    switches a registered (outgoing, incoming) pair (fx/effects/
+    transition_program.PROGRAMS). The facade re-checks the pair against the
+    virtual's REAL active effect, so this only decides whether to ask."""
+    from fx.effects import transition_program
+    from spectra.services import room_controls
+    request = room_controls.transition_program_request(room, on_mark=on_mark)
+    if request is None:
+        return None
+    current = current_effect_types() if current_types is None else current_types
+    if any(transition_program.program_name(current.get(w["virtual_id"]),
+                                           w["effect_type"])
+           for w in writes):
+        return request
+    return None
+
+
 async def fire_scene(scene: SceneV2, *, intensity: float = 0.5,
                      color_set: Optional[ColorSetCard] = None,
                      dry_run: bool = True,
@@ -457,13 +486,22 @@ async def fire_scene(scene: SceneV2, *, intensity: float = 0.5,
         entry_ramp_ms = (int(transition_ms) if transition_ms is not None
                          else (scene.entry_ramp_ms or room.global_transition_ms
                                or room_controls.scene_transition_ms(room, intensity)))
+        # A THEMATIC TRANSITION PROGRAM (transitions-drop plan phase 3) for
+        # any Matrix switch with a registered pair; house glides (an
+        # explicit transition_ms) never take one. Passed only when one
+        # applies, so every other fire keeps the exact old call shape.
+        program = (transition_program_for(live_writes, room, on_mark=cut)
+                   if transition_ms is None else None)
+        program_kw = {} if program is None else {"program": program}
         if cut:
             # The hard cut: only this caller passes the flag, so every other
             # fire (and every test double of apply_writes) keeps the exact
             # old call shape.
-            await fx_seam.apply_writes(live_writes, transition_ms=0, cut=True)
+            await fx_seam.apply_writes(live_writes, transition_ms=0, cut=True,
+                                       **program_kw)
         else:
-            await fx_seam.apply_writes(live_writes, transition_ms=entry_ramp_ms)
+            await fx_seam.apply_writes(live_writes, transition_ms=entry_ramp_ms,
+                                       **program_kw)
         logger.info("SPECTRA scene '%s' fired at intensity %.2f: %d virtual "
                     "writes%s", scene.name, intensity, len(writes),
                     f" (colour set '{color_set.name}')" if color_set else "")

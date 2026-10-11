@@ -711,7 +711,23 @@ async def _effects_put(host, virtual_id: str, body: dict) -> FacadeResponse:
             effect = host.effects.create(
                 ledfx=host, type=effect_type, config=effect_config
             )
-            virtual.set_effect(effect, fallback=fallback, cut=cut)
+            # THE TRANSITION PROGRAM (deviation #68): `"program": {...}` asks
+            # for a thematic transition instead of the stored crossfade —
+            # honoured only when one is registered for this exact pair
+            # (fx/effects/transition_program.py); every other switch, and
+            # every write without the key, takes the path it always did.
+            program = None
+            if body.get("program") is not None and fallback is None:
+                from fx.effects import transition_program
+                outgoing = virtual.active_effect
+                program = transition_program.build(
+                    getattr(outgoing, "type", None), effect_type,
+                    body.get("program"))
+            if program is not None:
+                virtual.set_effect(effect, fallback=fallback, cut=cut,
+                                   program=program)
+            else:
+                virtual.set_effect(effect, fallback=fallback, cut=cut)
     except (ValueError, RuntimeError) as msg:
         return _internal(f"Unable to set effect: {msg}")
 

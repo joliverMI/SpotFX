@@ -75,6 +75,17 @@ proven frame for frame against the pinned pre-change module; told 0, it
 keeps its one blob anyway (it has no dark lull to fall back to). Orbits
 is NOT in `DROP_INTENSITY_EFFECTS` (its drop does not scale).
 
+## Thematic transitions (2026-10-11, transitions-drop plan phase 3)
+
+The Black Hole's ERUPTION implodes onto Orbits' LIVE blobs (his comment:
+"implode into the orbits like the shoaling"): `_formation_points()` gives
+every tracked blob's pixel position each frame, and each ejecta lands ON
+one with its velocity. Orbits also FEEDS an Infall into the Black Hole:
+`_handoff_snapshot` now carries `vx`/`vy` (px/s, from `p_vx`/`p_vy` — SoA
+arrays set every frame from the drawn displacement, render byte-identical)
+and `gesture: "orbit"`. An incoming Orbits starts FRESH under a program
+(the program owns the outgoing particles). `fx/effects/transition_program.py`'s docstring is the binding statement; `tests/test_transition_programs.py` measures it on the real pipeline.
+
 ## Sonic reach
 
 Same rule as every effect here: no direct param edit. Sonic reaches these

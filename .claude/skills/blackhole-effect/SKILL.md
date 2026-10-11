@@ -119,6 +119,27 @@ halo cut-off, the forced-formation stop and the ambient-spawn pause all
 read `_lull_timing()`, byte-identical to before. Read lull_dark.py's
 docstring before changing anything about when this lull goes dark.
 
+## Thematic transitions in and out (2026-10-11, transitions-drop plan phase 3)
+
+A scene change between the Black Hole and Orbits / Fish / Squiggles (and
+Fireworks INTO it) no longer rides the 0.5 s crossfade: it runs a
+TRANSITION PROGRAM (INFALL in, ERUPTION out). Three things here exist for it:
+- **`_handoff_snapshot` carries `vx`/`vy` (px/s) + `gesture: "unwind"`**,
+  read off `_program_field_velocity(px, py)` — the ONE definition of "what a
+  blob at this position does next" (fall `v(r)` + swirl, or the horizon
+  ring's own `omega_h` at and inside `rh`). The infall program blends its
+  cloud into exactly this, so keep it in step with `draw()`'s motion.
+- **THE ADOPTION FIX: a cross-type adopt whose snapshot carries `vx`/`vy`
+  CONTINUES that velocity** (`p_ivx`/`p_ivy`, normalized units/s, NaN =
+  none; `_blend_inherited`, blended into the field over `handoff_ease`)
+  instead of `p_vr = 0` + the global wind-up from zero. A snapshot without a
+  velocity (pacman, dancer, radial, eye...) keeps the old wind-up. Measured:
+  speed at the hand-off 30 px/s -> 30 px/s, the control 30 -> 0.7.
+- **`snap["append"]`** adopts AFTER the population already spawned (the
+  program's hand-off — the Black Hole has been running under it); every
+  other adoption replaces, as before.
+`fx/effects/transition_program.py`'s docstring is the binding statement; `tests/test_transition_programs.py` measures it on the real pipeline.
+
 ## Sonic reach
 
 Sonic cannot edit these params directly (device/effect editing is out of

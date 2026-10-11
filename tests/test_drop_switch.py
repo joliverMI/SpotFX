@@ -192,7 +192,7 @@ def test_every_drop_ready_pair_has_a_handoff_and_the_fireworks_melds():
     for outside in ("eye", "dancer", "pacman", None):
         assert ds.handoff_kind(outside, "radial") is None
     assert ds.handoff_kind("radial", "blackhole") == ds.HANDOFF_CHOREOGRAPHED
-    assert ds.handoff_kind("squiggles", "blackhole") == ds.HANDOFF_GENERIC
+    assert ds.handoff_kind("squiggles", "blackhole") == ds.HANDOFF_PROGRAM
 
 
 def _ctx(virtuals, lull_s=2.0):

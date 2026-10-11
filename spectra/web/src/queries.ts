@@ -299,9 +299,12 @@ export interface TransitionPreviewTimeline {
   crossfade_ms: number;
   /** WHERE in that crossfade the payoff lands: 0.5 for an ordinary pair
    * (his own midpoint generalization), a registered phased pair's own
-   * 0.45 where one applies. */
+   * 0.45 where one applies. When a thematic TRANSITION PROGRAM runs
+   * instead of the crossfade (anchor_source 'program'), crossfade_ms is
+   * the program's own length and anchor_frac its payoff (the infall's
+   * ignition, the eruption's bloom). */
   anchor_frac: number;
-  anchor_source: 'midpoint' | 'phased_pair';
+  anchor_source: 'midpoint' | 'phased_pair' | 'program';
   /** A scene transition anchors its MIDDLE — the settled family. */
   anchor_rule: 'transition_middle';
   /** LEAD family: positive = EARLIER. anchor_frac x crossfade_ms. */

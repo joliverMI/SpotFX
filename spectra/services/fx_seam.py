@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from typing import Optional
 
 import httpx
 
@@ -141,7 +142,8 @@ def _require_owner() -> str:
 
 
 async def apply_writes(writes: list[dict], *, transition_ms: int = 0,
-                       cut: bool = False) -> None:
+                       cut: bool = False,
+                       program: Optional[dict] = None) -> None:
     """Send compiled writes as effect switches over the transport the
     ownership record grants. Raises on the first hard failure — the API
     surfaces it to the owner instead of half-applying a scene silently.
@@ -157,11 +159,28 @@ async def apply_writes(writes: list[dict], *, transition_ms: int = 0,
     (his live matrices carry Add / 0.5 s, which every ordinary scene change
     still rides) for THIS write only. In-process only — the external LedFX
     (spot-effects owning) has no such flag, so there a cut lands as an
-    ordinary instant switch over the stored blend, and says so in the log."""
+    ordinary instant switch over the stored blend, and says so in the log.
+
+    program (a dict, room_controls.transition_program_request) asks every
+    effect-TYPE switch in this fire for a THEMATIC TRANSITION PROGRAM in
+    place of the virtual's stored crossfade (fx/effects/transition_
+    program.py; transitions-drop plan phase 3). The facade honours it only
+    for a registered (outgoing, incoming) pair; every other switch rides
+    exactly the path it would have. In-process only, like the cut. None —
+    every caller that does not name one — is the unchanged path."""
     owner = _require_owner()
     if owner == light_ownership.SPECTRA:
-        await _apply_via_facade(writes, 0 if cut else transition_ms, cut=cut)
+        if program is not None:
+            await _apply_via_facade(writes, 0 if cut else transition_ms,
+                                    cut=cut, program=program)
+        else:
+            await _apply_via_facade(writes, 0 if cut else transition_ms,
+                                    cut=cut)
     else:
+        if program is not None:
+            logger.info("fx seam: a transition program was asked for but "
+                        "the external LedFX owns the lights — it lands over "
+                        "the virtual's stored crossfade")
         if cut:
             logger.info("fx seam: a hard cut was asked for but the external "
                         "LedFX owns the lights — it lands over the virtual's "
@@ -314,7 +333,8 @@ def _redirect_room_effect(writes: list[dict]) -> list[dict]:
     return out
 
 
-def _body(w: dict, transition_ms: int = 0, cut: bool = False) -> dict:
+def _body(w: dict, transition_ms: int = 0, cut: bool = False,
+          program: Optional[dict] = None) -> dict:
     w = _compose_room_effect(w)
     body = {
         "type": w["effect_type"],
@@ -322,6 +342,8 @@ def _body(w: dict, transition_ms: int = 0, cut: bool = False) -> dict:
     }
     if cut:
         body["cut"] = True
+    if program is not None:
+        body["program"] = dict(program)
     if transition_ms > 0:
         # Same tween shape fx_executor uses for glides — hue-arc blend,
         # never through grey, never a colour-recreation crossfade.
@@ -390,7 +412,8 @@ def _carry_forward_brightness(config: dict, current_effect: dict | None) -> dict
 
 
 async def _apply_via_facade(writes: list[dict], transition_ms: int = 0,
-                            cut: bool = False) -> None:
+                            cut: bool = False,
+                            program: Optional[dict] = None) -> None:
     global _type_switches_landed, _last_type_switch, _out_of_scope_skipped
     from fx import facade
     # THE TAKE SCOPE IS A WRITE BOUNDARY (fx/VENDOR.md #42): a scene names
@@ -408,10 +431,11 @@ async def _apply_via_facade(writes: list[dict], transition_ms: int = 0,
     writes = _redirect_room_effect(writes)
     for w in writes:
         vid = w["virtual_id"]
+        switching = transition_ms > 0 or cut or program is not None
         current = (await _current_effect(facade, vid)
-                   if transition_ms > 0 or cut else None)
+                   if switching else None)
         current_type = (current or {}).get("type")
-        if (transition_ms > 0 or cut) and current_type is not None \
+        if switching and current_type is not None \
                 and current_type != w["effect_type"]:
             # fx/facade.py's stale-tween-PUT guard (447-461) silently drops
             # a combined type-switch+transition PUT — a blend only makes
@@ -420,7 +444,8 @@ async def _apply_via_facade(writes: list[dict], transition_ms: int = 0,
             # config, so there is nothing left to tween.
             w = {**w, "config": _carry_forward_brightness(w["config"], current)}
             resp = await facade.handle(
-                "PUT", f"/api/virtuals/{vid}/effects", json=_body(w, 0, cut))
+                "PUT", f"/api/virtuals/{vid}/effects",
+                json=_body(w, 0, cut, program))
             _type_switches_landed += 1
             _last_type_switch = {"virtual_id": vid, "effect_type": w["effect_type"]}
         else:

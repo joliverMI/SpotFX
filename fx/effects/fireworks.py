@@ -530,6 +530,11 @@ class Fireworks2d(Twod, GradientEffect):
             "dims": (self.r_width, self.r_height),
             "px": px.astype(np.float32),
             "py": py.astype(np.float32),
+            # each spark's velocity (px/s) and how the form lets go — the
+            # transition program's RELEASE reads these (particle_handoff)
+            "vx": (self.p_vx[:n] * self.sx).astype(np.float32),
+            "vy": (self.p_vy[:n] * self.sy).astype(np.float32),
+            "gesture": "spray",
             "grad": self.p_grad[:n].copy(),
             "bright": self.p_shown[:n].copy(),
             "gradient": self._config.get("gradient"),

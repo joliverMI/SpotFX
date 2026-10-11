@@ -660,6 +660,7 @@ class Virtual:
         fallback: Optional[float] = None,
         activate: bool = True,
         cut: bool = False,
+        program=None,
     ):
         """
         Sets the active effect for the virtual device.
@@ -697,6 +698,18 @@ class Virtual:
                       touched: every later call blends exactly as before.
                       SpotFX deviation #63 (the drop-led scene switch's
                       hard cut, spectra/services/drop_switch.py).
+            program: A TRANSITION PROGRAM (fx/effects/transition_program.
+                      py) to run instead of the stored crossfade for THIS
+                      call: it reads the outgoing effect's particles before
+                      the outgoing deactivates, the switch then lands as a
+                      cut, and the program composes onto the incoming
+                      effect's own render until it hands its cloud over.
+                      None (every caller but the facade's program path) is
+                      byte-identical to before; a program that cannot read
+                      the outgoing effect falls back to the ordinary path.
+                      A switch arriving while a program runs finishes it
+                      first (the cloud is handed over, never dropped).
+                      SpotFX deviation #68.
 
         Raises:
             ValueError: If no configured device segments are available.
@@ -723,11 +736,24 @@ class Virtual:
                 # else: don't let new fallbacks override active fallbacks, just bump the timer
                 self.fallback_start(fallback)
 
+            # SpotFX deviation #68: a program still running hands its cloud
+            # over before anything else changes; a new one reads the
+            # outgoing effect's particles before that effect deactivates.
+            running = getattr(self, "_program", None)
+            if running is not None:
+                self._program = None
+                running.finish()
+            if program is not None and not program.capture(
+                self, self._active_effect
+            ):
+                program = None
+
             if (
                 self._config["transition_mode"] != "None"
                 and self._config["transition_time"] > 0
                 and not self.fallback_suppress_transition
                 and not cut
+                and program is None
             ):
                 self.transition_frame_total = (
                     self.refresh_rate * self._config["transition_time"]
@@ -761,6 +787,9 @@ class Virtual:
                 )
                 return
             self._active_effect.activate(self)
+            if program is not None:
+                program.begin(self, self._active_effect)
+                self._program = program
             self._ledfx.events.fire_event(
                 EffectSetEvent(
                     self._active_effect.name,
@@ -789,6 +818,12 @@ class Virtual:
 
     def clear_effect(self):
         with self.lock:
+            # SpotFX deviation #68: never leave a program composing onto an
+            # effect that is being cleared.
+            running = getattr(self, "_program", None)
+            if running is not None:
+                self._program = None
+                running.finish()
             self._ledfx.events.fire_event(EffectClearedEvent(self.id))
             self.clear_transition_effect()
 

@@ -2076,3 +2076,39 @@ against that commit.
     Evidence: `tests/test_squiggles_lull_thinning.py` (with the
     rectangle-fallback red control), `tests/test_eye_lull_lids_upside_down.py`,
     `tests/test_lull_dark.py`. Unverified against his live room.
+70. `virtuals.py` (`Virtual.set_effect(..., program=None)` + `clear_effect`)
+    + `effects/twod.py` (`Twod.render()`'s `_transition_program` hook) +
+    `facade.py` (`_effects_put` reads `"program": {...}`) + NEW SpotFX-authored
+    `effects/transition_program.py`: THE TRANSITION PROGRAM CLOCK
+    (2026-10-11, transitions-drop plan phase 3; the Admiral: "Ideas for
+    transitions should smoothly form into the particles and black hole,
+    etc, and vice versa"). A registered (outgoing, incoming) effect-type
+    switch — INFALL (orbits / fish / squiggles / fireworks -> blackhole),
+    ERUPTION (blackhole -> orbits / fish / squiggles) — runs a program with
+    its own clock instead of the stored crossfade: `set_effect(program=)`
+    reads the outgoing effect's particles (`program.capture`) BEFORE it
+    deactivates, lands the switch as a cut, and attaches the program to the
+    incoming effect, which then composes the program's cloud onto its own
+    matrix inside `Twod.render` (after `draw()`, before the pixel mapping)
+    by MAX until the program hands over. A switch or a clear arriving
+    mid-program finishes it first (the cloud is handed over, never
+    dropped). `program=None` — every caller but the facade's program path —
+    is byte-identical: the crossfade branch only gained `and program is
+    None`, and the Twod hook is one attribute read. The facade honours the
+    key only for a registered pair; any other switch, and every write
+    without the key, takes the path it always did. With it ride the
+    snapshot's new `vx`/`vy` (px/s) + `gesture` (blackhole, orbits —
+    `p_vx`/`p_vy` SoA arrays, render untouched — fish, fireworks,
+    squiggles), `_formation_points()` (orbits, fish, squiggles: the live
+    pieces an eruption implodes onto), `blackhole._program_field_velocity`,
+    and the two ADOPTION FIXES: `blackhole._adopt_handoff`'s cross-type
+    path continues an inherited velocity (`p_ivx`/`p_ivy`,
+    `_blend_inherited`, blended into the field over `handoff_ease`) instead
+    of freezing and winding up from zero, and can APPEND (`snap["append"]`,
+    the program's own hand-off); `fish._adopt_handoff`'s generic path keeps
+    the inherited heading and speed instead of re-heading to the tangent.
+    Evidence: `tests/test_transition_programs.py` (real pipeline, fake
+    clock: infall hand-off velocity change 0.04 px/s median against a
+    control that drops 30 -> 0.7 px/s; eruption pieces ON the moving
+    targets with their velocity; no white cell on a solid set; the facade
+    path and the untouched crossfade). Unverified against his live room.

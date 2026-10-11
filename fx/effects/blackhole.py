@@ -579,6 +579,13 @@ class Blackhole2d(Twod, GradientEffect):
         # instant-stall discontinuity this mechanism exists to remove.
         self.p_turn = np.zeros(CAP, dtype=bool)
         self.p_vr = np.zeros(CAP, dtype=np.float32)
+        # INHERITED VELOCITY (transitions-drop plan phase 3, VENDOR #68): an
+        # adopted blob's velocity at the switch, normalized units/s (NaN =
+        # none). For handoff_ease seconds its motion blends from this into
+        # the field's own instead of freezing and winding up from zero.
+        self.p_ivx = np.full(CAP, np.nan, dtype=np.float32)
+        self.p_ivy = np.full(CAP, np.nan, dtype=np.float32)
+        self._adopt_blend_age = None
         # scalar gate so p_turn is only scanned while a turn is in flight
         self._turn_active = False
 
@@ -741,6 +748,8 @@ class Blackhole2d(Twod, GradientEffect):
             self.p_nocap,
             self.p_turn,
             self.p_vr,
+            self.p_ivx,
+            self.p_ivy,
         ):
             arr[:count] = arr[: self.n][alive]
         self.n = count
@@ -754,12 +763,18 @@ class Blackhole2d(Twod, GradientEffect):
         n = self.n
         px = self.cx + self.p_r[:n] * np.cos(self.p_theta[:n]) * self.sx
         py = self.cy + self.p_r[:n] * np.sin(self.p_theta[:n]) * self.sy
+        vx, vy = self._program_field_velocity(px, py)
         return {
             "src": "blackhole",
             "t": particle_handoff.now(),
             "dims": (self.r_width, self.r_height),
             "px": px.astype(np.float32),
             "py": py.astype(np.float32),
+            # each blob's velocity (px/s) and how the form lets go — the
+            # transition program's RELEASE reads these (particle_handoff)
+            "vx": vx,
+            "vy": vy,
+            "gesture": "unwind",
             "grad": self.p_grad[:n].copy(),
             "bright": self.p_bright[:n].copy(),
             "gradient": self._config.get("gradient"),
@@ -782,7 +797,7 @@ class Blackhole2d(Twod, GradientEffect):
                     for name in (
                         "p_r", "p_theta", "p_grad", "p_bright",
                         "p_age", "p_band", "p_cap", "p_out", "p_is_burst",
-                        "p_nocap", "p_turn", "p_vr",
+                        "p_nocap", "p_turn", "p_vr", "p_ivx", "p_ivy",
                     )
                 },
             },
@@ -884,29 +899,130 @@ class Blackhole2d(Twod, GradientEffect):
         # imported particles join the normal infall/eruption flow. Adopt
         # EVERY inherited blob (max_blobs only gates fresh spawns) — nothing
         # on screen should vanish at the switch.
-        k = min(len(snap["px"]), CAP)
+        # A transition program hands its cloud over APPENDED to what this
+        # effect has already spawned while the program ran (snap "append");
+        # every other adoption replaces the population, as before.
+        base = self.n if snap.get("append") else 0
+        k = min(len(snap["px"]), CAP - base)
         if k <= 0:
             return
         gx = (snap["px"][:k] - self.cx) / max(self.sx, 1e-6)
         gy = (snap["py"][:k] - self.cy) / max(self.sy, 1e-6)
         r = np.sqrt(gx**2 + gy**2).astype(np.float32)
+        s = slice(base, base + k)
         # keep imported blobs inside the alive bounds of every mode; blobs
         # past the unit rim (orbits' field is wider) stay where they are
         # instead of teleporting inward
-        self.p_r[:k] = np.clip(r, self.kill_radius + 0.02, self.r_max - 0.02)
-        self.p_theta[:k] = np.arctan2(gy, gx).astype(np.float32)
-        self.p_grad[:k] = snap["grad"][:k]
-        self.p_bright[:k] = np.clip(snap["bright"][:k], 0.3, 1.0)
-        self.p_age[:k] = FADE_IN_S  # no fade-in flash
-        self.p_band[:k] = 0
-        self.p_cap[:k] = -1.0
-        self.p_is_burst[:k] = False  # adopted blobs are ordinary population
-        self.p_nocap[:k] = False
-        self.p_turn[:k] = False      # ... and never mid-turnaround
-        self.p_vr[:k] = 0.0
-        self.n = k
-        # adopted particles wind up to full speed over handoff_ease seconds
-        self._adopt_age = 0.0 if self.handoff_ease > 0.0 else None
+        self.p_r[s] = np.clip(r, self.kill_radius + 0.02, self.r_max - 0.02)
+        self.p_theta[s] = np.arctan2(gy, gx).astype(np.float32)
+        self.p_grad[s] = snap["grad"][:k]
+        self.p_bright[s] = np.clip(snap["bright"][:k], 0.3, 1.0)
+        self.p_age[s] = FADE_IN_S  # no fade-in flash
+        self.p_band[s] = 0
+        self.p_cap[s] = -1.0
+        self.p_out[s] = 0.0
+        self.p_is_burst[s] = False  # adopted blobs are ordinary population
+        self.p_nocap[s] = False
+        self.p_turn[s] = False      # ... and never mid-turnaround
+        self.p_vr[s] = 0.0
+        self.n = base + k
+        vx, vy = snap.get("vx"), snap.get("vy")
+        if (vx is not None and vy is not None and len(vx) >= k
+                and len(vy) >= k and self.handoff_ease > 0.0):
+            # THE LENSING FIX (VENDOR #68): the predecessor said how each
+            # blob was moving, so its motion CONTINUES — blended into this
+            # field's own over handoff_ease — instead of stopping dead and
+            # winding up from zero along the infall (a 68 degree heading
+            # change at the cut, measured in the plan).
+            ivx = np.asarray(vx[:k], dtype=np.float32) / max(self.sx, 1e-6)
+            ivy = np.asarray(vy[:k], dtype=np.float32) / max(self.sy, 1e-6)
+            ok = np.isfinite(ivx) & np.isfinite(ivy)
+            self.p_ivx[s] = np.where(ok, ivx, np.nan)
+            self.p_ivy[s] = np.where(ok, ivy, np.nan)
+            self._adopt_blend_age = 0.0
+            self._adopt_age = None
+        else:
+            self.p_ivx[s] = np.nan
+            self.p_ivy[s] = np.nan
+            # adopted particles wind up to full speed over handoff_ease s
+            self._adopt_age = 0.0 if self.handoff_ease > 0.0 else None
+
+    def _blend_inherited(self, n, r0, th0, dt):
+        """An adopted blob's displacement this frame: (1-w) of the velocity
+        it arrived with plus w of what the field just did, w easing 0 -> 1
+        over handoff_ease (VENDOR #68). A blob the horizon pinned this frame
+        keeps the pin — the ring owns its radius."""
+        self._adopt_blend_age += dt
+        ease = max(self.handoff_ease, 1e-3)
+        w = min(self._adopt_blend_age / ease, 1.0)
+        if w >= 1.0:
+            self._adopt_blend_age = None
+            self.p_ivx[: self.n] = np.nan
+            self.p_ivy[: self.n] = np.nan
+            return
+        w = w * (2.0 - w)
+        inh = np.isfinite(self.p_ivx[:n]) & (self.p_cap[:n] < 0)
+        if not inh.any():
+            return
+        x0 = r0[inh] * np.cos(th0[inh])
+        y0 = r0[inh] * np.sin(th0[inh])
+        r1 = self.p_r[:n][inh]
+        t1 = self.p_theta[:n][inh]
+        x1 = r1 * np.cos(t1)
+        y1 = r1 * np.sin(t1)
+        nx = x0 + (1.0 - w) * self.p_ivx[:n][inh] * dt + w * (x1 - x0)
+        ny = y0 + (1.0 - w) * self.p_ivy[:n][inh] * dt + w * (y1 - y0)
+        new_th = np.arctan2(ny, nx).astype(np.float32)
+        th_prev = th0[inh]
+        self.p_r[:n][inh] = np.clip(
+            np.hypot(nx, ny), self.kill_radius + 0.005, self.r_max
+        ).astype(np.float32)
+        # shortest way round, so the substep smear never crosses the cut
+        self.p_theta[:n][inh] = th_prev + (
+            ((new_th - th_prev + np.pi) % (2.0 * np.pi)) - np.pi
+        )
+
+    def _program_field_velocity(self, px, py):
+        """This field's velocity (px/s) at pixel positions — what a blob
+        there would do next: the fall `v(r)` inward (outward in reverse)
+        plus the swirl, or the horizon ring's own rate at and inside the
+        horizon. The transition program blends an arriving cloud into this
+        (VENDOR #68); the snapshot exports it per blob."""
+        px = np.asarray(px, dtype=np.float32)
+        py = np.asarray(py, dtype=np.float32)
+        if getattr(self, "r_width", None) is None or px.size == 0:
+            return (np.zeros_like(px), np.zeros_like(py))
+        sx, sy = max(self.sx, 1e-6), max(self.sy, 1e-6)
+        gx = (px - self.cx) / sx
+        gy = (py - self.cy) / sy
+        r = np.hypot(gx, gy)
+        th = np.arctan2(gy, gx)
+        gain = (1.0 + self.speed_audio * self.impulse * 2.0) \
+            * self._phase_speed_mult()
+        v = self.base_speed * (
+            self.edge_speed
+            + (1.0 - self.edge_speed) * np.clip(1.0 - r, 0.0, 1.0) ** self.accel
+        ) * gain
+        omega = np.clip(self.swirl * v / np.maximum(r, R_FLOOR),
+                        -OMEGA_MAX, OMEGA_MAX)
+        vr = v if self.reverse else -v
+        vt = omega * r
+        horizon_on = self.horizon_scale > 0.0 or self._phase != "none"
+        if horizon_on and not self.reverse:
+            rh = self._horizon_radius()
+            v_h = self.base_speed * (
+                self.edge_speed
+                + (1.0 - self.edge_speed) * max(0.0, 1.0 - rh) ** self.accel
+            ) * (1.0 + self.speed_audio * self.impulse * 2.0)
+            omega_h = float(np.clip(
+                (self.swirl if self.swirl != 0 else 1.0) * v_h / max(rh, R_FLOOR),
+                -OMEGA_MAX, OMEGA_MAX))
+            ring = r <= rh + REVERSE_FALLBACK_RING_TOL
+            vr = np.where(ring, 0.0, vr)
+            vt = np.where(ring, omega_h * np.maximum(r, 1e-6), vt)
+        nvx = vr * np.cos(th) - vt * np.sin(th)
+        nvy = vr * np.sin(th) + vt * np.cos(th)
+        return ((nvx * sx).astype(np.float32), (nvy * sy).astype(np.float32))
 
     def _arm_reverse_fallback(self, n, v_out):
         """Consume a reverse True->False edge: every live blob was flowing
@@ -1075,6 +1191,8 @@ class Blackhole2d(Twod, GradientEffect):
         self.p_nocap[s] = True     # the payoff must always land in full
         self.p_turn[s] = False
         self.p_vr[s] = 0.0
+        self.p_ivx[s] = np.nan
+        self.p_ivy[s] = np.nan
         if self.color_mode == "wheel":
             self.p_grad[s] = (
                 self.p_theta[s] / (2 * np.pi) - self.spin_total
@@ -1405,6 +1523,8 @@ class Blackhole2d(Twod, GradientEffect):
         self.p_out[s] = 0.0
         self.p_turn[s] = False
         self.p_vr[s] = 0.0
+        self.p_ivx[s] = np.nan
+        self.p_ivy[s] = np.nan
 
         # spin_total is baked in at spawn: colors travel WITH the blobs, so
         # a spinning gradient shows as rotating color arms, not in-place
@@ -1758,6 +1878,8 @@ class Blackhole2d(Twod, GradientEffect):
             self.p_r[:n] = new_r
             self.p_theta[:n] = th0 + omega * dt
             self.p_age[:n] += dt
+            if self._adopt_blend_age is not None:
+                self._blend_inherited(n, r0, th0, dt)
 
             if self.reverse:
                 # live until past the farthest panel corner, not the

@@ -152,6 +152,16 @@ up (measured: 189 lit cells -> 0 for five frames before; -> 42 on the cut
 frame after). A crossfade adoption (`live` True) is unchanged; so is the
 radial burst. `fx/VENDOR.md` #64.
 
+## Thematic transitions (2026-10-11, transitions-drop plan phase 3)
+
+Squiggles feeds an Infall into the Black Hole (`_handoff_snapshot` carries
+each head's `vx`/`vy` — its last lattice move at `base_speed`, via
+`_head_velocity` — and `gesture: "spark"`) and receives the Black Hole's
+Eruption: `_formation_points()` is the chain heads, read live, so the
+ejecta implode onto heads that are walking. A fresh Squiggles with no
+chains yet (silent audio) has no heads: the ejecta then simply fade.
+`fx/effects/transition_program.py`'s docstring is the binding statement; `tests/test_transition_programs.py` measures it on the real pipeline.
+
 ## Sonic reach
 
 No direct param edit — reachable only through an already-attached

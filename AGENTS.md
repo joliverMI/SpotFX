@@ -996,6 +996,46 @@ never using a `None` sentinel in the first place (it sets a concrete `t:
 0.0` directly), which is the simpler pattern to prefer in new code.
 Regression: `tests/test_blackhole_orphan_drop_none_crash.py`.
 
+## TRANSITION PROGRAMS — a Black Hole <-> particles switch is not a crossfade (2026-10-11)
+
+`fx/effects/transition_program.py`'s docstring is the binding statement
+(transitions-drop plan phase 3, `/home/javi/fleet-spotfx/data/
+transitions-drop-plan/report.md`; `fx/VENDOR.md` #70). A registered
+(outgoing, incoming) Matrix effect switch — INFALL (orbits / fish /
+squiggles / fireworks -> blackhole), ERUPTION (blackhole -> orbits / fish /
+squiggles) — runs a program with its own clock (room
+`transition_program_ms`, 1.4 s) instead of the virtual's stored 0.5 s
+crossfade. Five things:
+
+- **THE REQUEST IS EXPLICIT, end to end.** `scene_compiler.fire_scene` asks
+  (`transition_program_for`, against the conductor's current effect types)
+  and passes `program=` to `fx_seam.apply_writes` ONLY when a pair applies,
+  so every other fire — and every test double of `apply_writes` — keeps the
+  old call shape. The facade honours `"program"` only for a registered
+  pair against the virtual's REAL active effect. House glides (an explicit
+  `transition_ms`) never take one. Previews ask through
+  `flare_preview_hold.PreviewContext.apply_scene(program=True)`.
+- **ONE PICTURE, BY MAX.** The program composes onto the incoming effect's
+  matrix in `Twod.render` (`_transition_program`); never an add, set
+  colours only. The incoming effect runs its own kinematics underneath the
+  whole time, which is what the eruption implodes onto
+  (`_formation_points()`) — never a mirror of its physics.
+- **VELOCITY IS CARRIED, NOT RESET.** Snapshots carry `vx`/`vy` + `gesture`;
+  Black Hole's cross-type adopt continues an inherited velocity (no freeze
+  + wind-up), Fish's keeps the inherited heading/speed. A new effect
+  joining a program needs `vx`/`vy` in its snapshot (and
+  `_formation_points()` to be formed onto).
+- **THE LEAD READS THE PROGRAM** (`scene_transition_lead.program_lead_ms`,
+  replacing the crossfade lead when a program applies): the infall's
+  ignition / the eruption's bloom lands on the mark. A DROP-led cut on a
+  program pair (`drop_switch.HANDOFF_PROGRAM`) runs it `on_mark` (anchor 0).
+- **NEXT TASK, NOT THIS ONE**: Lensing / Fountain (Fireworks <-> Black
+  Hole — Fireworks still feeds a plain Infall until then), Flame Lick /
+  Ignition, Shoal Break / Shoaling. They join the same registry.
+  Spec: `tests/test_transition_programs.py`; help `transition-programs`;
+  contact sheets `scripts/render_transition_programs.py` ->
+  `docs/evidence/transition-programs/`.
+
 ## THE KNOWN AUDIO BUFFER — SPECTRA MIRRORS River's number, never shortens it
 
 **`spectra/services/known_buffer.py`'s module docstring is the binding

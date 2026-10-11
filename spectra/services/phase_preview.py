@@ -360,7 +360,8 @@ class PhaseSequenceProgram(flare_preview_hold.PreviewProgram):
                     # THE CUT, exactly as the trigger clock lands it: the
                     # target scene with no blend, then this member's own
                     # phase arm on the NEW effects
-                    await ctx.apply_scene(writes=writes, transition_ms=0, cut=True)
+                    await ctx.apply_scene(writes=writes, transition_ms=0, cut=True,
+                                      program=True)
                     cut = {"to_scene": target.name, "moment": plan.moment,
                            "handoff": plan.handoff}
                 # every step on a fresh scratch pair: point it at the scene
@@ -380,7 +381,8 @@ class PhaseSequenceProgram(flare_preview_hold.PreviewProgram):
             from spectra.services import drop_switch
             plan, target = self.switch
             writes = self._target_writes(ctx.intensity)
-            await ctx.apply_scene(writes=writes, transition_ms=0, cut=True)
+            await ctx.apply_scene(writes=writes, transition_ms=0, cut=True,
+                                      program=True)
             ctx.conductor.on_scene_fire(target, writes)
             out = {"result": "switched",
                    "drop_switch": {"to_scene": target.name,
