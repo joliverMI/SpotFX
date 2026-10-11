@@ -55,7 +55,7 @@ from fx import device_model  # noqa: E402
 from fx.effects import Effect, lull_dark, strip_phase as sp  # noqa: E402
 from spectra.services import room_controls as rc  # noqa: E402
 from spectra.services import scene_response  # noqa: E402
-from strip_phase_harness import (DT, FPS, PALETTE, STRIP_PX, Room,  # noqa: E402
+from strip_phase_harness import (FPS, PALETTE, STRIP_PX, Room,  # noqa: E402
                                  lum, palette_of, run, scene_for,
                                  whiter_than_set)
 

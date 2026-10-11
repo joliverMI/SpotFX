@@ -9429,10 +9429,13 @@ topic `lull-dark-cap`) — a 20 s lull is 17 s of approach + 3 s dark, a 4 s
 lull still 2 + 2. `fx/effects/lull_dark.py`'s docstring is the binding
 statement, including the three-step OPT-IN for an existing or future lull
 effect (schema fields, `fx.device_model.LULL_DARK_EFFECTS`, one
-`lull_timing()` call where the effect had a fixed dark fraction). Opted in: Black Hole,
-Squiggles, Pulse ONLY (his "just these 3 for now") — `blackhole1d`, Black
-Hole's own strip, is the obvious next one and still darkens at its old
-half-progress point. Three things:
+`lull_timing()` call where the effect had a fixed dark fraction). Opted in
+at the time: Black Hole, Squiggles, Pulse only (his "just these 3 for
+now") — `blackhole1d`, Black Hole's own strip, was the obvious next one
+and still darkens at its old half-progress point. **Since 2026-10-11 every
+strip phase member (Melt, Power — see "THE STRIP PHASE LAYER" below) is
+opted in too**, via the shared strip layer reading this same rule. Three
+things:
 
 - **SpotFX tells, the effect measures.** `scene_response._drive_phase` adds
   `lull_ramp_s`/`lull_dark_s` to the lull ARM write, only for

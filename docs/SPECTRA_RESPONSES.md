@@ -7,11 +7,13 @@ SpotFX program and carried verbatim into `fx/effects/`. SPECTRA's response
 engine (`spectra/services/scene_response.py`) DRIVES that machinery; it
 does not re-invent it.
 
-## The universal contract (all twelve phase-capable effects)
+## The universal contract (all phase-capable effects)
 
 Every effect in `fx/device_model.PHASE_EFFECTS` — `blackhole`,
 `blackhole1d`, `orbits`, `orbits1d`, `radial`, `fireworks`, `fireworks1d`,
-`squiggles`, `dancer`, `eye`, `fish`, `pulse` — carries two config params:
+`squiggles`, `dancer`, `eye`, `fish`, `pulse`, `sauron`, and (2026-10-11,
+via `fx.device_model.STRIP_PHASE_EFFECTS`) `melt`, `power` — carries two
+config params:
 
 - `phase`: `"none" | "charge" | "lull" | "drop"` — edge-detected in
   `config_updated` (a stale persisted value never edge-fires on a fresh
@@ -273,6 +275,45 @@ lull it is scaled by the lull's fade, so the lull still lands black) and
 only above intensity 0.4 by default —
 `FlareKind.min_intensity`). Both are instant, self-resetting pokes with no
 lead, carry or release.
+
+### Strip phase layer (`melt.py`, `power.py` — `fx/effects/strip_phase.py`)
+
+Unlike every family above, Melt and Power have no choreography of their
+own — they join ONE shared layer (2026-10-11, strip phase plan phase 1)
+that works in the output stage, after the effect's own render: a
+hue-kept colour gain (brighter, never whiter), a set-colour fill under the
+strip, the drop's set-colour shockwave painted over it, and a white guard
+on charge and drop. `fx/effects/strip_phase.py`'s own module docstring is
+the binding statement for the mechanism; `fx.device_model.
+STRIP_PHASE_EFFECTS` is where an effect joins it.
+
+- **Charge** — the fill (`charge_fill`, 0.30) rises under the strip and
+  shimmers faster as the build climbs; colours get brighter
+  (`charge_brightness`, 1.6×) and activity rises (`charge_activity`, 3× —
+  Melt's own clock runs that much faster; Power names no activity of its
+  own, so only its colours brighten).
+- **Lull** — everything eases from wherever the charge left it to black
+  (`lull_ember`, 0 by default) at the SAME dark point the crystal's Black
+  Hole/Squiggles and the Pulse singles share (`lull_dark.lull_timing`);
+  activity relaxes to `lull_activity` (0.25×). A flare landing while the
+  strip is darkening or dark PUNCHES THROUGH (`flare_punch_strength`) at
+  full strength, then slides back into the dark exactly where the lull
+  has got to.
+- **Drop** — begins on its mark: a shockwave in the set's colours leaves
+  the strip's centre and reaches both ends in 0.28 s, sized by
+  `drop_shockwave` (1.25) × the drop's intensity, leaving a flood behind it
+  that fades over ~0.8 s; colours brighten by `drop_brightness` (2×,
+  settling over `drop_brightness_settle_s`) and activity rises by
+  `drop_activity` (4×, settling over `drop_settle_s`).
+
+Held back under a house mode (`scene_response.HOUSE_HELD_PHASE_EFFECTS`),
+the same as Pulse. The room setting `strip_phase_strength` (0..1.5) scales
+every quantity above and, at 0, reproduces the effect exactly as it was
+before it joined — the rollback lever. Black Hole/Orbits/Fireworks' own
+strips keep their own choreography above and join this layer in later plan
+phases. Full mechanism (the output-stage order, the white guard, the
+punch envelope, how a future effect joins): the module's own docstring and
+AGENTS.md's "THE STRIP PHASE LAYER" section — not restated here.
 
 Fish answers one flare kind of its own (2026-10-08): **big_fish** — one
 really large fish (an ordinary fish's own body, scaled up and dimmer, laying
