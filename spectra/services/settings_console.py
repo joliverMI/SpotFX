@@ -494,6 +494,8 @@ async def apply_change(key: str, value: Any, source: str = "agent") -> dict:
     previous, candidate = validate_change(key, value)
     room_controls.save_room_controls(candidate)
     ambient_result = await room_controls.reconcile_ambient_if_changed(previous, candidate)
+    if previous.background_fade_s != candidate.background_fade_s:
+        room_controls.push_background_fade(candidate)
 
     new_value = getattr(candidate, key)
     label = SETTINGS_REGISTRY[key].label

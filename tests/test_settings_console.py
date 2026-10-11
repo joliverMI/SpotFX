@@ -207,6 +207,27 @@ def test_undo_with_empty_log_rejected():
         _run(sc.undo_last_change())
 
 
+def test_apply_change_pushes_background_fade_to_the_render_layer():
+    """A Sonic/voice set_setting of background_fade_s must take live effect
+    immediately, the same as a PUT /api/room-controls save — not just
+    persist to storage until the next restart/handover (room_controls.
+    apply_patch already does this; apply_change, the Sonic write path,
+    had not)."""
+    from fx import background_fade
+    from spectra.services import settings_console as sc
+
+    assert background_fade.default_s() == 1.0
+
+    result = _run(sc.apply_change("background_fade_s", 2.5))
+    assert result["new_value"] == 2.5
+    assert background_fade.default_s() == 2.5
+
+    result = _run(sc.apply_change("brightness_multiplier", 0.5))
+    assert result["new_value"] == 0.5
+    assert background_fade.default_s() == 2.5, \
+        "an unrelated field change must not touch the render layer's fade"
+
+
 # ═══ 4. the tool-dispatch boundary itself ════════════════════════════════
 
 def test_dispatch_recognizes_exactly_the_declared_settings_tools():
