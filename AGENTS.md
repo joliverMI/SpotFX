@@ -9134,10 +9134,12 @@ things:
   (radial, dancer, fish's `TRANSITION_ADOPTERS`, spectra
   `transition_phases`) names `"sauron"` too — a new one must as well. The
   copied `snap_threshold` saturating `>=` is fixed here only.
-- **`palette_sort`** (default `auto`: dark -> bright, cold -> warm for a
-  set spanning > 180° of hue) re-orders the curve THIS effect samples, in
-  a `_generate_gradient_curve` override — on a config change, never per
-  frame, never his colour-set data.
+- **`palette_sort`** (default `auto`: dark -> bright, or `radial` for a
+  set spanning > 180° of hue — tune-up 1, 2026-10-11, replacing a
+  heat-mapped `warm`; see the skill's own "Tune-up 1" section) re-orders
+  the curve THIS effect samples, in a `_generate_gradient_curve`
+  override — on a config change, never per frame, never his colour-set
+  data.
 - **`sauron_surge`** is the tenth FlareKind type, the firework_burst /
   pulse_flash / big_fish shape (`SAURON_SURGE_EFFECTS`, unregistered
   self-resetting `surge` poke, no lead/carry/release), written over

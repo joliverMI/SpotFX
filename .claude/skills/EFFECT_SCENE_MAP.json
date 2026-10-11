@@ -136,6 +136,7 @@
         "fx/effects/sauron.py",
         "scripts/check_sauron.py",
         "scripts/render_sauron.py",
+        "scripts/render_sauron_tuneup.py",
         "tests/test_sauron.py"
       ]
     },

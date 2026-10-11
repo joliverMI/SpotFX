@@ -50,8 +50,16 @@ effect that special-cases `"eye"` must name `"sauron"` too.
 3. **The palette sort runs only when GradientEffect regenerates its curve**
    (`_generate_gradient_curve` override — on a config change, never per
    frame) and rewrites only the curve THIS effect samples. Under `auto` a
-   rainbow (chromatic span > 180°, Pulse's own test) sorts cold → warm,
-   everything else dark → bright. KNOWN, TO WATCH AT THE GATE: the colour
+   rainbow (chromatic span > 180°, Pulse's own test) gets the RADIAL
+   mapping (tune-up 1, 2026-10-11, his "too messy" on a heat-mapped
+   rainbow): the set cold → warm walked outward-in through the eye's own
+   shape (`radial_coord` — lens-shaped against the slit, round at the
+   iris rim, following the hexagon outside), heat only sets brightness;
+   everything else dark → bright along the heat. The resolved mapping is
+   stored WITH the curve (`mapping()` calls `_assert_gradient` first), so
+   a journey that carries a set across the rainbow line switches mapping
+   in step with its colours. `angle` (Eye's rule) and `warm` (the old
+   rainbow heat map) are still choices. KNOWN, TO WATCH AT THE GATE: the colour
    journey rotates a set's hues, and a re-ordering is discrete — as a
    rotation carries one colour past another in warmth/brightness, those two
    swap places along the heat (a step, not a glide). Measured nowhere yet.
@@ -62,6 +70,24 @@ effect that special-cases `"eye"` must name `"sauron"` too.
    to the poke at once and decays exp(-t / SURGE_TAU); `surge_visible_s` is
    what the preview ruler draws. A drop/radial eruption (`_burst`) burns
    like a full surge.
+
+## Tune-up 1 (2026-10-11): the slit floor and the perimeter ring
+
+The Admiral, after tuning it live: the slit and the perimeter ring "don't
+resolve quite right as they move because of the nature of the hex
+pattern". Two constants govern the fix — never per-pixel tuning knobs:
+
+- **`SLIT_MIN_DARK_PX` (3)** — the slit's fully dark core is never
+  narrower than this many RENDERED pixels: a lattice row holds a real cell
+  every second column, so a 2-px band can miss a row as the eye moves; his
+  "one pixel more" cannot. A rounded column unioned with the lens, stopped
+  `SLIT_MIN_TIP` half-widths short of the tips, scaled back up by the
+  eyeball turn's sideways squeeze. `last_slit_core` is its instrument.
+- **`RING_WIDTH` (0.11, was 0.05) + `RING_FADE`/`RING_FADE_ROUGH`** — the
+  ring is ~2 px each side of the iris edge and fades into the flames,
+  SCREENED with them (not a max), so there is no step where they meet.
+
+No param changed meaning, so his tuned Sauron scene needed no migration.
 
 ## Background
 
@@ -80,9 +106,16 @@ including `palette_sort`); the `sauron_surge` kind through
 ## Executable proofs
 
 `scripts/check_sauron.py` (real pipeline, real crystal mask: slit
-continuous on the lattice, rim hottest, reach, surge erupt/reset/decay,
-beat dilation, palette sort, angle mode, a 60 s soak, frame cost ~2.8 ms
-p50 here) — run by `tests/test_sauron.py`, which also covers the registry,
+continuous on the lattice — and across a moving-gaze sweep at rest, under
+a full charge and at the narrowest Slit Width, the floor off as red
+control — rim hottest, the ring's crest on a real cell in every direction
+every frame and its fade into the flames, reach, surge erupt/reset/decay,
+beat dilation, palette sort, angle mode, the radial mapping following the
+slit and breaking a rainbow into far fewer patches than the heat map, a
+60 s soak, frame cost ~2.9 ms p50 here) — run by `tests/test_sauron.py`, which also covers the registry,
 the device-model sets, the flare kind, the engine write (incl. flares-off),
 the preview ruler and Sonic's enum. Offline GIFs:
-`scripts/render_sauron.py` -> `docs/evidence/sauron/`.
+`scripts/render_sauron.py` -> `docs/evidence/sauron/`; tune-up 1's
+before/after (the merged effect read out of git beside the working tree,
+his scene's own values, the eye moving): `scripts/render_sauron_tuneup.py`
+-> `docs/evidence/sauron-tuneup-1/`.

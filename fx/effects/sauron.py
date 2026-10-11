@@ -33,10 +33,24 @@ WHAT IS NEW — THE PICTURE (inside to outside):
     dilates it: width by `pupil_beat` x (0.55 + 0.45 x bass) and height by
     SLIT_HEIGHT_BEAT (0.3) of that — "as prototyped", easing back over
     BEAT_PULSE_TAU; bass also widens it a little (SLIT_BASS_WIDEN).
+    TUNE-UP 1 (the Admiral, 2026-10-11: "the eye slit [doesn't] resolve
+    quite right as [it moves] because of the nature of the hex pattern. I
+    think we can increase the minimum slit width by a pixel"): wherever
+    the lens is narrower, a rounded column keeps its fully dark core at
+    least SLIT_MIN_DARK_PX (3) RENDERED pixels wide — one lattice period
+    (a row holds a real cell every second column) plus his one pixel —
+    stopping short of the tips so they still come to a point, and undoing
+    the eyeball turn's sideways squeeze (`slit_min_half`). A charge or the
+    narrowest Slit Width now narrows the slit TO that floor, never past it.
   * a WHITE-HOT RIM hugging the slit (`core_white`), flaring on the beat.
   * the IRIS as fire: heat 0.5-0.8 rising toward the slit, radial STREAKS
-    from two angular noise layers (`streaks`), a bright outer rim where
-    the flames root.
+    from two angular noise layers (`streaks`), and the PERIMETER RING
+    where the flames root — since tune-up 1 ("the perimeter should cleanly
+    blend with the flame if we increase its thickness") a band RING_WIDTH
+    wide (~2 px each side, was ~1) that does not stop at the iris edge: it
+    fades into the flames over RING_FADE, roughened by the flame field,
+    and is SCREENED with them (1 - (1-a)(1-b)), so there is no step and no
+    crease where the flames leave it.
   * the FLAMES — plan method A, chosen over particles and a heat buffer
     (cheapest, erupts ON the mark, centred on the eye the instant it moves):
     a polar simplex-noise field scrolled outward and shaped into `tongues`
@@ -55,11 +69,24 @@ after the set's distinct colours are re-ORDERED along the heat:
   brightness  darkest colour at the tips .. brightest at the rim (Rec.709)
   warm        coldest hue at the tips .. warmest at the rim (warmth =
               cos(hue - 30 deg); an achromatic colour counts as hottest)
+  radial      (tune-up 1) the set cold -> warm walked OUTWARD-IN through
+              the eye's own shape, heat only sets brightness: inside the
+              iris the fraction of the way from the slit's edge to the
+              iris's edge (lens-shaped against the slit, round at the rim —
+              his "don't make it perfectly radial, considering the eye
+              slit is not radially symmetric"), outside it the fraction of
+              the way to the crystal's edge along each ray (following the
+              hexagon), tinted RADIAL_HEAT_MIX by the flames (`radial_coord`)
   angle       Eye's rainbow rule: colour by angle around the eye, heat only
               sets brightness
-  auto        (default) `brightness`, or `warm` for a RAINBOW set — one
+  auto        (default) `brightness`, or `radial` for a RAINBOW set — one
               whose chromatic stops span more than RAINBOW_SPAN_DEG of hue,
-              the same test Pulse's rainbow walk and the compiler use.
+              the same test Pulse's rainbow walk and the compiler use. (It
+              was `warm`, heat-mapped, until tune-up 1: the Admiral, after
+              tuning it live, "the sauron with rainbow colors is too
+              messy" — a noisy heat across eight hues speckles.) "auto" is
+              resolved with the curve, so a colour journey carrying the set
+              across the rainbow line switches the mapping with it.
 The sort rewrites only the curve THIS effect samples, once per gradient
 change (GradientEffect regenerates its curve only on a config change) —
 never his colour-set data and never another effect. A solid colour is
@@ -141,6 +168,22 @@ SURGE_HEAT = 0.35          # flame heat gain per unit of surge (on 0.9)
 SURGE_SKY = 0.6            # sky gain per unit of surge
 SURGE_SCROLL = 1.5         # outward scroll gain per unit of surge
 OVERREACH = 1.12           # a lick may reach this x the gap (past the edge)
+# tune-up 1 (the Admiral, 2026-10-11) ─────────────────────────────────────
+SLIT_AA_PX = 1.2           # the slit's anti-aliased edge, rendered px
+SLIT_MIN_DARK_PX = 3.0     # its fully dark core is never narrower than this
+                           # (one lattice period, 2 px, plus one pixel)
+SLIT_MIN_TIP = 1.5         # the floor column stops this x its half-width
+                           # short of the tips, so they still come to a point
+RING_WIDTH = 0.11          # the perimeter ring's half-width (eye units;
+                           # ~2 px each side on the crystal; was 0.05)
+RING_GAIN = 0.5            # how much the ring heats the iris's edge
+RING_OUT_HEAT = 0.9        # the ring's heat where it meets the flames
+RING_FADE = 0.2            # it fades into the flames over this (eye units)
+RING_FADE_ROUGH = 0.35     # the flame field roughens that fade by this much
+# the radial mapping (`palette_sort` radial; auto for a rainbow set)
+RADIAL_IRIS_SHARE = 0.3    # the iris spans this much of the colour run
+RADIAL_OUTER_SPAN = 0.75   # the outer run ends this far out along the gap
+RADIAL_HEAT_MIX = 0.12     # the flames' heat tints the coordinate this much
 RAINBOW_SPAN_DEG = 180.0   # "auto" sorts a set spanning more hue cold->warm
 PALETTE_BAND = 0.35        # a sorted colour holds this share of its band
 SURGE_POKE_FLOOR = 0.001   # a fire at intensity 0 still edges the poke
@@ -156,7 +199,7 @@ def surge_visible_s(intensity: float) -> float:
     above that floor."""
     i = max(float(intensity), SURGE_POKE_FLOOR)
     return max(0.0, SURGE_TAU * float(np.log(i / 0.05))) if i > 0.05 else 0.0
-PALETTE_SORTS = ["auto", "authored", "brightness", "warm", "angle"]
+PALETTE_SORTS = ["auto", "authored", "brightness", "warm", "radial", "angle"]
 
 
 # ── the palette sort (pure; tests and scripts/check_sauron.py use these) ──
@@ -192,12 +235,18 @@ def warmth(rgb) -> float:
 
 
 def resolve_palette_sort(how: str, gradient) -> str:
-    """The ordering `how` actually applies to `gradient`: "auto" resolves
-    to "warm" for a rainbow set and "brightness" for everything else."""
+    """The mapping `how` actually applies to `gradient`: "auto" resolves
+    to "radial" for a rainbow set (the Admiral, 2026-10-11: heat-mapping a
+    rainbow is too messy) and "brightness" for everything else."""
     if how != "auto":
         return how
-    return ("warm" if chromatic_span_deg(gradient) > RAINBOW_SPAN_DEG
+    return ("radial" if chromatic_span_deg(gradient) > RAINBOW_SPAN_DEG
             else "brightness")
+
+
+# the colour ORDER each mapping lays along its coordinate: "radial" walks
+# the set cold -> warm outward-in, the order a heat-mapped rainbow used
+SORT_ORDER = {"radial": "warm"}
 
 
 def _stops(gradient):
@@ -260,8 +309,9 @@ def ordered_gradient(gradient, how: str) -> str:
 
 
 def palette_gradient(gradient, how: str) -> str:
-    """The gradient string this effect heat-maps for `palette_sort` = how."""
-    return ordered_gradient(gradient, resolve_palette_sort(how, gradient))
+    """The gradient string this effect samples for `palette_sort` = how."""
+    resolved = resolve_palette_sort(how, gradient)
+    return ordered_gradient(gradient, SORT_ORDER.get(resolved, resolved))
 
 
 class Sauron2d(Twod, GradientEffect):
@@ -467,6 +517,9 @@ class Sauron2d(Twod, GradientEffect):
         self.last_d = None
         self.last_flame = None
         self.last_slit = None
+        self.last_radial = None
+        self.last_ring = None
+        self.last_slit_core = None
         self.last_eye_px = (0.0, 0.0)
 
     def config_updated(self, config):
@@ -523,13 +576,21 @@ class Sauron2d(Twod, GradientEffect):
         how = getattr(self, "palette_sort", None) or self._config.get(
             "palette_sort", "auto")
         try:
+            self._mapping = resolve_palette_sort(how, gradient)
             gradient = palette_gradient(gradient, how)
         except Exception:                           # noqa: BLE001
+            self._mapping = "authored"
             _LOGGER.warning("sauron: palette sort failed; using as authored")
         super()._generate_gradient_curve(gradient, gradient_length)
 
-    def _angle_mapped(self) -> bool:
-        return self.palette_sort == "angle"
+    def mapping(self) -> str:
+        """What the colour section samples this frame: "angle" (around the
+        eye), "radial" (outward through the eye's own shape), or anything
+        else = the heat. Resolved with the curve, so "auto" follows the set
+        it is wearing now (a colour journey can carry a set across the
+        rainbow line)."""
+        self._assert_gradient()
+        return getattr(self, "_mapping", self.palette_sort)
 
     def audio_data_updated(self, data):
         impulse = self.impulse_filter.update(getattr(data, self.power_func)())
@@ -939,6 +1000,41 @@ class Sauron2d(Twod, GradientEffect):
              * (1.0 + SLIT_HEIGHT_BEAT * self.pupil_beat * pulse))
         return min(w, h * SLIT_MAX_ASPECT), h
 
+    def slit_min_half(self, cos_eff=1.0, ux=1.0, uy=0.0) -> float:
+        """The slit floor's half-width in the slit's own (unforeshortened)
+        frame, eye units: SLIT_MIN_DARK_PX of fully dark core (black >= 0.9
+        sits 0.4 x the anti-alias inside the edge), scaled back up by how
+        much the eyeball turn squeezes the slit's width direction."""
+        if SLIT_MIN_DARK_PX <= 0.0:
+            return 0.0
+        half_px = SLIT_MIN_DARK_PX / 2.0 + 0.4 * SLIT_AA_PX
+        squeeze = ux * ux / max(cos_eff, 1e-3) + uy * uy
+        return half_px / self.s_min * squeeze
+
+    def radial_coord(self, sd, dist, d, gap, iris_r, heat):
+        """The RADIAL colour coordinate (1 at the slit .. 0 out at the
+        flames' far reach), measured in the eye's own shape rather than a
+        circle — the Admiral, 2026-10-11: "Don't make it perfectly radial,
+        considering the eye slit is not radially symmetric."
+
+        Inside the iris it is the fraction of the way from the slit's edge
+        to the iris's edge along each point (sd over sd + the gap to the
+        rim), so the bands are lens-shaped against the slit and round out
+        to circles at the rim. Outside, it is the fraction of the way to
+        the crystal's edge along that point's own ray (the flames' own
+        measure), so the outer bands follow the hexagon. A little of the
+        flames' heat (RADIAL_HEAT_MIX) tints it, so a lick carries the
+        warmer colour outward without breaking the bands up."""
+        sdp = np.maximum(sd, 0.0)
+        to_rim = np.maximum(iris_r - dist, 0.0)
+        u = sdp / np.maximum(sdp + to_rim, 1e-4)
+        inner = 1.0 - RADIAL_IRIS_SHARE * u
+        v = np.clip(d / np.maximum(gap * RADIAL_OUTER_SPAN, 1e-4), 0.0, 1.0)
+        outer = (1.0 - RADIAL_IRIS_SHARE) * (1.0 - v)
+        rc = np.where(d < 0.0, inner, outer)
+        return np.clip((1.0 - RADIAL_HEAT_MIX) * rc
+                       + RADIAL_HEAT_MIX * heat, 0.0, 1.0)
+
     def draw(self):
         if self.test:
             self.draw_test(self.m_draw)
@@ -1089,8 +1185,19 @@ class Sauron2d(Twod, GradientEffect):
         gap = self._edge_gap(eye_px, eye_py, iris_r)
         flame = self._flames(d, ang, gap, imp, surge, charge)
         self.last_flame = np.where(d >= 0.0, flame, 0.0).astype(np.float32)
-        base = np.clip(1.0 - d / 0.16, 0.0, 1.0) ** 2 * 0.9
-        heat = np.where(d >= 0.0, np.maximum(flame, base)
+        # the PERIMETER RING (tune-up 1: thick enough to hold its shape on
+        # the hex lattice as the eye moves): a band RING_WIDTH wide centred
+        # on the iris edge. Outside the iris it does not stop — it fades
+        # into the flames over RING_FADE, its fall roughened by the flame
+        # field, and the two are combined by a SCREEN (1 - (1-a)(1-b)), so
+        # the flames grow out of the ring with no step and no crease
+        ring = np.exp(-((dist - iris_r) / RING_WIDTH) ** 2)
+        self.last_ring = ring.astype(np.float32)
+        dpos = np.maximum(d, 0.0)
+        fade = np.exp(-(dpos / RING_FADE) ** 2) * (
+            1.0 - RING_FADE_ROUGH * (1.0 - flame))
+        root = RING_OUT_HEAT * np.maximum(ring, fade)
+        heat = np.where(d >= 0.0, (1.0 - (1.0 - flame) * (1.0 - root))
                         * (0.9 + SURGE_HEAT * surge), 0.0)
         if self.sky > 0.0:
             sk = self._noise(self.gx * 1.6, self.gy * 1.6 - self._t * 0.12,
@@ -1105,10 +1212,8 @@ class Sauron2d(Twod, GradientEffect):
         streak2 = self._noise(ang * 15.0, t_rad * 0.6, 91.0)
         iris_heat = (0.52 + 0.24 * (1.0 - t_rad)
                      + self.streaks * (0.22 * streak + 0.12 * streak2))
-        rim = np.exp(-((dist - iris_r) / 0.05) ** 2) * 0.6
-        iris_heat = np.clip(iris_heat + rim, 0.0, 1.0)
-        heat = np.where(inside, iris_heat,
-                        np.maximum(heat, rim * (d < 0.12)))
+        iris_heat = np.clip(iris_heat + RING_GAIN * ring, 0.0, 1.0)
+        heat = np.where(inside, iris_heat, heat)
 
         # ── the slit: a lens of two arcs, leading into the gaze ─────────
         w, h = self.slit_size(iris_r, pulse, imp, charge, size_gain)
@@ -1122,7 +1227,25 @@ class Sauron2d(Twod, GradientEffect):
         c = R - w
         sd = np.maximum(np.sqrt((qx - c) ** 2 + qy ** 2) - R,
                         np.sqrt((qx + c) ** 2 + qy ** 2) - R)
-        aa = 1.2 / self.s_min
+        # THE MINIMUM WIDTH (tune-up 1): wherever the lens is narrower, a
+        # rounded column of half-width `wm` keeps the slit's fully dark
+        # core at least SLIT_MIN_DARK_PX rendered pixels wide — a lattice
+        # row holds a real cell every second column, so a dark band of one
+        # period (2 px) can miss a row as the eye moves; one pixel more
+        # cannot. Measured in rendered pixels, so the foreshortening that
+        # squeezes the slit sideways as the eye turns is undone here
+        wm = self.slit_min_half(cos_eff, ux, uy)
+        hc = 0.0
+        if wm > 0.0:
+            hc = max(h - SLIT_MIN_TIP * wm, 0.0)
+            sd = np.minimum(sd, np.sqrt(
+                qx * qx + np.maximum(np.abs(qy) - hc, 0.0) ** 2) - wm)
+        # instrument: the floor column's centre and half-length, rendered px
+        # (the slit's height direction squeezed by the eyeball turn)
+        self.last_slit_core = (
+            eye_px + lpx * self.s_min, eye_py + lpy * self.s_min,
+            hc * self.s_min / (uy * uy / max(cos_eff, 1e-3) + ux * ux))
+        aa = SLIT_AA_PX / self.s_min
         core = np.exp(-np.maximum(sd, 0.0) / (0.085 + 0.05 * pulse)) * (
             0.9 + 0.35 * pulse)
         heat = np.maximum(heat, np.clip(core, 0.0, 1.0))
@@ -1134,15 +1257,20 @@ class Sauron2d(Twod, GradientEffect):
 
         # ── colour: the (sorted) set along the heat ─────────────────────
         hclip = np.clip(heat, 0.0, 1.0)
-        if self._angle_mapped():
+        how = self.mapping()
+        if how == "angle":
             a_norm = (ang * (1.0 / (2 * np.pi))) % 1.0
             rgb = self.get_gradient_color_vectorized1d(
                 a_norm.ravel()).astype(np.float32)
             rgb = rgb.reshape(self.r_height, self.r_width, 3) * (
                 hclip ** 0.85)[..., None]
         else:
+            coord = hclip
+            if how == "radial":
+                coord = self.radial_coord(sd, dist, d, gap, iris_r, hclip)
+                self.last_radial = coord.astype(np.float32)
             rgb = self.get_gradient_color_vectorized1d(
-                hclip.ravel()).astype(np.float32)
+                coord.ravel()).astype(np.float32)
             rgb = rgb.reshape(self.r_height, self.r_width, 3) * (
                 np.clip(hclip * 1.15, 0.0, 1.0) ** 0.7)[..., None]
         white = (np.clip(core, 0.0, 1.0) ** 1.8 * self.core_white

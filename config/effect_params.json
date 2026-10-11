@@ -4355,11 +4355,12 @@
             "authored",
             "brightness",
             "warm",
+            "radial",
             "angle"
           ],
           "aspect": "color",
           "distribute": false,
-          "note": "Colour order along the fire's heat (tips 0 .. slit rim 1): auto = brightness (darkest at the tips, brightest at the rim), or cold-to-warm for a rainbow set (hue span over 180 degrees); authored = the set's stops as stored; angle = Eye's rainbow-by-angle. Re-orders only what this effect samples — never the colour set itself",
+          "note": "How the colour set becomes fire. Heat-mapped (tips 0 .. slit rim 1): auto = brightness (darkest at the tips, brightest at the rim); authored = the set's stops as stored; brightness / warm force one order. radial = the set cold-to-warm outward through the eye's own shape (lens-shaped round the slit, following the hexagon outside), heat only sets brightness — what auto does for a rainbow set (hue span over 180 degrees). angle = Eye's rainbow-by-angle. Re-orders only what this effect samples — never the colour set itself",
           "default": "auto",
           "help_topic": "sauron-effect"
         },

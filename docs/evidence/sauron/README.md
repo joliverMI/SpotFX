@@ -17,3 +17,7 @@ dart the gaze, a bass swell 2.5-4.0 s (the flames lengthen), and
   surge) for Mid - Fire, Hype 1 and Mid - Ice.
 
 Every number is a first guess pending his live tuning session.
+
+These show the effect as first built. Tune-up 1 (2026-10-11) changed what
+`auto` does for a rainbow set (radial, no longer warm), the slit's minimum
+width and the perimeter ring — see `docs/evidence/sauron-tuneup-1/`.
