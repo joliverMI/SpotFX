@@ -124,6 +124,58 @@ def test_the_drop_opens_the_lids_the_same_way_round(effect_type):
     assert rows.mean() < (first.shape[0] - 1) / 2.0
 
 
+@pytest.mark.parametrize("effect_type", ["eye", "sauron"])
+def test_lids_rotated_carries_through_a_same_type_handoff_mid_lull(
+        effect_type):
+    """A flare fallback POST recreates the effect instance mid-lull (eye.py's
+    own comment on the `native` hand-off block). The outgoing instance's
+    `deactivate()` stores its live state — including whether the lull's
+    lids are drawn turned 180 degrees — for the successor to adopt on its
+    first draw. Before `lids_rotated` joined that block, a successor would
+    silently reset to the UN-rotated orientation mid-lull even though the
+    predecessor (and the room's own `lull_lids_upside_down` default) had
+    it turned: the geometry would visibly jump at the exact moment of the
+    recreation."""
+    async def main():
+        r = await W.rig("lidshand", {"gradient": GRADIENT}, seed=3,
+                        effect_type=effect_type, crystal=False)
+        eff_a = r.effect
+        try:
+            r.step(60)
+            eff_a.update_config({"phase": "lull", "phase_progress": 0.0})
+            for k in range(1, 61):
+                eff_a.update_config(
+                    {"phase_progress": min(1.0, k / (0.9 * LULL_FRAMES))})
+                r.step(1)
+            # mid-close, genuinely rotated — not merely the default state
+            assert eff_a._lids_rotated is True
+            assert 0.05 < eff_a._lid < 0.95
+
+            # the predecessor hands off; a successor is created on the SAME
+            # virtual (a same-type recreation, not a fresh song/scene)
+            eff_a.deactivate()
+            eff_b = W.headless.attach_effect(
+                r.host, r.virtual, effect_type, {"gradient": GRADIENT})
+            eff_b._rng = np.random.default_rng(3)
+            r.step(1)  # first draw -> _adopt_handoff()
+
+            assert eff_b._phase == "lull"
+            assert eff_b._lids_rotated is True, (
+                "successor did not inherit the predecessor's rotated lull"
+            )
+            frame = np.asarray(eff_b.matrix, np.float32)
+            lit = _lit(frame)
+            rows = np.flatnonzero(lit.any(axis=1))
+            assert rows.size > 0
+            # rotated: the lit band between the closing lids sits above the
+            # panel's own centre (the un-rotated default would sit below)
+            assert rows.mean() < (frame.shape[0] - 1) / 2.0
+        finally:
+            await W.close(r)
+
+    _run(main())
+
+
 def test_upside_down_is_the_default():
     for effect_type in ("eye", "sauron"):
         out = _run(_lull_and_drop(effect_type, None))
