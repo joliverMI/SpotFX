@@ -123,6 +123,7 @@ export function useScenes() { return { data: [] }; }
 export function useSpotColorSets() { return { data: [] }; }
 export function useGradient2dProfiles() { return { data: {} }; }
 export function useAmbientHueGroups() { return { data: { groups: [] } }; }
+export function useHaScenes() { return { data: { configured: true, scenes: [], error: null } }; }
 export function useSendSettingsMessage() { return { mutate: () => {}, mutateAsync: async () => ({}), isPending: false }; }
 export function useTranscribeSettingsAudio() { return { mutate: () => {}, mutateAsync: async () => ({}), isPending: false }; }
 export function useUndoLastSceneChange() { return { mutate: () => {}, mutateAsync: async () => ({}), isPending: false }; }

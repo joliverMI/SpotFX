@@ -525,6 +525,24 @@ def test_the_music_device_allowlist_widening_parses_from_its_structured_tool_res
     assert "Serenity" in change["summary"]
 
 
+def test_the_ha_actions_widening_parses_from_its_structured_tool_result():
+    """The outbound-HA-actions widening (the Admiral, 2026-10-11: Light
+    Show volume/scene steps reaching Home Assistant) gets its own
+    explicitly-synthetic fixture on the CURRENT manifest, same precedent
+    as the device/scene-entry-param/music-device-allowlist widenings
+    above. `changes` comes from the set_ha_volume_absolute tool_result's
+    own `status`/`summary`, never the reply prose."""
+    from spectra.services import settings_agent_cli as sac
+
+    result = sac._parse_transcript(
+        _load("cli_transcript_synthetic_ha_volume_absolute_applied.json"))
+    assert len(result["changes"]) == 1
+    change = result["changes"][0]
+    assert change["status"] == "applied"
+    assert change["run"]["steps"][0]["kind"] == "ha_volume_absolute"
+    assert "52" in change["summary"]
+
+
 def test_every_declared_operation_including_the_device_domain_is_in_the_manifest():
     """--allowedTools and the live manifest check are both derived from
     ALL_OPERATIONS, so a new domain cannot be added without its tools

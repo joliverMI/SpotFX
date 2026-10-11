@@ -12,6 +12,10 @@ export interface ShowParam {
   choices: string[] | null;
   min: number | null;
   max: number | null;
+  /** The number input's own increment — null falls back to the Build
+   * view's existing default. (HA volume actions set this to 4, to match
+   * Home Assistant's input_number.snap_volume.) */
+  step?: number | null;
   unit: string;
   help: string;
 }
@@ -19,7 +23,7 @@ export interface ShowParam {
 export interface ShowKind {
   kind: string;
   label: string;
-  /** setting | device | effect | control — or a group a later kind adds */
+  /** setting | device | effect | control | ha — or a group a later kind adds */
   group: string;
   params: ShowParam[];
   help: string;
@@ -32,6 +36,22 @@ export interface ShowCatalogue {
   room_effects: { id: string; name: string; kind: string; room_id: string }[];
   room_effect_schema: { properties?: Record<string, { type?: string; minimum?: number; maximum?: number; title?: string }> } | null;
   house_modes: { id: string; name: string }[];
+  /** Whether SPECTRA_HA_URL is set on this host — purely informational,
+   * the Build view may use it to hint "not configured yet" next to an
+   * HA step; the backend never needs it to decide anything. */
+  ha_configured: boolean;
+}
+
+/** GET /api/light-show/ha-scenes — his live Home Assistant scenes, a
+ * SEPARATE, network-touching read from the catalogue above (he can make
+ * or rename a scene in HA at any time, so there is no fixed allow-list
+ * to serve from the catalogue). `configured`/`error` name why the list
+ * might be empty; `scenes` is always [] rather than stale on a failure. */
+export interface HaScene { id: string; name: string }
+export interface HaScenesResult {
+  configured: boolean;
+  scenes: HaScene[];
+  error: string | null;
 }
 
 export interface ShowAction {

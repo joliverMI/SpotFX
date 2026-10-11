@@ -14,7 +14,7 @@ import HelpLink from '../help/HelpLink';
 import Icon from '../components/Icon';
 import SearchSelect, { type SearchOption } from '../components/forms/SearchSelect';
 import { colorCardOptions, namedOptions, sceneOptions } from '../lib/pickerOptions';
-import { useAmbientHueGroups, useGradient2dProfiles, useScenes, useSpotColorSets } from '../queries';
+import { useAmbientHueGroups, useGradient2dProfiles, useHaScenes, useScenes, useSpotColorSets } from '../queries';
 import { CALL_KIND, callableSets, stepSummary, type SummaryLookups } from './builderOps';
 import type { SortableRowProps } from './SortableList';
 import type { ShowAction, ShowCatalogue, ShowKind, ShowParam, ShowSet, ShowTargets } from './types';
@@ -215,6 +215,7 @@ export function ParamField({ p, value, onChange, catalogue, targets, action, set
   const colorSets = useSpotColorSets().data ?? [];
   const gradients = useGradient2dProfiles().data ?? {};
   const hueAreas = useAmbientHueGroups().data?.groups ?? [];
+  const haScenes = useHaScenes().data;
   const pick = (options: SearchOption[], placeholder = '— choose —') => wrap(
     <SearchSelect value={String(value ?? '')} options={options} placeholder={placeholder}
       width={240} onChange={(v) => onChange(v || undefined)} />);
@@ -233,7 +234,7 @@ export function ParamField({ p, value, onChange, catalogue, targets, action, set
       return wrap(<input type="number" value={value === undefined ? '' : String(value)}
         placeholder={p.default !== null && p.default !== undefined ? String(p.default) : ''}
         min={p.min ?? undefined} max={p.max ?? undefined}
-        step={p.max !== null && p.max <= 1 ? 0.05 : 1}
+        step={p.step ?? (p.max !== null && p.max <= 1 ? 0.05 : 1)}
         onChange={(e) => onChange(e.target.value === '' ? undefined : Number(e.target.value))} />);
     case 'color':
       return wrap(
@@ -277,6 +278,26 @@ export function ParamField({ p, value, onChange, catalogue, targets, action, set
       return wrap(<Chips options={hueAreas} value={(value as string[]) ?? []} onChange={onChange} />);
     case 'house_mode':
       return pick(namedOptions(catalogue.house_modes), '— pick house mode —');
+    case 'ha_scene':
+      // A free-text field, not a closed picker — he can make or rename a
+      // scene in HA at any time (his own ask, 2026-10-11: "I want to be
+      // able to customize the scene in HA and trigger it as part of the
+      // light show"), so there is nothing SPECTRA-side to restrict this
+      // to. <datalist> gives autocomplete from his live HA scenes
+      // (useHaScenes) WITHOUT blocking a typed entity id the fetch
+      // doesn't happen to know about yet.
+      return wrap(
+        <span>
+          <input type="text" list="ha-scene-options"
+            value={String(value ?? '')} placeholder="scene.music_mode"
+            onChange={(e) => onChange(e.target.value || undefined)} />
+          <datalist id="ha-scene-options">
+            {(haScenes?.scenes ?? []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </datalist>
+          {haScenes && !haScenes.configured && (
+            <span className="muted" title={haScenes.error ?? ''}> Home Assistant not configured — type the entity id</span>
+          )}
+        </span>);
     case 'target': {
       const t = (value as { kind: string; id: string | null }) ?? { kind: 'everything', id: null };
       return wrap(

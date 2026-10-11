@@ -2727,6 +2727,17 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        id: 'show-ha-actions',
+        title: 'Home Assistant actions',
+        keywords: 'home assistant ha volume snap_volume absolute relative step scene activate music mode',
+        body: [
+          'Three steps reach out to Home Assistant: HA volume (absolute) sets the snap_volume to an exact level (0-100, in steps of 4); HA volume (relative step) nudges it up or down by a signed step (e.g. +8 or -8); Activate HA scene turns on any HA scene — type its entity id (e.g. scene.music_mode, his first one) or pick from the live list fetched straight from Home Assistant. There is no fixed list on this side: make or rename a scene in HA and it is reachable here right away.',
+          'None of the three need SPECTRA to own the lights or the room to be live — they still run from a released or dark room, and a resting house mode never blocks or defers them: they always reach Home Assistant when they run.',
+          'If Home Assistant is not configured on this host (the SPECTRA_HA_URL/SPECTRA_HA_TOKEN environment values), the step reports "Home Assistant is not configured" and changes nothing — it is not a silent no-op.',
+          'Sonic can fire any of the three ad-hoc, by voice — naming a scene by his own words for it (matched against the live HA list) or by its full entity id.',
+        ],
+      },
+      {
         id: 'show-arming',
         title: 'Arming a set: next scene change, High, Low',
         keywords: 'arm armed disarm next scene change high trigger low trigger repeat once this song only carry expire finish on the mark countdown',

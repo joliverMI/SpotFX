@@ -3,6 +3,7 @@ binding statement for what each action does and how it is put back;
 show_output.py for the per-fixture holds).
 
   GET    /api/light-show/catalogue          every action kind + its params
+  GET    /api/light-show/ha-scenes          his live Home Assistant scenes
   GET    /api/light-show/targets            fixtures and categories
   GET    /api/light-show/status             holds, levels, settings changed,
                                             running sets, the gate
@@ -64,6 +65,21 @@ def brief() -> dict:
 @router.get("/catalogue")
 async def get_catalogue():
     return show_actions.catalogue()
+
+
+@router.get("/ha-scenes")
+async def get_ha_scenes():
+    """His live Home Assistant scene.* entities, for the "Activate HA
+    scene" step's picker (spectra/services/ha_client.py's list_scenes) —
+    a live network call, deliberately kept OUT of `get_catalogue()` above
+    so every other catalogue read stays instant and network-free. Never
+    a 4xx/5xx: unconfigured or unreachable both answer 200 with an empty
+    list and `configured`/`error` naming why, exactly the fail-soft shape
+    the Light Show's own HA actions share."""
+    from spectra.services import ha_client
+    states = await ha_client.list_scenes()
+    return {"configured": ha_client.configured(), "scenes": states.scenes,
+            "error": None if states.ok else (states.detail or None)}
 
 
 @router.get("/targets")

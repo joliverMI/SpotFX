@@ -276,11 +276,16 @@ FLARES_CHOICES = ("off", "on")
 
 async def _fire_one(kind: str, params: dict, name: str) -> dict:
     """One ad-hoc step through show_actions.fire — the SAME path the Build
-    view's steps run, never a second write path."""
-    reason = show_output.refusal()
-    if reason:
-        return {"status": "refused", "reason": reason,
-                "summary": f"did not run — the show is standing down: {reason}"}
+    view's steps run, never a second write path. Mirrors show_actions.py's
+    own `_run` gating exactly: the refusal check only applies when the
+    action kind actually needs the room (ACTION_KINDS[kind].needs_room),
+    so an HA-only kind still runs from a released or dark room."""
+    action_kind = show_actions.ACTION_KINDS.get(kind)
+    if action_kind is not None and action_kind.needs_room:
+        reason = show_output.refusal()
+        if reason:
+            return {"status": "refused", "reason": reason,
+                    "summary": f"did not run — the show is standing down: {reason}"}
     try:
         show_actions.validate(kind, params)
     except show_actions.ActionError as exc:
@@ -334,6 +339,63 @@ async def _op_set_flares(flares: str, target_kind: str = "everything",
         return rejection
     return await _fire_one("flares", {"target": target, "flares": flares,
                                       **_timing(until, duration_s)}, "Sonic: flares")
+
+
+async def _resolve_ha_scene(scene_name: Optional[str]):
+    """ANY scene he has made in HA, never a hand-maintained allow-list
+    (his own correction, 2026-10-11: "I want to be able to customize the
+    scene in HA and trigger it as part of the light show").
+
+    A name that already LOOKS like a full entity id (contains a ".") is
+    used VERBATIM, with no fetch at all — so a scene he just made in HA
+    is reachable by its real id even if the live list below can't be
+    fetched right now. Otherwise this fetches HA's live scene list
+    (`ha_client.list_scenes()`) and matches by friendly name, exact then
+    close — refused, naming the fetch failure, if nothing can be
+    resolved. Omitted entirely defaults to scene.music_mode, his first
+    scene."""
+    if not scene_name:
+        return "scene.music_mode", None
+    text = scene_name.strip()
+    if "." in text:
+        return text, None
+    from spectra.services import ha_client
+    states = await ha_client.list_scenes()
+    if not states.ok:
+        return None, {
+            "status": "rejected",
+            "reason": f"could not look up {scene_name!r} by name "
+                     f"({states.detail or 'Home Assistant unreachable'}) "
+                     f"— give the full entity id instead, e.g. "
+                     f"'scene.music_mode'"}
+    low = text.lower()
+    for s in states.scenes:
+        if s["name"].lower() == low or s["id"].lower() == f"scene.{low}":
+            return s["id"], None
+    names = [s["name"] for s in states.scenes]
+    ids = [s["id"] for s in states.scenes]
+    return None, {"status": "rejected",
+                  "reason": f"no HA scene called {scene_name!r}",
+                  "close_matches": _close(scene_name, names + ids),
+                  "known_scenes": ids}
+
+
+async def _op_set_ha_volume_absolute(volume: float) -> dict:
+    return await _fire_one("ha_volume_absolute", {"volume": volume},
+                           "Sonic: HA volume")
+
+
+async def _op_set_ha_volume_relative(delta: float) -> dict:
+    return await _fire_one("ha_volume_relative", {"delta": delta},
+                           "Sonic: HA volume step")
+
+
+async def _op_activate_ha_scene(scene_name: Optional[str] = None) -> dict:
+    scene, rejection = await _resolve_ha_scene(scene_name)
+    if rejection is not None:
+        return rejection
+    return await _fire_one("ha_activate_scene", {"scene": scene},
+                           "Sonic: HA scene")
 
 
 def _op_end_effect_hold(hold_id: str) -> dict:
@@ -750,6 +812,49 @@ OPERATIONS: dict[str, SonicOperation] = {
                     "active — it reports 'nothing to put back'.",
         input_schema={"type": "object", "properties": {}, "additionalProperties": False},
         handler=_op_end_show),
+    "set_ha_volume_absolute": SonicOperation(
+        name="set_ha_volume_absolute", domain="show", kind="write",
+        summary="Set Home Assistant's snap_volume to an exact level, as "
+                "an ad-hoc Light Show step.",
+        instructions="volume 0-100 (the entity steps in multiples of 4). "
+                    "Calls Home Assistant's script.music_volume_set. "
+                    "Reports 'Home Assistant is not configured' if "
+                    "SPECTRA_HA_URL is unset on this host — nothing was "
+                    "changed in that case.",
+        input_schema={
+            "type": "object",
+            "properties": {"volume": {"type": "number", "minimum": 0, "maximum": 100}},
+            "required": ["volume"], "additionalProperties": False},
+        handler=_op_set_ha_volume_absolute),
+    "set_ha_volume_relative": SonicOperation(
+        name="set_ha_volume_relative", domain="show", kind="write",
+        summary="Nudge Home Assistant's snap_volume up or down by a step, "
+                "as an ad-hoc Light Show step.",
+        instructions="delta is signed, e.g. +8 or -8 (8 is River's own "
+                    "suggested step size). Calls the entity named in the "
+                    "room's ha_volume_relative_entity setting (default "
+                    "script.music_volume_step).",
+        input_schema={
+            "type": "object",
+            "properties": {"delta": {"type": "number", "minimum": -100, "maximum": 100}},
+            "required": ["delta"], "additionalProperties": False},
+        handler=_op_set_ha_volume_relative),
+    "activate_ha_scene": SonicOperation(
+        name="activate_ha_scene", domain="show", kind="write",
+        summary="Activate any Home Assistant scene, as an ad-hoc Light "
+                "Show step.",
+        instructions="scene_name may be a full HA entity id "
+                    "(e.g. 'scene.music_mode', used verbatim) or his own "
+                    "words for one ('music mode'), matched against Home "
+                    "Assistant's own live scene list when reachable. "
+                    "Omit it to use scene.music_mode, his first scene. "
+                    "He can make or rename scenes in HA at any time — "
+                    "there is no fixed list to keep in sync.",
+        input_schema={
+            "type": "object",
+            "properties": {"scene_name": {"type": "string"}},
+            "additionalProperties": False},
+        handler=_op_activate_ha_scene),
 }
 
 OPERATIONS.update(SEQUENCE_OPERATIONS)

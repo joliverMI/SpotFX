@@ -146,6 +146,7 @@ export function useScenes() { return { data: ${JSON.stringify(SCENES)} }; }
 export function useSpotColorSets() { return { data: ${JSON.stringify(CARDS)} }; }
 export function useGradient2dProfiles() { return { data: { 'g-sunset': { name: 'Sunset' }, 'g-sea': { name: 'Deep Sea' } } }; }
 export function useAmbientHueGroups() { return { data: { groups: [{ id: 'a1', name: 'Living' }] } }; }
+export function useHaScenes() { return { data: { configured: true, scenes: [{ id: 'scene.music_mode', name: 'Music Mode' }], error: null } }; }
 export function useSendSettingsMessage() { return { mutate: () => {}, mutateAsync: async () => ({}), isPending: false }; }
 export function useTranscribeSettingsAudio() { return { mutate: () => {}, mutateAsync: async () => ({}), isPending: false }; }
 export function useUndoLastSceneChange() { return { mutate: () => {}, mutateAsync: async () => ({}), isPending: false }; }

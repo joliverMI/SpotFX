@@ -535,3 +535,41 @@ def short_exposure_fraction() -> float:
         return float(raw)
     except ValueError:
         return SHORT_EXPOSURE_FRACTION_DEFAULT
+
+
+# ── THE OUTBOUND HOME ASSISTANT CLIENT (spectra/services/ha_client.py) ────
+#
+# Every other HA seam in this codebase is HA pushing IN (house.py's own
+# "THE HA SEAM" — a mode, a fixture state, the mains). This is the first
+# one that calls OUT: the Light Show's HA actions (volume absolute/
+# relative, activate scene — spectra/services/show_actions.py's "ha"
+# group), 2026-10-11.
+
+def ha_url() -> str:
+    """Base URL of Home Assistant's REST API — SPECTRA POSTs to
+    `{ha_url()}/api/services/<domain>/<service>`.
+
+    UNSET IS THE SHIPPED STATE AND MEANS INERT, `pretake_url()`'s own
+    posture one module over: `ha_client.call_service()` sends nothing,
+    opens no socket, and every HA action reports "Home Assistant is not
+    configured" rather than failing silently or raising. DELIBERATELY NO
+    DEFAULT, for the same reason `pretake_url()` has none — a committed
+    host address is the pinned-by-location defect `fx/device_identity.py`
+    exists to end one layer down, and River's real Home Assistant address
+    is hers to move. Live use needs this AND `ha_token()` provisioned by
+    River, outside this repository — never committed, never logged."""
+    return os.getenv("SPECTRA_HA_URL", "").strip().rstrip("/")
+
+
+def ha_token() -> str:
+    """The bearer SPECTRA presents on every outbound Home Assistant call,
+    from the environment ONLY — `pretake_token()`'s exact rule: never
+    logged, never recorded, never read from a file this app's own writes
+    could touch.
+
+    An empty token does NOT make a call inert (that is `ha_url()`'s job
+    alone): the POST goes out with no Authorization header, Home Assistant
+    answers 401, and the step records a VISIBLE failure — a missing secret
+    said out loud beats a call that quietly skipped because nothing was
+    provisioned."""
+    return os.getenv("SPECTRA_HA_TOKEN", "")

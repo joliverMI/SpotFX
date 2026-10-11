@@ -41,6 +41,18 @@
 # stack at start (guarded activation + readiness gate — handover.
 # resume_own_room), so Restart=always genuinely restores the room, not just
 # the API. A failed resume stays dark-but-owned: liveness 503 is the alarm.
+#
+# THE OUTBOUND HOME ASSISTANT CLIENT (spectra/services/ha_client.py, the
+# Light Show's "ha" group — volume absolute/relative, activate scene):
+# SPECTRA_HA_URL / SPECTRA_HA_TOKEN, both read from the environment ONLY,
+# never committed, never logged. Config contract decided 2026-10-11: on
+# serenity they come from /home/javi/.config/spectra/ha.env, loaded by a
+# systemd drop-in (`systemctl --user edit spectra`, adding
+# `EnvironmentFile=/home/javi/.config/spectra/ha.env`) — never inlined as
+# Environment= lines here, since this unit file is checked into the repo
+# and a token belongs in neither. Absent or empty = every HA action
+# reports "Home Assistant is not configured" and changes nothing; this is
+# the shipped state until that file is provisioned.
 
 [Unit]
 Description=SPECTRA
