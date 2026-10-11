@@ -19,7 +19,8 @@ export interface ShowParam {
 export interface ShowKind {
   kind: string;
   label: string;
-  group: 'setting' | 'device' | 'effect' | 'control';
+  /** setting | device | effect | control — or a group a later kind adds */
+  group: string;
   params: ShowParam[];
   help: string;
   restore: string;
@@ -48,6 +49,11 @@ export interface ShowSet {
   notes?: string;
   problems?: string[];
   conflicts?: string[];
+  /** the sets its "Run another set" steps run (spectra/services/show_refs.py) */
+  calls?: { id: string; name: string | null; missing: boolean }[];
+  /** the sets that run it, and the sequences that use it */
+  used_by?: { id: string; name: string }[];
+  used_in_sequences?: { id: string; name: string }[];
 }
 
 export interface ShowTargets {
@@ -62,6 +68,8 @@ export interface ShowStep {
   label: string;
   status: 'pending' | 'waiting' | 'applied' | 'skipped' | 'refused' | 'failed';
   detail: string;
+  /** the sets this step was reached through ("Run another set"), outermost first */
+  via?: string[];
 }
 
 export interface ShowRun {

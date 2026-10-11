@@ -141,7 +141,13 @@ def _steps(arm: ShowArm) -> list[ShowAction]:
     if arm.action is not None:
         return [arm.action]
     s = show_store.get_set(arm.set_id) if arm.set_id else None
-    return list(s.actions) if s else []
+    if s is None:
+        return []
+    # A called set's steps count where the call sits (show_refs: inline), so
+    # a fade inside a shared "defaults" set still finishes on the mark.
+    from spectra.services import show_refs
+    return [e.action for e in show_refs.expand(s.actions, show_store.list_sets(),
+                                               root_id=s.id) if not e.problem]
 
 
 def lead_ms(arm: ShowArm) -> int:

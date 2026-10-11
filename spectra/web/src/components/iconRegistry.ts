@@ -69,6 +69,21 @@ export const ICONS = {
   arrowUp: 'M12 19V5M5 12L12 5L19 12',
   /** Down arrow — "on the next Low Trigger" (same ask). */
   arrowDown: 'M12 5V19M19 12L12 19L5 12',
+  /** Clipboard — "copy" (the Light Show builders' copy-to-clipboard, the
+   * legacy SpotFX editor's 📋, 2026-10-11). */
+  copy: 'M9 4H7A2 2 0 0 0 5 6V20A2 2 0 0 0 7 22H17A2 2 0 0 0 19 20V6A2 2 0 0 0 17 4H15M9 2H15V6H9Z',
+  /** Two overlapping squares — "duplicate in place" (legacy ⧉). */
+  duplicate: 'M8 8H20V20H8ZM16 8V4H4V16H8',
+  /** Clipboard with an arrow in — "paste". */
+  paste: 'M9 4H7A2 2 0 0 0 5 6V20A2 2 0 0 0 7 22H17A2 2 0 0 0 19 20V6A2 2 0 0 0 17 4H15M9 2H15V6H9ZM12 10V17M9 14L12 17L15 14',
+  /** Box with an arrow out — "open the referenced thing" (legacy ↗). */
+  open: 'M14 4H20V10M20 4L11 13M18 14V19A1 1 0 0 1 17 20H5A1 1 0 0 1 4 19V7A1 1 0 0 1 5 6H10',
+  /** Bin — "delete". */
+  trash: 'M4 7H20M9 7V4H15V7M6 7L7 20H17L18 7M10 11V16M14 11V16',
+  /** Chevron pointing right — a collapsed row's caret (rotated when open). */
+  chevron: 'M9 6L15 12L9 18',
+  /** Nested boxes — "run another set" (a set reference). */
+  callSet: 'M3 5H13V11H3ZM11 13H21V19H11ZM8 11V16H11',
 } satisfies Record<string, string>;
 
 export type IconName = keyof typeof ICONS;

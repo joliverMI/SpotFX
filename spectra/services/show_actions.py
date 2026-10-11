@@ -43,7 +43,10 @@ HOW EACH FAMILY LANDS, and how it is put back:
                   heartbeated for the action's duration. A future room
                   effect kind registers in light_field_fields.KINDS and is
                   armable here with no Light Show change.
-  control         (pause) — waits inside a set.
+  control         (pause, run another set) — a pause waits inside a set; a
+                  call is EXPANDED into the called set's own steps before
+                  anything runs (spectra/services/show_refs.py is the
+                  binding statement) — it never applies anything itself.
 
 BASELINES. The first time the show changes a setting its value is saved.
 End show writes each one back ONLY while the current value still equals
@@ -152,7 +155,7 @@ ACTION_KINDS: dict[str, ActionKind] = {}
 
 def register(kind: ActionKind) -> ActionKind:
     """THE extension point: one call per action kind."""
-    if kind.room_patch is None and kind.apply is None and kind.name != "pause":
+    if kind.room_patch is None and kind.apply is None and kind.name not in ("pause", "call_set"):
         raise ValueError(f"action kind {kind.name!r} has no way to apply")
     ACTION_KINDS[kind.name] = kind
     return kind
@@ -238,35 +241,64 @@ def validate(kind_name: str, params: Optional[dict]) -> dict:
     return out
 
 
-def validate_set(actions: list[ShowAction]) -> list[str]:
-    """Every problem in a set, one sentence each (empty = valid)."""
+def validate_set(actions: list[ShowAction], *, set_id: Optional[str] = None) -> list[str]:
+    """Every problem in a set, one sentence each (empty = valid). A call to
+    another set is checked through to the steps it would run, so a broken
+    shared "defaults" set shows on every set that calls it."""
+    from spectra.services import show_refs
     problems = []
+    lib = show_store.list_sets()
+    cycle = show_refs.find_cycle(set_id, actions, lib) if set_id else None
+    if cycle:
+        problems.append(show_refs.cycle_sentence(cycle, lib))
     for i, a in enumerate(actions, 1):
         try:
             validate(a.kind, a.params)
         except ActionError as exc:
             problems.append(f"step {i}: {exc}")
+            continue
+        if a.kind != show_refs.CALL_KIND or not a.enabled or cycle:
+            continue
+        for e in show_refs.expand([a], lib, root_id=set_id):
+            where = " › ".join(e.via)
+            if e.problem:
+                problems.append(f"step {i}{f' (in {where})' if where else ''}: {e.problem}")
+                continue
+            if e.action.kind == show_refs.CALL_KIND or not e.action.enabled:
+                continue
+            try:
+                validate(e.action.kind, e.action.params)
+            except ActionError as exc:
+                problems.append(f"step {i} (in {where}): {exc}")
     return problems
 
 
-def conflicts(actions: list[ShowAction]) -> list[str]:
+def conflicts(actions: list[ShowAction], *, set_id: Optional[str] = None) -> list[str]:
     """Later-wins collisions inside one set, named for the editor. The set
-    still saves; the later step wins when it runs."""
-    seen: dict[str, int] = {}
+    still saves; the later step wins when it runs. A called set's steps
+    take part at the call's position — which is what lets a set call its
+    "defaults" first and then override one of them, by name."""
+    from spectra.services import show_refs
+    lib = show_store.list_sets()
+    top = {a.id: i for i, a in enumerate(actions, 1)}
+    seen: dict[str, str] = {}
     out = []
-    for i, a in enumerate(actions, 1):
+    for e in show_refs.expand(actions, lib, root_id=set_id):
+        a = e.action
         kind = ACTION_KINDS.get(a.kind)
-        if kind is None or not a.enabled or kind.room_patch is None:
+        if e.problem or kind is None or not a.enabled or kind.room_patch is None:
             continue
         try:
             keys = kind.room_patch(validate(a.kind, a.params)).keys()
         except Exception:                                # noqa: BLE001
             continue
+        n = top.get(e.path.split("/", 1)[0], 0)
+        here = f"step {n}" + (f" (in {' › '.join(e.via)})" if e.via else "")
         for k in keys:
             if k in seen:
-                out.append(f"step {i} changes {k} again (step {seen[k]} also "
-                           f"does) — step {i} wins")
-            seen[k] = i
+                out.append(f"{here} changes {k} again ({seen[k]} also "
+                           f"does) — {here} wins")
+            seen[k] = here
     return out
 
 
@@ -1096,6 +1128,31 @@ register(ActionKind(
     restore="—", needs_room=False, help_topic="show-sets"))
 
 
+def _check_call_set(p: dict) -> dict:
+    sid = p.get("set")
+    if not sid or show_store.get_set(sid) is None:
+        hit = show_store.find_set(sid) if sid else None
+        if hit is None:
+            raise ActionError("Run another set: that set no longer exists"
+                              if sid else "Run another set: pick a set to run")
+        p["set"] = hit.id
+    return p
+
+
+# A call is EXPANDED, never applied: `fire()` replaces it with the called
+# set's own steps before anything runs (spectra/services/show_refs.py is the
+# binding statement — inline order, edits reach every caller, no cycles).
+register(ActionKind(
+    name="call_set", label="Run another set", group="control",
+    params=[Param("set", "set", "Set", required=True,
+                  help="Its steps run here, in order, as if they were pasted in. "
+                       "Editing that set changes every set that runs it.")],
+    help="Run another set's steps at this point — share a set of defaults "
+         "between sets that behave alike.",
+    restore="Each of the called set's steps is put back its own way.",
+    needs_room=False, check=_check_call_set, help_topic="show-set-references"))
+
+
 # ── catalogue (for the Build view and, later, Sonic) ───────────────────────
 
 def catalogue() -> dict:
@@ -1164,20 +1221,27 @@ def runs() -> list[dict]:
     return [r.as_dict() for r in reversed(_runs)]
 
 
-def _label(a: ShowAction) -> str:
+def _label(a: ShowAction, params: Optional[dict] = None) -> str:
     kind = ACTION_KINDS.get(a.kind)
-    return a.label or (kind.label if kind else a.kind)
+    if a.label:
+        return a.label
+    if a.kind == "call_set" and params is not None:
+        target = show_store.get_set((params or {}).get("set") or "")
+        if target is not None:
+            return f"Run “{target.name}”"
+    return kind.label if kind else a.kind
 
 
 def _record(run: Run, idx: int, outcome: Outcome) -> None:
     run.steps[idx].update(outcome.as_dict())
     try:
         from spectra.services import fire_history
-        fire_history.record_fire("show", run.steps[idx]["kind"],
-                                 {"run": run.id, "set": run.name,
-                                  "step": run.steps[idx]["label"],
-                                  "status": outcome.status,
-                                  "detail": outcome.detail})
+        entry = {"run": run.id, "set": run.name,
+                 "step": run.steps[idx]["label"],
+                 "status": outcome.status, "detail": outcome.detail}
+        if run.steps[idx].get("via"):
+            entry["via"] = list(run.steps[idx]["via"])
+        fire_history.record_fire("show", run.steps[idx]["kind"], entry)
     except Exception:                                    # noqa: BLE001
         logger.exception("light show: show-log write failed")
 
@@ -1228,7 +1292,10 @@ def _finish(run: Run) -> None:
     run.ended_ms = now_ms()
 
 
-async def _execute(run: Run, actions: list[ShowAction]) -> None:
+async def _execute(run: Run, steps: list) -> None:
+    """`steps` is `show_refs.expand()`'s output: every call already replaced
+    by the called set's own steps, so this loop never sees a call it could
+    run — only a switched-off one (skipped) or a broken one (`problem`)."""
     global _executing
     ctx = RunContext(run_id=run.id, source=run.source)
     pending: list[tuple[int, ShowAction, dict]] = []
@@ -1250,9 +1317,14 @@ async def _execute(run: Run, actions: list[ShowAction]) -> None:
                 _executing -= 1
 
     try:
-        for i, a in enumerate(actions):
+        for i, e in enumerate(steps):
+            a = e.action
             if not a.enabled:
                 _record(run, i, Outcome("skipped", "switched off in this set"))
+                continue
+            if e.problem:
+                await flush_group()
+                _record(run, i, Outcome("failed", f"{_label(a)}: {e.problem}"))
                 continue
             try:
                 p = validate(a.kind, a.params)
@@ -1303,14 +1375,17 @@ async def fire(actions: list[ShowAction], *, name: str, set_id: Optional[str] = 
     """Run steps NOW. Returns once every step up to the first pause has
     landed (or the run has finished); the rest continues in the background
     and shows in `runs()`."""
+    from spectra.services import show_refs
+    expanded = show_refs.expand(actions, show_store.list_sets(), root_id=set_id)
     run = Run(id=uuid.uuid4().hex[:10], name=name, set_id=set_id,
               source=source if not set_id else f"set:{set_id}",
               started_ms=now_ms(),
-              steps=[{"action_id": a.id, "kind": a.kind, "label": _label(a),
-                      "status": "pending", "detail": ""} for a in actions])
+              steps=[{"action_id": e.path, "kind": e.action.kind,
+                      "label": _label(e.action, e.action.params), "via": e.via,
+                      "status": "pending", "detail": ""} for e in expanded])
     _runs.append(run)
     del _runs[:-MAX_RUNS_KEPT]
-    run.task = asyncio.create_task(_execute(run, actions), name=f"light-show-{run.id}")
+    run.task = asyncio.create_task(_execute(run, expanded), name=f"light-show-{run.id}")
     await run.ready.wait()
     return run.as_dict()
 
@@ -1324,15 +1399,22 @@ async def fire_set(set_id_or_name: str, *, source: str = "button") -> dict:
     return await fire(s.actions, name=s.name, set_id=s.id, source=source)
 
 
-def preview(actions: list[ShowAction]) -> list[dict]:
-    """What firing would change against the room as it is NOW. Writes
-    nothing."""
+def preview(actions: list[ShowAction], *, set_id: Optional[str] = None) -> list[dict]:
+    """What firing would change against the room as it is NOW, one row per
+    step that would RUN (a call is listed as the called set's own steps,
+    each with `via` and the calling step's `top_id`). Writes nothing."""
     from spectra.services import room_controls
+    from spectra.services import show_refs
     current = room_controls.load_room_controls().model_dump()
     out = []
-    for a in actions:
+    for e in show_refs.expand(actions, show_store.list_sets(), root_id=set_id):
+        a = e.action
         kind = ACTION_KINDS.get(a.kind)
-        row = {"action_id": a.id, "kind": a.kind, "label": _label(a)}
+        row = {"action_id": e.path, "kind": a.kind, "label": _label(a, a.params),
+               "via": e.via, "top_id": e.path.split("/", 1)[0]}
+        if e.problem:
+            out.append({**row, "problem": e.problem})
+            continue
         try:
             p = validate(a.kind, a.params)
         except ActionError as exc:

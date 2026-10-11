@@ -8,7 +8,7 @@ show_output.py for the per-fixture holds).
                                             running sets, the gate
   GET    /api/light-show/sets               his library
   POST   /api/light-show/sets               create / update one set
-  DELETE /api/light-show/sets/{id}
+  DELETE /api/light-show/sets/{id}        409 + who uses it unless ?force=true
   POST   /api/light-show/sets/{id}/fire     run it NOW
   POST   /api/light-show/sets/{id}/preview  what it would change (writes nothing)
   POST   /api/light-show/fire               run ad-hoc steps NOW
@@ -29,7 +29,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from spectra.models.light_show import ActionSet, ShowAction
-from spectra.services import show_actions, show_output, show_store
+from spectra.services import show_actions, show_output, show_refs, show_store
 
 router = APIRouter(prefix="/api/light-show", tags=["spectra-light-show"])
 
@@ -77,14 +77,24 @@ async def get_status():
             "brief": brief()}
 
 
+def _set_payload(s: ActionSet, sets: Optional[list[ActionSet]] = None,
+                 sequences: Optional[list] = None) -> dict:
+    """A set as the editor reads it: its steps, its problems and conflicts
+    (calls checked through), and its references — what it calls and what
+    calls it (spectra/services/show_refs.py)."""
+    sets = show_store.list_sets() if sets is None else sets
+    sequences = show_store.list_sequences() if sequences is None else sequences
+    return {**s.model_dump(),
+            "problems": show_actions.validate_set(s.actions, set_id=s.id),
+            "conflicts": show_actions.conflicts(s.actions, set_id=s.id),
+            **show_refs.references(s.id, sets, sequences)}
+
+
 @router.get("/sets")
 async def list_sets():
-    out = []
-    for s in show_store.list_sets():
-        out.append({**s.model_dump(),
-                    "problems": show_actions.validate_set(s.actions),
-                    "conflicts": show_actions.conflicts(s.actions)})
-    return {"sets": out}
+    sets = show_store.list_sets()
+    sequences = show_store.list_sequences()
+    return {"sets": [_set_payload(s, sets, sequences) for s in sets]}
 
 
 @router.post("/sets")
@@ -97,17 +107,33 @@ async def upsert_set(body: SetBody):
         s = show_store.put_set(ActionSet(**data), after_id=after_id)
     except show_store.SetNameTaken as exc:
         return JSONResponse(status_code=409, content={"detail": str(exc)})
+    except show_refs.SetReferenceCycle as exc:
+        return JSONResponse(status_code=409, content={
+            "detail": f"Not saved: {exc}.", "reason": "cycle"})
     # Saved even with problems — a half-built set is his to finish — but the
     # problems travel with it so the editor shows them.
-    return {**s.model_dump(), "problems": show_actions.validate_set(s.actions),
-            "conflicts": show_actions.conflicts(s.actions)}
+    return _set_payload(s)
 
 
 @router.delete("/sets/{set_id}")
-async def remove_set(set_id: str):
-    if not show_store.delete_set(set_id):
+async def remove_set(set_id: str, force: bool = False):
+    """A set other sets call (or a sequence uses) is not deleted until the
+    delete is FORCED — the 409 names who uses it, so the editor can ask.
+    Forced, every call to it then fails by name until its caller is fixed."""
+    if show_store.get_set(set_id) is None:
         return JSONResponse(status_code=404, content={"detail": "no such set"})
-    return {"deleted": set_id}
+    refs = show_refs.references(set_id, show_store.list_sets(), show_store.list_sequences())
+    users = refs["used_by"] + refs["used_in_sequences"]
+    if users and not force:
+        names = ", ".join(f"“{u['name']}”" for u in users)
+        return JSONResponse(status_code=409, content={
+            "detail": f"This set is used by {names}. Deleting it makes those "
+                      f"steps fail until they are changed.",
+            "reason": "in_use", "used_by": refs["used_by"],
+            "used_in_sequences": refs["used_in_sequences"]})
+    show_store.delete_set(set_id)
+    return {"deleted": set_id, "was_used_by": refs["used_by"],
+            "was_used_in_sequences": refs["used_in_sequences"]}
 
 
 def _gate_or_none() -> Optional[JSONResponse]:
@@ -139,7 +165,7 @@ async def preview_set(set_id: str):
     s = show_store.find_set(set_id)
     if s is None:
         return JSONResponse(status_code=404, content={"detail": "no such set"})
-    return {"set": s.name, "steps": show_actions.preview(s.actions),
+    return {"set": s.name, "steps": show_actions.preview(s.actions, set_id=s.id),
             "refusal": show_output.refusal()}
 
 

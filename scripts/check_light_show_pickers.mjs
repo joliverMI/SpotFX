@@ -195,6 +195,14 @@ const build = await esbuild.build({
 ok(build.errors.length === 0, 'LightShowPage.tsx + its real children bundle cleanly');
 const { container, mount, step, unmount } = require(outFile);
 await mount();
+// Steps are collapsed by default (the legacy editor's card shape) — open
+// them all, the same "Expand all" he would press.
+{
+  const expand = [...container.querySelectorAll('.light-show-list-tools button')]
+    .find((b) => b.textContent.includes('Expand all'));
+  ok(Boolean(expand), 'an "Expand all" control sits above the steps');
+  await step(() => expand.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true })));
+}
 
 const steps = () => [...container.querySelectorAll('li.light-show-step')];
 const stepNamed = (label) => steps().find((li) => li.querySelector('b')?.textContent === label);

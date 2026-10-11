@@ -171,6 +171,9 @@ console.log('TWO — Build: items, the four arming icons, Waits, the song search
 const tabs = qa('.show-seq-sub button[role=tab]');
 ok(tabs.map((t) => t.textContent.trim()).join('|').startsWith('Build|Run'), 'Build and Run sub-tabs');
 ok(qa('li.show-seq-item').length === 3, `the sequence's three items render (${qa('li.show-seq-item').length})`);
+ok(qa('li.show-seq-item .light-show-step-summary').length === 3, 'items start collapsed, each with a one-line summary');
+await click(button('Expand all'));
+ok(qa('.show-seq-arm').length === 2, 'Expand all opens every item');
 const first = qa('li.show-seq-item')[0];
 const armBtns = qa('.show-seq-arm button', first);
 ok(armBtns.length === 4 && armBtns.every((b) => b.querySelector('svg path')), 'a Set item shows four icon buttons, real SVG');
@@ -180,6 +183,7 @@ await click(armBtns[1]);
 ok(qa('.show-seq-arm button', qa('li.show-seq-item')[0])[1].classList.contains('armed'), 'tapping the bunny re-arms it on scene change');
 await click(button('+ Wait'));
 ok(qa('li.show-seq-item').length === 4, '+ Wait adds an item');
+if (!q('.show-seq-wait', qa('li.show-seq-item')[3])) await click(q('.show-seq-item-head', qa('li.show-seq-item')[3]));
 const waitRow = qa('li.show-seq-item')[3];
 await setInput(q('.show-seq-wait select', waitRow), 'song_list');
 const search = q('input[type=search]', qa('li.show-seq-item')[3]);
@@ -196,19 +200,28 @@ ok(chosen.length === 2, `added songs appear on the Wait's list (${chosen.length}
 await click(q('button', chosen[1]));
 ok(qa('.show-seq-song-list li', qa('li.show-seq-item')[3]).length === 1, '✕ removes a song from the list');
 
-console.log('     drag the new Wait (row 4) to the top with the pointer');
-qa('li.show-seq-item').forEach((li, i) => { li.getBoundingClientRect = () => ({ top: i * 100, bottom: i * 100 + 90 }); });
-const handle = q('.show-seq-handle', qa('li.show-seq-item')[3]);
+console.log('     drag the new Wait (row 4) to the top with the pointer (dnd-kit, the legacy editor\'s own library)');
+const rectAt = (i) => ({ x: 0, y: i * 100, left: 0, top: i * 100, right: 300, bottom: i * 100 + 90,
+  width: 300, height: 90, toJSON() {} });
+qa('li.show-seq-item').forEach((li, i) => { li.getBoundingClientRect = () => rectAt(i); });
+const handle = q('.light-show-step-handle', qa('li.show-seq-item')[3]);
+ok(Boolean(handle) && handle.getAttribute('aria-roledescription') === 'sortable',
+  'each item has its own ⠿ drag handle (a dnd-kit sortable activator)');
 const pev = (type, y) => {
-  const e = new dom.window.MouseEvent(type, { bubbles: true, clientY: y });
+  const e = new dom.window.MouseEvent(type, { bubbles: true, cancelable: true, clientX: 150, clientY: y, button: 0 });
   Object.defineProperty(e, 'pointerId', { value: 7 });
+  Object.defineProperty(e, 'isPrimary', { value: true });
+  Object.defineProperty(e, 'pointerType', { value: 'touch' });
   return e;
 };
-await step(() => handle.dispatchEvent(pev('pointerdown', 350)));
-await step(() => handle.dispatchEvent(pev('pointermove', 20)));
-ok(qa('li.show-seq-item')[0].classList.contains('drop-target'), 'the landing row is marked while dragging');
-await step(() => handle.dispatchEvent(pev('pointerup', 20)));
-ok(qa('li.show-seq-item')[0].classList.contains('wait') && qa('li.show-seq-item')[0].querySelector('input[type=search]'),
+await step(() => handle.dispatchEvent(pev('pointerdown', 345)));
+await step(() => document.dispatchEvent(pev('pointermove', 330)));
+await step(() => document.dispatchEvent(pev('pointermove', 150)));
+await step(() => document.dispatchEvent(pev('pointermove', 30)));
+ok(qa('li.show-seq-item')[3].classList.contains('dragging'), 'the lifted item is marked while dragging');
+await step(() => document.dispatchEvent(pev('pointerup', 30)));
+await settle(50);
+ok(qa('li.show-seq-item')[0].classList.contains('wait'),
   'released at the top, the Wait is now item 1');
 await click(button('Save'));
 const saved = requests.filter((r) => r.method === 'POST' && r.path === '/spectra/api/light-show/sequences').pop();
@@ -219,7 +232,7 @@ ok(saved && saved.body.items[0].kind === 'wait' && saved.body.items[0].wait.kind
 ok(saved && saved.body.items[1].arm === 'scene_change', 'the re-armed set saved its new arming');
 ok(saved && !('title' in saved.body.items[1]), 'the served-only title is not posted back');
 await settle();
-await click(button('⧉ Duplicate'));
+await click(button('Duplicate'));
 ok(requests.some((r) => r.method === 'POST' && r.path === '/spectra/api/light-show/sequences/seq-1/duplicate'),
   'Duplicate asks the server for the copy');
 

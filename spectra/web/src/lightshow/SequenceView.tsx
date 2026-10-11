@@ -8,8 +8,10 @@
  *           (the app's searchable picker) each armed with the same four
  *           icons as the Run view's one-tap row, add Waits (a fixed time, a
  *           number of triggers, a number of songs, or one of a list of
- *           songs — searched from the songs SPECTRA knows), reorder by drag
- *           (pointer events, so a finger works as well as a mouse) or ↑/↓.
+ *           songs — searched from the songs SPECTRA knows), reorder by
+ *           dragging each item's own ⠿ handle (`SortableList.tsx`,
+ *           `@dnd-kit` — a finger works as well as a mouse, and so does
+ *           the keyboard).
  *   Run   — start one, then the current item highlighted with what it is
  *           waiting for, what is done and what is next, and the human
  *           override: Pause / Resume, Stop, Previous, Next, Fire now.
@@ -18,7 +20,7 @@
  * show_sequence.py); this view only shows `GET /light-show/sequence-run`,
  * polled, and its sentence `waiting_for` verbatim — never a second copy of
  * the runner's rules. */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { apiDel, apiGet, apiPost } from '../api/client';
 import Icon from '../components/Icon';
 import SearchSelect from '../components/forms/SearchSelect';
@@ -26,9 +28,12 @@ import HelpLink from '../help/HelpLink';
 import { namedOptions } from '../lib/pickerOptions';
 import useIsPhone from '../lib/useIsPhone';
 import {
-  ARM_ICON, ARM_LABEL, ARM_ORDER, WAIT_LABEL, clock, defaultWait, dropIndex, itemPhase,
+  ARM_ICON, ARM_LABEL, ARM_ORDER, WAIT_LABEL, clock, defaultWait, itemPhase,
   logLine, newSetItem, newWaitItem, reorder,
 } from './sequenceOps';
+import { cloneFresh, duplicateAt, insertAt, itemSummary, plainItem, writeClip } from './builderOps';
+import useShowClip from './useShowClip';
+import SortableList from './SortableList';
 import type {
   ArmTrigger, SequenceItem, SequenceStatus, SequenceWait, ShowSequence, ShowSet, SongRef, WaitKind,
 } from './types';
@@ -37,7 +42,11 @@ type Toast = (msg: string, kind?: 'success' | 'error') => void;
 
 const NEW_ID = '__new__';
 
-export default function SequenceView({ sets, toast }: { sets: ShowSet[]; toast: Toast }) {
+export default function SequenceView({ sets, toast, onOpenSet }: {
+  sets: ShowSet[]; toast: Toast;
+  /** open a set in the Build view (a Set item's ↗) */
+  onOpenSet?: (id: string) => void;
+}) {
   const isPhone = useIsPhone();
   const [sub, setSub] = useState<'build' | 'run'>(() => (window.matchMedia('(max-width: 720px)').matches ? 'run' : 'build'));
   const [sequences, setSequences] = useState<ShowSequence[]>([]);
@@ -71,7 +80,7 @@ export default function SequenceView({ sets, toast }: { sets: ShowSet[]; toast: 
       </div>
       {sub === 'build'
         ? <SequenceBuild sets={sets} sequences={sequences} reload={reload} status={status}
-            onStarted={() => { reloadStatus(); setSub('run'); }} toast={toast} />
+            onStarted={() => { reloadStatus(); setSub('run'); }} toast={toast} onOpenSet={onOpenSet} />
         : <SequenceRunView sequences={sequences} status={status} reloadStatus={reloadStatus} toast={toast} />}
     </div>
   );
@@ -79,9 +88,9 @@ export default function SequenceView({ sets, toast }: { sets: ShowSet[]; toast: 
 
 // ── Build ──────────────────────────────────────────────────────────────────
 
-function SequenceBuild({ sets, sequences, reload, status, onStarted, toast }: {
+function SequenceBuild({ sets, sequences, reload, status, onStarted, toast, onOpenSet }: {
   sets: ShowSet[]; sequences: ShowSequence[]; reload: () => Promise<ShowSequence[]>;
-  status: SequenceStatus | null; onStarted: () => void; toast: Toast;
+  status: SequenceStatus | null; onStarted: () => void; toast: Toast; onOpenSet?: (id: string) => void;
 }) {
   const [selected, setSelected] = useState<string | null>(null);
   const [draft, setDraft] = useState<ShowSequence | null>(null);
@@ -116,7 +125,8 @@ function SequenceBuild({ sets, sequences, reload, status, onStarted, toast }: {
   const save = async (): Promise<ShowSequence | null> => {
     if (!draft) return null;
     try {
-      const body = { ...draft, items: draft.items.map(({ title: _t, problems: _p, ...it }) => it) };
+      const { problems: _pr, ...rest } = draft;
+      const body = { ...rest, items: draft.items.map(plainItem) };
       const saved = await apiPost<ShowSequence>('/light-show/sequences', body);
       await reload();
       setSelected(saved.id ?? null);
@@ -212,7 +222,8 @@ function SequenceBuild({ sets, sequences, reload, status, onStarted, toast }: {
               {draft.id && (
                 <button disabled={dirty} onClick={() => void duplicate()}
                   title={dirty ? 'Save this sequence before duplicating it'
-                    : 'An independent copy, named "<name> copy", right after this one'}>⧉ Duplicate</button>
+                    : 'An independent copy, named "<name> copy", right after this one'}>
+                  <Icon name="duplicate" size={14} /> Duplicate</button>
               )}
               {draft.id && <button className="danger" onClick={() => void remove()}>Delete</button>}
             </div>
@@ -227,11 +238,19 @@ function SequenceBuild({ sets, sequences, reload, status, onStarted, toast }: {
               <p className="muted">Add a Set or a Wait. Items run strictly in order: each one starts
                 listening only after the one before it has run.</p>
             )}
-            <ItemList items={draft.items} setOptions={setOptions} sets={sets}
+            <ItemList items={draft.items} setOptions={setOptions} sets={sets} onOpenSet={onOpenSet}
               onChange={(items) => edit((d) => { d.items = items; })} toast={toast} />
             <div className="show-seq-add">
               <button onClick={() => edit((d) => { d.items.push(newSetItem()); })}>+ Set</button>
               <button onClick={() => edit((d) => { d.items.push(newWaitItem()); })}>+ Wait</button>
+              {draft.items.length > 0 && (
+                <button type="button" title="Copy every item of this sequence (paste into another)"
+                  onClick={() => {
+                    writeClip({ kind: 'items', items: draft.items.map(plainItem),
+                      summary: `the items of “${draft.name}” (${draft.items.length})` });
+                    toast(`Copied ${draft.items.length} items`, 'success');
+                  }}><Icon name="copy" size={14} /> Copy all</button>
+              )}
               <HelpLink topic="show-sequence-waits" />
             </div>
           </>
@@ -241,69 +260,114 @@ function SequenceBuild({ sets, sequences, reload, status, onStarted, toast }: {
   );
 }
 
-function ItemList({ items, setOptions, sets, onChange, toast }: {
+/** The items, as collapsible cards in a drag-to-order list — the Set
+ * editor's own interaction model (SortableList.tsx, the legacy SpotFX
+ * editor's): ⠿ to drag (finger or mouse), a caret to open, copy / duplicate
+ * / remove on the row, Collapse all / Expand all, and paste from the shared
+ * Light Show clipboard. A Set item's ↗ opens that set in the Build view. */
+function ItemList({ items, setOptions, sets, onChange, toast, onOpenSet }: {
   items: SequenceItem[]; setOptions: { value: string; label: string }[]; sets: ShowSet[];
-  onChange: (items: SequenceItem[]) => void; toast: Toast;
+  onChange: (items: SequenceItem[]) => void; toast: Toast; onOpenSet?: (id: string) => void;
 }) {
-  const rows = useRef<(HTMLLIElement | null)[]>([]);
-  const [drag, setDrag] = useState<{ from: number; to: number; pointer: number } | null>(null);
-
-  const rects = () => rows.current.slice(0, items.length).map((el) => {
-    const r = el?.getBoundingClientRect();
-    return { top: r?.top ?? 0, bottom: r?.bottom ?? 0 };
+  const [open, setOpen] = useState<Set<string>>(new Set());
+  const clip = useShowClip();
+  const setNames = new Map(sets.filter((s) => s.id).map((s) => [s.id as string, s.name]));
+  const toggle = (id: string | undefined) => id && setOpen((o) => {
+    const n = new Set(o);
+    if (n.has(id)) n.delete(id); else n.add(id);
+    return n;
   });
-
+  const opened = (...ids: (string | undefined)[]) => setOpen((o) => {
+    const n = new Set(o);
+    ids.forEach((id) => { if (id) n.add(id); });
+    return n;
+  });
   const update = (i: number, next: SequenceItem) => {
     const out = items.slice();
     out[i] = next;
     onChange(out);
   };
+  const allOpen = items.length > 0 && items.every((it) => it.id && open.has(it.id));
 
   return (
-    <ol className="show-seq-items">
-      {items.map((it, i) => {
-        const cls = ['show-seq-item', it.kind,
-          drag && drag.from === i ? 'dragging' : '',
-          drag && drag.to === i && drag.from !== i ? 'drop-target' : ''].filter(Boolean).join(' ');
-        return (
-          <li key={it.id ?? i} className={cls} ref={(el) => { rows.current[i] = el; }}>
-            <div className="show-seq-item-head">
-              <span className="light-show-step-handle show-seq-handle" aria-label="Drag to reorder"
-                title="Drag to reorder"
-                onPointerDown={(e) => {
-                  e.preventDefault();
-                  e.currentTarget.setPointerCapture(e.pointerId);
-                  setDrag({ from: i, to: i, pointer: e.pointerId });
+    <>
+      {items.length > 0 && (
+        <div className="light-show-list-tools">
+          <span className="muted">{items.length} item{items.length === 1 ? '' : 's'}</span>
+          <button type="button" onClick={() => setOpen(allOpen ? new Set() : new Set(items.map((it) => it.id as string)))}>
+            {allOpen ? 'Collapse all' : 'Expand all'}
+          </button>
+          <HelpLink topic="show-builder-editing" />
+        </div>
+      )}
+      <SortableList className="show-seq-items" items={items} getId={(it, i) => it.id ?? `i${i}`}
+        getLabel={(it, i) => `item ${i + 1}, ${itemSummary(it, setNames)}`}
+        onReorder={(from, to) => onChange(reorder(items, from, to))}
+        renderItem={(it, i, row) => {
+          const isOpen = Boolean(it.id && open.has(it.id));
+          const cls = ['show-seq-item', it.kind, row.isDragging ? 'dragging' : '', isOpen ? 'open' : '']
+            .filter(Boolean).join(' ');
+          return (
+            <li ref={row.rowRef} style={row.rowStyle} className={cls} data-item-id={it.id}>
+              <div className="show-seq-item-head" onClick={() => toggle(it.id)} role="button" aria-expanded={isOpen}
+                tabIndex={0} onKeyDown={(e) => {
+                  if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); toggle(it.id); }
                 }}
-                onPointerMove={(e) => {
-                  if (!drag || drag.pointer !== e.pointerId) return;
-                  const to = dropIndex(e.clientY, rects(), drag.from);
-                  if (to !== drag.to) setDrag({ ...drag, to });
-                }}
-                onPointerUp={(e) => {
-                  if (!drag || drag.pointer !== e.pointerId) return;
-                  if (drag.to !== drag.from) onChange(reorder(items, drag.from, drag.to));
-                  setDrag(null);
-                }}
-                onPointerCancel={() => setDrag(null)}>⠿</span>
-              <span className="show-seq-num">{i + 1}</span>
-              <b>{it.kind === 'set' ? 'Set' : 'Wait'}</b>
-              <span className="light-show-step-tools">
-                <button disabled={i === 0} onClick={() => onChange(reorder(items, i, i - 1))} aria-label="Move up">↑</button>
-                <button disabled={i === items.length - 1} onClick={() => onChange(reorder(items, i, i + 1))} aria-label="Move down">↓</button>
-                <button onClick={() => onChange(items.filter((_x, j) => j !== i))} aria-label="Remove item">✕</button>
-              </span>
-            </div>
-            {it.kind === 'set'
-              ? <SetItemEditor item={it} options={setOptions} sets={sets} onChange={(n) => update(i, n)} />
-              : <WaitEditor wait={it.wait ?? defaultWait()} onChange={(w) => update(i, { ...it, wait: w })} toast={toast} />}
-            {(it.problems?.length ?? 0) > 0 && (
-              <ul className="light-show-problems">{it.problems!.map((p) => <li key={p}>⚠ {p}</li>)}</ul>
-            )}
-          </li>
-        );
-      })}
-    </ol>
+                aria-label={`${isOpen ? 'Collapse' : 'Expand'} item ${i + 1}`}>
+                {row.handle}
+                <span className="show-seq-num">{i + 1}</span>
+                <Icon name="chevron" size={14} className={`light-show-caret${isOpen ? ' open' : ''}`} />
+                {it.kind === 'set' && <Icon name={ARM_ICON[it.arm]} size={16} />}
+                <b>{it.kind === 'set' ? 'Set' : 'Wait'}</b>
+                {!isOpen && <span className="light-show-step-summary">{itemSummary(it, setNames)}</span>}
+                <span className="light-show-step-tools" onClick={(e) => e.stopPropagation()}>
+                  {it.kind === 'set' && it.set_id && setNames.has(it.set_id) && onOpenSet && (
+                    <button type="button" className="icon-btn" title={`Open “${setNames.get(it.set_id)}” in Build`}
+                      aria-label={`Open ${setNames.get(it.set_id)}`} onClick={() => onOpenSet(it.set_id as string)}>
+                      <Icon name="open" size={15} />
+                    </button>
+                  )}
+                  <button type="button" className="icon-btn" title="Copy this item (paste into any sequence)"
+                    aria-label="Copy item" onClick={() => {
+                      writeClip({ kind: 'items', items: [plainItem(it)], summary: `the item “${itemSummary(it, setNames)}”` });
+                      toast('Item copied — paste it into any sequence', 'success');
+                    }}><Icon name="copy" size={15} /></button>
+                  <button type="button" className="icon-btn" title="Duplicate this item" aria-label="Duplicate item"
+                    onClick={() => {
+                      const dup = duplicateAt(items.map(plainItem), i);
+                      onChange(dup);
+                      opened(dup[i + 1].id);
+                    }}><Icon name="duplicate" size={15} /></button>
+                  <button type="button" className="icon-btn danger" title="Remove this item" aria-label="Remove item"
+                    onClick={() => onChange(items.filter((_x, j) => j !== i))}><Icon name="trash" size={15} /></button>
+                </span>
+              </div>
+              {!isOpen && (it.problems?.length ?? 0) > 0 && (
+                <p className="light-show-problems">⚠ {it.problems![0]}</p>
+              )}
+              {isOpen && (
+                <div className="show-seq-item-body">
+                  {it.kind === 'set'
+                    ? <SetItemEditor item={it} options={setOptions} sets={sets} onChange={(n) => update(i, n)} />
+                    : <WaitEditor wait={it.wait ?? defaultWait()} onChange={(w) => update(i, { ...it, wait: w })} toast={toast} />}
+                  {(it.problems?.length ?? 0) > 0 && (
+                    <ul className="light-show-problems">{it.problems!.map((p) => <li key={p}>⚠ {p}</li>)}</ul>
+                  )}
+                </div>
+              )}
+            </li>
+          );
+        }} />
+      {clip?.kind === 'items' && (
+        <button type="button" className="show-seq-paste" onClick={() => {
+          const fresh = cloneFresh(clip.items);
+          onChange(insertAt(items, items.length, fresh));
+          opened(...fresh.map((x) => x.id));
+        }} title={`Paste ${clip.summary} at the end`}>
+          <Icon name="paste" size={14} /> Paste {clip.items.length} item{clip.items.length === 1 ? '' : 's'}
+        </button>
+      )}
+    </>
   );
 }
 

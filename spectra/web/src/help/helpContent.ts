@@ -1947,6 +1947,7 @@ export const HELP_SECTIONS: HelpSection[] = [
           'Sonic never guesses a name you only approximated — if it doesn\'t match a set, fixture, or category exactly, it refuses and offers the closest spellings rather than picking one. Every reply says plainly what actually ran (or why it refused), read from the same structured result the page itself shows, never from Sonic\'s own prose.',
           'A new set Sonic creates is always empty and brand-new — it can never overwrite one of your existing sets, even given the exact same name (the name is rejected instead). Adding steps to a set, and editing an existing one\'s steps, stays the Build view\'s job — Sonic can fire, arm and create, not author.',
           'A set holding a room-effect step fires and arms exactly like any other set — there is no separate "room effect" command.',
+          'Sets that run other sets: ask "which sets use Defaults?" or "what does Party run?" — Sonic reads each set\'s Runs and Used by. Firing a set runs the steps of every set it calls, and the reply names them. Adding or removing a "Run another set" step is editing the set, so that stays the Build view\'s job.',
           'Pulse and flares too: "turn flares off for the hues", "flares back on for the Singles", "Pulse reactivity to 0.3 on the Singles", "keep the Hue bulbs\' Pulse between 0.2 and 0.6", "end that Pulse hold". These run the same Pulse reactivity, Pulse brightness and Flares on / off steps the Build view offers, held until released unless you give a time.',
         ],
       },
@@ -2640,6 +2641,26 @@ export const HELP_SECTIONS: HelpSection[] = [
           'Names are yours and unique ignoring case. Steps run in list order. Consecutive room-setting steps are saved as ONE room-controls save, so a set behaves like a single change.',
           'A Pause step waits before the next one ("then two seconds later"). Fire returns as soon as the first pause is reached; the rest keeps running and shows under "Right now" until it finishes.',
           'If two steps change the same setting the later one wins; the editor names the collision but still saves the set. A step with a problem (a scene that no longer exists, a missing choice) is marked ⚠ and fails by name when it runs, without stopping the others.',
+        ],
+      },
+      {
+        id: 'show-builder-editing',
+        title: 'Editing sets and sequences: drag, collapse, copy',
+        keywords: 'drag drop reorder handle touch finger collapse expand all copy paste duplicate clipboard step item set',
+        body: [
+          'Steps (and sequence items) are cards. Drag one by its ⠿ handle to a new place: with a mouse, or with a finger on a phone or tablet. Only the handle drags, so a finger anywhere else on the card still scrolls the page. A tap on the handle moves nothing; with a keyboard, focus the handle, press Space, move with the arrow keys and press Space again.',
+          'Cards start collapsed, each showing a one-line summary of what it does. Tap a card to open its settings; Expand all / Collapse all opens or closes every card at once. A step you just added, duplicated or pasted opens by itself.',
+          'On every card: copy (puts it on the Light Show clipboard), duplicate (an independent copy right after it) and remove. Paste appears at the bottom of any set (for steps) or any sequence (for items) while the clipboard holds something, in this tab or any other. Copy set copies a whole set: paste it as a new set from the Sets list, or paste its steps into another set. Every pasted step gets its own id, so a paste is never linked to what it was copied from.',
+        ],
+      },
+      {
+        id: 'show-set-references',
+        title: 'Sets that run other sets',
+        keywords: 'reference call run another set defaults shared nested used by cycle loop inline',
+        body: [
+          'A "Run another set" step runs that set\'s steps right there, in its own order, as if they were pasted in. Use it for shared defaults: build one set of settings once and run it at the top of every set that behaves alike, then change only what differs after it (a later step wins, and the editor names the override).',
+          'It is a reference, not a copy: editing the called set changes every set that runs it, the next time they run. The editor shows "Runs" (the sets this one calls) and "Used by" (the sets and sequences that use this one); each name opens that set. Open a "Run another set" step to see the steps it will run.',
+          'A set can never run itself, directly or through other sets: such a set is left out of the picker, and a save that would make a loop is refused, naming the loop. Deleting a set that other sets or sequences use warns first and names them; if you delete it anyway, each step that ran it fails by name until you change it. When a set fires, the run report and the show log name every step that came from a called set ("Defaults › Display mode").',
         ],
       },
       {
