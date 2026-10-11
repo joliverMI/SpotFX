@@ -25,6 +25,15 @@ regressed).
 
 ## Known invariants from this scene's edit history
 
+- **The strip's phase look is the shared strip phase layer's** (since
+  2026-10-11, strip phase plan phase 2 — blackhole-effect skill, "The
+  STRIP"): a tinted palette build with more blobs, black at the room's dark
+  point, a drop that is bright on its mark with an intensity-sized burst.
+  A report of "the strip goes white on the build" or "a grey dot in the
+  lull" means the old module is running, not his tuning. Its strip-phase
+  tunables live on this scene's Strips entry (Sonic:
+  `set_scene_entry_param`).
+
 - **Reverse-flare toggle**: `reverse` on `blackhole`/`blackhole1d` needs
   the real-`bool` coercion (see blackhole-effect skill) — a momentary/
   permanent kind targeting it silently did nothing before that fix. This

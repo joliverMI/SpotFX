@@ -6,8 +6,10 @@ Runs each strip phase member through a full cycle on the real render
 pipeline (tests/strip_phase_harness.py: fx.headless, the production
 ResponseEngine on the FacadeExecutor, a fake clock, deterministic audio) —
 1.5 s normal, a 4 s charge, a 7 s lull (dark point 4 s in, 3 s of dark), a
-drop at intensity 0.85 — once as the effect was before the layer and once
-with it, and prints:
+drop at intensity 0.85 — once with the layer's stage switched off and once
+with it, and prints (for Melt and Power the "off" run IS the effect as it
+was before the layer; the Black Hole strip's own choreography changed when
+it joined, so its true before/after is scripts/check_blackhole_strip_phase.py):
 
   normal / charge peak / charge end / dark seconds in the lull / drop peak
   (mean perceived luminance), and the worst frame's count of pixels whiter
@@ -121,7 +123,7 @@ def main() -> int:
     for et in sorted(device_model.STRIP_PHASE_EFFECTS):
         for layer in (False, True):
             m = measure(*run(cycle(et, layer)))
-            label = "layer" if layer else "today"
+            label = "layer" if layer else "off"
             print(f"{et:8} {label:6} {m['normal']:7.3f} {m['charge_peak']:8.3f} "
                   f"{m['charge_end']:7.3f} {m['dark_s']:7.2f} "
                   f"{m['drop_peak']:8.3f} {m['white']:9d}")

@@ -9488,10 +9488,9 @@ statement, including the three-step OPT-IN for an existing or future lull
 effect (schema fields, `fx.device_model.LULL_DARK_EFFECTS`, one
 `lull_timing()` call where the effect had a fixed dark fraction). Opted in
 at the time: Black Hole, Squiggles, Pulse only (his "just these 3 for
-now") — `blackhole1d`, Black Hole's own strip, was the obvious next one
-and still darkens at its old half-progress point. **Since 2026-10-11 every
-strip phase member (Melt, Power — see "THE STRIP PHASE LAYER" below) is
-opted in too**, via the shared strip layer reading this same rule. Three
+now"). **Since 2026-10-11 every strip phase member (Melt, Power and
+Black Hole's own strip `blackhole1d` — see "THE STRIP PHASE LAYER" below)
+is opted in too**, via the shared strip layer reading this same rule. Three
 things:
 
 - **SpotFX tells, the effect measures.** `scene_response._drive_phase` adds
@@ -9536,10 +9535,24 @@ output stage, HOW AN EFFECT JOINS). Six things:
   PHASE/LULL_DARK/DROP_INTENSITY, so SpotFX tells it with no SpotFX change),
   then register `strip_phase.registry_params()` in `config/
   effect_params.json` (Sonic reaches them via `set_scene_entry_param`).
-  Members: Melt, Power. `tests/test_strip_phase.py`'s guard fails on a
-  registered 1-D effect that neither joins nor is named in
-  `STRIP_PHASE_EXCEPTIONS` (the Black Hole/Orbits/Fireworks strips join in
-  plan phases 2-3).
+  Members: Melt, Power, the Black Hole strip (plan phase 2). `tests/
+  test_strip_phase.py`'s guard fails on a registered 1-D effect that
+  neither joins nor is named in `STRIP_PHASE_EXCEPTIONS` (the Orbits/
+  Fireworks strips join in plan phase 3).
+- **AN EFFECT WITH ITS OWN PHASE CHOREOGRAPHY JOINS IN TWO MORE PLACES**
+  (found joining `blackhole1d`, phase 2 — the same trap waits for Orbits
+  and Fireworks): every phase arm and per-frame `phase_progress` write is
+  PASSIVE, so it never reaches the effect's own `config_updated` — override
+  `_passive_config_updated` (super first) or the effect never sees a phase
+  edge; and its `config_updated` must NOT call `super()`, because
+  `_apply_config` already calls every direct base's own hook and a second
+  `StripPhase` pass on a creation write turns a stale persisted phase into
+  a false edge. Its content must read the layer's dark point
+  (`_strip_phase_lull()`), never a progress fraction of its own, and its
+  drawn phase looks are retired in favour of the layer's (the Black Hole
+  strip lost its white halo flood, lull mask, phosphor dot and drop
+  fade-up; it keeps its blob formation, a 12..36 intensity-sized drop burst
+  and a 6-blob ring burst on a flare punch — `_strip_phase_on_punch`).
 - **NO ADDED WHITE, STRUCTURALLY**: a hue-kept colour gain (a pixel scales
   whole and stops at full), a fill and a drop shockwave sampled from the
   effect's own gradient (the shockwave paints OVER, brighter-wins, never
@@ -9557,7 +9570,10 @@ output stage, HOW AN EFFECT JOINS). Six things:
   carrying ONLY layer-owned keys merges and calls `_passive_config_updated`.
 - **THE ROOM MASTER `strip_phase_strength`** (RoomControlState, 0..1.5,
   Sonic `set_setting`, Scenes panel) is pushed on every strip arm write;
-  0 reproduces the strips exactly as before (proven through a whole cycle).
+  0 reproduces Melt and Power exactly as before (proven through a whole
+  cycle); on the Black Hole strip 0 switches the layer's drawing off but
+  not its own (reworked) blob choreography — the retired white flood is
+  not a rollback target.
 - **A FLARE IN THE LULL'S DARK PUNCHES THROUGH** (his answer 5):
   `ResponseEngine._run_kinds` collects every virtual the batch actually
   wrote to (`_jump`/`_glide` — every write in scene_response goes through
@@ -9576,8 +9592,11 @@ Proofs: `tests/test_strip_phase.py` (harness `tests/strip_phase_harness.py`:
 the real pipeline + production ResponseEngine/FacadeExecutor, fake clock
 behind `time.time_ns` too, since Melt reads it), `scripts/
 check_strip_phase.py` (the measured cycle and the stage cost: ~0.1 µs
-off-phase, ~230-245 µs a frame during a charge/drop at 560 px). Help topic
-`strip-phases`; `fx/VENDOR.md` #68.
+off-phase, ~230-245 µs a frame during a charge/drop at 560 px); the Black
+Hole strip's before/after on his own entry, with the pinned pre-change
+module as red control: `scripts/check_blackhole_strip_phase.py` +
+`tests/test_blackhole_strip_phase.py`. Help topic `strip-phases`;
+`fx/VENDOR.md` #68, #70.
 
 ## THE LULL HAND-OFF HOOK — how a lull is told what to leave for its drop (`fx/effects/lull_handoff.py`)
 

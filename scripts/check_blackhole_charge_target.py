@@ -465,8 +465,9 @@ async def main():
 
     print("\n§6 SCOPE — the strips keep their own numbers")
     from fx.effects import blackhole1d as bh1  # noqa: E402
-    check(bh1.CHARGE_SPAWN_RATE_MAX == 12.0 and bh1.CHARGE_SPAWN_CURVE == 2.0,
-          "fx/effects/blackhole1d.py is deliberately untouched (12.0/2.0)")
+    check(bh1.CHARGE_SPAWN_RATE_MAX == 24.0 and bh1.CHARGE_SPAWN_CURVE == 2.0,
+          "fx/effects/blackhole1d.py keeps its own numbers (24.0/2.0 — the "
+          "strip phase plan's own ceiling, not this calibration's 45)")
     check(not hasattr(bh1.Blackhole1d, "_horizon_radius"),
           "— it has no event horizon and no capture at all, so \"blob count "
           "not in the event horizon\" has no referent there")

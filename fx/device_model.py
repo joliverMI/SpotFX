@@ -257,11 +257,12 @@ def resolve_scope(virtual_ids: list[str] = (), categories: list[str] = (),
 # no SpotFX code change; and scene_response._drive_phase holds a member's
 # phases back while a house mode owns the look (his call 4). Every
 # registered 1-D effect either joins or is named in STRIP_PHASE_EXCEPTIONS
-# with its reason (tests/test_strip_phase.py's guard).
-STRIP_PHASE_EFFECTS = frozenset({"melt", "power"})
+# with its reason (tests/test_strip_phase.py's guard). The Black Hole strip
+# joined in plan phase 2 (2026-10-11): the layer draws its phases, the
+# effect keeps its own blob choreography (fx/effects/blackhole1d.py).
+STRIP_PHASE_EFFECTS = frozenset({"melt", "power", "blackhole1d"})
 
 STRIP_PHASE_EXCEPTIONS = {
-    "blackhole1d": "own phase choreography; joins the layer in plan phase 2",
     "orbits1d": "own phase choreography; joins the layer in plan phase 3",
     "fireworks1d": "own phase choreography; joins the layer in plan phase 3",
     "pulse": "the Singles' one-colour light with its own lull/drop and flash budget",
@@ -297,8 +298,8 @@ ONE_COLOUR_EFFECTS = frozenset({"pulse"})
 # (spectra scene_response._drive_phase); an effect not listed here never
 # receives those keys. To opt an effect in, follow lull_dark.py's own
 # "HOW A LULL EFFECT OPTS IN". Every STRIP_PHASE_EFFECTS member is one (the
-# strip layer reads the same rule); blackhole1d (Black Hole's strip) joins
-# with it in plan phase 2.
+# strip layer reads the same rule) — Black Hole's own strip (blackhole1d)
+# among them since plan phase 2.
 LULL_DARK_EFFECTS = frozenset({"blackhole", "squiggles", "pulse"}) \
     | STRIP_PHASE_EFFECTS
 

@@ -275,7 +275,9 @@ def test_the_calibration_is_scoped_to_the_matrix_effect():
     capture at all (its blobs fall to the centre and die — there is no
     p_cap), so "blob count not in the event horizon" has no referent there,
     its own drop payoff is separately scaled, and 45 blobs/second on a 7-17
-    pixel strip is mush rather than a build."""
-    assert (bh1d.CHARGE_SPAWN_RATE_MAX, bh1d.CHARGE_SPAWN_CURVE) == (12.0, 2.0)
+    pixel strip is mush rather than a build. (The strip's own ceiling moved
+    12 -> 24 with the strip phase plan's phase 2 — its own number, from its
+    own plan, still not the Matrix's 45.)"""
+    assert (bh1d.CHARGE_SPAWN_RATE_MAX, bh1d.CHARGE_SPAWN_CURVE) == (24.0, 2.0)
     assert not hasattr(bh1d.Blackhole1d, "_horizon_radius")
     assert bh1d.PHASE_BURST_N != bh.PHASE_BURST_N

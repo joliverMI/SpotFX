@@ -94,8 +94,10 @@ guarded).
   disc, so the build reads even in silence. Ambient spawning pauses once
   the horizon covers the panel.
 - **Lull** — held full-screen black: the room's screen is *gone*, only the
-  halo's memory. (1D: mask fully closed with a lingering phosphor dot at
-  the strip middle.)
+  halo's memory. (The strip, `blackhole1d`, draws its phases through the
+  shared strip phase layer since 2026-10-11 — see "Strip phase layer"
+  below: no white halo flood, black at the room's dark point with no
+  phosphor dot, and a drop that begins bright on its mark.)
 - **Drop** — the horizon pinches to a point, 24 full-bright blobs erupt
   from the center (`_phase_burst`, bypasses `max_blobs` — the explosion
   must always land), the saved config is restored, and the horizon eases
@@ -283,10 +285,10 @@ only above intensity 0.4 by default —
 `FlareKind.min_intensity`). Both are instant, self-resetting pokes with no
 lead, carry or release.
 
-### Strip phase layer (`melt.py`, `power.py` — `fx/effects/strip_phase.py`)
+### Strip phase layer (`melt.py`, `power.py`, `blackhole1d.py` — `fx/effects/strip_phase.py`)
 
-Unlike every family above, Melt and Power have no choreography of their
-own — they join ONE shared layer (2026-10-11, strip phase plan phase 1)
+Melt and Power have no choreography of their own — they join ONE shared
+layer (2026-10-11, strip phase plan phase 1)
 that works in the output stage, after the effect's own render: a
 hue-kept colour gain (brighter, never whiter), a set-colour fill under the
 strip, the drop's set-colour shockwave painted over it, and a white guard
@@ -315,10 +317,22 @@ STRIP_PHASE_EFFECTS` is where an effect joins it.
 
 Held back under a house mode (`scene_response.HOUSE_HELD_PHASE_EFFECTS`),
 the same as Pulse. The room setting `strip_phase_strength` (0..1.5) scales
-every quantity above and, at 0, reproduces the effect exactly as it was
-before it joined — the rollback lever. Black Hole/Orbits/Fireworks' own
-strips keep their own choreography above and join this layer in later plan
-phases. Full mechanism (the output-stage order, the white guard, the
+every quantity above and, at 0, reproduces Melt and Power exactly as they
+were before they joined — the rollback lever.
+
+**The Black Hole strip** (`blackhole1d`) joined in plan phase 2: the layer
+draws its phases (its own white halo flood, lull mask, grey phosphor dot
+and the drop's fade-up from black are retired — his call 1, "tinted palette
+glow"), and the effect keeps its own blob choreography under it: the
+charge's forced formation accelerating to 24 blobs/s past the cap with a
+faster fall, tapering through the lull's approach to nothing at the dark
+point; a drop burst sized by the drop's intensity (12 at 0 → 36 at 1, ~32
+at his usual 0.85) on the drop's first frame; and a 6-blob ring burst
+through the ring when a flare punches through the lull's dark. Its
+activity raises the spawn rate, beat burst and density cap (and the fall
+speed, weighted 0.6). At `strip_phase_strength` 0 the layer's drawing is
+off but the reworked blob choreography stays. Orbits/Fireworks' own strips
+keep their own choreography above and join in plan phase 3. Full mechanism (the output-stage order, the white guard, the
 punch envelope, how a future effect joins): the module's own docstring and
 AGENTS.md's "THE STRIP PHASE LAYER" section — not restated here.
 

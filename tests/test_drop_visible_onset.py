@@ -54,6 +54,41 @@ def test_squiggles_burst_lands_on_drop_entry_not_the_ramp_end(tmp_path):
     )
 
 
+def test_black_hole_strip_burst_lands_on_drop_entry(tmp_path):
+    result = _run(check._burst_onset(
+        tmp_path, "blackhole1d-onset", "blackhole1d", dict(check.HIS_STRIP),
+        "_phase_burst"))
+    assert result["onset_s"] < 2 * check.DT + 1e-9
+
+
+def test_black_hole_strip_is_lit_on_the_drops_first_frame(tmp_path):
+    """Strip phase plan phase 2: the Black Hole strip used to FADE UP FROM
+    BLACK over DROP_RESET_S after its burst (the retired _phase_post mask),
+    so the burst fired on the mark and was hidden there. Measured on the
+    rendered frames: the first frame after the drop write is already
+    visibly lit (the shared layer's set-colour shockwave leaves the centre
+    on the mark, over the burst's own blobs)."""
+    result = _run(check._strip_lit_onset(tmp_path))
+    assert result["onset_s"] is not None and result["onset_s"] < check.DT / 2
+    assert result["first"] > 0.0
+
+
+def test_the_strip_lit_onset_instrument_goes_red_on_the_old_fade(tmp_path):
+    """The red control: the same instrument on the module as it was before
+    the strip joined the layer (scripts/check_blackhole_strip_phase.py's
+    pinned BEFORE_REF, loaded beside the current one) reports the drop's
+    first frame BLACK and the strip lit only frames later — so the test
+    above can fail on exactly the defect it was written for."""
+    import pytest
+    import scripts.check_blackhole_strip_phase as before
+    name = before.load_before()
+    if name is None:
+        pytest.skip(f"git cannot produce {before.BEFORE_REF}")
+    result = _run(check._strip_lit_onset(tmp_path, name, "old-strip"))
+    assert result["first"] == 0.0
+    assert result["onset_s"] is not None and result["onset_s"] >= check.DT
+
+
 def test_stalled_ramp_does_not_change_when_any_burst_effect_fires(tmp_path):
     """A dropped/lost phase_progress ramp used to matter (Blackhole's own
     DROP_FALLBACK_S wall-clock fallback existed exactly because the old
