@@ -664,6 +664,7 @@ class Sauron2d(Twod, GradientEffect):
                 "phase_progress": self.phase_progress,
                 "charge_amt": self._charge_amt,
                 "surge": self._surge_env,
+                "lids_rotated": self._lids_rotated,
             },
         }
 
@@ -715,6 +716,10 @@ class Sauron2d(Twod, GradientEffect):
                 self.phase_progress = float(
                     native.get("phase_progress", self.phase_progress)
                 )
+                if ph == "lull":
+                    self._lids_rotated = bool(
+                        native.get("lids_rotated", self._lids_rotated)
+                    )
                 if self._phase_pending == ph:
                     self._phase_pending = None
             return

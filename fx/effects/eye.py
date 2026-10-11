@@ -336,6 +336,7 @@ class Eye2d(Twod, GradientEffect):
                 "phase_t": self._phase_t,
                 "phase_progress": self.phase_progress,
                 "charge_amt": self._charge_amt,
+                "lids_rotated": self._lids_rotated,
             },
         }
 
@@ -393,6 +394,10 @@ class Eye2d(Twod, GradientEffect):
                 self.phase_progress = float(
                     native.get("phase_progress", self.phase_progress)
                 )
+                if ph == "lull":
+                    self._lids_rotated = bool(
+                        native.get("lids_rotated", self._lids_rotated)
+                    )
                 # keep a DIFFERENT pending edge (e.g. a drop written
                 # between creation and first draw); only drop a pending
                 # re-edge of the phase we just resumed

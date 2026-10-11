@@ -243,13 +243,16 @@ beat clock, not this machinery)
 - **Charge** — the iris grows (+30%), the pupil constricts (×0.5), and
   the flames reverse to stream INWARD: the eye feeds. A flare recreation
   mid-charge continues the phase (it rides the native handoff snapshot).
-- **Lull** — the lids close emoji-style (`_lid_travel`): fast ease-out to
-  the iris edge, a near-still pause over the ramp's [0.50, 0.75], then the
-  final close (completing at 0.93 so end-of-ramp jitter can't strand a
-  slit-open lid); the gaze returns to center.
+- **Lull** — the lids are drawn upside down (`lull_lids_upside_down`, a
+  plain 180-degree turn about the eye — the panel's bottom edge becomes
+  the turned frame's top) while they close emoji-style (`_lid_travel`):
+  fast ease-out to the iris edge, a near-still pause over the ramp's
+  [0.50, 0.75], then the final close (completing at 0.93 so end-of-ramp
+  jitter can't strand a slit-open lid); the gaze returns to center.
 - **Drop** — if a short lull left the lids mid-close they SLAM shut first,
-  then the eye explodes open (0.18 s), a flame burst with a randomness
-  spike rides the opening, settling over 1.2 s.
+  then the eye explodes open the same way round (0.18 s), a flame burst
+  with a randomness spike rides the opening, settling over 1.2 s.
+  Sauron shares this lull/drop choreography — see below.
 
 ### Pulse (`pulse.py`, the Singles — a one-colour effect, not a particle
 one; single-led-power plan phase 2, 2026-10-06)
