@@ -4520,7 +4520,16 @@ and trigger it as part of the light show" — ANY `scene.*` entity, typed
 by its full id or picked from `ha_client.list_scenes()`'s live
 `GET /api/states` fetch, `GET /api/light-show/ha-scenes` the route that
 serves it; `scene.music_mode` is only the step's own suggested default,
-never a stored list). Sonic reach:
+never a stored list). **Both volume steps EASE** (`ease_s`, default 1 s, 0 = the old single
+call; the Admiral, 2026-10-11) — SPECTRA walks snap_volume in steps of 4
+(max 10 writes/s), not a ramping HA script: River's `music_volume_set` is
+`mode: single` and would drop a newer call mid-ramp.
+`spectra/services/ha_volume_ease.py` is the binding statement: one ramp
+at a time, a newer volume step stops it between writes and wins, a
+relative step carries the stopped ramp's unfinished part (two quick +8s
+= +16), the first write is inline (the step's outcome), and a restart
+mid-ramp leaves a real level between start and target. Spec:
+`tests/test_ha_volume_ease.py`. Sonic reach:
 `show_console._op_set_ha_volume_absolute`/`_op_set_ha_volume_relative`/
 `_op_activate_ha_scene` (ad-hoc one-step fires through `show_actions.
 fire()`, the `hold_device`/`dim_device` pattern; `_resolve_ha_scene` uses

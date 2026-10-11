@@ -125,7 +125,7 @@ def test_volume_absolute_range_is_enforced():
 def test_volume_relative_calls_the_configured_entity_split_into_domain_service(
         room, ha_calls):
     calls, _ = ha_calls
-    run = fire([A("ha_volume_relative", delta=8)])
+    run = fire([A("ha_volume_relative", delta=8, ease_s=0)])
     assert run["steps"][0]["status"] == "applied"
     assert calls == [{"domain": "script", "service": "music_volume_step",
                       "data": {"delta": 8}}]
@@ -134,7 +134,7 @@ def test_volume_relative_calls_the_configured_entity_split_into_domain_service(
 def test_volume_relative_reads_a_changed_entity_setting(room, ha_calls):
     calls, _ = ha_calls
     _run(room_controls.apply_patch({"ha_volume_relative_entity": "script.other_step"}))
-    fire([A("ha_volume_relative", delta=-8)])
+    fire([A("ha_volume_relative", delta=-8, ease_s=0)])
     assert calls == [{"domain": "script", "service": "other_step",
                       "data": {"delta": -8}}]
 
@@ -219,7 +219,7 @@ def test_sonic_ad_hoc_ha_action_needs_no_room(room, ha_calls):
 
 def test_sonic_can_fire_ha_volume_relative(room, ha_calls):
     calls, _ = ha_calls
-    result = _run(show_console._op_set_ha_volume_relative(delta=-8))
+    result = _run(show_console._op_set_ha_volume_relative(delta=-8, ease_s=0))
     assert result["status"] == "applied"
     assert calls == [{"domain": "script", "service": "music_volume_step",
                       "data": {"delta": -8}}]

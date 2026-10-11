@@ -380,14 +380,20 @@ async def _resolve_ha_scene(scene_name: Optional[str]):
                   "known_scenes": ids}
 
 
-async def _op_set_ha_volume_absolute(volume: float) -> dict:
-    return await _fire_one("ha_volume_absolute", {"volume": volume},
-                           "Sonic: HA volume")
+async def _op_set_ha_volume_absolute(volume: float,
+                                     ease_s: Optional[float] = None) -> dict:
+    params = {"volume": volume}
+    if ease_s is not None:
+        params["ease_s"] = ease_s
+    return await _fire_one("ha_volume_absolute", params, "Sonic: HA volume")
 
 
-async def _op_set_ha_volume_relative(delta: float) -> dict:
-    return await _fire_one("ha_volume_relative", {"delta": delta},
-                           "Sonic: HA volume step")
+async def _op_set_ha_volume_relative(delta: float,
+                                     ease_s: Optional[float] = None) -> dict:
+    params = {"delta": delta}
+    if ease_s is not None:
+        params["ease_s"] = ease_s
+    return await _fire_one("ha_volume_relative", params, "Sonic: HA volume step")
 
 
 async def _op_activate_ha_scene(scene_name: Optional[str] = None) -> dict:
@@ -814,29 +820,35 @@ OPERATIONS: dict[str, SonicOperation] = {
         handler=_op_end_show),
     "set_ha_volume_absolute": SonicOperation(
         name="set_ha_volume_absolute", domain="show", kind="write",
-        summary="Set Home Assistant's snap_volume to an exact level, as "
-                "an ad-hoc Light Show step.",
+        summary="Set Home Assistant's snap_volume to an exact level, "
+                "eased over ease_s seconds, as an ad-hoc Light Show step.",
         instructions="volume 0-100 (the entity steps in multiples of 4). "
                     "Calls Home Assistant's script.music_volume_set. "
                     "Reports 'Home Assistant is not configured' if "
                     "SPECTRA_HA_URL is unset on this host — nothing was "
-                    "changed in that case.",
+                    "changed in that case."
+                    " ease_s is how many seconds the change takes (default 1.0, 0 = jump at once, max 60); a newer volume step stops an unfinished one where it is and takes over.",
         input_schema={
             "type": "object",
-            "properties": {"volume": {"type": "number", "minimum": 0, "maximum": 100}},
+            "properties": {"volume": {"type": "number", "minimum": 0, "maximum": 100},
+                           "ease_s": {"type": "number", "minimum": 0, "maximum": 60}},
             "required": ["volume"], "additionalProperties": False},
         handler=_op_set_ha_volume_absolute),
     "set_ha_volume_relative": SonicOperation(
         name="set_ha_volume_relative", domain="show", kind="write",
         summary="Nudge Home Assistant's snap_volume up or down by a step, "
-                "as an ad-hoc Light Show step.",
+                "eased over ease_s seconds, as an ad-hoc Light Show step.",
         instructions="delta is signed, e.g. +8 or -8 (8 is River's own "
                     "suggested step size). Calls the entity named in the "
                     "room's ha_volume_relative_entity setting (default "
-                    "script.music_volume_step).",
+                    "script.music_volume_step). A step fired while an "
+                    "earlier one is still easing adds to where that one "
+                    "was heading (two +8s make +16)."
+                    " ease_s is how many seconds the change takes (default 1.0, 0 = jump at once, max 60); a newer volume step stops an unfinished one where it is and takes over.",
         input_schema={
             "type": "object",
-            "properties": {"delta": {"type": "number", "minimum": -100, "maximum": 100}},
+            "properties": {"delta": {"type": "number", "minimum": -100, "maximum": 100},
+                           "ease_s": {"type": "number", "minimum": 0, "maximum": 60}},
             "required": ["delta"], "additionalProperties": False},
         handler=_op_set_ha_volume_relative),
     "activate_ha_scene": SonicOperation(

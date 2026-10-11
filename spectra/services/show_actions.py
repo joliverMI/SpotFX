@@ -703,6 +703,12 @@ register(ActionKind(
 # until the Admiral decides to provision SPECTRA_HA_TOKEN — no change
 # needed here when he does; the client already treats an absent token as
 # "send it anyway, let HA's own 401 be the visible signal".
+#
+# EASED (the Admiral, 2026-10-11): both volume steps carry `ease_s`
+# (default 1 s, 0 = jump) and walk snap_volume there from SPECTRA's side —
+# spectra/services/ha_volume_ease.py is the binding statement (why not a
+# ramping HA script, one ramp at a time, last step wins, a relative step
+# carries the stopped ramp's remainder, restart leaves a real level).
 
 def _split_entity(entity: str) -> tuple[str, str]:
     entity = (entity or "").strip()
@@ -727,23 +733,29 @@ def _ha_outcome(result: "ha_client.HAResult", verb: str) -> Outcome:
                    {"ha": result.as_dict()})
 
 
+def _ha_ease_outcome(eased: "ha_volume_ease.EaseResult") -> Outcome:
+    out = _ha_outcome(eased.ha, eased.detail)
+    if out.status == "applied":
+        out.data["ease"] = eased.data
+    return out
+
+
 async def _apply_ha_volume_absolute(p: dict, ctx: "RunContext") -> Outcome:
-    from spectra.services import ha_client
-    result = await ha_client.call_service(
-        "script", "music_volume_set", {"volume": p["volume"]})
-    return _ha_outcome(result, f"HA volume set to {p['volume']:g}")
+    from spectra.services import ha_volume_ease
+    eased = await ha_volume_ease.set_absolute(p["volume"], p.get("ease_s") or 0.0)
+    return _ha_ease_outcome(eased)
 
 
 async def _apply_ha_volume_relative(p: dict, ctx: "RunContext") -> Outcome:
-    from spectra.services import ha_client, room_controls
+    from spectra.services import ha_volume_ease, room_controls
     entity = room_controls.load_room_controls().ha_volume_relative_entity
     try:
         domain, service = _split_entity(entity)
     except ActionError as exc:
         return Outcome("failed", str(exc))
-    result = await ha_client.call_service(domain, service, {"delta": p["delta"]})
-    sign = "+" if p["delta"] >= 0 else ""
-    return _ha_outcome(result, f"HA volume step {sign}{p['delta']:g}")
+    eased = await ha_volume_ease.step_relative(domain, service, p["delta"],
+                                               p.get("ease_s") or 0.0)
+    return _ha_ease_outcome(eased)
 
 
 def ha_scene_label(entity: str) -> str:
@@ -788,14 +800,27 @@ async def _apply_ha_activate_scene(p: dict, ctx: "RunContext") -> Outcome:
     return _ha_outcome(result, f"HA scene activated: {p['scene']}")
 
 
+def _ease_param() -> Param:
+    from spectra.services import ha_volume_ease
+    return Param("ease_s", "number", "Ease", default=ha_volume_ease.DEFAULT_EASE_S,
+                 min=0, max=ha_volume_ease.MAX_EASE_S, step=0.1, unit="s",
+                 help="How long the volume takes to get there, in seconds "
+                      "(0 = jump at once). SPECTRA walks snap_volume in its "
+                      "own steps of 4, at most ten writes a second; a newer "
+                      "volume step stops this one where it is and takes "
+                      "over.")
+
+
 register(ActionKind(
     name="ha_volume_absolute", label="HA volume (absolute)", group="ha",
     params=[Param("volume", "number", "Volume", required=True, default=52,
                   min=0, max=100, step=4, unit="",
                   help="Target snap_volume, 0-100 — the entity steps in "
                        "multiples of 4. Calls Home Assistant's "
-                       "script.music_volume_set.")],
-    help="Set the snap_volume in Home Assistant to an exact level.",
+                       "script.music_volume_set."),
+            _ease_param()],
+    help="Set the snap_volume in Home Assistant to an exact level, eased "
+         "over a chosen time (default 1 s).",
     restore="Nothing to put back — a volume change is explicit, like "
             "turning a dial.",
     apply=_apply_ha_volume_absolute, needs_room=False,
@@ -807,8 +832,10 @@ register(ActionKind(
                   min=-100, max=100, step=4,
                   help="Signed step, e.g. +8 or -8. Calls the entity set "
                        "in the room's ha_volume_relative_entity setting "
-                       "(default script.music_volume_step).")],
-    help="Nudge the snap_volume in Home Assistant up or down by a step.",
+                       "(default script.music_volume_step)."),
+            _ease_param()],
+    help="Nudge the snap_volume in Home Assistant up or down by a step, "
+         "eased over a chosen time (default 1 s).",
     restore="Nothing to put back — a volume change is explicit, like "
             "turning a dial.",
     apply=_apply_ha_volume_relative, needs_room=False,
@@ -1741,7 +1768,13 @@ def status() -> dict:
             "room_effect": st.room_effect,
             "running_sets": running,
             "recent_runs": runs()[:5],
-            "arms": [a.model_dump() for a in st.arms if a.status == "armed"]}
+            "arms": [a.model_dump() for a in st.arms if a.status == "armed"],
+            "volume_ease": _volume_ease_status()}
+
+
+def _volume_ease_status() -> dict:
+    from spectra.services import ha_volume_ease
+    return ha_volume_ease.status()
 
 
 def brief() -> dict:
