@@ -305,8 +305,11 @@ def test_the_explicit_preview_fires_it_and_the_ruler_shows_the_burn_back():
 
 
 def test_sonic_can_make_the_kind():
+    from typing import get_args
+
     from spectra.services import scene_console
+    from spectra.services import settings_mcp_server as mcp_server
+
     schema = scene_console.OPERATIONS["set_flare_kind"].input_schema["properties"]
     assert "sauron_surge" in schema["type"]["enum"]
-    src = (ROOT / "spectra/services/settings_mcp_server.py").read_text()
-    assert '"sauron_surge"' in src
+    assert "sauron_surge" in get_args(mcp_server._FlareTypeEnum)
