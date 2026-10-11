@@ -57,14 +57,28 @@ START_SEGS = 3  # segments pre-laid inward at spawn (visible immediately)
 # `phase_progress`; see _phase_step)
 CHARGE_RATE = 7.0    # extra chains/s at full charge
 CHARGE_MAX_X = 1.6   # max_chains growth factor at full charge
-LULL_CRT_S = 2.2     # CRT collapse fallback when no lull ramp arrives
-# The vertical squash completes — the picture is gone, only a line is left —
-# at the lull's DARK POINT. Since 2026-10-07 that is the shared lull rule
-# (fx/effects/lull_dark.py: dark for half the lull, never longer than the
-# room's lull_dark_max_s, 3 s by default), told by SpotFX on the lull arm;
-# CRT_SPLIT is the LEGACY dark point, used when a write does not carry the
-# lull's timing (and by the lost-ramp wall-clock fallback).
-CRT_SPLIT = 0.55     # legacy lull fraction where the vertical squash completes
+# THE LULL: THINNING OUT (2026-10-11, the transitions/drop plan's option A,
+# his pick: "I like A. Use that one"; it replaces the old-TV switch-off).
+# The chains thin out: none are born once the entry has eased in, the ones
+# flying fizzle one by one into small booms, head-on meetings arc less and
+# less often, and the colour slides to the set's darkest stop; the panel is
+# dark by the lull's DARK POINT. Since 2026-10-07 that is the shared lull
+# rule (fx/effects/lull_dark.py: dark for half the lull, never longer than
+# the room's lull_dark_max_s, 3 s by default), told by SpotFX on the lull
+# arm; LULL_LEGACY_DARK_AT is the dark point a write that does not carry
+# the lull's timing falls back to (and the lost-ramp wall-clock fallback,
+# LULL_FALLBACK_S, runs on). The ENTRY is eased: for `lull_entry_s` the
+# normal flow carries on (spawning eases out, nothing fizzles, the colour
+# has not moved), so the lull's first frame is an ordinary frame.
+LULL_FALLBACK_S = 2.2      # wall-clock lull length when no ramp arrives
+LULL_LEGACY_DARK_AT = 0.55  # legacy lull fraction where it is dark
+# where the thinning starts/ends on an UNTOLD lull (fractions of the
+# approach to the dark point); a told lull derives both from its seconds
+LULL_UNTOLD_THIN_FROM = 0.2
+LULL_UNTOLD_THIN_TO = 0.85
+FIZZLE_SPARKS = 10         # a fizzle is a small boom, in the chain's colour
+FIZZLE_SPEED = (6.0, 20.0)
+FIZZLE_LIFE_S = 0.6        # a fizzle's sparks are gone this long after it
 DROP_BURST_N = 9     # chains erupting from the center on the drop
 # The burst fires on the phase's first frame — drop anchors its START to
 # the trigger mark (his ruling, 2026-08-20, superseding the end-anchored
@@ -217,6 +231,26 @@ class Squiggles2d(Twod, GradientEffect):
             # the lull's dark point, pushed by SpotFX on the lull arm —
             # fx/effects/lull_dark.py
             **lull_dark.schema_fields(),
+            vol.Optional(
+                "lull_entry_s",
+                description="Lull: seconds the normal flow carries on while the thinning eases in",
+                default=1.0,
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.3, max=2.0)),
+            vol.Optional(
+                "lull_fizzle_rate",
+                description="Lull: how the chains thin out; 1 = evenly up to the dark point, lower keeps more of them for longer, higher thins them early",
+                default=0.9,
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.3, max=2.0)),
+            vol.Optional(
+                "lull_arc_rate",
+                description="Lull: chance a head-on meeting still arcs (booms) as the thinning starts; falls to none by the dark point",
+                default=0.9,
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1.0)),
+            vol.Optional(
+                "lull_color_slide",
+                description="Lull: how far the chains' colour slides to the set's darkest stop by the dark point",
+                default=1.0,
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1.0)),
         }
     )
 
@@ -236,6 +270,9 @@ class Squiggles2d(Twod, GradientEffect):
         # squiggles→radial envoys: two chains that meet at the radial's
         # center and explode exactly at the bloom point
         self._envoys = None
+        # the lull's thinning: (population target, arc chance) while it
+        # runs, None otherwise (every head-on meeting booms)
+        self._arc = None
         # spark SoA
         self.s_x = np.zeros(SPARK_CAP, dtype=np.float32)
         self.s_y = np.zeros(SPARK_CAP, dtype=np.float32)
@@ -273,6 +310,10 @@ class Squiggles2d(Twod, GradientEffect):
         self.reverse = bool(self._config["reverse"])
         self.x_offset = self._config["x_offset"]
         self.y_offset = self._config["y_offset"]
+        self.lull_entry_s = float(self._config["lull_entry_s"])
+        self.lull_fizzle_rate = float(self._config["lull_fizzle_rate"])
+        self.lull_arc_rate = float(self._config["lull_arc_rate"])
+        self.lull_color_slide = float(self._config["lull_color_slide"])
         self.power_func = self.POWER_FUNCS_MAPPING[
             self._config["frequency_range"]
         ]
@@ -297,6 +338,7 @@ class Squiggles2d(Twod, GradientEffect):
             self._phase_rate = 0.0
             self._phase_done_t = None
             self._drop = None
+            self._thin = None
         else:
             # non-creation pass: a changed phase key arms the edge
             self._phase_pending = new_phase if new_phase != self._phase else None
@@ -579,6 +621,14 @@ class Squiggles2d(Twod, GradientEffect):
                 if dx * dx + dy * dy > r * r:
                     continue
                 angle = abs(_wrap_pi(ci["theta"] - ck["theta"]))
+                if angle > math.pi / 2 and not self._arc_allowed(
+                    n - len(dead)
+                ):
+                    # the lull's thinning held this arc back: the two pass
+                    # through each other
+                    ci["cooldown"] = COLLIDE_COOLDOWN_S
+                    ck["cooldown"] = COLLIDE_COOLDOWN_S
+                    break
                 if angle > math.pi / 2:
                     # head-on: both explode into a firework
                     mid = (
@@ -911,8 +961,8 @@ class Squiggles2d(Twod, GradientEffect):
     # ── charge/lull/drop choreography ──────────────────────────────────
     # SpotFX writes `phase` (instant) and ramps `phase_progress` 0→1 over
     # the event's ramp. charge: chains bounce off the silhouette instead of
-    # exiting while spawning ramps up; lull: old-TV switch-off — the frame
-    # squashes vertically to a line, then the line pinches to a held dot;
+    # exiting while spawning ramps up; lull: the chains thin out — see "the
+    # lull: thinning out" below;
     # drop: a fan of chains erupts from the center on the phase's first
     # frame, and everything returns to normal (`phase` self-resets to
     # "none") once the post-burst settle finishes.
@@ -924,6 +974,9 @@ class Squiggles2d(Twod, GradientEffect):
         self._phase_done_t = None
         if phase == "drop":
             self._drop = {"burst_t": None}
+        # the thinning's own state: the population it thins from (taken
+        # when the thinning starts) and nothing else
+        self._thin = {"n0": None} if phase == "lull" else None
         if phase in ("drop", "none"):
             # back to normal population no matter how we got here
             self.max_chains = int(self._config["max_blobs"])
@@ -938,7 +991,7 @@ class Squiggles2d(Twod, GradientEffect):
             return
         self._phase_t += dt
         # orphan watchdog: a charge/lull whose payoff never arrives
-        # releases itself — walls open, the CRT snaps back on, no burst
+        # releases itself — walls open, spawning resumes, no burst
         due, self._phase_done_t = particle_handoff.phase_release_due(
             self._phase, self.phase_progress, self._phase_t,
             self._phase_done_t,
@@ -1041,66 +1094,118 @@ class Squiggles2d(Twod, GradientEffect):
                 self._walk_one(c)
             self.chains.append(c)
 
-    def _lull_still_lit(self):
-        """A told lull before its dark point (spawning carries on)."""
-        return lull_dark.told(self._config) and not lull_dark.lull_timing(
-            self._config, self.phase_progress, self._phase_t, CRT_SPLIT
-        ).dark
+    # ── the lull: thinning out ─────────────────────────────────────────
+    # Option A of the transitions/drop plan (his pick): the chains thin
+    # out. For `lull_entry_s` the normal flow carries on while spawning
+    # eases out; then the chains fizzle one by one into small booms (the
+    # population follows a schedule, so a long lull keeps a few crossing
+    # right up to the end instead of colliding itself out in seconds),
+    # head-on meetings arc less and less often, the colour slides to the
+    # set's darkest stop, and the panel is dark by the lull's dark point.
 
-    def _phase_crt(self, buf):
-        """Lull post-process: CRT switch-off. Vertical squash to a bright
-        line by the lull's dark point (fx/effects/lull_dark.py — CRT_SPLIT
-        of the ramp when SpotFX did not say), then the line pinches
-        horizontally into a held white dot at the center by the end of the
-        ramp."""
-        if self._phase != "lull":
-            return buf
+    def _lull_timing(self):
+        """Where the lull is relative to its dark point (fx/effects/
+        lull_dark.py): SpotFX's told timing on the effect's own clock; else
+        progress once it moves (hand-scrubbable in the LedFX UI); else the
+        wall-clock fallback while progress sits at 0."""
         p = float(np.clip(self.phase_progress, 0.0, 1.0))
         if p > 0.0 or lull_dark.told(self._config):
-            # SpotFX's lull timing when it sent it (the effect's own clock),
-            # else progress-driven once it moves (hand-scrubbable in the
-            # LedFX UI)
-            timing = lull_dark.lull_timing(
-                self._config, p, self._phase_t, CRT_SPLIT)
-        else:
-            # the wall-clock fallback only runs while progress sits at 0
-            f = min(self._phase_t / LULL_CRT_S, 1.0)
-            if f <= 0.0:
-                return buf
-            timing = lull_dark.lull_timing({}, f, 0.0, CRT_SPLIT)
-        h, w = buf.shape[:2]
-        cy, cx = (h - 1) / 2.0, (w - 1) / 2.0
-        if not timing.dark:
-            s = timing.approach
-            if s <= 0.0:
-                return buf
-            fy = 1.0 - 0.96 * (s * s * (3.0 - 2.0 * s))
-            fx = 1.0
-            dot = 0.0
-        else:
-            s = timing.after
-            fy = 0.04
-            fx = 1.0 - 0.96 * (s * s * (3.0 - 2.0 * s))
-            dot = min(1.0, 0.3 + s)
-        # squeezing the picture concentrates its energy — brighten with it
-        boost = 1.0 + 2.2 * (1.0 - fy) + 1.5 * (1.0 - fx)
-        ys = np.arange(h)
-        xs = np.arange(w)
-        sy = cy + (ys - cy) / max(fy, 1e-3)
-        sx = cx + (xs - cx) / max(fx, 1e-3)
-        vy = (sy >= 0) & (sy <= h - 1)
-        vx = (sx >= 0) & (sx <= w - 1)
-        out = np.zeros_like(buf)
-        if vy.any() and vx.any():
-            yi = np.round(sy[vy]).astype(np.int32)
-            xi = np.round(sx[vx]).astype(np.int32)
-            out[np.ix_(vy, vx)] = buf[yi[:, None], xi[None, :]] * boost
-        if dot > 0.0:
-            # the lingering phosphor dot — the held "prepped" state
-            out[int(round(cy)), int(round(cx))] = np.maximum(
-                out[int(round(cy)), int(round(cx))], 235.0 * dot
-            )
-        return np.minimum(out, 255.0)
+            return lull_dark.lull_timing(
+                self._config, p, self._phase_t, LULL_LEGACY_DARK_AT)
+        f = min(self._phase_t / LULL_FALLBACK_S, 1.0)
+        return lull_dark.lull_timing({}, f, 0.0, LULL_LEGACY_DARK_AT)
+
+    def _lull_entry(self):
+        """0 -> 1 (smoothstep) over `lull_entry_s` of the lull's own
+        seconds: how far the thinning has eased in; 0 is the normal flow."""
+        x = min(self._phase_t / max(self.lull_entry_s, 1e-3), 1.0)
+        return x * x * (3.0 - 2.0 * x)
+
+    def _thin_window(self):
+        """(from, to) on the approach (0 -> 1, lull start -> dark point)
+        over which the chains fizzle: from the end of the entry, finishing
+        early enough that the last fizzle's sparks are gone by the dark
+        point."""
+        dark_s = float(self._config.get(lull_dark.DARK_KEY, 0.0) or 0.0)
+        if lull_dark.told(self._config) and dark_s > 0.0:
+            # a short lull starts thinning before its entry has fully
+            # eased in, so the chains still go one at a time
+            a0 = min(self.lull_entry_s / dark_s, 0.35)
+            a1 = 1.0 - min(FIZZLE_LIFE_S / dark_s, 0.2)
+            return a0, max(a1, a0 + 0.05)
+        return LULL_UNTOLD_THIN_FROM, LULL_UNTOLD_THIN_TO
+
+    def _thin_progress(self, timing):
+        """0 -> 1 through the thinning, or None before it starts."""
+        if timing.dark:
+            return 1.0
+        a0, a1 = self._thin_window()
+        if timing.approach < a0:
+            return None
+        return min(max((timing.approach - a0) / (a1 - a0), 0.0), 1.0)
+
+    def _thin_target(self, u):
+        """How many chains the thinning allows at thinning progress `u`."""
+        thin = self._thin
+        if thin is None:
+            thin = self._thin = {"n0": None}
+        if thin["n0"] is None:
+            # the population the thinning starts from
+            thin["n0"] = len(self.chains)
+        if u >= 1.0:
+            return 0
+        return int(math.ceil(thin["n0"] * (1.0 - u) ** self.lull_fizzle_rate))
+
+    def _arc_allowed(self, alive):
+        """A head-on meeting during the thinning arcs (booms both chains)
+        only by chance, falling with the thinning, and never more than one
+        boom ahead of the schedule or onto the last chain; otherwise the
+        two pass through each other. Outside the thinning every head-on
+        meeting booms, as it always has."""
+        arc = self._arc
+        if arc is None:
+            return True
+        target, chance = arc
+        if alive - 2 < max(1, target - 2):
+            return False
+        return bool(self._rng.random() < chance)
+
+    def _dark_stop(self):
+        """The set's darkest stop (by luminance) on the current gradient."""
+        samp = self.get_gradient_color_vectorized1d(
+            np.linspace(0.0, 1.0, 33, dtype=np.float32)
+        ).astype(np.float32)
+        lum = samp @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
+        return samp[int(np.argmin(lum))]
+
+    def _fizzle(self, cols, target):
+        """Fizzle chains, a random one at a time, into small booms in their
+        own colour until the population is down to `target`."""
+        rng = self._rng
+        while len(self.chains) > target:
+            i = int(rng.integers(len(self.chains)))
+            if i < len(cols):
+                self._fizzle_boom(self._head_pos(self.chains[i]), cols[i])
+                cols = np.delete(cols, i, axis=0)
+            del self.chains[i]
+        return cols
+
+    def _fizzle_boom(self, pos, rgb):
+        rng = self._rng
+        k = min(FIZZLE_SPARKS, SPARK_CAP - self.s_n)
+        if k <= 0:
+            return
+        s = slice(self.s_n, self.s_n + k)
+        ang = rng.uniform(0.0, 2 * math.pi, k).astype(np.float32)
+        spd = rng.uniform(*FIZZLE_SPEED, k).astype(np.float32)
+        self.s_x[s] = pos[0]
+        self.s_y[s] = pos[1]
+        self.s_vx[s] = np.cos(ang) * spd
+        self.s_vy[s] = np.sin(ang) * spd
+        self.s_life[s] = rng.uniform(
+            0.5 * FIZZLE_LIFE_S, FIZZLE_LIFE_S, k).astype(np.float32)
+        self.s_rgb[s] = rgb
+        self.s_n += k
 
     # ── frame ──────────────────────────────────────────────────────────
 
@@ -1163,28 +1268,40 @@ class Squiggles2d(Twod, GradientEffect):
         speed_px = self.base_speed * (1.0 + self.speed_audio * self.impulse)
         steps_target = self._steps_target()
 
-        # spawn pacing (blackhole model); the lull owns a dark screen, the
-        # charge adds a steady progress-driven influx on top. A lull SpotFX
-        # has told its timing (fx/effects/lull_dark.py) is not dark until
-        # its dark point, so — like Black Hole's own lull — ordinary chains
-        # keep forming until then: in a long lull the walled-in population
-        # otherwise collides itself out within seconds and the squash has
-        # nothing left to squash. An untold lull pauses for its whole
-        # length, as before.
-        if self._phase != "lull" or self._lull_still_lit():
+        # the lull thins out (see "the lull: thinning out" above): where it
+        # is, how far its rule has eased in, and how far the chains have
+        # thinned (None before the thinning starts)
+        lull = self._phase == "lull"
+        if lull:
+            timing = self._lull_timing()
+            entry = self._lull_entry()
+            thin_u = self._thin_progress(timing)
+        else:
+            timing, entry, thin_u = None, 0.0, None
+
+        # spawn pacing (blackhole model); the charge adds a steady
+        # progress-driven influx on top. In the lull spawning eases OUT over
+        # the entry (the normal flow carries on, fading) and then stops:
+        # no new chains are born while the chains thin out.
+        if not lull or (entry < 1.0 and not timing.dark):
+            keep = 1.0 - entry if lull else 1.0
             self.spawn_acc += (
                 self.spawn_rate * (1.0 + self.spawn_audio * self.impulse)
                 + self._phase_rate
-            ) * dt
+            ) * dt * keep
             n_new = int(self.spawn_acc)
             self.spawn_acc -= n_new
             if self._beat_pending:
                 self._beat_pending = False
-                n_new += self.beat_burst
+                n_new += (
+                    int(round(self.beat_burst * keep)) if lull
+                    else self.beat_burst
+                )
             if n_new:
                 self._spawn(n_new)
         else:
             self._beat_pending = False
+            self.spawn_acc = 0.0
 
         for c in self.chains:
             self._advance_chain(
@@ -1211,6 +1328,21 @@ class Squiggles2d(Twod, GradientEffect):
         else:
             cols = np.zeros((0, 3), dtype=np.float32)
 
+        if lull:
+            if self.lull_color_slide > 0.0 and len(cols):
+                # the colour slides to the set's darkest stop as the lull
+                # approaches its dark point (not at all on the first frame)
+                a = timing.approach
+                slide = self.lull_color_slide * entry * a * a * (3.0 - 2.0 * a)
+                cols = cols * (1.0 - slide) + self._dark_stop()[None, :] * slide
+            if thin_u is not None:
+                target = self._thin_target(thin_u)
+                cols = self._fizzle(cols, target)
+                self._arc = (target, self.lull_arc_rate * (1.0 - thin_u))
+            else:
+                self._arc = None
+        else:
+            self._arc = None
         cols = self._collide(cols)
         cols = self._drive_envoys(virtual, cols)
         self._update_sparks(dt)
@@ -1247,7 +1379,11 @@ class Squiggles2d(Twod, GradientEffect):
                 )
 
         self._splat_sparks(buf)
-        buf = self._phase_crt(buf)
+        if lull and timing.dark:
+            # the dark rule is the law: nothing left lit from the dark point
+            self.chains = []
+            self.s_n = 0
+            buf[...] = 0.0
         self.matrix = Image.fromarray(
             np.clip(buf, 0.0, 255.0).astype(np.uint8), "RGB"
         )

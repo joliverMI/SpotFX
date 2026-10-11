@@ -89,6 +89,19 @@ pattern". Two constants govern the fix — never per-pixel tuning knobs:
 
 No param changed meaning, so his tuned Sauron scene needed no migration.
 
+## The lull is UPSIDE DOWN (2026-10-11), Eye's change made here too
+
+His word: "upside down. it's a simple 180 degree rotation" (the plan's
+revision 3 had turned the lids a quarter turn; that reading is withdrawn).
+`_draw_lids` evaluates the copied lid geometry at (-dx, -dy) about the eye
+and swaps the panel edges, so the lids meet just above the eye's centre and
+curve the other way; `_step_lid`, the travel curve and the lid colour (the
+set's hottest) are unchanged. `_lids_rotated` is set when a lull starts
+(`lull_lids_upside_down`, registered, default True) and held through the
+drop until the lids are open, so the drop opens them the same way round.
+Same code as Eye (eye-effect skill); proof
+`tests/test_eye_lull_lids_upside_down.py`.
+
 ## Background
 
 No `no_background_color` flag: an authored set background reaches the wire

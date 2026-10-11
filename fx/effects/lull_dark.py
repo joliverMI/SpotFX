@@ -61,7 +61,8 @@ HOW A LULL EFFECT OPTS IN (existing or future — one call, plus two lines):
      0 -> 1 from the lull's start to the dark point (an expansion, a fade, a
      squash), `dark` says the dark portion has begun, and `after` runs 0 -> 1
      from the dark point to the end of SpotFX's ramp (a second movement
-     inside the dark, e.g. Squiggles' line pinching to its dot).
+     inside the dark; no opted-in effect uses one today — Squiggles' old
+     line-to-dot pinch was retired with its CRT lull, 2026-10-11).
 Black Hole, Squiggles and Pulse were his three ("just these 3 for now");
 since 2026-10-11 every strip phase member (fx/effects/strip_phase.py,
 fx.device_model.STRIP_PHASE_EFFECTS — Melt and Power) reads the same rule

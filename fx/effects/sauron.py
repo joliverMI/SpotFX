@@ -446,6 +446,11 @@ class Sauron2d(Twod, GradientEffect):
                 default=0.06,
             ): vol.All(vol.Coerce(float), vol.Range(min=0.01, max=0.3)),
             vol.Optional(
+                "lull_lids_upside_down",
+                description="Lull: the lids close upside down (the lull turned 180 degrees about the eye; the drop opens them the same way)",
+                default=True,
+            ): bool,
+            vol.Optional(
                 "color_blend",
                 description="Restart effect on color change, for transitions",
                 default=False,
@@ -491,6 +496,10 @@ class Sauron2d(Twod, GradientEffect):
         self._surge_env = 0.0
         self._burst = 0.0
         self._lid = 0.0
+        # the lids are drawn turned 180 degrees about the eye: set when a
+        # lull starts (lull_lids_upside_down), kept through the drop until
+        # the lids are open again (eye.py's)
+        self._lids_rotated = False
         self._drop_slam = False
         self._charge_amt = 0.0
         self.noise = fnl.FastNoiseLite(
@@ -532,6 +541,7 @@ class Sauron2d(Twod, GradientEffect):
                   "speed_audio", "x_offset", "y_offset"):
             setattr(self, k, float(c[k]))
         self.palette_sort = c.get("palette_sort", "auto")
+        self.lull_lids_upside_down = bool(c.get("lull_lids_upside_down", True))
 
         ang = np.arange(GAZE_N) * (2 * np.pi / GAZE_N)
         self.positions = np.zeros((GAZE_N + 1, 2), dtype=np.float32)
@@ -771,6 +781,8 @@ class Sauron2d(Twod, GradientEffect):
         self._phase = phase
         self._phase_t = 0.0
         self._phase_done_t = None
+        if phase == "lull":
+            self._lids_rotated = self.lull_lids_upside_down
         if phase == "drop":
             self._drop = {"t": 0.0, "fired": False}
             self._drop_slam = 0.03 < self._lid < 0.97
@@ -1287,6 +1299,8 @@ class Sauron2d(Twod, GradientEffect):
 
         # ── eyelids (eye.py's) ──────────────────────────────────────────
         self._step_lid(dt, blink_out, virtual)
+        if self._lid <= 0.001 and self._phase != "lull":
+            self._lids_rotated = False
         if self._lid > 0.001:
             self._draw_lids(rgb, dxp, dyp, eye_py, iris_r)
 
@@ -1371,6 +1385,12 @@ class Sauron2d(Twod, GradientEffect):
     def _draw_lids(self, out, dxp, dyp, eye_py, iris_r):
         top_ny = (0.0 - eye_py) / self.s_min
         bot_ny = (float(self.r_height - 1) - eye_py) / self.s_min
+        if self._lids_rotated:
+            # the lull upside down: the same lids turned 180 degrees about
+            # the eye centre (the panel's bottom edge is the turned frame's
+            # top)
+            dxp, dyp = -dxp, -dyp
+            top_ny, bot_ny = -bot_ny, -top_ny
         sag = 0.30 * iris_r
         y_meet = 0.15 * iris_r
         y_open = top_ny - sag - 0.05
