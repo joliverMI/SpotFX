@@ -38,6 +38,9 @@ LIGHT_SHOW_STATE_FILE = SPECTRA_STORAGE / "light_show_state.json"
 # Show Sequences (spectra/services/show_sequence.py): his library of ordered,
 # pre-armed sets and Waits. The RUN lives in light_show_state.json.
 LIGHT_SHOW_SEQUENCES_FILE = SPECTRA_STORAGE / "light_show_sequences.json"
+# Show Playlists (spectra/services/show_playlists.py): his programs keyed to
+# the Spotify playlists he plays. The RUN lives in light_show_state.json.
+LIGHT_SHOW_PLAYLISTS_FILE = SPECTRA_STORAGE / "light_show_playlists.json"
 #: his dragged High/Low Trigger positions, per song (spectra/services/show_cues.py)
 SHOW_CUES_FILE = SPECTRA_STORAGE / "show_cues.json"
 # The drop detector's per-song sequences: what was detected (a regenerable

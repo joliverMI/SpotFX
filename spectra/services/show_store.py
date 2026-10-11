@@ -20,7 +20,8 @@ from typing import Optional
 
 from spectra import config
 from spectra.models.light_show import (ActionSet, LightShowLibrary,
-                                       LightShowState, SequenceLibrary,
+                                       LightShowState, PlaylistLibrary,
+                                       SequenceLibrary, ShowPlaylist,
                                        ShowSequence, now_ms)
 
 logger = logging.getLogger(__name__)
@@ -243,6 +244,144 @@ def delete_sequence(seq_id: str) -> bool:
         lib.sequences = kept
         save_sequences(lib)
         return True
+
+
+# ── Show Playlists (spectra/services/show_playlists.py follows them) ─────
+
+class PlaylistConflict(ValueError):
+    """A name already taken, or a Spotify context already answered to by
+    another program (one context, one program — the Set List rule)."""
+
+
+def load_playlists() -> PlaylistLibrary:
+    raw = _read_json(config.LIGHT_SHOW_PLAYLISTS_FILE)
+    if not raw:
+        return PlaylistLibrary()
+    try:
+        return PlaylistLibrary(**raw)
+    except Exception:                                    # noqa: BLE001
+        logger.exception("light show: playlist library did not validate")
+        return PlaylistLibrary()
+
+
+def save_playlists(lib: PlaylistLibrary) -> None:
+    _write_json(config.LIGHT_SHOW_PLAYLISTS_FILE, lib.model_dump())
+
+
+def list_playlists() -> list[ShowPlaylist]:
+    return list(load_playlists().playlists)
+
+
+def get_playlist(pl_id: str) -> Optional[ShowPlaylist]:
+    return next((p for p in load_playlists().playlists if p.id == pl_id), None)
+
+
+def find_playlist(name_or_id: str) -> Optional[ShowPlaylist]:
+    """By id, then by exact name ignoring case."""
+    pls = load_playlists().playlists
+    hit = next((p for p in pls if p.id == name_or_id), None)
+    if hit is not None:
+        return hit
+    low = (name_or_id or "").strip().lower()
+    return next((p for p in pls if p.name.strip().lower() == low), None)
+
+
+def playlist_for_context(context_uri: Optional[str]) -> Optional[ShowPlaylist]:
+    if not context_uri:
+        return None
+    return next((p for p in load_playlists().playlists if context_uri in p.contexts), None)
+
+
+def put_playlist(new: ShowPlaylist, *, after_id: Optional[str] = None) -> ShowPlaylist:
+    """Create or update. Names are unique ignoring case, and a Spotify
+    context may belong to only one program; either clash is refused by
+    name rather than silently taking it from the other program."""
+    with _lock:
+        lib = load_playlists()
+        low = new.name.strip().lower()
+        if not low:
+            raise PlaylistConflict("a playlist program needs a name")
+        clash = next((p for p in lib.playlists if p.id != new.id
+                      and p.name.strip().lower() == low), None)
+        if clash is not None:
+            raise PlaylistConflict(f"a playlist program called {clash.name!r} already exists")
+        contexts = []
+        for c in new.contexts:
+            c = (c or "").strip()
+            if c and c not in contexts:
+                contexts.append(c)
+        for c in contexts:
+            owner = next((p for p in lib.playlists if p.id != new.id and c in p.contexts), None)
+            if owner is not None:
+                name = new.context_names.get(c) or c
+                raise PlaylistConflict(
+                    f"{name} already belongs to the program {owner.name!r} — "
+                    "one Spotify playlist can drive only one program")
+        new = new.model_copy(update={"contexts": contexts, "updated_ms": now_ms()})
+        existing = next((i for i, p in enumerate(lib.playlists) if p.id == new.id), None)
+        if existing is None:
+            after = next((i for i, p in enumerate(lib.playlists) if p.id == after_id), None) \
+                if after_id else None
+            if after is None:
+                lib.playlists.append(new)
+            else:
+                lib.playlists.insert(after + 1, new)
+        else:
+            new = new.model_copy(update={"created_ms": lib.playlists[existing].created_ms})
+            lib.playlists[existing] = new
+        save_playlists(lib)
+        return new
+
+
+def duplicate_playlist(pl_id: str) -> Optional[ShowPlaylist]:
+    """An independent deep copy named "<name> copy" (uniqued), every song
+    and step given a fresh id, placed right after the original. The copy
+    answers to NO Spotify context (a context belongs to one program), so
+    it never starts following on its own until he gives it one."""
+    from spectra.models.light_show import _id
+    with _lock:
+        lib = load_playlists()
+        src = next((p for p in lib.playlists if p.id == pl_id), None)
+        if src is None:
+            return None
+        taken = {p.name.strip().lower() for p in lib.playlists}
+        name = f"{src.name} copy"
+        n = 2
+        while name.strip().lower() in taken:
+            name = f"{src.name} copy {n}"
+            n += 1
+        data = src.model_dump()
+
+        def fresh(obj):
+            if isinstance(obj, dict):
+                return {k: (_id() if k == "id" else fresh(v)) for k, v in obj.items()}
+            if isinstance(obj, list):
+                return [fresh(v) for v in obj]
+            return obj
+        data = fresh(data)
+        data.update({"name": name, "contexts": [], "context_names": {}})
+        data.pop("created_ms", None)
+        data.pop("updated_ms", None)
+        return put_playlist(ShowPlaylist(**data), after_id=src.id)
+
+
+def delete_playlist(pl_id: str) -> bool:
+    with _lock:
+        lib = load_playlists()
+        kept = [p for p in lib.playlists if p.id != pl_id]
+        if len(kept) == len(lib.playlists):
+            return False
+        lib.playlists = kept
+        save_playlists(lib)
+        return True
+
+
+def set_follow_enabled(on: bool) -> bool:
+    with _lock:
+        lib = load_playlists()
+        lib.follow_enabled = bool(on)
+        save_playlists(lib)
+        return lib.follow_enabled
 
 
 # ── runtime state ──────────────────────────────────────────────────────────

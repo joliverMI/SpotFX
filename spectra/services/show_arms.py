@@ -43,7 +43,12 @@ trigger fire in the order they were armed. A SHOW SEQUENCE's arm
 (`source="sequence:<run>"`, spectra/services/show_sequence.py) and a
 hand-made arm never replace each other — the sequence must not lose its
 place to a tap, nor a tap to the sequence — and a sequence arm never
-expires on its own (no 12 h / idle expiry): the sequence owns it.
+expires on its own (no 12 h / idle expiry): the sequence owns it. A SHOW
+PLAYLIST's arm (`source="playlist:<run>"`, spectra/services/
+show_playlists.py) is scripted the same way — it never replaces and is
+never replaced (not even by another of the program's own steps), and has no
+12 h / idle expiry — but it is SONG-SCOPED, so it still goes MISSED when
+its song ends, unlike a sequence arm, which carries.
 
 ONE-SHOT OR REPEAT. One-shot fires once and is done; repeat stays armed and
 counts its fires.
@@ -131,6 +136,24 @@ def is_sequence_arm_source(source: Optional[str]) -> bool:
     return bool(source) and source.startswith("sequence:")
 
 
+def is_playlist_arm_source(source: Optional[str]) -> bool:
+    return bool(source) and source.startswith("playlist:")
+
+
+def is_scripted_arm_source(source: Optional[str]) -> bool:
+    """A sequence's or a playlist program's own arm: owned by its script,
+    so the 12 h / idle clocks never end it."""
+    return is_sequence_arm_source(source) or is_playlist_arm_source(source)
+
+
+def _replace_class(source: Optional[str]) -> Optional[str]:
+    """Arms of the same class replace each other ("same set, same
+    trigger"); a playlist arm is in a class of its own (None: never)."""
+    if is_playlist_arm_source(source):
+        return None
+    return "sequence" if is_sequence_arm_source(source) else "hand"
+
+
 # ── reading ────────────────────────────────────────────────────────────────
 
 def active_arms() -> list[ShowArm]:
@@ -181,7 +204,9 @@ def _applies_to_song(arm: ShowArm, uri: Optional[str]) -> bool:
 def arm(*, set_id: Optional[str] = None, action: Optional[ShowAction] = None,
         on: str = "scene_change", repeat: bool = False,
         this_song_only: bool = False, finish_on_mark: bool = True,
-        source: str = "manual") -> ShowArm:
+        source: str = "manual", song_uri: Optional[str] = None) -> ShowArm:
+    """`song_uri` scopes the arm to that song explicitly (a playlist
+    program's step); `this_song_only` scopes it to the song playing now."""
     if on not in TRIGGERS:
         raise ArmError(f"trigger must be one of {', '.join(TRIGGERS)}")
     if (set_id is None) == (action is None):
@@ -201,23 +226,24 @@ def arm(*, set_id: Optional[str] = None, action: Optional[ShowAction] = None,
         except show_actions.ActionError as exc:
             raise ArmError(str(exc))
         label = action.label or show_actions.ACTION_KINDS[action.kind].label
-    song = None
-    if this_song_only:
+    song = song_uri or None
+    if this_song_only and song is None:
         song = current_uri()
         if not song:
             raise ArmError("nothing is playing, so there is no song to scope this arm to")
     st = show_store.state()
     t = now_ms()
-    seq = is_sequence_arm_source(source)
-    if set_id is not None:
+    scripted = is_scripted_arm_source(source)
+    cls = _replace_class(source)
+    if set_id is not None and cls is not None:
         for old in st.arms:
             if old.status == ACTIVE and old.set_id == set_id and old.on == on \
-                    and is_sequence_arm_source(old.source) == seq:
+                    and _replace_class(old.source) == cls:
                 _end(old, DISARMED, "replaced by a new arm of the same set on the same trigger")
     new = ShowArm(set_id=set_id, action=action, label=label, on=on,
                   repeat=bool(repeat), song_uri=song, source=source,
                   finish_on_mark=bool(finish_on_mark), created_ms=t,
-                  expires_ms=None if seq else t + ARM_MAX_AGE_S * 1000)
+                  expires_ms=None if scripted else t + ARM_MAX_AGE_S * 1000)
     st.arms.append(new)
     _touch_music()
     _save()
@@ -336,6 +362,12 @@ async def _fire(a: ShowArm, trigger: dict) -> None:
             show_sequence.on_arm_fired(a)
         except Exception:                                # noqa: BLE001
             logger.exception("light show: sequence advance after an arm fired failed")
+    elif is_playlist_arm_source(a.source):
+        try:
+            from spectra.services import show_playlists
+            show_playlists.on_arm_fired(a)
+        except Exception:                                # noqa: BLE001
+            logger.exception("light show: playlist outcome after an arm fired failed")
 
 
 def _wait_or_fire(arms: list[ShowArm], trigger: dict) -> list[str]:
@@ -482,6 +514,13 @@ def tick() -> None:
     for a in arms:
         if is_sequence_arm_source(a.source):
             continue                     # the sequence owns its arm's life
+        if is_playlist_arm_source(a.source):
+            # the program owns its arm's life, but it is song-scoped: the
+            # runner ends it MISSED on a song change; this is the backstop
+            if a.song_uri is not None and uri is not None and uri != a.song_uri:
+                _end(a, MISSED, "its song ended before the trigger")
+                changed = True
+            continue
         if a.expires_ms is not None and t >= a.expires_ms:
             _end(a, EXPIRED, "armed 12 hours ago")
         elif idle:
@@ -496,6 +535,25 @@ def tick() -> None:
 
 
 # ── status ─────────────────────────────────────────────────────────────────
+
+def _source_tag(source: Optional[str]) -> Optional[str]:
+    """Where a scripted arm came from, in his words ("Playlist · 40!
+    Lightshow", "Sequence · Standard Start"), for the armed board."""
+    try:
+        if is_playlist_arm_source(source):
+            r = show_store.state().playlist_run
+            name = r.name if r is not None and source == f"playlist:{r.id}" else "a program"
+            return f"Playlist · {name}"
+        if is_sequence_arm_source(source):
+            r = show_store.state().sequence_run
+            name = r.name if r is not None and source == f"sequence:{r.id}" else "a sequence"
+            return f"Sequence · {name}"
+        if source and source.startswith("playlist-end:"):
+            return "Playlist end"
+    except Exception:                                    # noqa: BLE001
+        return None
+    return None
+
 
 def status() -> dict:
     """The armed board: every waiting arm (with its lead and the next time
@@ -521,6 +579,7 @@ def status() -> dict:
             if cue is not None and (position is None or cue.timestamp_ms > position):
                 due = cue.timestamp_ms - row["lead_ms"]
         row["due_ms"] = due
+        row["tag"] = _source_tag(a.source)
         waiting.append(row)
     history = [a.model_dump() for a in show_store.state().arms if a.status != ACTIVE]
     # The scene's own minimum hold (dwell.py) is a FLOOR, never a real

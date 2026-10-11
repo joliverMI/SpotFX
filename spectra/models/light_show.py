@@ -205,6 +205,9 @@ class LightShowState(BaseModel):
     #: the Show Sequence that is running (or last ran), if any
     #: (spectra/services/show_sequence.py) — one at a time
     sequence_run: Optional["SequenceRun"] = None
+    #: the Show Playlist that is following (or last followed), if any
+    #: (spectra/services/show_playlists.py) — one at a time
+    playlist_run: Optional["PlaylistRun"] = None
 
 
 # ── Show Sequences (the Admiral, 2026-10-09: "a sequence of pre-armed sets")
@@ -300,6 +303,146 @@ class SequenceRun(BaseModel):
     #: the last song this run saw start — a restart re-sees the playing
     #: song and must not count it as a new one
     last_uri: Optional[str] = None
+    log: list[dict] = Field(default_factory=list)
+
+
+# ── Show Playlists (the Admiral, 2026-10-11: "Let's make a detailed plan for
+# the playlist system"; plan: /home/javi/fleet-spotfx/data/playlist-plan/
+# report.md). spectra/services/show_playlists.py is the binding statement
+# for how one runs. A Show Playlist is a PROGRAM keyed to the Spotify
+# playlist (or album) he already plays: per song, which sets arm on which
+# trigger. Spectra FOLLOWS playback, it never drives it. The library
+# (light_show_playlists.json) is his; the run lives in LightShowState.
+
+PLAYLIST_STEP_TIMINGS = ("song_start", "scene_change", "high", "low")
+"""Phase 1's four timings: `song_start` fires the set as the song begins;
+the other three arm it for this song's next scene change / High / Low (the
+Run view's bunny / up / down). "at a time" and "before the end" are phase 2
+(they ride the show-cue tick) and are new values here, not a schema
+change."""
+
+UNLISTED_SONG = ("default", "nothing")
+
+
+class PlaylistStep(BaseModel):
+    """One step of a song entry (or of on-start / on-end): a set and when."""
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=_id)
+    set_id: Optional[str] = None
+    on: str = "high"                 # PLAYLIST_STEP_TIMINGS
+    repeat: bool = False
+    #: a fade armed on High/Low starts early so it COMPLETES on the mark
+    finish_on_mark: bool = True
+    enabled: bool = True
+    label: str = ""
+
+
+class SongEntry(BaseModel):
+    """What one song arms. Title/artist are carried so the program still
+    reads when the song is no longer in the library."""
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=_id)
+    uri: str = ""
+    title: str = ""
+    artist: str = ""
+    notes: str = ""
+    steps: list[PlaylistStep] = Field(default_factory=list)
+    enabled: bool = True
+
+
+class PlaylistOnStart(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    #: a Show Sequence to start when the program becomes active
+    sequence_id: Optional[str] = None
+    #: stop a sequence that is already running to start this one
+    replace_running_sequence: bool = False
+    steps: list[PlaylistStep] = Field(default_factory=list)
+
+
+class PlaylistOnEnd(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    steps: list[PlaylistStep] = Field(default_factory=list)
+    end_show: bool = False
+
+
+class ShowPlaylist(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=_id)
+    name: str
+    notes: str = ""
+    #: the Spotify contexts it answers to ("spotify:playlist:…",
+    #: "spotify:album:…") — one context belongs to at most one program
+    contexts: list[str] = Field(default_factory=list)
+    #: the names those contexts had when added (display only)
+    context_names: dict[str, str] = Field(default_factory=dict)
+    #: activate by itself when one of its contexts starts playing
+    auto_follow: bool = True
+    #: also apply a listed song's entry when that song plays from anywhere
+    follow_songs_anywhere: bool = False
+    on_start: PlaylistOnStart = Field(default_factory=PlaylistOnStart)
+    default_song: Optional[SongEntry] = None
+    unlisted_song: str = "default"   # UNLISTED_SONG
+    songs: list[SongEntry] = Field(default_factory=list)
+    on_end: PlaylistOnEnd = Field(default_factory=PlaylistOnEnd)
+    created_ms: int = Field(default_factory=now_ms)
+    updated_ms: int = Field(default_factory=now_ms)
+
+
+class PlaylistLibrary(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    schema_version: int = SCHEMA_VERSION
+    #: the Light Show page's global "Follow playlists" switch — off turns
+    #: every program's auto-follow off for an evening
+    follow_enabled: bool = True
+    playlists: list[ShowPlaylist] = Field(default_factory=list)
+
+
+class StepOutcome(BaseModel):
+    """What one step did for the song playing (or for on-start/on-end)."""
+    model_config = ConfigDict(extra="ignore")
+    step_id: str
+    set_id: Optional[str] = None
+    set_name: str = ""
+    on: str = ""
+    #: armed | fired | missed | skipped | disarmed | failed | pending | refused
+    status: str = "pending"
+    arm_id: Optional[str] = None
+    at_ms: int = Field(default_factory=now_ms)
+    detail: str = ""
+
+
+class PlaylistRun(BaseModel):
+    """A program being followed."""
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=_id)
+    playlist_id: str
+    name: str
+    state: str = "following"         # following | paused | stopped | ended
+    #: how it became active: context (its playlist played), song (follow
+    #: songs anywhere), manual (a button, Sonic, Home Assistant)
+    via: str = "context"
+    started_by: str = ""
+    context_uri: str = ""
+    started_ms: int = Field(default_factory=now_ms)
+    ended_ms: Optional[int] = None
+    end_reason: str = ""
+    paused_reason: str = ""
+    # the current song
+    song_uri: Optional[str] = None
+    song_title: str = ""
+    song_artist: str = ""
+    song_started_ms: Optional[int] = None
+    entry_source: str = "none"       # listed | default | none
+    song_steps: list[StepOutcome] = Field(default_factory=list)
+    start_steps: list[StepOutcome] = Field(default_factory=list)
+    songs_seen: list[dict] = Field(default_factory=list)
+    songs_count: int = 0
+    #: the last song this run saw start — a restart re-sees the playing song
+    #: and must not count it as a new one
+    last_uri: Optional[str] = None
+    #: "Stop following" while its playlist is still playing must not start
+    #: it again at once: auto-follow waits until the context changes
+    blocked_context: Optional[str] = None
     log: list[dict] = Field(default_factory=list)
 
 

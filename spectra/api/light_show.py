@@ -459,3 +459,170 @@ async def search_songs(q: str = "", limit: int = _Query(song_library.DEFAULT_LIM
         hit = await _asyncio.to_thread(song_library.lookup, playing)
         now = (hit.as_dict() if hit else {"uri": playing, "title": playing, "artist": ""})
     return {"songs": [s.as_dict() for s in found], "playing": now}
+
+
+# ── SHOW PLAYLISTS — programs keyed to the Spotify playlists he plays ──────
+# spectra/services/show_playlists.py is the binding statement. Spectra
+# FOLLOWS playback; nothing here starts, queues or skips a song.
+#
+#   GET    /api/light-show/playlists                 his programs (+ problems)
+#   POST   /api/light-show/playlists                 create / update one
+#   DELETE /api/light-show/playlists/{id}            409 while it is following
+#   POST   /api/light-show/playlists/{id}/duplicate  "<name> copy", no context
+#   PUT    /api/light-show/playlists/follow          {enabled} the global switch
+#   GET    /api/light-show/playlist-run              the run, its song, up next
+#   POST   /api/light-show/playlist-run/start        {playlist_id | name, replace}
+#   POST   /api/light-show/playlist-run/{stop|resume|skip-song}
+#   POST   /api/light-show/playlist-run/fire-step    {step_id}
+#   GET    /api/light-show/context-name?uri=         a Spotify context's name
+
+from spectra.models.light_show import ShowPlaylist
+from spectra.services import show_playlists
+
+
+class PlaylistBody(ShowPlaylist):
+    id: Optional[str] = None
+    #: a brand-new program only — place it right after this id
+    after_id: Optional[str] = None
+
+
+class PlaylistStartBody(BaseModel):
+    playlist_id: Optional[str] = None
+    name: Optional[str] = None
+    replace: bool = False
+
+
+class FollowBody(BaseModel):
+    enabled: bool
+
+
+class FireStepBody(BaseModel):
+    step_id: str
+
+
+def _playlist_row(p: ShowPlaylist) -> dict:
+    def steps(items):
+        return [{**st.model_dump(), "title": show_playlists.step_title(st),
+                 "problems": show_playlists.step_problems(st)} for st in items]
+    d = p.model_dump()
+    d["on_start"]["steps"] = steps(p.on_start.steps)
+    d["on_end"]["steps"] = steps(p.on_end.steps)
+    if p.default_song is not None:
+        d["default_song"]["steps"] = steps(p.default_song.steps)
+    d["songs"] = [{**e.model_dump(), "steps": steps(e.steps),
+                   "summary": show_playlists.entry_summary(e)} for e in p.songs]
+    d["problems"] = show_playlists.problems(p)
+    return d
+
+
+async def _broadcast_playlist() -> None:
+    try:
+        from spectra.services.ws import ws_manager
+        await ws_manager.broadcast({"type": "light_show_playlist",
+                                    "run": show_playlists.status()["run"]})
+    except Exception:                                    # noqa: BLE001
+        pass
+
+
+@router.get("/playlists")
+async def list_playlists():
+    lib = show_store.load_playlists()
+    return {"playlists": [_playlist_row(p) for p in lib.playlists],
+            "follow_enabled": lib.follow_enabled}
+
+
+@router.post("/playlists")
+async def upsert_playlist(body: PlaylistBody):
+    data = body.model_dump()
+    if not data.get("id"):
+        data.pop("id", None)
+    after_id = data.pop("after_id", None)
+    try:
+        p = show_store.put_playlist(ShowPlaylist(**data), after_id=after_id)
+    except show_store.PlaylistConflict as exc:
+        return JSONResponse(status_code=409, content={"detail": str(exc)})
+    # Saved even with problems (a half-built program is his to finish); the
+    # problems travel with it.
+    return _playlist_row(p)
+
+
+@router.put("/playlists/follow")
+async def put_follow(body: FollowBody):
+    on = show_playlists.set_follow(body.enabled)
+    return {"follow_enabled": on}
+
+
+@router.delete("/playlists/{pl_id}")
+async def remove_playlist(pl_id: str):
+    r = show_playlists.run()
+    if r is not None and r.playlist_id == pl_id and r.state in show_playlists.ACTIVE_STATES:
+        return JSONResponse(status_code=409, content={
+            "detail": f"{r.name!r} is following — stop it before deleting it"})
+    if not show_store.delete_playlist(pl_id):
+        return JSONResponse(status_code=404, content={"detail": "no such playlist program"})
+    return {"deleted": pl_id}
+
+
+@router.post("/playlists/{pl_id}/duplicate")
+async def duplicate_playlist(pl_id: str):
+    p = show_store.duplicate_playlist(pl_id)
+    if p is None:
+        return JSONResponse(status_code=404, content={"detail": "no such playlist program"})
+    return _playlist_row(p)
+
+
+@router.get("/playlist-run")
+async def get_playlist_run():
+    return show_playlists.status()
+
+
+async def _playlist_control(fn, *args, **kwargs):
+    try:
+        res = fn(*args, **kwargs)
+        if _asyncio.iscoroutine(res):
+            await res
+    except show_playlists.PlaylistError as exc:
+        return JSONResponse(status_code=409, content={"detail": str(exc)})
+    await _broadcast_playlist()
+    await _broadcast()
+    return show_playlists.status()
+
+
+@router.post("/playlist-run/start")
+async def start_playlist(body: PlaylistStartBody):
+    """Follow a program now (a button, Sonic, Home Assistant) — whatever is
+    playing. Open like sequence-run/start."""
+    key = body.playlist_id or body.name
+    if not key:
+        return JSONResponse(status_code=400, content={"detail": "name a playlist program"})
+    return await _playlist_control(show_playlists.start, key, replace=body.replace,
+                                   source="button")
+
+
+@router.post("/playlist-run/stop")
+async def stop_playlist():
+    return await _playlist_control(show_playlists.stop)
+
+
+@router.post("/playlist-run/resume")
+async def resume_playlist():
+    return await _playlist_control(show_playlists.resume)
+
+
+@router.post("/playlist-run/skip-song")
+async def skip_playlist_song():
+    return await _playlist_control(show_playlists.skip_song)
+
+
+@router.post("/playlist-run/fire-step")
+async def fire_playlist_step(body: FireStepBody):
+    return await _playlist_control(show_playlists.fire_step, body.step_id)
+
+
+@router.get("/context-name")
+async def get_context_name(uri: str = _Query(..., min_length=1)):
+    """A Spotify context's friendly name: the bridge's when it is the one
+    playing, else asked of SpotFX (read-only). "" when unknown."""
+    from spectra.services import spotify_context
+    name = await _asyncio.to_thread(spotify_context.name_for, uri)
+    return {"uri": uri, "name": name}

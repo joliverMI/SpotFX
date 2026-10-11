@@ -474,6 +474,16 @@ async def _on_track_uri(uri) -> None:
     # the original program kept — a build must not linger into the next
     # song) before the sequencer sees the transition.
     global _last_track_uri
+    # THE SHOW PLAYLIST (spectra/services/show_playlists.py): on EVERY state,
+    # FIRST — before anything here awaits — so a program activates on its
+    # playlist and a new song's arms exist before the song's opening scene
+    # change (the Admiral's answer to the plan's Q2: a "next scene change"
+    # step counts the opening change too). Never allowed to break a state.
+    try:
+        from spectra.services import show_playlists
+        show_playlists.on_state(uri, bridge.context_uri(), bridge.track_position_ms())
+    except Exception:                                    # noqa: BLE001
+        logger.exception("light show: playlist state hook failed")
     if uri != _last_track_uri:
         _last_track_uri = uri
         await responses.release_phases()
@@ -507,6 +517,13 @@ async def _on_track_uri(uri) -> None:
     from spectra.services.scene_sequencer import scene_sequencer
     await scene_sequencer.on_track_state(uri)
     await trigger_engine.on_track_state(uri)
+    # A playlist program's song-start steps fire only now, after the opening
+    # scene change has gone through (show_playlists.after_track_state).
+    try:
+        from spectra.services import show_playlists
+        show_playlists.after_track_state()
+    except Exception:                                    # noqa: BLE001
+        logger.exception("light show: playlist song-start hook failed")
     # Ambient's music-precedence gate (services/ambient_music_gate.py) —
     # every bridge broadcast re-evaluates whether Ambient should be
     # holding the room right now. Backgrounded, not awaited: a hold/

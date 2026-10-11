@@ -1575,7 +1575,8 @@ def brief() -> dict:
     """The small summary the top-bar strip and engine status carry."""
     out = show_output.status()
     act = status()
-    return {"active": act["active"] or bool(out["holds"] or out["levels"]),
+    pl = _playlist_brief()
+    return {"active": act["active"] or bool(out["holds"] or out["levels"]) or pl is not None,
             "holds": len(out["holds"]), "levels": len(out["levels"]),
             "pulse_mods": len(out["pulse_mods"]),
             "flare_blocks": len(out["flare_blocks"]),
@@ -1583,7 +1584,18 @@ def brief() -> dict:
             "room_effect": (act["room_effect"] or {}).get("name"),
             "changed_settings": len(act["baselines"]),
             "armed": len(act["arms"]),
+            "playlist": pl,
             "standdown": out["standdown"], "refusal": out["refusal"]}
+
+
+def _playlist_brief() -> Optional[dict]:
+    """The Show Playlist following, if any (name, song, up next) — what a
+    dashboard card reads off engine status's `light_show` key."""
+    try:
+        from spectra.services import show_playlists
+        return show_playlists.brief()
+    except Exception:                                    # noqa: BLE001
+        return None
 
 
 def reset() -> None:
