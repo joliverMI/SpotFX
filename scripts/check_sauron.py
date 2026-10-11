@@ -10,7 +10,13 @@ last_slit / last_d) — never re-deriving the picture from the formulas.
 What it proves (the approved plan's phase-1 list):
   1. the slit is black and CONTINUOUS on the hex lattice: every row it
      spans has a dark real cell at its centre line (a 1-px stroke would
-     vanish on alternate rows);
+     vanish on alternate rows) — and (1b, tune-up 1) it stays so while the
+     eye MOVES: a gaze sweep at rest, under a full charge (the slit
+     narrows) and at the narrowest Slit Width, every frame, with the floor
+     switched off as the red control;
+  2b. (tune-up 1) the perimeter ring resolves on the lattice as the eye
+     moves (every angular bin round the iris holds a real cell on the
+     ring's crest, every frame) and fades into the flames with no step;
   2. the rim is the hottest part of the fire: the brightest real cells sit
      on the slit's white-hot rim, far brighter than the flame tips;
   3. reach: bass lengthens the flames — measured as each angular bin's
@@ -22,9 +28,13 @@ What it proves (the approved plan's phase-1 list):
      on an identical later poke, and decays back to rest;
   5. a beat dilates the slit — width and height, about 1 : 0.3;
   6. the palette sort: identity on a set authored dark -> bright and on a
-     solid colour; a rainbow set (Hype 1) resolves to cold -> warm; Mid -
-     Ice (authored bright -> dark) is reversed;
+     solid colour; a rainbow set (Hype 1) resolves to the radial mapping,
+     cold -> warm; Mid - Ice (authored bright -> dark) is reversed;
   7. angle mode colours by angle (hue varies around a ring of equal heat);
+  7b. (tune-up 1) the radial mapping follows the eye's own shape (beside
+     the slit and above its tip read the same colour although their
+     distances from the centre differ) and is calmer than heat-mapping
+     the same rainbow (neighbouring cells differ far less);
   8. no NaNs over 60 s of music, surges and a charge/lull/drop arc;
   9. the frame cost.
 
@@ -198,6 +208,91 @@ async def section_slit(results):
     await r.close()
 
 
+# ── 1b · continuous while the eye moves (tune-up 1) ──────────────────────
+def _gaze_path(i, n):
+    """A sweep over the gaze ring: round it 1.4 times at a breathing radius,
+    a fractional step every frame (the slit lands on every lattice phase)."""
+    a = i * 2 * np.pi * 1.4 / n + 0.3
+    rad = 0.36 * (0.25 + 0.75 * abs(np.sin(i * 0.071)))
+    return np.array([rad * np.cos(a), rad * np.sin(a)], dtype=np.float32)
+
+
+def core_rows(e):
+    """Real rows the slit's floor column covers this frame."""
+    cx, cy, half = e.last_slit_core
+    return [y for y in range(ROWS)
+            if abs(y - cy) <= half - 0.5 and REAL2[y].any()], cx
+
+
+def row_gaps(e, rows, cx):
+    """Rows (of `rows`) with no real cell at least 90% black near cx."""
+    gaps = []
+    for y in rows:
+        cols = [x for x in range(COLS) if REAL2[y, x] and abs(x - cx) <= 4.5]
+        if max((e.last_slit[y, x] for x in cols), default=0.0) < 0.9:
+            gaps.append(y)
+    return gaps
+
+
+async def slit_sweep(config, charge, frames, plan=None):
+    """Run the gaze sweep; return [(rows, cx)] per frame (the plan) and the
+    per-frame gaps measured against `plan` (its own when None)."""
+    r = await Rig.make(config)
+    e = r.effect
+    if charge:
+        e.update_config({"phase": "charge", "phase_progress": 1.0})
+    r.step(25, impulse=0.0)
+    out_plan, gaps = [], []
+    for i in range(frames):
+        e.gaze = _gaze_path(i, frames)
+        e._hold_left = 9.0
+        r.step(1, impulse=0.0)
+        rows, cx = plan[i] if plan is not None else core_rows(e)
+        out_plan.append((rows, cx))
+        gaps.append(row_gaps(e, rows, cx))
+    await r.close()
+    return out_plan, gaps
+
+
+async def section_slit_moving(results, frames):
+    print("\n1b · the slit stays one continuous dark column while the eye "
+          "moves")
+    cases = [("rest", {"gradient": SETS["Mid - Fire"], "pupil_beat": 0.0},
+              False),
+             ("full charge", {"gradient": SETS["Mid - Fire"],
+                              "pupil_beat": 0.0}, True),
+             ("narrowest Slit Width", {"gradient": SETS["Mid - Fire"],
+                                       "pupil_beat": 0.0,
+                                       "pupil_width": 0.03}, False)]
+    out = {}
+    for label, cfg, charge in cases:
+        plan, gaps = await slit_sweep(cfg, charge, frames)
+        bad = sum(1 for g in gaps if g)
+        rows = [len(p[0]) for p in plan]
+        # red control: the same sweep and the same rows, the floor off
+        keep = S.SLIT_MIN_DARK_PX
+        S.SLIT_MIN_DARK_PX = 0.0
+        try:
+            _p, off = await slit_sweep(cfg, charge, frames, plan=plan)
+        finally:
+            S.SLIT_MIN_DARK_PX = keep
+        off_bad = sum(1 for g in off if g)
+        out[label] = {"frames": frames, "frames_with_a_gap": bad,
+                      "rows_min": min(rows), "rows_max": max(rows),
+                      "floor_off_frames_with_a_gap": off_bad}
+        print(f"   {label:21s}: column spans {min(rows)}-{max(rows)} real "
+              f"rows; frames with a broken row {bad}/{frames} "
+              f"(floor off: {off_bad}/{frames})")
+        check(min(rows) >= 8, f"{label}: the column spans at least 8 rows "
+              f"every frame")
+        check(bad == 0, f"{label}: no row of the column loses its dark real "
+              f"cell on any frame of the sweep")
+        if label != "rest":
+            check(off_bad > 0, f"{label}: red control — with the floor off "
+                  f"the same sweep breaks")
+    results["slit_moving"] = out
+
+
 # ── 2 · the rim is hottest ───────────────────────────────────────────────
 async def section_rim(results):
     print("\n2 · the slit's rim is the hottest part of the fire")
@@ -225,6 +320,52 @@ async def section_rim(results):
         check(ratio > 2.0, f"{name}: the rim is over twice as bright as the "
               f"flame tips")
         await r.close()
+
+
+# ── 2b · the perimeter ring (tune-up 1) ──────────────────────────────────
+async def section_ring(results, frames):
+    print("\n2b · the perimeter ring holds on the lattice and fades into the "
+          "flames")
+    r = await Rig.make({"gradient": SETS["Mid - Fire"], "sky": 0.0})
+    e = r.effect
+    r.step(25, impulse=0.3)
+    yy, xx = np.indices((ROWS, COLS))
+    covered = total = 0
+    prof = {}
+    for i in range(frames):
+        e.gaze = _gaze_path(i, frames)
+        e._hold_left = 9.0
+        r.step(1, impulse=0.3)
+        ex, ey = e.last_eye_px
+        b = ((np.arctan2(yy - ey, xx - ex) + np.pi) / (2 * np.pi)
+             * N_BINS).astype(int) % N_BINS
+        crest = REAL2 & (e.last_ring >= 0.8)
+        for k in range(N_BINS):
+            if (REAL2 & (b == k) & (e.last_d > -e.iris_size)).any():
+                total += 1
+                covered += bool((crest & (b == k)).any())
+        # the radial heat profile just outside the iris, by whole pixels
+        dpx = np.round(e.last_d * e.s_min).astype(int)
+        for k in range(0, 8):
+            m = REAL2 & (dpx == k) & (e.last_slit < 0.5)
+            if m.any():
+                prof.setdefault(k, []).append(float(e.last_heat[m].mean()))
+    await r.close()
+    cov = covered / max(total, 1)
+    mean = [float(np.mean(prof[k])) for k in sorted(prof)]
+    steps = [mean[k] - mean[k + 1] for k in range(len(mean) - 1)]
+    results["ring"] = {"crest_coverage": round(cov, 4),
+                       "profile": [round(v, 3) for v in mean],
+                       "largest_step": round(max(steps), 3)}
+    print(f"   angular bins holding a real cell on the ring's crest: "
+          f"{cov:.1%} of {total} (bin, frame) pairs")
+    print(f"   mean heat by pixel outside the iris: "
+          f"{' '.join(f'{v:.2f}' for v in mean)} (largest step "
+          f"{max(steps):.2f} per pixel)")
+    check(cov >= 0.99, "the ring's crest lands on a real cell in every "
+          "direction, every frame of a moving sweep")
+    check(max(steps) <= 0.2, "the ring fades into the flames with no step "
+          "(<= 0.2 heat per pixel)")
 
 
 # ── 3 · reach ────────────────────────────────────────────────────────────
@@ -371,8 +512,8 @@ def section_palette(results):
     check(S.palette_gradient("#ff4400", "auto") == "#ff4400",
           "a solid colour is untouched")
     hype = SETS["Hype 1"]
-    check(S.resolve_palette_sort("auto", hype) == "warm",
-          "Hype 1 (a rainbow set) resolves to cold -> warm")
+    check(S.resolve_palette_sort("auto", hype) == "radial",
+          "Hype 1 (a rainbow set) resolves to the radial mapping")
     check(S.resolve_palette_sort("auto", SETS["Mid - Fire"]) == "brightness",
           "Mid - Fire resolves to brightness")
     ice = S.palette_gradient(SETS["Mid - Ice"], "auto")
@@ -384,6 +525,8 @@ def section_palette(results):
     check(S.warmth(warm[-1]) >= max(S.warmth(c) for c in warm) - 1e-9
           and S.warmth(warm[0]) <= min(S.warmth(c) for c in warm) + 1e-9,
           "Hype 1 under auto: coldest colour at the tips, warmest at the rim")
+    check(_distinct_order(S.palette_gradient(hype, "radial")) == warm,
+          "radial walks the set cold -> warm")
     check(S.palette_gradient(hype, "authored") == hype
           and S.palette_gradient(hype, "angle") == hype,
           "authored and angle leave the set as written")
@@ -413,6 +556,91 @@ async def section_angle(results):
     check(band.sum() > 10 and spread > 0.2, "the iris ring wears many "
           "colours by angle")
     await r.close()
+
+
+# ── 7b · the radial mapping (tune-up 1) ──────────────────────────────────
+def colour_islands(px, region, palette):
+    """How BROKEN UP the colour is: label every real cell of `region` with
+    its nearest colour of the set (on chroma), then count the connected
+    patches of one colour over the lattice's own neighbours (two columns
+    along a row, one diagonally to the next row) — patches per lit cell.
+    A speckle of colours scores high; calm bands score low."""
+    col = px / np.maximum(px.max(axis=2, keepdims=True), 1.0)
+    pal = np.array(palette, dtype=np.float32)
+    pal = pal / np.maximum(pal.max(axis=1, keepdims=True), 1.0)
+    lab = np.argmin(((col[..., None, :] - pal) ** 2).sum(axis=3), axis=2)
+    parent = {}
+
+    def find(a):
+        while parent[a] != a:
+            parent[a] = parent[parent[a]]
+            a = parent[a]
+        return a
+
+    cells = list(zip(*np.nonzero(region)))
+    for c in cells:
+        parent[c] = c
+    for y, x in cells:
+        for dy, dx in ((0, 2), (1, 1), (1, -1)):
+            n = (y + dy, x + dx)
+            if n in parent and lab[n] == lab[y, x]:
+                parent[find(n)] = find((y, x))
+    roots = {find(c) for c in cells}
+    return len(roots) / max(len(cells), 1)
+
+
+async def section_radial(results):
+    print("\n7b · the radial mapping: follows the eye's shape, calmer than "
+          "heat")
+    busy = {}
+    for how in ("radial", "warm"):
+        vals = []
+        for seed in (1, 2):
+            r = await Rig.make({"gradient": SETS["Hype 1"],
+                                "palette_sort": how}, seed=seed)
+            r.step(40, impulse=0.4, beat_every=30, hold_center=True)
+            e = r.effect
+            px = r.pixels()
+            region = REAL2 & (lum(px) > 0.08) & (e.last_slit < 0.5)
+            vals.append(colour_islands(
+                px, region, _distinct_order(SETS["Hype 1"])))
+            if how == "radial":
+                check(e.mapping() == "radial", "radial is what is sampled")
+                ex, ey = e.last_eye_px
+                w, h = e.slit_size(e.iris_size, e._pulse, 0.4)
+                # one ring of EQUAL distance from the eye, inside the iris:
+                # a circular mapping reads one colour all round it; this
+                # one reads hotter toward the slit's tips (the slit is
+                # near) than out beside its flanks
+                yy, xx = np.indices((ROWS, COLS))
+                rr = np.hypot(xx - ex, yy - ey) / (e.iris_size * e.s_min)
+                aa = np.abs(np.arctan2(yy - ey, xx - ex))
+                vert = np.abs(aa - np.pi / 2) < np.radians(25)
+                horz = (aa < np.radians(25)) | (aa > np.radians(155))
+                ring_m = REAL2 & (np.abs(rr - 0.9) < 0.07) & (
+                    e.last_slit < 0.5)
+                rc = e.last_radial
+                results.setdefault("radial_shape", []).append(
+                    {"toward_tips": round(float(rc[ring_m & vert].mean()), 3),
+                     "beside_flanks": round(float(
+                         rc[ring_m & horz].mean()), 3)})
+            await r.close()
+        busy[how] = float(np.mean(vals))
+    shape = {k: float(np.mean([s_[k] for s_ in results["radial_shape"]]))
+             for k in ("toward_tips", "beside_flanks")}
+    print(f"   on one ring of equal distance (0.9 of the iris): colour "
+          f"coordinate toward the slit's tips {shape['toward_tips']:.2f}, "
+          f"beside its flanks {shape['beside_flanks']:.2f}")
+    print(f"   colour patches per lit cell on Hype 1: radial "
+          f"{busy['radial']:.3f}, heat-mapped (the old auto) "
+          f"{busy['warm']:.3f}")
+    results["radial_busy"] = {k: round(v, 3) for k, v in busy.items()}
+    check(shape["toward_tips"] - shape["beside_flanks"] > 0.03,
+          "the bands follow the slit, not a circle (equal distance, "
+          "hotter toward the tips)")
+    check(busy["radial"] < 0.6 * busy["warm"], "the radial mapping breaks "
+          "the colour into far fewer patches than heat-mapping the same "
+          "rainbow")
 
 
 # ── 8 · no NaNs over a minute of everything ──────────────────────────────
@@ -474,12 +702,15 @@ async def main_async(args):
     headless.silence_audio()
     results: dict = {}
     await section_slit(results)
+    await section_slit_moving(results, 60 if args.quick else 160)
     await section_rim(results)
+    await section_ring(results, 60 if args.quick else 160)
     await section_reach(results)
     await section_surge(results)
     await section_beat(results)
     section_palette(results)
     await section_angle(results)
+    await section_radial(results)
     await section_soak(results, 15.0 if args.quick else 60.0)
     await section_cost(results)
     if args.json:

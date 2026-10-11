@@ -58,8 +58,8 @@ def test_check_sauron_passes_on_the_real_pipeline():
 
 # ── the palette sort (pure) ────────────────────────────────────────────────
 
-def test_auto_sorts_a_rainbow_cold_to_warm_and_everything_else_by_brightness():
-    assert S.resolve_palette_sort("auto", HYPE_1) == "warm"
+def test_auto_maps_a_rainbow_radially_and_everything_else_by_brightness():
+    assert S.resolve_palette_sort("auto", HYPE_1) == "radial"
     assert S.resolve_palette_sort("auto", MID_ICE) == "brightness"
     assert S.resolve_palette_sort("authored", HYPE_1) == "authored"
     cols = _order(S.palette_gradient(HYPE_1, "auto"))
@@ -88,6 +88,40 @@ def test_the_sort_is_the_identity_on_a_dark_to_bright_set_and_a_solid():
 def test_authored_and_angle_leave_the_set_as_written():
     for how in ("authored", "angle"):
         assert S.palette_gradient(HYPE_1, how) == HYPE_1
+
+
+def test_radial_walks_any_set_cold_to_warm():
+    cols = _order(S.palette_gradient(HYPE_1, "radial"))
+    warmths = [S.warmth(c) for c in cols]
+    assert warmths == sorted(warmths)
+    assert _order(S.palette_gradient(HYPE_1, "radial")) == _order(
+        S.palette_gradient(HYPE_1, "auto"))
+    assert "radial" in S.PALETTE_SORTS and "angle" in S.PALETTE_SORTS
+
+
+def test_the_mapping_follows_the_set_it_is_wearing_now():
+    """'auto' is resolved with the curve, so a colour journey that carries
+    the set across the rainbow line switches the mapping with it."""
+    async def go():
+        from fx import headless
+        headless.silence_audio()
+        import tempfile
+        td = tempfile.mkdtemp()
+        host = await headless.start_headless_host(
+            td + "/m", pixel_count=72 * 37, rows=37, device_id="m")
+        v = host.virtuals.get("m")
+        e = headless.attach_effect(host, v, "sauron", {"gradient": HYPE_1})
+        try:
+            first = e.mapping()
+            e.update_config({"gradient": MID_ICE})
+            second = e.mapping()
+            e.update_config({"palette_sort": "angle"})
+            third = e.mapping()
+        finally:
+            await host.shutdown()
+        return first, second, third
+
+    assert _run(go()) == ("radial", "brightness", "angle")
 
 
 def test_a_sorted_gradient_parses_and_keeps_each_colours_share():
