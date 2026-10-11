@@ -27,13 +27,13 @@ What is proven here, on the real code it names:
   orphaned lull releases each strip back to its own show; the drop's
   phase key self-resets after each effect's own drop length while the
   layer's drop keeps running; and a house mode holds both back.
-- THE FOLD, structurally: no particle strip keeps phase plumbing of its
-  own (edge detection, the watchdog, the self-reset).
+- THE FOLD, by behaviour: each phase edge reaches a particle strip's
+  choreography exactly once, the drop ends itself after the effect's own
+  length, and an orphaned lull is released once.
 """
 from __future__ import annotations
 
 import asyncio
-import ast
 import sys
 from pathlib import Path
 from random import Random
@@ -77,25 +77,46 @@ def test_the_measured_before_and_after_passes():
 
 # ── the fold, structurally ──────────────────────────────────────────────────
 
-def test_no_particle_strip_keeps_phase_plumbing_of_its_own():
-    """Edge detection, the orphan watchdog and the drop's self-reset live in
-    the layer ONCE. A particle strip that grew its own copy back would edge
-    a phase twice and release a build on two clocks."""
-    for name in PARTICLE_STRIPS:
-        src = (ROOT / f"fx/effects/{name}.py").read_text()
-        tree = ast.parse(src)
-        names = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
-        attrs = {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)}
-        assert "phase_release_due" not in attrs, name
-        assert "particle_handoff" not in names, name
-        for own in ("_phase_pending", "_phase_done_t", "_phase_t"):
-            assert own not in attrs, (name, own)
-        cls = device_model._effect_class(name)
-        assert issubclass(cls, sp.StripPhase), name
-        assert cls.STRIP_PHASE_DROP_S is not None, name
-        assert "_strip_phase_enter" in vars(cls), name
-    assert ob1.Orbits1d.STRIP_PHASE_DROP_S == ob1.DROP_SETTLE_S
-    assert fw1.Fireworks1d.STRIP_PHASE_DROP_S == fw1.DROP_SETTLE_S
+@pytest.mark.parametrize("effect_type", PARTICLE_STRIPS)
+def test_each_phase_edge_reaches_the_choreography_exactly_once(tmp_path,
+                                                               effect_type):
+    """Edge detection, the drop's self-reset and the orphan watchdog live in
+    the layer ONCE: driven through charge -> lull -> drop on the production
+    path, the effect's choreography is told each edge exactly once, the
+    drop ends itself after the effect's own STRIP_PHASE_DROP_S, and an
+    orphaned lull is released once — never twice on two clocks."""
+    cfg = {"orbits1d": HIS_ORB, "fireworks1d": HIS_FW}.get(
+        effect_type, {"gradient": PALETTE})
+
+    async def main():
+        async with Room(str(tmp_path), {"s": (effect_type, STRIP_PX, 1,
+                                              dict(cfg))}) as r:
+            eff = r.effects["s"]
+            told = []
+            orig = eff._strip_phase_enter
+
+            def logged(phase, prev, released, _o=orig):
+                told.append((phase, prev, released))
+                _o(phase, prev, released)
+
+            eff._strip_phase_enter = logged
+            r.step(30)
+            await r.phase("charge", gap_ms=2000)
+            r.step(2 * FPS)
+            await r.phase("lull", gap_ms=2000)
+            r.step(2 * FPS)
+            await r.phase("drop", intensity=0.85)
+            r.step(2 * FPS)
+            cycle = list(told)
+            told.clear()
+            await r.phase("lull", gap_ms=2000)     # the drop never comes
+            r.step(int((2.0 + particle_handoff.PHASE_GRACE_S + 3.0) * FPS))
+            return cycle, list(told), eff._sp_phase, eff._config["phase"]
+    cycle, orphan, phase, key = run(main())
+    assert cycle == [("charge", "none", False), ("lull", "charge", False),
+                     ("drop", "lull", False), ("none", "drop", False)]
+    assert orphan == [("lull", "none", False), ("none", "lull", True)]
+    assert phase == "none" and key == "none"
 
 
 def test_the_fireworks_strip_carries_its_own_ember_default():
