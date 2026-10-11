@@ -44,7 +44,10 @@ Plan: `/home/javi/fleet-spotfx/data/single-led-power-plan/report.md`.
   the guard never engages (`guarded_frames == 0`) — keep it that way or say
   why. Measure on the OUTPUT (`h.max_rise_per_second`), never the booking.
 - **True black only during a music show**: phases are withheld from Pulse
-  while a house mode rests (`scene_response._drive_phase`). A flash during
+  while a house mode rests (`scene_response._drive_phase`,
+  `HOUSE_HELD_PHASE_EFFECTS` — every strip phase member is held the same
+  way, the Orbits strip beside Pulse in `tests/test_pulse_engine_wiring.py`
+  included since strip phase plan phase 3). A flash during
   a lull is scaled by the lull's own fade, so the lull still lands black.
 - **Rainbow walk**: Pulse walks only when its `gradient` spans > 180° of
   hue (`chromatic_span_deg`, the colour journey's own test). The compiler

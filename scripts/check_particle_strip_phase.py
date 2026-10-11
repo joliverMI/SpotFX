@@ -115,10 +115,11 @@ HIS_BLACKHOLE = {
 
 def load_before(module: str):
     """BEFORE_REF's fx/effects/<module>.py as a SECOND registered effect
-    named <module>_before (an Effect registers under its module's last name
+    named <module>_p3before (an Effect registers under its module's last name
     segment). None — a stated skip, never a silent pass — when git cannot
     produce the ref."""
-    name = f"{module}_before"
+    name = f"{module}_p3before"   # distinct from other checks' pinned copies
+                                  # (one process may load several refs)
     if name in sys.modules:
         return name
     try:
