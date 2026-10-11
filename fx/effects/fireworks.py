@@ -601,6 +601,11 @@ class Fireworks2d(Twod, GradientEffect):
             and snap["trail"].shape == self.trail.shape
         ):
             np.maximum(self.trail, snap["trail"], out=self.trail)
+        if snap.get("append") and snap.get("vx") is not None:
+            # a transition program's FOUNTAIN / FLAME LICK hands its sparks
+            # over still flying (fx/effects/transition_cloud.py, VENDOR #75)
+            self._import_sparks(snap)
+            return
         if snap["src"] == "fireworks":
             native = snap["native"]
             k = min(native["n"], CAP)
@@ -682,6 +687,49 @@ class Fireworks2d(Twod, GradientEffect):
                 grad=float(snap["grad"][i]),
                 bright=float(np.clip(snap["bright"][i], 0.4, 1.0)),
             )
+
+    def _import_sparks(self, snap):
+        """A transition program's sparks join as ordinary fireworks sparks
+        AT their positions WITH their velocities (px/s -> this field's
+        normalized units), already past their fade-in, each brightness set
+        so its first shown frame equals what the program last drew — one
+        motion and one picture across the hand-off. Appended to whatever
+        this effect launched while the program ran; capacity-capped."""
+        k = int(min(len(snap["px"]), CAP - self.n))
+        if k <= 0:
+            return
+        s = slice(self.n, self.n + k)
+        sx, sy = max(self.sx, 1e-6), max(self.sy, 1e-6)
+        self.p_x[s] = (np.asarray(snap["px"][:k], np.float32) - self.cx) / sx
+        self.p_y[s] = (np.asarray(snap["py"][:k], np.float32) - self.cy) / sy
+        self.p_vx[s] = np.asarray(snap["vx"][:k], np.float32) / sx
+        self.p_vy[s] = np.asarray(snap["vy"][:k], np.float32) / sy
+        life = snap.get("life")
+        if life is None or len(life) < k:
+            life = self.burst_life * self._rng.uniform(0.8, 1.2, k)
+        life = np.maximum(np.asarray(life[:k], np.float32), 2.0 * FADE_IN_S)
+        age = np.full(k, FADE_IN_S, dtype=np.float32)
+        # the forward envelope's value at that age (the draw's own formula)
+        env = (1.0 - age / life) ** 1.4
+        shown = np.clip(np.asarray(snap["bright"][:k], np.float32), 0.0, 1.0)
+        self.p_age[s] = age
+        self.p_life[s] = life
+        self.p_grad[s] = np.asarray(snap["grad"][:k], np.float32)
+        self.p_bright[s] = np.clip(shown / np.maximum(env, 1e-3), 0.0, 1.0)
+        self.p_shown[s] = shown
+        self.p_rev[s] = 0.0
+        self.p_rocket[s] = 0.0
+        self.p_nocap[s] = 1.0   # the hand-off must land whole
+        self.n += k
+
+    def _program_field_velocity(self, px, py, vx, vy, dt):
+        """What a spark here moving at (vx, vy) px/s does over dt: this
+        field's own drag (the draw's half-life). A transition program's
+        last stretch flies its sparks by it, so the hand-off continues one
+        motion (fx/effects/transition_cloud.py)."""
+        hl = max(0.6 - 0.5 * self.drag, 0.05)
+        decel = np.float32(0.5 ** (dt / hl))
+        return vx * decel, vy * decel
 
     def _import_keepers(self, xs, ys, grads, brights):
         """THE KEEPERS MELD: hold each adopted keeper as a stationary rocket

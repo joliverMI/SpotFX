@@ -527,6 +527,13 @@ class Sauron2d(Twod, GradientEffect):
         self._pacman_hold = None
         self._blink_in = None
         self._pull = None
+        # TRANSITION PROGRAMS (fx/effects/transition_cloud.py, VENDOR #75):
+        # an IGNITION opens the slit from a hairline (_lens_gain) and
+        # reads where the iris rim is (program_rim, px); a program handing
+        # over at a brightness has the body fade up from it (_fade_up)
+        self._lens_gain = 1.0
+        self.program_rim = None
+        self._fade_up = None
         span = np.arange(-2, 3)
         kdx, kdy = np.meshgrid(span, span)
         kd = np.sqrt(kdx**2 + kdy**2).ravel()
@@ -761,7 +768,13 @@ class Sauron2d(Twod, GradientEffect):
             return
         px = snap.get("px")
         py = snap.get("py")
+        body_from = snap.get("body_gain")
         if px is None or len(px) == 0:
+            if body_from is not None:
+                # a transition program handed the eye over at this
+                # brightness: the body fades up from it, not from 0.25
+                self._fade_up = {"t": 0.0,
+                                 "g0": float(np.clip(body_from, 0.0, 1.0))}
             return
         k = int(min(len(px), INFALL_CAP))
         idx = np.linspace(0, len(px) - 1, k).astype(np.int64)
@@ -791,6 +804,10 @@ class Sauron2d(Twod, GradientEffect):
             "dur": (self._rng.uniform(0.75, 1.15, k) * INFALL_S).astype(
                 np.float32
             ),
+            # the brightness the body fades up FROM (the predecessor's
+            # handed brightness when it said one; 0.25 otherwise)
+            "g0": float(np.clip(body_from, 0.0, 1.0))
+            if body_from is not None else 0.25,
         }
 
     # ── charge/lull/drop — Eye's state machine, inherited ───────────────
@@ -1172,7 +1189,14 @@ class Sauron2d(Twod, GradientEffect):
                 size_gain = 0.2 + 0.8 * f * (2.0 - f)
         body_gain = 1.0
         if self._infall is not None:
-            body_gain = 0.25 + 0.75 * min(self._infall["t"] / INFALL_S, 1.0)
+            g0 = self._infall.get("g0", 0.25)
+            body_gain = g0 + (1.0 - g0) * min(self._infall["t"] / INFALL_S, 1.0)
+        elif self._fade_up is not None:
+            self._fade_up["t"] += dt
+            g0 = self._fade_up["g0"]
+            body_gain = g0 + (1.0 - g0) * min(self._fade_up["t"] / INFALL_S, 1.0)
+            if self._fade_up["t"] >= INFALL_S:
+                self._fade_up = None
         body_show = not (
             blink_out is not None
             and blink_out >= particle_handoff.BLOOM_START
@@ -1222,6 +1246,7 @@ class Sauron2d(Twod, GradientEffect):
         ang = np.arctan2(ty, tx)
         iris_r = self.iris_size * (1.0 + CHARGE_IRIS_GROW * charge) * size_gain
         self._last_iris = (eye_px, eye_py, iris_r)  # the shock's rim
+        self.program_rim = (eye_px, eye_py, iris_r * self.s_min)
         d = dist - iris_r
 
         # ── flames + sky ────────────────────────────────────────────────
@@ -1260,6 +1285,7 @@ class Sauron2d(Twod, GradientEffect):
 
         # ── the slit: a lens of two arcs, leading into the gaze ─────────
         w, h = self.slit_size(iris_r, pulse, imp, charge, size_gain)
+        w *= self._lens_gain
         lpx = lead * iris_r * ux
         lpy = lead * iris_r * uy
         qa = ((dxp - lpx) * ux + (dyp - lpy) * uy) / cos_eff

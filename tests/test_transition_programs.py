@@ -68,13 +68,14 @@ def _ang(a, b):
 # ── 1. registry ────────────────────────────────────────────────────────────
 
 def test_the_registry_anchors_and_leads():
-    for src in ("orbits", "fish", "squiggles", "fireworks"):
+    for src in ("orbits", "fish", "squiggles"):
         assert tp.program_name(src, "blackhole") == tp.INFALL
     for dst in ("orbits", "fish", "squiggles"):
         assert tp.program_name("blackhole", dst) == tp.ERUPTION
-    # Fireworks <-> Black Hole's other half is Fountain (the next task);
-    # unrelated pairs and same-type writes have none
-    for out, inc in (("blackhole", "fireworks"), ("orbits", "fish"),
+    # Fireworks <-> Black Hole is Lensing / Fountain since phase 4
+    # (tests/test_transition_programs_phase4.py); unrelated pairs and
+    # same-type writes have none
+    for out, inc in (("fish", "fireworks"),
                      ("radial", "blackhole"), ("blackhole", "blackhole"),
                      (None, "blackhole")):
         assert tp.program_name(out, inc) is None
@@ -159,7 +160,7 @@ async def _program_run(tmp_path, sub, out_type, in_type, *, request=None,
 
 # ── 2. infall: continuous across the hand-off; the control is not ───────────
 
-@pytest.mark.parametrize("src", ["orbits", "fish", "fireworks"])
+@pytest.mark.parametrize("src", ["orbits", "fish"])
 def test_infall_hands_the_cloud_over_still_moving(tmp_path, src):
     r = _run(_program_run(tmp_path, src, src, "blackhole"))
     ctrl = _run(_program_run(tmp_path, src + "c", src, "blackhole",
@@ -284,7 +285,7 @@ def test_the_facade_runs_a_program_only_for_a_registered_pair(tmp_path, monkeypa
     assert asked["program"] is not None and asked["transition_live"] is False
     plain = _run(_facade_switch(tmp_path, "b", "orbits", "blackhole", None))
     assert plain["program"] is None and plain["transition_live"] is True
-    unregistered = _run(_facade_switch(tmp_path, "c", "orbits", "fish", {"seed": 1}))
+    unregistered = _run(_facade_switch(tmp_path, "c", "fish", "fireworks", {"seed": 1}))
     assert unregistered["program"] is None and unregistered["transition_live"] is True
     # the stored crossfade was never touched
     assert {asked["stored"], plain["stored"], unregistered["stored"]} == {0.5}
@@ -378,7 +379,7 @@ def test_program_lead_replaces_the_crossfade_lead_only_where_it_applies():
     assert stl.program_lead_ms({"m": "orbits", "s": "power"}, writes, room) == 900
     assert stl.program_lead_ms({"m": "blackhole"}, writes, room) is None
     assert stl.program_lead_ms({"m": "fish"},
-                               [{"virtual_id": "m", "effect_type": "orbits"}],
+                               [{"virtual_id": "m", "effect_type": "fireworks"}],
                                room) is None
     off = room.model_copy(update={"transition_programs_enabled": False})
     assert stl.program_lead_ms({"m": "orbits"}, writes, off) is None
@@ -408,4 +409,5 @@ def test_drop_switch_names_the_program_rows():
     assert ds.handoff_kind("orbits", "blackhole") == ds.HANDOFF_PROGRAM
     assert ds.handoff_kind("blackhole", "fish") == ds.HANDOFF_PROGRAM
     assert ds.handoff_kind("fireworks", "blackhole") == ds.HANDOFF_SWALLOWED
-    assert ds.handoff_kind("blackhole", "fireworks") == ds.HANDOFF_GENERIC
+    # phase 4: the Black Hole fountains into Fireworks on the mark
+    assert ds.handoff_kind("blackhole", "fireworks") == ds.HANDOFF_PROGRAM

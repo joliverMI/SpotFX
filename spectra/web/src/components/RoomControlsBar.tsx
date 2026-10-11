@@ -746,7 +746,7 @@ export default function RoomControlsBar() {
                   size={22}
                   ariaLabel="Thematic transitions"
                   title={local.transition_programs_enabled
-                    ? 'On — a Black Hole ↔ particles scene change runs a thematic transition (Infall / Eruption) instead of the crossfade. Tap to turn off.'
+                    ? 'On — a Black Hole, Sauron/Eye, Fish, Orbits, Squiggles or Fireworks scene change runs a thematic transition (Infall / Eruption, Lensing / Fountain, Flame Lick / Ignition, Shoal Break / Shoaling, Unravel) instead of the crossfade. Tap to turn off.'
                     : 'Off — every scene change crossfades. Tap to turn on.'}
                 />
                 Thematic transitions
@@ -809,6 +809,52 @@ export default function RoomControlsBar() {
                     type="number" min={0.5} max={2} step={0.1}
                     value={local.transition_eruption_speed}
                     onChange={(e) => setLocal({ ...local, transition_eruption_speed: Number(e.target.value) })}
+                    onBlur={() => commit(local)}
+                  />
+                  <span style={{ fontSize: '0.85em', opacity: 0.75 }}>×</span>
+                </div>
+                <div className="top-bar-group-field">
+                  <label title="When Sauron or the Eye hands over, this fraction of the eye's lit cells explode as shards; the rest collapse into the black.">
+                    Flame Lick exploding fraction
+                  </label>
+                  <input
+                    type="number" min={0} max={1} step={0.05}
+                    value={local.transition_explode_frac}
+                    onChange={(e) => setLocal({ ...local, transition_explode_frac: Number(e.target.value) })}
+                    onBlur={() => commit(local)}
+                  />
+                </div>
+                <div className="top-bar-group-field">
+                  <label title="How hard the Black Hole bends the Fireworks' sparks into spiral arms (and how hard its ring sprays out in a Fountain).">
+                    Lensing pull
+                  </label>
+                  <input
+                    type="number" min={0.2} max={3} step={0.1}
+                    value={local.transition_lensing_pull}
+                    onChange={(e) => setLocal({ ...local, transition_lensing_pull: Number(e.target.value) })}
+                    onBlur={() => commit(local)}
+                  />
+                  <span style={{ fontSize: '0.85em', opacity: 0.75 }}>×</span>
+                </div>
+                <div className="top-bar-group-field">
+                  <label title="Turns the arriving pieces make as they gather onto the iris rim when Sauron or the Eye comes in.">
+                    Ignition vortex turns
+                  </label>
+                  <input
+                    type="number" min={0} max={3} step={0.05}
+                    value={local.transition_ignition_turns}
+                    onChange={(e) => setLocal({ ...local, transition_ignition_turns: Number(e.target.value) })}
+                    onBlur={() => commit(local)}
+                  />
+                </div>
+                <div className="top-bar-group-field">
+                  <label title="How wide a shattered fish's (or an unspooled chain's) dots spread.">
+                    Shoal Break / Unravel scatter
+                  </label>
+                  <input
+                    type="number" min={0} max={2} step={0.1}
+                    value={local.transition_scatter}
+                    onChange={(e) => setLocal({ ...local, transition_scatter: Number(e.target.value) })}
                     onBlur={() => commit(local)}
                   />
                   <span style={{ fontSize: '0.85em', opacity: 0.75 }}>×</span>

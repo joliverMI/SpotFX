@@ -132,7 +132,9 @@ def transition_shape(from_scene: SceneV2, to_scene: SceneV2,
         return {"crossfade_ms": program_ms,
                 "anchor_frac": program_lead / max(program_ms, 1),
                 "lead_ms": program_lead, "writes": to_writes,
-                "anchor_source": "program", "ramp_ms": crossfade_ms}
+                "anchor_source": "program", "ramp_ms": crossfade_ms,
+                "program": scene_transition_lead.program_stages(
+                    from_types, to_writes, room)}
     anchor_frac = scene_transition_lead.anchor_frac_for(from_types, to_writes)
     lead_ms = scene_transition_lead.lead_ms_for(anchor_frac, crossfade_ms)
     registered = any(
@@ -188,7 +190,26 @@ async def build_timeline(from_scene: SceneV2, to_scene: SceneV2,
         "target_writes": [
             {"virtual_id": w["virtual_id"], "effect_type": w["effect_type"]}
             for w in shape["writes"]],
+        # A THEMATIC TRANSITION PROGRAM's named stages on this ruler (None
+        # for an ordinary crossfade) — drawn as bands over the program
+        "program": _program_on_ruler(shape.get("program"), fire_at, crossfade_s),
     }
+
+
+def _program_on_ruler(program: Optional[dict], start_s: float,
+                      length_s: float) -> Optional[dict]:
+    """A program's stage fractions placed on a preview ruler that starts
+    the program at start_s and runs it for length_s (phase_preview's drop
+    sequence uses it too)."""
+    if not program:
+        return None
+    return {"name": program["name"],
+            "out_type": program["out_type"], "in_type": program["in_type"],
+            "stages": [{"label": s["label"],
+                        "from_s": round(start_s + s["from"] * length_s, 4),
+                        "to_s": round(start_s + s["to"] * length_s, 4),
+                        "anchor": bool(s.get("anchor"))}
+                       for s in program["stages"]]}
 
 
 class TransitionProgram(flare_preview_hold.PreviewProgram):

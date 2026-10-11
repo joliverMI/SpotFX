@@ -90,6 +90,9 @@ def test_registry_is_an_explicit_allowlist_matching_room_control_bounds():
         "transition_eruption_count", "transition_eruption_speed",
         # 2026-10-11, the Admiral's background fade:
         "background_fade_s",
+        # 2026-10-11, phase 4's four (transition_cloud.py):
+        "transition_explode_frac", "transition_lensing_pull",
+        "transition_ignition_turns", "transition_scatter",
     }
     # force_scene_* deliberately excluded — see settings_console.py docstring
     assert "force_scene_enabled" not in sc.SETTINGS_REGISTRY

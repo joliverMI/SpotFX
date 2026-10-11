@@ -146,3 +146,11 @@ nearest proof of the other shared machinery this effect uses is
 `tests/test_blackhole_orphan_drop_none_crash.py` (the watchdog pattern)
 and `tests/test_lead_time_alignment.py` (the transition-anchor system
 `particle_handoff` feeds).
+
+## Flame Lick / Ignition (2026-10-11, transitions-drop plan phase 4)
+
+Same hooks as Sauron (see the sauron-effect skill): `program_rim`,
+`_lens_gain` (multiplies the PUPIL radius here), and the handed brightness
+(`snap["body_gain"]` -> `_infall["g0"]` / `_fade_up`; 0.25 when none). Eye ->
+the particle effects is FLAME LICK, the particle effects -> Eye is IGNITION.
+`fx/effects/transition_cloud.py`'s docstring is the binding statement for phase 4's programs; `tests/test_transition_programs_phase4.py` measures them on the real pipeline.

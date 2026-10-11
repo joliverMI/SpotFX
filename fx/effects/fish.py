@@ -43,6 +43,15 @@ SPLAT_KERNEL_R = 16  # the shared splat offset table's own span, in px:
                     # stamped from it and filtered by its own radius
 
 HANDOFF_ENTER_S = 0.65
+# THE PEEL (transitions-drop plan phase 4, SHOALING — fx/effects/
+# transition_cloud.py; VENDOR #75). A fish adopted from a predecessor that
+# said how fast its piece was TURNING (`snap["om"]`, rad/s: an orbit blob
+# curving round its orbit) peels off that curve: its heading rate starts
+# at the inherited rate and eases into the fish's own steering over
+# PEEL_S, so the heading's rate of change is continuous through the
+# transformation, not only the heading itself. Its body is backfilled
+# along that same curve.
+PEEL_S = 0.4
 SLOT_EASE_S = 0.6    # home-anchor re-spacing ease time constant
 
 # ── dispersal: a fish NEVER fades out ───────────────────────────────────────
@@ -1079,7 +1088,7 @@ _SOA_NAMES = (
     "p_grad", "p_grad_from", "p_scatter", "p_bright",
     "p_trail_x", "p_trail_y", "p_trail_acc",
     "p_wsg", "p_wurg", "p_wcmd", "p_wauth", "p_sb", "p_sb_t", "p_wr",
-    "p_wph",
+    "p_wph", "p_peel",
 )
 
 
@@ -1874,6 +1883,9 @@ class Fish2d(Twod, GradientEffect):
         # top speed — see the SOLO BURST block
         self.p_sb = np.zeros(CAP, dtype=np.float32)
         self.p_sb_t = np.zeros(CAP, dtype=np.float32)
+        # THE PEEL: the inherited heading rate, rad/s (NaN = none)
+        self.p_peel = np.full(CAP, np.nan, dtype=np.float32)
+        self._peel_age = None
         self._soa = tuple(getattr(self, name) for name in _SOA_NAMES)
         self.n = 0
 
@@ -2207,6 +2219,7 @@ class Fish2d(Twod, GradientEffect):
         self.p_wsg[s] = 0.0
         self.p_wr[s] = 0.0
         self.p_wph[s] = np.nan
+        self.p_peel[s] = np.nan
         self.p_wurg[s] = 0.0
         self.p_wcmd[s] = 0.0
         self.p_wauth[s] = 0.0
@@ -2559,6 +2572,14 @@ class Fish2d(Twod, GradientEffect):
                         np.clip(ispd, 0.2 * self.cruise_px,
                                 4.0 * self.cruise_px),
                         self.p_spd[s])
+                    # THE PEEL (PEEL_S): the inherited turning rate too
+                    iom = snap.get("om")
+                    if iom is not None and len(iom) == len(snap["px"]):
+                        iom = np.asarray(iom, dtype=np.float32)[idx]
+                        ok = moving & np.isfinite(iom)
+                        self.p_peel[s] = np.where(ok, iom, np.nan)
+                        if ok.any():
+                            self._peel_age = 0.0
                 self.p_erate[s] = max(1.0, self.enter_time / HANDOFF_ENTER_S)
                 self.p_grad[s] = snap["grad"][idx]
                 self.p_grad_from[s] = snap["grad"][idx]
@@ -4832,6 +4853,18 @@ class Fish2d(Twod, GradientEffect):
             )
             back_x = np.cos(self.p_hd[ni])[:, None] * steps[None, :] / self.sx
             back_y = np.sin(self.p_hd[ni])[:, None] * steps[None, :] / self.sy
+            peel = np.isfinite(self.p_peel[ni])
+            if peel.any():
+                # THE PEEL: a fish peeling off a curve was on that curve —
+                # its body lies back along it, not on a straight line
+                pi_ = ni[peel]
+                rate = self.p_peel[pi_] / np.maximum(self.p_spd[pi_], 1e-3)
+                ang = (self.p_hd[pi_][:, None]
+                       - rate[:, None] * (steps[None, :] + 0.5 * BODY_TRAIL_STEP_PX))
+                seg_x = np.cos(ang) * BODY_TRAIL_STEP_PX / self.sx
+                seg_y = np.sin(ang) * BODY_TRAIL_STEP_PX / self.sy
+                back_x[peel, 1:] = np.cumsum(seg_x, axis=1)[:, :-1]
+                back_y[peel, 1:] = np.cumsum(seg_y, axis=1)[:, :-1]
             self.p_trail_x[ni, :] = self.p_x[ni][:, None] - back_x
             self.p_trail_y[ni, :] = self.p_y[ni][:, None] - back_y
             self.p_trail_acc[ni] = 0.0
@@ -5403,6 +5436,20 @@ class Fish2d(Twod, GradientEffect):
         # is always an arc and never a flip.
         omega = np.clip(omega, -omega_max, omega_max)
         omega = np.where(steered, omega, 0.0)
+        if self._peel_age is not None:
+            # THE PEEL (PEEL_S): an adopted fish still turns at the rate
+            # it inherited, easing into its own steering
+            self._peel_age += dt
+            w = min(self._peel_age / PEEL_S, 1.0)
+            if w >= 1.0:
+                self._peel_age = None
+                self.p_peel[:n] = np.nan
+            else:
+                w = w * w * (3.0 - 2.0 * w)
+                pe = np.isfinite(self.p_peel[:n])
+                omega = np.where(
+                    pe, (1.0 - w) * np.nan_to_num(self.p_peel[:n]) + w * omega,
+                    omega)
         self.p_hd[:n] = _wrap_pi(hd + omega * dt)
         hd = self.p_hd[:n]
 

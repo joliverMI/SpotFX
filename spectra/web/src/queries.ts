@@ -8,6 +8,7 @@ import type { RoomPlacement, RoomPose, RoomView } from './live/roomMap';
 import type { CurvePoint } from './components/CurveEditor';
 import type { LightingStatus } from './house/types';
 import type { HaScenesResult } from './lightshow/types';
+import type { PreviewProgram } from './scenes/tabs/programStages';
 import type {
   AmbientHueGroup, ColorWheelPosition, DeviceListing, DevicePreviewFavorites, DevicePreviewStatus,
   DeviceWriteResult, DriftProfile,
@@ -316,6 +317,9 @@ export interface TransitionPreviewTimeline {
   animation_end_s: number;
   cues: PreviewCue[];
   target_writes: { virtual_id: string; effect_type: string }[];
+  /** The thematic transition program's named stages on this ruler, or
+   * null for an ordinary crossfade. */
+  program?: PreviewProgram | null;
 }
 
 export interface PhasePreviewMark {
@@ -371,6 +375,9 @@ export interface SequencePreviewSwitch {
   moment: 'drop' | 'charge_start' | 'charge_flare' | 'after_drop' | 'next_hit' | null;
   cut_s: number | null;
   lull_told?: { keep: number; next: Record<string, string> };
+  /** A cut that runs a thematic transition program on the mark: its
+   * named stages from the cut, in seconds on this ruler. */
+  program?: PreviewProgram | null;
 }
 
 export interface PreviewFireResult extends FlarePreviewFireResult {

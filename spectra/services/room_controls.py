@@ -748,13 +748,31 @@ class RoomControlState(BaseModel):
     #     which every piece's velocity blends into the Black Hole's own;
     #   - transition_infall_spin: extra turns the infall's spiral makes;
     #   - transition_eruption_count / _speed: how many ejecta the eruption
-    #     sprays and how fast, before they implode onto the incoming form.
+    #     sprays and how fast, before they implode onto the incoming form
+    #     (the speed also scales the Fountain's spray and the Flame Lick's
+    #     shards).
+    # Phase 4 (fx/effects/transition_cloud.py — Lensing / Fountain,
+    # Flame Lick / Ignition, Shoal Break / Shoaling, Unravel) adds four:
+    #   - transition_explode_frac: the Flame Lick's fraction of the eye's
+    #     own lit cells that explode (the rest collapse into the black) —
+    #     his "say half for now";
+    #   - transition_lensing_pull: how hard the Lensing pull bends the
+    #     Fireworks' sparks into the Black Hole (and how hard the Fountain
+    #     sprays them out);
+    #   - transition_ignition_turns: turns the Ignition's vortex makes onto
+    #     the iris rim;
+    #   - transition_scatter: how wide a shattered fish's dots and an
+    #     unspooled chain's dots spread.
     transition_programs_enabled: bool = True
     transition_program_ms: int = Field(default=1400, ge=600, le=2500)
     transition_velocity_blend_ms: int = Field(default=500, ge=100, le=1500)
     transition_infall_spin: float = Field(default=0.75, ge=0.0, le=3.0)
     transition_eruption_count: int = Field(default=60, ge=10, le=150)
     transition_eruption_speed: float = Field(default=1.0, ge=0.5, le=2.0)
+    transition_explode_frac: float = Field(default=0.5, ge=0.0, le=1.0)
+    transition_lensing_pull: float = Field(default=1.0, ge=0.2, le=3.0)
+    transition_ignition_turns: float = Field(default=0.6, ge=0.0, le=3.0)
+    transition_scatter: float = Field(default=1.0, ge=0.0, le=2.0)
 
     # THE A/V-SYNC LEAD (owner ask 2026-08-28) — LEAD family: positive =
     # fire EARLIER, negative = fire LATER. The value the /avsync
@@ -982,6 +1000,10 @@ def transition_program_request(room: "RoomControlState", *,
         "infall_spin": float(room.transition_infall_spin),
         "eruption_count": int(room.transition_eruption_count),
         "eruption_speed": float(room.transition_eruption_speed),
+        "explode_frac": float(room.transition_explode_frac),
+        "lensing_pull": float(room.transition_lensing_pull),
+        "ignition_turns": float(room.transition_ignition_turns),
+        "scatter": float(room.transition_scatter),
         "on_mark": bool(on_mark),
     }
 

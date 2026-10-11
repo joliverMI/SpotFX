@@ -329,6 +329,12 @@ class Twod(AudioReactiveEffect):
             except Exception:
                 _LOGGER.exception("transition program failed; dropped")
                 self._transition_program = None
+                # let it put back what it borrowed (IGNITION's slit width)
+                # and hand over what it can, at most once
+                try:
+                    program.finish()
+                except Exception:
+                    _LOGGER.exception("transition program finish failed")
                 program.done = True
         if self.DROP_SHOCK:
             self._phase_grammar_post()

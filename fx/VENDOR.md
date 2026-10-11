@@ -2245,3 +2245,29 @@ against that commit.
     `tests/test_particle_strip_phase.py`; the pinned pre-change modules as
     red controls), `scripts/check_strip_phase.py`. Unverified against his
     live room.
+75. `effects/orbits.py` (`p_om` SoA, the snapshot's `om`) + `effects/fish.py`
+    (`PEEL_S`, `p_peel`, `_peel_age`, the curved backfill) +
+    `effects/fireworks.py` (`_import_sparks`, `_program_field_velocity`) +
+    `effects/sauron.py` / `effects/eye.py` (`program_rim`, `_lens_gain`,
+    `_fade_up`, `snap["body_gain"]`) + NEW SpotFX-authored
+    `effects/transition_cloud.py` (+ `transition_program.py`'s registry,
+    stages and per-cell gain): THE PHASE-4 TRANSITION PROGRAMS (2026-10-11,
+    transitions-drop plan phase 4) — LENSING / FOUNTAIN (Fireworks <-> Black
+    Hole), FLAME LICK / IGNITION (Sauron or Eye <-> the particle effects),
+    SHOAL BREAK / SHOALING (Fish <-> Orbits / Squiggles), UNRAVEL (Squiggles
+    <-> Orbits / Fish) on #70's clock. The hooks are each inert outside a
+    program: `p_om` is render-inert state; the PEEL engages only for a
+    snapshot carrying `om`; `_import_sparks` only for a snapshot carrying
+    `append` + `vx`; `_lens_gain` is 1.0 and `_fade_up` None unless a program
+    set them; a snapshot without `body_gain` fades the eye's body up from
+    0.25 exactly as before. Evidence: `tests/test_transition_programs_phase4.py`
+    (real pipeline, fake clock: Lensing / Flame Lick hand-offs continuous
+    into the Black Hole against a velocity-stripped control; Fountain sparks
+    continuing in the Fireworks; the flame lick's exploding fraction; the
+    Ignition rim rising with the fill and the eye fading up from the handed
+    brightness; Shoal Break / Unravel ON the moving targets; Shoaling's fish
+    starting on their blobs with the blobs' turning rate against a control
+    without it; no white cell on a solid set). `effects/twod.py`'s #70
+    hook now also calls `program.finish()` when a program raises, so a
+    dropped program still puts back what it borrowed (IGNITION's slit
+    width) and hands over at most once. Unverified against his live room.

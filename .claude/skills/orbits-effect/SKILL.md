@@ -167,3 +167,15 @@ History: AGENTS.md's "Fish (`fx/effects/fish.py`) — Orbits' twin,
 different kinematics" section (how Fish reuses Orbits' patterns but not its
 motion) and the drop-timing-reference withdrawal note
 (`data/drops-still-fire-early-star-does-not-explode/`).
+
+## Phase 4 transitions (2026-10-11): Shoaling, Shoal Break, Unravel, Flame Lick
+
+- **`p_om`** (SoA, exported as the snapshot's `om`): each blob's heading RATE,
+  rad/s in pixel space, smoothed over `OM_TAU_S` from consecutive velocities.
+  Render-inert. The SHOALING (Orbits -> Fish) peel reads it: every fish starts
+  on its blob turning at the blob's own rate (fish.PEEL_S).
+- Orbits RECEIVES Shoal Break (fish dots), Unravel (a chain's dots), Flame
+  Lick (the eye's shards) onto its live `_formation_points()`, the same
+  Hermite FORM as the Eruption; Orbits -> Squiggles is UNRAVEL (the blobs
+  thread onto the chain heads).
+`fx/effects/transition_cloud.py`'s docstring is the binding statement for phase 4's programs; `tests/test_transition_programs_phase4.py` measures them on the real pipeline.

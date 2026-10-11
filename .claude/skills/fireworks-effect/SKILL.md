@@ -123,10 +123,9 @@ changed for it.
 
 ## Thematic transitions (2026-10-11, transitions-drop plan phase 3)
 
-Fireworks FEEDS the Infall into the Black Hole for now (`_handoff_snapshot`
-carries `vx`/`vy` = `p_vx`/`p_vy` in px/s + `gesture: "spray"`); Lensing
-replaces that row next task. Black Hole -> Fireworks has NO program (the
-Fountain, next task) and keeps its own adopt. A DROP-led Fireworks -> Black
+Fireworks' `_handoff_snapshot` carries `vx`/`vy` = `p_vx`/`p_vy` in px/s +
+`gesture: "spray"`. Since phase 4 its sparks LENS into the Black Hole
+(LENSING, not Infall) and the Black Hole FOUNTAINS into it (see below). A DROP-led Fireworks -> Black
 Hole switch is still the SWALLOWED meld, untouched. `fx/effects/transition_program.py`'s docstring is the binding statement; `tests/test_transition_programs.py` measures it on the real pipeline.
 
 ## Sonic reach
@@ -156,3 +155,17 @@ migration that attaches the kind, `scripts/add_fireworks_burst_flare.py`
 (dry-run default), belongs to the fireworks-v2-scene skill. History:
 `docs/SPECTRA_SPEC.md` §89 (also
 referenced in AGENTS.md's own prose), `fx/VENDOR.md` #15, #17.
+
+## Lensing / Fountain / Flame Lick into Fireworks (2026-10-11, phase 4)
+
+- **`_import_sparks`** (reached from `_adopt_handoff` when a snapshot carries
+  `append` + `vx`): a transition program's sparks join as ORDINARY sparks at
+  their positions WITH their velocities, already past their fade-in, each
+  `p_bright` set so its first shown frame equals what the program drew (the
+  draw's own forward envelope inverted), uncapped (`p_nocap`). Every other
+  adoption is exactly as before.
+- **`_program_field_velocity(px, py, vx, vy, dt)`**: this field's own drag
+  (the draw's half-life). FOUNTAIN (Black Hole -> Fireworks) and a FLAME LICK
+  into Fireworks fly their last stretch by it, so the hand-off continues one
+  motion.
+`fx/effects/transition_cloud.py`'s docstring is the binding statement for phase 4's programs; `tests/test_transition_programs_phase4.py` measures them on the real pipeline.

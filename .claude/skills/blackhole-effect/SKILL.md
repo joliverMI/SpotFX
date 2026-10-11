@@ -222,4 +222,14 @@ frames: `scripts/check_drop_visible_onset.py`; the plumbing fold:
 matching `tests/test_blackhole_*.py`. The disc's single-application
 background is proven in `tests/test_matrix_overwrite_background_double_apply.py`
 (`test_blackhole_disc_*`). Full history: `AGENTS.md`'s "Black
-Hole" section and `fx/VENDOR.md` deviations #12, #14, #18, #19, #20, #38, #61, #70.
+Hole" section and `fx/VENDOR.md` deviations #12, #14, #18, #19, #20, #38, #61, #70, #73.
+
+## Lensing / Fountain / Flame Lick / Ignition (2026-10-11, phase 4)
+
+No new Black Hole code: phase 3's `_program_field_velocity` and the APPEND
+adoption with an inherited velocity are what LENSING (Fireworks -> Black Hole,
+replacing that Infall row) and a FLAME LICK into the Black Hole hand over to.
+Black Hole -> Fireworks is FOUNTAIN (the ring unwinds outward and sprays);
+Black Hole -> Sauron / Eye is IGNITION (the ring unwinds into a vortex onto the
+iris rim — no flash).
+`fx/effects/transition_cloud.py`'s docstring is the binding statement for phase 4's programs; `tests/test_transition_programs_phase4.py` measures them on the real pipeline.

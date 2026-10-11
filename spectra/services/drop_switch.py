@@ -468,6 +468,16 @@ _PROGRAM_WORDS = {
         "the pieces spiral into the Black Hole and ignite its horizon",
     transition_program.ERUPTION:
         "the Black Hole erupts and its pieces implode onto the incoming form",
+    transition_program.LENSING:
+        "the sparks lens into spiral arms and ignite the Black Hole",
+    transition_program.FOUNTAIN:
+        "the Black Hole unwinds and sprays into fireworks",
+    transition_program.SHOAL_BREAK:
+        "the fish shatter and their dots implode onto the incoming form",
+    transition_program.SHOALING:
+        "the orbits peel off into a shoal",
+    transition_program.UNRAVEL:
+        "the chains unravel into the incoming form",
 }
 
 

@@ -221,6 +221,13 @@ class Eye2d(Twod, GradientEffect):
         # transition state
         self._handoff_pending = True
         self._infall = None      # predecessor particles flying to the rim
+        # TRANSITION PROGRAMS (fx/effects/transition_cloud.py, VENDOR #75):
+        # an IGNITION opens the pupil from a hairline (_lens_gain) and
+        # reads where the iris rim is (program_rim, px); a program handing
+        # over at a brightness has the body fade up from it (_fade_up)
+        self._lens_gain = 1.0
+        self.program_rim = None
+        self._fade_up = None
         self._form = None        # iris scale-in progress (radial explode-in)
         self._erupt_hold = None  # waiting for a collapsing radial's pinch
         self._pacman_hold = None  # waiting for pacman's maze to fade
@@ -457,7 +464,13 @@ class Eye2d(Twod, GradientEffect):
         # generic particle predecessor: its blobs fall in and form the iris
         px = snap.get("px")
         py = snap.get("py")
+        body_from = snap.get("body_gain")
         if px is None or len(px) == 0:
+            if body_from is not None:
+                # a transition program handed the eye over at this
+                # brightness: the body fades up from it, not from 0.25
+                self._fade_up = {"t": 0.0,
+                                 "g0": float(np.clip(body_from, 0.0, 1.0))}
             return
         k = int(min(len(px), INFALL_CAP))
         idx = np.linspace(0, len(px) - 1, k).astype(np.int64)
@@ -487,6 +500,10 @@ class Eye2d(Twod, GradientEffect):
             "dur": (self._rng.uniform(0.75, 1.15, k) * INFALL_S).astype(
                 np.float32
             ),
+            # the brightness the body fades up FROM (the predecessor's
+            # handed brightness when it said one; 0.25 otherwise)
+            "g0": float(np.clip(body_from, 0.0, 1.0))
+            if body_from is not None else 0.25,
         }
 
     # ── charge/lull/drop choreography ───────────────────────────────────
@@ -803,7 +820,14 @@ class Eye2d(Twod, GradientEffect):
         # the iris fades in as a predecessor's blobs arrive on the rim
         body_gain = 1.0
         if self._infall is not None:
-            body_gain = 0.25 + 0.75 * min(self._infall["t"] / INFALL_S, 1.0)
+            g0 = self._infall.get("g0", 0.25)
+            body_gain = g0 + (1.0 - g0) * min(self._infall["t"] / INFALL_S, 1.0)
+        elif self._fade_up is not None:
+            self._fade_up["t"] += dt
+            g0 = self._fade_up["g0"]
+            body_gain = g0 + (1.0 - g0) * min(self._fade_up["t"] / INFALL_S, 1.0)
+            if self._fade_up["t"] >= INFALL_S:
+                self._fade_up = None
         # blink-out phase 2: the eye is "gone behind the lids" — only the
         # opening lids render while the dancer fades in underneath
         body_show = not (
@@ -826,6 +850,8 @@ class Eye2d(Twod, GradientEffect):
         eye_px = self.cx + float(self.gaze[0]) * self.sx
         eye_py = self.cy + float(self.gaze[1]) * self.sy
         self._last_iris = (eye_px, eye_py, iris_r)  # the shock's rim
+        self.program_rim = (eye_px, eye_py, iris_r * self.s_min)
+        pupil_r *= self._lens_gain
         dxp = (self.px_x - eye_px) / self.s_min
         dyp = (self.px_y - eye_py) / self.s_min
 
