@@ -207,6 +207,86 @@ class Twod(AudioReactiveEffect):
                 )
             return result
 
+    # ── THE PHASE GRAMMAR (fx/effects/phase_grammar.py): the drop's
+    # SHOCKWAVE and the lull's BREATH-HOLD, painted here, after the child's
+    # own draw(), for every opted-in effect (DROP_SHOCK = True). An effect
+    # that does not opt in never reaches any of this.
+    DROP_SHOCK = False
+    SHOCK_DEBRIS_FATE = "return"   # "return" to the rim, or "fade" (a lick)
+    SHOCK_DEBRIS_BOOST = 1.0       # x the debris count
+
+    def shock_rim(self):
+        """The eye's perimeter: (cx, cy, rx, ry) in render pixels. Every
+        member names its own; this fallback is the panel's centre point."""
+        return ((self.r_width - 1) / 2.0, (self.r_height - 1) / 2.0,
+                1.0, 1.0)
+
+    def _shock_begin(self):
+        """Called by a member at the moment its own drop payoff fires (never
+        on a silent watchdog release). The painter is built after this
+        frame's draw(), so the rim it reads is the one just drawn."""
+        self._shock_pending = True
+
+    def _phase_grammar_post(self):
+        from fx.effects import lull_handoff, phase_grammar
+
+        # A Shockwave's own life can outlast the "drop" phase it was born
+        # in (debris return/fade, the wall splash's afterglow beats) — fine
+        # while the phase has gone back to "none" (the drop's own
+        # afterglow), but a NEW charge/lull cycle completing before that
+        # old wave finishes must never let it light the new cycle, or
+        # defeat a told breath-hold's true black (Q2). Discard it the
+        # instant a new charge or lull is entered.
+        if getattr(self, "_phase", "none") in ("charge", "lull"):
+            self._shock = None
+            self._shock_pending = False
+            self._shock_fresh = False
+
+        if getattr(self, "_shock_pending", False):
+            self._shock_pending = False
+            self._shock = None
+            self._shock_fresh = True
+            if float(self._config.get("drop_shock", 1.0) or 0.0) > 0.0:
+                try:
+                    self._shock = phase_grammar.Shockwave(
+                        phase_grammar.panel_field(self.r_width,
+                                                  self.r_height),
+                        self.shock_rim(),
+                        self.get_gradient_color_vectorized1d,
+                        self._config,
+                        lull_handoff.drop_intensity(self._config),
+                        fate=self.SHOCK_DEBRIS_FATE,
+                        boost=self.SHOCK_DEBRIS_BOOST,
+                        rng=getattr(self, "_rng", None),
+                    )
+                except Exception:                          # noqa: BLE001
+                    _LOGGER.exception("phase grammar: shockwave failed to "
+                                      "start — the drop runs without it")
+                    self._shock = None
+            else:
+                return
+        shock = getattr(self, "_shock", None)
+        gain = 1.0
+        if getattr(self, "_phase", "none") == "lull":
+            gain = phase_grammar.breath_gain(
+                self._config, getattr(self, "_phase_t", 0.0))
+        if shock is None and gain >= 1.0:
+            return
+        frame = np.asarray(self.matrix, dtype=np.float32)
+        if gain < 1.0:
+            frame = frame * gain
+        if shock is not None:
+            if getattr(self, "_shock_fresh", False):
+                self._shock_fresh = False      # the mark's own frame: t = 0
+            else:
+                shock.step(min(self.passed, 0.1))
+            frame = shock.composite(frame)
+            if shock.done:
+                self._shock = None
+        self.matrix.close()
+        self.matrix = Image.fromarray(
+            np.clip(frame, 0, 255).astype(np.uint8), "RGB")
+
     def draw(self):
         # this should be implemented in the child class
         # should render into self.matrix at the final size
@@ -250,6 +330,8 @@ class Twod(AudioReactiveEffect):
                 _LOGGER.exception("transition program failed; dropped")
                 self._transition_program = None
                 program.done = True
+        if self.DROP_SHOCK:
+            self._phase_grammar_post()
         self.image_to_pixels()
 
         self.try_dump()

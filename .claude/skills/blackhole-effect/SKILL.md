@@ -75,10 +75,12 @@ downstream of that geometry, not independent tuning.
   anything measuring the explosion (`PHASE_BURST_SPEED_MULT` keys off it).
   A blob population is Little's Law (`rate × dwell time`), not the
   integral of the spawn rate — measure counts on rendered frames, never
-  derive them from the rate curve. A drop's TOTAL visible peak is
-  `PHASE_BURST_N` plus whatever the charge/lull just fed the horizon
-  (`p_cap < 0`, captured), not the payoff alone — anchor any target ratio
-  on `p_is_burst`, never on the total (`fx/VENDOR.md` #38).
+  derive them from the rate curve. A drop's TOTAL visible peak is the
+  payoff burst (`_burst_count()` — `PHASE_BURST_N`, or more on a loud TOLD
+  drop, see "The drop Shockwave and the breath-hold" below) plus whatever
+  the charge/lull just fed the horizon (`p_cap < 0`, captured), not the
+  payoff alone — anchor any target ratio on `p_is_burst`, never on the
+  total (`fx/VENDOR.md` #38).
 
 ## The three-anchor rule for THIS effect specifically
 
@@ -118,6 +120,31 @@ back to the old `LULL_FILL_PROGRESS` (0.5) — the horizon's fill, the
 halo cut-off, the forced-formation stop and the ambient-spawn pause all
 read `_lull_timing()`, byte-identical to before. Read lull_dark.py's
 docstring before changing anything about when this lull goes dark.
+
+## The drop Shockwave and the breath-hold (2026-10-11, transitions-drop plan phase 1)
+
+This effect is a member of `fx.device_model.DROP_SHOCK_EFFECTS`. Its drop
+gets the shared Shockwave painted by `Twod.render` AFTER its own `draw()`
+(`fx/effects/phase_grammar.py` is the binding statement): a rim bloom, ONE
+wavefront born on the event horizon's baseline ring (`horizon_scale`), debris (curving back into the infall — 1.6x the shared count, the plan's Black Hole debris boost) and a wall splash, all in the
+colour set's own colours, max-composed, never white (his ruling), with this
+effect's own frame held dark ahead of the front (`drop_reveal`). The effect
+calls `self._shock_begin()` exactly where its own drop payoff fires — never
+on a silent watchdog release — and `shock_rim()` names its eye.
+The payoff burst itself grows on a loud TOLD drop (`_burst_count`: never below
+`PHASE_BURST_N`; untold it is `PHASE_BURST_N` exactly, so the charge
+calibration's denominator is unchanged).
+Eleven registered settings (`drop_shock` 0 = off, `drop_bloom_ms`,
+`drop_color_lean`, `drop_ring_speed`, `drop_ring_width`, `drop_wake`,
+`drop_debris_n`, `drop_debris_speed`, `drop_afterglow_beats`,
+`drop_reveal`, `drop_shock_scale_min`) are first guesses pending his eye;
+Sonic reaches them with `set_scene_entry_param`. The drop arm tells this
+effect `drop_intensity`, which scales the debris count and the front's life.
+The lull arm also tells it the BREATH-HOLD (`lull_breath_at_s`,
+`lull_breath_s`, from the room's `lull_breath_hold_s`, 0.4 s default, always
+inside the lull's dark rule): the base render takes the frame to true black
+for that window. Help topics `drop-shockwave`, `drop-breath-hold`; proof
+`scripts/check_drop_shockwave.py` / `tests/test_phase_grammar.py`.
 
 ## Thematic transitions in and out (2026-10-11, transitions-drop plan phase 3)
 

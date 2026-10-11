@@ -141,6 +141,7 @@ def _spec(key: str, label: str, description: str) -> SettingSpec:
             "lull_dark_max_s": "seconds",
             "strip_phase_strength": "multiplier 0.0-1.5, 0 = off",
             "background_fade_s": "seconds, 0 = instant",
+            "lull_breath_hold_s": "seconds",
             "drop_switch_stale_margin_s": "seconds beyond the scene's own dwell",
             "drop_switch_drops_in_a_row": "drops, 0 = off",
             "drop_switch_swallow_delay_s": "seconds after the drop",
@@ -311,6 +312,14 @@ SETTINGS_REGISTRY: dict[str, SettingSpec] = {
         "scene's own crossfade or a flare's colour ramp keeps its own "
         "timing. Default 1; 0 = instant. A Light Show Display mode step "
         "can set its own fade for that one switch."),
+    "lull_breath_hold_s": _spec(
+        "lull_breath_hold_s", "Breath-hold before the drop",
+        "How long the crystal goes to true black right before a drop "
+        "lands, in seconds, on the effects with the drop Shockwave (Black "
+        "Hole, Orbits, Sauron, Eye, Fish) — the drop is then born out of "
+        "black. Never longer than the lull's own darkness allows (half the "
+        "lull, capped by 'Lull darkness (max)'). 0 = no breath-hold. "
+        "Default 0.4. Takes effect on the very next lull."),
     "drop_switch_enabled": _spec(
         "drop_switch_enabled", "Drop-led scene switch",
         "On (default): a drop sequence may change the scene — a hard cut "

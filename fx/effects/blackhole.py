@@ -8,6 +8,7 @@ from PIL import Image
 import fx.effects.lull_dark as lull_dark
 import fx.effects.particle_handoff as particle_handoff
 from fx.color import parse_color, validate_color, validate_gradient
+from fx.effects import lull_handoff, phase_grammar
 from fx.effects.audio import AudioReactiveEffect
 from fx.effects.gradient import GradientEffect
 from fx.effects.twod import Twod
@@ -50,6 +51,15 @@ PHASE_BURST_N = 48       # blobs in the drop explosion (his ask: at least 2x
 # eruptions reuse the same out_mask/p_out mechanism but are never tagged
 # p_is_burst, so they are untouched by this multiplier.
 PHASE_BURST_SPEED_MULT = 2.0
+# THE BLACK HOLE DEBRIS BOOST (transitions-drop plan, phase 1): the drop's
+# Shockwave flings this many times the shared debris count here, and a TOLD
+# drop (`drop_intensity`) grows the payoff burst with the music — never
+# below PHASE_BURST_N, so a quiet drop is exactly today's and a loud one is
+# bigger (lull_handoff.drop_scale: 1.0 at the automatic ceiling 0.75, 1.2 on
+# a marked track at 1.0). Not told: PHASE_BURST_N, byte for byte (the
+# charge calibration's denominator — scripts/check_blackhole_charge_target).
+BH_SHOCK_DEBRIS_BOOST = 1.6
+BH_BURST_LOUD_GAIN = 1.5     # extra burst share per unit of drop_scale > 1
 # CHARGE / LULL (his ask, 2026-08-24, item 5 — the drop is deliberately
 # untouched by all of this): "for charge: instead of the black hole
 # expanding, accelerate the number of blobs forming (up to 12/second, but
@@ -336,6 +346,12 @@ def _hex_spawn_edge_radius(theta):
 
 class Blackhole2d(Twod, GradientEffect):
     NAME = "Blackhole"
+    # THE DROP SHOCKWAVE (fx/effects/phase_grammar.py): born on the horizon
+    # ring; its debris curves back into the infall, and there is more of it
+    # here than anywhere — the plan's "Black Hole debris boost"
+    DROP_SHOCK = True
+    SHOCK_DEBRIS_FATE = "return"
+    SHOCK_DEBRIS_BOOST = BH_SHOCK_DEBRIS_BOOST
     CATEGORY = "Matrix"
     # color_spin supersedes gradient_roll for this effect; color_blend stays
     # hidden — colors update in place, recreation would kill the particles.
@@ -354,6 +370,8 @@ class Blackhole2d(Twod, GradientEffect):
         *lull_dark.KEYS,
         "blob_rush",
         "horizon_follow_blobs",
+        *phase_grammar.BREATH_KEYS,
+        lull_handoff.DROP_KEY,
     ]
 
     CONFIG_SCHEMA = vol.Schema(
@@ -516,6 +534,12 @@ class Blackhole2d(Twod, GradientEffect):
             # the lull's dark point, pushed by SpotFX on the lull arm —
             # fx/effects/lull_dark.py
             **lull_dark.schema_fields(),
+            # THE PHASE GRAMMAR (fx/effects/phase_grammar.py): the drop's
+            # Shockwave settings (registered) and the breath-hold keys
+            # (ride ONLY the lull arm write)
+            **phase_grammar.shock_schema_fields(),
+            **phase_grammar.breath_schema_fields(),
+            **lull_handoff.drop_schema_fields(),
         }
     )
 
@@ -1177,7 +1201,7 @@ class Blackhole2d(Twod, GradientEffect):
         music-driven blobs need to keep coming through right after —
         otherwise doubling PHASE_BURST_N would starve the very spawns that
         are supposed to fill the post-explosion gap."""
-        got = int(min(PHASE_BURST_N, CAP - self.n))
+        got = int(min(self._burst_count(), CAP - self.n))
         if got <= 0:
             return
         s = slice(self.n, self.n + got)
@@ -1208,6 +1232,23 @@ class Blackhole2d(Twod, GradientEffect):
         ).astype(np.float32)
         self.n += got
         self._out_active = True
+
+    def _burst_count(self):
+        """The drop payoff's blob count: PHASE_BURST_N, grown on a loud told
+        drop (BH_SHOCK_DEBRIS_BOOST's comment) — never shrunk."""
+        scale = lull_handoff.drop_scale(
+            lull_handoff.drop_intensity(self._config))
+        if scale is None or scale <= 1.0:
+            return PHASE_BURST_N
+        return int(round(PHASE_BURST_N
+                         * (1.0 + BH_BURST_LOUD_GAIN * (scale - 1.0))))
+
+    def shock_rim(self):
+        """The Shockwave's eye (fx/effects/phase_grammar.py): the event horizon's own baseline ring
+        (horizon_scale through the effect's projection), in
+        render pixels."""
+        r = max(float(self.horizon_scale), 0.05)
+        return (self.cx, self.cy, r * self.sx, r * self.sy)
 
     def _phase_step(self, dt):
         """Advance the charge/lull/drop state machine. Runs every draw,
@@ -1265,6 +1306,7 @@ class Blackhole2d(Twod, GradientEffect):
                 self._restore_phase_overrides()
                 if not drop.get("silent"):
                     self._phase_burst()
+                    self._shock_begin()
             else:
                 drop["burst_t"] += dt
                 if drop["burst_t"] >= DROP_RESET_S:

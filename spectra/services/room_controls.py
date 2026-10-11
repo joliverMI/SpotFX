@@ -688,6 +688,16 @@ class RoomControlState(BaseModel):
     # switch. 0 = instant.
     background_fade_s: float = Field(default=1.0, ge=0.0, le=10.0)
 
+    # THE BREATH-HOLD (transitions-drop plan, his Q2: "a 0.4 s true black
+    # just before the drop, as a setting"). Every Shockwave member
+    # (fx.device_model.DROP_SHOCK_EFFECTS — Black Hole, Orbits, Sauron, Eye,
+    # Fish) goes to TRUE BLACK for this many seconds right before its drop
+    # mark, so the drop is born out of black. Always INSIDE the lull's dark
+    # rule above (never longer than the dark hold that lull_dark_max_s
+    # allows); applied on every lull arm (scene_response._drive_phase,
+    # fx/effects/phase_grammar.breath_keys_for). 0 = no breath-hold.
+    lull_breath_hold_s: float = Field(default=0.4, ge=0.0, le=3.0)
+
     # THE DROP-LED SCENE SWITCH (2026-10-08, drop-scene-variety plan phase
     # 2 — spectra/services/drop_switch.py is the binding statement). A drop
     # sequence switches the scene with a HARD CUT ON ITS DROP when the

@@ -72,8 +72,35 @@ evenly spaced ring — distinct origins for Fireworks to explode. Told
 `lull_next` another effect, `_handoff_snapshot` flags them (`"keepers"`).
 **Told 1 (the default) or untold, the lull is byte-identical to before** —
 proven frame for frame against the pinned pre-change module; told 0, it
-keeps its one blob anyway (it has no dark lull to fall back to). Orbits
-is NOT in `DROP_INTENSITY_EFFECTS` (its drop does not scale).
+keeps its one blob anyway (it has no dark lull to fall back to). Orbits'
+own drop ejecta burst (`_spawn_drop_ejecta`, `DROP_EJECTA_X *
+particle_count`) still does not scale with `drop_intensity` — only the
+Shockwave does (below): Orbits is now IN `DROP_INTENSITY_EFFECTS`, widened
+2026-10-11 to every `DROP_SHOCK_EFFECTS` member so the Shockwave's own
+debris/front-life can scale, but `orbits.py` itself never reads
+`drop_intensity`.
+
+## The drop Shockwave and the breath-hold (2026-10-11, transitions-drop plan phase 1)
+
+This effect is a member of `fx.device_model.DROP_SHOCK_EFFECTS`. Its drop
+gets the shared Shockwave painted by `Twod.render` AFTER its own `draw()`
+(`fx/effects/phase_grammar.py` is the binding statement): a rim bloom, ONE
+wavefront born on the tether ring at its resting radius (`horizon_scale` x `radius_scale`), debris (curving back onto the ring) and a wall splash, all in the
+colour set's own colours, max-composed, never white (his ruling), with this
+effect's own frame held dark ahead of the front (`drop_reveal`). The effect
+calls `self._shock_begin()` exactly where its own drop payoff fires — never
+on a silent watchdog release — and `shock_rim()` names its eye.
+Eleven registered settings (`drop_shock` 0 = off, `drop_bloom_ms`,
+`drop_color_lean`, `drop_ring_speed`, `drop_ring_width`, `drop_wake`,
+`drop_debris_n`, `drop_debris_speed`, `drop_afterglow_beats`,
+`drop_reveal`, `drop_shock_scale_min`) are first guesses pending his eye;
+Sonic reaches them with `set_scene_entry_param`. The drop arm tells this
+effect `drop_intensity`, which scales the debris count and the front's life.
+The lull arm also tells it the BREATH-HOLD (`lull_breath_at_s`,
+`lull_breath_s`, from the room's `lull_breath_hold_s`, 0.4 s default, always
+inside the lull's dark rule): the base render takes the frame to true black
+for that window. Help topics `drop-shockwave`, `drop-breath-hold`; proof
+`scripts/check_drop_shockwave.py` / `tests/test_phase_grammar.py`.
 
 ## Thematic transitions (2026-10-11, transitions-drop plan phase 3)
 

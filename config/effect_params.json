@@ -1585,6 +1585,127 @@
           "aspect": "brightness",
           "aspect_scale": 1.0,
           "default": 1.0
+        },
+        "drop_shock": {
+          "label": "Drop Shockwave",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 1.0,
+          "aspect": "shape",
+          "note": "How strongly the drop's Shockwave is painted over this effect's own drop: the rim bloom, the wavefront, the debris and the wall splash. 0 turns it off; always in the colour set's own colours.",
+          "help_topic": "drop-shockwave",
+          "default": 1.0
+        },
+        "drop_bloom_ms": {
+          "label": "Drop Bloom (ms)",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 400.0,
+          "aspect": "shape",
+          "note": "How long the eye's rim blooms in the set's brightest colour on the drop mark. 0 = no bloom.",
+          "help_topic": "drop-shockwave",
+          "default": 190.0
+        },
+        "drop_color_lean": {
+          "label": "Drop Colour Lean",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 1.0,
+          "aspect": "shape",
+          "note": "How far the wavefront leans toward the set's brightest colour (0 = the set by angle, 1 = all the brightest colour). Never white.",
+          "help_topic": "drop-shockwave",
+          "default": 0.45
+        },
+        "drop_ring_speed": {
+          "label": "Drop Wave Speed",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.6,
+          "max": 3.0,
+          "aspect": "shape",
+          "note": "How fast the wavefront runs out from the eye's rim, in panels per second (1 = the panel's centre to its edge).",
+          "help_topic": "drop-shockwave",
+          "default": 1.15
+        },
+        "drop_ring_width": {
+          "label": "Drop Wave Width",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.03,
+          "max": 0.2,
+          "aspect": "shape",
+          "note": "How thick the wavefront's sharp leading edge is.",
+          "help_topic": "drop-shockwave",
+          "default": 0.05
+        },
+        "drop_wake": {
+          "label": "Drop Wave Wake",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 0.4,
+          "aspect": "shape",
+          "note": "How long a glowing tail the wavefront trails behind it.",
+          "help_topic": "drop-shockwave",
+          "default": 0.13
+        },
+        "drop_debris_n": {
+          "label": "Drop Debris",
+          "type": "numeric",
+          "smooth": false,
+          "min": 0,
+          "max": 150,
+          "aspect": "shape",
+          "note": "Debris pieces flung from the rim at full intensity; fewer on a quieter drop. The count rises with the music, never the brightness.",
+          "help_topic": "drop-shockwave",
+          "default": 45
+        },
+        "drop_debris_speed": {
+          "label": "Drop Debris Speed",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.5,
+          "max": 1.5,
+          "aspect": "shape",
+          "note": "Debris speed as a multiple of the wave's speed (below 1 keeps it just inside the front).",
+          "help_topic": "drop-shockwave",
+          "default": 0.85
+        },
+        "drop_afterglow_beats": {
+          "label": "Drop Wall Splash (beats)",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 4.0,
+          "aspect": "shape",
+          "note": "How long the crystal's edge glows where the wave strikes it. 0 = no splash.",
+          "help_topic": "drop-shockwave",
+          "default": 1.5
+        },
+        "drop_reveal": {
+          "label": "Drop Reveal",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 1.0,
+          "aspect": "shape",
+          "note": "How dark this effect's own drop is held ahead of the wavefront before the wave passes and reveals it (0 = never held).",
+          "help_topic": "drop-shockwave",
+          "default": 0.75
+        },
+        "drop_shock_scale_min": {
+          "label": "Drop Quiet Scale",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.1,
+          "max": 1.0,
+          "aspect": "shape",
+          "note": "How much of the Shockwave a quiet drop gets (intensity 0), as a fraction of the full one at the automatic ceiling.",
+          "help_topic": "drop-shockwave",
+          "default": 0.55
         }
       },
       "defaults": {
@@ -1616,7 +1737,18 @@
         "gradient": "linear-gradient(90deg, #ff0000 0.00%,#ff7800 14.00%,#ffc800 28.00%,#00ff00 42.00%,#00c78c 56.00%,#0000ff 70.00%,#800080 84.00%,#ff00b2 98.00%)",
         "background_color": "#000000",
         "background_brightness": 1.0,
-        "brightness": 1.0
+        "brightness": 1.0,
+        "drop_shock": 1.0,
+        "drop_bloom_ms": 190.0,
+        "drop_color_lean": 0.45,
+        "drop_ring_speed": 1.15,
+        "drop_ring_width": 0.05,
+        "drop_wake": 0.13,
+        "drop_debris_n": 45,
+        "drop_debris_speed": 0.85,
+        "drop_afterglow_beats": 1.5,
+        "drop_reveal": 0.75,
+        "drop_shock_scale_min": 0.55
       }
     },
     "orbits": {
@@ -1884,6 +2016,127 @@
           "aspect": "brightness",
           "aspect_scale": 1.0,
           "default": 1.0
+        },
+        "drop_shock": {
+          "label": "Drop Shockwave",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 1.0,
+          "aspect": "shape",
+          "note": "How strongly the drop's Shockwave is painted over this effect's own drop: the rim bloom, the wavefront, the debris and the wall splash. 0 turns it off; always in the colour set's own colours.",
+          "help_topic": "drop-shockwave",
+          "default": 1.0
+        },
+        "drop_bloom_ms": {
+          "label": "Drop Bloom (ms)",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 400.0,
+          "aspect": "shape",
+          "note": "How long the eye's rim blooms in the set's brightest colour on the drop mark. 0 = no bloom.",
+          "help_topic": "drop-shockwave",
+          "default": 190.0
+        },
+        "drop_color_lean": {
+          "label": "Drop Colour Lean",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 1.0,
+          "aspect": "shape",
+          "note": "How far the wavefront leans toward the set's brightest colour (0 = the set by angle, 1 = all the brightest colour). Never white.",
+          "help_topic": "drop-shockwave",
+          "default": 0.45
+        },
+        "drop_ring_speed": {
+          "label": "Drop Wave Speed",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.6,
+          "max": 3.0,
+          "aspect": "shape",
+          "note": "How fast the wavefront runs out from the eye's rim, in panels per second (1 = the panel's centre to its edge).",
+          "help_topic": "drop-shockwave",
+          "default": 1.15
+        },
+        "drop_ring_width": {
+          "label": "Drop Wave Width",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.03,
+          "max": 0.2,
+          "aspect": "shape",
+          "note": "How thick the wavefront's sharp leading edge is.",
+          "help_topic": "drop-shockwave",
+          "default": 0.05
+        },
+        "drop_wake": {
+          "label": "Drop Wave Wake",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 0.4,
+          "aspect": "shape",
+          "note": "How long a glowing tail the wavefront trails behind it.",
+          "help_topic": "drop-shockwave",
+          "default": 0.13
+        },
+        "drop_debris_n": {
+          "label": "Drop Debris",
+          "type": "numeric",
+          "smooth": false,
+          "min": 0,
+          "max": 150,
+          "aspect": "shape",
+          "note": "Debris pieces flung from the rim at full intensity; fewer on a quieter drop. The count rises with the music, never the brightness.",
+          "help_topic": "drop-shockwave",
+          "default": 45
+        },
+        "drop_debris_speed": {
+          "label": "Drop Debris Speed",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.5,
+          "max": 1.5,
+          "aspect": "shape",
+          "note": "Debris speed as a multiple of the wave's speed (below 1 keeps it just inside the front).",
+          "help_topic": "drop-shockwave",
+          "default": 0.85
+        },
+        "drop_afterglow_beats": {
+          "label": "Drop Wall Splash (beats)",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 4.0,
+          "aspect": "shape",
+          "note": "How long the crystal's edge glows where the wave strikes it. 0 = no splash.",
+          "help_topic": "drop-shockwave",
+          "default": 1.5
+        },
+        "drop_reveal": {
+          "label": "Drop Reveal",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 1.0,
+          "aspect": "shape",
+          "note": "How dark this effect's own drop is held ahead of the wavefront before the wave passes and reveals it (0 = never held).",
+          "help_topic": "drop-shockwave",
+          "default": 0.75
+        },
+        "drop_shock_scale_min": {
+          "label": "Drop Quiet Scale",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.1,
+          "max": 1.0,
+          "aspect": "shape",
+          "note": "How much of the Shockwave a quiet drop gets (intensity 0), as a fraction of the full one at the automatic ceiling.",
+          "help_topic": "drop-shockwave",
+          "default": 0.55
         }
       },
       "defaults": {
@@ -1913,7 +2166,18 @@
         "gradient": "linear-gradient(90deg, #ff0000 0.00%,#ff7800 14.00%,#ffc800 28.00%,#00ff00 42.00%,#00c78c 56.00%,#0000ff 70.00%,#800080 84.00%,#ff00b2 98.00%)",
         "background_color": "#000000",
         "background_brightness": 1.0,
-        "brightness": 1.0
+        "brightness": 1.0,
+        "drop_shock": 1.0,
+        "drop_bloom_ms": 190.0,
+        "drop_color_lean": 0.45,
+        "drop_ring_speed": 1.15,
+        "drop_ring_width": 0.05,
+        "drop_wake": 0.13,
+        "drop_debris_n": 45,
+        "drop_debris_speed": 0.85,
+        "drop_afterglow_beats": 1.5,
+        "drop_reveal": 0.75,
+        "drop_shock_scale_min": 0.55
       }
     },
     "fish": {
@@ -2579,6 +2843,127 @@
           "note": "The big fish flare: the gap (pixels) the other fish try to keep between their bodies and its body.",
           "help_topic": "fish-big-fish",
           "default": 2.0
+        },
+        "drop_shock": {
+          "label": "Drop Shockwave",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 1.0,
+          "aspect": "shape",
+          "note": "How strongly the drop's Shockwave is painted over this effect's own drop: the rim bloom, the wavefront, the debris and the wall splash. 0 turns it off; always in the colour set's own colours.",
+          "help_topic": "drop-shockwave",
+          "default": 1.0
+        },
+        "drop_bloom_ms": {
+          "label": "Drop Bloom (ms)",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 400.0,
+          "aspect": "shape",
+          "note": "How long the eye's rim blooms in the set's brightest colour on the drop mark. 0 = no bloom.",
+          "help_topic": "drop-shockwave",
+          "default": 190.0
+        },
+        "drop_color_lean": {
+          "label": "Drop Colour Lean",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 1.0,
+          "aspect": "shape",
+          "note": "How far the wavefront leans toward the set's brightest colour (0 = the set by angle, 1 = all the brightest colour). Never white.",
+          "help_topic": "drop-shockwave",
+          "default": 0.45
+        },
+        "drop_ring_speed": {
+          "label": "Drop Wave Speed",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.6,
+          "max": 3.0,
+          "aspect": "shape",
+          "note": "How fast the wavefront runs out from the eye's rim, in panels per second (1 = the panel's centre to its edge).",
+          "help_topic": "drop-shockwave",
+          "default": 1.15
+        },
+        "drop_ring_width": {
+          "label": "Drop Wave Width",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.03,
+          "max": 0.2,
+          "aspect": "shape",
+          "note": "How thick the wavefront's sharp leading edge is.",
+          "help_topic": "drop-shockwave",
+          "default": 0.05
+        },
+        "drop_wake": {
+          "label": "Drop Wave Wake",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 0.4,
+          "aspect": "shape",
+          "note": "How long a glowing tail the wavefront trails behind it.",
+          "help_topic": "drop-shockwave",
+          "default": 0.13
+        },
+        "drop_debris_n": {
+          "label": "Drop Debris",
+          "type": "numeric",
+          "smooth": false,
+          "min": 0,
+          "max": 150,
+          "aspect": "shape",
+          "note": "Debris pieces flung from the rim at full intensity; fewer on a quieter drop. The count rises with the music, never the brightness.",
+          "help_topic": "drop-shockwave",
+          "default": 45
+        },
+        "drop_debris_speed": {
+          "label": "Drop Debris Speed",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.5,
+          "max": 1.5,
+          "aspect": "shape",
+          "note": "Debris speed as a multiple of the wave's speed (below 1 keeps it just inside the front).",
+          "help_topic": "drop-shockwave",
+          "default": 0.85
+        },
+        "drop_afterglow_beats": {
+          "label": "Drop Wall Splash (beats)",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 4.0,
+          "aspect": "shape",
+          "note": "How long the crystal's edge glows where the wave strikes it. 0 = no splash.",
+          "help_topic": "drop-shockwave",
+          "default": 1.5
+        },
+        "drop_reveal": {
+          "label": "Drop Reveal",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 1.0,
+          "aspect": "shape",
+          "note": "How dark this effect's own drop is held ahead of the wavefront before the wave passes and reveals it (0 = never held).",
+          "help_topic": "drop-shockwave",
+          "default": 0.75
+        },
+        "drop_shock_scale_min": {
+          "label": "Drop Quiet Scale",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.1,
+          "max": 1.0,
+          "aspect": "shape",
+          "note": "How much of the Shockwave a quiet drop gets (intensity 0), as a fraction of the full one at the automatic ceiling.",
+          "help_topic": "drop-shockwave",
+          "default": 0.55
         }
       },
       "defaults": {
@@ -2644,7 +3029,18 @@
         "big_fish_ripple": 1.0,
         "big_fish_ripple_size": 1.0,
         "big_fish_avoid": 1.0,
-        "big_fish_avoid_margin": 2.0
+        "big_fish_avoid_margin": 2.0,
+        "drop_shock": 1.0,
+        "drop_bloom_ms": 190.0,
+        "drop_color_lean": 0.45,
+        "drop_ring_speed": 1.15,
+        "drop_ring_width": 0.05,
+        "drop_wake": 0.13,
+        "drop_debris_n": 45,
+        "drop_debris_speed": 0.85,
+        "drop_afterglow_beats": 1.5,
+        "drop_reveal": 0.75,
+        "drop_shock_scale_min": 0.55
       }
     },
     "gifplayer": {
@@ -4714,6 +5110,127 @@
           "note": "The lull's lids close turned 180 degrees about the eye (meeting just above its centre); the drop opens them the same way round. Off = the old way round",
           "default": true,
           "help_topic": "response-families"
+        },
+        "drop_shock": {
+          "label": "Drop Shockwave",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 1.0,
+          "aspect": "shape",
+          "note": "How strongly the drop's Shockwave is painted over this effect's own drop: the rim bloom, the wavefront, the debris and the wall splash. 0 turns it off; always in the colour set's own colours.",
+          "help_topic": "drop-shockwave",
+          "default": 1.0
+        },
+        "drop_bloom_ms": {
+          "label": "Drop Bloom (ms)",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 400.0,
+          "aspect": "shape",
+          "note": "How long the eye's rim blooms in the set's brightest colour on the drop mark. 0 = no bloom.",
+          "help_topic": "drop-shockwave",
+          "default": 190.0
+        },
+        "drop_color_lean": {
+          "label": "Drop Colour Lean",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 1.0,
+          "aspect": "shape",
+          "note": "How far the wavefront leans toward the set's brightest colour (0 = the set by angle, 1 = all the brightest colour). Never white.",
+          "help_topic": "drop-shockwave",
+          "default": 0.45
+        },
+        "drop_ring_speed": {
+          "label": "Drop Wave Speed",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.6,
+          "max": 3.0,
+          "aspect": "shape",
+          "note": "How fast the wavefront runs out from the eye's rim, in panels per second (1 = the panel's centre to its edge).",
+          "help_topic": "drop-shockwave",
+          "default": 1.15
+        },
+        "drop_ring_width": {
+          "label": "Drop Wave Width",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.03,
+          "max": 0.2,
+          "aspect": "shape",
+          "note": "How thick the wavefront's sharp leading edge is.",
+          "help_topic": "drop-shockwave",
+          "default": 0.05
+        },
+        "drop_wake": {
+          "label": "Drop Wave Wake",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 0.4,
+          "aspect": "shape",
+          "note": "How long a glowing tail the wavefront trails behind it.",
+          "help_topic": "drop-shockwave",
+          "default": 0.13
+        },
+        "drop_debris_n": {
+          "label": "Drop Debris",
+          "type": "numeric",
+          "smooth": false,
+          "min": 0,
+          "max": 150,
+          "aspect": "shape",
+          "note": "Debris pieces flung from the rim at full intensity; fewer on a quieter drop. The count rises with the music, never the brightness.",
+          "help_topic": "drop-shockwave",
+          "default": 45
+        },
+        "drop_debris_speed": {
+          "label": "Drop Debris Speed",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.5,
+          "max": 1.5,
+          "aspect": "shape",
+          "note": "Debris speed as a multiple of the wave's speed (below 1 keeps it just inside the front).",
+          "help_topic": "drop-shockwave",
+          "default": 0.85
+        },
+        "drop_afterglow_beats": {
+          "label": "Drop Wall Splash (beats)",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 4.0,
+          "aspect": "shape",
+          "note": "How long the crystal's edge glows where the wave strikes it. 0 = no splash.",
+          "help_topic": "drop-shockwave",
+          "default": 1.5
+        },
+        "drop_reveal": {
+          "label": "Drop Reveal",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 1.0,
+          "aspect": "shape",
+          "note": "How dark this effect's own drop is held ahead of the wavefront before the wave passes and reveals it (0 = never held).",
+          "help_topic": "drop-shockwave",
+          "default": 0.75
+        },
+        "drop_shock_scale_min": {
+          "label": "Drop Quiet Scale",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.1,
+          "max": 1.0,
+          "aspect": "shape",
+          "note": "How much of the Shockwave a quiet drop gets (intensity 0), as a fraction of the full one at the automatic ceiling.",
+          "help_topic": "drop-shockwave",
+          "default": 0.55
         }
       },
       "defaults": {
@@ -4737,7 +5254,18 @@
         "brightness": 1.0,
         "spin_audio": 0.0,
         "gaze_depth": 0.6,
-        "lull_lids_upside_down": true
+        "lull_lids_upside_down": true,
+        "drop_shock": 1.0,
+        "drop_bloom_ms": 190.0,
+        "drop_color_lean": 0.45,
+        "drop_ring_speed": 1.15,
+        "drop_ring_width": 0.05,
+        "drop_wake": 0.13,
+        "drop_debris_n": 45,
+        "drop_debris_speed": 0.85,
+        "drop_afterglow_beats": 1.5,
+        "drop_reveal": 0.75,
+        "drop_shock_scale_min": 0.55
       }
     },
     "sauron": {
@@ -5043,6 +5571,127 @@
           "note": "The lull's lids close turned 180 degrees about the eye (meeting just above its centre); the drop opens them the same way round. Off = the old way round",
           "default": true,
           "help_topic": "response-families"
+        },
+        "drop_shock": {
+          "label": "Drop Shockwave",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 1.0,
+          "aspect": "shape",
+          "note": "How strongly the drop's Shockwave is painted over this effect's own drop: the rim bloom, the wavefront, the debris and the wall splash. 0 turns it off; always in the colour set's own colours.",
+          "help_topic": "drop-shockwave",
+          "default": 1.0
+        },
+        "drop_bloom_ms": {
+          "label": "Drop Bloom (ms)",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 400.0,
+          "aspect": "shape",
+          "note": "How long the eye's rim blooms in the set's brightest colour on the drop mark. 0 = no bloom.",
+          "help_topic": "drop-shockwave",
+          "default": 190.0
+        },
+        "drop_color_lean": {
+          "label": "Drop Colour Lean",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 1.0,
+          "aspect": "shape",
+          "note": "How far the wavefront leans toward the set's brightest colour (0 = the set by angle, 1 = all the brightest colour). Never white.",
+          "help_topic": "drop-shockwave",
+          "default": 0.45
+        },
+        "drop_ring_speed": {
+          "label": "Drop Wave Speed",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.6,
+          "max": 3.0,
+          "aspect": "shape",
+          "note": "How fast the wavefront runs out from the eye's rim, in panels per second (1 = the panel's centre to its edge).",
+          "help_topic": "drop-shockwave",
+          "default": 1.15
+        },
+        "drop_ring_width": {
+          "label": "Drop Wave Width",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.03,
+          "max": 0.2,
+          "aspect": "shape",
+          "note": "How thick the wavefront's sharp leading edge is.",
+          "help_topic": "drop-shockwave",
+          "default": 0.05
+        },
+        "drop_wake": {
+          "label": "Drop Wave Wake",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 0.4,
+          "aspect": "shape",
+          "note": "How long a glowing tail the wavefront trails behind it.",
+          "help_topic": "drop-shockwave",
+          "default": 0.13
+        },
+        "drop_debris_n": {
+          "label": "Drop Debris",
+          "type": "numeric",
+          "smooth": false,
+          "min": 0,
+          "max": 150,
+          "aspect": "shape",
+          "note": "Debris pieces flung from the rim at full intensity; fewer on a quieter drop. The count rises with the music, never the brightness.",
+          "help_topic": "drop-shockwave",
+          "default": 45
+        },
+        "drop_debris_speed": {
+          "label": "Drop Debris Speed",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.5,
+          "max": 1.5,
+          "aspect": "shape",
+          "note": "Debris speed as a multiple of the wave's speed (below 1 keeps it just inside the front).",
+          "help_topic": "drop-shockwave",
+          "default": 0.85
+        },
+        "drop_afterglow_beats": {
+          "label": "Drop Wall Splash (beats)",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 4.0,
+          "aspect": "shape",
+          "note": "How long the crystal's edge glows where the wave strikes it. 0 = no splash.",
+          "help_topic": "drop-shockwave",
+          "default": 1.5
+        },
+        "drop_reveal": {
+          "label": "Drop Reveal",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 1.0,
+          "aspect": "shape",
+          "note": "How dark this effect's own drop is held ahead of the wavefront before the wave passes and reveals it (0 = never held).",
+          "help_topic": "drop-shockwave",
+          "default": 0.75
+        },
+        "drop_shock_scale_min": {
+          "label": "Drop Quiet Scale",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.1,
+          "max": 1.0,
+          "aspect": "shape",
+          "note": "How much of the Shockwave a quiet drop gets (intensity 0), as a fraction of the full one at the automatic ceiling.",
+          "help_topic": "drop-shockwave",
+          "default": 0.55
         }
       },
       "defaults": {
@@ -5072,7 +5721,18 @@
         "background_brightness": 0.0,
         "brightness": 1.0,
         "background_color": "#000000",
-        "lull_lids_upside_down": true
+        "lull_lids_upside_down": true,
+        "drop_shock": 1.0,
+        "drop_bloom_ms": 190.0,
+        "drop_color_lean": 0.45,
+        "drop_ring_speed": 1.15,
+        "drop_ring_width": 0.05,
+        "drop_wake": 0.13,
+        "drop_debris_n": 45,
+        "drop_debris_speed": 0.85,
+        "drop_afterglow_beats": 1.5,
+        "drop_reveal": 0.75,
+        "drop_shock_scale_min": 0.55
       }
     },
     "gradient": {

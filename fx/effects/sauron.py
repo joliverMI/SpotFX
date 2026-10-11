@@ -124,6 +124,7 @@ from pyfastnoiselite import pyfastnoiselite as fnl
 
 import fx.effects.particle_handoff as particle_handoff
 from fx.color import parse_gradient, validate_gradient
+from fx.effects import lull_handoff, phase_grammar
 from fx.effects.audio import AudioReactiveEffect
 from fx.effects.blackhole import _HEX_FACE_D, _HEX_FACE_NX, _HEX_FACE_NY
 from fx.effects.gradient import GradientEffect
@@ -316,6 +317,10 @@ def palette_gradient(gradient, how: str) -> str:
 
 class Sauron2d(Twod, GradientEffect):
     NAME = "Sauron"
+    # THE DROP SHOCKWAVE (fx/effects/phase_grammar.py): born on the iris
+    # rim; its debris burns out as flame licks
+    DROP_SHOCK = True
+    SHOCK_DEBRIS_FATE = "fade"
     CATEGORY = "Matrix"
     # color_blend stays hidden — colours update in place, recreation would
     # reset the gaze. phase/phase_progress are SpotFX-driven; `surge` is
@@ -326,6 +331,8 @@ class Sauron2d(Twod, GradientEffect):
         "phase",
         "phase_progress",
         "surge",
+        *phase_grammar.BREATH_KEYS,
+        lull_handoff.DROP_KEY,
     ]
 
     CONFIG_SCHEMA = vol.Schema(
@@ -470,6 +477,12 @@ class Sauron2d(Twod, GradientEffect):
                 description="Surge flare poke: the fire's intensity (written by SpotFX, self-resets)",
                 default=0.0,
             ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1.0)),
+            # THE PHASE GRAMMAR (fx/effects/phase_grammar.py): the drop's
+            # Shockwave settings (registered) and the breath-hold keys
+            # (ride ONLY the lull arm write)
+            **phase_grammar.shock_schema_fields(),
+            **phase_grammar.breath_schema_fields(),
+            **lull_handoff.drop_schema_fields(),
         }
     )
 
@@ -795,6 +808,17 @@ class Sauron2d(Twod, GradientEffect):
             self._drop = None
             self._drop_slam = False
 
+    def shock_rim(self):
+        """The Shockwave's eye (fx/effects/phase_grammar.py): the iris rim as
+        drawn this frame — a circle in the eye's own isotropic pixels."""
+        last = getattr(self, "_last_iris", None)
+        if last is None:
+            return (self.cx, self.cy, self.iris_size * self.s_min,
+                    self.iris_size * self.s_min)
+        ex, ey, iris_r = last
+        r = max(iris_r, 0.05) * self.s_min
+        return (ex, ey, r, r)
+
     def _phase_step(self, dt):
         pend = self._phase_pending
         if pend is not None:
@@ -828,6 +852,7 @@ class Sauron2d(Twod, GradientEffect):
             if not drop["fired"] and not self._drop_slam:
                 drop["fired"] = True
                 self._burst = 1.0
+                self._shock_begin()
             drop["t"] += dt
             if drop["t"] >= DROP_TOTAL_S:
                 self._phase = "none"
@@ -1196,6 +1221,7 @@ class Sauron2d(Twod, GradientEffect):
         dist = np.sqrt(tx * tx + ty * ty)
         ang = np.arctan2(ty, tx)
         iris_r = self.iris_size * (1.0 + CHARGE_IRIS_GROW * charge) * size_gain
+        self._last_iris = (eye_px, eye_py, iris_r)  # the shock's rim
         d = dist - iris_r
 
         # ── flames + sky ────────────────────────────────────────────────

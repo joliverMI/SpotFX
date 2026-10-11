@@ -332,7 +332,10 @@ def test_an_untold_orbits_lull_is_byte_identical_to_before(tmp_path):
     pinned = _load_pinned("orbits", "orbits_premeld", "lull_handoff")
 
     async def arc(effect_type):
-        r = await _rig(tmp_path, effect_type, SOURCES["orbits"], seed=11)
+        # the drop Shockwave (fx/effects/phase_grammar.py) is held off: the
+        # pinned Orbits predates it
+        r = await _rig(tmp_path, effect_type,
+                       dict(SOURCES["orbits"], drop_shock=0.0), seed=11)
         frames = []
         r.step(120)
         for ph, s in (("charge", 2.0), ("lull", 3.0), ("drop", 2.0)):

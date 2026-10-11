@@ -133,6 +133,8 @@ check(set(sc.SETTINGS_REGISTRY) == {
     "drop_floor",
     # the lull-darkness cap (2026-10-07, the Admiral's own ask)
     "lull_dark_max_s",
+    # the drop's breath-hold (2026-10-11, transitions-drop plan Q2)
+    "lull_breath_hold_s",
     # the drop-led scene switch's tunables (2026-10-08)
     "drop_switch_enabled", "drop_switch_after_previous_drop",
     "drop_switch_stale_margin_s", "drop_switch_drops_in_a_row",
@@ -149,8 +151,9 @@ check(set(sc.SETTINGS_REGISTRY) == {
     "transition_eruption_count", "transition_eruption_speed",
 }, "registry is the deliberate allowlist (eight room keys + the four "
    "analysed-transition knobs + the five 2026-10-06 widening keys + "
-   "drop_floor + lull_dark_max_s + the four drop-switch tunables + the two "
-   "fireworks-meld tunables + strip_phase_strength + background_fade_s + "
+   "drop_floor + lull_dark_max_s + lull_breath_hold_s + the four "
+   "drop-switch tunables + the two fireworks-meld tunables + "
+   "strip_phase_strength + background_fade_s + "
    "the six transition-program tunables)")
 check(sc.SETTINGS_REGISTRY["ambient_enabled"].kind == "bool"
       and sc.SETTINGS_REGISTRY["ambient_on_music_pause"].kind == "bool",

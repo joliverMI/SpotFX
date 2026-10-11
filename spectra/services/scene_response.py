@@ -408,7 +408,7 @@ from random import Random
 from typing import Any, Awaitable, Callable, Mapping, NamedTuple, Optional
 
 from fx import device_model
-from fx.effects import lull_dark, lull_handoff, strip_phase
+from fx.effects import lull_dark, lull_handoff, phase_grammar, strip_phase
 from spectra.models.binding import ValueBinding
 from spectra.models.scene import (FlareBand, FlareKind, ParamTarget,
                                   ResponseClass, SceneV2)
@@ -2791,7 +2791,13 @@ class ResponseEngine:
         every LULL_HANDOFF_EFFECTS virtual what the resolver decided
         (`lull_keep`/`lull_next`/`lull_s` — every key, every arm, even at
         the default), and a drop arm tells every DROP_INTENSITY_EFFECTS
-        virtual the fire's `intensity`. Both are named in the record."""
+        virtual the fire's `intensity`. Both are named in the record.
+
+        THE BREATH-HOLD (fx/effects/phase_grammar.py): a lull arm also tells
+        every DROP_SHOCK_EFFECTS virtual when its short true black before
+        the drop starts and how long it is (`lull_breath_at_s`,
+        `lull_breath_s` — the room's lull_breath_hold_s, never longer than
+        the lull's dark hold; 0 when the gap is unknowable)."""
         ramp_ms = _phase_ramp_ms(event_class, gap_ms)
         lull_keys: dict = {}
         if event_class == "lull" and any(
@@ -2799,6 +2805,14 @@ class ResponseEngine:
                 for st in self.conductor.virtuals.values()):
             lull_keys = _lull_dark_keys(ramp_ms, gap_ms,
                                         self._lull_dark_max_s())
+        breath_keys: dict = {}
+        if event_class == "lull" and any(
+                st.effect_type in device_model.DROP_SHOCK_EFFECTS
+                for st in self.conductor.virtuals.values()):
+            breath_keys = phase_grammar.breath_keys_for(
+                gap_ms / 1000.0 if gap_ms is not None and gap_ms > 0
+                else None,
+                self._lull_breath_hold_s(), self._lull_dark_max_s())
         handoff: Optional[LullHandoff] = None
         handoff_by: Optional[str] = None
         if event_class == "lull" and any(
@@ -2841,6 +2855,9 @@ class ResponseEngine:
             if (lull_keys
                     and state.effect_type in device_model.LULL_DARK_EFFECTS):
                 arm.update(lull_keys)
+            if (breath_keys and state.effect_type
+                    in device_model.DROP_SHOCK_EFFECTS):
+                arm.update(breath_keys)
             if (handoff is not None and state.effect_type
                     in device_model.LULL_HANDOFF_EFFECTS):
                 arm.update(lull_handoff.keys_for(
@@ -2864,6 +2881,8 @@ class ResponseEngine:
             record["strip_phase_strength"] = strip_keys[strip_phase.STRENGTH_KEY]
         if lull_keys:
             record["lull_dark_s"] = lull_keys[lull_dark.DARK_KEY]
+        if breath_keys:
+            record["lull_breath_s"] = breath_keys[phase_grammar.BREATH_KEY]
         if handoff is not None:
             record["lull_handoff"] = {
                 "keep": lull_handoff.clamp_keep(handoff.keep),
@@ -2960,6 +2979,18 @@ class ResponseEngine:
             logger.exception("lull hand-off: resolver failed — the lull "
                              "gets the default hand-off")
             return default_lull_handoff(ctx), "default (resolver failed)"
+
+    def _lull_breath_hold_s(self) -> float:
+        """The room's breath-hold before a drop (RoomControlState.
+        lull_breath_hold_s, fx/effects/phase_grammar.py). Never raises: an
+        unreadable room reads as the shipped default."""
+        try:
+            return float(getattr(self._room_controls(), "lull_breath_hold_s",
+                                 phase_grammar.DEFAULT_BREATH_S))
+        except Exception:                                # noqa: BLE001
+            logger.exception("phase drive: room controls unreadable — "
+                             "breath-hold at its default")
+            return phase_grammar.DEFAULT_BREATH_S
 
     def _lull_dark_max_s(self) -> float:
         """The room's lull darkness cap (RoomControlState.lull_dark_max_s).

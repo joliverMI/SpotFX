@@ -81,7 +81,10 @@ async def _frames(tmp_path, effect_type, cfg, script, seed=5, poke=None):
     cm = headless.fake_clock()
     clock = cm.__enter__()
     try:
-        eff = headless.attach_effect(host, virtual, effect_type, dict(cfg))
+        # the drop Shockwave (fx/effects/phase_grammar.py) is held off: these
+        # proofs compare against modules that predate it
+        eff = headless.attach_effect(host, virtual, effect_type,
+                                     dict(cfg, drop_shock=0.0))
         eff._rng = np.random.default_rng(seed)
         out = []
         for step, (phase, n) in enumerate(script):

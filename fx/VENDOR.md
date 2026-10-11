@@ -2170,3 +2170,28 @@ against that commit.
     test_blackhole_strip_phase.py`), `tests/test_blackhole_charge_lull.py`,
     `tests/test_drop_visible_onset.py` (with a red control on the old
     fade). Unverified against his live room.
+73. `effects/phase_grammar.py` (NEW, SpotFX-authored) + `effects/twod.py`
+    (`Twod.render` calls `_phase_grammar_post()` after `draw()` for an
+    opted-in class; `DROP_SHOCK`/`SHOCK_DEBRIS_FATE`/`SHOCK_DEBRIS_BOOST`
+    class attributes, `shock_rim()`, `_shock_begin()`) + opt-ins in
+    `effects/{blackhole,orbits,sauron,eye,fish}.py`: THE DROP SHOCKWAVE
+    and THE BREATH-HOLD (2026-10-11, the transitions-drop plan's phase 1,
+    /home/javi/fleet-spotfx/data/transitions-drop-plan/report.md; the
+    Admiral: the wave originates "from the permieter of the eye, not the
+    center of the screen ... don't do the shockwave for fireworks", no
+    white in the drop, and "a 0.4 s true black just before the drop, as a
+    setting"). After the member's own draw, the base render max-composes a
+    rim bloom, one wavefront born on the member's own eye (`shock_rim()`:
+    Black Hole's horizon, Orbits' tether ring, the Fish's home ring,
+    Sauron/Eye's iris), debris and a wall splash — all in the set's own
+    colours — over the effect's frame, held dark ahead of the front
+    (`drop_reveal`); and, in a lull told `lull_breath_at_s`/`lull_breath_s`,
+    multiplies the frame to true black for the breath. Each member calls
+    `_shock_begin()` where its own drop payoff fires (never on a silent
+    watchdog release); Black Hole's payoff burst grows on a loud TOLD drop
+    (`_burst_count`, never below PHASE_BURST_N; untold: PHASE_BURST_N).
+    A class that does not opt in (`DROP_SHOCK = False`, Fireworks included)
+    never reaches any of it; `drop_shock: 0` and no breath keys return
+    before touching the frame. Evidence: `scripts/check_drop_shockwave.py`
+    (run by `tests/test_phase_grammar.py`). Unverified against his live
+    room.

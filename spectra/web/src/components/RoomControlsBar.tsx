@@ -647,6 +647,20 @@ export default function RoomControlsBar() {
               <span style={{ fontSize: '0.85em', opacity: 0.75 }}>×</span>
             </div>
             <div className="top-bar-group-field">
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}
+                title="How long the crystal goes to true black right before a drop lands (Black Hole, Orbits, Sauron, Eye, Fish). Never longer than the lull's own darkness. 0 = none.">
+                Breath-hold before drop
+                <HelpLink topic="drop-breath-hold" />
+              </label>
+              <input
+                type="number" min={0} max={3} step={0.1}
+                value={local.lull_breath_hold_s}
+                onChange={(e) => setLocal({ ...local, lull_breath_hold_s: Number(e.target.value) })}
+                onBlur={() => commit(local)}
+              />
+              <span style={{ fontSize: '0.85em', opacity: 0.75 }}>s</span>
+            </div>
+            <div className="top-bar-group-field">
               <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
                 <PowerButton
                   on={local.drop_switch_enabled}

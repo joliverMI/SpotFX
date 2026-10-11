@@ -6,7 +6,7 @@ import voluptuous as vol
 from PIL import Image
 
 import fx.effects.particle_handoff as particle_handoff
-from fx.effects import lull_handoff
+from fx.effects import lull_handoff, phase_grammar
 from fx.color import validate_gradient
 from fx.effects.audio import AudioReactiveEffect
 from fx.effects.gradient import GradientEffect
@@ -1353,6 +1353,10 @@ class Fish2d(Twod, GradientEffect):
     """
 
     NAME = "Fish"
+    # THE DROP SHOCKWAVE (fx/effects/phase_grammar.py): born on the home
+    # ring (on screen: the window's centre); its debris curves back to it
+    DROP_SHOCK = True
+    SHOCK_DEBRIS_FATE = "return"
     CATEGORY = "Matrix"
     HIDDEN_KEYS = Twod.HIDDEN_KEYS + ["gradient_roll", "color_blend"]
     ADVANCED_KEYS = Twod.ADVANCED_KEYS + [
@@ -1363,6 +1367,7 @@ class Fish2d(Twod, GradientEffect):
         *lull_handoff.KEYS,
         lull_handoff.DROP_KEY,
         "big_fish",
+        *phase_grammar.BREATH_KEYS,
     ]
 
     CONFIG_SCHEMA = vol.Schema(
@@ -1789,6 +1794,11 @@ class Fish2d(Twod, GradientEffect):
             # the lull/drop arm writes, like the phase keys above
             **lull_handoff.schema_fields(),
             **lull_handoff.drop_schema_fields(),
+            # THE PHASE GRAMMAR (fx/effects/phase_grammar.py): the drop's
+            # Shockwave settings (registered) and the breath-hold keys
+            # (ride ONLY the lull arm write)
+            **phase_grammar.shock_schema_fields(),
+            **phase_grammar.breath_schema_fields(),
         }
     )
 
@@ -3234,6 +3244,14 @@ class Fish2d(Twod, GradientEffect):
         self._depart(extra)
         self.p_disp[:n] = np.nan
 
+    def shock_rim(self):
+        """The Shockwave's eye (fx/effects/phase_grammar.py): the home ring, centred on the
+        window (screen = world - window, so on screen its centre is the
+        panel's own cx, cy), in
+        render pixels."""
+        r = max(float(self.horizon_scale), 0.05)
+        return (self.cx, self.cy, r * self.sx, r * self.sy)
+
     def _drop_step(self):
         """The drop he likes, plus his addendum's three beats — RUSH IN,
         SWIRL AROUND, STAY BEHIND. Nothing about the existing payoff (the
@@ -3287,6 +3305,7 @@ class Fish2d(Twod, GradientEffect):
             # the explosion: 2x more fish that DON'T stay — they bolt
             # straight off the panel during the boost window
             self._spawn_drop_ejecta(DROP_EJECTA_X * self.particle_count)
+            self._shock_begin()
         scale = drop.get("scale")
         if scale is None:
             settle_s, boost = DROP_SETTLE_S, DROP_BOOST

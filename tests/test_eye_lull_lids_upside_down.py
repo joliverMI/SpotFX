@@ -41,8 +41,13 @@ def _run(coro):
     return asyncio.run(coro)
 
 
-async def _lull_and_drop(effect_type, upside_down, prepare=None):
-    cfg = {"gradient": GRADIENT}
+async def _lull_and_drop(effect_type, upside_down, prepare=None,
+                         shock=False):
+    # The drop Shockwave (fx/effects/phase_grammar.py) paints its own set
+    # colour over the drop frames, so the lid-geometry tests hold it off
+    # (`drop_shock: 0`) and measure the lids alone; the coexistence test
+    # below turns it on.
+    cfg = {"gradient": GRADIENT, "drop_shock": 1.0 if shock else 0.0}
     if upside_down is not None:
         cfg["lull_lids_upside_down"] = upside_down
     r = await W.rig("lids", cfg, seed=3, effect_type=effect_type,
@@ -122,6 +127,37 @@ def test_the_drop_opens_the_lids_the_same_way_round(effect_type):
     first = _lit(out["drop"][0][2])
     rows = np.flatnonzero(first.any(axis=1))
     assert rows.mean() < (first.shape[0] - 1) / 2.0
+
+
+@pytest.mark.parametrize("effect_type", ["eye", "sauron"])
+def test_the_upside_down_lull_and_the_shockwave_coexist(effect_type,
+                                                      monkeypatch):
+    """The drop Shockwave and the upside-down lull on one Eye/Sauron: the
+    Shockwave paints the drop, and the lids still open the same way round,
+    their own state machine untouched by it. (Eye and Sauron draw their
+    construction-time state from an unseeded generator, so both runs are
+    constructed from the same seed.)"""
+    real_rng = np.random.default_rng
+    monkeypatch.setattr(
+        np.random, "default_rng",
+        lambda seed=None, *a, **k: real_rng(11 if seed is None else seed,
+                                            *a, **k))
+    held = _run(_lull_and_drop(effect_type, True))
+    shocked = _run(_lull_and_drop(effect_type, True, shock=True))
+    # nothing is told to breathe here, so the lull itself is the same
+    for k in held["frames"]:
+        assert np.array_equal(held["frames"][k], shocked["frames"][k]), k
+    # the Shockwave genuinely ran: it changed the drop's light
+    assert any(not np.array_equal(a, b) for (_l, _r, a), (_l2, _r2, b)
+               in zip(held["drop"], shocked["drop"]))
+    # and the lids opened exactly as they do without it
+    lids = [lid for lid, _rot, _f in shocked["drop"]]
+    assert lids == [lid for lid, _rot, _f in held["drop"]]
+    assert ([rot for _lid, rot, _f in shocked["drop"]]
+            == [rot for _lid, rot, _f in held["drop"]])
+    assert lids[0] > 0.8 and lids[-1] == 0.0
+    assert all(rot for lid, rot, _f in shocked["drop"] if lid > 0.001)
+    assert not shocked["drop"][-1][1]
 
 
 @pytest.mark.parametrize("effect_type", ["eye", "sauron"])
