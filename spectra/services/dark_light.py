@@ -296,10 +296,9 @@ async def _restore_pre_light(virtual_ids: list[str], shielded: set[str]) -> list
         if any(cfg.get(k) != painted.get(k) for k in _BG_KEYS):
             continue            # repainted since Light — that paint wins
         before = entry.get("before") or {}
-        for k in _BG_KEYS:
-            cfg[k] = before.get(k, _BG_FALLBACK[k])
         writes.append({"virtual_id": vid, "effect_type": effect["type"],
-                       "config": cfg})
+                       "config": {k: before.get(k, _BG_FALLBACK[k])
+                                  for k in _BG_KEYS}})
     restored: list[str] = []
     if writes:
         try:
@@ -350,17 +349,31 @@ def _house_driving() -> bool:
 
 async def reconcile(mode: str, shield_categories: list[str], shield_virtuals: list[str],
                     light_bg_color: str = "#201830",
-                    light_bg_brightness: float = 0.3) -> dict:
+                    light_bg_brightness: float = 0.3,
+                    fade_s: Optional[float] = None) -> dict:
     """Drive the room's display_mode to `mode` ("default" | "dark" |
     "light"). Locked so rapid switches / a shield-list edit racing a mode
     flip can't interleave and fight over the same snapshot. Never raises —
     a mid-handover refusal or an unreachable LedFX still leaves the
     room-control save itself succeeding (state is the durable record even
-    when nothing could be driven live), same posture as ambient.reconcile()."""
+    when nothing could be driven live), same posture as ambient.reconcile().
+
+    THE BACKGROUND FADES (fx/background_fade.py): every background this
+    call changes — Dark's clamp, Light's forced paint, the way back — lands
+    as a colour-wheel fade on the fixture, over `fade_s` seconds (a Light
+    Show Display-mode step's own length) or, when None, the room's
+    background_fade_s. A switch arriving mid-fade picks up from the colour
+    on the fixture right now."""
+    from fx import background_fade
     async with _get_lock():
         try:
-            return await _reconcile_impl(mode, shield_categories, shield_virtuals,
-                                         light_bg_color, light_bg_brightness)
+            with background_fade.fading(fade_s):
+                result = await _reconcile_impl(mode, shield_categories, shield_virtuals,
+                                               light_bg_color, light_bg_brightness)
+            if result.get("status") in ("default", "dark", "light"):
+                result["fade_s"] = (background_fade.default_s()
+                                    if fade_s is None else float(fade_s))
+            return result
         except fx_seam.RoomReleased:
             logger.warning("dark/light: room released — state saved, no lights touched")
             return {"status": "released"}
@@ -455,7 +468,12 @@ async def _reconcile_impl(mode: str, shield_categories: list[str],
             cfg["background_brightness"] = light_bg_brightness
             pre_light[vid] = {"before": before,
                               "painted": {k: cfg[k] for k in _BG_KEYS}}
-            writes.append({"virtual_id": vid, "effect_type": effect_type, "config": cfg})
+            # ONLY the two background keys: a write naming the effect's
+            # other colour keys recreates it (the facade's colour-key
+            # crossfade), which would swap the background's own wheel fade
+            # for the virtual's stored crossfade.
+            writes.append({"virtual_id": vid, "effect_type": effect_type,
+                           "config": {k: cfg[k] for k in _BG_KEYS}})
         if writes:
             _save_light_snapshot(pre_light)
             try:
@@ -492,9 +510,32 @@ async def _reconcile_impl(mode: str, shield_categories: list[str],
                            "pre-dark repaint, the room's own live show repaints "
                            "it on its next natural fire")
             else:
-                writes = [{"virtual_id": vid, "effect_type": snap["type"], "config": snap["config"]}
-                         for vid, snap in snapshot.items()
-                         if vid in virtual_ids and vid not in shielded and vid not in house_held]
+                # Dark only ever took the BACKGROUND. Where the effect still
+                # showing is the one the snapshot caught, put back just
+                # those two keys, so the way out of Dark is the same wheel
+                # fade as the way in; where a different effect is showing,
+                # the whole snapshot is replayed as before (an effect
+                # switch rides the virtual's own crossfade).
+                try:
+                    live_now = await fx_seam.get_virtuals()
+                except Exception:
+                    logger.exception("dark/light: could not read live virtuals "
+                                     "before the repaint — replaying whole configs")
+                    live_now = {}
+                writes = []
+                for vid, snap in snapshot.items():
+                    if vid not in virtual_ids or vid in shielded or vid in house_held:
+                        continue
+                    live_type = (((live_now.get(vid) or {}).get("effect") or {})
+                                 .get("type"))
+                    cfg = snap["config"] or {}
+                    if live_type == snap["type"] and any(k in cfg for k in _BG_KEYS):
+                        writes.append({"virtual_id": vid, "effect_type": snap["type"],
+                                       "config": {k: cfg[k] for k in _BG_KEYS
+                                                  if k in cfg}})
+                    else:
+                        writes.append({"virtual_id": vid, "effect_type": snap["type"],
+                                       "config": snap["config"]})
                 if writes:
                     try:
                         await fx_seam.apply_writes(writes, transition_ms=0)

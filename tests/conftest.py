@@ -496,6 +496,18 @@ def _isolated_pulse_feed():
 
 
 @pytest.fixture(autouse=True)
+def _isolated_background_fade():
+    """fx/background_fade.py's process default is a bare module global that
+    SPECTRA PUSHES (room_controls.push_background_fade, on a save and when
+    the live stack comes up). A test that saves background_fade_s=0 would
+    otherwise leave every later test's backgrounds landing instantly."""
+    from fx import background_fade
+    background_fade.set_default_s(background_fade.DEFAULT_S)
+    yield
+    background_fade.set_default_s(background_fade.DEFAULT_S)
+
+
+@pytest.fixture(autouse=True)
 def _isolated_param_watchdog():
     """spectra/services/param_watchdog.py (the param orphan watchdog,
     2026-08-21) keeps its suspicion clocks / restore counts / give-ups as

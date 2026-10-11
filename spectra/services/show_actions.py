@@ -386,8 +386,13 @@ register(ActionKind(
 register(ActionKind(
     name="display_mode", label="Display mode", group="setting",
     params=[Param("mode", "enum", "Mode", default="dark", required=True,
-                  choices=_room_choices("display_mode") or ["default", "dark", "light"])],
-    help="Hybrid (default), Dark or Light.",
+                  choices=_room_choices("display_mode") or ["default", "dark", "light"]),
+            Param("fade_s", "number", "Fade", default=None, min=0.0, max=10.0,
+                  step=0.1, unit="s",
+                  help="How long the background takes to fade into the new "
+                       "mode. Empty = the room's own Background fade "
+                       "(default 1 s); 0 = instant.")],
+    help="Hybrid (default), Dark or Light — the background fades into it.",
     restore="End show puts the mode back, unless you changed it since.",
     room_patch=lambda p: {"display_mode": p["mode"]}))
 
@@ -1450,13 +1455,24 @@ async def _run_room_group(run: Run, group: list[tuple[int, ShowAction, dict]]) -
     from spectra.services import room_controls
     patch: dict = {}
     snap = False
+    fade_s = None
     for _i, a, p in group:
         patch.update(ACTION_KINDS[a.kind].room_patch(p))
         if a.kind == "ambient" and p.get("speed") == "snap":
             snap = True
+        if a.kind == "display_mode":
+            # The LAST display-mode step wins the mode, so it wins the fade
+            # too (its own, or the room's when it names none).
+            fade_s = p.get("fade_s")
     previous = room_controls.load_room_controls().model_dump()
     try:
-        result = await room_controls.apply_patch(patch, ambient_snap=snap)
+        # A step's own fade is passed only when one was authored, so every
+        # existing caller (and test double) of apply_patch keeps its shape.
+        if fade_s is not None:
+            result = await room_controls.apply_patch(patch, ambient_snap=snap,
+                                                     display_fade_s=fade_s)
+        else:
+            result = await room_controls.apply_patch(patch, ambient_snap=snap)
     except Exception as exc:                             # noqa: BLE001
         for i, _a, _p in group:
             _record(run, i, Outcome("failed", f"the room settings did not save: {exc}"))

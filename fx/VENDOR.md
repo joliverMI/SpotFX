@@ -2112,3 +2112,27 @@ against that commit.
     control that drops 30 -> 0.7 px/s; eruption pieces ON the moving
     targets with their velocity; no white cell on a solid set; the facade
     path and the untouched crossfade). Unverified against his live room.
+71. `background_fade.py` (NEW, SpotFX-authored) + `effects/__init__.py`
+    (`Effect._apply_config(bg_follow=)`, `_retarget_bg`,
+    `_advance_bg_fade`, `_refresh_bg_render_state`, `_advance_tweens`):
+    THE LIVE BACKGROUND FADES ROUND THE COLOUR WHEEL (2026-10-11; the
+    Admiral: "when the live background changes due to a turning on or off
+    of the light/dark mode, it should fade. The fade timing should be
+    default 1s ... This fade should also apply for when we are in hybrid
+    and the background changes ... colors should fade by rotation around
+    wheel"). Before: the live background COLOUR eased exponentially in RGB
+    over the virtual's transition_time while BRIGHTNESS was applied
+    instantly — so Dark's clamp (colour black AND brightness 0) cut, and
+    Light cut in. Now the RENDERED background (colour x brightness) walks a
+    hue path (shortest arc; black adopts the other end's hue and
+    saturation, grey/white only its hue) over `background_fade.
+    duration_s()` — a per-task override (`fading()`, used by SpotFX's
+    dark/light reconcile for a Light Show step's own fade) or the default
+    SpotFX pushes from its `background_fade_s` room setting (1.0 s; 0 =
+    instant). Linear, retargeted from the live colour (newest wins, no
+    jump); an unchanged target never restarts a fade. A param tween of
+    at least `FOLLOW_MIN_S` (a scene crossfade, a flare colour ramp) is
+    FOLLOWED frame by frame instead of faded again; a 1 ms jump fades.
+    Config values still change instantly — only the light travels.
+    Evidence: `tests/test_background_fade.py` (assembled frames on
+    `fx.headless`). Unverified against his live room.

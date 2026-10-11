@@ -463,6 +463,7 @@ own minimum hold yet, and `fire_scene_by_id` marks the result
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import tempfile
@@ -671,6 +672,21 @@ class RoomControlState(BaseModel):
     # (scene_response._drive_phase), so a change reaches the next phase.
     # Sonic-tellable.
     strip_phase_strength: float = Field(default=1.0, ge=0.0, le=1.5)
+
+    # THE BACKGROUND FADE (2026-10-11, the Admiral: "when the live
+    # background changes due to a turning on or off of the light/dark
+    # mode, it should fade. The fade timing should be default 1s ... This
+    # fade should also apply for when we are in hybrid and the background
+    # changes"). How long a live background change takes to land, walking
+    # round the colour wheel — Dark switching on or off, Light's forced
+    # background, and any background a scene/colour set writes instantly.
+    # A change that already carries its own fade (a scene crossfade, a
+    # flare's colour ramp) keeps its own timing. fx/background_fade.py is
+    # the binding statement; this value is PUSHED there
+    # (push_background_fade) on every save and when the live stack comes
+    # up. A Light Show Display-mode step may name its own fade for that one
+    # switch. 0 = instant.
+    background_fade_s: float = Field(default=1.0, ge=0.0, le=10.0)
 
     # THE DROP-LED SCENE SWITCH (2026-10-08, drop-scene-variety plan phase
     # 2 — spectra/services/drop_switch.py is the binding statement). A drop
@@ -1302,8 +1318,26 @@ async def reconcile_ambient_if_changed(previous: RoomControlState,
     return await ambient_music_gate.reconcile_now(wait=False)
 
 
+def push_background_fade(state: Optional[RoomControlState] = None) -> float:
+    """Hand the room's background_fade_s to the render layer
+    (fx/background_fade.py — fx/ may not import spectra/, so it is pushed,
+    never pulled). Called on every room-controls save and when the live
+    stack comes up. Never raises."""
+    try:
+        from fx import background_fade
+        st = state if state is not None else load_room_controls()
+        background_fade.set_default_s(st.background_fade_s)
+        return background_fade.default_s()
+    except Exception:                                   # noqa: BLE001
+        logging.getLogger(__name__).exception(
+            "room controls: background fade not pushed to the render layer")
+        return 0.0
+
+
 async def reconcile_dark_light_if_changed(previous: RoomControlState,
-                                          new_state: RoomControlState) -> Optional[dict]:
+                                          new_state: RoomControlState,
+                                          *, fade_s: Optional[float] = None
+                                          ) -> Optional[dict]:
     """The dark_lock/light-bg-sync half of a room-controls save — same
     one-choke-point shape as reconcile_ambient_if_changed above, so a human
     PUT and the settings-console agent's apply path can never diverge. Also
@@ -1328,6 +1362,16 @@ async def reconcile_dark_light_if_changed(previous: RoomControlState,
     if not changed:
         return None
     from spectra.services import dark_light
+    if fade_s is not None:
+        # A Light Show Display-mode step's own fade length. Passed only when
+        # one was authored, so every existing caller (and every test double
+        # of dark_light.reconcile) keeps the exact old call shape.
+        return await dark_light.reconcile(new_state.display_mode,
+                                          new_state.dark_light_shield_categories,
+                                          new_state.dark_light_shield_virtuals,
+                                          new_state.display_light_bg_color,
+                                          new_state.display_light_bg_brightness,
+                                          fade_s=fade_s)
     return await dark_light.reconcile(new_state.display_mode,
                                       new_state.dark_light_shield_categories,
                                       new_state.dark_light_shield_virtuals,
@@ -1502,7 +1546,8 @@ FORCE_STATE_FIELDS = ("force_scene_enabled", "force_scene_scene_id",
                      "force_color_enabled", "force_color_target_id")
 
 
-async def apply_patch(body: object, *, ambient_snap: bool = False) -> dict:
+async def apply_patch(body: object, *, ambient_snap: bool = False,
+                      display_fade_s: Optional[float] = None) -> dict:
     """THE ONE ROOM-CONTROLS WRITER: merge a partial body onto the stored
     state, save it, and run every reconciler a save owes — the body of
     PUT /api/room-controls, factored out so the human handler and the Light
@@ -1535,7 +1580,13 @@ async def apply_patch(body: object, *, ambient_snap: bool = False) -> dict:
                                                         snap=ambient_snap)
     if ambient_result is not None:
         response["ambient_result"] = ambient_result
-    dark_light_result = await reconcile_dark_light_if_changed(previous, state)
+    if previous.background_fade_s != state.background_fade_s:
+        push_background_fade(state)
+    if display_fade_s is not None:
+        dark_light_result = await reconcile_dark_light_if_changed(
+            previous, state, fade_s=display_fade_s)
+    else:
+        dark_light_result = await reconcile_dark_light_if_changed(previous, state)
     if dark_light_result is not None:
         response["dark_light_result"] = dark_light_result
     force_scene_result = await reconcile_force_scene_if_changed(previous, state)

@@ -10,6 +10,7 @@ import numpy as np
 import voluptuous as vol
 from numpy.typing import NDArray
 
+from fx import background_fade
 from fx.color import LEDFX_COLORS, hsv_to_rgb, parse_color, validate_color
 from fx.effects.utils.logsec_helper import LogSecHelper
 from fx.events import EffectUpdatedEvent
@@ -439,11 +440,13 @@ class Effect(BaseRegistry):
         # Mutated only under self.lock (started from the event loop via
         # start_param_transitions, advanced each frame in _render).
         self._tweens = None
-        # Live background color (unscaled RGB) chasing its config target so
-        # bg changes FADE over the virtual's transition length instead of
-        # snapping — especially black -> color. Brightness stays instant
-        # (bass-drop dims rely on it). None until first _apply_config.
+        # THE LIVE BACKGROUND (fx/background_fade.py, VENDOR #68): the
+        # RENDERED background (colour x brightness) walking round the
+        # colour wheel toward its config target, so a background change
+        # FADES instead of cutting. None until first _apply_config.
         self._bg_live_rgb = None
+        self._bg_target_render = None
+        self._bg_fade = None
         self.update_config(config)
 
     def __del__(self):
@@ -517,7 +520,8 @@ class Effect(BaseRegistry):
         with self.lock:
             self._apply_config(config, validate=True, fire_event=True)
 
-    def _apply_config(self, config, *, validate=True, fire_event=True):
+    def _apply_config(self, config, *, validate=True, fire_event=True,
+                      bg_follow=False):
         """Lock-free core of update_config — CALLER MUST HOLD self.lock.
 
         Merges `config` into self._config and refreshes all derived state
@@ -588,11 +592,7 @@ class Effect(BaseRegistry):
         bg_color = parse_color(self._config["background_color"])
         self._bg_target_rgb = np.array(bg_color, dtype=float)
         self._bg_brightness = float(self._config["background_brightness"])
-        if self._bg_live_rgb is None or not self._active:
-            # first config / pre-activation (fresh instances on an effect
-            # switch fade via the crossfade already): start ON target
-            self._bg_live_rgb = self._bg_target_rgb.copy()
-        self._refresh_bg_render_state()
+        self._retarget_bg(self._bg_target_rgb * self._bg_brightness, bg_follow)
 
         self.flip = self._config["flip"]
         self.mirror = self._config["mirror"]
@@ -887,7 +887,17 @@ class Effect(BaseRegistry):
                 )
 
         if frame:
-            self._apply_config(frame, validate=False, fire_event=False)
+            # A background tween long enough to be a fade of its own (a
+            # scene crossfade, a flare's colour ramp) keeps its authored
+            # timing: the live background follows it. A jump (1 ms) does
+            # not — it lands as an instant change and fades.
+            bg_tweens = [self._tweens[k] for k in frame
+                         if k in ("background_color", "background_brightness")]
+            follow = bool(bg_tweens) and all(
+                float(tw["duration"]) >= background_fade.FOLLOW_MIN_S
+                for tw in bg_tweens)
+            self._apply_config(frame, validate=False, fire_event=False,
+                               bg_follow=follow)
 
         # Gradient LUTs are set last: _apply_config's config_updated chain nulls
         # _gradient_curve, so our lerped curve must win for this frame's render.
@@ -912,46 +922,73 @@ class Effect(BaseRegistry):
                 )
 
     def _refresh_bg_render_state(self):
-        """Rebuild the render-facing bg fields from the LIVE color and the
-        (instant) brightness. bg compositing stays on while either the live
-        or the target color is non-black, so fades out finish cleanly."""
-        live = self._bg_live_rgb * self._bg_brightness
+        """Rebuild the render-facing bg fields from the LIVE rendered
+        background. bg compositing stays on while either the live or the
+        target background is lit, so fades out finish cleanly."""
+        live = self._bg_live_rgb
         self._bg_color = live
         self._bg_color_pil = tuple(int(c) for c in np.clip(live, 0, 255))
         self.bg_color_use = bool(
-            (live > 0.5).any() or (self._bg_target_rgb > 0.5).any()
+            (live > 0.5).any() or (self._bg_target_render > 0.5).any()
         )
 
+    def _retarget_bg(self, target, follow=False):
+        """A new rendered-background target (colour x brightness, RGB
+        0..255). CALLER HOLDS self.lock. fx/background_fade.py is the
+        binding statement:
+
+          * first config / pre-activation (a fresh instance on an effect
+            switch already rides the crossfade): start ON target;
+          * an unchanged target: nothing (a repeated write — Dark's clamp
+            on every write while locked — never restarts a fade);
+          * `follow` (a tween frame of an authored fade): the live
+            background IS the tween — unless a fade is still running, whose
+            target then moves with the tween on the fade's own clock, so
+            neither ever jumps;
+          * anything else: fade from the CURRENT live colour (newest wins,
+            no jump) over background_fade.duration_s(); 0 = instant."""
+        target = np.asarray(target, dtype=float)
+        prev = self._bg_target_render
+        self._bg_target_render = target
+        if self._bg_live_rgb is None or not self._active:
+            self._bg_live_rgb = target.copy()
+            self._bg_fade = None
+        elif prev is not None and not np.abs(target - prev).max() > 0.5:
+            pass
+        elif follow:
+            fade = self._bg_fade
+            if fade is None:
+                self._bg_live_rgb = target.copy()
+            else:
+                fade["hsv_start"], fade["hsv_delta"] = background_fade.path(
+                    fade["start"], target)
+        else:
+            duration = background_fade.duration_s()
+            if duration <= 0 or not np.abs(target - self._bg_live_rgb).max() > 0.5:
+                self._bg_live_rgb = target.copy()
+                self._bg_fade = None
+            else:
+                start = self._bg_live_rgb.copy()
+                hsv_start, hsv_delta = background_fade.path(start, target)
+                self._bg_fade = {"start": start, "hsv_start": hsv_start,
+                                 "hsv_delta": hsv_delta, "elapsed": 0.0,
+                                 "duration": float(duration)}
+        self._refresh_bg_render_state()
+
     def _advance_bg_fade(self):
-        """Ease the live background color toward its target over the
-        virtual's transition length (time constant transition_time / 3, so
-        the fade visually completes in about one transition). CALLER HOLDS
-        self.lock (runs inside _render). Retargets mid-fade continue from
-        the current live color — no snap."""
-        if self._bg_live_rgb is None:
+        """Walk the live background one frame along its wheel path.
+        CALLER HOLDS self.lock (runs inside _render)."""
+        fade = self._bg_fade
+        if fade is None or self._bg_live_rgb is None:
             return
-        delta = self._bg_target_rgb - self._bg_live_rgb
-        if not np.abs(delta).max() > 0.5:
-            if (self._bg_live_rgb != self._bg_target_rgb).any():
-                self._bg_live_rgb = self._bg_target_rgb.copy()
-                self._refresh_bg_render_state()
-            return
-        duration = 0.5
-        virtual = self._virtual
-        if virtual is not None:
-            try:
-                duration = float(
-                    (virtual._config or {}).get("transition_time", 0.5)
-                )
-            except Exception:
-                duration = 0.5
-        duration = max(duration, 0.05)
-        # np.exp, NOT math.exp: the registry's module scan imports the
-        # ledfx.effects.math SUBMODULE, which rebinds this module's global
-        # `math` name (package attribute == __init__ global) and turns
-        # math.exp into an AttributeError that kills the virtual thread.
-        alpha = 1.0 - float(np.exp(-3.0 * self.passed / duration))
-        self._bg_live_rgb = self._bg_live_rgb + delta * alpha
+        fade["elapsed"] += self.passed
+        t = fade["elapsed"] / fade["duration"]
+        if t >= 1.0:
+            self._bg_live_rgb = self._bg_target_render.copy()
+            self._bg_fade = None
+        else:
+            self._bg_live_rgb = background_fade.at(
+                fade["hsv_start"], fade["hsv_delta"], t)
         self._refresh_bg_render_state()
 
     def config_updated(self, config):
