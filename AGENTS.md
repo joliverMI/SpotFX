@@ -4403,6 +4403,50 @@ Four things:
   pause/resume/next/previous/fire by name; authoring excluded). Specs:
   `tests/test_show_sequence.py`, `node scripts/check_show_sequence_ui.mjs`.
 
+**SETS THAT RUN SETS, AND THE BUILDER V2 (2026-10-11, his ask: "reference
+other sets within sets ... set a bunch of default values ... and call them on
+several sets"; "the UI for building events/actions in spotfx was really good
+... the drag and drop ordering, the collapsability, the copy ability").**
+`spectra/services/show_refs.py`'s docstring is the binding statement. Four
+things:
+
+- **A `call_set` step is EXPANDED, never applied**: `show_actions.fire()`
+  replaces it with the called set's steps (`show_refs.expand`) before
+  anything runs, so it is inline in every sense — a pause inside pauses the
+  caller, room-setting steps coalesce across the boundary, a later step
+  wins. Anything that reads a set's steps to decide something (preview,
+  conflicts, problems, an arm's `lead_ms`) must read the EXPANSION, not
+  `set.actions`. Run steps carry `via` (the set names they came through)
+  and a path id (`<call id>/<step id>`, unique when a set is called twice);
+  the show log carries `via` too.
+- **A reference, not a copy; no cycles**: `show_store.put_set` refuses a
+  save that would make a set call itself (`SetReferenceCycle` → 409
+  `reason: cycle`), and `expand` refuses one at run time too (a failed step,
+  never recursion). `DELETE /api/light-show/sets/{id}` answers 409
+  `in_use` with `used_by`/`used_in_sequences` unless `?force=true`; a call
+  to a deleted set then fails by name. Sonic reads references
+  (`list_show_sets`) but adding a call is step authoring, excluded.
+- **The builders use `@dnd-kit` (a spectra/web dependency since this
+  build — a deploy needs `npm ci` there)** through
+  `spectra/web/src/lightshow/SortableList.tsx`: only the ⠿ handle drags
+  (`touch-action: none`), so a finger elsewhere still scrolls; 6 px to
+  start; keyboard sortable. Cards are collapsed by default with a one-line
+  summary (`builderOps.stepSummary`/`itemSummary`); copy/paste is a
+  localStorage clipboard shared across tabs (`builderOps` CLIP_KEY), every
+  paste regenerating ids. A new action kind's param `type` renders in
+  `StepCard.ParamField`; type `set` is the call picker, which leaves out
+  any set that would loop (`builderOps.callableSets`). The Add-a-step
+  dialog lists any catalogue `group` it does not know (e.g. Home Assistant
+  kinds) under its own heading.
+- Specs: `tests/test_show_set_references.py` (inline order, nesting,
+  pauses, coalescing, cycles, deletes, preview, arms, Sonic) and
+  `node scripts/check_light_show_builder.mjs` (via
+  `tests/test_light_show_builder.py`; collapse, a finger drag, copy/paste,
+  the cycle-free picker, the delete warning). The other Light Show UI
+  checks expand the cards first. Screenshots at 390/820:
+  `docs/evidence/lightshow-builder/`. Help: `show-builder-editing`,
+  `show-set-references`.
+
 ## HOUSE LIGHTING (`/house`) — the room's always-on resting look (phases 1–2)
 
 Plan: `/home/javi/fleet-spotfx/data/standard-lighting-plan/report.md` (his

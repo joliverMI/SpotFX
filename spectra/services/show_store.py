@@ -112,6 +112,13 @@ def put_set(new: ActionSet, *, after_id: Optional[str] = None) -> ActionSet:
                       and s.name.strip().lower() == low), None)
         if clash is not None:
             raise SetNameTaken(f"a set called {clash.name!r} already exists")
+        # A set may not call itself, directly or through other sets
+        # (spectra/services/show_refs.py is the binding statement).
+        from spectra.services import show_refs
+        cycle = show_refs.find_cycle(new.id, new.actions, lib.sets)
+        if cycle is not None:
+            raise show_refs.SetReferenceCycle(
+                show_refs.cycle_sentence(cycle, lib.sets, {new.id: new.name}))
         existing = next((i for i, s in enumerate(lib.sets) if s.id == new.id), None)
         new = new.model_copy(update={"updated_ms": now_ms()})
         if existing is None:

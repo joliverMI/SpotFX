@@ -25,20 +25,31 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiDel, apiGet, apiPost } from '../api/client';
 import HelpLink from '../help/HelpLink';
+import Icon from '../components/Icon';
 import { useToast } from '../components/Toast';
 import SonicChatPopover from '../components/SonicChatPopover';
 import SearchSelect, { type SearchOption } from '../components/forms/SearchSelect';
-import { colorCardOptions, namedOptions, sceneOptions } from '../lib/pickerOptions';
 import useIsPhone from '../lib/useIsPhone';
-import { useAmbientHueGroups, useGradient2dProfiles, useScenes, useSpotColorSets } from '../queries';
+import { useScenes, useSpotColorSets } from '../queries';
 import { ArmBoard, ArmControl } from './ArmBoard';
+import {
+  callersOf, calledIds, cloneFresh, duplicateAt, insertAt, pasteSetName, writeClip,
+  type SummaryLookups,
+} from './builderOps';
+import useShowClip from './useShowClip';
 import RunView from './RunView';
 import SequenceView from './SequenceView';
+import SortableList from './SortableList';
+import StepCard, { type PreviewLine } from './StepCard';
+import { reorder } from './sequenceOps';
 import { endShowSummary, runSummary } from './showSummary';
 import type {
-  ArmsStatus, EndShowReport, ShowAction, ShowCatalogue, ShowKind, ShowParam, ShowRun, ShowSet,
+  ArmsStatus, EndShowReport, ShowAction, ShowCatalogue, ShowKind, ShowRun, ShowSet,
   ShowStatus, ShowTargets,
 } from './types';
+
+interface PreviewRow extends PreviewLine { action_id: string; top_id?: string }
+
 
 const NEW_ID = '__new__';
 
@@ -66,14 +77,27 @@ export default function LightShowPage() {
   const [draft, setDraft] = useState<ShowSet | null>(null);
   const [dirty, setDirty] = useState(false);
   const [status, setStatus] = useState<ShowStatus | null>(null);
-  const [preview, setPreview] = useState<{ label: string; change?: string; problem?: string }[] | null>(null);
+  const [preview, setPreview] = useState<PreviewRow[] | null>(null);
   const [lastRun, setLastRun] = useState<ShowRun | null>(null);
   const [busy, setBusy] = useState(false);
   const [arms, setArms] = useState<ArmsStatus | null>(null);
+  /** which steps are open, by step id (collapsed by default, like the
+   * legacy editor; a step just added or pasted opens) */
+  const [openSteps, setOpenSteps] = useState<Set<string>>(new Set());
+  const clip = useShowClip();
+  const scenes = useScenes().data ?? [];
+  const colorSets = useSpotColorSets().data ?? [];
   const reloadArms = useCallback(
     () => void apiGet<ArmsStatus>('/light-show/arms').then(setArms).catch(() => undefined), []);
 
   const kinds = useMemo(() => new Map((catalogue?.kinds ?? []).map((k) => [k.kind, k])), [catalogue]);
+  const lookups: SummaryLookups = useMemo(() => ({
+    sets: new Map(sets.filter((s) => s.id).map((s) => [s.id as string, s.name])),
+    scenes: new Map(scenes.map((s) => [s.id, s.name])),
+    colorSets: new Map(colorSets.map((c) => [c.id, c.name])),
+    fixtures: new Map((targets?.fixtures ?? []).map((f) => [f.id, f.name])),
+    houseModes: new Map((catalogue?.house_modes ?? []).map((m) => [m.id, m.name])),
+  }), [sets, scenes, colorSets, targets, catalogue]);
 
   const reloadSets = useCallback(async () => {
     const r = await apiGet<{ sets: ShowSet[] }>('/light-show/sets');
@@ -123,10 +147,29 @@ export default function LightShowPage() {
     setPreview(null);
   };
 
+  const openStep = (...ids: (string | undefined)[]) => setOpenSteps((o) => {
+    const n = new Set(o);
+    ids.forEach((id) => { if (id) n.add(id); });
+    return n;
+  });
+
+  /** Choose a set in the editor (from the list, or a "Run another set"
+   * step's ↗ / a sequence item's ↗) — unsaved edits are asked about first. */
+  const chooseSet = (id: string | null) => {
+    if (id === selected) return true;
+    if (dirty && !window.confirm('Discard unsaved changes to this set?')) return false;
+    setSelected(id);
+    return true;
+  };
+  const openSetFromElsewhere = (id: string) => {
+    if (chooseSet(id)) setMode('build');
+  };
+
   const save = async (): Promise<ShowSet | null> => {
     if (!draft) return null;
     try {
-      const saved = await apiPost<ShowSet>('/light-show/sets', draft);
+      const { problems: _p, conflicts: _c, calls: _ca, used_by: _u, used_in_sequences: _q, ...body } = draft;
+      const saved = await apiPost<ShowSet>('/light-show/sets', body);
       await reloadSets();
       setSelected(saved.id ?? null);
       setDirty(false);
@@ -138,31 +181,54 @@ export default function LightShowPage() {
     }
   };
 
-  /** "Duplicate" (the Admiral, 2026-10-08): an identical, independent copy
-   * of a SAVED set, named "<name> copy" (uniqued if that's taken too),
-   * saved right after the original (`after_id`) and selected so it's
-   * immediately editable — never a local unsaved draft the way "+ New"
-   * is, since "right after the original" is a property of the saved
-   * list order. */
-  const duplicate = async () => {
-    if (!draft?.id) return;
-    const existingNames = new Set(sets.map((s) => s.name.trim().toLowerCase()));
-    let name = `${draft.name} copy`;
-    for (let n = 2; existingNames.has(name.trim().toLowerCase()); n++) name = `${draft.name} copy ${n}`;
-    const copy: ShowSet & { after_id?: string } = {
-      name, notes: draft.notes ?? '',
-      actions: draft.actions.map((a) => ({ ...a, id: newId() })),
-      after_id: draft.id,
-    };
+  /** Create a NEW saved set from steps (Duplicate, Paste as new set),
+   * placed right after `afterId` when given. */
+  const createSet = async (baseName: string, actions: ShowAction[], afterId?: string, notes = '') => {
+    const name = pasteSetName(baseName, sets.map((s) => s.name));
     try {
-      const saved = await apiPost<ShowSet>('/light-show/sets', copy);
+      const saved = await apiPost<ShowSet>('/light-show/sets', {
+        name, notes, actions: cloneFresh(actions), ...(afterId ? { after_id: afterId } : {}),
+      });
       await reloadSets();
       setSelected(saved.id ?? null);
       setDirty(false);
-      toast(`Duplicated as ${saved.name}`, 'success');
+      return saved;
     } catch (e) {
       toast(String(e), 'error');
+      return null;
     }
+  };
+
+  /** "Duplicate" (the Admiral, 2026-10-08): an identical, independent copy
+   * of a SAVED set, named "<name> copy" (uniqued if that's taken too),
+   * saved right after the original (`after_id`) and selected so it's
+   * immediately editable. */
+  const duplicate = async () => {
+    if (!draft?.id) return;
+    const saved = await createSet(`${draft.name} copy`, draft.actions, draft.id, draft.notes ?? '');
+    if (saved) toast(`Duplicated as ${saved.name}`, 'success');
+  };
+
+  const copySet = () => {
+    if (!draft) return;
+    writeClip({ kind: 'steps', steps: draft.actions, set_name: draft.name,
+      summary: `the set “${draft.name}” (${draft.actions.length} step${draft.actions.length === 1 ? '' : 's'})` });
+    toast(`Copied “${draft.name}” — paste it as a new set, or into another set`, 'success');
+  };
+
+  const pasteAsNewSet = async () => {
+    if (clip?.kind !== 'steps') return;
+    if (dirty && !window.confirm('Discard unsaved changes to this set?')) return;
+    const saved = await createSet(clip.set_name ? `${clip.set_name} copy` : 'Pasted set', clip.steps,
+      draft?.id ?? undefined);
+    if (saved) toast(`Pasted as ${saved.name}`, 'success');
+  };
+
+  const pasteSteps = (at?: number) => {
+    if (clip?.kind !== 'steps' || !draft) return;
+    const fresh = cloneFresh(clip.steps);
+    edit((d) => { d.actions = insertAt(d.actions, at ?? d.actions.length, fresh); });
+    openStep(...fresh.map((a) => a.id));
   };
 
   const fireNow = async () => {
@@ -187,14 +253,41 @@ export default function LightShowPage() {
   const doPreview = async () => {
     if (!draft?.id) return;
     if (dirty) await save();
-    const r = await apiPost<{ steps: { label: string; change?: string; problem?: string }[] }>(
-      `/light-show/sets/${draft.id}/preview`);
+    const r = await apiPost<{ steps: PreviewRow[] }>(`/light-show/sets/${draft.id}/preview`);
     setPreview(r.steps);
+    openStep(...r.steps.map((x) => x.top_id ?? x.action_id));
   };
 
+  /** A set other sets run (or a sequence uses) warns, naming them, before it
+   * goes — the server refuses an unforced delete of such a set with 409. */
   const remove = async () => {
-    if (!draft?.id || !window.confirm(`Delete the set "${draft.name}"?`)) return;
-    await apiDel(`/light-show/sets/${draft.id}`);
+    if (!draft?.id) return;
+    const callers = callersOf(draft.id, sets).map((u) => `the set “${u.name}”`);
+    const users = [...new Set([...callers, ...(draft.used_by ?? []).map((u) => `the set “${u.name}”`),
+      ...(draft.used_in_sequences ?? []).map((u) => `the sequence “${u.name}”`)])];
+    const msg = users.length
+      ? `“${draft.name}” is used by ${users.join(', ')}.\n\nDelete it anyway? Those steps will fail until you change them.`
+      : `Delete the set "${draft.name}"?`;
+    if (!window.confirm(msg)) return;
+    try {
+      await apiDel(`/light-show/sets/${draft.id}${users.length ? '?force=true' : ''}`);
+    } catch (e) {
+      // The server knows of a user this page did not (another tab's edit):
+      // it refuses with 409 and names it — ask again with its own words.
+      const text = String(e);
+      if (!users.length && text.includes('409') && window.confirm(`${text.split(': ').slice(1).join(': ')}\n\nDelete it anyway?`)) {
+        try {
+          await apiDel(`/light-show/sets/${draft.id}?force=true`);
+        } catch (e2) {
+          toast(String(e2), 'error');
+          return;
+        }
+      } else {
+        toast(text, 'error');
+        await reloadSets();
+        return;
+      }
+    }
     const s = await reloadSets();
     setSelected(s[0]?.id ?? null);
   };
@@ -222,6 +315,15 @@ export default function LightShowPage() {
   };
 
   const gate = status?.output.refusal ?? status?.output.standdown ?? null;
+  const previewByStep = useMemo(() => {
+    const m = new Map<string, PreviewRow[]>();
+    for (const row of preview ?? []) {
+      const key = row.top_id ?? row.action_id;
+      m.set(key, [...(m.get(key) ?? []), row]);
+    }
+    return m;
+  }, [preview]);
+  const allOpen = Boolean(draft && draft.actions.length > 0 && draft.actions.every((a) => a.id && openSteps.has(a.id)));
 
   return (
     <div className="light-show-page">
@@ -254,7 +356,7 @@ export default function LightShowPage() {
       )}
 
       {mode === 'sequence' ? (
-        <SequenceView sets={sets} toast={toast} />
+        <SequenceView sets={sets} toast={toast} onOpenSet={openSetFromElsewhere} />
       ) : mode === 'run' ? (
         <RunView sets={sets} status={status} arms={arms} onChangeArms={reloadArms}
           onEndShowDone={() => void reloadSets()} toast={toast} />
@@ -269,25 +371,40 @@ export default function LightShowPage() {
           <div className="light-show-sets-head">
             <strong>Sets</strong> <HelpLink topic="show-sets" />
             <button onClick={() => {
+              if (dirty && !window.confirm('Discard unsaved changes to this set?')) return;
               setSelected(NEW_ID);
               setDraft({ name: 'New set', actions: [] });
               setDirty(true);
             }}>+ New</button>
           </div>
+          {clip?.kind === 'steps' && (
+            <button type="button" className="light-show-paste-set" onClick={() => void pasteAsNewSet()}
+              title={`Paste ${clip.summary} as a new set`}>
+              <Icon name="paste" size={14} /> Paste as new set
+            </button>
+          )}
           {sets.length === 0 && <p className="muted">No sets yet.</p>}
           <ul>
-            {sets.map((s) => (
-              <li key={s.id}>
-                <button className={s.id === selected ? 'active' : ''} onClick={() => {
-                  if (dirty && !window.confirm('Discard unsaved changes to this set?')) return;
-                  setSelected(s.id ?? null);
-                }}>
-                  {s.name}
-                  {(s.problems?.length ?? 0) > 0 && <span title={s.problems?.join('\n')}> ⚠</span>}
-                  <span className="muted"> · {s.actions.length}</span>
-                </button>
-              </li>
-            ))}
+            {sets.map((s) => {
+              const used = (s.used_by?.length ?? 0) + (s.used_in_sequences?.length ?? 0);
+              return (
+                <li key={s.id}>
+                  <button className={s.id === selected ? 'active' : ''} onClick={() => chooseSet(s.id ?? null)}>
+                    {s.name}
+                    {(s.problems?.length ?? 0) > 0 && <span title={s.problems?.join('\n')}> ⚠</span>}
+                    <span className="muted"> · {s.actions.length}</span>
+                    {(s.calls?.length ?? 0) > 0 && (
+                      <span className="light-show-ref-badge" title={`Runs ${s.calls!.map((c) => c.name ?? 'a deleted set').join(', ')}`}>
+                        <Icon name="callSet" size={12} />{s.calls!.length}
+                      </span>
+                    )}
+                    {used > 0 && (
+                      <span className="light-show-used-badge" title={usedByTitle(s)}>used by {used}</span>
+                    )}
+                  </button>
+                </li>
+              );
+            })}
           </ul>
         </div>
 
@@ -307,11 +424,16 @@ export default function LightShowPage() {
                   <button disabled={dirty} onClick={() => void duplicate()}
                     title={dirty ? 'Save this set before duplicating it'
                       : 'An independent copy, named "<name> copy", right after this one'}>
-                    ⧉ Duplicate
+                    <Icon name="duplicate" size={14} /> Duplicate
                   </button>
                 )}
+                <button onClick={copySet} disabled={draft.actions.length === 0}
+                  title="Copy this whole set — paste it as a new set, or its steps into another set">
+                  <Icon name="copy" size={14} /> Copy set
+                </button>
                 {draft.id && <button className="danger" onClick={() => void remove()}>Delete</button>}
               </div>
+              <SetReferences draft={draft} sets={sets} onOpenSet={(id) => chooseSet(id)} />
               <ArmControl setId={draft.id} disabled={busy || dirty} onArmed={reloadArms} toast={toast} />
               {dirty && <p className="muted">Save the set before arming it.</p>}
               {(draft.problems?.length ?? 0) > 0 && !dirty && (
@@ -320,28 +442,58 @@ export default function LightShowPage() {
               {(draft.conflicts?.length ?? 0) > 0 && !dirty && (
                 <ul className="light-show-conflicts">{draft.conflicts!.map((p) => <li key={p}>↯ {p}</li>)}</ul>
               )}
-              <ol className="light-show-steps">
-                {draft.actions.map((a, i) => (
-                  <StepEditor key={a.id ?? i} action={a} index={i} count={draft.actions.length}
-                    kind={kinds.get(a.kind)} catalogue={catalogue} targets={targets}
+              {draft.actions.length > 0 && (
+                <div className="light-show-list-tools">
+                  <span className="muted">{draft.actions.length} step{draft.actions.length === 1 ? '' : 's'}</span>
+                  <button type="button" onClick={() => setOpenSteps(allOpen ? new Set()
+                    : new Set(draft.actions.map((a) => a.id as string)))}>
+                    {allOpen ? 'Collapse all' : 'Expand all'}
+                  </button>
+                  <HelpLink topic="show-builder-editing" />
+                </div>
+              )}
+              <SortableList className="light-show-steps" items={draft.actions}
+                getId={(a, i) => a.id ?? `i${i}`}
+                getLabel={(a, i) => `step ${i + 1}, ${kinds.get(a.kind)?.label ?? a.kind}`}
+                onReorder={(from, to) => edit((d) => { d.actions = reorder(d.actions, from, to); })}
+                renderItem={(a, i, row) => (
+                  <StepCard key={a.id ?? i} action={a} index={i}
+                    kind={kinds.get(a.kind)} kinds={kinds} catalogue={catalogue} targets={targets}
+                    sets={sets} currentSetId={draft.id} lookups={lookups}
+                    open={Boolean(a.id && openSteps.has(a.id))}
+                    onToggle={() => setOpenSteps((o) => {
+                      const n = new Set(o);
+                      if (a.id && n.has(a.id)) n.delete(a.id); else if (a.id) n.add(a.id);
+                      return n;
+                    })}
                     onChange={(next) => edit((d) => { d.actions[i] = next; })}
-                    onMove={(delta) => edit((d) => {
-                      const j = i + delta;
-                      if (j < 0 || j >= d.actions.length) return;
-                      [d.actions[i], d.actions[j]] = [d.actions[j], d.actions[i]];
-                    })}
-                    onReorderFrom={(from) => edit((d) => {
-                      if (from < 0 || from >= d.actions.length || from === i) return;
-                      const [moved] = d.actions.splice(from, 1);
-                      d.actions.splice(i, 0, moved);
-                    })}
+                    onDuplicate={() => {
+                      const dup = duplicateAt(draft.actions, i);
+                      edit((d) => { d.actions = dup; });
+                      openStep(dup[i + 1].id);
+                    }}
+                    onCopy={() => {
+                      writeClip({ kind: 'steps', steps: [a],
+                        summary: `the step “${kinds.get(a.kind)?.label ?? a.kind}”` });
+                      toast('Step copied — paste it into any set', 'success');
+                    }}
                     onDelete={() => edit((d) => { d.actions.splice(i, 1); })}
-                    previewLine={preview?.[i]} />
-                ))}
-              </ol>
-              <AddStep catalogue={catalogue} onAdd={(k) => edit((d) => {
-                d.actions.push({ id: newId(), kind: k.kind, params: defaultsFor(k), enabled: true });
-              })} />
+                    onOpenSet={(id) => chooseSet(id)}
+                    previewLines={a.id ? previewByStep.get(a.id) : undefined}
+                    row={row} />
+                )} />
+              <div className="light-show-add-row">
+                <AddStep catalogue={catalogue} onAdd={(k) => {
+                  const id = newId();
+                  edit((d) => { d.actions.push({ id, kind: k.kind, params: defaultsFor(k), enabled: true }); });
+                  openStep(id);
+                }} />
+                {clip?.kind === 'steps' && (
+                  <button type="button" onClick={() => pasteSteps()} title={`Paste ${clip.summary} at the end`}>
+                    <Icon name="paste" size={14} /> Paste {clip.steps.length} step{clip.steps.length === 1 ? '' : 's'}
+                  </button>
+                )}
+              </div>
             </>
           )}
         </div>
@@ -351,6 +503,44 @@ export default function LightShowPage() {
       </>
       )}
       <SonicChatPopover helpTopic="sonic-light-show" />
+    </div>
+  );
+}
+
+function usedByTitle(s: ShowSet): string {
+  const parts = [...(s.used_by ?? []).map((u) => u.name), ...(s.used_in_sequences ?? []).map((u) => `${u.name} (sequence)`)];
+  return `Used by ${parts.join(', ')}`;
+}
+
+/** "Runs: …" and "Used by: …" under the set's name — each name opens that
+ * set (spectra/services/show_refs.py: a reference, never a copy, so an edit
+ * here changes every set listed under Used by). */
+function SetReferences({ draft, sets, onOpenSet }: {
+  draft: ShowSet; sets: ShowSet[]; onOpenSet: (id: string) => void;
+}) {
+  const calls = calledIds(draft.actions).map((id) => ({ id, name: sets.find((s) => s.id === id)?.name ?? null }));
+  const usedBy = draft.id ? callersOf(draft.id, sets).map((s) => ({ id: s.id as string, name: s.name })) : [];
+  const seqs = draft.used_in_sequences ?? [];
+  if (!calls.length && !usedBy.length && !seqs.length) return null;
+  return (
+    <div className="light-show-refs">
+      {calls.length > 0 && (
+        <div><span className="muted">Runs</span>{' '}
+          {calls.map((c) => c.name
+            ? <button key={c.id} type="button" className="linklike" onClick={() => onOpenSet(c.id)}>{c.name}</button>
+            : <span key={c.id} className="light-show-problems">a deleted set</span>)}
+          <HelpLink topic="show-set-references" />
+        </div>
+      )}
+      {(usedBy.length > 0 || seqs.length > 0) && (
+        <div><span className="muted">Used by {usedBy.length + seqs.length}:</span>{' '}
+          {usedBy.map((u) => (
+            <button key={u.id} type="button" className="linklike" onClick={() => onOpenSet(u.id)}>{u.name}</button>
+          ))}
+          {seqs.map((q) => <span key={q.id} className="light-show-seq-ref">{q.name} (sequence)</span>)}
+          <span className="muted"> — editing this set changes {usedBy.length + seqs.length === 1 ? 'it' : 'all of them'}</span>
+        </div>
+      )}
     </div>
   );
 }
@@ -427,7 +617,9 @@ function RunReport({ run }: { run: ShowRun }) {
       <ol>
         {run.steps.map((s) => (
           <li key={s.action_id} className={`show-step-${s.status}`}>
-            <span className="show-step-status">{s.status}</span> {s.label}
+            <span className="show-step-status">{s.status}</span>{' '}
+            {s.via && s.via.length > 0 && <span className="muted">{s.via.join(' › ')} › </span>}
+            {s.label}
             {s.detail && <span className="muted"> — {s.detail}</span>}
           </li>
         ))}
@@ -463,9 +655,14 @@ function AddStep({ catalogue, onAdd }: { catalogue: ShowCatalogue; onAdd: (k: Sh
 function AddStepDialog({ catalogue, onAdd, onClose }: {
   catalogue: ShowCatalogue; onAdd: (k: ShowKind) => void; onClose: () => void;
 }) {
-  const groups: [string, string][] = [
+  const named: [string, string][] = [
     ['setting', 'Settings'], ['device', 'Devices'], ['effect', 'Room effects'], ['control', 'Control'],
   ];
+  // a group a later action kind declares (e.g. Home Assistant) lists too
+  const extra = [...new Set(catalogue.kinds.map((k) => k.group))]
+    .filter((g) => !named.some(([n]) => n === g))
+    .map((g): [string, string] => [g, g.charAt(0).toUpperCase() + g.slice(1).replace(/_/g, ' ')]);
+  const groups = [...named, ...extra];
   const options: SearchOption[] = groups.flatMap(([g, label]) =>
     catalogue.kinds.filter((k) => k.group === g).map((k) => ({
       value: k.kind, label: k.label, group: label, keywords: k.help,
@@ -493,212 +690,3 @@ function AddStepDialog({ catalogue, onAdd, onClose }: {
   );
 }
 
-function StepEditor({ action, index, count, kind, catalogue, targets, onChange, onMove, onReorderFrom, onDelete, previewLine }: {
-  action: ShowAction; index: number; count: number; kind: ShowKind | undefined;
-  catalogue: ShowCatalogue; targets: ShowTargets | null;
-  onChange: (a: ShowAction) => void; onMove: (d: number) => void;
-  onReorderFrom: (fromIndex: number) => void; onDelete: () => void;
-  previewLine?: { change?: string; problem?: string };
-}) {
-  const [dragOver, setDragOver] = useState(false);
-  const set = (name: string, value: unknown) => {
-    const params = { ...action.params };
-    if (value === undefined || value === '' || value === null) delete params[name];
-    else params[name] = value;
-    onChange({ ...action, params });
-  };
-  return (
-    <li className={`light-show-step${action.enabled === false ? ' off' : ''}${dragOver ? ' drag-over' : ''}`}
-      onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-      onDragLeave={() => setDragOver(false)}
-      onDrop={(e) => {
-        e.preventDefault();
-        setDragOver(false);
-        const from = Number(e.dataTransfer.getData('text/plain'));
-        if (!Number.isNaN(from)) onReorderFrom(from);
-      }}>
-      <div className="light-show-step-head">
-        <span className="light-show-step-handle" draggable aria-label="Drag to reorder"
-          title="Drag to reorder"
-          onDragStart={(e) => { e.dataTransfer.setData('text/plain', String(index)); }}>
-          ⠿
-        </span>
-        <label title="Switch this step off without deleting it">
-          <input type="checkbox" checked={action.enabled !== false}
-            onChange={(e) => onChange({ ...action, enabled: e.target.checked })} />
-          <b>{kind?.label ?? action.kind}</b>
-        </label>
-        {kind && <HelpLink topic={kind.help_topic} />}
-        <span className="light-show-step-tools">
-          <button disabled={index === 0} onClick={() => onMove(-1)} aria-label="Move up">↑</button>
-          <button disabled={index === count - 1} onClick={() => onMove(1)} aria-label="Move down">↓</button>
-          <button onClick={onDelete} aria-label="Remove step">✕</button>
-        </span>
-      </div>
-      {!kind && <p className="light-show-problems">Unknown action kind “{action.kind}”.</p>}
-      {kind && <p className="muted light-show-step-help">{kind.help}</p>}
-      {kind && (
-        <div className="light-show-params">
-          {kind.params.map((p) => (
-            <ParamField key={p.name} p={p} value={action.params[p.name]} onChange={(v) => set(p.name, v)}
-              catalogue={catalogue} targets={targets} action={action} />
-          ))}
-        </div>
-      )}
-      {previewLine && (
-        <p className={previewLine.problem ? 'light-show-problems' : 'light-show-preview'}>
-          {previewLine.problem ? `⚠ ${previewLine.problem}` : `→ ${previewLine.change}`}
-        </p>
-      )}
-    </li>
-  );
-}
-
-function Chips({ options, value, onChange }: {
-  options: { id: string; name: string }[]; value: string[]; onChange: (v: string[]) => void;
-}) {
-  return (
-    <span className="light-show-chips">
-      {options.map((o) => {
-        const on = value.includes(o.id);
-        return (
-          <button key={o.id} className={on ? 'active' : ''} type="button"
-            onClick={() => onChange(on ? value.filter((x) => x !== o.id) : [...value, o.id])}>
-            {o.name}
-          </button>
-        );
-      })}
-    </span>
-  );
-}
-
-/** A long multi-pick (scenes, colour sets): the chosen ones as removable
- * chips, plus the same searchable picker to add another. */
-function SearchChips({ options, value, onChange, placeholder }: {
-  options: SearchOption[]; value: string[]; onChange: (v: string[]) => void; placeholder: string;
-}) {
-  const byId = new Map(options.map((o) => [o.value, o]));
-  const rest = options.filter((o) => !value.includes(o.value));
-  return (
-    <span className="light-show-chips">
-      {value.map((id) => (
-        <button key={id} className="active" type="button" title="Remove"
-          onClick={() => onChange(value.filter((x) => x !== id))}>
-          {byId.get(id)?.label ?? id} ✕
-        </button>
-      ))}
-      <SearchSelect value="" options={rest} placeholder={placeholder} allowEmpty={false} width={220}
-        onChange={(v) => { if (v && !value.includes(v)) onChange([...value, v]); }} />
-    </span>
-  );
-}
-
-function ParamField({ p, value, onChange, catalogue, targets, action }: {
-  p: ShowParam; value: unknown; onChange: (v: unknown) => void;
-  catalogue: ShowCatalogue; targets: ShowTargets | null; action: ShowAction;
-}) {
-  const scenes = useScenes().data ?? [];
-  const colorSets = useSpotColorSets().data ?? [];
-  const gradients = useGradient2dProfiles().data ?? {};
-  const hueAreas = useAmbientHueGroups().data?.groups ?? [];
-  const pick = (options: SearchOption[], placeholder = '— choose —') => wrap(
-    <SearchSelect value={String(value ?? '')} options={options} placeholder={placeholder}
-      width={240} onChange={(v) => onChange(v || undefined)} />);
-  const label = <span className="light-show-param-label" title={p.help}>{p.label}{p.unit ? ` (${p.unit})` : ''}</span>;
-  const wrap = (input: JSX.Element) => <label className="light-show-param">{label}{input}</label>;
-
-  switch (p.type) {
-    case 'bool':
-      return wrap(<input type="checkbox" checked={Boolean(value)} onChange={(e) => onChange(e.target.checked)} />);
-    case 'enum':
-      return wrap(
-        <select value={String(value ?? '')} onChange={(e) => onChange(e.target.value)}>
-          {(p.choices ?? []).map((c) => <option key={c} value={c}>{c.replace(/_/g, ' ')}</option>)}
-        </select>);
-    case 'number':
-      return wrap(<input type="number" value={value === undefined ? '' : String(value)}
-        placeholder={p.default !== null && p.default !== undefined ? String(p.default) : ''}
-        min={p.min ?? undefined} max={p.max ?? undefined}
-        step={p.max !== null && p.max <= 1 ? 0.05 : 1}
-        onChange={(e) => onChange(e.target.value === '' ? undefined : Number(e.target.value))} />);
-    case 'color':
-      return wrap(
-        <span>
-          <input type="color" value={typeof value === 'string' ? value : '#ffffff'}
-            onChange={(e) => onChange(e.target.value)} />
-          {value ? <button type="button" onClick={() => onChange(undefined)}>clear</button>
-            : <span className="muted"> default</span>}
-        </span>);
-    case 'scene':
-      return pick(sceneOptions(scenes), '— pick scene —');
-    case 'scenes':
-      return wrap(<SearchChips options={sceneOptions(scenes)} placeholder="+ add a scene…"
-        value={(value as string[]) ?? []} onChange={onChange} />);
-    case 'color_set':
-      return pick(colorCardOptions(colorSets), '— pick colour set —');
-    case 'color_sets':
-      return wrap(<SearchChips options={colorCardOptions(colorSets)} placeholder="+ add a colour set…"
-        value={(value as string[]) ?? []} onChange={onChange} />);
-    case 'gradient':
-      return pick(namedOptions(Object.entries(gradients).map(([id, g]) => (
-        { id, name: (g as { name?: string }).name ?? id }))), '— pick gradient —');
-    case 'hue_areas':
-      return wrap(<Chips options={hueAreas} value={(value as string[]) ?? []} onChange={onChange} />);
-    case 'house_mode':
-      return pick(namedOptions(catalogue.house_modes), '— pick house mode —');
-    case 'target': {
-      const t = (value as { kind: string; id: string | null }) ?? { kind: 'everything', id: null };
-      return wrap(
-        <span className="light-show-target">
-          <select value={t.kind} onChange={(e) => onChange({ kind: e.target.value, id: null })}>
-            <option value="everything">Everything</option>
-            <option value="category">Category</option>
-            <option value="fixture">Fixture</option>
-          </select>
-          {t.kind === 'category' && (
-            <SearchSelect value={t.id ?? ''} width={200} placeholder="— pick category —"
-              options={namedOptions((targets?.categories ?? []).map((c) => ({ id: c.name, name: c.name })))}
-              onChange={(v) => onChange({ kind: 'category', id: v || null })} />
-          )}
-          {t.kind === 'fixture' && (
-            <SearchSelect value={t.id ?? ''} width={220} placeholder="— pick fixture —"
-              options={(targets?.fixtures ?? []).map((f) => ({
-                value: f.id, label: `${f.name}${f.held_by_ambient ? ' (held by Hue Hold)' : ''}`,
-                keywords: f.type,
-              }))}
-              onChange={(v) => onChange({ kind: 'fixture', id: v || null })} />
-          )}
-          {targets && !targets.live && <span className="muted"> live stack down — fixtures unknown</span>}
-        </span>);
-    }
-    case 'room_effect':
-      return pick(catalogue.room_effects.map((e) => ({
-        value: e.name, label: `${e.name} (${e.kind.replace(/_/g, ' ')})`,
-      })), '— pick room effect —');
-    case 'overrides': {
-      const props = catalogue.room_effect_schema?.properties ?? {};
-      const numeric = Object.entries(props).filter(([, s]) => s.type === 'number' || s.type === 'integer');
-      const cur = (value as Record<string, number>) ?? {};
-      if (!action.params.effect || numeric.length === 0) return null;
-      return (
-        <div className="light-show-param light-show-overrides">
-          {label}
-          {numeric.map(([name, s]) => (
-            <label key={name}>
-              {name}
-              <input type="number" placeholder="effect's own" value={cur[name] ?? ''}
-                min={s.minimum} max={s.maximum} step={0.05}
-                onChange={(e) => {
-                  const next = { ...cur };
-                  if (e.target.value === '') delete next[name];
-                  else next[name] = Number(e.target.value);
-                  onChange(next);
-                }} />
-            </label>
-          ))}
-        </div>);
-    }
-    default:
-      return wrap(<input type="text" value={String(value ?? '')} onChange={(e) => onChange(e.target.value || undefined)} />);
-  }
-}

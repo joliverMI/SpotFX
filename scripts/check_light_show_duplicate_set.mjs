@@ -192,13 +192,15 @@ const editorHeadButtons = () => [...container.querySelectorAll('.light-show-edit
 const duplicateBtn = () => editorHeadButtons().find((b) => b.textContent.includes('Duplicate'));
 const nameInput = () => container.querySelector('.light-show-editor-head input[type="text"]');
 
-console.log('ONE — the editor head shows "⧉ Duplicate" next to Save / Preview changes / Delete');
+console.log('ONE — the editor head shows "Duplicate" (an SVG icon + word) right after Preview changes');
 await selectSet('Dinner Party');
 const headLabels = editorHeadButtons().map((b) => b.textContent.trim());
-ok(headLabels.includes('⧉ Duplicate'), `Duplicate sits in the editor head row (${headLabels.join(', ')})`);
-const dupIdx = headLabels.indexOf('⧉ Duplicate');
-ok(headLabels[dupIdx - 1] === 'Preview changes' && headLabels[dupIdx + 1] === 'Delete',
-  'between Preview changes and Delete, the row\'s own established grammar');
+ok(headLabels.includes('Duplicate') && Boolean(duplicateBtn()?.querySelector('svg')),
+  `Duplicate sits in the editor head row with its icon (${headLabels.join(', ')})`);
+const dupIdx = headLabels.indexOf('Duplicate');
+ok(headLabels[dupIdx - 1] === 'Preview changes' && headLabels[dupIdx + 1] === 'Copy set'
+  && headLabels[dupIdx + 2] === 'Delete',
+  'between Preview changes and Copy set / Delete, the row\'s own established grammar');
 
 console.log('TWO — clicking it POSTs a fresh, independent copy with after_id set');
 await click(duplicateBtn());

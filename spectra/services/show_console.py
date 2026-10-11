@@ -27,6 +27,13 @@ ordering and arming items, building a song list — is the Sequence tab's
 Build view, deliberately excluded here for the same reason editing a set's
 steps is.
 
+SETS THAT CALL SETS (2026-10-11, spectra/services/show_refs.py): a set's
+"Run another set" steps run the called set's steps inline. Sonic READS the
+references (`list_show_sets`: `calls`, `used_by`, `used_in_sequences`,
+`runs_steps`) and firing/arming honours them with no special case — the
+executor expands them. ADDING or removing a call is editing a set's steps,
+excluded below with the rest of step authoring.
+
 WHAT IS DELIBERATELY EXCLUDED: editing an EXISTING set's own steps (that is
 a drag-and-drop authoring act on the Build view, not a settable field —
 the same line `room_effect_console.py` draws around starting/stopping an
@@ -140,11 +147,22 @@ def _op_show_status() -> dict:
 
 
 def _op_list_show_sets() -> dict:
+    from spectra.services import show_refs
+    sets = show_store.list_sets()
+    sequences = show_store.list_sequences()
     out = []
-    for s in show_store.list_sets():
+    for s in sets:
+        refs = show_refs.references(s.id, sets, sequences)
         out.append({"id": s.id, "name": s.name, "steps": len(s.actions),
                     "kinds": [a.kind for a in s.actions],
-                    "problems": show_actions.validate_set(s.actions)})
+                    # what runs when it fires: a "Run another set" step is
+                    # listed as the called set's own steps
+                    "runs_steps": len([e for e in show_refs.expand(s.actions, sets, root_id=s.id)
+                                       if not e.problem]),
+                    "calls": [c["name"] or c["id"] for c in refs["calls"]],
+                    "used_by": [u["name"] for u in refs["used_by"]],
+                    "used_in_sequences": [u["name"] for u in refs["used_in_sequences"]],
+                    "problems": show_actions.validate_set(s.actions, set_id=s.id)})
     return {"sets": out}
 
 
@@ -171,8 +189,10 @@ async def _op_fire_show_set(set_name: str) -> dict:
         run = await show_actions.fire_set(s.id, source="sonic")
     except show_actions.ActionError as exc:
         return {"status": "rejected", "reason": str(exc)}
+    called = sorted({v for st in run.get("steps", []) for v in (st.get("via") or [])})
+    via = f" (including the steps of {', '.join(repr(c) for c in called)})" if called else ""
     return {"status": "applied", "run": run,
-            "summary": f"fired '{s.name}'"}
+            "summary": f"fired '{s.name}'{via}"}
 
 
 async def _op_arm_show_set(set_name: str, on: str = "scene_change", repeat: bool = False,
@@ -522,7 +542,8 @@ OPERATIONS: dict[str, SonicOperation] = {
         handler=_op_show_status),
     "list_show_sets": SonicOperation(
         name="list_show_sets", domain="show", kind="read",
-        summary="His named Light Show sets, with their step count and kinds.",
+        summary="His named Light Show sets, with their step count and kinds, "
+                "which other sets each one runs (calls) and which run it (used_by).",
         instructions="Use this to find the exact name/id to pass to "
                     "fire_show_set/arm_show_set — never guess a name a "
                     "user approximated; if it doesn't exactly match one "
