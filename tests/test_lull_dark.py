@@ -104,7 +104,10 @@ def test_untold_writes_keep_each_effects_old_progress_fraction(legacy):
 
 
 def test_the_three_effects_and_only_them_are_opted_in():
-    assert device_model.LULL_DARK_EFFECTS == {"blackhole", "squiggles", "pulse"}
+    """His three, plus every strip phase member (fx/effects/strip_phase.py
+    reads the same rule — strip phase plan phase 1, 2026-10-11)."""
+    assert device_model.LULL_DARK_EFFECTS == (
+        {"blackhole", "squiggles", "pulse"} | device_model.STRIP_PHASE_EFFECTS)
     assert device_model.LULL_DARK_EFFECTS <= device_model.PHASE_EFFECTS
     for mod, cls in ((bh, "Blackhole2d"), (sq, "Squiggles2d"),
                      (pulse_mod, None)):

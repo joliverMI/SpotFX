@@ -138,9 +138,11 @@ check(set(sc.SETTINGS_REGISTRY) == {
     "drop_switch_stale_margin_s", "drop_switch_drops_in_a_row",
     # 2026-10-08, the fireworks melds' two tunables:
     "drop_switch_swallow_delay_s", "drop_switch_hit_threshold",
+    # 2026-10-11, the strip phase layer's master (strip phase plan):
+    "strip_phase_strength",
 }, "registry is the deliberate allowlist (eight room keys + the four "
    "analysed-transition knobs + the five 2026-10-06 widening keys + "
-   "drop_floor + lull_dark_max_s + the four drop-switch tunables + the two fireworks-meld tunables)")
+   "drop_floor + lull_dark_max_s + the four drop-switch tunables + the two fireworks-meld tunables + strip_phase_strength)")
 check(sc.SETTINGS_REGISTRY["ambient_enabled"].kind == "bool"
       and sc.SETTINGS_REGISTRY["ambient_on_music_pause"].kind == "bool",
       "the ambient toggle is binary to Sonic too — no mode string to mis-say")

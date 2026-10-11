@@ -2020,3 +2020,30 @@ against that commit.
     them changes. Evidence: `scripts/check_sauron.py` (run by
     `tests/test_sauron.py`), `scripts/render_sauron.py`. Unverified
     against his live room.
+68. `effects/strip_phase.py` (NEW, SpotFX-authored) + `effects/__init__.py`
+    (`Effect._strip_phase`, `Effect.PASSIVE_CONFIG_KEYS`, three guarded
+    call sites in `_apply_config`/`_render`/`get_pixels`) + `effects/
+    melt.py` / `effects/power.py` (join it) + `effects/lull_dark.py`
+    (`punch_envelope`): THE STRIP PHASE LAYER (2026-10-11, strip phase
+    plan phase 1, revision 3 — the Admiral: "increase in brightness and
+    activity during charge, dim and relax into black for most lulls, and
+    big explosion of brightness and activity on the [drop]" and "i don't
+    want to raise the white in the charge, or on the drop"). One mixin a
+    1-D effect joins by putting `StripPhase` first in its bases: it reads
+    the phase keys SpotFX already sends (plus `strip_phase_strength` and
+    the self-resetting `flare_punch` poke) and, in the output stage after
+    background and brightness and before blur, applies a hue-kept colour
+    gain, a set-colour fill under the strip, the drop's set-colour
+    shockwave painted over it, the lull's fade at the shared dark point
+    (`lull_dark.lull_timing`), the flare punch (`lull_dark.
+    punch_envelope`) and a white guard on charge and drop; its activity
+    scales Melt's clock step. NON-MEMBERS ARE BYTE-IDENTICAL: all three
+    base call sites are guarded by the class flag `_strip_phase` (False on
+    Effect) and the passive-key branch by an empty frozenset. The passive
+    branch exists because a phase ramp tweens `phase_progress` every
+    frame, and running a gradient effect's whole config_updated chain
+    every frame resets its audio filters and snaps its gradient roll; a
+    write carrying ONLY layer-owned keys merges and calls
+    `_passive_config_updated` instead. Evidence: `tests/
+    test_strip_phase.py`, `scripts/check_strip_phase.py`. Unverified
+    against his live room.

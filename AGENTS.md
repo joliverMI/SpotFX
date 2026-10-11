@@ -9458,6 +9458,63 @@ half-progress point. Three things:
   `tests/test_lull_dark.py` (rule, arm write, and all three effects on the
   real pipeline through a 20 s lull after a completed charge).
 
+## THE STRIP PHASE LAYER — charge, lull and drop on the 1-D strips (`fx/effects/strip_phase.py`)
+
+2026-10-11, strip phase plan phase 1 (`/home/javi/fleet-spotfx/data/
+strip-phase-plan/report.md`, revision 3). The Admiral: brighter and busier
+on a charge, relax to black in a lull, a big explosion on the drop — and,
+binding, "i don't want to raise the white in the charge, or on the drop".
+The module docstring is the binding statement (the curves, THE ORDER of the
+output stage, HOW AN EFFECT JOINS). Six things:
+
+- **ONE LAYER, ONE LINE TO JOIN**: put `StripPhase` first in a 1-D effect's
+  bases and add it to `fx.device_model.STRIP_PHASE_EFFECTS` (unioned into
+  PHASE/LULL_DARK/DROP_INTENSITY, so SpotFX tells it with no SpotFX change),
+  then register `strip_phase.registry_params()` in `config/
+  effect_params.json` (Sonic reaches them via `set_scene_entry_param`).
+  Members: Melt, Power. `tests/test_strip_phase.py`'s guard fails on a
+  registered 1-D effect that neither joins nor is named in
+  `STRIP_PHASE_EXCEPTIONS` (the Black Hole/Orbits/Fireworks strips join in
+  plan phases 2-3).
+- **NO ADDED WHITE, STRUCTURALLY**: a hue-kept colour gain (a pixel scales
+  whole and stops at full), a fill and a drop shockwave sampled from the
+  effect's own gradient (the shockwave paints OVER, brighter-wins, never
+  adds hues), and a WHITE GUARD on charge and drop that pulls any pixel
+  back to the set's own grey share at its hue — and does the device's
+  per-channel 255 clip itself, hue-kept, since that clip is what whitens
+  an over-full colour. Proof measures whiteness with code independent of
+  the layer and carries a red control.
+- **NON-MEMBERS ARE BYTE-IDENTICAL**: the base `Effect` gained three call
+  sites (`_render`, `get_pixels`, `_apply_config`), each guarded by the
+  class flag `_strip_phase` / an empty `PASSIVE_CONFIG_KEYS`.
+  `PASSIVE_CONFIG_KEYS` exists because a phase ramp tweens
+  `phase_progress` every frame and a gradient effect's full config_updated
+  chain resets its audio filters and snaps its gradient roll; a write
+  carrying ONLY layer-owned keys merges and calls `_passive_config_updated`.
+- **THE ROOM MASTER `strip_phase_strength`** (RoomControlState, 0..1.5,
+  Sonic `set_setting`, Scenes panel) is pushed on every strip arm write;
+  0 reproduces the strips exactly as before (proven through a whole cycle).
+- **A FLARE IN THE LULL'S DARK PUNCHES THROUGH** (his answer 5):
+  `ResponseEngine._run_kinds` collects every virtual the batch actually
+  wrote to (`_jump`/`_glide` — every write in scene_response goes through
+  them — into a ContextVar) and, while a lull is armed, pokes the strip
+  members the lull reached (`_lull_vids`) with `flare_punch` +
+  `flare_punch_hold_s`. The envelope is `lull_dark.punch_envelope` (one
+  definition, for the crystal's later phase 5 too). A charge/lull/drop
+  event's own band never punches (`_PUNCH_OK`, carried on a
+  PendingKindBatch). The poke key is `flare_punch`; the tunable is
+  `flare_punch_strength` — they collided once, and a collision silently
+  zeroes the strength on the poke's self-reset.
+- **HELD BACK UNDER A HOUSE MODE** (his call 4):
+  `scene_response.HOUSE_HELD_PHASE_EFFECTS` = one-colour ∪ strip members,
+  read by `_drive_phase` and `rearm_phase`.
+Proofs: `tests/test_strip_phase.py` (harness `tests/strip_phase_harness.py`:
+the real pipeline + production ResponseEngine/FacadeExecutor, fake clock
+behind `time.time_ns` too, since Melt reads it), `scripts/
+check_strip_phase.py` (the measured cycle and the stage cost: ~0.1 µs
+off-phase, ~230-245 µs a frame during a charge/drop at 560 px). Help topic
+`strip-phases`; `fx/VENDOR.md` #68.
+
 ## THE LULL HAND-OFF HOOK — how a lull is told what to leave for its drop (`fx/effects/lull_handoff.py`)
 
 2026-10-08 (fish-lull plan phase 1), lull_dark's sibling and built the same

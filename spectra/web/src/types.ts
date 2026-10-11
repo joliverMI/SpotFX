@@ -493,6 +493,10 @@ export interface RoomControlState {
    * effects (Black Hole, Squiggles, Pulse): a lull holds dark for half its
    * length, never longer than this (fx/effects/lull_dark.py). Default 3. */
   lull_dark_max_s: number;
+  /** THE STRIP PHASE LAYER's master (fx/effects/strip_phase.py): how
+   * strongly the strip effects answer charge/lull/drop. 0 = off (the strips
+   * as before), 1 = as tuned (default), up to 1.5. */
+  strip_phase_strength: number;
   /** THE DROP-LED SCENE SWITCH (spectra/services/drop_switch.py): a drop
    * sequence may switch the scene with a hard cut on its drop when the
    * showing scene is stale. The three stale thresholds are his to tune

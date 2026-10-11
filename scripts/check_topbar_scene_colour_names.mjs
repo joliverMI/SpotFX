@@ -191,6 +191,7 @@ const BASE_ROOM = {
   transition_edge_sensitivity: 0.5,
   scene_changes_per_minute: 0,
   lull_dark_max_s: 3,
+  strip_phase_strength: 1,
   active_gradient_id: null,
   music_device_allowlist: ['Serenity', 'Serenity guest'],
   force_scene_enabled: false,

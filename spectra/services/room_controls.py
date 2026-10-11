@@ -661,6 +661,17 @@ class RoomControlState(BaseModel):
     # its drop.
     lull_dark_max_s: float = Field(default=3.0, ge=0.0, le=30.0)
 
+    # THE STRIP PHASE LAYER's master (2026-10-11, strip phase plan phase 1 —
+    # fx/effects/strip_phase.py is the binding statement): how strongly the
+    # 1-D strip effects in fx.device_model.STRIP_PHASE_EFFECTS answer charge,
+    # lull and drop — every quantity's distance from neutral (colour gain,
+    # fill, shockwave, the lull's fade, activity) is multiplied by it. 0 =
+    # the strips exactly as before the layer (the rollback lever), 1 = as
+    # tuned, up to 1.5 = stronger. Pushed on every phase arm write
+    # (scene_response._drive_phase), so a change reaches the next phase.
+    # Sonic-tellable.
+    strip_phase_strength: float = Field(default=1.0, ge=0.0, le=1.5)
+
     # THE DROP-LED SCENE SWITCH (2026-10-08, drop-scene-variety plan phase
     # 2 — spectra/services/drop_switch.py is the binding statement). A drop
     # sequence switches the scene with a HARD CUT ON ITS DROP when the

@@ -4,9 +4,15 @@ import voluptuous as vol
 from fx.color import parse_color, validate_color
 from fx.effects.audio import AudioReactiveEffect
 from fx.effects.gradient import GradientEffect
+from fx.effects.strip_phase import StripPhase
 
 
-class PowerAudioEffect(AudioReactiveEffect, GradientEffect):
+class PowerAudioEffect(StripPhase, AudioReactiveEffect, GradientEffect):
+    """Charge/lull/drop come from the shared strip phase layer
+    (fx/effects/strip_phase.py) — gain, set-colour fill, shockwave, the
+    lull's fade and the white guard in the output stage. Power names no
+    ACTIVITY attributes (its motion is the audio itself)."""
+
     NAME = "Power"
     CATEGORY = "Classic"
     CONFIG_SCHEMA = vol.Schema(

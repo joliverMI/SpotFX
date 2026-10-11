@@ -619,6 +619,20 @@ export default function RoomControlsBar() {
               <span style={{ fontSize: '0.85em', opacity: 0.75 }}>s</span>
             </div>
             <div className="top-bar-group-field">
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}
+                title="How strongly the strip effects answer a charge, lull and drop — brighter colours, a set-colour fill and more motion on a build, a fade to black in a lull, a set-colour shockwave on a drop. Never adds white. 0 = off.">
+                Strip phase strength
+                <HelpLink topic="strip-phases" />
+              </label>
+              <input
+                type="number" min={0} max={1.5} step={0.05}
+                value={local.strip_phase_strength}
+                onChange={(e) => setLocal({ ...local, strip_phase_strength: Number(e.target.value) })}
+                onBlur={() => commit(local)}
+              />
+              <span style={{ fontSize: '0.85em', opacity: 0.75 }}>×</span>
+            </div>
+            <div className="top-bar-group-field">
               <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
                 <PowerButton
                   on={local.drop_switch_enabled}

@@ -5,9 +5,17 @@ import voluptuous as vol
 
 from fx.effects.audio import AudioReactiveEffect
 from fx.effects.hsv_effect import HSVEffect
+from fx.effects.strip_phase import StripPhase
 
 
-class Melt(AudioReactiveEffect, HSVEffect):
+class Melt(StripPhase, AudioReactiveEffect, HSVEffect):
+    """Charge/lull/drop come from the shared strip phase layer
+    (fx/effects/strip_phase.py): its gain/fill/shockwave/fade run in the
+    output stage, and its ACTIVITY scales Melt's own clock step (the melt
+    runs up to charge_activity x faster on a build, drop_activity x on a
+    drop, lull_activity x as a lull relaxes). At activity 1 the step is
+    left untouched, so off-phase Melt is byte-identical to before."""
+
     NAME = "Melt"
     CATEGORY = "Atmospheric"
     CONFIG_SCHEMA = vol.Schema(
@@ -57,6 +65,9 @@ class Melt(AudioReactiveEffect, HSVEffect):
             / self._config["speed"]
             * 1000000000.0
         )
+        act = self._sp_activity
+        if act != 1.0:
+            step *= act
         self.timestep += self._direction * step
         self.last_time = time.time_ns()
 

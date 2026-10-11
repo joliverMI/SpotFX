@@ -93,7 +93,8 @@ def test_the_fish_is_the_first_member_and_carries_every_key():
     # fireworks melds: it keeps N blobs for a Fireworks drop) — lull keys
     # only; its drop does not scale
     assert device_model.LULL_HANDOFF_EFFECTS == {"fish", "orbits"}
-    assert device_model.DROP_INTENSITY_EFFECTS == {"fish"}
+    assert device_model.DROP_INTENSITY_EFFECTS == (
+        {"fish"} | device_model.STRIP_PHASE_EFFECTS)
     assert device_model.LULL_HANDOFF_EFFECTS <= device_model.PHASE_EFFECTS
     keys = {str(k) for k in fish_mod.Fish2d.CONFIG_SCHEMA.schema}
     assert set(lh.KEYS) | {lh.DROP_KEY} <= keys
