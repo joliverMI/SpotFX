@@ -128,6 +128,8 @@ class SpotEffectsBridge:
         self._track: dict | None = None
         self._track_received_at: float | None = None
         self._timing: dict | None = None
+        self._next_track: dict | None = None
+        self._context_name: str | None = None
         self.paused = False
         self.dinner_party = False
         self.ambient = False
@@ -153,6 +155,9 @@ class SpotEffectsBridge:
             self._track = payload.get("track")
             self._track_received_at = self._clock()
             self._timing = payload.get("timing") or None
+            self._next_track = {"uri": payload.get("next_track_uri") or None,
+                                "title": payload.get("next_track_title") or ""}
+            self._context_name = payload.get("context_name") or None
             if self._on_track_uri is not None:
                 uri = (self._track or {}).get("spotify_uri")
                 await self._on_track_uri(uri)
@@ -180,6 +185,34 @@ class SpotEffectsBridge:
 
     def track_uri(self) -> Optional[str]:
         return (self._track or {}).get("spotify_uri")
+
+    def context_uri(self) -> Optional[str]:
+        """The Spotify context the song is playing from ("spotify:playlist:
+        …", an album, an artist), as SpotFX reads it off Spotify's own
+        playback on every poll (api/spotify_client.py, broadcast on every
+        "state" message's `track.context_uri`). None with no track, or when
+        Spotify reports no context (a single song, the queue) — never "".
+        Show Playlists (spectra/services/show_playlists.py) key on it."""
+        return (self._track or {}).get("context_uri") or None
+
+    def context_type(self) -> Optional[str]:
+        """"playlist" | "album" | "artist", or None (see context_uri)."""
+        return (self._track or {}).get("context_type") or None
+
+    def context_name(self) -> Optional[str]:
+        """The friendly name SpotFX resolved for the playing context
+        (its top-level `context_name`), or None when it has not."""
+        return self._context_name if self.context_uri() else None
+
+    def next_track(self) -> Optional[dict]:
+        """{"uri", "title"} of the next song in Spotify's queue, as SpotFX
+        read it on the last song change (`next_track_uri`/`_title`) — a
+        PREVIEW only: a queue he edits mid-song is seen at the next song.
+        None when the queue is empty or unknown."""
+        nt = self._next_track or {}
+        if not nt.get("uri"):
+            return None
+        return {"uri": nt["uri"], "title": nt.get("title") or ""}
 
     def track_position_ms(self) -> Optional[int]:
         """Broadcast progress + elapsed-since-received while playing."""
@@ -416,7 +449,12 @@ class SpotEffectsBridge:
                 # shape_offset_ms) — None when the block is this track's or
                 # cannot be checked. Visible so "no lock" is never silent.
                 "timing_refused_for_uri": self.refused_timing_uri(),
+                # "Playing from" / "Up next" (Show Playlists' read half).
+                "context_uri": self.context_uri(),
+                "context_type": self.context_type(),
+                "context_name": self.context_name(),
             } if self._track else None),
+            "next_track": self.next_track(),
             "deferral": self.sequencer_deferral(),
             "intensity": self.intensity(),
             "genre_bucket": self.genre_bucket(),

@@ -21,7 +21,10 @@
  * editing. Both read the same polled status/arms — one source of truth
  * for the countdowns, never two. A third tab, Sequence (SequenceView.tsx),
  * builds and runs Show Sequences: ordered sets, each pre-armed one of the
- * same four ways, and Waits, run strictly in order. */
+ * same four ways, and Waits, run strictly in order. A fourth, Playlists
+ * (PlaylistView.tsx), builds Show Playlists: programs keyed to the Spotify
+ * playlist he plays, arming each song's steps as the song starts; the
+ * banner (PlaylistRunCard.tsx) says on every view when one is following. */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiDel, apiGet, apiPost } from '../api/client';
 import HelpLink from '../help/HelpLink';
@@ -36,6 +39,8 @@ import {
   callersOf, calledIds, cloneFresh, duplicateAt, insertAt, pasteSetName, writeClip,
   type SummaryLookups,
 } from './builderOps';
+import { PlaylistBanner, usePlaylistStatus } from './PlaylistRunCard';
+import PlaylistView from './PlaylistView';
 import useShowClip from './useShowClip';
 import RunView from './RunView';
 import SequenceView from './SequenceView';
@@ -69,7 +74,7 @@ function newId() {
 export default function LightShowPage() {
   const toast = useToast();
   const isPhone = useIsPhone();
-  const [mode, setMode] = useState<'build' | 'run' | 'sequence'>(() => (window.matchMedia('(max-width: 720px)').matches ? 'run' : 'build'));
+  const [mode, setMode] = useState<'build' | 'run' | 'sequence' | 'playlists'>(() => (window.matchMedia('(max-width: 720px)').matches ? 'run' : 'build'));
   const [catalogue, setCatalogue] = useState<ShowCatalogue | null>(null);
   const [targets, setTargets] = useState<ShowTargets | null>(null);
   const [sets, setSets] = useState<ShowSet[]>([]);
@@ -87,6 +92,7 @@ export default function LightShowPage() {
   const clip = useShowClip();
   const scenes = useScenes().data ?? [];
   const colorSets = useSpotColorSets().data ?? [];
+  const { status: playlistStatus, reload: reloadPlaylist } = usePlaylistStatus();
   const reloadArms = useCallback(
     () => void apiGet<ArmsStatus>('/light-show/arms').then(setArms).catch(() => undefined), []);
 
@@ -336,6 +342,10 @@ export default function LightShowPage() {
             onClick={() => setMode('run')}>Run{isPhone ? ' (recommended)' : ''}</button>
           <button role="tab" aria-selected={mode === 'sequence'} className={mode === 'sequence' ? 'active' : ''}
             onClick={() => setMode('sequence')}>Sequence</button>
+          <button role="tab" aria-selected={mode === 'playlists'} className={mode === 'playlists' ? 'active' : ''}
+            onClick={() => setMode('playlists')}>Playlists
+            {playlistStatus?.run?.active && <span className="show-seq-live-dot" aria-label="a playlist program is following" />}
+          </button>
           <HelpLink topic="show-run-view" />
         </div>
         {mode === 'build' && (
@@ -355,10 +365,15 @@ export default function LightShowPage() {
         </div>
       )}
 
-      {mode === 'sequence' ? (
+      <PlaylistBanner status={playlistStatus} onChange={() => { reloadPlaylist(); reloadArms(); }} toast={toast} />
+
+      {mode === 'playlists' ? (
+        <PlaylistView sets={sets} status={playlistStatus} reloadStatus={() => { reloadPlaylist(); reloadArms(); }} toast={toast} />
+      ) : mode === 'sequence' ? (
         <SequenceView sets={sets} toast={toast} onOpenSet={openSetFromElsewhere} />
       ) : mode === 'run' ? (
         <RunView sets={sets} status={status} arms={arms} onChangeArms={reloadArms}
+          playlistStatus={playlistStatus} onChangePlaylist={reloadPlaylist}
           onEndShowDone={() => void reloadSets()} toast={toast} />
       ) : (
       <>

@@ -95,6 +95,8 @@ export interface ShowBrief {
   changed_settings: number;
   /** waiting arms (phase 2) */
   armed?: number;
+  /** the Show Playlist following, if any */
+  playlist?: PlaylistBrief | null;
   standdown: string | null;
   refusal: string | null;
 }
@@ -158,6 +160,8 @@ export interface ShowArm {
   last_outcome: { status: string; reason?: string; at_ms?: number; trigger?: string } | null;
   /** status only (armed rows) */
   lead_ms?: number;
+  /** where a scripted arm came from ("Playlist · 40! Lightshow") */
+  tag?: string | null;
   this_song?: boolean;
   due_ms?: number | null;
 }
@@ -271,3 +275,111 @@ export interface SequenceStatus {
   refusal: string | null;
   playing_uri: string | null;
 }
+
+// ── Show Playlists (spectra/services/show_playlists.py) ────────────────────
+
+/** Phase 1's four timings: fire as the song starts, or arm for this song's
+ * next scene change / High / Low. */
+export type PlaylistTiming = 'song_start' | 'scene_change' | 'high' | 'low';
+
+export interface PlaylistStep {
+  id?: string;
+  set_id: string | null;
+  on: PlaylistTiming;
+  repeat: boolean;
+  finish_on_mark: boolean;
+  enabled: boolean;
+  label?: string;
+  /** served only */
+  title?: string;
+  problems?: string[];
+}
+
+export interface SongEntry {
+  id?: string;
+  uri: string;
+  title: string;
+  artist: string;
+  notes?: string;
+  steps: PlaylistStep[];
+  enabled: boolean;
+  /** served only: one line naming its steps */
+  summary?: string;
+}
+
+export interface ShowPlaylist {
+  id?: string;
+  name: string;
+  notes?: string;
+  contexts: string[];
+  context_names: Record<string, string>;
+  auto_follow: boolean;
+  follow_songs_anywhere: boolean;
+  on_start: { sequence_id: string | null; replace_running_sequence: boolean; steps: PlaylistStep[] };
+  default_song: SongEntry | null;
+  unlisted_song: 'default' | 'nothing';
+  songs: SongEntry[];
+  on_end: { steps: PlaylistStep[]; end_show: boolean };
+  problems?: string[];
+}
+
+export interface StepOutcome {
+  step_id: string;
+  set_id: string | null;
+  set_name: string;
+  on: PlaylistTiming | string;
+  status: 'armed' | 'fired' | 'missed' | 'skipped' | 'disarmed' | 'failed' | 'pending' | 'refused' | 'expired';
+  arm_id: string | null;
+  at_ms: number;
+  detail: string;
+}
+
+export interface PlaylistLogEntry { at_ms: number; what: string; detail: string; song: string }
+
+export interface PlaylistRun {
+  id: string;
+  playlist_id: string;
+  name: string;
+  state: 'following' | 'paused' | 'stopped' | 'ended';
+  active: boolean;
+  via: 'context' | 'song' | 'manual';
+  started_by: string;
+  context_uri: string;
+  started_ms: number;
+  ended_ms: number | null;
+  end_reason: string;
+  paused_reason: string;
+  song_uri: string | null;
+  song_title: string;
+  song_artist: string;
+  entry_source: 'listed' | 'default' | 'none' | 'off';
+  song_steps: StepOutcome[];
+  start_steps: StepOutcome[];
+  songs_seen: { uri: string; title: string; artist: string; entry_source: string;
+    steps: number; fired: number; missed: number; open: boolean }[];
+  songs_count: number;
+  log: PlaylistLogEntry[];
+}
+
+export interface PlayingFrom { uri: string; type: string | null; name: string | null; program: string | null }
+export interface UpNext { uri: string; title: string; entry_source: string | null; summary: string }
+
+export interface PlaylistStatus {
+  run: PlaylistRun | null;
+  refusal: string | null;
+  follow_enabled: boolean;
+  playing_uri: string | null;
+  playing_from: PlayingFrom | null;
+  up_next: UpNext | null;
+}
+
+export interface PlaylistBrief {
+  name: string;
+  state: string;
+  song: string | null;
+  entry_source: string;
+  songs: number;
+  up_next: string | null;
+}
+
+export interface SpotifyContext { context_uri: string; type: string; name: string }

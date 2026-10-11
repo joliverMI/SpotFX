@@ -15,6 +15,7 @@ export function stripLine(b: ShowBrief | null | undefined): string | null {
   if (b.flare_blocks) parts.push(`flares off ×${b.flare_blocks}`);
   if (b.room_effect) parts.push(b.room_effect);
   if (b.changed_settings) parts.push(`${b.changed_settings} setting${b.changed_settings === 1 ? '' : 's'} changed`);
+  if (b.playlist) parts.push(`following ${b.playlist.name}`);
   let line = `Show: ${parts.length ? parts.join(', ') : 'on'}`;
   if (b.standdown) line += ` — standing down (${b.standdown})`;
   return line;
@@ -54,7 +55,7 @@ export function endShowSummary(r: EndShowReport): string {
 export const SHOW_KIND_HELP_TOPICS = [
   'show-actions', 'show-device-states', 'show-level', 'show-room-effects', 'show-sets',
   'show-arming', 'show-high-low-triggers', 'show-run-view', 'sonic-light-show',
-  'show-pulse', 'show-flares',
+  'show-pulse', 'show-flares', 'show-playlists', 'show-playlist-steps', 'show-playlist-run',
 ] as const;
 
 // ── PHASE 2: arms and the High/Low Triggers ───────────────────────────────
@@ -87,6 +88,7 @@ export function countdown(dueMs: number | null | undefined,
 /** One armed card's line: what, on what, how, and why it is waiting. */
 export function armLine(a: ShowArm, positionMs: number | null | undefined): string {
   const parts = [`${a.label || 'Action'} → ${triggerLabel(a.on)}`];
+  if (a.tag) parts.push(a.tag);
   parts.push(a.repeat ? `repeat (${a.fire_count} so far)` : 'once');
   if (a.song_uri) parts.push(a.this_song === false ? 'this song only (not this song)' : 'this song only');
   if ((a.lead_ms ?? 0) > 0) parts.push(`starts ${((a.lead_ms ?? 0) / 1000).toFixed(1)} s early so its fade lands on the mark`);

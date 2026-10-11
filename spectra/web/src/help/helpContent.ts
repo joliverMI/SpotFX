@@ -2619,7 +2619,7 @@ export const HELP_SECTIONS: HelpSection[] = [
     title: 'Light Show — named sets of actions, fired on your word',
     keywords: 'light show show actions sets fire end show blackout intermission arm armed high low trigger',
     intro:
-      'The Light Show (nav "Light Show", /show) groups changes to the room into named SETS you fire with one press. A set is an ordered list of steps: room settings (Ambient, Dark/Light/Hybrid, forced scene or colour, scene and colour-set on/off, the drift gradient, the scene-change setting), firing a scene or applying a colour set now, per-fixture DEVICE steps (Dark, Steady, Freeze, back to Show, a timed Level, a Flash), room effects, and pauses. A set can also be ARMED to fire on the next scene change, or on this song\'s High or Low Trigger.',
+      'The Light Show (nav "Light Show", /show) groups changes to the room into named SETS you fire with one press. A set is an ordered list of steps: room settings (Ambient, Dark/Light/Hybrid, forced scene or colour, scene and colour-set on/off, the drift gradient, the scene-change setting), firing a scene or applying a colour set now, per-fixture DEVICE steps (Dark, Steady, Freeze, back to Show, a timed Level, a Flash), room effects, and pauses. A set can also be ARMED to fire on the next scene change, or on this song\'s High or Low Trigger. Four tabs: Build, Run, Sequence (sets run in a set order) and Playlists (steps per song of the Spotify playlist you play).',
     entries: [
       {
         id: 'light-show-page',
@@ -2801,6 +2801,38 @@ export const HELP_SECTIONS: HelpSection[] = [
           'Run: pick a sequence and tap Start. One sequence runs at a time — starting another asks before stopping the running one. The current item is highlighted with exactly what it is waiting for ("armed for the next High Trigger", "waiting for 2 more scene changes", "waiting for one of: …"); done items are ticked and the rest are listed in order.',
           'Pause disarms the current item and stops a timed Wait\'s clock; nothing is counted while paused, and Resume picks up where it was. Next skips the current item without running it. Previous steps back one item and re-arms it — nothing it already did is undone, and an instant item does not fire by itself after a step back. Fire now runs the current set at once (whatever its arming) and moves on; on a Wait it ends the Wait. Stop ends the run (it does not undo anything — that is End show).',
           'If SPECTRA restarts, a running sequence resumes at its current item: a timed Wait keeps its deadline, counts are kept and the item is re-armed. If the room is released the sequence pauses and says so. Every step is in History and the show log. Sonic can list your sequences and start, pause, resume, stop, step and fire them by name.',
+        ],
+      },
+      {
+        id: 'show-playlists',
+        title: 'Playlists: a program for the Spotify playlist you play',
+        keywords: 'playlist program spotify context follow auto-follow serenity songs per song arm script playlist runner',
+        body: [
+          'A playlist program answers to the Spotify playlist (or album) you already play on Serenity, and says, song by song, which of your sets arm on which trigger. SPECTRA follows the music; it never starts, skips or changes what plays, so shuffle, skipping and starting in the middle all just work: each song gets its own steps when it starts.',
+          'Build it on the Playlists tab: + New, then add the Spotify playlist it follows (tap one you played recently, or paste its link). One Spotify playlist belongs to one program. Add songs with the search (or + Playing now), and give each song its steps. 📋 copies a song\'s steps and ⎘ pastes them onto another song.',
+          'Auto-follow (on) starts the program by itself when its playlist starts playing; the banner on every Light Show view says so. "Follow its songs anywhere" also applies a listed song\'s steps when that song plays from somewhere else. The Follow playlists switch turns every auto-follow off for an evening. ▶ Follow now starts a program by hand, whatever is playing. Home Assistant can start one too.',
+          'For a song the program does not list: use the default steps, or arm nothing. On start can start one of your sequences and arm or fire sets; On end runs when the music leaves the playlist (and can End show). Thirty minutes without music also ends it.',
+        ],
+      },
+      {
+        id: 'show-playlist-steps',
+        title: 'Playlist steps: when each set runs',
+        keywords: 'step timing song start scene change high low trigger repeat finish on the mark bolt bunny arrow',
+        body: [
+          'Each step is one of your sets and one of four timings, with the same icons as the Run view: ⚡ as the song starts, 🐇 the next scene change, ▲ this song\'s High Trigger, ▼ this song\'s Low Trigger.',
+          'The song\'s steps are armed as the song starts, BEFORE its opening scene change, so a 🐇 step fires on that opening change when the song has one. ⚡ fires just after the opening change. A step still waiting when the song ends is recorded as missed, by name.',
+          'Repeat keeps a step armed after it fires, so it fires again on every matching trigger in that song. Finish on the mark starts a High/Low set early so its fades complete on the trigger. A step can be switched off without deleting it.',
+          'Program arms are ordinary arms on the Armed board, tagged with the playlist. They never replace (or get replaced by) an arm you made by hand, and they never expire on the 12-hour or idle clocks.',
+        ],
+      },
+      {
+        id: 'show-playlist-run',
+        title: 'Following a playlist: the Run card',
+        keywords: 'run playlist card following playing from up next stop following skip fire now missed history',
+        body: [
+          'The Playlist card (top of the Run view, and on the Playlists tab) says where the music is playing from and which program answers to it, the song playing and which of its steps are armed, fired or missed, and what is up next with what its steps will arm (a preview from the Spotify queue).',
+          'Stop following disarms the program\'s arms and leaves every hold and setting as the sets left them (End show is still the button that puts the room back). It will not start following again until that playlist stops playing. Skip this song\'s entry disarms just this song\'s steps. ⚡ fires one step now.',
+          'While SPECTRA does not hold the room (or a preview, camera run or night run has it) armed steps wait and say so, and an as-the-song-starts step does not fire. If the room is released the program pauses and says so; Resume arms the playing song\'s steps again. After a restart a following program carries on as it was. Every start, song, fire and miss is in History and the show log.',
         ],
       },
       {

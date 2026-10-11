@@ -630,6 +630,11 @@ def on_release() -> None:
     except Exception:                                    # noqa: BLE001
         logger.exception("light show: pausing the sequence on release failed")
     try:
+        from spectra.services import show_playlists
+        show_playlists.on_release()
+    except Exception:                                    # noqa: BLE001
+        logger.exception("light show: pausing the playlist on release failed")
+    try:
         from spectra.services import show_arms
         show_arms.on_release()
     except Exception:                                    # noqa: BLE001
@@ -733,6 +738,11 @@ def tick() -> None:
         show_sequence.tick()
     except Exception:                                    # noqa: BLE001
         logger.exception("light show: sequence pass failed")
+    try:
+        from spectra.services import show_playlists
+        show_playlists.tick()
+    except Exception:                                    # noqa: BLE001
+        logger.exception("light show: playlist pass failed")
     if is_live and not _was_live:
         _safe_refresh()
         try:
