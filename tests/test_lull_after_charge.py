@@ -181,6 +181,10 @@ def _phase_of(effect):
     `_phase` and its charge/lull/drop in `_cld_phase`)."""
     if hasattr(effect, "_cld_phase"):
         return effect._cld_phase
+    if getattr(effect, "_strip_phase", False):
+        # a strip phase member (fx/effects/strip_phase.py) keeps it in
+        # `_sp_phase`
+        return effect._sp_phase
     return getattr(effect, "_phase", None)
 
 

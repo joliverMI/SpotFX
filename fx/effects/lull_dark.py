@@ -62,8 +62,12 @@ HOW A LULL EFFECT OPTS IN (existing or future — one call, plus two lines):
      squash), `dark` says the dark portion has begun, and `after` runs 0 -> 1
      from the dark point to the end of SpotFX's ramp (a second movement
      inside the dark, e.g. Squiggles' line pinching to its dot).
-Only Black Hole, Squiggles and Pulse are opted in (his "just these 3 for
-now"); blackhole1d — Black Hole's own strip — is the natural next one.
+Black Hole, Squiggles and Pulse were his three ("just these 3 for now");
+since 2026-10-11 every strip phase member (fx/effects/strip_phase.py,
+fx.device_model.STRIP_PHASE_EFFECTS — Melt and Power) reads the same rule
+through the shared strip layer, and blackhole1d joins it in the strip
+phase plan's phase 2. The FLARE PUNCH envelope at the end of this module
+is the same kind of one-definition rule for "a flare in the dark".
 """
 
 from __future__ import annotations
@@ -172,3 +176,56 @@ def lull_timing(config: Mapping, progress: float, phase_t: float,
     else:
         after = 1.0 if dark else 0.0
     return LullTiming(approach, dark, after)
+
+
+# ── A FLARE IN THE LULL'S DARK PUNCHES THROUGH ──────────────────────────────
+# The Admiral, 2026-10-11 (strip phase plan, his answer 5): a flare that
+# lands while a lull is darkening — or already dark — shows at full
+# strength, and when it is over the lull's own curve takes the light back
+# exactly where the lull has got to. The lull's timing (dark point, cap,
+# drop) never moves. Defined HERE, beside the dark point, so every lull-dark
+# member can read the same envelope: the strip layer (fx/effects/
+# strip_phase.py) reads it today; the crystal's Black Hole / Squiggles and
+# the Pulse singles can later (the plan's phase 5, on his word).
+#
+# The envelope rises over PUNCH_ATTACK_S, holds for max(min_hold, the
+# flare's own hold), then releases over `release_s` (smoothstep). SpotFX
+# pokes it (scene_response's flare pipeline, only while a lull is armed).
+
+PUNCH_ATTACK_S = 0.04
+DEFAULT_PUNCH_MIN_HOLD_S = 0.5
+DEFAULT_PUNCH_RELEASE_S = 0.8
+
+
+def _smoothstep(x: float) -> float:
+    x = _clip01(x)
+    return x * x * (3.0 - 2.0 * x)
+
+
+def punch_envelope(t: float, hold_s: float,
+                   min_hold_s: float = DEFAULT_PUNCH_MIN_HOLD_S,
+                   release_s: float = DEFAULT_PUNCH_RELEASE_S) -> float:
+    """How much of a flare punch is showing `t` seconds after it landed:
+    0 -> 1 over PUNCH_ATTACK_S, 1 through the hold, then a smoothstep back
+    to 0 over `release_s`. 0 for t < 0 and once fully released."""
+    t = float(t)
+    if t < 0.0:
+        return 0.0
+    if t < PUNCH_ATTACK_S:
+        return t / PUNCH_ATTACK_S
+    hold = max(float(min_hold_s), float(hold_s or 0.0))
+    t_rel = t - PUNCH_ATTACK_S - hold
+    if t_rel <= 0.0:
+        return 1.0
+    release = max(0.0, float(release_s))
+    if release <= 0.0 or t_rel >= release:
+        return 0.0
+    return 1.0 - _smoothstep(t_rel / release)
+
+
+def punch_length_s(hold_s: float,
+                   min_hold_s: float = DEFAULT_PUNCH_MIN_HOLD_S,
+                   release_s: float = DEFAULT_PUNCH_RELEASE_S) -> float:
+    """Seconds from a punch landing until it has fully released."""
+    return (PUNCH_ATTACK_S + max(float(min_hold_s), float(hold_s or 0.0))
+            + max(0.0, float(release_s)))

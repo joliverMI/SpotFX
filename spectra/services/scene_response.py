@@ -402,12 +402,13 @@ from __future__ import annotations
 import logging
 import time
 from collections import deque
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from random import Random
 from typing import Any, Awaitable, Callable, Mapping, NamedTuple, Optional
 
 from fx import device_model
-from fx.effects import lull_dark, lull_handoff
+from fx.effects import lull_dark, lull_handoff, strip_phase
 from spectra.models.binding import ValueBinding
 from spectra.models.scene import (FlareBand, FlareKind, ParamTarget,
                                   ResponseClass, SceneV2)
@@ -482,6 +483,9 @@ class PendingKindBatch:
     due_at: float
     fire_seq: int
     delay_ms: int = 0
+    # THE FLARE PUNCH: False for a batch a charge/lull/drop event's own band
+    # queued (_PUNCH_OK), so it never punches the lull it belongs to.
+    punch: bool = True
 
 # A dice re-roll's own eased landing (registry "smooth": true params only —
 # see _reroll). Live-measured ordinary flare cadence during active music is
@@ -804,6 +808,28 @@ def default_lull_handoff(ctx: LullContext) -> LullHandoff:
     left at the half way mark", the same effect, the real lull length."""
     return LullHandoff(keep=lull_handoff.DEFAULT_KEEP, next_effect={},
                        lull_s=ctx.lull_s)
+
+
+# THE FLARE PUNCH's write tap (_punch_lull): the virtuals one flare batch
+# actually wrote to, collected by ResponseEngine._jump/_glide while
+# _run_kinds runs (a ContextVar, so a concurrent fire's writes never land in
+# another batch's set). None outside a batch.
+_BATCH_WRITES: ContextVar[Optional[set]] = ContextVar(
+    "spectra_flare_batch_writes", default=None)
+# ... and whether this batch may punch at all: False while a charge/lull/
+# drop event runs its own band (on_event) — the lull's own kinds must not
+# hold its own start lit — and carried on a PendingKindBatch it queues.
+_PUNCH_OK: ContextVar[bool] = ContextVar("spectra_flare_punch_ok",
+                                         default=True)
+
+
+# The phase effects held back while a house mode's resting look owns the
+# room (_drive_phase / rearm_phase): the one-colour Singles (a lull takes
+# them to true black) and every strip phase member (the Admiral's call 4,
+# 2026-10-11: "hold strip phases back under a house mode" — Melt on House
+# Star / House Fish never charges or goes dark under a calm mode).
+HOUSE_HELD_PHASE_EFFECTS = (device_model.ONE_COLOUR_EFFECTS
+                            | device_model.STRIP_PHASE_EFFECTS)
 
 
 def _house_owns_the_look() -> Optional[str]:
@@ -1197,6 +1223,10 @@ class ResponseEngine:
         # _color_rotate's own docstring.
         self._pending_color_rotates: list[tuple[str, str, float, int]] = []
         self._phase_armed: Optional[str] = None  # "charge"|"lull" awaiting payoff
+        # The virtuals the armed LULL actually reached (a house-withheld or
+        # flares-off virtual is not among them) — where a flare may punch
+        # through the lull's dark (_punch_lull).
+        self._lull_vids: frozenset = frozenset()
         # PER-FLARE TRIGGER MOMENT (module docstring, above): kind batches a
         # fire staggered to a later moment than the band's own anchor —
         # claimed and cleared in one call (take_kind_batch_schedule), same
@@ -1250,9 +1280,13 @@ class ResponseEngine:
             return record
         record["band"] = {"intensity_min": band.intensity_min,
                           "intensity_max": band.intensity_max}
-        await self._execute_band(scene, band, intensity, record,
-                                 started_at=started_at,
-                                 anchor_relocated=anchor_relocated)
+        punch_token = _PUNCH_OK.set(event_class not in PHASE_RAMP_MS)
+        try:
+            await self._execute_band(scene, band, intensity, record,
+                                     started_at=started_at,
+                                     anchor_relocated=anchor_relocated)
+        finally:
+            _PUNCH_OK.reset(punch_token)
         self.surges.append(record)
         await self._broadcast({"type": "surge", **record})
         return record
@@ -1378,11 +1412,83 @@ class ResponseEngine:
             self._pending_kind_batches.append(PendingKindBatch(
                 scene=scene, kinds=kinds, intensity=intensity,
                 due_at=started_at + delay_ms / 1000.0,
-                fire_seq=fire_seq, delay_ms=delay_ms))
+                fire_seq=fire_seq, delay_ms=delay_ms,
+                punch=_PUNCH_OK.get()))
+
+    async def _jump(self, vid: str, effect_type: str, params: dict):
+        """Every write this engine makes goes through here (or _glide): the
+        executor's own jump, noted for THE FLARE PUNCH's write tap."""
+        writes = _BATCH_WRITES.get()
+        if writes is not None:
+            writes.add(vid)
+        return await self.executor.jump(vid, effect_type, params)
+
+    async def _glide(self, vid: str, effect_type: str, params: dict,
+                     *args, **kwargs):
+        writes = _BATCH_WRITES.get()
+        if writes is not None:
+            writes.add(vid)
+        return await self.executor.glide(vid, effect_type, params,
+                                         *args, **kwargs)
 
     async def _run_kinds(self, scene: SceneV2,
                          attached: list[tuple[FlareKind, float]],
                          intensity: float, fire_seq: int) -> dict[str, Any]:
+        """One flare batch (_run_kinds_inner), then THE FLARE PUNCH: a strip
+        the batch actually wrote to punches through a running lull's dark
+        (_punch_lull). Every batch — inline, a staggered PendingKindBatch,
+        the dwell deferral's update flare, the preview — runs through
+        here, so they all punch alike."""
+        token = _BATCH_WRITES.set(set())
+        try:
+            result = await self._run_kinds_inner(scene, attached, intensity,
+                                                 fire_seq)
+            written = set(_BATCH_WRITES.get() or ())
+        finally:
+            _BATCH_WRITES.reset(token)
+        punch = (await self._punch_lull(written, attached)
+                 if _PUNCH_OK.get() else None)
+        if punch:
+            result["flare_punch"] = punch
+        return result
+
+    async def _punch_lull(self, written: set,
+                          attached: list[tuple[FlareKind, float]]
+                          ) -> Optional[dict]:
+        """A FLARE IN THE LULL'S DARK PUNCHES THROUGH (the Admiral's answer
+        5, 2026-10-11; fx/effects/strip_phase.py and lull_dark.
+        punch_envelope are the binding statement). While the room's armed
+        phase is a lull, every strip phase member the batch WROTE TO — and
+        that the lull actually reached (not house-withheld, not flares off)
+        — gets one instant poke: `flare_punch` (self-resetting, the
+        burst_rockets shape) and `flare_punch_hold_s`, the longest momentary
+        hold among the batch's kinds (PULSE_HOLD_S when none). A batch that
+        wrote nothing to a strip (Pulse flash/flip, blob rush, big fish,
+        Sauron surge) punches nothing. Never in the param registry."""
+        if self._phase_armed != "lull" or not written:
+            return None
+        targets = []
+        states = self._flare_states()
+        for vid in sorted(written & self._lull_vids):
+            state = states.get(vid)
+            if (state is not None and state.effect_type
+                    in device_model.STRIP_PHASE_EFFECTS):
+                targets.append((vid, state.effect_type))
+        if not targets:
+            return None
+        holds = [k.hold_ms / 1000.0 if k.hold_ms else PULSE_HOLD_S
+                 for k, _s in attached if k.type == "momentary"]
+        hold_s = round(max(holds) if holds else PULSE_HOLD_S, 3)
+        for vid, effect_type in targets:
+            await self.executor.jump(vid, effect_type,
+                                     {strip_phase.PUNCH_KEY: 1,
+                                      strip_phase.PUNCH_HOLD_KEY: hold_s})
+        return {"virtuals": [vid for vid, _et in targets], "hold_s": hold_s}
+
+    async def _run_kinds_inner(self, scene: SceneV2,
+                               attached: list[tuple[FlareKind, float]],
+                               intensity: float, fire_seq: int
+                               ) -> dict[str, Any]:
         """The fixed dice -> permanent -> momentary -> gain -> colour
         pipeline (the legacy reroll -> patch -> gain -> colour pass,
         generalized) over exactly `attached` — already lane-picked, already
@@ -1462,13 +1568,13 @@ class ResponseEngine:
         for vid, params in glides.items():
             state = self.conductor.virtuals.get(vid)
             if state is not None and params:
-                await self.executor.glide(
+                await self._glide(
                     vid, state.effect_type, params, DICE_REROLL_GLIDE_MS)
                 self._arm_pending(vid, params, fire_seq=fire_seq)
         for vid, params in jumps.items():
             state = self.conductor.virtuals.get(vid)
             if state is not None:
-                await self.executor.jump(vid, state.effect_type, params)
+                await self._jump(vid, state.effect_type, params)
                 self._arm_pending(vid, params, fire_seq=fire_seq)
 
         for kind, scale in gains:
@@ -1579,6 +1685,7 @@ class ResponseEngine:
                 batch, "skipped_stale_scene",
                 current_scene_id=current.id if current is not None else None)
         fire_seq = self._begin_fire()
+        punch_token = _PUNCH_OK.set(batch.punch)
         try:
             result = await self._run_kinds(batch.scene, batch.kinds,
                                            batch.intensity, fire_seq)
@@ -1590,6 +1697,7 @@ class ResponseEngine:
             return self.note_kind_batch(
                 batch, "error", error=f"{type(exc).__name__}: {exc}")
         finally:
+            _PUNCH_OK.reset(punch_token)
             self._end_fire(fire_seq)
         return self.note_kind_batch(batch, "landed", kinds=result["kinds"],
                                     carried=result["carried"])
@@ -1668,13 +1776,13 @@ class ResponseEngine:
         for vid, params in glides.items():
             state = self.conductor.virtuals.get(vid)
             if state is not None and params:
-                await self.executor.glide(
+                await self._glide(
                     vid, state.effect_type, params, DICE_REROLL_GLIDE_MS)
                 self._arm_pending(vid, params, fire_seq=fire_seq)   # hold clock starts as the spike lands
         for vid, params in jumps.items():
             state = self.conductor.virtuals.get(vid)
             if state is not None:
-                await self.executor.jump(vid, state.effect_type, params)
+                await self._jump(vid, state.effect_type, params)
                 self._arm_pending(vid, params, fire_seq=fire_seq)
         if kind.gain != 1.0:
             record["gain_envelope"] = await self._gain(kind, 1.0, carry,
@@ -2073,7 +2181,7 @@ class ResponseEngine:
             rotated = color_rotate.rotate_color_value(original, degrees)
             if rotated == original:
                 continue
-            await self.executor.glide(vid, state.effect_type,
+            await self._glide(vid, state.effect_type,
                                       {"gradient": rotated}, ramp_ms)
             self._pending_color_rotates.append((vid, original, dwell_s, fade_ms))
             rotated_count += 1
@@ -2125,7 +2233,7 @@ class ResponseEngine:
         for vid, state in self._flare_states().items():
             if state.effect_type not in device_model.FIREWORK_BURST_EFFECTS:
                 continue
-            await self.executor.jump(vid, state.effect_type,
+            await self._jump(vid, state.effect_type,
                                      {"burst_rockets": rockets})
             targets += 1
         return {"rockets": rockets, "virtuals": targets}
@@ -2165,7 +2273,7 @@ class ResponseEngine:
         for vid, state in self._flare_states().items():
             if state.effect_type not in device_model.BLOB_RUSH_EFFECTS:
                 continue
-            await self.executor.jump(vid, state.effect_type,
+            await self._jump(vid, state.effect_type,
                                      {"blob_rush": BLOB_RUSH_BLOBS})
             targets += 1
         return {"blobs": BLOB_RUSH_BLOBS, "virtuals": targets}
@@ -2194,7 +2302,7 @@ class ResponseEngine:
         for vid, state in self._flare_states().items():
             if state.effect_type not in device_model.PULSE_FLARE_EFFECTS:
                 continue
-            await self.executor.jump(vid, state.effect_type,
+            await self._jump(vid, state.effect_type,
                                      {"flash": strength})
             targets += 1
         return {"strength": strength, "virtuals": targets}
@@ -2217,7 +2325,7 @@ class ResponseEngine:
         for vid, state in self._flare_states().items():
             if state.effect_type not in device_model.PULSE_FLARE_EFFECTS:
                 continue
-            await self.executor.jump(vid, state.effect_type, {"flip": 1})
+            await self._jump(vid, state.effect_type, {"flip": 1})
             targets += 1
         return {"intensity": round(intensity, 4), "virtuals": targets}
 
@@ -2246,7 +2354,7 @@ class ResponseEngine:
         for vid, state in self.conductor.virtuals.items():
             if state.effect_type not in device_model.BIG_FISH_EFFECTS:
                 continue
-            await self.executor.jump(vid, state.effect_type,
+            await self._jump(vid, state.effect_type,
                                      {"big_fish": strength})
             targets += 1
         return {"intensity": strength, "virtuals": targets}
@@ -2277,7 +2385,7 @@ class ResponseEngine:
         for vid, state in self._flare_states().items():
             if state.effect_type not in device_model.SAURON_SURGE_EFFECTS:
                 continue
-            await self.executor.jump(vid, state.effect_type,
+            await self._jump(vid, state.effect_type,
                                      {"surge": strength})
             targets += 1
         return {"intensity": strength, "virtuals": targets}
@@ -2310,7 +2418,7 @@ class ResponseEngine:
             state = self.conductor.virtuals.get(vid)
             if state is None:
                 continue
-            await self.executor.glide(vid, state.effect_type,
+            await self._glide(vid, state.effect_type,
                                       {"gradient": original}, fade_ms)
             count += 1
         return count
@@ -2331,7 +2439,7 @@ class ResponseEngine:
                                  state.brightness_baseline)
             peak = max(0.0, min(1.0, float(baseline) * effective))
             if kind.type == "momentary":
-                await self.executor.jump(vid, state.effect_type,
+                await self._jump(vid, state.effect_type,
                                          {"brightness": peak})
                 self._push_release(vid, "brightness", hold_s, instant=False,
                                    return_to=float(baseline), arm_now=True,
@@ -2339,7 +2447,7 @@ class ResponseEngine:
                 out.append({"virtual_id": vid, "peak": round(peak, 4),
                             "returns_to": round(float(baseline), 4)})
             else:
-                await self.executor.glide(vid, state.effect_type,
+                await self._glide(vid, state.effect_type,
                                           {"brightness": peak},
                                           int(GAIN_GLIDE_S * 1000))
                 carry[(vid, "brightness")] = peak
@@ -2622,10 +2730,10 @@ class ResponseEngine:
             state = self.conductor.virtuals[vid]
             try:
                 if vid in jump_by_vid:
-                    await self.executor.jump(vid, state.effect_type,
+                    await self._jump(vid, state.effect_type,
                                              jump_by_vid[vid])
                 if vid in glide_by_vid:
-                    await self.executor.glide(vid, state.effect_type,
+                    await self._glide(vid, state.effect_type,
                                               glide_by_vid[vid],
                                               int(PULSE_RELEASE_S * 1000))
                 released.add(vid)
@@ -2669,7 +2777,15 @@ class ResponseEngine:
         no music plays) the choreography is withheld from those virtuals
         and NAMED in the record; every other phase effect is driven as
         before. The house layer's levels, Hue Hold and off rules sit
-        downstream of every effect and keep winning either way.
+        downstream of every effect and keep winning either way. The STRIP
+        PHASE members (fx.device_model.STRIP_PHASE_EFFECTS — Melt on House
+        Star / House Fish) are held back the same way (the Admiral's call
+        4, 2026-10-11; HOUSE_HELD_PHASE_EFFECTS).
+
+        THE STRIP PHASE LAYER (fx/effects/strip_phase.py): every strip
+        member's arm also carries the room's `strip_phase_strength`, and a
+        lull arm records the virtuals it reached (`_lull_vids`) — where a
+        flare may punch through the dark (_punch_lull).
 
         THE LULL HAND-OFF HOOK (module docstring): a lull arm also tells
         every LULL_HANDOFF_EFFECTS virtual what the resolver decided
@@ -2696,9 +2812,13 @@ class ResponseEngine:
         targets: list[str] = []
         withheld: list[str] = []
         house_reason: Optional[str] = None
-        if any(st.effect_type in device_model.ONE_COLOUR_EFFECTS
+        if any(st.effect_type in HOUSE_HELD_PHASE_EFFECTS
                for st in self.conductor.virtuals.values()):
             house_reason = _house_owns_the_look()
+        strip_keys: dict = {}
+        if any(st.effect_type in device_model.STRIP_PHASE_EFFECTS
+               for st in self.conductor.virtuals.values()):
+            strip_keys = {strip_phase.STRENGTH_KEY: self._strip_phase_strength()}
         allowed = self._flare_states()
         flares_off: list[str] = []
         for vid, state in self.conductor.virtuals.items():
@@ -2711,10 +2831,13 @@ class ResponseEngine:
                 flares_off.append(vid)
                 continue
             if (house_reason is not None
-                    and state.effect_type in device_model.ONE_COLOUR_EFFECTS):
+                    and state.effect_type in HOUSE_HELD_PHASE_EFFECTS):
                 withheld.append(vid)
                 continue
             arm = {"phase": event_class, "phase_progress": 0.0}
+            if (strip_keys and state.effect_type
+                    in device_model.STRIP_PHASE_EFFECTS):
+                arm.update(strip_keys)
             if (lull_keys
                     and state.effect_type in device_model.LULL_DARK_EFFECTS):
                 arm.update(lull_keys)
@@ -2726,15 +2849,19 @@ class ResponseEngine:
             if (drop_keys and state.effect_type
                     in device_model.DROP_INTENSITY_EFFECTS):
                 arm.update(drop_keys)
-            await self.executor.jump(vid, state.effect_type, arm)
-            await self.executor.glide(
+            await self._jump(vid, state.effect_type, arm)
+            await self._glide(
                 vid, state.effect_type, {"phase_progress": 1.0}, ramp_ms)
             targets.append(vid)
         if targets:
             self._phase_armed = (event_class
                                  if event_class in ("charge", "lull")
                                  else None)
+            self._lull_vids = (frozenset(targets) if event_class == "lull"
+                               else frozenset())
         record = {"targets": targets, "ramp_ms": ramp_ms, "gap_ms": gap_ms}
+        if strip_keys:
+            record["strip_phase_strength"] = strip_keys[strip_phase.STRENGTH_KEY]
         if lull_keys:
             record["lull_dark_s"] = lull_keys[lull_dark.DARK_KEY]
         if handoff is not None:
@@ -2768,25 +2895,31 @@ class ResponseEngine:
         progress = min(1.0, max(0.0, float(progress)))
         targets: list[str] = []
         house_reason: Optional[str] = None
-        if any(st.effect_type in device_model.ONE_COLOUR_EFFECTS
+        if any(st.effect_type in HOUSE_HELD_PHASE_EFFECTS
                for st in self.conductor.virtuals.values()):
             house_reason = _house_owns_the_look()
+        strength: Optional[float] = None
         for vid, state in self._flare_states().items():
             if state.effect_type not in device_model.PHASE_EFFECTS:
                 continue
             if (house_reason is not None
-                    and state.effect_type in device_model.ONE_COLOUR_EFFECTS):
+                    and state.effect_type in HOUSE_HELD_PHASE_EFFECTS):
                 continue
-            await self.executor.jump(vid, state.effect_type,
-                                     {"phase": event_class,
-                                      "phase_progress": progress})
+            arm = {"phase": event_class, "phase_progress": progress}
+            if state.effect_type in device_model.STRIP_PHASE_EFFECTS:
+                if strength is None:
+                    strength = self._strip_phase_strength()
+                arm[strip_phase.STRENGTH_KEY] = strength
+            await self._jump(vid, state.effect_type, arm)
             if remaining_ms > 0 and progress < 1.0:
-                await self.executor.glide(vid, state.effect_type,
+                await self._glide(vid, state.effect_type,
                                           {"phase_progress": 1.0},
                                           int(remaining_ms))
             targets.append(vid)
         if targets and event_class in ("charge", "lull"):
             self._phase_armed = event_class
+            self._lull_vids = (frozenset(targets) if event_class == "lull"
+                               else frozenset())
         return {"targets": targets, "event_class": event_class,
                 "progress": round(progress, 4),
                 "remaining_ms": int(remaining_ms)}
@@ -2839,6 +2972,20 @@ class ResponseEngine:
                              "lull dark cap at its default")
             return lull_dark.DEFAULT_MAX_DARK_S
 
+    def _strip_phase_strength(self) -> float:
+        """The room's strip phase strength (RoomControlState.
+        strip_phase_strength — fx/effects/strip_phase.py's master, 0 = the
+        strips exactly as before the layer). Never raises: an unreadable
+        room reads as the shipped default."""
+        try:
+            v = float(getattr(self._room_controls(), "strip_phase_strength",
+                              strip_phase.DEFAULT_STRENGTH))
+        except Exception:                                # noqa: BLE001
+            logger.exception("phase drive: room controls unreadable — "
+                             "strip phase strength at its default")
+            return strip_phase.DEFAULT_STRENGTH
+        return min(strip_phase.MAX_STRENGTH, max(0.0, v))
+
     async def release_phases(self, *, force: bool = False) -> int:
         """The lifecycle guard carried from the original program
         (trigger_engine cleared _phase_armed on track change): a charge or
@@ -2862,11 +3009,12 @@ class ResponseEngine:
         if self._phase_armed is None and not force:
             return 0
         self._phase_armed = None
+        self._lull_vids = frozenset()
         count = 0
         for vid, state in self.conductor.virtuals.items():
             if state.effect_type not in device_model.PHASE_EFFECTS:
                 continue
-            await self.executor.jump(
+            await self._jump(
                 vid, state.effect_type,
                 {"phase": "none", "phase_progress": 0.0})
             count += 1
@@ -2884,7 +3032,7 @@ class ResponseEngine:
             state = self.conductor.virtuals.get(vid)
             if state is None or state.effect_type not in device_model.PHASE_EFFECTS:
                 continue
-            await self.executor.jump(vid, state.effect_type,
+            await self._jump(vid, state.effect_type,
                                      {"phase": "none", "phase_progress": 0.0})
             out.append(vid)
         return out
@@ -3072,7 +3220,7 @@ class ResponseEngine:
             if entry.background_brightness is not None:
                 params["background_brightness"] = entry.background_brightness
             if params:
-                await self.executor.glide(vid, state.effect_type, params,
+                await self._glide(vid, state.effect_type, params,
                                           ramp_ms)
                 landed += 1
         position = eligible.get(picked_id)

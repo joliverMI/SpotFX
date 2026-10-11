@@ -137,6 +137,7 @@ def _spec(key: str, label: str, description: str) -> SettingSpec:
             "drop_suggested_score": "detector score",
             "drop_floor": "top-bar displayed energy, fraction 0.0-1.0",
             "lull_dark_max_s": "seconds",
+            "strip_phase_strength": "multiplier 0.0-1.5, 0 = off",
             "drop_switch_stale_margin_s": "seconds beyond the scene's own dwell",
             "drop_switch_drops_in_a_row": "drops, 0 = off",
             "drop_switch_swallow_delay_s": "seconds after the drop",
@@ -281,6 +282,18 @@ SETTINGS_REGISTRY: dict[str, SettingSpec] = {
         "4-second lull is still 2 and 2. 0 = the lull only goes dark on "
         "its drop. Takes effect on the very next lull. Convert spoken "
         "minutes to seconds yourself."),
+    "strip_phase_strength": _spec(
+        "strip_phase_strength", "Strip phase strength",
+        "How strongly the strip effects (Melt and Power today) answer a "
+        "charge, lull and drop: on a charge their colours get brighter, a "
+        "fill in the set's colours rises under them and they move faster; "
+        "a lull fades them to black at the same dark point as the crystal; "
+        "a drop sends a shockwave in the set's colours from the middle. "
+        "Never adds white. 1 = as tuned (default), 0 = off (the strips "
+        "exactly as before), up to 1.5 = stronger. Takes effect on the next "
+        "charge, lull or drop. Per-scene details (charge fill, drop "
+        "shockwave, flare punch, ...) are the strip effect's own settings "
+        "on the scene (set_scene_entry_param)."),
     "drop_switch_enabled": _spec(
         "drop_switch_enabled", "Drop-led scene switch",
         "On (default): a drop sequence may change the scene — a hard cut "

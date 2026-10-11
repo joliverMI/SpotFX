@@ -351,6 +351,14 @@ class Effect(BaseRegistry):
     LATTICE_EXACT = False
     # over ride in effect children to allow edit and show others
     PERMITTED_KEYS = None
+    # THE STRIP PHASE LAYER (fx/effects/strip_phase.py): False here, True on
+    # StripPhase members only — the ONE guard that keeps every other effect's
+    # _render/get_pixels byte-identical.
+    _strip_phase = False
+    # Config keys a write may carry WITHOUT re-running the effect's own
+    # config_updated chain (merged, then _passive_config_updated). Empty here,
+    # so the branch never runs for an effect that does not declare it.
+    PASSIVE_CONFIG_KEYS = frozenset()
     _config = None
     _active = False
     _virtual = None
@@ -555,6 +563,20 @@ class Effect(BaseRegistry):
                 "background_color": "#000000",
                 "background_brightness": 0.0,
             }
+
+        passive = type(self).PASSIVE_CONFIG_KEYS
+        if (passive and self._config and config
+                and passive.issuperset(config)):
+            # only layer-owned keys (e.g. a phase ramp's per-frame
+            # phase_progress): merge, tell the layer, skip the chain — a
+            # gradient effect's chain resets its filters and gradient roll
+            self._config = {**self._config, **config}
+            self._passive_config_updated(self._config)
+            if fire_event and self._virtual:
+                self._ledfx.events.fire_event(
+                    EffectUpdatedEvent(self.id, self._virtual.id)
+                )
+            return
 
         if self._config != {}:
             self._config = {**self._config, **config}
@@ -949,7 +971,14 @@ class Effect(BaseRegistry):
                 if self._tweens:
                     self._advance_tweens()
                 self._advance_bg_fade()
-                self.render()
+                if self._strip_phase:
+                    self._strip_phase_before_render()
+                    try:
+                        self.render()
+                    finally:
+                        self._strip_phase_after_render()
+                else:
+                    self.render()
                 # NaN/inf guard: effects read self.pixels back as their previous
                 # frame (feedback), so a single non-finite value — e.g. a
                 # divide-by-zero or overflow on a big audio spike — would
@@ -1035,6 +1064,9 @@ class Effect(BaseRegistry):
                             out=pixels,
                             casting="unsafe",
                         )
+
+                    if self._strip_phase:
+                        pixels = self._strip_phase_stage(pixels)
 
                     # If the configured blur is greater than 0 and pixel_count > 3, apply blur
                     # The matrix math requires > 3 pixels to work properly

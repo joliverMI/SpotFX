@@ -248,11 +248,32 @@ def resolve_scope(virtual_ids: list[str] = (), categories: list[str] = (),
 # Matches the original SpotFX program's PHASE_EFFECTS set; deliberately NOT
 # part of the effect-parameter registry below — phase keys ride ONLY
 # dedicated phase writes, never editor surfaces or band patches.
+# THE STRIP PHASE LAYER (2026-10-11, strip phase plan phase 1 — fx/effects/
+# strip_phase.py is the binding statement): the 1-D effects that take
+# charge/lull/drop from the ONE shared layer (gain, set-colour fill, drop
+# shockwave, the lull's fade at the shared dark point, the white guard, the
+# flare punch). Membership is unioned into PHASE_EFFECTS, LULL_DARK_EFFECTS
+# and DROP_INTENSITY_EFFECTS below, so SpotFX tells a member everything with
+# no SpotFX code change; and scene_response._drive_phase holds a member's
+# phases back while a house mode owns the look (his call 4). Every
+# registered 1-D effect either joins or is named in STRIP_PHASE_EXCEPTIONS
+# with its reason (tests/test_strip_phase.py's guard).
+STRIP_PHASE_EFFECTS = frozenset({"melt", "power"})
+
+STRIP_PHASE_EXCEPTIONS = {
+    "blackhole1d": "own phase choreography; joins the layer in plan phase 2",
+    "orbits1d": "own phase choreography; joins the layer in plan phase 3",
+    "fireworks1d": "own phase choreography; joins the layer in plan phase 3",
+    "pulse": "the Singles' one-colour light with its own lull/drop and flash budget",
+    "gradient": "the house Singles' breathing colour (House Star/House Fish), not a strip",
+    "blender": "a Matrix compositing helper (blends other virtuals), not a strip look",
+}
+
 PHASE_EFFECTS = frozenset({
     "blackhole", "blackhole1d", "orbits", "orbits1d", "radial",
     "fireworks", "fireworks1d", "squiggles", "dancer", "eye", "fish",
     "pulse", "sauron",
-})
+}) | STRIP_PHASE_EFFECTS
 
 # The ONE-COLOUR effects (single-led-power plan, phase 2): each pixel is one
 # light wearing one colour. Three things key off this set, and only these:
@@ -275,9 +296,11 @@ ONE_COLOUR_EFFECTS = frozenset({"pulse"})
 # own timing (`lull_ramp_s`, `lull_dark_s`) on the lull arm write
 # (spectra scene_response._drive_phase); an effect not listed here never
 # receives those keys. To opt an effect in, follow lull_dark.py's own
-# "HOW A LULL EFFECT OPTS IN". blackhole1d (Black Hole's strip) is the
-# natural next member.
-LULL_DARK_EFFECTS = frozenset({"blackhole", "squiggles", "pulse"})
+# "HOW A LULL EFFECT OPTS IN". Every STRIP_PHASE_EFFECTS member is one (the
+# strip layer reads the same rule); blackhole1d (Black Hole's strip) joins
+# with it in plan phase 2.
+LULL_DARK_EFFECTS = frozenset({"blackhole", "squiggles", "pulse"}) \
+    | STRIP_PHASE_EFFECTS
 
 # THE LULL HAND-OFF HOOK (2026-10-08, fish-lull plan phase 1): phase effects
 # whose lull can be TOLD how many pieces to leave on the panel at its
@@ -293,8 +316,9 @@ LULL_HANDOFF_EFFECTS = frozenset({"fish", "orbits"})
 
 # ... and its drop-side half: effects told the fire's intensity on every
 # drop arm (`drop_intensity`) so the drop's length and speed scale with the
-# music (lull_handoff.drop_scale).
-DROP_INTENSITY_EFFECTS = frozenset({"fish"})
+# music (lull_handoff.drop_scale). Every STRIP_PHASE_EFFECTS member too (the
+# strip layer sizes its drop shockwave by it).
+DROP_INTENSITY_EFFECTS = frozenset({"fish"}) | STRIP_PHASE_EFFECTS
 
 # THE DROP-LED SCENE SWITCH's families (2026-10-08, drop-scene-variety plan
 # phase 2 — spectra/services/drop_switch.py is the binding statement). A
