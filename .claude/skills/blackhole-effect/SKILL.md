@@ -75,10 +75,12 @@ downstream of that geometry, not independent tuning.
   anything measuring the explosion (`PHASE_BURST_SPEED_MULT` keys off it).
   A blob population is Little's Law (`rate × dwell time`), not the
   integral of the spawn rate — measure counts on rendered frames, never
-  derive them from the rate curve. A drop's TOTAL visible peak is
-  `PHASE_BURST_N` plus whatever the charge/lull just fed the horizon
-  (`p_cap < 0`, captured), not the payoff alone — anchor any target ratio
-  on `p_is_burst`, never on the total (`fx/VENDOR.md` #38).
+  derive them from the rate curve. A drop's TOTAL visible peak is the
+  payoff burst (`_burst_count()` — `PHASE_BURST_N`, or more on a loud TOLD
+  drop, see "The drop Shockwave and the breath-hold" below) plus whatever
+  the charge/lull just fed the horizon (`p_cap < 0`, captured), not the
+  payoff alone — anchor any target ratio on `p_is_burst`, never on the
+  total (`fx/VENDOR.md` #38).
 
 ## The three-anchor rule for THIS effect specifically
 

@@ -72,8 +72,13 @@ evenly spaced ring — distinct origins for Fireworks to explode. Told
 `lull_next` another effect, `_handoff_snapshot` flags them (`"keepers"`).
 **Told 1 (the default) or untold, the lull is byte-identical to before** —
 proven frame for frame against the pinned pre-change module; told 0, it
-keeps its one blob anyway (it has no dark lull to fall back to). Orbits
-is NOT in `DROP_INTENSITY_EFFECTS` (its drop does not scale).
+keeps its one blob anyway (it has no dark lull to fall back to). Orbits'
+own drop ejecta burst (`_spawn_drop_ejecta`, `DROP_EJECTA_X *
+particle_count`) still does not scale with `drop_intensity` — only the
+Shockwave does (below): Orbits is now IN `DROP_INTENSITY_EFFECTS`, widened
+2026-10-11 to every `DROP_SHOCK_EFFECTS` member so the Shockwave's own
+debris/front-life can scale, but `orbits.py` itself never reads
+`drop_intensity`.
 
 ## The drop Shockwave and the breath-hold (2026-10-11, transitions-drop plan phase 1)
 
