@@ -5,6 +5,7 @@
     "cwd": "/tmp/spectra-settings-agent-cli-music-device-widening/neutral_cwd",
     "session_id": "synthetic-music-device-allowlist-applied-0001",
     "tools": [
+      "mcp__settings-console__activate_ha_scene",
       "mcp__settings-console__add_drop_sequence",
       "mcp__settings-console__arm_show_set",
       "mcp__settings-console__confirm_drop_sequence",
@@ -74,6 +75,8 @@
       "mcp__settings-console__set_flares",
       "mcp__settings-console__set_force_color",
       "mcp__settings-console__set_force_scene",
+      "mcp__settings-console__set_ha_volume_absolute",
+      "mcp__settings-console__set_ha_volume_relative",
       "mcp__settings-console__set_house_energy",
       "mcp__settings-console__set_house_fixture",
       "mcp__settings-console__set_house_hue",
@@ -121,7 +124,10 @@
           "id": "toolu_synthetic_music_device_1",
           "name": "mcp__settings-console__set_music_device_allowlist",
           "input": {
-            "devices": ["Serenity", "Serenity guest"]
+            "devices": [
+              "Serenity",
+              "Serenity guest"
+            ]
           }
         }
       ]
@@ -161,7 +167,7 @@
       "content": [
         {
           "type": "text",
-          "text": "Done — music-reactive lighting now only follows 'Serenity' or 'Serenity guest'."
+          "text": "Done \u2014 music-reactive lighting now only follows 'Serenity' or 'Serenity guest'."
         }
       ]
     },
@@ -177,7 +183,7 @@
     "num_turns": 2,
     "stop_reason": "end_turn",
     "session_id": "synthetic-music-device-allowlist-applied-0001",
-    "result": "Done — music-reactive lighting now only follows 'Serenity' or 'Serenity guest'.",
+    "result": "Done \u2014 music-reactive lighting now only follows 'Serenity' or 'Serenity guest'.",
     "usage": {
       "input_tokens": 880,
       "output_tokens": 55

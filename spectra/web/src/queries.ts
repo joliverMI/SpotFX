@@ -7,6 +7,7 @@ import type { LiveLayout } from './live/positions';
 import type { RoomPlacement, RoomPose, RoomView } from './live/roomMap';
 import type { CurvePoint } from './components/CurveEditor';
 import type { LightingStatus } from './house/types';
+import type { HaScenesResult } from './lightshow/types';
 import type {
   AmbientHueGroup, ColorWheelPosition, DeviceListing, DevicePreviewFavorites, DevicePreviewStatus,
   DeviceWriteResult, DriftProfile,
@@ -689,6 +690,19 @@ export function useAmbientHueGroups() {
     queryKey: ['spectra-ambient-hue-groups'],
     queryFn: () => apiGet<{ groups: AmbientHueGroup[] }>('/room-controls/ambient-groups'),
     staleTime: 30_000,
+  });
+}
+
+/** The Light Show's "Activate HA scene" step's picker — his live Home
+ * Assistant scenes (GET /api/light-show/ha-scenes), never cached as long
+ * as useAmbientHueGroups above: he can make or rename a scene in HA at
+ * any time, and the whole point of fetching live is to see it without a
+ * SPECTRA-side list to keep in sync. */
+export function useHaScenes() {
+  return useQuery({
+    queryKey: ['spectra-light-show-ha-scenes'],
+    queryFn: () => apiGet<HaScenesResult>('/light-show/ha-scenes'),
+    staleTime: 10_000,
   });
 }
 

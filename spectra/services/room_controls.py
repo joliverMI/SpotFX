@@ -830,6 +830,30 @@ class RoomControlState(BaseModel):
     music_device_allowlist: list[str] = Field(
         default_factory=lambda: ["Serenity", "Serenity guest"])
 
+    # THE LIGHT SHOW'S HOME ASSISTANT ACTIONS (the Admiral, 2026-10-11:
+    # volume control of "the snap_volume in home assistant", relative and
+    # absolute, plus activating an HA scene from a set). SPECTRA's own HA
+    # client is `spectra/services/ha_client.py`; this field is its ONLY
+    # per-room configuration — everything else (the URL, the bearer) lives
+    # in the environment, `spectra/config.py`'s `ha_url()`/`ha_token()`,
+    # River's to provision. There is deliberately NO scene allow-list
+    # here: his own correction, 2026-10-11 ("I want to be able to
+    # customize the scene in HA and trigger it as part of the light show")
+    # — a hand-maintained list would never see a scene he makes later, so
+    # the "Activate HA scene" step picks any scene.* entity, fetched live
+    # from Home Assistant when configured (`GET /api/light-show/
+    # ha-scenes`) or typed by its full entity id otherwise.
+    #
+    # `ha_volume_relative_entity` names the entity id of River's relative-
+    # step script (its NAME is TBD by River at the time this shipped — the
+    # absolute script, `script.music_volume_set`, is fixed and not a
+    # setting, since Firstmate's spec named it directly). Split on its
+    # first "." for the HA service call (`domain.service`), the same shape
+    # a script's own auto-registered service always takes. Default is a
+    # SENSIBLE GUESS, not a confirmed name — see show_actions.py's "ha"
+    # group docstring for what it is called with.
+    ha_volume_relative_entity: str = "script.music_volume_step"
+
     @field_validator("ambient_color", "ambient_color_dark", "display_light_bg_color")
     @classmethod
     def _validate_hex(cls, v: Optional[str]) -> Optional[str]:

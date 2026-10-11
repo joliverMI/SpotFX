@@ -5,6 +5,7 @@
     "cwd": "/tmp/spectra-settings-agent-cli-overwrite-widening/neutral_cwd",
     "session_id": "synthetic-overwrite-rejected-0001",
     "tools": [
+      "mcp__settings-console__activate_ha_scene",
       "mcp__settings-console__add_drop_sequence",
       "mcp__settings-console__arm_show_set",
       "mcp__settings-console__confirm_drop_sequence",
@@ -74,6 +75,8 @@
       "mcp__settings-console__set_flares",
       "mcp__settings-console__set_force_color",
       "mcp__settings-console__set_force_scene",
+      "mcp__settings-console__set_ha_volume_absolute",
+      "mcp__settings-console__set_ha_volume_relative",
       "mcp__settings-console__set_house_energy",
       "mcp__settings-console__set_house_fixture",
       "mcp__settings-console__set_house_hue",

@@ -671,6 +671,29 @@ async def end_show() -> dict:
 
 
 @mcp.tool()
+async def set_ha_volume_absolute(volume: float) -> dict:
+    """Set Home Assistant's snap_volume to an exact level (0-100, steps
+    of 4), as an ad-hoc Light Show step. Calls script.music_volume_set."""
+    return await _call("set_ha_volume_absolute", volume=volume)
+
+
+@mcp.tool()
+async def set_ha_volume_relative(delta: float) -> dict:
+    """Nudge Home Assistant's snap_volume up or down by a signed step
+    (e.g. +8 or -8), as an ad-hoc Light Show step."""
+    return await _call("set_ha_volume_relative", delta=delta)
+
+
+@mcp.tool()
+async def activate_ha_scene(scene_name: Optional[str] = None) -> dict:
+    """Activate any Home Assistant scene, as an ad-hoc Light Show step.
+    scene_name may be a full entity id (e.g. "scene.music_mode") or his
+    own words for one, matched against Home Assistant's live scene list.
+    Omit it to use scene.music_mode, his first scene."""
+    return await _call("activate_ha_scene", scene_name=scene_name)
+
+
+@mcp.tool()
 async def list_show_sequences() -> dict:
     """His Show Sequences (ordered, pre-armed sets and Waits). Use this to
     find the exact name for start_show_sequence."""

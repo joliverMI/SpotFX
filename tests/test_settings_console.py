@@ -209,7 +209,12 @@ def test_dispatch_recognizes_exactly_the_declared_settings_tools():
     trio (set_force_scene/set_force_color/get_force_pins — by NAME, not
     registry keys; see the module docstring), and the 2026-10-09
     music-device-allowlist pair (get_music_device_allowlist/
-    set_music_device_allowlist — same "list, not a registry key" reason)."""
+    set_music_device_allowlist — same "list, not a registry key" reason).
+    The HA scene picker (2026-10-11) is deliberately NOT a settings-
+    domain pair — his own correction that it must pick ANY scene he makes
+    in HA means there is no allow-list left to read or write here; see
+    show_console.py's activate_ha_scene op and ha_client.list_scenes()
+    instead."""
     from spectra.services import settings_agent as sa
     from spectra.services import settings_console as sc
 

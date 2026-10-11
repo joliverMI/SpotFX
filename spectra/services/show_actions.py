@@ -93,7 +93,12 @@ class Param:
     """One parameter. `type` is what the Build view renders:
     bool | enum | number | color | text | scene | scenes | color_set |
     color_sets | gradient | target | hue_areas | room_effect | house_mode |
-    overrides."""
+    ha_scene | overrides.
+
+    `step` is the number input's own increment — None lets the Build view
+    fall back to its existing default (0.05 below max<=1, else 1); the HA
+    volume actions set it to 4 to match River's input_number.snap_volume
+    (snaps to multiples of 4)."""
     name: str
     type: str
     label: str = ""
@@ -102,6 +107,7 @@ class Param:
     choices: Optional[list] = None
     min: Optional[float] = None
     max: Optional[float] = None
+    step: Optional[float] = None
     unit: str = ""
     help: str = ""
 
@@ -110,7 +116,7 @@ class Param:
                 "label": self.label or self.name.replace("_", " "),
                 "default": self.default, "required": self.required,
                 "choices": self.choices, "min": self.min, "max": self.max,
-                "unit": self.unit, "help": self.help}
+                "step": self.step, "unit": self.unit, "help": self.help}
 
 
 class ActionError(ValueError):
@@ -664,6 +670,168 @@ register(ActionKind(
     apply=_apply_color_set_now))
 
 
+# ── Home Assistant (the Admiral, 2026-10-11) ───────────────────────────────
+# Three steps reaching OUT to Home Assistant through spectra/services/
+# ha_client.py — the first outbound HA path in this app (every other HA
+# seam here is HA pushing IN, house.py's own "THE HA SEAM"). None of the
+# three touch SPECTRA's own lights, so `needs_room=False` on all three —
+# the show_output.refusal() gate is about who owns the lights, which these
+# actions have nothing to do with; they must still work from a released or
+# dark room.
+#
+# `ha_client.call_service(domain, service, data)` is the one primitive; HA
+# unconfigured or unreachable never raises here, it answers with a named,
+# visible outcome on the step ("Home Assistant is not configured...").
+#
+# ENTITY-TO-SERVICE: a script's own auto-registered HA service is named
+# after its entity id's object_id, under domain "script" — splitting an
+# entity id on its FIRST "." gives exactly (domain, service) for any such
+# entity, which is what `_split_entity` does for the relative-step script
+# (River's own name, read from the room setting `ha_volume_relative_entity`
+# — see room_controls.py's own docstring on that field). The absolute
+# script's service is fixed to script.music_volume_set, named directly in
+# Firstmate's spec rather than left TBD.
+#
+# PAYLOAD SHAPES ARE RIVER'S OWN (from firstmate's inbox, 2026-10-11):
+# script.music_volume_set takes `volume` (0-100 — HA clamps
+# input_number.snap_volume to that range, and the entity steps in
+# multiples of 4, hence the Build view's own step=4); script.
+# music_volume_step takes `delta` (a signed number of those same points,
+# e.g. +8/-8 — 8 is River's own suggested default step size). An HA token
+# cannot be scoped to individual scripts, so these actions stay INERT
+# (ha_client.configured() == False, every call reports "not configured")
+# until the Admiral decides to provision SPECTRA_HA_TOKEN — no change
+# needed here when he does; the client already treats an absent token as
+# "send it anyway, let HA's own 401 be the visible signal".
+
+def _split_entity(entity: str) -> tuple[str, str]:
+    entity = (entity or "").strip()
+    if "." not in entity:
+        raise ActionError(
+            f"HA entity {entity!r} is not a valid entity id (expected "
+            f"domain.object_id, e.g. script.music_volume_step)")
+    domain, service = entity.split(".", 1)
+    if not domain or not service:
+        raise ActionError(f"HA entity {entity!r} is not a valid entity id")
+    return domain, service
+
+
+def _ha_outcome(result: "ha_client.HAResult", verb: str) -> Outcome:
+    if result.status == "unconfigured":
+        return Outcome("failed", result.detail or
+                       "Home Assistant is not configured on this host "
+                       "(SPECTRA_HA_URL)")
+    if result.status == "sent":
+        return Outcome("applied", verb, {"ha": result.as_dict()})
+    return Outcome("failed", result.detail or "Home Assistant call failed",
+                   {"ha": result.as_dict()})
+
+
+async def _apply_ha_volume_absolute(p: dict, ctx: "RunContext") -> Outcome:
+    from spectra.services import ha_client
+    result = await ha_client.call_service(
+        "script", "music_volume_set", {"volume": p["volume"]})
+    return _ha_outcome(result, f"HA volume set to {p['volume']:g}")
+
+
+async def _apply_ha_volume_relative(p: dict, ctx: "RunContext") -> Outcome:
+    from spectra.services import ha_client, room_controls
+    entity = room_controls.load_room_controls().ha_volume_relative_entity
+    try:
+        domain, service = _split_entity(entity)
+    except ActionError as exc:
+        return Outcome("failed", str(exc))
+    result = await ha_client.call_service(domain, service, {"delta": p["delta"]})
+    sign = "+" if p["delta"] >= 0 else ""
+    return _ha_outcome(result, f"HA volume step {sign}{p['delta']:g}")
+
+
+def ha_scene_label(entity: str) -> str:
+    """A fallback label for an entity id when nothing better is known
+    ("scene.music_mode" -> "music mode") — the live picker prefers HA's
+    own `friendly_name` (`ha_client.list_scenes()`), this is only what a
+    typed-but-unfetched id falls back to."""
+    return entity.split(".", 1)[-1].replace("_", " ") or entity
+
+
+def ha_configured() -> bool:
+    from spectra.services import ha_client
+    return ha_client.configured()
+
+
+def _check_ha_scene(p: dict) -> dict:
+    """GENERIC validation only (the Admiral, 2026-10-11: "I want to be
+    able to customize the scene in HA and trigger it as part of the light
+    show" — ANY scene he makes, never a hand-maintained allow-list). The
+    only thing checked here is that it LOOKS like a scene entity id; which
+    scenes actually exist is Home Assistant's own business, fetched live
+    by the picker (`GET /api/light-show/ha-scenes`) and otherwise typed
+    freely."""
+    scene = (p.get("scene") or "").strip()
+    if "." not in scene:
+        raise ActionError(
+            f"Activate HA scene: {scene!r} is not a valid entity id "
+            f"(expected scene.<name>, e.g. scene.music_mode)")
+    domain = scene.split(".", 1)[0]
+    if domain != "scene":
+        raise ActionError(
+            f"Activate HA scene: {scene!r} is not a scene entity "
+            f"(expected domain 'scene', got {domain!r})")
+    p["scene"] = scene
+    return p
+
+
+async def _apply_ha_activate_scene(p: dict, ctx: "RunContext") -> Outcome:
+    from spectra.services import ha_client
+    result = await ha_client.call_service(
+        "scene", "turn_on", {"entity_id": p["scene"]})
+    return _ha_outcome(result, f"HA scene activated: {p['scene']}")
+
+
+register(ActionKind(
+    name="ha_volume_absolute", label="HA volume (absolute)", group="ha",
+    params=[Param("volume", "number", "Volume", required=True, default=52,
+                  min=0, max=100, step=4, unit="",
+                  help="Target snap_volume, 0-100 — the entity steps in "
+                       "multiples of 4. Calls Home Assistant's "
+                       "script.music_volume_set.")],
+    help="Set the snap_volume in Home Assistant to an exact level.",
+    restore="Nothing to put back — a volume change is explicit, like "
+            "turning a dial.",
+    apply=_apply_ha_volume_absolute, needs_room=False,
+    help_topic="show-ha-actions"))
+
+register(ActionKind(
+    name="ha_volume_relative", label="HA volume (relative step)", group="ha",
+    params=[Param("delta", "number", "Step", required=True, default=8,
+                  min=-100, max=100, step=4,
+                  help="Signed step, e.g. +8 or -8. Calls the entity set "
+                       "in the room's ha_volume_relative_entity setting "
+                       "(default script.music_volume_step).")],
+    help="Nudge the snap_volume in Home Assistant up or down by a step.",
+    restore="Nothing to put back — a volume change is explicit, like "
+            "turning a dial.",
+    apply=_apply_ha_volume_relative, needs_room=False,
+    help_topic="show-ha-actions"))
+
+register(ActionKind(
+    name="ha_activate_scene", label="Activate HA scene", group="ha",
+    params=[Param("scene", "ha_scene", "Scene", required=False,
+                  default="scene.music_mode",
+                  help="Any Home Assistant scene.* entity — fetched live "
+                       "from Home Assistant when configured, or typed as "
+                       "its full entity id (e.g. scene.music_mode, his "
+                       "first scene). He can make, edit or rename scenes "
+                       "in HA at any time; this step always reaches "
+                       "whatever the entity id currently points to.")],
+    help="Activate a Home Assistant scene, e.g. the music-mode scene — "
+         "any scene he makes in HA can be picked here.",
+    restore="Nothing to put back — an HA scene activation is explicit, "
+            "like its own switch.",
+    apply=_apply_ha_activate_scene, check=_check_ha_scene, needs_room=False,
+    help_topic="show-ha-actions"))
+
+
 # ── device output ──────────────────────────────────────────────────────────
 
 def _hex_rgb(h: str) -> tuple:
@@ -1174,7 +1342,12 @@ def catalogue() -> dict:
     except Exception:                                    # noqa: BLE001
         logger.exception("light show: could not list house modes")
     return {"kinds": kinds, "room_effects": effects,
-            "room_effect_schema": effect_schema, "house_modes": house_modes}
+            "room_effect_schema": effect_schema, "house_modes": house_modes,
+            # Live HA scenes are served separately (GET /api/light-show/
+            # ha-scenes) since fetching them is a network call this
+            # otherwise-synchronous, no-network function must not make —
+            # only the configured flag (no network needed) rides here.
+            "ha_configured": ha_configured()}
 
 
 # ── running a set ──────────────────────────────────────────────────────────

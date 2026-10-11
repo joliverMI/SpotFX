@@ -4485,6 +4485,49 @@ one context per program) and maps song -> steps (set + `song_start` /
   (incl. the opening-change proof through the real bridge -> engine ->
   TriggerEngine, with a red control), `node scripts/check_show_playlist_ui.mjs`.
 
+### THE OUTBOUND HOME ASSISTANT CLIENT + Light Show "ha" actions (2026-10-11)
+
+`spectra/services/ha_client.py` is SPECTRA's FIRST outbound path to Home
+Assistant — every other HA seam in this codebase is HA pushing IN
+(`house.py`'s own "THE HA SEAM"). `ha_client.call_service(domain, service,
+data)` POSTs to `{SPECTRA_HA_URL}/api/services/<domain>/<service>` with
+`Authorization: Bearer {SPECTRA_HA_TOKEN}` — both read from the
+environment only (`spectra/config.py`'s `ha_url()`/`ha_token()`,
+`pretake_url()`'s own posture), never committed, never logged. Unset URL
+is the shipped state and means INERT: every caller gets back
+`HAResult(status="unconfigured")` and reports "Home Assistant is not
+configured" rather than failing silently or raising. Deploy contract
+(firstmate/River, 2026-10-11): on serenity the two env vars come from
+`/home/javi/.config/spectra/ha.env`, loaded by a systemd drop-in
+(`deploy/spectra.service`'s own comment has the exact `EnvironmentFile=`
+line) — never inlined into the checked-in unit file.
+
+Three Light Show action kinds (`spectra/services/show_actions.py`'s "ha"
+group), all `needs_room=False` (they have nothing to do with who owns the
+lights, so they still fire from a released or dark room — AND they never
+consult `house.py`: a resting house mode must never block or defer an HA
+action, his own explicit ruling, 2026-10-11, held by a test that actively
+simulates a resting house mode and fires anyway):
+`ha_volume_absolute` (`script.music_volume_set`, field `volume` 0-100,
+step 4 — River's `input_number.snap_volume` snaps to multiples of 4),
+`ha_volume_relative` (the entity named in the new
+`RoomControlState.ha_volume_relative_entity` setting, default
+`script.music_volume_step`, field `delta`, signed, default step 8 — split
+into `domain.service` on its first "."), `ha_activate_scene` (`scene.
+turn_on` with `entity_id` — **GENERIC, no allow-list**: his own
+correction the same day, "I want to be able to customize the scene in HA
+and trigger it as part of the light show" — ANY `scene.*` entity, typed
+by its full id or picked from `ha_client.list_scenes()`'s live
+`GET /api/states` fetch, `GET /api/light-show/ha-scenes` the route that
+serves it; `scene.music_mode` is only the step's own suggested default,
+never a stored list). Sonic reach:
+`show_console._op_set_ha_volume_absolute`/`_op_set_ha_volume_relative`/
+`_op_activate_ha_scene` (ad-hoc one-step fires through `show_actions.
+fire()`, the `hold_device`/`dim_device` pattern; `_resolve_ha_scene` uses
+a full entity id verbatim with NO fetch, or resolves a bare name against
+the live list, fuzzy-matched). Tests (mocked HA, no live calls, ever):
+`tests/test_ha_client.py`, `tests/test_show_ha_actions.py`.
+
 ## HOUSE LIGHTING (`/house`) — the room's always-on resting look (phases 1–2)
 
 Plan: `/home/javi/fleet-spotfx/data/standard-lighting-plan/report.md` (his
