@@ -980,7 +980,9 @@ arrived) set `self._drop = {"burst_t": None, "silent": True}` and
 resolves `burst_t` out of that `None` sentinel, which every OTHER entry
 path (a normal `_enter_phase("drop")`) falls through into within one call.
 `draw()` reads `burst_t` via `_horizon_radius()`/`_phase_halo()`
-(`_phase_post()` in the 1d strip) immediately after `_phase_step()`
+(the 1d strip's own `_phase_post()` read it the same way until it was
+retired 2026-10-11 when the strip joined the shared strip phase layer —
+see "THE STRIP PHASE LAYER" below) immediately after `_phase_step()`
 returns, every frame, with no chance for a next call to self-heal first —
 so `None / DROP_RESET_S` raised inside the render thread, killing it
 silently (the service kept reporting healthy until the render-plane

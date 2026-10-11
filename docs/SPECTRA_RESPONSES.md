@@ -332,8 +332,10 @@ through the ring when a flare punches through the lull's dark. Its
 activity raises the spawn rate, beat burst and density cap (and the fall
 speed, weighted 0.6). At `strip_phase_strength` 0 the layer's drawing is
 off but the reworked blob choreography stays. Orbits/Fireworks' own strips
-keep their own choreography above and join in plan phase 3. Full mechanism (the output-stage order, the white guard, the
-punch envelope, how a future effect joins): the module's own docstring and
+keep their own choreography above and join in plan phase 3.
+
+Full mechanism (the output-stage order, the white guard, the punch
+envelope, how a future effect joins): the module's own docstring and
 AGENTS.md's "THE STRIP PHASE LAYER" section — not restated here.
 
 Fish answers one flare kind of its own (2026-10-08): **big_fish** — one

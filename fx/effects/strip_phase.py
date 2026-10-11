@@ -14,8 +14,8 @@ brightness."
 Plan: /home/javi/fleet-spotfx/data/strip-phase-plan/report.md (revision 3;
 its phase 1 is this module, Melt and Power joining it, the flare punch and
 the house-mode hold; its phase 2 is the Black Hole strip joining it — the
-first member with phase choreography of its own, see step 5 below). ONE layer, ONE line per effect to join, no SpotFX code
-change per effect.
+first member with phase choreography of its own, see step 5 below). ONE
+layer, ONE line per effect to join, no SpotFX code change per effect.
 
 WHAT IT LISTENS TO — only keys SpotFX sends on a phase write (spectra
 scene_response._drive_phase): `phase`, `phase_progress`, the lull's
