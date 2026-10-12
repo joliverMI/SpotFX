@@ -1841,13 +1841,12 @@ def test_strip_phase_strength_room_master_is_sonic_reachable():
     round trip already proven in test_settings_console.py — re-asserted
     here so the two halves (the room master and the per-effect tunables
     above) are proven side by side, matching how the plan itself frames
-    this as one coverage claim."""
+    this as one coverage claim. Whether the setting actually governs
+    every joining strip effect at render time (not just Melt/Power) is
+    proven behaviorally in test_strip_phase.py, against the real pipeline
+    — not re-derived here from the description's own wording."""
     from spectra.services import settings_console as sc
 
     assert "strip_phase_strength" in sc.SETTINGS_REGISTRY
     spec = sc.SETTINGS_REGISTRY["strip_phase_strength"]
     assert spec.min == 0.0 and spec.max == 1.5
-    # the description names every strip effect it now governs, not just
-    # the two (Melt/Power) it shipped with in phase 1
-    for name in ("Melt", "Power", "Black Hole", "Orbits", "Fireworks"):
-        assert name in spec.description
