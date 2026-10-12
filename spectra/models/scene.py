@@ -1159,6 +1159,15 @@ class SceneV2(BaseModel):
     # test it at first"). Since 2026-10-12 the strips' own drop shockwave
     # (fx/effects/strip_phase.py) follows it too ("stip shockwave, yes").
     drop_shock_enabled: bool = True
+    # THE DROP TIMING OFFSET, PER SCENE (2026-10-12): None (default) = the
+    # room's RoomControlState.drop_timing_offset_ms governs this scene's
+    # drops; a number = this scene's own drop offset instead (OFFSET family,
+    # ms, NEGATIVE = earlier). The slot the follow-up drag of the drop mark
+    # on this scene's drop-sequence preview writes; resolved by
+    # spectra/services/drop_timing.resolve_offset_ms against the scene
+    # showing when the drop fires (the same live peek the band's flare-kind
+    # offset uses).
+    drop_timing_offset_ms: Optional[int] = Field(default=None, ge=-2000, le=2000)
 
     @model_validator(mode="before")
     @classmethod

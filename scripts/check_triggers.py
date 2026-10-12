@@ -79,6 +79,13 @@ from spectra.models.trigger import (FireResponseAction, FireSceneAction,
                                     SelectColorSetAction, SpectraTrigger)
 from spectra.services import scene_store, trigger_store
 
+# THE DROP TIMING OFFSET (spectra/services/drop_timing.py) ships at -400 ms.
+# This spec proves the gaps, leads and offsets the drop sits among, against
+# drops ON their mark — held at 0 here, as tests/conftest.py does for the
+# pytest suites; tests/test_drop_timing.py proves the offset itself.
+from spectra.services import drop_timing as _drop_timing
+_drop_timing.resolve_offset_ms = lambda room=None, scene=None: 0
+
 # ═══ 1. model ═════════════════════════════════════════════════════════════
 
 expect_invalid(lambda: SpectraTrigger(timestamp_ms=-1,

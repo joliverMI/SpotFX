@@ -109,6 +109,22 @@ matching the same authored mark fire on top of each other; `matches_his`
 decides which of two sequences near one drop wins (his sort order), never
 whether the dedup applies at all.
 
+## Every drop fires off its mark — the drop timing offset (2026-10-12)
+
+`spectra/services/drop_timing.py` is the binding statement. The room's
+`drop_timing_offset_ms` (default -400 ms, negative = earlier; a scene's own
+`SceneV2.drop_timing_offset_ms` wins when set) is summed by
+`trigger_engine.tick()` into the target of every fire_response DROP — the
+sequence members and his own stored drops alike — so the drop arm, the
+drop-led cut on the drop, the Shockwave and the strip drop all move
+together. `FiringSequence.gap_ms(..., drop_offset_ms=)` and
+`_phase_partner_gap_ms` hand a build ending on a drop the gap to the
+SHIFTED mark (the breath-hold ends on it); a drop never moves within
+`MIN_BUILD_MS` of its lull; a Fireworks meld's `after_drop` delay counts
+from the fired drop (`late_release(drop_offset_ms=)`). The member
+timestamps, the protected windows and the Timeline's drop marks stay on the
+music's own mark. Tests hold it at 0 unless marked `drop_timing_live`.
+
 ## What a LULL is TOLD about its drop — the lull hand-off hook (2026-10-08)
 
 A drop sequence's lull can be told how many pieces to leave on the panel

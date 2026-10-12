@@ -160,8 +160,11 @@ def analyse(songs: dict[str, list[SpectraTrigger]], mode: str, baseline_mod) -> 
     unchanged_by_reason = Counter()
     problems: list[str] = []
     for uri, triggers in songs.items():
+        # the drop timing offset (drop_timing.py) held at 0: this script
+        # isolates the PARTNER rule against an engine that predates both
         new = TriggerEngine(list_triggers=lambda _u, t=triggers: t,
-                            scene_change_mode=lambda m=mode: m)
+                            scene_change_mode=lambda m=mode: m,
+                            drop_offset_ms=lambda: 0)
         old = baseline_mod.TriggerEngine(list_triggers=lambda _u, t=triggers: t,
                                          scene_change_mode=lambda m=mode: m)
         new._uri = old._uri = uri

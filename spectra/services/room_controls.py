@@ -702,6 +702,19 @@ class RoomControlState(BaseModel):
     # 0 = no breath-hold.
     lull_breath_hold_s: float = Field(default=0.4, ge=0.0, le=3.0)
 
+    # THE DROP TIMING OFFSET (the Admiral, 2026-10-12: "Let's start by
+    # shifting the drops so they fire 400ms earlier"). OFFSET family, ms,
+    # NEGATIVE = every drop fires EARLIER than its mark. Applied once, by
+    # trigger_engine.tick() to every fire_response drop (his stored drops and
+    # the drop-sequence members); the drop arm, the drop-led cut, the
+    # Shockwave and the strip drop all ride that one fire, and a charge/lull
+    # building to the drop is told the gap to the shifted mark so its ramp
+    # and the breath-hold end on it. A scene's own
+    # SceneV2.drop_timing_offset_ms, when set, wins. spectra/services/
+    # drop_timing.py is the binding statement. Sonic-tellable. 0 = on the
+    # mark.
+    drop_timing_offset_ms: int = Field(default=-400, ge=-2000, le=2000)
+
     # THE DROP SHOCKWAVE'S SWITCHES (2026-10-12, the Admiral: "Shockwave
     # should be a setting that can be toggled per scene, as well as
     # globally, as well as a global setting for minimum energy before it is

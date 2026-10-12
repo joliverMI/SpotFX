@@ -382,6 +382,25 @@ def _isolated_house(tmp_path_factory, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _drop_timing_on_the_mark(request, monkeypatch):
+    """THE DROP TIMING OFFSET (spectra/services/drop_timing.py) ships at
+    -400 ms — every drop fires early. The suites that prove OTHER timing
+    (the drop's zero lead, the phase-partner gaps, the drop-led cut, the
+    sequence preview's ruler) were written against drops on their mark and
+    read real room controls with no DI seam, so each test starts with the
+    offset at 0 — the house switch's own shape above. A test about the
+    offset itself opts back into the real resolution with
+    @pytest.mark.drop_timing_live (tests/test_drop_timing.py)."""
+    if request.node.get_closest_marker("drop_timing_live") is not None:
+        yield
+        return
+    from spectra.services import drop_timing
+    monkeypatch.setattr(drop_timing, "resolve_offset_ms",
+                        lambda room=None, scene=None: 0)
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _isolated_fire_history(tmp_path, monkeypatch):
     """SPECTRA's fire-history counter/show-log (spectra/services/
     fire_history.py) is written from inside production choke points

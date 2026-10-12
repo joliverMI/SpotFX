@@ -96,7 +96,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from typing import Iterable, Optional
 
-from spectra.services import analysed_flares, drop_detector, drop_sequences, phase_partner
+from spectra.services import (analysed_flares, drop_detector, drop_sequences,
+                               drop_timing, phase_partner)
 
 ID_PREFIX = "drop-seq:"
 """Synthetic trigger ids the trigger clock fires members under:
@@ -202,18 +203,30 @@ class FiringSequence:
     def trigger_id(self, cls: str) -> str:
         return f"{ID_PREFIX}{self.key}:{cls}"
 
-    def gap_ms(self, cls: str, effective_mode: Optional[str] = None) -> Optional[int]:
+    def gap_ms(self, cls: str, effective_mode: Optional[str] = None,
+               drop_offset_ms: int = 0) -> Optional[int]:
         """How long `cls`'s build runs: to its own partner in this sequence
         (phase_partner's rule and reach). None for the drop. `effective_mode`
         resolves the same mode-aware member set `members()` does, so a
         stood-down neighbour never counts as `cls`'s partner in a mode
-        where that neighbour isn't actually firing alongside it."""
+        where that neighbour isn't actually firing alongside it.
+        `drop_offset_ms` is the room's drop timing offset (drop_timing.py):
+        a build ending on the drop runs to where the drop FIRES, so its
+        ramp and the breath-hold end on the shifted mark."""
         members = self.members(effective_mode)
         start = dict(members).get(cls)
         if start is None or cls not in phase_partner.BUILD_CLASSES:
             return None
         later = [(ms, c) for c, ms in members if c != cls]
-        return phase_partner.build_target(cls, start, later).gap_ms(start)
+        target = phase_partner.build_target(cls, start, later)
+        return drop_timing.build_gap_ms(start, target.ms, target.target_class,
+                                        drop_offset_ms)
+
+    def build_start_ms(self, effective_mode: Optional[str] = None) -> Optional[int]:
+        """The member the drop's build starts from — its lull, else its
+        charge — for drop_timing's clamp."""
+        members = dict(self.members(effective_mode))
+        return members.get("lull", members.get("charge"))
 
     def resolved_stood_down(self, effective_mode: str) -> dict:
         """`stood_down`, but only when his own trigger actually fires in
