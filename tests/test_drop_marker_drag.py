@@ -49,6 +49,7 @@ def _storage(tmp_path, monkeypatch):
                      ("SCENE_BACKUPS_FILE", "scene_backups.json"),
                      ("SCENE_GENESIS_FILE", "scene_genesis.json")):
         monkeypatch.setattr(scfg, name, tmp_path / fn)
+    real_categories = device_model.CATEGORIES_FILE
     monkeypatch.setattr(device_model, "CATEGORIES_FILE",
                         tmp_path / "device_categories.json")
     device_model.CATEGORIES_FILE.write_text(json.dumps({}))
@@ -59,6 +60,9 @@ def _storage(tmp_path, monkeypatch):
     from spectra.services import flare_preview_hold, preview_pause
     preview_pause.clear()
     flare_preview_hold.clear_ceiling_lock()
+    # leave the shared category cache as the next test expects to find it
+    device_model.CATEGORIES_FILE = real_categories
+    device_model.refresh()
 
 
 def _scene(**kw):
