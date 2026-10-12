@@ -124,6 +124,10 @@ SHIFTED mark (the breath-hold ends on it); a drop never moves within
 from the fired drop (`late_release(drop_offset_ms=)`). The member
 timestamps, the protected windows and the Timeline's drop marks stay on the
 music's own mark. Tests hold it at 0 unless marked `drop_timing_live`.
+A scene's own value is set by dragging the drop's red line on its
+drop-sequence preview (a scene-draft edit, kept by Save; −50/−10/+10/+50 ms
+buttons and "Room's" beside it) or by Sonic's `set_scene_setting` key
+`drop_timing_offset_ms` (null = back to the room's).
 
 ## What a LULL is TOLD about its drop — the lull hand-off hook (2026-10-08)
 

@@ -271,7 +271,8 @@ def test_the_preview_red_line_moves_400ms_earlier(_preview_storage):
     _tl0, on_mark = _timeline(_scene(), gaps)
     _set_room(-400)
     tl, early = _timeline(_scene(), gaps)
-    assert tl["drop_timing"] == {"offset_ms": -400, "applied_ms": -400, "source": "room"}
+    assert {k: tl["drop_timing"][k] for k in ("offset_ms", "applied_ms", "source")} == {
+        "offset_ms": -400, "applied_ms": -400, "source": "room"}
     assert early["drop"]["drop_timing_offset_ms"] == -400
     # the red line (mark_s) and the drop's fire cue: 0.4 s earlier than the
     # charge and lull, which stay put relative to each other

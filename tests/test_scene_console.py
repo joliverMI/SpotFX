@@ -102,6 +102,8 @@ def test_scene_settings_registry_bounds_are_read_from_the_real_models():
         "color_journey_pace_factor", "accept_all_sets",
         # 2026-10-12, the drop Shockwave per scene:
         "drop_shock_enabled",
+        # 2026-10-12, the drop timing per scene (the drop mark's drag):
+        "drop_timing_offset_ms",
     }
 
     spec = sc.SCENE_SETTINGS_REGISTRY["entry_ramp_ms"]

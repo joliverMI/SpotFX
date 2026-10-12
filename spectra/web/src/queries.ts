@@ -9,6 +9,7 @@ import type { CurvePoint } from './components/CurveEditor';
 import type { LightingStatus } from './house/types';
 import type { HaScenesResult } from './lightshow/types';
 import type { PreviewProgram } from './scenes/tabs/programStages';
+import type { DropTimingInfo } from './scenes/tabs/dropMarkDrag';
 import type {
   AmbientHueGroup, ColorWheelPosition, DeviceListing, DevicePreviewFavorites, DevicePreviewStatus,
   DeviceWriteResult, DriftProfile,
@@ -344,6 +345,10 @@ export interface PhasePreviewMark {
   /** The DROP TIMING OFFSET applied to this mark (spectra/services/
    * drop_timing.py): negative = earlier. Non-zero only on the drop. */
   drop_timing_offset_ms: number;
+  /** Where the mark would sit WITHOUT the drop timing offset — the music's
+   * own drop moment, which the drop mark's drag measures its offset from.
+   * Equal to mark_s on the charge and lull. */
+  music_mark_s?: number;
   lead_ms: number;
   anchor_rule: 'switch_end' | 'drop_start';
 }
@@ -358,7 +363,7 @@ export interface PhasePreviewTimeline {
   /** THE DROP TIMING OFFSET in force for this scene (drop_timing.py):
    * `offset_ms` as set (the scene's own, else the room's), `applied_ms` as
    * actually moved on this ruler (never closer than 100 ms to its lull). */
-  drop_timing: { offset_ms: number; applied_ms: number; source: 'scene' | 'room' | 'default' };
+  drop_timing: DropTimingInfo;
   marks: PhasePreviewMark[];
   cues: PreviewCue[];
   /** Virtuals the vendored phase machinery will actually reach. Empty
@@ -401,19 +406,24 @@ export const fireTransitionPreview = (
   apiPost<PreviewFireResult>('/preview/transition/fire',
     { to_scene_id: toSceneId, from_scene_id: fromSceneId, intensity, step });
 
+/** `dropTimingMs`: the scene DRAFT's own drop timing offset (a number, or
+ * null for the room's) — sent so the preview shows an unsaved drag of the
+ * drop mark; `undefined` = the stored scene's value. */
 export const openSequencePreview = (
   sceneId: string, intensity: number, chargeGapMs: number, lullGapMs: number,
-  dropSwitch = true) =>
+  dropSwitch = true, dropTimingMs?: number | null) =>
   apiPost<PhasePreviewTimeline>('/preview/sequence/open',
     { scene_id: sceneId, intensity, charge_gap_ms: chargeGapMs, lull_gap_ms: lullGapMs,
-      drop_switch: dropSwitch });
+      drop_switch: dropSwitch,
+      ...(dropTimingMs !== undefined ? { drop_timing_offset_ms: dropTimingMs } : {}) });
 
 export const fireSequencePreview = (
   sceneId: string, intensity: number, chargeGapMs: number, lullGapMs: number, step: string,
-  dropSwitch = true) =>
+  dropSwitch = true, dropTimingMs?: number | null) =>
   apiPost<PreviewFireResult>('/preview/sequence/fire',
     { scene_id: sceneId, intensity, charge_gap_ms: chargeGapMs,
-      lull_gap_ms: lullGapMs, step, drop_switch: dropSwitch });
+      lull_gap_ms: lullGapMs, step, drop_switch: dropSwitch,
+      ...(dropTimingMs !== undefined ? { drop_timing_offset_ms: dropTimingMs } : {}) });
 
 export const closeFlarePreviewBeacon = (): void => {
   try {

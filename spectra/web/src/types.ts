@@ -287,7 +287,7 @@ export interface SceneV2 {
    * and energy floor allow. The Fish scene ships off. */
   drop_shock_enabled: boolean;
   /** This scene's own DROP TIMING OFFSET (drop_timing.py), ms, negative =
-   * earlier. null (default) = the room's. The follow-up drag of the drop
+   * earlier. null (default) = the room's. The drag of the drop
    * mark on the drop-sequence preview writes it. */
   drop_timing_offset_ms?: number | null;
 }

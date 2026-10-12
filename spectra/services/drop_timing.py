@@ -12,8 +12,9 @@ drop's moment; it is not a lead. Default -400 (the Admiral's number).
 
 WHERE IT COMES FROM (`resolve_offset_ms`), most specific first:
   1. the scene's own SceneV2.drop_timing_offset_ms, when set (None = not
-     set). This is the slot the follow-up drag UI on a scene's drop-sequence
-     preview writes; nothing writes it yet.
+     set). Dragging the drop's red line on a scene's drop-sequence preview
+     writes it (SequencePreviewOverlay, a scene-draft edit kept by Save), and
+     Sonic sets it through set_scene_setting.
   2. the room's RoomControlState.drop_timing_offset_ms (Sonic-editable, the
      room bar's Scenes panel).
 A single drop's own moment is already editable without a new field: a

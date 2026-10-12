@@ -11311,8 +11311,9 @@ window). Four things:
 Admiral: "shifting the drops so they fire 400ms earlier").**
 `spectra/services/drop_timing.py` is the binding statement. A room setting
 (default -400, OFFSET family, Sonic-editable) with a per-scene override
-slot (`SceneV2.drop_timing_offset_ms`, None = the room's — the follow-up
-drag UI's target), applied in ONE place: `tick()` sums it into the target
+slot (`SceneV2.drop_timing_offset_ms`, None = the room's — set by dragging
+the drop's red line on a scene's drop-sequence preview, or Sonic's
+`set_scene_setting`), applied in ONE place: `tick()` sums it into the target
 of every `fire_response` drop (his and the sequences'); the cut, Shockwave
 and strip drop ride that fire. A build ending on a drop gets the gap to the
 SHIFTED mark (`drop_timing.build_gap_ms` — `_phase_partner_gap_ms`,
@@ -11320,7 +11321,13 @@ SHIFTED mark (`drop_timing.build_gap_ms` — `_phase_partner_gap_ms`,
 ends on it. **Tests run with it at 0** (`tests/conftest.py`'s
 `_drop_timing_on_the_mark`; `@pytest.mark.drop_timing_live` opts back in —
 `tests/test_drop_timing.py`), and `scripts/check_triggers.py` holds it at 0
-the same way.
+the same way. **The drag** (2026-10-12, "it should work on a touch screen"):
+`PreviewRuler`'s `dragMark` (own handle lane, narrow line strip, per-pointer,
+`touch-action: none`) + `scenes/tabs/dropMarkDrag.ts` (the arithmetic,
+measured from the drop mark's `music_mark_s`); the preview request carries
+the draft value (`SequenceRequest.drop_timing_offset_ms`) so an unsaved drag
+plays at once. Spec: `node scripts/check_drop_marker_drag.mjs`,
+`tests/test_drop_marker_drag.py`; help `drop-mark-drag`.
 
 **PHASE 2 OF THE DROP-SCENE-VARIETY PLAN — A DROP CAN BE THE SCENE CHANGE
 (2026-10-08, the Admiral: "just switch at the drop", early in the charge

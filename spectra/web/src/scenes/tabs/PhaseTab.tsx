@@ -80,6 +80,14 @@ export default function PhaseTab({ scene, setScene, scenes }: {
           <>Shockwave <b>off</b> for this scene — its drops play the effect's own drop alone.</>
         )}
       </div>
+      <div style={{ fontSize: 12, marginTop: 8, color: 'var(--text-muted)' }}>
+        Drop timing:{' '}
+        {scene.drop_timing_offset_ms != null
+          ? <b style={{ color: 'var(--text)' }}>{scene.drop_timing_offset_ms} ms (this scene's own)</b>
+          : <>the room's (Scenes panel in the top bar)</>}
+        {' '}— drag the drop's red line on <i>▶ Preview drop sequence</i> to change it for this
+        scene. <HelpLink topic="drop-mark-drag" />
+      </div>
       <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
         <button onClick={() => setPreviewing('transition')}>
           ▶ Preview transition into this scene
@@ -102,7 +110,10 @@ export default function PhaseTab({ scene, setScene, scenes }: {
         />
       )}
       {previewing === 'sequence' && (
-        <SequencePreviewOverlay scene={scene} onClose={() => setPreviewing(null)} />
+        <SequencePreviewOverlay
+          scene={scene} onClose={() => setPreviewing(null)}
+          onDropOffsetChange={(ms) => setScene({ ...scene, drop_timing_offset_ms: ms })}
+        />
       )}
 
       <p style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 8 }}>

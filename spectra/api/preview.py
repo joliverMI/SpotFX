@@ -84,6 +84,18 @@ class SequenceRequest(BaseModel):
     # THE DROP-LED SWITCH: show (and perform, live) the cut the resolver
     # would make for this scene at a stale drop (phase_preview.switch_for).
     drop_switch: bool = True
+    # THE SCENE'S DROP TIMING OFFSET AS DRAFTED (the drop mark's drag,
+    # SequencePreviewOverlay): when SENT — a number, or null for "the
+    # room's" — the preview uses it in place of the stored scene's value, so
+    # the ruler and the live fires show an unsaved drag. Absent = the stored
+    # scene's own value. Never written anywhere from here: the Scenes page's
+    # Save is what persists it.
+    drop_timing_offset_ms: Optional[int] = Field(default=None, ge=-2000, le=2000)
+
+    def scene_for_preview(self, scene: SceneV2) -> SceneV2:
+        if "drop_timing_offset_ms" not in self.model_fields_set:
+            return scene
+        return scene.model_copy(update={"drop_timing_offset_ms": self.drop_timing_offset_ms})
 
     def gaps(self) -> dict[str, int]:
         out: dict[str, int] = {}
@@ -117,7 +129,7 @@ async def fire_transition(body: TransitionRequest):
 
 @router.post("/sequence/open")
 async def open_sequence(body: SequenceRequest):
-    scene = _scene(body.scene_id)
+    scene = body.scene_for_preview(_scene(body.scene_id))
     timeline = await phase_preview.build_timeline(
         scene, body.intensity, gaps=body.gaps(),
         drop_switch_enabled=body.drop_switch)
@@ -128,7 +140,7 @@ async def open_sequence(body: SequenceRequest):
 
 @router.post("/sequence/fire")
 async def fire_sequence(body: SequenceRequest):
-    scene = _scene(body.scene_id)
+    scene = body.scene_for_preview(_scene(body.scene_id))
     program = phase_preview.PhaseSequenceProgram(
         scene, body.gaps(),
         switch=phase_preview.switch_for(scene, body.intensity, body.drop_switch))
