@@ -89,8 +89,9 @@ def test_into_fireworks_from_a_keeping_lull_cuts_on_the_drop_with_keepers():
         assert p.switch and p.moment == ds.MOMENT_DROP
         assert p.handoff == ds.HANDOFF_KEEPERS and p.cut_ms() == 16_000
         assert "three keepers that burst on the drop" in p.sentence
-    # a lull that cannot keep pieces cuts into Fireworks generically
-    assert _decide("bh", "fw").handoff == ds.HANDOFF_GENERIC
+    # a lull that cannot keep pieces cuts into Fireworks on the mark — the
+    # Black Hole's FOUNTAIN since transitions-drop phase 4
+    assert _decide("bh", "fw").handoff == ds.HANDOFF_PROGRAM
 
 
 def test_the_lull_is_told_keep_three_and_fireworks(monkeypatch):

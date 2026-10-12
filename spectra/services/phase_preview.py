@@ -278,6 +278,7 @@ async def build_timeline(scene: SceneV2, intensity: float, *,
             target_scene=_target)
         switch_out["lull_told"] = {"keep": told.keep,
                                    "next": dict(told.next_effect)}
+        switch_out["program"] = _switch_program(plan, switch_out["cut_s"])
     return {
         "scene_id": scene.id, "scene_name": scene.name,
         "intensity": round(intensity, 4),
@@ -293,6 +294,25 @@ async def build_timeline(scene: SceneV2, intensity: float, *,
         # rather than looping an invisible preview.
         "phase_targets": _phase_targets(virtuals),
     }
+
+
+def _switch_program(plan, cut_s: Optional[float]) -> Optional[dict]:
+    """A drop-led cut that runs a THEMATIC TRANSITION PROGRAM (drop_switch.
+    HANDOFF_PROGRAM, on the mark) — its named stages placed on this ruler
+    from the cut, so the sequence preview draws what the program does
+    (transition_program.stages, the program classes' own definition)."""
+    from spectra.services import drop_switch, room_controls, scene_transition_lead
+    from spectra.services.transition_preview import _program_on_ruler
+    if cut_s is None or plan.handoff != drop_switch.HANDOFF_PROGRAM:
+        return None
+    room = room_controls.load_room_controls()
+    program = scene_transition_lead.program_stages(
+        {"matrix": plan.from_effect},
+        [{"virtual_id": "matrix", "effect_type": plan.to_effect}],
+        room, on_mark=True)
+    if program is None:
+        return None
+    return _program_on_ruler(program, cut_s, program["duration_ms"] / 1000.0)
 
 
 def _phase_targets(virtuals: dict) -> list[str]:

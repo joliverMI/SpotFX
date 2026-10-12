@@ -122,11 +122,46 @@ def program_lead_ms(current_types: dict[str, Optional[str]],
     if request is None:
         return None
     settings = transition_program.ProgramSettings.from_request(request)
-    leads = [transition_program.lead_ms(name, settings)
-             for name in (transition_program.program_name(
-                 current_types.get(w["virtual_id"]), w["effect_type"])
-                 for w in writes)
-             if name is not None]
+    leads = []
+    for w in writes:
+        out_type = current_types.get(w["virtual_id"])
+        name = transition_program.program_name(out_type, w["effect_type"])
+        if name is not None:
+            leads.append(transition_program.lead_ms(
+                name, settings, out_type, w["effect_type"]))
     if not leads:
         return None
     return min(max(leads), transition_phases.MAX_LEAD_MS)
+
+
+def program_stages(current_types: dict[str, Optional[str]],
+                   writes: list[dict], room: Any, *,
+                   on_mark: bool = False) -> Optional[dict]:
+    """The governing TRANSITION PROGRAM of a fire (the switch with the
+    longest lead, the one program_lead_ms answers for) as the previews draw
+    it: {"name", "out_type", "in_type", "stages": [{label, from, to,
+    anchor?}]} with the stages as fractions of the program
+    (transition_program.stages — the program classes' own definition), or
+    None when no program runs."""
+    from fx.effects import transition_program
+    from spectra.services import room_controls
+    request = room_controls.transition_program_request(room, on_mark=on_mark)
+    if request is None:
+        return None
+    settings = transition_program.ProgramSettings.from_request(request)
+    best = None
+    for w in writes:
+        out_type = current_types.get(w["virtual_id"])
+        name = transition_program.program_name(out_type, w["effect_type"])
+        if name is None:
+            continue
+        lead = transition_program.lead_ms(name, settings, out_type,
+                                          w["effect_type"])
+        if best is None or lead > best[0]:
+            best = (lead, name, out_type, w["effect_type"])
+    if best is None:
+        return None
+    _lead, name, out_type, in_type = best
+    return {"name": name, "out_type": out_type, "in_type": in_type,
+            "duration_ms": int(round(settings.duration_s * 1000.0)),
+            "stages": transition_program.stages(out_type, in_type, settings)}

@@ -41,6 +41,7 @@ import type { SceneV2 } from '../../types';
 import PreviewRuler from './PreviewRuler';
 import type { RulerBand, RulerMark } from './PreviewRuler';
 import { useCueLoop, useHeartbeat } from './usePreviewLoop';
+import { programBands, PROGRAM_WORDS } from './programStages';
 
 const fmtMs = (ms: number) => `${Math.round(ms)} ms`;
 
@@ -101,9 +102,13 @@ export default function TransitionPreviewOverlay({
       * (timeline.animation_end_s - timeline.animation_start_s)
     : 0;
   const drawnMarkS = markS ?? timeline?.trigger_mark_s ?? 0;
+  // a thematic transition program draws its own named stages (its payoff
+  // stage accented); an ordinary crossfade is one band
   const bands: RulerBand[] = timeline
-    ? [{ from_s: timeline.animation_start_s, to_s: timeline.animation_end_s,
-         label: 'crossfade', tone: 'accent' }]
+    ? (timeline.program
+      ? programBands(timeline.program)
+      : [{ from_s: timeline.animation_start_s, to_s: timeline.animation_end_s,
+           label: 'crossfade', tone: 'accent' }])
     : [];
   const marks: RulerMark[] = timeline
     ? [{ at_s: anchorS, label: 'anchor', tone: 'accent' },
@@ -184,11 +189,12 @@ export default function TransitionPreviewOverlay({
             <div style={{ fontSize: 12, marginTop: 6, padding: '6px 8px', borderRadius: 6,
                           background: 'var(--panel-bg, #1a1024)' }}>
               {timeline.anchor_source === 'program'
-                ? <>This switch runs a thematic transition program over{' '}
-                    <strong>{fmtMs(timeline.crossfade_ms)}</strong> instead of a crossfade, and its payoff
-                    is anchored at <strong>{Math.round(timeline.anchor_frac * 100)}%</strong> of it —{' '}
-                    the moment the cloud ignites the Black Hole, or the Black Hole's bloom before its
-                    pieces implode into the incoming effect</>
+                ? <>This switch runs the thematic transition{' '}
+                    <strong>{PROGRAM_WORDS[timeline.program?.name ?? ''] ?? 'program'}</strong> over{' '}
+                    <strong>{fmtMs(timeline.crossfade_ms)}</strong> instead of a crossfade (its stages are
+                    the bands on the ruler), and its payoff is anchored at{' '}
+                    <strong>{Math.round(timeline.anchor_frac * 100)}%</strong> of it — the start of the
+                    accented stage</>
                 : <>This transition crossfades over <strong>{fmtMs(timeline.crossfade_ms)}</strong>
                     {' '}at this intensity, and its payoff is anchored at{' '}
                     <strong>{Math.round(timeline.anchor_frac * 100)}%</strong> of the blend —{' '}

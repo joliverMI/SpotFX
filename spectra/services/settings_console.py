@@ -150,7 +150,11 @@ def _spec(key: str, label: str, description: str) -> SettingSpec:
             "transition_velocity_blend_ms": "ms",
             "transition_infall_spin": "extra turns",
             "transition_eruption_count": "pieces",
-            "transition_eruption_speed": "multiplier"}.get(key)
+            "transition_eruption_speed": "multiplier",
+            "transition_explode_frac": "fraction 0.0-1.0",
+            "transition_lensing_pull": "multiplier",
+            "transition_ignition_turns": "turns",
+            "transition_scatter": "multiplier"}.get(key)
     return SettingSpec(key=key, label=label, kind=kind, description=description,
                        unit=unit, min=ge, max=le, choices=choices)
 
@@ -356,13 +360,13 @@ SETTINGS_REGISTRY: dict[str, SettingSpec] = {
     "transition_programs_enabled": _spec(
         "transition_programs_enabled", "Thematic transitions",
         "On (default): a scene change between the Black Hole and the "
-        "particle effects (Orbits, Fish, Squiggles; Fireworks into the "
-        "Black Hole) runs a THEMATIC TRANSITION instead of the half-second "
-        "crossfade — the pieces spiral into the Black Hole and ignite its "
-        "horizon (Infall), or the Black Hole contracts, blooms and its "
-        "pieces implode onto the incoming orbits / fish / chains "
-        "(Eruption). The payoff lands on the trigger. Off: every switch "
-        "crossfades as before."),
+        "particle effects (Orbits, Fish, Squiggles, Fireworks), between "
+        "Sauron / the Eye and them, and between Fish, Orbits and Squiggles "
+        "runs a THEMATIC TRANSITION instead of the half-second crossfade — "
+        "Infall / Eruption, Lensing / Fountain (Fireworks), Flame Lick / "
+        "Ignition (the eye explodes, or ignites from a vortex onto its "
+        "rim), Shoal Break / Shoaling, Unravel. The payoff lands on the "
+        "trigger. Off: every switch crossfades as before."),
     "transition_program_ms": _spec(
         "transition_program_ms", "Thematic transition length",
         "How long a thematic transition takes, in milliseconds (600-2500, "
@@ -385,7 +389,28 @@ SETTINGS_REGISTRY: dict[str, SettingSpec] = {
         "implode onto the incoming effect (10-150, default 60)."),
     "transition_eruption_speed": _spec(
         "transition_eruption_speed", "Eruption: speed",
-        "How fast the eruption's pieces fly out (0.5-2, default 1)."),
+        "How fast the eruption's pieces fly out (0.5-2, default 1); it "
+        "also scales the Fountain's spray and the Flame Lick's shards."),
+    "transition_explode_frac": _spec(
+        "transition_explode_frac", "Flame Lick: exploding fraction",
+        "When Sauron or the Eye hands over to a particle effect the eye "
+        "itself EXPLODES: this fraction of its lit cells fly out as shards "
+        "in the set's colours (0-1, default 0.5); the rest collapse into "
+        "the black. The shards then merge into the incoming effect."),
+    "transition_lensing_pull": _spec(
+        "transition_lensing_pull", "Lensing: pull",
+        "How hard the Black Hole's pull bends the Fireworks' sparks into "
+        "spiral arms as they fall in (Lensing), and how hard the Black "
+        "Hole's gathered ring sprays out into fireworks (Fountain) — "
+        "0.2-3, default 1."),
+    "transition_ignition_turns": _spec(
+        "transition_ignition_turns", "Ignition: vortex turns",
+        "Turns the arriving pieces make as they gather onto the iris rim "
+        "when Sauron or the Eye comes in (0-3, default 0.6)."),
+    "transition_scatter": _spec(
+        "transition_scatter", "Shoal Break / Unravel: scatter",
+        "How wide a fish's dots spread as its body shatters (Shoal Break) "
+        "and a chain's dots as it unspools (Unravel) — 0-2, default 1."),
 }
 
 

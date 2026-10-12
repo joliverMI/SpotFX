@@ -45,6 +45,7 @@ import type { SceneV2 } from '../../types';
 import PreviewRuler from './PreviewRuler';
 import type { RulerBand, RulerMark } from './PreviewRuler';
 import { useCueLoop, useHeartbeat } from './usePreviewLoop';
+import { programBands } from './programStages';
 
 const DEFAULT_CHARGE_GAP_MS = 4444;   // phase_preview.DEFAULT_GAP_MS
 const DEFAULT_LULL_GAP_MS = 2778;
@@ -106,6 +107,9 @@ export default function SequencePreviewOverlay({ scene, onClose }: {
   const sw = timeline?.drop_switch ?? null;
   if (sw?.switch && sw.cut_s != null) {
     marks.push({ at_s: sw.cut_s, label: `⇄ ${sw.to_scene_name ?? 'switch'}`, tone: 'accent' });
+    // a cut that runs a thematic transition program: its stages from the
+    // cut, muted under the phase bands they overlap
+    bands.push(...programBands(sw.program, false));
   }
 
   return (

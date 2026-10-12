@@ -25,15 +25,20 @@ answer to Q4) and draws ONE picture at a time:
            incoming effect's own motion, so the hand-off frame continues
            one motion instead of throwing the velocity away.
 
-THE TWO PROGRAMS BUILT HERE (the rest of the plan's pairs are the next
-task and join the same registry):
+THE PROGRAMS. Phase 3 built the first two here (INFALL, ERUPTION);
+phase 4 (fx/effects/transition_cloud.py — its docstring is the binding
+statement for them) adds LENSING / FOUNTAIN (Fireworks <-> Black Hole),
+FLAME LICK / IGNITION (Sauron or Eye <-> the particle effects), SHOAL
+BREAK / SHOALING (Fish <-> Orbits / Squiggles) and UNRAVEL (Squiggles <->
+Orbits / Fish), all in the one registry below:
 
-  INFALL    particles -> Black Hole (orbits / fish / squiggles / fireworks
-            -> blackhole; his "I like this upgrade for Infall"). Every piece
-            leaves on the velocity it had and bends onto an accelerating
-            spiral into the horizon (`transition_infall_spin` extra turns),
-            the horizon ignites as it feeds (the incoming Black Hole fades
-            up over the second half of the flight), and over the last
+  INFALL    particles -> Black Hole (orbits / fish / squiggles -> blackhole
+            — fireworks LENS in instead, below; his "I like this upgrade
+            for Infall"). Every piece leaves on the velocity it had and
+            bends onto an accelerating spiral into the horizon
+            (`transition_infall_spin` extra turns), the horizon ignites as
+            it feeds (the incoming Black Hole fades up over the second
+            half of the flight), and over the last
             `transition_velocity_blend_ms` every piece's velocity is blended
             into the Black Hole's own field at its radius
             (Blackhole2d._program_field_velocity). The real Black Hole then
@@ -92,12 +97,24 @@ _LOGGER = logging.getLogger(__name__)
 
 INFALL = "infall"
 ERUPTION = "eruption"
+# phase 4 (fx/effects/transition_cloud.py)
+LENSING = "lensing"
+FOUNTAIN = "fountain"
+FLAME_LICK = "flame_lick"
+IGNITION = "ignition"
+SHOAL_BREAK = "shoal_break"
+SHOALING = "shoaling"
+UNRAVEL = "unravel"
 
-# The pairs this slice builds. Fireworks <-> Black Hole is Lensing /
-# Fountain (the next task) — fireworks still FEEDS an infall until Lensing
-# takes that row over; Black Hole -> Fireworks keeps the existing path.
-INFALL_SOURCES = ("orbits", "fish", "squiggles", "fireworks")
+# Infall feeds the Black Hole from every particle effect but Fireworks,
+# whose sparks LENS in instead (phase 4); the Black Hole erupts into every
+# particle effect but Fireworks, which it FOUNTAINS into.
+INFALL_SOURCES = ("orbits", "fish", "squiggles")
 ERUPTION_TARGETS = ("orbits", "fish", "squiggles")
+# The eye effects, and the particle effects they explode into (FLAME LICK)
+# and ignite from (IGNITION).
+EYES = ("sauron", "eye")
+EYE_PARTNERS = ("blackhole", "orbits", "fish", "squiggles", "fireworks")
 
 
 def _registry() -> dict[tuple[str, str], str]:
@@ -106,6 +123,18 @@ def _registry() -> dict[tuple[str, str], str]:
         table[(src, "blackhole")] = INFALL
     for dst in ERUPTION_TARGETS:
         table[("blackhole", dst)] = ERUPTION
+    table[("fireworks", "blackhole")] = LENSING
+    table[("blackhole", "fireworks")] = FOUNTAIN
+    for eye in EYES:
+        for other in EYE_PARTNERS:
+            table[(eye, other)] = FLAME_LICK
+            table[(other, eye)] = IGNITION
+    for dst in ("orbits", "squiggles"):
+        table[("fish", dst)] = SHOAL_BREAK
+    table[("orbits", "fish")] = SHOALING
+    for other in ("orbits", "fish"):
+        table[("squiggles", other)] = UNRAVEL
+    table[("orbits", "squiggles")] = UNRAVEL
     return table
 
 
@@ -132,6 +161,11 @@ DEFAULT_VELOCITY_BLEND_S = 0.5
 DEFAULT_INFALL_SPIN = 0.75
 DEFAULT_ERUPTION_COUNT = 60
 DEFAULT_ERUPTION_SPEED = 1.0
+# phase 4 (transition_cloud.py)
+DEFAULT_EXPLODE_FRAC = 0.5      # his "say half for now"
+DEFAULT_LENSING_PULL = 1.0
+DEFAULT_IGNITION_TURNS = 0.6
+DEFAULT_SCATTER = 1.0
 
 
 def _clamp(v, lo, hi, default):
@@ -151,6 +185,10 @@ class ProgramSettings:
     infall_spin: float = DEFAULT_INFALL_SPIN
     eruption_count: int = DEFAULT_ERUPTION_COUNT
     eruption_speed: float = DEFAULT_ERUPTION_SPEED
+    explode_frac: float = DEFAULT_EXPLODE_FRAC
+    lensing_pull: float = DEFAULT_LENSING_PULL
+    ignition_turns: float = DEFAULT_IGNITION_TURNS
+    scatter: float = DEFAULT_SCATTER
     on_mark: bool = False
     seed: Optional[int] = None
 
@@ -173,6 +211,13 @@ class ProgramSettings:
                                       10, 150, d.eruption_count)),
             eruption_speed=_clamp(req.get("eruption_speed", d.eruption_speed),
                                   0.5, 2.0, d.eruption_speed),
+            explode_frac=_clamp(req.get("explode_frac", d.explode_frac),
+                                0.0, 1.0, d.explode_frac),
+            lensing_pull=_clamp(req.get("lensing_pull", d.lensing_pull),
+                                0.2, 3.0, d.lensing_pull),
+            ignition_turns=_clamp(req.get("ignition_turns", d.ignition_turns),
+                                  0.0, 3.0, d.ignition_turns),
+            scatter=_clamp(req.get("scatter", d.scatter), 0.0, 2.0, d.scatter),
             on_mark=bool(req.get("on_mark", False)),
             seed=int(seed) if isinstance(seed, (int, float)) else None,
         )
@@ -189,33 +234,88 @@ ERUPTION_FORM_AT = 0.6     # the implosion onto the live targets begins
 ON_MARK_FORM_AT = 0.45     # on the mark there is no contraction stage
 
 
-def anchor_frac(name: Optional[str], settings: ProgramSettings) -> float:
-    """Where the program's payoff lands, as a fraction of its duration."""
+# Phase 4's anchors (transition_cloud.py's docstring says why each sits
+# where it does): FLAME LICK's eye explodes ON the mark, the shoal breaks
+# ON the mark, a chain unspools ON the mark; the fountain sprays, the
+# ignition's rim catches, the shoal and the threads are formed at these.
+FOUNTAIN_ANCHOR = 0.3
+IGNITION_ANCHOR = 0.55
+SHOALING_ANCHOR = 0.35
+THREAD_ANCHOR = 0.5
+_FIXED_ANCHORS = {
+    ERUPTION: ERUPTION_ANCHOR,
+    FOUNTAIN: FOUNTAIN_ANCHOR,
+    FLAME_LICK: 0.0,
+    IGNITION: IGNITION_ANCHOR,
+    SHOAL_BREAK: 0.0,
+    SHOALING: SHOALING_ANCHOR,
+}
+
+
+def anchor_frac(name: Optional[str], settings: ProgramSettings,
+                out_type: Optional[str] = None,
+                in_type: Optional[str] = None) -> float:
+    """Where the program's payoff lands, as a fraction of its duration.
+    UNRAVEL's depends on its direction (out of Squiggles a chain unspools
+    on the mark; into Squiggles the threads complete at THREAD_ANCHOR), so
+    callers that know the pair pass it."""
     if name is None or settings.on_mark:
         return 0.0
-    if name == INFALL:
+    if name in (INFALL, LENSING):
         return 1.0 - settings.infall_form_s() / settings.duration_s
-    if name == ERUPTION:
-        return ERUPTION_ANCHOR
-    return 0.5
+    if name == UNRAVEL:
+        return THREAD_ANCHOR if in_type == "squiggles" else 0.0
+    return _FIXED_ANCHORS.get(name, 0.5)
 
 
-def lead_ms(name: Optional[str], settings: ProgramSettings) -> int:
+def lead_ms(name: Optional[str], settings: ProgramSettings,
+            out_type: Optional[str] = None,
+            in_type: Optional[str] = None) -> int:
     """LEAD family (positive = fire EARLIER): how early a scene change must
     fire for this program's payoff to land on its mark."""
     if name is None:
         return 0
-    return int(round(anchor_frac(name, settings) * settings.duration_s * 1000.0))
+    return int(round(anchor_frac(name, settings, out_type, in_type)
+                     * settings.duration_s * 1000.0))
+
+
+def program_class(name: Optional[str]):
+    """The class that runs a program name (phase 4's live in transition_
+    cloud.py, imported lazily: it builds on this module)."""
+    if name == INFALL:
+        return InfallProgram
+    if name == ERUPTION:
+        return EruptionProgram
+    if name is None:
+        return None
+    from fx.effects import transition_cloud
+    return transition_cloud.PROGRAM_CLASSES.get(name)
+
+
+def stages(out_type: Optional[str], in_type: Optional[str],
+           settings: ProgramSettings) -> list[dict]:
+    """The program's named stages as fractions of its duration — what the
+    previews draw on their rulers ({"label", "from", "to"}, "anchor": True
+    on the stage the payoff opens). [] when no program runs."""
+    cls = program_class(program_name(out_type, in_type))
+    if cls is None:
+        return []
+    out = [dict(s) for s in cls.stage_fracs(settings, out_type, in_type)
+           if s["to"] - s["from"] > 1e-6]
+    if out and not any(s.get("anchor") for s in out):
+        # on the mark the stage before the payoff has no length: the
+        # payoff opens the program
+        out[0]["anchor"] = True
+    return out
 
 
 def build(out_type: Optional[str], in_type: Optional[str],
           request: Optional[dict]) -> Optional["TransitionProgram"]:
     """The facade's one call: a program for this switch, or None."""
-    name = program_name(out_type, in_type)
-    if name is None:
+    cls = program_class(program_name(out_type, in_type))
+    if cls is None:
         return None
     settings = ProgramSettings.from_request(request)
-    cls = InfallProgram if name == INFALL else EruptionProgram
     return cls(settings, out_type, in_type)
 
 
@@ -279,6 +379,19 @@ def _sample_rgb(effect: Any, grad: np.ndarray) -> Optional[np.ndarray]:
     return rgb
 
 
+PALETTE_GRID = np.linspace(0.0, 1.0, 64, dtype=np.float32)
+
+
+def palette_rgb(palette: Optional[np.ndarray], grad: np.ndarray) -> Optional[np.ndarray]:
+    """A palette sampled on PALETTE_GRID, read at `grad` (n,) by linear
+    interpolation — the outgoing set's colours after it has deactivated."""
+    if palette is None:
+        return None
+    g = np.clip(np.asarray(grad, np.float32), 0.0, 1.0)
+    return np.stack([np.interp(g, PALETTE_GRID, palette[:, c]) for c in range(3)],
+                    axis=1).astype(np.float32)
+
+
 def brightest_stop(effect: Any) -> np.ndarray:
     """The colour set's brightest colour as the effect samples it — the
     bloom's colour (his ruling: no white term, the set's own brightest)."""
@@ -299,13 +412,37 @@ class TransitionProgram:
     name = "program"
     RELEASE_HALF_LIFE_S = 0.12   # the outgoing's last picture fades this fast
     TRAIL_HALF_LIFE_S = 0.09     # the cloud's own streaks
+    # begin() takes the outgoing's registry snapshot so the incoming adopts
+    # nothing of its own — the program owns the pieces. A program whose
+    # FORM is the incoming effect's own adoption (SHOALING) leaves it.
+    TAKE_REGISTRY = True
+
+    @classmethod
+    def stage_fracs(cls, settings: ProgramSettings, out_type=None,
+                    in_type=None) -> list[dict]:
+        """The stages a preview ruler draws (see stages())."""
+        a = anchor_frac(cls.name, settings, out_type, in_type)
+        if cls.name == INFALL:
+            return [{"label": "spiral in", "from": 0.0, "to": a},
+                    {"label": "ignite", "from": a, "to": 1.0, "anchor": True}]
+        if cls.name == ERUPTION:
+            if settings.on_mark:
+                return [{"label": "erupt", "from": 0.0, "to": ON_MARK_FORM_AT,
+                         "anchor": True},
+                        {"label": "implode", "from": ON_MARK_FORM_AT, "to": 1.0}]
+            return [{"label": "contract", "from": 0.0, "to": a},
+                    {"label": "erupt", "from": a, "to": ERUPTION_FORM_AT,
+                     "anchor": True},
+                    {"label": "implode", "from": ERUPTION_FORM_AT, "to": 1.0}]
+        return [{"label": "release", "from": 0.0, "to": a},
+                {"label": "form", "from": a, "to": 1.0, "anchor": True}]
 
     def __init__(self, settings: ProgramSettings, out_type: str, in_type: str):
         self.settings = settings
         self.out_type = out_type
         self.in_type = in_type
         self.duration = settings.duration_s
-        self.anchor = anchor_frac(self.name, settings)
+        self.anchor = anchor_frac(self.name, settings, out_type, in_type)
         self.rng = np.random.default_rng(settings.seed)
         self.done = False
         self.virtual = None
@@ -344,6 +481,9 @@ class TransitionProgram:
         if rgb is None:
             rgb = np.full((grad.size, 3), 200.0, dtype=np.float32)
         self.rgb_out = rgb
+        # the outgoing set's colours, sampled while it can still be asked
+        # (a deactivated effect has no pixels to size its gradient by)
+        self.out_palette = _sample_rgb(outgoing, PALETTE_GRID)
         self.release = self._last_picture(outgoing, (h, w))
         if self.release is None and isinstance(snap.get("trail"), np.ndarray) \
                 and snap["trail"].shape == (h, w, 3):
@@ -355,7 +495,8 @@ class TransitionProgram:
         """After the incoming effect is attached: own its render, and make
         sure it starts FRESH — the outgoing's deactivate() just left the
         same particles in the registry, and the program owns them now."""
-        particle_handoff.take(getattr(virtual, "id", "") or "")
+        if self.TAKE_REGISTRY:
+            particle_handoff.take(getattr(virtual, "id", "") or "")
         self.virtual = virtual
         self.incoming = incoming
         incoming._transition_program = self
@@ -384,10 +525,16 @@ class TransitionProgram:
             if self.release is not None:
                 self.release *= np.float32(0.5 ** (dt / self.RELEASE_HALF_LIFE_S))
         layer = np.zeros((h, w, 3), dtype=np.float32)
-        gain = float(self._step(effect, t, dt, layer))
+        gain = self._step(effect, t, dt, layer)
         np.maximum(self.trail, layer, out=self.trail)
         inc = np.asarray(effect.matrix, dtype=np.float32)
-        out = np.maximum(self.trail, inc * gain)
+        if isinstance(gain, np.ndarray):
+            # a per-cell gain (IGNITION's reveal mask, transition_cloud.py)
+            out = np.maximum(self.trail, inc * gain[..., None])
+            gain = float(gain.max()) if gain.size else 0.0
+        else:
+            gain = float(gain)
+            out = np.maximum(self.trail, inc * gain)
         if self.release is not None:
             np.maximum(out, self.release, out=out)
         self.last_gain = gain

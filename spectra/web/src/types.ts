@@ -526,6 +526,13 @@ export interface RoomControlState {
   transition_infall_spin: number;
   transition_eruption_count: number;
   transition_eruption_speed: number;
+  /** Phase 4 (fx/effects/transition_cloud.py): the Flame Lick's exploding
+   * fraction, the Lensing pull, the Ignition's vortex turns, the Shoal
+   * Break / Unravel scatter. */
+  transition_explode_frac: number;
+  transition_lensing_pull: number;
+  transition_ignition_turns: number;
+  transition_scatter: number;
   /** Legacy Now Playing "Force Scene" control, ported verbatim: while
    * enabled, every scene the system would otherwise pick automatically
    * (sequencer roll, trigger fire, or the automatic transition fire) fires

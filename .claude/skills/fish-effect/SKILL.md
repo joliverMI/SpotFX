@@ -523,3 +523,18 @@ a lit fish carried the full background under it — additive by construction
 changed. If a background-mode report lands on this effect again, run
 `scripts/check_effect_background_mode.py fish` before reading fish.py —
 the probe measures the lit-pixel blue against each mode's own curve.
+
+## Phase 4 transitions (2026-10-11): the PEEL, Shoal Break, Unravel
+
+- **THE PEEL** (`PEEL_S`, `p_peel` SoA, `_peel_age`): a fish adopted from a
+  snapshot carrying `om` (an orbit blob's turning rate) turns at that rate and
+  eases into its own steering over 0.4 s — the heading RATE is continuous, not
+  just the heading — and its backfilled body lies back along that curve, not a
+  straight line. Applied after the turn-circle clip (the inherited rate is an
+  arc already). A snapshot without `om` adopts exactly as before.
+- Fish -> Orbits / Squiggles is SHOAL BREAK (each body shatters into dots that
+  implode onto the moving targets); Orbits -> Fish is SHOALING (the real Fish
+  adopts the blobs from the first frame — the program leaves the registry
+  snapshot, `TAKE_REGISTRY = False`); Squiggles -> Fish is UNRAVEL; Sauron/Eye
+  -> Fish is FLAME LICK onto `_formation_points()`.
+`fx/effects/transition_cloud.py`'s docstring is the binding statement for phase 4's programs; `tests/test_transition_programs_phase4.py` measures them on the real pipeline.

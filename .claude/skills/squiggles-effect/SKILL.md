@@ -182,3 +182,19 @@ the squiggles-v2-scene skill. History: `docs/SPECTRA_SPEC.md` §85, §86, §87
 signal meeting >=" section (check `min_volume`/
 `burst_threshold`-shaped gates on this effect against that pattern before
 adding one).
+
+## Unravel (2026-10-11, transitions-drop plan phase 4)
+
+Squiggles -> Orbits / Fish: each chain's path cells (read off `self.chains`
+at the switch) become dots released tail-first over 0.45 s, each leaving
+along the chain's own path at `base_speed`, imploding onto the incoming form.
+Orbits -> Squiggles is also UNRAVEL in reverse: the cloud converges onto
+the live chain heads (`_formation_points()`); a Squiggles with NO chain yet
+(it walks none until a beat) is SEEDED through its own `_adopt_handoff`
+with a few chains at the brightest pieces (TargetFormer._seed). **Fish ->
+Squiggles is SHOAL BREAK, not Unravel** — each fish shatters into
+`DOTS_PER_FISH` scattered dots (`ShoalBreakProgram._release`) that then
+implode onto Squiggles' own chain heads via the same `_formation_points()`/
+`_adopt_handoff` seeding; it shares the FORM step with Unravel but not the
+release.
+`fx/effects/transition_cloud.py`'s docstring is the binding statement for phase 4's programs; `tests/test_transition_programs_phase4.py` measures them on the real pipeline.

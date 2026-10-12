@@ -154,3 +154,20 @@ the preview ruler and Sonic's enum. Offline GIFs:
 before/after (the merged effect read out of git beside the working tree,
 his scene's own values, the eye moving): `scripts/render_sauron_tuneup.py`
 -> `docs/evidence/sauron-tuneup-1/`.
+
+## Flame Lick / Ignition (2026-10-11, transitions-drop plan phase 4)
+
+- **FLAME LICK** (Sauron -> Black Hole / Orbits / Fish / Squiggles /
+  Fireworks): the program reads the eye's last picture; `explode_frac`
+  (room `transition_explode_frac`, his "say half for now") of its lit cells
+  fly out as shards in the SET colour nearest each cell (never white), the
+  rest collapse into the black; the eye dissolves over 0.3 s.
+- **IGNITION** (those -> Sauron): `program_rim` (eye centre + iris radius in
+  px, written each draw) is where the vortex lands; `_lens_gain` (1.0 outside
+  a program) multiplies the slit's width so it opens from a hairline; the
+  program reveals the eye from the rim by ONE fill, so the ring never pops in.
+- **THE HANDED BRIGHTNESS**: a snapshot carrying `body_gain` sets where the
+  body fades up FROM — `_infall["g0"]` for an adoption with particles,
+  `_fade_up` for an empty program hand-off; 0.25 (the old fixed start) when
+  none is handed, byte-identical. Eye has the same three hooks.
+`fx/effects/transition_cloud.py`'s docstring is the binding statement for phase 4's programs; `tests/test_transition_programs_phase4.py` measures them on the real pipeline.

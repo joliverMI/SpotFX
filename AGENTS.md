@@ -998,16 +998,19 @@ never using a `None` sentinel in the first place (it sets a concrete `t:
 0.0` directly), which is the simpler pattern to prefer in new code.
 Regression: `tests/test_blackhole_orphan_drop_none_crash.py`.
 
-## TRANSITION PROGRAMS — a Black Hole <-> particles switch is not a crossfade (2026-10-11)
+## TRANSITION PROGRAMS — a Matrix effect switch between the main effects is not a crossfade (2026-10-11)
 
 `fx/effects/transition_program.py`'s docstring is the binding statement
-(transitions-drop plan phase 3, `/home/javi/fleet-spotfx/data/
-transitions-drop-plan/report.md`; `fx/VENDOR.md` #70). A registered
-(outgoing, incoming) Matrix effect switch — INFALL (orbits / fish /
-squiggles / fireworks -> blackhole), ERUPTION (blackhole -> orbits / fish /
-squiggles) — runs a program with its own clock (room
+for the clock and the registry (transitions-drop plan phase 3, `/home/
+javi/fleet-spotfx/data/transitions-drop-plan/report.md`; `fx/VENDOR.md`
+#70), `fx/effects/transition_cloud.py`'s for phase 4's programs (#75). A
+registered (outgoing, incoming) Matrix switch — INFALL / ERUPTION (Black
+Hole <-> Orbits / Fish / Squiggles), LENSING / FOUNTAIN (Fireworks <->
+Black Hole), FLAME LICK / IGNITION (Sauron or Eye <-> those five), SHOAL
+BREAK / SHOALING (Fish <-> Orbits / Squiggles), UNRAVEL (Squiggles <->
+Orbits / Fish) — runs a program with its own clock (room
 `transition_program_ms`, 1.4 s) instead of the virtual's stored 0.5 s
-crossfade. Five things:
+crossfade. Six things:
 
 - **THE REQUEST IS EXPLICIT, end to end.** `scene_compiler.fire_scene` asks
   (`transition_program_for`, against the conductor's current effect types)
@@ -1019,23 +1022,31 @@ crossfade. Five things:
   `flare_preview_hold.PreviewContext.apply_scene(program=True)`.
 - **ONE PICTURE, BY MAX.** The program composes onto the incoming effect's
   matrix in `Twod.render` (`_transition_program`); never an add, set
-  colours only. The incoming effect runs its own kinematics underneath the
-  whole time, which is what the eruption implodes onto
-  (`_formation_points()`) — never a mirror of its physics.
-- **VELOCITY IS CARRIED, NOT RESET.** Snapshots carry `vx`/`vy` + `gesture`;
-  Black Hole's cross-type adopt continues an inherited velocity (no freeze
-  + wind-up), Fish's keeps the inherited heading/speed. A new effect
-  joining a program needs `vx`/`vy` in its snapshot (and
-  `_formation_points()` to be formed onto).
+  colours only (a `_step` may return a per-cell gain — IGNITION's reveal).
+  The incoming effect runs its own kinematics underneath the whole time,
+  which is what a cloud implodes onto (`_formation_points()`) — never a
+  mirror of its physics.
+- **VELOCITY IS CARRIED, NOT RESET.** Snapshots carry `vx`/`vy` + `gesture`
+  (Orbits also `om`, its turning rate, which Fish's PEEL continues);
+  Black Hole's cross-type adopt continues an inherited velocity, Fish's
+  keeps heading/speed/turn rate, Fireworks' `_import_sparks` keeps sparks
+  flying. A new effect joining needs `vx`/`vy` in its snapshot and
+  `_formation_points()` to be formed onto.
+- **FORM IS CHOSEN BY THE INCOMING EFFECT** (`transition_cloud._make_former`:
+  Field / Target / Spark / Fade); RELEASE and FLIGHT by the program. An
+  outgoing effect's palette is sampled at `capture` (`out_palette`) — a
+  deactivated effect cannot size its own gradient.
 - **THE LEAD READS THE PROGRAM** (`scene_transition_lead.program_lead_ms`,
-  replacing the crossfade lead when a program applies): the infall's
-  ignition / the eruption's bloom lands on the mark. A DROP-led cut on a
+  replacing the crossfade lead when a program applies; UNRAVEL's anchor
+  depends on direction, so callers pass the pair). A DROP-led cut on a
   program pair (`drop_switch.HANDOFF_PROGRAM`) runs it `on_mark` (anchor 0).
-- **NEXT TASK, NOT THIS ONE**: Lensing / Fountain (Fireworks <-> Black
-  Hole — Fireworks still feeds a plain Infall until then), Flame Lick /
-  Ignition, Shoal Break / Shoaling. They join the same registry.
-  Spec: `tests/test_transition_programs.py`; help `transition-programs`;
-  contact sheets `scripts/render_transition_programs.py` ->
+- **THE PREVIEWS DRAW THE STAGES**: `transition_program.stages()` (the
+  classes' own `stage_fracs`), placed by `transition_preview.
+  _program_on_ruler` on the transition preview and from the cut on the
+  drop-sequence preview (`phase_preview._switch_program`).
+  Spec: `tests/test_transition_programs.py`, `tests/test_transition_
+  programs_phase4.py`; help `transition-programs`; contact sheets
+  `scripts/render_transition_programs.py` ->
   `docs/evidence/transition-programs/`.
 
 ## THE KNOWN AUDIO BUFFER — SPECTRA MIRRORS River's number, never shortens it

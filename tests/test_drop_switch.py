@@ -184,8 +184,10 @@ def test_every_drop_ready_pair_has_a_handoff_and_the_fireworks_melds():
     # every other centre-burst effect on the next big hit
     for keeper in ("fish", "orbits"):
         assert ds.handoff_kind(keeper, "fireworks") == ds.HANDOFF_KEEPERS
-    for other in ("radial", "blackhole", "squiggles"):
+    for other in ("radial", "squiggles"):
         assert ds.handoff_kind(other, "fireworks") == ds.HANDOFF_GENERIC
+    # the Black Hole FOUNTAINS into Fireworks (transitions-drop phase 4)
+    assert ds.handoff_kind("blackhole", "fireworks") == ds.HANDOFF_PROGRAM
     assert ds.handoff_kind("fireworks", "blackhole") == ds.HANDOFF_SWALLOWED
     for other in ("radial", "orbits", "squiggles", "fish"):
         assert ds.handoff_kind("fireworks", other) == ds.HANDOFF_IMPLODE_ON_HIT

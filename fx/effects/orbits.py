@@ -58,6 +58,7 @@ DROP_EJECTA_X = 2        # ejecta per kept blob (3× total spawn)
 # his ask (data/spectra-orbits-blob-persistence/HIS-DECISION.md), up from
 # the ~1.4-1.6s the previous (0.9, 1.6) speed produced
 DROP_EJECTA_SPEED = (0.49, 0.87)
+OM_TAU_S = 0.08   # p_om's smoothing (transition_cloud.py's SHOALING peel)
 
 # Every per-particle SoA array, in one place so compaction and the particle
 # handoff native snapshot can never drift out of sync with each other.
@@ -66,7 +67,7 @@ _SOA_NAMES = (
     "p_enter", "p_ex", "p_ey", "p_lvx", "p_lvy", "p_leave",
     "p_nf1", "p_nf2", "p_np1", "p_np2", "p_wf", "p_wp", "p_gf", "p_gp",
     "p_grad", "p_x0", "p_y0", "p_scatter", "p_bright", "p_grad_from",
-    "p_erate", "p_lfade", "p_vx", "p_vy",
+    "p_erate", "p_lfade", "p_vx", "p_vy", "p_om",
 )
 
 
@@ -293,6 +294,10 @@ class Orbits2d(Twod, GradientEffect):
         # (fx/effects/transition_program.py, VENDOR #68)
         self.p_vx = np.zeros(CAP, dtype=np.float32)
         self.p_vy = np.zeros(CAP, dtype=np.float32)
+        # ... and how fast its heading is turning, rad/s in pixel space
+        # (smoothed over OM_TAU_S) — a SHOALING fish peels off its orbit
+        # turning at this rate (fx/effects/transition_cloud.py)
+        self.p_om = np.zeros(CAP, dtype=np.float32)
         self._soa = tuple(getattr(self, name) for name in _SOA_NAMES)
         self.n = 0
         self._booted = False
@@ -443,6 +448,7 @@ class Orbits2d(Twod, GradientEffect):
         self.p_bright[s] = 0.0
         self.p_vx[s] = 0.0
         self.p_vy[s] = 0.0
+        self.p_om[s] = 0.0
         self.p_grad_from[s] = np.nan
         self.p_erate[s] = 1.0
         self.p_lfade[s] = LEAVE_FADE_S
@@ -514,6 +520,7 @@ class Orbits2d(Twod, GradientEffect):
             # transition program's RELEASE reads these (particle_handoff)
             "vx": (self.p_vx[:n] * self.sx).astype(np.float32),
             "vy": (self.p_vy[:n] * self.sy).astype(np.float32),
+            "om": self.p_om[:n].copy(),
             "gesture": "orbit",
             "grad": self.p_grad[:n].copy(),
             "bright": self.p_bright[:n].copy(),
@@ -1379,8 +1386,20 @@ class Orbits2d(Twod, GradientEffect):
         # Bright current particles over a fading history, bounded.
         np.maximum(self.trail, np.minimum(frame, 255.0), out=self.trail)
 
-        self.p_vx[:n] = (x - self.p_x0[:n]) / dt
-        self.p_vy[:n] = (y - self.p_y0[:n]) / dt
+        nvx = (x - self.p_x0[:n]) / dt
+        nvy = (y - self.p_y0[:n]) / dt
+        # heading rate (pixel space), from this frame's velocity against
+        # the last one, smoothed — the jiggle is noise, the orbit is signal
+        h_prev = np.arctan2(self.p_vy[:n] * self.sy, self.p_vx[:n] * self.sx)
+        h_new = np.arctan2(nvy * self.sy, nvx * self.sx)
+        moving = (np.hypot(self.p_vx[:n], self.p_vy[:n]) > 1e-4) & (
+            np.hypot(nvx, nvy) > 1e-4)
+        rate = np.where(
+            moving, ((h_new - h_prev + np.pi) % (2.0 * np.pi) - np.pi) / dt, 0.0)
+        a = min(dt / OM_TAU_S, 1.0)
+        self.p_om[:n] += (rate.astype(np.float32) - self.p_om[:n]) * np.float32(a)
+        self.p_vx[:n] = nvx
+        self.p_vy[:n] = nvy
         self.p_x0[:n] = x
         self.p_y0[:n] = y
 

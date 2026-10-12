@@ -32,7 +32,23 @@ RUNS = (
     ("eruption_blackhole_to_orbits", "blackhole", "orbits", False),
     ("eruption_blackhole_to_fish", "blackhole", "fish", False),
     ("eruption_on_the_mark_blackhole_to_orbits", "blackhole", "orbits", True),
+    # phase 4 (fx/effects/transition_cloud.py)
+    ("lensing_fireworks_to_blackhole", "fireworks", "blackhole", False),
+    ("fountain_blackhole_to_fireworks", "blackhole", "fireworks", False),
+    ("flame_lick_sauron_to_blackhole", "sauron", "blackhole", False),
+    ("flame_lick_sauron_to_orbits", "sauron", "orbits", False),
+    ("ignition_blackhole_to_sauron", "blackhole", "sauron", False),
+    ("ignition_orbits_to_eye", "orbits", "eye", False),
+    ("shoal_break_fish_to_orbits", "fish", "orbits", False),
+    ("shoaling_orbits_to_fish", "orbits", "fish", False),
+    ("unravel_squiggles_to_orbits", "squiggles", "orbits", False),
+    ("unravel_orbits_to_squiggles", "orbits", "squiggles", False),
 )
+# a few effects need a livelier warm-up to have something to hand over
+WARM_CONFIG = {
+    "fireworks": {"spawn_rate": 6.0},
+    "squiggles": {"spawn_rate": 4.0},   # a silent rig has no beats to spawn on
+}
 
 
 async def render(out_dir: Path, name, out_type, in_type, on_mark,
@@ -47,7 +63,8 @@ async def render(out_dir: Path, name, out_type, in_type, on_mark,
     frames = []
     try:
         with headless.fake_clock() as clk:
-            headless.attach_effect(host, v, out_type, {"gradient": WARM})
+            headless.attach_effect(host, v, out_type,
+                                   {"gradient": WARM, **WARM_CONFIG.get(out_type, {})})
             headless.render_frames(v, 120, clock=clk)
             new = host.effects.create(ledfx=host, type=in_type,
                                       config={"gradient": COOL})
@@ -74,10 +91,13 @@ async def render(out_dir: Path, name, out_type, in_type, on_mark,
 
 
 def main() -> None:
+    only = set(sys.argv[2:])
     out_dir = Path(sys.argv[1]) if len(sys.argv) > 1 else (
         Path(__file__).resolve().parent.parent / "docs/evidence/transition-programs")
     out_dir.mkdir(parents=True, exist_ok=True)
     for run in RUNS:
+        if only and run[0] not in only:
+            continue
         asyncio.run(render(out_dir, *run))
         print("wrote", out_dir / f"{run[0]}.png")
 
