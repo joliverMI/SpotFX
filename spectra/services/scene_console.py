@@ -230,6 +230,9 @@ _ACCESSORS: dict[str, tuple[Callable[[SceneV2], Any], Callable[[SceneV2, Any], N
     "drop_shock_enabled": (
         lambda s: s.drop_shock_enabled,
         lambda s, v: setattr(s, "drop_shock_enabled", v)),
+    "drop_timing_offset_ms": (
+        lambda s: s.drop_timing_offset_ms,
+        lambda s, v: setattr(s, "drop_timing_offset_ms", v)),
 }
 
 SCENE_SETTINGS_REGISTRY: dict[str, SceneSettingSpec] = {
@@ -285,6 +288,21 @@ SCENE_SETTINGS_REGISTRY: dict[str, SceneSettingSpec] = {
         "true/false only. The room-wide switch and the energy floor are "
         "room settings (drop_shock_enabled, drop_shock_min_energy), not "
         "this one."),
+    "drop_timing_offset_ms": _spec(
+        "drop_timing_offset_ms", SceneV2, "drop_timing_offset_ms",
+        "Drop timing on this scene", "int",
+        "How far off its mark every drop fires while this scene shows, in "
+        "ms — NEGATIVE = earlier, positive = later, 0 = on the mark. null "
+        "(the default) = this scene uses the room's drop timing "
+        "(the room setting drop_timing_offset_ms, -400 out of the box). "
+        "The same value the drop mark's drag on this scene's drop-sequence "
+        "preview sets.",
+        "Integer ms, signed: 'fire the drops 100ms earlier on this scene' "
+        "means the room's value minus 100 (read the room's with "
+        "get_settings first), e.g. -500. null puts the scene back on the "
+        "room's value. The room-wide value is the room setting "
+        "drop_timing_offset_ms, not this one.",
+        unit="ms", nullable=True),
 }
 
 

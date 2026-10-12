@@ -16,7 +16,21 @@
  * sliders set the gaps those ramps stretch to fill. The DROP is never
  * stretched and BEGINS on its mark: the settled start anchor.
  *
- * THE MARKS ARE NOT DRAGGABLE HERE, deliberately. Each mark is its band's
+ * THE DROP'S RED LINE IS DRAGGABLE (2026-10-12, the Admiral: "I wanted to
+ * be able to edit red line for the drop in the preview drop sequence page
+ * for a scene, but I cannot click it and drag it"). It sets THIS SCENE's
+ * drop timing (SceneV2.drop_timing_offset_ms, spectra/services/
+ * drop_timing.py — negative = the drop fires earlier), measured from the
+ * music's own drop mark (the faint dashed line). It is a scene-draft edit
+ * like the transition preview's trigger mark: the preview shows the draft
+ * at once (the request carries it), and the Scenes page's Save keeps it.
+ * For a crowded ruler and a tablet: a handle in its own lane under the
+ * ruler, a grab strip on the line, snapping (10 ms; on the mark and the
+ * room's value pull), and −50/−10/+10/+50 ms buttons plus "Use the room's"
+ * for when a finger is not precise enough — see PreviewRuler's dragMark
+ * and dropMarkDrag.ts.
+ *
+ * THE OTHER MARKS ARE NOT DRAGGABLE HERE, deliberately. Each mark is its band's
  * ANCHOR, an aggregate over however many flare kinds it attaches (min over
  * every enabled kind's offset, zero included), while every kind keeps its
  * own offset and lands at it relative to that anchor (scene_response's
@@ -39,21 +53,35 @@ import { useEffect, useState } from 'react';
 import HelpLink from '../../help/HelpLink';
 import {
   closeFlarePreview, closeFlarePreviewBeacon, fireSequencePreview, openSequencePreview,
+  useScenes,
 } from '../../queries';
 import type { PhasePreviewTimeline } from '../../queries';
 import type { SceneV2 } from '../../types';
 import PreviewRuler from './PreviewRuler';
-import type { RulerBand, RulerMark } from './PreviewRuler';
+import type { RulerBand, RulerDragMark, RulerMark } from './PreviewRuler';
+import {
+  NUDGE_BIG_MS, NUDGE_SMALL_MS, NUDGE_STEPS, appliedOffsetMs, dragToOffset, effectiveOffsetMs,
+  markSForOffset, nudgeOffsetMs, offsetWords, signedMs,
+} from './dropMarkDrag';
 import { useCueLoop, useHeartbeat } from './usePreviewLoop';
 import { programBands } from './programStages';
 
 const DEFAULT_CHARGE_GAP_MS = 4444;   // phase_preview.DEFAULT_GAP_MS
 const DEFAULT_LULL_GAP_MS = 2778;
 
-export default function SequencePreviewOverlay({ scene, onClose }: {
+export default function SequencePreviewOverlay({ scene, onClose, onDropOffsetChange }: {
   scene: SceneV2;
   onClose: () => void;
+  /** Write the scene draft's own drop timing (null = the room's). Absent =
+   * the drop mark is drawn but cannot be moved. */
+  onDropOffsetChange?: (ms: number | null) => void;
 }) {
+  // The scene DRAFT's own drop timing — what the preview shows and fires.
+  const draftDropMs = scene.drop_timing_offset_ms ?? null;
+  // While the drop mark is held: the offset it would set now.
+  const [dropGhost, setDropGhost] = useState<{ ms: number; snappedTo: number | null } | null>(null);
+  const { data: savedScenes } = useScenes();
+  const savedDropMs = savedScenes?.find((s) => s.id === scene.id)?.drop_timing_offset_ms ?? null;
   const [intensity, setIntensity] = useState(1.0);
   const [chargeGapMs, setChargeGapMs] = useState(DEFAULT_CHARGE_GAP_MS);
   const [lullGapMs, setLullGapMs] = useState(DEFAULT_LULL_GAP_MS);
@@ -65,7 +93,7 @@ export default function SequencePreviewOverlay({ scene, onClose }: {
   useEffect(() => {
     let cancelled = false;
     const t = setTimeout(() => {
-      openSequencePreview(scene.id, intensity, chargeGapMs, lullGapMs, dropSwitch)
+      openSequencePreview(scene.id, intensity, chargeGapMs, lullGapMs, dropSwitch, draftDropMs)
         .then((tl) => {
           if (cancelled) return;
           setTimeline(tl);
@@ -76,12 +104,12 @@ export default function SequencePreviewOverlay({ scene, onClose }: {
     }, 200);
     return () => { cancelled = true; clearTimeout(t); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scene.id, intensity, chargeGapMs, lullGapMs, dropSwitch]);
+  }, [scene.id, intensity, chargeGapMs, lullGapMs, dropSwitch, draftDropMs]);
 
   const { playheadS, playing, setPlaying, scrubTo } = useCueLoop({
     timeline,
     fire: (step) => fireSequencePreview(scene.id, intensity, chargeGapMs, lullGapMs, step,
-      dropSwitch)
+      dropSwitch, draftDropMs)
       .then((res) => { if (res.expired) onHoldExpired(); })
       .catch((e) => setError(String(e))),
   });
@@ -95,6 +123,13 @@ export default function SequencePreviewOverlay({ scene, onClose }: {
 
   const bands: RulerBand[] = [];
   const marks: RulerMark[] = [];
+  const info = timeline?.drop_timing ?? null;
+  const dropMark = timeline?.marks.find((m) => m.event_class === 'drop') ?? null;
+  const editable = !!onDropOffsetChange && dropMark?.music_mark_s != null;
+  // The offset in force for the DRAFT (null = the room's) — what the line,
+  // the handle and the buttons all speak about.
+  const inForceMs = effectiveOffsetMs(draftDropMs, info);
+  const shownMs = dropGhost?.ms ?? inForceMs;
   for (const m of timeline?.marks ?? []) {
     bands.push({ from_s: m.ramp_start_s, to_s: m.ramp_end_s,
                  label: `${m.event_class} ramp`, tone: 'accent' });
@@ -102,8 +137,46 @@ export default function SequencePreviewOverlay({ scene, onClose }: {
       bands.push({ from_s: m.ramp_end_s, to_s: m.hang_end_s,
                    label: 'hang', tone: 'muted' });
     }
+    // the drop's line is the draggable one (drawn last, on top) when it can move
+    if (m.event_class === 'drop' && editable) continue;
     marks.push({ at_s: m.mark_s, label: m.event_class, tone: 'hot' });
   }
+  // The server's own mark once it has caught up with the draft; the same
+  // mapping inverted (dropMarkDrag.markSForOffset) while held, or for the
+  // moment between a release and the next timeline.
+  const serverCaughtUp = !dropGhost && info != null && info.offset_ms === inForceMs;
+  const dropLineS = dropMark == null ? 0
+    : serverCaughtUp || dropMark.music_mark_s == null ? dropMark.mark_s
+      : markSForOffset(shownMs, dropMark.music_mark_s, info);
+  const setDropMs = (ms: number | null) => {
+    setDropGhost(null);
+    onDropOffsetChange?.(ms);
+  };
+  const dragMark: RulerDragMark | null = editable && dropMark ? {
+    at_s: dropLineS,
+    label: 'drop',
+    readout: signedMs(shownMs),
+    valueText: offsetWords(shownMs),
+    title: 'Drag to retime this scene\'s drops — left fires earlier, right later. '
+      + '←/→ steps 10 ms (Shift: 50 ms).',
+    active: dropGhost != null,
+    onDrag: (s) => setDropGhost(dragToOffset(s, dropMark.music_mark_s!, info)),
+    onDragEnd: (s) => {
+      const next = dragToOffset(s, dropMark.music_mark_s!, info);
+      if (next.snappedTo != null && next.ms === info?.room_offset_ms && draftDropMs == null) {
+        setDropGhost(null); // landed back on the room's — nothing to change
+        return;
+      }
+      setDropMs(next.ms);
+    },
+    onDragCancel: () => setDropGhost(null),
+    onStep: (dir, big) => setDropMs(nudgeOffsetMs(
+      inForceMs, dir * (big ? NUDGE_BIG_MS : NUDGE_SMALL_MS), info)),
+  } : null;
+  const dropRef = editable && dropMark && shownMs !== 0
+    ? { at_s: dropMark.music_mark_s!, label: 'mark' } : null;
+  const sourceWord = draftDropMs != null ? "this scene's own" : "the room's";
+  const appliedHere = appliedOffsetMs(shownMs, info);
   const sw = timeline?.drop_switch ?? null;
   if (sw?.switch && sw.cut_s != null) {
     marks.push({ at_s: sw.cut_s, label: `⇄ ${sw.to_scene_name ?? 'switch'}`, tone: 'accent' });
@@ -189,7 +262,56 @@ export default function SequencePreviewOverlay({ scene, onClose }: {
               marks={marks}
               triggerMarkS={null}
               onScrub={scrubTo}
+              dragMark={dragMark}
+              dragRef={dropRef}
             />
+
+            {editable && (
+              <div className="drop-timing-row" data-testid="drop-timing-row"
+                style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap',
+                         fontSize: 12, marginTop: 6, padding: '6px 8px', borderRadius: 6,
+                         background: 'var(--panel-bg, #1a1024)' }}>
+                <span style={{ minWidth: 0 }}>
+                  <b>Drop timing:</b>{' '}
+                  <b data-testid="drop-timing-value" style={{ color: '#ff5a3c',
+                    fontVariantNumeric: 'tabular-nums' }}>{signedMs(shownMs)}</b>{' '}
+                  <span style={{ color: 'var(--text-muted)' }}>
+                    ({offsetWords(shownMs)} — {dropGhost ? 'dragging' : sourceWord})
+                  </span>
+                  <HelpLink topic="drop-mark-drag" />
+                </span>
+                <span style={{ display: 'flex', gap: 4, marginLeft: 'auto', flexWrap: 'wrap' }}>
+                  {NUDGE_STEPS.map((d) => (
+                    <button key={d} className="drop-nudge-btn" data-nudge={d}
+                      style={{ minHeight: 40, minWidth: 52, fontVariantNumeric: 'tabular-nums' }}
+                      title={`Fire this scene's drops ${Math.abs(d)} ms ${d < 0 ? 'earlier' : 'later'}`}
+                      onClick={() => setDropMs(nudgeOffsetMs(inForceMs, d, info))}>
+                      {d < 0 ? '−' : '+'}{Math.abs(d)}
+                    </button>
+                  ))}
+                  <button data-testid="drop-timing-reset" style={{ minHeight: 40 }}
+                    disabled={draftDropMs == null}
+                    title="Put this scene back on the room's drop timing (the Scenes panel in the top bar)"
+                    onClick={() => setDropMs(null)}>
+                    ↺ Room's{info?.room_offset_ms != null ? ` (${signedMs(info.room_offset_ms)})` : ''}
+                  </button>
+                </span>
+                {appliedHere !== shownMs && (
+                  <div style={{ flexBasis: '100%', color: 'var(--text-muted)' }}>
+                    The lull is only {lullGapMs} ms ahead on this ruler, so the drop
+                    can only move to {signedMs(appliedHere)} here — a real song's lull is further
+                    back, where the full {signedMs(shownMs)} applies.
+                  </div>
+                )}
+                {draftDropMs !== savedDropMs && (
+                  <div data-testid="drop-timing-unsaved"
+                    style={{ flexBasis: '100%', color: 'var(--accent2, var(--accent))' }}>
+                    Not saved yet — press <b>Save</b> on the scene to keep it (the preview already
+                    plays it).
+                  </div>
+                )}
+              </div>
+            )}
 
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12, marginTop: 4 }}>
               <button onClick={() => setPlaying(!playing)}>{playing ? '⏸ Pause' : '▶ Play'}</button>
@@ -231,11 +353,13 @@ export default function SequencePreviewOverlay({ scene, onClose }: {
                 </div>
               ))}
               <div style={{ marginTop: 6, color: 'var(--text-muted)' }}>
-                The marks here aren't draggable: each mark is its band's anchor, the earliest offset
-                among its flare kinds (one still at 0 counts), while every kind keeps its own offset, so there's no
-                single kind to write a drag to. Retime one from that kind's own ▶ Preview on the
-                Response tab and it shows up here; kinds authored later than the anchor land that
-                much after the mark.
+                {editable && <>Drag the drop's red line — or its handle under the ruler — to
+                  retime this scene's drops (the dashed line is the music's own drop mark). </>}
+                The charge and lull marks aren't draggable: each is its band's anchor, the earliest
+                offset among its flare kinds (one still at 0 counts), while every kind keeps its own
+                offset, so there's no single kind to write a drag to. Retime one from that kind's
+                own ▶ Preview on the Response tab and it shows up here; kinds authored later than
+                the anchor land that much after the mark.
               </div>
             </div>
           </>

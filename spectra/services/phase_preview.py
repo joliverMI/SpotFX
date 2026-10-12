@@ -61,8 +61,19 @@ build_gap_ms — the firing path's function), so its ramp, hang and the
 breath-hold end on it, and the live program uses the same gaps. The
 "Lull → drop gap" slider is still the distance between the MARKS.
 
-WHY THE MARKS ARE NOT DRAGGABLE HERE, stated rather than quietly omitted: a
-band's offset is an AGGREGATE over however many kinds it attaches, so a
+THE DROP MARK IS DRAGGABLE (2026-10-12, the Admiral: "I wanted to be able
+to edit red line for the drop in the preview drop sequence page for a scene,
+but I cannot click it and drag it"). Dragging it writes the SCENE's own
+SceneV2.drop_timing_offset_ms — never a band's kind offset (below) — as a
+scene-draft edit saved by the Scenes page's Save. The request may carry the
+draft value (spectra/api/preview.py's SequenceRequest), so the ruler and the
+live fires show the draft before it is saved. `music_mark_s` (the mark
+without the drop timing offset) is what the drag measures from, and
+`drop_timing.floor_applied_ms` is the earliest the drop can actually land
+on this ruler.
+
+WHY THE OTHER MARKS ARE NOT DRAGGABLE HERE, stated rather than quietly
+omitted: a band's offset is an AGGREGATE over however many kinds it attaches, so a
 drag would have to pick one kind to write it to, and picking would be
 invention. The place a kind's own offset is authored already exists and is
 per-kind by construction — the flare scrubbing preview's own marker. This
@@ -143,12 +154,22 @@ def drop_offset_for(scene: SceneV2) -> tuple[int, str]:
     room controls fall back to drop_timing's default, named "default"."""
     if getattr(scene, "drop_timing_offset_ms", None) is not None:
         return drop_timing.resolve_offset_ms(None, scene), "scene"
+    room_ms = room_drop_offset_ms()
+    if room_ms is None:
+        return drop_timing.DEFAULT_DROP_OFFSET_MS, "default"
+    return room_ms, "room"
+
+
+def room_drop_offset_ms() -> Optional[int]:
+    """The ROOM's drop timing offset (what a scene with no value of its own
+    fires at, and what "Use the room's" puts back), or None when the room
+    controls cannot be read."""
     try:
         from spectra.services.room_controls import load_room_controls
         room = load_room_controls()
     except Exception:                                    # noqa: BLE001
-        return drop_timing.DEFAULT_DROP_OFFSET_MS, "default"
-    return drop_timing.resolve_offset_ms(room, None), "room"
+        return None
+    return drop_timing.resolve_offset_ms(room, None)
 
 
 def build_gaps(gaps: dict[str, int], drop_offset_ms: int) -> dict[str, int]:
@@ -296,6 +317,12 @@ async def build_timeline(scene: SceneV2, intensity: float, *,
         m["ramp_start_s"] = m["fire_at_s"]
         m["ramp_end_s"] = round(m["fire_at_s"] + m["ramp_ms"] / 1000.0, 4)
         m["hang_end_s"] = round(m["ramp_end_s"] + m["hang_ms"] / 1000.0, 4)
+        # Where the mark would sit WITHOUT the drop timing offset — the
+        # music's own drop moment on this ruler, the reference the drop
+        # mark's drag measures its offset from (equal to mark_s for every
+        # other class).
+        m["music_mark_s"] = round(
+            (m["mark_ms"] - m["drop_timing_offset_ms"] + shift_ms) / 1000.0, 4)
 
     end_s = max(m["hang_end_s"] for m in marks)
     switch = switch_for(scene, intensity, drop_switch_enabled)
@@ -342,8 +369,21 @@ async def build_timeline(scene: SceneV2, intensity: float, *,
         "drop_switch": switch_out,
         "duration_s": round(duration_s, 4),
         "gaps": resolved_gaps,
+        # THE DROP MARK'S DRAG (SequencePreviewOverlay): the offset in force
+        # and where it came from, the scene's own slot (None = the room's),
+        # the room's value (what "Use the room's" puts back), the legal
+        # range, and the most negative offset this ruler can actually APPLY
+        # (drop_timing.shift_drop_ms keeps a drop MIN_BUILD_MS after its own
+        # lull) — so the dragged line can be held exactly where the server
+        # will draw it.
         "drop_timing": {"offset_ms": drop_offset_ms, "applied_ms": drop_applied_ms,
-                        "source": drop_offset_source},
+                        "source": drop_offset_source,
+                        "scene_offset_ms": getattr(scene, "drop_timing_offset_ms", None),
+                        "room_offset_ms": room_drop_offset_ms(),
+                        "min_ms": drop_timing.MIN_OFFSET_MS,
+                        "max_ms": drop_timing.MAX_OFFSET_MS,
+                        "floor_applied_ms": drop_timing.applied_offset_ms(
+                            slots["drop"], drop_timing.MIN_OFFSET_MS, slots["lull"])},
         "hang_fraction": PHASE_RAMP_HANG_FRACTION,
         "marks": marks,
         "cues": cues,
