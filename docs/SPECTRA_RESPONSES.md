@@ -96,10 +96,16 @@ guarded).
   disc, so the build reads even in silence. Ambient spawning pauses once
   the horizon covers the panel.
 - **Lull** — held full-screen black: the room's screen is *gone*, only the
-  halo's memory. (The strip, `blackhole1d`, draws its phases through the
-  shared strip phase layer since 2026-10-11 — see "Strip phase layer"
-  below: no white halo flood, black at the room's dark point with no
-  phosphor dot, and a drop that begins bright on its mark.)
+  halo's memory. A flare landing while the panel is darkening or dark
+  PUNCHES THROUGH (`flare_punch_strength`, strip phase plan phase 5,
+  2026-10-11): the horizon pulls back toward its baseline by the punch's
+  level and an even rush of blobs falls in from the hex edge, then the
+  horizon swallows the panel again exactly where the lull has got to —
+  what it had already swallowed stays pinned to its ring throughout. (The
+  strip, `blackhole1d`, draws its phases through the shared strip phase
+  layer since 2026-10-11 — see "Strip phase layer" below: no white halo
+  flood, black at the room's dark point with no phosphor dot, and a drop
+  that begins bright on its mark.)
 - **Drop** — the horizon pinches to a point, 24 full-bright blobs erupt
   from the center (`_phase_burst`, bypasses `max_blobs` — the explosion
   must always land), the saved config is restored, and the horizon eases
@@ -228,8 +234,13 @@ drop tail is 12/s.)
   chains stop coming, then the chains fizzle one by one into small booms
   on a schedule, head-on meetings arc less and less often, the colour
   slides to the set's darkest stop, and the panel is dark from the lull's
-  dark point (fx/effects/lull_dark.py). The squiggles-effect skill has the
-  detail.
+  dark point (fx/effects/lull_dark.py). A flare landing while the panel is
+  darkening or dark PUNCHES THROUGH (`flare_punch_strength`, strip phase
+  plan phase 5, 2026-10-11): a few fresh chains cross the dark with the
+  flare, tagged so the thinning never counts or fizzles them, then leave
+  once the punch releases — the lull's own thinning keeps running
+  underneath, so the release lands back exactly where it has got to. The
+  squiggles-effect skill has the detail.
 - **Drop** — once the drop ramp completes (gated on `phase_progress` the
   same way Blackhole gates its own payoff, not on the instant phase edge —
   fixed 2026-08-20, PR fm/spectra-squiggles-drop-timing-and-a-much-bigger-
@@ -276,7 +287,12 @@ one; single-led-power plan phase 2, 2026-10-06)
   `CHARGE_MIN_DEPTH`); fades shorten by `CHARGE_FADE_X`.
 - **Lull** — the level held at lull entry is multiplied by
   `1 - smoothstep(progress)`, reaching true black exactly when the ramp
-  completes — the same clock the crystal and strips use.
+  completes — the same clock the crystal and strips use. A flare landing
+  while the Singles are darkening or dark PUNCHES THROUGH
+  (`flare_punch_strength`, strip phase plan phase 5, 2026-10-11): the light
+  is the brighter of the lull's own fade and the ordinary look (its hits
+  and any `pulse_flash` included) scaled by the punch, then falls back to
+  the lull's curve once the punch releases.
 - **Drop** — begins ON its first frame at `drop_burst`, whitened by
   `drop_white`, settling over `drop_settle_beats`; the phase then
   self-resets so an identical later drop edges again. A charge or lull
@@ -290,7 +306,8 @@ room — true black is only right during a music show.
 Pulse also answers two flare kinds of its own (phase 3): **pulse_flash**
 (the level jumps by `flash_size` x a strength of 0.4 + 0.6 x intensity and
 falls back to a tenth in `flash_ms`, spent from the flash budget; inside a
-lull it is scaled by the lull's fade, so the lull still lands black) and
+lull it is scaled by the lull's fade, so the lull still lands black —
+unless the flare also punches, above) and
 **pulse_flip** (the hue turns `flip_degrees`, holds for `flip_hold_s`
 (0.5s), then swings back round the wheel over `flip_fade_s` (1.0s); fires
 only above intensity 0.4 by default —

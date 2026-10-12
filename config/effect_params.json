@@ -372,6 +372,33 @@
           "default": 1.0,
           "help_topic": "pulse-flares",
           "note": "Seconds for a Pulse Colour Flip to fade back to the original colour, eased so it never snaps."
+        },
+        "flare_punch_strength": {
+          "label": "Flare punch",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 1.0,
+          "default": 1.0,
+          "help_topic": "flare-punch"
+        },
+        "flare_punch_min_hold_s": {
+          "label": "Flare punch hold",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 5.0,
+          "default": 0.5,
+          "help_topic": "flare-punch"
+        },
+        "flare_punch_release_s": {
+          "label": "Flare punch release",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 5.0,
+          "default": 0.8,
+          "help_topic": "flare-punch"
         }
       },
       "defaults": {
@@ -1706,6 +1733,33 @@
           "note": "How much of the Shockwave a quiet drop gets (intensity 0), as a fraction of the full one at the automatic ceiling.",
           "help_topic": "drop-shockwave",
           "default": 0.55
+        },
+        "flare_punch_strength": {
+          "label": "Flare punch",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 1.0,
+          "default": 1.0,
+          "help_topic": "flare-punch"
+        },
+        "flare_punch_min_hold_s": {
+          "label": "Flare punch hold",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 5.0,
+          "default": 0.5,
+          "help_topic": "flare-punch"
+        },
+        "flare_punch_release_s": {
+          "label": "Flare punch release",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 5.0,
+          "default": 0.8,
+          "help_topic": "flare-punch"
         }
       },
       "defaults": {
@@ -4889,6 +4943,33 @@
           "note": "How far the chains' colour slides to the colour set's darkest colour by the lull's dark point",
           "default": 1.0,
           "help_topic": "response-families"
+        },
+        "flare_punch_strength": {
+          "label": "Flare punch",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 1.0,
+          "default": 1.0,
+          "help_topic": "flare-punch"
+        },
+        "flare_punch_min_hold_s": {
+          "label": "Flare punch hold",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 5.0,
+          "default": 0.5,
+          "help_topic": "flare-punch"
+        },
+        "flare_punch_release_s": {
+          "label": "Flare punch release",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 5.0,
+          "default": 0.8,
+          "help_topic": "flare-punch"
         }
       },
       "defaults": {

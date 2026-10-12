@@ -106,6 +106,40 @@ approach. All four `lull_*` settings are registered (Sonic reaches them).
 Outside the lull the effect is the predecessor bit for bit
 (`tests/test_squiggles_lull_thinning.py` loads it out of git).
 
+## A flare in the lull's dark punches through (2026-10-11, strip phase plan phase 5)
+
+His approval: Squiggles takes the same flare punch as the strips. The dark
+here is the thinning down to no chains and a cleared panel, so a punch
+(`_punch_step`, the module's "a flare in the lull's dark punches through"
+block) answers with `PUNCH_CHAINS` (4) fresh chains from the silhouette and
+reopens spawning for its length; those chains are TAGGED (`c["punch"]`):
+never counted by the thinning (`_lull_chain_count`) or fizzled
+(`_fizzle` picks among the lull's own chains only — with none tagged it
+draws exactly the same random numbers as before), shown at the punch's
+level, and dropped once it has released (or kept as ordinary chains if a
+drop lands under them). In the dark the whole frame is scaled by the level
+(their sparks too); while darkening the colour slide gives way by the
+level. The thinning keeps running underneath, so the release lands where
+the lull has got to.
+
+SpotFX pokes `flare_punch` (+ `flare_punch_hold_s`) from
+`scene_response._punch_lull` only while a lull is armed, only on a virtual
+the flare batch actually WROTE to, and only for
+`fx.device_model.FLARE_PUNCH_EFFECTS` (every strip phase member plus the
+crystal's Black Hole and Squiggles and the Pulse singles) — so a flare kind
+that writes nothing here (a Big Fish, a Sauron surge) never punches it, a
+Light Show "flares off" virtual is never poked, and a house-withheld lull
+reaches nobody. The envelope and its runtime are ONE definition,
+`fx/effects/lull_dark.py`'s `punch_envelope` / `FlarePunch` (the strips use
+the same object): up in 40 ms, held max(`flare_punch_min_hold_s` 0.5, the
+flare's own hold), released over `flare_punch_release_s` (0.8 s); "Flare
+punch" (`flare_punch_strength`) 0 restores the dark winning, for one scene
+entry. All three settings are registered (help topic `flare-punch`), so
+Sonic reaches them with `set_scene_entry_param`. The lull's timing never
+moves; with no punch open the lull renders BYTE FOR BYTE what it did before
+(`tests/test_flare_punch_crystal.py` loads the pre-change module out of git
+at a pinned ref). Measure with `scripts/check_flare_punch_crystal.py`.
+
 ## The lull's dark point is the SHARED rule, not a constant here
 
 Since 2026-10-07 (the Admiral: "set a max time for that portion to 3

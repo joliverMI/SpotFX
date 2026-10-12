@@ -1636,6 +1636,30 @@ def test_set_scene_entry_param_rejects_out_of_range_numeric():
     assert "above" in exc.value.message
 
 
+def test_sonic_reaches_the_flare_punch_on_the_crystal_and_the_singles():
+    # the strip phase plan's phase 5: the crystal's Black Hole / Squiggles
+    # and the Pulse singles take the flare punch, and its three settings
+    # are ordinary registered params Sonic reaches like any other
+    from spectra.services import scene_console as sc
+    from spectra.services import scene_store
+
+    for et, target in (("blackhole", "Matrix"), ("squiggles", "Matrix"),
+                       ("pulse", "Singles")):
+        scene, _ = _seed_scene_with_entry(f"Punch {et}", target_kind="category",
+                                          target=target, effect_type=et)
+        for name, value in (("flare_punch_strength", 0.0),
+                            ("flare_punch_min_hold_s", 1.0),
+                            ("flare_punch_release_s", 1.5)):
+            result = _run(sc.apply_scene_entry_param(scene.id, target, name, value))
+            assert result["status"] == "applied", (et, name)
+        entry = next(d for d in scene_store.get_by_id(scene.id).devices
+                     if d.target == target)
+        assert entry.params["flare_punch_strength"] == 0.0, et
+        with pytest.raises(sc.SceneOpError):
+            _run(sc.apply_scene_entry_param(scene.id, target,
+                                            "flare_punch_strength", 1.5))
+
+
 def test_set_scene_entry_param_rejects_wrong_type_for_toggle():
     from spectra.services import scene_console as sc
 

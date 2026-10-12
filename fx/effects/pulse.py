@@ -118,7 +118,7 @@ a fresh instance.
   on the frame it lands and falls back to a tenth in `flash_ms` (180).
   Spent from the SAME flash budget as hits: a flash that would overspend
   is shrunk to what is left. Scaled down by a lull's own fade so a lull
-  still reaches black on time.
+  still reaches black on time — unless the flare also PUNCHES (below).
 - `flip` (a count): the colour's hue turns `flip_degrees` (180) at once,
   HOLDS there for `flip_hold_s` (0.5 s default — tuning feedback
   2026-10-06: "the color rotation effect is way too fast... at least half
@@ -315,6 +315,7 @@ class PulseAudioEffect(AudioReactiveEffect, GradientEffect):
         "phase",
         "phase_progress",
         *lull_dark.KEYS,
+        *lull_dark.PUNCH_KEYS,
         "flash",
         "flip",
     ]
@@ -479,6 +480,9 @@ class PulseAudioEffect(AudioReactiveEffect, GradientEffect):
             # the lull's dark point, pushed by SpotFX on the lull arm —
             # fx/effects/lull_dark.py
             **lull_dark.schema_fields(),
+            # a flare in the lull's dark punches through (the poke and the
+            # three "Flare punch" settings) — fx/effects/lull_dark.py
+            **lull_dark.punch_schema_fields(),
         }
     )
 
@@ -541,6 +545,12 @@ class PulseAudioEffect(AudioReactiveEffect, GradientEffect):
         self._flip_t = None
         cfg["flash"] = 0.0
         cfg["flip"] = 0
+        # THE FLARE PUNCH (lull_dark.FlarePunch; same creation baseline:
+        # the key reads 0 and is remembered as 0, so the next real poke
+        # always edges)
+        self._punch = lull_dark.FlarePunch(0)
+        self._punch_level = 0.0
+        cfg[lull_dark.PUNCH_KEY] = 0
         # diagnostics (read by tests and the check script)
         self.level = 0.0
         self.white = 0.0
@@ -571,6 +581,7 @@ class PulseAudioEffect(AudioReactiveEffect, GradientEffect):
             self._flip_seen = new_flip
             if new_flip > 0:
                 self._flip_pending = True
+        self._punch.note(self._config.get(lull_dark.PUNCH_KEY, 0))
 
     def _refresh_bg_render_state(self):
         # One colour, no background: whatever background a colour set writes
@@ -839,6 +850,17 @@ class PulseAudioEffect(AudioReactiveEffect, GradientEffect):
                 LULL_LEGACY_DARK_AT).approach)
             level = (self._lull_from + self._pulse(env, depth)) * keep
             rest = self._lull_from * keep
+            pp = self._punch_level
+            if pp > 0.0:
+                # A FLARE IN THE LULL'S DARK PUNCHES THROUGH (strip phase
+                # plan phase 5, the strip layer's own shape): the light is
+                # the brighter of the lull's own fade and the ordinary look
+                # (no lull) x the punch — so the flare, its hits and its
+                # flash show at full strength, and the release lands back
+                # exactly where the lull's curve has got to underneath.
+                level = max(level, (floor + self._pulse(env, depth)) * pp)
+                rest = max(rest, floor * pp)
+                keep = max(keep, pp)
         else:
             level = floor + self._pulse(env, depth)
         if self._burst > 0.0:
@@ -948,6 +970,18 @@ class PulseAudioEffect(AudioReactiveEffect, GradientEffect):
             self._flash = landed
         self.flashes.append((self._render_t, want, landed))
 
+    def _step_punch(self, dt):
+        """THE FLARE PUNCH (fx/effects/lull_dark.py): an armed poke opens
+        the envelope only in a lull (spent either way, the key self-reset),
+        then this frame's level — read by _compose's lull fade."""
+        punch = self._punch
+        punch.consume(self._phase == "lull",
+                      self._config.get(lull_dark.PUNCH_HOLD_KEY, 0.0))
+        if punch.spent:
+            self._self_reset_poke(lull_dark.PUNCH_KEY, 0)
+        punch.advance(dt)
+        self._punch_level = punch.level(self._phase == "lull", self._config)
+
     def _consume_pokes(self):
         if self._flash_pending > 0.0:
             strength, self._flash_pending = self._flash_pending, 0.0
@@ -1036,6 +1070,7 @@ class PulseAudioEffect(AudioReactiveEffect, GradientEffect):
             1.0 - math.exp(-dt / ENERGY_SLEW_S)
         )
         self._phase_step(dt)
+        self._step_punch(dt)
         self._advance_envelope(dt)
         self._consume_pokes()
         self._advance_walk(dt)

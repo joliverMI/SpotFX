@@ -234,6 +234,19 @@ REVERSE_FALLBACK_RING_TOL = 0.02
 # is deliberately NOT taken, nothing already on screen is disturbed.
 BLOB_RUSH_WIGGLE_FRAC = 1.0 / 6.0   # fireworks' own wiggle (deviation #16)
 
+# A FLARE IN THE LULL'S DARK PUNCHES THROUGH (the strip phase plan's phase 5,
+# fx/effects/lull_dark.py's flare punch section is the binding statement):
+# the lull's dark is the horizon swallowing the panel, so while a punch is
+# open the horizon is pulled back toward its baseline by the punch's level
+# (ambient spawning resumes; the lull's own explicit halo ring gives way,
+# since outside a phase there is none; the blobs the lull already swallowed
+# stay swallowed on its ring), and the punch answers with a
+# rush of PUNCH_RUSH_N blobs from the hex edge (the blob rush's own even
+# ring, a rush flare's own count) so a flare in an EMPTY dark still shows
+# blobs falling in. As the punch releases the horizon
+# re-expands onto exactly the fill the lull has reached, swallowing them.
+PUNCH_RUSH_N = 12
+
 # infall-mode (`reverse=False`) spawn boundary, in the same normalized-r
 # units as radius_scale (r=1 sits at the panel's own rectangular edge).
 #
@@ -368,6 +381,7 @@ class Blackhole2d(Twod, GradientEffect):
         "phase",
         "phase_progress",
         *lull_dark.KEYS,
+        *lull_dark.PUNCH_KEYS,
         "blob_rush",
         "horizon_follow_blobs",
         *phase_grammar.BREATH_KEYS,
@@ -534,6 +548,9 @@ class Blackhole2d(Twod, GradientEffect):
             # the lull's dark point, pushed by SpotFX on the lull arm —
             # fx/effects/lull_dark.py
             **lull_dark.schema_fields(),
+            # a flare in the lull's dark punches through (the poke and the
+            # three "Flare punch" settings) — fx/effects/lull_dark.py
+            **lull_dark.punch_schema_fields(),
             # THE PHASE GRAMMAR (fx/effects/phase_grammar.py): the drop's
             # Shockwave settings (registered) and the breath-hold keys
             # (ride ONLY the lull arm write)
@@ -684,6 +701,16 @@ class Blackhole2d(Twod, GradientEffect):
             # speed, which only the render step computes.
             if prev_reverse is not None and prev_reverse != self.reverse:
                 self._reverse_edge = "fallback" if prev_reverse else "eject"
+
+        # THE FLARE PUNCH (lull_dark.FlarePunch): the poke reads 0 and is
+        # remembered as 0 on creation, so a stale persisted poke never fires
+        # and the next real one always edges
+        if not hasattr(self, "_punch"):
+            self._punch = lull_dark.FlarePunch(0)
+            self._punch_level = 0.0
+            self._config = {**self._config, lull_dark.PUNCH_KEY: 0}
+        else:
+            self._punch.note(self._config.get(lull_dark.PUNCH_KEY, 0))
 
         # BLOB RUSH: edge-detect the count exactly like fireworks'
         # burst_rockets (SpotFX writes a count, draw consumes it and
@@ -1318,6 +1345,24 @@ class Blackhole2d(Twod, GradientEffect):
                         fire_event=False,
                     )
 
+    def _punch_step(self, dt):
+        """THE FLARE PUNCH (PUNCH_RUSH_N's comment): an armed poke opens the
+        envelope only in a lull (spent either way, the key self-reset) and
+        answers with an even rush from the hex edge; then this frame's
+        level, read by the horizon, the lull's halo and the spawn gate."""
+        punch = self._punch
+        lull = self._phase == "lull"
+        opened = punch.consume(
+            lull, self._config.get(lull_dark.PUNCH_HOLD_KEY, 0.0))
+        if punch.spent:
+            self._apply_config({lull_dark.PUNCH_KEY: 0},
+                               validate=False, fire_event=False)
+        if opened and float(self._config.get(
+                "flare_punch_strength", 1.0) or 0.0) > 0.0:
+            self._rush_pending += PUNCH_RUSH_N
+        punch.advance(dt)
+        self._punch_level = punch.level(lull, self._config)
+
     def _lull_timing(self):
         """Where the lull is relative to its dark point — the shared rule
         (fx/effects/lull_dark.py), LULL_FILL_PROGRESS when SpotFX did not
@@ -1388,7 +1433,9 @@ class Blackhole2d(Twod, GradientEffect):
         the burst fires doesn't silently let ambient spawn clutter the
         payoff's very first frame again."""
         if self._phase == "lull":
-            return self._lull_timing().dark
+            # a flare punch reopens spawning for its length
+            return (self._lull_timing().dark
+                    and getattr(self, "_punch_level", 0.0) <= 0.0)
         if self._phase == "drop":
             drop = self._drop
             return drop is None or drop["burst_t"] is None
@@ -1424,6 +1471,9 @@ class Blackhole2d(Twod, GradientEffect):
             # the lull's dark point (_lull_timing), then HOLD (so the rest of the lull is
             # fully dark). HEX_FILL_RADIUS, never r_max: see that constant.
             fill = self._lull_timing().approach
+            # a flare punch pulls the horizon back toward its baseline by
+            # its level; the release re-expands it onto exactly this fill
+            fill *= 1.0 - min(1.0, getattr(self, "_punch_level", 0.0))
             top = max(HEX_FILL_RADIUS + LULL_FILL_MARGIN, base)
             return base + (top - base) * fill
         # drop: the burst fires (and the horizon starts easing back from
@@ -1477,6 +1527,10 @@ class Blackhole2d(Twod, GradientEffect):
             # cell — not even this ring's own outer tail
             w = CHARGE_HALO_W_MAX
             b = 0.0 if self._lull_timing().dark else 1.0
+            # a flare punch shows the panel as that flare would look with no
+            # lull — and outside a phase there is no explicit halo at all:
+            # the ring gives way by the punch's level (never lit by it)
+            b *= 1.0 - min(1.0, getattr(self, "_punch_level", 0.0))
         elif phase == "drop":
             # post-burst fade only — the burst fires on the phase's first
             # frame (see _phase_step), so there is no pre-burst pinch state
@@ -1623,6 +1677,7 @@ class Blackhole2d(Twod, GradientEffect):
             self.spin_total = 0.0
 
         self._phase_step(dt)
+        self._punch_step(dt)
         horizon_on = self.horizon_scale > 0.0 or self._phase != "none"
         rh = self._horizon_radius() if horizon_on else 0.0
         swirl_sign = np.sign(self.swirl) if self.swirl != 0 else 1.0
@@ -1892,6 +1947,17 @@ class Blackhole2d(Twod, GradientEffect):
                 if self._turn_active:
                     self.p_turn[:n] &= ~pinned
                     self._turn_active = bool(self.p_turn[:n].any())
+                if (self._phase == "lull"
+                        and getattr(self, "_punch_level", 0.0) > 0.0):
+                    # A FLARE PUNCH holds the horizon back (PUNCH_RUSH_N's
+                    # comment): what the lull already swallowed STAYS
+                    # swallowed — its captives hold their radius on the
+                    # lull's own ring instead of falling across the panel —
+                    # and are back on that ring when the punch releases,
+                    # still there for the drop. Only a blob caught during
+                    # the punch pins to the held-back horizon.
+                    held = captured & ~pinned & (r > rh)
+                    new_r = np.where(held, r, new_r)
                 new_r = np.where(pinned, rh, new_r)
                 v_h = (
                     self.base_speed

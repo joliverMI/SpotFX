@@ -304,6 +304,20 @@ ONE_COLOUR_EFFECTS = frozenset({"pulse"})
 LULL_DARK_EFFECTS = frozenset({"blackhole", "squiggles", "pulse"}) \
     | STRIP_PHASE_EFFECTS
 
+# A FLARE IN THE LULL'S DARK PUNCHES THROUGH (the Admiral's answer 5 on the
+# strip phase plan, 2026-10-11, extended past the strips in that plan's
+# phase 5: "so a flare in a dark room lights everything together"): the
+# lull-dark effects that take SpotFX's `flare_punch` poke — a flare batch
+# that wrote to one of these while a lull is armed punches its dark open for
+# the length of fx/effects/lull_dark.punch_envelope (spectra
+# scene_response._punch_lull). Every strip phase member, plus the crystal's
+# Black Hole and Squiggles and the Pulse singles. To join, follow
+# lull_dark.py's "HOW A LULL EFFECT TAKES THE PUNCH". Must equal the
+# registered effects whose schema carries lull_dark.PUNCH_KEY
+# (tests/test_flare_punch_crystal.py holds that).
+FLARE_PUNCH_EFFECTS = frozenset({"blackhole", "squiggles", "pulse"}) \
+    | STRIP_PHASE_EFFECTS
+
 # THE LULL HAND-OFF HOOK (2026-10-08, fish-lull plan phase 1): phase effects
 # whose lull can be TOLD how many pieces to leave on the panel at its
 # half-way mark (`lull_keep`), which effect the drop will land on

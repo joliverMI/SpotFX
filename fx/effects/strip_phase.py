@@ -175,11 +175,14 @@ _LOGGER = logging.getLogger(__name__)
 PHASES = ("none", "charge", "lull", "drop")
 
 STRENGTH_KEY = "strip_phase_strength"
-PUNCH_KEY = "flare_punch"
-PUNCH_HOLD_KEY = "flare_punch_hold_s"
+# the flare punch's poke keys are lull_dark's (one definition for every
+# member — the strips here, the crystal's Black Hole / Squiggles and the
+# Pulse singles); kept as names here for the strip callers
+PUNCH_KEY = lull_dark.PUNCH_KEY
+PUNCH_HOLD_KEY = lull_dark.PUNCH_HOLD_KEY
 DEFAULT_STRENGTH = 1.0
 MAX_STRENGTH = 1.5
-MAX_PUNCH = 1000
+MAX_PUNCH = lull_dark.MAX_PUNCH
 
 # Where the dark point sat when a lull was NOT told its timing (an older
 # SpotFX, a hand-written test, a LedFX UI scrub): half the progress ramp.
@@ -241,12 +244,9 @@ TUNABLES = (
      "Drop: seconds for the activity to settle back"),
     ("white_guard", "White guard", 1.0, 0.0, 1.0,
      "Charge and drop: keep every pixel no whiter than the set's own colour (0 = the effect's own blending)"),
-    ("flare_punch_strength", "Flare punch", 1.0, 0.0, 1.0,
-     "Lull: how strongly a flare punches through the dark (0 = the dark wins)"),
-    ("flare_punch_min_hold_s", "Flare punch hold", lull_dark.DEFAULT_PUNCH_MIN_HOLD_S,
-     0.0, 5.0, "Lull: shortest time a flare's punch holds before releasing"),
-    ("flare_punch_release_s", "Flare punch release", lull_dark.DEFAULT_PUNCH_RELEASE_S,
-     0.0, 5.0, "Lull: seconds a flare's punch takes to fall back into the dark"),
+    # the punch's own three (lull_dark.PUNCH_TUNABLES — shared with the
+    # crystal's Black Hole / Squiggles and the Pulse singles)
+    *lull_dark.PUNCH_TUNABLES,
     ("flare_punch_glow", "Flare punch glow", 0.10, 0.0, 1.0,
      "Lull: set-colour fill a flare adds where the dark had taken the light (0 = none)"),
 )
@@ -329,16 +329,7 @@ def _schema() -> vol.Schema:
             description="The room's strip phase strength (driven by SpotFX; 0 = off)",
             default=DEFAULT_STRENGTH,
         ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=MAX_STRENGTH)),
-        vol.Optional(
-            PUNCH_KEY,
-            description="A flare landed in the lull (driven by SpotFX; self-resets)",
-            default=0,
-        ): vol.All(vol.Coerce(int), vol.Range(min=0, max=MAX_PUNCH)),
-        vol.Optional(
-            PUNCH_HOLD_KEY,
-            description="The punching flare's own hold, seconds (driven by SpotFX)",
-            default=0.0,
-        ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=30.0)),
+        **lull_dark.punch_poke_fields(),
     }
     for key, _label, default, lo, hi, desc in TUNABLES:
         fields[vol.Optional(key, description=desc, default=default)] = vol.All(
@@ -536,10 +527,10 @@ class StripPhase(Effect):
             self._sp_drop_fill = 0.0
             self._sp_lull_from = (1.0, 0.0, 1.0)   # gain, fill, activity
             self._sp_raw = (1.0, 0.0, 1.0)
-            self._sp_punch_seen = new_punch
-            self._sp_punch_pending = False
-            self._sp_punch_t = None
-            self._sp_punch_hold = 0.0
+            # the poke reads 0 and is remembered as 0, so a stale persisted
+            # poke never fires AND the next real one always edges
+            self._sp_punch = lull_dark.FlarePunch(0)
+            self._config = {**self._config, PUNCH_KEY: 0}
             self._sp_frame = None
             self._sp_activity = 1.0
             self._sp_saved = None
@@ -550,10 +541,7 @@ class StripPhase(Effect):
             self._sp_punch_level = 0.0
             return
         self._sp_pending = new_phase if new_phase != self._sp_phase else None
-        if new_punch != self._sp_punch_seen:
-            self._sp_punch_seen = new_punch
-            if new_punch > 0:
-                self._sp_punch_pending = True
+        self._sp_punch.note(new_punch)
 
     # ── per frame ───────────────────────────────────────────────────────────
 
@@ -563,7 +551,7 @@ class StripPhase(Effect):
         out. Writes the key so an identical later arm edges again."""
         prev = self._sp_phase
         self._sp_phase = "none"
-        self._sp_punch_t = None
+        self._sp_punch.close()
         self._apply_config({"phase": "none", "phase_progress": 0.0},
                            validate=False, fire_event=False)
         self._strip_phase_enter("none", prev, released)
@@ -587,7 +575,7 @@ class StripPhase(Effect):
         self._sp_done_t = None
         if pend == "charge":
             self._sp_drop_t = None
-            self._sp_punch_t = None
+            self._sp_punch.close()
         elif pend == "lull":
             # ease from wherever the charge (or a drop still settling) left
             # the strip — never a jump at the lull's edge
@@ -597,9 +585,9 @@ class StripPhase(Effect):
         elif pend == "drop":
             self._sp_drop_t = 0.0
             self._sp_drop_fill = self._sp_raw[1]
-            self._sp_punch_t = None
+            self._sp_punch.close()
         else:   # "none": the drop's own clock keeps running
-            self._sp_punch_t = None
+            self._sp_punch.close()
         self._strip_phase_enter(pend, prev, False)
 
     def _strip_phase_compute(self, dt: float) -> Optional[StripFrame]:
@@ -611,14 +599,12 @@ class StripPhase(Effect):
             self._sp_pending = None
             if pend != self._sp_phase:
                 self._strip_phase_edge(pend)
-        if self._sp_punch_pending:
-            self._sp_punch_pending = False
-            if self._sp_phase == "lull":
-                self._sp_punch_t = 0.0
-                self._sp_punch_hold = float(cfg.get(PUNCH_HOLD_KEY, 0.0) or 0.0)
-                self._strip_phase_on_punch()
+        punch = self._sp_punch
+        if punch.consume(self._sp_phase == "lull",
+                         cfg.get(PUNCH_HOLD_KEY, 0.0)):
+            self._strip_phase_on_punch()
+        if punch.spent:
             # self-reset so an identical later poke edges again
-            self._sp_punch_seen = 0
             self._config = {**self._config, PUNCH_KEY: 0}
             cfg = self._config
 
@@ -641,8 +627,7 @@ class StripPhase(Effect):
             if self._sp_drop_t > drop_live_s(cfg["drop_settle_s"],
                                              cfg["drop_brightness_settle_s"]):
                 self._sp_drop_t = None
-        if self._sp_punch_t is not None:
-            self._sp_punch_t += dt
+        punch.advance(dt)
 
         gain, fill, act, wave, fade, guard = 1.0, 0.0, 1.0, 0.0, 1.0, 0.0
         in_lull = False
@@ -686,24 +671,15 @@ class StripPhase(Effect):
                        guard=guard, activity=act),
             float(cfg.get(STRENGTH_KEY, DEFAULT_STRENGTH)))
 
-        if in_lull and self._sp_punch_t is not None:
-            env = lull_dark.punch_envelope(
-                self._sp_punch_t, self._sp_punch_hold,
-                float(cfg["flare_punch_min_hold_s"]),
-                float(cfg["flare_punch_release_s"]))
-            p = float(cfg["flare_punch_strength"]) * env
+        p = punch.level(in_lull, cfg)
+        if p > 0.0:
             self._sp_punch_level = p
-            if p > 0.0:
-                taken = 1.0 - min(1.0, frame.fade)
-                act = frame.activity
-                frame = frame._replace(
-                    fade=max(frame.fade, p),
-                    activity=act + (1.0 - act) * p if act < 1.0 else act,
-                    punch_fill=float(cfg["flare_punch_glow"]) * p * taken)
-            elif self._sp_punch_t > lull_dark.PUNCH_ATTACK_S:
-                self._sp_punch_t = None
-        elif not in_lull:
-            self._sp_punch_t = None
+            taken = 1.0 - min(1.0, frame.fade)
+            act = frame.activity
+            frame = frame._replace(
+                fade=max(frame.fade, p),
+                activity=act + (1.0 - act) * p if act < 1.0 else act,
+                punch_fill=float(cfg["flare_punch_glow"]) * p * taken)
 
         return None if frame.neutral() else frame
 

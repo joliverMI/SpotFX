@@ -3103,7 +3103,7 @@ is deliberately NOT in scope, still true after the widening below.
 **Reversed for VALUES only, 2026-10-06 (his own ruling: "yes, as long as
 it doesn't limit more than we currently have")**: `get_scene_entry_params`/
 `set_scene_entry_param` read and write any registered effect param's
-CURRENT value on one scene's one device entry — the 27 Pulse settings
+CURRENT value on one scene's one device entry — the Pulse settings
 among them — validated against the real effect registry (type/range/
 options), with a ⚡-bound value REPLACED (and named as such) rather than
 refused. **The property that protects his authored
@@ -9598,10 +9598,19 @@ output stage, HOW AN EFFECT JOINS). Six things:
 - **A FLARE IN THE LULL'S DARK PUNCHES THROUGH** (his answer 5):
   `ResponseEngine._run_kinds` collects every virtual the batch actually
   wrote to (`_jump`/`_glide` — every write in scene_response goes through
-  them — into a ContextVar) and, while a lull is armed, pokes the strip
-  members the lull reached (`_lull_vids`) with `flare_punch` +
-  `flare_punch_hold_s`. The envelope is `lull_dark.punch_envelope` (one
-  definition, for the crystal's later phase 5 too). A charge/lull/drop
+  them — into a ContextVar) and, while a lull is armed, pokes the
+  `fx.device_model.FLARE_PUNCH_EFFECTS` virtuals the lull reached
+  (`_lull_vids`) with `flare_punch` + `flare_punch_hold_s`. The envelope
+  AND its runtime are `lull_dark.punch_envelope` / `lull_dark.FlarePunch`
+  — one definition (read lull_dark.py's "HOW A LULL EFFECT TAKES THE
+  PUNCH"). Since plan phase 5 the crystal's Black Hole and Squiggles and
+  the Pulse singles are members too ("a flare in a dark room lights
+  everything together"): Black Hole holds its horizon back and keeps what
+  the lull swallowed on the lull's ring, Squiggles brings tagged chains
+  the thinning never touches, Pulse shows max(lull fade, punch x its
+  ordinary look) — each shows its ORDINARY look under a punch, never the
+  phase's (measured: `scripts/check_flare_punch_crystal.py`; byte-identical
+  without a punch, `tests/test_flare_punch_crystal.py`). A charge/lull/drop
   event's own band never punches (`_PUNCH_OK`, carried on a
   PendingKindBatch). The poke key is `flare_punch`; the tunable is
   `flare_punch_strength` — they collided once, and a collision silently

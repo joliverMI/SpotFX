@@ -271,22 +271,28 @@ def _punches(ex):
     return [(vid, p) for vid, _et, p in ex.jumps if sp.PUNCH_KEY in p]
 
 
-def test_a_flare_in_a_lull_pokes_only_the_strips_it_wrote_to():
-    eng, ex = _responder({"s": "melt", "p": "pulse", "bh": "blackhole"})
+def test_a_flare_in_a_lull_pokes_only_the_members_it_wrote_to():
+    # since the strip phase plan's phase 5 the crystal's Black Hole and the
+    # Pulse singles take the punch too (fx.device_model.FLARE_PUNCH_EFFECTS)
+    # — still only where the batch actually wrote
+    eng, ex = _responder({"s": "melt", "p": "pulse", "bh": "blackhole",
+                          "o": "orbits"})
     asyncio.run(eng._drive_phase("lull", gap_ms=8_000))
     ex.jumps.clear()
     gain = _kind("Flare gain", "momentary", gain=1.4, hold_ms=600)
     scene = scene_for({"s": "melt"}, [gain])
     rec = asyncio.run(eng._run_kinds(scene, [(gain, 1.0)], 0.8, 1))
-    assert _punches(ex) == [("s", {sp.PUNCH_KEY: 1, sp.PUNCH_HOLD_KEY: 0.6})]
-    assert rec["flare_punch"] == {"virtuals": ["s"], "hold_s": 0.6}
+    poke = {sp.PUNCH_KEY: 1, sp.PUNCH_HOLD_KEY: 0.6}
+    # Orbits keeps a lit keeper and is not a member: never poked
+    assert _punches(ex) == [("bh", poke), ("p", poke), ("s", poke)]
+    assert rec["flare_punch"] == {"virtuals": ["bh", "p", "s"], "hold_s": 0.6}
 
-    # a Pulse-only batch writes nothing to the strip: no punch
+    # a Pulse-only batch writes only to the Singles: it punches only them
     ex.jumps.clear()
     flash = _kind("Pulse Flash", "pulse_flash")
     rec = asyncio.run(eng._run_kinds(scene, [(flash, 1.0)], 0.8, 2))
-    assert not _punches(ex) and "flare_punch" not in rec
-    assert any(vid == "p" for vid, _et, _p in ex.jumps)
+    assert [vid for vid, _p in _punches(ex)] == ["p"]
+    assert rec["flare_punch"]["virtuals"] == ["p"]
 
 
 def test_no_punch_outside_a_lull_or_on_a_flares_off_strip():
@@ -302,11 +308,13 @@ def test_no_punch_outside_a_lull_or_on_a_flares_off_strip():
     asyncio.run(eng._run_kinds(scene, [(gain, 1.0)], 0.8, 1))
     assert not _punches(ex)
     # flares off on the strip: the lull never reached it, the flare cannot
+    # (the crystal's Black Hole beside it, flares on, still takes its punch
+    # since the strip phase plan's phase 5)
     eng, ex = _responder({"s": "melt", "bh": "blackhole"}, blocked={"s"})
     asyncio.run(eng._drive_phase("lull", gap_ms=8_000))
     ex.jumps.clear()
     asyncio.run(eng._run_kinds(scene, [(gain, 1.0)], 0.8, 1))
-    assert not _punches(ex)
+    assert [vid for vid, _p in _punches(ex)] == ["bh"]
 
 
 def test_the_lulls_own_band_does_not_punch_its_own_start():
