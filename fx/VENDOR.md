@@ -1085,10 +1085,12 @@ variables named `ledfx` (the core object handle) are untouched.
     The retry/confirm POLICY is deliberately NOT here: fx/ owns the
     transport, spectra/ owns what to do when a fixture will not take a
     write (`spectra/services/fixture_brightness.py`, whose docstring is the
-    binding statement). Evidence:
-    `tests/test_fixture_brightness_restore.py` (his sentence reproduced
-    byte for byte against the real transport and a real saturating HTTP
-    server, then fixed), `scripts/check_fixture_brightness.py` §4.
+    binding statement). RETIRED 2026-10-12 along with `set_brightness`
+    itself (#78) — a WLED's master brightness is Home Assistant's, so there
+    is no longer a write to restore. The timeout this entry gave
+    `set_brightness`/`get_brightness` still binds `get_brightness` (read
+    only) and `house_fixtures`' power writes. Evidence:
+    `tests/test_fixture_brightness.py`, `scripts/check_fixture_brightness.py`.
 
 Everything else is byte-identical to the fork at 149f4470 modulo the import
 rewrite and the deviations above. When updating vendored files, re-diff

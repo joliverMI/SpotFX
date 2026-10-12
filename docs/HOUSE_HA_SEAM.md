@@ -56,7 +56,7 @@ Standard in the middle of the night.
 | `PUT /house/tv-music` | `{"on": true \| false}` | `status`: recorded / unchanged; `tv_strip` | R6 |
 | `PUT /house/media` | `{"source": "roku" \| "switch" \| "bluray" \| …, "state": "playing" \| "paused" \| "idle" \| "stopped"}` | `status`: applied / recorded / unchanged; `note` when no mode answers | R7 |
 | `PUT /house/fixture/{id}` | `{"state": "on" \| "off"}` and/or `{"lent_to": "hyperion" \| null}` | `status`: recorded / unchanged; `override`, `applied`, `acting` | R6, R9 |
-| `GET /house/fixtures` | — | every override, what was applied, corrections, rechecks | — |
+| `GET /house/fixtures` | — | every override, what was applied, rechecks | — |
 | `POST /house/voice` | `{"state": "listening" \| "processing" \| "responding" \| "idle"}` | `status`: painted / cleared / skipped / unchanged | R8 |
 | `POST /house/recheck` | `{"fixtures": ["sconce-kitchen-left", "sconce-kitchen-right"]}` | `status`: rechecking / skipped / nothing_to_recheck | R16 |
 | `PUT /house/mains` *(phase 3)* | `{"fixtures": ["sconce-kitchen-left", "sconce-kitchen-right"], "on": false \| true}` | `status`: recorded / unchanged; `mains_off`; with `on: true` also the recheck's answer | R16 |

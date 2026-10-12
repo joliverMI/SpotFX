@@ -27,8 +27,8 @@ stays at the old value in memory regardless of what the file says, so the
 render loop keeps multiplying by 0.96 until the next restart either way.
 
 Run this with `spectra.service` STOPPED, then start it again with the
-corrected file in place — the same order `fix_crystal_brightness_ceiling.py`
-documents for a stored value with no HTTP surface of its own.
+corrected file in place — the ordinary pattern for correcting a stored
+value with no HTTP surface of its own.
 
 Dry-run by default; `--apply` writes, after backing the file up to
 `storage/spectra/fx-live/backups/`, and asserts the written file is
