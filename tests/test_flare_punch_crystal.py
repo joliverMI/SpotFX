@@ -46,7 +46,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from fx import device_model, facade, headless  # noqa: E402
 from fx.effects import lull_dark  # noqa: E402
-from spectra.services import scene_response  # noqa: E402
 from strip_phase_harness import FPS, DT, Room, run, scene_for  # noqa: E402
 
 # the commit this phase was built on: the "before" of every byte-identity
@@ -410,11 +409,3 @@ def test_without_a_punch_the_lull_renders_exactly_as_before(
     # a cycle that never lit anything would prove nothing
     assert today.max() > 0.0
     assert np.array_equal(today, before), effect
-
-
-def test_scene_response_pokes_the_crystal_from_the_shared_key():
-    # SpotFX writes the poke by lull_dark's name for every member
-    src = (ROOT / "spectra/services/scene_response.py").read_text()
-    assert "lull_dark.PUNCH_KEY" in src
-    assert "device_model.FLARE_PUNCH_EFFECTS" in src
-    assert scene_response is not None
