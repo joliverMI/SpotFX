@@ -21,8 +21,8 @@ production code rather than quoted:
      against it. This is the whole claim: 62 is inside, 250 is not.
   3. THE LIGHT BUDGET, which is the question the brief calls item 4. His own
      62-unit readings are the evidence, and the arithmetic is stated rather
-     than hoped: what the allowed regime should measure, and what the
-     fixture-brightness compensation is and is NOT worth.
+     than hoped: what the allowed regime should measure, and that a dim
+     fixture is NAMED for him to raise in Home Assistant, never raised.
   4. THE JUDGEMENT IS UNCHANGED. The same drift and the same
      more-time-less-light shapes, moved into the short regime, still refuse
      — through the same `judge`, against the same four constants.
@@ -158,18 +158,21 @@ def section_three():
         check(scaled > floor,
               f"his own {label} reading, scaled to the allowed regime, is "
               f"over the floor with margin")
-    # The compensation, stated honestly rather than implied.
-    gain = fb.FULL / 214.0                     # his measured .236 level, 84%
-    print(f"   fixture brightness compensation: 84% -> 100% is x{gain:.2f}")
+    # The light side, stated honestly rather than implied: the lamp has no
+    # headroom left, and a fixture's own master brightness is HIS (Home
+    # Assistant's) — since 2026-10-12 no capture raises it, so a dim
+    # fixture is named in the run's notes for him to raise instead.
     print(f"   the lamp itself has NO headroom left: "
-          f"room_mapping.LIT_BRIGHTNESS={room_mapping.LIT_BRIGHTNESS}, "
-          f"fixture_brightness.FULL={fb.FULL}")
-    check(gain > 1.0,
-          "taking his fixture to full is worth about a fifth more light — "
-          "real, and NOT a substitute for the margin above")
-    check(fb.FULL == 255,
-          "full firmware brightness is already the ceiling, so this is the "
-          "whole of the compensation available on the light side")
+          f"room_mapping.LIT_BRIGHTNESS={room_mapping.LIT_BRIGHTNESS}")
+    check(room_mapping.LIT_BRIGHTNESS == 1.0,
+          "the capture lamp is already at full — the only light-side "
+          "headroom is his own fixture brightness, which is his to raise")
+    note = fb.AsIsResult(dim=[fb.FixtureBrightness("tv-backlight", "read",
+                                                   214)]).note
+    print(f"   a dim fixture is NAMED, not raised: {note}")
+    check("tv-backlight at 84%" in note and "Home Assistant" in note,
+          "a fixture below full is named in the run's notes with where to "
+          "raise it — never written")
 
 
 # ── 4 ──────────────────────────────────────────────────────────────────────

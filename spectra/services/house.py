@@ -18,7 +18,7 @@ the room and has no code that could.
 PHASE 4 ADDED A THIRD CONDITION — THE CUTOVER SWITCH (HouseSettings.enabled,
 default OFF). Once his modes exist, Home Assistant's lighting_mode maps to
 one every five minutes, so without the switch his next music take would run
-under a house mode (Hue held at the mode's look, master brightness owned,
+under a house mode (Hue held at the mode's look, WLED power switched,
 Away silencing the music) before River has cut a single HA writer over.
 Off, gate() answers ("off", ...): HA's word is still recorded and mapped,
 the status still names the mode, and nothing reaches a fixture.
@@ -98,9 +98,9 @@ picture.
           read the layer HANDS IN (levels go to each fixture's
           `music_level` — 100% where none is set — caps lifted, motion
           restored to what the scene authored, over HAND_IN_FADE_S) and the
-          engine runs exactly as it always has. Phase 2: Spectra owns each
-          WLED's master brightness, so `music_level` is where the music
-          brightness Home Assistant's scripts used to write now lives.
+          engine runs exactly as it always has. `music_level` is PIXEL
+          brightness; it multiplies with each WLED's master brightness,
+          which is Home Assistant's (Spectra never writes it, 2026-10-12).
           When music has stayed
           stopped for transitions.music_debounce_s the room HANDS OUT —
           the mode is re-entered over music_return_glide_s.
@@ -1161,6 +1161,18 @@ async def reapply() -> None:
     await tick()
 
 
+#: Settings that no longer exist, and why — a PUT naming one is refused by
+#: name rather than silently ignored (HouseSettings is extra="ignore", so a
+#: stored library carrying them still loads).
+RETIRED_SETTINGS = {
+    "own_brightness": ("retired 2026-10-12 — a WLED's master brightness is "
+                       "Home Assistant's; Spectra never writes it and its "
+                       "power follows the house mode"),
+    "owned_brightness": ("retired 2026-10-12 — a WLED's master brightness is "
+                         "Home Assistant's; Spectra never writes it"),
+}
+
+
 async def apply_settings_patch(body: dict) -> dict:
     """THE ONE HOUSE-SETTINGS WRITER — the exact merge PUT /api/house/
     settings has always done (spectra/api/house.py's own put_settings),
@@ -1183,6 +1195,9 @@ async def apply_settings_patch(body: dict) -> dict:
     from spectra.models.house_mode import HouseSettings
     current = house_store.load_library().settings.model_dump()
     body = dict(body or {})
+    retired = sorted(k for k in body if k in RETIRED_SETTINGS)
+    if retired:
+        raise ValueError("; ".join(f"{k}: {RETIRED_SETTINGS[k]}" for k in retired))
     if isinstance(body.get("voice_looks"), dict):
         looks = {k: dict(v) for k, v in current["voice_looks"].items()}
         for state, look in body["voice_looks"].items():

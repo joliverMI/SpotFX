@@ -77,7 +77,9 @@ TWO THINGS THIS OWNS THAT NOTHING ELSE DID
 POWER (`night_power.py`): at 1am his fixtures may be switched off, and a
 capture of an unlit fixture is a photograph, not a footprint. The run turns
 on exactly the fixtures it is about to drive and puts his switch back in a
-`finally` — the `fixture_brightness.owned` pattern, one layer down. That
+`finally` — power only, never a brightness (a WLED's brightness is Home
+Assistant's; a dim fixture is recorded as a request for him to raise it in
+Home Assistant, the night's `brightness` block). That
 module's docstring carries what was ESTABLISHED about a powered-off WLED
 under a realtime stream and, more importantly, what was not.
 
@@ -314,6 +316,11 @@ class NightRun:
     fixtures: list[dict] = field(default_factory=list)
     #: What `night_power.owned` did, per fixture.
     power: dict = field(default_factory=dict)
+    #: Each run fixture's own master brightness, READ once it is powered —
+    #: never written (a WLED's brightness is Home Assistant's, 2026-10-12).
+    #: {"readings": [...], "request": "<raise X in Home Assistant…>"}; the
+    #: request is what the morning read puts on his list.
+    brightness: dict = field(default_factory=dict)
     #: What the declared queue was priced at, and against how much of the
     #: night was left — the planned-end bound, recorded whether it passed
     #: or refused.
@@ -361,6 +368,7 @@ class NightRun:
                 "ended": self.ended, "detail": self.detail,
                 "refusal": self.refusal, "label": self.label,
                 "fixtures": list(self.fixtures), "power": dict(self.power),
+                "brightness": dict(self.brightness),
                 "price": dict(self.price), "planned_end": self.planned_end,
                 "planned_end_label": PLANNED_END_LABEL,
                 "queue": dict(self.queue), "exit": dict(self.exit_report),
@@ -1327,6 +1335,21 @@ async def _live_devices() -> list:
     return list(host.devices.values())
 
 
+async def _brightness_request(devices) -> dict:
+    """Read each run fixture's master brightness and, where it is below
+    full, RECORD a request for him to raise it in Home Assistant — never a
+    write (the Admiral's D1a, 2026-10-12). Never raises: a night does not
+    stop over a reading."""
+    from spectra.services import fixture_brightness
+    try:
+        readings = await fixture_brightness.read_all(devices)
+    except Exception:                                   # noqa: BLE001
+        logger.exception("night run: reading fixture brightness failed")
+        return {}
+    return {"readings": [r.as_dict() for r in readings],
+            "request": fixture_brightness.raise_request(readings)}
+
+
 async def _work(run: NightRun, items, target=None, resolved=None) -> None:
     """The night itself. Never raises past here: an unattended caller gets a
     record, and the record says what happened.
@@ -1353,6 +1376,7 @@ async def _work(run: NightRun, items, target=None, resolved=None) -> None:
         async with night_power.owned(mine) as power:
             held.append(power)
             run.power = power.as_dict()
+            run.brightness = await _brightness_request(mine)
             save_night(run)
             # NEVER SCHEDULE PAST HIS MORNING. Checked before EVERY item,
             # not once at the top: a queue that fitted at 01:00 has not

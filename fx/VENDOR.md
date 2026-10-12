@@ -743,6 +743,7 @@ variables named `ledfx` (the core object handle) are untouched.
     render pipeline. Not in the fork source at `/home/javi/ledfx-src`.
 
 27. `utils.py`: `WLED.set_brightness` FIXED and `WLED.get_brightness` ADDED
+    (`set_brightness` DELETED 2026-10-12 — see #78; the read stays)
     — the fixture's MASTER (firmware) brightness, json/state's `bri`, which
     scales everything the fixture emits INCLUDING a realtime stream.
     THE LIVE FINDING THAT NEEDED IT (2026-08-31): his fixture sat at ~10%
@@ -1084,10 +1085,12 @@ variables named `ledfx` (the core object handle) are untouched.
     The retry/confirm POLICY is deliberately NOT here: fx/ owns the
     transport, spectra/ owns what to do when a fixture will not take a
     write (`spectra/services/fixture_brightness.py`, whose docstring is the
-    binding statement). Evidence:
-    `tests/test_fixture_brightness_restore.py` (his sentence reproduced
-    byte for byte against the real transport and a real saturating HTTP
-    server, then fixed), `scripts/check_fixture_brightness.py` §4.
+    binding statement). RETIRED 2026-10-12 along with `set_brightness`
+    itself (#78) — a WLED's master brightness is Home Assistant's, so there
+    is no longer a write to restore. The timeout this entry gave
+    `set_brightness`/`get_brightness` still binds `get_brightness` (read
+    only) and `house_fixtures`' power writes. Evidence:
+    `tests/test_fixture_brightness.py`, `scripts/check_fixture_brightness.py`.
 
 Everything else is byte-identical to the fork at 149f4470 modulo the import
 rewrite and the deviations above. When updating vendored files, re-diff
@@ -2326,3 +2329,30 @@ against that commit.
     ResponseEngine, red controls), `tests/test_phase_grammar.py`
     (`scripts/check_drop_shockwave.breath_ok`),
     `tests/test_particle_strip_phase.py`. Unverified against his live room.
+78. `utils.py` (`WLED._wled_request` refuses a json body carrying `bri`,
+    `wled_brightness_refusal`, `WLEDBrightnessRefused`; `WLED.set_brightness`
+    DELETED): A WLED'S MASTER BRIGHTNESS IS HOME ASSISTANT'S (2026-10-12, the
+    Admiral: "Home assistant can set the WLED global brightness of any of
+    these lights, and spectra doesn't touch that value";
+    data/wled-bri-audit/report.md). `_wled_request` is the one transport
+    every WLED JSON write in this fork goes through, so it refuses — before
+    any request leaves — a body that would set `bri` at the top level or on
+    a segment, raising `WLEDBrightnessRefused` (a ValueError, so every
+    caller that already reads a transport failure as "not accepted" names
+    it). `set_brightness` (#27, #34) had exactly one caller,
+    `spectra/services/fixture_brightness.owned`, which took a dim fixture to
+    full for a capture and put his level back; that module now only reads
+    and warns. `get_brightness` stays (read only). Upstream LedFX never
+    calls `set_brightness` either, so nothing upstream-shaped moved.
+    `maxbri` ("Force max brightness", json/cfg `if.live.maxbri`) is refused
+    the same way, anywhere in a json= or data= body: it stays off on his
+    WLEDs (River's acceptance, 2026-10-12) so Home Assistant's brightness
+    keeps scaling the realtime stream. That makes `flush_sync_settings`
+    (which posts the whole read-back sync block, `maxbri` included) always
+    refused — it already had no live caller (`set_wleds_sync_mode` is
+    uncalled, `wled.py`'s flush is commented out as upstream's is), and
+    `force_max_brightness` is never called.
+    Evidence: `tests/test_wled_never_writes_bri.py` (the transport refusal,
+    plus behavioural proofs through `flush_sync_settings` and the
+    vendored, uncalled `Devices.set_wleds_sync_mode`, and through
+    `house_fixtures`' real default transport).

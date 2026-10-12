@@ -433,15 +433,17 @@ def test_a_turned_down_fixture_is_warned_about_BEFORE_the_room_goes_dark():
     assert plan.as_dict()["brightness"] == plan.brightness
 
 
-def test_the_run_takes_the_fixture_to_full_and_puts_his_level_back():
+def test_the_run_measures_the_fixture_as_is_and_never_writes_its_brightness():
+    """2026-10-12 (D1a): a WLED's brightness is Home Assistant's. The run
+    measures the turned-down fixture as it is, writes nothing to it, and
+    says so in its notes."""
     room = RoomMap(name="Living room", carrier_ids=[SEEN], axis=AXIS)
     helper = _WledHelper(26)
     result = asyncio.run(room_mapping.run_mapping(
         room, _brightness_deps(_Session(), helper), granularity="whole"))
 
     assert result.ok is True
-    # full for the capture, HIS level back afterwards — the own-the-flag
-    # pattern activate_for_capture already uses for the `active` flag
-    assert helper.writes == [255, 26]
+    assert helper.writes == []
     assert helper.value == 26
-    assert any("put your own brightness back" in n for n in result.notes)
+    assert any("lamp at 10%" in n and "Home Assistant" in n
+               for n in result.notes)

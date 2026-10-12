@@ -946,7 +946,7 @@ async def set_house_mode_pool(mode: str, pool: _PoolEnum, names: list[str],
 @mcp.tool()
 async def get_house_settings() -> dict:
     """Read the house-wide seam settings (the cutover switch, excluded Hue
-    bulbs, TV/voice fixtures, owned brightness, energy block)."""
+    bulbs, TV/voice fixtures, energy block)."""
     return await _call("get_house_settings")
 
 

@@ -120,12 +120,14 @@ export const MUSIC_HUE_WORDS: Record<string, string> = {
 
 /** One line per fixture the seam is doing something to, in plain words —
  * the House page's Home Assistant card. Only fixtures that differ from
- * "streamed and on" are named; a fixture held on at the owned brightness is
- * the normal case and stays quiet. */
+ * "streamed and on" are named; a fixture streamed and switched on (at Home
+ * Assistant's own brightness — Spectra never writes it) is the normal case
+ * and stays quiet. A fixture left as it was (`kept`: power is switched only
+ * on a mode change) is quiet too. */
 export function fixtureLine(f: SeamFixture): string | null {
   const name = f.name || f.device;
   const outcome = f.applied && f.applied.outcome !== 'landed' && f.applied.outcome !== 'sent'
-    && f.applied.outcome !== 'withheld'
+    && f.applied.outcome !== 'withheld' && f.applied.outcome !== 'kept'
     ? ` — ${f.applied.outcome}${f.applied.detail ? `: ${f.applied.detail}` : ''}` : '';
   if (f.target === 'unpowered') return `${name}: mains off — no stream, not searched for`;
   if (f.target === 'lent') return `${name}: lent — ${f.why ?? 'no stream'}${outcome}`;
@@ -164,12 +166,9 @@ export function seamLines(l: LightingStatus | undefined): string[] {
     const line = fixtureLine(f);
     if (line) out.push(line);
   }
-  for (const c of l.fixtures_seam?.corrections ?? []) {
-    out.push(`Corrected ${c.device}: found on=${c.found.on} brightness=${c.found.bri} — something else wrote it (${c.outcome}).`);
-  }
   for (const h of l.fixtures_seam?.handed_back ?? []) {
     out.push(`Handed back ${h.device} after the release: ${h.set.on ? 'on' : 'off'}`
-      + `${h.set.bri ? ` at brightness ${h.set.bri}` : ''} — ${h.outcome}${h.detail ? ` (${h.detail})` : ''}.`);
+      + ` — ${h.outcome}${h.detail ? ` (${h.detail})` : ''}.`);
   }
   for (const [d, r] of Object.entries(l.fixtures_seam?.rechecks ?? {})) {
     if (r.state === 'found') out.push(`Recheck: ${d} answered after ${r.after_s ?? '?'} s${r.moved ? ' (it had moved)' : ''}.`);

@@ -103,11 +103,10 @@ class FixtureHook(BaseModel):
     fps     a frame-rate CAP (only ever lowers a fixture's own rate).
     off     the fixture shows nothing (Dark on the output layer).
     music_level  percent while the MUSIC SHOW has the room (mode.music
-            "show"), 100 = unchanged. Phase 2: Spectra owns each WLED's
-            master brightness (house_fixtures.py writes 255), so the
-            brightness Home Assistant's music scripts used to write
-            (crystal 11-100%, strips 100%) lives here instead. None = the
-            show runs at the picture's own brightness."""
+            "show"), 100 = unchanged. None = the show runs at the picture's
+            own brightness. Both levels are PIXEL brightness and multiply
+            with each WLED's own master brightness, which is Home
+            Assistant's (2026-10-12) — Spectra never writes it."""
     model_config = ConfigDict(extra="ignore")
     target: HouseTarget = Field(default_factory=HouseTarget)
     level: Optional[float] = Field(default=None, ge=0.0, le=200.0)
@@ -250,7 +249,8 @@ DEFAULT_VOICE_LOOKS = {
 class VoiceLook(BaseModel):
     model_config = ConfigDict(extra="ignore")
     color: str = "#0000ff"
-    #: percent of full, over Spectra's owned master brightness
+    #: percent of the pixel's full colour (a WLED's master brightness on top
+    #: is Home Assistant's — Spectra never writes it)
     level: float = Field(default=100.0, ge=1.0, le=200.0)
 
     @field_validator("color")
@@ -321,25 +321,14 @@ class HouseSettings(BaseModel):
     voice_fixtures   where Serenity's listening/processing/responding colours
                      show (Home Assistant used the crystal and both sconces)
     voice_looks      one colour + level per voice state
-    own_brightness   while a mode drives the room, Spectra manages every
-                     WLED's power switch where the mode says. Its master
-                     brightness is NEVER raised above the level HIS OWN
-                     prior setting (Home Assistant or the fixture itself)
-                     had it at — that captured level is the ceiling
-                     (house_fixtures.py's `pre_take`), and the per-fixture
-                     Levels dimmer only ever scales within it. A later
-                     reading ABOVE that ceiling is ALWAYS corrected back
-                     down (fixed 2026-10-06 — an earlier build adopted an
-                     un-rebooted overshoot as his own deliberate increase,
-                     and adopted a raise the night proved Home Assistant
-                     never made; see house_fixtures.py's module docstring,
-                     "BRIGHTNESS IS NEVER ADOPTED"). The ceiling itself only
-                     ever moves at take-start capture or a hand-back —
-                     never via a drift-check reading.
-                     Off = leave both power and brightness alone.
-    owned_brightness an ADDITIONAL hard cap (0-255) on top of the preserved
-                     ceiling above — never a value Spectra forces upward.
-                     255 (the default) imposes no extra limit.
+    RETIRED 2026-10-12: own_brightness / owned_brightness. A WLED's master
+                     brightness is Home Assistant's (or the fixture's own
+                     page's) — Spectra never writes it (house_fixtures.py,
+                     "BRIGHTNESS IS HOME ASSISTANT'S"). A stored library
+                     carrying either key loads without it (extra="ignore")
+                     and is saved without it on the next settings write; a
+                     PUT naming either is refused by name
+                     (house.RETIRED_SETTINGS).
 
     PHASE 4:
     enabled          THE CUTOVER SWITCH. Off (the default) = house lighting
@@ -367,8 +356,6 @@ class HouseSettings(BaseModel):
         "crystal", "sconce-kitchen-left", "sconce-kitchen-right"])
     voice_looks: dict[str, VoiceLook] = Field(default_factory=lambda: {
         k: VoiceLook(**v) for k, v in DEFAULT_VOICE_LOOKS.items()})
-    own_brightness: bool = True
-    owned_brightness: int = Field(default=255, ge=1, le=255)
     #: phase 3: energy and network (HouseEnergy above)
     energy: HouseEnergy = Field(default_factory=HouseEnergy)
 
@@ -452,9 +439,23 @@ class HouseState(BaseModel):
     #: mode drives the room Spectra neither streams to them nor searches
     #: for them; "mains on" (or a recheck naming them) clears the entry.
     mains_off: dict[str, int] = Field(default_factory=dict)
-    #: phase 3: what each WLED's power and master brightness were BEFORE
-    #: Spectra first took them over (device -> {"on", "bri", "ip",
-    #: "at_ms"}) — handed back when the room is released, so a fixture
-    #: that was off before a take is off after it (house_fixtures.py
-    #: HAND-BACK). The first reading wins until it has been handed back.
+    #: phase 3: what each WLED's POWER was BEFORE Spectra first switched it
+    #: (device -> {"on", "ip", "at_ms"}) — handed back when the room is
+    #: released, so a fixture that was off before a take is off after it
+    #: (house_fixtures.py HAND-BACK). The first reading wins until it has
+    #: been handed back. No brightness (2026-10-12: Spectra never writes
+    #: it); a pre-2026-10-12 entry's "bri" is dropped on load.
     pre_take: dict[str, dict] = Field(default_factory=dict)
+    #: 2026-10-12 (D2a): the last power Spectra itself switched each WLED
+    #: to, and under which EFFECTIVE house mode (device -> {"mode",
+    #: "target", "on", "at_ms"}). A write is owed only when the mode or the
+    #: target changes, so a restart under the same mode writes nothing and
+    #: Home Assistant switching a fixture off stands until the next mode
+    #: change. Cleared when the room is released.
+    power_applied: dict[str, dict] = Field(default_factory=dict)
+
+    @field_validator("pre_take")
+    @classmethod
+    def _no_brightness(cls, v: dict) -> dict:
+        return {did: {k: x for k, x in (entry or {}).items() if k != "bri"}
+                for did, entry in (v or {}).items() if isinstance(entry, dict)}

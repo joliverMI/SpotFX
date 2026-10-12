@@ -442,8 +442,8 @@ class CameraRequest:
     #: `exposure_dynamic_framerate` off, 1 turns it on, None does not ask.
     #: A run that pins it OWNS it — the client restores the value it read
     #: off the device before the pin the moment this goes back to None
-    #: (`spectra/capture_client/camera.py`, the `fixture_brightness.owned`
-    #: contract one layer down). See `PINNED_SWITCHES`.
+    #: (`spectra/capture_client/camera.py`, `night_power.owned`'s own-the-
+    #: flag contract one layer down). See `PINNED_SWITCHES`.
     dynamic_framerate: Optional[int] = None
     #: what was clamped on the way in, in his words, so a bounded value is
     #: never silently different from the one he typed

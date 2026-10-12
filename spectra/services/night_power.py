@@ -57,20 +57,19 @@ never given a fabricated `on: true` — the same rule
 `spectra/services/fixture_brightness.py` holds for the same reason: a
 made-up reading makes an unguarded fixture look guarded.
 
-THE MODEL IS `fixture_brightness.owned`, deliberately. Same shape, same
-guarantees, one layer over: read first, own for the body, restore in a
-`finally` that runs on the failure path too, never let a restore failure
-mask the body's own exception, and NAME a restore that could not be
-delivered rather than swallowing it. The two are separate modules rather
-than one because they are separate axes — a fixture can be on and dim, or
-off and at full — and a run wants both, in that order (power, then
-brightness: raising the brightness of a fixture that is off writes a value
-nothing displays).
+THE SHAPE: read first, own for the body, restore in a `finally` that runs
+on the failure path too, never let a restore failure mask the body's own
+exception, and NAME a restore that could not be delivered rather than
+swallowing it. POWER ONLY: `{"on": …}` keeps the fixture's own master
+brightness, which is Home Assistant's and which no Spectra path writes
+(2026-10-12 — `fixture_brightness.py` used to take a dim fixture to full
+for a capture; it now only reads and warns, and a night records a request
+for him to raise it in Home Assistant).
 
 IT NEVER PERSISTS ANYTHING. His power state is held for the run's duration
 and handed back; a crash between the two is covered by the report and by
 the night record, not by a file — a stale stored power state landed at the
-wrong moment is its own hazard, which is `fixture_brightness`' own ruling.
+wrong moment is its own hazard.
 """
 from __future__ import annotations
 

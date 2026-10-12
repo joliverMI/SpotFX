@@ -185,7 +185,7 @@ def test_the_settings_put_applies_a_flip_at_once(open_room, fakes, a_mode):
     assert out["settings"]["enabled"] is True
     assert out["lighting"]["enabled"] is True and out["lighting"]["active"] is True
     assert fakes["fires"], "switching on applied the mode without waiting a tick"
-    other = _run(api.put_settings({"owned_brightness": 200}))
+    other = _run(api.put_settings({"voice_looks": {"listening": {"level": 50}}}))
     assert other["settings"]["enabled"] is True, "an unrelated edit keeps the switch"
     assert "lighting" not in other
 

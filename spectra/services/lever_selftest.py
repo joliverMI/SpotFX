@@ -89,10 +89,10 @@ and `REPEAT_BAND` are all exactly as they were, and `judge` is byte for byte
 the function it was. A camera that drifts inside the short regime still
 refuses; one that does not respond inside it still refuses. The test is if
 anything HARDER to pass there — every reading has less light in it — which
-is why the driven fixture is now taken to full firmware brightness for the
-three captures (`fixture_brightness.owned`, which this test was the only
-capture path never to run inside) and why a bright regime that still cannot
-clear the floor is reported as what it is rather than passed.
+is why the driven fixture's firmware brightness is read and, when it is
+below full, NAMED in the notes (`fixture_brightness.measured_as_is`; Home
+Assistant's, never written since 2026-10-12), and why a bright regime that
+still cannot clear the floor is reported as what it is rather than passed.
 
 WHAT IT NEVER DOES. It never writes a footprint (throwaway room, no
 `save_room`). It never leaves the camera where it put it (the previous
@@ -678,24 +678,22 @@ async def run_selftest(room: RoomMap, deps: "room_mapping.RunDeps", *,
     before = sess.camera_request
     stream_lag_refused = False
     try:
-        # TAKE THE ONE DRIVEN FIXTURE TO FULL FOR THE THREE CAPTURES and put
-        # his own level back — `fixture_brightness.owned`, the same guard
-        # the map, the commissioning pass and the pose fingerprint have all
-        # run inside since it was written. THIS TEST NEVER DID, and that
-        # gap is exactly where the short regime bites: a shorter integration
-        # collects less light, and a fixture sitting at his own 84% while
-        # the bright regime has to clear `light_field.UNSEEN_WEIGHT` turns a
-        # working camera into a NO_SIGNAL refusal about nothing.
+        # THE ONE DRIVEN FIXTURE'S OWN BRIGHTNESS, MEASURED AS IS — Home
+        # Assistant's, never written (2026-10-12; until then this took it to
+        # full and put his level back). A dim fixture collects less light in
+        # the short regime and can turn a working camera into a NO_SIGNAL
+        # refusal about nothing, so the notes name it: raise it in Home
+        # Assistant and run again.
         #
         # SCOPED TO THE DRIVEN EMITTER'S OWN FIXTURES, never the room's: the
         # plan handed to `fixture_readings` is the same one-emitter plan the
-        # activation above used, so this touches no fixture the self-test is
+        # activation above used, so this reads no fixture the self-test is
         # not lighting.
         one = replace(plan, emitters=[emitter])
         brightness_readings, fixtures = await room_mapping.fixture_readings(
             one, await room_mapping._chains(quiet), quiet)   # noqa: SLF001
-        async with fixture_brightness.owned(
-                fixtures, brightness_readings) as owned:
+        async with fixture_brightness.measured_as_is(
+                fixtures, brightness_readings) as as_is:
             # THE STREAM'S OWN LAG, MEASURED, BEFORE ANY REGIME IS COMMANDED
             # — the 2026-09-23 kiosk fix
             # (`data/kiosk-exposure-lever-no-response/report.md`). This is
@@ -740,9 +738,8 @@ async def run_selftest(room: RoomMap, deps: "room_mapping.RunDeps", *,
                         lit_settle=lit_settle))
                     if not out.readings[-1].ok and label != "repeat":
                         break
-        if owned.note:
-            out.notes.append(owned.note)
-        out.problems.extend(owned.problems)
+        if as_is.note:
+            out.notes.append(as_is.note)
     finally:
         # PUT THE CAMERA BACK. A self-test that left its own bright regime
         # running would silently retune the very run it just cleared.

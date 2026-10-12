@@ -66,9 +66,17 @@ THE HUE LOOKS ARE HOME ASSISTANT'S OWN, read from its scenes (2026-10-05):
 standard_daytime 3521 K full; standard_evening 2000 K (living) / 2005 K
 (dining) full; standard_nighttime (Dim) xy red-orange, living 50% / dining
 full; bedtime, travel and away off; media_mode (TV playing) off;
-media_pause living #ff9d31 at 29%, dining 2095 K at 54%. The crystal's
-levels are HA's WLED presets' master brightness: Daytime bri 15 (6%),
-Evening 34 (13%), Nightlight 7 (3%), media_mode bri 3 (1.2%).
+media_pause living #ff9d31 at 29%, dining 2095 K at 54%.
+
+EVERY WLED ROW'S LEVEL IS 100% (2026-10-12, the Admiral's D3a,
+data/wled-bri-audit/report.md). A WLED's master brightness is Home
+Assistant's and Spectra never writes it; a mode's Level is PIXEL brightness
+and multiplies with it. The first seed (2026-10-05) put HA's own WLED preset
+brightnesses here (the crystal at Daytime 6%, Evening 13%, Nightlight 3%,
+media_mode 1.2%) because Spectra owned the master brightness then; now HA
+carries per-mode / time-of-day brightness and these start at 100%, to be
+tuned together. scripts/migrate_house_wled_levels_full.py is the one-time
+catch-up for a library this seeder already wrote.
 
 NOTHING HERE SWITCHES HOUSE LIGHTING ON. HouseSettings.enabled is left as
 it is (off unless he switched it on): seeding is inert until he does.
@@ -330,15 +338,20 @@ def _off(area: str) -> dict:
     return {"area": area, "look": "off"}
 
 
-def _resting(crystal: float, strips: float, singles: float, *, crystal_motion: float,
-             strip_motion: float, single_motion: float, crystal_fps: int = 20) -> list[dict]:
+#: every WLED row's Level (D3a, module docstring): brightness is Home
+#: Assistant's, so the pixels start at full and the two are tuned together
+WLED_LEVEL = 100.0
+
+
+def _resting(*, crystal_motion: float, strip_motion: float, single_motion: float,
+             crystal_fps: int = 20) -> list[dict]:
     return [
-        _hook(CRYSTAL, level=crystal, motion=crystal_motion, fps=crystal_fps),
-        _hook(TV, level=strips, motion=strip_motion, fps=20),
-        _hook(SCONCE_L, level=strips, fps=20),
-        _hook(SCONCE_R, level=strips, fps=20),
-        _hook(PORCH, level=singles, motion=single_motion, fps=10),
-        _hook(TABLE, level=singles, fps=10),
+        _hook(CRYSTAL, level=WLED_LEVEL, motion=crystal_motion, fps=crystal_fps),
+        _hook(TV, level=WLED_LEVEL, motion=strip_motion, fps=20),
+        _hook(SCONCE_L, level=WLED_LEVEL, fps=20),
+        _hook(SCONCE_R, level=WLED_LEVEL, fps=20),
+        _hook(PORCH, level=WLED_LEVEL, motion=single_motion, fps=10),
+        _hook(TABLE, level=WLED_LEVEL, fps=10),
     ]
 
 
@@ -370,40 +383,37 @@ def modes(cards: dict, scenes: dict) -> list[dict]:
 
     return [
         mode("Standard", ["Daytime", "Party"], star, calm,
-             _resting(6.0, 40.0, 100.0, crystal_motion=0.015, strip_motion=0.12,
-                      single_motion=0.8),
+             _resting(crystal_motion=0.015, strip_motion=0.12, single_motion=0.8),
              [_hold(HUE_LIVING, kelvin=3521), _hold(HUE_DINING, kelvin=3521)],
              "show", "room",
-             "Starting look (phase 4). Calm on Star; crystal at HA's Daytime preset "
-             "brightness (bri 15 = 6%). Hue = HA's standard_daytime, 3521 K full. "
+             "Starting look (phase 4). Calm on Star; WLED brightness is Home "
+             "Assistant's (rows at 100%). Hue = HA's standard_daytime, 3521 K full. "
              "Answers to Party too: there is no Party mode, and HA's own crystal "
              "script treats Party as Daytime."),
         mode("Evening", [], star, evening,
-             _resting(13.0, 30.0, 100.0, crystal_motion=0.0125, strip_motion=0.10,
-                      single_motion=0.6),
+             _resting(crystal_motion=0.0125, strip_motion=0.10, single_motion=0.6),
              [_hold(HUE_LIVING, kelvin=2000), _hold(HUE_DINING, kelvin=2005)],
              "show", "room",
              "Starting look (phase 4). Calm - Evening (redder, dimmer background) on "
-             "Star; crystal at HA's Evening preset brightness (bri 34 = 13%). Hue = "
+             "Star; WLED brightness is Home Assistant's (rows at 100%). Hue = "
              "HA's standard_evening, 2000 K living / 2005 K dining, full."),
         mode("Dim", [], fish, night,
-             _resting(3.0, 12.0, 50.0, crystal_motion=0.016, strip_motion=0.08,
-                      single_motion=0.45),
+             _resting(crystal_motion=0.016, strip_motion=0.08, single_motion=0.45),
              [_hold(HUE_LIVING, color="#ff3900", brightness=50.0),
               _hold(HUE_DINING, color="#ff4401", brightness=100.0)],
              "show", "room",
-             "Starting look (phase 4). The Night light fish on the crystal at HA's "
-             "Nightlight preset brightness (bri 7 = 3%), strips and singles dim red-"
-             "orange. Hue = HA's standard_nighttime: deep red-orange, living 50%, "
+             "Starting look (phase 4). The Night light fish on the crystal, strips "
+             "and singles red-orange; WLED brightness is Home Assistant's (rows "
+             "at 100%). Hue = HA's standard_nighttime: deep red-orange, living 50%, "
              "dining full."),
         mode("Night light", ["Bedtime"], fish, night,
-             [_hook(CRYSTAL, level=3.0, motion=0.016, fps=15),
+             [_hook(CRYSTAL, level=WLED_LEVEL, motion=0.016, fps=15),
               _hook(TV, off=True), _hook(SCONCE_L, off=True), _hook(SCONCE_R, off=True),
               _hook(PORCH, off=True), _hook(TABLE, off=True)],
              [_off(HUE_LIVING), _off(HUE_DINING)],
              "ignore", "hold",
              "Starting look (phase 4). Only the crystal: three large, slow fish in "
-             "deep purple and teal on dark blue, at 3%. Every other fixture off; Hue "
+             "deep purple and teal on dark blue. Every other fixture off; Hue "
              "off (HA's bedtime). Never lights the bedroom or the loft."),
         mode("Away", ["Travel"], star, calm,
              [_hook("", off=True, kind="everything")],
@@ -412,21 +422,23 @@ def modes(cards: dict, scenes: dict) -> list[dict]:
              "Starting look (phase 4). Every Spectra fixture off, Hue off (HA's "
              "away_lighting / travel scenes). HA keeps its own presence lights."),
         mode("TV", [], star, evening,
-             [_hook(CRYSTAL, level=1.2, motion=0.01, fps=20),
-              _hook(TV, level=15.0, fps=20), _hook(SCONCE_L, level=15.0, fps=20),
-              _hook(SCONCE_R, level=15.0, fps=20),
-              _hook(PORCH, level=30.0, motion=0.6, fps=10), _hook(TABLE, level=30.0, fps=10)],
+             [_hook(CRYSTAL, level=WLED_LEVEL, motion=0.01, fps=20),
+              _hook(TV, level=WLED_LEVEL, fps=20), _hook(SCONCE_L, level=WLED_LEVEL, fps=20),
+              _hook(SCONCE_R, level=WLED_LEVEL, fps=20),
+              _hook(PORCH, level=WLED_LEVEL, motion=0.6, fps=10),
+              _hook(TABLE, level=WLED_LEVEL, fps=10)],
              [_off(HUE_LIVING), _off(HUE_DINING)],
              "ignore", "hold",
-             "Starting look (phase 4): a film playing. Crystal at HA's media_mode "
-             "brightness (bri 3 = 1.2%), sconces and singles dim, Hue off (HA's "
+             "Starting look (phase 4): a film playing. WLED brightness is Home "
+             "Assistant's (rows at 100%), Hue off (HA's "
              "media_mode). The TV strip goes to Hyperion by itself while the media "
              "centre is on."),
         mode("TV paused", [], star, evening,
-             [_hook(CRYSTAL, level=6.0, motion=0.01, fps=20),
-              _hook(TV, level=35.0, fps=20), _hook(SCONCE_L, level=35.0, fps=20),
-              _hook(SCONCE_R, level=35.0, fps=20),
-              _hook(PORCH, level=60.0, motion=0.6, fps=10), _hook(TABLE, level=60.0, fps=10)],
+             [_hook(CRYSTAL, level=WLED_LEVEL, motion=0.01, fps=20),
+              _hook(TV, level=WLED_LEVEL, fps=20), _hook(SCONCE_L, level=WLED_LEVEL, fps=20),
+              _hook(SCONCE_R, level=WLED_LEVEL, fps=20),
+              _hook(PORCH, level=WLED_LEVEL, motion=0.6, fps=10),
+              _hook(TABLE, level=WLED_LEVEL, fps=10)],
              [_hold(HUE_LIVING, color="#ff9d31", brightness=29.0),
               _hold(HUE_DINING, kelvin=2095, brightness=54.0)],
              "ignore", "hold",

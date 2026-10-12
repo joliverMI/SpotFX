@@ -3,7 +3,8 @@ name: house-lighting
 description: >
   The house lighting ENGINE — spectra/services/house.py (modes, the gate,
   tick/reapply, the settings writer), house_fixtures.py (per-fixture
-  power/brightness), house_energy.py (frame-rate caps, parking,
+  power — never a WLED's brightness, which is Home Assistant's),
+  house_energy.py (frame-rate caps, parking,
   send-on-change, audio pause), house_voice.py (Serenity's colours), and
   the Home Assistant seam (spectra/api/house.py). Load before touching
   any of these modules, the House page's settings panel, or Sonic's
@@ -40,9 +41,8 @@ worth knowing cold:
    bulb in his Spectra home, loft uplight and ledge lights included, is
    an ordinary house-mode bulb, and carving those four out as Home
    Assistant's was a wrong assumption, corrected 2026-10-06) and the
-   seam-wiring fields (`tv_strips`, `voice_fixtures`,
-   `own_brightness`, `owned_brightness`, set once at cutover with River).
-   All five stay readable through `get_house_settings`; none is in
+   seam-wiring fields (`tv_strips`, `voice_fixtures`, set once at cutover
+   with River). All three stay readable through `get_house_settings`; none is in
    `house_console.ENERGY_KEYS` or any other write op. Don't add a write
    path for them without going back to the Admiral. The 2026-10-06
    correction only fixed what a FRESH `scripts/seed_hue_scope.py`/
@@ -90,6 +90,22 @@ worth knowing cold:
    checked. A manual Fire button / scene-change arm is never gated by
    any of this. See `house.py`'s own "THE MUSIC-DEVICE GATE" docstring
    section.
+
+7. **A WLED'S BRIGHTNESS IS HOME ASSISTANT'S (the Admiral, 2026-10-12,
+   `data/wled-bri-audit/report.md`)** — `house_fixtures.py`'s "BRIGHTNESS
+   IS HOME ASSISTANT'S" / "POWER FOLLOWS THE MODE" docstring sections are
+   the binding statement. No payload anywhere carries `bri` (or `maxbri`):
+   `fx/utils.py::WLED._wled_request` refuses one and
+   `tests/test_wled_never_writes_bri.py` drives that transport and its
+   real callers and asserts the refusal fires. Power writes
+   are exactly `{"on": true|false}`, due only when the EFFECTIVE mode or a
+   fixture's target changes (`HouseState.power_applied`, durable — a
+   restart under the same mode writes nothing); there is NO drift check,
+   so an HA "off" stands until the next mode change. `own_brightness`/
+   `owned_brightness` are retired (a PUT naming either is refused by name,
+   `house.RETIRED_SETTINGS`). Mode `level`/`music_level` are pixel
+   brightness and MULTIPLY with HA's brightness. Don't add a brightness
+   write back to "fix" a dim fixture — ask HA (River) instead.
 
 ## Sonic reach
 

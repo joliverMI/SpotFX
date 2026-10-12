@@ -39,7 +39,7 @@ THE SWEEP RUNS ONCE, AT THE END. It is up to 254 probes; running it every
 poll would spend the whole budget on the cheapest-to-fail path. So the
 cheap rungs run every round and the sweep runs on the LAST round only —
 which means the stated ceiling is the budget PLUS one sweep, exactly the
-way `fixture_brightness.RESTORE_BUDGET_S` is the budget plus one attempt.
+way a bounded retry loop's budget is always the budget plus one attempt.
 
 ────────────────────────────────────────────────────────────────────────────
 THREE ANSWERS, AND THE MIDDLE ONE IS THE ONLY ONE THAT STOPS A NIGHT

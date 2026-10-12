@@ -42,9 +42,10 @@ rebuilt — which is the standing rule on this path:
     as `room_mapping`'s run already does (`emitters.substitutes_for`);
   * bringing an idle substitute up and putting it back:
     `room_mapping.activate_for_capture` / `deactivate_after_capture`;
-  * the fixture's own firmware brightness, taken to full for the capture
-    and given back: `fixture_brightness.owned` — a run at 10% brightness
-    measures the dimmer, which this codebase learned the hard way;
+  * the fixture's own firmware brightness, read and MEASURED AS IS
+    (`fixture_brightness.measured_as_is` — Home Assistant's, never written
+    since 2026-10-12): a run at 10% brightness measures the dimmer, which
+    this codebase learned the hard way, so the run warns and names it;
   * every named refusal: `mapping_refusals`.
 
 ONE CONTINUOUS HOLD, deliberately, where the MAP's run is a chain of short
@@ -1583,14 +1584,13 @@ async def run_commission(mapper_id: str, deps: room_mapping.RunDeps, *,
             result.problems.append(warning)
         resolved_instrument = (instrument if instrument is not None
                                else _safe_instrument(result))
-        async with fixture_brightness.owned(fixtures, readings) as owned:
+        async with fixture_brightness.measured_as_is(fixtures, readings) as as_is:
             for spec in specs:
                 entries.append(await _run_target(
                     deps, scope, composition, spec, layout, layout_note,
                     result, result.repeats, resolved_instrument, capture_s))
-        if owned.note:
-            result.notes.append(owned.note)
-        result.problems.extend(owned.problems)
+        if as_is.note:
+            result.notes.append(as_is.note)
     except CameraRefused as exc:
         result.reason, result.refusal = str(exc), "camera"
     except (RunAborted, HoldRefused) as exc:

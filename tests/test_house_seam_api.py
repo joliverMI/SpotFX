@@ -124,13 +124,13 @@ def test_tv_music_media_voice_and_recheck(client):
 def test_settings_round_trip_and_refuse_nonsense(client):
     r = client.get("/api/house/settings")
     s = r.json()["settings"]
-    assert s["tv_strips"] == ["tv-backlight"] and s["owned_brightness"] == 255
+    assert s["tv_strips"] == ["tv-backlight"]
+    assert "owned_brightness" not in s and "own_brightness" not in s
     assert s["voice_looks"]["listening"]["color"] == "#0000ff"
-    r = client.put("/api/house/settings", json={"owned_brightness": 200,
-                                                 "voice_looks": {"listening": {"color": "#112233"}}})
+    r = client.put("/api/house/settings", json={
+        "voice_looks": {"listening": {"color": "#112233"}}})
     assert r.status_code == 200, r.text
     s = r.json()["settings"]
-    assert s["owned_brightness"] == 200
     assert s["voice_looks"]["listening"]["color"] == "#112233"
     assert s["voice_looks"]["processing"]["color"] == "#26a269", "others kept"
     r = client.put("/api/house/settings",
@@ -139,8 +139,12 @@ def test_settings_round_trip_and_refuse_nonsense(client):
     assert s["voice_looks"]["listening"]["color"] == "#112233", \
         "editing one state keeps his other edits"
     assert s["voice_looks"]["processing"] == {"color": "#26a269", "level": 50.0}
-    assert client.put("/api/house/settings",
-                      json={"owned_brightness": 999}).status_code == 422
+    # the retired WLED-brightness settings are refused BY NAME (2026-10-12:
+    # a WLED's brightness is Home Assistant's), never silently ignored
+    for retired in ("owned_brightness", "own_brightness"):
+        r = client.put("/api/house/settings", json={retired: 200})
+        assert r.status_code == 422 and retired in r.text
+        assert "Home Assistant" in r.text
     assert client.put("/api/house/settings",
                       json={"voice_looks": {"singing": {"color": "#000000"}}}).status_code == 422
     # the modes in the same file are untouched by a settings edit

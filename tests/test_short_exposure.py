@@ -274,7 +274,7 @@ def test_re_asserting_a_pin_never_overwrites_the_remembered_value(ctl):
 
 
 def test_un_pinning_hands_his_own_value_back(ctl):
-    """THE OWN-THE-FLAG CONTRACT, `fixture_brightness.owned` one layer down.
+    """THE OWN-THE-FLAG CONTRACT, `night_power.owned` one layer down.
     A run un-pins by naming the control null, which is exactly the
     all-default request every restore path already sends."""
     camera = V4L2Camera()

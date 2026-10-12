@@ -4670,55 +4670,50 @@ split). Six things:
 - **RECORDED ALWAYS, ACTED ON ONLY WHILE `house.layer_active()`** (a mode
   set, SPECTRA holds the room, no standby). HA's facts (TV Music, the media
   centre, fixture overrides) live in `house_state.json`; the seam's settings
-  (TV strip ids, voice fixtures/colours, owned brightness) in the library
+  (TV strip ids, voice fixtures/colours) in the library
   file. No mode → nothing withheld, no WLED written.
 - **WITHHELD ≠ DARK.** A lent or switched-off fixture gets NO packet
   (`fx/device_output.set_withheld`, VENDOR #44), checked in
   `Device.update_pixels`; suspension streams it anyway. `streaming_device_ids`
   and `device_gaps` leave withheld fixtures out, or the dark-fixture watch and
   the activation gate would call a switched-off fixture a fault. Off = no
-  stream, `{"live": false}`, `{"on": false}`; on = `{"on": true, "bri":
-  <his own ceiling>}` WHILE STILL WITHHELD, then the stream (`pending_on`).
-- **HIS OWN BRIGHTNESS IS THE CEILING, NEVER FORCED UPWARD (REWORKED
-  2026-10-06 — Admiral order: the crystal kept landing at 100% in Home
-  Assistant, far too bright)**. `house_fixtures.py` used to hold every
-  streamed WLED's master brightness at a flat `owned_brightness` (255) and
-  RE-ASSERT it on drift — fighting and winning against his own HA
-  brightness writes (a live `corrections` log entry caught it: `bri=43`
-  forced back to 255). It now reads the fixture's brightness BEFORE its
-  first write this take (`HouseState.pre_take[did]["bri"]`, already
-  existed for hand-back) and treats that — his own last setting — as the
-  per-take ceiling (`house_fixtures._brightness_ceiling`), capped further
-  only by `owned_brightness` if he's set that lower (default 255 = no
-  extra cap). A mode's per-fixture `level` (`show_
-  output`'s own output-brightness scaling, a SEPARATE mechanism from WLED's
-  hardware `bri`) is still the dimmer BELOW that hardware ceiling — a mode
-  without levels now puts the crystal at HIS level, never a forced FULL.
-  Every WLED write runs on a worker thread (the transport is blocking).
-  **BRIGHTNESS IS NEVER ADOPTED (fixed the SAME night, PR
-  fm/crystal-255-followup)** — the paragraph above originally continued:
-  a drift check corrected DOWNWARD ONLY on a genuine reboot
-  (`_rebooted_since_last_check`'s uptime comparison), and any OTHER
-  overshoot was treated as HIS OWN new deliberate HA raise and ADOPTED
-  into `pre_take[did]["bri"]`, nothing written. Three minutes into this
-  very fix's own deploy, the crystal's bri rose from his 34 to 255 with
-  no reboot — and it was adopted. River's own HA trace proved Home
-  Assistant never made that write (empty logbook, silent pretake
-  endpoint, no scene/automation); a grep of Spectra's own `house
-  fixtures:` log showed no write of any kind from this process landed on
-  the fixture in that window either. So "no reboot evidence" was never
-  evidence of a deliberate raise — adoption is now REMOVED entirely:
-  `_drift_check` corrects EVERY overshoot straight back down, reboot
-  -explained or not. `_looks_like_our_own_echo`/`_rt.written_bri` track
-  every bri value Spectra itself has written this take, purely so the
-  correction's log line can name an overshoot that looks like Spectra's
-  own lingering value (e.g. a prior ceiling now above a freshly
-  tightened `owned_brightness`) — diagnostic only, never a behavior gate.
-  A reading at or below the ceiling, including a fresh, LOWER HA
-  brightness write, is still his and is never fought back up.
-  `scripts/fix_crystal_brightness_ceiling.py` is the one-time correction
-  for the ceiling the pre-fix adoption already wrote to disk (255, needs
-  restoring to 34) — run while `spectra.service` is stopped.
+  stream, `{"live": false}`, `{"on": false}`; on = `{"on": true}` WHILE
+  STILL WITHHELD, then the stream (`pending_on`).
+- **A WLED'S BRIGHTNESS IS HOME ASSISTANT'S — SPECTRA NEVER WRITES IT
+  (2026-10-12, the Admiral: "Home assistant can set the WLED global
+  brightness of any of these lights, and spectra doesn't touch that
+  value"; `data/wled-bri-audit/report.md`, his D1a/D2a/D3a).**
+  `house_fixtures.py`'s "BRIGHTNESS IS HOME ASSISTANT'S" and "POWER FOLLOWS
+  THE MODE, NEVER RE-ASSERTED" docstring sections are the binding
+  statement. It retired a whole week of brightness ownership (2026-10-05
+  to 10-12: a per-take "ceiling", soft power through `bri 1`, a 60 s drift
+  check that corrected HA's raises back down, a hand-back of a days-old
+  `bri` — which left three fixtures stuck at bri 1 the morning it went).
+  Four things hold now:
+  * **No payload carries `bri`, `seg[].bri` or `maxbri`, anywhere** —
+    `fx/utils.py::WLED._wled_request` (the one WLED transport) refuses
+    one (VENDOR #78; `set_brightness` is deleted, and the dead flush of
+    Force max brightness is refused too), and `tests/test_wled_never_writes_bri.py`
+    drives that transport and its real callers (house_fixtures' power
+    writes, the vendored sync-mode flush) and asserts the refusal fires
+    and nothing reaches `requests.post`.
+  * **Power is exactly `{"on": true|false}` and is due only on a CHANGE**:
+    the effective mode (a media overlay counts), a fixture's target (lend,
+    override, mains), or a take of a released room. `HouseState.
+    power_applied` records the last power Spectra switched each WLED to
+    and under which mode, durably — a restart under the same mode writes
+    nothing. There is NO drift check: an HA "off" stands until the next
+    mode change; a failed write is named, not retried on the clock.
+  * **Hand-back on release is power only**, and only where Spectra's own
+    last switch left the fixture different from `pre_take["on"]`
+    (`pre_take` no longer records `bri`; an old entry's is dropped on load).
+  * **Mode `level`/`music_level` are pixel brightness that MULTIPLY with
+    HA's.** D3a set every WLED row to 100% at ship
+    (`scripts/migrate_house_wled_levels_full.py`, dry run default,
+    `--apply` with `--spectra-url`; the seeder seeds 100% too).
+    `own_brightness`/`owned_brightness` are retired — dropped on load,
+    refused by name on a PUT (`house.RETIRED_SETTINGS`).
+  Don't "fix" a dim WLED by writing brightness: ask Home Assistant (River).
 - **MEDIA IS AN OVERLAY**: `house.current_mode()` is the EFFECTIVE mode —
   the one answering to "TV" / "TV paused" (source-specific first) while a
   source is on AND a clock mode is set — with the clock's pick kept
@@ -4769,13 +4764,13 @@ Five things:
   Never Hue, never while suspended. Each device counts `_frames_sent`/
   `_frames_skipped`; the House page's Energy lines read those, never a
   setting.
-- **OFF MEANS NO STREAM, SOFTLY.** A mode's `off` on a WLED fades to black
-  over the glide, then `house.mode_off_devices()` hands it to
-  house_fixtures as TARGET_OFF (withheld + live:false + on:false). While
-  Spectra owns brightness every switch-off first writes `bri: 1` and every
-  power-on from withheld writes `{"on": true, "bri": 1}`, lets the stream
-  back, then the owned brightness — the WLED's own preset never shows at
-  full. A Light Show Steady/Freeze hold beats a mode's off.
+- **OFF MEANS NO STREAM.** A mode's `off` on a WLED fades to black over
+  the glide, then `house.mode_off_devices()` hands it to house_fixtures as
+  TARGET_OFF (withheld + live:false + on:false). The phase-3 soft power
+  (a `bri: 1` dip around every switch, to hide the WLED's own preset) is
+  RETIRED with brightness ownership (2026-10-12) — a brief preset frame on
+  a switch is possible and was handed to a room check, never to a
+  brightness write. A Light Show Steady/Freeze hold beats a mode's off.
 - **MAINS OFF = NO STREAM, NO SEARCH.** `PUT /api/house/mains` records HA's
   report (`HouseState.mains_off`); acted on only while a mode drives:
   TARGET_UNPOWERED (withheld, nothing written), `activation_report.recheck`
@@ -4786,10 +4781,11 @@ Five things:
   closes (`live.pause_audio`); music, another hub listener (A/V sync) or the
   layer going inactive resume it; an unknown playback read restarts the
   quiet clock. **A RELEASE HANDS BACK POWER** (found in the phase-3 room
-  re-measure: the dining table was left ON at 255): before its first owned
-  write house_fixtures records each WLED's `{on, bri, ip}`
-  (`HouseState.pre_take`, durable) and, once the owner is RELEASED, writes it
-  back and reads it back — a fixture off before a take is off after. Never
+  re-measure: the dining table was left ON): before its first power write
+  house_fixtures records each WLED's `{on, ip}` (`HouseState.pre_take`,
+  durable) and, once the owner is RELEASED, writes `{"on": before}` back
+  (only where Spectra's own switch changed it) and reads it back — a
+  fixture off before a take is off after. Never
   on a restart or a handover to SpotFX. Status labels are unique
   (`house.fixture_labels()`: four of his WLEDs are all named "WLED").
   Measure with `scripts/measure_room_energy.py` (read-only, the planner's
@@ -4938,8 +4934,9 @@ colours). `house.apply_settings_patch()` is the ONE writer both
 `spectra/api/house.py`'s own route so neither can diverge. Still
 deliberately read-only: `hue_excluded_lights` (a safety fence around
 bulbs outside the room) and the seam-wiring fields (`tv_strips`,
-`voice_fixtures`, `own_brightness`, `owned_brightness` — set once at
-cutover with River). See the `house-lighting` skill.
+`voice_fixtures` — set once at cutover with River). A WLED's brightness is
+no Spectra setting at all (Home Assistant's, 2026-10-12). See the
+`house-lighting` skill.
 
 **THE MUSIC-DEVICE GATE (the Admiral, 2026-10-09): "When I'm playing
 music on devices that aren't Serenity or Serenity guest the system
@@ -5377,54 +5374,30 @@ and the id shape. Five things to know:
   sat at ten percent FIRMWARE brightness (WLED's `bri`, which scales
   everything the fixture emits including a realtime stream) for the whole
   run, and nothing said so. **`spectra/services/fixture_brightness.py` is
-  the binding statement.** Two acts, deliberately separate: the PLAN reads
-  it and warns loudly BEFORE the cost (a warning after a four-minute dark
-  run has arrived too late to act on — `mapping_refusals.one_piece_warning`'s
-  own discipline), and the CAPTURE takes each fixture to full and puts HIS
-  level back, restore in a `finally` so it survives the failure path — the
-  own-the-flag pattern `activate_for_capture` already uses. A non-WLED
-  fixture is `not_applicable` and a fixture that would not answer is
-  `unreadable`; NEITHER is ever given a fabricated 255, because a made-up
-  full reading makes an unguarded fixture look guarded. **The vendored
-  `WLED.set_brightness` had to be fixed first** (`fx/VENDOR.md` #27): it had
-  no caller anywhere in the fork and forced every input to 255 via a double
-  `max`, so a RESTORE would have silently set full. Spec:
-  `tests/test_fixture_brightness.py`.
+  the binding statement.** SINCE 2026-10-12 IT NEVER WRITES (the
+  Admiral's D1a: a WLED's brightness is Home Assistant's): the PLAN reads
+  it and warns loudly BEFORE the cost, naming Home Assistant as where to
+  raise it (`mapping_refusals.one_piece_warning`'s own discipline); the
+  CAPTURE measures AS IS (`fixture_brightness.measured_as_is`, writes
+  nothing) and its notes name every fixture captured below full; a NIGHT
+  run records "raise X to 100% in Home Assistant" in its `brightness`
+  block for the morning read. Until then the capture took each fixture to
+  full and put his level back (`owned()`, and the 2026-09-06 restore
+  hardening around it — both retired with `WLED.set_brightness`, VENDOR
+  #78). A non-WLED fixture is `not_applicable` and a fixture that would
+  not answer is `unreadable`; NEITHER is ever given a fabricated 255,
+  because a made-up full reading makes an unguarded fixture look guarded.
+  Spec: `tests/test_fixture_brightness.py`, `scripts/check_fixture_brightness.py`.
 - **A CONTROL WRITE THAT MUST LAND NEEDS A BUDGET THAT BINDS, AND A
-  READ-BACK** (2026-09-06, PR fm/spectra-fix-brightness-restore; the sconce
-  commissioning). The restore above shipped as ONE HTTP write at
-  `fx.utils.WLED._wled_request`'s blanket **0.5 s**, and `tv-backlight`
-  (.236) was taken to full and LEFT there — "could NOT be put back to 84%
-  (ValueError) — set it on the fixture itself" — until it was set by hand.
-  Nothing else does it for him: **the release path hands back the STREAM,
-  not `bri`**, so a failed restore strands a fixture bright indefinitely.
-  Three things to know, and the first two generalize past this module:
-  - **0.5 s is a DISCOVERY budget, not a control-write one.** .236 is the
-    fixture `dark_fixture_watch` exists for — a controller that saturates
-    under its own realtime stream — and the restore lands at the END of a
-    run that has spent ~35 s pouring a capture stream into it (which is why
-    the RAISE succeeded and the restore did not). `fx/VENDOR.md` #34 gives
-    the brightness pair its own `WLED_BRIGHTNESS_TIMEOUT_S` (3.0, matching
-    `dark_fixture_watch.HTTP_TIMEOUT_S`) as the DEFAULT `timeout` handed to
-    the transport explicitly — every other WLED call keeps 0.5 s. At 0.5 s
-    a saturated fixture also read `unreadable` at PLAN time, which `owned()`
-    correctly leaves completely alone, so the run measured his dim level
-    with only a "we could not ask" note.
-  - **A 2xx IS NOT PROOF, one fixture type over from §64.** Every write is
-    now confirmed by reading `bri` back, retried bounded and spaced inside
-    a declared wall budget (`RESTORE_BUDGET_S`, checked BETWEEN attempts —
-    an in-flight request cannot be abandoned, so the stated ceiling is the
-    budget plus one attempt). **Policy lives in `fixture_brightness.py`,
-    transport in `fx/`** — do not put retries in the driver.
-  - **THREE outcomes, not two, and `OwnResult.note` obeys them.** `landed` /
-    `unconfirmed` (accepted, never confirmed — a SOFTER sentence, because
-    sending him to a fixture that probably already carries his level is
-    noise) / `failed` (the loud original sentence, unchanged). The note is
-    read after the block exits, so it never claims a restore its own
-    `problems` deny. Spec: `tests/test_fixture_brightness_restore.py` (his
-    sentence reproduced byte for byte against the REAL transport and a real
-    saturating HTTP server, then fixed) + `scripts/check_fixture_brightness.py`
-    §4.
+  READ-BACK** (2026-09-06, the sconce commissioning, where a single 0.5 s
+  restore write left .236 at full). The brightness restore it hardened is
+  gone (above), but both lessons still govern every control write here:
+  **0.5 s is a DISCOVERY budget, not a control-write one** — a controller
+  saturating under its own stream needs `fx.utils.WLED_BRIGHTNESS_TIMEOUT_S`
+  (3.0, VENDOR #34, which `get_brightness` and house_fixtures' power writes
+  still use) — and **a 2xx is not proof**: confirm by reading back, retry
+  bounded and spaced, and keep "accepted but unconfirmed" a different,
+  softer sentence from "never accepted".
 - **A NORMALISED THUMBNAIL IS BLIND TO THE MAGNITUDE IT NORMALISED AWAY.**
   `light_field.thumbnail` scales each footprint to its OWN peak, so one
   holding a hundredth of its neighbour's light draws an equally convincing
@@ -5834,7 +5807,7 @@ exposure lock, refusals — plus a full-resolution ring it turns on for the
 run and off in a `finally`, because 736 pixels cannot be resolved by 2304
 map-grid cells), `flare_preview_hold.open_program_hold`, the copy-carrier
 substitution, `activate_for_capture`/`deactivate_after_capture`,
-`fixture_brightness.owned`, and `mapping_refusals`. The lamp is
+`fixture_brightness.measured_as_is`, and `mapping_refusals`. The lamp is
 `fx/effects/pixelPattern.py` (`fx/VENDOR.md` #28, registry-exempt); all the
 gray-code arithmetic is `spectra/services/gray_code.py`, pure, so the lamp
 and the decoder cannot drift into two ideas of which pixel is which.
@@ -6196,13 +6169,14 @@ long command undeliverable. There is no third setting. Six things:
   from the four levers because their refusal contracts differ. The client
   reads his value before the first pin and writes it back on the un-pin
   (`camera._apply_switches`), which every run's existing all-default
-  restore already sends. `fixture_brightness.owned` one layer down.
+  restore already sends. `night_power.owned` one layer down.
 - **THE COMPENSATION IS SMALLER THAN IT SOUNDS, and saying so is the
-  useful part.** `room_mapping.LIT_BRIGHTNESS` is already 1.0, the
-  commissioning pattern lamp already writes `brightness: 1.0` and
-  `fixture_brightness.FULL` is already 255 — full is full. What was
-  genuinely missing is that **the lever self-test was the ONE capture path
-  never wrapped in `fixture_brightness.owned`**; it is now. Gain is
+  useful part.** `room_mapping.LIT_BRIGHTNESS` is already 1.0 and the
+  commissioning pattern lamp already writes `brightness: 1.0` — the lamp is
+  full. The fixture's own master brightness is Home Assistant's (since
+  2026-10-12 no capture raises it), so the lever self-test, like every
+  capture path, NAMES a fixture below full in its notes
+  (`fixture_brightness.measured_as_is`) for him to raise. Gain is
   deliberately NOT raised to compensate: it would lift the sensor's noise
   into the `lit - dark` difference this instrument measures.
 - **A REGIME THAT STILL CANNOT SEE SAYS SO.** `mapping_refusals`'
@@ -6532,10 +6506,10 @@ few (`MIN_DISCRIMINATING` = 3) or too clustered (`MIN_ANCHOR_SPREAD`) cannot
 discriminate at all and **SAYS SO AT ESTABLISHMENT**, so the weaker answer
 months later is a known property of the pose rather than a surprise; and a
 whole-frame brightness change (his firmware-brightness trap, one axis over)
-is deliberately not attributed to either. The fingerprint takes each fixture
-to full firmware brightness for the pass (`fixture_brightness.owned`,
-`run_mapping`'s own guard) precisely because that class of change would
-otherwise make every re-check unreadable.
+is deliberately not attributed to either. The fingerprint reads each
+fixture's firmware brightness and NAMES any below full in its notes
+(`fixture_brightness.measured_as_is` — Home Assistant's, never written since
+2026-10-12), so that class of change is at least explainable on a re-check.
 
 **PROVENANCE IS A READ, NEVER A COPY.** A run records the emitter ids it
 produced; the footprints stay in `room_maps.json`, which remains the live
@@ -6709,10 +6683,10 @@ already:
   `flare_preview_hold.close_hold()` after a short bounded grace —
   REGARDLESS, because his dark room back within seconds outranks a tidy run.
   Nothing new was invented for it.
-- **LIGHTS ON IF NECESSARY** — `spectra/services/night_power.py`, the
-  `fixture_brightness.owned` pattern one axis down (power first, then
-  brightness: raising the brightness of a fixture that is off writes a value
-  nothing displays). Read its docstring for WHAT WAS ESTABLISHED about a
+- **LIGHTS ON IF NECESSARY** — `spectra/services/night_power.py`: power
+  only (`{"on": …}` keeps the fixture's own brightness, which is Home
+  Assistant's — a dim fixture is a RECORDED REQUEST in the night's
+  `brightness` block, never a write). Read its docstring for WHAT WAS ESTABLISHED about a
   powered-off WLED under a realtime stream **and what was not**: the answer
   for his fixtures could not be settled from here, so the run is correct
   under either — it turns on only what reads off, CONFIRMS by reading back,
@@ -7049,7 +7023,7 @@ Six things:
   and fine, which is that module's own founding defect arriving through this
   door. THE SWEEP RUNS ON THE LAST ROUND ONLY (254 probes), so the stated
   ceiling is the budget plus one sweep —
-  `fixture_brightness.RESTORE_BUDGET_S`'s own shape. A fixture with no
+  every bounded retry loop's own shape. A fixture with no
   stored identity is asked at its pin and its MAC is LEARNED there; a
   relocation is written back to the fx-live config **only while the live
   stack is down**, because `fx.facade`'s own writes own that file whenever a

@@ -947,7 +947,8 @@ async def resolve_plan(room: RoomMap, deps: RunDeps, scope: list[str],
     # the room is still lit and nothing has been spent. A turned-down
     # fixture scales everything it emits, so a map taken like that measures
     # the dimmer — his first map's weights came out about ten times too
-    # small for exactly this reason, and nothing told him.
+    # small for exactly this reason, and nothing told him. Spectra never
+    # raises it (Home Assistant's, 2026-10-12): it warns and measures as is.
     readings, devices = await fixture_readings(plan, chains, deps)
     plan.brightness = [r.as_dict() for r in readings]
     warning = fixture_brightness.warning_for(readings)
@@ -968,8 +969,8 @@ async def _chains(deps: RunDeps) -> dict:
 
 async def fixture_readings(plan, chains: dict, deps: RunDeps):
     """(readings, live driver objects) for the fixtures THIS plan will
-    light — never the whole house, so a lamp in another room is neither
-    read nor turned up.
+    light — never the whole house, so a lamp in another room is never
+    read.
 
     Resolved through the carrier->devices chain the plan already uses, so
     there is no second idea anywhere of which fixtures a run touches."""
@@ -1491,22 +1492,20 @@ async def run_mapping(room: RoomMap, deps: RunDeps, *,
             f"capture (the fixture's own strip held the device) and was put "
             f"back on it afterwards.")
     try:
-        # OWN THE FIXTURE'S OWN BRIGHTNESS for the capture and give his level
-        # back — including if the chain below raises. The plan already read
-        # it (and warned); this is the acting half. A fixture already at
-        # full, or one that could not be read, is never touched.
+        # THE FIXTURE'S OWN BRIGHTNESS IS MEASURED AS IS — Home Assistant's,
+        # never written (2026-10-12). The plan already read it and warned;
+        # the run's notes say which fixtures were captured below full.
         readings = [fixture_brightness.FixtureBrightness(**{
             "device_id": b["device_id"], "state": b["state"],
             "value": b["value"], "reason": b["reason"]})
             for b in (getattr(plan, "brightness", None) or [])]
         _, fixtures = await fixture_readings(plan, await _chains(deps), deps)
-        async with fixture_brightness.owned(fixtures, readings) as owned:
+        async with fixture_brightness.measured_as_is(fixtures, readings) as as_is:
             await _capture_all(room, plan, scope, deps, result,
                                dark_settle, lit_settle,
                                dark_capture, lit_capture)
-        if owned.note:
-            result.notes.append(owned.note)
-        result.problems.extend(owned.problems)
+        if as_is.note:
+            result.notes.append(as_is.note)
     finally:
         # THE ONE RELEASE. The room was taken dark once and comes back once,
         # here, whatever ended the run — a finished sweep, his Stop, an
