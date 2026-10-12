@@ -177,7 +177,7 @@ def test_tail_outlives_the_drop_phase_on_its_own_clock(tmp_path, effect_type):
                 else:
                     rig.step(1)
                 after = rig.t - t_mark
-                if reset_at is None and rig.effect._phase == "none":
+                if reset_at is None and (getattr(rig.effect, "_sp_phase", None) or rig.effect._phase) == "none":
                     reset_at = after
             # 1. phase clock untouched (one frame of granularity)
             assert reset_at == pytest.approx(mod.DROP_SETTLE_S, abs=2 * DT)
@@ -311,11 +311,16 @@ def test_uncapped_particles_never_occupy_the_density_cap(tmp_path, effect_type):
 
 def test_both_effects_agree_on_the_tail_constants():
     """He sees the crystal and the strips together — the tail must read
-    the same on both: same rate, same ease-out duration, both outliving
-    the (also shared) drop settle window."""
+    the same on both: same ease-out duration, both outliving the (also
+    shared) drop settle window. The RATE deliberately differs since the
+    strip phase plan's phase 3 (2026-10-11, his "big explosion of
+    brightness and activity on the [drop]"): the strip's shower is heavier
+    (12/s against the crystal's 8/s), because a 560-px strip shows a
+    firework as two small sparks where the crystal shows a ring."""
     from fx.effects import fireworks as a
     from fx.effects import fireworks1d as b
-    assert a.DROP_TAIL_RATE == b.DROP_TAIL_RATE
+    assert a.DROP_TAIL_RATE == 8.0
+    assert b.DROP_TAIL_RATE == 12.0
     assert a.DROP_TAIL_S == b.DROP_TAIL_S
     assert a.DROP_SETTLE_S == b.DROP_SETTLE_S
     assert a.DROP_TAIL_S > a.DROP_SETTLE_S

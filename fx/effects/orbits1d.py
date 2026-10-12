@@ -4,10 +4,10 @@ import logging
 import numpy as np
 import voluptuous as vol
 
-import fx.effects.particle_handoff as particle_handoff
 from fx.color import validate_gradient
 from fx.effects.audio import AudioReactiveEffect
 from fx.effects.gradient import GradientEffect
+from fx.effects.strip_phase import StripPhase
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -21,13 +21,43 @@ SPIKE_COOL_S = 0.12  # min gap between jump-direction re-rolls
 KERNEL_MAX = 8       # max blob radius in pixels
 
 # charge/lull/drop choreography (SpotFX drives `phase` + ramps
-# `phase_progress`; see _phase_step). Same arc as 2D Orbits: swell to
-# CHARGE_PEAK_N then shed to one; the last blob falls to the strip middle
-# and shrinks; the drop bursts the population back (each re-add fires its
-# implosion fragments — the strip-native explosion).
-CHARGE_PEAK_N = 10
+# `phase_progress`; the strip phase layer edge-detects it and calls
+# _strip_phase_enter).
+#
+# THE STRIP PHASE LAYER, 2026-10-11 (strip phase plan phase 3 — fx/effects/
+# strip_phase.py is the binding statement). The Admiral: "increase in
+# brightness and activity during charge, dim and relax into black for most
+# lulls, and big explosion of brightness and activity on the [drop]" — and,
+# binding, "i don't want to raise the white in the charge, or on the drop".
+# This strip joins the shared layer (StripPhase, first in its bases), which
+# draws what the strip SHOWS on a phase (the hue-kept colour gain, the
+# set-colour fill, the drop's set-colour shockwave, the lull's fade at the
+# room's shared dark point, the white guard — which also keeps the
+# implosion fragments' ±120° hues from adding up to white on a charge or a
+# drop) and owns the phase plumbing (edge detection, the orphan watchdog,
+# the drop's self-reset after DROP_SETTLE_S). What stays here is the
+# effect's own choreography:
+#   - the charge SWELLS to CHARGE_PEAK_N blobs over its first CHARGE_PEAK_AT
+#     of progress and HOLDS there (his call 2, "swell and hold" — it used
+#     to shed back to ONE by the charge's end, emptying the build just
+#     before the drop);
+#   - the lull drops to one blob that falls to the strip middle and shrinks,
+#     landing exactly as the strip reaches the room's dark point (the
+#     layer's own lull timing, `_strip_phase_lull`);
+#   - the drop re-adds ALL CHARGE_PEAK_N blobs (each erupting through its
+#     implosion fragments — the strip-native explosion) flying back out
+#     with a spin boost, then sheds back to the scene's own count when the
+#     drop settles;
+#   - a flare that punches through the lull's dark springs the collapsed
+#     blob back out (size and position follow the punch's envelope) with an
+#     implosion burst in the blob's OWN colour (the lull has no white
+#     guard, and the ±120° pair converging on the blob would add to white);
+#   - on a charge or a drop the implosion pair comes from the SET (the set
+#     rotated by a third) instead of the hue wheel's ±120°, which reaches
+#     hues the set never has — set colours only (_phase_fragment_colours).
+# The layer's ACTIVITY scales the orbit speed and the ring spin.
+CHARGE_PEAK_N = 16          # particle_count's own max (strip phase plan)
 CHARGE_PEAK_AT = 0.45
-LULL_FALL_S = 3.0
 DROP_FLY_S = 0.4
 DROP_SETTLE_S = 1.2
 DROP_BOOST = 2.5
@@ -47,7 +77,7 @@ def _hue_rotate(rgb, degrees):
     return np.array(colorsys.hsv_to_rgb(h, s, v), dtype=np.float32) * 255.0
 
 
-class Orbits1d(AudioReactiveEffect, GradientEffect):
+class Orbits1d(StripPhase, AudioReactiveEffect, GradientEffect):
     """The Orbits particle system flattened onto a strip.
 
     A fixed population of particles, each tethered to an evenly-spaced point
@@ -70,10 +100,20 @@ class Orbits1d(AudioReactiveEffect, GradientEffect):
     ±120° from the particle's color, start implode_reach of the strip away on
     either side and converge on the spawn point over implode_fade seconds,
     brightening as they arrive while the particle itself fades in.
+
+    Charge/lull/drop: the shared strip phase layer (fx/effects/
+    strip_phase.py) draws the phases; this effect adds its own blob
+    choreography under it (module constants above).
     """
 
     NAME = "Orbits Strip"
     CATEGORY = "Classic"
+    # the strip phase layer's ACTIVITY (fx/effects/strip_phase.py, HOW AN
+    # EFFECT JOINS, step 3): the orbit speed and the ring spin — the blob
+    # COUNT is this effect's own choreography (the swell), never scaled
+    STRIP_PHASE_ACTIVITY = {"base_speed": 0.5, "spin": 0.5}
+    # the drop's own length: the layer self-resets the phase key after it
+    STRIP_PHASE_DROP_S = DROP_SETTLE_S
     # gradient_spin supersedes gradient_roll for this effect
     HIDDEN_KEYS = ["gradient_roll"]
     # phase/phase_progress are SpotFX-driven choreography; advanced (not
@@ -209,16 +249,6 @@ class Orbits1d(AudioReactiveEffect, GradientEffect):
                 description="Decay filter applied to the audio impulse",
                 default=0.06,
             ): vol.All(vol.Coerce(float), vol.Range(min=0.01, max=0.3)),
-            vol.Optional(
-                "phase",
-                description="Charge/lull/drop choreography phase (driven by SpotFX)",
-                default="none",
-            ): vol.In(["none", "charge", "lull", "drop"]),
-            vol.Optional(
-                "phase_progress",
-                description="Progress through the current phase (ramped by SpotFX)",
-                default=0.0,
-            ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1.0)),
         }
     )
 
@@ -273,9 +303,21 @@ class Orbits1d(AudioReactiveEffect, GradientEffect):
         self._spike_cool = 0.0
         self._rng = np.random.default_rng()
         self.trail = None
+        # charge/lull/drop choreography state (_strip_phase_enter)
+        self._charge_n0 = 1
+        self._pos_scale = 1.0
+        self._lull_f = 0.0
+        self._omega_scale = 1.0
+        # the drop's fly-out (or a watchdog release's), on its own clock:
+        # {"ps0": the collapse it flies out of, "t": seconds}
+        self._fly = None
+        self._punch_pending = False
 
     def config_updated(self, config):
-        super().config_updated(config)
+        # NO super() call: Effect._apply_config already runs every direct
+        # base's own config_updated (StripPhase, AudioReactiveEffect,
+        # GradientEffect), and a second StripPhase pass on a creation write
+        # would turn a stale persisted phase key into a false edge.
         self.particle_count = self._config["particle_count"]
         self.tether_scatter = self._config["tether_scatter"]
         self.orbit_radius = self._config["orbit_radius"]
@@ -309,27 +351,6 @@ class Orbits1d(AudioReactiveEffect, GradientEffect):
         self.slow_filter = self.create_filter(
             alpha_decay=0.08, alpha_rise=0.08
         )
-
-        # charge/lull/drop: edge-detect the phase key. State is created here
-        # (not __init__) because config_updated runs first, during
-        # super().__init__; the pending flag is consumed in render.
-        new_phase = self._config.get("phase", "none")
-        self.phase_progress = float(self._config.get("phase_progress", 0.0))
-        if not hasattr(self, "_phase"):
-            # creation baseline: a stale persisted phase key must never
-            # edge-fire choreography on a fresh instance
-            self._phase = "none"
-            self._phase_t = 0.0
-            self._phase_pending = None
-            self._drop_state = None
-            self._charge_n0 = 1
-            self._pos_scale = 1.0
-            self._lull_f = 0.0
-            self._omega_scale = 1.0
-            self._phase_done_t = None
-        else:
-            # non-creation pass: a changed phase key arms the edge
-            self._phase_pending = new_phase if new_phase != self._phase else None
 
     def audio_data_updated(self, data):
         power = getattr(data, self.power_func)()
@@ -409,13 +430,16 @@ class Orbits1d(AudioReactiveEffect, GradientEffect):
                 self.p_slot[fresh].astype(np.float32) / max(tracked.size, 1)
             )
 
-    def _spawn_fragments(self, pos, rgb):
+    def _spawn_fragments(self, pos, rgb, colours=None):
         """Implosion: two half-brightness fragments, hue-rotated ±120° from
         the particle color, start implode_reach away on either side and
         converge on `pos` over implode_fade seconds, brightening as they
-        arrive."""
+        arrive. `colours` (two RGB colours) replaces the hue-wheel pair —
+        on a phase the pair comes from the SET (_phase_fragment_colours)."""
         speed = self.implode_reach / max(self.implode_fade, 0.05)
-        for direction, degrees in ((1.0, 120.0), (-1.0, -120.0)):
+        if colours is None:
+            colours = (_hue_rotate(rgb, 120.0), _hue_rotate(rgb, -120.0))
+        for direction, colour in zip((1.0, -1.0), colours):
             if self.fn >= FRAG_CAP:
                 return
             i = self.fn
@@ -423,96 +447,92 @@ class Orbits1d(AudioReactiveEffect, GradientEffect):
             self.f_vel[i] = -direction * speed
             self.f_age[i] = 0.0
             self.f_life[i] = self.implode_fade
-            self.f_rgb[i] = _hue_rotate(rgb, degrees) * 0.5
+            self.f_rgb[i] = np.clip(colour, 0, 255) * 0.5
             self.fn += 1
+
+    def _phase_fragment_colours(self, grad):
+        """On a phase (and while the drop settles) the implosion pair is
+        the set rotated by a third — two of the set's OWN colours, still a
+        pair either side of the particle's — instead of the hue wheel's
+        ±120°, which reaches hues the set never has ("set colours only")
+        and adds up to white where the pair meets its particle. None
+        outside a phase: the effect's own look, unchanged."""
+        if self._sp_phase == "none" and self._sp_drop_t is None:
+            return None
+        at = np.array([(grad + 1.0 / 3.0) % 1.0, (grad - 1.0 / 3.0) % 1.0],
+                      dtype=np.float32)
+        pair = self.get_gradient_color_vectorized1d(at).astype(np.float32)
+        return pair[0], pair[1]
 
     # ── charge/lull/drop choreography ───────────────────────────────────
 
-    def _enter_phase(self, phase):
-        self._phase = phase
-        self._phase_t = 0.0
-        self._phase_done_t = None
+    def _strip_phase_enter(self, phase, prev, released):
+        """The phase key edged (the strip layer's plumbing — fx/effects/
+        strip_phase.py). A watchdog release of an orphaned charge/lull
+        flies the blobs back out like a drop (no extra blobs)."""
         if phase == "charge":
             tracked = int(np.count_nonzero(self.p_mode[: self.n] < 2))
             self._charge_n0 = max(tracked, 1)
-            self._drop_state = None
+            self._fly = None
         elif phase == "drop":
-            self._drop_state = {"ps0": self._pos_scale}
+            self._fly = {"ps0": self._pos_scale, "t": 0.0}
         elif phase == "none":
-            self._drop_state = None
-            self._pos_scale = 1.0
+            # shed back to the scene's own count (the drop's peak, or a
+            # released build, departs through the ordinary fade-out)
             self.particle_count = int(self._config["particle_count"])
+            if released:
+                self._fly = {"ps0": self._pos_scale, "t": 0.0}
+
+    def _strip_phase_on_punch(self):
+        """A flare punched through the lull (strip_phase): the collapsed
+        blob springs back out with an implosion burst of its own colour —
+        unless his "Flare punch" is 0, where the dark wins."""
+        if float(self._config.get("flare_punch_strength", 1.0) or 0.0) > 0.0:
+            self._punch_pending = True
 
     def _phase_step(self, dt):
-        pend = self._phase_pending
-        if pend is not None:
-            self._phase_pending = None
-            if pend != self._phase:
-                self._enter_phase(pend)
+        """This frame's choreography (module constants): the blob count,
+        the collapse toward the strip middle and the spin scale."""
         self._lull_f = 0.0
         self._omega_scale = 1.0
-        if self._phase == "none":
-            return
-        self._phase_t += dt
-        # orphan watchdog: a charge/lull whose payoff never arrives
-        # releases itself — the blobs re-add via their normal implosions
-        due, self._phase_done_t = particle_handoff.phase_release_due(
-            self._phase, self.phase_progress, self._phase_t,
-            self._phase_done_t,
-        )
-        if due:
-            _LOGGER.info(
-                "orbits1d: %s watchdog release after %.1fs",
-                self._phase, self._phase_t,
-            )
-            self._phase = "drop"
-            self._phase_t = 0.0
-            self.phase_progress = 0.0
-            self.particle_count = int(self._config["particle_count"])
-            self._drop_state = {"ps0": self._pos_scale}
-            return
+        fly = self._fly
+        if fly is not None:
+            # the drop's fly-out: ease the collapse back open over
+            # DROP_FLY_S, the spin boost settling over DROP_SETTLE_S — its
+            # own clock, so the drop's self-reset never cuts it short
+            fly["t"] += dt
+            t = fly["t"]
+            ps0 = fly["ps0"]
+            self._pos_scale = ps0 + (1.0 - ps0) * min(t / DROP_FLY_S, 1.0)
+            self._omega_scale = 1.0 + DROP_BOOST * max(
+                1.0 - t / DROP_SETTLE_S, 0.0)
+            if t >= DROP_SETTLE_S:
+                self._fly = None
+                self._pos_scale = 1.0
+        phase = self._sp_phase
         p = float(np.clip(self.phase_progress, 0.0, 1.0))
-        if self._phase == "charge":
-            if p < CHARGE_PEAK_AT:
-                f = p / CHARGE_PEAK_AT
-                want = self._charge_n0 + (CHARGE_PEAK_N - self._charge_n0) * f
-            else:
-                f = (p - CHARGE_PEAK_AT) / (1.0 - CHARGE_PEAK_AT)
-                want = CHARGE_PEAK_N + (1.0 - CHARGE_PEAK_N) * f
+        if phase == "charge":
+            # swell to the peak, then HOLD it to the drop (his call 2)
+            f = min(p / CHARGE_PEAK_AT, 1.0)
+            want = self._charge_n0 + (CHARGE_PEAK_N - self._charge_n0) * f
             self.particle_count = int(np.clip(round(want), 1, CHARGE_PEAK_N))
             self._pos_scale = 1.0
-        elif self._phase == "lull":
-            # fall to the strip middle: progress-driven once it moves,
-            # wall-clock fallback only while progress sits at 0
-            f = p if p > 0.0 else min(self._phase_t / LULL_FALL_S, 1.0)
-            f = f * f * (3.0 - 2.0 * f)
+        elif phase == "lull":
+            # one blob falls to the strip middle, landing as the strip
+            # reaches the room's dark point; a flare punch springs it back
+            # out along its own envelope
+            timing = self._strip_phase_lull()
+            a = 1.0 if timing is None or timing.dark else float(timing.approach)
+            f = a * a * (3.0 - 2.0 * a)
+            f *= 1.0 - self._strip_phase_punch()
             self._lull_f = f
             self._pos_scale = 1.0 - 0.97 * f
             self._omega_scale = 1.0 - 0.6 * f
             self.particle_count = 1
-        else:  # drop
-            drop = self._drop_state
-            if drop is None:
-                drop = self._drop_state = {"ps0": self._pos_scale}
-            # the restored particle_count makes _manage_population re-add
-            # the missing blobs, each erupting via its implosion fragments
-            self.particle_count = int(self._config["particle_count"])
-            ps0 = drop["ps0"]
-            self._pos_scale = ps0 + (1.0 - ps0) * min(
-                self._phase_t / DROP_FLY_S, 1.0
-            )
-            self._omega_scale = 1.0 + DROP_BOOST * max(
-                1.0 - self._phase_t / DROP_SETTLE_S, 0.0
-            )
-            if self._phase_t >= DROP_SETTLE_S:
-                self._phase = "none"
-                self._drop_state = None
-                self._pos_scale = 1.0
-                self._apply_config(
-                    {"phase": "none", "phase_progress": 0.0},
-                    validate=False,
-                    fire_event=False,
-                )
+        elif phase == "drop":
+            # every blob of the swell re-added, each erupting via its
+            # implosion fragments; shed back to the scene's count on "none"
+            self.particle_count = CHARGE_PEAK_N
 
     def _stamp(self, positions, rgb, size):
         """Additive 1D stamp of one sprite's substep path; returns its own
@@ -727,9 +747,19 @@ class Orbits1d(AudioReactiveEffect, GradientEffect):
         # fire the add-implosions now that positions and colors are known
         boom = np.flatnonzero(self.p_boom[:n] > 0)
         for i in boom:
-            self._spawn_fragments(float(pos[i]), rgb[i])
+            self._spawn_fragments(
+                float(pos[i]), rgb[i],
+                self._phase_fragment_colours(float(self.p_grad[i])))
         if boom.size:
             self.p_boom[boom] = 0
+        if self._punch_pending:
+            # a flare punched through the lull's dark: the collapsed blob's
+            # own implosion burst, in its own colour
+            self._punch_pending = False
+            if self._sp_phase == "lull":
+                for i in np.flatnonzero(tracked):
+                    self._spawn_fragments(float(pos[i]), rgb[i],
+                                          (rgb[i], rgb[i]))
 
         # ── fragments ───────────────────────────────────────────────────
         fn = self.fn

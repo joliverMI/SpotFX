@@ -151,7 +151,7 @@ async def _drive(tmp_path, sub, *, spawn_rate=1.0, charge_s=CHARGE_S,
             out["horizon"].append(round(float(effect._horizon_radius()), 6))
         step(int(0.4 / DT))
         out["burst_frame"] = burst_frame[0]
-        out["end_phase"] = effect._phase
+        out["end_phase"] = (getattr(effect, "_sp_phase", None) or effect._phase)
         out["end_reverse"] = effect.reverse
     await host.shutdown()
     return out

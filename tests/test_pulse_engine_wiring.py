@@ -554,7 +554,11 @@ def test_a_push_eases_in_over_two_seconds_not_a_snap(tmp_path):
 
 # ── the house layer ─────────────────────────────────────────────────────────
 
-def test_a_resting_house_look_withholds_the_lull_from_pulse_only(tmp_path, monkeypatch):
+def test_a_resting_house_look_withholds_the_lull_from_pulse_and_the_strip(tmp_path, monkeypatch):
+    """A resting house look withholds charge/lull/drop from the one-colour
+    singles — and, since the strip phase plan's phase 3 made the Orbits
+    strip a strip phase member, from the strip too (his call 4: strip
+    phases are held back under a house mode)."""
     from spectra.services import house
 
     async def script(room):
@@ -565,11 +569,12 @@ def test_a_resting_house_look_withholds_the_lull_from_pulse_only(tmp_path, monke
         return rec, room.pulse.level, room.strip._config.get("phase")
 
     rec, level, strip_phase = _with_room(tmp_path, script)
-    assert rec["phase"]["targets"] == [STRIP_V]
-    assert rec["phase"]["withheld"] == {
-        "virtuals": [SINGLE_V],
-        "reason": "house mode 'Evening' is resting — it owns the scene"}
-    assert strip_phase == "lull"
+    assert rec["phase"]["targets"] == []
+    assert sorted(rec["phase"]["withheld"]["virtuals"]) == sorted(
+        [SINGLE_V, STRIP_V])
+    assert rec["phase"]["withheld"]["reason"] == (
+        "house mode 'Evening' is resting — it owns the scene")
+    assert strip_phase == "none"
     assert level > 0.2                               # not black: no music show
 
 

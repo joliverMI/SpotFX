@@ -168,7 +168,7 @@ def test_every_one_d_effect_joins_or_is_a_named_exception():
 
 def test_membership_reaches_every_phase_set():
     m = device_model.STRIP_PHASE_EFFECTS
-    assert m == {"melt", "power", "blackhole1d"}
+    assert m == {"melt", "power", "blackhole1d", "orbits1d", "fireworks1d"}
     assert m <= device_model.PHASE_EFFECTS
     assert m <= device_model.LULL_DARK_EFFECTS
     assert m <= device_model.DROP_INTENSITY_EFFECTS
@@ -177,8 +177,12 @@ def test_membership_reaches_every_phase_set():
 
 def test_the_tunables_are_registered_exactly_as_the_schema_says():
     registry = json.loads((ROOT / "config/effect_params.json").read_text())
-    want = sp.registry_params()
     for e in device_model.STRIP_PHASE_EFFECTS:
+        # an effect's own tunable defaults (the Fireworks strip's lull
+        # ember) are the class's STRIP_PHASE_DEFAULTS, in schema and
+        # registry alike
+        want = sp.registry_params(
+            device_model._effect_class(e).STRIP_PHASE_DEFAULTS)
         params = registry["effects"][e]["params"]
         for key, meta in want.items():
             assert params.get(key) == meta, (e, key)
@@ -191,7 +195,7 @@ def test_the_tunables_are_registered_exactly_as_the_schema_says():
 def test_a_non_member_never_reaches_the_layer():
     assert Effect._strip_phase is False
     assert Effect.PASSIVE_CONFIG_KEYS == frozenset()
-    for e in ("gradient", "pulse", "orbits1d", "fireworks1d"):
+    for e in ("gradient", "pulse", "blender"):
         cls = device_model._effect_class(e)
         assert cls._strip_phase is False and not cls.PASSIVE_CONFIG_KEYS, e
 
@@ -224,12 +228,17 @@ def _responder(effects, *, strength=1.0, blocked=frozenset()):
 
 
 def test_strip_arms_carry_the_dark_point_drop_size_and_strength():
-    eng, ex = _responder({"s": "melt", "bh": "blackhole", "o": "orbits1d"},
+    eng, ex = _responder({"s": "melt", "bh": "blackhole", "o": "orbits",
+                          "o1": "orbits1d", "f1": "fireworks1d"},
                          strength=0.6)
     rec = asyncio.run(eng._drive_phase("lull", gap_ms=20_000))
     told = {vid: p for vid, _et, p in ex.jumps}
-    assert told["s"][lull_dark.DARK_KEY] == pytest.approx(17.0)
-    assert told["s"][sp.STRENGTH_KEY] == pytest.approx(0.6)
+    # every strip member is told the dark point and the room's strength —
+    # the particle strips too since plan phase 3
+    for vid in ("s", "o1", "f1"):
+        assert told[vid][lull_dark.DARK_KEY] == pytest.approx(17.0), vid
+        assert told[vid][sp.STRENGTH_KEY] == pytest.approx(0.6), vid
+    # the crystal's own phase effects are not strip members
     assert sp.STRENGTH_KEY not in told["bh"] and sp.STRENGTH_KEY not in told["o"]
     assert rec["strip_phase_strength"] == pytest.approx(0.6)
     ex.jumps.clear()

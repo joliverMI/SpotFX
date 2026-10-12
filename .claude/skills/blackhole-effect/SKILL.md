@@ -170,7 +170,7 @@ TRANSITION PROGRAM (INFALL in, ERUPTION out). Three things here exist for it:
 ## The STRIP (`blackhole1d`) draws its phases through the strip phase layer
 
 Since 2026-10-11 (strip phase plan phase 2; `fx/effects/strip_phase.py` is
-the binding statement, `fx/VENDOR.md` #70 the deviation) the strip's
+the binding statement, `fx/VENDOR.md` #72 the deviation, #74 the plumbing fold) the strip's
 charge/lull/drop LOOK comes from the shared strip layer, not this module:
 a hue-kept colour gain, a set-colour fill, the drop's set-colour shockwave,
 the lull's fade to black at the room's dark point, and a white guard on
@@ -185,10 +185,17 @@ the lull's approach and stopping (ambient spawn too) at the layer's OWN
 dark point — read `_strip_phase_lull()`, never a progress fraction; the
 drop burst sized by `drop_intensity` (12 → 36, ~32 at 0.85); a 6-blob
 ring burst when a flare punches through the dark (`_strip_phase_on_punch`,
-none when "Flare punch" is 0). Plumbing traps: every phase write is
-PASSIVE, so `_passive_config_updated` runs the module's own edge
-detection, and `config_updated` must not call `super()` (AGENTS.md's
-strip phase section). The 2-D Matrix module is untouched by all of this.
+none when "Flare punch" is 0). PLUMBING (since plan phase 3): the module
+keeps NONE of its own — no edge detection, no watchdog, no self-reset.
+The layer calls `_strip_phase_enter(phase, prev, released)` on each edge
+(the charge saves `reverse`, the drop arms its burst for the first
+rendered frame, "none" puts `reverse` back; a watchdog release is the old
+silent sweep back) and resets the key after `STRIP_PHASE_DROP_S`
+(`DROP_RESET_S`). The phase is `self._sp_phase` — there is no `_phase`.
+`config_updated` must not call `super()` (AGENTS.md's strip phase
+section). At strength 0 the strip renders the same bytes as before the
+fold, watchdog included (`scripts/check_particle_strip_phase.py`). The
+2-D Matrix module is untouched by all of this.
 
 ## Sonic reach
 
@@ -207,7 +214,8 @@ the real pipeline). The strip on the strip phase layer:
 `scripts/check_blackhole_strip_phase.py` (before/after on his own Black
 Hole V2 strip entry, the pinned pre-change module as red control) +
 `tests/test_blackhole_strip_phase.py`; the strip's drop onset on rendered
-frames: `scripts/check_drop_visible_onset.py`.
+frames: `scripts/check_drop_visible_onset.py`; the plumbing fold:
+`scripts/check_particle_strip_phase.py` + `tests/test_particle_strip_phase.py`.
 `scripts/check_blackhole_charge_lull.py`, `check_blackhole_charge_target.py`,
 `check_blackhole_explosion_and_gap.py`, `check_blackhole_explosion_speed.py`,
 `check_blackhole_hex_spawn.py`, `check_blackhole_reverse_fallback.py` +

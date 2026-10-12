@@ -13,7 +13,9 @@ Every effect in `fx/device_model.PHASE_EFFECTS` — `blackhole`,
 `blackhole1d`, `orbits`, `orbits1d`, `radial`, `fireworks`, `fireworks1d`,
 `squiggles`, `dancer`, `eye`, `fish`, `pulse`, `sauron`, and (2026-10-11,
 via `fx.device_model.STRIP_PHASE_EFFECTS`) `melt`, `power` — carries two
-config params:
+config params (on a strip phase member — `melt`, `power` and the three
+particle strips — the shared layer edge-detects them and runs the watchdog,
+`fx/effects/strip_phase.py`):
 
 - `phase`: `"none" | "charge" | "lull" | "drop"` — edge-detected in
   `config_updated` (a stale persisted value never edge-fires on a fresh
@@ -116,6 +118,10 @@ guarded).
   the panel; orbital speed boosted ×3.5 decaying over 2.4 s; survivors fly
   back to their orbits in 0.4 s.
 
+(The strip, `orbits1d`, draws its phases through the shared strip phase
+layer since 2026-10-11 — see "Strip phase layer" below: it swells to 16
+and HOLDS through the charge instead of shedding to one.)
+
 ### Fish (`fish.py`, no strip translation — the scene runs `orbits1d` there)
 
 Orbits' twin as a scene, but the charge and the lull are his own
@@ -205,6 +211,12 @@ clears the tag on the keepers and departs the rest, the drop and a return to
   underneath the afterglow instead of pausing for `PAYOFF_LIFE × burst_life`
   (`fx/VENDOR.md` #17, `scripts/check_fireworks_drop_tail.py`).
 
+(The strip, `fireworks1d`, draws its phases through the shared strip phase
+layer since 2026-10-11 — see "Strip phase layer" below: its charge no
+longer shrinks, slows or shortens anything and adds uncapped launches, its
+lull rockets are faint embers rather than dimmed by the effect, and its
+drop tail is 12/s.)
+
 ### Squiggles (`squiggles.py`)
 
 - **Charge** — the silhouette's walls turn solid (`_bounce`: chains turn
@@ -285,7 +297,7 @@ only above intensity 0.4 by default —
 `FlareKind.min_intensity`). Both are instant, self-resetting pokes with no
 lead, carry or release.
 
-### Strip phase layer (`melt.py`, `power.py`, `blackhole1d.py` — `fx/effects/strip_phase.py`)
+### Strip phase layer (`melt.py`, `power.py`, `blackhole1d.py`, `orbits1d.py`, `fireworks1d.py` — `fx/effects/strip_phase.py`)
 
 Melt and Power have no choreography of their own — they join ONE shared
 layer (2026-10-11, strip phase plan phase 1)
@@ -331,8 +343,24 @@ at his usual 0.85) on the drop's first frame; and a 6-blob ring burst
 through the ring when a flare punches through the lull's dark. Its
 activity raises the spawn rate, beat burst and density cap (and the fall
 speed, weighted 0.6). At `strip_phase_strength` 0 the layer's drawing is
-off but the reworked blob choreography stays. Orbits/Fireworks' own strips
-keep their own choreography above and join in plan phase 3.
+off but the reworked blob choreography stays.
+
+**The Orbits and Fireworks strips** joined in plan phase 3, and the three
+particle strips' phase plumbing (edge detection, the orphan watchdog, the
+drop's self-reset) moved into the layer — each keeps only its choreography,
+started on the layer's edge (`_strip_phase_enter`). The Orbits strip swells
+to 16 blobs over the first 45% of the charge and HOLDS them (his call 2;
+it used to shed to one); its lull blob collapses to the middle as the strip
+reaches the dark point; the drop re-adds all 16 and settles back to the
+scene's count; a flare punch springs the collapsed blob back out with an
+own-colour burst; on a phase its implosion pair comes from the set, not
+the hue wheel. Its activity raises the orbit speed and ring spin. The
+Fireworks strip's charge no longer slows or shortens its fireworks and adds
+an uncapped launch rate rising to 8/s (his density cap clipped the old ×6
+to 3 in flight); its lull is the one strip lull that is not black — its
+`lull_ember` default is 0.12, so the two rockets cross the dark as embers;
+its drop tail is 12/s. Its activity raises the launches and burst speed,
+never the density cap.
 
 Full mechanism (the output-stage order, the white guard, the punch
 envelope, how a future effect joins): the module's own docstring and

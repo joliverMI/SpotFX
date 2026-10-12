@@ -3,10 +3,11 @@ import logging
 import numpy as np
 import voluptuous as vol
 
-import fx.effects.particle_handoff as particle_handoff
 from fx.color import validate_gradient
+from fx.effects import strip_phase
 from fx.effects.audio import AudioReactiveEffect
 from fx.effects.gradient import GradientEffect
+from fx.effects.strip_phase import StripPhase
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -17,18 +18,49 @@ FADE_IN_S = 0.05
 KERNEL_MAX = 8      # max blob radius in pixels
 
 # charge/lull/drop choreography (SpotFX drives `phase` + ramps
-# `phase_progress`; see _phase_step). Same arc as 2D Fireworks: launch
-# rate climbs while pairs shrink; the lull goes dark except two slow
-# rockets crossing from the strip ends past the middle, dimming with
-# trails; the drop explodes each into giant pairs in its own color, then
-# a shower of ordinary fireworks keeps launching through the payoff's
-# afterglow, easing back to the ordinary show (the drop tail).
+# `phase_progress`; the strip phase layer edge-detects it and calls
+# _strip_phase_enter). Same arc as 2D Fireworks: the launch rate climbs
+# through the charge; the lull goes dark except two slow rockets crossing
+# from the strip ends past the middle, with trails; the drop explodes each
+# into giant pairs in its own color, then a shower of ordinary fireworks
+# keeps launching through the payoff's afterglow, easing back to the
+# ordinary show (the drop tail).
+#
+# THE STRIP PHASE LAYER, 2026-10-11 (strip phase plan phase 3 — fx/effects/
+# strip_phase.py is the binding statement). The Admiral: "increase in
+# brightness and activity during charge, dim and relax into black for most
+# lulls, and big explosion of brightness and activity on the [drop]" — and,
+# binding, "i don't want to raise the white in the charge, or on the drop".
+# This strip joins the shared layer (StripPhase, first in its bases), which
+# draws what the strip SHOWS on a phase (hue-kept colour gain, set-colour
+# fill, the drop's set-colour shockwave, the lull's fade at the room's dark
+# point, the white guard — which also keeps overlapping fireworks from
+# adding up to white on a charge or a drop) and owns the phase plumbing
+# (edge detection, the orphan watchdog, the drop's self-reset after
+# DROP_SETTLE_S). The effect's own choreography, retuned:
+#   - the charge no longer SLOWS or SHORTENS its fireworks (CHARGE_SLOW and
+#     CHARGE_SHORT are 0 — a slower, shorter burst read as LESS going on);
+#   - "more fireworks": his scene caps the strip at max_blobs 6, which
+#     silently clipped the charge's launch multiplier to 3 fireworks in
+#     flight, so the charge adds an UNCAPPED launch rate rising 0 ->
+#     CHARGE_LAUNCH_RATE_MAX across the build (the drop tail's own
+#     ignore_cap shape — such fireworks never occupy the cap either);
+#   - the drop's shower is heavier (DROP_TAIL_RATE 8 -> 12/s);
+#   - the lull's two rockets are the ONE thing a strip lull keeps lit (his
+#     call 3): the layer fades the strip to this effect's own `lull_ember`
+#     default (LULL_EMBER, 12%) at the dark point, so the rockets cross the
+#     dark as faint embers and explode on the drop. Their own dimming
+#     (LULL_ROCKET_FADE) is retired — the layer's fade is the one dimmer.
+# A flare in the lull's dark needs nothing here: the Firework Burst flare
+# is its own punch. The layer's ACTIVITY scales the launches (spawn rate,
+# beat burst — never the density cap) and the burst speed.
 CHARGE_SPAWN_X = 5.0
-CHARGE_SLOW = 0.55
-CHARGE_SHORT = 0.4
+CHARGE_SLOW = 0.0
+CHARGE_SHORT = 0.0
+CHARGE_LAUNCH_RATE_MAX = 8.0   # uncapped fireworks/s at p=1 (plan phase 3)
 LULL_ROCKETS = 2
 LULL_FLIGHT_S = 4.0
-LULL_ROCKET_FADE = 0.75
+LULL_EMBER = 0.12              # the strip's own lull_ember default
 DROP_SETTLE_S = 0.9
 PAYOFF_SPEED = 1.8
 PAYOFF_LIFE = 1.5
@@ -44,11 +76,11 @@ PAYOFF_LIFE = 1.5
 # max_blobs (p_nocap/f_nocap), so the ordinary show — his beat bursts —
 # keeps launching underneath the whole time instead of going silent for
 # ~PAYOFF_LIFE x burst_life the way it did before that flag existed.
-DROP_TAIL_RATE = 8.0
+DROP_TAIL_RATE = 12.0          # strip phase plan phase 3 (was 8, the 2D's)
 DROP_TAIL_S = 2.5
 
 
-class Fireworks1d(AudioReactiveEffect, GradientEffect):
+class Fireworks1d(StripPhase, AudioReactiveEffect, GradientEffect):
     """Fireworks flattened onto a strip: each firework spawns TWO particles
     at a random position that race away from each other, trailing and
     fading as they go (like a removed Orbits Strip particle). Both share
@@ -57,10 +89,24 @@ class Fireworks1d(AudioReactiveEffect, GradientEffect):
     Fireworks (spawn_rate + beat_burst + spawn_audio, capped by max_blobs).
     Positions wrap, so connected-end strips read as a true ring. No
     center weighting — origins are uniform along the strip.
+
+    Charge/lull/drop: the shared strip phase layer (fx/effects/
+    strip_phase.py) draws the phases; this effect adds its own launches,
+    rockets and payoff under it (module constants above).
     """
 
     NAME = "Fireworks Strip"
     CATEGORY = "Classic"
+    # the strip phase layer's ACTIVITY (fx/effects/strip_phase.py, HOW AN
+    # EFFECT JOINS, step 3): more launches and faster bursts. Not the
+    # density cap (max_blobs is his scene's own call; the charge's extra
+    # fireworks come from the uncapped launch rate instead).
+    STRIP_PHASE_ACTIVITY = {"spawn_rate": 1.0, "beat_burst": 1.0,
+                            "burst_speed": 0.3}
+    # the lull keeps the rockets as embers (his call 3; module constants)
+    STRIP_PHASE_DEFAULTS = {"lull_ember": LULL_EMBER}
+    # the drop's own length: the layer self-resets the phase key after it
+    STRIP_PHASE_DROP_S = DROP_SETTLE_S
     HIDDEN_KEYS = ["gradient_roll", "color_blend"]
     # phase/phase_progress are SpotFX-driven choreography; advanced (not
     # hidden) so the arc can be hand-scrubbed in the LedFX UI for tuning.
@@ -151,16 +197,8 @@ class Fireworks1d(AudioReactiveEffect, GradientEffect):
                 description="Decay filter applied to the audio impulse",
                 default=0.06,
             ): vol.All(vol.Coerce(float), vol.Range(min=0.01, max=0.3)),
-            vol.Optional(
-                "phase",
-                description="Charge/lull/drop choreography phase (driven by SpotFX)",
-                default="none",
-            ): vol.In(["none", "charge", "lull", "drop"]),
-            vol.Optional(
-                "phase_progress",
-                description="Progress through the current phase (ramped by SpotFX)",
-                default=0.0,
-            ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1.0)),
+            # the layer's tunables carrying this effect's own defaults
+            **strip_phase.tunable_fields(**STRIP_PHASE_DEFAULTS),
             vol.Optional(
                 "burst_rockets",
                 description="Payoff rockets to explode right now (driven by SpotFX flares; self-resets)",
@@ -192,9 +230,21 @@ class Fireworks1d(AudioReactiveEffect, GradientEffect):
         self._beat_pending = False
         self._rng = np.random.default_rng()
         self.trail = None
+        # charge/lull/drop choreography state (_strip_phase_enter)
+        self._rocket_path = None
+        self._pspawn = 1.0
+        self._pspeed = 1.0
+        self._plife = 1.0
+        self._tail_t = None
+        self._tail_rate = 0.0
+        self._tail_acc = 0.0
+        self._charge_acc = 0.0
 
     def config_updated(self, config):
-        super().config_updated(config)
+        # NO super() call: Effect._apply_config already runs every direct
+        # base's own config_updated (StripPhase, AudioReactiveEffect,
+        # GradientEffect), and a second StripPhase pass on a creation write
+        # would turn a stale persisted phase key into a false edge.
         self.spawn_rate = self._config["spawn_rate"]
         self.beat_burst = int(self._config["beat_burst"])
         self.spawn_audio = self._config["spawn_audio"]
@@ -214,29 +264,6 @@ class Fireworks1d(AudioReactiveEffect, GradientEffect):
         self.impulse_filter = self.create_filter(
             alpha_decay=self._config["impulse_decay"], alpha_rise=0.99
         )
-
-        # charge/lull/drop: edge-detect the phase key. State is created here
-        # (not __init__) because config_updated runs first, during
-        # super().__init__; the pending flag is consumed in render.
-        new_phase = self._config.get("phase", "none")
-        self.phase_progress = float(self._config.get("phase_progress", 0.0))
-        if not hasattr(self, "_phase"):
-            # creation baseline: a stale persisted phase key must never
-            # edge-fire choreography on a fresh instance
-            self._phase = "none"
-            self._phase_t = 0.0
-            self._phase_pending = None
-            self._rocket_path = None
-            self._pspawn = 1.0
-            self._pspeed = 1.0
-            self._plife = 1.0
-            self._phase_done_t = None
-            self._tail_t = None
-            self._tail_rate = 0.0
-            self._tail_acc = 0.0
-        else:
-            # non-creation pass: a changed phase key arms the edge
-            self._phase_pending = new_phase if new_phase != self._phase else None
 
         # flare-driven payoff burst: edge-detect burst_rockets exactly like
         # the phase key (SpotFX writes a count, render consumes it and
@@ -370,10 +397,9 @@ class Fireworks1d(AudioReactiveEffect, GradientEffect):
             return
         idx = idx[:m]
         p = float(np.clip(self.phase_progress, 0.0, 1.0))
-        f = p if p > 0.0 else min(self._phase_t / LULL_FLIGHT_S, 1.0)
+        f = p if p > 0.0 else min(self._sp_t / LULL_FLIGHT_S, 1.0)
         ease = 1.0 - (1.0 - f) ** 2
         self.f_pos[idx] = path["s"][:m] + (path["e"][:m] - path["s"][:m]) * ease
-        self.f_bright[idx] = 1.0 - LULL_ROCKET_FADE * f
 
     def _rocket_payoff(self):
         n = self.n
@@ -415,69 +441,39 @@ class Fireworks1d(AudioReactiveEffect, GradientEffect):
         for _ in range(count):
             self._payoff_burst_at(float(rng.random()), float(rng.random()))
 
-    def _phase_step(self, dt):
-        pend = self._phase_pending
-        if pend is not None:
-            self._phase_pending = None
-            if pend != self._phase:
-                prev = self._phase
-                self._phase = pend
-                self._phase_t = 0.0
-                self._phase_done_t = None
-                if pend == "lull":
-                    self._launch_rockets()
-                elif pend == "drop":
-                    self._rocket_payoff()
-                    self._tail_t = 0.0
-                elif pend == "none" and prev == "lull":
-                    n = self.n
-                    idx = np.flatnonzero(self.f_rocket[:n] > 0.0)
-                    if idx.size:
-                        self.f_life[idx] = self.f_age[idx] + 0.4
-                    self._rocket_path = None
-        self._pspawn = 1.0
-        self._pspeed = 1.0
-        self._plife = 1.0
-        self._tail_rate = self._drop_tail_step(dt)
-        if self._phase == "none":
-            return
-        self._phase_t += dt
-        # orphan watchdog: a charge/lull whose payoff never arrives
-        # releases itself — the rockets burn out, launching resumes
-        due, self._phase_done_t = particle_handoff.phase_release_due(
-            self._phase, self.phase_progress, self._phase_t,
-            self._phase_done_t,
-        )
-        if due:
-            _LOGGER.info(
-                "fireworks1d: %s watchdog release after %.1fs",
-                self._phase, self._phase_t,
-            )
+    def _strip_phase_enter(self, phase, prev, released):
+        """The phase key edged (the strip layer's plumbing — fx/effects/
+        strip_phase.py): a lull launches its rockets, a drop explodes them
+        and starts its shower, leaving a lull any other way (or the
+        watchdog releasing an orphaned one) burns them out."""
+        self._charge_acc = 0.0
+        if phase == "lull":
+            self._launch_rockets()
+        elif phase == "drop":
+            self._rocket_payoff()
+            self._tail_t = 0.0
+        elif prev == "lull":
             n = self.n
             idx = np.flatnonzero(self.f_rocket[:n] > 0.0)
             if idx.size:
                 self.f_life[idx] = self.f_age[idx] + 0.4
             self._rocket_path = None
-            self._phase = "none"
-            self._apply_config(
-                {"phase": "none", "phase_progress": 0.0},
-                validate=False,
-                fire_event=False,
-            )
-            return
-        if self._phase == "charge":
-            p = float(np.clip(self.phase_progress, 0.0, 1.0))
-            self._pspawn = 1.0 + CHARGE_SPAWN_X * p
-            self._pspeed = 1.0 - CHARGE_SLOW * p
-            self._plife = 1.0 - CHARGE_SHORT * p
-        elif self._phase == "drop":
-            if self._phase_t >= DROP_SETTLE_S:
-                self._phase = "none"
-                self._apply_config(
-                    {"phase": "none", "phase_progress": 0.0},
-                    validate=False,
-                    fire_event=False,
-                )
+
+    def _phase_step(self, dt):
+        """This frame's choreography: the charge's launch multipliers and
+        its uncapped launch rate (fireworks/s, returned), and the drop
+        tail's clock."""
+        self._pspawn = 1.0
+        self._pspeed = 1.0
+        self._plife = 1.0
+        self._tail_rate = self._drop_tail_step(dt)
+        if self._sp_phase != "charge":
+            return 0.0
+        p = float(np.clip(self.phase_progress, 0.0, 1.0))
+        self._pspawn = 1.0 + CHARGE_SPAWN_X * p
+        self._pspeed = 1.0 - CHARGE_SLOW * p
+        self._plife = 1.0 - CHARGE_SHORT * p
+        return CHARGE_LAUNCH_RATE_MAX * p
 
     def _drop_tail_step(self, dt):
         """Advance the drop tail's own clock; return its launch rate
@@ -526,7 +522,7 @@ class Fireworks1d(AudioReactiveEffect, GradientEffect):
         if not np.isfinite(self.spawn_acc):
             self.spawn_acc = 0.0
 
-        self._phase_step(dt)
+        charge_rate = self._phase_step(dt)
 
         n = self.n
         # ── update ──────────────────────────────────────────────────────
@@ -541,14 +537,14 @@ class Fireworks1d(AudioReactiveEffect, GradientEffect):
                 self._compact(alive)
                 n = self.n
 
-        if self._phase == "lull":
+        if self._sp_phase == "lull":
             # guided rocket motion (positions set directly; f_pos0 above
             # gives them their motion smear + trail)
             self._phase_rockets()
 
         # ── spawn ───────────────────────────────────────────────────────
         # paused during a lull: the dark strip belongs to the rockets
-        if self._phase != "lull":
+        if self._sp_phase != "lull":
             rate = self.spawn_rate * self._pspawn * (
                 1.0 + self.spawn_audio * self.impulse * 3.0
             )
@@ -571,6 +567,14 @@ class Fireworks1d(AudioReactiveEffect, GradientEffect):
                     self._spawn_firework(ignore_cap=True)
             else:
                 self._tail_acc = 0.0
+            # the charge's uncapped launches ("more fireworks" past his
+            # density cap, the tail's own ignore_cap shape)
+            if charge_rate > 0.0:
+                self._charge_acc += charge_rate * dt
+                extra = int(self._charge_acc)
+                self._charge_acc -= extra
+                for _ in range(extra):
+                    self._spawn_firework(ignore_cap=True)
         else:
             self._beat_pending = False
 

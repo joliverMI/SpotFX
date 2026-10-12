@@ -222,7 +222,8 @@ async def _run(tmp, sub, effect_type="blackhole", config=None,
             effect.update_config({"phase_progress": i / frames_d})
             step(1)
         step(int(0.6 / DT))
-        end_phase, end_reverse = effect._phase, effect.reverse
+        end_phase = getattr(effect, "_sp_phase", None) or effect._phase
+        end_reverse = effect.reverse
         r_max = float(getattr(effect, "r_max", 0.0))
     await host.shutdown()
     return {
