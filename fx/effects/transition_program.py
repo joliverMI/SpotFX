@@ -32,12 +32,13 @@ FLAME LICK / IGNITION (Sauron or Eye <-> the particle effects), SHOAL
 BREAK / SHOALING (Fish <-> Orbits / Squiggles) and UNRAVEL (Squiggles <->
 Orbits / Fish), all in the one registry below:
 
-  INFALL    particles -> Black Hole (orbits / fish / squiggles / fireworks
-            -> blackhole; his "I like this upgrade for Infall"). Every piece
-            leaves on the velocity it had and bends onto an accelerating
-            spiral into the horizon (`transition_infall_spin` extra turns),
-            the horizon ignites as it feeds (the incoming Black Hole fades
-            up over the second half of the flight), and over the last
+  INFALL    particles -> Black Hole (orbits / fish / squiggles -> blackhole
+            — fireworks LENS in instead, below; his "I like this upgrade
+            for Infall"). Every piece leaves on the velocity it had and
+            bends onto an accelerating spiral into the horizon
+            (`transition_infall_spin` extra turns), the horizon ignites as
+            it feeds (the incoming Black Hole fades up over the second
+            half of the flight), and over the last
             `transition_velocity_blend_ms` every piece's velocity is blended
             into the Black Hole's own field at its radius
             (Blackhole2d._program_field_velocity). The real Black Hole then

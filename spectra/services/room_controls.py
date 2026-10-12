@@ -733,11 +733,12 @@ class RoomControlState(BaseModel):
     # THE TRANSITION PROGRAMS (transitions-drop plan phase 3 — fx/effects/
     # transition_program.py is the binding statement). A scene change whose
     # Matrix effect-type switch has a registered program (INFALL: orbits /
-    # fish / squiggles / fireworks -> Black Hole; ERUPTION: Black Hole ->
-    # orbits / fish / squiggles) runs that program instead of the virtual's
-    # stored 0.5 s crossfade: the outgoing particles become a cloud that
-    # flies into the incoming form, velocity-matched at the hand-off. His
-    # answer to Q4: "~1.4 s by default (1.2-2.5 s), anchored on the mark" —
+    # fish / squiggles -> Black Hole; ERUPTION: Black Hole -> orbits / fish /
+    # squiggles; phase 4 below widens the registry further) runs that
+    # program instead of the virtual's stored 0.5 s crossfade: the outgoing
+    # particles become a cloud that flies into the incoming form,
+    # velocity-matched at the hand-off. His answer to Q4: "~1.4 s by
+    # default (1.2-2.5 s), anchored on the mark" —
     # the trigger clock fires early so the program's payoff (the infall's
     # ignition, the eruption's bloom) lands on the trigger
     # (scene_transition_lead.program_lead_ms). All Sonic-tellable:
