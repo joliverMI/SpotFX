@@ -33,10 +33,12 @@ carries rides that one fire, so nothing else is shifted separately:
     the same _fire call just before the drop member — and with it a
     transition program run on the mark (drop_switch.HANDOFF_PROGRAM,
     anchor 0: the program has no lead of its own to double-shift);
-  - a Fireworks meld's LATE cut, which is measured from the drop's actual
-    fire (trigger_engine._arm_late_switch passes this offset to
-    drop_switch.late_release, so "swallow_delay_s after the drop" and "the
-    next big hit after the drop" stay after the drop that actually fired).
+  - a Fireworks meld's LATE cut, when its moment is "swallow_delay_s after
+    the drop" (trigger_engine._arm_late_switch passes this offset to
+    drop_switch.late_release, which measures that delay from the drop's
+    actual fire). The OTHER two late moments — the next big hit and the
+    deadline — stay on the music's own drop mark, as late_release's own
+    docstring says: they are moments in the song, not the relocated fire.
 The drop's automatic LEAD stays 0, unconditionally
 (trigger_engine._response_switch_lead_ms): a drop still BEGINS on its
 (now relocated) mark; this offset moves the mark, never the anchor rule.
