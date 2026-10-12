@@ -3089,10 +3089,12 @@ feature ships, never a gate on the feature's own deploy.
 and the settings within the scenes and creating scenes")** — a SECOND
 mechanism module, `spectra/services/scene_console.py`, zero import of
 `settings_console.py`/`room_controls.py`, whose only write surface is
-`scene_store.save()`. `SCENE_SETTINGS_REGISTRY` (6 scalar keys: entry
-blend, choreography timing, colour-journey pace, colour-set acceptance —
-charge/lull phase ramps REMOVED 2026-08-20, see the Override Blend entry
-above; the ramp is a computed dynamic stretch now, not a scene setting)
+`scene_store.save()`. `SCENE_SETTINGS_REGISTRY` (8 scalar keys: entry
+blend, choreography timing, colour-journey pace, colour-set acceptance,
+the drop shockwave on/off switch, and the per-scene drop timing offset
+(2026-10-12, see drop_timing.py's own entry above) — charge/lull phase
+ramps REMOVED 2026-08-20, see the Override Blend entry above; the ramp is
+a computed dynamic stretch now, not a scene setting)
 reads bounds off `SceneV2`/`PhaseChoreography`/`SceneColorJourney`'s own
 `Field(ge=,le=)`, same discipline as the room registry. Named `FlareKind`
 create/update/remove
@@ -4138,12 +4140,15 @@ they show — and both run on the ONE hold above, never a second one.
   so the dynamic stretch to ~90% of the real gap is what the ruler draws,
   with the remaining ~10% as a separate HANG band — his spec verbatim, and
   the reason two gap sliders exist: the hang is a thing to SEE, not a
-  number to set. Drop is never stretched and BEGINS on its mark. **Marks
-  are deliberately not draggable** — a band's offset is an aggregate over
-  its attached kinds (`band_trigger_offset_ms`, min over every declared
-  offset, zero included since the 2026-09-16 fix above), so a
-  drag would have to pick one; the per-kind flare preview already authors
-  it and the panel says so. `release_phases()` gained `force=` for the
+  number to set. Drop is never stretched and BEGINS on its mark. **The
+  charge and lull marks are deliberately not draggable** — a band's offset
+  is an aggregate over its attached kinds (`band_trigger_offset_ms`, min
+  over every declared offset, zero included since the 2026-09-16 fix
+  above), so a drag would have to pick one; the per-kind flare preview
+  already authors it and the panel says so. **The DROP mark IS draggable,
+  since 2026-10-12 — see the drop-timing-offset entry above** (it sets
+  `SceneV2.drop_timing_offset_ms`, not a flare kind's offset, so there is
+  no aggregate to pick between). `release_phases()` gained `force=` for the
   per-lap release (each step runs on a FRESH scratch pair, and a drop arms
   nothing by production's own rule — exactly when a sequence ends); every
   production call site keeps the guard.
