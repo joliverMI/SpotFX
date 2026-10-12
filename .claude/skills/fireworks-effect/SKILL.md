@@ -2,9 +2,10 @@
 name: fireworks-effect
 description: >
   fx/effects/fireworks.py (Matrix, crystal-mapper) and fx/effects/
-  fireworks1d.py (Strips) — the rocket/burst effect behind Fireworks V2.
-  Load before touching launch/burst/drop-tail timing, before tuning
-  spawn_rate (at 0, beat bursts are the ONLY launch source and every
+  fireworks1d.py (Strips) — the rocket/burst effect behind Fireworks V2,
+  and ALSO the Fish scene's Strips entry (live data — see the fish-scene
+  skill). Load before touching launch/burst/drop-tail timing, before
+  tuning spawn_rate (at 0, beat bursts are the ONLY launch source and every
   spawn_rate multiplier is inert — verify the live value, it drifts), or
   before adding a firework_burst-style flare kind to another scene.
 ---
@@ -12,6 +13,13 @@ description: >
 # Fireworks / Fireworks1d
 
 Matrix effect renders to `crystal-mapper` — load `crystal-hex-grid` first.
+
+**`fireworks1d` is also the Fish scene's Strips entry** (live data, not
+the `orbits1d` that `scripts/seed_fish_scene.py` itself still copies in —
+see the fish-scene skill's own note on the divergence). A change to the
+strip's phase behaviour, launch rate or lull ember can move two scenes at
+once (Fireworks V2 and Fish); check the live scenes
+(`GET /spectra/api/scenes`) before assuming a fix is Fireworks-V2-only.
 
 ## At `spawn_rate: 0`, beat bursts are the ONLY launch source — check the
    live value before promising a spawn-rate fix

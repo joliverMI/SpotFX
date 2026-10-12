@@ -3,11 +3,11 @@ name: orbits-effect
 description: >
   fx/effects/orbits.py (Matrix, crystal-mapper) and fx/effects/orbits1d.py
   (Strips) — orbiting-particle effect behind Orbits V2, and the strip
-  effect four OTHER scenes' Strips entries reuse (Squiggles V2,
-  Dancers V2, Pacman V2, Fish). Load before touching either module, before
-  tuning drop-ejecta persistence, or before assuming Fish's kinematics —
-  Fish is a wholesale copy of this scene's params/bands but moves
-  completely differently; see the fish-effect skill for the split.
+  effect three OTHER scenes' Strips entries reuse (Squiggles V2,
+  Dancers V2, Pacman V2). NOT Fish — Fish's own Strips entry is
+  `fireworks1d` (live data, see the fish-scene skill), even though its
+  Matrix entry is a wholesale copy of this scene's params/bands and moves
+  completely differently; see the fish-effect skill for that split.
 ---
 
 # Orbits / Orbits1d
@@ -16,10 +16,13 @@ Matrix effect renders to `crystal-mapper` — load `crystal-hex-grid` first
 for anything about coverage/spawn radius on this device.
 
 **Orbits1d is load-bearing for scenes that aren't "Orbits" at all** —
-Squiggles V2, Dancers V2, Pacman V2 and Fish all use `orbits1d` for their
-Strips entry (their own Matrix effect is something else). A change here can
-move five scenes at once (Orbits V2 plus those four); check the live scenes
-(`GET /spectra/api/scenes`) before assuming a fix is Orbits-only.
+Squiggles V2, Dancers V2 and Pacman V2 all use `orbits1d` for their Strips
+entry (their own Matrix effect is something else). A change here can move
+four scenes at once (Orbits V2 plus those three); check the live scenes
+(`GET /spectra/api/scenes`) before assuming a fix is Orbits-only. **Fish is
+NOT one of them** — despite being a wholesale copy of this scene's own
+Matrix params/bands, its Strips entry is `fireworks1d` (see the fish-scene
+skill's own note on the divergence from its seed script).
 
 ## Params worth knowing before tuning
 

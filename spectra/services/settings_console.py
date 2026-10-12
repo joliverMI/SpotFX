@@ -297,16 +297,20 @@ SETTINGS_REGISTRY: dict[str, SettingSpec] = {
         "minutes to seconds yourself."),
     "strip_phase_strength": _spec(
         "strip_phase_strength", "Strip phase strength",
-        "How strongly the strip effects (Melt and Power today) answer a "
-        "charge, lull and drop: on a charge their colours get brighter, a "
-        "fill in the set's colours rises under them and they move faster; "
-        "a lull fades them to black at the same dark point as the crystal; "
-        "a drop sends a shockwave in the set's colours from the middle. "
-        "Never adds white. 1 = as tuned (default), 0 = off (the strips "
-        "exactly as before), up to 1.5 = stronger. Takes effect on the next "
-        "charge, lull or drop. Per-scene details (charge fill, drop "
-        "shockwave, flare punch, ...) are the strip effect's own settings "
-        "on the scene (set_scene_entry_param)."),
+        "How strongly the strip effects (Melt, Power, and the Black Hole, "
+        "Orbits and Fireworks strips) answer a charge, lull and drop: on a "
+        "charge their colours get brighter, a fill in the set's colours "
+        "rises under them and there's more going on (more blobs, more "
+        "fireworks, a faster melt); a lull fades them to black at the same "
+        "dark point as the crystal (the Fireworks strip keeps a faint "
+        "ember); a drop sends a shockwave in the set's colours from the "
+        "middle. Never adds white. 1 = as tuned (default), 0 = off (the "
+        "strips exactly as before — the Black Hole, Orbits and Fireworks "
+        "strips keep their own blob/launch choreography, just without the "
+        "colour build, fade or shockwave), up to 1.5 = stronger. Takes "
+        "effect on the next charge, lull or drop. Per-scene details "
+        "(charge fill, drop shockwave, flare punch, ...) are the strip "
+        "effect's own settings on the scene (set_scene_entry_param)."),
     "background_fade_s": _spec(
         "background_fade_s", "Background fade",
         "How long, in seconds, the background on the lights takes to fade "
