@@ -1,11 +1,13 @@
 ---
 name: fish-scene
 description: >
-  The "Fish" SPECTRA scene — Matrix `fish`, Strips `orbits1d` (unchanged from
-  the Orbits V2 data it was copied from), Singles `power` (`pulse` once
-  scripts/migrate_singles_to_pulse.py runs). Load before editing this scene's
-  flare bands/kinds, especially the "Fish Swim Burst" flare kind. Load the
-  fish-effect skill first for the underlying Matrix effect's kinematics.
+  The "Fish" SPECTRA scene — Matrix `fish`, Strips `fireworks1d` (live data —
+  diverged from the `orbits1d` the seed script still copies in; see the note
+  below), Singles `power` (`pulse` once scripts/migrate_singles_to_pulse.py
+  runs). Load before editing this scene's flare bands/kinds, especially the
+  "Fish Swim Burst" flare kind. Load the fish-effect skill first for the
+  underlying Matrix effect's kinematics, and the fireworks-effect skill for
+  the strip's own charge/lull/drop.
 ---
 
 # Fish (scene)
@@ -22,7 +24,25 @@ pools it into a pick-one "Shape" lane alongside this scene's existing
 momentary shape flares (e.g. "Reverse Momentarily (500ms)"), refusing if a
 "Shape" lane already exists on that band.
 
-## This scene's AUTHORED DATA tracks Orbits V2 — its MOTION never does
+## The Strips entry is `fireworks1d`, not the seed script's own `orbits1d`
+
+The seed script's own docstring states a DELIBERATE, STATED NON-COPY for
+Strips: it copies every other device entry from Orbits V2 but leaves
+Fish's Strips entry at `orbits1d` ("there is no `fish1d`... the strips
+therefore run exactly what Orbits V2 runs on them"). The LIVE scene has
+since diverged from that — a later hand edit moved this scene's Strips
+entry onto `fireworks1d` (the strip-phase plan's own read of
+`storage/spectra/scenes.json`, 2026-10-11). **Load `fireworks-effect`, not
+`orbits-effect`, for this scene's Strips behaviour** (charge/lull/drop via
+the shared strip phase layer, the rocket ember through the lull, the drop
+tail). A re-run of `scripts/seed_fish_scene.py` upserts every device entry
+from Orbits V2's CURRENT data (its own docstring: "a re-run upserts Fish,
+and only Fish") — including Strips — so re-running it would silently put
+`orbits1d` back and undo this divergence. Check which effect the live
+scene actually runs on Strips (`GET /spectra/api/scenes`) before touching
+either the seed script or this scene's Strips params.
+
+## This scene's AUTHORED DATA (bands/kinds/weights, Matrix only) tracks Orbits V2 — its MOTION never does
 
 A band/kind-authoring change made on Orbits V2 (a weighting rebalance, a
 new flare kind, a colour-set change) is a candidate for porting to this
@@ -96,6 +116,11 @@ semantics. **It looks the kind up BY NAME: pass `name="Fish Swim Burst"`.
 creates a duplicate kind instead of editing this one.** Flare kinds are
 already scene-console scope, so this is the ordinary rule applied, not an
 exception; every other kind/scene setting follows it the same way.
+
+The Strips entry's strip-phase tunables (`charge_fill` … `flare_punch_glow`,
+`fx/effects/strip_phase.py`) are reachable the same way:
+`set_scene_entry_param` on scene "Fish", target "Strips" — see the
+fireworks-effect skill, since that is the effect actually running there.
 
 ## Executable proofs
 

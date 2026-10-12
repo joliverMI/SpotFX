@@ -1768,3 +1768,86 @@ def test_set_scene_entry_param_discoverable_via_list_operations():
     idx = _run(sa._dispatch("list_operations", {"domain": "scene"}))
     names = {o["name"] for o in idx["operations"]}
     assert {"get_scene_entry_params", "set_scene_entry_param"} <= names
+
+
+# ═══ 14. THE STRIP PHASE LAYER's tunables — strip-phase plan phase 4
+# ("Sonic, help, skills"): no NEW operation was needed (the plan's own
+# claim: "Sonic reaches them through the existing `set_scene_entry_param`
+# with no new operation") because every strip-phase tunable
+# (fx/effects/strip_phase.py's TUNABLES) is registered like any other
+# effect param in config/effect_params.json on each joining effect
+# (blackhole1d/orbits1d/fireworks1d/melt/power). This re-proves that
+# generic claim concretely, on one real strip effect, so a future change
+# that narrows get_scene_entry_params/set_scene_entry_param's param-type
+# coverage (_SIMPLE_PARAM_TYPES) can't silently strand these numeric
+# tunables without a test noticing. ══════════════════════════════════════
+
+def test_strip_phase_tunable_is_registered_on_every_joining_strip_effect():
+    from fx import device_model
+
+    for effect_type in ("blackhole1d", "orbits1d", "fireworks1d", "melt", "power"):
+        # Sonic-facing shape (what get_scene_entry_params/set_scene_entry_param
+        # actually validate against)
+        catalogue = device_model.param_catalogue(effect_type)
+        assert "charge_fill" in catalogue, effect_type
+        assert catalogue["charge_fill"]["type"] == "numeric"
+        # UI-facing raw registry entry — help_topic rides here, not through
+        # param_catalogue() (which deliberately doesn't copy it; see its
+        # own docstring), so the scene editor's per-param HelpLink reads
+        # this, not the Sonic catalogue above
+        raw = device_model.effect_params(effect_type)
+        assert raw["charge_fill"]["help_topic"] == "strip-phases", effect_type
+
+
+def test_get_and_set_scene_entry_param_round_trip_a_strip_phase_tunable():
+    from spectra.services import scene_console as sc
+    from spectra.services import scene_store
+
+    scene, _ = _seed_scene_with_entry(
+        "Black Hole V2", target_kind="category", target="Strips",
+        effect_type="blackhole1d")
+
+    before = sc.get_scene_entry_params(scene.id, "Strips")
+    assert before["params"]["charge_fill"]["value"] == \
+        before["params"]["charge_fill"]["default"]
+    assert before["params"]["flare_punch_strength"]["type"] == "numeric"
+
+    result = _run(sc.apply_scene_entry_param(scene.id, "Strips", "charge_fill", 0.6))
+    assert result["status"] == "applied"
+
+    reloaded = scene_store.get_by_id(scene.id)
+    entry = next(d for d in reloaded.devices if d.target == "Strips")
+    assert entry.params["charge_fill"] == 0.6
+
+    after = sc.get_scene_entry_params(scene.id, "Strips")
+    assert after["params"]["charge_fill"]["value"] == 0.6
+
+
+def test_set_scene_entry_param_rejects_a_strip_phase_tunable_out_of_range():
+    from spectra.services import scene_console as sc
+
+    scene, _ = _seed_scene_with_entry(
+        "Orbits V2", target_kind="category", target="Strips",
+        effect_type="orbits1d")
+
+    result = _run(sc._op_set_scene_entry_param(scene.id, "Strips", "white_guard", 3.0))
+    assert result["status"] == "rejected"
+    assert "white_guard" in result["reason"]
+
+
+def test_strip_phase_strength_room_master_is_sonic_reachable():
+    """The room-wide master (RoomControlState.strip_phase_strength) is a
+    plain SETTINGS_REGISTRY key — the generic set_setting/get_settings
+    round trip already proven in test_settings_console.py — re-asserted
+    here so the two halves (the room master and the per-effect tunables
+    above) are proven side by side, matching how the plan itself frames
+    this as one coverage claim."""
+    from spectra.services import settings_console as sc
+
+    assert "strip_phase_strength" in sc.SETTINGS_REGISTRY
+    spec = sc.SETTINGS_REGISTRY["strip_phase_strength"]
+    assert spec.min == 0.0 and spec.max == 1.5
+    # the description names every strip effect it now governs, not just
+    # the two (Melt/Power) it shipped with in phase 1
+    for name in ("Melt", "Power", "Black Hole", "Orbits", "Fireworks"):
+        assert name in spec.description
