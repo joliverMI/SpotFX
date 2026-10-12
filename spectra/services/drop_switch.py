@@ -541,17 +541,25 @@ def next_big_hit(flares, drop_ms: int, beat_ms: Optional[float],
 
 
 def late_release(plan: SwitchPlan, settings: SwitchSettings,
-                 flares=(), beat_ms: Optional[float] = None) -> SwitchPlan:
+                 flares=(), beat_ms: Optional[float] = None,
+                 drop_offset_ms: int = 0) -> SwitchPlan:
     """Where a late plan's cut lands (module docstring, THE FIREWORKS
     MELDS): `swallow_delay_s` after the drop, or the next big hit, or the
     deadline. Recomputed when the drop arms it, since the song's analysed
-    flares may have been planned since the decision."""
+    flares may have been planned since the decision.
+
+    `drop_offset_ms` is how far off its mark the drop actually FIRED
+    (spectra/services/drop_timing.py — the room's drop timing offset as
+    applied): the swallow delay is measured from that fire, since it waits
+    on the drop the room just played. The next big hit and the deadline
+    stay on the music's own drop mark — they are moments in the song."""
     if not plan.late or plan.drop_ms is None:
         return plan
     if plan.moment == MOMENT_AFTER_DROP:
+        fired_ms = plan.drop_ms + int(drop_offset_ms)
         return replace(plan, release_by="delay", hit_trigger_id=None,
                        deadline_ms=None,
-                       release_ms=int(round(plan.drop_ms
+                       release_ms=int(round(fired_ms
                                             + max(0.0, settings.swallow_delay_s) * 1000)))
     deadline = hit_deadline_ms(plan.drop_ms, beat_ms)
     hit = next_big_hit(flares, plan.drop_ms, beat_ms, settings.hit_threshold,

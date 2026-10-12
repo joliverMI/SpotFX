@@ -76,6 +76,8 @@ def test_registry_is_an_explicit_allowlist_matching_room_control_bounds():
         "lull_dark_max_s",
         # 2026-10-11, the drop's breath-hold (transitions-drop plan, Q2):
         "lull_breath_hold_s",
+        # 2026-10-12, every drop fires this far off its mark (drop_timing.py):
+        "drop_timing_offset_ms",
         # 2026-10-08, the drop-led scene switch's tunables:
         "drop_switch_enabled", "drop_switch_after_previous_drop",
         "drop_switch_stale_margin_s", "drop_switch_drops_in_a_row",

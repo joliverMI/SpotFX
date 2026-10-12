@@ -23,6 +23,9 @@ Widened again 2026-10-07 with lull_dark_max_s (the Admiral's own "make
 this something sonic can change": the longest a lull stays fully dark).
 Widened again 2026-10-11 with background_fade_s (the Admiral's own
 background fade: how long a live background change takes to land).
+Widened again 2026-10-12 with drop_timing_offset_ms (the Admiral's own
+"shifting the drops so they fire 400ms earlier" — spectra/services/
+drop_timing.py).
 
 force_scene_scene_id/force_color_target_id STAY OUT OF THIS REGISTRY —
 each targets a scene or colour SET/GROUP by OPAQUE ID, a poor fit for
@@ -142,6 +145,7 @@ def _spec(key: str, label: str, description: str) -> SettingSpec:
             "strip_phase_strength": "multiplier 0.0-1.5, 0 = off",
             "background_fade_s": "seconds, 0 = instant",
             "lull_breath_hold_s": "seconds",
+            "drop_timing_offset_ms": "ms, negative = earlier, 0 = on the mark",
             "drop_shock_min_energy": "top-bar displayed energy, fraction 0.0-1.0",
             "pulse_flash_min_energy": "top-bar displayed energy, fraction 0.0-1.0",
             "drop_switch_stale_margin_s": "seconds beyond the scene's own dwell",
@@ -332,6 +336,18 @@ SETTINGS_REGISTRY: dict[str, SettingSpec] = {
         "dark). Never longer than the lull's own darkness allows (half the "
         "lull, capped by 'Lull darkness (max)'). 0 = no breath-hold. "
         "Default 0.4. Takes effect on the very next lull."),
+    "drop_timing_offset_ms": _spec(
+        "drop_timing_offset_ms", "Drop timing",
+        "How far off its mark every drop fires, in milliseconds — "
+        "negative is EARLIER, positive later, 0 exactly on the mark. "
+        "Default -400 (every drop fires 0.4 s early). Moves the whole "
+        "drop together: the explosion, the drop's scene change, the "
+        "Shockwave and the strips' drop; the lull before it builds to the "
+        "new moment, so its breath-hold still ends right on the drop. "
+        "Applies to every drop — his own drop triggers and the detected "
+        "drop sequences — on the very next drop. A scene can carry its own "
+        "drop timing instead (set later from its drop-sequence preview). "
+        "Range -2000 to 2000."),
     "drop_shock_enabled": _spec(
         "drop_shock_enabled", "Drop Shockwave (whole room)",
         "On (default): the crystal effects with a drop Shockwave (Black "

@@ -221,6 +221,12 @@ export default function SequencePreviewOverlay({ scene, onClose }: {
                   {m.trigger_offset_ms !== 0 && (
                     <> — its band's authored offset moves the mark <b>{Math.abs(m.trigger_offset_ms)} ms{' '}
                       {m.trigger_offset_ms < 0 ? 'earlier' : 'later'}</b></>
+                  )}
+                  {(m.drop_timing_offset_ms ?? 0) !== 0 && (
+                    <> — the {timeline.drop_timing?.source === 'scene' ? "scene's" : "room's"} drop
+                      timing fires it <b>{Math.abs(m.drop_timing_offset_ms)} ms{' '}
+                      {m.drop_timing_offset_ms < 0 ? 'early' : 'late'}</b>, and the lull builds to
+                      that moment <HelpLink topic="drop-timing-offset" /></>
                   )}.
                 </div>
               ))}

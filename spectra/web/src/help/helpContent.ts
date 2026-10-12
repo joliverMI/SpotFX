@@ -988,6 +988,17 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        id: 'drop-timing-offset',
+        title: 'Drop timing — every drop fires early',
+        keywords: 'drop timing offset earlier later 400 ms milliseconds fire early drop mark red line explosion shockwave strip drop cut lull breath-hold sonic',
+        body: [
+          'Every drop fires a little off its mark: "Drop timing" in the Scenes panel (room controls bar) says how far, in milliseconds. Negative is EARLIER, positive later, 0 exactly on the mark. The default is -400, so every drop lands 0.4 seconds before its mark. Sonic can read and change it too ("make the drops fire half a second early").',
+          'It moves the whole drop together: the explosion itself, a scene change the drop makes, the Shockwave and the strips\' drop. The lull before it builds to the new moment, so its ramp, its hang and the breath-hold still end exactly on the drop. Nothing else moves: the charge and the lull fire where they always did.',
+          'It applies to every drop — your own drop triggers and the detected drop sequences — on the very next drop. Your own per-trigger offsets and a flare kind\'s offset still add on top. A drop never moves to within a tenth of a second of its own lull.',
+          'A scene\'s drop-sequence preview draws the drop\'s red line where it will fire. A scene can carry its own drop timing instead of the room\'s — that is what dragging the drop mark on the preview will set, once that is built.',
+        ],
+      },
+      {
         id: 'drop-shockwave',
         title: 'The drop Shockwave',
         keywords: 'drop shockwave shock wave wavefront ring bloom debris splash wall afterglow reveal bigger drop explosion black hole orbits sauron eye fish rim eye perimeter colour set no white intensity',

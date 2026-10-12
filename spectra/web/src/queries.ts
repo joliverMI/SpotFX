@@ -341,6 +341,9 @@ export interface PhasePreviewMark {
    * dragging would have to pick one to write to; a kind's own offset is authored per-kind in the flare
    * preview's own marker. */
   trigger_offset_ms: number;
+  /** The DROP TIMING OFFSET applied to this mark (spectra/services/
+   * drop_timing.py): negative = earlier. Non-zero only on the drop. */
+  drop_timing_offset_ms: number;
   lead_ms: number;
   anchor_rule: 'switch_end' | 'drop_start';
 }
@@ -352,6 +355,10 @@ export interface PhasePreviewTimeline {
   duration_s: number;
   gaps: { charge: number; lull: number };
   hang_fraction: number;
+  /** THE DROP TIMING OFFSET in force for this scene (drop_timing.py):
+   * `offset_ms` as set (the scene's own, else the room's), `applied_ms` as
+   * actually moved on this ruler (never closer than 100 ms to its lull). */
+  drop_timing: { offset_ms: number; applied_ms: number; source: 'scene' | 'room' | 'default' };
   marks: PhasePreviewMark[];
   cues: PreviewCue[];
   /** Virtuals the vendored phase machinery will actually reach. Empty

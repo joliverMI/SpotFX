@@ -11307,6 +11307,21 @@ window). Four things:
   `scripts/check_drop_firing.py` (temp copies of live storage). Help topic
   `drop-sequence-firing`.
 
+**EVERY DROP FIRES `drop_timing_offset_ms` OFF ITS MARK (2026-10-12, the
+Admiral: "shifting the drops so they fire 400ms earlier").**
+`spectra/services/drop_timing.py` is the binding statement. A room setting
+(default -400, OFFSET family, Sonic-editable) with a per-scene override
+slot (`SceneV2.drop_timing_offset_ms`, None = the room's — the follow-up
+drag UI's target), applied in ONE place: `tick()` sums it into the target
+of every `fire_response` drop (his and the sequences'); the cut, Shockwave
+and strip drop ride that fire. A build ending on a drop gets the gap to the
+SHIFTED mark (`drop_timing.build_gap_ms` — `_phase_partner_gap_ms`,
+`FiringSequence.gap_ms`, the preview's `build_gaps`), so the breath-hold
+ends on it. **Tests run with it at 0** (`tests/conftest.py`'s
+`_drop_timing_on_the_mark`; `@pytest.mark.drop_timing_live` opts back in —
+`tests/test_drop_timing.py`), and `scripts/check_triggers.py` holds it at 0
+the same way.
+
 **PHASE 2 OF THE DROP-SCENE-VARIETY PLAN — A DROP CAN BE THE SCENE CHANGE
 (2026-10-08, the Admiral: "just switch at the drop", early in the charge
 only "if it doesn't fit well at the drop").** `spectra/services/

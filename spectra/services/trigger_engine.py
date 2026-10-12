@@ -222,7 +222,10 @@ own resolution, reconfirming the first two and adding the third):
     the momentary-glide check the other two classes use). Don't let a
     future drop-band edit reintroduce the momentary rule's early start —
     see that function's own docstring for why the branch has to come
-    first, not just happen to evaluate to 0 today.
+    first, not just happen to evaluate to 0 today. Since 2026-10-12 the
+    MARK a drop begins on is itself relocated by the room's drop timing
+    offset (default -400 ms, spectra/services/drop_timing.py) — an OFFSET,
+    summed into target_ms; the drop's lead is still 0.
 Both scene-transition and momentary-flare peeks are read-only and
 conservative: a fire with nothing to glide yields lead=0. tick()'s
 crossing check always ALSO checks the trigger's own unshifted timestamp as
@@ -354,7 +357,8 @@ from typing import Any, Awaitable, Callable, Optional
 
 from spectra.models.trigger import FireResponseAction, FireSceneAction, SpectraTrigger
 from spectra.services import (analysed_flares, drop_firing, drop_sequences,
-                               drop_switch, phase_partner, transition_phases,
+                               drop_switch, drop_timing, phase_partner,
+                               transition_phases,
                                trigger_store)
 
 logger = logging.getLogger(__name__)
@@ -487,6 +491,7 @@ class TriggerEngine:
         auto_refresh: Callable[[str], Awaitable[Any]] | None = None,
         lead_ms: Callable[[SpectraTrigger], int] | None = None,
         response_offset_ms: Callable[[Any], int] | None = None,
+        drop_offset_ms: Callable[[], int] | None = None,
         intensity_event: Callable[[], None] | None = None,
         analysed_plan: Callable[[str, list], Any] | None = None,
         fire_analysed_flare: Callable[[float], Awaitable[Any]] | None = None,
@@ -529,6 +534,17 @@ class TriggerEngine:
         self._refreshing: set[str] = set()
         self._lead_ms = lead_ms or self._default_lead_ms
         self._response_offset_ms = response_offset_ms or self._default_response_offset_ms
+        # THE DROP TIMING OFFSET (2026-10-12, spectra/services/drop_timing.py
+        # is the binding statement): every fire_response drop's target moves
+        # by this much (OFFSET family, negative = earlier), and a build
+        # ending on a drop is told the gap to the shifted mark. Read live
+        # (room controls + the showing scene's own override) — a test injects
+        # a constant. `_drop_applied` remembers, per drop trigger id, the
+        # offset tick() actually applied (after drop_timing's clamp), so a
+        # Fireworks meld's late cut is measured from the drop's real fire.
+        self._drop_offset_ms = drop_offset_ms or self._default_drop_offset_ms
+        self._drop_applied: dict[str, int] = {}
+        self._tick_drop_offset: Optional[int] = None
         # Two-dimensional drift gradient retarget hook (owner ask
         # 2026-08-20) — deliberately NOT a lazy import of the production
         # engine.conductor singleton the way _default_fire_scene/
@@ -948,6 +964,7 @@ class TriggerEngine:
         if seq_trigs:
             candidates = candidates + seq_trigs
         windows = self._drop_windows
+        self._tick_drop_offset = None
         self._tick_flares = [
             (t.id, t.timestamp_ms + t.trigger_offset_ms) for t in candidates
             if t.enabled and t.action.kind == "fire_response"
@@ -1071,6 +1088,13 @@ class TriggerEngine:
             if abs(trig.timestamp_ms - last) <= RESPONSE_OFFSET_HORIZON_MS:
                 if trig.action.kind == "fire_response":
                     target_ms += self._response_offset_ms(trig.action)
+                    # THE DROP TIMING OFFSET (drop_timing.py): a third
+                    # OFFSET-family term for a DROP, summed like the two
+                    # above — the one place a drop's moment moves. The
+                    # drop's LEAD stays 0 (_response_switch_lead_ms), so
+                    # fire_at == target_ms: it begins on the shifted mark.
+                    if getattr(trig.action, "event_class", None) == "drop":
+                        target_ms += self._drop_shift_ms(trig, triggers)
                 elif trig.action.kind == "fire_scene":
                     target_ms += self._scene_offset_ms(trig)
             # TRANSITION/FLARE LEAD-TIME ALIGNMENT (his ask, 2026-08-19):
@@ -1531,13 +1555,13 @@ class TriggerEngine:
                 # charge) in this same call, so the member's own phase arm
                 # lands on the NEW scene.
                 plan = await self._switch_before_member(seq, cls, fire_mode, render)
+                gap = (seq.gap_ms(cls, fire_mode, self._live_drop_offset_ms())
+                       if cls in phase_partner.BUILD_CLASSES else None)
                 if cls == "lull":
                     with drop_switch.lull_plan(plan):
-                        await self._fire_sequence(cls, render,
-                                                  seq.gap_ms(cls, fire_mode))
+                        await self._fire_sequence(cls, render, gap)
                 else:
-                    await self._fire_sequence(cls, render,
-                                              seq.gap_ms(cls, fire_mode))
+                    await self._fire_sequence(cls, render, gap)
                 if cls == "drop":
                     self._note_drop(seq, plan)
                     self._arm_late_switch(seq)
@@ -1756,8 +1780,9 @@ class TriggerEngine:
             settings = self._switch_settings()
         except Exception:
             settings = drop_switch.SwitchSettings()
-        plan = drop_switch.late_release(plan, settings, self._tick_hits,
-                                        seq.beat_ms)
+        plan = drop_switch.late_release(
+            plan, settings, self._tick_hits, seq.beat_ms,
+            drop_offset_ms=self._drop_applied.get(seq.trigger_id("drop"), 0))
         self._switch_plans[seq.key] = plan
         drop_switch.record_plan(plan)
         self._late_pending[seq.key] = plan
@@ -1852,6 +1877,54 @@ class TriggerEngine:
         except Exception:
             logger.exception("trigger %s: analysed colour jump failed", trig.id)
 
+    def _drop_shift_ms(self, trig: SpectraTrigger,
+                       triggers: list[SpectraTrigger]) -> int:
+        """The drop timing offset tick() applies to this drop trigger
+        (drop_timing.py): the live offset, clamped so the drop never fires
+        within drop_timing.MIN_BUILD_MS of the lull/charge its build starts
+        from. Remembered in `_drop_applied`. Never raises — an unreadable
+        offset is 0 (the drop on its mark), named in the log."""
+        if self._tick_drop_offset is None:
+            # read once per tick, however many drops sit in the horizon
+            try:
+                self._tick_drop_offset = int(self._drop_offset_ms())
+            except Exception:
+                logger.exception("drop timing: offset unreadable — the drop "
+                                 "fires on its mark")
+                self._tick_drop_offset = 0
+        offset = self._tick_drop_offset
+        meta = self._seq_meta.get(trig.id)
+        if meta is not None:
+            seq, _cls, fire_mode = meta
+            start = seq.build_start_ms(fire_mode)
+        else:
+            builds = [t.timestamp_ms for t in triggers
+                      if t.enabled and t.id != trig.id
+                      and _phase_class(t) in phase_partner.BUILD_CLASSES
+                      and t.timestamp_ms < trig.timestamp_ms]
+            start = max(builds) if builds else None
+        applied = drop_timing.applied_offset_ms(trig.timestamp_ms, offset, start)
+        self._drop_applied[trig.id] = applied
+        return applied
+
+    def _live_drop_offset_ms(self) -> int:
+        """The offset a build ending on a drop is told about (never
+        raises; 0 when unreadable, matching _drop_shift_ms)."""
+        try:
+            return int(self._drop_offset_ms())
+        except Exception:
+            logger.exception("drop timing: offset unreadable — builds run to "
+                             "the drop's own mark")
+            return 0
+
+    def _default_drop_offset_ms(self) -> int:
+        """The room's drop timing offset, or the SHOWING scene's own
+        SceneV2.drop_timing_offset_ms when it has one — the scene whose drop
+        band fires, the same live peek _default_response_offset_ms makes."""
+        from spectra.services.room_controls import load_room_controls
+        return drop_timing.resolve_offset_ms(load_room_controls(),
+                                             self._active_scene())
+
     def _phase_partner_gap_ms(self, trig: SpectraTrigger) -> Optional[int]:
         """OVERRIDE BLEND's dynamic half (ported from legacy trigger_engine.
         _phase_blend_ramp_ms/_blend_factor_for, missing from the SPECTRA
@@ -1888,7 +1961,11 @@ class TriggerEngine:
                  and self._trigger_allowed(t, mode)]
         target = phase_partner.build_target(
             trig.action.event_class, trig.timestamp_ms, later)
-        return target.gap_ms(trig.timestamp_ms)
+        # A build ending on a drop runs to where the drop FIRES (drop_
+        # timing.py), so the ramp's hang and the breath-hold end on it.
+        return drop_timing.build_gap_ms(trig.timestamp_ms, target.ms,
+                                        target.target_class,
+                                        self._live_drop_offset_ms())
 
     # ── observability ─────────────────────────────────────────────────────
 

@@ -286,6 +286,10 @@ export interface SceneV2 {
    * drop still plays). true (default) = it paints when the room's switch
    * and energy floor allow. The Fish scene ships off. */
   drop_shock_enabled: boolean;
+  /** This scene's own DROP TIMING OFFSET (drop_timing.py), ms, negative =
+   * earlier. null (default) = the room's. The follow-up drag of the drop
+   * mark on the drop-sequence preview writes it. */
+  drop_timing_offset_ms?: number | null;
 }
 
 /** His exact default dwell curve (spectra/services/dwell.py's
@@ -513,6 +517,12 @@ export interface RoomControlState {
    * one dim blob; the Fish is never darkened). Never longer than the
    * lull's own darkness allows. 0 = none. Default 0.4. */
   lull_breath_hold_s: number;
+  /** THE DROP TIMING OFFSET (spectra/services/drop_timing.py): how far off
+   * its mark every drop fires, ms — NEGATIVE = earlier, 0 = on the mark.
+   * Moves the drop arm, the drop-led cut, the Shockwave and the strip drop
+   * together; the lull builds to the moved mark. Default -400. A scene's
+   * own drop_timing_offset_ms wins. */
+  drop_timing_offset_ms: number;
   /** THE DROP SHOCKWAVE'S ROOM SWITCH (fx/effects/phase_grammar.py,
    * scene_response._drop_shock_keys): off = no Shockwave on any drop,
    * crystal or strips; every effect's own drop unchanged. Default on. */
@@ -1086,6 +1096,7 @@ export function newScene(id: string): SceneV2 {
     disabled: false,
     dwell_curve: null,
     drop_shock_enabled: true,
+    drop_timing_offset_ms: null,
   };
 }
 

@@ -52,6 +52,15 @@ relative to it (scene_response's "PER-FLARE TRIGGER MOMENT"), so the mark
 tells the truth about where the fire begins, and a kind authored after the
 anchor lands that much after the mark.
 
+THE DROP TIMING OFFSET (2026-10-12, spectra/services/drop_timing.py): the
+drop's mark — the red line — also moves by the drop timing offset in force
+for this scene (its own SceneV2.drop_timing_offset_ms, else the room's,
+default -400), clamped exactly as trigger_engine.tick() clamps it; the lull
+builds over the gap to that moved mark (build_gaps, drop_timing.
+build_gap_ms — the firing path's function), so its ramp, hang and the
+breath-hold end on it, and the live program uses the same gaps. The
+"Lull → drop gap" slider is still the distance between the MARKS.
+
 WHY THE MARKS ARE NOT DRAGGABLE HERE, stated rather than quietly omitted: a
 band's offset is an AGGREGATE over however many kinds it attaches, so a
 drag would have to pick one kind to write it to, and picking would be
@@ -73,7 +82,7 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from spectra.models.scene import SceneV2
-from spectra.services import flare_preview, flare_preview_hold
+from spectra.services import drop_timing, flare_preview, flare_preview_hold
 from spectra.services.scene_response import (DICE_REROLL_GLIDE_MS,
                                              PHASE_RAMP_HANG_FRACTION,
                                              PHASE_RAMP_MS,
@@ -125,6 +134,36 @@ def class_lead_ms(scene: SceneV2, event_class: str, intensity: float,
 
 def default_gaps() -> dict[str, int]:
     return dict(DEFAULT_GAP_MS)
+
+
+def drop_offset_for(scene: SceneV2) -> tuple[int, str]:
+    """The drop timing offset this scene's drops fire at
+    (drop_timing.resolve_offset_ms) and where it came from: "scene" (its
+    own SceneV2.drop_timing_offset_ms) or "room". Never raises — unreadable
+    room controls fall back to drop_timing's default, named "default"."""
+    if getattr(scene, "drop_timing_offset_ms", None) is not None:
+        return drop_timing.resolve_offset_ms(None, scene), "scene"
+    try:
+        from spectra.services.room_controls import load_room_controls
+        room = load_room_controls()
+    except Exception:                                    # noqa: BLE001
+        return drop_timing.DEFAULT_DROP_OFFSET_MS, "default"
+    return drop_timing.resolve_offset_ms(room, None), "room"
+
+
+def build_gaps(gaps: dict[str, int], drop_offset_ms: int) -> dict[str, int]:
+    """The gaps each class actually BUILDS over on this ruler: the charge
+    to its lull (unmoved), the lull to where the drop FIRES (its slot gap
+    moved by the drop timing offset — drop_timing.build_gap_ms, the
+    function the firing path calls), so the ramp, hang and breath-hold end
+    on the shifted mark."""
+    out = dict(gaps)
+    lull = gaps.get("lull")
+    if lull is not None:
+        built = drop_timing.build_gap_ms(0, int(lull), "drop", drop_offset_ms)
+        if built is not None:
+            out["lull"] = built
+    return out
 
 
 def switch_for(scene: SceneV2, intensity: float, enabled: bool = True
@@ -197,10 +236,27 @@ async def build_timeline(scene: SceneV2, intensity: float, *,
         scene, intensity, clock, RecordingExecutor(clock=clock))
     virtuals = conductor.virtuals
 
-    marks: list[dict[str, Any]] = []
+    # THE DROP TIMING OFFSET (spectra/services/drop_timing.py): the drop's
+    # mark moves by the offset trigger_engine.tick() applies (this scene's
+    # own, else the room's), and the lull builds to the SHIFTED mark, so its
+    # ramp, hang and breath-hold end on it — the same two moves the firing
+    # path makes, read through the same functions.
+    drop_offset_ms, drop_offset_source = drop_offset_for(scene)
+    slots: dict[str, int] = {}
     at_ms = 0
     for cls in SEQUENCE:
+        slots[cls] = at_ms
         gap_ms = resolved_gaps.get(cls) if cls in PHASE_RAMP_STRETCH_CLASSES else None
+        at_ms += (gap_ms if gap_ms is not None
+                  else PHASE_RAMP_MS[cls] + DROP_TAIL_MS)
+    drop_applied_ms = drop_timing.applied_offset_ms(
+        slots["drop"], drop_offset_ms, slots["lull"])
+    built_gaps = build_gaps(resolved_gaps, drop_offset_ms)
+
+    marks: list[dict[str, Any]] = []
+    for cls in SEQUENCE:
+        at_ms = slots[cls]
+        gap_ms = built_gaps.get(cls) if cls in PHASE_RAMP_STRETCH_CLASSES else None
         ramp_ms = _phase_ramp_ms(cls, gap_ms)
         # The HANG is whatever is left of the gap once the ramp finishes —
         # free, because nothing writes phase_progress again until the next
@@ -208,14 +264,17 @@ async def build_timeline(scene: SceneV2, intensity: float, *,
         hang_ms = max(0, (gap_ms or 0) - ramp_ms)
         offset_ms = band_trigger_offset_ms(scene, cls, intensity)
         lead_ms = class_lead_ms(scene, cls, intensity, virtuals)
+        drop_shift = drop_applied_ms if cls == "drop" else 0
         marks.append({
             "event_class": cls,
             # Where the MARK sits: the class's own slot, relocated by its
-            # band's authored offset in HIS sign (negative = earlier) —
-            # the same relocation trigger_engine.tick() performs.
-            "mark_ms": at_ms + offset_ms,
+            # band's authored offset in HIS sign (negative = earlier) and,
+            # for the drop, the drop timing offset — the same relocation
+            # trigger_engine.tick() performs.
+            "mark_ms": at_ms + offset_ms + drop_shift,
             "slot_ms": at_ms,
             "trigger_offset_ms": offset_ms,
+            "drop_timing_offset_ms": drop_shift,
             "lead_ms": lead_ms,
             "ramp_ms": ramp_ms,
             "hang_ms": hang_ms,
@@ -223,8 +282,6 @@ async def build_timeline(scene: SceneV2, intensity: float, *,
             "stretched": cls in PHASE_RAMP_STRETCH_CLASSES and gap_ms is not None,
             "anchor_rule": ("drop_start" if cls == "drop" else "switch_end"),
         })
-        at_ms += (gap_ms if gap_ms is not None
-                  else PHASE_RAMP_MS[cls] + DROP_TAIL_MS)
 
     front_pad_ms = round(FRONT_PAD_S * 1000)
     max_lead_ms = max(m["lead_ms"] for m in marks)
@@ -270,7 +327,7 @@ async def build_timeline(scene: SceneV2, intensity: float, *,
         mark = next((m for m in marks if m["event_class"] == cls), None)
         switch_out["cut_s"] = (late_cut_s if late_cut_s is not None
                                else mark["fire_at_s"] if mark else None)
-        lull_gap = resolved_gaps.get("lull")
+        lull_gap = built_gaps.get("lull")
         told = drop_switch.handoff_for(plan, LullContext(
             scene=scene, intensity=intensity, gap_ms=lull_gap,
             lull_s=(lull_gap or 0) / 1000.0,
@@ -285,6 +342,8 @@ async def build_timeline(scene: SceneV2, intensity: float, *,
         "drop_switch": switch_out,
         "duration_s": round(duration_s, 4),
         "gaps": resolved_gaps,
+        "drop_timing": {"offset_ms": drop_offset_ms, "applied_ms": drop_applied_ms,
+                        "source": drop_offset_source},
         "hang_fraction": PHASE_RAMP_HANG_FRACTION,
         "marks": marks,
         "cues": cues,
@@ -349,7 +408,10 @@ class PhaseSequenceProgram(flare_preview_hold.PreviewProgram):
     def __init__(self, scene: SceneV2, gaps: Optional[dict[str, int]] = None,
                  switch: Optional[tuple[Any, Optional[SceneV2]]] = None) -> None:
         self.hold_scene = scene
-        self.gaps = {**DEFAULT_GAP_MS, **(gaps or {})}
+        # the gaps each member BUILDS over: the lull's ends on the drop's
+        # shifted mark (build_gaps), the same as the drawn ruler
+        self.gaps = build_gaps({**DEFAULT_GAP_MS, **(gaps or {})},
+                               drop_offset_for(scene)[0])
         # THE DROP-LED SWITCH (switch_for): (plan, target scene) or None.
         self.switch = switch if (switch and switch[0].switch and switch[1]) else None
 

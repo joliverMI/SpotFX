@@ -661,6 +661,20 @@ export default function RoomControlsBar() {
               <span style={{ fontSize: '0.85em', opacity: 0.75 }}>s</span>
             </div>
             <div className="top-bar-group-field">
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}
+                title="How far off its mark every drop fires, in ms: negative = earlier, 0 = on the mark. The explosion, the drop's scene change, the Shockwave and the strips' drop move together; the lull builds to the new moment.">
+                Drop timing
+                <HelpLink topic="drop-timing-offset" />
+              </label>
+              <input
+                type="number" min={-2000} max={2000} step={50}
+                value={local.drop_timing_offset_ms}
+                onChange={(e) => setLocal({ ...local, drop_timing_offset_ms: Number(e.target.value) })}
+                onBlur={() => commit(local)}
+              />
+              <span style={{ fontSize: '0.85em', opacity: 0.75 }}>ms</span>
+            </div>
+            <div className="top-bar-group-field">
               <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
                 <PowerButton
                   on={local.drop_shock_enabled}
