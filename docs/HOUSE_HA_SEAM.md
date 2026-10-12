@@ -99,9 +99,8 @@ the WLEDs report `live: false`. Re-assert the mode (R1) when it comes back.
   that does not want the strip off is unaffected: "TV Music default on,
   off only for Hyperion" still holds.
 - It comes back when TV Music is ON **and** no media source is on: Spectra
-  writes `{"on": true}` at a soft dim brightness first, lets the stream
-  resume, then raises brightness to his own ceiling (see Brightness below —
-  never a forced 255).
+  writes `{"on": true}` (power only — see Brightness below), then lets the
+  stream resume.
 - Recommended HA order: TV Music ON → call `tv-music {"on": true}`; TV Music
   OFF → call it with `false`. The data-line switch is physical either way;
   the call is what stops Spectra streaming to a strip nobody sees.
@@ -122,8 +121,7 @@ the WLEDs report `live: false`. Re-assert the mode (R1) when it comes back.
 
 - `PUT /house/fixture/crystal {"state": "off"}` → no stream, `{"live":
   false}`, then `{"on": false}` (confirmed by read-back). `"on"` → `{"on":
-  true}` at his own brightness ceiling (see Brightness below — never a
-  forced 255) first, then the stream. `"state": null` hands the fixture
+  true}` (power only — see Brightness below) first, then the stream. `"state": null` hands the fixture
   back to the mode.
 - Only a WLED can be switched off here; a Hue area answers 422 (its look is
   the mode's `hue` setting). A single bulb (Kitchen Infuse) is not
@@ -132,28 +130,37 @@ the WLEDs report `live: false`. Re-assert the mode (R1) when it comes back.
   `sconce-kitchen-left`, `sconce-kitchen-right`, `hue-lights`, `dining-hues`
   (a fixture's name, e.g. `"Porch Rail"`, works too).
 
-### Brightness (R4)
+### Brightness is Home Assistant's (2026-10-12)
 
-While a mode drives the room Spectra manages every streamed WLED's power
-switch, and caps its master brightness at **HIS OWN last-set level** — what
-the fixture held before Spectra's first write that take. It never writes a
-flat `bri: 255`; that value is only `owned_brightness`'s default, an
-additional cap that imposes no extra limit unless set lower. Each fixture is
-re-read every minute: a reading ABOVE the ceiling is ALWAYS corrected back
-down (fixed 2026-10-06 — an earlier build adopted an un-rebooted overshoot as
-his own deliberate HA raise, and the very first night it shipped it adopted a
-raise HA never made; with no channel that can tell "HA changed this" from
-"something else did", the absence of a reboot is never read as his word). A
-reading at or below the ceiling, including a fresh, lower HA write, is always
-his and is never corrected upward. So a LOWER HA brightness write to these
-fixtures always stands; a HIGHER one is corrected back to his last-set level
-within the minute — Spectra does not currently distinguish a deliberate HA
-raise from anything else, so it cannot be made to stand automatically.
-Corrections (power re-asserted, or an above-ceiling brightness pulled back
-down) are listed in `GET /house/fixtures`.
-The mode's per-fixture `level` dims the rest, below that ceiling; the music
-show's brightness is each fixture's `music_level`.
-`PUT /house/settings {"own_brightness": false}` turns ownership off.
+The Admiral's ruling (data/wled-bri-audit/report.md): **Spectra never writes
+a WLED's master brightness** (`json/state` `bri`, nor a segment's, nor
+`live.maxbri` / Force max brightness, which stays off). HA — or the WLED's
+own web page — owns it, and it scales Spectra's stream: what shows is the
+mode's `level` (pixel brightness) x the WLED's `bri`. This replaces R4's
+"HA removes its WLED brightness writes" for **brightness** (HA's per-mode /
+time-of-day WLED brightness goes back in HA); R4's **preset/effect** half
+still stands — HA must not fire WLED presets or effects while Spectra
+streams.
+
+- Every power write is exactly `{"on": true}` or `{"on": false}` (plus a
+  `{"live": false}` before an off), including every retry, so a WLED comes
+  back at its own last brightness. The one WLED transport refuses any body
+  carrying `bri` or `maxbri` (`fx/utils.py`, VENDOR #78).
+- **Power follows the mode, never re-asserted (D2a).** Spectra switches a
+  WLED's power only when the effective house mode changes (a TV source
+  starting counts), a lend ends, an override is posted, or the mains come
+  back. There is no periodic drift check: an HA "off" stands until the next
+  mode change. A Spectra restart under the same mode writes nothing.
+- Every WLED row's mode `level` / `music_level` was set to 100% at ship
+  (`scripts/migrate_house_wled_levels_full.py`, D3a), so HA carries the
+  brightness until the two are tuned together.
+- Capture / calibration runs never raise a dim fixture (D1a): they warn
+  ("raise it to 100% in Home Assistant") and measure as is; a night run
+  records the same request for the morning read. If HA should raise the
+  run's WLEDs for a night, do it on the `window_open` ping and restore on
+  `window_close`.
+- `own_brightness` / `owned_brightness` are retired: a `PUT
+  /house/settings` naming either is refused (422) by name.
 
 ### Voice (R8)
 
@@ -173,7 +180,7 @@ After HA switches `light.dimmer_kitchen_sconce` ON, call
 `POST /house/recheck {"fixtures": ["sconce-kitchen-left",
 "sconce-kitchen-right"]}`. Spectra re-finds them by hardware identity (a mains
 cycle can change the DHCP address), re-inits a driver that never resolved,
-and re-applies their power and brightness the moment they answer — looking
+and re-applies the mode's power (never a brightness) the moment they answer — looking
 for up to 45 s. It returns at once; progress is in `GET /house/fixtures`
 `rechecks`.
 
@@ -193,13 +200,13 @@ start.
 
 ### Releases hand power back (phase 3)
 
-While a mode drives the room Spectra holds every WLED on, at or below his
-own brightness ceiling (see Brightness above — never forced to full).
-Before its first such write it records what each fixture was
-(power + brightness); when the room is RELEASED it writes those back and
-checks them — so a fixture that was off before Spectra took the room is off
-after, even one River's restore does not capture (the dining-table
-under-glow). A restart keeps the picture and hands nothing back.
+Before its first power write to a WLED, Spectra records whether it was on;
+when the room is RELEASED it writes `{"on": <before>}` back — only where
+Spectra's own last switch left it different — and checks it, so a fixture
+that was off before Spectra took the room is off after, even one River's
+restore does not capture (the dining-table under-glow). No brightness is
+ever handed back (Spectra never changed it). A restart keeps the picture and
+hands nothing back.
 
 ### Restarts
 
@@ -218,8 +225,7 @@ levels, and held Hue areas stay held. The sconces' own realtime timeout is
  "voice_fixtures": ["crystal", "sconce-kitchen-left", "sconce-kitchen-right"],
  "voice_looks": {"listening": {"color": "#0000ff", "level": 100},
                  "processing": {"color": "#26a269", "level": 100},
-                 "responding": {"color": "#613583", "level": 100}},
- "own_brightness": true, "owned_brightness": 255}
+                 "responding": {"color": "#613583", "level": 100}}}
 ```
 
 A partial `PUT` keeps everything it does not name (one voice state's colour

@@ -14,20 +14,13 @@ WHAT THIS SHOWS, in order:
      same room, the same emitter, the same camera — at 100% and at 10%.
      Weight scales with the dimmer, and the thumbnail does NOT, which is the
      trap: the picture looks identical while the measurement is gone.
-  2. THE READ, against the real vendored `WLED.get_brightness`/
-     `set_brightness` over a stubbed transport, so the wire shape is proved
-     rather than assumed.
-  3. THE GUARD: the warning that lands before the cost, and the
-     take-it-to-full-and-give-it-back around a capture — including when the
-     capture raises, the case that would otherwise leave his lounge lit.
-  4. THE RESTORE OVER A BUSY CONTROLLER (2026-09-06): his `tv-backlight`
-     (.236) was taken to full for a commissioning capture and left there —
-     "could NOT be put back to 84% (ValueError)" — because the restore got
-     ONE shot at the vendored transport's blanket 0.5s, at the end of a run
-     that had spent ~35s pouring its own capture stream into a controller
-     that saturates under exactly that. Measured here at the wire, against
-     the REAL vendored `WLED` and a REAL local HTTP server that stops
-     answering promptly for the stretch the restore lands in.
+  2. THE READ, against the real vendored `WLED.get_brightness` over a
+     stubbed transport — and THE REFUSAL: since 2026-10-12 a WLED's
+     brightness is Home Assistant's, so the real transport refuses a body
+     carrying `bri` before anything reaches the wire.
+  3. THE GUARD: the warning that lands before the cost (naming Home
+     Assistant as the place to raise it), and a capture measured AS IS —
+     nothing written, including when the capture raises.
 
 Run from repo root: .venv/bin/python scripts/check_fixture_brightness.py
 No LedFX, no network, no live storage, no camera, no fixture.
@@ -113,7 +106,7 @@ async def main() -> int:
 
     print("\n== 2. the real vendored driver call, at the wire ==")
     from fx import utils as fx_utils
-    from fx.utils import WLED
+    from fx.utils import WLED, WLEDBrightnessRefused
     sent: list[dict] = []
 
     def _post(url, timeout=None, **kwargs):
@@ -128,33 +121,27 @@ async def main() -> int:
     try:
         wled = WLED("1.2.3.4")
         read = await wled.get_brightness()
-        await wled.set_brightness(read)            # the RESTORE shape
+        refused = ""
+        try:
+            await WLED._wled_request(fx_utils.requests.post, "1.2.3.4",
+                                     "json/state", json={"bri": 255})
+        except WLEDBrightnessRefused as exc:
+            refused = str(exc)
+        await WLED._wled_request(fx_utils.requests.post, "1.2.3.4",
+                                 "json/state", json={"on": True})
     finally:
-        fx_utils.requests.post = original_post
-        fx_utils.requests.get = original_get
-
+        fx_utils.requests.post, fx_utils.requests.get = original_post, original_get
     check(read == 26, f"get_brightness reads json/state's `bri` ({read}/255 "
-                      f"= {round(read * 100 / 255)}%, his own level)")
-    check(sent[0]["json"] == {"bri": 26},
-          f"set_brightness sends THE VALUE IT WAS GIVEN {sent[0]['json']} — "
-          f"upstream's double `max` forced every input to 255, so a restore "
-          f"would silently have set full and called itself a restore")
-    check(sent[0]["url"] == "http://1.2.3.4/json/state" and "data" not in sent[0],
-          f"as a JSON body to {sent[0]['url']} — upstream form-encoded it to "
-          f"a double-slashed URL")
+                      f"= {round(read * 100 / 255)}%)")
+    check(not hasattr(WLED, "set_brightness"),
+          "the vendored set_brightness is gone — nothing here writes it")
+    check(refused and "Home Assistant" in refused,
+          f"the real transport REFUSES a `bri` body before it reaches the "
+          f"wire: {refused!r}")
+    check(sent == [{"url": "http://1.2.3.4/json/state", "json": {"on": True}}],
+          f"…and a power-only body still goes out untouched ({sent})")
 
-    print("\n== 3. the guard ==")
-    readings = [fb.FixtureBrightness("tv-backlight", "read", 26),
-                fb.FixtureBrightness("sconce", "read", 255),
-                fb.FixtureBrightness("hue-lamp", "not_applicable")]
-    warning = fb.warning_for(readings)
-    print(f"   plan warning: {warning}")
-    check("TURNED DOWN" in warning and "tv-backlight at 10%" in warning,
-          "the plan names the fixture and its level BEFORE the room goes "
-          "dark — a warning after a four-minute run has arrived too late")
-    check("sconce" not in warning and "hue-lamp" not in warning,
-          "and says nothing about a fixture at full, or one with no such "
-          "setting to read (never a fabricated 255)")
+    print("\n== 3. the guard: warned before the cost, measured as is ==")
 
     class _Helper:
         def __init__(self, value):
@@ -163,119 +150,43 @@ async def main() -> int:
         async def get_brightness(self):
             return self.value
 
-        async def set_brightness(self, v):
-            self.writes.append(int(v))
-            self.value = int(v)
+        async def set_brightness(self, v):             # must never be called
+            self.writes.append(v)
 
     class _Device:
-        def __init__(self, i, h):
-            self.id, self.type, self.wled = i, "wled", h
+        def __init__(self, did, helper):
+            self.id, self.type, self.wled = did, "wled", helper
 
     helper = _Helper(26)
-    async with fb.owned([_Device("tv-backlight", helper)]) as owned:
+    readings = await fb.read_all([_Device("tv-backlight", helper)])
+    warning = fb.warning_for(readings)
+    print(f"   plan warning: {warning}")
+    check("TURNED DOWN" in warning and "Home Assistant" in warning,
+          "the plan warns before the room goes dark, and names Home "
+          "Assistant as where he raises it")
+    async with fb.measured_as_is([_Device("tv-backlight", helper)],
+                                 readings) as as_is:
         during = helper.value
-    check(during == 255 and helper.value == 26,
-          f"the capture runs at full ({during}) and his own level comes back "
-          f"({helper.value}) — writes {helper.writes}")
-    check(owned.restored == ["tv-backlight"] and not owned.problems,
-          "and the run can SAY it did, rather than a reader inferring it")
-
+    print(f"   run note: {as_is.note}")
+    check(during == 26 and helper.writes == [],
+          "the capture runs at HIS level and writes nothing")
     crashed = _Helper(26)
     try:
-        async with fb.owned([_Device("tv-backlight", crashed)]):
-            raise RuntimeError("the run died mid-capture")
+        async with fb.measured_as_is([_Device("tv-backlight", crashed)]):
+            raise RuntimeError("the capture died")
     except RuntimeError:
         pass
-    check(crashed.value == 26,
-          "THE FAILURE PATH: a run that dies mid-capture still hands his "
-          "brightness back — leaving his lounge at full would be a worse "
-          "bug than the one this fixes")
-
-    # ── 4. the restore, over a controller busy taking its own stream ──────
-    print("\n== 4. the restore, over a controller busy being photographed ==")
-
-    class _Saturating(_Helper):
-        """Refuses `refuse` writes before answering again — the shape a
-        controller saturated by its own capture stream actually fails in,
-        and the exact class the real transport raises on a read timeout."""
-
-        def __init__(self, value, refuse=0):
-            super().__init__(value)
-            self.refuse = refuse
-
-        async def set_brightness(self, v):
-            if self.refuse > 0:
-                self.refuse -= 1
-                raise ValueError("WLED 10.0.0.236: Failed to connect")
-            await super().set_brightness(v)
-
-    busy = _Saturating(214)
-    async with fb.owned([_Device("tv-backlight", busy)]) as owned:
-        busy.refuse = 2                    # the stream saturates it
-    check(busy.value == 214 and owned.restored == ["tv-backlight"]
-          and not owned.problems,
-          f"his own 84% comes back over a controller that refused the first "
-          f"two writes (fixture at {busy.value}) — one shot at .236 was "
-          f"never a restore, it was a coin flip")
-
-    class _Swallows(_Helper):
-        """Accepts every write and carries only the raise — a 2xx that says
-        nothing about what the fixture did with it."""
-
-        async def set_brightness(self, v):
-            self.writes.append(int(v))
-            if int(v) == fb.FULL:
-                self.value = fb.FULL
-
-    swallowed = _Swallows(214)
-    async with fb.owned([_Device("tv-backlight", swallowed)]) as owned:
-        pass
-    check(not owned.restored and owned.problems
-          and "84%" in owned.problems[0],
-          "a write ACCEPTED and not carried is caught by reading `bri` back "
-          "and named with his own level — a 2xx is not proof (SPECTRA_SPEC "
-          "§64, arriving one fixture type over)")
-
-    class _Mute(_Helper):
-        """Takes the write and then will not say how bright it is."""
-
-        def __init__(self, value):
-            super().__init__(value)
-            self.mute = False
-
-        async def get_brightness(self):
-            if self.mute:
-                raise ValueError("WLED 10.0.0.236: Failed to connect")
-            return self.value
-
-    mute = _Mute(214)
-    async with fb.owned([_Device("tv-backlight", mute)]) as owned:
-        mute.mute = True
-    check(mute.value == 214 and not owned.restored and owned.problems
-          and "could NOT be put back" not in owned.problems[0],
-          "and a write that WAS accepted but could not be confirmed gets a "
-          "different, softer sentence — sending him to a fixture that "
-          "probably already carries his level is noise, and \"we could not "
-          "check\" is not \"it is broken\"")
-
-    dead = _Saturating(214, refuse=99)
-    dead.refuse = 0
-    async with fb.owned([_Device("tv-backlight", dead)]) as owned:
-        dead.refuse = 99
-    check(not owned.restored and owned.problems
-          and "could NOT be put back to 84%" in owned.problems[0]
-          and "set it on the fixture itself" in owned.problems[0],
-          "a controller that never takes it is STILL loud, with his own "
-          "level in the sentence — a lounge left bright must be said out "
-          "loud, and that half of the night's behaviour is unchanged")
+    check(crashed.writes == [],
+          "a capture that raises writes nothing either — there is nothing to "
+          "put back")
 
     if FAILURES:
         print(f"\nFAILED {len(FAILURES)} check(s)")
         for f in FAILURES:
             print(f"  {f}")
         return 1
-    print("\nFIXTURE BRIGHTNESS: MEASURED, WARNED BEFORE THE COST, OWNED FOR "
-          "THE CAPTURE, GIVEN BACK — AND CONFIRMED BACK")
+    print("\nFIXTURE BRIGHTNESS: MEASURED, WARNED BEFORE THE COST, MEASURED "
+          "AS IS — NEVER WRITTEN (it is Home Assistant's)")
     return 0
 
 

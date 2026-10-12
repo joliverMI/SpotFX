@@ -7,22 +7,23 @@ less, which is the unseen threshold's own tail, and blocks plainly in shot
 reading a fraction of what the same room's whole-device map measured. The
 instrument was measuring his dimmer and nothing in the map said so.
 
-What is proved here:
+THE RULE SINCE 2026-10-12 (the Admiral, data/wled-bri-audit/report.md D1a):
+a WLED's master brightness is Home Assistant's, and Spectra never writes it
+— not even for a capture. What is proved here:
 
   * the fixture's own brightness is READ AT PLAN TIME and warned about
-    LOUDLY, before the room ever goes dark and before the cost is spent;
-  * a run TAKES the fixture to full for the capture and puts HIS level back
-    — including when the capture raises, which is the case that would
-    otherwise leave his lounge at full;
-  * a restore that genuinely fails is NAMED, never swallowed;
+    LOUDLY, before the room ever goes dark, naming what to do (raise it in
+    Home Assistant);
+  * a capture MEASURES AS IS: `measured_as_is` writes nothing — on entry,
+    on exit, or when the capture raises — and names every fixture captured
+    below full for the run's notes;
+  * a NIGHT run's request ("raise X to 100% in Home Assistant") is a
+    sentence for the morning, never a write;
   * a fixture with no such setting (Hue, e131, a dummy) is reported as "not
     applicable" and never given a fabricated full reading, and a fixture
     that could not be asked is reported as unreadable — the three states
     stay distinct, because "we could not ask" must never render as "fine";
-  * the vendored `WLED.set_brightness` actually sends the value it was
-    given. Upstream's double `max` forced every input to 255, which would
-    have turned every RESTORE into "set it to full" — the single most
-    damaging way this feature could have failed.
+  * the vendored `WLED.set_brightness` no longer exists.
 """
 from __future__ import annotations
 
@@ -47,9 +48,7 @@ class _Helper:
             raise OSError("no answer")
         return self.value
 
-    async def set_brightness(self, value):
-        if self.fail_set:
-            raise OSError("refused")
+    async def set_brightness(self, value):             # must never be called
         self.writes.append(int(value))
         self.value = int(value)
 
@@ -99,8 +98,9 @@ def test_the_warning_names_the_fixture_and_its_level():
     assert "TURNED DOWN" in warning
     assert "tv at 10%" in warning
     assert "lamp" not in warning              # a fixture at full is not nagged
-    # it says what the run will do about it, so he need not act
-    assert "put your own level back" in warning
+    # it says what HE can do — Spectra never changes it
+    assert "raise it to 100% in Home Assistant" in warning
+    assert "measures it as it is" in warning
 
 
 def test_nothing_to_say_says_nothing():
@@ -109,156 +109,59 @@ def test_nothing_to_say_says_nothing():
     assert fb.warning_for([]) == ""
 
 
-# ── 3. owning it for the capture, and giving it back ───────────────────────
+# ── 3. measured as is: never a write ───────────────────────────────────────
 
-def test_the_capture_takes_it_to_full_and_puts_his_level_back():
+def test_a_capture_measures_a_dim_fixture_as_is_and_names_it():
     helper = _Helper(26)
     device = _Device("tv", helper=helper)
     inside = []
 
     async def go():
-        async with fb.owned([device]) as owned:
+        async with fb.measured_as_is([device]) as as_is:
             inside.append(helper.value)
-            return owned
+            return as_is
 
-    owned = asyncio.run(go())
-    assert inside == [255]                    # full while being photographed
-    assert helper.value == 26                 # HIS level back afterwards
-    assert helper.writes == [255, 26]
-    assert owned.restored == ["tv"]
-    assert "tv (10% -> 100%)" in owned.raised[0]
-    assert not owned.problems
+    as_is = asyncio.run(go())
+    assert inside == [26]                     # his level while photographed
+    assert helper.value == 26 and helper.writes == []
+    assert "tv at 10%" in as_is.note
+    assert "Home Assistant" in as_is.note
 
 
-def test_his_level_comes_back_even_when_the_capture_raises():
+def test_nothing_is_written_even_when_the_capture_raises():
     helper = _Helper(26)
 
     async def go():
-        async with fb.owned([_Device("tv", helper=helper)]):
+        async with fb.measured_as_is([_Device("tv", helper=helper)]):
             raise RuntimeError("the run died mid-capture")
 
     with pytest.raises(RuntimeError, match="died mid-capture"):
         asyncio.run(go())
-    # the case that would otherwise leave his lounge at full all evening
-    assert helper.value == 26
-    assert helper.writes == [255, 26]
-
-
-def test_a_restore_that_fails_is_named_rather_than_swallowed():
-    class _FailsOnRestore(_Helper):
-        async def set_brightness(self, value):
-            if self.writes:                   # the second write is the restore
-                raise OSError("gone")
-            await super().set_brightness(value)
-
-    helper = _FailsOnRestore(26)
-
-    async def go():
-        async with fb.owned([_Device("tv", helper=helper)]) as owned:
-            pass
-        return owned
-
-    owned = asyncio.run(go())
-    assert owned.restored == []
-    assert len(owned.problems) == 1
-    assert "could NOT be put back to 10%" in owned.problems[0]
-    assert "set it on the fixture itself" in owned.problems[0]
-
-
-def test_a_fixture_already_at_full_is_never_written_to_at_all():
-    helper = _Helper(255)
-
-    async def go():
-        async with fb.owned([_Device("tv", helper=helper)]) as owned:
-            pass
-        return owned
-
-    owned = asyncio.run(go())
-    # no write means no restore that could fail — the quietest correct thing
     assert helper.writes == []
-    assert owned.raised == [] and owned.problems == []
 
 
-def test_an_unreadable_fixture_is_left_completely_alone():
-    helper = _Helper(fail_get=True)
-
-    async def go():
-        async with fb.owned([_Device("tv", helper=helper)]) as owned:
-            pass
-        return owned
-
-    owned = asyncio.run(go())
-    # never set to a value we would then have to guess how to undo
-    assert helper.writes == []
-    assert owned.raised == []
+def test_a_fixture_at_full_or_unreadable_gets_no_note():
+    for helper in (_Helper(255), _Helper(fail_get=True)):
+        async def go(h=helper):
+            async with fb.measured_as_is([_Device("tv", helper=h)]) as as_is:
+                return as_is
+        assert asyncio.run(go()).note == ""
+        assert helper.writes == []
 
 
-def test_a_fixture_that_will_not_turn_up_is_named_and_the_run_goes_on():
-    helper = _Helper(26, fail_set=True)
-
-    async def go():
-        async with fb.owned([_Device("tv", helper=helper)]) as owned:
-            pass
-        return owned
-
-    owned = asyncio.run(go())
-    assert owned.raised == []
-    assert "measured at 10% brightness and is not comparable" in owned.problems[0]
+def test_a_night_records_a_request_rather_than_writing():
+    readings = [fb.FixtureBrightness("crystal", "read", 34),
+                fb.FixtureBrightness("porch", "read", 255)]
+    request = fb.raise_request(readings)
+    assert request.startswith("Raise crystal (it was at 13%) to 100% in Home "
+                              "Assistant")
+    assert "porch" not in request
+    assert fb.raise_request([fb.FixtureBrightness("x", "read", 255)]) == ""
 
 
-# ── 4. the vendored driver call itself ─────────────────────────────────────
+# ── 4. the vendored driver call is gone ────────────────────────────────────
 
-def test_the_vendored_set_brightness_sends_the_value_it_was_given():
-    """Upstream's `max(0, max(int(x), 255))` forced EVERY input to 255, so a
-    restore would silently have set full and called itself a restore. Proved
-    against the real vendored function, at the request it builds."""
+def test_the_vendored_set_brightness_no_longer_exists():
     from fx.utils import WLED
-
-    sent = {}
-
-    class _Response:
-        ok = True
-
-        def json(self):
-            return {}
-
-    def _post(url, timeout=None, **kwargs):
-        sent["url"] = url
-        sent.update(kwargs)
-        return _Response()
-
-    import fx.utils as utils
-    original = utils.requests.post
-    utils.requests.post = _post
-    try:
-        asyncio.run(WLED("1.2.3.4").set_brightness(26))
-    finally:
-        utils.requests.post = original
-
-    assert sent["json"] == {"bri": 26}        # the value, not 255
-    assert "data" not in sent                 # JSON body, not form-encoded
-    assert sent["url"] == "http://1.2.3.4/json/state"   # no double slash
-
-
-def test_the_vendored_set_brightness_still_clamps_to_the_real_range():
-    from fx.utils import WLED
-
-    sent = []
-
-    class _Response:
-        ok = True
-
-    def _post(url, timeout=None, **kwargs):
-        sent.append(kwargs.get("json"))
-        return _Response()
-
-    import fx.utils as utils
-    original = utils.requests.post
-    utils.requests.post = _post
-    try:
-        asyncio.run(WLED("1.2.3.4").set_brightness(9999))
-        asyncio.run(WLED("1.2.3.4").set_brightness(-5))
-    finally:
-        utils.requests.post = original
-
-    assert sent == [{"bri": 255}, {"bri": 0}]
+    assert not hasattr(WLED, "set_brightness")
+    assert hasattr(WLED, "get_brightness")     # reading stays

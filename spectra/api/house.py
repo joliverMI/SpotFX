@@ -33,7 +33,7 @@ and ACTED ON only while a mode drives the room):
   PUT    /api/house/mains          {"fixtures": [...], "on": false|true} —
   POST                             phase 3: mains off = no stream, no search
   GET    /api/house/settings       the seam's settings (TV strip, voice
-  PUT                              fixtures and colours, owned brightness)
+  PUT                              fixtures and colours)
                                    and phase 4's CUTOVER SWITCH
                                    {"enabled": true|false} plus the Hue
                                    bulbs a mode leaves alone

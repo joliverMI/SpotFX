@@ -288,3 +288,20 @@ def test_the_modes_validate_against_the_seeded_scenes_and_sets(root, monkeypatch
     for mode in house_store.list_modes():
         problems, _warnings = api.validate_mode(mode)
         assert problems == [], (mode.name, problems)
+
+
+def test_every_wled_row_is_seeded_at_full(root, monkeypatch):
+    """D3a (2026-10-12): a WLED's brightness is Home Assistant's, so the
+    seeded Levels — which once stood in for HA's preset brightness — start
+    at 100% on every WLED row and the two are tuned together."""
+    from spectra import config as scfg
+    from spectra.services import house_store
+    seed.apply(seed.plan(root), root / "b")
+    monkeypatch.setattr(scfg, "HOUSE_MODES_FILE", root / "storage" / "spectra" / "house_modes.json")
+    wleds = {seed.CRYSTAL, seed.TV, seed.SCONCE_L, seed.SCONCE_R, seed.PORCH,
+             seed.TABLE}
+    rows = [(m.name, h) for m in house_store.list_modes() for h in m.fixtures
+            if h.target.kind == "fixture" and h.target.id in wleds and not h.off]
+    assert rows
+    assert all(h.level == 100.0 for _n, h in rows), \
+        [(n, h.target.id, h.level) for n, h in rows if h.level != 100.0]

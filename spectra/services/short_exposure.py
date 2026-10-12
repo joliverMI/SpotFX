@@ -90,8 +90,8 @@ THREE. OWN THE FLAG, AND GIVE IT BACK
 
 `exposure_dynamic_framerate` is HIS camera's setting, not this app's. A run
 pins it off for its own duration and the client puts back the value it read
-off the device before the pin — the `fixture_brightness.owned` contract one
-layer down, living in `spectra/capture_client/camera.py` because that is the
+off the device before the pin — `night_power.owned`'s own-the-flag
+contract one layer down, living in `spectra/capture_client/camera.py` because that is the
 only thing that can read the camera. A run un-pins by naming the control
 null, which every restore path here already does by re-applying the request
 it saved.
@@ -125,15 +125,16 @@ pose, on the night, clears the floor — only a live camera can say that.
 
 Three things follow anyway, and none of them is a fudge:
 
-  * THE FIXTURE GOES TO FULL. `fixture_brightness.owned` already takes every
-    controllable fixture to full firmware brightness for a capture and puts
-    his own level back; the map, the commissioning pass and the pose
-    fingerprint have always run inside it and THE LEVER SELF-TEST NEVER DID.
-    It does now, which is the compensation this build can actually deliver.
+  * THE FIXTURE'S OWN BRIGHTNESS IS NAMED, NOT RAISED. Until 2026-10-12
+    every capture took a dim fixture to full and put his level back; a
+    WLED's master brightness is Home Assistant's now, so the lever
+    self-test (like every capture path) reads it and NAMES a fixture below
+    full in its notes (`fixture_brightness.measured_as_is`) — raise it in
+    Home Assistant for the bright regime to have the light it needs.
   * THERE IS NO HEADROOM LEFT IN THE LAMP, and saying so is more use than
     pretending otherwise: `room_mapping.LIT_BRIGHTNESS` is already 1.0, the
-    commissioning pattern lamp already writes `brightness: 1.0`, and
-    `fixture_brightness.FULL` is already 255. Full is full.
+    commissioning pattern lamp already writes `brightness: 1.0`, and a
+    fixture's own master brightness is his to set in Home Assistant.
   * SO A REGIME THAT STILL CANNOT SEE SAYS THAT. It is reported as what it
     is — "not enough light at the exposure this camera can hold" — never as
     a pass, and never by lowering the floor. `mapping_refusals.

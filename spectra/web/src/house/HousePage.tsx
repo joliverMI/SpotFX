@@ -302,7 +302,7 @@ function EnergyLines({ lighting }: { lighting: LightingStatus }) {
 
 /** What Home Assistant has told Spectra about the fixtures (phase 2): the
  * TV strip lent to Hyperion, the media centre, Serenity's voice, a fixture
- * switched off, a brightness Spectra had to put back. Read-only — Home
+ * switched off, a power handed back on release. Read-only — Home
  * Assistant and its buttons are the controls. */
 function SeamLines({ lighting }: { lighting: LightingStatus }) {
   const lines = seamLines(lighting);
@@ -523,7 +523,7 @@ function FixtureRow({ hook, targets, onChange, onRemove }: {
         <input type="number" min={1} max={60} placeholder="—" value={hook.fps ?? ''}
           onChange={(e) => set({ fps: num(e.target.value) })} />fps
       </label>
-      <label className="house-inline" title="Brightness while the music show has the room; empty = the picture's own (100%). Spectra holds each WLED's own brightness at full, so this is the music level.">music
+      <label className="house-inline" title="Brightness while the music show has the room; empty = the picture's own (100%). It multiplies with each WLED's own brightness, which is Home Assistant's — Spectra never changes it.">music
         <input type="number" min={0} max={200} placeholder="—" value={hook.music_level ?? ''}
           onChange={(e) => set({ music_level: num(e.target.value) })} />%
       </label>

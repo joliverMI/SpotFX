@@ -221,7 +221,9 @@ def _what_waits(night: dict, cal_link: dict, state: str) -> list[str]:
 
     Every entry here is sourced from a record: the night's own refusal, the
     calibration's `applied` flag, the exit report's own `problems`. Nothing
-    is inferred."""
+    is inferred — a turned-down fixture comes from the night's own
+    `brightness` block (Spectra never raises it; he does, in Home
+    Assistant)."""
     from spectra.services import night_run
     out: list[str] = []
     if state == night_run.STATE_DECLINED:
@@ -244,6 +246,9 @@ def _what_waits(night: dict, cal_link: dict, state: str) -> list[str]:
                    f"'{cal_link.get('name') or 'this calibration'}' again: "
                    f"it was cut short, so nothing it measured was applied "
                    f"and your room is still on the previous calibration.")
+    request = (night.get("brightness") or {}).get("request")
+    if request:
+        out.append(request)
     for problem in (night.get("exit") or {}).get("problems") or []:
         out.append(problem)
     return out

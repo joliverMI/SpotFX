@@ -156,8 +156,8 @@ def test_dispatch_reaches_a_house_operation():
 # ═══ house-wide settings (Sonic coverage audit build item C, 2026-10-06):
 # read all of HouseSettings; change the cutover switch, the energy knobs,
 # and Serenity's voice colours — never the seam-wiring/safety-fence fields
-# (hue_excluded_lights/tv_strips/voice_fixtures/own_brightness/
-# owned_brightness stay read-only). ═══════════════════════════════════
+# (hue_excluded_lights/tv_strips/voice_fixtures stay read-only; the WLED
+# brightness settings were retired 2026-10-12). ═══════════════════════════
 
 def test_get_house_settings_reads_everything(lib):
     # tests/conftest.py's autouse _isolated_house fixture writes enabled=True
@@ -169,8 +169,8 @@ def test_get_house_settings_reads_everything(lib):
     assert "hue_excluded_lights" in settings
     assert "tv_strips" in settings
     assert "voice_fixtures" in settings
-    assert "own_brightness" in settings
-    assert "owned_brightness" in settings
+    assert "own_brightness" not in settings       # retired: HA's brightness
+    assert "owned_brightness" not in settings
     assert "energy" in settings and "voice_looks" in settings
 
 
@@ -267,7 +267,6 @@ def test_every_house_settings_field_is_settable_or_read_only():
     READ_ONLY_SEAM_WIRING = {
         "hue_excluded_lights",  # a safety fence around bulbs outside the room
         "tv_strips", "voice_fixtures",          # set once at cutover with River
-        "own_brightness", "owned_brightness",   # seam wiring
     }
     accounted = WRITABLE_TOP_LEVEL | WRITABLE_NESTED | READ_ONLY_SEAM_WIRING
     assert set(HouseSettings.model_fields) == accounted

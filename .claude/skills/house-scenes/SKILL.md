@@ -13,7 +13,7 @@ description: >
 
 `scripts/seed_house_lighting.py`'s module docstring is the binding
 statement: what it writes, where every number came from (Home Assistant's
-own scenes and WLED presets, read 2026-10-05), and the four decisions the
+own scenes, read 2026-10-05), and the four decisions the
 data encodes. The short list of traps:
 
 1. **"Calm - Evening" is a group of COPIES.** A set fired by its own id
@@ -35,13 +35,23 @@ data encodes. The short list of traps:
 
 | Mode | HA words | Scene / colours | Crystal | Strips | Singles | Hue | Music |
 |---|---|---|---|---|---|---|---|
-| Standard | Daytime, Party | House Star / Calm | 6% | 40% | 100% breathe | 3521 K full | show, Hue Hold switch |
-| Evening | Evening | House Star / Calm - Evening | 13% | 30% | 100% | 2000 K / 2005 K full | show, switch |
-| Dim | Dim | House Fish / Night Light | 3% | 12% | 50% | red-orange 50% / full | show, switch |
-| Night light | Bedtime | House Fish / Night Light | 3% (fish only) | off | off | off | ignore |
+| Standard | Daytime, Party | House Star / Calm | 100% | 100% | 100% breathe | 3521 K full | show, Hue Hold switch |
+| Evening | Evening | House Star / Calm - Evening | 100% | 100% | 100% | 2000 K / 2005 K full | show, switch |
+| Dim | Dim | House Fish / Night Light | 100% | 100% | 100% | red-orange 50% / full | show, switch |
+| Night light | Bedtime | House Fish / Night Light | 100% (fish only) | off | off | off | ignore |
 | Away | Travel, Away | House Star / Calm | off | off | off | off | ignore |
-| TV | TV | House Star / Calm - Evening | 1.2% | 15% (TV strip lent) | 30% | off | ignore |
-| TV paused | TV paused | House Star / Calm - Evening | 6% | 35% | 60% | #ff9d31 29% / 2095 K 54% | ignore |
+| TV | TV | House Star / Calm - Evening | 100% | 100% (TV strip lent) | 100% | off | ignore |
+| TV paused | TV paused | House Star / Calm - Evening | 100% | 100% | 100% | #ff9d31 29% / 2095 K 54% | ignore |
+
+**Every WLED row's Level is 100% (D3a, 2026-10-12).** A WLED's master
+brightness is Home Assistant's and Spectra never writes it, and a Level is
+pixel brightness that MULTIPLIES with it. The first seed put HA's own WLED
+preset brightnesses here (crystal 6/13/3/3/1.2/6%, strips 40/30/12/15/35%,
+singles 100/100/50/30/60%) because Spectra owned the master brightness then;
+those now belong to Home Assistant (per mode / time of day), and the two
+are tuned together. `scripts/migrate_house_wled_levels_full.py` is the
+one-time catch-up for his already-seeded library (dry run default,
+`--apply` with `--spectra-url`, through `POST /api/house/modes`).
 
 "unknown"/"unavailable" are deliberately unmapped (an HA restart keeps the
 current mode). The seeder writes no Hue exclusion

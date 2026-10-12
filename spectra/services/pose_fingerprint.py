@@ -348,16 +348,16 @@ async def measure(room: RoomMap, deps: "room_mapping.RunDeps", *,
     if sess is not None:
         sess.run_abort = None
     try:
-        # OWN THE FIXTURES' OWN FIRMWARE BRIGHTNESS for the pass, exactly as
-        # `run_mapping` does, and give his levels back on the way out. It
-        # matters MORE here than it does for a map: an anchor's weight is
-        # compared against the same anchor's weight weeks later, and a
-        # fixture left at 10% would move every one of those weights at once
-        # — which this judges, correctly but uselessly, as "something
-        # changed and I cannot tell what". Taking each fixture to full at
-        # both ends removes that whole class of unreadable answer.
-        async with fixture_brightness.owned(
-                *await _brightness_guard(plan, quiet)) as owned:
+        # THE FIXTURES' OWN FIRMWARE BRIGHTNESS, MEASURED AS IS (Home
+        # Assistant's, never written — 2026-10-12). It matters MORE here
+        # than for a map: an anchor's weight is compared against the same
+        # anchor's weight weeks later, and a fixture whose brightness moved
+        # in between moves every one of those weights at once — which this
+        # judges, correctly, as "something changed and I cannot tell what".
+        # The notes name every fixture read below full so that answer is
+        # explainable.
+        async with fixture_brightness.measured_as_is(
+                *await _brightness_guard(plan, quiet)) as as_is:
             for emitter in chosen:
                 lit = [v for v in emitter.virtual_ids if v in set(scope)]
                 outcome = await room_mapping._map_one(      # noqa: SLF001
@@ -370,9 +370,8 @@ async def measure(room: RoomMap, deps: "room_mapping.RunDeps", *,
                 if getattr(sess, "run_abort", None):
                     out.problems.append(sess.run_abort)
                     break
-        out.problems.extend(owned.problems)
-        if owned.note:
-            out.notes.append(owned.note)
+        if as_is.note:
+            out.notes.append(as_is.note)
     finally:
         try:
             await quiet.close_hold()
@@ -393,11 +392,10 @@ async def measure(room: RoomMap, deps: "room_mapping.RunDeps", *,
 
 
 async def _brightness_guard(plan, deps) -> tuple[list, list]:
-    """`(devices, readings)` for `fixture_brightness.owned` — the plan's own
-    already-taken readings and the live driver objects they name. The plan
-    read them while the room was still lit and nothing had been spent; this
-    is the acting half, and reusing the plan's readings is what keeps the
-    two from being two different opinions of the same fixture."""
+    """`(devices, readings)` for `fixture_brightness.measured_as_is` — the
+    plan's own already-taken readings and the live driver objects they name.
+    Reusing the plan's readings is what keeps the two from being two
+    different opinions of the same fixture."""
     readings = [fixture_brightness.FixtureBrightness(
         device_id=b["device_id"], state=b["state"], value=b["value"],
         reason=b["reason"]) for b in (getattr(plan, "brightness", None) or [])]

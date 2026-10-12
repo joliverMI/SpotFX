@@ -21,9 +21,9 @@ library — the House page's button, his press); taking or releasing the room
 (no domain here has that authority; settings_agent.py's boundary argument);
 anything that writes Home Assistant (River's side of the seam);
 `hue_excluded_lights` (a safety fence around bulbs outside the room) and
-the seam-wiring fields (`tv_strips`/`voice_fixtures`/`own_brightness`/
-`owned_brightness`, set once at cutover with River) — readable, never
-writable, from here.
+the seam-wiring fields (`tv_strips`/`voice_fixtures`, set once at cutover
+with River) — readable, never writable, from here. A WLED's master
+brightness is no Spectra setting at all (Home Assistant's, 2026-10-12).
 
 NAMES ARE NEVER GUESSED. A mode, scene, colour set, category, fixture or Hue
 area named by a person resolves only on an exact id or case-insensitive
@@ -358,9 +358,10 @@ async def _op_set_house_mode_pool(mode: str, pool: str, names: list[str],
 # mode never touches — a dropped name here could light or switch off a
 # bulb nobody meant to touch; the list is empty by default (every bulb,
 # Loft Ceiling Uplight and the three Ledge lights included, is an
-# ordinary house-mode bulb) — tv_strips/voice_fixtures/own_brightness/owned_
-# brightness — seam wiring set once at cutover with River, not a
-# standing setting. All four stay READABLE via get_house_settings; none
+# ordinary house-mode bulb) — tv_strips/voice_fixtures — seam wiring set
+# once at cutover with River, not a standing setting. (own_brightness/
+# owned_brightness were retired 2026-10-12: a WLED's master brightness is
+# Home Assistant's.) All three stay READABLE via get_house_settings; none
 # is writable from here. enabled is BOTH directions (his ruling,
 # 2026-10-06: "both on and off") — unlike the audit's own cautious
 # default, which only proposed "off". ═══════════════════════════════════
@@ -551,12 +552,14 @@ OPERATIONS: dict[str, SonicOperation] = {
         name="get_house_settings", domain="house", kind="read",
         summary="Read the house-wide seam settings: the cutover switch, "
                 "Hue bulbs a mode leaves alone, the TV strip/voice "
-                "fixtures, owned brightness, and the energy block.",
-        instructions="hue_excluded_lights/tv_strips/voice_fixtures/"
-                    "own_brightness/owned_brightness are READ ONLY here "
-                    "(seam wiring, or a safety fence around bulbs outside "
-                    "the room) — use set_house_lighting_enabled/"
-                    "set_house_energy/set_house_voice_look for what can change.",
+                "fixtures, and the energy block.",
+        instructions="hue_excluded_lights/tv_strips/voice_fixtures are READ "
+                    "ONLY here (seam wiring, or a safety fence around bulbs "
+                    "outside the room) — use set_house_lighting_enabled/"
+                    "set_house_energy/set_house_voice_look for what can "
+                    "change. A WLED's master brightness is not a Spectra "
+                    "setting at all: it is Home Assistant's (or the "
+                    "fixture's own page's), and Spectra never writes it.",
         input_schema=_EMPTY, handler=_op_get_house_settings),
     "set_house_lighting_enabled": SonicOperation(
         name="set_house_lighting_enabled", domain="house", kind="write",
@@ -595,8 +598,9 @@ OPERATIONS: dict[str, SonicOperation] = {
         name="set_house_voice_look", domain="house", kind="write",
         summary="Change Serenity's colour and/or level for one voice "
                 "state (listening, processing, responding).",
-        instructions="level is a percent of full, over Spectra's owned "
-                    "master brightness (1-200). Give colour, level, or both.",
+        instructions="level is a percent of the pixels' full colour "
+                    "(1-200); a WLED's master brightness on top is Home "
+                    "Assistant's. Give colour, level, or both.",
         input_schema={"type": "object",
                       "properties": {"state": {"type": "string", "enum": list(VOICE_STATES)},
                                      "color": {"type": "string"},

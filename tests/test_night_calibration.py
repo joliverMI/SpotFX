@@ -601,3 +601,29 @@ def test_the_morning_read_says_a_declined_night_declined_and_why(monkeypatch):
 
 def test_the_morning_read_with_no_night_at_all_says_that(monkeypatch):
     assert "No night run has happened yet." in morning_read.build()["summary"]
+
+
+def test_a_turned_down_fixture_is_a_request_for_the_morning_never_a_write():
+    """2026-10-12 (D1a): a WLED's brightness is Home Assistant's. A night
+    reads each run fixture's brightness and, when it is low, RECORDS a
+    request — the morning read puts it on his list; nothing is written."""
+    class _Helper:
+        def __init__(self, value):
+            self.value, self.writes = value, []
+
+        async def get_brightness(self):
+            return self.value
+
+        async def set_brightness(self, value):            # must never run
+            self.writes.append(value)
+
+    dim, full = _Helper(34), _Helper(255)
+    devices = [type("D", (), {"id": "crystal", "type": "wled", "wled": dim})(),
+               type("D", (), {"id": "porch", "type": "wled", "wled": full})()]
+    block = _run(night_run._brightness_request(devices))
+    assert dim.writes == [] and full.writes == []
+    assert block["request"].startswith("Raise crystal (it was at 13%) to 100% "
+                                       "in Home Assistant")
+    assert "porch" not in block["request"]
+    waiting = morning_read._what_waits({"brightness": block}, {}, "finished")
+    assert block["request"] in waiting

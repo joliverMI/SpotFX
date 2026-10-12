@@ -338,6 +338,45 @@ def async_callback(loop, callback, *args):
 WLED_BRIGHTNESS_TIMEOUT_S = 3.0
 
 
+class WLEDBrightnessRefused(ValueError):
+    """A json body that would set a WLED's master (or segment) brightness.
+    A ValueError, so every caller that already treats a transport failure
+    as "not accepted" names it rather than crashing."""
+
+
+def _has_key(body, key: str) -> bool:
+    if isinstance(body, dict):
+        return key in body or any(_has_key(v, key) for v in body.values())
+    if isinstance(body, (list, tuple)):
+        return any(_has_key(v, key) for v in body)
+    return False
+
+
+def wled_brightness_refusal(body) -> str:
+    """Why `body` may not be sent to a WLED, or "". Spectra never writes a
+    WLED's brightness: it belongs to Home Assistant or the fixture's own
+    page (fx/VENDOR.md #78, spectra/services/house_fixtures.py). Refused:
+    `bri` at the top level or inside a segment, and `maxbri` anywhere (the
+    realtime "Force max brightness" switch in json/cfg — it must stay off so
+    Home Assistant's brightness keeps scaling the stream)."""
+    if not isinstance(body, dict):
+        return ""
+    if _has_key(body, "maxbri"):
+        return ("refused to send \"maxbri\" (Force max brightness) — it stays "
+                "off so a WLED's brightness stays Home Assistant's")
+    if "bri" in body:
+        return ("refused to send a master brightness (\"bri\") — a WLED's "
+                "brightness is Home Assistant's, never Spectra's")
+    segs = body.get("seg")
+    if not isinstance(segs, list):
+        segs = [segs]
+    for seg in segs:
+        if isinstance(seg, dict) and "bri" in seg:
+            return ("refused to send a segment brightness (\"seg\"[].\"bri\") — "
+                    "a WLED's brightness is Home Assistant's, never Spectra's")
+    return ""
+
+
 class WLED:
     """
     A collection of WLED helper functions
@@ -356,6 +395,17 @@ class WLED:
     async def _wled_request(
         method, ip_address, endpoint, timeout=0.5, **kwargs
     ):
+        # SPOT-FX DEVIATION (fx/VENDOR.md #78): a WLED's MASTER brightness
+        # is Home Assistant's (the Admiral, 2026-10-12). This is the one
+        # transport every WLED write in this fork goes through, so it
+        # refuses a body (json= or data=) that would set `bri` — at the top
+        # level or on a segment — or `maxbri` anywhere, rather than
+        # trusting every caller to remember. `flush_sync_settings` always
+        # carries `maxbri` (the read-back sync block), so it is refused too.
+        refusal = (wled_brightness_refusal(kwargs.get("json"))
+                   or wled_brightness_refusal(kwargs.get("data")))
+        if refusal:
+            raise WLEDBrightnessRefused(f"WLED {ip_address}: {refusal}")
         url = f"http://{ip_address}/{endpoint}"
 
         try:
@@ -543,52 +593,6 @@ class WLED:
             "WLED %s: Turned %s.", self.ip_address, "on" if state else "off"
         )
 
-    async def set_brightness(self, brightness, timeout=WLED_BRIGHTNESS_TIMEOUT_S):
-        """
-            Uses a JSON API post call to adjust a WLED compatible device's
-            MASTER (firmware) brightness — the `bri` field of json/state,
-            which scales everything the fixture emits including a realtime
-            stream. Distinct from any effect's own brightness.
-
-        Args:
-            brightness (int): The brightness value between 0-255
-            timeout (float): per-request budget, defaulting to
-                WLED_BRIGHTNESS_TIMEOUT_S above rather than the transport's
-                blanket 0.5s (fx/VENDOR.md #34) — a control write that has
-                to land on a controller busy taking its own realtime stream
-                needs a budget that binds, and 0.5s is what stranded a
-                fixture at full on 2026-09-06.
-
-        SPOT-FX DEVIATION (fx/VENDOR.md #26). Upstream this function had
-        never been called by anything — `grep` finds no caller in the fork —
-        and it was broken three ways, each of which this fixes:
-
-          * `max(0, max(int(brightness), 255))` is a double `max`, so EVERY
-            input came out >= 255. Setting full worked by accident;
-            RESTORING someone's own level would silently set it to full and
-            call that a restore. That one mattered most: this is used to put
-            his fixture BACK.
-          * `data=bri` form-encodes the body (`bri=255`), where WLED's JSON
-            API needs a JSON one. `release_realtime` above — SpotFX's own
-            addition — already shows the working shape (`json=`).
-          * the endpoint's leading slash makes the URL `http://ip//json/state`.
-
-        Fixed rather than reimplemented in spectra/: this is the device
-        transport, which is fx/'s job, and a second copy of a WLED call
-        living in spectra/ is exactly the drift `release_realtime` avoided.
-        """
-        # cast to int and clamp to range (upstream's own stated intent)
-        brightness = max(0, min(int(brightness), 255))
-
-        await WLED._wled_request(
-            requests.post, self.ip_address, "json/state",
-            timeout=timeout, json={"bri": brightness}
-        )
-
-        _LOGGER.info(
-            "WLED %s: Set brightness to %s.", self.ip_address, brightness
-        )
-
     async def get_brightness(self, timeout=WLED_BRIGHTNESS_TIMEOUT_S):
         """The fixture's current MASTER (firmware) brightness, 0-255, off
         json/state's `bri`. SPOT-FX addition (fx/VENDOR.md #26): a run that
@@ -596,14 +600,11 @@ class WLED:
         that warns about a dim fixture has to read it before the room ever
         goes dark.
 
-        It runs at WLED_BRIGHTNESS_TIMEOUT_S for the same reason the write
-        does (fx/VENDOR.md #34), and it matters twice over: this read is
-        also the READ-BACK that confirms a restore landed, taken over the
-        same busy controller that just refused the write. At the shipped
-        0.5s a saturated fixture also read as `unreadable` at PLAN time,
-        which `fixture_brightness.owned` correctly leaves completely
-        alone — so the run would then measure his dim level with nothing
-        but a "we could not ask" note to show for it."""
+        It runs at WLED_BRIGHTNESS_TIMEOUT_S (fx/VENDOR.md #34): at the
+        shipped 0.5s a saturated fixture read as `unreadable` at PLAN time,
+        so a run measured his dim level with nothing but a "we could not
+        ask" note to show for it. READ ONLY — since 2026-10-12 nothing in
+        this fork writes a WLED's master brightness (VENDOR #78)."""
         response = await WLED._wled_request(
             requests.get, self.ip_address, "json/state", timeout=timeout)
         return int(response.json().get("bri", 0))
@@ -626,6 +627,11 @@ class WLED:
         Updates internal sync settings to enable "Force Max Brightness"
 
         {"if": {"live": {"maxbri": True|False}}}
+
+        SPOT-FX NOTE (fx/VENDOR.md #78): never called, and it could never
+        reach a fixture — the only flush (`flush_sync_settings`) is refused
+        at `_wled_request` for carrying `maxbri`. Force max brightness stays
+        OFF on his WLEDs so Home Assistant's brightness scales the stream.
         """
         self.sync_settings["if"]["live"]["maxbri"] = True
 

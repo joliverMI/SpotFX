@@ -141,14 +141,16 @@ export interface SeamFixture {
 }
 
 export interface SeamFixtures {
-  acting: boolean; reason: string | null; own_brightness: boolean; owned_brightness: number;
+  acting: boolean; reason: string | null;
+  /** A WLED's master brightness is Home Assistant's — Spectra never writes it (2026-10-12). */
+  brightness_owner?: 'home_assistant';
   tv_music: boolean | null; fixtures: SeamFixture[]; withheld: Record<string, string>;
-  corrections: { at_ms: number; device: string; target: string; found: { on: boolean | null; bri: number | null };
-    set: Record<string, unknown>; outcome: string; detail: string }[];
+  /** The last power Spectra switched each WLED to, and under which mode — re-sent only on a mode change. */
+  power_applied?: Record<string, { mode: string; target: string; on: boolean | null; at_ms: number }>;
   rechecks: Record<string, { state: string; attempts?: number; after_s?: number; reason?: string; moved?: boolean }>;
   mains_off?: Record<string, number>;
-  pre_take?: Record<string, { on: boolean; bri: number | null; at_ms: number }>;
-  handed_back?: { at_ms: number; device: string; set: { on: boolean; bri?: number }; outcome: string; detail: string }[];
+  pre_take?: Record<string, { on: boolean; at_ms: number }>;
+  handed_back?: { at_ms: number; device: string; set: { on: boolean }; outcome: string; detail: string }[];
 }
 
 export interface SeamVoice {

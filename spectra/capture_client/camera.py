@@ -398,8 +398,8 @@ DYNAMIC_FRAMERATE_OFF = 0
 #: AND A SWITCH IS OWNED, NOT JUST SET. The value read off the device before
 #: the first pin is remembered and written back the moment the switch is
 #: un-pinned (named null in a `config` message) — his camera's setting,
-#: borrowed for a run and given back, which is `fixture_brightness.owned`
-#: one layer down. A killed client leaves it pinned off: unlike a lounge
+#: borrowed for a run and given back (`night_power.owned`'s own pattern,
+#: one layer down). A killed client leaves it pinned off: unlike a lounge
 #: left at full brightness that costs nothing and is corrected by the next
 #: run's own un-pin, so there is deliberately no file anywhere holding it.
 SWITCHES: tuple[tuple[str, tuple[str, ...]], ...] = (
@@ -937,7 +937,7 @@ class V4L2Camera(BaseCamera):
 
     def _apply_switches(self, wanted: dict, controls: dict) -> None:
         """OWN A PINNED SWITCH FOR A RUN, AND GIVE IT BACK — the
-        `fixture_brightness.owned` contract, one layer down and living here
+        `night_power.owned` contract, one layer down and living here
         because this is the only thing that can read the camera.
 
         THREE STATES, and the middle one is the whole of it:
