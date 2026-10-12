@@ -131,10 +131,15 @@ Hole switch is still the SWALLOWED meld, untouched. `fx/effects/transition_progr
 
 ## Sonic reach
 
-No direct param edit — same rule as every effect here; reachable only
-through an already-attached `FlareKind` on Fireworks V2. The melds' two
-room tunables (`drop_switch_swallow_delay_s`, `drop_switch_hit_threshold`)
-are settings-registry keys.
+No direct param edit on the 2-D Matrix effect — same rule as every effect
+here; reachable only through an already-attached `FlareKind` on Fireworks
+V2. The strip (`fireworks1d`) is the one exception: a registered param's
+current value on one scene entry is reachable through
+`set_scene_entry_param` (since 2026-10-06), which includes the strip's
+strip-phase tunables (`charge_fill` … `flare_punch_glow`, registered on
+`fireworks1d`) — including its own non-zero `lull_ember` default. The
+melds' two room tunables (`drop_switch_swallow_delay_s`,
+`drop_switch_hit_threshold`) are settings-registry keys.
 
 ## Executable proofs
 
