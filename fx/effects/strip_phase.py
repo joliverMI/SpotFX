@@ -24,7 +24,8 @@ effect.
 WHAT IT LISTENS TO — only keys SpotFX sends on a phase write (spectra
 scene_response._drive_phase): `phase`, `phase_progress`, the lull's
 dark-point timing (`lull_ramp_s`/`lull_dark_s`, fx/effects/lull_dark.py),
-`drop_intensity` (fx/effects/lull_handoff.py), plus three this layer adds:
+`drop_intensity` (fx/effects/lull_handoff.py), `drop_shock_on` (the
+Shockwave's switches, below), plus three this layer adds:
 `strip_phase_strength` (the room's master, pushed on every arm write),
 `flare_punch` (a self-resetting poke, the `burst_rockets` shape) and
 `flare_punch_hold_s` (the punching flare's own hold). None of them is in
@@ -73,6 +74,14 @@ are the plan's first guesses, pending his live tuning pass):
            drop_settle_s; white guard on until the drop has settled. The
            drop runs on its OWN clock, so a phase reset to "none" (a track
            change's release) never cuts it short.
+           THE SHOCKWAVE'S SWITCHES (2026-10-12, the Admiral: "stip
+           shockwave, yes"): the wave and its flood obey the crystal
+           Shockwave's three switches — the room's drop_shock_enabled, the
+           showing scene's own, and drop_shock_min_energy against the top
+           bar's Energy at the drop — told on the drop arm as
+           `drop_shock_on` (fx/effects/phase_grammar.shock_allowed is the
+           one rule; untold = True). Told False only the wave and flood
+           are skipped: the colour brightness, activity and fill still run.
 
 A FLARE IN THE LULL'S DARK PUNCHES THROUGH (his answer 5): while a lull is
 running, a `flare_punch` poke opens lull_dark.punch_envelope; the fade
@@ -168,7 +177,8 @@ from typing import NamedTuple, Optional
 import numpy as np
 import voluptuous as vol
 
-from fx.effects import Effect, lull_dark, lull_handoff, particle_handoff
+from fx.effects import (Effect, lull_dark, lull_handoff, particle_handoff,
+                        phase_grammar)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -271,7 +281,8 @@ def tunable_fields(**overrides) -> dict:
 
 # The keys SpotFX pushes (never in the registry).
 PUSHED_KEYS = ("phase", "phase_progress", *lull_dark.KEYS,
-               lull_handoff.DROP_KEY, STRENGTH_KEY, PUNCH_KEY, PUNCH_HOLD_KEY)
+               lull_handoff.DROP_KEY, STRENGTH_KEY, PUNCH_KEY, PUNCH_HOLD_KEY,
+               phase_grammar.SHOCK_ON_KEY)
 
 HELP_TOPIC = "strip-phases"
 
@@ -324,6 +335,7 @@ def _schema() -> vol.Schema:
         ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1.0)),
         **lull_dark.schema_fields(),
         **lull_handoff.drop_schema_fields(),
+        **phase_grammar.shock_on_schema_fields(),
         vol.Optional(
             STRENGTH_KEY,
             description="The room's strip phase strength (driven by SpotFX; 0 = off)",
@@ -660,7 +672,11 @@ class StripPhase(Effect):
             fill = self._sp_drop_fill * (1.0 - _smoothstep(t / DROP_FILL_CARRY_S))
             told = lull_handoff.drop_intensity(cfg)
             size = UNTOLD_DROP_INTENSITY if told is None else told
-            wave = float(cfg["drop_shockwave"]) * size
+            # THE SHOCKWAVE'S SWITCHES (module docstring): told off — the
+            # room's switch, the scene's, or the energy floor — the wave and
+            # its flood are skipped; gain, activity and fill still run
+            wave = (float(cfg["drop_shockwave"]) * size
+                    if phase_grammar.shock_on(cfg) else 0.0)
             guard = float(cfg["white_guard"])
             self._sp_raw = (gain, fill, act)
         else:

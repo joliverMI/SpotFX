@@ -31,6 +31,10 @@ ENTRY_R = 1.35      # normalized radius where new particles appear
 CHARGE_PEAK_N = 10   # population grows to this, then sheds to 1
 CHARGE_PEAK_AT = 0.45  # progress fraction where the shed begins
 LULL_FALL_S = 3.0    # fall-to-center fallback when no lull ramp arrives
+# The breath-hold before the drop (phase_grammar "WHO BREATHES") dims Orbits
+# to this share of its lull picture — the lull's one blob stays, dim — never
+# to true black (his to tune).
+BREATH_FLOOR_DIM = 0.25
 # THE LULL HAND-OFF HOOK (fx/effects/lull_handoff.py; drop-scene-variety
 # phase 3, fx/VENDOR.md #64). Told `lull_keep` N > 1 — a lull leading into
 # Fireworks asks for 3 — the lull keeps N blobs instead of its one, and the
@@ -84,6 +88,10 @@ class Orbits2d(Twod, GradientEffect):
     # ring; its debris curves back onto the ring
     DROP_SHOCK = True
     SHOCK_DEBRIS_FATE = "return"
+    # THE BREATH-HOLD keeps the lull's one blob, dim (2026-10-12, the
+    # Admiral: "orbits should keep at least one dim blob"): the short black
+    # before the drop dims the panel to this share instead of true black.
+    BREATH_FLOOR = BREATH_FLOOR_DIM
     CATEGORY = "Matrix"
     # gradient_spin supersedes gradient_roll for this effect; color_blend
     # stays hidden — colors update in place, recreation kills the particles.

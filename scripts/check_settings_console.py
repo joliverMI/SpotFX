@@ -155,13 +155,15 @@ check(set(sc.SETTINGS_REGISTRY) == {
     "transition_ignition_turns", "transition_scatter",
     # 2026-10-12, the drop Shockwave's room switch and energy floor:
     "drop_shock_enabled", "drop_shock_min_energy",
+    # 2026-10-12, the Pulse flash flare's energy floor:
+    "pulse_flash_min_energy",
 }, "registry is the deliberate allowlist (eight room keys + the four "
    "analysed-transition knobs + the five 2026-10-06 widening keys + "
    "drop_floor + lull_dark_max_s + lull_breath_hold_s + the four "
    "drop-switch tunables + the two fireworks-meld tunables + "
    "strip_phase_strength + background_fade_s + "
    "the ten transition-program tunables + the drop Shockwave's switch "
-   "and energy floor)")
+   "and energy floor + the Pulse flash's energy floor)")
 check(sc.SETTINGS_REGISTRY["ambient_enabled"].kind == "bool"
       and sc.SETTINGS_REGISTRY["ambient_on_music_pause"].kind == "bool",
       "the ambient toggle is binary to Sonic too — no mode string to mis-say")

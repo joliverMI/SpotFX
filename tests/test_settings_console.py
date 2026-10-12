@@ -95,6 +95,8 @@ def test_registry_is_an_explicit_allowlist_matching_room_control_bounds():
         "transition_ignition_turns", "transition_scatter",
         # 2026-10-12, the drop Shockwave's room switch and energy floor:
         "drop_shock_enabled", "drop_shock_min_energy",
+        # 2026-10-12, the Pulse flash flare's energy floor:
+        "pulse_flash_min_energy",
     }
     # force_scene_* deliberately excluded — see settings_console.py docstring
     assert "force_scene_enabled" not in sc.SETTINGS_REGISTRY

@@ -10,7 +10,10 @@ them, twice from one seed — once with the Shockwave on, once with
 
 - BREATH: the brightest real cell over the breath-hold window (the last
   `lull_breath_hold_s` of the lull) — 0 means TRUE BLACK — beside the same
-  window with no breath told;
+  window with no breath told. Per member (phase_grammar "WHO BREATHES",
+  2026-10-12): true black by default; a member with a BREATH_FLOOR (Orbits)
+  stays lit but dimmer than untold — its one dim blob; a member that opts
+  out (BREATH_HOLD = False, the Fish) is exactly as untold;
 - RIM vs PERIMETER at the mark: the mean brightest channel on the eye's own
   rim band and on the crystal's outermost real cells on the drop's first
   frame (the wave is born on the rim, never the panel's edge), and the
@@ -245,6 +248,16 @@ def measure(effect_type: str, **kw) -> dict:
     }
 
 
+def breath_ok(effect_type: str, m: dict) -> bool:
+    """The breath-hold's own bar for this member (module docstring)."""
+    cls = device_model._effect_class(effect_type)
+    if not getattr(cls, "BREATH_HOLD", True):
+        return m["breath_max"] == m["breath_off_max"] and m["breath_max"] > 0
+    if getattr(cls, "BREATH_FLOOR", 0.0) > 0.0:
+        return 0.0 < m["breath_max"] < m["breath_off_max"]
+    return m["breath_max"] == 0.0
+
+
 def main(argv) -> int:
     assert "fireworks" not in device_model.DROP_SHOCK_EFFECTS
     effects = argv or sorted(device_model.DROP_SHOCK_EFFECTS)
@@ -254,7 +267,7 @@ def main(argv) -> int:
         s = measure(e, gradient=SOLID)
         m["white_max_on_solid"] = s["white_max_on"]
         print(json.dumps(m))
-        good = (m["breath_max"] == 0.0
+        good = (breath_ok(e, m)
                 and m["rim_at_mark"] > m["perimeter_at_mark"]
                 and (m["lit_drop_1s_on"] > m["lit_drop_1s_off"]
                      or m["energy_after_front_on"]

@@ -7,6 +7,7 @@ import voluptuous as vol
 from fx.color import validate_gradient
 from fx.effects.audio import AudioReactiveEffect
 from fx.effects.gradient import GradientEffect
+from fx.effects import strip_phase
 from fx.effects.strip_phase import StripPhase
 
 _LOGGER = logging.getLogger(__name__)
@@ -43,7 +44,10 @@ KERNEL_MAX = 8       # max blob radius in pixels
 #     before the drop);
 #   - the lull drops to one blob that falls to the strip middle and shrinks,
 #     landing exactly as the strip reaches the room's dark point (the
-#     layer's own lull timing, `_strip_phase_lull`);
+#     layer's own lull timing, `_strip_phase_lull`) — and that blob STAYS,
+#     dim, through the dark (2026-10-12, the Admiral: "orbits should keep at
+#     least one dim blob"): the layer fades the strip to this effect's own
+#     `lull_ember` default (LULL_EMBER), never to true black;
 #   - the drop re-adds ALL CHARGE_PEAK_N blobs (each erupting through its
 #     implosion fragments — the strip-native explosion) flying back out
 #     with a spin boost, then sheds back to the scene's own count when the
@@ -61,6 +65,7 @@ CHARGE_PEAK_AT = 0.45
 DROP_FLY_S = 0.4
 DROP_SETTLE_S = 1.2
 DROP_BOOST = 2.5
+LULL_EMBER = 0.2            # the strip's own lull_ember default: one dim blob
 
 _SOA_NAMES = (
     "p_mode", "p_slot", "p_slot_frac", "p_phase", "p_dir", "p_jdir",
@@ -114,6 +119,8 @@ class Orbits1d(StripPhase, AudioReactiveEffect, GradientEffect):
     STRIP_PHASE_ACTIVITY = {"base_speed": 0.5, "spin": 0.5}
     # the drop's own length: the layer self-resets the phase key after it
     STRIP_PHASE_DROP_S = DROP_SETTLE_S
+    # the lull's one blob stays, dim, through the dark (module constants)
+    STRIP_PHASE_DEFAULTS = {"lull_ember": LULL_EMBER}
     # gradient_spin supersedes gradient_roll for this effect
     HIDDEN_KEYS = ["gradient_roll"]
     # phase/phase_progress are SpotFX-driven choreography; advanced (not
@@ -249,6 +256,8 @@ class Orbits1d(StripPhase, AudioReactiveEffect, GradientEffect):
                 description="Decay filter applied to the audio impulse",
                 default=0.06,
             ): vol.All(vol.Coerce(float), vol.Range(min=0.01, max=0.3)),
+            # the layer's tunables carrying this effect's own defaults
+            **strip_phase.tunable_fields(**STRIP_PHASE_DEFAULTS),
         }
     )
 

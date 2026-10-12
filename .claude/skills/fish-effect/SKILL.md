@@ -446,11 +446,15 @@ Eleven registered settings (`drop_shock` 0 = off, `drop_bloom_ms`,
 `drop_reveal`, `drop_shock_scale_min`) are first guesses pending his eye;
 Sonic reaches them with `set_scene_entry_param`. The drop arm tells this
 effect `drop_intensity`, which scales the debris count and the front's life.
-The lull arm also tells it the BREATH-HOLD (`lull_breath_at_s`,
-`lull_breath_s`, from the room's `lull_breath_hold_s`, 0.4 s default, always
-inside the lull's dark rule): the base render takes the frame to true black
-for that window. Help topics `drop-shockwave`, `drop-breath-hold`; proof
-`scripts/check_drop_shockwave.py` / `tests/test_phase_grammar.py`.
+**NO BREATH-HOLD on the Fish** (2026-10-12, the Admiral: "I want orbits and
+fish to specifically not go dark completely on the crystal or the strips"):
+`BREATH_HOLD = False` on the class, and SpotFX no longer tells it the
+breath keys (`fx.device_model.BREATH_HOLD_EFFECTS` leaves the Fish out), so
+the lull's searcher swims straight through to the drop — no short black
+before it. The schema still carries the two keys (a told one is a no-op).
+The Fish scene's strip (`fireworks1d`) keeps its own 12% ember and is
+unchanged. Help topics `drop-shockwave`, `drop-breath-hold`; proof
+`scripts/check_drop_shockwave.py` (`breath_ok`) / `tests/test_phase_grammar.py`.
 
 WHETHER A DROP PAINTS IT AT ALL (2026-10-12, his "toggled per scene, as
 well as globally, as well as a global setting for minimum energy"): the drop

@@ -13,7 +13,8 @@ color, increasing the brightness of the colors, and having more baseline
 effects, like more orbiting blobs, more fireworks, etc". His call 2: the
 Orbits strip's charge SWELLS AND HOLDS. His call 3: every lull is black at
 the room's dark point, except the Fireworks strip's rockets, which cross it
-as faint embers.
+as faint embers — and, since 2026-10-12 ("orbits should keep at least one
+dim blob"), the Orbits strip's one collapsed blob, which stays dim.
 
 Runs his real Orbits V2 and Fireworks V2 strip entries (live scenes.json,
 read once and copied in below — the Orbits entry's two intensity bindings
@@ -247,6 +248,8 @@ def measure(frames, pal, counts, lives, final_count):
         "dark_from": dark[0] if dark else None,
         "dark_solid": bool(dark) and dark == list(range(dark[0], len(lull))),
         "dark_max": max(float(f.max()) for f in span),
+        "dark_min": min(float(f.max()) for f in span),
+        "n_dark": max(counts[d0 - len(span):d0]),
         "drop_first": L[d0],
         "drop_peak": max(L[d0:d0 + wd]),
         "white_charge": max(whiter_than_set(frames[k], pal)
@@ -338,10 +341,15 @@ def orbits(tmp):
           and now["n_charge_end"] == ob1.CHARGE_PEAK_N,
           f"orbits: the charge swells to {ob1.CHARGE_PEAK_N} blobs and HOLDS "
           f"them to the drop (end of charge: {now['n_charge_end']:.0f})")
-    want_from = int(round((LULL_S - MAX_DARK_S) * FPS)) - 1
-    check(now["dark_solid"] and now["dark_from"] == want_from,
-          f"orbits: the lull is black from the room's dark point (frame "
-          f"{now['dark_from']} of the lull) to the drop")
+    # 2026-10-12, the Admiral: "orbits should keep at least one dim blob" —
+    # through the dark the strip holds ONE blob at its own lull ember,
+    # never black (it used to go black at the room's dark point)
+    ember = ob1.LULL_EMBER * 255.0
+    check(0.0 < now["dark_min"] and now["dark_max"] <= ember + 1e-6
+          and now["n_dark"] == 1,
+          f"orbits: through the lull's dark ONE blob stays, dim (brightest "
+          f"channel {now['dark_min']:.1f}-{now['dark_max']:.1f} of at most "
+          f"{ember:.1f}, {now['n_dark']:.0f} blob), never black")
     check(now["n_drop_peak"] == ob1.CHARGE_PEAK_N,
           f"orbits: the drop re-adds all {ob1.CHARGE_PEAK_N} blobs "
           f"(drop peak {now['n_drop_peak']:.0f})")

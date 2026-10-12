@@ -1156,8 +1156,8 @@ class SceneV2(BaseModel):
     # once per drop arm by scene_response._drive_phase, which tells the
     # verdict to the effect as `drop_shock_on`. The Fish scene ships OFF
     # (scripts/set_fish_drop_shock_off.py, his "turn it off for fish to
-    # test it at first"). Not the strips' own drop shockwave
-    # (fx/effects/strip_phase.py), which this does not govern.
+    # test it at first"). Since 2026-10-12 the strips' own drop shockwave
+    # (fx/effects/strip_phase.py) follows it too ("stip shockwave, yes").
     drop_shock_enabled: bool = True
 
     @model_validator(mode="before")

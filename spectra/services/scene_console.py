@@ -279,8 +279,9 @@ SCENE_SETTINGS_REGISTRY: dict[str, SceneSettingSpec] = {
         "debris and edge splash painted over the effect's own drop) may "
         "paint while this scene drops. true (default) = yes, when the "
         "room's own Shockwave switch is on and the drop clears the room's "
-        "minimum energy; false = never on this scene. The effect's own "
-        "drop plays either way.",
+        "minimum energy; false = never on this scene. The strips' own drop "
+        "shockwave follows it too. The effect's own drop (and the strips' "
+        "colour and activity burst) plays either way.",
         "true/false only. The room-wide switch and the energy floor are "
         "room settings (drop_shock_enabled, drop_shock_min_energy), not "
         "this one."),

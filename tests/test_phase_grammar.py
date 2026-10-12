@@ -341,8 +341,9 @@ def test_a_stale_shock_is_discarded_on_a_new_charge_too():
 def test_on_the_real_pipeline(effect):
     import scripts.check_drop_shockwave as check
     m = check.measure(effect)
-    # the breath-hold is true black
-    assert m["breath_max"] == 0.0, m
+    # the breath-hold is true black — except Orbits' one dim blob and the
+    # Fish, which takes none (2026-10-12, phase_grammar "WHO BREATHES")
+    assert check.breath_ok(effect, m), m
     # born on the eye's rim, not the panel's edge
     assert m["rim_at_mark"] > 100.0 > m["perimeter_at_mark"] * 4, m
     # more colour / activity on the drop

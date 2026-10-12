@@ -167,7 +167,9 @@ Per event, fed by the bridge with the fire's intensity:
                   firework_burst in every
                   structural respect — an instant, self-resetting,
                   deliberately-unregistered poke key, no carry, no release,
-                  no lead — see _pulse_flash/_pulse_flip.
+                  no lead — see _pulse_flash/_pulse_flip. A FLASH fires only
+                  while the top bar's Energy is at least the room's
+                  pulse_flash_min_energy (0.8, pulse_flash_allowed).
   MINIMUM INTENSITY (FlareKind.min_intensity, any type; pulse_flip defaults
   to 0.4): a kind fires only ABOVE its minimum. Below it the kind leaves its
   lane's pool for that fire, exactly as a disabled kind does
@@ -605,6 +607,35 @@ PULSE_FLASH_STRENGTH_HARD = 1.0     # intensity 1.0
 def pulse_flash_strength(intensity: float) -> float:
     return round(_intensity_scaled(
         intensity, PULSE_FLASH_STRENGTH_GENTLE, PULSE_FLASH_STRENGTH_HARD), 4)
+
+
+# THE PULSE FLASH'S ENERGY FLOOR (2026-10-12, the Admiral: "The flash flare
+# on pulse should only happen on high energy, .8 or higher"): a pulse_flash
+# flare writes nothing unless the TOP BAR'S Energy (bridge.intensity() —
+# the same number the drop Shockwave's floor reads) is at least the room's
+# RoomControlState.pulse_flash_min_energy. Inside a lull and outside it
+# alike: a gated flash writes nothing, so it cannot punch a lull open
+# either. An energy that cannot be read is never gated (the drop floor's
+# and the Shockwave's own rule) — named in the record.
+DEFAULT_PULSE_FLASH_MIN_ENERGY = 0.8
+PULSE_FLASH_ALLOWED = "allowed"
+PULSE_FLASH_BELOW_ENERGY = "below_energy"
+PULSE_FLASH_ENERGY_UNKNOWN = "energy_unknown"   # allowed: never gated
+
+
+def pulse_flash_allowed(energy: Optional[float],
+                        min_energy: float) -> tuple[bool, str]:
+    """THE rule: may a pulse_flash fire now, and why (`energy >=
+    min_energy`; a floor of 0 never gates; an unknown energy never gates)."""
+    if energy is None:
+        return True, PULSE_FLASH_ENERGY_UNKNOWN
+    try:
+        floor = float(min_energy)
+    except (TypeError, ValueError):
+        floor = DEFAULT_PULSE_FLASH_MIN_ENERGY
+    if float(energy) < floor:
+        return False, PULSE_FLASH_BELOW_ENERGY
+    return True, PULSE_FLASH_ALLOWED
 
 
 # BLOB RUSH: his number, verbatim and fixed — "it just generates 12 blobs
@@ -2305,7 +2336,18 @@ class ResponseEngine:
         the four drain points. `flash` is deliberately absent from the
         effect-parameter registry, so it never enters the param/gain kinds'
         jumps/glides dicts: it composes with every other kind in the band.
-        LEAD: none — the write is instant and the jump IS the animation."""
+        LEAD: none — the write is instant and the jump IS the animation.
+
+        THE ENERGY FLOOR (pulse_flash_allowed, 2026-10-12): below the room's
+        pulse_flash_min_energy on the top bar's Energy nothing is written
+        (so nothing punches a lull open either); the record names it
+        (`skipped: "below_energy"`, the energy and the floor)."""
+        on, reason, energy, floor = self._pulse_flash_gate()
+        gate = {"energy": None if energy is None else round(energy, 4),
+                "min_energy": round(floor, 4), "reason": reason}
+        if not on:
+            return {"strength": 0.0, "virtuals": 0,
+                    "skipped": PULSE_FLASH_BELOW_ENERGY, **gate}
         strength = pulse_flash_strength(intensity)
         targets = 0
         for vid, state in self._flare_states().items():
@@ -2314,7 +2356,28 @@ class ResponseEngine:
             await self._jump(vid, state.effect_type,
                                      {"flash": strength})
             targets += 1
-        return {"strength": strength, "virtuals": targets}
+        return {"strength": strength, "virtuals": targets, **gate}
+
+    def _pulse_flash_gate(self) -> tuple[bool, str, Optional[float], float]:
+        """The Pulse flash's energy floor: (on, reason, energy, floor).
+        Never raises — an unreadable room reads as the shipped 0.8, an
+        unreadable energy as unknown (never gated)."""
+        floor = DEFAULT_PULSE_FLASH_MIN_ENERGY
+        try:
+            floor = float(getattr(self._room_controls(),
+                                  "pulse_flash_min_energy", floor))
+        except Exception:                                # noqa: BLE001
+            logger.exception("pulse flash: room controls unreadable — the "
+                             "energy floor at its default")
+        energy: Optional[float] = None
+        try:
+            raw = self._room_energy()
+            energy = None if raw is None else float(raw)
+        except Exception:                                # noqa: BLE001
+            logger.exception("pulse flash: energy unreadable — the flash "
+                             "is not energy-gated this time")
+        on, reason = pulse_flash_allowed(energy, floor)
+        return on, reason, energy, floor
 
     async def _pulse_flip(self, intensity: float) -> dict:
         """The PULSE COLOUR FLIP flare (same plan, his goal 7: "a temporary
@@ -2803,17 +2866,20 @@ class ResponseEngine:
         virtual the fire's `intensity`. Both are named in the record.
 
         THE BREATH-HOLD (fx/effects/phase_grammar.py): a lull arm also tells
-        every DROP_SHOCK_EFFECTS virtual when its short true black before
+        every BREATH_HOLD_EFFECTS virtual when its short true black before
         the drop starts and how long it is (`lull_breath_at_s`,
         `lull_breath_s` — the room's lull_breath_hold_s, never longer than
-        the lull's dark hold; 0 when the gap is unknowable).
+        the lull's dark hold; 0 when the gap is unknowable). Since
+        2026-10-12 that is the Shockwave members WITHOUT the Fish, plus
+        Pulse; Orbits breathes only down to a dim blob (its BREATH_FLOOR).
 
         THE SHOCKWAVE'S SWITCHES (_drop_shock_keys): a drop arm also tells
-        every DROP_SHOCK_EFFECTS virtual whether its Shockwave overlay may
-        paint (`drop_shock_on` — the room's switch, the scene's, and the
+        every DROP_SHOCK_TOLD_EFFECTS virtual — the crystal's Shockwave
+        members and every strip phase member — whether its drop shockwave
+        may paint (`drop_shock_on` — the room's switch, the scene's, and the
         top-bar Energy against the room's floor), named in the record as
-        `drop_shock`. The effect's own drop is driven exactly the same
-        either way."""
+        `drop_shock`. The effect's own drop (and a strip's colour and
+        activity burst) is driven exactly the same either way."""
         ramp_ms = _phase_ramp_ms(event_class, gap_ms)
         lull_keys: dict = {}
         if event_class == "lull" and any(
@@ -2823,7 +2889,7 @@ class ResponseEngine:
                                         self._lull_dark_max_s())
         breath_keys: dict = {}
         if event_class == "lull" and any(
-                st.effect_type in device_model.DROP_SHOCK_EFFECTS
+                st.effect_type in device_model.BREATH_HOLD_EFFECTS
                 for st in self.conductor.virtuals.values()):
             breath_keys = phase_grammar.breath_keys_for(
                 gap_ms / 1000.0 if gap_ms is not None and gap_ms > 0
@@ -2842,7 +2908,7 @@ class ResponseEngine:
         shock_keys: dict = {}
         shock_verdict: Optional[dict] = None
         if event_class == "drop" and any(
-                st.effect_type in device_model.DROP_SHOCK_EFFECTS
+                st.effect_type in device_model.DROP_SHOCK_TOLD_EFFECTS
                 for st in self.conductor.virtuals.values()):
             shock_keys, shock_verdict = self._drop_shock_keys()
         targets: list[str] = []
@@ -2878,7 +2944,7 @@ class ResponseEngine:
                     and state.effect_type in device_model.LULL_DARK_EFFECTS):
                 arm.update(lull_keys)
             if (breath_keys and state.effect_type
-                    in device_model.DROP_SHOCK_EFFECTS):
+                    in device_model.BREATH_HOLD_EFFECTS):
                 arm.update(breath_keys)
             if (handoff is not None and state.effect_type
                     in device_model.LULL_HANDOFF_EFFECTS):
@@ -2889,7 +2955,7 @@ class ResponseEngine:
                     in device_model.DROP_INTENSITY_EFFECTS):
                 arm.update(drop_keys)
             if (shock_keys and state.effect_type
-                    in device_model.DROP_SHOCK_EFFECTS):
+                    in device_model.DROP_SHOCK_TOLD_EFFECTS):
                 arm.update(shock_keys)
             await self._jump(vid, state.effect_type, arm)
             await self._glide(
