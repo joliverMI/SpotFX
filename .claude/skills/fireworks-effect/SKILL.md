@@ -77,12 +77,14 @@ out) and a per-frame `_phase_step`. The phase is `self._sp_phase`. Retuned:
   fireworks in flight, so the charge ADDS an uncapped launch rate rising
   0 -> `CHARGE_LAUNCH_RATE_MAX` (8/s) (the tail's own `ignore_cap` shape);
 - the strip's drop tail is 12/s (the crystal's stays 8);
-- the lull is the ONE strip lull that is not black (his call 3): this
-  effect's own `lull_ember` default is `LULL_EMBER` (0.12, its schema via
-  `strip_phase.tunable_fields`, its registry entry via
+- the lull is not black (his call 3): this effect's own `lull_ember`
+  default is `LULL_EMBER` (0.12, its schema via `strip_phase.
+  tunable_fields`, its registry entry via
   `registry_params(STRIP_PHASE_DEFAULTS)`), so the rockets cross the dark
   as 12% embers. Their own dimming (`LULL_ROCKET_FADE`) is retired — the
-  layer's fade is the one dimmer.
+  layer's fade is the one dimmer. (Since 2026-10-12 the Orbits strip has
+  its own non-black lull too, its one dim blob at 20% — see the
+  orbits-effect skill; the two are independent `STRIP_PHASE_DEFAULTS`.)
 - ACTIVITY (`STRIP_PHASE_ACTIVITY`): spawn_rate, beat_burst, burst_speed
   (0.3) — never max_blobs, his density cap.
 

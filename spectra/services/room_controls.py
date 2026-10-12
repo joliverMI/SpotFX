@@ -695,10 +695,11 @@ class RoomControlState(BaseModel):
     # seconds right before its drop mark, so the drop is born out of black.
     # Not the Fish, and Orbits only dims to one dim blob (the Admiral,
     # 2026-10-12: "I want orbits and fish to specifically not go dark
-    # completely ... I do want it on pulse effect, though"). Always INSIDE the lull's dark
-    # rule above (never longer than the dark hold that lull_dark_max_s
-    # allows); applied on every lull arm (scene_response._drive_phase,
-    # fx/effects/phase_grammar.breath_keys_for). 0 = no breath-hold.
+    # completely ... I do want it on pulse effect, though"). Always INSIDE
+    # the lull's dark rule above (never longer than the dark hold that
+    # lull_dark_max_s allows); applied on every lull arm
+    # (scene_response._drive_phase, fx/effects/phase_grammar.breath_keys_for).
+    # 0 = no breath-hold.
     lull_breath_hold_s: float = Field(default=0.4, ge=0.0, le=3.0)
 
     # THE DROP SHOCKWAVE'S SWITCHES (2026-10-12, the Admiral: "Shockwave

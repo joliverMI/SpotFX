@@ -292,7 +292,10 @@ one; single-led-power plan phase 2, 2026-10-06)
   (`flare_punch_strength`, strip phase plan phase 5, 2026-10-11): the light
   is the brighter of the lull's own fade and the ordinary look (its hits
   and any `pulse_flash` included) scaled by the punch, then falls back to
-  the lull's curve once the punch releases.
+  the lull's curve once the punch releases — except during the
+  BREATH-HOLD (2026-10-12, his "I do want it on pulse effect"): the last
+  `lull_breath_hold_s` before the drop wins over the punch and the flash
+  alike, so the Singles are genuinely black for that window regardless.
 - **Drop** — begins ON its first frame at `drop_burst`, whitened by
   `drop_white`, settling over `drop_settle_beats`; the phase then
   self-resets so an identical later drop edges again. A charge or lull
@@ -307,7 +310,9 @@ Pulse also answers two flare kinds of its own (phase 3): **pulse_flash**
 (the level jumps by `flash_size` x a strength of 0.4 + 0.6 x intensity and
 falls back to a tenth in `flash_ms`, spent from the flash budget; inside a
 lull it is scaled by the lull's fade, so the lull still lands black —
-unless the flare also punches, above) and
+unless the flare also punches, above; since 2026-10-12 it fires at all only
+when the top bar's Energy is at least `pulse_flash_min_energy`, 0.8 by
+default — below it, nothing is written) and
 **pulse_flip** (the hue turns `flip_degrees`, holds for `flip_hold_s`
 (0.5s), then swings back round the wheel over `flip_fade_s` (1.0s); fires
 only above intensity 0.4 by default —
@@ -342,7 +347,11 @@ STRIP_PHASE_EFFECTS` is where an effect joins it.
   `drop_shockwave` (1.25) × the drop's intensity, leaving a flood behind it
   that fades over ~0.8 s; colours brighten by `drop_brightness` (2×,
   settling over `drop_brightness_settle_s`) and activity rises by
-  `drop_activity` (4×, settling over `drop_settle_s`).
+  `drop_activity` (4×, settling over `drop_settle_s`). Since 2026-10-12
+  ("stip shockwave, yes") the wave and its flood obey the crystal
+  Shockwave's own three switches (the room, the scene, the top-bar energy
+  floor) — told off, only the wave and flood are skipped; the colour
+  brightness and activity burst still run.
 
 Held back under a house mode (`scene_response.HOUSE_HELD_PHASE_EFFECTS`),
 the same as Pulse. The room setting `strip_phase_strength` (0..1.5) scales
@@ -368,16 +377,17 @@ drop's self-reset) moved into the layer — each keeps only its choreography,
 started on the layer's edge (`_strip_phase_enter`). The Orbits strip swells
 to 16 blobs over the first 45% of the charge and HOLDS them (his call 2;
 it used to shed to one); its lull blob collapses to the middle as the strip
-reaches the dark point; the drop re-adds all 16 and settles back to the
-scene's count; a flare punch springs the collapsed blob back out with an
-own-colour burst; on a phase its implosion pair comes from the set, not
-the hue wheel. Its activity raises the orbit speed and ring spin. The
-Fireworks strip's charge no longer slows or shortens its fireworks and adds
-an uncapped launch rate rising to 8/s (his density cap clipped the old ×6
-to 3 in flight); its lull is the one strip lull that is not black — its
-`lull_ember` default is 0.12, so the two rockets cross the dark as embers;
-its drop tail is 12/s. Its activity raises the launches and burst speed,
-never the density cap.
+reaches the dark point and STAYS there, dim (2026-10-12, his "orbits should
+keep at least one dim blob" — its own `lull_ember` default is 0.2, never
+black); the drop re-adds all 16 and settles back to the scene's count; a
+flare punch springs the collapsed blob back out with an own-colour burst;
+on a phase its implosion pair comes from the set, not the hue wheel. Its
+activity raises the orbit speed and ring spin. The Fireworks strip's charge
+no longer slows or shortens its fireworks and adds an uncapped launch rate
+rising to 8/s (his density cap clipped the old ×6 to 3 in flight); its lull
+is not black either — its `lull_ember` default is 0.12, so the two rockets
+cross the dark as embers; its drop tail is 12/s. Its activity raises the
+launches and burst speed, never the density cap.
 
 Full mechanism (the output-stage order, the white guard, the punch
 envelope, how a future effect joins): the module's own docstring and

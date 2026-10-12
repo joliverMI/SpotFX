@@ -9568,12 +9568,13 @@ output stage, HOW AN EFFECT JOINS). Six things:
   own; its drawn phase looks are retired in favour of the layer's; it may
   answer a flare punch (`_strip_phase_on_punch`, `_strip_phase_punch()`),
   and carry its own tunable defaults (`STRIP_PHASE_DEFAULTS` — the
-  Fireworks strip's 12% `lull_ember`, the one strip lull that is not
-  black). The Black Hole strip keeps its blob formation and drop/punch
-  bursts; the Orbits strip swells to 16 and HOLDS (his call 2), re-adds 16
-  on the drop and draws its phase implosions from the set; the Fireworks
-  strip stopped slowing on the charge and adds an uncapped launch rate
-  past his density cap.
+  Fireworks strip's 12% `lull_ember`; the Orbits strip's own 20%, since
+  2026-10-12, is the other — neither strip lull goes fully black). The
+  Black Hole strip keeps its blob formation and drop/punch bursts; the
+  Orbits strip swells to 16 and HOLDS (his call 2), re-adds 16 on the drop
+  and draws its phase implosions from the set; the Fireworks strip stopped
+  slowing on the charge and adds an uncapped launch rate past his density
+  cap.
 - **NO ADDED WHITE, STRUCTURALLY**: a hue-kept colour gain (a pixel scales
   whole and stops at full), a fill and a drop shockwave sampled from the
   effect's own gradient (the shockwave paints OVER, brighter-wins, never

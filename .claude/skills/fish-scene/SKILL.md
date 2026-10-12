@@ -132,7 +132,8 @@ Fish's own drop (the rush, its scaled burst) plays exactly as before — only
 the crystal's Shockwave overlay is withheld, and since 2026-10-12 ("stip
 shockwave, yes") the strip's (`fireworks1d`) own drop shockwave too (its
 colour/activity burst still plays). The Fish takes no breath-hold before
-its drop at all (the fish-effect skill), and the strip keeps its 12% ember. Sonic flips it back with
+its drop at all (the fish-effect skill), and the strip keeps its 12%
+ember. Sonic flips it back with
 `set_scene_setting` on scene "Fish", key `drop_shock_enabled`. The room's
 own switch and 0.7 energy floor (`drop_shock_enabled`,
 `drop_shock_min_energy`) govern every other scene. Help

@@ -347,9 +347,9 @@ SETTINGS_REGISTRY: dict[str, SettingSpec] = {
     "drop_shock_min_energy": _spec(
         "drop_shock_min_energy", "Shockwave minimum energy (top-bar Energy)",
         "The drop Shockwave (on the crystal and on the strips) only paints "
-        "when the top bar's Energy reading "
-        "(the ⚡ Energy number, exactly as shown) is at least this much at "
-        "the moment of the drop. Default 0.7. 0 = every drop gets it. A "
+        "when the top bar's Energy reading (the ⚡ Energy number, exactly "
+        "as shown) is at least this much at the moment of the drop. "
+        "Default 0.7. 0 = every drop gets it. A "
         "song's loudest section reads exactly 1.0, so even 1.0 still lets "
         "that section's drops through — to stop it entirely turn the "
         "Shockwave off instead. When the energy can't be read (no "
