@@ -2192,9 +2192,15 @@ against that commit.
     (`_burst_count`, never below PHASE_BURST_N; untold: PHASE_BURST_N).
     A class that does not opt in (`DROP_SHOCK = False`, Fireworks included)
     never reaches any of it; `drop_shock: 0` and no breath keys return
-    before touching the frame. Evidence: `scripts/check_drop_shockwave.py`
-    (run by `tests/test_phase_grammar.py`). Unverified against his live
-    room.
+    before touching the frame. **Widened 2026-10-12** (the Admiral: a room
+    switch, a per-scene switch and a minimum-energy floor, all SpotFX's —
+    AGENTS.md "THREE SWITCHES DECIDE WHETHER A DROP PAINTS IT"): each
+    opted-in class also registers `phase_grammar.shock_on_schema_fields()`
+    and `SHOCK_ON_KEY` in `ADVANCED_KEYS`, and `Twod.render` gained a third
+    way to skip the painter entirely — `phase_grammar.shock_on(self._config)`
+    reading False — alongside `drop_shock: 0` and not opting in. Evidence:
+    `scripts/check_drop_shockwave.py` (run by `tests/test_phase_grammar.py`),
+    `tests/test_drop_shock_switches.py`. Unverified against his live room.
 74. `effects/orbits1d.py`, `effects/fireworks1d.py`, `effects/blackhole1d.py`
     + `effects/strip_phase.py` (THE PARTICLE STRIPS' PLUMBING): THE ORBITS
     AND FIREWORKS STRIPS JOIN THE STRIP PHASE LAYER, AND THE THREE PARTICLE

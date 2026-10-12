@@ -9674,8 +9674,8 @@ including how an effect opts in. Four things:
   Fish — NEVER Fireworks, his word); a test holds the set equal to the
   opted-in classes. The member names its eye (`shock_rim()`, render pixels)
   and calls `_shock_begin()` where its own payoff fires — never on a silent
-  watchdog release. Not opted in, `drop_shock: 0`, or no breath told: the
-  frame is never touched.
+  watchdog release. Not opted in, `drop_shock: 0`, the switches below
+  saying no, or no breath told: the frame is never touched.
 - **SET COLOURS ONLY, MAX-COMPOSED — NEVER WHITE** (his ruling: brighter
   means more colour and more activity). Every layer is a set colour scaled;
   the front's lean toward the brightest stop moves the GRADIENT POSITION,
