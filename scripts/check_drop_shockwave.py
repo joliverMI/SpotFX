@@ -120,7 +120,8 @@ def _lull_arm(effect_type: str, breath: bool) -> dict:
 async def run_sequence(effect_type: str, *, shock: bool = True,
                        breath: bool = True, intensity: float = 0.9,
                        gradient: str = SET, seed: int = 7,
-                       extra: dict | None = None) -> dict:
+                       extra: dict | None = None,
+                       drop_arm: dict | None = None) -> dict:
     """One member through normal -> charge -> told lull -> told drop.
     Returns the per-frame real-cell frames (rows x cols x 3) and the frame
     index of the drop mark and of the lull's start."""
@@ -171,6 +172,7 @@ async def run_sequence(effect_type: str, *, shock: bool = True,
             arm = {"phase": "drop", "phase_progress": 0.0}
             if effect_type in device_model.DROP_INTENSITY_EFFECTS:
                 arm.update(lull_handoff.drop_keys_for(intensity))
+            arm.update(drop_arm or {})      # e.g. SpotFX's drop_shock_on
             eff.update_config(arm)
             step(int(DROP_S / DT))
             rim = eff.shock_rim() if eff.DROP_SHOCK else None

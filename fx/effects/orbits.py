@@ -97,6 +97,7 @@ class Orbits2d(Twod, GradientEffect):
         "phase_progress",
         *lull_handoff.KEYS,
         *phase_grammar.BREATH_KEYS,
+        phase_grammar.SHOCK_ON_KEY,
         lull_handoff.DROP_KEY,
     ]
 
@@ -244,6 +245,7 @@ class Orbits2d(Twod, GradientEffect):
             # Shockwave settings (registered) and the breath-hold keys
             # (ride ONLY the lull arm write)
             **phase_grammar.shock_schema_fields(),
+            **phase_grammar.shock_on_schema_fields(),
             **phase_grammar.breath_schema_fields(),
             **lull_handoff.drop_schema_fields(),
         }

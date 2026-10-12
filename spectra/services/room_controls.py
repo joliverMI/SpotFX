@@ -698,6 +698,23 @@ class RoomControlState(BaseModel):
     # fx/effects/phase_grammar.breath_keys_for). 0 = no breath-hold.
     lull_breath_hold_s: float = Field(default=0.4, ge=0.0, le=3.0)
 
+    # THE DROP SHOCKWAVE'S SWITCHES (2026-10-12, the Admiral: "Shockwave
+    # should be a setting that can be toggled per scene, as well as
+    # globally, as well as a global setting for minimum energy before it is
+    # allowed to fire ... leave it on globally for drops over .7 energy").
+    # The crystal's drop Shockwave overlay (fx/effects/phase_grammar.py,
+    # every DROP_SHOCK_EFFECTS member) paints on a drop only while
+    # drop_shock_enabled is on, the showing scene's own
+    # SceneV2.drop_shock_enabled is on, AND the top bar's Energy at the
+    # drop (bridge.intensity() — raw section energy, the number the drop
+    # floor reads; firstmate's ruling 2026-10-12) is at least
+    # drop_shock_min_energy. An energy that cannot be read is never gated.
+    # Off or skipped, the effect's own drop runs unchanged. Decided once per
+    # drop arm (scene_response._drive_phase, phase_grammar.shock_allowed).
+    # Not the strips' own drop shockwave (strip_phase_strength governs it).
+    drop_shock_enabled: bool = True
+    drop_shock_min_energy: float = Field(default=0.7, ge=0.0, le=1.0)
+
     # THE DROP-LED SCENE SWITCH (2026-10-08, drop-scene-variety plan phase
     # 2 — spectra/services/drop_switch.py is the binding statement). A drop
     # sequence switches the scene with a HARD CUT ON ITS DROP when the

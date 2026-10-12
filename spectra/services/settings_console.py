@@ -142,6 +142,7 @@ def _spec(key: str, label: str, description: str) -> SettingSpec:
             "strip_phase_strength": "multiplier 0.0-1.5, 0 = off",
             "background_fade_s": "seconds, 0 = instant",
             "lull_breath_hold_s": "seconds",
+            "drop_shock_min_energy": "top-bar displayed energy, fraction 0.0-1.0",
             "drop_switch_stale_margin_s": "seconds beyond the scene's own dwell",
             "drop_switch_drops_in_a_row": "drops, 0 = off",
             "drop_switch_swallow_delay_s": "seconds after the drop",
@@ -328,6 +329,28 @@ SETTINGS_REGISTRY: dict[str, SettingSpec] = {
         "black. Never longer than the lull's own darkness allows (half the "
         "lull, capped by 'Lull darkness (max)'). 0 = no breath-hold. "
         "Default 0.4. Takes effect on the very next lull."),
+    "drop_shock_enabled": _spec(
+        "drop_shock_enabled", "Drop Shockwave (whole room)",
+        "On (default): the crystal effects with a drop Shockwave (Black "
+        "Hole, Orbits, Sauron, Eye, Fish) paint it over their own drop — a "
+        "rim bloom, a wavefront, debris and a splash on the crystal's edge, "
+        "in the colour set's own colours. Off: no Shockwave on any drop, "
+        "anywhere; every effect's own drop still plays exactly as before. "
+        "A scene can also switch it off for itself (the scene setting "
+        "drop_shock_enabled), and quiet drops can be left out with "
+        "'Shockwave minimum energy'. Does not touch the strips' own drop "
+        "shockwave (that is 'Strip phase strength'). Takes effect on the "
+        "very next drop."),
+    "drop_shock_min_energy": _spec(
+        "drop_shock_min_energy", "Shockwave minimum energy (top-bar Energy)",
+        "The drop Shockwave only paints when the top bar's Energy reading "
+        "(the ⚡ Energy number, exactly as shown) is at least this much at "
+        "the moment of the drop. Default 0.7. 0 = every drop gets it. A "
+        "song's loudest section reads exactly 1.0, so even 1.0 still lets "
+        "that section's drops through — to stop it entirely turn the "
+        "Shockwave off instead. When the energy can't be read (no "
+        "analysis for the song) the drop is not held back. Takes effect "
+        "on the very next drop."),
     "drop_switch_enabled": _spec(
         "drop_switch_enabled", "Drop-led scene switch",
         "On (default): a drop sequence may change the scene — a hard cut "

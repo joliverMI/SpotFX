@@ -1157,8 +1157,13 @@ class ResponseEngine:
         room_controls: Callable[[], Any] | None = None,
         song_position: Callable[[], tuple[Optional[str], Optional[int]]] | None = None,
         flare_blocked: Callable[[], frozenset] | None = None,
+        room_energy: Callable[[], Optional[float]] | None = None,
     ) -> None:
         self.conductor = conductor
+        # THE DROP SHOCKWAVE'S ENERGY FLOOR: the top bar's Energy right now
+        # (engine.py wires bridge.intensity()). None — scratch engines, the
+        # previews — is "unknown", which is never gated (_drop_shock_keys).
+        self._room_energy = room_energy or (lambda: None)
         # FLARES OFF (the Light Show, spectra/services/show_mods.py): the
         # virtuals no flare kind may write to right now. engine.py wires the
         # show's switches; None (scratch engines — the previews) = none.
@@ -2801,7 +2806,14 @@ class ResponseEngine:
         every DROP_SHOCK_EFFECTS virtual when its short true black before
         the drop starts and how long it is (`lull_breath_at_s`,
         `lull_breath_s` — the room's lull_breath_hold_s, never longer than
-        the lull's dark hold; 0 when the gap is unknowable)."""
+        the lull's dark hold; 0 when the gap is unknowable).
+
+        THE SHOCKWAVE'S SWITCHES (_drop_shock_keys): a drop arm also tells
+        every DROP_SHOCK_EFFECTS virtual whether its Shockwave overlay may
+        paint (`drop_shock_on` — the room's switch, the scene's, and the
+        top-bar Energy against the room's floor), named in the record as
+        `drop_shock`. The effect's own drop is driven exactly the same
+        either way."""
         ramp_ms = _phase_ramp_ms(event_class, gap_ms)
         lull_keys: dict = {}
         if event_class == "lull" and any(
@@ -2827,6 +2839,12 @@ class ResponseEngine:
         drop_keys: dict = {}
         if event_class == "drop" and intensity is not None:
             drop_keys = lull_handoff.drop_keys_for(intensity)
+        shock_keys: dict = {}
+        shock_verdict: Optional[dict] = None
+        if event_class == "drop" and any(
+                st.effect_type in device_model.DROP_SHOCK_EFFECTS
+                for st in self.conductor.virtuals.values()):
+            shock_keys, shock_verdict = self._drop_shock_keys()
         targets: list[str] = []
         withheld: list[str] = []
         house_reason: Optional[str] = None
@@ -2870,6 +2888,9 @@ class ResponseEngine:
             if (drop_keys and state.effect_type
                     in device_model.DROP_INTENSITY_EFFECTS):
                 arm.update(drop_keys)
+            if (shock_keys and state.effect_type
+                    in device_model.DROP_SHOCK_EFFECTS):
+                arm.update(shock_keys)
             await self._jump(vid, state.effect_type, arm)
             await self._glide(
                 vid, state.effect_type, {"phase_progress": 1.0}, ramp_ms)
@@ -2899,6 +2920,8 @@ class ResponseEngine:
                 st.effect_type in device_model.DROP_INTENSITY_EFFECTS
                 for st in self.conductor.virtuals.values()):
             record["drop_intensity"] = drop_keys[lull_handoff.DROP_KEY]
+        if shock_verdict is not None:
+            record["drop_shock"] = shock_verdict
         if withheld:
             record["withheld"] = {"virtuals": withheld, "reason": house_reason}
         if flares_off:
@@ -2983,6 +3006,41 @@ class ResponseEngine:
             logger.exception("lull hand-off: resolver failed — the lull "
                              "gets the default hand-off")
             return default_lull_handoff(ctx), "default (resolver failed)"
+
+    def _drop_shock_keys(self) -> tuple[dict, dict]:
+        """THE DROP SHOCKWAVE'S SWITCHES (fx/effects/phase_grammar.py,
+        "WHETHER IT MAY PAINT AT ALL"): the room's drop_shock_enabled, the
+        showing scene's own drop_shock_enabled, and the room's
+        drop_shock_min_energy against the top bar's Energy right now —
+        decided by phase_grammar.shock_allowed and told to every
+        DROP_SHOCK_EFFECTS member's drop arm as `drop_shock_on`. Returns
+        (the arm keys, the record's verdict). Never raises: an unreadable
+        room reads as the shipped defaults (on, 0.7), an unreadable energy
+        as unknown (never gated)."""
+        room_on = True
+        floor = phase_grammar.DEFAULT_SHOCK_MIN_ENERGY
+        try:
+            room = self._room_controls()
+            room_on = bool(getattr(room, "drop_shock_enabled", True))
+            floor = float(getattr(room, "drop_shock_min_energy", floor))
+        except Exception:                                # noqa: BLE001
+            logger.exception("phase drive: room controls unreadable — "
+                             "drop Shockwave at its defaults")
+        scene = self.conductor.scene
+        scene_on = bool(getattr(scene, "drop_shock_enabled", True))
+        energy: Optional[float] = None
+        try:
+            raw = self._room_energy()
+            energy = None if raw is None else float(raw)
+        except Exception:                                # noqa: BLE001
+            logger.exception("phase drive: energy unreadable — the drop "
+                             "Shockwave is not energy-gated this drop")
+        on, reason = phase_grammar.shock_allowed(room_on, scene_on, energy,
+                                                 floor)
+        verdict = {"on": on, "reason": reason,
+                   "energy": None if energy is None else round(energy, 4),
+                   "min_energy": round(floor, 4)}
+        return {phase_grammar.SHOCK_ON_KEY: on}, verdict
 
     def _lull_breath_hold_s(self) -> float:
         """The room's breath-hold before a drop (RoomControlState.

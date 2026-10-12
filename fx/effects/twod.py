@@ -246,7 +246,12 @@ class Twod(AudioReactiveEffect):
             self._shock_pending = False
             self._shock = None
             self._shock_fresh = True
-            if float(self._config.get("drop_shock", 1.0) or 0.0) > 0.0:
+            # Off (the room's switch, the scene's, or the energy floor —
+            # SpotFX's told verdict) or at zero strength: no painter at all,
+            # so the frame stays the effect's own drop, byte for byte.
+            if (phase_grammar.shock_on(self._config)
+                    and float(self._config.get("drop_shock", 1.0) or 0.0)
+                    > 0.0):
                 try:
                     self._shock = phase_grammar.Shockwave(
                         phase_grammar.panel_field(self.r_width,

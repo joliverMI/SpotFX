@@ -281,6 +281,11 @@ export interface SceneV2 {
    * default: 16s @ intensity 0, 4s @ intensity 1, linear. Gated entirely at
    * fire_scene_by_id — see DWELL_CURVE_DEFAULT and dwell.py's docstring. */
   dwell_curve: CurveAttachment | null;
+  /** The drop Shockwave on THIS scene (2026-10-12): false = the crystal's
+   * Shockwave overlay never paints while this scene drops (the effect's own
+   * drop still plays). true (default) = it paints when the room's switch
+   * and energy floor allow. The Fish scene ships off. */
+  drop_shock_enabled: boolean;
 }
 
 /** His exact default dwell curve (spectra/services/dwell.py's
@@ -507,6 +512,14 @@ export interface RoomControlState {
    * drop-Shockwave effects (Black Hole, Orbits, Sauron, Eye, Fish). Never
    * longer than the lull's own darkness allows. 0 = none. Default 0.4. */
   lull_breath_hold_s: number;
+  /** THE DROP SHOCKWAVE'S ROOM SWITCH (fx/effects/phase_grammar.py,
+   * scene_response._drop_shock_keys): off = no crystal Shockwave on any
+   * drop; every effect's own drop unchanged. Default on. */
+  drop_shock_enabled: boolean;
+  /** The Shockwave paints only when the top bar's Energy (bridge.intensity)
+   * at the drop is at least this. Default 0.7; 0 = every drop; an unknown
+   * energy is never gated. */
+  drop_shock_min_energy: number;
   /** THE DROP-LED SCENE SWITCH (spectra/services/drop_switch.py): a drop
    * sequence may switch the scene with a hard cut on its drop when the
    * showing scene is stale. The three stale thresholds are his to tune
@@ -1067,6 +1080,7 @@ export function newScene(id: string): SceneV2 {
     preferred_color_set_mode: 'default',
     disabled: false,
     dwell_curve: null,
+    drop_shock_enabled: true,
   };
 }
 

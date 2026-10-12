@@ -122,6 +122,19 @@ The Strips entry's strip-phase tunables (`charge_fill` … `flare_punch_glow`,
 `set_scene_entry_param` on scene "Fish", target "Strips" — see the
 fireworks-effect skill, since that is the effect actually running there.
 
+## The drop Shockwave is OFF on this scene (2026-10-12)
+
+His words: "Turn it off for fish to test it at first and leave it on
+globally for drops over .7 energy." `SceneV2.drop_shock_enabled` is false on
+this scene, set by `scripts/set_fish_drop_shock_off.py` (dry run default,
+`--apply` at deploy, `--on` puts it back; one raw key, nothing else). The
+Fish's own drop (the rush, its scaled burst) plays exactly as before — only
+the crystal's Shockwave overlay is withheld. Sonic flips it back with
+`set_scene_setting` on scene "Fish", key `drop_shock_enabled`. The room's
+own switch and 0.7 energy floor (`drop_shock_enabled`,
+`drop_shock_min_energy`) govern every other scene. Help
+`drop-shockwave-switches`.
+
 ## Executable proofs
 
 Shares the fish-effect skill's proof corpus in full

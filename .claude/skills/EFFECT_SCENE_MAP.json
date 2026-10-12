@@ -240,7 +240,8 @@
       "files": [
         "scripts/seed_fish_scene.py",
         "scripts/add_fish_swim_burst_flare.py",
-        "scripts/add_fish_big_fish_flare.py"
+        "scripts/add_fish_big_fish_flare.py",
+        "scripts/set_fish_drop_shock_off.py"
       ]
     },
     "sauron-scene": {
