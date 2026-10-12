@@ -117,6 +117,17 @@ inside the lull's dark rule): the base render takes the frame to true black
 for that window. Help topics `drop-shockwave`, `drop-breath-hold`; proof
 `scripts/check_drop_shockwave.py` / `tests/test_phase_grammar.py`.
 
+WHETHER A DROP PAINTS IT AT ALL (2026-10-12, his "toggled per scene, as
+well as globally, as well as a global setting for minimum energy"): the drop
+arm also tells this effect `drop_shock_on` — the room's `drop_shock_enabled`,
+the showing scene's own `drop_shock_enabled`, and the top bar's Energy
+(`bridge.intensity()`) against the room's `drop_shock_min_energy` (0.7),
+decided by `phase_grammar.shock_allowed`. False = no painter at all: the
+frame is this effect's own drop byte for byte (no reveal hold-back either).
+Untold reads True. It is an overlay, so nothing in this effect's own drop
+changes; `drop_shock` (the per-effect strength) is a separate knob. Help
+`drop-shockwave-switches`; proof `tests/test_drop_shock_switches.py`.
+
 **The Shockwave paints the drop frames, so a test of the lids' own drop
 geometry must hold it off** (`drop_shock: 0`), the way
 `tests/test_eye_lull_lids_upside_down.py`'s helper does by default — with it

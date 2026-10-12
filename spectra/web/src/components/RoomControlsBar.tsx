@@ -663,6 +663,35 @@ export default function RoomControlsBar() {
             <div className="top-bar-group-field">
               <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
                 <PowerButton
+                  on={local.drop_shock_enabled}
+                  onChange={(on) => commit({ ...local, drop_shock_enabled: on })}
+                  size={22}
+                  ariaLabel="Drop Shockwave"
+                  title={local.drop_shock_enabled
+                    ? 'On — the crystal effects (Black Hole, Orbits, Sauron, Eye, Fish) paint the Shockwave over their own drop, on scenes that allow it and drops above the minimum energy. Tap to turn off everywhere.'
+                    : 'Off — no Shockwave on any drop; every effect\'s own drop plays as before. Tap to turn on.'}
+                />
+                Drop Shockwave
+                <HelpLink topic="drop-shockwave-switches" />
+              </label>
+            </div>
+            {local.drop_shock_enabled && (
+              <div className="top-bar-group-field">
+                <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}
+                  title="The Shockwave only paints on a drop when the top bar's ⚡ Energy reading is at least this much at the drop. 0 = every drop.">
+                  Shockwave minimum energy (top-bar Energy)
+                </label>
+                <input
+                  type="number" min={0} max={1} step={0.05}
+                  value={local.drop_shock_min_energy}
+                  onChange={(e) => setLocal({ ...local, drop_shock_min_energy: Number(e.target.value) })}
+                  onBlur={() => commit(local)}
+                />
+              </div>
+            )}
+            <div className="top-bar-group-field">
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                <PowerButton
                   on={local.drop_switch_enabled}
                   onChange={(on) => commit({ ...local, drop_switch_enabled: on })}
                   size={22}

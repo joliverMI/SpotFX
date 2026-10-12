@@ -100,6 +100,8 @@ def test_scene_settings_registry_bounds_are_read_from_the_real_models():
         "entry_ramp_ms",
         "choreography_enabled", "choreography_transition_ms", "choreography_anchor_frac",
         "color_journey_pace_factor", "accept_all_sets",
+        # 2026-10-12, the drop Shockwave per scene:
+        "drop_shock_enabled",
     }
 
     spec = sc.SCENE_SETTINGS_REGISTRY["entry_ramp_ms"]

@@ -9693,6 +9693,19 @@ including how an effect opts in. Four things:
   shape) — schema keys may not contain "colour" (`fx/utils.py` refuses it).
   Proof: `scripts/check_drop_shockwave.py`, `tests/test_phase_grammar.py`;
   help `drop-shockwave`, `drop-breath-hold`.
+- **THREE SWITCHES DECIDE WHETHER A DROP PAINTS IT** (2026-10-12, the
+  Admiral): `RoomControlState.drop_shock_enabled` (room, default on), the
+  showing scene's `SceneV2.drop_shock_enabled` (default on; the Fish scene
+  ships OFF via `scripts/set_fish_drop_shock_off.py`, a deploy step), and
+  `drop_shock_min_energy` (0.7) against the TOP BAR's Energy at the drop
+  (`bridge.intensity()`, wired as `ResponseEngine(room_energy=)`; NOT the
+  render `drop_intensity`, which the automatic path caps at 0.75 — 8% of his
+  real drops clear 0.7 on it; an unknown energy is never gated).
+  `scene_response._drop_shock_keys` decides once per drop arm with
+  `phase_grammar.shock_allowed` and tells every member `drop_shock_on`
+  (record key `drop_shock`); told False the base render builds no painter,
+  so the frame is the effect's own drop byte for byte. Strips untouched.
+  Spec `tests/test_drop_shock_switches.py`; help `drop-shockwave-switches`.
 
 ## Radial (STAR) rotation is audio-lows-driven — a healthy `spin` can read as parked
 

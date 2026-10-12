@@ -227,6 +227,9 @@ _ACCESSORS: dict[str, tuple[Callable[[SceneV2], Any], Callable[[SceneV2, Any], N
     "accept_all_sets": (
         lambda s: s.accept_all_sets,
         lambda s, v: setattr(s, "accept_all_sets", v)),
+    "drop_shock_enabled": (
+        lambda s: s.drop_shock_enabled,
+        lambda s, v: setattr(s, "drop_shock_enabled", v)),
 }
 
 SCENE_SETTINGS_REGISTRY: dict[str, SceneSettingSpec] = {
@@ -269,6 +272,18 @@ SCENE_SETTINGS_REGISTRY: dict[str, SceneSettingSpec] = {
         "play with this scene (true), or only the scene's own accepted "
         "list (false, edited in the Scenes page Colour Sets tab).",
         "true/false only."),
+    "drop_shock_enabled": _spec(
+        "drop_shock_enabled", SceneV2, "drop_shock_enabled",
+        "Drop Shockwave on this scene", "bool",
+        "Whether the crystal's drop Shockwave (the rim bloom, wavefront, "
+        "debris and edge splash painted over the effect's own drop) may "
+        "paint while this scene drops. true (default) = yes, when the "
+        "room's own Shockwave switch is on and the drop clears the room's "
+        "minimum energy; false = never on this scene. The effect's own "
+        "drop plays either way.",
+        "true/false only. The room-wide switch and the energy floor are "
+        "room settings (drop_shock_enabled, drop_shock_min_energy), not "
+        "this one."),
 }
 
 

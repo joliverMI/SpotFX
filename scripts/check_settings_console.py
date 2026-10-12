@@ -28,7 +28,7 @@ software; do not build the Admiral a settings page"). Covers:
     to assume.
   - Sonic's WIDENED scene/flare surface (2026-08-15, services/
     scene_console.py, merged into settings_agent.ALL_OPERATIONS): the
-    six-key SCENE_SETTINGS_REGISTRY (bounds read live off SceneV2/
+    seven-key SCENE_SETTINGS_REGISTRY (bounds read live off SceneV2/
     PhaseChoreography/SceneColorJourney, same discipline as the
     room settings registry — phase_blend_charge_ramp_ms/lull_ramp_ms
     retired 2026-08-20 along with models.scene.PhaseBlend, see AGENTS.md),
@@ -153,12 +153,15 @@ check(set(sc.SETTINGS_REGISTRY) == {
     # Ignition, Lensing/Fountain, Shoal Break/Unravel) — four more tunables:
     "transition_explode_frac", "transition_lensing_pull",
     "transition_ignition_turns", "transition_scatter",
+    # 2026-10-12, the drop Shockwave's room switch and energy floor:
+    "drop_shock_enabled", "drop_shock_min_energy",
 }, "registry is the deliberate allowlist (eight room keys + the four "
    "analysed-transition knobs + the five 2026-10-06 widening keys + "
    "drop_floor + lull_dark_max_s + lull_breath_hold_s + the four "
    "drop-switch tunables + the two fireworks-meld tunables + "
    "strip_phase_strength + background_fade_s + "
-   "the ten transition-program tunables)")
+   "the ten transition-program tunables + the drop Shockwave's switch "
+   "and energy floor)")
 check(sc.SETTINGS_REGISTRY["ambient_enabled"].kind == "bool"
       and sc.SETTINGS_REGISTRY["ambient_on_music_pause"].kind == "bool",
       "the ambient toggle is binary to Sonic too — no mode string to mis-say")
@@ -234,7 +237,8 @@ check(set(scc.SCENE_SETTINGS_REGISTRY) == {
     "entry_ramp_ms",
     "choreography_enabled", "choreography_transition_ms", "choreography_anchor_frac",
     "color_journey_pace_factor", "accept_all_sets",
-}, "scene settings registry is the deliberate six-key scalar allowlist "
+    "drop_shock_enabled",
+}, "scene settings registry is the deliberate seven-key scalar allowlist "
    "(phase_blend_charge_ramp_ms/lull_ramp_ms retired 2026-08-20 — the "
    "charge/lull ramp is a computed dynamic stretch now, not a knob)")
 check(scc._model_field_bounds(_SceneV2, "entry_ramp_ms") ==

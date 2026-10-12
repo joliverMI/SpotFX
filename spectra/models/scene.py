@@ -1145,6 +1145,20 @@ class SceneV2(BaseModel):
     # (fire_history's "deferred" bucket), never silent. See
     # spectra/services/dwell.py for the full mechanism.
     dwell_curve: Optional[CurveAttachment] = None
+    # THE DROP SHOCKWAVE, PER SCENE (2026-10-12, the Admiral: "Shockwave
+    # should be a setting that can be toggled per scene, as well as
+    # globally, as well as a global setting for minimum energy before it is
+    # allowed to fire"). False = the crystal's drop Shockwave overlay
+    # (fx/effects/phase_grammar.py) never paints while this scene drops;
+    # the effect's own drop runs exactly as before. True (default) = it
+    # paints when the room's own switch and energy floor allow it
+    # (RoomControlState.drop_shock_enabled / drop_shock_min_energy). Read
+    # once per drop arm by scene_response._drive_phase, which tells the
+    # verdict to the effect as `drop_shock_on`. The Fish scene ships OFF
+    # (scripts/set_fish_drop_shock_off.py, his "turn it off for fish to
+    # test it at first"). Not the strips' own drop shockwave
+    # (fx/effects/strip_phase.py), which this does not govern.
+    drop_shock_enabled: bool = True
 
     @model_validator(mode="before")
     @classmethod

@@ -118,6 +118,9 @@ responses = ResponseEngine(
     song_position=lambda: (bridge.track_uri(),
                            bridge.effective_position_ms()),
     flare_blocked=_show_flare_blocked,
+    # THE DROP SHOCKWAVE'S ENERGY FLOOR reads the top bar's own Energy
+    # (RoomControlState.drop_shock_min_energy, phase_grammar.shock_allowed).
+    room_energy=lambda: bridge.intensity(),
 )
 
 # THE DROP-LED SCENE SWITCH (spectra/services/drop_switch.py) supplies the

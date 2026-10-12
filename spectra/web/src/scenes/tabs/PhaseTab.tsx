@@ -11,6 +11,7 @@
  * Blend sentence below describes the charge/lull stretch. A preview is the
  * same statement, shown instead of said. */
 import { useState } from 'react';
+import PowerButton from '../../components/PowerButton';
 import HelpLink from '../../help/HelpLink';
 import type { SceneV2 } from '../../types';
 import SequencePreviewOverlay from './SequencePreviewOverlay';
@@ -54,6 +55,30 @@ export default function PhaseTab({ scene, setScene, scenes }: {
         <br />
         Scene entry ramp:{' '}
         <b>{scene.entry_ramp_ms > 0 ? `${scene.entry_ramp_ms} ms blend-in` : 'instant (jump)'}</b>
+      </div>
+      <div
+        className="card-title"
+        style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 14 }}
+      >
+        <PowerButton
+          on={scene.drop_shock_enabled !== false}
+          onChange={(on) => setScene({ ...scene, drop_shock_enabled: on })}
+          size={22}
+          ariaLabel="Drop Shockwave on this scene"
+          title={scene.drop_shock_enabled !== false
+            ? 'On — this scene\'s drops may paint the Shockwave (when the room\'s own switch and minimum energy allow). Tap to turn it off for this scene.'
+            : 'Off — this scene\'s drops never paint the Shockwave; the effect\'s own drop still plays. Tap to turn on.'}
+        />
+        Drop Shockwave <HelpLink topic="drop-shockwave-switches" />
+      </div>
+      <div style={{ background: 'var(--surface2)', padding: 12, borderRadius: 'var(--radius)', fontSize: 13, lineHeight: 1.6 }}>
+        {scene.drop_shock_enabled !== false ? (
+          <>The crystal paints the <b>Shockwave</b> over this scene's own drop — when the room's
+            Drop Shockwave switch is on and the drop clears its minimum energy (Scenes panel in
+            the top bar).</>
+        ) : (
+          <>Shockwave <b>off</b> for this scene — its drops play the effect's own drop alone.</>
+        )}
       </div>
       <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
         <button onClick={() => setPreviewing('transition')}>

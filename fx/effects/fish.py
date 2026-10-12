@@ -1377,6 +1377,7 @@ class Fish2d(Twod, GradientEffect):
         lull_handoff.DROP_KEY,
         "big_fish",
         *phase_grammar.BREATH_KEYS,
+        phase_grammar.SHOCK_ON_KEY,
     ]
 
     CONFIG_SCHEMA = vol.Schema(
@@ -1807,6 +1808,7 @@ class Fish2d(Twod, GradientEffect):
             # Shockwave settings (registered) and the breath-hold keys
             # (ride ONLY the lull arm write)
             **phase_grammar.shock_schema_fields(),
+            **phase_grammar.shock_on_schema_fields(),
             **phase_grammar.breath_schema_fields(),
         }
     )

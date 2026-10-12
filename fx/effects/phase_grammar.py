@@ -76,6 +76,28 @@ HOW AN EFFECT OPTS IN (the Twod subclass):
      SHOCK_PARAMS in config/effect_params.json so Sonic reaches them.
 NEVER FIREWORKS (his word): it keeps its own drop.
 
+WHETHER IT MAY PAINT AT ALL (2026-10-12, the Admiral: "Shockwave should be
+a setting that can be toggled per scene, as well as globally, as well as a
+global setting for minimum energy before it is allowed to fire. As i
+understand it, it is an overlay, so it should easily be able to be turned
+off"). It IS an overlay: nothing here touches the effect's own drop (Black
+Hole's burst, the Fish's rush, Orbits' ejecta, the Eye's lids all run in
+the effect's own draw(), before this module is reached), so switching it
+off is "never build the painter". Three switches decide, all SpotFX's
+(spectra scene_response._drive_phase, `shock_allowed` below is the one
+rule): the room's `drop_shock_enabled`, the showing scene's own
+`drop_shock_enabled`, and the room's `drop_shock_min_energy` against the
+TOP BAR'S Energy at the drop (bridge.intensity(), the same number the drop
+floor reads — an unknown energy is never gated). The verdict rides every
+member's DROP ARM as `drop_shock_on` (SHOCK_ON_KEY, every drop, every
+member, so an earlier "off" is never left standing); untold (the LedFX UI,
+a test with no SpotFX) it reads True — the shipped behaviour. When it is
+False the drop's frame is the effect's own, byte for byte: no bloom, no
+wavefront, no debris, no wall splash, and no reveal hold-back either (the
+reveal is the overlay's, not the effect's). The per-effect `drop_shock`
+strength is a SEPARATE, effect-level knob and stays as it is. The strips'
+own drop shockwave (fx/effects/strip_phase.py) is not governed by this.
+
 THE BREATH-HOLD (lull)
 ======================
 
@@ -213,6 +235,60 @@ SHOCK_PARAMS = (
 SHOCK_KEYS = tuple(p[0] for p in SHOCK_PARAMS)
 SHOCK_DEFAULTS = {p[0]: p[1] for p in SHOCK_PARAMS}
 SHOCK_HELP_TOPIC = "drop-shockwave"
+
+# ── whether a drop may paint the Shockwave at all (module docstring) ──────
+
+# Told on every member's drop arm; never in the effect-parameter registry
+# (like the phase keys) — it is SpotFX's verdict, not a per-effect setting.
+SHOCK_ON_KEY = "drop_shock_on"
+DEFAULT_SHOCK_MIN_ENERGY = 0.7
+
+# the verdict's reasons, named in the drop's record
+SHOCK_ALLOWED = "allowed"
+SHOCK_ROOM_OFF = "room_off"
+SHOCK_SCENE_OFF = "scene_off"
+SHOCK_BELOW_ENERGY = "below_energy"
+SHOCK_ENERGY_UNKNOWN = "energy_unknown"   # allowed: an unknown is never gated
+
+
+def shock_allowed(room_on: bool, scene_on: bool, energy: Optional[float],
+                  min_energy: float) -> tuple[bool, str]:
+    """THE rule: may this drop paint the Shockwave, and why. The room's
+    switch wins, then the scene's, then the energy floor (`energy >=
+    min_energy`; a floor of 0 never gates; the loudest section of a song
+    reads exactly 1.0, so even a floor of 1.0 lets that section through —
+    the room switch is what turns it off). An energy that cannot be read
+    is never gated (the drop floor's own rule)."""
+    if not room_on:
+        return False, SHOCK_ROOM_OFF
+    if not scene_on:
+        return False, SHOCK_SCENE_OFF
+    if energy is None:
+        return True, SHOCK_ENERGY_UNKNOWN
+    try:
+        floor = float(min_energy)
+    except (TypeError, ValueError):
+        floor = DEFAULT_SHOCK_MIN_ENERGY
+    if float(energy) < floor:
+        return False, SHOCK_BELOW_ENERGY
+    return True, SHOCK_ALLOWED
+
+
+def shock_on_schema_fields() -> dict:
+    return {
+        vol.Optional(
+            SHOCK_ON_KEY,
+            description="Drop: whether this drop may paint the Shockwave "
+                        "(driven by SpotFX: the room's and the scene's "
+                        "switches and the energy floor)",
+            default=True,
+        ): bool,
+    }
+
+
+def shock_on(config: Mapping) -> bool:
+    """The told verdict; True when not told."""
+    return config.get(SHOCK_ON_KEY, True) is not False
 
 
 def shock_schema_fields() -> dict:
@@ -559,6 +635,8 @@ __all__ = [
     "BREATH_AT_KEY", "BREATH_KEY", "BREATH_KEYS", "DEFAULT_BREATH_S",
     "breath_s", "breath_keys_for", "breath_schema_fields", "breath_gain",
     "SHOCK_PARAMS", "SHOCK_KEYS", "SHOCK_DEFAULTS", "shock_schema_fields",
+    "SHOCK_ON_KEY", "DEFAULT_SHOCK_MIN_ENERGY", "shock_allowed",
+    "shock_on_schema_fields", "shock_on",
     "registry_params", "shock_scale", "Shockwave", "panel_field",
     "white_cells",
 ]
