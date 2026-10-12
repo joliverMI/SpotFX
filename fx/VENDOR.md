@@ -743,7 +743,7 @@ variables named `ledfx` (the core object handle) are untouched.
     render pipeline. Not in the fork source at `/home/javi/ledfx-src`.
 
 27. `utils.py`: `WLED.set_brightness` FIXED and `WLED.get_brightness` ADDED
-    (`set_brightness` DELETED 2026-10-12 — see #77; the read stays)
+    (`set_brightness` DELETED 2026-10-12 — see #78; the read stays)
     — the fixture's MASTER (firmware) brightness, json/state's `bri`, which
     scales everything the fixture emits INCLUDING a realtime stream.
     THE LIVE FINDING THAT NEEDED IT (2026-08-31): his fixture sat at ~10%
@@ -2351,4 +2351,6 @@ against that commit.
     uncalled, `wled.py`'s flush is commented out as upstream's is), and
     `force_max_brightness` is never called.
     Evidence: `tests/test_wled_never_writes_bri.py` (the transport refusal,
-    and a static scan of every Python source that could reach a WLED).
+    plus behavioural proofs through `flush_sync_settings` and the
+    vendored, uncalled `Devices.set_wleds_sync_mode`, and through
+    `house_fixtures`' real default transport).

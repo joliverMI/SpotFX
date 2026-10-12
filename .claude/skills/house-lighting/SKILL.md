@@ -96,7 +96,8 @@ worth knowing cold:
    IS HOME ASSISTANT'S" / "POWER FOLLOWS THE MODE" docstring sections are
    the binding statement. No payload anywhere carries `bri` (or `maxbri`):
    `fx/utils.py::WLED._wled_request` refuses one and
-   `tests/test_wled_never_writes_bri.py` scans the source. Power writes
+   `tests/test_wled_never_writes_bri.py` drives that transport and its
+   real callers and asserts the refusal fires. Power writes
    are exactly `{"on": true|false}`, due only when the EFFECTIVE mode or a
    fixture's target changes (`HouseState.power_applied`, durable — a
    restart under the same mode writes nothing); there is NO drift check,

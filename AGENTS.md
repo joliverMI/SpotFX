@@ -4694,8 +4694,9 @@ split). Six things:
     `fx/utils.py::WLED._wled_request` (the one WLED transport) refuses
     one (VENDOR #78; `set_brightness` is deleted, and the dead flush of
     Force max brightness is refused too), and `tests/test_wled_never_writes_bri.py`
-    scans every Python source that can reach a WLED. A new dict with a
-    `"bri"` key fails that test unless it is a named READ-BACK.
+    drives that transport and its real callers (house_fixtures' power
+    writes, the vendored sync-mode flush) and asserts the refusal fires
+    and nothing reaches `requests.post`.
   * **Power is exactly `{"on": true|false}` and is due only on a CHANGE**:
     the effective mode (a media overlay counts), a fixture's target (lend,
     override, mains), or a take of a released room. `HouseState.
@@ -5383,7 +5384,7 @@ and the id shape. Five things to know:
   block for the morning read. Until then the capture took each fixture to
   full and put his level back (`owned()`, and the 2026-09-06 restore
   hardening around it — both retired with `WLED.set_brightness`, VENDOR
-  #77). A non-WLED fixture is `not_applicable` and a fixture that would
+  #78). A non-WLED fixture is `not_applicable` and a fixture that would
   not answer is `unreadable`; NEITHER is ever given a fabricated 255,
   because a made-up full reading makes an unguarded fixture look guarded.
   Spec: `tests/test_fixture_brightness.py`, `scripts/check_fixture_brightness.py`.

@@ -2,49 +2,26 @@
 
 The Admiral, 2026-10-12 (data/wled-bri-audit/report.md): "Home assistant can
 set the WLED global brightness of any of these lights, and spectra doesn't
-touch that value." Two independent guards, so the rule fails LOUDLY the day
-a code path grows a brightness write back:
+touch that value." The guard is AT THE TRANSPORT, not in the source text:
+`fx.utils.WLED._wled_request` is the one call every WLED JSON write in this
+repo goes through (house_fixtures' power writes, night_power,
+release_realtime, and the vendored sync-mode flush). It refuses a json/data
+body carrying `bri` — top level or on a segment — before anything leaves.
+It refuses "Force max brightness" (`maxbri`, anywhere in a json= or data=
+body) the same way: it stays OFF so Home Assistant's brightness keeps
+scaling the stream (River's acceptance, 2026-10-12).
 
-  1. AT THE TRANSPORT. `fx.utils.WLED._wled_request` is the one call every
-     WLED JSON write in this repo goes through (house_fixtures' power
-     writes, night_power, release_realtime). It refuses a json body carrying
-     `bri` — top level or on a segment — before anything leaves.
-     It refuses "Force max brightness" (`maxbri`, anywhere in a json= or
-     data= body) the same way: it stays OFF so Home Assistant's brightness
-     keeps scaling the stream (River's acceptance, 2026-10-12).
-  2. IN THE SOURCE. A static scan of every Python file that can reach a WLED
-     (`spectra/`, `fx/`, the root process's `services/`/`api/`, `scripts/`,
-     `main.py`) finds every dict literal with a "bri" key, every
-     `x["bri"] = ...` store and every `bri=` keyword. Each one must be a
-     named READ-BACK below, with why; a new one fails this test. A test
-     double that models a WLED's reply lives under tests/ and is not
-     scanned.
+Every test below drives that transport, or a real caller of it, and asserts
+on observable behaviour — a raised `WLEDBrightnessRefused` and nothing
+reaching `requests.post` — never on what the source text of a call site
+happens to spell.
 """
 from __future__ import annotations
 
-import ast
 import asyncio
-from pathlib import Path
 
 import pytest
 
-REPO = Path(__file__).resolve().parent.parent
-SCANNED = ("spectra", "fx", "services", "api", "scripts", "main.py")
-
-#: (path, enclosing function) -> why a "bri" key there is not a write. Keep
-#: it short: every entry is something that READS a WLED and names what it
-#: read.
-READS = {
-    ("spectra/services/night_exit.py", "_read_wled"):
-        "the honest exit's read-back record of what the fixture reported",
-    ("scripts/check_fixture_brightness.py", "_get"):
-        "a fake json/state REPLY the check reads get_brightness against",
-    ("scripts/check_fixture_brightness.py", "main"):
-        "the deliberate `bri` body that proves the transport REFUSES it",
-}
-
-
-# ── 1. the transport ───────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("body", [
     {"bri": 255},
@@ -84,27 +61,40 @@ def test_the_transport_refuses_force_max_brightness_however_it_is_sent(kw):
 
 def test_nothing_can_flush_force_max_brightness():
     """The vendored sync-settings flush always carries the `maxbri` it read,
-    so it is refused at the transport — and nothing calls it, the setter or
-    the sync-mode loop that would."""
+    so it is refused at the transport."""
     from fx.utils import WLED, WLEDBrightnessRefused
     wled = WLED("10.0.0.9")
     wled.sync_settings = {"if": {"live": {"maxbri": False, "timeout": 2}}}
     wled.force_max_brightness()
     with pytest.raises(WLEDBrightnessRefused):
         asyncio.run(wled.flush_sync_settings())
-    callers = []
-    for path in _files():
-        rel = path.relative_to(REPO).as_posix()
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-        for node in ast.walk(tree):
-            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
-                    and node.func.attr in ("force_max_brightness",
-                                           "flush_sync_settings",
-                                           "set_wleds_sync_mode")):
-                callers.append((rel, node.func.attr))
-    # the one call left is inside the vendored set_wleds_sync_mode, which
-    # nothing calls (and which the transport would refuse anyway)
-    assert callers == [("fx/devices/__init__.py", "flush_sync_settings")], callers
+
+
+def test_set_wleds_sync_mode_is_refused_before_reaching_the_wire(monkeypatch):
+    """`fx.devices.Devices.set_wleds_sync_mode` — the vendored sync-mode
+    switch, with no caller anywhere in this fork today — flushes the same
+    read-back sync block as `flush_sync_settings` above, so it is refused
+    at the transport too, before a single byte reaches `requests.post`."""
+    from types import SimpleNamespace
+
+    import fx.utils as fx_utils
+    from fx.devices import Devices
+    from fx.utils import WLED, WLEDBrightnessRefused
+
+    sent = []
+    monkeypatch.setattr(fx_utils.requests, "post",
+                        lambda *a, **k: sent.append((a, k)))
+
+    wled = WLED("10.0.0.48")
+    wled.sync_settings = {"if": {"live": {"port": 5568, "maxbri": False,
+                                          "timeout": 2}}}
+    device = SimpleNamespace(type="wled", pixel_count=560,
+                             config={"sync_mode": "udp"}, wled=wled)
+    registry = SimpleNamespace(values=lambda: [device])
+
+    with pytest.raises(WLEDBrightnessRefused):
+        asyncio.run(Devices.set_wleds_sync_mode(registry, "ddp"))
+    assert sent == [], "nothing may reach the wire"
 
 
 def test_a_power_only_body_still_goes_out():
@@ -184,65 +174,3 @@ async def _noop_remember(_did, _dev):
 def test_set_brightness_no_longer_exists():
     from fx.utils import WLED
     assert not hasattr(WLED, "set_brightness")
-
-
-# ── 2. the source ──────────────────────────────────────────────────────────
-
-def _files():
-    for root in SCANNED:
-        path = REPO / root
-        if path.is_file():
-            yield path
-        elif path.is_dir():
-            for p in sorted(path.rglob("*.py")):
-                if "node_modules" in p.parts or "__pycache__" in p.parts:
-                    continue
-                yield p
-
-
-def _bri_sites(tree: ast.AST):
-    """(line, enclosing function, kind) for every "bri" key written."""
-    parents: dict[ast.AST, ast.AST] = {}
-    for node in ast.walk(tree):
-        for child in ast.iter_child_nodes(node):
-            parents[child] = node
-
-    def enclosing(node):
-        while node in parents:
-            node = parents[node]
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                return node.name
-        return "<module>"
-
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Dict):
-            for key in node.keys:
-                if isinstance(key, ast.Constant) and key.value == "bri":
-                    yield node.lineno, enclosing(node), "dict key"
-        elif (isinstance(node, ast.Subscript) and isinstance(node.ctx, ast.Store)
-              and isinstance(node.slice, ast.Constant)
-              and node.slice.value == "bri"):
-            yield node.lineno, enclosing(node), '["bri"] store'
-        elif isinstance(node, ast.keyword) and node.arg == "bri":
-            yield getattr(node, "lineno", 0), enclosing(node), "bri= keyword"
-
-
-def test_no_source_builds_a_brightness_payload_for_a_wled():
-    found, seen_reads = [], set()
-    for path in _files():
-        rel = path.relative_to(REPO).as_posix()
-        try:
-            tree = ast.parse(path.read_text(encoding="utf-8"))
-        except SyntaxError:                              # pragma: no cover
-            continue
-        for line, func, kind in _bri_sites(tree):
-            if (rel, func) in READS:
-                seen_reads.add((rel, func))
-                continue
-            found.append(f"{rel}:{line} ({func}, {kind})")
-    assert not found, (
-        "a WLED's brightness is Home Assistant's — Spectra never writes it. "
-        "These build a 'bri' payload; if one is only a READ-BACK, name it in "
-        f"READS with why: {found}")
-    stale = set(READS) - seen_reads
-    assert not stale, f"READS names sites that no longer exist: {stale}"

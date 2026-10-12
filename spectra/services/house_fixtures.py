@@ -31,7 +31,8 @@ FIXTURES, and what Spectra then does to them:
              brightness, which belongs to Home Assistant or the fixture's own
              web page. `fx/utils.py::WLED._wled_request` refuses a json/state
              body carrying `bri` (VENDOR #78), and
-             tests/test_wled_never_writes_bri.py holds it statically too.
+             tests/test_wled_never_writes_bri.py drives that transport and
+             its real callers behaviourally to prove the refusal holds.
              The retired build (2026-10-05 to 10-12) held each fixture at a
              captured "ceiling", soft-powered it through bri 1, corrected
              drift every minute and handed a days-old bri back on release —
