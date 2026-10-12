@@ -23,7 +23,7 @@ whoever is reading this.
 | Family | Positive means | Negative means | Composed as | Members |
 |---|---|---|---|---|
 | **LEAD** ("how early to start so the payoff lands on the mark") | **EARLIER** | later | `fire_at = target − lead` (subtracted from the target, or equivalently added to the running clock: `effective_now = now + offset`) | `lead_ms` (SPECTRA, all variants below), `RoomControlState.av_sync_lead_ms` (the room's own measured A/V calibration — the only AUTHORED member of this family), legacy's `ledfx_trigger_buffer_ms` + `effective_offset_ms` + `shape_offset_ms` |
-| **OFFSET** ("where the owner dragged the mark / authored the moment") | **LATER** | earlier | `target = timestamp + offset` (added directly to the stored moment; two OFFSET terms may be SUMMED — see below) | `FlareKind.trigger_offset_ms`, `SceneV2.trigger_offset_ms`, `SpectraTrigger.trigger_offset_ms`, `DeviceSettings.timing_offset_ms` (SPECTRA); `MusicEvent.event_offset_ms`, `MorphLane.offset_ms`, `ParallelChild.offset_ms` (predecessor, currently dark) |
+| **OFFSET** ("where the owner dragged the mark / authored the moment") | **LATER** | earlier | `target = timestamp + offset` (added directly to the stored moment; two OFFSET terms may be SUMMED — see below) | `FlareKind.trigger_offset_ms`, `SceneV2.trigger_offset_ms`, `SpectraTrigger.trigger_offset_ms`, `RoomControlState.drop_timing_offset_ms` / `SceneV2.drop_timing_offset_ms` (a THIRD term, drops only), `DeviceSettings.timing_offset_ms` (SPECTRA); `MusicEvent.event_offset_ms`, `MorphLane.offset_ms`, `ParallelChild.offset_ms` (predecessor, currently dark) |
 
 Both families are live simultaneously in SPECTRA's own trigger engine and
 **compose in the same function**
