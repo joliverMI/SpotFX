@@ -508,18 +508,23 @@ export interface RoomControlState {
    * Light Show Display-mode step may set its own fade for that switch. */
   background_fade_s: number;
   /** THE BREATH-HOLD before a drop (fx/effects/phase_grammar.py): how long
-   * the crystal goes to true black right before a drop lands, on the
-   * drop-Shockwave effects (Black Hole, Orbits, Sauron, Eye, Fish). Never
-   * longer than the lull's own darkness allows. 0 = none. Default 0.4. */
+   * the lights go to true black right before a drop lands — the crystal's
+   * Black Hole, Sauron and Eye, and the Pulse singles (Orbits only dims to
+   * one dim blob; the Fish is never darkened). Never longer than the
+   * lull's own darkness allows. 0 = none. Default 0.4. */
   lull_breath_hold_s: number;
   /** THE DROP SHOCKWAVE'S ROOM SWITCH (fx/effects/phase_grammar.py,
-   * scene_response._drop_shock_keys): off = no crystal Shockwave on any
-   * drop; every effect's own drop unchanged. Default on. */
+   * scene_response._drop_shock_keys): off = no Shockwave on any drop,
+   * crystal or strips; every effect's own drop unchanged. Default on. */
   drop_shock_enabled: boolean;
   /** The Shockwave paints only when the top bar's Energy (bridge.intensity)
    * at the drop is at least this. Default 0.7; 0 = every drop; an unknown
    * energy is never gated. */
   drop_shock_min_energy: number;
+  /** THE PULSE FLASH'S ENERGY FLOOR (scene_response.pulse_flash_allowed):
+   * the Pulse flash flare fires only when the top bar's Energy is at least
+   * this. Default 0.8; 0 = never gated; an unknown energy is never gated. */
+  pulse_flash_min_energy: number;
   /** THE DROP-LED SCENE SWITCH (spectra/services/drop_switch.py): a drop
    * sequence may switch the scene with a hard cut on its drop when the
    * showing scene is stale. The three stale thresholds are his to tune

@@ -9682,10 +9682,18 @@ including how an effect opts in. Four things:
   never an RGB mix. Measure with `phase_grammar.white_cells` before adding
   any layer.
 - **THE BREATH-HOLD** (`RoomControlState.lull_breath_hold_s`, 0.4 s,
-  Sonic-editable, 0 = off) rides every member's lull arm as
+  Sonic-editable, 0 = off) rides the lull arm of every
+  `fx.device_model.BREATH_HOLD_EFFECTS` member as
   `lull_breath_at_s`/`lull_breath_s`, always inside `lull_dark.dark_hold_s`,
   0 when the gap is unknowable; it ends on the drop's edge or
-  `BREATH_OVERRUN_S` after it was due.
+  `BREATH_OVERRUN_S` after it was due. Since 2026-10-12 (the Admiral: "I
+  want orbits and fish to specifically not go dark completely ... I do want
+  it on pulse effect"; "orbits should keep at least one dim blob") that set
+  is the Shockwave members WITHOUT the Fish (`Twod.BREATH_HOLD = False`)
+  plus Pulse (true black, punch and flash included), and Orbits breathes
+  only to its `BREATH_FLOOR` (one dim blob); the Orbits strip keeps one
+  dim blob through its lull's dark (its own `lull_ember`, 0.2). Spec
+  `tests/test_drop_feedback_1012.py`.
 - `DROP_INTENSITY_EFFECTS` widened to every member: the drop scales the
   debris and the front's life; Black Hole's own burst grows on a loud told
   drop and is exactly `PHASE_BURST_N` untold. The eleven `drop_*` settings
@@ -9704,8 +9712,14 @@ including how an effect opts in. Four things:
   `scene_response._drop_shock_keys` decides once per drop arm with
   `phase_grammar.shock_allowed` and tells every member `drop_shock_on`
   (record key `drop_shock`); told False the base render builds no painter,
-  so the frame is the effect's own drop byte for byte. Strips untouched.
-  Spec `tests/test_drop_shock_switches.py`; help `drop-shockwave-switches`.
+  so the frame is the effect's own drop byte for byte. Since 2026-10-12
+  ("stip shockwave, yes") every strip phase member is told the same verdict
+  (`DROP_SHOCK_TOLD_EFFECTS`) and skips only its wave and flood; its colour
+  and activity burst still run. The Pulse FLASH flare has its own floor on
+  the same top-bar Energy (`pulse_flash_min_energy`, 0.8,
+  `scene_response.pulse_flash_allowed`). Spec
+  `tests/test_drop_shock_switches.py`, `tests/test_drop_feedback_1012.py`;
+  help `drop-shockwave-switches`, `pulse-flash-energy`.
 
 ## Radial (STAR) rotation is audio-lows-driven — a healthy `spin` can read as parked
 

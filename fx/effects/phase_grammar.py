@@ -96,7 +96,8 @@ False the drop's frame is the effect's own, byte for byte: no bloom, no
 wavefront, no debris, no wall splash, and no reveal hold-back either (the
 reveal is the overlay's, not the effect's). The per-effect `drop_shock`
 strength is a SEPARATE, effect-level knob and stays as it is. The strips'
-own drop shockwave (fx/effects/strip_phase.py) is not governed by this.
+own drop shockwave (fx/effects/strip_phase.py) obeys the same verdict
+since 2026-10-12 (WHO BREATHES, below).
 
 THE BREATH-HOLD (lull)
 ======================
@@ -113,6 +114,24 @@ it changes nothing. A gap SpotFX cannot know (no partner trigger) tells 0:
 there is no mark to breathe before. If the drop never comes, the panel
 comes back BREATH_OVERRUN_S after the breath should have ended rather than
 staying black until the orphan watchdog.
+
+WHO BREATHES (2026-10-12, the Admiral: "I want orbits and fish to
+specifically not go dark completely on the crystal or the strips. I do
+want it on pulse effect, though" / "orbits should keep at least one dim
+blob"): fx.device_model.BREATH_HOLD_EFFECTS is who SpotFX tells. A Twod
+member opts out with `BREATH_HOLD = False` (the Fish: its lull's searcher
+swims straight through to the drop) or breathes only down to its own
+`BREATH_FLOOR` (Orbits: its lull's one blob stays, dim, through the breath —
+`breath_gain(..., floor=)`). Pulse is not a Twod member and takes the
+breath itself (fx/effects/pulse.py): the Singles go fully dark for it, a
+flare's flash or punch included. The strips never breathe; their lull dark
+is the strip layer's own (fx/effects/strip_phase.py, `lull_ember`).
+
+AND THE STRIPS' OWN DROP SHOCKWAVE (fx/effects/strip_phase.py) obeys the
+same three switches above (the Admiral: "stip shockwave, yes"): SpotFX
+tells every fx.device_model.DROP_SHOCK_TOLD_EFFECTS member `drop_shock_on`,
+and a strip told False skips only its shockwave (the wave and its flood) —
+its colour brightness and activity burst still run.
 """
 
 from __future__ import annotations
@@ -174,9 +193,17 @@ def breath_schema_fields() -> dict:
     }
 
 
-def breath_gain(config: Mapping, phase_t: float) -> float:
+def breath_gain(config: Mapping, phase_t: float, floor: float = 0.0) -> float:
     """How much of the lull's own picture shows at `phase_t` seconds into
-    the lull: 1.0 = untouched, 0.0 = the breath's true black."""
+    the lull: 1.0 = untouched, 0.0 = the breath's true black. With a
+    `floor` (an effect's own BREATH_FLOOR — Orbits keeps one dim blob) the
+    breath bottoms out there instead of black: floor + (1 - floor) x gain."""
+    g = _breath_gain(config, phase_t)
+    f = min(1.0, max(0.0, float(floor)))
+    return g if f <= 0.0 else f + (1.0 - f) * g
+
+
+def _breath_gain(config: Mapping, phase_t: float) -> float:
     try:
         b = float(config.get(BREATH_KEY, 0.0) or 0.0)
         at = float(config.get(BREATH_AT_KEY, 0.0) or 0.0)

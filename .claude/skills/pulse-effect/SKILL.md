@@ -66,6 +66,24 @@ Plan: `/home/javi/fleet-spotfx/data/single-led-power-plan/report.md`.
   one runtime (the strips use the same); `scripts/check_flare_punch_crystal.py`
   measures it, `tests/test_flare_punch_crystal.py` proves it (and that the
   lull is byte-identical without a punch).
+- **The breath-hold takes Pulse to TRUE BLACK** (2026-10-12, the Admiral:
+  "I do want it on pulse effect"): Pulse is in `fx.device_model.
+  BREATH_HOLD_EFFECTS`, so the lull arm tells it `lull_breath_at_s`/
+  `lull_breath_s` (the room's `lull_breath_hold_s`, 0.4 s, inside the lull's
+  dark hold), and `_compose`'s lull branch multiplies level, rest and the
+  flash's keep by `phase_grammar.breath_gain` AFTER the punch — so a punch
+  or a flash in the last 0.4 s before the drop is black too. The Light
+  Show's brightness floor still wins (an explicit hold).
+- **The flash flare only fires on HIGH ENERGY** (2026-10-12, "The flash
+  flare on pulse should only happen on high energy, .8 or higher"):
+  `scene_response._pulse_flash` writes nothing unless the top bar's Energy
+  (`bridge.intensity()`, `ResponseEngine(room_energy=)`) is at least
+  `RoomControlState.pulse_flash_min_energy` (0.8, Sonic `set_setting`,
+  room bar's Scenes panel) — `pulse_flash_allowed` is the one rule; an
+  unknown energy (no analysis, the previews' scratch engines) is never
+  gated. A gated flash writes nothing, so it cannot punch a lull open
+  either. The colour flip is untouched. Help `pulse-flash-energy`; proof
+  `tests/test_drop_feedback_1012.py`.
 - **Rainbow walk**: Pulse walks only when its `gradient` spans > 180° of
   hue (`chromatic_span_deg`, the colour journey's own test). The compiler
   (`scene_compiler.set_entries_for`) hands it the STRIPS' WHOLE gradient in

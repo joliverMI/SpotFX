@@ -3830,7 +3830,7 @@
           "smooth": true,
           "min": 0.0,
           "max": 1.0,
-          "default": 0.0,
+          "default": 0.2,
           "help_topic": "strip-phases"
         },
         "drop_shockwave": {

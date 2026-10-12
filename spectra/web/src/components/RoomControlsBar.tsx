@@ -648,7 +648,7 @@ export default function RoomControlsBar() {
             </div>
             <div className="top-bar-group-field">
               <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}
-                title="How long the crystal goes to true black right before a drop lands (Black Hole, Orbits, Sauron, Eye, Fish). Never longer than the lull's own darkness. 0 = none.">
+                title="How long the lights go to true black right before a drop lands (the crystal's Black Hole, Sauron and Eye, and the Pulse singles; Orbits only dims to one dim blob and the Fish keeps swimming). Never longer than the lull's own darkness. 0 = none.">
                 Breath-hold before drop
                 <HelpLink topic="drop-breath-hold" />
               </label>
@@ -668,8 +668,8 @@ export default function RoomControlsBar() {
                   size={22}
                   ariaLabel="Drop Shockwave"
                   title={local.drop_shock_enabled
-                    ? 'On — the crystal effects (Black Hole, Orbits, Sauron, Eye, Fish) paint the Shockwave over their own drop, on scenes that allow it and drops above the minimum energy. Tap to turn off everywhere.'
-                    : 'Off — no Shockwave on any drop; every effect\'s own drop plays as before. Tap to turn on.'}
+                    ? 'On — the crystal effects (Black Hole, Orbits, Sauron, Eye, Fish) and the strips paint the Shockwave over their own drop, on scenes that allow it and drops above the minimum energy. Tap to turn off everywhere.'
+                    : 'Off — no Shockwave on any drop, crystal or strips; every effect\'s own drop plays as before. Tap to turn on.'}
                 />
                 Drop Shockwave
                 <HelpLink topic="drop-shockwave-switches" />
@@ -689,6 +689,19 @@ export default function RoomControlsBar() {
                 />
               </div>
             )}
+            <div className="top-bar-group-field">
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}
+                title="The Pulse singles' flash flare only fires when the top bar's ⚡ Energy reading is at least this much — in a lull or out of one. 0 = every flash.">
+                Pulse flash minimum energy (top-bar Energy)
+                <HelpLink topic="pulse-flash-energy" />
+              </label>
+              <input
+                type="number" min={0} max={1} step={0.05}
+                value={local.pulse_flash_min_energy}
+                onChange={(e) => setLocal({ ...local, pulse_flash_min_energy: Number(e.target.value) })}
+                onBlur={() => commit(local)}
+              />
+            </div>
             <div className="top-bar-group-field">
               <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
                 <PowerButton

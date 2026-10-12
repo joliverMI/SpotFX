@@ -343,6 +343,29 @@ LULL_HANDOFF_EFFECTS = frozenset({"fish", "orbits"})
 DROP_SHOCK_EFFECTS = frozenset({"blackhole", "orbits", "sauron", "eye",
                                 "fish"})
 
+# ... and who is TOLD whether a drop may paint its shockwave
+# (`drop_shock_on`, phase_grammar.SHOCK_ON_KEY — the room's switch, the
+# scene's and the top-bar Energy floor; spectra scene_response.
+# _drop_shock_keys). The crystal's Shockwave members and, since 2026-10-12
+# (the Admiral: "stip shockwave, yes"), every STRIP_PHASE_EFFECTS member,
+# whose own drop shockwave (fx/effects/strip_phase.py) obeys the same three
+# switches. Skipped, only the shockwave goes — every other part of the
+# drop still runs.
+DROP_SHOCK_TOLD_EFFECTS = DROP_SHOCK_EFFECTS | STRIP_PHASE_EFFECTS
+
+# THE BREATH-HOLD (fx/effects/phase_grammar.py): the effects SpotFX tells
+# the lull's short true black right before the drop (`lull_breath_at_s`,
+# `lull_breath_s`). 2026-10-12, the Admiral: "I want orbits and fish to
+# specifically not go dark completely on the crystal or the strips. I do
+# want it on pulse effect, though" / "orbits should keep at least one dim
+# blob". So: the Shockwave members WITHOUT the Fish (its class opts out,
+# Twod.BREATH_HOLD = False), PLUS Pulse (fx/effects/pulse.py — the Singles
+# go fully dark for the breath). Orbits stays told but breathes only down
+# to its own BREATH_FLOOR (a dim blob, never black). Must equal the
+# registered effects whose class takes the breath
+# (tests/test_drop_feedback_1012.py holds that).
+BREATH_HOLD_EFFECTS = (DROP_SHOCK_EFFECTS - {"fish"}) | {"pulse"}
+
 # ... and its drop-side half: effects told the fire's intensity on every
 # drop arm (`drop_intensity`) so the drop's length and speed scale with the
 # music (lull_handoff.drop_scale). Every STRIP_PHASE_EFFECTS member too (the

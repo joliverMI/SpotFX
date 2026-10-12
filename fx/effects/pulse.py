@@ -90,7 +90,12 @@ INPUTS THE ENGINE PUSHES (phase 2) — hooks with safe defaults:
   point the crystal's Black Hole and Squiggles use, so Pulse is pitch black
   for exactly as long as they are (a 20 s lull: 17 s of fade, 3 s black).
   Without SpotFX's lull timing on the write it falls back to the end of
-  the ramp, its pre-rule behaviour. drop: begins ON
+  the ramp, its pre-rule behaviour. THE BREATH-HOLD (2026-10-12,
+  fx/effects/phase_grammar.py, the Admiral: "I do want it on pulse
+  effect"): the lull arm also tells `lull_breath_at_s`/`lull_breath_s`
+  (the room's lull_breath_hold_s, 0.4 s) and the light is TRUE BLACK for
+  that window right before the drop — a flare's punch or flash included.
+  drop: begins ON
   its first frame at `drop_burst` with a `drop_white` mix, settles over
   `drop_settle_beats`, then the phase key self-resets to "none" so an
   identical later write edges again. A charge or lull that ends without a
@@ -174,6 +179,7 @@ import voluptuous as vol
 
 import fx.effects.lull_dark as lull_dark
 import fx.effects.particle_handoff as particle_handoff
+import fx.effects.phase_grammar as phase_grammar
 from fx import pulse_modulation
 from fx.effects.audio import AudioReactiveEffect
 from fx.effects.gradient import GradientEffect
@@ -316,6 +322,7 @@ class PulseAudioEffect(AudioReactiveEffect, GradientEffect):
         "phase_progress",
         *lull_dark.KEYS,
         *lull_dark.PUNCH_KEYS,
+        *phase_grammar.BREATH_KEYS,
         "flash",
         "flip",
     ]
@@ -483,6 +490,9 @@ class PulseAudioEffect(AudioReactiveEffect, GradientEffect):
             # a flare in the lull's dark punches through (the poke and the
             # three "Flare punch" settings) — fx/effects/lull_dark.py
             **lull_dark.punch_schema_fields(),
+            # the breath-hold before the drop, pushed by SpotFX on the lull
+            # arm — fx/effects/phase_grammar.py
+            **phase_grammar.breath_schema_fields(),
         }
     )
 
@@ -861,6 +871,15 @@ class PulseAudioEffect(AudioReactiveEffect, GradientEffect):
                 level = max(level, (floor + self._pulse(env, depth)) * pp)
                 rest = max(rest, floor * pp)
                 keep = max(keep, pp)
+            # THE BREATH-HOLD (fx/effects/phase_grammar.py, 2026-10-12, the
+            # Admiral: "I do want it on pulse effect"): the short true black
+            # right before the drop wins over everything in the lull — the
+            # lull's own glow, a flare's punch and its flash alike.
+            breath = phase_grammar.breath_gain(self._config, self._phase_t)
+            if breath < 1.0:
+                level *= breath
+                rest *= breath
+                keep *= breath
         else:
             level = floor + self._pulse(env, depth)
         if self._burst > 0.0:

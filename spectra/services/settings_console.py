@@ -143,6 +143,7 @@ def _spec(key: str, label: str, description: str) -> SettingSpec:
             "background_fade_s": "seconds, 0 = instant",
             "lull_breath_hold_s": "seconds",
             "drop_shock_min_energy": "top-bar displayed energy, fraction 0.0-1.0",
+            "pulse_flash_min_energy": "top-bar displayed energy, fraction 0.0-1.0",
             "drop_switch_stale_margin_s": "seconds beyond the scene's own dwell",
             "drop_switch_drops_in_a_row": "drops, 0 = off",
             "drop_switch_swallow_delay_s": "seconds after the drop",
@@ -304,8 +305,9 @@ SETTINGS_REGISTRY: dict[str, SettingSpec] = {
         "rises under them and there's more going on (more blobs, more "
         "fireworks, a faster melt); a lull fades them to black at the same "
         "dark point as the crystal (the Fireworks strip keeps a faint "
-        "ember); a drop sends a shockwave in the set's colours from the "
-        "middle. Never adds white. 1 = as tuned (default), 0 = off (the "
+        "ember, the Orbits strip one dim blob); a drop sends a shockwave in "
+        "the set's colours from the middle (it obeys the drop Shockwave's "
+        "switches too). Never adds white. 1 = as tuned (default), 0 = off (the "
         "strips exactly as before — the Black Hole, Orbits and Fireworks "
         "strips keep their own blob/launch choreography, just without the "
         "colour build, fade or shockwave), up to 1.5 = stronger. Takes "
@@ -323,10 +325,11 @@ SETTINGS_REGISTRY: dict[str, SettingSpec] = {
         "can set its own fade for that one switch."),
     "lull_breath_hold_s": _spec(
         "lull_breath_hold_s", "Breath-hold before the drop",
-        "How long the crystal goes to true black right before a drop "
-        "lands, in seconds, on the effects with the drop Shockwave (Black "
-        "Hole, Orbits, Sauron, Eye, Fish) — the drop is then born out of "
-        "black. Never longer than the lull's own darkness allows (half the "
+        "How long the lights go to true black right before a drop lands, "
+        "in seconds — on the crystal's Black Hole, Sauron and Eye, and on "
+        "the Pulse singles — so the drop is born out of black. Orbits only "
+        "dims to one dim blob and the Fish keeps swimming (never fully "
+        "dark). Never longer than the lull's own darkness allows (half the "
         "lull, capped by 'Lull darkness (max)'). 0 = no breath-hold. "
         "Default 0.4. Takes effect on the very next lull."),
     "drop_shock_enabled": _spec(
@@ -338,12 +341,13 @@ SETTINGS_REGISTRY: dict[str, SettingSpec] = {
         "anywhere; every effect's own drop still plays exactly as before. "
         "A scene can also switch it off for itself (the scene setting "
         "drop_shock_enabled), and quiet drops can be left out with "
-        "'Shockwave minimum energy'. Does not touch the strips' own drop "
-        "shockwave (that is 'Strip phase strength'). Takes effect on the "
-        "very next drop."),
+        "'Shockwave minimum energy'. The strips' own drop shockwave follows "
+        "the same switch (the strips' colour and activity burst still "
+        "plays). Takes effect on the very next drop."),
     "drop_shock_min_energy": _spec(
         "drop_shock_min_energy", "Shockwave minimum energy (top-bar Energy)",
-        "The drop Shockwave only paints when the top bar's Energy reading "
+        "The drop Shockwave (on the crystal and on the strips) only paints "
+        "when the top bar's Energy reading "
         "(the ⚡ Energy number, exactly as shown) is at least this much at "
         "the moment of the drop. Default 0.7. 0 = every drop gets it. A "
         "song's loudest section reads exactly 1.0, so even 1.0 still lets "
@@ -351,6 +355,15 @@ SETTINGS_REGISTRY: dict[str, SettingSpec] = {
         "Shockwave off instead. When the energy can't be read (no "
         "analysis for the song) the drop is not held back. Takes effect "
         "on the very next drop."),
+    "pulse_flash_min_energy": _spec(
+        "pulse_flash_min_energy", "Pulse flash minimum energy (top-bar Energy)",
+        "The Pulse singles' flash flare (the brightness spike) only fires "
+        "when the top bar's Energy reading (the ⚡ Energy number, exactly "
+        "as shown) is at least this much at that moment — in a lull or "
+        "out of one. Default 0.8. 0 = every flash fires. When the energy "
+        "can't be read (no analysis for the song) the flash is not held "
+        "back. Does not touch the colour-flip flare. Takes effect on the "
+        "very next flash."),
     "drop_switch_enabled": _spec(
         "drop_switch_enabled", "Drop-led scene switch",
         "On (default): a drop sequence may change the scene — a hard cut "

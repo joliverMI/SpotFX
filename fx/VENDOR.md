@@ -2303,3 +2303,26 @@ against that commit.
     no-punch lull byte-identical to the pinned pre-change modules) and
     `scripts/check_flare_punch_crystal.py` (the numbers). Unverified against
     his live room.
+77. `effects/phase_grammar.py` (`breath_gain(..., floor=)`, the WHO
+    BREATHES docstring section) + `effects/twod.py` (`BREATH_HOLD`,
+    `BREATH_FLOOR`, read by `_phase_grammar_post`) + `effects/orbits.py`
+    (`BREATH_FLOOR = BREATH_FLOOR_DIM`, 0.25) + `effects/fish.py`
+    (`BREATH_HOLD = False`) + `effects/pulse.py` (the breath keys in its
+    schema, `breath_gain` applied last in `_compose`'s lull branch) +
+    `effects/orbits1d.py` (`LULL_EMBER` 0.2 as its own `lull_ember`
+    default) + `effects/strip_phase.py` (`drop_shock_on` pushed and
+    passive; the drop's wave and flood skipped when told False) +
+    `device_model.py` (`DROP_SHOCK_TOLD_EFFECTS`, `BREATH_HOLD_EFFECTS`):
+    THE ADMIRAL'S DROP FEEDBACK (2026-10-12) — "I want orbits and fish to
+    specifically not go dark completely on the crystal or the strips. I do
+    want it on pulse effect, though", "orbits should keep at least one dim
+    blob", "stip shockwave, yes". Untold (no SpotFX) every key reads as
+    before: no breath, `drop_shock_on` True. Behaviour that changes when
+    told: the Fish no longer breathes, Orbits breathes to a dim floor,
+    Pulse breathes to true black, the Orbits strip's lull dark is a 20%
+    ember, and a strip told `drop_shock_on: False` draws no wave or flood
+    (byte-identical to its drop at `drop_shockwave: 0`). Evidence:
+    `tests/test_drop_feedback_1012.py` (real pipeline, production
+    ResponseEngine, red controls), `tests/test_phase_grammar.py`
+    (`scripts/check_drop_shockwave.breath_ok`),
+    `tests/test_particle_strip_phase.py`. Unverified against his live room.

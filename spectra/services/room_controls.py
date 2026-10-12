@@ -689,10 +689,13 @@ class RoomControlState(BaseModel):
     background_fade_s: float = Field(default=1.0, ge=0.0, le=10.0)
 
     # THE BREATH-HOLD (transitions-drop plan, his Q2: "a 0.4 s true black
-    # just before the drop, as a setting"). Every Shockwave member
-    # (fx.device_model.DROP_SHOCK_EFFECTS — Black Hole, Orbits, Sauron, Eye,
-    # Fish) goes to TRUE BLACK for this many seconds right before its drop
-    # mark, so the drop is born out of black. Always INSIDE the lull's dark
+    # just before the drop, as a setting"). Every breathing effect
+    # (fx.device_model.BREATH_HOLD_EFFECTS — Black Hole, Sauron, Eye and,
+    # since 2026-10-12, the Pulse singles) goes to TRUE BLACK for this many
+    # seconds right before its drop mark, so the drop is born out of black.
+    # Not the Fish, and Orbits only dims to one dim blob (the Admiral,
+    # 2026-10-12: "I want orbits and fish to specifically not go dark
+    # completely ... I do want it on pulse effect, though"). Always INSIDE the lull's dark
     # rule above (never longer than the dark hold that lull_dark_max_s
     # allows); applied on every lull arm (scene_response._drive_phase,
     # fx/effects/phase_grammar.breath_keys_for). 0 = no breath-hold.
@@ -711,9 +714,19 @@ class RoomControlState(BaseModel):
     # drop_shock_min_energy. An energy that cannot be read is never gated.
     # Off or skipped, the effect's own drop runs unchanged. Decided once per
     # drop arm (scene_response._drive_phase, phase_grammar.shock_allowed).
-    # Not the strips' own drop shockwave (strip_phase_strength governs it).
+    # Since 2026-10-12 (the Admiral: "stip shockwave, yes") the strips' own
+    # drop shockwave (fx/effects/strip_phase.py) obeys the same three
+    # switches; skipped, a strip still gets its colour/activity burst.
     drop_shock_enabled: bool = True
     drop_shock_min_energy: float = Field(default=0.7, ge=0.0, le=1.0)
+
+    # THE PULSE FLASH'S ENERGY FLOOR (2026-10-12, the Admiral: "The flash
+    # flare on pulse should only happen on high energy, .8 or higher"): a
+    # pulse_flash flare writes nothing unless the top bar's Energy
+    # (bridge.intensity(), the Shockwave floor's number) is at least this.
+    # In lulls and out of them; an unreadable energy is never gated.
+    # scene_response.pulse_flash_allowed is the one rule. 0 = never gated.
+    pulse_flash_min_energy: float = Field(default=0.8, ge=0.0, le=1.0)
 
     # THE DROP-LED SCENE SWITCH (2026-10-08, drop-scene-variety plan phase
     # 2 — spectra/services/drop_switch.py is the binding statement). A drop

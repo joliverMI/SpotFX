@@ -101,9 +101,14 @@ Sonic reaches them with `set_scene_entry_param`. The drop arm tells this
 effect `drop_intensity`, which scales the debris count and the front's life.
 The lull arm also tells it the BREATH-HOLD (`lull_breath_at_s`,
 `lull_breath_s`, from the room's `lull_breath_hold_s`, 0.4 s default, always
-inside the lull's dark rule): the base render takes the frame to true black
-for that window. Help topics `drop-shockwave`, `drop-breath-hold`; proof
-`scripts/check_drop_shockwave.py` / `tests/test_phase_grammar.py`.
+inside the lull's dark rule). **On Orbits it is NOT true black** (2026-10-12,
+the Admiral: "I want orbits and fish to specifically not go dark completely
+on the crystal or the strips" / "orbits should keep at least one dim blob"):
+`BREATH_FLOOR = BREATH_FLOOR_DIM` (0.25) makes the base render dim the frame
+to that share instead, so the lull's one blob stays, dim, through the
+breath (`phase_grammar.breath_gain(..., floor=)`). Do not set it back to 0.
+Help topics `drop-shockwave`, `drop-breath-hold`; proof
+`scripts/check_drop_shockwave.py` (`breath_ok`) / `tests/test_phase_grammar.py`.
 
 WHETHER A DROP PAINTS IT AT ALL (2026-10-12, his "toggled per scene, as
 well as globally, as well as a global setting for minimum energy"): the drop
@@ -132,7 +137,17 @@ per-frame `_phase_step`. The phase is `self._sp_phase`. What it owns:
   holds there to the drop. It used to shed back to ONE blob by the
   charge's end — do not bring the shed back.
 - The lull's one blob collapses to the middle on the layer's OWN lull
-  timing (`_strip_phase_lull()`), landing as the strip goes black.
+  timing (`_strip_phase_lull()`), landing as the strip reaches its dark
+  point — and STAYS, dim (2026-10-12, "orbits should keep at least one dim
+  blob"): the strip's own `lull_ember` default is `LULL_EMBER` (0.2,
+  `STRIP_PHASE_DEFAULTS`, spliced into the schema and the registry like the
+  Fireworks strip's 0.12), so the layer fades it to 20%, never black. This
+  is every scene that uses `orbits1d` (Orbits, Squiggles, Dancers, Pacman
+  V2). Proof `tests/test_particle_strip_phase.py`,
+  `scripts/check_particle_strip_phase.py`.
+- The strip's drop SHOCKWAVE obeys the crystal Shockwave's switches (the
+  room, the scene, the 0.7 top-bar Energy floor — told `drop_shock_on`);
+  skipped, only the wave and flood go (`tests/test_drop_feedback_1012.py`).
 - The drop re-adds all 16 (each erupting through its implosion), the
   fly-out on its own clock (`_fly`), and sheds back to the scene's own
   `particle_count` on the "none" edge.

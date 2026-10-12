@@ -214,6 +214,12 @@ class Twod(AudioReactiveEffect):
     DROP_SHOCK = False
     SHOCK_DEBRIS_FATE = "return"   # "return" to the rim, or "fade" (a lick)
     SHOCK_DEBRIS_BOOST = 1.0       # x the debris count
+    # THE BREATH-HOLD (phase_grammar "WHO BREATHES"): False opts a member
+    # out entirely (the Fish); a BREATH_FLOOR above 0 breathes only down to
+    # that share of the lull's picture instead of true black (Orbits' dim
+    # blob). Must agree with fx.device_model.BREATH_HOLD_EFFECTS.
+    BREATH_HOLD = True
+    BREATH_FLOOR = 0.0
 
     def shock_rim(self):
         """The eye's perimeter: (cx, cy, rx, ry) in render pixels. Every
@@ -272,9 +278,11 @@ class Twod(AudioReactiveEffect):
                 return
         shock = getattr(self, "_shock", None)
         gain = 1.0
-        if getattr(self, "_phase", "none") == "lull":
+        if (getattr(self, "_phase", "none") == "lull"
+                and getattr(self, "BREATH_HOLD", True)):
             gain = phase_grammar.breath_gain(
-                self._config, getattr(self, "_phase_t", 0.0))
+                self._config, getattr(self, "_phase_t", 0.0),
+                floor=getattr(self, "BREATH_FLOOR", 0.0))
         if shock is None and gain >= 1.0:
             return
         frame = np.asarray(self.matrix, dtype=np.float32)

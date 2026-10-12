@@ -1366,6 +1366,12 @@ class Fish2d(Twod, GradientEffect):
     # ring (on screen: the window's centre); its debris curves back to it
     DROP_SHOCK = True
     SHOCK_DEBRIS_FATE = "return"
+    # NO BREATH-HOLD (2026-10-12, the Admiral: "I want orbits and fish to
+    # specifically not go dark completely"): the lull's searcher swims
+    # straight through to the drop — no short black before it. SpotFX does
+    # not tell the Fish the breath either (fx.device_model.
+    # BREATH_HOLD_EFFECTS); this makes a told one a no-op too.
+    BREATH_HOLD = False
     CATEGORY = "Matrix"
     HIDDEN_KEYS = Twod.HIDDEN_KEYS + ["gradient_roll", "color_blend"]
     ADVANCED_KEYS = Twod.ADVANCED_KEYS + [

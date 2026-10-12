@@ -20,10 +20,11 @@ What is proven here, on the real code it names:
   a whole cycle and an orphaned lull (the fold moved plumbing, not looks).
 - THE PRODUCTION PATH (tests/strip_phase_harness.py: the real
   ResponseEngine on the FacadeExecutor, a fake clock): both strips reach
-  the room's dark point on the Pulse single's frame (the Orbits strip
-  black, the Fireworks strip at its ember); a flare in the dark springs
-  the Orbits strip's collapsed blob back out with a burst in its own
-  colour and the dark returns, "Flare punch" 0 lets the dark win; an
+  the room's dark point on the Pulse single's frame (the Orbits strip at
+  its own ember — one dim blob, never black, 2026-10-12 — the Fireworks
+  strip at its ember); a flare in the dark springs the Orbits strip's
+  collapsed blob back out with a burst in its own colour and the dim blob
+  returns, "Flare punch" 0 lets the dark win; an
   orphaned lull releases each strip back to its own show; the drop's
   phase key self-resets after each effect's own drop length while the
   layer's drop keeps running; and a house mode holds both back.
@@ -122,7 +123,9 @@ def test_each_phase_edge_reaches_the_choreography_exactly_once(tmp_path,
 def test_the_fireworks_strip_carries_its_own_ember_default():
     assert device_model.schema_default("fireworks1d", "lull_ember") == \
         pytest.approx(fw1.LULL_EMBER) == pytest.approx(0.12)
-    assert device_model.schema_default("orbits1d", "lull_ember") == 0.0
+    # 2026-10-12, "orbits should keep at least one dim blob"
+    assert device_model.schema_default("orbits1d", "lull_ember") == \
+        pytest.approx(ob1.LULL_EMBER) == pytest.approx(0.2)
     assert fw1.CHARGE_SLOW == 0.0 and fw1.CHARGE_SHORT == 0.0
     assert fw1.DROP_TAIL_RATE == 12.0
     assert ob1.CHARGE_PEAK_N == 16
@@ -133,9 +136,10 @@ def test_the_fireworks_strip_carries_its_own_ember_default():
 # ── on the production path ──────────────────────────────────────────────────
 
 def test_both_strips_reach_the_dark_point_on_the_singles_frame(tmp_path):
-    """One room, one lull arm (6 s, the 3 s cap): the Orbits strip goes
-    black on the Pulse single's frame and stays black; the Fireworks strip
-    reaches its ember on that frame and holds it (lit, never above it)."""
+    """One room, one lull arm (6 s, the 3 s cap): the Orbits strip reaches
+    its own ember (one dim blob, 2026-10-12) on the Pulse single's black
+    frame and holds it; the Fireworks strip reaches its ember on that frame
+    and holds it (lit, never above it)."""
     async def main():
         effects = {ORB: ("orbits1d", STRIP_PX, 1, dict(HIS_ORB)),
                    FW: ("fireworks1d", STRIP_PX, 1, dict(HIS_FW)),
@@ -151,11 +155,16 @@ def test_both_strips_reach_the_dark_point_on_the_singles_frame(tmp_path):
             r.step(6 * FPS)
             return r.frames[ORB][n0:], r.frames[FW][n0:], r.frames["p"][n0:]
     orb, fw, pulse = run(main())
-    first_orb = next(i for i, f in enumerate(orb) if f.max() == 0)
     first_pulse = next(i for i, f in enumerate(pulse) if f.max() == 0)
-    assert first_orb == first_pulse == 3 * FPS - 1
-    assert all(f.max() == 0 for f in orb[first_orb:])
-    assert orb[first_orb - 15].max() > 0            # a fade, not a cut
+    assert first_pulse == 3 * FPS - 1
+    first_orb = first_pulse
+    # one dim blob, never black: lit, at most its own ember, from the dark
+    # point to the drop (it was black there before 2026-10-12)
+    orb_ember = ob1.LULL_EMBER * 255.0
+    assert all(0.0 < f.max() <= orb_ember + 1e-6 for f in orb[first_orb:])
+    # a fade, not a cut: brighter on the approach, easing down to the ember
+    assert max(f.max() for f in orb[:first_orb]) > orb_ember
+    assert orb[first_orb - 30].max() > orb[first_orb].max()
     ember = fw1.LULL_EMBER * 255.0
     assert all(0.0 < f.max() <= ember + 1e-6 for f in fw[first_orb:])
     assert fw[first_orb - 30].max() > ember          # the ember is reached
@@ -196,7 +205,10 @@ def _orbit_punch(tmp_path, cfg_extra=None):
 
 def test_a_flare_in_the_dark_springs_the_orbits_blob_out_in_its_own_colour(tmp_path):
     dark_before, collapsed, sprung, after, spawned = _orbit_punch(tmp_path / "p")
-    assert dark_before == 0.0 and collapsed == pytest.approx(1.0)
+    # the collapsed blob is dim, never black (its own ember, 2026-10-12)
+    ember = ob1.LULL_EMBER * 255.0
+    assert 0.0 < dark_before <= ember + 1e-6
+    assert collapsed == pytest.approx(1.0)
     # the collapsed blob springs back out along the punch's envelope …
     assert sprung < 0.1
     # … with an implosion burst in its OWN colour (no white guard in a lull)
@@ -205,15 +217,17 @@ def test_a_flare_in_the_dark_springs_the_orbits_blob_out_in_its_own_colour(tmp_p
     assert all(np.allclose(c, rgb) for c in colours)
     assert max(lum(f) for f in after[2:int(0.5 * FPS)]) > 0.005
     back = int(lull_dark.punch_length_s(0.25) * FPS) + 2
-    assert all(f.max() == 0.0 for f in after[back:])
+    assert all(0.0 < f.max() <= ember + 1e-6 for f in after[back:])
 
 
 def test_flare_punch_zero_lets_the_orbits_dark_win(tmp_path):
     dark_before, collapsed, sprung, after, spawned = _orbit_punch(
         tmp_path / "d", {"flare_punch_strength": 0.0})
-    assert dark_before == 0.0
+    ember = ob1.LULL_EMBER * 255.0
+    assert 0.0 < dark_before <= ember + 1e-6
     assert spawned == [] and sprung == pytest.approx(1.0)
-    assert all(f.max() == 0.0 for f in after)
+    # the dark wins: the one dim blob stays exactly as dim
+    assert all(0.0 < f.max() <= ember + 1e-6 for f in after)
 
 
 def test_phase_implosions_are_drawn_from_the_set_not_the_hue_wheel(tmp_path):
