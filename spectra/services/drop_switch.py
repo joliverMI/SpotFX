@@ -96,13 +96,17 @@ snapshot (report E6): "choreographed" where the incoming effect stages the
 arrival (radial's standalone bloom out of the particles; a particle effect
 erupting from STAR's imploded point), "program" where a THEMATIC
 TRANSITION PROGRAM is registered for the pair (fx/effects/transition_
-program.py — INFALL into the Black Hole, the Black Hole's ERUPTION into
-orbits / fish / squiggles; transitions-drop plan phase 3: the cut lands on
+program.py — phase 3's INFALL into the Black Hole and the Black Hole's
+ERUPTION into orbits / fish / squiggles, widened by phase 4 to the Black
+Hole's FOUNTAIN into Fireworks (the reverse, Fireworks' LENSING into the
+Black Hole, stays the SWALLOWED meld below) and to SHOALING / SHOAL BREAK
+/ UNRAVEL among orbits, fish and squiggles themselves): the cut lands on
 the mark as always and runs the program `on_mark`, its payoff on the cut
-frame — scene_compiler.fire_scene asks for it), "generic" otherwise (the pieces join
-the incoming effect as its own particles), and the three FIREWORKS MELDS
-below. An outgoing effect outside the families (the Eye, the Dancer,
-Pac-Man) has no row: no good drop hand-off, so its switch goes early (A).
+frame — scene_compiler.fire_scene asks for it), "generic" otherwise (the
+pieces join the incoming effect as its own particles), and the three
+FIREWORKS MELDS below. An outgoing effect outside the families (the Eye,
+the Dancer, Pac-Man) has no row: no good drop hand-off, so its switch
+goes early (A).
 
 THE FIREWORKS MELDS (drop-scene-variety plan phase 3, option C — his ask:
 "fish and orbits could have 3 'particles' remain instead of just 1 and
