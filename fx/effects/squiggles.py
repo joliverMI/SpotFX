@@ -79,6 +79,10 @@ LULL_UNTOLD_THIN_TO = 0.85
 FIZZLE_SPARKS = 10         # a fizzle is a small boom, in the chain's colour
 FIZZLE_SPEED = (6.0, 20.0)
 FIZZLE_LIFE_S = 0.6        # a fizzle's sparks are gone this long after it
+# the chains a flare punch brings into the lull's dark (fx/effects/
+# lull_dark.py's flare punch; "a flare in the lull's dark punches through"
+# below)
+PUNCH_CHAINS = 4
 DROP_BURST_N = 9     # chains erupting from the center on the drop
 # The burst fires on the phase's first frame — drop anchors its START to
 # the trigger mark (his ruling, 2026-08-20, superseding the end-anchored
@@ -119,6 +123,7 @@ class Squiggles2d(Twod, GradientEffect):
         "phase",
         "phase_progress",
         *lull_dark.KEYS,
+        *lull_dark.PUNCH_KEYS,
     ]
 
     CONFIG_SCHEMA = vol.Schema(
@@ -231,6 +236,9 @@ class Squiggles2d(Twod, GradientEffect):
             # the lull's dark point, pushed by SpotFX on the lull arm —
             # fx/effects/lull_dark.py
             **lull_dark.schema_fields(),
+            # a flare in the lull's dark punches through (the poke and the
+            # three "Flare punch" settings) — fx/effects/lull_dark.py
+            **lull_dark.punch_schema_fields(),
             vol.Optional(
                 "lull_entry_s",
                 description="Lull: seconds the normal flow carries on while the thinning eases in",
@@ -342,6 +350,16 @@ class Squiggles2d(Twod, GradientEffect):
         else:
             # non-creation pass: a changed phase key arms the edge
             self._phase_pending = new_phase if new_phase != self._phase else None
+
+        # THE FLARE PUNCH (lull_dark.FlarePunch): the poke reads 0 and is
+        # remembered as 0 on creation, so a stale persisted poke never fires
+        # and the next real one always edges
+        if not hasattr(self, "_punch"):
+            self._punch = lull_dark.FlarePunch(0)
+            self._punch_level = 0.0
+            self._config = {**self._config, lull_dark.PUNCH_KEY: 0}
+        else:
+            self._punch.note(self._config.get(lull_dark.PUNCH_KEY, 0))
 
     def audio_data_updated(self, data):
         # audio thread — latch only
@@ -1178,8 +1196,9 @@ class Squiggles2d(Twod, GradientEffect):
         if thin is None:
             thin = self._thin = {"n0": None}
         if thin["n0"] is None:
-            # the population the thinning starts from
-            thin["n0"] = len(self.chains)
+            # the population the thinning starts from (the lull's own chains:
+            # a flare punch's chains are never counted or fizzled)
+            thin["n0"] = self._lull_chain_count()
         if u >= 1.0:
             return 0
         return int(math.ceil(thin["n0"] * (1.0 - u) ** self.lull_fizzle_rate))
@@ -1206,17 +1225,73 @@ class Squiggles2d(Twod, GradientEffect):
         lum = samp @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
         return samp[int(np.argmin(lum))]
 
+    def _lull_chain_count(self):
+        """Chains the lull's own thinning governs (every chain but a flare
+        punch's)."""
+        return sum(1 for c in self.chains if not c.get("punch"))
+
     def _fizzle(self, cols, target):
         """Fizzle chains, a random one at a time, into small booms in their
-        own colour until the population is down to `target`."""
+        own colour until the population is down to `target`. A flare
+        punch's chains are not the lull's to thin (they leave with the
+        punch's own release); with none of them on the panel this draws
+        exactly what it always did."""
         rng = self._rng
-        while len(self.chains) > target:
-            i = int(rng.integers(len(self.chains)))
+        while True:
+            own = [i for i, c in enumerate(self.chains) if not c.get("punch")]
+            if len(own) <= target:
+                break
+            i = own[int(rng.integers(len(own)))]
             if i < len(cols):
                 self._fizzle_boom(self._head_pos(self.chains[i]), cols[i])
                 cols = np.delete(cols, i, axis=0)
             del self.chains[i]
         return cols
+
+    # ── a flare in the lull's dark punches through ─────────────────────
+    # The strip phase plan's phase 5 (fx/effects/lull_dark.py's flare punch
+    # section is the binding statement): the lull's dark is the chains
+    # thinned to none and the panel cleared, so a punch answers with
+    # PUNCH_CHAINS fresh chains from the silhouette (and spawning resumes for
+    # its length); the chains a punch brings are the punch's own — never
+    # thinned, shown at the punch's level, and gone once it has released.
+    # While it is open the lull's colour slide gives way by its level. The
+    # lull's own thinning keeps running underneath, so the release lands
+    # back exactly where the lull has got to.
+
+    def _punch_step(self, dt):
+        """An armed poke opens the envelope only in a lull (spent either
+        way, the key self-reset); then this frame's level."""
+        punch = self._punch
+        lull = self._phase == "lull"
+        opened = punch.consume(
+            lull, self._config.get(lull_dark.PUNCH_HOLD_KEY, 0.0))
+        if punch.spent:
+            self._apply_config({lull_dark.PUNCH_KEY: 0},
+                               validate=False, fire_event=False)
+        punch.advance(dt)
+        self._punch_level = punch.level(lull, self._config)
+        if opened and float(self._config.get(
+                "flare_punch_strength", 1.0) or 0.0) > 0.0:
+            self._spawn_punch(PUNCH_CHAINS)
+        if not punch.open:
+            if lull:
+                # released: the punch's chains leave with it (they are at
+                # zero brightness by now)
+                if any(c.get("punch") for c in self.chains):
+                    self.chains = [c for c in self.chains
+                                   if not c.get("punch")]
+            else:
+                # the lull ended under them (a drop): they carry on as
+                # ordinary chains
+                for c in self.chains:
+                    c.pop("punch", None)
+
+    def _spawn_punch(self, count):
+        before = len(self.chains)
+        self._spawn(count)
+        for c in self.chains[before:]:
+            c["punch"] = True
 
     def _fizzle_boom(self, pos, rgb):
         rng = self._rng
@@ -1292,6 +1367,8 @@ class Squiggles2d(Twod, GradientEffect):
         dt = min(dt, DT_MAX)
 
         self._phase_step(dt)
+        self._punch_step(dt)
+        punch_p = min(1.0, float(self._punch_level))
 
         speed_px = self.base_speed * (1.0 + self.speed_audio * self.impulse)
         steps_target = self._steps_target()
@@ -1311,8 +1388,13 @@ class Squiggles2d(Twod, GradientEffect):
         # progress-driven influx on top. In the lull spawning eases OUT over
         # the entry (the normal flow carries on, fading) and then stops:
         # no new chains are born while the chains thin out.
-        if not lull or (entry < 1.0 and not timing.dark):
+        if not lull or (entry < 1.0 and not timing.dark) or punch_p > 0.0:
             keep = 1.0 - entry if lull else 1.0
+            if lull and punch_p > 0.0:
+                # a flare punch has the flow open again for its length
+                keep = max(keep, punch_p)
+                if timing.dark or entry >= 1.0:
+                    keep = punch_p
             self.spawn_acc += (
                 self.spawn_rate * (1.0 + self.spawn_audio * self.impulse)
                 + self._phase_rate
@@ -1326,7 +1408,10 @@ class Squiggles2d(Twod, GradientEffect):
                     else self.beat_burst
                 )
             if n_new:
-                self._spawn(n_new)
+                if lull and punch_p > 0.0 and (timing.dark or entry >= 1.0):
+                    self._spawn_punch(n_new)
+                else:
+                    self._spawn(n_new)
         else:
             self._beat_pending = False
             self.spawn_acc = 0.0
@@ -1362,7 +1447,12 @@ class Squiggles2d(Twod, GradientEffect):
                 # approaches its dark point (not at all on the first frame)
                 a = timing.approach
                 slide = self.lull_color_slide * entry * a * a * (3.0 - 2.0 * a)
-                cols = cols * (1.0 - slide) + self._dark_stop()[None, :] * slide
+                # a flare punch shows the set's own colours: the slide gives
+                # way by its level
+                slide *= 1.0 - punch_p
+                if slide > 0.0:
+                    cols = (cols * (1.0 - slide)
+                            + self._dark_stop()[None, :] * slide)
             if thin_u is not None:
                 target = self._thin_target(thin_u)
                 cols = self._fizzle(cols, target)
@@ -1386,6 +1476,10 @@ class Squiggles2d(Twod, GradientEffect):
             if i >= len(cols):
                 break
             fade = min(c["age"] / FADE_IN_S, 1.0)
+            if c.get("punch") and not (lull and timing.dark):
+                # a punch's own chain shows at the punch's level (in the
+                # dark the whole frame is scaled below instead)
+                fade *= punch_p
             col = cols[i] * (bright_gain * fade * c["bright"])
             n = len(c["path"])
             cs = np.fromiter((p[0] for p in c["path"]), dtype=np.int32,
@@ -1408,10 +1502,17 @@ class Squiggles2d(Twod, GradientEffect):
 
         self._splat_sparks(buf)
         if lull and timing.dark:
-            # the dark rule is the law: nothing left lit from the dark point
-            self.chains = []
-            self.s_n = 0
-            buf[...] = 0.0
+            if punch_p > 0.0:
+                # ... except what a flare punch lights: its own chains and
+                # their sparks, at the punch's level
+                self.chains = [c for c in self.chains if c.get("punch")]
+                buf *= punch_p
+            else:
+                # the dark rule is the law: nothing left lit from the dark
+                # point
+                self.chains = []
+                self.s_n = 0
+                buf[...] = 0.0
         self.matrix = Image.fromarray(
             np.clip(buf, 0.0, 255.0).astype(np.uint8), "RGB"
         )

@@ -121,6 +121,43 @@ halo cut-off, the forced-formation stop and the ambient-spawn pause all
 read `_lull_timing()`, byte-identical to before. Read lull_dark.py's
 docstring before changing anything about when this lull goes dark.
 
+## A flare in the lull's dark punches through (2026-10-11, strip phase plan phase 5)
+
+His approval: the crystal's Black Hole takes the same flare punch as the
+strips, "so a flare in a dark room lights everything together". The lull's
+dark here is the HORIZON swallowing the panel, so while a punch is open
+(`_punch_step`, `PUNCH_RUSH_N`'s comment is the binding statement): the
+horizon's fill is pulled back toward its baseline by the punch's level, the
+ambient spawn reopens, the lull's explicit halo ring GIVES WAY by the level
+(outside a phase there is no halo — lighting it was tried and measured at
+~5x the normal panel), and the punch answers with an even rush of
+`PUNCH_RUSH_N` (12) blobs from the hex edge so a flare in an EMPTY dark
+still shows blobs falling in. Two traps, both measured: the ~200 captives
+the lull already swallowed must STAY on the lull's ring while the horizon
+is held back (the infall block holds their radius) — unpinned, they fall
+across the panel as a ring brighter than anything the effect draws normally
+— and they must still be there afterwards, because the drop releases them
+as part of its own burst. Measured: the punch shows ~the normal panel's
+light, and the dark is back ~1.3 s after the flare.
+
+SpotFX pokes `flare_punch` (+ `flare_punch_hold_s`) from
+`scene_response._punch_lull` only while a lull is armed, only on a virtual
+the flare batch actually WROTE to, and only for
+`fx.device_model.FLARE_PUNCH_EFFECTS` (every strip phase member plus the
+crystal's Black Hole and Squiggles and the Pulse singles) — so a flare kind
+that writes nothing here (a Big Fish, a Sauron surge) never punches it, a
+Light Show "flares off" virtual is never poked, and a house-withheld lull
+reaches nobody. The envelope and its runtime are ONE definition,
+`fx/effects/lull_dark.py`'s `punch_envelope` / `FlarePunch` (the strips use
+the same object): up in 40 ms, held max(`flare_punch_min_hold_s` 0.5, the
+flare's own hold), released over `flare_punch_release_s` (0.8 s); "Flare
+punch" (`flare_punch_strength`) 0 restores the dark winning, for one scene
+entry. All three settings are registered (help topic `flare-punch`), so
+Sonic reaches them with `set_scene_entry_param`. The lull's timing never
+moves; with no punch open the lull renders BYTE FOR BYTE what it did before
+(`tests/test_flare_punch_crystal.py` loads the pre-change module out of git
+at a pinned ref). Measure with `scripts/check_flare_punch_crystal.py`.
+
 ## The drop Shockwave and the breath-hold (2026-10-11, transitions-drop plan phase 1)
 
 This effect is a member of `fx.device_model.DROP_SHOCK_EFFECTS`. Its drop

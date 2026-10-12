@@ -1456,15 +1456,19 @@ class ResponseEngine:
                           attached: list[tuple[FlareKind, float]]
                           ) -> Optional[dict]:
         """A FLARE IN THE LULL'S DARK PUNCHES THROUGH (the Admiral's answer
-        5, 2026-10-11; fx/effects/strip_phase.py and lull_dark.
-        punch_envelope are the binding statement). While the room's armed
-        phase is a lull, every strip phase member the batch WROTE TO — and
-        that the lull actually reached (not house-withheld, not flares off)
-        — gets one instant poke: `flare_punch` (self-resetting, the
-        burst_rockets shape) and `flare_punch_hold_s`, the longest momentary
-        hold among the batch's kinds (PULSE_HOLD_S when none). A batch that
-        wrote nothing to a strip (Pulse flash/flip, blob rush, big fish,
-        Sauron surge) punches nothing. Never in the param registry."""
+        5, 2026-10-11; fx/effects/lull_dark.py's flare punch section is the
+        binding statement). While the room's armed phase is a lull, every
+        FLARE_PUNCH_EFFECTS virtual the batch WROTE TO — and that the lull
+        actually reached (not house-withheld, not flares off) — gets one
+        instant poke: `flare_punch` (self-resetting, the burst_rockets
+        shape) and `flare_punch_hold_s`, the longest momentary hold among
+        the batch's kinds (PULSE_HOLD_S when none). The members are every
+        strip phase effect and, since the strip phase plan's phase 5, the
+        crystal's Black Hole and Squiggles and the Pulse singles — so one
+        flare lights every dark fixture it touched together. A batch that
+        wrote nothing to a member (a Big Fish, a Sauron surge) punches
+        nothing; a Pulse flash/flip punches only the Singles it wrote to.
+        Never in the param registry."""
         if self._phase_armed != "lull" or not written:
             return None
         targets = []
@@ -1472,7 +1476,7 @@ class ResponseEngine:
         for vid in sorted(written & self._lull_vids):
             state = states.get(vid)
             if (state is not None and state.effect_type
-                    in device_model.STRIP_PHASE_EFFECTS):
+                    in device_model.FLARE_PUNCH_EFFECTS):
                 targets.append((vid, state.effect_type))
         if not targets:
             return None
@@ -1481,8 +1485,8 @@ class ResponseEngine:
         hold_s = round(max(holds) if holds else PULSE_HOLD_S, 3)
         for vid, effect_type in targets:
             await self.executor.jump(vid, effect_type,
-                                     {strip_phase.PUNCH_KEY: 1,
-                                      strip_phase.PUNCH_HOLD_KEY: hold_s})
+                                     {lull_dark.PUNCH_KEY: 1,
+                                      lull_dark.PUNCH_HOLD_KEY: hold_s})
         return {"virtuals": [vid for vid, _et in targets], "hold_s": hold_s}
 
     async def _run_kinds_inner(self, scene: SceneV2,

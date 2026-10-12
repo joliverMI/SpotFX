@@ -2271,3 +2271,29 @@ against that commit.
     hook now also calls `program.finish()` when a program raises, so a
     dropped program still puts back what it borrowed (IGNITION's slit
     width) and hands over at most once. Unverified against his live room.
+76. `effects/blackhole.py` (`PUNCH_RUSH_N`, `_punch_step`, the punch reads
+    in `_horizon_radius` / `_phase_halo` / `_phase_spawn_paused`, the
+    swallowed-captive hold in the infall block) + `effects/squiggles.py`
+    (`PUNCH_CHAINS`, `_punch_step`, `_spawn_punch`, `_lull_chain_count`,
+    `_fizzle` choosing among the lull's own chains, the punch reads in
+    `draw`) + `effects/pulse.py` (`_step_punch`, the lull branch of
+    `_compose`) + `effects/lull_dark.py` (`FlarePunch`, `PUNCH_KEYS`,
+    `PUNCH_TUNABLES`, `punch_schema_fields`, `punch_registry_params`) +
+    `effects/strip_phase.py` (onto the shared `FlarePunch`, the poke's
+    creation baseline now 0): A FLARE IN THE LULL'S DARK PUNCHES THROUGH ON
+    THE CRYSTAL AND THE SINGLES (2026-10-11, strip phase plan phase 5 —
+    `fx.device_model.FLARE_PUNCH_EFFECTS`). Every punch read is gated on an
+    open punch (`_punch_level > 0`, only ever in a lull), and `_fizzle` draws
+    the same random numbers when no punch chain exists, so with no punch the
+    three render byte for byte what they did before. The strip layer's
+    punch behaviour is unchanged (its tests pass untouched but for the two
+    that pinned the strips-only SpotFX rule this phase widens); its creation
+    baseline now remembers the poke as 0 (the key zeroed), so a stale
+    persisted 1 can no longer swallow the next real poke. Evidence:
+    `tests/test_flare_punch_crystal.py` (real pipeline, production
+    ResponseEngine: all three light within the flare and are dark again
+    ~1.4 s later, before the drop; "Flare punch" 0 and a strips-only SpotFX
+    as red controls; a flare while darkening leaves the dark point; the
+    no-punch lull byte-identical to the pinned pre-change modules) and
+    `scripts/check_flare_punch_crystal.py` (the numbers). Unverified against
+    his live room.

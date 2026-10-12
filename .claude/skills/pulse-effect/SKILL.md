@@ -48,7 +48,24 @@ Plan: `/home/javi/fleet-spotfx/data/single-led-power-plan/report.md`.
   `HOUSE_HELD_PHASE_EFFECTS` — every strip phase member is held the same
   way, the Orbits strip beside Pulse in `tests/test_pulse_engine_wiring.py`
   included since strip phase plan phase 3). A flash during
-  a lull is scaled by the lull's own fade, so the lull still lands black.
+  a lull is scaled by the lull's own fade, so the lull still lands black —
+  unless the flare also punches (next bullet).
+- **A flare in the lull's dark punches through** (2026-10-11, strip phase
+  plan phase 5): while a punch is open the light is the BRIGHTER of the
+  lull's own fade and the ordinary look (no lull) x the punch's level
+  (`_compose`'s lull branch, `_step_punch`) — the strip layer's own
+  max(fade, punch) shape — and a flash is scaled by max(fade, punch), so a
+  flare in the dark (a Pulse Flash, a gain flare, anything that wrote to
+  the Singles) shows at full strength and the lull's curve takes it back.
+  NOT just "un-fade the lull": the lull fades from the level at its entry
+  (often the charge's top), so un-fading it showed ~8x the normal light —
+  measured and replaced. The output guard still holds the flash budget on
+  what is delivered. SpotFX pokes `flare_punch` only on a lull it reached
+  (never under a house mode), only where the flare batch wrote; "Flare
+  punch" 0 = the dark wins. `fx/effects/lull_dark.py`'s `FlarePunch` is the
+  one runtime (the strips use the same); `scripts/check_flare_punch_crystal.py`
+  measures it, `tests/test_flare_punch_crystal.py` proves it (and that the
+  lull is byte-identical without a punch).
 - **Rainbow walk**: Pulse walks only when its `gradient` spans > 180° of
   hue (`chromatic_span_deg`, the colour journey's own test). The compiler
   (`scene_compiler.set_entries_for`) hands it the STRIPS' WHOLE gradient in
@@ -107,9 +124,10 @@ docstring before changing anything about when this lull goes dark.
 
 Effect params: YES, as of the 2026-10-06 Sonic coverage audit build —
 `get_scene_entry_params`/`set_scene_entry_param` (spectra/services/
-scene_console.py) read and write any of the 27 Pulse settings' current
+scene_console.py) read and write any of the Pulse settings' current
 value on one scene's one device entry (e.g. "set Resting Level (calm) to
-0.3 on Pulse Test's Singles entry"). A value held by a ⚡ binding is
+0.3 on Pulse Test's Singles entry") — and, since strip phase plan phase 5,
+the three "Flare punch" settings (30 in all). A value held by a ⚡ binding is
 replaced, named as such. Flares: `set_flare_kind` creates/updates
 `pulse_flash` / `pulse_flip` and `min_intensity` (omit-means-keep).
 Declaring both on the test scene: `scripts/add_pulse_flares.py` (dry run

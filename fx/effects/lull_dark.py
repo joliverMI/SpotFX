@@ -185,13 +185,30 @@ def lull_timing(config: Mapping, progress: float, phase_t: float,
 # strength, and when it is over the lull's own curve takes the light back
 # exactly where the lull has got to. The lull's timing (dark point, cap,
 # drop) never moves. Defined HERE, beside the dark point, so every lull-dark
-# member can read the same envelope: the strip layer (fx/effects/
-# strip_phase.py) reads it today; the crystal's Black Hole / Squiggles and
-# the Pulse singles can later (the plan's phase 5, on his word).
+# member reads the same envelope AND the same runtime (FlarePunch): the strip
+# layer (fx/effects/strip_phase.py) since the strip phase plan's phase 1, the
+# crystal's Black Hole and Squiggles and the Pulse singles since its phase 5
+# (his approval: "so a flare in a dark room lights everything together").
 #
 # The envelope rises over PUNCH_ATTACK_S, holds for max(min_hold, the
 # flare's own hold), then releases over `release_s` (smoothstep). SpotFX
-# pokes it (scene_response's flare pipeline, only while a lull is armed).
+# pokes it (scene_response's flare pipeline, only while a lull is armed, only
+# on a virtual the flare batch actually wrote to, only for an effect in
+# fx.device_model.FLARE_PUNCH_EFFECTS).
+#
+# HOW A LULL EFFECT TAKES THE PUNCH (existing or future):
+#   1. splice `**punch_schema_fields()` into its CONFIG_SCHEMA and
+#      `*PUNCH_KEYS` into ADVANCED_KEYS (the two pushed keys; the three
+#      PUNCH_TUNABLES are ordinary params);
+#   2. add its registry name to fx.device_model.FLARE_PUNCH_EFFECTS (SpotFX
+#      pokes it from then on) and register `punch_registry_params()` in
+#      config/effect_params.json (Sonic reaches the three tunables through
+#      set_scene_entry_param);
+#   3. hold one `FlarePunch` (built in its creation pass), `note()` the poke
+#      key in config_updated, `consume()` + `advance()` + `level()` once a
+#      frame, and let its own lull darkness give way to the level — the
+#      lull's own curve keeps running underneath, so the release lands back
+#      exactly where the lull has got to.
 
 PUNCH_ATTACK_S = 0.04
 DEFAULT_PUNCH_MIN_HOLD_S = 0.5
@@ -230,3 +247,144 @@ def punch_length_s(hold_s: float,
     """Seconds from a punch landing until it has fully released."""
     return (PUNCH_ATTACK_S + max(float(min_hold_s), float(hold_s or 0.0))
             + max(0.0, float(release_s)))
+
+
+# The poke SpotFX writes (a self-resetting count, the `burst_rockets` shape)
+# and the punching flare's own hold. Never in the param registry.
+PUNCH_KEY = "flare_punch"
+PUNCH_HOLD_KEY = "flare_punch_hold_s"
+PUNCH_KEYS = (PUNCH_KEY, PUNCH_HOLD_KEY)
+MAX_PUNCH = 1000
+MAX_PUNCH_HOLD_S = 30.0
+
+PUNCH_HELP_TOPIC = "flare-punch"
+
+# The punch's tunables: (key, label, default, min, max, description). One
+# table for every member (the strip layer splices it into its own TUNABLES),
+# so the strips and the crystal can never mean different things by them.
+PUNCH_TUNABLES = (
+    ("flare_punch_strength", "Flare punch", 1.0, 0.0, 1.0,
+     "Lull: how strongly a flare punches through the dark (0 = the dark wins)"),
+    ("flare_punch_min_hold_s", "Flare punch hold", DEFAULT_PUNCH_MIN_HOLD_S,
+     0.0, 5.0, "Lull: shortest time a flare's punch holds before releasing"),
+    ("flare_punch_release_s", "Flare punch release", DEFAULT_PUNCH_RELEASE_S,
+     0.0, 5.0, "Lull: seconds a flare's punch takes to fall back into the dark"),
+)
+PUNCH_TUNABLE_KEYS = tuple(t[0] for t in PUNCH_TUNABLES)
+
+
+def punch_poke_fields() -> dict:
+    """CONFIG_SCHEMA entries for the two pushed keys (never registered)."""
+    return {
+        vol.Optional(
+            PUNCH_KEY,
+            description="A flare landed in the lull (driven by SpotFX; self-resets)",
+            default=0,
+        ): vol.All(vol.Coerce(int), vol.Range(min=0, max=MAX_PUNCH)),
+        vol.Optional(
+            PUNCH_HOLD_KEY,
+            description="The punching flare's own hold, seconds (driven by SpotFX)",
+            default=0.0,
+        ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=MAX_PUNCH_HOLD_S)),
+    }
+
+
+def punch_tunable_fields() -> dict:
+    """CONFIG_SCHEMA entries for the three PUNCH_TUNABLES."""
+    return {
+        vol.Optional(key, description=desc, default=default): vol.All(
+            vol.Coerce(float), vol.Range(min=lo, max=hi))
+        for key, _label, default, lo, hi, desc in PUNCH_TUNABLES
+    }
+
+
+def punch_schema_fields() -> dict:
+    """Everything a lull effect splices in to take the punch (step 1)."""
+    return {**punch_poke_fields(), **punch_tunable_fields()}
+
+
+def punch_registry_params(help_topic: str = PUNCH_HELP_TOPIC) -> dict:
+    """The config/effect_params.json `params` entries for PUNCH_TUNABLES
+    (step 2) — the one place their registry shape is derived from."""
+    return {
+        key: {"label": label, "type": "numeric", "smooth": True,
+              "min": lo, "max": hi, "default": default,
+              "help_topic": help_topic}
+        for key, label, default, lo, hi, _desc in PUNCH_TUNABLES
+    }
+
+
+class FlarePunch:
+    """ONE FLARE PUNCH's runtime, the same for every member (step 3): the
+    poke's edge detection, its clock and its level.
+
+    - `note(value)` from config_updated: a CHANGED, nonzero poke arms;
+    - `consume(in_lull, hold_s)` once a frame, before the effect reads the
+      level: an armed poke opens the envelope only while a lull is running
+      (outside a lull a poke does nothing) and is spent either way. Returns
+      True when it opened (the effect may answer with content of its own);
+      the effect then writes the poke key back to 0 (`spent` says so), so
+      an identical later poke edges again;
+    - `advance(dt)` moves the open punch's clock;
+    - `level(in_lull, config)` is strength x the envelope (0 outside a lull
+      or once released — the punch then closes itself).
+    """
+
+    __slots__ = ("seen", "pending", "t", "hold", "spent")
+
+    def __init__(self, seen: int = 0):
+        # creation baseline: a stale persisted poke never fires on a fresh
+        # instance
+        self.seen = int(seen or 0)
+        self.pending = False
+        self.t = None
+        self.hold = 0.0
+        self.spent = False
+
+    def note(self, value) -> None:
+        value = int(value or 0)
+        if value != self.seen:
+            self.seen = value
+            if value > 0:
+                self.pending = True
+
+    def consume(self, in_lull: bool, hold_s: float = 0.0) -> bool:
+        self.spent = False
+        if not self.pending:
+            return False
+        self.pending = False
+        self.seen = 0
+        self.spent = True
+        if not in_lull:
+            return False
+        self.t = 0.0
+        self.hold = max(0.0, float(hold_s or 0.0))
+        return True
+
+    def advance(self, dt: float) -> None:
+        if self.t is not None:
+            self.t += max(0.0, float(dt))
+
+    def close(self) -> None:
+        self.t = None
+
+    @property
+    def open(self) -> bool:
+        return self.t is not None
+
+    def level(self, in_lull: bool, config: Mapping) -> float:
+        if self.t is None:
+            return 0.0
+        if not in_lull:
+            self.t = None
+            return 0.0
+        env = punch_envelope(
+            self.t, self.hold,
+            float(config.get("flare_punch_min_hold_s",
+                             DEFAULT_PUNCH_MIN_HOLD_S)),
+            float(config.get("flare_punch_release_s",
+                             DEFAULT_PUNCH_RELEASE_S)))
+        p = float(config.get("flare_punch_strength", 1.0)) * env
+        if p <= 0.0 and self.t > PUNCH_ATTACK_S:
+            self.t = None
+        return max(0.0, p)
