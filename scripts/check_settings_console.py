@@ -149,12 +149,16 @@ check(set(sc.SETTINGS_REGISTRY) == {
     "transition_programs_enabled", "transition_program_ms",
     "transition_velocity_blend_ms", "transition_infall_spin",
     "transition_eruption_count", "transition_eruption_speed",
+    # 2026-10-11, phase 4's four new thematic transitions (Flame Lick/
+    # Ignition, Lensing/Fountain, Shoal Break/Unravel) — four more tunables:
+    "transition_explode_frac", "transition_lensing_pull",
+    "transition_ignition_turns", "transition_scatter",
 }, "registry is the deliberate allowlist (eight room keys + the four "
    "analysed-transition knobs + the five 2026-10-06 widening keys + "
    "drop_floor + lull_dark_max_s + lull_breath_hold_s + the four "
    "drop-switch tunables + the two fireworks-meld tunables + "
    "strip_phase_strength + background_fade_s + "
-   "the six transition-program tunables)")
+   "the ten transition-program tunables)")
 check(sc.SETTINGS_REGISTRY["ambient_enabled"].kind == "bool"
       and sc.SETTINGS_REGISTRY["ambient_on_music_pause"].kind == "bool",
       "the ambient toggle is binary to Sonic too — no mode string to mis-say")
