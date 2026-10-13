@@ -10299,6 +10299,11 @@ better, far-enough majority. Four things:
   `whole_song_check.SETTINGS`), reached by Sonic's `lock` domain
   (`spectra/services/lock_console.py`, over HTTP — SPECTRA may not import it;
   its `KEYS` mirror is asserted equal in `tests/test_lock_console.py`).
+- **A seek or a pause is not a new offset**: the capture clock runs from the
+  play's fixed song start, so frames after a scrub read as offset + the jump
+  and could win the vote by a landslide. `whole_song_check.TimelineWatch`
+  (fed Spotify's progress once a second in the frame loop) cuts the frames at
+  the first seek, pause or song change; a play cut short is too short to judge.
 - **Rec. 4 rides with it**: `SweepEvaluator.stronger_elsewhere` withholds a
   save (per-window and final) when `xcorr_withhold_resave_min_repeats` windows
   whose OLD test point WAS the value about to be saved found one other offset
