@@ -267,6 +267,45 @@ def test_a_set_list_slot_history_is_replaced_so_the_median_moves(tmp_path, monke
     assert aos._stored_base_offset(AudioShapeMeta(**json.loads(side.read_text())), "sl1") == 11750
 
 
+def test_stored_base_offset_mirrors_resolve_shape_offsets_setlist_bias_fallback(monkeypatch):
+    """A Set List that is active but has never seen this track falls back
+    to the track's own default offset plus that Set List's recent-deltas
+    bias — services/trigger_engine.py's _resolve_shape_offset third branch,
+    lines 218-225. _stored_base_offset must mirror it exactly (base only,
+    no systemic bias or perception trim layered on top)."""
+    import services.auto_offset_service as aos
+    from services import setlist_store, trigger_engine
+    from models.audio_shape import AudioShapeMeta
+    from models.setlist import Setlist
+
+    monkeypatch.setattr(
+        setlist_store, "get_by_id",
+        lambda sid: Setlist(id=sid, recent_offset_deltas=[500, 700, 600]))
+
+    meta = AudioShapeMeta(
+        spotify_uri="spotify:track:unseen", title="Unseen", artist="Someone",
+        npz_file="song.npz", duration_ms=200000, capture_complete=True,
+        timestamp_offset_ms=325, offset_quality=0.4,
+        offset_verification="auto_verified", sample_interval_ms=12,
+        perception_trim_ms=50,
+    )
+
+    expected_bias = trigger_engine._setlist_delta_bias("sl-unseen")
+    assert expected_bias == 600  # median of [500, 600, 700]
+    assert aos._stored_base_offset(meta, "sl-unseen") == 325 + expected_bias
+
+    # Perception trim must NOT be layered in here — only in
+    # trigger_engine._resolve_shape_offset's own return.
+    assert aos._stored_base_offset(meta, "sl-unseen") == 925
+
+    # No Set List history at all (recent_offset_deltas has fewer than 2
+    # entries) means zero bias — falls back to the plain track default.
+    monkeypatch.setattr(
+        setlist_store, "get_by_id",
+        lambda sid: Setlist(id=sid, recent_offset_deltas=[500]))
+    assert aos._stored_base_offset(meta, "sl-unseen") == 325
+
+
 def test_the_service_leaves_a_right_song_untouched(tmp_path, monkeypatch):
     aos, side, applied = _service_world(tmp_path, monkeypatch)
     before = side.read_text()

@@ -2531,12 +2531,18 @@ def _stored_base_offset(meta, setlist_id: Optional[str]) -> int:
     """The raw offset the NEXT play of this song would load for this slot,
     before perception trim and the systemic bias — the same resolution as
     trigger_engine._resolve_shape_offset's base (Set List slot: median of its
-    history, else its value; otherwise the track's own stored offset)."""
+    history, else its value; otherwise the track's own stored offset; or,
+    when the Set List is active but has never seen this track, the track's
+    default offset plus that Set List's recent-deltas bias — mirrors
+    _resolve_shape_offset's third branch exactly)."""
     if setlist_id:
         entry = (meta.setlist_offsets or {}).get(setlist_id)
         if entry:
             med = _median_offset(entry.get("history") or [])
             return int(med if med is not None else entry.get("timestamp_offset_ms", 0))
+        from services import trigger_engine
+        bias = trigger_engine._setlist_delta_bias(setlist_id)
+        return int(meta.timestamp_offset_ms or 0) + bias
     return int(meta.timestamp_offset_ms or 0)
 
 
