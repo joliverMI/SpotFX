@@ -568,3 +568,16 @@ def test_live_cli_can_apply_a_change():
     result = _run(sac.run_turn(None, "Set the brightness to 50%."))
     assert result["changes"], "the model should have called set_setting"
     assert rc.load_room_controls().brightness_multiplier == pytest.approx(0.5, abs=0.05)
+
+
+def test_the_lock_domain_widening_parses_from_its_structured_tool_result():
+    """The whole-song check's Sonic reach (spectra/services/lock_console.py,
+    data/lock-investigation/report.md rec. 1) gets its own explicitly-
+    synthetic fixture on the CURRENT manifest, same precedent as the
+    device/scene-entry-param widenings above."""
+    from spectra.services import settings_agent_cli as sac
+
+    result = sac._parse_transcript(
+        _load("cli_transcript_synthetic_whole_song_applied.json"))
+    assert [c["key"] for c in result["changes"]] == ["xcorr_whole_song_locked_every"]
+    assert (result["changes"][0]["old"], result["changes"][0]["new"]) == (4, 2)

@@ -417,3 +417,15 @@ def test_finds_that_merely_beat_a_stale_loaded_offset_never_count_against_the_sa
             engine_play_best_quality=0.8)
     assert ev.finalize().disk_save[0] == 6225
     assert ev.withheld_save is None
+
+
+# ── 10. The executable spec runs green ───────────────────────────────────────
+
+def test_the_executable_spec_passes():
+    import subprocess
+    from pathlib import Path
+    repo = Path(__file__).resolve().parent.parent
+    out = subprocess.run([sys.executable, str(repo / "scripts" / "check_whole_song_check.py")],
+                         cwd=repo, capture_output=True, text=True, timeout=600)
+    assert out.returncode == 0, out.stdout[-3000:] + out.stderr[-2000:]
+    assert "ALL CHECKS PASSED" in out.stdout

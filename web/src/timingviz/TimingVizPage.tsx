@@ -7,6 +7,7 @@ import { useQuery } from '@tanstack/react-query';
 import { apiGet } from '../api/client';
 import { useToast } from '../components/Toast';
 import LockHistoryPanel from './LockHistoryPanel';
+import WholeSongCheckPanel from './WholeSongCheckPanel';
 
 interface Dump {
   uri?: string;
@@ -147,7 +148,10 @@ export default function TimingVizPage() {
   const h3 = { margin: '0 0 8px 0', fontSize: 13, color: 'var(--text-muted)', textTransform: 'uppercase' as const, letterSpacing: '0.5px' };
 
   const historyPanel = (
-    <LockHistoryPanel activeUri={uri} onPick={(u) => setParams({ uri: u })} />
+    <>
+      <LockHistoryPanel activeUri={uri} onPick={(u) => setParams({ uri: u })} />
+      <WholeSongCheckPanel onPick={(u) => setParams({ uri: u })} />
+    </>
   );
 
   if (!isLoading && d && !uri) {

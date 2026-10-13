@@ -1178,6 +1178,17 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        id: 'timing-whole-song-check',
+        title: 'Whole-song check (offset watchdog)',
+        keywords: 'whole song check watchdog correct offset stale twin lookalike vote corrected el efecto ponle dembow sonic withhold resave',
+        body: [
+          'Every play re-measures a song only within about ±3 s of its saved offset, so a saved offset that is further off than that — stale after an audio-pipeline change, or stuck on a repeating-phrase lookalike ("twin") — could never be found wrong, and was saved again every play. The whole-song check closes that gap. After a play that did not lock (and every 4th play that did), it scores the play\'s own captured audio against the whole song, 5 seconds at a time, over ±15 s of offsets, and votes.',
+          'It corrects the saved offset only when one offset wins a clear majority of the scored stretches (70 %), matches strongly (median r 0.80 or more), scores clearly better than the saved offset (by 0.15), and is at least 0.75 s away from it — the next play then starts there. A song already right agrees with itself and is never moved; a song whose vote is split between lookalikes is left alone; a play skipped before about 75 s of song is too short to judge; a user-verified offset is reported, never changed.',
+          'The card on the Timing page lists the corrections (tick "every check" to see every outcome and why): when, the song, the saved offset → what the whole song voted for, how many stretches it won, and the match strength at the vote and at the saved offset. Click a row to open that song below. "Settings" edits the thresholds; Sonic can read and change them too ("turn the whole-song check off", "only check every 2nd locked play").',
+          'Related: a play no longer re-saves its offset when, several times over, it measured one other offset that matched better and its own safety gates kept it from moving there — the saved offset is left for the whole-song check instead ("Withhold a re-save after N stronger finds", 0 = off).',
+        ],
+      },
+      {
         id: 'timing-pipeline-drift',
         title: 'Pipeline drift line & alarm',
         keywords: 'drift alarm audio chain latency session offset moved snapclient common shift level step ramp stable reversal anchor reanchor re-anchor',

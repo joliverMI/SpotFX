@@ -8,6 +8,7 @@ import { apiGet } from '../api/spotfx';
 import { useToast } from '../components/Toast';
 import HelpLink from '../help/HelpLink';
 import LockHistoryPanel from './LockHistoryPanel';
+import WholeSongCheckPanel from './WholeSongCheckPanel';
 import KnownBufferLine from './KnownBufferLine';
 
 interface Dump {
@@ -155,6 +156,7 @@ export default function TimingVizPage() {
           reaches the show clock while the application gate is shut. */}
       <KnownBufferLine />
       <LockHistoryPanel activeUri={uri} onPick={(u) => setParams({ uri: u })} />
+      <WholeSongCheckPanel onPick={(u) => setParams({ uri: u })} />
     </>
   );
 
