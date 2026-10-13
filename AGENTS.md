@@ -4389,7 +4389,12 @@ is the binding statement. Four things:
 - **PULSE IS MODULATED THROUGH `fx/pulse_modulation.py`, never a config
   write** (VENDOR #66) — a config write would fight scene fires, the Pulse
   feed and the param watchdog. Reactivity scales only the live-audio hit
-  term and the rainbow hit-step (the Admiral's option A).
+  term and the rainbow hit-step (the Admiral's option A). **A lull's dark
+  beats a brightness FLOOR** (2026-10-13, his "goes dark at the end of the
+  lull ... like it used to"): a held floor once kept the Hues at a glow
+  through every lull — before reasoning about "Pulse won't go dark", read
+  the held `pulse_mods` (engine status `light_show`). `pulse-effect` skill;
+  `tests/test_pulse_lull_dark_floor.py`.
 - **FLARES OFF IS `ResponseEngine._flare_states()`** (wired as
   `flare_blocked` in engine.py; scratch preview engines are unfiltered):
   every flare kind's loop AND `_drive_phase`/`rearm_phase` read it, so a

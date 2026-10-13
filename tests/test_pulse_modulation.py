@@ -8,8 +8,10 @@ Proven on the REAL effect class, frame-stepped, measured on what it renders:
   * reactivity scales the live-audio hit pulse linearly (1 = today, 0 = the
     resting glow) and the rainbow walk's hit step (option A) — and NOT the
     flash flare, the drop burst or the resting level;
-  * floor and ceiling clamp the eye-scale level, through hits, a lull's
-    darkness and a drop;
+  * floor and ceiling clamp the eye-scale level through hits and a drop;
+    a lull's darkness beats the floor (2026-10-13 — the floor fades with
+    the lull and the lull still lands black; tests/
+    test_pulse_lull_dark_floor.py is the real-path proof);
   * ramps, suspension and pruning of the fx module itself.
 """
 from __future__ import annotations
@@ -181,7 +183,7 @@ def test_reactivity_leaves_the_flash_flare_and_the_drop_burst_alone():
 
 # ── floor and ceiling ──────────────────────────────────────────────────────
 
-def test_ceiling_caps_hits_flash_and_drop_and_floor_holds_a_lull():
+def test_ceiling_caps_hits_flash_and_drop_and_a_lull_still_lands_black():
     pm.set_mod(VID, floor=0.3, ceiling=0.6)
     r = Rig(energy=1.0)
     r.settle(2.0)
@@ -191,17 +193,18 @@ def test_ceiling_caps_hits_flash_and_drop_and_floor_holds_a_lull():
     r.e.update_config({"phase": "drop", "phase_progress": 0.0})
     r.settle(1.0)
     assert max(r.levels) <= 0.6 + 1e-9
-    # a lull fades the light to black — the floor holds it at 0.3
+    # a lull fades the light to black — the floor fades WITH it (the
+    # Admiral, 2026-10-13: Pulse goes dark at the end of the lull before
+    # the drop): held near 0.3 as the lull starts, black at its dark point
     r.e.update_config({"phase": "lull", "phase_progress": 0.0})
+    n0 = len(r.levels)
     for i in range(1, 121):
         r.e._apply_config({"phase_progress": min(1.0, i / 100)},
                           validate=False, fire_event=False)
         r.frame(0.1)
-    assert min(r.levels[-60:]) >= 0.3 - 1e-9
-    assert r.levels[-1] == pytest.approx(0.3, abs=1e-6)
-    # the output is the colour at the clamped level through the bulb curve
-    g = r.e._config["gamma"]
-    assert r.out[-1][0] == pytest.approx(255.0 * 0.3 ** g, abs=1e-6)
+    assert min(r.levels[n0:n0 + 10]) >= 0.25
+    assert max(r.levels[-20:]) == 0.0
+    assert max(r.out[-1]) == 0.0
 
 
 def test_crossed_floor_and_ceiling_the_ceiling_wins():

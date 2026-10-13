@@ -1145,8 +1145,8 @@ register(ActionKind(
             _UNTIL, _FOR,
             Param("fade_out_ms", "number", "Fade out", default=1000, min=0, max=60000, unit="ms")],
     help="Keep the Pulse effect between a brightness floor and ceiling "
-         "(0..1, the effect's own brightness scale) — through hits, drops, "
-         "lulls and flares alike.",
+         "(0..1, the effect's own brightness scale) — through hits, drops "
+         "and flares alike; a lull still goes dark before its drop.",
     restore="Ends by itself (after its time, at the next scene change), its "
             "End button, or End show.",
     apply=_apply_pulse_brightness, check=_check_pulse_brightness,

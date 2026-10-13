@@ -750,7 +750,8 @@ OPERATIONS: dict[str, SonicOperation] = {
         instructions="floor/ceiling are 0..1 on Pulse's own (perceived) "
                     "brightness scale; floor 0 = none, ceiling 1 = none, and "
                     "at least one must be set; floor may not exceed "
-                    "ceiling. Clamps hits, drops, lulls and flares alike. "
+                    "ceiling. Clamps hits, drops and flares alike (a lull "
+                    "still goes dark before its drop). "
                     "until as for set_pulse_reactivity.",
         input_schema={
             "type": "object",
