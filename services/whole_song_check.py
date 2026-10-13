@@ -279,6 +279,51 @@ def decide(vote: VoteResult, cfg: WholeSongConfig, *,
     return Decision(CORRECTED, winner, summary)
 
 
+# ── Timeline continuity (a seek or a pause is not a new offset) ──────────────
+# The capture clock runs from the play's fixed song start, so a seek or a
+# pause mid-song shifts every later frame against the song by the jump — and
+# a whole-song vote over those frames would read the jump as the song's
+# offset (a 10 s scrub at 20 s in would "win" by a landslide at offset+10 s).
+# The sweep feeds `TimelineWatch` Spotify's own progress beside the capture
+# clock once a second; the vote only ever sees the frames BEFORE the first
+# break (seek, pause, stop, or the song changing).
+TIMELINE_TOL_MS = 2000      # Spotify poll jitter is a few hundred ms
+TIMELINE_SETTLE_MS = 3000   # take the baseline once the song has settled
+TIMELINE_GUARD_MS = 1000    # frames this close before the break are dropped too
+
+
+class TimelineWatch:
+    """Where the play's capture stopped describing one continuous run of
+    the song. Pure; fed by the sweep's frame loop."""
+
+    def __init__(self) -> None:
+        self.baseline_ms: Optional[float] = None
+        self.break_ms: Optional[int] = None
+        self.reason: Optional[str] = None
+
+    def note(self, frame_ms: int, progress_ms: Optional[float], *,
+             same_song_playing: bool) -> None:
+        if self.break_ms is not None:
+            return
+        if not same_song_playing or progress_ms is None:
+            self.break_ms, self.reason = int(frame_ms), "stopped or changed song"
+            return
+        drift = float(progress_ms) - float(frame_ms)
+        if self.baseline_ms is None:
+            if frame_ms >= TIMELINE_SETTLE_MS:
+                self.baseline_ms = drift
+            return
+        if abs(drift - self.baseline_ms) > TIMELINE_TOL_MS:
+            self.break_ms = int(frame_ms)
+            self.reason = f"seek or pause ({drift - self.baseline_ms:+.0f} ms jump)"
+
+    def trim(self, frames: list) -> list:
+        if self.break_ms is None:
+            return list(frames)
+        cut = self.break_ms - TIMELINE_GUARD_MS
+        return [f for f in frames if f[0] < cut]
+
+
 def should_check(*, locked: bool, locked_plays_since_check: int,
                  cfg: WholeSongConfig) -> bool:
     """Cadence: every play that did not hard-lock; every `locked_every`-th

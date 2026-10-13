@@ -429,3 +429,41 @@ def test_the_executable_spec_passes():
                          cwd=repo, capture_output=True, text=True, timeout=600)
     assert out.returncode == 0, out.stdout[-3000:] + out.stderr[-2000:]
     assert "ALL CHECKS PASSED" in out.stdout
+
+
+# ── 11. A seek or a pause is not a new offset ────────────────────────────────
+
+def test_timeline_watch_breaks_on_a_seek_a_pause_and_a_song_change():
+    tw = wsc.TimelineWatch()
+    for ms in range(0, 30_000, 1000):
+        tw.note(ms, ms + 400.0, same_song_playing=True)       # steady 400 ms drift
+    assert tw.break_ms is None
+    tw.note(31_000, 31_000 + 400.0 + 10_000, same_song_playing=True)   # 10 s scrub
+    assert tw.break_ms == 31_000 and tw.reason.startswith("seek")
+    paused = wsc.TimelineWatch()
+    paused.note(5_000, 5_400.0, same_song_playing=True)
+    paused.note(6_000, None, same_song_playing=False)
+    assert paused.break_ms == 6_000
+    frames = [(t, 0.0, 0.0, 0.0, 0.0) for t in range(0, 40_000, 500)]
+    assert max(f[0] for f in tw.trim(frames)) < 30_000
+
+
+def test_a_scrubbed_play_would_vote_for_the_scrub_without_the_watch():
+    """RED CONTROL for the guard: scrub 3 s forward 30 s into El Efecto and
+    the frames after the scrub vote for truth + 3 s. Trimmed at the break,
+    the first 30 s are too short to judge — nothing is changed."""
+    ts, sq, raw = W.load_fixture("el_efecto")
+    pre = [f for f in W.live_frames(ts, raw, 11750) if f[0] < 30_000]
+    post = [(t - 3_000, *rest) for t, *rest in W.live_frames(ts, raw, 11750, seed=3)
+            if t >= 33_000]
+    scrubbed = pre + post
+    bad = wsc.decide(wsc.whole_song_vote(ts, sq, scrubbed, saved_offset_ms=11750), CFG)
+    assert bad.action == wsc.CORRECTED and bad.offset_ms == 11750 + 3_000
+    tw = wsc.TimelineWatch()
+    for f in scrubbed[::86]:
+        progress = f[0] + 400.0 + (3_000 if f[0] >= 30_000 else 0)
+        tw.note(f[0], progress, same_song_playing=True)
+    kept = tw.trim(scrubbed)
+    assert kept[-1][0] < 30_000
+    assert wsc.decide(wsc.whole_song_vote(ts, sq, kept, saved_offset_ms=11750),
+                      CFG).action == wsc.TOO_FEW_WINDOWS

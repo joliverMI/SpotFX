@@ -1113,12 +1113,25 @@ class AutoOffsetService:
         # capture end) — only a real give-up keeps this play from relaunching.
         _keep_gave_up: Optional[str] = None
 
+        # Whole-song check: where this play's capture stops being one
+        # continuous run of the song (a seek, a pause, the song changing).
+        _timeline = whole_song_check.TimelineWatch()
+        _timeline_next_ms = 0
+
         capture.start()
         try:
             async for frame in capture:
                 if not app_state.current_track:
                     break
                 frames.append((frame.timestamp_ms, frame.rms_total, frame.rms_low, frame.rms_mid, frame.rms_high))
+                if frame.timestamp_ms >= _timeline_next_ms:
+                    _timeline_next_ms = frame.timestamp_ms + 1000
+                    _tl_t = app_state.current_track
+                    _tl_same = bool(_tl_t and _tl_t.spotify_uri == uri and _tl_t.is_playing)
+                    _timeline.note(
+                        frame.timestamp_ms,
+                        _tl_t.interpolated_progress_ms() if _tl_same else None,
+                        same_song_playing=_tl_same)
 
                 # Live-frame snapshot for the Debug page, refreshed on a ~1 s
                 # throttle so the page's live tail advances smoothly instead of
@@ -1568,7 +1581,7 @@ class AutoOffsetService:
             self._schedule_whole_song_check(
                 uri=uri, meta=meta, locked=False, frames=frames,
                 stored_ts=stored_ts, stored_bands=stored_bands,
-                play_context=_play_ctx)
+                play_context=_play_ctx, timeline=_timeline)
             # A continued search that GAVE UP has already spent the rest of
             # the song's chances; relaunching would only find "no reachable
             # windows" and overwrite the failed badge with "Not checked".
@@ -1734,7 +1747,7 @@ class AutoOffsetService:
         self._schedule_whole_song_check(
             uri=uri, meta=meta, locked=_locked_via_stop, frames=frames,
             stored_ts=stored_ts, stored_bands=stored_bands,
-            play_context=_play_ctx)
+            play_context=_play_ctx, timeline=_timeline)
 
         # Lock-and-stop: keep `_watching_uri` set so on_track_change's
         # "already watching this URI" guard suppresses a fresh xcorr task
@@ -1753,6 +1766,7 @@ class AutoOffsetService:
         self, *, uri: str, meta, locked: bool,
         frames: list, stored_ts: np.ndarray, stored_bands: list,
         play_context: PlayContext,
+        timeline: Optional["whole_song_check.TimelineWatch"] = None,
     ) -> Optional[asyncio.Task]:
         """Start the whole-song check for a play that just ended, when the
         cadence asks for one (services/whole_song_check.should_check). Runs on
@@ -1763,6 +1777,16 @@ class AutoOffsetService:
             return None
         if locked:
             self._whole_song_locked_plays += 1
+        # Only the frames before the first seek / pause / song change: past
+        # that the capture clock no longer describes the song it says.
+        if timeline is not None and timeline.break_ms is not None:
+            kept = timeline.trim(frames)
+            (logger.info if timeline.reason and timeline.reason.startswith("seek")
+             else logger.debug)(
+                "Whole-song check: capture of %s breaks at %dms (%s) — judging the "
+                "first %.0fs only", uri, timeline.break_ms, timeline.reason,
+                (kept[-1][0] / 1000.0) if kept else 0.0)
+            frames = kept
         # A play too short to ever reach min_windows (a skip, a sweep restart)
         # is not checked at all — nothing to judge, nothing to log.
         if not frames or (frames[-1][0] - frames[0][0]
