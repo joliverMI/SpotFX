@@ -72,6 +72,9 @@ from services.xcorr_sweep import (
     MismatchMonitor, MonitorConfig, SearchLadder, SweepConfig, SweepEvaluator,
 )
 from services.xcorr_evidence import EvidenceAccumulator
+# End-of-play whole-song check (the missing per-song watchdog). Pure vote +
+# decision + bounded log; this module runs it and performs the save.
+from services import whole_song_check
 
 logger = logging.getLogger(__name__)
 
@@ -245,6 +248,12 @@ class AutoOffsetService:
         # confident yet. In-memory only, by design — "this session" means
         # since the process started, not the persisted lock_history log.
         self._session_locked_offsets_ms: list[int] = []
+        # Whole-song check cadence: hard-locked plays since the last check
+        # that ran after a hard lock (services/whole_song_check.should_check).
+        self._whole_song_locked_plays: int = 0
+        # Strong references to in-flight checks (a bare create_task can be
+        # garbage-collected mid-run).
+        self._whole_song_tasks: set[asyncio.Task] = set()
 
     def get_status(self, uri: str) -> dict:
         """Return whether xcorr calibration is currently active for a URI."""
@@ -1104,12 +1113,25 @@ class AutoOffsetService:
         # capture end) — only a real give-up keeps this play from relaunching.
         _keep_gave_up: Optional[str] = None
 
+        # Whole-song check: where this play's capture stops being one
+        # continuous run of the song (a seek, a pause, the song changing).
+        _timeline = whole_song_check.TimelineWatch()
+        _timeline_next_ms = 0
+
         capture.start()
         try:
             async for frame in capture:
                 if not app_state.current_track:
                     break
                 frames.append((frame.timestamp_ms, frame.rms_total, frame.rms_low, frame.rms_mid, frame.rms_high))
+                if frame.timestamp_ms >= _timeline_next_ms:
+                    _timeline_next_ms = frame.timestamp_ms + 1000
+                    _tl_t = app_state.current_track
+                    _tl_same = bool(_tl_t and _tl_t.spotify_uri == uri and _tl_t.is_playing)
+                    _timeline.note(
+                        frame.timestamp_ms,
+                        _tl_t.interpolated_progress_ms() if _tl_same else None,
+                        same_song_playing=_tl_same)
 
                 # Live-frame snapshot for the Debug page, refreshed on a ~1 s
                 # throttle so the page's live tail advances smoothly instead of
@@ -1556,6 +1578,10 @@ class AutoOffsetService:
         if evaluator.n_measurements == 0:
             logger.info("Auto-offset xcorr: no measurements obtained for %s", uri)
             lock_state.note_outcome(uri, locked=False, reason="no_measurements")
+            self._schedule_whole_song_check(
+                uri=uri, meta=meta, locked=False, frames=frames,
+                stored_ts=stored_ts, stored_bands=stored_bands,
+                play_context=_play_ctx, timeline=_timeline)
             # A continued search that GAVE UP has already spent the rest of
             # the song's chances; relaunching would only find "no reachable
             # windows" and overwrite the failed badge with "Not checked".
@@ -1715,6 +1741,14 @@ class AutoOffsetService:
                          source=_fin_source, bypass_drift_cap=_fin_bypass,
                          play_context=_end_ctx)
 
+        # The whole-song check runs AFTER the final save, on its own task and
+        # a worker thread, so it reads what the next play would load and
+        # never delays the next song's sweep.
+        self._schedule_whole_song_check(
+            uri=uri, meta=meta, locked=_locked_via_stop, frames=frames,
+            stored_ts=stored_ts, stored_bands=stored_bands,
+            play_context=_play_ctx, timeline=_timeline)
+
         # Lock-and-stop: keep `_watching_uri` set so on_track_change's
         # "already watching this URI" guard suppresses a fresh xcorr task
         # spawn until the song actually changes. Without this, the task ends
@@ -1726,6 +1760,119 @@ class AutoOffsetService:
         if not _locked_via_stop and _keep_gave_up is None:
             self._watching_uri = None
         self._task = None
+
+    # ── End-of-play whole-song check ─────────────────────────────────────────
+    def _schedule_whole_song_check(
+        self, *, uri: str, meta, locked: bool,
+        frames: list, stored_ts: np.ndarray, stored_bands: list,
+        play_context: PlayContext,
+        timeline: Optional["whole_song_check.TimelineWatch"] = None,
+    ) -> Optional[asyncio.Task]:
+        """Start the whole-song check for a play that just ended, when the
+        cadence asks for one (services/whole_song_check.should_check). Runs on
+        its own task so the sweep task (often already cancelled by the track
+        change) and the next song's sweep are never held up by it."""
+        cfg = whole_song_check.WholeSongConfig.from_settings(settings)
+        if not cfg.enabled:
+            return None
+        if locked:
+            self._whole_song_locked_plays += 1
+        # Only the frames before the first seek / pause / song change: past
+        # that the capture clock no longer describes the song it says.
+        if timeline is not None and timeline.break_ms is not None:
+            kept = timeline.trim(frames)
+            (logger.info if timeline.reason and timeline.reason.startswith("seek")
+             else logger.debug)(
+                "Whole-song check: capture of %s breaks at %dms (%s) — judging the "
+                "first %.0fs only", uri, timeline.break_ms, timeline.reason,
+                (kept[-1][0] / 1000.0) if kept else 0.0)
+            frames = kept
+        # A play too short to ever reach min_windows (a skip, a sweep restart)
+        # is not checked at all — nothing to judge, nothing to log.
+        if not frames or (frames[-1][0] - frames[0][0]
+                          < cfg.min_windows * whole_song_check.STEP_MS):
+            return None
+        if not whole_song_check.should_check(
+                locked=locked,
+                locked_plays_since_check=self._whole_song_locked_plays, cfg=cfg):
+            return None
+        if locked:
+            self._whole_song_locked_plays = 0
+        try:
+            task = asyncio.get_running_loop().create_task(
+                self._run_whole_song_check(
+                    uri=uri, title=meta.title or "", artist=meta.artist or "",
+                    locked=locked, frames=list(frames), stored_ts=stored_ts,
+                    stored_bands=stored_bands, play_context=play_context, cfg=cfg),
+                name="auto-offset-whole-song",
+            )
+        except RuntimeError:
+            return None
+        self._whole_song_tasks.add(task)
+        task.add_done_callback(self._whole_song_tasks.discard)
+        return task
+
+    async def _run_whole_song_check(
+        self, *, uri: str, title: str, artist: str, locked: bool,
+        frames: list, stored_ts: np.ndarray, stored_bands: list,
+        play_context: PlayContext, cfg: "whole_song_check.WholeSongConfig",
+    ) -> Optional["whole_song_check.Decision"]:
+        """Vote the play's own audio over the whole song (worker thread) and,
+        when `decide()` says so, correct the stored offset the next play loads.
+        Every check is logged and recorded; only CORRECTED writes."""
+        meta = load_audio_shape_meta(uri)
+        if meta is None:
+            return None
+        saved = _stored_base_offset(meta, play_context.setlist_id)
+        try:
+            vote = await asyncio.to_thread(
+                whole_song_check.whole_song_vote,
+                stored_ts, stored_bands, frames, saved_offset_ms=saved,
+            )
+        except Exception as exc:                       # noqa: BLE001
+            logger.warning("Whole-song check failed for %s: %s", uri, exc)
+            return None
+        if vote is None:
+            return None
+        decision = whole_song_check.decide(
+            vote, cfg, verification=str(meta.offset_verification or ""))
+        saved_flag: Optional[bool] = None
+        if decision.action == whole_song_check.CORRECTED and decision.offset_ms is not None:
+            try:
+                _save_offset(
+                    uri, int(decision.offset_ms),
+                    float(vote.median_r_winner or 0.0),
+                    source=whole_song_check.SOURCE,
+                    play_context=play_context,
+                    replace_history=True,
+                )
+                saved_flag = True
+            except Exception as exc:                   # noqa: BLE001
+                logger.warning("Whole-song check: correction save failed for %s: %s", uri, exc)
+                saved_flag = False
+            logger.warning(
+                "Whole-song check: CORRECTED %s — %s (%s) [%s]",
+                title or uri, decision.reason, uri,
+                "saved" if saved_flag else "SAVE FAILED",
+            )
+        else:
+            logger.info("Whole-song check: %s — %s for %s (%s)",
+                        decision.action, decision.reason, title or uri, uri)
+        try:
+            entry = whole_song_check.record(
+                uri=uri, title=title, artist=artist, locked=locked,
+                vote=vote, decision=decision, saved=saved_flag)
+        except Exception as exc:                       # noqa: BLE001
+            logger.warning("Whole-song check: log write failed for %s: %s", uri, exc)
+            entry = None
+        if entry is not None:
+            try:
+                from services.websocket_manager import ws_manager
+                asyncio.create_task(ws_manager.broadcast(
+                    {"type": "whole_song_check", **entry}))
+            except Exception:
+                pass
+        return decision
 
     async def _detect_loop_spike_legacy(self, uri: str, candidates: list[dict]) -> None:
         """
@@ -2380,6 +2527,25 @@ def _write_csv_row(
 # END DIAGNOSTIC CSV ──────────────────────────────────────────────────────────
 
 
+def _stored_base_offset(meta, setlist_id: Optional[str]) -> int:
+    """The raw offset the NEXT play of this song would load for this slot,
+    before perception trim and the systemic bias — the same resolution as
+    trigger_engine._resolve_shape_offset's base (Set List slot: median of its
+    history, else its value; otherwise the track's own stored offset; or,
+    when the Set List is active but has never seen this track, the track's
+    default offset plus that Set List's recent-deltas bias — mirrors
+    _resolve_shape_offset's third branch exactly)."""
+    if setlist_id:
+        entry = (meta.setlist_offsets or {}).get(setlist_id)
+        if entry:
+            med = _median_offset(entry.get("history") or [])
+            return int(med if med is not None else entry.get("timestamp_offset_ms", 0))
+        from services import trigger_engine
+        bias = trigger_engine._setlist_delta_bias(setlist_id)
+        return int(meta.timestamp_offset_ms or 0) + bias
+    return int(meta.timestamp_offset_ms or 0)
+
+
 def _save_offset_from_anchor(uri: str, offset_ms: int, quality: float) -> None:
     """Anchor-derived save. The anchor's uniqueness is vetted offline, so a
     single confident match is enough to commit — no cluster gate needed.
@@ -2392,7 +2558,8 @@ def _save_offset_from_anchor(uri: str, offset_ms: int, quality: float) -> None:
 def _save_offset(uri: str, offset_ms: int, quality: float = 0.0,
                  source: str = "sweep",
                  bypass_drift_cap: bool = False,
-                 play_context: Optional[PlayContext] = None) -> None:
+                 play_context: Optional[PlayContext] = None,
+                 replace_history: bool = False) -> None:
     """Persist offset + quality score, mark as auto_verified, hot-reload trigger engine.
 
     When the active context is a tracked Set List, write into
@@ -2408,6 +2575,13 @@ def _save_offset(uri: str, offset_ms: int, quality: float = 0.0,
     `play_context` names the Set List slot and polled duration to save
     against instead of live `app_state` (see `PlayContext`); None reads live
     state, as every caller did before it existed.
+
+    `replace_history` (the whole-song check's correction): the Set List
+    slot's history becomes just this entry, because the next play loads the
+    MEDIAN of that history and one correct entry could never out-vote four
+    twins; the sidecar's `offset_history` also records it with its source.
+    The systemic-offset learner is not fed by a whole-song correction — it
+    learns from in-play locks against the loaded offset, which this is not.
     """
     from datetime import datetime, timezone
     meta = load_audio_shape_meta(uri)
@@ -2427,7 +2601,7 @@ def _save_offset(uri: str, offset_ms: int, quality: float = 0.0,
         if not isinstance(meta.setlist_offsets, dict):
             meta.setlist_offsets = {}
         prev = meta.setlist_offsets.get(sl_id) or {}
-        history = list(prev.get("history") or [])
+        history = [] if replace_history else list(prev.get("history") or [])
         history.insert(0, {
             "offset_ms": int(offset_ms),
             "quality": round(quality, 3),
@@ -2471,6 +2645,14 @@ def _save_offset(uri: str, offset_ms: int, quality: float = 0.0,
         meta.timestamp_offset_ms = offset_ms
         meta.offset_quality = round(quality, 3)
         meta.offset_verification = "auto_verified"
+    if replace_history:
+        meta.offset_history.insert(0, {
+            "iso_timestamp": now_iso,
+            "offset_ms": int(offset_ms),
+            "quality": round(quality, 3),
+            "source": source,
+        })
+        meta.offset_history = meta.offset_history[:20]
 
     meta_path = AUDIO_SHAPES_DIR / meta.npz_file.replace(".npz", ".json")
     meta_path.write_text(meta.model_dump_json(indent=2), encoding="utf-8")
@@ -2495,13 +2677,14 @@ def _save_offset(uri: str, offset_ms: int, quality: float = 0.0,
         # from the offset loaded at song start (the residual neither the
         # per-song baseline nor the per-Set-List bias predicted) BEFORE
         # apply_save mutates the live offset. No-op unless the learner is on.
-        try:
-            from services import systemic_offset
-            residual = engine.systemic_residual_for(uri, int(offset_ms))
-            if residual is not None:
-                systemic_offset.record(residual, float(quality))
-        except Exception as exc:
-            logger.debug("systemic_offset record failed: %s", exc)
+        if source != whole_song_check.SOURCE:
+            try:
+                from services import systemic_offset
+                residual = engine.systemic_residual_for(uri, int(offset_ms))
+                if residual is not None:
+                    systemic_offset.record(residual, float(quality))
+            except Exception as exc:
+                logger.debug("systemic_offset record failed: %s", exc)
         engine.apply_save(uri, int(offset_ms), apply_quality, source,
                           bypass_drift_cap=bypass_drift_cap)
     except Exception as exc:

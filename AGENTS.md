@@ -10277,6 +10277,48 @@ captured audio for MIA (`tests/fixtures/`, the two captures that sit
 ~5375ms apart in their own timelines) through the real production kernel
 (`xcorr_window_full`/`EvidenceAccumulator`/`SweepEvaluator.lock_and_stop`).
 
+## THE WHOLE-SONG CHECK — the per-song offset watchdog (2026-10-13)
+
+`services/whole_song_check.py`'s module docstring is the binding statement
+(data/lock-investigation/report.md §5.4/§8; the Admiral's call, option A:
+correct automatically). The per-play sweep only ever searches ±2.5–3.5 s of
+the STORED offset and its twin gates (drift cap, envelope, 0.20 margin) also
+keep the truth out, so an offset more than ~3 s wrong was re-saved forever
+(El Efecto +325 vs truth +11,750). After a play that did not hard-lock (and
+every `xcorr_whole_song_locked_every`-th that did), `AutoOffsetService.
+_schedule_whole_song_check` — called AFTER the play's final save, on its own
+task, the vote on a worker thread — votes the play's own frames over ±15 s
+of the whole song and REPLACES the stored offset (a Set List slot's history
+becomes just that entry, or its median never moves) only on a clear, strong,
+better, far-enough majority. Four things:
+
+- **Every outcome is recorded**: `storage/whole_song_checks.json` (bounded),
+  `GET /api/lock-history/whole-song`, the Timing page's card (both apps,
+  `timingviz/WholeSongCheckPanel.tsx`), a WARNING per correction. Settings:
+  `PUT /api/lock-history/whole-song/settings` (the ONE validator,
+  `whole_song_check.SETTINGS`), reached by Sonic's `lock` domain
+  (`spectra/services/lock_console.py`, over HTTP — SPECTRA may not import it;
+  its `KEYS` mirror is asserted equal in `tests/test_lock_console.py`).
+- **A seek or a pause is not a new offset**: the capture clock runs from the
+  play's fixed song start, so frames after a scrub read as offset + the jump
+  and could win the vote by a landslide. `whole_song_check.TimelineWatch`
+  (fed Spotify's progress once a second in the frame loop) cuts the frames at
+  the first seek, pause or song change; a play cut short is too short to judge.
+- **Rec. 4 rides with it**: `SweepEvaluator.stronger_elsewhere` withholds a
+  save (per-window and final) when `xcorr_withhold_resave_min_repeats` windows
+  whose OLD test point WAS the value about to be saved found one other offset
+  beating it on r — the Ponle Dembow re-save. Recorded before the envelope clip.
+- **The sweep-world driver turns both OFF** (`tests/sweep_world_driver.py`
+  `SETTINGS`), because every pinned-baseline trace comparison predates them;
+  a world testing them turns them on with `settings_over`.
+- **Proof**: `scripts/check_whole_song_check.py` (`--live-shapes DIR` adds the
+  report's 20 locked songs, read-only) + `tests/test_whole_song_check.py`, on
+  his two failing songs' REAL stored shapes (`tests/fixtures/whole_song/`)
+  with a live capture synthesised the way §5.4 measured — the twin he was
+  stuck on scores r ≈ 0.55 against ≈ 0.93 at the truth, as measured live.
+  NOT built here, deliberately: the first-sweep planning freeze, library
+  compensation from River's 8097 feed, recapture and monitor recovery.
+
 ## `librosa_offset_ms` is unreliable — don't shift section/beat times by it
 
 `LibrosaAnalysis.librosa_offset_ms` is meant to convert WAV-capture time to

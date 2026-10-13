@@ -94,6 +94,7 @@ from spectra.services import (  # noqa: E402
     device_console,
     drop_console,  # noqa: F401 — its operations are wrapped below
     house_console,
+    lock_console,
     room_effect_console,
     scene_console,
     settings_agent,
@@ -126,6 +127,7 @@ _HouseEnergyKeyEnum = Literal[tuple(house_console.ENERGY_KEYS)]
 _VoiceStateEnum = Literal[tuple(house_console.VOICE_STATES)]
 _DropHandleEnum = Literal["lull", "charge"]
 _DropReviewChoiceEnum = Literal["keep", "take"]
+_LockKeyEnum = Literal[tuple(lock_console.KEYS)]
 
 mcp = MCPServer("settings-console")
 
@@ -977,6 +979,25 @@ async def list_room_map(pose: Optional[str] = None) -> dict:
     """The Live view's room map: camera poses with anything drawn, or (with
     one pose_id) which pieces are placed and which are still in the tray."""
     return await _call("list_room_map", pose=pose)
+
+
+
+# Lock (spectra/services/lock_console.py): the whole-song check, the root
+# lock engine's per-song offset watchdog.
+
+
+@mcp.tool()
+async def get_whole_song_check(limit: int = 10, every_check: bool = False) -> dict:
+    """The whole-song check's settings and its recent corrections (or every
+    check, with why it left a song alone)."""
+    return await _call("get_whole_song_check", limit=limit, every_check=every_check)
+
+
+@mcp.tool()
+async def set_whole_song_check_setting(key: _LockKeyEnum,
+                                       value: Union[bool, float]) -> dict:
+    """Change one whole-song check setting."""
+    return await _call("set_whole_song_check_setting", key=key, value=value)
 
 
 if __name__ == "__main__":

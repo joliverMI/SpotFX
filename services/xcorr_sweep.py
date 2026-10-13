@@ -26,6 +26,10 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
+# Report rec. 4: a NEW find counts as "stronger" than the OLD test point only
+# when it beats it by at least this much r (a coin-flip tie is not evidence).
+STRONGER_MIN_R_GAIN = 0.05
+
 
 @dataclass
 class SweepConfig:
@@ -54,6 +58,9 @@ class SweepConfig:
     # attached to the evaluator).
     accum_lock_mass: float = 1.6
     accum_dominance: float = 0.5
+    # Report rec. 4 (the Ponle Dembow path): a save is withheld when this many
+    # windows found one OTHER offset beating it on r. 0 = off.
+    withhold_resave_min_repeats: int = 0
 
     @classmethod
     def from_settings(cls, settings) -> "SweepConfig":
@@ -76,6 +83,8 @@ class SweepConfig:
             lock_agree_windows=int(getattr(settings, "xcorr_lock_agree_windows", 3)),
             accum_lock_mass=float(getattr(settings, "xcorr_accum_lock_mass", 1.6)),
             accum_dominance=float(getattr(settings, "xcorr_accum_dominance", 0.5)),
+            withhold_resave_min_repeats=int(
+                getattr(settings, "xcorr_withhold_resave_min_repeats", 0)),
         )
 
 
@@ -585,6 +594,12 @@ class SweepEvaluator:
         self.baseline_anti_corr: bool = False
         self._anti_neg_streak: int = 0
         self._last_agree_now: float = 0.0
+        # Report rec. 4: per window, a NEW measurement that scored higher r
+        # than the OLD test point at a DIFFERENT offset — whether or not the
+        # gates let it win (displacement floor, envelope clip, drift cap).
+        # (new_offset, new_r, old_offset, old_r). See stronger_elsewhere().
+        self.stronger_measurements: list[tuple[int, float, int, float]] = []
+        self.withheld_save: Optional[dict] = None
 
     # ── Anchor / progressive votes ────────────────────────────────────────────
     def add_anchor_vote(self, offset_ms: int, weight: float) -> None:
@@ -669,6 +684,14 @@ class SweepEvaluator:
             new_quality = round(new_r * difficulty, 3)
         else:
             new_offset_ms, new_r, new_quality = 0, 0.0, 0.0
+        # Recorded BEFORE the envelope clip: a clipped find is still a
+        # measurement the play made (El Efecto's +12 s finds were all clipped).
+        if (new_result is not None
+                and new_r >= cfg.global_threshold
+                and new_r > old_r + STRONGER_MIN_R_GAIN
+                and abs(int(new_offset_ms) - int(stored_offset_ms)) > cfg.save_confirm_tol_ms):
+            self.stronger_measurements.append(
+                (int(new_offset_ms), float(new_r), int(stored_offset_ms), float(old_r)))
 
         # Round 9.5: envelope clip. Each window has a precomputed safe-shift
         # range — outside it, the matcher's peak likely landed on a twin
@@ -843,6 +866,14 @@ class SweepEvaluator:
                 win_r, cfg.single_save_r, win_quality, cfg.single_save_q,
             )
 
+        if disk_save is not None:
+            _held = self.stronger_elsewhere(int(disk_save[0]))
+            if _held is not None:
+                self._log_withheld(int(disk_save[0]), _held, "per-window")
+                if disk_save[2] == "sweep-accum":
+                    self._last_accum_save_offset = None
+                disk_save = None
+
         return WindowOutcome(
             win_start=win_start, win_end=win_end,
             win_offset=win_offset, win_quality=win_quality, win_r=win_r,
@@ -944,6 +975,54 @@ class SweepEvaluator:
             return None
         return (save_offset, save_quality, "sweep", self.baseline_anti_corr)
 
+    # ── Report rec. 4: never re-save a capped value over a stronger one ──────
+    def stronger_elsewhere(self, save_offset_ms: int) -> Optional[dict]:
+        """A repeated measurement that beat `save_offset_ms` on r, or None.
+
+        Counts only windows whose OLD test point WAS (within the confirm
+        tolerance) the offset about to be saved — so an early window that
+        merely beat a stale loaded offset on the way to this very save never
+        counts against it — and whose NEW landed elsewhere. When at least
+        `withhold_resave_min_repeats` of those NEW finds agree with one
+        another (±tolerance), the play repeatedly measured something better
+        than what it is about to save, and the sweep's own gates (displacement
+        floor, envelope, drift cap) kept it from moving there: Ponle Dembow
+        re-saving +1,225 ms while seven windows found +6,225 at r 0.77-0.84.
+        Saving then would only re-confirm the capped value; the save is
+        withheld and the stored offset left to the whole-song check
+        (services/whole_song_check.py)."""
+        n_min = int(self.cfg.withhold_resave_min_repeats)
+        if n_min <= 0:
+            return None
+        tol = int(self.cfg.save_confirm_tol_ms)
+        rel = [(no, nr, orr) for no, nr, oo, orr in self.stronger_measurements
+               if abs(oo - save_offset_ms) <= tol and abs(no - save_offset_ms) > tol]
+        if len(rel) < n_min:
+            return None
+        best: list[tuple[int, float, float]] = []
+        for centre, _nr, _orr in rel:
+            members = [m for m in rel if abs(m[0] - centre) <= tol]
+            if len(members) > len(best):
+                best = members
+        if len(best) < n_min:
+            return None
+        return {
+            "offset_ms": int(np.median([m[0] for m in best])),
+            "count": len(best),
+            "median_new_r": float(np.median([m[1] for m in best])),
+            "median_old_r": float(np.median([m[2] for m in best])),
+        }
+
+    def _log_withheld(self, save_offset_ms: int, held: dict, where: str) -> None:
+        self.withheld_save = {"save_offset_ms": int(save_offset_ms), **held}
+        logger.warning(
+            "Auto-offset xcorr: NOT saving %+dms (%s) — %d window(s) measured %+dms "
+            "at median r %.2f against %.2f at %+dms and the sweep's gates kept it there; "
+            "stored offset left for the whole-song check for %s",
+            save_offset_ms, where, held["count"], held["offset_ms"],
+            held["median_new_r"], held["median_old_r"], save_offset_ms, self.uri,
+        )
+
     # ── Post-loop finalization ────────────────────────────────────────────────
     def finalize(self) -> FinalDecision:
         """Cluster-override + final save gates (the post-loop logic)."""
@@ -992,6 +1071,12 @@ class SweepEvaluator:
                 disk_save = self._finalize_cluster(cfg)
         else:
             disk_save = self._finalize_cluster(cfg)
+
+        if disk_save is not None:
+            _held = self.stronger_elsewhere(int(disk_save[0]))
+            if _held is not None:
+                self._log_withheld(int(disk_save[0]), _held, "final")
+                disk_save = None
 
         return FinalDecision(
             best_offset=self.best_offset,
