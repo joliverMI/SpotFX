@@ -87,3 +87,49 @@ async def reanchor(body: ReanchorBody, request: Request) -> dict:
                                      reason=body.reason, client=client)
     except lock_history.ReanchorRefused as exc:
         raise HTTPException(status_code=409, detail=str(exc))
+
+
+# ── Whole-song check (services/whole_song_check.py) ──────────────────────────
+
+@router.get("/whole-song")
+async def whole_song(limit: int = 50, corrections_only: bool = False) -> dict:
+    """Every end-of-play whole-song check, newest first — the corrections it
+    made (song, old → new offset, windows won, median r) and the checks that
+    left a song alone, with why. Also the live settings."""
+    from config import settings
+    from services import whole_song_check
+    return {
+        "entries": whole_song_check.recent(limit=max(1, min(limit, 300)),
+                                           corrections_only=corrections_only),
+        "settings": whole_song_check.current_settings(settings),
+    }
+
+
+@router.get("/whole-song/settings")
+async def whole_song_settings() -> dict:
+    from config import settings
+    from services import whole_song_check
+    return {"settings": whole_song_check.current_settings(settings),
+            "spec": whole_song_check.SETTINGS}
+
+
+@router.put("/whole-song/settings")
+async def put_whole_song_settings(body: dict) -> dict:
+    """Partial update: only the keys sent change. Validated against
+    whole_song_check.SETTINGS, applied live, persisted to
+    storage/settings.json. 422 names the first bad key."""
+    from config import settings
+    from routers import settings_router
+    from services import whole_song_check
+    try:
+        patch = whole_song_check.validate_patch(body)
+    except whole_song_check.SettingRejected as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    previous = whole_song_check.current_settings(settings)
+    stored = settings_router._load_settings_file()
+    for k, v in patch.items():
+        object.__setattr__(settings, k, v)
+        stored[k] = v
+    settings_router._save_settings_file(stored)
+    return {"settings": whole_song_check.current_settings(settings),
+            "previous": previous, "changed": sorted(patch)}

@@ -420,6 +420,29 @@ class Settings(BaseSettings):
     xcorr_keep_searching_enabled: bool = True
     xcorr_keep_searching_interval_ms: int = 5000
     xcorr_keep_searching_give_up_ms: int = 45000
+    # End-of-play WHOLE-SONG CHECK (data/lock-investigation/report.md §5.4/§8
+    # rec. 1; the Admiral's call 2026-10-13, option A — correct automatically).
+    # After a play that did not hard-lock (and every `locked_every`-th play
+    # that did; 0 = never after a lock), the play's own captured audio is
+    # voted over ±15 s of the whole song and, when one offset wins clearly and
+    # beats the saved one, the stored offset is corrected so the next play
+    # starts there. services/whole_song_check.py is the binding statement;
+    # every check lands in storage/whole_song_checks.json (Timing page).
+    # Editable on the Timing page, by PUT /api/lock-history/whole-song/settings
+    # and by Sonic.
+    xcorr_whole_song_enabled: bool = True
+    xcorr_whole_song_min_windows: int = 15
+    xcorr_whole_song_min_vote_fraction: float = 0.70
+    xcorr_whole_song_min_r: float = 0.80
+    xcorr_whole_song_min_r_margin: float = 0.15
+    xcorr_whole_song_min_move_ms: int = 750
+    xcorr_whole_song_locked_every: int = 4
+    # Never re-save a capped value over a stronger repeated measurement
+    # (report rec. 4, the Ponle Dembow path): when this many windows of the
+    # play found ONE other offset scoring higher r than the value about to be
+    # saved — and the sweep's gates refused to move to it — the save is
+    # withheld and the stored offset left for the whole-song check. 0 = off.
+    xcorr_withhold_resave_min_repeats: int = 3
     # Phase 6: capture-gap rejection. A window (or monitor rolling check)
     # whose live span contains a consecutive-frame gap larger than this is
     # discarded/neutralized — np.interp would otherwise bridge the hole with

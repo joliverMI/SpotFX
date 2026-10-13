@@ -313,6 +313,12 @@ SETTINGS = dict(
     xcorr_keep_searching_enabled=True,
     xcorr_keep_searching_interval_ms=5000,
     xcorr_keep_searching_give_up_ms=45000,
+    # The end-of-play whole-song check and the re-save withholding are their
+    # own subjects (tests/test_whole_song_check.py); every pinned-baseline
+    # trace comparison here predates them, so they are off unless a world
+    # turns them on.
+    xcorr_whole_song_enabled=False,
+    xcorr_withhold_resave_min_repeats=0,
 )
 
 # His live storage/settings.json: the FFT kernel, evidence accumulation, the
