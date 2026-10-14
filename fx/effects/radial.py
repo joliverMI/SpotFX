@@ -838,6 +838,8 @@ class Radial2d(Twod):
 
     def _shape_div_for(self, phi, edges):
         phi = np.asarray(phi, dtype=np.float32)
+        if edges == 1:
+            return 1.0 / np.maximum(np.abs(np.cos(phi)), epsilon)
         if edges == 2:
             return 1.0 / np.sqrt(np.cos(phi) ** 2 + 0.25 * np.sin(phi) ** 2)
         if edges is not None and edges >= 3:
