@@ -60,6 +60,8 @@ export default function HomeTimeline({
     || (filters.drop && isDrop(e.kind))
     || (filters.lightShow && isLightShow(e.kind))
   )), [events, filters]);
+  const shownRef = useRef(shown);
+  shownRef.current = shown;
 
   const getNowForWin = useMemo(() => () => getShowClockMs(), []);
   const win = useFollowWindow({ getNowMs: getNowForWin, durationMs: Math.max(1, durationMs), keyPrefix: 'home' });
@@ -69,6 +71,7 @@ export default function HomeTimeline({
   const windowOverlayRef = useRef<HTMLDivElement>(null);
   const playheadRef = useRef<SVGLineElement>(null);
   const timeRef = useRef<HTMLSpanElement>(null);
+  const nextRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const canvasPlayheadRef = useRef<HTMLDivElement>(null);
 
@@ -175,6 +178,12 @@ export default function HomeTimeline({
         timeRef.current.textContent = pos != null && durationMs > 0
           ? `${fmtMMSS(pos)} / ${fmtMMSS(durationMs)}` : '—:— / —:—';
       }
+      if (nextRef.current) {
+        const n = now != null ? pickNext(shownRef.current, now) : null;
+        nextRef.current.textContent = n
+          ? `Next: ${eventLabel(n)} in ${fmtCountdown(Math.max(0, n.ms - (now as number)))}` : '';
+        nextRef.current.title = n ? eventLabel(n) : '';
+      }
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
@@ -216,11 +225,6 @@ export default function HomeTimeline({
     window.addEventListener('pointerup', up);
   };
 
-  const next = useMemo(() => {
-    const now = getShowClockMs();
-    return now != null ? pickNext(shown, now) : null;
-  }, [shown]);
-
   return (
     <div className="home-timeline card">
       <div className="home-timeline-head">
@@ -252,11 +256,7 @@ export default function HomeTimeline({
         </div>
       </div>
 
-      {next && (
-        <div className="home-timeline-next" title={eventLabel(next)}>
-          Next: {eventLabel(next)} in {fmtCountdown(Math.max(0, next.ms - (getShowClockMs() ?? next.ms)))}
-        </div>
-      )}
+      <div ref={nextRef} className="home-timeline-next" />
 
       {showAudioShape && (
         <div className="home-timeline-shape">
