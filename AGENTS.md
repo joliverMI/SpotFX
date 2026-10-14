@@ -4330,8 +4330,10 @@ docstring first (Sonic's authority boundary here, the same shape
   than always `sonic-scenes`).
 - **THE RUN VIEW IS A SEPARATE COMPONENT OVER THE SAME POLLED STATE**
   (`spectra/web/src/lightshow/RunView.tsx`) — a Build/Run tap toggle in the
-  page head (`useIsPhone()` defaults the initial tab, never force-switches
-  later). Run reuses `ArmBoard` and the exported `ShowNowPanel` verbatim
+  page head (`isPhone` only labels the Run tab "(recommended)" now; the
+  tab that actually SHOWS on open is the Sequence tab's own Run view,
+  unconditionally — see "THE LIGHT SHOW TAB DEFAULTS TO SEQUENCE → RUN"
+  below). Run reuses `ArmBoard` and the exported `ShowNowPanel` verbatim
   (one countdown source, one Holding-list source — never a second copy
   that could disagree), and big Disarm all / End show buttons. Run never
   edits a set. **Each set's own row is ONE TAP PER TIMING, no menu
@@ -4565,11 +4567,13 @@ one context per program) and maps song -> steps (set + `song_start` /
 The Admiral, verbatim: "make the sequence running page the default for the
 lightshow tab. add quick start buttons for recently used sequences."
 `LightShowPage.tsx`'s top-level `mode` now defaults to `'sequence'`
-unconditionally (not phone-vs-desktop as the Build/Run split still is), and
-`SequenceView.tsx`'s own `sub` defaults to `'run'` the same way — so opening
-`/show` on any screen size lands on `SequenceRunView`, never Build. Neither
-default is persisted or deep-linkable; there was no such mechanism to
-preserve.
+unconditionally, and `SequenceView.tsx`'s own `sub` defaults to `'run'` the
+same way — so opening `/show` on any screen size lands on
+`SequenceRunView`, never Build. Both replace the pre-existing phone-vs-
+desktop `matchMedia` default with a flat literal; `isPhone` now only
+labels the Run tab "(recommended)" and no longer chooses which tab shows
+on open. Neither default is persisted or deep-linkable; there was no such
+mechanism to preserve.
 
 **Quick start reads the durable show log back, it keeps no history of its
 own.** `show_sequence.start()` now threads `sequence_id=r.sequence_id` into
