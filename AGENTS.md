@@ -11693,14 +11693,23 @@ unmerged — expect a rebase of `App.tsx`/`tokens.css` against that work.
   clock could each read a different "now" for the same song — measured
   1.73s/4.5s apart on two real songs). `BuilderPage.tsx`'s
   `getStripNowMs` switches TimelineBar/SpectraTriggersCard/
-  DropSequenceStrip's "played" fill to it; the audio-shape canvas's own
-  `getCanvasNowMs`/`getPlayheadMs` are DELIBERATELY untouched — that
-  playhead is drawn in its own shifted frame (`audio_latency_ms` + the
-  stored shape offset) its follow-window anchors on
-  (`hooks/followWindow.ts`, the "Pop Off" incident), and composing the
-  show clock (which already carries the live shape offset) on top of
-  that legacy shift would double-apply it. Consolidating that playhead
-  onto the one clock is real, separate follow-up work.
+  DropSequenceStrip's "played" fill AND the audio-shape canvas's own
+  playhead (his own "perfectly matched" follow-up ask) to it — the old
+  `getCanvasNowMs`/`getPlayheadMs` (`audio_latency_ms` subtract + stored
+  shape-offset add, `drawnPlayheadMs`) are RETIRED, not merely left
+  alone: that shift was misaligning the canvas playhead against its OWN
+  RMS/trigger data too (already drawn at raw, unshifted song time —
+  `debug/plannedEvents.ts`'s own docstring), not only against the
+  strips. `canvas/layers.ts`'s shared `playhead` layer now draws
+  `f.nowMs` verbatim — safe for `DebugPage.tsx` (shares the same layer
+  object) because it already passed `view.offsetMs: 0` and does its own
+  shifting entirely inside its own `getCanvasNowMs`, proven by
+  `scripts/check_timeline_playhead_one_clock.mjs`'s behavioural check
+  (a huge, wrong `view.offsetMs` changes nothing drawn, with a red
+  control showing the retired formula really would have moved it) beside
+  its source-level check (one shared `getStripNowMs` wired to all four
+  `getNowMs` props, canvas included). `audio_latency_ms` itself is
+  untouched elsewhere (capture alignment, a separate job).
 - **`GET /api/upcoming?uri=&limit=`** (`spectra/api/upcoming.py`): the
   merged "what will actually fire" list for one song — computed by the
   engine's OWN gating (`TriggerEngine._trigger_allowed`/
@@ -11721,7 +11730,16 @@ unmerged — expect a rebase of `App.tsx`/`tokens.css` against that work.
   "strong", shared with the Timeline/debug canvases. The playhead and the
   fixed-96px next-event countdown move in ONE rAF loop that writes
   SVG attributes / `textContent` directly, never a React render per
-  frame — the markers themselves are rebuilt only when the song or its
+  frame — measured at ~60 drawn fps over a 6s window
+  (`scripts/check_song_strip_fps.py`, the `preview_perf` rig's own
+  drawn-fps TECHNIQUE — a real headless Chromium + CDP, wrapping
+  `requestAnimationFrame` to count real per-frame work — applied to a
+  purpose-built mocked-fetch/WebSocket harness page
+  (`spectra/web/harness/songstrip.html`, built alongside the existing
+  harness pages by `vite.harness.config.ts`) rather than the rig's own
+  `:live`/`:map` systems, which are specific to the device-preview/
+  Live-view feature and need a real dummy-device fx host to drive). The
+  markers themselves are rebuilt only when the song or its
   plan changes, into a dedicated `<g>` the rAF loop never touches (a
   React-managed sibling `<line>` is the playhead — clearing the wrong
   node here throws on reconciliation, don't merge the two).
