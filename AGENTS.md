@@ -11841,8 +11841,11 @@ second concept.** `spectra/api/upcoming.py`'s own docstring and handler
 read them straight off `plan["show_cues"]` (`spectra/services/
 show_cues.py`), stamped `source: "show_cue"` — the exact store the
 Timeline page's own `canvas/lightShowLayer.ts` flags already draw from.
-Proven (backend source text + frontend behaviour) in `scripts/
-check_home_timeline_light_show_markers.mjs`. **That same build fixed a
+Proven behaviourally — the real `/api/upcoming` handler driven as a
+subprocess, and the real `drawShapeMarkers`/`HomeTimeline.tsx` bundled with
+esbuild — in `scripts/check_home_timeline_light_show_markers.mjs`
+(Timeline parity is its own pre-existing proof,
+`scripts/check_timeline_light_show_markers.mjs`). **That same build fixed a
 latent catch-all bug found while verifying it**: both HomeTimeline.tsx's
 strip-marker SVG builder and `songStrip.ts`'s `drawShapeMarkers()` used to
 treat "anything that isn't scene/flare/charge/lull/drop" as a Light Show
