@@ -141,7 +141,14 @@ export default function HomeTimeline({
         bar.setAttribute('width', e.kind === 'drop' ? '4' : '10'); bar.setAttribute('height', '6');
         bar.setAttribute('rx', '2'); bar.setAttribute('fill', color);
         svg.appendChild(bar);
-      } else {
+      } else if (isLightShow(e.kind)) {
+        // These ARE the Light Show's own High/Low Trigger cues (spectra/
+        // api/upcoming.py's own docstring: "The Light Show's High/Low cues
+        // (show_cues)...") — drawn as a flag, same shape SongStrip.tsx's
+        // own flag branch uses. The check is explicit, not a catch-all
+        // `else`, because a catch-all would also match `kind: "colour"`
+        // (an authored select_color_set trigger) and wrongly draw it as a
+        // Light Show flag — left undrawn here, matching SongStrip.tsx.
         const flag = document.createElementNS(ns, 'line');
         flag.setAttribute('x1', `${frac * 100}%`); flag.setAttribute('x2', `${frac * 100}%`);
         flag.setAttribute('y1', '0'); flag.setAttribute('y2', '8');

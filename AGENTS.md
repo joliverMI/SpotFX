@@ -11836,6 +11836,28 @@ uses (resolve `/components\/songStrip$/` straight to the absolute `.ts`
 path) — this is a test-tool-only quirk, not a reason to rename either
 production file.
 
+**`kind: "high"/"low"` ARE the Light Show's High/Low Trigger cues — not a
+second concept.** `spectra/api/upcoming.py`'s own docstring and handler
+read them straight off `plan["show_cues"]` (`spectra/services/
+show_cues.py`), stamped `source: "show_cue"` — the exact store the
+Timeline page's own `canvas/lightShowLayer.ts` flags already draw from.
+Proven (backend source text + frontend behaviour) in `scripts/
+check_home_timeline_light_show_markers.mjs`. **That same build fixed a
+latent catch-all bug found while verifying it**: both HomeTimeline.tsx's
+strip-marker SVG builder and `songStrip.ts`'s `drawShapeMarkers()` used to
+treat "anything that isn't scene/flare/charge/lull/drop" as a Light Show
+flag — which also matches `kind: "colour"` (an authored `select_color_set`
+trigger, reachable through `/api/upcoming`'s "his own triggers fire
+instead" branch) and drew it as a flag it is not. Both now check
+`kind === 'high' || kind === 'low'` explicitly, matching `SongStrip.tsx`'s
+own flag branch, which already got this right; `colour` is left undrawn
+everywhere, the same silent-drop `SongStrip.tsx` already shipped. The
+Timeline page's audio-shape canvas already drew every one of the
+Admiral's named marker kinds (scene/flare via `analysedEvents`,
+charge/lull/drop via `dropSeqBody`'s gold-wedge/blue-band/drop, high/low
+via `lightShowMarkers`) before this build touched anything — confirmed,
+not assumed, by reading each layer; no Timeline change was needed.
+
 ## THE GROUPED MENU, ONE BAR, AND HOME — UI declutter plan (2026-10-14)
 
 The Admiral's layout declutter plan (`data/ui-layout-plan/` in
