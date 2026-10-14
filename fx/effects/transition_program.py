@@ -133,8 +133,8 @@ EYE_PARTNERS = ("blackhole", "orbits", "fish", "squiggles", "fireworks")
 # OUT OF STAR (the star plan, 2026-10-13 — his "The ones from star to the
 # others are great and approved"): Star's bands RELEASE as pieces
 # (radial.Radial2d._program_snapshot) and four pairs reuse an existing
-# program unchanged; two are new flights (transition_cloud.py). Into Star is
-# NOT registered yet — those still crossfade (his "still need work").
+# program unchanged; two are new flights (transition_cloud.py). Into Star
+# is registered below (STAR_IN, 2026-10-14, "Do rec on transitions").
 STAR = "radial"
 STAR_OUT = {
     "blackhole": INFALL,
