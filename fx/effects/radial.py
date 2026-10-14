@@ -1426,7 +1426,11 @@ class Radial2d(Twod):
         """The "implode" lull's own fade to black ON the shared dark point
         (the strip that used to fade under it skips its lull while Star
         reads it — strip_phase, THE STRIP STAR READS): the same eased curve
-        the strip layer faded by."""
+        the strip layer faded by. Only when SpotFX has TOLD Star the lull's
+        dark point (it always does — Star is a LULL_DARK member); an untold
+        lull (a hand scrub, the vendored warp alone) is the warp as it was."""
+        if not lull_dark.told(self._config):
+            return 1.0
         p = float(np.clip(self.phase_progress, 0.0, 1.0))
         tim = lull_dark.lull_timing(self._config, p, self._phase_t,
                                     legacy_dark_at=1.0)
