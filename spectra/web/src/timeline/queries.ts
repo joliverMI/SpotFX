@@ -7,7 +7,7 @@ import type {
 } from './types';
 import type { AnalysedPlan } from '../debug/plannedEvents';
 import type { DropRails, DropSequencesResponse } from './dropSequences';
-import type { ArmsStatus } from '../lightshow/types';
+import type { ArmsStatus, SequenceStatus } from '../lightshow/types';
 
 const enc = encodeURIComponent;
 
@@ -154,6 +154,22 @@ export function useShowArms(enabled = true) {
   return useQuery({
     queryKey: ['light-show-arms'],
     queryFn: () => spectraGet<ArmsStatus>('/light-show/arms'),
+    enabled,
+    refetchInterval: 10_000,
+    retry: false,
+  });
+}
+
+/** The Light Show's running sequence (spectra/services/show_sequence.py),
+ * for the bar's now/next slot (LightShowStrip.tsx) and SequenceView.tsx's
+ * own polling — shared under one query key so both read/invalidate the
+ * same cache entry (the `useAmbientStatusPush` precedent). The server
+ * pushes `{"type": "light_show_sequence", "run": ...}` on every advance;
+ * see `queries.ts`'s `useLightShowSequencePush`. */
+export function useSequenceRunStatus(enabled = true) {
+  return useQuery({
+    queryKey: ['light-show-sequence-run'],
+    queryFn: () => spectraGet<SequenceStatus>('/light-show/sequence-run'),
     enabled,
     refetchInterval: 10_000,
     retry: false,

@@ -17,10 +17,22 @@
  *   expands to the three-setting select, both authored colours, the Hue
  *   entertainment-area picker (AmbientGroupsPicker, embedded directly —
  *   no separate modal), and the live status.
- * - **Scenes** — scene-change tier, Force Scene, AND the global
- *   transition pace bundled in (his own ask: "bundle transitions into
- *   scenes"). A press just opens the panel — no cycle behaviour, by his
- *   own stated reason ("it don't want it to cycle anything").
+ * - **Scenes** — now just Force Scene (moved to the TOP of the panel, his
+ *   2026-10-14 UI declutter edit) and the scene-change tier select, plus
+ *   recents. Every other tuning field this panel used to carry (transition
+ *   pace, lull darkness, strip phase strength, breath-hold, drop timing/
+ *   Shockwave, Pulse flash floor, drop-switch/thematic-transition rules,
+ *   music devices, the transition placement rule, analysed-action rates)
+ *   moved to Settings → "Scenes & drops" (settings/ScenesDropsCard.tsx) —
+ *   a UI move only, same writers. A press just opens the panel — no cycle
+ *   behaviour, by his own stated reason ("it don't want it to cycle
+ *   anything").
+ *
+ * Brightness, the drift gradient (DriftGradientBar.tsx, now
+ * components/DriftGradientPanel.tsx) and the preview Favourites picker
+ * ALSO moved out of this bar into Settings → "Room"
+ * (settings/RoomCard.tsx) in the same change — see AGENTS.md's "THE
+ * GROUPED MENU, ONE BAR, AND HOME" section for the whole layout.
  *
  * THE ONE-SECOND APPLY DELAY (Mode only, his words: "don't apply change
  * for 1s to avoid spam") is deliberately NOT a debounce on the button —
@@ -33,7 +45,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import AmbientGroupsPicker from './AmbientGroupsPicker';
 import ColorGradientPicker from './ColorGradientPicker';
-import DriftGradientBar from './DriftGradientBar';
 import Icon from './Icon';
 import PowerButton from './PowerButton';
 import ReleaseButton from './ReleaseButton';
@@ -191,11 +202,6 @@ export default function RoomControlsBar() {
   const [forceColorResult, setForceColorResult] = useState<ForceColorResult | null>(null);
   const { data: colorCards } = useSpotColorSets();
   const [hueGroupsResetKey, setHueGroupsResetKey] = useState(0);
-  // The music-device allowlist is edited as a plain comma-separated
-  // string while typing; null means "show local's own list" — cleared
-  // after a commit (or whenever `local` is swapped in from the server)
-  // so the field never holds a stale draft across an external update.
-  const [musicDeviceAllowlistDraft, setMusicDeviceAllowlistDraft] = useState<string | null>(null);
   const localRef = useRef<RoomControlState | null>(null);
   // 6-most-recently-used, one list per picker (owner ask, card
   // force-colour-and-forced-trigger-dialogs-p99a) — a per-viewer
@@ -585,477 +591,10 @@ export default function RoomControlsBar() {
         panelTitle="Scenes"
         panel={(
           <>
-            <div className="top-bar-group-field">
-              <label>Transition</label>
-              <input
-                type="number" min={0} max={20000} step={100}
-                value={local.global_transition_ms}
-                onChange={(e) => setLocal({ ...local, global_transition_ms: Number(e.target.value) })}
-                onBlur={() => commit(local)}
-              />
-              <span style={{ fontSize: '0.85em', opacity: 0.75 }}>ms (0 = use the two below)</span>
-            </div>
-            <div className="top-bar-group-field">
-              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-                Transition @ low intensity
-                <HelpLink topic="intensity-scaled-transitions" />
-              </label>
-              <input
-                type="number" min={0} max={20000} step={50}
-                value={local.scene_transition_ms_gentle}
-                onChange={(e) => setLocal({ ...local, scene_transition_ms_gentle: Number(e.target.value) })}
-                onBlur={() => commit(local)}
-              />
-              <span style={{ fontSize: '0.85em', opacity: 0.75 }}>ms</span>
-            </div>
-            <div className="top-bar-group-field">
-              <label>Transition @ high intensity</label>
-              <input
-                type="number" min={0} max={20000} step={50}
-                value={local.scene_transition_ms_hard}
-                onChange={(e) => setLocal({ ...local, scene_transition_ms_hard: Number(e.target.value) })}
-                onBlur={() => commit(local)}
-              />
-              <span style={{ fontSize: '0.85em', opacity: 0.75 }}>ms</span>
-            </div>
-            <div className="top-bar-group-field">
-              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}
-                title="The longest a lull stays fully dark on Black Hole, Squiggles, Pulse and Star. A lull is dark for half its length, never longer than this.">
-                Lull darkness (max)
-                <HelpLink topic="lull-dark-cap" />
-              </label>
-              <input
-                type="number" min={0} max={30} step={0.5}
-                value={local.lull_dark_max_s}
-                onChange={(e) => setLocal({ ...local, lull_dark_max_s: Number(e.target.value) })}
-                onBlur={() => commit(local)}
-              />
-              <span style={{ fontSize: '0.85em', opacity: 0.75 }}>s</span>
-            </div>
-            <div className="top-bar-group-field">
-              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}
-                title="How strongly the strip effects answer a charge, lull and drop — brighter colours, a set-colour fill and more motion on a build, a fade to black in a lull, a set-colour shockwave on a drop. Never adds white. 0 = off.">
-                Strip phase strength
-                <HelpLink topic="strip-phases" />
-              </label>
-              <input
-                type="number" min={0} max={1.5} step={0.05}
-                value={local.strip_phase_strength}
-                onChange={(e) => setLocal({ ...local, strip_phase_strength: Number(e.target.value) })}
-                onBlur={() => commit(local)}
-              />
-              <span style={{ fontSize: '0.85em', opacity: 0.75 }}>×</span>
-            </div>
-            <div className="top-bar-group-field">
-              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}
-                title="How long the lights go to true black right before a drop lands (the crystal's Black Hole, Sauron and Eye, Star, and the Pulse singles; Orbits only dims to one dim blob and the Fish keeps swimming). Never longer than the lull's own darkness. 0 = none.">
-                Breath-hold before drop
-                <HelpLink topic="drop-breath-hold" />
-              </label>
-              <input
-                type="number" min={0} max={3} step={0.1}
-                value={local.lull_breath_hold_s}
-                onChange={(e) => setLocal({ ...local, lull_breath_hold_s: Number(e.target.value) })}
-                onBlur={() => commit(local)}
-              />
-              <span style={{ fontSize: '0.85em', opacity: 0.75 }}>s</span>
-            </div>
-            <div className="top-bar-group-field">
-              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}
-                title="How far off its mark every drop fires, in ms: negative = earlier, 0 = on the mark. The explosion, the drop's scene change, the Shockwave and the strips' drop move together; the lull builds to the new moment.">
-                Drop timing
-                <HelpLink topic="drop-timing-offset" />
-              </label>
-              <input
-                type="number" min={-2000} max={2000} step={50}
-                value={local.drop_timing_offset_ms}
-                onChange={(e) => setLocal({ ...local, drop_timing_offset_ms: Number(e.target.value) })}
-                onBlur={() => commit(local)}
-              />
-              <span style={{ fontSize: '0.85em', opacity: 0.75 }}>ms</span>
-            </div>
-            <div className="top-bar-group-field">
-              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-                <PowerButton
-                  on={local.drop_shock_enabled}
-                  onChange={(on) => commit({ ...local, drop_shock_enabled: on })}
-                  size={22}
-                  ariaLabel="Drop Shockwave"
-                  title={local.drop_shock_enabled
-                    ? 'On — the crystal effects (Black Hole, Orbits, Sauron, Eye, Fish) and the strips paint the Shockwave over their own drop, Star\'s bands snap back out of the core, on scenes that allow it and drops above the minimum energy. Tap to turn off everywhere.'
-                    : 'Off — no Shockwave on any drop, crystal or strips, and Star plays the plain bloom instead of snapping its bands back; every other effect\'s own drop plays as before. Tap to turn on.'}
-                />
-                Drop Shockwave
-                <HelpLink topic="drop-shockwave-switches" />
-              </label>
-            </div>
-            {local.drop_shock_enabled && (
-              <div className="top-bar-group-field">
-                <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}
-                  title="The Shockwave only paints on a drop when the top bar's ⚡ Energy reading is at least this much at the drop. 0 = every drop.">
-                  Shockwave minimum energy (top-bar Energy)
-                </label>
-                <input
-                  type="number" min={0} max={1} step={0.05}
-                  value={local.drop_shock_min_energy}
-                  onChange={(e) => setLocal({ ...local, drop_shock_min_energy: Number(e.target.value) })}
-                  onBlur={() => commit(local)}
-                />
-              </div>
-            )}
-            <div className="top-bar-group-field">
-              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}
-                title="The Pulse singles' flash flare only fires when the top bar's ⚡ Energy reading is at least this much — in a lull or out of one. 0 = every flash.">
-                Pulse flash minimum energy (top-bar Energy)
-                <HelpLink topic="pulse-flash-energy" />
-              </label>
-              <input
-                type="number" min={0} max={1} step={0.05}
-                value={local.pulse_flash_min_energy}
-                onChange={(e) => setLocal({ ...local, pulse_flash_min_energy: Number(e.target.value) })}
-                onBlur={() => commit(local)}
-              />
-            </div>
-            <div className="top-bar-group-field">
-              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-                <PowerButton
-                  on={local.drop_switch_enabled}
-                  onChange={(on) => commit({ ...local, drop_switch_enabled: on })}
-                  size={22}
-                  ariaLabel="Drop-led scene switch"
-                  title={local.drop_switch_enabled
-                    ? 'On — a drop sequence switches the scene with a hard cut on its drop once the scene showing has grown stale. Tap to turn off.'
-                    : 'Off — every drop plays on whatever scene is showing. Tap to turn on.'}
-                />
-                Drops change stale scenes
-                <HelpLink topic="drop-led-switch" />
-              </label>
-            </div>
-            {local.drop_switch_enabled && (
-              <>
-                <div className="top-bar-group-field">
-                  <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-                    <PowerButton
-                      on={local.drop_switch_after_previous_drop}
-                      onChange={(on) => commit({ ...local, drop_switch_after_previous_drop: on })}
-                      size={22}
-                      ariaLabel="Stale after repeating the previous drop"
-                      title="A scene that already played the previous drop (without arriving on it) counts as stale."
-                    />
-                    Stale after a repeated drop
-                  </label>
-                </div>
-                <div className="top-bar-group-field">
-                  <label title="Seconds beyond the scene's own minimum dwell after which it has overstayed — an overstayed scene switches early, at the charge.">
-                    Overstayed after dwell +
-                  </label>
-                  <input
-                    type="number" min={0} max={300} step={1}
-                    value={local.drop_switch_stale_margin_s}
-                    onChange={(e) => setLocal({ ...local, drop_switch_stale_margin_s: Number(e.target.value) })}
-                    onBlur={() => commit(local)}
-                  />
-                  <span style={{ fontSize: '0.85em', opacity: 0.75 }}>s</span>
-                </div>
-                <div className="top-bar-group-field">
-                  <label title="A scene that has carried this many drops in a row counts as stale. 0 turns the rule off.">
-                    Stale after drops in a row
-                  </label>
-                  <input
-                    type="number" min={0} max={16} step={1}
-                    value={local.drop_switch_drops_in_a_row}
-                    onChange={(e) => setLocal({ ...local, drop_switch_drops_in_a_row: Number(e.target.value) })}
-                    onBlur={() => commit(local)}
-                  />
-                </div>
-                <div className="top-bar-group-field">
-                  <label title="Leaving Fireworks for the Black Hole: Fireworks plays its own drop, then the Black Hole cuts in this many seconds after the drop and swallows the burst.">
-                    Fireworks → Black Hole after
-                  </label>
-                  <input
-                    type="number" min={0} max={10} step={0.1}
-                    value={local.drop_switch_swallow_delay_s}
-                    onChange={(e) => setLocal({ ...local, drop_switch_swallow_delay_s: Number(e.target.value) })}
-                    onBlur={() => commit(local)}
-                  />
-                  <span style={{ fontSize: '0.85em', opacity: 0.75 }}>s</span>
-                  <HelpLink topic="fireworks-melds" />
-                </div>
-                <div className="top-bar-group-field">
-                  <label title="Leaving Fireworks for Fish, Orbits, Squiggles or STAR: Fireworks plays its own drop, then the next scene cuts in on the next analysed flare at least this strong (0-1), or one bar after the drop's tail.">
-                    Fireworks: next big hit ≥
-                  </label>
-                  <input
-                    type="number" min={0} max={1} step={0.05}
-                    value={local.drop_switch_hit_threshold}
-                    onChange={(e) => setLocal({ ...local, drop_switch_hit_threshold: Number(e.target.value) })}
-                    onBlur={() => commit(local)}
-                  />
-                </div>
-              </>
-            )}
-            <div className="top-bar-group-field">
-              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-                <PowerButton
-                  on={local.transition_programs_enabled}
-                  onChange={(on) => commit({ ...local, transition_programs_enabled: on })}
-                  size={22}
-                  ariaLabel="Thematic transitions"
-                  title={local.transition_programs_enabled
-                    ? 'On — a Black Hole, Sauron/Eye, Fish, Orbits, Squiggles or Fireworks scene change runs a thematic transition (Infall / Eruption, Lensing / Fountain, Flame Lick / Ignition, Shoal Break / Shoaling, Unravel) instead of the crossfade. Tap to turn off.'
-                    : 'Off — every scene change crossfades. Tap to turn on.'}
-                />
-                Thematic transitions
-                <HelpLink topic="transition-programs" />
-              </label>
-            </div>
-            {local.transition_programs_enabled && (
-              <>
-                <div className="top-bar-group-field">
-                  <label title="How long a thematic transition takes; its payoff still lands on the trigger.">
-                    Transition length
-                  </label>
-                  <input
-                    type="number" min={600} max={2500} step={100}
-                    value={local.transition_program_ms}
-                    onChange={(e) => setLocal({ ...local, transition_program_ms: Number(e.target.value) })}
-                    onBlur={() => commit(local)}
-                  />
-                  <span style={{ fontSize: '0.85em', opacity: 0.75 }}>ms</span>
-                </div>
-                <div className="top-bar-group-field">
-                  <label title="The Infall's last stretch, over which every piece's motion blends into the Black Hole's own.">
-                    Infall velocity blend
-                  </label>
-                  <input
-                    type="number" min={100} max={1500} step={50}
-                    value={local.transition_velocity_blend_ms}
-                    onChange={(e) => setLocal({ ...local, transition_velocity_blend_ms: Number(e.target.value) })}
-                    onBlur={() => commit(local)}
-                  />
-                  <span style={{ fontSize: '0.85em', opacity: 0.75 }}>ms</span>
-                </div>
-                <div className="top-bar-group-field">
-                  <label title="Extra turns the pieces make spiralling into the Black Hole.">
-                    Infall spiral turns
-                  </label>
-                  <input
-                    type="number" min={0} max={3} step={0.05}
-                    value={local.transition_infall_spin}
-                    onChange={(e) => setLocal({ ...local, transition_infall_spin: Number(e.target.value) })}
-                    onBlur={() => commit(local)}
-                  />
-                </div>
-                <div className="top-bar-group-field">
-                  <label title="How many pieces the Black Hole's eruption sprays before they implode onto the incoming effect.">
-                    Eruption pieces
-                  </label>
-                  <input
-                    type="number" min={10} max={150} step={5}
-                    value={local.transition_eruption_count}
-                    onChange={(e) => setLocal({ ...local, transition_eruption_count: Number(e.target.value) })}
-                    onBlur={() => commit(local)}
-                  />
-                </div>
-                <div className="top-bar-group-field">
-                  <label title="How fast the eruption's pieces fly out.">
-                    Eruption speed
-                  </label>
-                  <input
-                    type="number" min={0.5} max={2} step={0.1}
-                    value={local.transition_eruption_speed}
-                    onChange={(e) => setLocal({ ...local, transition_eruption_speed: Number(e.target.value) })}
-                    onBlur={() => commit(local)}
-                  />
-                  <span style={{ fontSize: '0.85em', opacity: 0.75 }}>×</span>
-                </div>
-                <div className="top-bar-group-field">
-                  <label title="When Sauron or the Eye hands over, this fraction of the eye's lit cells explode as shards; the rest collapse into the black.">
-                    Flame Lick exploding fraction
-                  </label>
-                  <input
-                    type="number" min={0} max={1} step={0.05}
-                    value={local.transition_explode_frac}
-                    onChange={(e) => setLocal({ ...local, transition_explode_frac: Number(e.target.value) })}
-                    onBlur={() => commit(local)}
-                  />
-                </div>
-                <div className="top-bar-group-field">
-                  <label title="How hard the Black Hole bends the Fireworks' sparks into spiral arms (and how hard its ring sprays out in a Fountain).">
-                    Lensing pull
-                  </label>
-                  <input
-                    type="number" min={0.2} max={3} step={0.1}
-                    value={local.transition_lensing_pull}
-                    onChange={(e) => setLocal({ ...local, transition_lensing_pull: Number(e.target.value) })}
-                    onBlur={() => commit(local)}
-                  />
-                  <span style={{ fontSize: '0.85em', opacity: 0.75 }}>×</span>
-                </div>
-                <div className="top-bar-group-field">
-                  <label title="Turns the arriving pieces make as they gather onto the iris rim when Sauron or the Eye comes in.">
-                    Ignition vortex turns
-                  </label>
-                  <input
-                    type="number" min={0} max={3} step={0.05}
-                    value={local.transition_ignition_turns}
-                    onChange={(e) => setLocal({ ...local, transition_ignition_turns: Number(e.target.value) })}
-                    onBlur={() => commit(local)}
-                  />
-                </div>
-                <div className="top-bar-group-field">
-                  <label title="How wide a shattered fish's (or an unspooled chain's) dots spread.">
-                    Shoal Break / Unravel scatter
-                  </label>
-                  <input
-                    type="number" min={0} max={2} step={0.1}
-                    value={local.transition_scatter}
-                    onChange={(e) => setLocal({ ...local, transition_scatter: Number(e.target.value) })}
-                    onBlur={() => commit(local)}
-                  />
-                  <span style={{ fontSize: '0.85em', opacity: 0.75 }}>×</span>
-                </div>
-                <div className="top-bar-group-field">
-                  <label title="When the Star hands over to another effect, its bands break into this many pieces.">
-                    Out of Star pieces
-                  </label>
-                  <input
-                    type="number" min={60} max={220} step={10}
-                    value={local.transition_bands_pieces}
-                    onChange={(e) => setLocal({ ...local, transition_bands_pieces: Number(e.target.value) })}
-                    onBlur={() => commit(local)}
-                  />
-                </div>
-                <div className="top-bar-group-field">
-                  <label title="How long the Star's pieces keep turning on their rings before they unwind toward the Orbits or the Fish.">
-                    Out of Star ring hold
-                  </label>
-                  <input
-                    type="number" min={0} max={800} step={50}
-                    value={local.transition_bands_hold_ms}
-                    onChange={(e) => setLocal({ ...local, transition_bands_hold_ms: Number(e.target.value) })}
-                    onBlur={() => commit(local)}
-                  />
-                  <span style={{ fontSize: '0.85em', opacity: 0.75 }}>ms</span>
-                </div>
-                <div className="top-bar-group-field">
-                  <label title="How hard the Star's pieces unwind outward on their way to the Orbits (the Fish gets a gentler share).">
-                    Out of Star unwind
-                  </label>
-                  <input
-                    type="number" min={0} max={40} step={1}
-                    value={local.transition_unwind}
-                    onChange={(e) => setLocal({ ...local, transition_unwind: Number(e.target.value) })}
-                    onBlur={() => commit(local)}
-                  />
-                </div>
-              </>
-            )}
-            <div className="top-bar-group-field">
-              <label>Scene changes</label>
-              <select
-                value={local.scene_change_mode}
-                onChange={(e) => commit({ ...local, scene_change_mode: e.target.value as SceneChangeMode })}
-              >
-                {SCENE_CHANGE_MODES.map((m) => (
-                  <option key={m.value} value={m.value} title={m.title}>{m.label}</option>
-                ))}
-              </select>
-            </div>
-            <div className="top-bar-group-field" style={{ alignItems: 'flex-start' }}>
-              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-                Music devices
-                <HelpLink topic="music-device-gate" />
-              </label>
-              <input
-                type="text"
-                style={{ minWidth: 160 }}
-                value={musicDeviceAllowlistDraft ?? local.music_device_allowlist.join(', ')}
-                onChange={(e) => setMusicDeviceAllowlistDraft(e.target.value)}
-                onBlur={() => {
-                  const parsed = (musicDeviceAllowlistDraft ?? '')
-                    .split(',').map((s) => s.trim()).filter(Boolean);
-                  setMusicDeviceAllowlistDraft(null);
-                  if (parsed.length === 0) return;      // an empty list is refused server-side
-                  if (parsed.join('|') === local.music_device_allowlist.join('|')) return;
-                  commit({ ...local, music_device_allowlist: parsed });
-                }}
-                title="Comma-separated Spotify Connect device names. Music playing on any device outside this list is ignored — the house stays on its own lighting."
-              />
-              <span style={{ fontSize: '0.85em', opacity: 0.75 }}>
-                playing here switches on music-reactive lighting; anywhere else is ignored
-              </span>
-            </div>
-            <div className="top-bar-group-field">
-              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-                <PowerButton
-                  on={local.midsong_snap_to_beat}
-                  onChange={(on) => commit({ ...local, midsong_snap_to_beat: on })}
-                  size={22}
-                  ariaLabel="Snap generated cues to beat"
-                  title={local.midsong_snap_to_beat
-                    ? 'On — a generated mid-song cue that finds no rhythmic edge falls back to the nearest downbeat of its beat grid (within one beat). Tap to turn off.'
-                    : 'Off — a generated mid-song cue that finds no rhythmic edge keeps its raw section-boundary time, unsnapped. Tap to turn on.'}
-                />
-                Snap generated cues to beat
-              </label>
-              <HelpLink topic="transition-placement-rule" />
-            </div>
-            <div className="top-bar-group-field">
-              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-                Transition edge window
-                <HelpLink topic="transition-placement-rule" />
-              </label>
-              <input
-                type="number" min={1} max={16} step={1}
-                value={local.transition_window_beats}
-                onChange={(e) => setLocal({ ...local, transition_window_beats: Number(e.target.value) })}
-                onBlur={() => commit(local)}
-              />
-              <span style={{ fontSize: '0.85em', opacity: 0.75 }}>beats</span>
-            </div>
-            <div className="top-bar-group-field">
-              <label>Transition edge sensitivity</label>
-              <input
-                type="number" min={0.2} max={1.5} step={0.05}
-                value={local.transition_edge_sensitivity}
-                onChange={(e) => setLocal({ ...local, transition_edge_sensitivity: Number(e.target.value) })}
-                onBlur={() => commit(local)}
-              />
-            </div>
-            <div className="top-bar-group-field">
-              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-                Total actions per minute
-                <HelpLink topic="transition-placement-rule" />
-                <HelpLink topic="analysed-flares" />
-              </label>
-              <input
-                type="number" min={1} max={30} step={0.5}
-                value={local.transitions_per_minute}
-                onChange={(e) => setLocal({ ...local, transitions_per_minute: Number(e.target.value) })}
-                onBlur={() => commit(local)}
-              />
-            </div>
-            <div className="top-bar-group-field">
-              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}
-                title="An optional ceiling on how many analysed actions become real scene changes. 0 = off: the strongest moments change the scene wherever the minimum hold allows.">
-                Scene changes per minute
-                <HelpLink topic="scene-change-planner" />
-              </label>
-              <input
-                type="number" min={0} max={30} step={0.5}
-                value={local.scene_changes_per_minute}
-                onChange={(e) => setLocal({ ...local, scene_changes_per_minute: Number(e.target.value) })}
-                onBlur={() => commit(local)}
-              />
-              <span style={{ fontSize: '0.85em', opacity: 0.75 }}>
-                {local.scene_changes_per_minute > 0 ? 'ceiling' : 'off'}
-              </span>
-            </div>
-            <div className="top-bar-group-field" style={{ fontSize: '0.85em', opacity: 0.75 }}>
-              <span>Changes here re-plan each song's analysed cues the next time it plays — or ask Sonic to refresh them all.</span>
-              <HelpLink topic="analysed-refresh" title="Re-analysing songs after a settings change" />
-            </div>
+            {/* Force Scene — moved to the TOP of this panel (his edit
+              * to the UI declutter plan, 2026-10-14: everything else that
+              * used to live here is now Settings -> "Scenes & drops",
+              * see settings/ScenesDropsCard.tsx). */}
             <div className="top-bar-group-field">
               <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
                 <PowerButton
@@ -1120,6 +659,17 @@ export default function RoomControlsBar() {
                 />
               </>
             )}
+            <div className="top-bar-group-field">
+              <label>Scene changes</label>
+              <select
+                value={local.scene_change_mode}
+                onChange={(e) => commit({ ...local, scene_change_mode: e.target.value as SceneChangeMode })}
+              >
+                {SCENE_CHANGE_MODES.map((m) => (
+                  <option key={m.value} value={m.value} title={m.title}>{m.label}</option>
+                ))}
+              </select>
+            </div>
           </>
         )}
       >
@@ -1229,22 +779,11 @@ export default function RoomControlsBar() {
         )}
       </TopBarGroupButton>
 
-      <DriftGradientBar />
-
-      <label className="room-control" aria-label="Brightness"
-        title="Brightness — dims/undims the whole room uniformly">
-        <Icon name="bulb" size={15} title="Brightness" />
-        <input
-          type="range" min={0} max={100} step={1}
-          value={Math.round(local.brightness_multiplier * 100)}
-          onChange={(e) => setLocal({ ...local, brightness_multiplier: Number(e.target.value) / 100 })}
-          onMouseUp={() => commit(local)}
-          onTouchEnd={() => commit(local)}
-        />
-        <span className="room-control-value">{Math.round(local.brightness_multiplier * 100)}%</span>
-      </label>
-
-      <HelpLink topic="room-controls-bar" />
+      {/* Brightness, the drift gradient, and the preview Favourites picker
+        * all moved to Settings → "Room" (UI declutter plan §3/§9,
+        * decided yes) — see settings/RoomCard.tsx. A UI move only: same
+        * writers (PUT /api/room-controls, the gradients store, the
+        * favourites PUT). */}
 
       {/* THE PANIC HANDLE, moved to the right end of this row and made
         * small/iconic/hold-to-confirm (his ask 2026-10-06) — see

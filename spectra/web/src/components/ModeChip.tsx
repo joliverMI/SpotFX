@@ -38,6 +38,7 @@
 import { useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import HelpLink from '../help/HelpLink';
+import Icon from './Icon';
 import { chipLine } from '../house/houseSummary';
 import type { LightingStatus } from '../house/types';
 import { useHoldToConfirm } from '../lib/useHoldToConfirm';
@@ -79,6 +80,7 @@ export default function ModeChip() {
         to="/house"
         className="mode-chip-link"
         title={holdTooltip(title)}
+        aria-label={`House: ${text}. ${holdTooltip('Tap to open House, hold to turn house lighting on/off')}`}
         {...bind}
         onPointerDown={(e) => {
           firedRef.current = false;
@@ -122,7 +124,7 @@ export default function ModeChip() {
             />
           </svg>
         )}
-        ⌂ {text}
+        <Icon name="home" size={16} />
       </Link>
       <HelpLink topic="house-chip" />
       {(pressing || justReleasedEarly) && (

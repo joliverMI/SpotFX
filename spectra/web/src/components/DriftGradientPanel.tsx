@@ -1,10 +1,10 @@
-/** Top-bar control for the two-dimensional drift gradient (owner ask
- * 2026-08-20) — "click the preview, it expands, pick another saved one or
- * make a new one/edit the current one and save as new or overwrite,"
- * reusing the curve selector's own storage/picking SHAPE (see
- * spectra/services/gradient2d_store.py — same named-profile pattern as
- * spectra/services/drift_profiles.py) without reusing CurveAttachmentEditor
- * itself: a drift gradient has exactly ONE room-level attachment point
+/** The two-dimensional drift gradient editor (owner ask 2026-08-20) —
+ * "click the preview, it expands, pick another saved one or make a new
+ * one/edit the current one and save as new or overwrite," reusing the
+ * curve selector's own storage/picking SHAPE (see spectra/services/
+ * gradient2d_store.py — same named-profile pattern as spectra/services/
+ * drift_profiles.py) without reusing CurveAttachmentEditor itself: a
+ * drift gradient has exactly ONE room-level attachment point
  * (RoomControlState.active_gradient_id), not a per-entry map, so the
  * "inline one-off vs shared profile" machinery that shape needs doesn't
  * apply here — editing is a local draft; Save writes it back to its own id
@@ -12,16 +12,17 @@
  * "save as new or overwrite" wording as two plain buttons rather than a
  * detach/revert dance.
  *
- * Sits in the same grouped-button row as Mode/Ambient/Scenes
- * (RoomControlsBar.tsx), tap-to-open like Scenes (no cycle behaviour to
- * protect). Also carries the Rainbow select intensity limit — a small,
- * closely related setting with no other natural home in the top bar. (The
- * "Songs without triggers" gradient switch lived here until 2026-09-26: the
- * trigger-timed colour journey replaced it — the panel now says so.) */
+ * Moved from the top bar into Settings → "Room" (UI declutter plan §3/§9,
+ * decided yes — settings/RoomCard.tsx), so this is now a plain panel of
+ * content with no `TopBarGroupButton` expand/collapse of its own: it's
+ * already inline on its own page, always "open". Also carries the
+ * Rainbow select intensity limit — a small, closely related setting with
+ * no other natural home. (The "Songs without triggers" gradient switch
+ * lived here until 2026-09-26: the trigger-timed colour journey replaced
+ * it — the panel now says so.) */
 import { useEffect, useState } from 'react';
 import GradientEditor2D, { type XMode } from './GradientEditor2D';
 import GradientSquarePreview from './GradientSquarePreview';
-import TopBarGroupButton from './TopBarGroupButton';
 import { useToast } from './Toast';
 import HelpLink from '../help/HelpLink';
 import { uuid } from '../lib/uid';
@@ -34,7 +35,7 @@ const newProfile = (): DriftGradientProfile => ({
   id: uuid(), name: 'New Gradient', top: '#ffff00', bottom: '#0000ff', x_mode: 'loop',
 });
 
-export default function DriftGradientBar() {
+export default function DriftGradientPanel() {
   const toast = useToast();
   const { data: room } = useRoomControls();
   const { data: profiles = {} } = useGradient2dProfiles();
@@ -117,20 +118,10 @@ export default function DriftGradientBar() {
     }
   };
 
-  const swatch = draft
-    ? <GradientSquarePreview top={draft.top} bottom={draft.bottom} size={26} />
-    : <div style={{ width: 26, height: 26, borderRadius: 4, border: '1px solid var(--border)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: 10, color: 'var(--text-muted)' }}>off</div>;
-
   return (
-    <TopBarGroupButton
-      holdToExpand={false}
-      title="Drift gradient — the two-dimensional colour space the room drifts through"
-      ariaLabel="Drift gradient"
-      panelTitle={<>Drift gradient <HelpLink topic="drift-gradient" /></>}
-      panel={
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, width: 300 }}>
+    <div className="drift-gradient-panel">
+      <div className="top-bar-group-panel-title">Drift gradient <HelpLink topic="drift-gradient" /></div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, width: '100%', maxWidth: 320 }}>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(64px, 1fr))', gap: 6 }}>
             <button type="button" title="Off — the wheel-based colour journey drives the room"
               onClick={() => void setActive(null)}
@@ -217,10 +208,7 @@ export default function DriftGradientBar() {
               }}
             />
           </div>
-        </div>
-      }
-    >
-      {swatch}
-    </TopBarGroupButton>
+      </div>
+    </div>
   );
 }

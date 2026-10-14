@@ -37,6 +37,17 @@ export default function FavoritesPicker({ onClose }: { onClose: () => void }) {
     });
   };
 
+  // Cancel discards any unsaved checkbox toggles — self-contained rather
+  // than relying on `onClose` unmounting this component. That unmount-
+  // discards-the-draft assumption held while this was only ever opened in
+  // a popover/dialog; mounted permanently inline (settings/RoomCard.tsx),
+  // nothing ever unmounts it, so without this the picker would otherwise
+  // keep showing whatever was toggled with no way to back out.
+  const cancel = () => {
+    setPicked(favorites ? favorites.effective_virtual_ids : null);
+    onClose();
+  };
+
   return (
     <div className="device-preview-picker">
       <div className="device-preview-picker-title">
@@ -56,7 +67,7 @@ export default function FavoritesPicker({ onClose }: { onClose: () => void }) {
         <button type="button" onClick={() => commit([])} title="Clear your choices — back to the auto-populated default">
           Reset to default
         </button>
-        <button type="button" onClick={onClose}>Cancel</button>
+        <button type="button" onClick={cancel}>Cancel</button>
         <button type="button" className="primary" disabled={save.isPending}
           onClick={() => commit(picked ?? [])}>
           Save

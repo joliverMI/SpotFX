@@ -73,7 +73,7 @@ export default function ReleaseButton() {
         title="Release ALL lights to Home Assistant — hold for ~1s to confirm. Rare and consequential: this hands the room away from SPECTRA."
         {...bind}
       >
-        <Icon name="home" size={14} />
+        <Icon name="plug" size={14} />
         <svg
           className="release-hold-ring"
           width={SIZE}

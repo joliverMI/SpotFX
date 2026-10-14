@@ -33,8 +33,16 @@
  * Its Run view also carries a Quick start row of his most recently
  * STARTED sequences (`GET /light-show/sequences/recent`, show_sequence.
  * recent_runs — derived from the durable show log's own start records,
- * never a second history), newest first, one tap to run. */
+ * never a second history), newest first, one tap to run.
+ *
+ * DEEP LINK (UI declutter plan §3): the one bar's Light Show slot
+ * (components/LightShowStrip.tsx) links here with `?tab=sequence` while a
+ * sequence is running, else `?tab=run` — read once on mount below, never
+ * written back on a later tab click (a plain deep link in, not a synced
+ * URL — SequenceView's own `sub=run` default already lands the Sequence
+ * tab on Run with no query param needed for that half). */
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { apiDel, apiGet, apiPost } from '../api/client';
 import HelpLink from '../help/HelpLink';
 import Icon from '../components/Icon';
@@ -80,16 +88,24 @@ function newId() {
   return Math.random().toString(16).slice(2, 14);
 }
 
+const VALID_TABS = ['build', 'run', 'sequence', 'playlists'] as const;
+
 export default function LightShowPage() {
   const toast = useToast();
   const isPhone = useIsPhone();
+  const [searchParams] = useSearchParams();
   // Opening the Light Show tab lands on Sequence — the "Run" sub-view of
   // SequenceView.tsx, which defaults to its own Run tab — on every screen
   // size (the Admiral, 2026-10-13: "make the sequence running page the
-  // default for the lightshow tab"). The mode is not persisted across
-  // visits and there is no deep-link query param on this route today, so
-  // this is a flat default, not a conditional one.
-  const [mode, setMode] = useState<'build' | 'run' | 'sequence' | 'playlists'>('sequence');
+  // default for the lightshow tab"), UNLESS a `?tab=` deep link (the bar's
+  // Light Show slot) asks for a specific tab — read once, on mount, never
+  // re-read on a later navigation within this page.
+  const [mode, setMode] = useState<'build' | 'run' | 'sequence' | 'playlists'>(() => {
+    const requested = searchParams.get('tab');
+    return (VALID_TABS as readonly string[]).includes(requested ?? '')
+      ? (requested as typeof VALID_TABS[number])
+      : 'sequence';
+  });
   const [catalogue, setCatalogue] = useState<ShowCatalogue | null>(null);
   const [targets, setTargets] = useState<ShowTargets | null>(null);
   const [sets, setSets] = useState<ShowSet[]>([]);

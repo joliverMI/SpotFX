@@ -234,9 +234,9 @@ export default function HomeTimeline({
           <span className="song-strip-song-artist">{artist}</span>
         </div>
         <div className="home-timeline-toggles">
-          <IconToggle icon="scene" on={filters.analysed} onToggle={() => toggle('analysed')} title="Analysed events" />
-          <IconToggle icon="pulse" on={filters.drop} onToggle={() => toggle('drop')} title="Drop sequences" />
-          <IconToggle icon="arrowUp" on={filters.lightShow} onToggle={() => toggle('lightShow')} title="Light Show" />
+          <IconToggle icon="scene" on={filters.analysed} onChange={() => toggle('analysed')} title="Analysed events" />
+          <IconToggle icon="pulse" on={filters.drop} onChange={() => toggle('drop')} title="Drop sequences" />
+          <IconToggle icon="arrowUp" on={filters.lightShow} onChange={() => toggle('lightShow')} title="Light Show" />
         </div>
         <button type="button" className={`home-timeline-follow${win.follow ? ' on' : ''}`}
           title="Follow the playhead" onClick={() => win.setFollowSnapped(!win.follow)}>⌖</button>

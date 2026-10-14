@@ -11,28 +11,33 @@
  * `.top-bar-strip` is `display: flex; flex-wrap: wrap;` — load-bearing for
  * `<DevicePreviewStrip />`, which renders TWO top-level siblings (a
  * Fragment) rather than one: its own controls plus, only while its
- * preview is expanded, a second element with `flex: 1 0 100%`. Because a
- * Fragment's children land directly as flex items of THIS div, that
- * second element always wraps onto its own full-width line below every
- * other occupant here — see DevicePreviewStrip.tsx's own module docstring
- * ("NO TEXT IN THE EXPANDED STAGE, AND IT NOW LANDS BELOW...") before
- * changing this element to anything other than a flex-wrap container, or
- * that mechanism breaks. */
+ * preview is expanded, a second element with `flex: 1 0 100%`. That keeps
+ * the wrap working for any STANDALONE render of this component (outside
+ * `.one-bar`, e.g. an isolated test mount). Inside the app, though, this
+ * div is itself `display: contents` under `.one-bar` (App.tsx/tokens.css),
+ * which erases its own box — so in the live app the actual wrap-to-a-new-
+ * line behaviour is `.one-bar:has(.device-preview-expanded-row)`
+ * (tokens.css), not this rule. See DevicePreviewStrip.tsx's own module
+ * docstring ("NO TEXT IN THE EXPANDED STAGE, AND IT NOW LANDS BELOW...")
+ * before changing either place. */
 import DevicePreviewStrip from './DevicePreviewStrip';
 import ModeChip from './ModeChip';
-import IntensityMarkControl from './IntensityMarkControl';
-import LiveEnergyReadout from './LiveEnergyReadout';
+import EnergyBar from './EnergyBar';
 import LightShowStrip from './LightShowStrip';
+import WarningChip from './WarningChip';
 
 export default function TopBarStrip() {
   return (
     <div className="top-bar-strip">
-      {/* House lighting's mode — FIRST, the resting state every page sits on. */}
+      {/* House lighting's mode — FIRST, the resting state every page sits on.
+        * Visual position within the merged one-bar row is driven by CSS
+        * `order` (tokens.css's `.one-bar .mode-chip` etc.), not DOM order —
+        * see App.tsx's own comment on the `display: contents` merge. */}
       <ModeChip />
-      <LiveEnergyReadout />
-      <IntensityMarkControl />
+      <EnergyBar />
       <LightShowStrip />
       <DevicePreviewStrip />
+      <WarningChip />
     </div>
   );
 }

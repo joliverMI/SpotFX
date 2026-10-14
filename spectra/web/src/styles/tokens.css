@@ -64,17 +64,82 @@ nav a:hover, nav a.active {
   text-decoration: none;
 }
 
+/* THE GROUPED TOP MENU (UI declutter plan §2, nav/NavBar.tsx + NavMenu.tsx):
+ * Home | Artifacts ▾ | Engine ▾ | Settings, replacing the old 17-link row. */
+.nav-plain-link, .nav-group-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: var(--radius);
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 500;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.nav-plain-link:hover, .nav-group-trigger:hover,
+.nav-plain-link.active, .nav-group-trigger.active {
+  background: var(--surface2);
+  color: var(--text);
+  text-decoration: none;
+}
+/* The active GROUP (its dropdown holds the current page) gets a second,
+ * stronger mark — a 2px accent underline — distinct from plain hover. */
+.nav-group-trigger.active { box-shadow: inset 0 -2px 0 var(--accent); }
+.nav-group-caret { transition: transform 0.15s; opacity: 0.7; }
+.nav-group-caret-open { transform: rotate(180deg); }
+.nav-group { position: relative; display: inline-flex; }
+.nav-group-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 50;
+  min-width: 160px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.nav-group-item {
+  padding: 8px 12px;
+  border-radius: calc(var(--radius) - 2px);
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.nav-group-item:hover, .nav-group-item:focus-visible {
+  background: var(--surface2);
+  color: var(--text);
+  text-decoration: none;
+  outline: none;
+}
+.nav-group-item.active { color: var(--accent2); box-shadow: inset 2px 0 0 var(--accent2); }
+/* Touch: 46px rows under a coarse pointer (his own figure — §2), 36px
+ * with a mouse. */
+@media (pointer: coarse) {
+  .nav-group-item { padding: 12px 14px; min-height: 46px; display: flex; align-items: center; }
+}
+
 main { flex: 1; padding: 16px; max-width: 1200px; margin: 0 auto; width: 100%; }
 /* Home's own timeline/audio-shape run edge to edge on desktop (song-layout-
    plan §9 idea 8); its quick-run cards stay capped via .home-quick-runs's
    own minmax(0, 560px) columns. */
 main.home-route { max-width: none; }
-/* Phone portrait: the nav keeps one row (four links + help) and content
- * padding narrows so cards use the width. */
-@media (max-width: 720px) {
+/* Phone portrait: the nav keeps one row (icons + "?") and content padding
+ * narrows so cards use the width — labels hide, only icons/carets show. */
+@media (max-width: 520px) {
   nav { padding: 6px 8px; gap: 2px; }
   nav .logo { font-size: 15px; margin-right: 4px; letter-spacing: 0.08em; }
-  nav a { padding: 6px 8px; }
+  .nav-plain-link, .nav-group-trigger { padding: 6px 8px; }
+  .nav-plain-link-label, .nav-group-label { display: none; }
   main { padding: 10px; }
 }
 
@@ -185,6 +250,75 @@ button.danger:hover { border-color: var(--danger); color: var(--danger); }
   border-bottom: 1px solid var(--border);
   font-size: 12px;
 }
+/* ONE BAR (UI declutter plan §3): RoomControlsBar and TopBarStrip each
+ * keep their own component/state — this is a layout-only merge.
+ * `display: contents` on both of their root divs, scoped to when they sit
+ * inside `.one-bar` (App.tsx), lets their own children become direct flex
+ * items of `.one-bar` with no box of their own; an explicit `order` per
+ * occupant (below, each near its own rule) then sequences House → Display
+ * mode → Hue Hold → Scenes → Colour → Energy(+Mark) → Light Show →
+ * preview swatches → ⚠ → Release, regardless of which of the two
+ * components a given occupant's markup actually comes from. Standalone
+ * (e.g. `check_topbar_scene_colour_names.mjs`'s own isolated render) is
+ * unaffected — the `.one-bar >` scope never fires there. */
+.one-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: nowrap;
+  padding: 6px 16px;
+  background: var(--surface2);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  overflow-x: auto;
+}
+.one-bar > .room-controls-bar, .one-bar > .top-bar-strip {
+  display: contents;
+}
+/* `.top-bar-strip`'s own `flex-wrap: wrap` (TopBarStrip.tsx's own
+ * comment) used to be what dropped `.device-preview-expanded-row` onto
+ * its own full-width line below every other top-bar occupant — but that
+ * div is `display: contents` here (the rule immediately above), so its
+ * wrap no longer applies to anything: wrapping is now decided solely by
+ * `.one-bar`'s own `flex-wrap`. Scoping the override to `:has()` (rather
+ * than making `.one-bar` wrap unconditionally) keeps every OTHER
+ * occupant's "fits on one line at 1024/1180/1440" guarantee intact —
+ * nothing here wraps unless the expanded stage is actually mounted. */
+.one-bar:has(.device-preview-expanded-row) {
+  flex-wrap: wrap;
+}
+/* Tablet squeeze (plan §12's own named risk: "names get ~110-140px slots
+ * at 1024"): tighten the row's own spacing and the Light Show slot's label
+ * so a real long scene/colour-set name (his live room measured "House
+ * Fish" / "Calm - Green") still fits with no internal bar scroll at
+ * 1024px — found by the real-browser no-overflow proof
+ * (check_onebar_layout.py), not eyeballed. */
+@media (max-width: 1180px) {
+  .one-bar { gap: 6px; }
+  .light-show-item-label { max-width: 64px; }
+}
+@media (max-width: 520px) {
+  .one-bar { flex-wrap: wrap; overflow-x: visible; }
+}
+/* The explicit left-to-right sequence (see the `.one-bar` comment above).
+ * Ties (both Scenes and Colour are `.scenes-group-btn`) resolve by DOM
+ * source order, which already has Scenes before Colour — no extra class
+ * needed to tell them apart. `.device-preview-expanded-row` is ordered
+ * AFTER the warning chip and the release button (not tied with its own
+ * collapsed swatches at order 8) on purpose: flex wrapping never backfills
+ * an earlier line, so if the expanded row wrapped ahead of them, THEY
+ * would wrap again behind it onto a third line instead of staying on the
+ * bar's first row the way every other icon does. */
+.one-bar .mode-chip { order: 1; }
+.one-bar .mode-group-btn { order: 2; }
+.one-bar .ambient-group-btn { order: 3; }
+.one-bar .scenes-group-btn { order: 4; }
+.one-bar .energy-mark-group { order: 6; }
+.one-bar .light-show-strip { order: 7; }
+.one-bar .device-preview-strip { order: 8; }
+.one-bar .warning-chip { order: 9; }
+.one-bar .release-hold-wrap { order: 10; }
+.one-bar .device-preview-expanded-row { order: 11; }
 .room-control {
   display: flex;
   align-items: center;
@@ -402,6 +536,16 @@ button.danger:hover { border-color: var(--danger); color: var(--danger); }
 }
 
 .scenes-group-btn.scenes-group-btn-forced { border-color: var(--accent2); }
+/* NO-JUMPING FIX (UI declutter plan §6): Scenes/Colour used to size
+ * between 64-126px depending on the current scene/colour-set NAME
+ * (`min-width: 64px` on the shared `.top-bar-group-btn` racing
+ * `.top-bar-group-btn-value`'s own `max-width: 100px`), moving the
+ * control after them by up to 61px over 90s of ordinary playing
+ * (measured). A FIXED width — no min-width/max-width race — plus
+ * ellipsis on the value (already set) stops that: the button is always
+ * exactly 132px, whatever the name. */
+.scenes-group-btn { width: 132px; min-width: 132px; }
+.scenes-group-btn .top-bar-group-btn-value { max-width: 100%; }
 
 /* The panel a hold (Mode/Ambient) or a tap (Scenes) expands into — always
  * `position: fixed` below the trigger (TopBarGroupButton computes top/
@@ -606,7 +750,15 @@ button.danger:hover { border-color: var(--danger); color: var(--danger); }
 .device-preview-status-blue { background: #0e2a3a; color: #6ab0f3; }
 .device-preview-status-amber { background: #3a2c0e; color: var(--warning); }
 .device-preview-status-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.device-preview-chips { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; max-width: 100%; }
+/* Now a <button> (plan §2: the swatches themselves are the expand/
+ * collapse toggle) — reset button chrome, keep the same flex layout, add
+ * an outline while expanded so it still reads as "currently open". */
+.device-preview-chips {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap; max-width: 100%;
+  background: none; border: 1px solid transparent; border-radius: var(--radius);
+  padding: 2px 4px; cursor: pointer;
+}
+.device-preview-chips-open { border-color: var(--accent); }
 .device-preview-device { display: flex; align-items: center; }
 .device-preview-swatch {
   display: inline-block;
@@ -854,6 +1006,98 @@ input[type='range'] { accent-color: var(--accent); }
 }
 .help-link:hover { border-color: var(--accent); color: var(--accent); text-decoration: none; }
 nav .help-link { margin-left: auto; width: 22px; height: 22px; font-size: 12px; padding: 0; }
+
+/* InfoTip.tsx — a rich hover/long-press tooltip (plan idea 5). */
+.info-tip { position: relative; display: inline-flex; }
+.info-tip-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px; border-radius: 50%;
+  border: 1px solid var(--border); background: var(--surface2);
+  color: var(--text-muted); cursor: pointer; padding: 0;
+}
+.info-tip-btn:hover, .info-tip-btn:focus-visible { border-color: var(--accent); color: var(--accent); }
+.info-tip-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 40;
+  width: 240px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--text-muted);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.info-tip-panel p { margin: 0; }
+
+/* IconToggle.tsx — ONE 30px icon-toggle component (plan idea 6),
+ * purple-tinted when on, used everywhere a boolean display filter is
+ * toggled (Timeline/Home/Test Bed). */
+.icon-toggle {
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text-muted);
+  cursor: pointer;
+  flex: none;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.icon-toggle:hover { color: var(--text); }
+.icon-toggle-on {
+  background: rgba(168, 85, 247, 0.18);
+  border-color: var(--accent);
+  color: var(--accent2);
+}
+
+/* EnergyBar.tsx — Energy + Mark grouped; Mark folds into a compact form
+ * below desktop width (plan §13 Q12, his two tablet widths: 1024/1180). */
+.energy-mark-group { display: flex; align-items: center; gap: 10px; }
+@media (max-width: 1180px) {
+  .energy-mark-group .intensity-mark-label { display: none; }
+  .energy-mark-group .intensity-mark { gap: 4px; }
+}
+
+/* WarningChip.tsx — the ⚠ chip (plan §13 Q8), replacing the three
+ * full-width amber strips in normal use; their own content/markup
+ * (RoomOwnershipBar.tsx's ActivationStrip/DarkFixtureStrip/HueScopeStrip)
+ * is unchanged, just drawn inside this popover instead of a full row. */
+.warning-chip { position: relative; display: inline-flex; margin-left: auto; }
+.warning-chip-btn {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 4px 10px; border-radius: 999px;
+  border: 1px solid var(--warning); background: rgba(217, 164, 65, 0.14);
+  color: var(--warning); font-weight: 700; font-size: 12px; cursor: pointer;
+}
+.warning-chip-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 60;
+  width: min(420px, calc(100vw - 32px));
+  max-height: 60vh;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+/* Inside the chip's popover the strips no longer need to look like
+ * full-width page rows. */
+.warning-chip-panel .activation-strip { flex-wrap: wrap; }
+
+/* DriftGradientPanel.tsx, now a plain Settings-card panel (no popover of
+ * its own — it's already inline on its own page). */
+.drift-gradient-panel { display: flex; flex-direction: column; gap: 8px; }
 
 .help-section { margin-bottom: 10px; }
 .help-section > .help-section-header {
@@ -1152,6 +1396,13 @@ kbd {
 }
 
 /* ── settings console (standing order 5) ── */
+/* Settings "Room" / "Scenes & drops" cards (UI declutter plan §9):
+ * reuse `.top-bar-group-field`'s own row layout (label/input/unit) — this
+ * is purely cosmetic, divorced from the top-bar context it originally
+ * shipped in. */
+.settings-field-grid { display: flex; flex-direction: column; gap: 10px; }
+.settings-field-unit { font-size: 0.85em; opacity: 0.75; }
+
 .settings-console { display: flex; flex-direction: column; gap: 12px; }
 .settings-console-chat { display: flex; flex-direction: column; }
 .settings-console-messages {
@@ -1751,6 +2002,31 @@ button.linklike { background: none; border: none; padding: 0 4px; color: var(--a
 .show-step-waiting .show-step-status { color: var(--warning); }
 .light-show-strip { display: inline-flex; gap: 4px; align-items: center; font-size: 0.85em; }
 .light-show-strip a { color: var(--accent2); text-decoration: none; font-weight: 600; }
+.light-show-link { display: inline-flex; align-items: center; gap: 6px; }
+.light-show-diamond { position: relative; display: inline-flex; }
+.light-show-holds-badge {
+  position: absolute; top: -6px; right: -8px;
+  min-width: 13px; height: 13px; padding: 0 2px;
+  border-radius: 999px; background: var(--accent);
+  color: #fff; font-size: 9px; font-weight: 700;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.light-show-item { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.light-show-item-label {
+  max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.light-show-item-when { font-variant-numeric: tabular-nums; color: var(--text-muted); }
+.light-show-sep { opacity: 0.6; }
+/* The 10s lead-in fill (his edited decision — the Light Show slot gets a
+ * longer fill window than the global timeline's own 3s next-event box). */
+.light-show-item-near { position: relative; }
+.light-show-item-near .light-show-item-when {
+  color: var(--accent2);
+  font-weight: 700;
+  background: rgba(232, 121, 249, 0.14);
+  border-radius: 4px;
+  padding: 0 4px;
+}
 @media (max-width: 720px) {
   .light-show-layout { grid-template-columns: minmax(0, 1fr); }
   .light-show-page { padding: 8px 12px; }
@@ -1782,8 +2058,15 @@ button.linklike { background: none; border: none; padding: 0 4px; color: var(--a
    the cutover switch (HouseSettings.enabled) — his ask 2026-10-06. The
    ring is the same visible-progress shape as .release-hold-ring. */
 .mode-chip { display: inline-flex; gap: 4px; align-items: center; font-size: 0.85em; position: relative; }
-.mode-chip a { text-decoration: none; font-weight: 600; padding: 1px 8px; border-radius: 999px;
-  border: 1px solid var(--border); white-space: nowrap; }
+/* ICON ONLY (UI declutter plan §13 Q6, decided: icon only — the mode name
+ * and source live in the tooltip/aria-label, same house glyph whichever
+ * mode drives, coloured/badged by state). 34x30 to match the other
+ * grouped buttons' own 30px height (`.top-bar-group-btn`). */
+.mode-chip a {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 34px; height: 30px; border-radius: var(--radius);
+  border: 1px solid var(--border); text-decoration: none;
+}
 .mode-chip-on a { color: var(--ok); border-color: var(--ok); }
 .mode-chip-music a { color: var(--accent2); border-color: var(--accent2); }
 .mode-chip-idle a { color: var(--warning); border-color: var(--warning); }
@@ -2282,13 +2565,6 @@ button.linklike { background: none; border: none; padding: 0 4px; color: var(--a
 .home-timeline-shape { position: relative; height: 160px; min-height: 100px; resize: vertical; overflow: hidden; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); }
 .home-timeline-shape-canvas { width: 100%; height: 100%; display: block; }
 .home-timeline-shape-playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: #fff; box-shadow: 0 0 4px rgba(255,255,255,0.7); }
-
-.icon-toggle {
-  display: inline-flex; align-items: center; justify-content: center;
-  border-radius: 6px; border: 1px solid var(--border); background: var(--surface2);
-  color: var(--text-muted); cursor: pointer;
-}
-.icon-toggle.on { color: #fff; background: var(--accent, #7c5cff); border-color: var(--accent, #7c5cff); }
 
 .home-quick-runs { display: grid; grid-template-columns: repeat(2, minmax(0, 560px)); gap: 16px; }
 @media (max-width: 700px) { .home-quick-runs { grid-template-columns: minmax(0, 1fr); } }

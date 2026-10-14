@@ -1,30 +1,34 @@
-/** ONE 30px icon-toggle component (song-layout-plan, data/ui-layout-plan/
- * report.md §9 idea 6 — approved, all 8 ideas): replaces "chip filter"
- * text toggles across Timeline/Home/Test Bed with one look, purple-tinted
- * when on. A parallel task (ui-build-bar) also owns a shared icon-toggle
- * component for the consolidated top bar; if that one lands first, this
- * component should be rebased onto it rather than kept as a second
- * implementation — written self-contained here (no cross-import) so
- * either direction of merge is a drop-in replacement, not a rewrite. */
+/** ONE icon-toggle component (UI declutter plan idea 6): a 30px square,
+ * purple-tinted when on, replacing the "chip filter" text toggles
+ * scattered across Timeline/Home/Test Bed (`chip filter ${on ? 'active'
+ * : ''}` button text like "Analysed events" / "Drop sequences" / "Light
+ * Show") with one consistent look and behaviour everywhere a boolean
+ * display filter is toggled. Exported for reuse outside this package (the
+ * Home page's own icon toggles for Analysed events / Drop sequences /
+ * Light Show are built on this same component). */
 import Icon, { type IconName } from './Icon';
 
 export default function IconToggle({
-  icon, on, onToggle, title, size = 30,
+  on, onChange, icon, title, ariaLabel, size = 30,
 }: {
-  icon: IconName;
   on: boolean;
-  onToggle: () => void;
+  onChange: (on: boolean) => void;
+  icon: IconName;
   title: string;
+  /** Falls back to `title` when the icon alone wouldn't announce enough. */
+  ariaLabel?: string;
   size?: number;
 }) {
   return (
     <button
       type="button"
-      className={`icon-toggle${on ? ' on' : ''}`}
-      style={{ width: size, height: size }}
-      aria-pressed={on}
+      role="switch"
+      aria-checked={on}
+      aria-label={ariaLabel ?? title}
       title={title}
-      onClick={onToggle}
+      className={`icon-toggle${on ? ' icon-toggle-on' : ''}`}
+      style={{ width: size, height: size }}
+      onClick={() => onChange(!on)}
     >
       <Icon name={icon} size={Math.round(size * 0.55)} />
     </button>

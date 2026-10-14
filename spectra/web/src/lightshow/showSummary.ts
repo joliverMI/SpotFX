@@ -1,6 +1,9 @@
 /** Pure wording for the Light Show's status surfaces — kept out of React so
  * scripts/check_light_show_summary.mjs can drive it with no DOM. */
-import type { ArmTrigger, EndShowReport, ShowArm, ShowBrief, ShowCue, ShowRun } from './types';
+import type { IconName } from '../components/iconRegistry';
+import type {
+  ArmsStatus, ArmTrigger, EndShowReport, SequenceRun, ShowArm, ShowBrief, ShowCue, ShowRun,
+} from './types';
 
 /** The top-bar strip's one line, or null when the show holds nothing (the
  * strip is absent then — it costs no space in normal use). */
@@ -121,4 +124,99 @@ export function cueLine(c: ShowCue | null, positionMs: number | null | undefined
   const cd = countdown(c.timestamp_ms, positionMs);
   const close = c.runner_up_close && c.source === 'auto' ? ' · a runner-up is within 10%' : '';
   return `${mmss(c.timestamp_ms)} (${why})${cd ? ` · ${cd}` : ' · passed'}${close}`;
+}
+
+// ── THE BAR SLOT: current → next (UI declutter plan §3) ───────────────────
+
+const TRIGGER_ICON: Record<ArmTrigger, IconName> = {
+  scene_change: 'rabbit', high: 'arrowUp', low: 'arrowDown',
+};
+
+export interface ShowNowNextItem {
+  icon: IconName;
+  label: string;
+  /** The song-position ms this item fires at, when it's a plain trigger
+   * wait with a known mark (ArmsStatus's `due_ms`) — the bar slot ticks a
+   * live countdown to this against the interpolated song position. `null`
+   * means "no clean numeric countdown" (a sequence Wait on a song/trigger
+   * count, or nothing known yet) — `whenText` is shown instead, static. */
+  dueMs: number | null;
+  whenText: string;
+}
+
+export interface ShowNowNext {
+  current: ShowNowNextItem | null;
+  next: ShowNowNextItem | null;
+  /** Where tapping the slot goes. */
+  href: string;
+  /** The small count badge on the ◈ icon — "the show is doing something
+   * to my room" (holds + levels + pulse mods + flare blocks + room
+   * effect), kept (plan §13 Q13). */
+  holdsCount: number;
+}
+
+function sequenceItemDisplay(run: SequenceRun, index: number): ShowNowNextItem | null {
+  const item = run.items[index];
+  if (!item) return null;
+  if (item.kind === 'wait') {
+    const w = item.wait;
+    const label = item.title ?? (w ? `Wait (${w.kind})` : 'Wait');
+    if (index === run.index && run.waiting_reason === 'duration' && run.wait_left_s != null) {
+      return { icon: 'wait', label, dueMs: null, whenText: `${mmss(run.wait_left_s * 1000)} left` };
+    }
+    if (index === run.index && run.wait_count > 0) {
+      return { icon: 'wait', label, dueMs: null, whenText: `${run.wait_count} more ${w?.trigger === 'scene_change' ? 'scene change' : triggerLabel(w?.trigger ?? '')}${run.wait_count === 1 ? '' : 's'}` };
+    }
+    return { icon: 'wait', label, dueMs: null, whenText: w ? `waiting on ${w.kind}` : 'waiting' };
+  }
+  const icon: IconName = item.arm === 'instant' ? 'bolt' : TRIGGER_ICON[item.arm as ArmTrigger] ?? 'bolt';
+  const label = item.title ?? item.label ?? 'Set';
+  const whenText = item.arm === 'instant' ? 'now' : `on ${triggerLabel(item.arm)}`;
+  return { icon, label, dueMs: null, whenText };
+}
+
+function armDisplay(a: ShowArm, positionMs: number | null | undefined): ShowNowNextItem {
+  const icon = TRIGGER_ICON[a.on as ArmTrigger] ?? 'bolt';
+  const label = a.label || 'Action';
+  const dueMs = a.due_ms ?? null;
+  const cd = countdown(dueMs, positionMs);
+  const whenText = cd ?? (dueMs != null ? 'now' : `on ${triggerLabel(a.on)}`);
+  return { icon, label, dueMs, whenText };
+}
+
+/** The bar slot's rule, exactly as decided: a running sequence wins
+ * (current/next = its own items); else the soonest-due armed actions;
+ * else "Nothing armed". Tap-through: `/show?tab=sequence&sub=run` while a
+ * sequence runs, else `/show?tab=run`. */
+export function showNowNext(
+  brief: ShowBrief | null | undefined,
+  arms: ArmsStatus | null | undefined,
+  sequence: { run: SequenceRun | null } | null | undefined,
+): ShowNowNext {
+  const holdsCount = brief
+    ? (brief.holds ?? 0) + (brief.levels ?? 0) + (brief.pulse_mods ?? 0) + (brief.flare_blocks ?? 0)
+      + (brief.room_effect ? 1 : 0) + (brief.running_sets ?? 0)
+    : 0;
+
+  const run = sequence?.run;
+  if (run?.active) {
+    const n = run.items.length;
+    const current = sequenceItemDisplay(run, run.index);
+    const nextIndex = run.index + 1 < n ? run.index + 1 : (run.loop && n > 0 ? 0 : -1);
+    const next = nextIndex >= 0 ? sequenceItemDisplay(run, nextIndex) : null;
+    return { current, next: next ?? { icon: 'wait', label: 'End', dueMs: null, whenText: '—' }, href: '/show?tab=sequence&sub=run', holdsCount };
+  }
+
+  const positionMs = arms?.song.position_ms ?? null;
+  const armed = [...(arms?.armed ?? [])].sort((a, b) => {
+    const ad = a.due_ms ?? Infinity;
+    const bd = b.due_ms ?? Infinity;
+    return ad - bd;
+  });
+  if (armed.length === 0) {
+    return { current: null, next: null, href: '/show?tab=run', holdsCount };
+  }
+  const current = armDisplay(armed[0], positionMs);
+  const next = armed[1] ? armDisplay(armed[1], positionMs) : null;
+  return { current, next, href: '/show?tab=run', holdsCount };
 }
