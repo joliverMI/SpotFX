@@ -3,34 +3,36 @@
 // concept this build invented (firstmate's gap-check against the
 // Admiral's words, "scenes, flares, drops, and light show triggers").
 //
-//   ONE   — BACKEND TRUTH: spectra/api/upcoming.py's `/api/upcoming`
-//           handler (the one source HomeTimeline/SongStrip read) sources
-//           `kind: "high"/"low"` straight from `plan["show_cues"]`
-//           (spectra/services/show_cues.py, the Light Show's own store),
-//           stamped `source: "show_cue"` — read directly off the real
-//           source file, not assumed from a comment.
-//   TWO   — THE SAME STORE FEEDS THE TIMELINE PAGE'S OWN LIGHT SHOW
-//           MARKERS: canvas/lightShowLayer.ts draws from `show_cues` too
-//           (its own module docstring says so), so Home's high/low flags
-//           and the Timeline's flags are provably the same feature, not
-//           two different things that happen to share a name.
-//   THREE — FRONTEND: HomeTimeline.tsx's `isLightShow` predicate matches
-//           EXACTLY `high`/`low` — the "Light Show" icon toggle gates
-//           precisely the kinds BACKEND TRUTH identified above, nothing
-//           more and nothing less.
-//   FOUR  — drawShapeMarkers (the new audio-shape canvas overlay) draws
+//   ONE   — BACKEND TRUTH, EXECUTED: drives the REAL
+//           `spectra.api.upcoming.upcoming_for_song` (a Python subprocess,
+//           `spectra/api/analysed_plan._plan_with_cues` monkeypatched to a
+//           fixture plan) and asserts its ACTUAL OUTPUT emits `kind:
+//           "high"/"low"` with `source: "show_cue"` straight off
+//           `plan["show_cues"]` — and emits NOTHING for a cue with no
+//           resolved timestamp — proving the handler's behaviour, not
+//           just reading its source text. (The Timeline page's own
+//           High/Low Trigger markers, which read from the SAME
+//           `show_cues` store, already have their own dedicated
+//           behavioural proof: scripts/check_timeline_light_show_markers.mjs.)
+//   TWO   — FRONTEND: drawShapeMarkers (the new audio-shape canvas
+//           overlay, the REAL songStrip.ts bundled with esbuild) draws
 //           high/low as a flag and draws NOTHING for `kind: "colour"` —
 //           proving the explicit-kind-check fix (a catch-all `else`
 //           would have wrongly drawn a colour-set trigger as a Light Show
 //           flag).
-//   FIVE  — BEHAVIOURAL: mounting the REAL HomeTimeline.tsx and toggling
+//   THREE — BEHAVIOURAL: mounting the REAL HomeTimeline.tsx and toggling
 //           the "Light Show" icon off removes the high/low flags from
 //           BOTH the full-song strip's SVG and the shape canvas's own
-//           overlay, while scene/flare/drop markers are untouched.
+//           overlay, while scene/flare/drop markers are untouched — this
+//           is also what proves `isLightShow` gates exactly `high`/`low`,
+//           the two kinds ONE proved the backend actually emits.
 //
 // Run: node scripts/check_home_timeline_light_show_markers.mjs
 //   (needs the dev-only jsdom: cd spectra/web && npm install --no-save jsdom)
-import { readFileSync, mkdtempSync, writeFileSync } from 'node:fs';
+//   (ONE needs a Python interpreter with spectra's own deps installed:
+//   .venv/bin/python, else $PYTHON, else python3)
+import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -40,6 +42,8 @@ const repo = dirname(dirname(fileURLToPath(import.meta.url)));
 const webDir = join(repo, 'spectra/web');
 const require = createRequire(join(webDir, 'package.json'));
 const esbuild = require('esbuild');
+const venvPy = join(repo, '.venv/bin/python');
+const PYTHON = process.env.PYTHON || (existsSync(venvPy) ? venvPy : 'python3');
 
 let failures = 0;
 const ok = (cond, msg) => {
@@ -47,24 +51,48 @@ const ok = (cond, msg) => {
   else { console.log(`  ✗ ${msg}`); failures += 1; }
 };
 
-console.log('ONE — spectra/api/upcoming.py sources high/low from the Light Show\'s own show_cues store');
+console.log('ONE — the real /api/upcoming handler actually emits high/low from plan["show_cues"]');
 {
-  const src = readFileSync(join(repo, 'spectra/api/upcoming.py'), 'utf8');
-  ok(/The Light Show's High\/Low cues \(`?show_cues`?\)/.test(src),
-    "the module docstring names show_cues as the source of the high/low cues");
-  ok(/cues = plan\.get\("show_cues"\)/.test(src),
-    'the handler reads `cues` straight off `plan.get("show_cues")`');
-  ok(/for level in \("high", "low"\):/.test(src),
-    'the loop that builds the high/low events is literally named "high"/"low"');
-  ok(/"kind": level,[\s\S]{0,100}"source": "show_cue"/.test(src),
-    'each emitted event is stamped kind=level (high/low) AND source="show_cue" — not a second, invented kind');
+  const probeScript = `
+import json, os, sys
+
+os.environ["SPECTRA_STORAGE_DIR"] = __import__("tempfile").mkdtemp(prefix="upcoming-probe-")
+sys.path.insert(0, ${JSON.stringify(repo)})
+
+import spectra.api.upcoming as upcoming_mod
+
+URI = "spotify:track:check-home-timeline-light-show-markers"
+BASE_PLAN = {
+    "uri": URI, "effective_mode": "analysed", "has_authored": False,
+    "applies": False, "reason": "fixture", "scene_changes": [], "flares": [],
+    "scene_source": None, "rank_of": None,
+    "drop_sequences": {"sequences": []},
 }
 
-console.log('TWO — the Timeline page\'s own Light Show flag layer reads from the SAME store');
-{
-  const src = readFileSync(join(repo, 'spectra/web/src/timeline/canvas/lightShowLayer.ts'), 'utf8');
-  ok(/High\/Low Trigger markers/.test(src) && /show_cues/.test(join(repo, 'spectra/web/src/timeline/lightShowMarkers.ts') && readFileSync(join(repo, 'spectra/web/src/timeline/lightShowMarkers.ts'), 'utf8')),
-    'lightShowLayer.ts (Timeline\'s own audio-shape canvas) + lightShowMarkers.ts are built on the same show_cues-sourced High/Low Trigger concept Home now draws');
+def run(show_cues):
+    plan = {**BASE_PLAN, "show_cues": show_cues}
+    upcoming_mod._plan_with_cues = lambda uri: plan
+    return upcoming_mod.upcoming_for_song(URI, limit=20)
+
+with_cues = run({"high": {"timestamp_ms": 12345}, "low": {"timestamp_ms": 67890}})
+without_cues = run({"high": None, "low": {"timestamp_ms": None}})
+print(json.dumps({"with_cues": with_cues, "without_cues": without_cues}))
+`;
+  const raw = execFileSync(PYTHON, ['-c', probeScript], { cwd: repo, encoding: 'utf8' });
+  const { with_cues: withCues, without_cues: withoutCues } = JSON.parse(raw);
+
+  const high = withCues.events.find((e) => e.kind === 'high');
+  const low = withCues.events.find((e) => e.kind === 'low');
+  ok(!!high && high.ms === 12345 && high.source === 'show_cue',
+    `a show_cues "high" cue is emitted as kind="high", ms=12345, source="show_cue" (got: ${JSON.stringify(high)})`);
+  ok(!!low && low.ms === 67890 && low.source === 'show_cue',
+    `a show_cues "low" cue is emitted as kind="low", ms=67890, source="show_cue" (got: ${JSON.stringify(low)})`);
+  ok(!withCues.events.some((e) => e.kind !== 'high' && e.kind !== 'low'),
+    'no other event kind is fabricated from the show_cues branch alone');
+
+  ok(!withoutCues.events.some((e) => e.kind === 'high' || e.kind === 'low'),
+    `a cue with no resolved timestamp_ms (None, or a dict carrying timestamp_ms=None) emits NOTHING `
+    + `(got: ${JSON.stringify(withoutCues.events)})`);
 }
 
 const tmp = mkdtempSync(join(tmpdir(), 'home-light-show-'));
@@ -77,7 +105,7 @@ const songStripFix = {
   },
 };
 
-console.log('THREE/FOUR — frontend: the Light Show toggle and drawShapeMarkers both check high/low explicitly');
+console.log('TWO — frontend: drawShapeMarkers draws high/low as a flag and nothing for "colour"');
 {
   const js = join(tmp, 'songStrip.mjs');
   await esbuild.build({
@@ -85,13 +113,6 @@ console.log('THREE/FOUR — frontend: the Light Show toggle and drawShapeMarkers
     platform: 'node', logLevel: 'silent', outfile: js,
   });
   const { drawShapeMarkers, KIND_COLOR } = await import(js);
-
-  const homeSrc = readFileSync(join(webDir, 'src/home/HomeTimeline.tsx'), 'utf8');
-  const m = homeSrc.match(/const isLightShow = \(k: UpcomingEvent\['kind'\]\) => (.+);/);
-  ok(!!m, 'HomeTimeline.tsx defines isLightShow as a plain predicate (so its literal text can be checked)');
-  ok(m[1].replace(/\s/g, '') === "k==='high'||k==='low'",
-    `isLightShow checks exactly 'high'/'low' — the same two kinds ONE/TWO identified as the Light Show's `
-    + `own cues, nothing more and nothing less (got: ${m[1]})`);
 
   const makeCtx = () => {
     const calls = [];
@@ -136,13 +157,13 @@ console.log('THREE/FOUR — frontend: the Light Show toggle and drawShapeMarkers
   }
 }
 
-console.log('FIVE — behavioural: mounting the real HomeTimeline and toggling "Light Show" off');
+console.log('THREE — behavioural: mounting the real HomeTimeline and toggling "Light Show" off');
 let jsdomMod;
 try {
   jsdomMod = require('jsdom');
 } catch {
   console.log('jsdom not installed in spectra/web/node_modules (dev-only, '
-    + 'not a declared dependency) — skipping FIVE. Install with '
+    + 'not a declared dependency) — skipping THREE. Install with '
     + '`cd spectra/web && npm install --no-save jsdom`.');
   console.log(failures ? `\n${failures} FAILED` : '\nall passed (jsdom-based section skipped)');
   process.exit(failures ? 1 : 0);
