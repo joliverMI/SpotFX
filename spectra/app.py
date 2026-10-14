@@ -84,6 +84,24 @@ class SPAStaticFiles(StaticFiles):
 def create_app() -> FastAPI:
     app = FastAPI(title="SPECTRA", version="0.1.0")
 
+    # THE KIOSK VIEW's framing header (song-layout-plan, data/ui-layout-
+    # plan/report.md's kiosk section): Home Assistant hosts `/?kiosk=1` in
+    # a dashboard-tab iframe, which the browser refuses outright with no
+    # `frame-ancestors` allow-list. Set unconditionally (not just for
+    # kiosk requests) — the header only ever RELAXES framing for the
+    # named origins and has no other effect, so a non-kiosk page carries
+    # it for free rather than needing a second code path to decide when
+    # to add it. See config.kiosk_frame_ancestors's own docstring for why
+    # an HTTPS Home Assistant view (the phone app's remote access) is NOT
+    # covered by this and is not expected to be.
+    @app.middleware("http")
+    async def _kiosk_frame_ancestors(request, call_next):
+        response = await call_next(request)
+        origins = config.kiosk_frame_ancestors()
+        response.headers["Content-Security-Policy"] = (
+            "frame-ancestors " + (" ".join(origins) if origins else "'none'"))
+        return response
+
     app.include_router(scenes.router)
     app.include_router(sequencer.router)
     app.include_router(registry.router)

@@ -475,6 +475,26 @@ def whisper_bridge_url() -> str:
     started") unless whoever does the containerising reads this."""
     return os.getenv("SPECTRA_WHISPER_BRIDGE_URL") or "http://127.0.0.1:8090"
 
+
+def kiosk_frame_ancestors() -> list[str]:
+    """Origins allowed to embed SPECTRA in an `<iframe>` (the kiosk view,
+    `/?kiosk=1` — song-layout-plan, data/ui-layout-plan/report.md's kiosk
+    section), expressed as a `Content-Security-Policy: frame-ancestors`
+    header value (`app.py`'s middleware). Default: the two Home Assistant
+    origins River named for the wall kiosk (a Raspberry Pi 7in touchscreen
+    dashboard tab, 2026-10-14) — both PLAIN HTTP, which is the whole
+    reason this is a configured list rather than a blanket `*`: an HTTPS
+    HA view (the phone app's remote access) refuses to embed a plain-HTTP
+    iframe as mixed content, so that path is NOT covered here and isn't
+    expected to be — the wall kiosk is unaffected, since it and SPECTRA
+    are both plain HTTP on the same LAN. Override with
+    SPECTRA_KIOSK_FRAME_ANCESTORS (space- or comma-separated) if River's
+    addresses change; an empty override means "nobody may frame this"."""
+    raw = os.getenv("SPECTRA_KIOSK_FRAME_ANCESTORS")
+    if raw is None:
+        return ["http://homeassistant.local:8123", "http://192.168.40.16:8123"]
+    return [o for o in raw.replace(",", " ").split() if o]
+
 # Read-only spot-effects storage (S2 formalizes this as the bridge).
 COLOR_SETS_FILE = REPO_ROOT / "storage" / "color_sets.json"
 PROFILES_DIR = REPO_ROOT / "storage" / "profiles"
