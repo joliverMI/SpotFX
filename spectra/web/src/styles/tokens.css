@@ -65,6 +65,10 @@ nav a:hover, nav a.active {
 }
 
 main { flex: 1; padding: 16px; max-width: 1200px; margin: 0 auto; width: 100%; }
+/* Home's own timeline/audio-shape run edge to edge on desktop (song-layout-
+   plan §9 idea 8); its quick-run cards stay capped via .home-quick-runs's
+   own minmax(0, 560px) columns. */
+main.home-route { max-width: none; }
 /* Phone portrait: the nav keeps one row (four links + help) and content
  * padding narrows so cards use the width. */
 @media (max-width: 720px) {
@@ -2306,3 +2310,20 @@ button.linklike { background: none; border: none; padding: 0 4px; color: var(--a
   .home-page { max-width: none; }
   .home-timeline { max-width: none; }
 }
+
+/* ── song-layout-plan: kiosk view (/?kiosk=1) ─────────────────────────── */
+.kiosk-page {
+  --kiosk-width: 800px;
+  --kiosk-usable-height: 424px;
+  --kiosk-touch-target: 44px;
+  width: 100%;
+  min-height: var(--kiosk-usable-height);
+  overflow: hidden;
+  font-size: 15px;
+}
+.kiosk-main { padding: 8px 10px; overflow: auto; max-height: calc(var(--kiosk-usable-height) - 90px); }
+.kiosk-page .home-quick-runs { grid-template-columns: minmax(0, 1fr); }
+.kiosk-page button,
+.kiosk-page .icon-toggle,
+.kiosk-page .home-quick-icon-btn { min-width: var(--kiosk-touch-target); min-height: var(--kiosk-touch-target); }
+.kiosk-page .home-timeline-shape { display: none; }

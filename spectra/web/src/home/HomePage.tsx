@@ -11,7 +11,7 @@ import { useUpcoming, useEngineStatus } from '../queries';
 import HomeTimeline from './HomeTimeline';
 import HomeQuickRuns from './HomeQuickRuns';
 
-export default function HomePage() {
+export default function HomePage({ showAudioShape = true }: { showAudioShape?: boolean }) {
   const { data: status } = useEngineStatus();
   const track = status?.bridge.track ?? null;
   const uri = track?.uri ?? null;
@@ -26,6 +26,7 @@ export default function HomePage() {
           artist={track.artist ?? ''}
           durationMs={track.duration_ms ?? 0}
           events={upcoming?.events ?? []}
+          showAudioShape={showAudioShape}
         />
       ) : (
         <div className="card home-no-track">Nothing playing.</div>

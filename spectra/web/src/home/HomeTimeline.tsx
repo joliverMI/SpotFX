@@ -20,6 +20,7 @@
  * an editing surface, so it does not need that capture-alignment term at
  * all, only the shape offset that puts it on the right axis. */
 import { useEffect, useMemo, useRef, useState } from 'react';
+import HelpLink from '../help/HelpLink';
 import IconToggle from '../components/IconToggle';
 import {
   eventLabel, fmtCountdown, fmtMMSS, KIND_COLOR,
@@ -36,16 +37,19 @@ const isDrop = (k: UpcomingEvent['kind']) => k === 'charge' || k === 'lull' || k
 const isLightShow = (k: UpcomingEvent['kind']) => k === 'high' || k === 'low';
 
 export default function HomeTimeline({
-  uri, title, artist, durationMs, events,
+  uri, title, artist, durationMs, events, showAudioShape = true,
 }: {
   uri: string | null;
   title: string;
   artist: string;
   durationMs: number;
   events: UpcomingEvent[];
+  /** The kiosk view's own small-screen rule (kiosk/kioskConfig.ts): drop
+   * the audio shape rather than squeeze it illegible. */
+  showAudioShape?: boolean;
 }) {
-  const { data: meta } = useAudioShapeMeta(uri);
-  const { data: shape } = useAudioShapeData(uri, true);
+  const { data: meta } = useAudioShapeMeta(showAudioShape ? uri : null);
+  const { data: shape } = useAudioShapeData(showAudioShape ? uri : null, true);
   const offsetMs = Number(meta?.timestamp_offset_ms ?? 0);
 
   const [filters, setFilters] = useState<KindFilter>({ analysed: true, drop: true, lightShow: true });
@@ -234,6 +238,7 @@ export default function HomeTimeline({
           title="Follow the playhead" onClick={() => win.setFollowSnapped(!win.follow)}>⌖</button>
         <button type="button" className="home-timeline-fullsong" title="Full song" onClick={win.fullSong}>↔</button>
         <span ref={timeRef} className="song-strip-time tabular-nums">—:— / —:—</span>
+        <HelpLink topic="home-page" title="Help — Home" />
       </div>
 
       <div ref={stripRef} className="home-timeline-strip">
@@ -253,10 +258,12 @@ export default function HomeTimeline({
         </div>
       )}
 
-      <div className="home-timeline-shape">
-        <canvas ref={canvasRef} className="home-timeline-shape-canvas" />
-        <div ref={canvasPlayheadRef} className="home-timeline-shape-playhead" />
-      </div>
+      {showAudioShape && (
+        <div className="home-timeline-shape">
+          <canvas ref={canvasRef} className="home-timeline-shape-canvas" />
+          <div ref={canvasPlayheadRef} className="home-timeline-shape-playhead" />
+        </div>
+      )}
     </div>
   );
 }
