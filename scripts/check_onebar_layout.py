@@ -1,26 +1,69 @@
-"""Executable spec: the merged one-bar (UI declutter plan §2/§3/§6) fits
-on one line with NO horizontal overflow at 1024, 1180 and 1440 px — the
-three widths the Admiral decided on (landscape on both tablets, 1024 and
-1180, plus desktop 1440).
+"""Executable spec: the merged one-bar (UI declutter plan §2/§3/§6) at the
+Admiral's three named desktop/tablet widths (1024, 1180, 1440) plus the
+kiosk view's own 800x424 (`?kiosk=1`) — TWO TIERS, his own decision of
+2026-10-14, superseding an earlier one-line-everywhere attempt:
+
+  - 1180 and 1440 are ONE LINE, <= `MAX_BAR_HEIGHT_PX` (48) tall — the
+    original plan.
+  - 1024 and the kiosk's 800 are a DELIBERATE TWO ROWS, each <=
+    `MAX_BAR_HEIGHT_PX` tall, with every occupant on screen and no
+    sideways scroll — "extend the phone two-row top-bar rule from <=520px
+    up to about 1100px... do not shed swatches or hide controls to force
+    one line." An earlier version of this file (and the bar) tried to
+    force all four widths onto one line by shedding/hiding controls at
+    1024 and 800; both are abandoned in favour of the two-row form.
+
+Also guards the still-live regression this replaces
+(spotfx-onebar-tablet-height: measured 43px at 1440 but 69px/172px at
+1180/1024 before ANY fix, because two occupants answered being squeezed
+by growing taller instead of narrower — fixed at the root for every
+width, not by hiding anything) and the kiosk-specific one
+(spotfx-deploy-423 finding B: `KioskPage.tsx` used to render the two bar
+components as bare siblings, outside the `.one-bar >` scoping tokens.css
+relies on, so the kiosk kept the OLD two-STRIP layout).
 
 Drives a real headless Chromium (no jsdom — jsdom has no layout engine, so
-the no-jumping/no-overflow claim can only be proven against a real browser)
-over raw CDP via websockets, the established recipe for this repo (no
-Playwright Python dependency, no system Chrome requirement — launches the
-cached Playwright Chromium binary directly).
+the no-jumping/no-overflow/height/row-count claims can only be proven
+against a real browser) over raw CDP via websockets, the established
+recipe for this repo (no Playwright Python dependency, no system Chrome
+requirement — launches the cached Playwright Chromium binary directly).
 
-READ-ONLY against the live app at http://127.0.0.1:8010/spectra/ (GET
-requests only, no button pressed, nothing fired) — this task's own
-instruction: front-end only, no live light tests, no writes.
+READ-ONLY against the live app at http://127.0.0.1:8000/spectra/ — through
+the spot-effects reverse proxy, NOT the standalone :8010 SPECTRA port:
+the Colour button's own data (`useSpotColorSets`) only resolves same-origin
+through :8000 (confirmed live, spotfx-deploy-423 §6) — against :8010 it
+reads blank, which would make the no-jump/occupant-visible measurements
+pass for the wrong reason (nothing there to overflow). GET requests only,
+no button pressed, nothing fired — this task's own instruction: front-end
+only, no live light tests, no writes.
 
-What it measures, at each width:
+What it measures, at every width:
   - the one-bar row itself does not force the page to scroll horizontally
     (`document.documentElement.scrollWidth <= clientWidth + 1`, a 1px
-    rounding slop);
+    rounding slop) — ALSO checked directly on the one-bar's own
+    `scrollWidth == clientWidth` (its `overflow-x: auto` escape valve
+    must never actually be needed, per this task's "no sideways scroll"
+    requirement — a bar that fits the page but itself scrolls sideways
+    would pass the page-level check alone and still hide the Release
+    button);
+  - the occupants are grouped into ROWS by their own `top`, clustering
+    tops within `ROW_CLUSTER_PX` (20px — wider than the few px of spread
+    one row's own shorter occupants get from `align-items: center`,
+    narrower than the ~40px+ gap between two real rows) of each other.
+    1180/1440 assert exactly ONE row; 1024/kiosk assert exactly TWO —
+    catching either a stray wrap (a third row/overflow) or a collapse
+    back to one (the two-row CSS silently stopped applying);
+  - every row's own max occupant height stays at or under
+    `MAX_BAR_HEIGHT_PX` (48) — the actual regression finding A fixed: a
+    swatch/chip wrapping into a second internal row grows ITS row tall
+    without ever overflowing the page or clipping an occupant, which is
+    exactly what let the pre-fix bar pass every other check in this file
+    while still being 1.6x-4x its intended height;
   - every one of the nine occupants (house / mode / hue hold / scenes /
     colour / energy+mark / light show / preview / release) is actually
     ON SCREEN (not clipped off the right edge) — `getBoundingClientRect()
-    .right <= window.innerWidth + 1` for each;
+    .right <= window.innerWidth + 1` for each, regardless of which row
+    it landed on;
   - the NO-JUMP claim, behaviourally: it mutates the live DOM (client-side
     only — `el.textContent = ...` in the page, no fetch/POST of any kind)
     to give the Scenes/Colour buttons' own value an artificially long
@@ -38,11 +81,17 @@ What it measures, at each width:
     line, which is what overflowed the bar before the `.one-bar:has(...)`
     fix in tokens.css), with no resulting horizontal overflow either.
 
-This proves "fits on one line, nothing jumps/overflows" against whatever
-names/state his live room happens to have right now — it does not (and,
-read-only, cannot) inject a synthetic short/long name into the SERVER's
-own data; the text-length mutation above is a pure client-side DOM edit
-used only to drive the measurement, never persisted or sent anywhere.
+The kiosk's own 800x424 (`?kiosk=1`) runs the identical two-row
+measurement above (rows, heights, on-screen, no scroll) — nothing is shed
+there any more, so every occupant is expected present, not just a named
+subset.
+
+This proves "no sideways scroll, nothing jumps/overflows/grows, the right
+number of rows" against whatever names/state his live room happens to
+have right now — it does not (and, read-only, cannot) inject a synthetic
+short/long name into the SERVER's own data; the text-length mutation
+above is a pure client-side DOM edit used only to drive the measurement,
+never persisted or sent anywhere.
 
 Run: .venv/bin/python scripts/check_onebar_layout.py
 """
@@ -67,9 +116,39 @@ except ImportError:
     sys.exit(0)
 
 REPO = Path(__file__).resolve().parent.parent
-APP_URL = os.environ.get("SPECTRA_LIVE_URL", "http://127.0.0.1:8010/spectra/")
-WIDTHS = [1024, 1180, 1440]
+APP_URL = os.environ.get("SPECTRA_LIVE_URL", "http://127.0.0.1:8000/spectra/")
 HEIGHT = 800
+MAX_BAR_HEIGHT_PX = 48
+# width -> expected row count (the Admiral's own tiering, 2026-10-14):
+# 1180/1440 stay one line; 1024 (and the kiosk's 800, measured separately
+# below) are a deliberate two rows.
+WIDTHS = {1024: 2, 1180: 1, 1440: 1}
+KIOSK_WIDTH = 800
+KIOSK_HEIGHT = 424
+KIOSK_EXPECTED_ROWS = 2
+# Every occupant this bar can show — the kiosk no longer sheds any of
+# them (the two-row form gives row 2 all the width it needs), so this
+# same list is used for both the desktop/tablet measurement and the
+# kiosk one.
+OCCUPANT_SELECTORS = [
+    ".mode-chip", ".mode-group-btn", ".ambient-group-btn",
+    ".scenes-group-btn", ".energy-mark-group", ".light-show-strip",
+    ".device-preview-strip", ".warning-chip", ".release-hold-wrap",
+]
+# Clusters occupant `top`s into rows: wider than the few px of spread a
+# row's own shorter occupants get from `align-items: center`, narrower
+# than the ~40px+ gap between two real rows (both measured live).
+ROW_CLUSTER_PX = 20
+
+
+def cluster_rows(tops: list[float]) -> list[list[float]]:
+    rows: list[list[float]] = []
+    for t in sorted(tops):
+        if rows and t - rows[-1][-1] <= ROW_CLUSTER_PX:
+            rows[-1].append(t)
+        else:
+            rows.append([t])
+    return rows
 
 CHROME_CANDIDATES = [
     Path.home() / ".cache/ms-playwright",
@@ -208,33 +287,32 @@ async def main() -> int:
                       "(is spectra.service actually serving a build with this change?)")
                 return 0
 
-            for width in WIDTHS:
+            for width, expected_rows in WIDTHS.items():
                 await cdp_call(ws, nid(), "Emulation.setDeviceMetricsOverride", {
                     "width": width, "height": HEIGHT, "deviceScaleFactor": 1, "mobile": False,
                 })
                 await asyncio.sleep(0.3)  # let layout settle
                 r = await cdp_call(ws, nid(), "Runtime.evaluate", {
-                    "expression": """
-                        JSON.stringify({
+                    "expression": f"""
+                        JSON.stringify({{
                           scrollWidth: document.documentElement.scrollWidth,
                           clientWidth: document.documentElement.clientWidth,
-                          bar: (() => {
+                          bar: (() => {{
                             const b = document.querySelector('.one-bar');
                             if (!b) return null;
                             const rect = b.getBoundingClientRect();
-                            return { right: rect.right, width: rect.width };
-                          })(),
-                          occupants: [
-                            '.mode-chip', '.mode-group-btn', '.ambient-group-btn',
-                            '.scenes-group-btn', '.energy-mark-group', '.light-show-strip',
-                            '.device-preview-strip', '.release-hold-wrap',
-                          ].map((sel) => {
-                            const els = [...document.querySelectorAll(sel)];
-                            if (!els.length) return { sel, present: false, right: null };
-                            const right = Math.max(...els.map((e) => e.getBoundingClientRect().right));
-                            return { sel, present: true, right };
-                          }),
-                        })
+                            return {{
+                              right: rect.right, width: rect.width,
+                              scrollWidth: b.scrollWidth, clientWidth: b.clientWidth,
+                            }};
+                          }})(),
+                          occupants: {json.dumps(OCCUPANT_SELECTORS)}.flatMap((sel) =>
+                            [...document.querySelectorAll(sel)].map((e) => {{
+                              const r = e.getBoundingClientRect();
+                              return {{ sel, top: r.top, right: r.right, height: r.height }};
+                            }})
+                          ),
+                        }})
                     """,
                     "returnByValue": True,
                 })
@@ -256,10 +334,33 @@ async def main() -> int:
                     f"at {width}px: the one-bar's own right edge ({data['bar']['right']:.0f}) "
                     f"stays within the viewport",
                 )
-                for occ in data.get("occupants", []):
-                    if not occ["present"]:
-                        continue  # a hidden-when-nothing-to-show occupant (ReleaseButton
-                                  # when already released, LightShowStrip when inactive, etc.)
+                ok(
+                    data["bar"]["scrollWidth"] <= data["bar"]["clientWidth"] + 1,
+                    f"at {width}px: the one-bar itself needs no sideways scroll "
+                    f"(scrollWidth {data['bar']['scrollWidth']:.0f} <= "
+                    f"clientWidth {data['bar']['clientWidth']:.0f}) — its own "
+                    "`overflow-x: auto` escape valve must never actually be needed at this "
+                    "width, or an occupant past the fold (e.g. Release) would be reachable "
+                    "only by scrolling the bar, not by looking at it",
+                )
+                occupants = data.get("occupants", [])
+                rows = cluster_rows([o["top"] for o in occupants])
+                ok(
+                    len(rows) == expected_rows,
+                    f"at {width}px: the bar forms exactly {expected_rows} row(s) "
+                    f"(measured {len(rows)}: tops {rows})",
+                )
+                for row_tops in rows:
+                    row_occ = [o for o in occupants if o["top"] in row_tops]
+                    row_max_h = max((o["height"] for o in row_occ), default=0)
+                    ok(
+                        row_max_h <= MAX_BAR_HEIGHT_PX + 1,
+                        f"at {width}px: row at top={row_tops[0]:.0f} stays at or under "
+                        f"{MAX_BAR_HEIGHT_PX}px tall (measured {row_max_h:.0f}px) — a tall "
+                        "row is the regression this check exists to catch even when nothing "
+                        "overflows or clips",
+                    )
+                for occ in occupants:
                     ok(
                         occ["right"] <= width + 1,
                         f"at {width}px: {occ['sel']} stays within the viewport "
@@ -389,6 +490,115 @@ async def main() -> int:
                         "expression": "document.querySelector('.device-preview-chips')?.click();",
                     })
                     await asyncio.sleep(0.2)
+
+            # THE KIOSK VIEW (spotfx-deploy-423 finding B) — same app, a
+            # separate route (`?kiosk=1`) with no menu and its own
+            # 800x424 usable size. `KioskPage.tsx` now wraps the two bar
+            # components the same way App.tsx does, so this exercises the
+            # identical `.one-bar` CSS, at a width inside the same
+            # deliberate-two-row band as 1024 — nothing is shed here any
+            # more (the Admiral's own 2026-10-14 decision), so every
+            # occupant is expected present across the two rows.
+            kiosk_url = APP_URL.rstrip("/") + "/?kiosk=1"
+            await cdp_call(ws, nid(), "Emulation.setDeviceMetricsOverride", {
+                "width": KIOSK_WIDTH, "height": KIOSK_HEIGHT, "deviceScaleFactor": 1, "mobile": False,
+            })
+            await cdp_call(ws, nid(), "Page.navigate", {"url": kiosk_url})
+            deadline = time.monotonic() + 20
+            kiosk_loaded = False
+            last_diag = None
+            while time.monotonic() < deadline:
+                # Wait for the Scenes button too, not just the bar's own
+                # box — a cold load can mount `.one-bar` before the
+                # scene/registry data its occupants need has arrived
+                # (react-query's own fetch), and measuring mid-fetch
+                # read as occupants being transiently ABSENT rather than
+                # a real layout defect (flaky, found by running this
+                # check repeatedly against a live instance).
+                r = await cdp_call(ws, nid(), "Runtime.evaluate", {
+                    "expression": "JSON.stringify({rs: document.readyState, "
+                                  "bar: !!document.querySelector('.kiosk-page .one-bar'), "
+                                  "scenes: !!document.querySelector('.kiosk-page .scenes-group-btn')})",
+                    "returnByValue": True,
+                })
+                last_diag = r.get("result", {}).get("result", {}).get("value")
+                if last_diag:
+                    parsed = json.loads(last_diag)
+                    if parsed.get("rs") == "complete" and parsed.get("bar") and parsed.get("scenes"):
+                        kiosk_loaded = True
+                        break
+                await asyncio.sleep(0.5)
+            if not kiosk_loaded:
+                print(f"kiosk: the one-bar never fully appeared within 20s (last diag: {last_diag}) — "
+                      "skipping the kiosk measurement (is spectra.service serving a build with "
+                      "this change?)")
+            else:
+                await asyncio.sleep(0.5)  # let layout settle
+                r = await cdp_call(ws, nid(), "Runtime.evaluate", {
+                    "expression": f"""
+                        JSON.stringify({{
+                          scrollWidth: document.documentElement.scrollWidth,
+                          clientWidth: document.documentElement.clientWidth,
+                          bar: (() => {{
+                            const b = document.querySelector('.kiosk-page .one-bar');
+                            if (!b) return null;
+                            const rect = b.getBoundingClientRect();
+                            return {{
+                              right: rect.right,
+                              scrollWidth: b.scrollWidth, clientWidth: b.clientWidth,
+                            }};
+                          }})(),
+                          occupants: {json.dumps(OCCUPANT_SELECTORS)}.flatMap((sel) =>
+                            [...document.querySelectorAll('.kiosk-page ' + sel)].map((e) => {{
+                              const r = e.getBoundingClientRect();
+                              return {{ sel, top: r.top, right: r.right, height: r.height }};
+                            }})
+                          ),
+                        }})
+                    """,
+                    "returnByValue": True,
+                })
+                value = r.get("result", {}).get("result", {}).get("value")
+                kiosk_data = json.loads(value) if value else {}
+                ok(
+                    kiosk_data.get("bar") is not None,
+                    f"kiosk {KIOSK_WIDTH}x{KIOSK_HEIGHT}: the one-bar is present",
+                )
+                if kiosk_data.get("bar") is not None:
+                    ok(
+                        kiosk_data["scrollWidth"] <= kiosk_data["clientWidth"] + 1,
+                        f"kiosk {KIOSK_WIDTH}x{KIOSK_HEIGHT}: no page-level horizontal scroll "
+                        f"(scrollWidth {kiosk_data['scrollWidth']} <= "
+                        f"clientWidth {kiosk_data['clientWidth']})",
+                    )
+                    ok(
+                        kiosk_data["bar"]["scrollWidth"] <= kiosk_data["bar"]["clientWidth"] + 1,
+                        f"kiosk {KIOSK_WIDTH}x{KIOSK_HEIGHT}: the one-bar itself needs no "
+                        "sideways scroll",
+                    )
+                    kiosk_occ = kiosk_data.get("occupants", [])
+                    kiosk_rows = cluster_rows([o["top"] for o in kiosk_occ])
+                    ok(
+                        len(kiosk_rows) == KIOSK_EXPECTED_ROWS,
+                        f"kiosk {KIOSK_WIDTH}x{KIOSK_HEIGHT}: the bar forms exactly "
+                        f"{KIOSK_EXPECTED_ROWS} row(s) (measured {len(kiosk_rows)}: "
+                        f"tops {kiosk_rows})",
+                    )
+                    for row_tops in kiosk_rows:
+                        row_occ = [o for o in kiosk_occ if o["top"] in row_tops]
+                        row_max_h = max((o["height"] for o in row_occ), default=0)
+                        ok(
+                            row_max_h <= MAX_BAR_HEIGHT_PX + 1,
+                            f"kiosk {KIOSK_WIDTH}x{KIOSK_HEIGHT}: row at top={row_tops[0]:.0f} "
+                            f"stays at or under {MAX_BAR_HEIGHT_PX}px tall "
+                            f"(measured {row_max_h:.0f}px)",
+                        )
+                    for occ in kiosk_occ:
+                        ok(
+                            occ["right"] <= KIOSK_WIDTH + 1,
+                            f"kiosk {KIOSK_WIDTH}x{KIOSK_HEIGHT}: {occ['sel']} stays within "
+                            f"the viewport (right={occ['right']:.0f})",
+                        )
     finally:
         # Exact-pid/pgid teardown only — never a pattern-based kill on a
         # shared host (AGENTS.md's own "pkill -f hits live spectra.service"

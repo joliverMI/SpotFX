@@ -45,7 +45,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import HelpLink from '../help/HelpLink';
 import IconToggle from '../components/IconToggle';
 import {
-  drawShapeMarkers, eventLabel, fmtCountdown, fmtMMSS, KIND_COLOR,
+  axisScale, compensate, drawShapeMarkers, eventLabel, fmtCountdown, fmtMMSS, KIND_COLOR,
   markerOpacity, markerSizePx, pickNext, xFraction,
   type UpcomingEvent,
 } from '../components/songStrip';
@@ -115,32 +115,44 @@ export default function HomeTimeline({
   // dependent and moves into the rAF loop below instead, where it's
   // updated every frame rather than on a 500ms timer.
   useEffect(() => {
-    const svg = markersGroupRef.current;
-    if (!svg) return;
-    while (svg.lastChild) svg.removeChild(svg.lastChild);
+    const group = markersGroupRef.current;
+    const svgEl = group?.closest('svg');
+    if (!group || !svgEl) return;
+    while (group.lastChild) group.removeChild(group.lastChild);
+    // Re-measured every draw (a window/data change) — cheap, and the only
+    // way this stays correct across a resize with no ResizeObserver of
+    // its own (see songStrip.ts's `axisScale` docstring for why BOTH
+    // axes, not just X, need this).
+    const svgRect = svgEl.getBoundingClientRect();
+    const xScale = axisScale(svgRect.width, 100);
+    const yScale = axisScale(svgRect.height, 39);
     const ns = 'http://www.w3.org/2000/svg';
     for (const e of shown) {
       const frac = xFraction(e.ms, durationMs);
       const color = KIND_COLOR[e.kind];
       if (e.kind === 'scene') {
         const r = markerSizePx('scene', e.rank, e.rank_of);
+        const widthUnits = compensate(r * 2, xScale);
         const rect = document.createElementNS(ns, 'rect');
-        rect.setAttribute('x', `${frac * 100}%`); rect.setAttribute('y', '15');
-        rect.setAttribute('width', `${r * 2}`); rect.setAttribute('height', `${r * 2}`);
+        rect.setAttribute('x', `${frac * 100 - widthUnits / 2}%`); rect.setAttribute('y', '15');
+        rect.setAttribute('width', `${widthUnits}`); rect.setAttribute('height', `${compensate(r * 2, yScale)}`);
         rect.setAttribute('fill', color); rect.setAttribute('opacity', String(markerOpacity(e.rank, e.rank_of)));
-        svg.appendChild(rect);
+        group.appendChild(rect);
       } else if (e.kind === 'flare') {
         const r = markerSizePx('flare', e.rank, e.rank_of);
-        const circ = document.createElementNS(ns, 'circle');
-        circ.setAttribute('cx', `${frac * 100}%`); circ.setAttribute('cy', '19'); circ.setAttribute('r', `${r}`);
-        circ.setAttribute('fill', color); circ.setAttribute('opacity', String(markerOpacity(e.rank, e.rank_of)));
-        svg.appendChild(circ);
+        const ell = document.createElementNS(ns, 'ellipse');
+        ell.setAttribute('cx', `${frac * 100}%`); ell.setAttribute('cy', '19');
+        ell.setAttribute('rx', `${compensate(r, xScale)}`); ell.setAttribute('ry', `${compensate(r, yScale)}`);
+        ell.setAttribute('fill', color); ell.setAttribute('opacity', String(markerOpacity(e.rank, e.rank_of)));
+        group.appendChild(ell);
       } else if (isDrop(e.kind)) {
         const bar = document.createElementNS(ns, 'rect');
         bar.setAttribute('x', `${frac * 100}%`); bar.setAttribute('y', '29');
-        bar.setAttribute('width', e.kind === 'drop' ? '4' : '10'); bar.setAttribute('height', '6');
-        bar.setAttribute('rx', '2'); bar.setAttribute('fill', color);
-        svg.appendChild(bar);
+        bar.setAttribute('width', `${compensate(e.kind === 'drop' ? 4 : 10, xScale)}`);
+        bar.setAttribute('height', `${compensate(6, yScale)}`);
+        bar.setAttribute('rx', `${compensate(2, xScale)}`); bar.setAttribute('ry', `${compensate(2, yScale)}`);
+        bar.setAttribute('fill', color);
+        group.appendChild(bar);
       } else if (isLightShow(e.kind)) {
         // These ARE the Light Show's own High/Low Trigger cues (spectra/
         // api/upcoming.py's own docstring: "The Light Show's High/Low cues
@@ -152,8 +164,9 @@ export default function HomeTimeline({
         const flag = document.createElementNS(ns, 'line');
         flag.setAttribute('x1', `${frac * 100}%`); flag.setAttribute('x2', `${frac * 100}%`);
         flag.setAttribute('y1', '0'); flag.setAttribute('y2', '8');
-        flag.setAttribute('stroke', color); flag.setAttribute('stroke-width', '2');
-        svg.appendChild(flag);
+        flag.setAttribute('stroke', color);
+        flag.setAttribute('stroke-width', `${compensate(2, xScale)}`);
+        group.appendChild(flag);
       }
     }
   }, [shown, durationMs]);

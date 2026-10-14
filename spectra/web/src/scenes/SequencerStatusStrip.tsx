@@ -3,7 +3,7 @@
  * (spectra/services/dwell.py, process-global — not just this sequencer's
  * own rolls), next change source, last pick with factor breakdown, and the
  * room's colour state. */
-import HelpLink from '../help/HelpLink';
+import InfoTip from '../components/InfoTip';
 import { useSequencerStatus, useSpotColorSets } from '../queries';
 import type { SceneV2 } from '../types';
 
@@ -27,7 +27,11 @@ export default function SequencerStatusStrip({ scenes }: { scenes: SceneV2[] }) 
       flexWrap: 'wrap', padding: '8px 12px', fontSize: 12,
     }}>
       <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600 }}>
-        Sequencer <HelpLink topic="tab-sequencing" />
+        Sequencer
+        <InfoTip
+          topic="tab-sequencing"
+          text="The scene's likelihood curve and minimum dwell, engine state, deferrals, and the room's current colour state."
+        />
       </span>
 
       {!st.enabled ? (

@@ -10,6 +10,7 @@
 import { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import Icon from '../components/Icon';
+import InfoTip from '../components/InfoTip';
 import HelpLink from '../help/HelpLink';
 import { topicForPath } from '../help/routeTopics';
 import { confirmLeave } from '../lib/unsavedGuard';
@@ -33,7 +34,10 @@ export default function NavBar() {
       }}
     >
       <span className="logo">◆ SPECTRA</span>
-      <HelpLink topic="nav-menu" title="How the grouped menu works" />
+      <InfoTip
+        topic="nav-menu"
+        text="Home · Artifacts ▾ (Scenes, Colours, Devices, Rooms, Room FX, Light Show) · Engine ▾ (Debug, Status, Timing, Review, Feedback, AV Sync, House, Test Bed, Timeline) · Settings."
+      />
       {NAV_GROUPS.map((g) => {
         if (!g.items) {
           // Home / Settings — a plain link, no dropdown.

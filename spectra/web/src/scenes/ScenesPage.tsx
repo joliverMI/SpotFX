@@ -11,6 +11,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import PowerButton from '../components/PowerButton';
 import ModeAvailabilityToggle from '../components/ModeAvailabilityToggle';
+import InfoTip from '../components/InfoTip';
 import SonicChatPopover from '../components/SonicChatPopover';
 import { useToast } from '../components/Toast';
 import HelpLink from '../help/HelpLink';
@@ -189,8 +190,15 @@ export default function ScenesPage() {
   const sceneList = (
     <>
       <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        Scenes <HelpLink topic="scenes-page" />
-        <HelpLink topic="power-button" title="The power button" />
+        Scenes
+        <InfoTip
+          topic="scenes-page"
+          text="Scene list on the left, the tabbed editor on the right. Drafts live locally until Save."
+        />
+        <InfoTip
+          topic="power-button"
+          text="The power button: lit green when on, dim when off. One tap flips it — on a list row, it saves itself immediately."
+        />
         <button className="primary" style={{ marginLeft: 'auto', fontSize: 11, padding: '3px 10px' }}
           onClick={() => { create(); setPickerOpen(false); }}>
           + Scene

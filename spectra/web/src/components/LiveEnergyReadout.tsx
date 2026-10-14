@@ -10,7 +10,7 @@
  * this build found feeding every automatic, non-authored decision path.
  * Already on the wire via useEngineStatus() (bridge.intensity), so this
  * is display-only: no new backend surface. */
-import HelpLink from '../help/HelpLink';
+import InfoTip from './InfoTip';
 import { useEngineStatus } from '../queries';
 
 export default function LiveEnergyReadout() {
@@ -39,7 +39,10 @@ export default function LiveEnergyReadout() {
       <span className="energy-readout-value">
         {intensity != null ? intensity.toFixed(2) : '—'}
       </span>
-      <HelpLink topic="live-energy" />
+      <InfoTip
+        topic="live-energy"
+        text="The same number the engine's own automatic decisions read — raw section energy at the current playback position, 0.00 quietest to 1.00 loudest this song."
+      />
     </div>
   );
 }

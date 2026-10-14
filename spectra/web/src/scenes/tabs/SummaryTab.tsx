@@ -1,5 +1,6 @@
 /** Summary — a read-only overview of the whole scene; each card jumps to
  * its tab. Labels edit here (they're identity, not configuration). */
+import InfoTip from '../../components/InfoTip';
 import { LabelsInput } from '../../components/inputs';
 import HelpLink from '../../help/HelpLink';
 import { useRoomJourney, useSequencerConfig } from '../../queries';
@@ -40,7 +41,11 @@ export default function SummaryTab({ scene, setScene, goTo }: {
   return (
     <div>
       <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>
-        Summary <HelpLink topic="tab-summary" />
+        Summary
+        <InfoTip
+          topic="tab-summary"
+          text="A read-only overview of the whole scene — entries, bound values, dice letters, responses, drift, journey, choreography, sequencing."
+        />
       </div>
       <div className="field" style={{ maxWidth: 420 }}>
         <label>Labels (comma separated)</label>
