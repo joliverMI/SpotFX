@@ -26,6 +26,11 @@ import RoomEffectsPage from './roomeffects/RoomEffectsPage';
 import DebugPage from './debug/DebugPage';
 import LightShowPage from './lightshow/LightShowPage';
 import HousePage from './house/HousePage';
+import HomePage from './home/HomePage';
+import SongStrip from './components/SongStrip';
+import KioskPage from './kiosk/KioskPage';
+import { isKioskRequested } from './kiosk/kioskConfig';
+import { useShowClockSeed } from './queries';
 
 const PAGE_TITLES: [string, string][] = [
   ['/scenes', 'Scenes'],
@@ -51,8 +56,12 @@ const PAGE_TITLES: [string, string][] = [
 function usePageTitle() {
   const { pathname } = useLocation();
   useEffect(() => {
-    const hit = PAGE_TITLES.find(([prefix]) => pathname.startsWith(prefix));
-    document.title = `SPECTRA — ${hit?.[1] ?? 'Scenes'}`;
+    // "/" is Home now (§13 decision 10) — matched exactly, before the
+    // prefix scan below, since every path is technically a "/" prefix.
+    const title = pathname === '/'
+      ? 'Home'
+      : PAGE_TITLES.find(([prefix]) => pathname.startsWith(prefix))?.[1] ?? 'Home';
+    document.title = `SPECTRA — ${title}`;
   }, [pathname]);
 }
 
@@ -70,7 +79,10 @@ function NavBar() {
       }
     }}>
       <span className="logo">◆ SPECTRA</span>
-      <Link to="/scenes" className={cls((p) => p === '/' || p.startsWith('/scenes'))}>Scenes</Link>
+      {/* "/" is Home now (song-layout-plan §13 decision 10) — Scenes no
+        * longer claims the bare root route. */}
+      <Link to="/" className={cls((p) => p === '/')}>Home</Link>
+      <Link to="/scenes" className={cls((p) => p.startsWith('/scenes'))}>Scenes</Link>
       <Link to="/colorsets" className={cls((p) => p.startsWith('/colorsets'))}>Colours</Link>
       <Link to="/timeline" className={cls((p) => p === '/timeline')}>Timeline</Link>
       <Link to="/feedback" className={cls((p) => p === '/feedback')}>Feedback</Link>
@@ -93,7 +105,21 @@ function NavBar() {
 
 export default function App() {
   usePageTitle();
-  const { pathname } = useLocation();
+  useShowClockSeed();
+  const { pathname, search } = useLocation();
+
+  // THE KIOSK VIEW (/?kiosk=1 — song-layout-plan's kiosk section): no
+  // Spectra menu, just the one bar and Home, for a Home Assistant
+  // dashboard tab. Checked before every other route so a kiosk request
+  // can never fall through to the ordinary chrome.
+  if (isKioskRequested(search)) {
+    return (
+      <ToastProvider>
+        <KioskPage />
+      </ToastProvider>
+    );
+  }
+
   // The Live view's pop-out window: the stage alone, none of the app's bars
   // (the top strip would hold a second, summary-level view of the same feed).
   if (pathname === '/live') {
@@ -103,6 +129,10 @@ export default function App() {
       </ToastProvider>
     );
   }
+  // THE GLOBAL SONG TIMELINE (song-layout-plan §4) sits on every page
+  // except Home and Timeline, which carry their own editable copy (§13
+  // decision 5) — and not on the Live pop-out, handled above.
+  const hideSongStrip = pathname === '/' || pathname === '/timeline';
   return (
     <ToastProvider>
       {/* FIRST, above NavBar — this must genuinely be the top bar on every
@@ -114,9 +144,10 @@ export default function App() {
       <RoomControlsBar />
       <TopBarStrip />
       <RoomOwnershipBar />
-      <main>
+      {!hideSongStrip && <SongStrip />}
+      <main className={pathname === '/' ? 'home-route' : undefined}>
         <Routes>
-          <Route path="/" element={<ScenesPage />} />
+          <Route path="/" element={<HomePage />} />
           <Route path="/scenes" element={<ScenesPage />} />
           <Route path="/scenes/:id" element={<ScenesPage />} />
           <Route path="/colorsets" element={<ColorSetsPage />} />

@@ -65,6 +65,10 @@ nav a:hover, nav a.active {
 }
 
 main { flex: 1; padding: 16px; max-width: 1200px; margin: 0 auto; width: 100%; }
+/* Home's own timeline/audio-shape run edge to edge on desktop (song-layout-
+   plan §9 idea 8); its quick-run cards stay capped via .home-quick-runs's
+   own minmax(0, 560px) columns. */
+main.home-route { max-width: none; }
 /* Phone portrait: the nav keeps one row (four links + help) and content
  * padding narrows so cards use the width. */
 @media (max-width: 720px) {
@@ -2185,3 +2189,142 @@ button.linklike { background: none; border: none; padding: 0 4px; color: var(--a
 .show-playlist-step.off { opacity: 0.6; }
 .show-playlist-step-flags { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; }
 .show-playlist-song-search input[type='search'] { width: 100%; min-height: 40px; }
+
+/* ── song-layout-plan: the global song timeline (SongStrip.tsx) ───────── */
+.song-strip {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr) 96px 100px;
+  align-items: center;
+  gap: 14px;
+  height: 39px;
+  padding: 0 16px;
+  background: linear-gradient(180deg, var(--surface), var(--bg));
+  border-bottom: 1px solid var(--border);
+  position: relative;
+  z-index: 4;
+}
+.song-strip-song { display: flex; flex-direction: column; min-width: 0; justify-content: center; line-height: 1.15; }
+.song-strip-title-row { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.song-strip-song-title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.song-strip-song-artist { font-size: 0.8em; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.song-strip-track { position: relative; min-width: 0; }
+.song-strip-svg { width: 100%; height: 100%; display: block; }
+.song-strip-playhead { stroke: #fff; stroke-width: 2; filter: drop-shadow(0 0 3px rgba(255,255,255,0.6)); }
+.song-strip-next {
+  position: relative;
+  height: 28px;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  overflow: hidden;
+}
+.song-strip-next-fill { position: absolute; inset: 0; background: var(--accent, #7c5cff); opacity: 0.22; transform-origin: left; transform: scaleX(0); }
+.song-strip-next-icon { position: relative; color: var(--text-muted); }
+.song-strip-next-count { position: relative; }
+.song-strip-next-soon { border-color: var(--accent, #7c5cff); box-shadow: 0 0 6px rgba(124, 92, 255, 0.5); }
+.song-strip-next-soon .song-strip-next-icon,
+.song-strip-next-soon .song-strip-next-count { color: #fff; }
+.song-strip-next-flash { animation: song-strip-flash 0.6s ease-out; }
+@keyframes song-strip-flash { 0% { box-shadow: 0 0 0 2px var(--accent, #7c5cff); } 100% { box-shadow: none; } }
+.song-strip-time { font-size: 0.85em; color: var(--text-muted); text-align: right; white-space: nowrap; }
+
+@media (prefers-reduced-motion: reduce) {
+  .song-strip-next-flash { animation: none; }
+}
+
+@media (max-width: 1180px) {
+  .song-strip { grid-template-columns: 176px minmax(0, 1fr) 96px 88px; gap: 12px; }
+}
+@media (max-width: 900px) {
+  .song-strip { grid-template-columns: 128px minmax(0, 1fr) 96px 72px; }
+  .song-strip-song-artist { display: none; }
+}
+@media (max-width: 520px) {
+  .song-strip {
+    grid-template-columns: minmax(0, 1fr) 96px;
+    grid-template-rows: auto auto;
+    height: auto;
+    padding: 6px 12px;
+    gap: 4px 12px;
+  }
+  .song-strip-song { grid-row: 1; }
+  .song-strip-time { grid-row: 1; }
+  .song-strip-track { grid-row: 2; grid-column: 1; height: 20px; }
+  .song-strip-next { grid-row: 2; grid-column: 2; }
+}
+
+/* ── song-layout-plan: Home page (/) ──────────────────────────────────── */
+.home-page { display: flex; flex-direction: column; gap: 16px; }
+.home-timeline { display: flex; flex-direction: column; gap: 8px; }
+.home-timeline-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.home-timeline-eq { color: var(--accent, #7c5cff); }
+.home-timeline-song { display: flex; flex-direction: column; min-width: 0; margin-right: auto; }
+.home-timeline-toggles { display: flex; gap: 6px; }
+.home-timeline-follow, .home-timeline-fullsong {
+  width: 30px; height: 30px; border-radius: 6px; border: 1px solid var(--border);
+  background: var(--surface2); color: var(--text-muted); cursor: pointer;
+}
+.home-timeline-follow.on { color: #fff; background: var(--accent, #7c5cff); border-color: var(--accent, #7c5cff); }
+.home-timeline-strip { position: relative; height: 39px; background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; touch-action: none; }
+.home-timeline-window {
+  position: absolute; top: 0; bottom: 0; background: rgba(255,255,255,0.1);
+  border: 1px solid rgba(255,255,255,0.3); cursor: grab; z-index: 2;
+}
+.home-timeline-window-edge { position: absolute; top: 0; bottom: 0; width: 8px; cursor: ew-resize; }
+.home-timeline-window-edge.left { left: -4px; }
+.home-timeline-window-edge.right { right: -4px; }
+.home-timeline-next { font-size: 0.85em; color: var(--text-muted); }
+.home-timeline-shape { position: relative; height: 160px; min-height: 100px; resize: vertical; overflow: hidden; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); }
+.home-timeline-shape-canvas { width: 100%; height: 100%; display: block; }
+.home-timeline-shape-playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: #fff; box-shadow: 0 0 4px rgba(255,255,255,0.7); }
+
+.icon-toggle {
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 6px; border: 1px solid var(--border); background: var(--surface2);
+  color: var(--text-muted); cursor: pointer;
+}
+.icon-toggle.on { color: #fff; background: var(--accent, #7c5cff); border-color: var(--accent, #7c5cff); }
+
+.home-quick-runs { display: grid; grid-template-columns: repeat(2, minmax(0, 560px)); gap: 16px; }
+@media (max-width: 700px) { .home-quick-runs { grid-template-columns: minmax(0, 1fr); } }
+.home-quick-card { display: flex; flex-direction: column; gap: 8px; }
+.home-quick-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.home-quick-run-btn {
+  width: 100%; display: flex; align-items: center; gap: 10px; padding: 8px 10px;
+  border-radius: 6px; border: 1px solid var(--border); background: var(--surface2); cursor: pointer; text-align: left;
+}
+.home-quick-run-name { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.home-quick-run-sub { margin-left: auto; font-size: 0.85em; white-space: nowrap; }
+.home-quick-action-row { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border-radius: 6px; background: var(--surface2); border: 1px solid var(--border); }
+.home-quick-action-icons { display: flex; gap: 6px; align-items: center; margin-left: auto; }
+.home-quick-icon-btn { width: 30px; height: 30px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); cursor: pointer; color: var(--text-muted); }
+.home-quick-icon-btn.armed { color: #fff; background: var(--accent, #7c5cff); border-color: var(--accent, #7c5cff); }
+.home-quick-armed-tag { display: flex; align-items: center; gap: 8px; font-size: 0.85em; color: var(--text-muted); }
+.home-quick-toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.85); color: #fff; padding: 6px 14px; border-radius: 6px; z-index: 50; }
+
+@media (min-width: 1200px) {
+  .home-page { max-width: none; }
+  .home-timeline { max-width: none; }
+}
+
+/* ── song-layout-plan: kiosk view (/?kiosk=1) ─────────────────────────── */
+.kiosk-page {
+  --kiosk-width: 800px;
+  --kiosk-usable-height: 424px;
+  --kiosk-touch-target: 44px;
+  width: 100%;
+  min-height: var(--kiosk-usable-height);
+  overflow: hidden;
+  font-size: 15px;
+}
+.kiosk-main { padding: 8px 10px; overflow: auto; max-height: calc(var(--kiosk-usable-height) - 90px); }
+.kiosk-page .home-quick-runs { grid-template-columns: minmax(0, 1fr); }
+.kiosk-page button,
+.kiosk-page .icon-toggle,
+.kiosk-page .home-quick-icon-btn { min-width: var(--kiosk-touch-target); min-height: var(--kiosk-touch-target); }
+.kiosk-page .home-timeline-shape { display: none; }

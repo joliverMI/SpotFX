@@ -84,6 +84,16 @@ export const ICONS = {
   chevron: 'M9 6L15 12L9 18',
   /** Nested boxes — "run another set" (a set reference). */
   callSet: 'M3 5H13V11H3ZM11 13H21V19H11ZM8 11V16H11',
+  /** A framed picture with sunbeams — "scene change" (the song-layout-
+   * plan's global/Home song timeline next-event box, and the Scenes
+   * button, data/ui-layout-plan/report.md §4/§13 decision 6: no icon on
+   * the button itself, but the timeline's per-event type icon still
+   * needs one). */
+  scene: 'M3 5H21V19H3Z M3 15L8 10L13 15L16 12L21 17 M8.5 8A1.5 1.5 0 1 0 8.5 5A1.5 1.5 0 0 0 8.5 8Z',
+  /** One pulse spike — the generic "drop-sequence phase" glyph (charge /
+   * lull / drop all share it; the next-event box's own text distinguishes
+   * them, e.g. "Charge · drop 1" vs "Drop 1" — song-layout-plan §4). */
+  pulse: 'M3 12H8L10 6L14 18L16 12H21',
 } satisfies Record<string, string>;
 
 export type IconName = keyof typeof ICONS;

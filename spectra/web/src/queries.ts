@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect } from 'react';
 import { apiDel, apiGet, apiPost, apiPostForm, apiPut, spotfxDel, spotfxGet, spotfxPost } from './api/client';
 import { onSpectraMessage } from './api/spectraWs';
+import { seedShowClockFromStatus } from './lib/showClock';
 import type { LiveLayout } from './live/positions';
 import type { RoomPlacement, RoomPose, RoomView } from './live/roomMap';
 import type { CurvePoint } from './components/CurveEditor';
@@ -806,6 +807,32 @@ export function useEngineStatus() {
     queryKey: ['spectra-engine-status'],
     queryFn: () => apiGet<EngineStatus>('/engine/status'),
     refetchInterval: 3000,
+  });
+}
+
+/** THE ONE SHOW CLOCK's poll-side backstop (lib/showClock.ts): every time
+ * this 3 s poll lands, feed its `bridge.track.show_clock_ms` into the
+ * module-level clock anchor — same push-plus-poll-backstop shape as
+ * useAmbientStatusPush, applied to the show clock instead of ambient
+ * phase. Mount once, high in the tree, beside useAmbientStatusPush. */
+export function useShowClockSeed() {
+  const { data } = useEngineStatus();
+  useEffect(() => {
+    seedShowClockFromStatus(data?.bridge.track ?? null);
+  }, [data]);
+}
+
+/** The merged "what will fire" list for one song (spectra/api/upcoming.py
+ * — song-layout-plan §4/§7/§12), the single source for the global song
+ * timeline / Home's editable copy's markers and next-event box. */
+export function useUpcoming(uri: string | null, limit = 50) {
+  return useQuery({
+    queryKey: ['spectra-upcoming', uri, limit],
+    queryFn: () => apiGet<import('./components/songStrip').UpcomingResponse>(
+      `/upcoming?uri=${encodeURIComponent(uri!)}&limit=${limit}`),
+    enabled: !!uri,
+    refetchInterval: 15_000,
+    retry: false,
   });
 }
 

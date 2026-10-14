@@ -3,7 +3,6 @@
  * circles. Debug-only layers (live mirror, anchors, xcorr windows, spikes)
  * have data contracts in frame.ts and are implemented when debug migrates. */
 import type { CanvasFrame, CanvasLayer, Hit } from './frame';
-import { drawnPlayheadMs } from '../hooks/followWindow';
 import { AVG_COLORS, MARK_ABBR, MARK_COLOR, computeBlendSpans } from './data';
 import type { MarkType } from '../types';
 // Reused verbatim from the debug page (PR fm/planned-event-markers) — the
@@ -34,10 +33,22 @@ function maxRmsFor(f: CanvasFrame, idx: number[]): number {
   return raw * f.view.scales.total * f.view.scaleOverall;
 }
 
-/** Legacy semantics (shape_canvas.js): the shape offset shifts the PLAYHEAD
- * (playhead layer draws at drawnPlayheadMs(nowMs, offsetMs) — the follow
- * window anchors on that same function, ../hooks/followWindow.ts); RMS data, triggers, marks and
- * librosa overlays all draw at their raw timestamps. */
+/** RMS data, triggers, marks and librosa overlays all draw at their raw
+ * timestamps (unchanged from the legacy shape_canvas.js port). The
+ * PLAYHEAD used to be the one exception — drawn at nowMs + the shape
+ * offset (`drawnPlayheadMs`, ../hooks/followWindow.ts) — which the
+ * song-layout-plan's ONE CLOCK retired (data/ui-layout-plan/report.md
+ * §4.1/§7, his own "perfectly matched" ask): the playhead layer below
+ * now draws `f.nowMs` verbatim, the SAME value every other lane (the
+ * global/Home song strips, the Timeline's SPECTRA trigger strips) reads
+ * from lib/showClock.ts — so it is finally on the SAME raw-timestamp
+ * frame as the data it moves across, not a second, shifted idea of
+ * "now". `drawnPlayheadMs`/`followWindowFor` (../hooks/followWindow.ts)
+ * are unchanged as PURE arithmetic — only this layer's call site
+ * changed, dropping the shift argument it used to pass. The debug
+ * page's own playhead (canvas/layers.ts is shared with DebugPage.tsx)
+ * is unaffected: it always passed `view.offsetMs: 0` and does its own
+ * shifting entirely inside its own `getCanvasNowMs`. */
 const dataX = (f: CanvasFrame, ms: number) => f.timeToX(ms);
 
 // ── 0: intensity background — total RMS / bass RMS / section energy /
@@ -518,7 +529,10 @@ export const playhead: CanvasLayer = {
   visible: (f) => f.nowMs !== null,
   draw(f) {
     const { ctx } = f;
-    const ms = drawnPlayheadMs(f.nowMs!, f.view.offsetMs);
+    // ONE CLOCK (dataX's own docstring above): draw f.nowMs verbatim, no
+    // added shift — the caller (BuilderPage's getStripNowMs, DebugPage's
+    // own getCanvasNowMs) already supplies the exact right moment.
+    const ms = f.nowMs!;
     if (ms >= f.win.startMs && ms <= f.win.endMs) {
       const x = f.timeToX(ms);
       ctx.save();

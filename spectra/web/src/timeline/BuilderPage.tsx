@@ -12,8 +12,8 @@ import { FLARE_MARKER_COLOR, SCENE_MARKER_COLOR, songPositionMarkers } from '../
 import { LIGHT_SHOW_COLOR, lightShowCueMarkers, sceneChangeArms } from './lightShowMarkers';
 import AnalysedEventsStrip from './components/AnalysedEventsStrip';
 import { usePlayhead } from './hooks/usePlayhead';
+import { getShowClockMs } from '../lib/showClock';
 import { useFollowWindow } from './hooks/useFollowWindow';
-import { drawnPlayheadMs } from './hooks/followWindow';
 import TimelineCanvas from './canvas/TimelineCanvas';
 import { BUILDER_LAYERS } from './canvas/layers';
 import { BEAT_STRIP_H, snapRailHFor, stripCountFor, type IntensityBgMode, type LayerDataBag, type ViewState } from './canvas/frame';
@@ -49,6 +49,24 @@ const ALL_MARKS: Record<MarkType, boolean> = {
 
 export default function BuilderPage() {
   const { getNowMs, coarseMs } = usePlayhead();
+  // ONE CLOCK (song-layout-plan, data/ui-layout-plan/report.md §4.1/§7,
+  // and his own "perfectly matched" ask): the SPECTRA trigger strip, the
+  // drop-sequence strip's "played" fill, the Timeline bar AND the
+  // audio-shape canvas's own playhead all draw this SAME function —
+  // never a per-lane approximation. Falls back to the raw interpolation
+  // while the show clock hasn't anchored yet. This ALSO retires the
+  // audio-shape canvas's old audio_latency_ms-subtract +
+  // shape-offset-add playhead math (formerly getCanvasNowMs/getPlayheadMs
+  // in this file, now removed) — that shift existed only to match the
+  // raw progress clock the strips used to draw; now that every lane
+  // shares one clock there is nothing left to reconcile. The canvas's
+  // own RMS/trigger DATA was already
+  // drawn in raw, unshifted song time (debug/plannedEvents.ts's own
+  // docstring), so the playhead was actually MISALIGNED against its own
+  // canvas before this — not just against the strips.
+  const getStripNowMs = useCallback(() => getShowClockMs() ?? getNowMs(),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []);
   const track = useBuilderStore((s) => s.track);
   const manualUri = useBuilderStore((s) => s.manualUri);
   const liveMode = useBuilderStore((s) => s.liveMode);
@@ -121,30 +139,21 @@ export default function BuilderPage() {
 
   const durationMs = profile?.duration_ms || meta?.duration_ms || track?.duration_ms || 1;
 
-  // Canvas playhead shows the AUDIBLE moment: raw progress minus the audio
-  // chain latency (legacy: setPlayhead(p - audio_latency_ms)). The timeline
-  // bar uses raw progress, matching legacy. The playhead LAYER draws that
-  // audible moment shifted by the song's shape offset (view.offsetMs), so the
-  // FOLLOW WINDOW anchors on exactly that drawn position — never the raw
-  // clock, which on a song with a large stored offset (Pop Off: 14,450 ms)
-  // left the playhead drawn past the window's right edge for the whole
-  // song. See hooks/followWindow.ts.
-  const audioLatencyRef = useRef(0);
-  audioLatencyRef.current = Number(settings?.audio_latency_ms ?? 0);
-  const shapeOffsetRef = useRef(0);
-  shapeOffsetRef.current = Number(meta?.timestamp_offset_ms ?? 0);
-  const getCanvasNowMs = useCallback(() => {
-    const now = getNowMs();
-    return now === null ? null : now - audioLatencyRef.current;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  const getPlayheadMs = useCallback(() => {
-    const now = getCanvasNowMs();
-    return now === null ? null : drawnPlayheadMs(now, shapeOffsetRef.current);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // THE AUDIO-SHAPE CANVAS PLAYHEAD now draws the ONE CLOCK too (his own
+  // "perfectly matched" ask) — the SAME getStripNowMs the strips use, not
+  // a second function that merely happens to agree. `drawnPlayheadMs`'s
+  // old audio_latency_ms-subtract + shape-offset-add formula is RETIRED
+  // here: this canvas's own RMS/trigger data already draws in raw,
+  // unshifted song time, so that shift was misaligning the playhead
+  // against its own canvas, not just against the strips. The FOLLOW
+  // WINDOW still anchors on exactly the drawn position
+  // (hooks/followWindow.ts's own rule) — trivially true now that both
+  // are the identical function. `meta`'s own `timestamp_offset_ms` is
+  // still read below for `view.offsetMs`, which the CALIBRATION layer
+  // alone consumes (capture-data-time targets) — an unrelated, unchanged
+  // use of the same stored field.
   const followWin = useFollowWindow({
-    getNowMs: getPlayheadMs,
+    getNowMs: getStripNowMs,
     durationMs,
     seedWindowS: settings ? Number(settings.builder_zoom_window_s ?? 30) : undefined,
     seedFutureS: settings ? Number(settings.builder_future_buffer_s ?? 10) : undefined,
@@ -391,7 +400,7 @@ export default function BuilderPage() {
           triggers={workingTriggers}
           events={data.events}
           getWin={followWin.getWin}
-          getNowMs={getNowMs}
+          getNowMs={getStripNowMs}
           follow={followWin.follow}
           onManualWin={(w) => { followWin.setFollow(false); followWin.setManualWin(w); }}
           onAdjustFollow={(edge, deltaMs) => {
@@ -422,7 +431,7 @@ export default function BuilderPage() {
         uri={uri}
         durationMs={durationMs}
         getWin={followWin.getWin}
-        getNowMs={getNowMs}
+        getNowMs={getStripNowMs}
         below={uri ? (
           <>
             {showAnalysedEvents && (
@@ -457,7 +466,7 @@ export default function BuilderPage() {
               capturedFromMs={dropCapturedFrom}
               selectedKey={dropSel}
               getWin={followWin.getWin}
-              getNowMs={getNowMs}
+              getNowMs={getStripNowMs}
               onPick={(key) => { dropUi.select(key); jumpToDrop(key); }}
             />
             </div>
@@ -523,7 +532,7 @@ export default function BuilderPage() {
               disabled={!profile}
               title="Add a trigger at the current playhead"
               onClick={() => {
-                const now = getNowMs() ?? 0;
+                const now = getStripNowMs() ?? 0;
                 useBuilderStore.getState().setEditingTrigger(`new:${Math.round(now / 20) * 20}`);
               }}
             >
@@ -538,7 +547,7 @@ export default function BuilderPage() {
           data={data}
           view={view}
           getWin={followWin.getWin}
-          getNowMs={getCanvasNowMs}
+          getNowMs={getStripNowMs}
           height={totalCanvasHeight}
           pointer={{
             ...triggerPointer,

@@ -32,6 +32,7 @@ from fastapi.staticfiles import StaticFiles
 
 from spectra import config
 from spectra.api import analysed_plan as analysed_plan_api
+from spectra.api import upcoming as upcoming_api
 from spectra.api import drop_sequences as drop_sequences_api
 from spectra.api import calibrations as calibrations_api
 from spectra.api import capture_queue as capture_queue_api
@@ -83,6 +84,24 @@ class SPAStaticFiles(StaticFiles):
 def create_app() -> FastAPI:
     app = FastAPI(title="SPECTRA", version="0.1.0")
 
+    # THE KIOSK VIEW's framing header (song-layout-plan, data/ui-layout-
+    # plan/report.md's kiosk section): Home Assistant hosts `/?kiosk=1` in
+    # a dashboard-tab iframe, which the browser refuses outright with no
+    # `frame-ancestors` allow-list. Set unconditionally (not just for
+    # kiosk requests) — the header only ever RELAXES framing for the
+    # named origins and has no other effect, so a non-kiosk page carries
+    # it for free rather than needing a second code path to decide when
+    # to add it. See config.kiosk_frame_ancestors's own docstring for why
+    # an HTTPS Home Assistant view (the phone app's remote access) is NOT
+    # covered by this and is not expected to be.
+    @app.middleware("http")
+    async def _kiosk_frame_ancestors(request, call_next):
+        response = await call_next(request)
+        origins = config.kiosk_frame_ancestors()
+        response.headers["Content-Security-Policy"] = (
+            "frame-ancestors " + (" ".join(origins) if origins else "'none'"))
+        return response
+
     app.include_router(scenes.router)
     app.include_router(sequencer.router)
     app.include_router(registry.router)
@@ -99,6 +118,7 @@ def create_app() -> FastAPI:
     app.include_router(triggers.router)
     app.include_router(fire_history.router)
     app.include_router(analysed_plan_api.router)
+    app.include_router(upcoming_api.router)
     app.include_router(drop_sequences_api.router)
     app.include_router(feedback.router)
     app.include_router(show_review.router)
@@ -330,13 +350,22 @@ async def _standalone_lifespan(app):
     from spectra.services import house_fixtures
     house_fixtures_task = asyncio.create_task(
         house_fixtures.run_supervised(), name="spectra-house-fixtures")
+    # THE ONE SHOW CLOCK's 1 Hz push (song-layout-plan, data/ui-layout-plan/
+    # report.md §4.1): every browser lane anchors on the identical
+    # `show_clock_ms` the trigger poll fires against, pushed on the
+    # SPECTRA websocket, with `GET /api/engine/status`'s own
+    # `bridge.track.show_clock_ms` as the poll backstop. Display only —
+    # feeds nothing back into the fire path.
+    clock_push_task = asyncio.create_task(
+        engine.run_clock_push_supervised(), name="spectra-clock-push")
     logger.info("SPECTRA started — own process, pid %d", os.getpid())
     yield
     all_tasks = (watchdog_task, reconciler_task, ambient_verify_task,
                 flare_preview_sweep_task, param_watchdog_task,
                 activation_recheck_task, dark_fixture_task,
                 known_buffer_poll_task, known_buffer_sse_task,
-                light_show_task, house_task, house_fixtures_task)
+                light_show_task, house_task, house_fixtures_task,
+                clock_push_task)
     for task in all_tasks:
         task.cancel()
     for task in all_tasks:

@@ -36,7 +36,9 @@ const ROUTE_TOPICS: [prefix: string, topic: string][] = [
  * has no known page-level topic (the "?" should fall back to the plain
  * index rather than guess). */
 export function topicForPath(pathname: string): string | null {
-  if (pathname === '/') return 'scenes-page';
+  // "/" is Home now (song-layout-plan §13 decision 10) — matched exactly,
+  // before the prefix scan, since every path is technically a "/" prefix.
+  if (pathname === '/') return 'home-page';
   const hit = ROUTE_TOPICS.find(([prefix]) => pathname.startsWith(prefix));
   return hit ? hit[1] : null;
 }

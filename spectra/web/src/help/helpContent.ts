@@ -814,6 +814,24 @@ export const HELP_SECTIONS: HelpSection[] = [
       'App status (scene count, light ownership from the durable record, which lights the last take-back/restart brought up and which it had to skip — see "A light the take-back had to skip", which streamed lights are reading back dark or not answering — see "A light that is dark or not answering while SPECTRA streams to it", bridge state, sequencer state, room journey) plus the evolution-engine card: journey custody, active scene and legs, bridge health, recorded writes, the parameter watchdog\'s count.',
   },
   {
+    id: 'home-page',
+    title: 'Home',
+    keywords: 'landing home timeline window follow quick sequences actions song strip',
+    intro:
+      'The landing page ("/"). An editable copy of the song timeline: the whole song with the playhead, scene changes (cyan squares), flares (lime circles), drop sequences (gold charge, sky-blue lull, magenta drop), and High/Low Trigger flags — only the moments that will actually fire, never a guess at what might. Three icon toggles show/hide analysed events, drop sequences and the Light Show flags. Drag the window\'s body to pan, an edge to zoom; ⌖ snaps back to following the playhead, ↔ shows the whole song. Below it, the audio shape shares the SAME playhead. Quick sequences and Quick actions below that run his recent sequences and sets with one tap, without opening the Light Show page.',
+    entries: [
+      {
+        id: 'song-timeline',
+        title: 'The song timeline (every other page)',
+        keywords: 'global strip next event countdown playhead one clock',
+        body: [
+          'A thin, read-only strip between the menu and the top bar on every page except Home and the Timeline page (which carry their own editable copy): song and artist at the left, the whole song with the same markers Home shows, and on the right the next thing that will fire — its type and a countdown to a tenth of a second. Inside the last three seconds the box glows and fills as the moment approaches.',
+          'Every playhead in the app — this strip, Home\'s own copy, and (where it reuses the same clock) the Timeline page\'s strips — reads the ONE SHOW CLOCK: the exact moment the trigger engine fires against, not raw Spotify playback position. Before this, different pages could each read a different "now" for the same song.',
+        ],
+      },
+    ],
+  },
+  {
     id: 'ownership',
     title: 'Light ownership & handover (S3)',
     keywords:

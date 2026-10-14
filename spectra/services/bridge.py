@@ -186,6 +186,18 @@ class SpotEffectsBridge:
     def track_uri(self) -> Optional[str]:
         return (self._track or {}).get("spotify_uri")
 
+    def track_artist(self) -> Optional[str]:
+        """SpotFX's own `track.artist` (services/websocket_manager.py's
+        broadcast_state already carries it — this bridge simply never
+        parsed it before the song-timeline plan). None with no track."""
+        return (self._track or {}).get("artist") or None
+
+    def track_duration_ms(self) -> Optional[int]:
+        """SpotFX's own `track.duration_ms`. None with no track or an
+        unreported length."""
+        d = (self._track or {}).get("duration_ms")
+        return int(d) if isinstance(d, (int, float)) else None
+
     def context_uri(self) -> Optional[str]:
         """The Spotify context the song is playing from ("spotify:playlist:
         …", an album, an artist), as SpotFX reads it off Spotify's own
@@ -440,6 +452,12 @@ class SpotEffectsBridge:
             "track": ({
                 "uri": self.track_uri(),
                 "title": (self._track or {}).get("title"),
+                # Song-timeline plan (data/ui-layout-plan/report.md §7):
+                # artist + duration were already on SpotFX's own broadcast,
+                # just never parsed here before the global/Home timeline
+                # needed them for its "2:07 / 3:09" readout.
+                "artist": self.track_artist(),
+                "duration_ms": self.track_duration_ms(),
                 "is_playing": (self._track or {}).get("is_playing"),
                 "device_name": self.device_name(),
                 "position_ms": self.track_position_ms(),
