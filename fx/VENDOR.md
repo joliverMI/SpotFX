@@ -2384,4 +2384,5 @@ against that commit.
     returns it untouched); "implode" restores the vendored lull. Evidence:
     `tests/test_star_phases.py`, `tests/test_star_programs.py` (real
     pipeline: a real Melt strip under a real Radial,
-    `tests/star_harness.py`). Unverified against his live room.
+    `tests/star_harness.py`), `scripts/check_star_phases.py` (the same rig,
+    printed). Unverified against his live room.

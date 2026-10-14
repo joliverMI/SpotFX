@@ -620,7 +620,7 @@ export default function RoomControlsBar() {
             </div>
             <div className="top-bar-group-field">
               <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}
-                title="The longest a lull stays fully dark on Black Hole, Squiggles and Pulse. A lull is dark for half its length, never longer than this.">
+                title="The longest a lull stays fully dark on Black Hole, Squiggles, Pulse and Star. A lull is dark for half its length, never longer than this.">
                 Lull darkness (max)
                 <HelpLink topic="lull-dark-cap" />
               </label>
@@ -648,7 +648,7 @@ export default function RoomControlsBar() {
             </div>
             <div className="top-bar-group-field">
               <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}
-                title="How long the lights go to true black right before a drop lands (the crystal's Black Hole, Sauron and Eye, and the Pulse singles; Orbits only dims to one dim blob and the Fish keeps swimming). Never longer than the lull's own darkness. 0 = none.">
+                title="How long the lights go to true black right before a drop lands (the crystal's Black Hole, Sauron and Eye, Star, and the Pulse singles; Orbits only dims to one dim blob and the Fish keeps swimming). Never longer than the lull's own darkness. 0 = none.">
                 Breath-hold before drop
                 <HelpLink topic="drop-breath-hold" />
               </label>
@@ -682,8 +682,8 @@ export default function RoomControlsBar() {
                   size={22}
                   ariaLabel="Drop Shockwave"
                   title={local.drop_shock_enabled
-                    ? 'On — the crystal effects (Black Hole, Orbits, Sauron, Eye, Fish) and the strips paint the Shockwave over their own drop, on scenes that allow it and drops above the minimum energy. Tap to turn off everywhere.'
-                    : 'Off — no Shockwave on any drop, crystal or strips; every effect\'s own drop plays as before. Tap to turn on.'}
+                    ? 'On — the crystal effects (Black Hole, Orbits, Sauron, Eye, Fish) and the strips paint the Shockwave over their own drop, Star\'s bands snap back out of the core, on scenes that allow it and drops above the minimum energy. Tap to turn off everywhere.'
+                    : 'Off — no Shockwave on any drop, crystal or strips, and Star plays the plain bloom instead of snapping its bands back; every other effect\'s own drop plays as before. Tap to turn on.'}
                 />
                 Drop Shockwave
                 <HelpLink topic="drop-shockwave-switches" />

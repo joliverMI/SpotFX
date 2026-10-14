@@ -499,8 +499,9 @@ export interface RoomControlState {
    * keeps 9 of 11). */
   drop_floor: number;
   /** The longest a lull stays fully dark, in seconds, on the lull-dark
-   * effects (Black Hole, Squiggles, Pulse): a lull holds dark for half its
-   * length, never longer than this (fx/effects/lull_dark.py). Default 3. */
+   * effects (Black Hole, Squiggles, Pulse, Star/Radial): a lull holds dark
+   * for half its length, never longer than this (fx/effects/lull_dark.py).
+   * Default 3. */
   lull_dark_max_s: number;
   /** THE STRIP PHASE LAYER's master (fx/effects/strip_phase.py): how
    * strongly the strip effects answer charge/lull/drop. 0 = off (the strips
@@ -513,9 +514,9 @@ export interface RoomControlState {
   background_fade_s: number;
   /** THE BREATH-HOLD before a drop (fx/effects/phase_grammar.py): how long
    * the lights go to true black right before a drop lands — the crystal's
-   * Black Hole, Sauron and Eye, and the Pulse singles (Orbits only dims to
-   * one dim blob; the Fish is never darkened). Never longer than the
-   * lull's own darkness allows. 0 = none. Default 0.4. */
+   * Black Hole, Sauron and Eye, the Pulse singles, and Star/Radial (Orbits
+   * only dims to one dim blob; the Fish is never darkened). Never longer
+   * than the lull's own darkness allows. 0 = none. Default 0.4. */
   lull_breath_hold_s: number;
   /** THE DROP TIMING OFFSET (spectra/services/drop_timing.py): how far off
    * its mark every drop fires, ms — NEGATIVE = earlier, 0 = on the mark.
@@ -525,11 +526,14 @@ export interface RoomControlState {
   drop_timing_offset_ms: number;
   /** THE DROP SHOCKWAVE'S ROOM SWITCH (fx/effects/phase_grammar.py,
    * scene_response._drop_shock_keys): off = no Shockwave on any drop,
-   * crystal or strips; every effect's own drop unchanged. Default on. */
+   * crystal or strips; every Shockwave member's own drop unchanged. Star
+   * is told the same verdict (fx/effects/radial.py) — off, it plays the
+   * plain bloom instead of snapping its bands back out of the core.
+   * Default on. */
   drop_shock_enabled: boolean;
-  /** The Shockwave paints only when the top bar's Energy (bridge.intensity)
-   * at the drop is at least this. Default 0.7; 0 = every drop; an unknown
-   * energy is never gated. */
+  /** The Shockwave paints, and Star's bands snap back, only when the top
+   * bar's Energy (bridge.intensity) at the drop is at least this. Default
+   * 0.7; 0 = every drop; an unknown energy is never gated. */
   drop_shock_min_energy: number;
   /** THE PULSE FLASH'S ENERGY FLOOR (scene_response.pulse_flash_allowed):
    * the Pulse flash flare fires only when the top bar's Energy is at least

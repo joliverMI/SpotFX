@@ -66,18 +66,20 @@ export default function PhaseTab({ scene, setScene, scenes }: {
           size={22}
           ariaLabel="Drop Shockwave on this scene"
           title={scene.drop_shock_enabled !== false
-            ? 'On — this scene\'s drops may paint the Shockwave (when the room\'s own switch and minimum energy allow). Tap to turn it off for this scene.'
-            : 'Off — this scene\'s drops never paint the Shockwave; the effect\'s own drop still plays. Tap to turn on.'}
+            ? 'On — this scene\'s drops may paint the Shockwave (when the room\'s own switch and minimum energy allow), or — on STAR — snap its bands back out of the core. Tap to turn it off for this scene.'
+            : 'Off — this scene\'s drops never paint the Shockwave, and STAR plays the plain bloom instead of snapping its bands back; every other effect\'s own drop still plays. Tap to turn on.'}
         />
         Drop Shockwave <HelpLink topic="drop-shockwave-switches" />
       </div>
       <div style={{ background: 'var(--surface2)', padding: 12, borderRadius: 'var(--radius)', fontSize: 13, lineHeight: 1.6 }}>
         {scene.drop_shock_enabled !== false ? (
-          <>The crystal paints the <b>Shockwave</b> over this scene's own drop — when the room's
+          <>The crystal paints the <b>Shockwave</b> over this scene's own drop — or, on STAR,
+            snaps its bands back out of the core — when the room's
             Drop Shockwave switch is on and the drop clears its minimum energy (Scenes panel in
             the top bar).</>
         ) : (
-          <>Shockwave <b>off</b> for this scene — its drops play the effect's own drop alone.</>
+          <>Shockwave <b>off</b> for this scene — its drops play the effect's own drop alone
+            (on STAR, the plain bloom instead of the bands snapping back).</>
         )}
       </div>
       <div style={{ fontSize: 12, marginTop: 8, color: 'var(--text-muted)' }}>

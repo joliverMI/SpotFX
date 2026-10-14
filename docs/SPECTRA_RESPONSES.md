@@ -186,13 +186,41 @@ fish never survives the moment it was granted for — the rush's own settle
 clears the tag on the keepers and departs the rest, the drop and a return to
 `phase: none` both release any left over.
 
-### Radial (`radial.py`)
+### Radial / Star (`radial.py`) — the star plan, 2026-10-13
 
 - **Charge** — the spin accelerates in the pattern's apparent direction,
   ease-in so the spin-up peaks exactly at the ramp end.
-- **Lull** — the whole pattern implodes to a held center point
-  (`_phase_warp`), background fading with it.
-- **Drop** — the pattern blooms back out over 0.5 s.
+- **Lull** — `lull_mode` "bands" (the default, his "lull b"): a rim cut
+  sweeps the shaped pattern inward, band by band; every lit cell it passes
+  breaks off as a piece that keeps the ring's own rotation (Star's
+  rotating frame) and spirals into the core, where it is kept for the
+  drop. Star is in `fx.device_model.LULL_DARK_EFFECTS` and reaches true
+  black itself, at the same shared dark point Black Hole/Squiggles/Pulse/
+  the strip-phase members do (`lull_dark.lull_timing`) — every piece is
+  in by then. `lull_mode` "implode" is the original warp: the whole
+  pattern implodes to a held center point (`_phase_warp`), background
+  fading with it — still selectable, and what a drop with nothing kept
+  falls back to.
+- **Drop** — D3 (his "drop d 3"): the pieces the lull kept are thrown back
+  out of the core along their own angle and snap onto the band they came
+  from as the bloom reveals the pattern, wearing a hue-kept colour gain
+  (`drop_snap_gain`, ×1.6 by default, settling over `drop_snap_decay_s`) —
+  more colour, never white. It is Star's own drop, not the shared
+  Shockwave (Star is never a `DROP_SHOCK_EFFECTS` member), but SpotFX
+  tells it the same `drop_shock_on` verdict as the Shockwave's three
+  switches (room/scene/top-bar-energy) — told False, or with nothing kept
+  (an implode lull, a charge straight into a drop, the orphan watchdog's
+  quiet release), the drop is the plain bloom over 0.5 s, unchanged from
+  before this plan.
+- Star also takes the breath-hold true black in its own draw
+  (`fx.device_model.BREATH_HOLD_EFFECTS`, like Pulse) — a no-op while
+  "bands", since the lull is already dark there by the shared dark point,
+  same as Black Hole.
+
+Out of Star, a scene change runs a thematic transition program instead
+of this drop (`AGENTS.md`'s "TRANSITION PROGRAMS" section, "OUT OF STAR");
+into Star is still the choreographed bloom. The radial-effect skill is
+the full mechanism detail for all of the above.
 
 ### Fireworks (`fireworks.py`, strip translation `fireworks1d.py`)
 

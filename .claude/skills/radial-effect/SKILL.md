@@ -166,7 +166,10 @@ Sonic write access.
 (a real Melt strip under a real Radial — Star renders black without it),
 `tests/test_star_phases.py` (lull B black on the dark point, D3 no-white,
 the switches, the morph), `tests/test_star_programs.py` (every program out
-of Star on the real `set_effect(program=)` hook). The warp background fix is proven in
+of Star on the real `set_effect(program=)` hook), `scripts/
+check_star_phases.py` (the same rig, printed: lull B's lit/falling/kept
+cells every 0.1 s, D3's lit/white cells after the drop, and every program
+out of Star's largest frame-to-frame change and white-cell count). The warp background fix is proven in
 `tests/test_matrix_overwrite_background_double_apply.py`
 (`test_radial_warp_background_applies_once_not_twice`,
 `test_radial_background_recovers_after_a_warp_ends`). History: AGENTS.md's

@@ -296,10 +296,11 @@ SETTINGS_REGISTRY: dict[str, SettingSpec] = {
     "lull_dark_max_s": _spec(
         "lull_dark_max_s", "Lull darkness (max)",
         "The longest a lull stays fully dark, in seconds, on the lull "
-        "effects that go dark (Black Hole, Squiggles, Pulse). A lull holds "
-        "dark for half its length, never longer than this — the rest is "
-        "its build-up (the black hole's event horizon expanding, "
-        "Squiggles' screen squashing, Pulse fading). So at the default 3 "
+        "effects that go dark (Black Hole, Squiggles, Pulse, Star). A "
+        "lull holds dark for half its length, never longer than this — "
+        "the rest is its build-up (the black hole's event horizon "
+        "expanding, Squiggles' screen squashing, Pulse fading, Star's "
+        "bands falling into the core). So at the default 3 "
         "a 20-second lull is 17 seconds of build-up and 3 of dark, and a "
         "4-second lull is still 2 and 2. 0 = the lull only goes dark on "
         "its drop. Takes effect on the very next lull. Convert spoken "
@@ -333,12 +334,13 @@ SETTINGS_REGISTRY: dict[str, SettingSpec] = {
     "lull_breath_hold_s": _spec(
         "lull_breath_hold_s", "Breath-hold before the drop",
         "How long the lights go to true black right before a drop lands, "
-        "in seconds — on the crystal's Black Hole, Sauron and Eye, and on "
-        "the Pulse singles — so the drop is born out of black. Orbits only "
-        "dims to one dim blob and the Fish keeps swimming (never fully "
-        "dark). Never longer than the lull's own darkness allows (half the "
-        "lull, capped by 'Lull darkness (max)'). 0 = no breath-hold. "
-        "Default 0.4. Takes effect on the very next lull."),
+        "in seconds — on the crystal's Black Hole, Sauron and Eye, on "
+        "the Pulse singles, and on Star — so the drop is born out of "
+        "black. Orbits only dims to one dim blob and the Fish keeps "
+        "swimming (never fully dark). Never longer than the lull's own "
+        "darkness allows (half the lull, capped by 'Lull darkness "
+        "(max)'). 0 = no breath-hold. Default 0.4. Takes effect on the "
+        "very next lull."),
     "drop_timing_offset_ms": _spec(
         "drop_timing_offset_ms", "Drop timing",
         "How far off its mark every drop fires, in milliseconds — "
@@ -362,18 +364,21 @@ SETTINGS_REGISTRY: dict[str, SettingSpec] = {
         "drop_shock_enabled), and quiet drops can be left out with "
         "'Shockwave minimum energy'. The strips' own drop shockwave follows "
         "the same switch (the strips' colour and activity burst still "
-        "plays). Takes effect on the very next drop."),
+        "plays). Star does not paint the Shockwave itself — this switch "
+        "instead decides whether its own bands snap back out of the core "
+        "on the drop (off: the plain bloom). Takes effect on the very "
+        "next drop."),
     "drop_shock_min_energy": _spec(
         "drop_shock_min_energy", "Shockwave minimum energy (top-bar Energy)",
-        "The drop Shockwave (on the crystal and on the strips) only paints "
-        "when the top bar's Energy reading (the ⚡ Energy number, exactly "
-        "as shown) is at least this much at the moment of the drop. "
-        "Default 0.7. 0 = every drop gets it. A "
-        "song's loudest section reads exactly 1.0, so even 1.0 still lets "
-        "that section's drops through — to stop it entirely turn the "
-        "Shockwave off instead. When the energy can't be read (no "
-        "analysis for the song) the drop is not held back. Takes effect "
-        "on the very next drop."),
+        "The drop Shockwave (on the crystal and on the strips), and Star's "
+        "own bands snapping back, only happen when the top bar's Energy "
+        "reading (the ⚡ Energy number, exactly as shown) is at least this "
+        "much at the moment of the drop. Default 0.7. 0 = every drop gets "
+        "it. A song's loudest section reads exactly 1.0, so even 1.0 "
+        "still lets that section's drops through — to stop it entirely "
+        "turn the Shockwave off instead. When the energy can't be read "
+        "(no analysis for the song) the drop is not held back. Takes "
+        "effect on the very next drop."),
     "pulse_flash_min_energy": _spec(
         "pulse_flash_min_energy", "Pulse flash minimum energy (top-bar Energy)",
         "The Pulse singles' flash flare (the brightness spike) only fires "

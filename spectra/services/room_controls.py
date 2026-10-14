@@ -653,10 +653,11 @@ class RoomControlState(BaseModel):
     # change). So if we have a 20 second lull ... Now it would be 17 seconds
     # of expansion and 3 seconds of dark. Pulse should match"). A lull
     # effect (fx.device_model.LULL_DARK_EFFECTS — Black Hole, Squiggles,
-    # Pulse) holds dark for half the lull, never longer than this many
-    # seconds; the rest of the lull is its approach (the event horizon's
-    # expansion, Squiggles' thinning chains, Pulse's fade). The rule itself
-    # is ONE function, fx/effects/lull_dark.py's dark_hold_s; SpotFX
+    # Pulse and, since 2026-10-13 (the star plan), Star/Radial) holds dark
+    # for half the lull, never longer than this many seconds; the rest of
+    # the lull is its approach (the event horizon's expansion, Squiggles'
+    # thinning chains, Pulse's fade, Star's bands still falling). The rule
+    # itself is ONE function, fx/effects/lull_dark.py's dark_hold_s; SpotFX
     # applies it on every lull arm (scene_response._drive_phase), so a
     # change reaches the very next lull — nothing is re-planned. 0 = the
     # lull only goes dark on its drop.
@@ -691,8 +692,9 @@ class RoomControlState(BaseModel):
     # THE BREATH-HOLD (transitions-drop plan, his Q2: "a 0.4 s true black
     # just before the drop, as a setting"). Every breathing effect
     # (fx.device_model.BREATH_HOLD_EFFECTS — Black Hole, Sauron, Eye and,
-    # since 2026-10-12, the Pulse singles) goes to TRUE BLACK for this many
-    # seconds right before its drop mark, so the drop is born out of black.
+    # since 2026-10-12, the Pulse singles, and since 2026-10-13 (the star
+    # plan) Star/Radial) goes to TRUE BLACK for this many seconds right
+    # before its drop mark, so the drop is born out of black.
     # Not the Fish, and Orbits only dims to one dim blob (the Admiral,
     # 2026-10-12: "I want orbits and fish to specifically not go dark
     # completely ... I do want it on pulse effect, though"). Always INSIDE
@@ -730,7 +732,11 @@ class RoomControlState(BaseModel):
     # drop arm (scene_response._drive_phase, phase_grammar.shock_allowed).
     # Since 2026-10-12 (the Admiral: "stip shockwave, yes") the strips' own
     # drop shockwave (fx/effects/strip_phase.py) obeys the same three
-    # switches; skipped, a strip still gets its colour/activity burst.
+    # switches; skipped, a strip still gets its colour/activity burst. Star
+    # (radial.py, the star plan, 2026-10-13) also obeys the same three
+    # switches for its OWN drop — it never paints the shared overlay, but
+    # told False its bands-snap-back is withheld and the drop IS the plain
+    # bloom, not unchanged.
     drop_shock_enabled: bool = True
     drop_shock_min_energy: float = Field(default=0.7, ge=0.0, le=1.0)
 
