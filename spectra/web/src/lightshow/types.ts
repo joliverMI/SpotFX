@@ -296,6 +296,14 @@ export interface SequenceStatus {
   playing_uri: string | null;
 }
 
+/** GET /light-show/sequences/recent — his most recently STARTED sequences,
+ * newest first, for the Run sub-view's quick-start row. */
+export interface RecentSequenceRun {
+  sequence_id: string;
+  name: string;
+  last_started_ms: number;
+}
+
 // ── Show Playlists (spectra/services/show_playlists.py) ────────────────────
 
 /** Phase 1's four timings: fire as the song starts, or arm for this song's

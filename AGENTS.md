@@ -4330,8 +4330,10 @@ docstring first (Sonic's authority boundary here, the same shape
   than always `sonic-scenes`).
 - **THE RUN VIEW IS A SEPARATE COMPONENT OVER THE SAME POLLED STATE**
   (`spectra/web/src/lightshow/RunView.tsx`) — a Build/Run tap toggle in the
-  page head (`useIsPhone()` defaults the initial tab, never force-switches
-  later). Run reuses `ArmBoard` and the exported `ShowNowPanel` verbatim
+  page head (`isPhone` only labels the Run tab "(recommended)" now; the
+  tab that actually SHOWS on open is the Sequence tab's own Run view,
+  unconditionally — see "THE LIGHT SHOW TAB DEFAULTS TO SEQUENCE → RUN"
+  below). Run reuses `ArmBoard` and the exported `ShowNowPanel` verbatim
   (one countdown source, one Holding-list source — never a second copy
   that could disagree), and big Disarm all / End show buttons. Run never
   edits a set. **Each set's own row is ONE TAP PER TIMING, no menu
@@ -4559,6 +4561,56 @@ one context per program) and maps song -> steps (set + `song_start` /
   reach is phase 3a (not built). Specs: `tests/test_show_playlists.py`
   (incl. the opening-change proof through the real bridge -> engine ->
   TriggerEngine, with a red control), `node scripts/check_show_playlist_ui.mjs`.
+
+### THE LIGHT SHOW TAB DEFAULTS TO SEQUENCE → RUN, WITH A QUICK-START ROW (2026-10-13)
+
+The Admiral, verbatim: "make the sequence running page the default for the
+lightshow tab. add quick start buttons for recently used sequences."
+`LightShowPage.tsx`'s top-level `mode` now defaults to `'sequence'`
+unconditionally, and `SequenceView.tsx`'s own `sub` defaults to `'run'` the
+same way — so opening `/show` on any screen size lands on
+`SequenceRunView`, never Build. Both replace the pre-existing phone-vs-
+desktop `matchMedia` default with a flat literal; `isPhone` now only
+labels the Run tab "(recommended)" and no longer chooses which tab shows
+on open. Neither default is persisted or deep-linkable; there was no such
+mechanism to preserve.
+
+**Quick start reads the durable show log back, it keeps no history of its
+own.** `show_sequence.start()` now threads `sequence_id=r.sequence_id` into
+its `_log(r, "started", ...)` call, so the durable `fire_history` show-log
+entry for `key="sequence_started"` carries it in `detail` (previously only
+`sequence`/`run`, where `run` is the SequenceRun INSTANCE id, not the
+`ShowSequence` id — useless for this). `show_sequence.recent_runs(limit=6)`
+walks that log newest-first, dedupes by `sequence_id` (keeping the newest
+start), and resolves each id against the LIVE store
+(`show_store.get_sequence`) — a deleted sequence drops off, a renamed one
+shows its current name, an old log entry with no `sequence_id` (pre-this-PR)
+is skipped rather than guessed at. Route: `GET /api/light-show/sequences/
+recent?limit=`. Frontend: `SequenceRunView`'s "Quick start" card, one button
+per entry (name + "last ran Xh/d ago", its own local day-aware `fmtAgo`),
+one tap calls the same `start()` the picker's own Start button uses — same
+confirm-before-replacing-a-running-sequence safety.
+
+**`SequenceView.reload()` now falls back to `r.sequences ?? []`** — a
+defensive hardening with zero production effect (the real endpoint always
+returns the field) that was needed because `SequenceRunView` now mounts on
+first paint: four `.mjs` check scripts that mount the whole `LightShowPage`
+for unrelated Build-view features (`check_light_show_add_step_dialog`,
+`check_light_show_pickers`, `check_light_show_duplicate_set`,
+`check_light_show_builder`) had no fake-fetch handlers for the Sequence
+tab's endpoints and crashed on mount once Sequence became the default; each
+now also clicks the top-level "Build" tab right after `mount()`, mirroring
+how they already had to stub `catalogue`/`targets`/`arms`/`status` for
+endpoints their own test doesn't care about — **any future script that
+mounts `LightShowPage.tsx` whole must do the same** (stub the Sequence
+tab's three GETs, or switch tabs before asserting on Build/Run content) or
+it will crash on the new default landing view. Specs:
+`tests/test_show_sequence.py` (recent_runs: dedup/newest-first, delete
+hides it, rename shows current name, limit clamps both ways, an entry with
+no `sequence_id` is skipped, the route round-trips), `scripts/
+check_show_sequence_ui.mjs` §ONE-B (Run selected with no click, Quick start
+renders name+age, one tap posts `sequence-run/start`, a recent entry for a
+sequence the loaded list doesn't know about is left out).
 
 ### THE OUTBOUND HOME ASSISTANT CLIENT + Light Show "ha" actions (2026-10-11)
 

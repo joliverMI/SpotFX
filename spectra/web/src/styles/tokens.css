@@ -2123,6 +2123,11 @@ button.linklike { background: none; border: none; padding: 0 4px; color: var(--a
 .show-seq-playing { align-self: flex-start; }
 .show-seq-add { display: flex; gap: 8px; align-items: center; }
 .show-seq-add button { min-height: 40px; }
+.show-seq-recent-row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; }
+.show-seq-recent-btn { flex: 1 1 160px; min-width: 140px; max-width: 260px; display: flex; flex-direction: column;
+  align-items: flex-start; gap: 2px; text-align: left; padding: 10px 14px; }
+.show-seq-recent-name { font-weight: 600; overflow-wrap: anywhere; }
+.show-seq-recent-ago { font-size: 0.82em; }
 .show-seq-start-row { display: flex; gap: 10px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
 .show-seq-start-row > :first-child { flex: 1 1 220px; min-width: 0; }
 .show-seq-now-head { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }

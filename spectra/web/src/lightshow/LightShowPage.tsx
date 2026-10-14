@@ -24,7 +24,16 @@
  * same four ways, and Waits, run strictly in order. A fourth, Playlists
  * (PlaylistView.tsx), builds Show Playlists: programs keyed to the Spotify
  * playlist he plays, arming each song's steps as the song starts; the
- * banner (PlaylistRunCard.tsx) says on every view when one is following. */
+ * banner (PlaylistRunCard.tsx) says on every view when one is following.
+ *
+ * Sequence is the DEFAULT tab (the Admiral, 2026-10-13: "make the sequence
+ * running page the default for the lightshow tab"), on every screen size —
+ * and SequenceView.tsx's own default sub-view is Run, not Build, so
+ * opening /show lands straight on where a sequence is actually started.
+ * Its Run view also carries a Quick start row of his most recently
+ * STARTED sequences (`GET /light-show/sequences/recent`, show_sequence.
+ * recent_runs — derived from the durable show log's own start records,
+ * never a second history), newest first, one tap to run. */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiDel, apiGet, apiPost } from '../api/client';
 import HelpLink from '../help/HelpLink';
@@ -74,7 +83,13 @@ function newId() {
 export default function LightShowPage() {
   const toast = useToast();
   const isPhone = useIsPhone();
-  const [mode, setMode] = useState<'build' | 'run' | 'sequence' | 'playlists'>(() => (window.matchMedia('(max-width: 720px)').matches ? 'run' : 'build'));
+  // Opening the Light Show tab lands on Sequence — the "Run" sub-view of
+  // SequenceView.tsx, which defaults to its own Run tab — on every screen
+  // size (the Admiral, 2026-10-13: "make the sequence running page the
+  // default for the lightshow tab"). The mode is not persisted across
+  // visits and there is no deep-link query param on this route today, so
+  // this is a flat default, not a conditional one.
+  const [mode, setMode] = useState<'build' | 'run' | 'sequence' | 'playlists'>('sequence');
   const [catalogue, setCatalogue] = useState<ShowCatalogue | null>(null);
   const [targets, setTargets] = useState<ShowTargets | null>(null);
   const [sets, setSets] = useState<ShowSet[]>([]);

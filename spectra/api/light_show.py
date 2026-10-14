@@ -335,6 +335,10 @@ async def delete_cue(uri: str = _Query(..., min_length=1),
 # spectra/services/show_sequence.py is the binding statement.
 #
 #   GET    /api/light-show/sequences                 his sequences (+ problems)
+#   GET    /api/light-show/sequences/recent?limit=    his most recently
+#                                                    STARTED sequences, newest
+#                                                    first — the Run view's
+#                                                    quick-start row
 #   POST   /api/light-show/sequences                 create / update one
 #   DELETE /api/light-show/sequences/{id}
 #   POST   /api/light-show/sequences/{id}/duplicate  "<name> copy", right after it
@@ -381,6 +385,13 @@ async def _broadcast_sequence() -> None:
 @router.get("/sequences")
 async def list_sequences():
     return {"sequences": [_sequence_row(s) for s in show_store.list_sequences()]}
+
+
+@router.get("/sequences/recent")
+async def recent_sequences(
+        limit: int = _Query(show_sequence.RECENT_RUNS_DEFAULT_LIMIT, ge=1,
+                             le=show_sequence.RECENT_RUNS_MAX_LIMIT)):
+    return {"recent": show_sequence.recent_runs(limit)}
 
 
 @router.post("/sequences")
