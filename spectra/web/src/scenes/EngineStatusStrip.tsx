@@ -2,6 +2,7 @@
  * Live journey position (custody, pace, wheel), active drift legs, bridge
  * health, and the last surge. The engine runs DARK (recording executor)
  * until the S3 handover — the strip says so rather than pretending. */
+import InfoTip from '../components/InfoTip';
 import HelpLink from '../help/HelpLink';
 import { useEngineStatus } from '../queries';
 
@@ -48,7 +49,11 @@ export default function EngineStatusStrip() {
       flexWrap: 'wrap', padding: '8px 12px', fontSize: 12,
     }}>
       <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600 }}>
-        Engine <HelpLink topic="engine" /><HelpLink topic="engine-strip" title="The Engine strip" />
+        Engine
+        <InfoTip
+          topic="engine"
+          text="A drift conductor (one leg every ~20s) plus a response engine, running the scene's declared life — journey, legs, holds, and the last surge."
+        />
       </span>
       {st.dark && (
         <span className="badge badge-purple"
@@ -128,7 +133,10 @@ export default function EngineStatusStrip() {
         <span style={{ color: 'var(--text-muted)' }}
           title="Most recent response event and what it did">
           last surge: {surge.class} @ {surge.intensity.toFixed(2)} → {surge.result}
-          <HelpLink topic="engine-surges" title="Surges — how a response executes" />
+          <InfoTip
+            topic="engine-surges"
+            text="A response's attached kinds fire at their scales, in a fixed order: dice re-rolls, param moves, gain envelopes, then the colour jump."
+          />
         </span>
       )}
 
@@ -142,7 +150,10 @@ export default function EngineStatusStrip() {
           && ` · i=${st.bridge.intensity.toFixed(2)}`}
         {st.bridge.connected && st.bridge.last_event?.class
           && ` · ${st.bridge.last_event.class}`}
-        <HelpLink topic="engine-bridge" title="The read-only bridge" />
+        <InfoTip
+          topic="engine-bridge"
+          text="A one-directional, read-only feed from spot-effects. If it's down, nothing breaks — intensity just holds at 0.5 neutral."
+        />
       </span>
     </div>
   );

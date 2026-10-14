@@ -796,7 +796,7 @@ export const HELP_SECTIONS: HelpSection[] = [
     title: 'Evolution engine (S2)',
     keywords: 'drift conductor response surge leg bridge dark recording carry',
     intro:
-      'The S2 engine is a scene\'s declared life, running: a drift conductor (one leg every ~20s glides creeping and following values, and walks the room\'s colour journey) plus a response engine (flares/charges/lulls/drops execute their bands). It is fed READ-ONLY from spot-effects and runs DARK — every move is computed, recorded, and shown here, but no write reaches the lights until the S3 handover.',
+      'The S2 engine is a scene\'s declared life, running: a drift conductor (one leg every ~20s glides creeping and following values, and walks the room\'s colour journey) plus a response engine (flares/charges/lulls/drops execute their bands). It is fed READ-ONLY from spot-effects and runs DARK — every move is computed, recorded, and shown here, but no write reaches the lights until the S3 handover. The Engine strip on the Scenes page is a live display of exactly this: journey custody (room, or a scene OVERRIDE) with pace and wheel position, the engine-active scene with its drift legs (expand for per-virtual positions), holds (pause / Dinner Party / Ambient — Force Scene does NOT hold drift), the last surge, and bridge health with the current section-energy intensity.',
     entries: [
       {
         id: 'engine-dark',
@@ -804,14 +804,6 @@ export const HELP_SECTIONS: HelpSection[] = [
         keywords: 'recording executor s3 handover safe',
         body: [
           'The "dark — recording" badge means the engine\'s executor records every glide and jump instead of sending them. The identical engine runs against the real render pipeline in the offline test bed; the S3 handover swaps the executor when the ownership record grants SPECTRA the lights — nothing else changes.',
-        ],
-      },
-      {
-        id: 'engine-strip',
-        title: 'The Engine strip (Scenes page)',
-        keywords: 'status strip journey position legs live',
-        body: [
-          'Live display only: journey custody (room, or a scene OVERRIDE) with pace and wheel position, the engine-active scene with its drift legs (expand for per-virtual positions), holds (pause / Dinner Party / Ambient — Force Scene does NOT hold drift), the last surge, and bridge health with the current section-energy intensity.',
         ],
       },
       {

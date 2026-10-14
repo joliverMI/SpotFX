@@ -11767,12 +11767,12 @@ menu, the one consolidated bar, Settings cards) built in the parallel
   Assistant dashboard-tab iframe for a wall-mounted Raspberry Pi 7in
   touchscreen (800x480, plain http, touch-only — River's 2026-10-14
   measurement). `App.tsx` checks `kioskConfig.isKioskRequested(search)`
-  BEFORE every other route, rendering `KioskPage` (no menu, today's
-  existing `RoomControlsBar`/`TopBarStrip` — swap for the parallel
-  ui-build-bar task's consolidated bar once it lands — plus `HomePage`
-  with its audio shape dropped). `kioskConfig.ts` is the ONE place the
-  800x480/56px-HA-header/424px-usable sizing lives, so a later real
-  measurement is a one-line change. `spectra/config.py::
+  BEFORE every other route, rendering `KioskPage` (no menu,
+  `RoomControlsBar`/`TopBarStrip` wrapped in `.one-bar` — see "THE ONE BAR
+  IS TWO-TIER" below for why 800px lands on that band's deliberate two
+  rows — plus `HomePage` with its audio shape dropped). `kioskConfig.ts`
+  is the ONE place the 800x480/56px-HA-header/424px-usable sizing lives,
+  so a later real measurement is a one-line change. `spectra/config.py::
   kiosk_frame_ancestors()` (env override `SPECTRA_KIOSK_FRAME_ANCESTORS`)
   + `spectra/app.py`'s unconditional middleware set a
   `Content-Security-Policy: frame-ancestors` header on every response —
@@ -11930,7 +11930,16 @@ timeline, the global read-only song timeline, `show_clock_ms` and
   timeline filter toggles, `home/HomeTimeline.tsx`) and `InfoTip.tsx` (a
   rich hover/long-press tooltip carrying a short description plus a
   `HelpLink`, replacing a bare "?" circle where one control deserves its
-  own explanation — used on the Light Show bar slot). Neither is wired
+  own explanation — used on the Light Show bar slot). **Since 2026-10-14
+  (idea 5, "one help '?' per page") it also replaces the four
+  always-visible bar circles** (`ModeChip`/`LiveEnergyReadout`/
+  `IntensityMarkControl`/`DevicePreviewStrip`) **and each card's own
+  always-visible header circle on the Scenes page** (`ScenesPage`/
+  `EngineStatusStrip`/`SequencerStatusStrip`/`SummaryTab`'s "Scenes" /
+  "Engine" / "Sequencer" / "Summary" titles) — a state-conditional
+  `HelpLink` elsewhere on the same card (e.g. `EngineStatusStrip`'s
+  "dark — recording" badge) is untouched, since it isn't one of the
+  always-visible circles this pass targeted. Neither component is wired
   into every page; a future pass choosing to do that inherits these.
 - **Icons**: `dash`/`cube`/`gauge`/`chevronDown`/`plug`/`info`/`wave`/
   `wait` added to `iconRegistry.ts` for this build — see that file before
@@ -11964,13 +11973,78 @@ timeline, the global read-only song timeline, `show_clock_ms` and
   in tokens.css, with `.device-preview-expanded-row`'s own CSS `order`
   moved past the warning chip and Release so it can never wrap ahead of
   them onto a second line and push them to a third). Read-only against a
-  live instance (`SPECTRA_LIVE_URL`, default `http://127.0.0.1:8010/spectra/`);
-  skips cleanly when no Chromium/live app is reachable. **Teardown is by
-  the exact Popen pid/pgid only, never `pkill -f`** — a loose pattern can
-  match an unrelated real process on a shared host (see the `pkill -f`
-  memory entries); this script's own `start_new_session=True` +
-  `os.killpg` is the pattern to copy for any future browser-automation
-  check script here.
+  live instance (`SPECTRA_LIVE_URL`, default `http://127.0.0.1:8000/spectra/`
+  — through the spot-effects proxy, not :8010, because the Colour button's
+  own data only resolves same-origin through :8000); skips cleanly when no
+  Chromium/live app is reachable. **Teardown is by the exact Popen
+  pid/pgid only, never `pkill -f`** — a loose pattern can match an
+  unrelated real process on a shared host (see the `pkill -f` memory
+  entries); this script's own `start_new_session=True` + `os.killpg` is
+  the pattern to copy for any future browser-automation check script here.
+
+## THE ONE BAR IS TWO-TIER (1180/1440 one line, 1024/kiosk two rows) — the Admiral's own 2026-10-14 reversal
+
+The tablet-height fix above first tried to keep 1024 (and the kiosk's
+800px) on ONE line by shedding/capping occupants (fewer swatches, a
+glyph-only Clear button, hiding the Light Show "next" item) — all of it
+was abandoned the same day on the Admiral's own word: "extend the phone
+two-row top-bar rule from <=520px up to about 1100px... do not shed
+swatches or hide controls to force one line." **1024 and the kiosk's
+800px are now a DELIBERATE TWO ROWS, nothing hidden; only 1180 and 1440
+stay one line** (with the swatch cap — 2 shown — still needed there).
+
+The split is a forced flex line-break, not organic reflow: `.one-bar`'s
+unused `order: 5` (between Colour at 4 and Energy+Mark at 6) carries a
+`.one-bar::before { content: ""; flex-basis: 100%; height: 0; }` at that
+width band (`521px`–`1100px`, deliberately excluding the already-shipped,
+separately-tuned <=520px phone tier). Row 1 is house/display-mode/Hue-Hold/
+Scenes/Colour (short, fixed); row 2 is Energy+Mark/Light-Show/preview/⚠/
+Release — the one that actually varies with his live data (a long scene
+name, a marked song's extra "Clear" button, an armed Light Show item) —
+and it fits with room to spare once it has a whole row rather than
+fighting row 1 for one line. The kiosk's own touch-target floor (`.kiosk-
+page button { min-height: 44px }`) is scoped to `main` only, never the
+bar — it used to win over `.scenes-group-btn`'s own fixed 30px height by
+CSS specificity (an element+class selector beats a bare class one),
+which is what grew the kiosk bar tall independent of the row question.
+`scripts/check_onebar_layout.py` clusters occupants into rows by their
+own `top` (tolerant of the few px of `align-items: center` spread within
+one row, strict about the ~40px+ gap between two real rows) and asserts
+the row COUNT per width, not just a height ceiling — a stray third row
+or a silent collapse back to one are both regressions this now catches
+that a pure height check cannot.
+
+## SONG TIMELINE MARKERS — the `preserveAspectRatio="none"` SVG stretch, and why BOTH axes need compensating
+
+`SongStrip.tsx`/`HomeTimeline.tsx` draw their markers (scene squares,
+flare circles, charge/lull/drop bars, High/Low flags) into an SVG whose
+`viewBox="0 0 100 39"` is force-stretched to the rendered box
+(`preserveAspectRatio="none"`) so a scene/colour name of any length still
+positions correctly via `%`-string `x`/`cx` (SVG resolves a `%` length
+against the rendered viewport directly, bypassing the viewBox transform).
+**Every SIZE attribute — `width`/`height`, `r`, a rounded rect's `rx`, a
+line's `stroke-width` — was a bare, unscaled viewBox number, which gets
+stretched by whatever the viewBox-to-viewport ratio happens to be: X
+stretches by `renderedWidthPx/100` (a few px/unit on a phone, well over
+ten on a wide desktop bar) and Y — found live, NOT exactly 1:1 the way a
+first draft of this fix assumed, because a border-box border eats a
+couple of the container's nominal 39px — stretches by its own, separate
+`renderedHeightPx/39`.** A "circle" with the same raw number for both
+axes therefore rendered as a wide ellipse, a "square" as a slab — the
+Admiral's own report, "the little icons on the top timeline are stretched
+really wide." Fix: `songStrip.ts`'s `axisScale(renderedPx, viewBoxUnits)`
++ `compensate(desiredPx, scale)`, measured fresh off the SVG's own
+`getBoundingClientRect()` on EVERY marker rebuild (a `ResizeObserver` on
+SongStrip's own rebuild-on-data-change effect; HomeTimeline already
+redraws on a 500ms interval, so no observer needed there) and applied to
+every size on BOTH axes — never assume either axis is 1:1, measure both.
+The charge/lull/drop bars are a deliberately OBLONG pill (10:6 or 4:6),
+not meant to land at ratio 1 — the fix preserves THEIR intended ratio,
+not a blanket "make everything round." Spec:
+`scripts/check_song_strip.mjs` §FIVE (pure math, including a red control
+against the pre-fix formula) — the real on-screen pixel sizes were
+independently confirmed in a live headless-Chromium render before
+trusting the math alone.
 
 ## Maintaining this file
 

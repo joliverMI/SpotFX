@@ -308,7 +308,9 @@ button.danger:hover { border-color: var(--danger); color: var(--danger); }
  * collapsed swatches at order 8) on purpose: flex wrapping never backfills
  * an earlier line, so if the expanded row wrapped ahead of them, THEY
  * would wrap again behind it onto a third line instead of staying on the
- * bar's first row the way every other icon does. */
+ * bar's first row the way every other icon does. Order 5 is deliberately
+ * left unused — the deliberate-two-row rule below plants its own forced
+ * line-break there. */
 .one-bar .mode-chip { order: 1; }
 .one-bar .mode-group-btn { order: 2; }
 .one-bar .ambient-group-btn { order: 3; }
@@ -319,6 +321,51 @@ button.danger:hover { border-color: var(--danger); color: var(--danger); }
 .one-bar .warning-chip { order: 9; }
 .one-bar .release-hold-wrap { order: 10; }
 .one-bar .device-preview-expanded-row { order: 11; }
+
+/* NO OCCUPANT GROWS TALLER (spotfx-onebar-tablet-height) — the bar was
+ * 43px at 1440 but 69px/172px at 1180/1024, because two occupants
+ * answered being squeezed by growing TALLER instead of narrower: the
+ * swatches button (`.device-preview-chips`, `flex-wrap: wrap`) stacked
+ * into a column, and the ⚠ chip's own "⚠ N" text wrapped onto two lines.
+ * Neither has a `min-width`/`flex-shrink: 0` of its own the way
+ * `.scenes-group-btn` does, so the default `flex: 0 1 auto` let them
+ * shrink below their content's natural width inside a `nowrap` row.
+ * Fixed at the root, for every row width, never by hiding anything:
+ * `flex-shrink: 0` on the occupant plus `nowrap`/`white-space: nowrap`
+ * on what was wrapping inside it, so neither can grow taller than its
+ * row's own ~30px content height. */
+.one-bar .device-preview-strip { flex-shrink: 0; }
+.one-bar .device-preview-chips { flex-wrap: nowrap; }
+.one-bar .warning-chip { flex-shrink: 0; white-space: nowrap; }
+
+/* A DELIBERATE TWO ROWS AT 1024 AND THE 800 KIOSK (the Admiral's own
+ * decision, superseding an earlier one-line-by-shedding attempt at this
+ * width: "extend the phone two-row top-bar rule from <=520px up to about
+ * 1100px... do not shed swatches or hide controls to force one line").
+ * `.one-bar::before` is a zero-height flex item planted at the unused
+ * order 5, between Colour (4) and Energy+Mark (6) — `flex-basis: 100%`
+ * forces every later-ordered occupant onto a fresh line regardless of
+ * how wide row 1's own content happens to be, which is what makes this a
+ * DETERMINISTIC two-row split rather than organic reflow (robust against
+ * his live room's own varying text: a long scene name, a marked song's
+ * extra "Clear" button, an armed Light Show item). Row 1 (house, display
+ * mode, Hue Hold, Scenes, Colour) is short and fixed; row 2 (Energy+Mark,
+ * Light Show, preview, ⚠, Release) is what actually varies with his data
+ * and gets the whole width to do it in — comfortably, even with every
+ * favourite swatch shown and nothing hidden (measured). Scoped above
+ * 520px so it never touches the ALREADY-shipped, separately-tuned phone
+ * tier below it (same media value as that rule, but phone wraps today by
+ * its own content naturally reflowing, not this forced break — adding
+ * the break there too was not asked for and not measured). */
+@media (min-width: 521px) and (max-width: 1100px) {
+  .one-bar { flex-wrap: wrap; }
+  .one-bar::before { content: ""; order: 5; flex-basis: 100%; height: 0; }
+}
+/* Between the two: 1180 still fits one line, but only with the swatch
+ * count capped (measured: 2 fits, every favourite shown does not). */
+@media (min-width: 1101px) and (max-width: 1180px) {
+  .one-bar .device-preview-device:nth-of-type(n + 3) { display: none; }
+}
 .room-control {
   display: flex;
   align-items: center;
@@ -2598,9 +2645,34 @@ button.linklike { background: none; border: none; padding: 0 4px; color: var(--a
   overflow: hidden;
   font-size: 15px;
 }
+/* The one bar's own budget — its own deliberate-TWO-ROW height (measured
+ * ~85px here: two ~30px occupant rows plus the bar's own padding/gap/
+ * border — the touch-target rule below is scoped to `main` precisely so
+ * it never floors the bar's own occupants taller than that) plus a
+ * couple px of rounding slop; was a bare "90" guessed against the OLD
+ * two-STRIP (not two-row) layout's own, different, height. */
 .kiosk-main { padding: 8px 10px; overflow: auto; max-height: calc(var(--kiosk-usable-height) - 90px); }
 .kiosk-page .home-quick-runs { grid-template-columns: minmax(0, 1fr); }
-.kiosk-page button,
+/* Scoped to `main` — never the bar. The bar's own buttons already carry
+ * a fixed, measured size (`.top-bar-group-btn`'s own "fixed, uniform,
+ * measured — not eyeballed" 30px height; `.scenes-group-btn`'s own
+ * 132px width) that this task's own "no occupant may grow taller" rule
+ * protects; `.kiosk-page button` (no `main`) used to win that fight by
+ * specificity (a class+element selector beats a bare class one), which
+ * is what grew the whole bar to 57-72px depending on which scene/colour
+ * set happened to be showing. */
+.kiosk-page main button,
 .kiosk-page .icon-toggle,
 .kiosk-page .home-quick-icon-btn { min-width: var(--kiosk-touch-target); min-height: var(--kiosk-touch-target); }
 .kiosk-page .home-timeline-shape { display: none; }
+
+/* The kiosk's own one-bar is 800px wide — inside the deliberate-two-row
+ * band above (521-1100px), so it gets the SAME forced row-1/row-2 split
+ * as the 1024 tablet, with nothing shed: row 2's full content (Energy+
+ * Mark, Light Show, every favourite swatch, ⚠, Release) fits an 800px
+ * row with room to spare (measured) once it has a whole row to itself
+ * instead of fighting row 1 for one line. An earlier attempt shed the
+ * device preview and several bar controls outright to force one line at
+ * this width — superseded by the Admiral's own decision (two rows, shed
+ * nothing) once that was found to grow the bar tall/cause sideways
+ * scroll for the reasons documented above this rule. */

@@ -6,7 +6,7 @@
  * FACTOR that scales it (auto, always <=125%, or a manual mark up to
  * 200%). See help topic "intensity-mark". */
 import { useState } from 'react';
-import HelpLink from '../help/HelpLink';
+import InfoTip from './InfoTip';
 import {
   useClearIntensityScaleMark, useEngineStatus, useIntensityScaleMark, useSetIntensityScaleMark,
 } from '../queries';
@@ -97,7 +97,10 @@ export default function IntensityMarkControl() {
           Clear
         </button>
       )}
-      <HelpLink topic="intensity-mark" />
+      <InfoTip
+        topic="intensity-mark"
+        text="This song's intensity scaling factor. Automatic always tops out at 75%; Mark is the one way past that ceiling, up to 200%."
+      />
     </div>
   );
 }

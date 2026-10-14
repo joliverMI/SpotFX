@@ -146,10 +146,10 @@ import {
   onDevicePreviewTabHiddenPause, setDevicePreviewLevel,
 } from '../api/devicePreviewWs';
 import type { PreviewFrame } from '../api/devicePreviewWs';
-import HelpLink from '../help/HelpLink';
 import { compactPositions, withHeldOverlay } from '../live/positions';
 import type { LiveLayout, StagePlan } from '../live/positions';
 import { useLiveStageCanvas } from '../live/useLiveStageCanvas';
+import InfoTip from './InfoTip';
 import {
   pauseDevicePreview, resumeDevicePreview, useDevicePreviewFavorites, useDevicePreviewLayout,
 } from '../queries';
@@ -415,7 +415,10 @@ export default function DevicePreviewStrip() {
           {stateIcon}
         </button>
 
-        <HelpLink topic="device-preview" />
+        <InfoTip
+          topic="device-preview"
+          text="Live colour per favourite device, read straight off whichever world is actually driving your lights. Click the swatches to expand to the real fixture layout."
+        />
       </div>
 
       {expanded && favoriteIds.length > 0 && (

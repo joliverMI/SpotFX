@@ -12,12 +12,12 @@
 import { useEffect, useRef } from 'react';
 import { ICONS } from './iconRegistry';
 import {
-  eventLabel, FINAL_STRETCH_MS, fmtCountdown, fmtMMSS, KIND_COLOR, KIND_ICON,
-  markerOpacity, markerSizePx, NEXT_EVENT_BOX_WIDTH, pickNext, xFraction,
+  axisScale, compensate, eventLabel, FINAL_STRETCH_MS, fmtCountdown, fmtMMSS, KIND_COLOR,
+  KIND_ICON, markerOpacity, markerSizePx, NEXT_EVENT_BOX_WIDTH, pickNext, xFraction,
 } from './songStrip';
 import { useEngineStatus, useUpcoming } from '../queries';
 import { getPositionMs, getShowClockMs } from '../lib/showClock';
-import HelpLink from '../help/HelpLink';
+import InfoTip from './InfoTip';
 
 const TRACK_H = 39;
 
@@ -39,57 +39,73 @@ export default function SongStrip() {
   const flashedKeyRef = useRef<string | null>(null);
   const lastNextKindRef = useRef<string | null>(null);
 
-  // Re-render SVG markers only when the inputs that decide WHAT is drawn
+  // Re-render SVG markers when the inputs that decide WHAT is drawn
   // change (song, its plan) — the per-frame loop below only ever moves
-  // the playhead / next-event text, never touches these nodes.
+  // the playhead / next-event text, never touches these nodes. ALSO
+  // rebuilt on resize (a ResizeObserver, not a dep) — the viewBox's own
+  // axis stretch (see `axisScale`'s own docstring) depends on the SVG's
+  // rendered width/height, which change independently of the song/plan.
   useEffect(() => {
-    const svg = markersGroupRef.current;
-    if (!svg) return;
-    while (svg.lastChild) svg.removeChild(svg.lastChild);
-    const ns = 'http://www.w3.org/2000/svg';
-    for (const e of events) {
-      if (durationMs <= 0) continue;
-      const frac = xFraction(e.ms, durationMs);
-      const color = KIND_COLOR[e.kind];
-      if (e.kind === 'scene') {
-        const r = markerSizePx('scene', e.rank, e.rank_of);
-        const rect = document.createElementNS(ns, 'rect');
-        rect.setAttribute('x', `${frac * 100 - (r / 3.9)}%`);
-        rect.setAttribute('y', '15');
-        rect.setAttribute('width', `${r * 2}`);
-        rect.setAttribute('height', `${r * 2}`);
-        rect.setAttribute('fill', color);
-        rect.setAttribute('opacity', String(markerOpacity(e.rank, e.rank_of)));
-        svg.appendChild(rect);
-      } else if (e.kind === 'flare') {
-        const r = markerSizePx('flare', e.rank, e.rank_of);
-        const circ = document.createElementNS(ns, 'circle');
-        circ.setAttribute('cx', `${frac * 100}%`);
-        circ.setAttribute('cy', '19');
-        circ.setAttribute('r', `${r}`);
-        circ.setAttribute('fill', color);
-        circ.setAttribute('opacity', String(markerOpacity(e.rank, e.rank_of)));
-        svg.appendChild(circ);
-      } else if (e.kind === 'charge' || e.kind === 'lull' || e.kind === 'drop') {
-        const bar = document.createElementNS(ns, 'rect');
-        bar.setAttribute('x', `${frac * 100}%`);
-        bar.setAttribute('y', '29');
-        bar.setAttribute('width', e.kind === 'drop' ? '4' : '10');
-        bar.setAttribute('height', '6');
-        bar.setAttribute('rx', '2');
-        bar.setAttribute('fill', color);
-        svg.appendChild(bar);
-      } else if (e.kind === 'high' || e.kind === 'low') {
-        const flag = document.createElementNS(ns, 'line');
-        flag.setAttribute('x1', `${frac * 100}%`);
-        flag.setAttribute('x2', `${frac * 100}%`);
-        flag.setAttribute('y1', '0');
-        flag.setAttribute('y2', '8');
-        flag.setAttribute('stroke', color);
-        flag.setAttribute('stroke-width', '2');
-        svg.appendChild(flag);
+    const svg = markersGroupRef.current?.closest('svg');
+    const group = markersGroupRef.current;
+    if (!svg || !group) return undefined;
+    const build = () => {
+      while (group.lastChild) group.removeChild(group.lastChild);
+      const rect0 = svg.getBoundingClientRect();
+      const xScale = axisScale(rect0.width, 100);
+      const yScale = axisScale(rect0.height, TRACK_H);
+      const ns = 'http://www.w3.org/2000/svg';
+      for (const e of events) {
+        if (durationMs <= 0) continue;
+        const frac = xFraction(e.ms, durationMs);
+        const color = KIND_COLOR[e.kind];
+        if (e.kind === 'scene') {
+          const r = markerSizePx('scene', e.rank, e.rank_of);
+          const widthUnits = compensate(r * 2, xScale);
+          const rect = document.createElementNS(ns, 'rect');
+          rect.setAttribute('x', `${frac * 100 - widthUnits / 2}%`);
+          rect.setAttribute('y', '15');
+          rect.setAttribute('width', `${widthUnits}`);
+          rect.setAttribute('height', `${compensate(r * 2, yScale)}`);
+          rect.setAttribute('fill', color);
+          rect.setAttribute('opacity', String(markerOpacity(e.rank, e.rank_of)));
+          group.appendChild(rect);
+        } else if (e.kind === 'flare') {
+          const r = markerSizePx('flare', e.rank, e.rank_of);
+          const ell = document.createElementNS(ns, 'ellipse');
+          ell.setAttribute('cx', `${frac * 100}%`);
+          ell.setAttribute('cy', '19');
+          ell.setAttribute('rx', `${compensate(r, xScale)}`);
+          ell.setAttribute('ry', `${compensate(r, yScale)}`);
+          ell.setAttribute('fill', color);
+          ell.setAttribute('opacity', String(markerOpacity(e.rank, e.rank_of)));
+          group.appendChild(ell);
+        } else if (e.kind === 'charge' || e.kind === 'lull' || e.kind === 'drop') {
+          const bar = document.createElementNS(ns, 'rect');
+          bar.setAttribute('x', `${frac * 100}%`);
+          bar.setAttribute('y', '29');
+          bar.setAttribute('width', `${compensate(e.kind === 'drop' ? 4 : 10, xScale)}`);
+          bar.setAttribute('height', `${compensate(6, yScale)}`);
+          bar.setAttribute('rx', `${compensate(2, xScale)}`);
+          bar.setAttribute('ry', `${compensate(2, yScale)}`);
+          bar.setAttribute('fill', color);
+          group.appendChild(bar);
+        } else if (e.kind === 'high' || e.kind === 'low') {
+          const flag = document.createElementNS(ns, 'line');
+          flag.setAttribute('x1', `${frac * 100}%`);
+          flag.setAttribute('x2', `${frac * 100}%`);
+          flag.setAttribute('y1', '0');
+          flag.setAttribute('y2', '8');
+          flag.setAttribute('stroke', color);
+          flag.setAttribute('stroke-width', `${compensate(2, xScale)}`);
+          group.appendChild(flag);
+        }
       }
-    }
+    };
+    build();
+    const observer = new ResizeObserver(build);
+    observer.observe(svg);
+    return () => observer.disconnect();
   }, [events, durationMs]);
 
   // THE ONE rAF LOOP — playhead, next-event countdown/fill, the one-shot
@@ -148,7 +164,10 @@ export default function SongStrip() {
       <div className="song-strip-song" title={track.title ?? ''}>
         <div className="song-strip-title-row">
           <span className="song-strip-song-title">{track.title || 'No song'}</span>
-          <HelpLink topic="song-timeline" title="About this strip" />
+          <InfoTip
+            topic="song-timeline"
+            text="The whole song with the same markers Home shows, and the next thing that will actually fire — its type and a countdown."
+          />
         </div>
         <span className="song-strip-song-artist">{track.artist || ''}</span>
       </div>

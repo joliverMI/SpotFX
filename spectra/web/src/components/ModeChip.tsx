@@ -37,8 +37,8 @@
  * expiring while the current gesture is still live. */
 import { useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import HelpLink from '../help/HelpLink';
 import Icon from './Icon';
+import InfoTip from './InfoTip';
 import { chipLine } from '../house/houseSummary';
 import type { LightingStatus } from '../house/types';
 import { useHoldToConfirm } from '../lib/useHoldToConfirm';
@@ -126,7 +126,10 @@ export default function ModeChip() {
         )}
         <Icon name="home" size={16} />
       </Link>
-      <HelpLink topic="house-chip" />
+      <InfoTip
+        topic="house-chip"
+        text="Green while the house mode is on the room, purple while music has it, amber when paused or not applied. Tap to open House; hold ~1s to turn house lighting on/off."
+      />
       {(pressing || justReleasedEarly) && (
         <span className="mode-chip-hold-hint" role="status">
           {pressing ? 'Keep holding…' : 'Hold to turn house lighting on/off'}

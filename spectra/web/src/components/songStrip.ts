@@ -190,3 +190,37 @@ export function drawShapeMarkers(
   }
   ctx.globalAlpha = 1;
 }
+
+/** STRETCHED ICONS (the Admiral's report, 2026-10-14) — the strip's own
+ * markers are drawn in an SVG whose `viewBox="0 0 100 39"` is stretched
+ * to the rendered box with `preserveAspectRatio="none"`, so the X and Y
+ * axes scale by DIFFERENT factors: X stretches by `renderedWidthPx / 100`
+ * — anywhere from a few px/unit on a phone to well over ten on a wide
+ * desktop bar — while Y is INTENDED to be 1:1 (the viewBox height, 39, is
+ * set equal to the track's own fixed CSS height, `TRACK_H`) but measured
+ * live at a few percent off that (37px rendered for a 39px box, some
+ * layout rounding/box-model detail upstream of this module) — so BOTH
+ * axes are measured and compensated, never one assumed exactly 1:1. A
+ * marker whose width/height (or radius, or stroke-width) is given as the
+ * SAME raw viewBox number in both directions — which every marker kind
+ * here is — therefore renders many times wider than it is tall: a
+ * "circle" is an ellipse, a "square" scene marker is a slab, a flag's
+ * stroke is a wide bar. Positions (`cx`/`x` as a `%` string) are
+ * untouched by this: SVG resolves a `%` length against the rendered
+ * viewport directly, bypassing the viewBox transform entirely, which is
+ * why only SIZES need fixing.
+ *
+ * The fix is `compensate`: divide a desired ON-SCREEN pixel size by the
+ * actual stretch factor for its axis to get the viewBox-unit value that
+ * renders at that many pixels — apply it to every size on BOTH axes (a
+ * circle/ellipse's `rx`/`ry`, a rect's `width`/`height`, a rounded rect's
+ * own `rx`/`ry`, a vertical line's `stroke-width`). `axisScale` is 1 (a
+ * no-op) for a rendered size of 0 (not yet laid out) rather than dividing
+ * by zero. */
+export function axisScale(renderedPx: number, viewBoxUnits: number): number {
+  return renderedPx > 0 && viewBoxUnits > 0 ? renderedPx / viewBoxUnits : 1;
+}
+
+export function compensate(desiredPx: number, scale: number): number {
+  return scale > 0 ? desiredPx / scale : desiredPx;
+}
