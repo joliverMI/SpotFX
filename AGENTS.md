@@ -11663,6 +11663,112 @@ Exec spec: `scripts/check_show_cue_flags.mjs` sections THREE/FOUR (+
 `tests/test_show_cue_flags.py`) prove the beat-snap radius arithmetic and
 the no-jump grab-offset property directly.
 
+## THE SONG-LAYOUT PLAN — one show clock, the global song timeline, Home, kiosk
+
+2026-10-14, `data/ui-layout-plan/report.md` (+ `explainer-final.html`, his
+edited copy with every decision). Four pieces, phased by the plan's own
+build order — slices 3/4 (the clock, the timeline, Home, kiosk) are built;
+slices 1/2 (the grouped menu, the one consolidated bar, Settings cards,
+the shared icon-toggle) are a separate, parallel effort and may still be
+unmerged — expect a rebase of `App.tsx`/`tokens.css` against that work.
+
+- **ONE SHOW CLOCK**: `spectra/services/engine.py::current_show_clock_ms()`
+  is a second READER of the exact application point
+  `_run_trigger_engine` already feeds `tick()` with
+  (`av_sync_lead.show_clock_ms(bridge.effective_position_ms(),
+  av_sync_lead.current_lead_ms(), known_buffer.compensation_ms())`) —
+  never a second computation of it. Served on `GET /api/engine/status`'s
+  `bridge.track.show_clock_ms` (alongside new `artist`/`duration_ms`,
+  which were already on SpotFX's own broadcast and simply never parsed
+  by `bridge.py` before) and pushed once a second on the SPECTRA
+  websocket as `{"type": "clock", show_clock_ms, position_ms, is_playing,
+  server_ms}` (`engine.run_clock_push_supervised`, wired in
+  `spectra/app.py`'s lifespan). `spectra/web/src/lib/showClock.ts` is the
+  ONE client-side anchor — a plain module-level function
+  (`getShowClockMs()`), not a hook, so a per-frame caller (a rAF loop)
+  never triggers a React re-render; `queries.ts`'s `useShowClockSeed()`
+  feeds the 3s poll in as the backstop before the first push lands.
+  Fixes the pre-existing three-playhead mismatch (the Timeline page's own
+  SPECTRA strips, the audio-shape canvas, and the engine's real fire
+  clock could each read a different "now" for the same song — measured
+  1.73s/4.5s apart on two real songs). `BuilderPage.tsx`'s
+  `getStripNowMs` switches TimelineBar/SpectraTriggersCard/
+  DropSequenceStrip's "played" fill to it; the audio-shape canvas's own
+  `getCanvasNowMs`/`getPlayheadMs` are DELIBERATELY untouched — that
+  playhead is drawn in its own shifted frame (`audio_latency_ms` + the
+  stored shape offset) its follow-window anchors on
+  (`hooks/followWindow.ts`, the "Pop Off" incident), and composing the
+  show clock (which already carries the live shape offset) on top of
+  that legacy shift would double-apply it. Consolidating that playhead
+  onto the one clock is real, separate follow-up work.
+- **`GET /api/upcoming?uri=&limit=`** (`spectra/api/upcoming.py`): the
+  merged "what will actually fire" list for one song — computed by the
+  engine's OWN gating (`TriggerEngine._trigger_allowed`/
+  `_effective_mode_for_song`, `analysed_flares`, `drop_firing.annotate`,
+  `show_cues`), never re-derived in TypeScript. On a song where his own
+  triggers fire instead of the planned analysed events, this lists HIS
+  triggers; a drop-sequence member only appears when `drop_firing` says
+  `fires=True` (a SUGGESTED, unconfirmed detection is excluded). Proof:
+  `tests/test_upcoming_api.py`, driven against a real swept
+  `TriggerEngine.tick()` — the "prove from the show side" standard.
+- **THE GLOBAL SONG TIMELINE** (`spectra/web/src/components/SongStrip.tsx`
+  + the pure helpers in `songStrip.ts`, spec'd by
+  `scripts/check_song_strip.mjs`): a 39px read-only strip mounted in
+  `App.tsx` on every route except Home (`/`) and `/timeline` (both carry
+  their own editable copy) and the `/live` pop-out. Markers reuse
+  `debug/plannedEvents.ts`'s own rank-tier sizing/opacity rules and
+  `timeline/dropSequences.ts`'s `PHASE_COLOR` — one definition of
+  "strong", shared with the Timeline/debug canvases. The playhead and the
+  fixed-96px next-event countdown move in ONE rAF loop that writes
+  SVG attributes / `textContent` directly, never a React render per
+  frame — the markers themselves are rebuilt only when the song or its
+  plan changes, into a dedicated `<g>` the rAF loop never touches (a
+  React-managed sibling `<line>` is the playhead — clearing the wrong
+  node here throws on reconciliation, don't merge the two).
+- **HOME (`/`)** is now the landing page (`home/HomePage.tsx`,
+  `home/HomeTimeline.tsx`, `home/HomeQuickRuns.tsx`): an editable copy of
+  the timeline (icon toggles for analysed events/drop sequences/Light
+  Show, a draggable/zoomable window via the EXISTING
+  `timeline/hooks/useFollowWindow`, TimelineBar's own `dragEdge` shape
+  re-implemented here since `TimelineBar` itself is bound to the legacy
+  `MusicTrigger`/`EventOption` editor model) plus a tuned audio-shape
+  trace sharing the strip's one playhead, and two capped-width
+  (`minmax(0, 560px)`) Quick sequences / Quick actions cards. The audio
+  shape's own samples are WAV-time; each is shifted by the song's stored
+  `timestamp_offset_ms` to land on the SAME song-time axis the strip's
+  markers use — deliberately a NARROWER reconciliation than the Timeline
+  page's own `audio_latency_ms`-involving math (Home's shape is a
+  glance-and-navigate view, not an editing surface). `HomeQuickRuns.tsx`
+  is deliberately self-contained rather than literally extracting
+  `QuickStartCard`/`SetRunRows` out of `lightshow/SequenceView.tsx`/
+  `RunView.tsx` — a real follow-up, not done here, to let the Light
+  Show page's own Run view and Home share one implementation.
+  `main.home-route` drops the page's usual 1200px cap so Home's timeline/
+  shape run edge to edge on desktop; the quick-run cards stay capped
+  through their own grid.
+- **THE KIOSK VIEW** (`/?kiosk=1`, `spectra/web/src/kiosk/`): a Home
+  Assistant dashboard-tab iframe for a wall-mounted Raspberry Pi 7in
+  touchscreen (800x480, plain http, touch-only — River's 2026-10-14
+  measurement). `App.tsx` checks `kioskConfig.isKioskRequested(search)`
+  BEFORE every other route, rendering `KioskPage` (no menu, today's
+  existing `RoomControlsBar`/`TopBarStrip` — swap for the parallel
+  ui-build-bar task's consolidated bar once it lands — plus `HomePage`
+  with its audio shape dropped). `kioskConfig.ts` is the ONE place the
+  800x480/56px-HA-header/424px-usable sizing lives, so a later real
+  measurement is a one-line change. `spectra/config.py::
+  kiosk_frame_ancestors()` (env override `SPECTRA_KIOSK_FRAME_ANCESTORS`)
+  + `spectra/app.py`'s unconditional middleware set a
+  `Content-Security-Policy: frame-ancestors` header on every response —
+  the default origins are `http://homeassistant.local:8123` and
+  `http://192.168.40.16:8123`. Noted, not addressed: an HTTPS Home
+  Assistant view (the phone app's remote access) refuses to embed a
+  plain-HTTP iframe as mixed content — the wall kiosk itself is
+  unaffected (both plain HTTP, same LAN).
+- **`components/IconToggle.tsx`**: the shared 30px icon-toggle component
+  (report §9 idea 6), written self-contained (no cross-import) so it can
+  go either direction in a merge against the parallel ui-build-bar task's
+  own shared toggle, should that one land first.
+
 ## Maintaining this file
 
 Keep this file for knowledge useful to almost every future agent session in this project.
