@@ -97,7 +97,7 @@ def test_the_fish_is_the_first_member_and_carries_every_key():
     # STRIP_PHASE_EFFECTS member) and with the drop Shockwave (fx/effects/
     # phase_grammar.py — every Shockwave member is told the intensity too)
     assert device_model.DROP_INTENSITY_EFFECTS == (
-        {"fish"} | device_model.STRIP_PHASE_EFFECTS
+        {"fish", "radial"} | device_model.STRIP_PHASE_EFFECTS
         | device_model.DROP_SHOCK_EFFECTS)
     assert device_model.LULL_HANDOFF_EFFECTS <= device_model.PHASE_EFFECTS
     keys = {str(k) for k in fish_mod.Fish2d.CONFIG_SCHEMA.schema}

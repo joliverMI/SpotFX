@@ -1158,6 +1158,10 @@ class SceneV2(BaseModel):
     # (scripts/set_fish_drop_shock_off.py, his "turn it off for fish to
     # test it at first"). Since 2026-10-12 the strips' own drop shockwave
     # (fx/effects/strip_phase.py) follows it too ("stip shockwave, yes").
+    # STAR is the one exception to "the effect's own drop runs exactly as
+    # before": Star never paints the shared overlay at all (the star plan,
+    # 2026-10-13), but is told the same verdict — False swaps its own D3
+    # bands-snap-back for the plain bloom, a real change to ITS drop.
     drop_shock_enabled: bool = True
     # THE DROP TIMING OFFSET, PER SCENE (2026-10-12): None (default) = the
     # room's RoomControlState.drop_timing_offset_ms governs this scene's

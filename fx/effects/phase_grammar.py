@@ -97,7 +97,11 @@ wavefront, no debris, no wall splash, and no reveal hold-back either (the
 reveal is the overlay's, not the effect's). The per-effect `drop_shock`
 strength is a SEPARATE, effect-level knob and stays as it is. The strips'
 own drop shockwave (fx/effects/strip_phase.py) obeys the same verdict
-since 2026-10-12 (WHO BREATHES, below).
+since 2026-10-12 (WHO BREATHES, below). Since 2026-10-13 (the star plan)
+Star/Radial (fx/effects/radial.py) is told the same verdict too, though
+it is never a member here (`DROP_SHOCK` stays False) — Star never reaches
+this overlay at all; the verdict instead gates its OWN bands-snap-back
+drop, told False the drop is the plain bloom.
 
 THE BREATH-HOLD (lull)
 ======================
@@ -125,7 +129,13 @@ swims straight through to the drop) or breathes only down to its own
 `breath_gain(..., floor=)`). Pulse is not a Twod member and takes the
 breath itself (fx/effects/pulse.py): the Singles go fully dark for it, a
 flare's flash or punch included. The strips never breathe; their lull dark
-is the strip layer's own (fx/effects/strip_phase.py, `lull_ember`).
+is the strip layer's own (fx/effects/strip_phase.py, `lull_ember`). Star
+(radial.py, the star plan, 2026-10-13) IS a Twod member but, like Pulse,
+takes the breath in its OWN draw rather than through this module's base
+painter — the base painter only runs for a `DROP_SHOCK` member, and Star
+is never one. A no-op while its lull is in "bands" mode, since Star is
+already in `LULL_DARK_EFFECTS` and black by the shared dark point this
+breath can never exceed.
 
 AND THE STRIPS' OWN DROP SHOCKWAVE (fx/effects/strip_phase.py) obeys the
 same three switches above (the Admiral: "stip shockwave, yes"): SpotFX

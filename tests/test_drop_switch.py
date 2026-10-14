@@ -184,8 +184,9 @@ def test_every_drop_ready_pair_has_a_handoff_and_the_fireworks_melds():
     # every other centre-burst effect on the next big hit
     for keeper in ("fish", "orbits"):
         assert ds.handoff_kind(keeper, "fireworks") == ds.HANDOFF_KEEPERS
-    for other in ("radial", "squiggles"):
-        assert ds.handoff_kind(other, "fireworks") == ds.HANDOFF_GENERIC
+    assert ds.handoff_kind("squiggles", "fireworks") == ds.HANDOFF_GENERIC
+    # OUT OF STAR is a program on every pair (the star plan, 2026-10-13)
+    assert ds.handoff_kind("radial", "fireworks") == ds.HANDOFF_PROGRAM
     # the Black Hole FOUNTAINS into Fireworks (transitions-drop phase 4)
     assert ds.handoff_kind("blackhole", "fireworks") == ds.HANDOFF_PROGRAM
     assert ds.handoff_kind("fireworks", "blackhole") == ds.HANDOFF_SWALLOWED
@@ -193,7 +194,10 @@ def test_every_drop_ready_pair_has_a_handoff_and_the_fireworks_melds():
         assert ds.handoff_kind("fireworks", other) == ds.HANDOFF_IMPLODE_ON_HIT
     for outside in ("eye", "dancer", "pacman", None):
         assert ds.handoff_kind(outside, "radial") is None
-    assert ds.handoff_kind("radial", "blackhole") == ds.HANDOFF_CHOREOGRAPHED
+    for inc in ("blackhole", "orbits", "fish", "squiggles"):
+        assert ds.handoff_kind("radial", inc) == ds.HANDOFF_PROGRAM
+        # INTO Star is still the choreographed bloom (his "still need work")
+        assert ds.handoff_kind(inc, "radial") == ds.HANDOFF_CHOREOGRAPHED
     assert ds.handoff_kind("squiggles", "blackhole") == ds.HANDOFF_PROGRAM
 
 

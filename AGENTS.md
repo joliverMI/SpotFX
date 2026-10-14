@@ -1048,6 +1048,13 @@ crossfade. Six things:
   programs_phase4.py`; help `transition-programs`; contact sheets
   `scripts/render_transition_programs.py` ->
   `docs/evidence/transition-programs/`.
+- **OUT OF STAR (2026-10-13, the star plan)**: Star releases its bands
+  through `Radial2d._program_snapshot` (a program asks it before
+  `_handoff_snapshot`, which stays empty so crossfade adoptions are
+  unchanged) into `transition_program.STAR_OUT` (INFALL / FOUNTAIN /
+  IGNITION / UNRAVEL reused, UNWIND / CLUSTER new). Into Star is not
+  registered yet. Star's own lull B / drop D3 / shape morph: the
+  radial-effect skill.
 
 ## THE KNOWN AUDIO BUFFER — SPECTRA MIRRORS River's number, never shortens it
 
@@ -9542,8 +9549,10 @@ effect (schema fields, `fx.device_model.LULL_DARK_EFFECTS`, one
 at the time: Black Hole, Squiggles, Pulse only (his "just these 3 for
 now"). **Since 2026-10-11 every strip phase member (Melt, Power and
 Black Hole's own strip `blackhole1d` — see "THE STRIP PHASE LAYER" below)
-is opted in too**, via the shared strip layer reading this same rule. Three
-things:
+is opted in too**, via the shared strip layer reading this same rule.
+**Star (radial) joined 2026-10-13** (the star plan, his "lull b") — its
+own fall-into-the-core mechanism is the radial-effect skill's, not a
+second copy of this rule. Three things:
 
 - **SpotFX tells, the effect measures.** `scene_response._drive_phase` adds
   `lull_ramp_s`/`lull_dark_s` to the lull ARM write, only for
@@ -9732,7 +9741,9 @@ including how an effect opts in. Four things:
   is the Shockwave members WITHOUT the Fish (`Twod.BREATH_HOLD = False`)
   plus Pulse (true black, punch and flash included), and Orbits breathes
   only to its `BREATH_FLOOR` (one dim blob); the Orbits strip keeps one
-  dim blob through its lull's dark (its own `lull_ember`, 0.2). Spec
+  dim blob through its lull's dark (its own `lull_ember`, 0.2). Star
+  (radial) joined 2026-10-13 too (the star plan) — like Pulse it takes
+  the breath in its own draw, true black (the radial-effect skill). Spec
   `tests/test_drop_feedback_1012.py`.
 - `DROP_INTENSITY_EFFECTS` widened to every member: the drop scales the
   debris and the front's life; Black Hole's own burst grows on a loud told
@@ -9755,7 +9766,11 @@ including how an effect opts in. Four things:
   so the frame is the effect's own drop byte for byte. Since 2026-10-12
   ("stip shockwave, yes") every strip phase member is told the same verdict
   (`DROP_SHOCK_TOLD_EFFECTS`) and skips only its wave and flood; its colour
-  and activity burst still run. The Pulse FLASH flare has its own floor on
+  and activity burst still run. Star (radial) joined `DROP_SHOCK_TOLD_
+  EFFECTS` too (2026-10-13, the star plan's drop D3) — it is never a
+  Shockwave member (its own bands-snap-back is its drop), but told False
+  that snap is withheld and the drop is the plain bloom (the radial-effect
+  skill). The Pulse FLASH flare has its own floor on
   the same top-bar Energy (`pulse_flash_min_energy`, 0.8,
   `scene_response.pulse_flash_allowed`). Spec
   `tests/test_drop_shock_switches.py`, `tests/test_drop_feedback_1012.py`;

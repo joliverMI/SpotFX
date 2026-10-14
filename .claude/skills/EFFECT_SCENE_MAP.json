@@ -40,7 +40,11 @@
         "fx/effects/radial.py",
         "scripts/check_star_spin_motion.py",
         "scripts/check_radial_base_rotation.py",
-        "tests/test_radial_base_rotation.py"
+        "scripts/check_star_phases.py",
+        "tests/test_radial_base_rotation.py",
+        "tests/star_harness.py",
+        "tests/test_star_phases.py",
+        "tests/test_star_programs.py"
       ]
     },
     "fireworks-effect": {

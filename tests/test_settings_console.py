@@ -95,6 +95,9 @@ def test_registry_is_an_explicit_allowlist_matching_room_control_bounds():
         # 2026-10-11, phase 4's four (transition_cloud.py):
         "transition_explode_frac", "transition_lensing_pull",
         "transition_ignition_turns", "transition_scatter",
+        # 2026-10-13, the star plan's three out-of-Star tunables:
+        "transition_bands_pieces", "transition_bands_hold_ms",
+        "transition_unwind",
         # 2026-10-12, the drop Shockwave's room switch and energy floor:
         "drop_shock_enabled", "drop_shock_min_energy",
         # 2026-10-12, the Pulse flash flare's energy floor:

@@ -79,11 +79,27 @@ may hard-cut into this one ON the drop, with this scene's own drop firing
 on the mark and adopting the outgoing pieces — or cut out of it the same
 way. Nothing in this scene's data opts in or out; `spectra/services/
 drop_switch.py` (and the drop-detection skill) is where the rule lives,
-including the hand-off table row for this effect (radial blooms out of a particle effect's pieces — a choreographed hand-off).
+including the hand-off table row for this effect (INTO STAR: radial blooms out of a particle effect's pieces — a choreographed hand-off; OUT OF STAR since 2026-10-13: a transition program run on the mark).
+
+## Its lull, drop and transitions out (the star plan, 2026-10-13)
+
+His "Use lull b, drop d 3": STAR's lull now breaks its bands into pieces
+that fall into the core (black on the shared dark point) and its drop throws
+them back out with a hue-kept colour gain — the radial-effect skill has the
+mechanism. Nothing in this scene's DATA changed for it: `lull_mode`
+defaults to "bands" on the effect, so STAR (and House Star, if a house mode
+ever lets a phase through) gets it with no migration; set `lull_mode` to
+"implode" on the Matrix entry to put the old lull back. The scene's own
+`drop_shock_enabled` switch withholds the snap-back (plain bloom). Every
+scene change OUT of STAR into Black Hole / Fireworks / Sauron / Eye /
+Squiggles / Orbits / Fish now runs a transition program (approved); into
+STAR is still the old bloom — the next task (with a better charge).
 
 ## Sonic reach
 
-Scene settings and flare kinds only via the scene console.
+Scene settings and flare kinds only via the scene console; the Matrix
+entry's effect VALUES (incl. `lull_mode`, `shape_morph_s`) via
+`set_scene_entry_param`.
 
 ## Executable proofs
 

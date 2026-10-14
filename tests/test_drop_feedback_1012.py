@@ -49,10 +49,11 @@ from strip_phase_harness import (FPS, PALETTE, STRIP_PX, Room,  # noqa: E402
 
 def test_the_breath_hold_set_matches_the_effect_classes():
     """BREATH_HOLD_EFFECTS = every Shockwave member whose class takes the
-    breath (not the Fish) plus Pulse; Orbits takes it only down to a floor."""
+    breath (not the Fish) plus Pulse and Star (both take it in their own
+    draw); Orbits takes it only down to a floor."""
     taking = {e for e in device_model.DROP_SHOCK_EFFECTS
               if getattr(device_model._effect_class(e), "BREATH_HOLD", True)}
-    assert device_model.BREATH_HOLD_EFFECTS == taking | {"pulse"}
+    assert device_model.BREATH_HOLD_EFFECTS == taking | {"pulse", "radial"}
     assert "fish" not in device_model.BREATH_HOLD_EFFECTS
     assert "pulse" in device_model.BREATH_HOLD_EFFECTS
     assert device_model._effect_class("fish").BREATH_HOLD is False

@@ -1163,6 +1163,69 @@
           "aspect": "shape",
           "default": 6
         },
+        "shape_morph_s": {
+          "label": "Shape Morph (s)",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 2,
+          "aspect": "shape",
+          "default": 0.6,
+          "help_topic": "star-shape-morph",
+          "note": "Seconds a change of Edges (STAR's dice re-roll) glides from the old shape to the new one instead of cutting in one frame. 0 = the old instant cut. The star plan, 2026-10-13."
+        },
+        "lull_mode": {
+          "label": "Lull",
+          "type": "enum",
+          "smooth": false,
+          "options": [
+            "bands",
+            "implode"
+          ],
+          "default": "bands",
+          "help_topic": "star-lull-drop",
+          "note": "bands (default, the Admiral's lull B): the outermost band breaks into pieces that spiral into the core, then the next, until the last is gone at the lull's dark point; the drop throws them back out (the bands snap back). implode: the original lull — the pattern squeezes into a narrow band at the core, and the drop is the plain bloom."
+        },
+        "lull_core_u": {
+          "label": "Lull Core Size",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.05,
+          "max": 0.4,
+          "default": 0.14,
+          "help_topic": "star-lull-drop",
+          "note": "Lull (bands): how close to the centre a falling piece gets before the core swallows it, in shaped-radius units (1 = the panel's corner)."
+        },
+        "lull_piece_tau": {
+          "label": "Lull Fall Time (s)",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.3,
+          "max": 2.0,
+          "default": 0.7,
+          "help_topic": "star-lull-drop",
+          "note": "Lull (bands): how fast a piece falls into the core — its radius decays on this many seconds (shortened automatically near the dark point so every piece is in by then)."
+        },
+        "drop_snap_gain": {
+          "label": "Drop Colour Gain",
+          "type": "numeric",
+          "smooth": true,
+          "min": 1.0,
+          "max": 2.5,
+          "default": 1.6,
+          "help_topic": "star-lull-drop",
+          "note": "Drop (the bands snap back, after a bands lull): the bands' hue-kept colour gain at the mark — more colour, never white. 1 = none. Scaled by the drop's told intensity."
+        },
+        "drop_snap_decay_s": {
+          "label": "Drop Gain Settle (s)",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.2,
+          "max": 3.0,
+          "default": 1.0,
+          "help_topic": "star-lull-drop",
+          "note": "Drop (the bands snap back): seconds the colour gain takes to settle back to 1."
+        },
         "x_offset": {
           "label": "X Offset",
           "type": "numeric",

@@ -2356,3 +2356,33 @@ against that commit.
     plus behavioural proofs through `flush_sync_settings` and the
     vendored, uncalled `Devices.set_wleds_sync_mode`, and through
     `house_fixtures`' real default transport).
+79. `effects/radial.py` (`_lull_bands`, `_begin_snap`, `_drop_snap`,
+    `splat_brighter`, `hue_gain`, `_shaped_radius`, `_shape_div`, the
+    `_morph` state, `_refresh_palette` + `get_gradient_color_vectorized1d`,
+    `_program_snapshot`, `_track_rotation`; schema: `lull_mode`,
+    `lull_core_u`, `lull_piece_tau`, `drop_snap_gain`, `drop_snap_decay_s`,
+    `shape_morph_s` and the told lull-dark / breath / drop-intensity /
+    `drop_shock_on` keys) + `effects/transition_program.py` (`STAR_OUT`
+    rows, `UNWIND`/`CLUSTER`, `ProgramSettings.bands_pieces` /
+    `bands_hold_s` / `unwind`, and `capture` asking an outgoing effect's
+    `_program_snapshot` before `_handoff_snapshot` and honouring a
+    snapshot's own `rgb`) + `effects/transition_cloud.py` (`turn_about`,
+    `UnwindProgram`, `ClusterProgram`, `ClusterFormer`) + `device_model.py`
+    (radial in `LULL_DARK_EFFECTS`, `BREATH_HOLD_EFFECTS`,
+    `DROP_INTENSITY_EFFECTS`, `DROP_SHOCK_TOLD_EFFECTS`): THE STAR PLAN
+    (data/star-plan/report.md; the Admiral, 2026-10-13: "Use lull b, drop
+    d 3", and on the transitions out of Star "great and approved"). A lull
+    in `lull_mode` "bands" (the new default) cuts the picture from the rim
+    inward and drops the passed cells as pieces into the core, black ON the
+    shared dark point; the drop throws them back out with a hue-kept colour
+    gain, withheld when SpotFX tells `drop_shock_on` False. An `edges`
+    change on a live instance glides over `shape_morph_s`. A transition
+    program out of Star releases its bands as pieces (`_program_snapshot`);
+    the ordinary `_handoff_snapshot` is unchanged (empty pieces), so every
+    crossfade adoption is byte-identical. Untold and outside a phase the
+    frame is the vendored mapping byte for byte (`_star_phase_frame`
+    returns it untouched); "implode" restores the vendored lull. Evidence:
+    `tests/test_star_phases.py`, `tests/test_star_programs.py` (real
+    pipeline: a real Melt strip under a real Radial,
+    `tests/star_harness.py`), `scripts/check_star_phases.py` (the same rig,
+    printed). Unverified against his live room.
