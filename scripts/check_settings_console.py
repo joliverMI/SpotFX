@@ -153,6 +153,9 @@ check(set(sc.SETTINGS_REGISTRY) == {
     # Ignition, Lensing/Fountain, Shoal Break/Unravel) — four more tunables:
     "transition_explode_frac", "transition_lensing_pull",
     "transition_ignition_turns", "transition_scatter",
+    # 2026-10-13, the star plan's three out-of-Star tunables:
+    "transition_bands_pieces", "transition_bands_hold_ms",
+    "transition_unwind",
     # 2026-10-12, the drop Shockwave's room switch and energy floor:
     "drop_shock_enabled", "drop_shock_min_energy",
     # 2026-10-12, the Pulse flash flare's energy floor:
@@ -162,7 +165,7 @@ check(set(sc.SETTINGS_REGISTRY) == {
    "drop_floor + lull_dark_max_s + lull_breath_hold_s + the four "
    "drop-switch tunables + the two fireworks-meld tunables + "
    "strip_phase_strength + background_fade_s + "
-   "the ten transition-program tunables + the drop Shockwave's switch "
+   "the thirteen transition-program tunables + the drop Shockwave's switch "
    "and energy floor + the Pulse flash's energy floor)")
 check(sc.SETTINGS_REGISTRY["ambient_enabled"].kind == "bool"
       and sc.SETTINGS_REGISTRY["ambient_on_music_pause"].kind == "bool",

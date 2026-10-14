@@ -808,6 +808,14 @@ class RoomControlState(BaseModel):
     #     the iris rim;
     #   - transition_scatter: how wide a shattered fish's dots and an
     #     unspooled chain's dots spread.
+    # The star plan (2026-10-13, out of Star — fx/effects/transition_cloud.py
+    # UNWIND / CLUSTER) adds three:
+    #   - transition_bands_pieces: how many pieces Star's bands release into
+    #     any program out of Star;
+    #   - transition_bands_hold_ms: how long those pieces keep turning on
+    #     their rings before they unwind;
+    #   - transition_unwind: how hard they unwind outward (px/s^2) on their
+    #     way to the Orbits (and, gentler, the Fish).
     transition_programs_enabled: bool = True
     transition_program_ms: int = Field(default=1400, ge=600, le=2500)
     transition_velocity_blend_ms: int = Field(default=500, ge=100, le=1500)
@@ -818,6 +826,9 @@ class RoomControlState(BaseModel):
     transition_lensing_pull: float = Field(default=1.0, ge=0.2, le=3.0)
     transition_ignition_turns: float = Field(default=0.6, ge=0.0, le=3.0)
     transition_scatter: float = Field(default=1.0, ge=0.0, le=2.0)
+    transition_bands_pieces: int = Field(default=180, ge=60, le=220)
+    transition_bands_hold_ms: int = Field(default=300, ge=0, le=800)
+    transition_unwind: float = Field(default=14.0, ge=0.0, le=40.0)
 
     # THE A/V-SYNC LEAD (owner ask 2026-08-28) — LEAD family: positive =
     # fire EARLIER, negative = fire LATER. The value the /avsync
@@ -1049,6 +1060,9 @@ def transition_program_request(room: "RoomControlState", *,
         "lensing_pull": float(room.transition_lensing_pull),
         "ignition_turns": float(room.transition_ignition_turns),
         "scatter": float(room.transition_scatter),
+        "bands_pieces": int(room.transition_bands_pieces),
+        "bands_hold_ms": int(room.transition_bands_hold_ms),
+        "unwind": float(room.transition_unwind),
         "on_mark": bool(on_mark),
     }
 

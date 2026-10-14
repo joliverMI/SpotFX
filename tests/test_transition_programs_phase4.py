@@ -130,7 +130,7 @@ def test_the_phase4_registry_and_anchors():
     assert tp.program_name("orbits", "blackhole") == tp.INFALL
     assert tp.program_name("blackhole", "orbits") == tp.ERUPTION
     # pairs with no program keep the crossfade
-    for out, inc in (("sauron", "eye"), ("radial", "sauron"), ("fish", "fireworks"),
+    for out, inc in (("sauron", "eye"), ("pacman", "sauron"), ("fish", "fireworks"),
                      ("dancer", "sauron"), ("sauron", "sauron")):
         assert tp.program_name(out, inc) is None, (out, inc)
     # the leads: Lensing's payoff is its ignition, like Infall's; the eye
@@ -162,7 +162,7 @@ def test_every_program_names_contiguous_stages_with_one_payoff():
                 assert a["to"] == pytest.approx(b["from"]), (out, inc, st)
             assert all(x["to"] > x["from"] for x in st)
             assert sum(1 for x in st if x.get("anchor")) == 1, (out, inc, st)
-    assert tp.stages("radial", "sauron", tp.ProgramSettings()) == []
+    assert tp.stages("pacman", "sauron", tp.ProgramSettings()) == []
 
 
 # ── 2. lensing ─────────────────────────────────────────────────────────────
@@ -535,7 +535,7 @@ def test_the_previews_carry_the_program_stages():
     # the payoff stage opens exactly where the lead says the mark is
     assert anchor["from_s"] - 2.0 == pytest.approx(
         stl.program_lead_ms({"m": "blackhole"}, writes, room) / 1000.0, abs=1e-3)
-    assert stl.program_stages({"m": "radial"}, writes, room) is None
+    assert stl.program_stages({"m": "pacman"}, writes, room) is None
     off = room.model_copy(update={"transition_programs_enabled": False})
     assert stl.program_stages({"m": "blackhole"}, writes, off) is None
 

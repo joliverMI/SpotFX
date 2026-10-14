@@ -99,9 +99,62 @@ incoming `"eye"` snapshot it names `"sauron"` alongside it (the src gate in `_ad
 the two together: a new `"eye"` special case here needs `"sauron"` too
 (sauron-effect skill).
 
+## Star's own lull and drop (the star plan, 2026-10-13 — "Use lull b, drop d 3")
+
+`radial.py`'s "STAR'S OWN LULL AND DROP" block comment is the binding
+statement; the plan is `/home/javi/fleet-spotfx/data/star-plan/report.md`.
+Five things not visible cold:
+
+- **Star draws nothing of its own** — its colours are the `radial-dummy`
+  strip's (Melt on STAR), so the strip's own charge/lull/drop (gain, fade,
+  drop shockwave) still rides into the crystal through the mapping (his
+  answer to the plan's Q5: keep it). The set's colours are cached once a
+  frame off the strip effect's gradient (`_refresh_palette`), which is what
+  `get_gradient_color_vectorized1d` and `_set_colours` read — a piece
+  always wears the SET colour nearest its cell, composed brighter-wins
+  (`splat_brighter`), never a channel max (two hues maxed pale to white).
+- **LULL B (`lull_mode` "bands", the default)** is a rim CUT in Star's own
+  shaped radius, shrinking the lit AREA evenly in time; every lit cell the
+  cut passes may become a piece that falls in Star's ROTATING frame (so it
+  keeps the ring's turning). Star is in `LULL_DARK_EFFECTS` and reads the
+  dark point itself: black ON it (`LULL_END_FADE`), the fall sped up near
+  it so every piece is in. Untold (no SpotFX keys) the dark point is
+  progress 1.0. "implode" is the original warp, still selectable.
+- **DROP D3** throws the swallowed pieces (`_held`) back out on the drop's
+  edge (`_begin_snap`) and wears a hue-kept colour gain (`hue_gain`). It is
+  NOT the shared Shockwave (`DROP_SHOCK` stays False) but Star is in
+  `DROP_SHOCK_TOLD_EFFECTS`: told `drop_shock_on` False (room switch, scene
+  switch, energy floor) the drop is the plain bloom. Nothing kept, an
+  "implode" lull, or the orphan watchdog's quiet release: plain bloom too.
+  The snap outlives the drop phase's own self-reset; a new charge/lull
+  discards it.
+- **The breath-hold** is applied in Star's own draw (`BREATH_HOLD_EFFECTS`,
+  like Pulse) — the base Twod painter only runs for Shockwave members.
+- **The shape morph** (`shape_morph_s`, 0.6 s): only a CHANGE of `edges` on
+  a live instance starts one (`config_updated`); the shaped radius blends
+  linearly old->new, a piece's divisor harmonically (`_shape_div`).
+
+## Out of Star: the bands release (transition programs)
+
+A program out of Star captures `_program_snapshot(settings)` — NOT
+`_handoff_snapshot`, which stays an empty-pieces snapshot so the ordinary
+crossfade adoptions (every particle effect's `src == "radial"` branch) are
+unchanged. ~`bands_pieces` lit cells, brightness-weighted, each with its
+set colour (`rgb`) and `v = omega x r` from the live rotation rate
+(`_track_rotation`). A dark star offers no pieces, so no program. Registry:
+`transition_program.STAR_OUT`; the two new flights (UNWIND, CLUSTER) are in
+`transition_cloud.py`. Into Star is not registered yet (his "still need
+work") — the next task.
+
 ## Sonic reach
 
-No direct param edit (same rule as every effect skill here). `spin`/
+No direct param edit (same rule as every effect skill here) — except the
+per-entry VALUES Sonic reaches through `set_scene_entry_param`: every
+registered param, including `lull_mode`, `lull_core_u`, `lull_piece_tau`,
+`drop_snap_gain`, `drop_snap_decay_s`, `shape_morph_s` (help topics
+`star-lull-drop`, `star-shape-morph`). The three out-of-Star transition
+knobs are ROOM settings (`transition_bands_pieces`, `_bands_hold_ms`,
+`transition_unwind`), reached by `set_setting`. `spin`/
 `base_rotation` both have registry `help_topic: radial-base-rotation`
 (shown as a HelpLink on the Initial Set tab) — documentation reach, not
 Sonic write access.
@@ -109,7 +162,11 @@ Sonic write access.
 ## Executable proofs
 
 `scripts/check_star_spin_motion.py`, `scripts/check_radial_base_rotation.py`,
-`tests/test_radial_base_rotation.py`. The warp background fix is proven in
+`tests/test_radial_base_rotation.py`. The star plan: `tests/star_harness.py`
+(a real Melt strip under a real Radial — Star renders black without it),
+`tests/test_star_phases.py` (lull B black on the dark point, D3 no-white,
+the switches, the morph), `tests/test_star_programs.py` (every program out
+of Star on the real `set_effect(program=)` hook). The warp background fix is proven in
 `tests/test_matrix_overwrite_background_double_apply.py`
 (`test_radial_warp_background_applies_once_not_twice`,
 `test_radial_background_recovers_after_a_warp_ends`). History: AGENTS.md's

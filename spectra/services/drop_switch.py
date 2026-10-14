@@ -93,8 +93,10 @@ DETERMINISTIC, so the room, the Timeline and Sonic agree about one decision.
 THE HAND-OFF TABLE (`HANDOFF`). Every ordered pair of drop-switch effects
 has one, because every member's _adopt_handoff takes any predecessor's
 snapshot (report E6): "choreographed" where the incoming effect stages the
-arrival (radial's standalone bloom out of the particles; a particle effect
-erupting from STAR's imploded point), "program" where a THEMATIC
+arrival (radial's standalone bloom out of the particles — INTO Star;
+since the star plan, 2026-10-13, every pair OUT of Star is a program
+below instead of a particle effect erupting from its imploded point),
+"program" where a THEMATIC
 TRANSITION PROGRAM is registered for the pair (fx/effects/transition_
 program.py — phase 3's INFALL into the Black Hole and the Black Hole's
 ERUPTION into orbits / fish / squiggles, widened by phase 4 to the Black
@@ -240,6 +242,12 @@ def _handoff_table() -> dict[tuple[str, str], str]:
                 # Fireworks drops, then implodes into the next scene on the
                 # next big bass hit
                 table[(out, inc)] = HANDOFF_IMPLODE_ON_HIT
+            elif out == "radial" and transition_program.program_name(
+                    out, inc) is not None:
+                # OUT OF STAR (the star plan, 2026-10-13): the bands release
+                # as pieces and the pair's program carries them across on
+                # the mark (transition_program.STAR_OUT)
+                table[(out, inc)] = HANDOFF_PROGRAM
             elif inc == "radial" and out in particles:
                 # radial gathers the particles and blooms out of the centre
                 table[(out, inc)] = HANDOFF_CHOREOGRAPHED

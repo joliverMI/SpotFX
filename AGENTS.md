@@ -1048,6 +1048,13 @@ crossfade. Six things:
   programs_phase4.py`; help `transition-programs`; contact sheets
   `scripts/render_transition_programs.py` ->
   `docs/evidence/transition-programs/`.
+- **OUT OF STAR (2026-10-13, the star plan)**: Star releases its bands
+  through `Radial2d._program_snapshot` (a program asks it before
+  `_handoff_snapshot`, which stays empty so crossfade adoptions are
+  unchanged) into `transition_program.STAR_OUT` (INFALL / FOUNTAIN /
+  IGNITION / UNRAVEL reused, UNWIND / CLUSTER new). Into Star is not
+  registered yet. Star's own lull B / drop D3 / shape morph: the
+  radial-effect skill.
 
 ## THE KNOWN AUDIO BUFFER — SPECTRA MIRRORS River's number, never shortens it
 

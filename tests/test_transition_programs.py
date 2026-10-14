@@ -76,7 +76,7 @@ def test_the_registry_anchors_and_leads():
     # (tests/test_transition_programs_phase4.py); unrelated pairs and
     # same-type writes have none
     for out, inc in (("fish", "fireworks"),
-                     ("radial", "blackhole"), ("blackhole", "blackhole"),
+                     ("pacman", "blackhole"), ("blackhole", "blackhole"),
                      (None, "blackhole")):
         assert tp.program_name(out, inc) is None
     s = tp.ProgramSettings.from_request({})
@@ -396,7 +396,7 @@ def test_fire_scene_asks_for_a_program_only_for_a_registered_switch(monkeypatch)
     room = rc.RoomControlState()
     w = [{"virtual_id": "m", "effect_type": "blackhole"}]
     assert sc.transition_program_for(w, room, current_types={"m": "orbits"})
-    assert sc.transition_program_for(w, room, current_types={"m": "radial"}) is None
+    assert sc.transition_program_for(w, room, current_types={"m": "pacman"}) is None
     assert sc.transition_program_for(
         w, room.model_copy(update={"transition_programs_enabled": False}),
         current_types={"m": "orbits"}) is None

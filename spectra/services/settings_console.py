@@ -160,7 +160,10 @@ def _spec(key: str, label: str, description: str) -> SettingSpec:
             "transition_explode_frac": "fraction 0.0-1.0",
             "transition_lensing_pull": "multiplier",
             "transition_ignition_turns": "turns",
-            "transition_scatter": "multiplier"}.get(key)
+            "transition_scatter": "multiplier",
+            "transition_bands_pieces": "pieces",
+            "transition_bands_hold_ms": "ms",
+            "transition_unwind": "px/s^2"}.get(key)
     return SettingSpec(key=key, label=label, kind=kind, description=description,
                        unit=unit, min=ge, max=le, choices=choices)
 
@@ -467,6 +470,19 @@ SETTINGS_REGISTRY: dict[str, SettingSpec] = {
         "transition_scatter", "Shoal Break / Unravel: scatter",
         "How wide a fish's dots spread as its body shatters (Shoal Break) "
         "and a chain's dots as it unspools (Unravel) — 0-2, default 1."),
+    "transition_bands_pieces": _spec(
+        "transition_bands_pieces", "Out of Star: pieces",
+        "When the Star hands over to another effect its bands break into "
+        "this many pieces (60-220, default 180), which then fly into the "
+        "incoming effect."),
+    "transition_bands_hold_ms": _spec(
+        "transition_bands_hold_ms", "Out of Star: ring hold",
+        "How long the Star's pieces keep turning on their rings before they "
+        "unwind toward the Orbits or the Fish, in ms (0-800, default 300)."),
+    "transition_unwind": _spec(
+        "transition_unwind", "Out of Star: unwind",
+        "How hard the Star's pieces unwind outward on their way to the "
+        "Orbits (the Fish gets a gentler share) — 0-40, default 14."),
 }
 
 

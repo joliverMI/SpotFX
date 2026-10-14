@@ -109,6 +109,28 @@ sliding to the incoming set's at the same gradient position; every layer
 composes by max (transition_program.splat_max); there is no white term
 anywhere — the flame lick's shards take the set colour NEAREST their cell.
 
+OUT OF STAR (the star plan, data/star-plan/report.md, 2026-10-13 — his
+"The ones from star to the others are great and approved"). Star draws its
+bands from the strip; on a program its RELEASE is its own
+(radial.Radial2d._program_snapshot): ~`transition_bands_pieces` pieces from
+its lit cells, each in the SET colour nearest its cell and moving with the
+ring it sat on (v = omega x r). Four pairs then run an existing program
+unchanged — INFALL (-> Black Hole), FOUNTAIN (-> Fireworks), IGNITION (->
+Sauron / Eye), UNRAVEL (-> Squiggles, threading onto the chain heads) — and
+two are new flights here:
+
+  UNWIND      Star -> Orbits: the pieces keep turning on their rings for
+              `transition_bands_hold_ms` (the tangential velocity kept, the
+              radial part settling out — `turn_about`), then unwind outward
+              (`transition_unwind` px/s^2) and condense onto the LIVE orbit
+              blobs (the TargetFormer).
+  CLUSTER     Star -> Fish: the pieces turn and unwind a little, then each
+              gathers onto one of the Fish's own count of SEED pieces
+              (angularly spread, the brightest first), and each cluster then
+              flies onto a live fish on the TargetFormer's Hermite — so every
+              piece arrives ON its fish with the fish's velocity and fades
+              into it as the Fish fades up.
+
 THE ANCHORS (transition_program.anchor_frac, what the trigger clock leads
 by): Lensing's is its ignition (like Infall's); the Fountain sprays at
 FOUNTAIN_ANCHOR; the Flame Lick explodes, the Shoal Break shatters and a
@@ -1205,6 +1227,201 @@ class UnravelProgram(CloudProgram):
         super()._fly(inc, t, dt)
 
 
+# ── OUT OF STAR: UNWIND (-> Orbits) and CLUSTER (-> Fish) ───────────────
+
+CLUSTER_UNWIND = 8.0 / 14.0    # the cluster flight unwinds this much of UNWIND's
+CLUSTER_GATHER = 0.5           # share of FORM over which pieces gather on seeds
+CLUSTER_SEP_RAD = 0.8          # seeds at least this far apart in angle (rad)
+
+
+def turn_about(prog, cx, cy, dt, drag=0.4, unwind=0.0, settle=0.25):
+    """Rings keep turning: the tangential part of each piece's velocity
+    about (cx, cy) is kept (decaying by `drag` 1/s, and turning with the
+    piece), the radial part settles out over `settle` s plus an optional
+    outward `unwind` px/s^2 — so a piece rides a circle about the centre on
+    the speed it had, then spirals outward."""
+    dx = prog.x - cx
+    dy = prog.y - cy
+    rho = np.maximum(np.hypot(dx, dy), 1e-3)
+    ux, uy = dx / rho, dy / rho
+    vr = prog.vx * ux + prog.vy * uy
+    vt = -prog.vx * uy + prog.vy * ux
+    vr = vr * np.float32(math.exp(-dt / max(settle, 1e-3))) + unwind * dt
+    vt = vt * np.float32(math.exp(-drag * dt))
+    om = vt / rho
+    ang = np.arctan2(dy, dx) + om * dt
+    rho2 = np.maximum(rho + vr * dt, 1.0)
+    nx = cx + rho2 * np.cos(ang)
+    ny = cy + rho2 * np.sin(ang)
+    if dt > 0:
+        prog.vx = ((nx - prog.x) / dt).astype(np.float32)
+        prog.vy = ((ny - prog.y) / dt).astype(np.float32)
+    prog.x = nx.astype(np.float32)
+    prog.y = ny.astype(np.float32)
+
+
+class _StarRelease(CloudProgram):
+    """Shared by the two new flights out of Star: the release is Star's own
+    snapshot (radial._program_snapshot — the set colours already named), and
+    the flight turns about Star's centre."""
+
+    RELEASE_HALF_LIFE_S = 0.22   # Star's picture fades a little slower than
+    #                              a particle effect's, under its own pieces
+    DRAG = 0.3
+    UNWIND_SCALE = 1.0
+
+    def _release(self, inc):
+        self._release_snapshot(cap=int(self.settings.bands_pieces),
+                               min_bright=0.3)
+        c = self.snap.get("center_px") or (inc.r_width / 2.0, inc.r_height / 2.0)
+        self.ccx, self.ccy = float(c[0]), float(c[1])
+
+    def _fly(self, inc, t, dt):
+        hold = self.settings.bands_hold_s
+        unwind = 0.0 if t < hold else self.settings.unwind * self.UNWIND_SCALE
+        turn_about(self, self.ccx, self.ccy, dt, drag=self.DRAG, unwind=unwind)
+
+
+class UnwindProgram(_StarRelease):
+    name = tp.UNWIND
+    FORM_AT = 0.5
+    STAGGER = 0.3
+
+    @classmethod
+    def stage_fracs(cls, settings, out_type=None, in_type=None):
+        return [{"label": "unwind", "from": 0.0, "to": cls.FORM_AT,
+                 "anchor": True},
+                {"label": "condense", "from": cls.FORM_AT, "to": 1.0}]
+
+
+class ClusterFormer(TargetFormer):
+    """CLUSTER's FORM (module docstring): gather onto the Fish's count of
+    seed pieces, then fly each cluster onto a live fish (the TargetFormer's
+    Hermite, so every piece arrives ON its fish with its velocity)."""
+
+    def __init__(self, prog, inc, t_form):
+        super().__init__(prog, inc, t_form, 0.0)
+        self.t_mid = t_form + CLUSTER_GATHER * max(prog.duration - t_form, 1e-3)
+        self.seed = None      # per piece: the index of its seed piece
+        self.d_gx = None      # its offset from the seed at FORM's start
+        self.d_gy = None
+        self.target = None    # per piece: its seed's fish
+        self.launched = False
+
+    def _choose(self, qx, qy):
+        p = self.p
+        n = p.n
+        k = int(max(1, min(qx.size, n)))
+        ang = np.arctan2(p.y - p.ccy, p.x - p.ccx)
+        seeds = []
+        sep = min(CLUSTER_SEP_RAD, 0.6 * 2.0 * np.pi / k)
+        for i in np.argsort(p.drawn_bright())[::-1]:
+            if all(abs((ang[i] - ang[j] + np.pi) % (2 * np.pi) - np.pi) > sep
+                   for j in seeds):
+                seeds.append(int(i))
+            if len(seeds) >= k:
+                break
+        seeds = np.asarray(seeds, dtype=np.int64)
+        d = np.abs((ang[:, None] - ang[seeds][None, :] + np.pi)
+                   % (2 * np.pi) - np.pi)
+        self.seed = seeds[np.argmin(d, axis=1)]
+        self.d_gx = (p.x - p.x[self.seed]).astype(np.float32)
+        self.d_gy = (p.y - p.y[self.seed]).astype(np.float32)
+        # each seed its own fish: the nearest still free (greedy)
+        free = list(range(qx.size))
+        fish_of = {}
+        for s_ in seeds:
+            dd = [(p.x[s_] - qx[f]) ** 2 + (p.y[s_] - qy[f]) ** 2 for f in free]
+            f = free.pop(int(np.argmin(dd))) if free else int(
+                np.argmin((p.x[s_] - qx) ** 2 + (p.y[s_] - qy) ** 2))
+            fish_of[int(s_)] = f
+        self.target = np.asarray([fish_of[int(s_)] for s_ in self.seed],
+                                 dtype=np.int64)
+
+    def advance(self, inc, t, dt):
+        p = self.p
+        targets = self._targets(inc, dt)
+        if t < self.t_form or targets is None:
+            p._fly(inc, t, dt)
+            if targets is None and t >= self.t_form:
+                f = 1.0 - float(_smoothstep(
+                    (t - self.t_form) / max(p.duration - self.t_form, 1e-3)))
+                p.form_fade[:] = np.minimum(p.form_fade, f)
+            return
+        self.targets_seen = True
+        qx, qy, ux, uy = targets
+        if self.seed is None:
+            self._choose(qx, qy)
+        if t < self.t_mid:
+            # GATHER: the seeds fly on; every other piece closes on its seed
+            x0, y0 = p.x.copy(), p.y.copy()
+            p._fly(inc, t, dt)
+            e = float(_smoothstep((t - self.t_form)
+                                  / max(self.t_mid - self.t_form, 1e-3)))
+            p.x = (p.x[self.seed] + self.d_gx * (1.0 - e)).astype(np.float32)
+            p.y = (p.y[self.seed] + self.d_gy * (1.0 - e)).astype(np.float32)
+            if dt > 0:
+                p.vx = ((p.x - x0) / dt).astype(np.float32)
+                p.vy = ((p.y - y0) / dt).astype(np.float32)
+            return
+        m = qx.size
+        if not self.launched:
+            self.launched = True
+            j = self.target % m
+            self.j[:] = j
+            self.ts[:] = t
+            self.d0x[:] = p.x - qx[j]
+            self.d0y[:] = p.y - qy[j]
+            self.e0x[:] = p.vx - ux[j]
+            self.e0y[:] = p.vy - uy[j]
+        j = self.j % m
+        tau = np.maximum(p.duration - self.ts, 1e-3)
+        s = np.clip((t - self.ts) / tau, 0.0, 1.0)
+        h00 = 2 * s ** 3 - 3 * s ** 2 + 1
+        h10 = s ** 3 - 2 * s ** 2 + s
+        dh00 = (6 * s ** 2 - 6 * s) / tau
+        dh10 = 3 * s ** 2 - 4 * s + 1
+        p.x = (qx[j] + h00 * self.d0x + h10 * tau * self.e0x).astype(np.float32)
+        p.y = (qy[j] + h00 * self.d0y + h10 * tau * self.e0y).astype(np.float32)
+        p.vx = (ux[j] + dh00 * self.d0x + dh10 * self.e0x).astype(np.float32)
+        p.vy = (uy[j] + dh00 * self.d0y + dh10 * self.e0y).astype(np.float32)
+        p.form_fade[:] = 1.0 - s ** 3
+        self.last_s[:] = s
+
+    def gain(self, t) -> float:
+        d = self.p.duration
+        return float(_smoothstep((t - self.t_mid) / max(d - self.t_mid, 1e-3)))
+
+
+class ClusterProgram(_StarRelease):
+    name = tp.CLUSTER
+    FORM_AT = 0.45
+    DRAG = 0.4
+    UNWIND_SCALE = CLUSTER_UNWIND
+
+    @classmethod
+    def stage_fracs(cls, settings, out_type=None, in_type=None):
+        mid = cls.FORM_AT + CLUSTER_GATHER * (1.0 - cls.FORM_AT)
+        return [{"label": "break", "from": 0.0, "to": cls.FORM_AT,
+                 "anchor": True},
+                {"label": "gather", "from": cls.FORM_AT, "to": mid},
+                {"label": "shoal", "from": mid, "to": 1.0}]
+
+    def _release(self, inc):
+        super()._release(inc)
+        cap = min(int(self.settings.bands_pieces), 160)
+        if self.x.size > cap:
+            keep = _cap_by_brightness(self.bright, cap)
+            self._set_pieces(self.x[keep], self.y[keep], self.vx[keep],
+                             self.vy[keep], self.grad[keep], self.bright[keep],
+                             self.rgb_from[keep])
+
+    def _make_former(self, inc):
+        if hasattr(inc, "_formation_points"):
+            return ClusterFormer(self, inc, self.FORM_AT * self.duration)
+        return FadeFormer(self, inc, self.FORM_AT * self.duration)
+
+
 PROGRAM_CLASSES = {
     tp.LENSING: LensingProgram,
     tp.FOUNTAIN: FountainProgram,
@@ -1213,4 +1430,6 @@ PROGRAM_CLASSES = {
     tp.SHOAL_BREAK: ShoalBreakProgram,
     tp.SHOALING: ShoalingProgram,
     tp.UNRAVEL: UnravelProgram,
+    tp.UNWIND: UnwindProgram,
+    tp.CLUSTER: ClusterProgram,
 }

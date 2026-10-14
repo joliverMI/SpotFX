@@ -301,7 +301,10 @@ ONE_COLOUR_EFFECTS = frozenset({"pulse"})
 # "HOW A LULL EFFECT OPTS IN". Every STRIP_PHASE_EFFECTS member is one (the
 # strip layer reads the same rule) — the Black Hole strip among them since
 # plan phase 2, the Orbits and Fireworks strips since phase 3.
-LULL_DARK_EFFECTS = frozenset({"blackhole", "squiggles", "pulse"}) \
+# Star (radial) joined 2026-10-13 (the star plan, his "lull b"): its
+# bands fall into the core and the panel is black at the dark point, read
+# off the same rule (fx/effects/radial.py `_lull_bands`).
+LULL_DARK_EFFECTS = frozenset({"blackhole", "squiggles", "pulse", "radial"}) \
     | STRIP_PHASE_EFFECTS
 
 # A FLARE IN THE LULL'S DARK PUNCHES THROUGH (the Admiral's answer 5 on the
@@ -351,7 +354,11 @@ DROP_SHOCK_EFFECTS = frozenset({"blackhole", "orbits", "sauron", "eye",
 # whose own drop shockwave (fx/effects/strip_phase.py) obeys the same three
 # switches. Skipped, only the shockwave goes — every other part of the
 # drop still runs.
-DROP_SHOCK_TOLD_EFFECTS = DROP_SHOCK_EFFECTS | STRIP_PHASE_EFFECTS
+# Star (radial, 2026-10-13, the star plan's "drop d 3") is told too: it
+# never takes the shared Shockwave overlay (its drop is the bands snapping
+# back, fx/effects/radial.py), but told False that snap is withheld and the
+# drop is its plain bloom — the same three switches govern it.
+DROP_SHOCK_TOLD_EFFECTS = DROP_SHOCK_EFFECTS | STRIP_PHASE_EFFECTS | {"radial"}
 
 # THE BREATH-HOLD (fx/effects/phase_grammar.py): the effects SpotFX tells
 # the lull's short true black right before the drop (`lull_breath_at_s`,
@@ -364,7 +371,9 @@ DROP_SHOCK_TOLD_EFFECTS = DROP_SHOCK_EFFECTS | STRIP_PHASE_EFFECTS
 # to its own BREATH_FLOOR (a dim blob, never black). Must equal the
 # registered effects whose class takes the breath
 # (tests/test_drop_feedback_1012.py holds that).
-BREATH_HOLD_EFFECTS = (DROP_SHOCK_EFFECTS - {"fish"}) | {"pulse"}
+# Star (radial) joined 2026-10-13 (the star plan): like Pulse it is not a
+# Shockwave member and takes the breath in its own draw.
+BREATH_HOLD_EFFECTS = (DROP_SHOCK_EFFECTS - {"fish"}) | {"pulse", "radial"}
 
 # ... and its drop-side half: effects told the fire's intensity on every
 # drop arm (`drop_intensity`) so the drop's length and speed scale with the
@@ -372,8 +381,8 @@ BREATH_HOLD_EFFECTS = (DROP_SHOCK_EFFECTS - {"fish"}) | {"pulse"}
 # strip layer sizes its drop shockwave by it), and every DROP_SHOCK_EFFECTS
 # member (the Fish's own drop, and every Shockwave member's wave and debris).
 DROP_INTENSITY_EFFECTS = (
-    frozenset({"fish"}) | STRIP_PHASE_EFFECTS | DROP_SHOCK_EFFECTS
-)
+    frozenset({"fish", "radial"}) | STRIP_PHASE_EFFECTS | DROP_SHOCK_EFFECTS
+)  # Star: the told intensity sizes its bands' snap-back (radial.py)
 
 # THE DROP-LED SCENE SWITCH's families (2026-10-08, drop-scene-variety plan
 # phase 2 — spectra/services/drop_switch.py is the binding statement). A

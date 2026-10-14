@@ -30,7 +30,10 @@ phase 4 (fx/effects/transition_cloud.py — its docstring is the binding
 statement for them) adds LENSING / FOUNTAIN (Fireworks <-> Black Hole),
 FLAME LICK / IGNITION (Sauron or Eye <-> the particle effects), SHOAL
 BREAK / SHOALING (Fish <-> Orbits / Squiggles) and UNRAVEL (Squiggles <->
-Orbits / Fish), all in the one registry below:
+Orbits / Fish); the star plan (2026-10-13) adds every pair OUT OF STAR —
+Star's bands release as pieces and ride INFALL / FOUNTAIN / IGNITION /
+UNRAVEL unchanged, or the two new flights UNWIND (-> Orbits) and CLUSTER
+(-> Fish) — all in the one registry below:
 
   INFALL    particles -> Black Hole (orbits / fish / squiggles -> blackhole
             — fireworks LENS in instead, below; his "I like this upgrade
@@ -105,6 +108,9 @@ IGNITION = "ignition"
 SHOAL_BREAK = "shoal_break"
 SHOALING = "shoaling"
 UNRAVEL = "unravel"
+# the star plan (2026-10-13; out of Star — fx/effects/transition_cloud.py)
+UNWIND = "unwind"
+CLUSTER = "cluster"
 
 # Infall feeds the Black Hole from every particle effect but Fireworks,
 # whose sparks LENS in instead (phase 4); the Black Hole erupts into every
@@ -115,6 +121,21 @@ ERUPTION_TARGETS = ("orbits", "fish", "squiggles")
 # and ignite from (IGNITION).
 EYES = ("sauron", "eye")
 EYE_PARTNERS = ("blackhole", "orbits", "fish", "squiggles", "fireworks")
+# OUT OF STAR (the star plan, 2026-10-13 — his "The ones from star to the
+# others are great and approved"): Star's bands RELEASE as pieces
+# (radial.Radial2d._program_snapshot) and four pairs reuse an existing
+# program unchanged; two are new flights (transition_cloud.py). Into Star is
+# NOT registered yet — those still crossfade (his "still need work").
+STAR = "radial"
+STAR_OUT = {
+    "blackhole": INFALL,
+    "fireworks": FOUNTAIN,
+    "sauron": IGNITION,
+    "eye": IGNITION,
+    "squiggles": UNRAVEL,
+    "orbits": UNWIND,
+    "fish": CLUSTER,
+}
 
 
 def _registry() -> dict[tuple[str, str], str]:
@@ -135,6 +156,8 @@ def _registry() -> dict[tuple[str, str], str]:
     for other in ("orbits", "fish"):
         table[("squiggles", other)] = UNRAVEL
     table[("orbits", "squiggles")] = UNRAVEL
+    for dst, name in STAR_OUT.items():
+        table[(STAR, dst)] = name
     return table
 
 
@@ -166,6 +189,11 @@ DEFAULT_EXPLODE_FRAC = 0.5      # his "say half for now"
 DEFAULT_LENSING_PULL = 1.0
 DEFAULT_IGNITION_TURNS = 0.6
 DEFAULT_SCATTER = 1.0
+# the star plan (transition_cloud.py's UNWIND / CLUSTER, and how many pieces
+# Star's bands release for any program out of Star)
+DEFAULT_BANDS_PIECES = 180
+DEFAULT_BANDS_HOLD_S = 0.3
+DEFAULT_UNWIND = 14.0
 
 
 def _clamp(v, lo, hi, default):
@@ -189,6 +217,9 @@ class ProgramSettings:
     lensing_pull: float = DEFAULT_LENSING_PULL
     ignition_turns: float = DEFAULT_IGNITION_TURNS
     scatter: float = DEFAULT_SCATTER
+    bands_pieces: int = DEFAULT_BANDS_PIECES
+    bands_hold_s: float = DEFAULT_BANDS_HOLD_S
+    unwind: float = DEFAULT_UNWIND
     on_mark: bool = False
     seed: Optional[int] = None
 
@@ -218,6 +249,11 @@ class ProgramSettings:
             ignition_turns=_clamp(req.get("ignition_turns", d.ignition_turns),
                                   0.0, 3.0, d.ignition_turns),
             scatter=_clamp(req.get("scatter", d.scatter), 0.0, 2.0, d.scatter),
+            bands_pieces=int(_clamp(req.get("bands_pieces", d.bands_pieces),
+                                    60, 220, d.bands_pieces)),
+            bands_hold_s=_clamp(req.get("bands_hold_ms", d.bands_hold_s * 1000.0),
+                                0.0, 800.0, d.bands_hold_s * 1000.0) / 1000.0,
+            unwind=_clamp(req.get("unwind", d.unwind), 0.0, 40.0, d.unwind),
             on_mark=bool(req.get("on_mark", False)),
             seed=int(seed) if isinstance(seed, (int, float)) else None,
         )
@@ -249,6 +285,9 @@ _FIXED_ANCHORS = {
     IGNITION: IGNITION_ANCHOR,
     SHOAL_BREAK: 0.0,
     SHOALING: SHOALING_ANCHOR,
+    # out of Star the bands come apart ON the mark (the Shoal Break's rule)
+    UNWIND: 0.0,
+    CLUSTER: 0.0,
 }
 
 
@@ -467,7 +506,12 @@ class TransitionProgram:
         if outgoing is None or not hasattr(outgoing, "_handoff_snapshot"):
             return False
         try:
-            snap = outgoing._handoff_snapshot()
+            # a form whose ordinary hand-off snapshot carries no pieces (Star:
+            # its crossfade adoptions read an empty one) offers a program its
+            # own RELEASE (radial.Radial2d._program_snapshot)
+            release = getattr(outgoing, "_program_snapshot", None)
+            snap = (release(self.settings) if release is not None
+                    else outgoing._handoff_snapshot())
         except Exception:
             _LOGGER.exception("transition program: outgoing snapshot failed")
             return False
@@ -477,7 +521,15 @@ class TransitionProgram:
         self.snap = snap
         self.dims = (int(w), int(h))
         grad = np.asarray(snap["grad"], dtype=np.float32)
-        rgb = _sample_rgb(outgoing, grad)
+        rgb = None
+        own = snap.get("rgb")
+        if own is not None:
+            # the pieces' own set colours (Star's release names them)
+            own = np.asarray(own, dtype=np.float32)
+            if own.shape == (grad.size, 3):
+                rgb = own
+        if rgb is None:
+            rgb = _sample_rgb(outgoing, grad)
         if rgb is None:
             rgb = np.full((grad.size, 3), 200.0, dtype=np.float32)
         self.rgb_out = rgb

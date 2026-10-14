@@ -561,6 +561,12 @@ export interface RoomControlState {
   transition_lensing_pull: number;
   transition_ignition_turns: number;
   transition_scatter: number;
+  /** The star plan (out of Star — transition_cloud.py UNWIND / CLUSTER):
+   * how many pieces the Star's bands release, how long they keep turning
+   * on their rings, and how hard they unwind outward. */
+  transition_bands_pieces: number;
+  transition_bands_hold_ms: number;
+  transition_unwind: number;
   /** Legacy Now Playing "Force Scene" control, ported verbatim: while
    * enabled, every scene the system would otherwise pick automatically
    * (sequencer roll, trigger fire, or the automatic transition fire) fires

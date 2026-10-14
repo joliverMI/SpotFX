@@ -351,7 +351,10 @@ def _render_radial_warp(tmp_path, sub, config, *, phase, phase_progress,
             with headless.fake_clock() as clock:
                 effect = headless.attach_effect(
                     host, virtual, "radial",
-                    dict(config, source_virtual=source_id),
+                    # the IMPLODE lull is the warp under test ("bands",
+                    # the default since the star plan, has no warp)
+                    dict(config, source_virtual=source_id,
+                         lull_mode="implode"),
                 )
                 effect._phase = phase
                 effect.phase_progress = phase_progress
@@ -463,7 +466,7 @@ def test_radial_background_recovers_after_a_warp_ends(tmp_path):
                 effect = headless.attach_effect(
                     host, virtual, "radial",
                     dict(OVERWRITE_BG, reverse=False,
-                         source_virtual=source_id),
+                         source_virtual=source_id, lull_mode="implode"),
                 )
                 effect._phase = "lull"
                 effect.phase_progress = 0.5

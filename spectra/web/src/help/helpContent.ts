@@ -273,6 +273,26 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        id: 'star-lull-drop',
+        title: 'STAR / Radial — the lull (bands fall in) and the drop (bands snap back)',
+        keywords: 'star radial lull drop bands particles pieces fall core swallow dark point snap back bloom colour gain implode breath hold shockwave switch energy',
+        body: [
+          'STAR is not really a star: it bends the strip\'s colour bands into rings around its centre, shaped by Edges and Star. Its lull and drop are its own.',
+          'THE LULL (Lull = bands, the default). The outermost band breaks into pieces that keep turning with the star and spiral into the core, then the next band, and the next, until the last one is gone. The panel is black ON the lull\'s dark point — half way through the lull, never more than "Lull darkness (max)" before the drop, the same moment every other effect goes dark — and stays black through the short breath-hold before the mark. Every piece wears the colour-set colour nearest where it broke off, so the core never washes out toward white. Lull Core Size is how close to the centre a piece gets before the core swallows it; Lull Fall Time is how fast it falls (it speeds up near the dark point so every piece is in by then).',
+          'THE DROP. Every piece the core swallowed is kept, and on the drop it is thrown back out of the core along its own angle and snaps onto its band as the bloom reveals the pattern, then melts into it. The bands wear a colour gain at the mark (Drop Colour Gain, 1.6× by default, settling over Drop Gain Settle) — more colour, never white: each colour brightens as a whole and stops at full. A louder drop runs the gain harder and longer.',
+          'SWITCHES. STAR does not take the shared Shockwave overlay — the bands snapping back is its drop — but it obeys the same three switches: when the room\'s Shockwave switch is off, the scene\'s own switch is off, or the top-bar Energy is below the Shockwave minimum, the drop is the plain bloom (nothing thrown, no colour gain). A drop with nothing kept (a charge straight into a drop, or Lull = implode) is the plain bloom too.',
+          'Lull = implode is the original lull: the pattern squeezes into a narrow band at the core, and the drop blooms it back out. Every one of these is a Sonic effect-parameter value on the scene\'s Matrix entry.',
+        ],
+      },
+      {
+        id: 'star-shape-morph',
+        title: 'STAR / Radial — the shape morph',
+        keywords: 'star radial edges shape morph glide dice re-roll polygon points cut smooth',
+        body: [
+          'When STAR\'s Edges changes (its dice re-roll picks a new number of points), the shape glides from the old polygon to the new one over Shape Morph seconds (0.6 by default) instead of cutting in one frame. 0 puts the old instant cut back. Changing anything else — Star, Twist, the speed — never starts a morph; those already glide on their own.',
+        ],
+      },
+      {
         id: 'pulse-effect',
         title: 'Pulse — the Singles\' one-colour effect',
         keywords: 'pulse singles single led hue bulbs porch rail dining table power replacement resting level depth fade beats rise sharp soft hit sensitivity hit source kick bass bulb curve gamma charge top drop burst white flash budget intensity tempo test scene tune',
@@ -1619,7 +1639,7 @@ export const HELP_SECTIONS: HelpSection[] = [
           {
             id: 'transition-programs',
             title: 'Thematic transitions: Infall, Eruption, Lensing, Flame Lick and the rest',
-            keywords: 'transition program thematic infall eruption lensing fountain flame lick ignition shoal break shoaling unravel sauron eye black hole orbits fish squiggles fireworks crossfade spiral implode bloom ignite horizon explode shards vortex rim slit peel unspool thread velocity hand off smooth cloud particles length anchor mark stages preview',
+            keywords: 'transition program thematic infall eruption lensing fountain flame lick ignition shoal break shoaling unravel unwind cluster star radial bands sauron eye black hole orbits fish squiggles fireworks crossfade spiral implode bloom ignite horizon explode shards vortex rim slit peel unspool thread velocity hand off smooth cloud particles length anchor mark stages preview',
             body: [
               'A scene change between the Black Hole and a particle effect no longer crossfades for half a second. It runs a thematic transition with its own clock (1.4 seconds by default) and draws one picture at a time, never two half-bright ones added together.',
               'Infall (Orbits, Fish, Squiggles or Fireworks into the Black Hole): every piece leaves on the motion it had, bends onto a spiral that speeds up as it falls, and lands on the event horizon, which lights up as it feeds. Over the last half second each piece\'s motion blends into the Black Hole\'s own, and the Black Hole takes the pieces over still moving — they never stop dead and start again.',
@@ -1627,6 +1647,7 @@ export const HELP_SECTIONS: HelpSection[] = [
               'Lensing (Fireworks into the Black Hole): every spark keeps its own momentum while a pull that grows over the transition bends the trails into spiral arms round the forming horizon; the last half second blends each spark into the Black Hole\'s own motion, so nothing changes direction when the Black Hole takes over. Fountain is the reverse: the Black Hole\'s ring gathers toward the centre spinning ever faster on its own spin, then sprays out of it into sparks across the whole colour set, which the Fireworks take over as its own, still flying.',
               'Flame Lick (Sauron or the Eye into a particle effect): the eye itself explodes. Half of its lit pixels (the Flame Lick exploding fraction) fly out as shards, each in the colour-set colour nearest its own pixel, while the other half collapse into the black; the eye dissolves into its shards over 0.3 seconds, then the shards slow and merge into the incoming effect (drawn into the Black Hole, or onto moving orbits, fish or chains, or taken over as fireworks sparks). Ignition is the way in: the arriving pieces gather in a vortex onto the iris rim; the eye is revealed from the rim inward and its flames outward by one fill, so the ring never appears before the rest of the eye; the slit opens from a hairline, and the eye fades the rest of the way up from where the transition left it.',
               'Shoal Break (Fish into Orbits or Squiggles): each fish\'s body shatters into its dots, which keep the fish\'s heading and spread, then implode onto the moving orbits (or chain heads). Shoaling (Orbits into Fish): every fish starts exactly on an orbit blob, with its speed, direction and the rate it was turning, and eases into swimming — its body laid back along the curve it was on. Unravel (Squiggles into Orbits or Fish, and Orbits into Squiggles): a chain unspools from its tail into dots that implode onto the incoming form, or the cloud threads onto the moving chain heads one piece after another.',
+              'Out of STAR (into the Black Hole, the Fireworks, Sauron or the Eye, Squiggles, Orbits or the Fish): the star\'s bands break into pieces on the mark — each in the colour-set colour nearest where it sat, and still turning with the star — and ride the matching transition: an Infall into the Black Hole, a Fountain into the Fireworks, an Ignition into an eye, an Unravel threading onto the chains. Into Orbits they Unwind: the pieces keep turning on their rings for a moment (Out of Star ring hold), then unwind outward (Out of Star unwind) and condense onto the moving orbits. Into the Fish they Cluster: the pieces gather onto as many clusters as there are fish, and each cluster swims onto a fish, arriving with its speed. Into STAR from another effect is still the older bloom for now.',
               'The preview rulers (the transition preview, and the drop-sequence preview when a drop cuts into one) draw each transition\'s stages as bands, the stage that carries the payoff accented.',
               'The payoff lands on the trigger: the Black Hole lighting up for an Infall or Lensing, the bloom for an Eruption, the spray for a Fountain, the explosion for a Flame Lick or Shoal Break, the rim catching for an Ignition. The show fires the scene change early by exactly that much, and the transition preview draws the same length and anchor. When a drop changes the scene, the cut still lands on the drop and the transition runs from there, its payoff on the mark. Only the colour set\'s own colours are used — nothing is pushed to white.',
             ],
@@ -1640,6 +1661,9 @@ export const HELP_SECTIONS: HelpSection[] = [
               ['Lensing pull', '1× (0.2-3) — how hard the sparks are bent in (and how hard the Fountain sprays out).'],
               ['Ignition vortex turns', '0.6 turns onto the iris rim.'],
               ['Shoal Break / Unravel scatter', '1× (0-2) — how wide the dots spread.'],
+              ['Out of Star pieces', '180 (60-220) — how many pieces the star\'s bands break into.'],
+              ['Out of Star ring hold', '300 ms (0-800) — how long they keep turning on their rings before they unwind.'],
+              ['Out of Star unwind', '14 (0-40) — how hard they unwind outward toward the Orbits (the Fish get a gentler share).'],
             ],
             kbd: false,
           },

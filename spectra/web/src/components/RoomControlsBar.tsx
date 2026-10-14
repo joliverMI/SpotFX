@@ -915,6 +915,40 @@ export default function RoomControlsBar() {
                   />
                   <span style={{ fontSize: '0.85em', opacity: 0.75 }}>×</span>
                 </div>
+                <div className="top-bar-group-field">
+                  <label title="When the Star hands over to another effect, its bands break into this many pieces.">
+                    Out of Star pieces
+                  </label>
+                  <input
+                    type="number" min={60} max={220} step={10}
+                    value={local.transition_bands_pieces}
+                    onChange={(e) => setLocal({ ...local, transition_bands_pieces: Number(e.target.value) })}
+                    onBlur={() => commit(local)}
+                  />
+                </div>
+                <div className="top-bar-group-field">
+                  <label title="How long the Star's pieces keep turning on their rings before they unwind toward the Orbits or the Fish.">
+                    Out of Star ring hold
+                  </label>
+                  <input
+                    type="number" min={0} max={800} step={50}
+                    value={local.transition_bands_hold_ms}
+                    onChange={(e) => setLocal({ ...local, transition_bands_hold_ms: Number(e.target.value) })}
+                    onBlur={() => commit(local)}
+                  />
+                  <span style={{ fontSize: '0.85em', opacity: 0.75 }}>ms</span>
+                </div>
+                <div className="top-bar-group-field">
+                  <label title="How hard the Star's pieces unwind outward on their way to the Orbits (the Fish gets a gentler share).">
+                    Out of Star unwind
+                  </label>
+                  <input
+                    type="number" min={0} max={40} step={1}
+                    value={local.transition_unwind}
+                    onChange={(e) => setLocal({ ...local, transition_unwind: Number(e.target.value) })}
+                    onBlur={() => commit(local)}
+                  />
+                </div>
               </>
             )}
             <div className="top-bar-group-field">
