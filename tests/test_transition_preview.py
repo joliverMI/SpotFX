@@ -112,9 +112,11 @@ def test_an_ordinary_pair_anchors_at_the_plain_midpoint():
 
 
 def test_a_registered_phased_pair_uses_its_own_anchor():
-    """orbits -> radial is a registered particle handoff (0.45), so its
-    payoff phase — not the midpoint — is what lands on the mark."""
-    tl = _timeline(_scene("A", "orbits"), _scene("B", "radial", entry_ramp_ms=1200))
+    """dancer -> radial is a registered particle handoff (0.45), so its
+    payoff phase — not the midpoint — is what lands on the mark. (Orbits ->
+    radial runs a transition PROGRAM since 2026-10-14 — WIND — and anchors
+    on the program instead; Dancer has none, so it still crossfades.)"""
+    tl = _timeline(_scene("A", "dancer"), _scene("B", "radial", entry_ramp_ms=1200))
     assert tl["anchor_frac"] == 0.45
     assert tl["anchor_source"] == "phased_pair"
     assert tl["lead_ms"] == 540

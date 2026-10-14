@@ -1174,6 +1174,17 @@
           "help_topic": "star-shape-morph",
           "note": "Seconds a change of Edges (STAR's dice re-roll) glides from the old shape to the new one instead of cutting in one frame. 0 = the old instant cut. The star plan, 2026-10-13."
         },
+        "ring_reveal_front_s": {
+          "label": "Into Star: Grow-In (s)",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.2,
+          "max": 2,
+          "aspect": "shape",
+          "default": 0.65,
+          "help_topic": "star-into-transitions",
+          "note": "A transition program INTO Star (the RingFormer): seconds the soft front takes to grow the star out of the core while the arriving pieces land on its bands. Clamped to the time the program has (the room's transition length). 2026-10-14."
+        },
         "lull_mode": {
           "label": "Lull",
           "type": "enum",

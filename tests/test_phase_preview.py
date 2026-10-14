@@ -260,7 +260,8 @@ def test_the_ruler_carries_the_drop_led_switch_the_resolver_would_make(monkeypat
     assert sw["switch"] and sw["to_scene_name"] == "STAR" and sw["moment"] == "drop"
     drop = next(m for m in tl["marks"] if m["event_class"] == "drop")
     assert sw["cut_s"] == drop["fire_at_s"]
-    assert sw["handoff"] == dsw.HANDOFF_CHOREOGRAPHED
+    # orbits -> STAR runs the WIND program on the cut (2026-10-14)
+    assert sw["handoff"] == dsw.HANDOFF_PROGRAM
     from spectra.services import phase_preview
     off = asyncio.run(phase_preview.build_timeline(scene, 0.7, drop_switch_enabled=False))
     assert off["drop_switch"] is None

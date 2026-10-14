@@ -5,7 +5,7 @@ import voluptuous as vol
 from PIL import Image
 
 import fx.effects.particle_handoff as particle_handoff
-from fx.effects import lull_dark, lull_handoff, phase_grammar
+from fx.effects import lull_dark, lull_handoff, phase_grammar, strip_phase
 from fx.effects.audio import AudioReactiveEffect
 from fx.effects.twod import Twod
 from fx.utils import nonlinear_log
@@ -89,6 +89,15 @@ DEFAULT_SHAPE_MORPH_S = 0.6
 # when a program asks).
 RELEASE_PIECES = 180
 RELEASE_LIT_MIN = 0.12       # a cell's brightest channel / 255 to be a piece
+#
+# INTO STAR (a transition program INTO Star — transition_cloud.RingFormer):
+# the pieces land on Star's bands while a soft front grows the star out of
+# the core; this is how long that front takes to reach the rim (a Star
+# param, so it is tuned per scene on the Star entry).
+DEFAULT_RING_REVEAL_FRONT_S = 0.65
+BAND_MIN_SHARE = 0.35        # a strip peak at least this share of the
+#                              brightest is a band a piece may land on
+BAND_FALLBACK = np.linspace(0.12, 0.92, 8, dtype=np.float32)
 
 _LUM = np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
 _SPLAT_R = 2
@@ -284,6 +293,14 @@ class Radial2d(Twod):
                             "colour gain takes to settle back to 1",
                 default=DEFAULT_DROP_SNAP_DECAY_S,
             ): vol.All(vol.Coerce(float), vol.Range(min=0.2, max=3.0)),
+            vol.Optional(
+                "ring_reveal_front_s",
+                description="Into Star (a transition program): seconds the "
+                            "soft front takes to grow the star out of the "
+                            "core while the arriving pieces land on its "
+                            "bands (clamped to the time the program has)",
+                default=DEFAULT_RING_REVEAL_FRONT_S,
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.2, max=2.0)),
             vol.Optional(
                 "shape_morph_s",
                 description="Seconds a change of Edges glides from the old "
@@ -580,11 +597,21 @@ class Radial2d(Twod):
                 particle_handoff.store(virtual.id, self._handoff_snapshot())
         except Exception:
             pass
+        # the strip Star read goes back to doing its own lull
+        strip_phase.unmark_radial_source(self.source_virtual)
         super().deactivate()
 
     def _adopt_handoff(self):
         """First-draw adoption from a particle predecessor: continue its
-        rotation (patch our twist sign) and arm the center-out bloom."""
+        rotation (patch our twist sign) and arm the center-out bloom.
+
+        Never while a TRANSITION PROGRAM brings Star in (transition_cloud.
+        RingFormer): the program owns the arrival — the old crossfade
+        choreography (this bloom, and the particle side's gather into the
+        centre, which only a crossfade sibling ever runs) is retired for
+        every program pair."""
+        if getattr(self, "_transition_program", None) is not None:
+            return
         snap = None
         virtual = self._virtual
         sibling = (
@@ -813,9 +840,11 @@ class Radial2d(Twod):
     #
     # THE BREATH-HOLD: Star takes the lull's short true black before the
     # mark itself (phase_grammar.breath_gain, once a frame — the base
-    # Twod's shared painter only runs for Shockwave members). In "bands"
-    # mode the panel is already black there; in "implode" mode it is the
-    # one moment the implode goes dark.
+    # Twod's shared painter only runs for Shockwave members). The panel is
+    # already black there in both modes: since 2026-10-14 the strip Star
+    # reads skips its own lull (strip_phase, THE STRIP STAR READS), so Star
+    # takes the panel dark ON the dark point itself — "bands" by its cut,
+    # "implode" by `_implode_fade`.
 
     def _lull_mode(self):
         mode = self._config.get("lull_mode", DEFAULT_LULL_MODE)
@@ -916,11 +945,14 @@ class Radial2d(Twod):
                 self._held = {"u0": np.zeros(0, np.float32),
                               "phi": np.zeros(0, np.float32),
                               "rgb": np.zeros((0, 3), np.float32)}
-        # STAR HOLDS ITS OWN PICTURE (the plan's Q6): the strip under it
-        # fades through its own lull (the strip phase layer) and reaches
-        # black before the dark point; Star brings the bands it still shows
-        # back up to their brightness at the lull's start (hue-kept, capped)
-        # so the bands fall in on Star's clock, black ON the dark point.
+        # STAR HOLDS ITS OWN PICTURE (the plan's Q6): since 2026-10-14 the
+        # strip Star reads skips its own lull while Star reads it (strip_
+        # phase, THE STRIP STAR READS), so its brightness only eases back
+        # from the charge; should a strip under Star dim anyway (a strip no
+        # longer marked, an older layer), Star brings the bands it still
+        # shows back up to their brightness at the lull's start (hue-kept,
+        # capped) so the bands fall in on Star's clock, black ON the dark
+        # point.
         if st["peak0"] > 0.0:
             live = lum[st["region"] & (lum > 2.0)]
             if live.size:
@@ -1089,6 +1121,9 @@ class Radial2d(Twod):
 
     def draw(self):
         self._ensure_source()
+        # THE STRIP STAR READS leaves the lull to Star (strip_phase's module
+        # docstring): say, every frame, which strip that is
+        strip_phase.mark_radial_source(self.source_virtual)
         self._refresh_bg_render_state()
 
         if self._handoff_pending:
@@ -1276,6 +1311,10 @@ class Radial2d(Twod):
 
             # Normalize and apply twist
             norm_radius = radius / self.max_radius
+            # this frame's shaped radius / angle fields: what a transition
+            # program INTO Star reveals by (transition_cloud.RingFormer)
+            self._last_u = norm_radius
+            self._last_angle = angle
             if warp is not None:
                 # explosion / implosion warp: sample the pattern at
                 # u = origin + (norm - origin)/scale. Origin 0 = zoom from
@@ -1356,9 +1395,13 @@ class Radial2d(Twod):
         self._refresh_palette(pixels_in)
         bands = self._phase == "lull" and self._lull_mode() == "bands"
         breath = 1.0
+        implode_fade = 1.0
         if self._phase == "lull":
             breath = phase_grammar.breath_gain(self._config, self._phase_t)
-        if not bands and self._snap is None and breath >= 1.0:
+            if not bands:
+                implode_fade = self._implode_fade()
+        if not bands and self._snap is None and breath >= 1.0 \
+                and implode_fade >= 1.0:
             return rgb_array
         rgb = rgb_array.astype(np.float32)
         layers = []
@@ -1375,4 +1418,90 @@ class Radial2d(Twod):
             rgb[lit] = layer[lit]
         if breath < 1.0:
             rgb *= np.float32(breath)
+        if implode_fade < 1.0:
+            rgb *= np.float32(implode_fade)
         return np.clip(rgb, 0, 255).astype(np.uint8)
+
+    def _implode_fade(self):
+        """The "implode" lull's own fade to black ON the shared dark point
+        (the strip that used to fade under it skips its lull while Star
+        reads it — strip_phase, THE STRIP STAR READS): the same eased curve
+        the strip layer faded by. Only when SpotFX has TOLD Star the lull's
+        dark point (it always does — Star is a LULL_DARK member); an untold
+        lull (a hand scrub, the vendored warp alone) is the warp as it was."""
+        if not lull_dark.told(self._config):
+            return 1.0
+        p = float(np.clip(self.phase_progress, 0.0, 1.0))
+        tim = lull_dark.lull_timing(self._config, p, self._phase_t,
+                                    legacy_dark_at=1.0)
+        if tim.dark:
+            return 0.0
+        return 1.0 - float(_smooth(tim.approach))
+
+    # ── INTO STAR (a transition program's FORM — transition_cloud.
+    # RingFormer): the geometry and the bands the arriving pieces land on ──
+
+    def _program_bands(self):
+        """The bands a piece may land on: the strip's bright peaks as strip
+        positions (n,) 0..1, read off the strip Star draws (`radial-dummy`'s
+        assembled frame), with each band's SET colour at full (n, 3). A
+        strip with no clear peaks falls back to evenly spaced rings."""
+        self._ensure_source()
+        strip = None
+        src = self.source_virtual
+        if src is not None and hasattr(src, "assembled_frame"):
+            try:
+                strip = np.asarray(src.assembled_frame, dtype=np.float32)
+            except Exception:                              # noqa: BLE001
+                strip = None
+        pos = None
+        cols = None
+        if strip is not None and strip.ndim == 2 and strip.shape[0] >= 8:
+            lum = strip[:, :3].max(axis=1)
+            k = np.array([1.0, 2.0, 3.0, 2.0, 1.0], np.float32)
+            sm = np.convolve(lum, k / k.sum(), mode="same")
+            top = float(sm.max())
+            if top > LIT_MIN:
+                peak = ((sm[1:-1] >= sm[:-2]) & (sm[1:-1] > sm[2:])
+                        & (sm[1:-1] >= BAND_MIN_SHARE * top))
+                idx = np.flatnonzero(peak) + 1
+                if idx.size >= 2:
+                    pos = (idx.astype(np.float32) + 0.5) / strip.shape[0]
+                    cols = strip[idx, :3]
+        if pos is None:
+            pos = BAND_FALLBACK.copy()
+            if self._palette is not None:
+                from fx.effects import transition_program as tp
+                cols = tp.palette_rgb(self._palette, pos)
+            else:
+                cols = np.full((pos.size, 3), 200.0, np.float32)
+        _grad, full = self._set_colours(cols)
+        return pos.astype(np.float32), full
+
+    def _program_theta(self):
+        """Star's rotation angle this frame (rad)."""
+        return float(((self.spin_total + self.rotation) % 1.0) * 2 * np.pi)
+
+    def _program_polar(self, x, y):
+        """Pixel positions -> (u, phi): Star's shaped radius and the angle
+        in its ROTATING frame (a piece at fixed (u, phi) turns with the
+        star) — the inverse of `_piece_xy`."""
+        x = np.asarray(x, np.float32)
+        y = np.asarray(y, np.float32)
+        theta = self._program_theta()
+        ang = np.arctan2(y - float(self.cy), x - float(self.cx))
+        phi = (ang - theta).astype(np.float32)
+        r = np.hypot(x - float(self.cx), y - float(self.cy))
+        u = r / (float(self.max_radius) * self._shape_div(phi))
+        return u.astype(np.float32), phi
+
+    def _program_band_u(self, band_pos, phi):
+        """The shaped radius at which strip position(s) `band_pos` show at
+        rotating-frame angle(s) `phi` (the draw samples the strip at
+        u + twist x angle_norm)."""
+        phi = np.asarray(phi, np.float32)
+        # the draw's own angle_norm (atan2 - theta, unwrapped), so a twisted
+        # star's band lands where the draw shows it
+        an = (phi + np.pi) / (2 * np.pi)
+        tw = float(self.twist or 0.0)
+        return (np.asarray(band_pos, np.float32) - tw * an) % 1.0

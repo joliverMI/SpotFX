@@ -131,6 +131,54 @@ two are new flights here:
               piece arrives ON its fish with the fish's velocity and fades
               into it as the Fish fades up.
 
+INTO STAR (2026-10-14, the Admiral: "Do rec on transitions" — the plan's
+revised recommendation, data/star-plan/report.md revision 2, after his
+"the star just appears, make it smoother" and "all the transitions to star
+have the same problem"). Every partner RELEASES its pieces its own way and
+Star FORMs them — the RingFormer, chosen by the incoming effect like every
+other former:
+
+  RingFormer  FORM begins at transition_program.STAR_FORM_AT (0.35) of the
+              program. Each piece, at its own glide start (spread so the
+              LANDINGS run from FORM + RING_LOCK_S to RING_LAND_END_S before
+              the end — never all on one frame), takes the band of Star's
+              strip (radial.Radial2d._program_bands — the strip's bright
+              peaks, read once at FORM) nearest where its own FLIGHT is
+              taking it, at its own angle in Star's ROTATING frame, and
+              glides onto it over RING_LOCK_S on a cubic Hermite relative to
+              the moving band point — leaving with its own velocity,
+              arriving riding the ring's rotation (velocity continuous at
+              both ends). Star's picture is revealed by a per-cell gain, the
+              max of: (1) a soft radial FRONT riding out from the core over
+              Star's own `ring_reveal_front_s` — in Star's shaped radius, but
+              paced by Star's own CELLS: it passes an even share of them
+              every frame (feathered over RING_FRONT_W of them), because the
+              cells crowd into a narrow band of radius and a front at a
+              steady radial speed lights that whole band at once — at
+              RING_LEVEL until the TAIL
+              eases the level inside the front to full over the program's
+              last RING_TAIL_S; (2) a GLOW on every landed piece's band,
+              growing from RING_GLOW_R0 cells at RING_GLOW_GROW cells/s (one
+              distance transform a frame). A landed piece dissolves into its
+              band over RING_FADE_S once the front has passed its cell (and
+              by the end regardless). No frame shows the whole star at once.
+  FOUNTAIN    Black Hole -> Star: the ring gathers and sprays at FORM.
+  SHOAL BREAK Fish -> Star: the bodies shatter into their dots on the mark.
+  SPARK RINGS Fireworks -> Star: the sparks fly on, slowing, and land.
+  FLAME LICK  Sauron / Eye -> Star: the eye explodes on the mark.
+  UNRAVEL     Squiggles -> Star: each chain unspools from its tail.
+  WIND        Orbits -> Star — UNWIND with time inverted (his "Just reverse
+              the one for the other direction"): each orbit blob comes
+              apart into an arc of WIND_DOTS dots along its OWN orbit over
+              WIND_ARC_S (±WIND_ARC_DEG, every dot still turning at the
+              blob's rate), the arcs wind INWARD on UNWIND's own turn-about
+              law with the push reversed (-`transition_unwind`), and the
+              RingFormer glides them onto the rings.
+The old crossfade choreography toward Star (radial's bloom out of the
+centre, the particle side's gather) never runs for these pairs: a program
+switch has no crossfade sibling, and radial._adopt_handoff stands down
+while a program owns the arrival.
+
 THE ANCHORS (transition_program.anchor_frac, what the trigger clock leads
 by): Lensing's is its ignition (like Infall's); the Fountain sprays at
 FOUNTAIN_ANCHOR; the Flame Lick explodes, the Shoal Break shatters and a
@@ -243,6 +291,11 @@ class _Former:
     def gain(self, t) -> float:
         d = self.p.duration
         return float(_smoothstep((t - self.t_form) / max(d - self.t_form, 1e-3)))
+
+    def colour(self, t, rgb):
+        """The pieces' colours this frame (n, 3) — a former may move them
+        toward where they land (the RingFormer's bands)."""
+        return rgb
 
     def hand_off(self, inc):
         return None
@@ -584,6 +637,8 @@ class CloudProgram(TransitionProgram):
 
     def _make_former(self, inc):
         d = self.duration
+        if self.in_type == tp.STAR and hasattr(inc, "_program_bands"):
+            return RingFormer(self, inc, tp.STAR_FORM_AT * d)
         if self.in_type == "blackhole" and hasattr(inc, "_program_field_velocity"):
             return FieldFormer(self, inc)
         if self.in_type == "fireworks":
@@ -628,13 +683,28 @@ class CloudProgram(TransitionProgram):
         b = self.drawn_bright()
         on = b > 0.005
         if on.any():
-            rgb = self._colour(t) * b[:, None]
+            rgb = self.former.colour(t, self._colour(t)) * b[:, None]
             splat_path(layer, px[on], py[on], self.x[on], self.y[on], rgb[on])
         return self.former.gain(t)
 
     def _hand_off(self, inc) -> None:
         if self._ready:
             self.former.hand_off(inc)
+
+    @classmethod
+    def star_in_stage_fracs(cls, settings, out_type=None, in_type=None):
+        """INTO STAR (module docstring): the partner's own release, then
+        Star's FORM ("grow in") from STAR_FORM_AT."""
+        a = tp.anchor_frac(cls.name, settings, out_type, in_type)
+        f = tp.STAR_FORM_AT
+        rel = {"label": STAR_IN_WORDS.get(cls.name, "release"),
+               "from": 0.0, "to": f}
+        form = {"label": "grow in", "from": f, "to": 1.0}
+        if a >= f - 1e-6:
+            form["anchor"] = True
+        else:
+            rel["anchor"] = True
+        return [rel, form]
 
 
 def _unit(dx, dy, rng):
@@ -709,6 +779,9 @@ class FountainProgram(CloudProgram):
         self.om0 = ((dx * self.vy - dy * self.vx) / (rho * rho)).astype(np.float32)
 
     def _make_former(self, fw):
+        if self.in_type == tp.STAR and hasattr(fw, "_program_bands"):
+            # into Star the sprayed sparks land on the bands (RingFormer)
+            return RingFormer(self, fw, tp.STAR_FORM_AT * self.duration)
         return SparkFormer(self, fw, self.t_spray)
 
     def _spray(self, fw):
@@ -738,6 +811,11 @@ class FountainProgram(CloudProgram):
         self.c_to_t = self.duration
 
     def _fly(self, fw, t, dt):
+        if self.sprayed:
+            # after the spray the sparks fly on, slowing (into Star the
+            # RingFormer flies them until each glides onto its band; into
+            # Fireworks the SparkFormer owns this stretch)
+            return CloudProgram._fly(self, fw, t, dt)
         # the unwind (before the spray): the ring and its blobs gather
         # toward the centre turning faster on the spin they had, bent from
         # the motion they had over the first stretch
@@ -1422,7 +1500,350 @@ class ClusterProgram(_StarRelease):
         return FadeFormer(self, inc, self.FORM_AT * self.duration)
 
 
+# ── INTO STAR: the RingFormer, SPARK RINGS and WIND (module docstring) ────
+
+RING_LOCK_S = 0.45      # a piece's glide onto its band
+RING_FADE_S = 0.25      # a landed piece melts into its band once passed
+RING_LAND_END_S = 0.25  # every piece has landed this long before the end
+RING_LEVEL = 0.35       # the star inside the front, until the tail
+RING_FRONT_W = 0.22     # the front's feather, as a share of Star's cells
+RING_TAIL_S = 0.45      # the level inside the front eases to full over the
+#                         program's last this-long
+RING_GLOW = 0.4         # a landed piece's glow on its band ...
+RING_GLOW_R0 = 2.0      # ... this many cells across at landing ...
+RING_GLOW_GROW = 4.0    # ... growing this many cells a second
+RING_PASSED = 0.5       # the front term at a landed piece's cell that lets
+#                         it melt into its band
+RING_U_MIN = 0.04       # a band this close to the core is not landed on
+
+STAR_IN_WORDS = {
+    tp.FOUNTAIN: "gather",
+    tp.SHOAL_BREAK: "break",
+    tp.SPARK_RINGS: "fly",
+    tp.FLAME_LICK: "explode",
+    tp.UNRAVEL: "unspool",
+    tp.WIND: "wind",
+}
+
+
+def _hermite(s, tau):
+    s = np.clip(s, 0.0, 1.0)
+    return (2 * s ** 3 - 3 * s ** 2 + 1, s ** 3 - 2 * s ** 2 + s,
+            (6 * s ** 2 - 6 * s) / tau, 3 * s ** 2 - 4 * s + 1)
+
+
+class RingFormer(_Former):
+    """Star's FORM (module docstring, INTO STAR): the pieces glide onto
+    Star's bands, staggered, while a soft front grows the star out of the
+    core; landings glow on their band ahead of it, and a landed piece melts
+    into its band once the front has passed it."""
+
+    def __init__(self, prog, star, t_form):
+        super().__init__(prog, star, t_form)
+        d = prog.duration
+        span = max(d - self.t_form, 1e-3)
+        self.lock = float(min(RING_LOCK_S, max(0.15, 0.45 * span)))
+        self.land_end = d - min(RING_LAND_END_S, 0.3 * span)
+        self.last_start = max(self.t_form, self.land_end - self.lock)
+        try:
+            want = float(star._config.get("ring_reveal_front_s", 0.65))
+        except Exception:                                  # noqa: BLE001
+            want = 0.65
+        room = max(self.land_end - self.t_form, 0.1)
+        self.front_s = float(min(max(want, 0.1), room))
+        self.tail_s = float(min(RING_TAIL_S, span))
+        self.cx, self.cy = float(star.cx), float(star.cy)
+        self.formed = False
+        self.bands = None
+        self.band_rgb = None
+        self._u_sorted = None
+        self._gain = None
+        self._shape = (int(star.r_height), int(star.r_width))
+
+    # ── FORM's start: the pieces as they are now (a fountain has just
+    # sprayed), the bands as the strip shows them ──────────────────────────
+    def _begin(self, star):
+        p = self.p
+        n = int(p.x.size)
+        self.n = n
+        self.formed = True
+        try:
+            self.bands, self.band_rgb = star._program_bands()
+        except Exception:                                  # noqa: BLE001
+            self.bands = np.linspace(0.12, 0.92, 8, dtype=np.float32)
+            self.band_rgb = np.full((self.bands.size, 3), 200.0, np.float32)
+        # the front passes an even SHARE of Star's cells every frame (its
+        # cells crowd into a narrow band of radius, so a front at a steady
+        # radial speed would light the whole middle at once)
+        self._u_sorted = np.sort(self._u_field(star).ravel()).astype(np.float32)
+        order = p.rng.permutation(n).astype(np.float32)
+        self.ts = (self.t_form + (self.last_start - self.t_form)
+                   * (order + 0.5) / max(n, 1)).astype(np.float32)
+        self.j = np.full(n, -1, dtype=np.int64)
+        self.ub = np.zeros(n, np.float32)
+        self.phib = np.zeros(n, np.float32)
+        self.d0x = np.zeros(n, np.float32)
+        self.d0y = np.zeros(n, np.float32)
+        self.e0x = np.zeros(n, np.float32)
+        self.e0y = np.zeros(n, np.float32)
+        self.s = np.zeros(n, np.float32)
+        self.t_land = np.full(n, np.inf, np.float32)
+        self.t_melt = np.full(n, np.inf, np.float32)
+        if p.form_fade.size != n:
+            p.form_fade = np.ones(n, np.float32)
+
+    def _band_point(self, star, ub, phib):
+        """Where a band point (rotating frame) is now, and its velocity
+        (riding Star's rotation)."""
+        qx, qy = star._piece_xy(ub, phib, star._program_theta())
+        w = float(getattr(star, "_omega", 0.0) or 0.0)
+        ux = -w * (qy - self.cy)
+        uy = w * (qx - self.cx)
+        return qx, qy, ux.astype(np.float32), uy.astype(np.float32)
+
+    def _assign(self, star, idx):
+        """Each piece starting its glide takes the band nearest where its
+        own flight is taking it, at its own angle, inside the panel."""
+        p = self.p
+        h, w = self._shape
+        fx_ = p.x[idx] + p.vx[idx] * 0.5 * self.lock
+        fy_ = p.y[idx] + p.vy[idx] * 0.5 * self.lock
+        u_pred, phi = star._program_polar(fx_, fy_)
+        u_c = star._program_band_u(self.bands[None, :], phi[:, None])
+        bx, by = star._piece_xy(u_c, np.broadcast_to(phi[:, None], u_c.shape),
+                                star._program_theta())
+        ok = ((u_c >= RING_U_MIN) & (bx >= 0.5) & (bx <= w - 0.5)
+              & (by >= 0.5) & (by <= h - 0.5))
+        cost = np.abs(u_c - u_pred[:, None]) + np.where(ok, 0.0, 10.0)
+        j = np.argmin(cost, axis=1)
+        rows = np.arange(idx.size)
+        self.j[idx] = j
+        self.ub[idx] = u_c[rows, j]
+        self.phib[idx] = phi
+        qx, qy, ux, uy = self._band_point(star, self.ub[idx], self.phib[idx])
+        self.d0x[idx] = p.x[idx] - qx
+        self.d0y[idx] = p.y[idx] - qy
+        self.e0x[idx] = p.vx[idx] - ux
+        self.e0y[idx] = p.vy[idx] - uy
+
+    def advance(self, star, t, dt):
+        p = self.p
+        p._fly(star, t, dt)
+        if t < self.t_form:
+            return
+        if not self.formed:
+            self._begin(star)
+        if self.n == 0:
+            self._gain = self._gain_map(star, t)
+            return
+        new = (t >= self.ts) & (self.j < 0)
+        if new.any():
+            self._assign(star, np.flatnonzero(new))
+        i = np.flatnonzero(self.j >= 0)
+        if i.size:
+            qx, qy, ux, uy = self._band_point(star, self.ub[i], self.phib[i])
+            s = np.clip((t - self.ts[i]) / self.lock, 0.0, 1.0)
+            h00, h10, dh00, dh10 = _hermite(s, self.lock)
+            p.x[i] = (qx + h00 * self.d0x[i] + h10 * self.lock * self.e0x[i]
+                      ).astype(np.float32)
+            p.y[i] = (qy + h00 * self.d0y[i] + h10 * self.lock * self.e0y[i]
+                      ).astype(np.float32)
+            p.vx[i] = (ux + dh00 * self.d0x[i] + dh10 * self.e0x[i]
+                       ).astype(np.float32)
+            p.vy[i] = (uy + dh00 * self.d0y[i] + dh10 * self.e0y[i]
+                       ).astype(np.float32)
+            self.s[i] = s
+            landed = i[s >= 1.0]
+            self.t_land[landed] = np.minimum(self.t_land[landed], t)
+        self._gain = self._gain_map(star, t)
+        # a landed piece melts into its band once the front has passed its
+        # cell — and by the end regardless
+        land = np.flatnonzero(np.isfinite(self.t_land) & ~np.isfinite(self.t_melt))
+        if land.size:
+            hh, ww = self._shape
+            xi = np.clip(np.floor(p.x[land]).astype(int), 0, ww - 1)
+            yi = np.clip(np.floor(p.y[land]).astype(int), 0, hh - 1)
+            passed = self._front_term[yi, xi] >= RING_PASSED
+            self.t_melt[land[passed]] = t
+        late = p.duration - RING_FADE_S
+        if t >= late:
+            self.t_melt = np.minimum(self.t_melt, np.float32(late))
+        melt = np.isfinite(self.t_melt)
+        p.form_fade[:] = 1.0
+        if melt.any():
+            p.form_fade[melt] = 1.0 - _smoothstep(
+                (t - self.t_melt[melt]) / RING_FADE_S)
+
+    def _u_field(self, star):
+        u = getattr(star, "_last_u", None)
+        if isinstance(u, np.ndarray) and u.shape == self._shape:
+            return u
+        hh, ww = self._shape
+        yy, xx = np.mgrid[0:hh, 0:ww]
+        r = np.hypot(xx + 0.5 - self.cx, yy + 0.5 - self.cy)
+        return r / max(float(r.max()), 1.0)
+
+    def _gain_map(self, star, t):
+        d = self.p.duration
+        u = self._u_field(star)
+        srt = self._u_sorted
+        rank = (np.searchsorted(srt, u, side="right").astype(np.float32)
+                / max(srt.size, 1))
+        q = (1.0 + RING_FRONT_W) * (t - self.t_form) / self.front_s
+        level = RING_LEVEL + (1.0 - RING_LEVEL) * float(
+            _smoothstep((t - (d - self.tail_s)) / max(self.tail_s, 1e-3)))
+        front = _smoothstep((q - rank) / RING_FRONT_W).astype(np.float32)
+        self._front_term = front * np.float32(level)
+        g = self._front_term.copy()
+        land = np.flatnonzero(np.isfinite(self.t_land)) if self.n else []
+        if len(land):
+            from scipy.ndimage import distance_transform_edt
+            hh, ww = self._shape
+            p = self.p
+            xi = np.clip(np.floor(p.x[land]).astype(int), 0, ww - 1)
+            yi = np.clip(np.floor(p.y[land]).astype(int), 0, hh - 1)
+            owner = np.full((hh, ww), -1, dtype=np.int64)
+            owner[yi, xi] = np.arange(land.size)
+            dist, (ny, nx) = distance_transform_edt(owner < 0,
+                                                    return_indices=True)
+            who = owner[ny, nx]
+            rad = (RING_GLOW_R0 + RING_GLOW_GROW
+                   * np.maximum(t - self.t_land[land], 0.0)).astype(np.float32)
+            glow = RING_GLOW * _smoothstep(1.0 - dist / rad[who])
+            np.maximum(g, glow.astype(np.float32), out=g)
+        return g
+
+    def gain(self, t):
+        if t < self.t_form or self._gain is None:
+            return 0.0
+        return self._gain
+
+    def colour(self, t, rgb):
+        """A gliding piece takes its band's colour as it lands."""
+        if not self.formed or self.n == 0 or rgb.shape[0] != self.n:
+            return rgb
+        i = np.flatnonzero(self.j >= 0)
+        if not i.size:
+            return rgb
+        out = rgb.copy()
+        k = _smoothstep(self.s[i])[:, None].astype(np.float32)
+        out[i] = rgb[i] + (self.band_rgb[self.j[i]] - rgb[i]) * k
+        return out
+
+
+class SparkRingsProgram(CloudProgram):
+    """Fireworks -> Star: the sparks fly on as they were, slowing, and the
+    RingFormer lands them on the bands."""
+
+    name = tp.SPARK_RINGS
+    SPLIT_MIN = MIN_PIECES
+
+    def _release(self, star):
+        self._release_snapshot()
+
+
+WIND_ARC_S = 0.3        # the blobs come apart into arcs over this
+WIND_ARC_DEG = 50.0     # ... each arc reaching this far along its orbit
+WIND_ARC_MAX_T = 0.35   # ... (s of the blob's own motion, at most)
+WIND_DOTS = 20          # dots per blob
+WIND_DRAG = 0.3         # UNWIND's own drag (_StarRelease.DRAG)
+
+
+class WindProgram(CloudProgram):
+    """Orbits -> Star — UNWIND with time inverted (module docstring)."""
+
+    name = tp.WIND
+    DRAG = WIND_DRAG
+
+    def _release(self, star):
+        snap = self.snap
+        px, py, vx, vy, grad, bright, rgb = self._snap_arrays()
+        full_b = np.asarray(snap["bright"], np.float32)
+        keep = (np.isfinite(np.asarray(snap["px"], np.float32))
+                & np.isfinite(np.asarray(snap["py"], np.float32))
+                & (np.clip(full_b, 0.0, 1.0) > 0.03))
+        om = snap.get("om")
+        om = (np.asarray(om, np.float32)[keep] if om is not None
+              and len(om) == len(full_b) else np.zeros(px.size, np.float32))
+        om = np.where(np.isfinite(om), om, 0.0).astype(np.float32)
+        n = px.size
+        dots = WIND_DOTS
+        if n * dots > PIECE_CAP:
+            dots = max(3, PIECE_CAP // max(n, 1))
+            if n * dots > PIECE_CAP:
+                sel = _cap_by_brightness(bright, PIECE_CAP // dots)
+                px, py, vx, vy = px[sel], py[sel], vx[sel], vy[sel]
+                grad, bright, rgb, om = grad[sel], bright[sel], rgb[sel], om[sel]
+                n = px.size
+        arc = math.radians(WIND_ARC_DEG)
+        span = np.where(np.abs(om) > 1e-3,
+                        np.minimum(arc / np.maximum(np.abs(om), 1e-3),
+                                   WIND_ARC_MAX_T),
+                        WIND_ARC_MAX_T).astype(np.float32)
+        k = np.linspace(-1.0, 1.0, dots, dtype=np.float32)
+        self.w_tau = (span[:, None] * k[None, :]).ravel()
+        rep = lambda a: np.repeat(a, dots, axis=0)        # noqa: E731
+        self.w_p0x, self.w_p0y = rep(px), rep(py)
+        self.w_v0x, self.w_v0y = rep(vx), rep(vy)
+        self.w_om = rep(om)
+        self._set_pieces(self.w_p0x, self.w_p0y, self.w_v0x, self.w_v0y,
+                         rep(grad), rep(np.clip(bright, 0.35, 1.0)), rep(rgb))
+        self.ccx, self.ccy = float(star.cx), float(star.cy)
+
+    def _orbit_at(self, s):
+        """Each dot's blob's own orbit, `s` seconds on (the blob's velocity
+        turning at its rate om) — the arc a dot is laid along."""
+        om = self.w_om
+        small = np.abs(om) < 1e-4
+        safe = np.where(small, 1.0, om)
+        a = np.where(small, s, np.sin(om * s) / safe)
+        b = np.where(small, 0.5 * om * s * s, (1.0 - np.cos(om * s)) / safe)
+        x = self.w_p0x + a * self.w_v0x - b * self.w_v0y
+        y = self.w_p0y + a * self.w_v0y + b * self.w_v0x
+        return x.astype(np.float32), y.astype(np.float32)
+
+    def _fly(self, star, t, dt):
+        if t < WIND_ARC_S:
+            # each blob comes apart into an arc along its own orbit, every
+            # dot still turning at the blob's rate
+            e = float(_smoothstep(t / WIND_ARC_S))
+            nx, ny = self._orbit_at(t + self.w_tau * e)
+            if dt > 0:
+                self.vx = ((nx - self.x) / dt).astype(np.float32)
+                self.vy = ((ny - self.y) / dt).astype(np.float32)
+            self.x, self.y = nx, ny
+            return
+        # then the arcs wind INWARD on UNWIND's own law (turn_about: the
+        # tangential speed kept, decaying by DRAG; the radial part settling
+        # out; the push, reversed), integrated in polar terms. turn_about
+        # re-reads each piece's radial speed off its last frame's chord,
+        # which adds a small outward drift on a turning ring (rho om^2 dt/2
+        # a frame) — harmless outward, but it outruns an inward push, so
+        # WIND keeps each piece's (vr, vt) itself.
+        dx = self.x - self.ccx
+        dy = self.y - self.ccy
+        rho = np.maximum(np.hypot(dx, dy), 1e-3)
+        ang = np.arctan2(dy, dx)
+        if getattr(self, "w_vr", None) is None or self.w_vr.size != rho.size:
+            ux, uy = dx / rho, dy / rho
+            self.w_vr = (self.vx * ux + self.vy * uy).astype(np.float32)
+            self.w_vt = (-self.vx * uy + self.vy * ux).astype(np.float32)
+        self.w_vr = (self.w_vr * np.float32(math.exp(-dt / 0.25))
+                     - np.float32(self.settings.unwind * dt))
+        self.w_vt = self.w_vt * np.float32(math.exp(-self.DRAG * dt))
+        ang = ang + self.w_vt / rho * dt
+        rho2 = np.maximum(rho + self.w_vr * dt, 1.0)
+        nx = (self.ccx + rho2 * np.cos(ang)).astype(np.float32)
+        ny = (self.ccy + rho2 * np.sin(ang)).astype(np.float32)
+        if dt > 0:
+            self.vx = ((nx - self.x) / dt).astype(np.float32)
+            self.vy = ((ny - self.y) / dt).astype(np.float32)
+        self.x, self.y = nx, ny
+
+
 PROGRAM_CLASSES = {
+    tp.SPARK_RINGS: SparkRingsProgram,
+    tp.WIND: WindProgram,
     tp.LENSING: LensingProgram,
     tp.FOUNTAIN: FountainProgram,
     tp.FLAME_LICK: FlameLickProgram,

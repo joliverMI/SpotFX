@@ -8,8 +8,8 @@ Measured on the real pipeline (tests/star_harness.py: a real Melt strip
 under a real Radial, the switch through the REAL `Virtual.set_effect(
 program=...)` hook):
 
-  1. the registry: every pair out of Star has a program, into Star none
-     yet; the anchors and the stages;
+  1. the registry: every pair out of Star has a program (into Star:
+     tests/test_star_into_programs.py); the anchors and the stages;
   2. the drop-led cut table: out of Star is a program on the mark;
   3. every program runs its whole clock (never dropped on an exception),
      draws no white cell, and starts from Star's released bands (the
@@ -46,11 +46,9 @@ OUT = {"blackhole": tp.INFALL, "fireworks": tp.FOUNTAIN,
 
 # ── 1. the registry ────────────────────────────────────────────────────────
 
-def test_every_pair_out_of_star_has_its_program_and_none_into_it_yet():
+def test_every_pair_out_of_star_has_its_program():
     for inc, name in OUT.items():
         assert tp.program_name("radial", inc) == name, inc
-        # into Star still crossfades (his "still need work")
-        assert tp.program_name(inc, "radial") is None, inc
     s = tp.ProgramSettings()
     assert tp.anchor_frac(tp.UNWIND, s) == 0.0
     assert tp.anchor_frac(tp.CLUSTER, s) == 0.0

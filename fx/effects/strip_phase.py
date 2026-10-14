@@ -83,6 +83,23 @@ are the plan's first guesses, pending his live tuning pass):
            one rule; untold = True). Told False only the wave and flood
            are skipped: the colour brightness, activity and fill still run.
 
+THE STRIP STAR READS LEAVES THE LULL TO STAR (2026-10-14, the Admiral:
+"The strip used by the radial effect shouldn't do the lull, let the crystal
+mapping handle the lull, but the charge and drop should still happen").
+Star (fx/effects/radial.py) draws nothing of its own — it bends a strip
+(`radial-dummy`) into rings — so whatever that strip does rides into the
+crystal. Its lull is Star's own now (lull B: the bands fall in, black ON
+the dark point), so while a Radial is reading a strip
+(`mark_radial_source` / `serving_radial`, stamped by Radial every frame
+and cleared when it deactivates) that strip's LULL IS SKIPPED: decided once
+at the lull's edge, the effect is told "none" (it leaves its build the way
+it would on a release: no lull content, no lull activity change, no fade),
+and the layer only eases whatever the charge left back to neutral over the
+lull's approach — never a jump at the edge, never a fade. The key itself
+stays "lull" (`_sp_seen`), so nothing re-edges until SpotFX's next write.
+Charge and drop run exactly as on any strip. Every other strip — any strip
+no Radial reads — is unchanged.
+
 A FLARE IN THE LULL'S DARK PUNCHES THROUGH (his answer 5): while a lull is
 running, a `flare_punch` poke opens lull_dark.punch_envelope; the fade
 becomes max(the lull's fade now, punch x flare_punch_strength), activity eases back
@@ -193,6 +210,39 @@ PUNCH_HOLD_KEY = lull_dark.PUNCH_HOLD_KEY
 DEFAULT_STRENGTH = 1.0
 MAX_STRENGTH = 1.5
 MAX_PUNCH = lull_dark.MAX_PUNCH
+
+# THE STRIP STAR READS (module docstring): a Radial's mark on its source
+# virtual counts for this long — Radial stamps it every frame it draws, so
+# this only matters if one stops drawing without deactivating.
+RADIAL_SOURCE_FRESH_S = 1.0
+RADIAL_MARK_ATTR = "_radial_reader_t"
+
+
+def mark_radial_source(virtual) -> None:
+    """A Radial is drawing from `virtual` this frame (radial.Radial2d.draw)."""
+    if virtual is not None:
+        try:
+            setattr(virtual, RADIAL_MARK_ATTR, particle_handoff.now())
+        except Exception:                                # noqa: BLE001
+            pass
+
+
+def unmark_radial_source(virtual) -> None:
+    """The Radial reading `virtual` deactivated (radial.Radial2d.deactivate)."""
+    if virtual is not None and getattr(virtual, RADIAL_MARK_ATTR, None) is not None:
+        try:
+            setattr(virtual, RADIAL_MARK_ATTR, None)
+        except Exception:                                # noqa: BLE001
+            pass
+
+
+def serving_radial(virtual) -> bool:
+    """True while a Radial is reading this strip (its mark is fresh)."""
+    t = getattr(virtual, RADIAL_MARK_ATTR, None) if virtual is not None else None
+    if t is None:
+        return False
+    return (particle_handoff.now() - float(t)) <= RADIAL_SOURCE_FRESH_S
+
 
 # Where the dark point sat when a lull was NOT told its timing (an older
 # SpotFX, a hand-written test, a LedFX UI scrub): half the progress ramp.
@@ -532,6 +582,10 @@ class StripPhase(Effect):
             # edge-fire on a fresh instance (the effect is born at "none";
             # SpotFX's arm write right after a cut is the real edge)
             self._sp_phase = "none"
+            # the phase KEY last edged — equal to _sp_phase except while the
+            # strip Star reads skips a lull (module docstring)
+            self._sp_seen = "none"
+            self._sp_skip = None
             self._sp_pending = None
             self._sp_t = 0.0
             self._sp_done_t = None
@@ -552,7 +606,7 @@ class StripPhase(Effect):
             self._sp_lull_timing = None
             self._sp_punch_level = 0.0
             return
-        self._sp_pending = new_phase if new_phase != self._sp_phase else None
+        self._sp_pending = new_phase if new_phase != self._sp_seen else None
         self._sp_punch.note(new_punch)
 
     # ── per frame ───────────────────────────────────────────────────────────
@@ -563,6 +617,8 @@ class StripPhase(Effect):
         out. Writes the key so an identical later arm edges again."""
         prev = self._sp_phase
         self._sp_phase = "none"
+        self._sp_seen = "none"
+        self._sp_skip = None
         self._sp_punch.close()
         self._apply_config({"phase": "none", "phase_progress": 0.0},
                            validate=False, fire_event=False)
@@ -580,8 +636,28 @@ class StripPhase(Effect):
         An effect with choreography of its own starts it here. Default:
         nothing (Melt, Power)."""
 
+    def _strip_phase_serving_radial(self) -> bool:
+        """A Radial is reading this strip (THE STRIP STAR READS)."""
+        return serving_radial(getattr(self, "_virtual", None))
+
     def _strip_phase_edge(self, pend):
         prev = self._sp_phase
+        self._sp_seen = pend
+        self._sp_skip = None
+        if pend == "lull" and self._strip_phase_serving_radial():
+            # THE STRIP STAR READS (module docstring): Star takes the lull;
+            # this strip leaves its build as on a release and only eases
+            # what the charge left back to neutral — no fade, no lull look
+            live = prev == "charge" or self._sp_drop_t is not None
+            self._sp_skip = {"from": self._sp_raw if live else (1.0, 0.0, 1.0),
+                             "t": 0.0}
+            self._sp_phase = "none"
+            self._sp_t = 0.0
+            self._sp_done_t = None
+            self._sp_drop_t = None
+            self._sp_punch.close()
+            self._strip_phase_enter("none", prev, False)
+            return
         self._sp_phase = pend
         self._sp_t = 0.0
         self._sp_done_t = None
@@ -609,7 +685,7 @@ class StripPhase(Effect):
         pend = self._sp_pending
         if pend is not None:
             self._sp_pending = None
-            if pend != self._sp_phase:
+            if pend != self._sp_seen:
                 self._strip_phase_edge(pend)
         punch = self._sp_punch
         if punch.consume(self._sp_phase == "lull",
@@ -679,6 +755,21 @@ class StripPhase(Effect):
                     if phase_grammar.shock_on(cfg) else 0.0)
             guard = float(cfg["white_guard"])
             self._sp_raw = (gain, fill, act)
+        elif self._sp_skip is not None:
+            # a lull skipped on the strip Star reads: ease what the charge
+            # left back to neutral over the lull's approach — never a fade
+            sk = self._sp_skip
+            sk["t"] += dt
+            timing = lull_dark.lull_timing(cfg, progress, sk["t"],
+                                           LEGACY_DARK_AT)
+            a = 1.0 if timing.dark else _smoothstep(timing.approach)
+            g0, fill0, act0 = sk["from"]
+            gain = g0 + (1.0 - g0) * a
+            fill = fill0 * (1.0 - a)
+            act = act0 + (1.0 - act0) * a
+            self._sp_raw = (gain, fill, act)
+            if a >= 1.0:
+                self._sp_skip = None
         else:
             self._sp_raw = (1.0, 0.0, 1.0)
 
