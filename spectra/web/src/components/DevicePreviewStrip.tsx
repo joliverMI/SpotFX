@@ -5,6 +5,13 @@
  * (api/devicePreviewWs.ts, module-level singleton) survives route changes
  * rather than tearing down and resubscribing on every navigation.
  *
+ * NO EXPAND BUTTON, NO FAVOURITES BUTTON (UI declutter plan §2/§3): the
+ * swatches themselves are the expand/collapse toggle now — they stay
+ * visible in BOTH states (outlined while expanded, `.device-preview-
+ * chips-open`) rather than disappearing once expanded. Favourites moved
+ * to Settings → "Room" (settings/RoomCard.tsx) as a plain always-visible
+ * picker, no popover here.
+ *
  * Approved by the owner with one explicit condition: "add a pause button
  * to pause the preview and conserve resources." Pause/resume call the
  * server (spectra/services/device_preview.py), which genuinely drops or
@@ -147,7 +154,6 @@ import {
   pauseDevicePreview, resumeDevicePreview, useDevicePreviewFavorites, useDevicePreviewLayout,
 } from '../queries';
 import type { DevicePreviewStatus } from '../types';
-import FavoritesPicker from './FavoritesPicker';
 import Icon from './Icon';
 import { useToast } from './Toast';
 
@@ -173,7 +179,6 @@ export default function DevicePreviewStrip() {
   const { data: layout } = useDevicePreviewLayout();
   const [status, setStatus] = useState<DevicePreviewStatus | null>(null);
   const [expanded, setExpanded] = useState(() => localStorage.getItem(EXPANDED_KEY) === '1');
-  const [pickerOpen, setPickerOpen] = useState(false);
   const [pausePending, setPausePending] = useState(false);
   const [tabHiddenPause, setTabHiddenPause] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
@@ -366,10 +371,20 @@ export default function DevicePreviewStrip() {
       <div className="device-preview-strip">
         {favoriteIds.length === 0 ? (
           <span className="device-preview-empty">no favourite devices</span>
-        ) : !expanded ? (
-          <div className="device-preview-chips">
+        ) : (
+          // Always visible, in BOTH states (outlined while expanded) and
+          // the toggle itself now — "clicking the preview swatches
+          // expands/collapses" (plan §2, no Expand button). Favourites is
+          // a Settings control now (settings/RoomCard.tsx), not a popover
+          // here.
+          <button
+            type="button"
+            className={`device-preview-chips${expanded ? ' device-preview-chips-open' : ''}`}
+            onClick={toggleExpanded}
+            title={expanded ? 'Collapse to one swatch per device' : 'Expand to the real fixture layout'}
+          >
             {favoriteIds.map((id) => (
-              <div key={id} className="device-preview-device" title={id}>
+              <span key={id} className="device-preview-device" title={id}>
                 <span
                   ref={(el) => {
                     swatchRefs.current[id] = el;
@@ -389,36 +404,16 @@ export default function DevicePreviewStrip() {
                   className="device-preview-swatch"
                   style={{ backgroundColor: DARK_PLACEHOLDER }}
                 />
-              </div>
+              </span>
             ))}
-          </div>
-        ) : null}
+          </button>
+        )}
 
         <button type="button" className={`device-preview-status-btn ${stateClass}`}
           disabled={pausePending || favoriteIds.length === 0}
           onClick={togglePause} aria-label={stateLabel} title={stateTitle}>
           {stateIcon}
         </button>
-
-        {favoriteIds.length > 0 && (
-          <button type="button" className="device-preview-btn" onClick={toggleExpanded}
-            title={expanded ? 'Collapse to one swatch per device' : 'Expand to the real fixture layout'}>
-            {expanded ? '▾ Collapse' : '▸ Expand'}
-          </button>
-        )}
-
-        <button type="button" className="device-preview-btn" onClick={() => setPickerOpen(true)}
-          title="Choose favourite devices">
-          ★ Favourites
-        </button>
-
-        {pickerOpen && (
-          <div className="device-preview-picker-overlay" onClick={() => setPickerOpen(false)}>
-            <div onClick={(e) => e.stopPropagation()}>
-              <FavoritesPicker onClose={() => setPickerOpen(false)} />
-            </div>
-          </div>
-        )}
 
         <HelpLink topic="device-preview" />
       </div>

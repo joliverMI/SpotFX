@@ -94,6 +94,33 @@ export const ICONS = {
    * lull / drop all share it; the next-event box's own text distinguishes
    * them, e.g. "Charge · drop 1" vs "Drop 1" — song-layout-plan §4). */
   pulse: 'M3 12H8L10 6L14 18L16 12H21',
+  /** Dashboard grid — the top menu's Home item (2026-10-14 UI declutter
+   * plan): deliberately NOT a house glyph, which stays reserved for house
+   * lighting (ModeChip.tsx's icon, "home" below). */
+  dash: 'M3 3H11V13H3ZM13 3H21V9H13ZM13 11H21V21H13ZM3 15H11V21H3Z',
+  /** Stacked cube — the top menu's "Artifacts ▾" group (Scenes, Colours,
+   * Devices, Rooms, Room FX, Light Show). */
+  cube: 'M12 2L21 7V17L12 22L3 17V7Z M3 7L12 12L21 7 M12 12V22',
+  /** Speed gauge — the top menu's "Engine ▾" group (Debug, Status, Timing,
+   * Review, AV Sync, House, Test Bed, Timeline, Feedback). */
+  gauge: 'M3.5 17.5A9 9 0 1 1 20.5 17.5 M12 14L16.5 9.5 M12 15.5A1.5 1.5 0 1 0 12 12.5A1.5 1.5 0 0 0 12 15.5Z',
+  /** Electrical plug — the panic-release control's icon (replaces the
+   * house glyph there, 2026-10-14: a house glyph now means house
+   * lighting, so releasing the room to Home Assistant needed its own). */
+  plug: 'M9 2V8 M15 2V8 M6 8H18V12A6 6 0 0 1 6 12Z M12 18V22',
+  /** Downward chevron — a closed dropdown group's own caret (flips to
+   * point up while its menu is open). */
+  chevronDown: 'M6 9L12 15L18 9',
+  /** Circled "i" — InfoTip.tsx's own trigger (a rich tooltip, hover/
+   * long-press, replacing a bare "?" wherever a control deserves its own
+   * short description plus a Help link). */
+  info: 'M12 22A10 10 0 1 0 12 2A10 10 0 0 0 12 22Z M12 16V11 M12 8H12.01',
+  /** A waveform trace — the test bed's own waveform-lane visibility
+   * toggle (IconToggle.tsx's first adoption site). */
+  wave: 'M2 12H5L7 5L11 19L14 9L16 15L18 10L20 14L22 12',
+  /** Hourglass — the Light Show bar slot's "Wait" item kind (a sequence
+   * step waiting on a duration/song count, not a trigger). */
+  wait: 'M6 2H18 M6 22H18 M6 2C6 8 10 10 12 12C14 14 18 16 18 22 M18 2C18 8 14 10 12 12C10 14 6 16 6 22',
 } satisfies Record<string, string>;
 
 export type IconName = keyof typeof ICONS;

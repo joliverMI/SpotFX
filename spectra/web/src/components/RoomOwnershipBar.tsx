@@ -1,17 +1,18 @@
-/** THE OWNER'S PANIC HANDLE — mounted once in App.tsx under the nav, on
- * every page, phone-first.
- *   - normal:   RENDERS NOTHING OF ITS OWN besides the strips below — the
- *               small, always-reachable "Release to HA" control itself
- *               moved to the right end of RoomControlsBar's row as a
- *               small icon button requiring a hold to confirm (his ask
- *               2026-10-06: it was "too prominent" for a control that now
- *               hands away SPECTRA's own everyday house lighting — see
- *               ReleaseButton.tsx). This module keeps only the strips,
- *               which belong on every page regardless of where the
- *               release control itself lives.
+/** THE OWNER'S PANIC HANDLE — mounted once in App.tsx under the one bar,
+ * on every page, phone-first.
+ *   - normal:   RENDERS NOTHING — the three amber strips below
+ *               (ActivationStrip/DarkFixtureStrip/HueScopeStrip) moved
+ *               into WarningChip.tsx's small "⚠ N" popover in the bar
+ *               (UI declutter plan §13 Q8, decided yes: shrink the
+ *               full-width warning to a chip). They're exported from
+ *               here, unchanged in content, so WarningChip can draw them
+ *               inside its own panel — this module just stops rendering
+ *               them itself. The small, always-reachable "Release to HA"
+ *               control lives at the right end of the bar (ReleaseButton.tsx,
+ *               his ask 2026-10-06).
  *   - released: an unmissable full-width banner, with the way back — the
  *               SAME guarded handover to SPECTRA, still readiness-gated
- *               and SPECTRA_HANDOVER_ARMED-gated. UNCHANGED by the move
+ *               and SPECTRA_HANDOVER_ARMED-gated. UNCHANGED by either move
  *               above (his own "its behaviour after release is
  *               unchanged").
  * Plus, since 2026-08-21 (owner ruling: one unreachable device must not
@@ -19,11 +20,11 @@
  * ACTIVATION STRIP. A take-back from released now commits over a light it
  * could not reach instead of aborting the whole room to darkness, and a
  * silently partial take-back is its own trap — so while any light the last
- * take-back/resume had to skip is STILL dark, an amber strip on every page
- * names it, says why, and shows how long ago it was last rechecked (the
- * server re-asks every 30 s and retries the light's own driver; the strip
- * disappears on its own the moment the light confirms). The take-back's
- * toast says the same thing once, immediately. */
+ * take-back/resume had to skip is STILL dark, WarningChip's panel names it,
+ * says why, and shows how long ago it was last rechecked (the server
+ * re-asks every 30 s and retries the light's own driver; it disappears on
+ * its own the moment the light confirms). The take-back's toast says the
+ * same thing once, immediately. */
 import HelpLink from '../help/HelpLink';
 import { fmtAgo, fmtDuration } from '../lib/time';
 import {
@@ -174,11 +175,7 @@ export default function RoomOwnershipBar() {
     );
   }
 
-  return (
-    <>
-      <ActivationStrip act={data.activation} />
-      <DarkFixtureStrip dark={data.dark_fixtures} />
-      <HueScopeStrip refusals={data.hue_stream_refusals} />
-    </>
-  );
+  // The normal path's own strips moved into WarningChip.tsx's "⚠ N" chip
+  // in the bar — see this module's own docstring.
+  return null;
 }

@@ -11667,10 +11667,10 @@ the no-jump grab-offset property directly.
 
 2026-10-14, `data/ui-layout-plan/report.md` (+ `explainer-final.html`, his
 edited copy with every decision). Four pieces, phased by the plan's own
-build order — slices 3/4 (the clock, the timeline, Home, kiosk) are built;
-slices 1/2 (the grouped menu, the one consolidated bar, Settings cards,
-the shared icon-toggle) are a separate, parallel effort and may still be
-unmerged — expect a rebase of `App.tsx`/`tokens.css` against that work.
+build order — slices 3/4 (the clock, the timeline, Home, kiosk) landed
+alongside slices 1/2 and the bar/settings half of slice 5 (the grouped
+menu, the one consolidated bar, Settings cards) built in the parallel
+`ui-build-bar` task — see "THE GROUPED MENU, ONE BAR, AND HOME" below.
 
 - **ONE SHOW CLOCK**: `spectra/services/engine.py::current_show_clock_ms()`
   is a second READER of the exact application point
@@ -11782,9 +11782,107 @@ unmerged — expect a rebase of `App.tsx`/`tokens.css` against that work.
   plain-HTTP iframe as mixed content — the wall kiosk itself is
   unaffected (both plain HTTP, same LAN).
 - **`components/IconToggle.tsx`**: the shared 30px icon-toggle component
-  (report §9 idea 6), written self-contained (no cross-import) so it can
-  go either direction in a merge against the parallel ui-build-bar task's
-  own shared toggle, should that one land first.
+  (report §9 idea 6) was built independently on both the `ui-build-home`
+  and `ui-build-bar` sides of this plan; reconciled on the latter's own
+  shape (`onChange: (on: boolean) => void`, `role="switch"`/
+  `aria-checked`/`aria-label` — see "THE GROUPED MENU, ONE BAR, AND HOME"
+  below) when the two landed together — `HomeTimeline.tsx`'s three
+  toggles (Analysed events / Drop sequences / Light Show) call it that
+  way too.
+
+## THE GROUPED MENU, ONE BAR, AND HOME — UI declutter plan (2026-10-14)
+
+The Admiral's layout declutter plan (`data/ui-layout-plan/` in
+fleet-spotfx, report.md + his edited explainer-final.html) replaced the
+17-link flat nav and two separately-wrapping top strips. Slices 1, 2 and
+the bar/settings half of slice 5 are built here; the editable Home
+timeline, the global read-only song timeline, `show_clock_ms` and
+`/api/upcoming` are the parallel `ui-build-home` task's own build — see
+"THE SONG-LAYOUT PLAN" above, landed alongside this one.
+
+- **The menu**: `spectra/web/src/nav/{navGroups.ts,NavMenu.tsx,NavBar.tsx}`
+  — Home | Artifacts ▾ | Engine ▾ | Settings, a plain data table
+  (`NAV_GROUPS`) driving the dropdowns. Feedback sits under Engine, next
+  to Review. The unsaved-changes guard is STILL a capture-phase handler on
+  `<nav>` reading `a.closest('a')` — every dropdown item renders INLINE
+  (absolute-positioned, never portalled to `<body>`) specifically so this
+  guard keeps covering it; don't portal a future menu item without
+  rechecking this.
+- **One bar**: `RoomControlsBar.tsx` and `TopBarStrip.tsx` are UNCHANGED as
+  components (same state/hooks) — App.tsx wraps both in one `<div
+  className="one-bar">`, and `tokens.css` gives each of their own root
+  divs `display: contents` so their CHILDREN become direct flex items of
+  `.one-bar`. Left-to-right order (house icon → display mode → Hue Hold →
+  Scenes → Colour → Energy+Mark → Light Show → preview swatches → ⚠ chip →
+  Release) is CSS `order` on each occupant's own class (`.one-bar
+  .mode-chip { order: 1; }` etc. in tokens.css), not DOM reordering — a new
+  occupant needs an `order` rule there, not a JSX move. `ModeChip.tsx`
+  (house mode) is icon-only now (no cycling text); `ReleaseButton.tsx`
+  uses a "plug" icon (the "home" glyph is ModeChip's now). The Scenes
+  popover (`RoomControlsBar.tsx`) keeps ONLY Force Scene (moved to the
+  TOP, his edit), the scene-change-tier select, and recents — every other
+  tuning field that used to live there moved to Settings (below).
+  `DevicePreviewStrip.tsx`'s swatches are now the expand/collapse toggle
+  themselves (no separate Expand/Favourites buttons); `WarningChip.tsx`
+  collapses the three full-width amber strips (`RoomOwnershipBar.tsx`'s
+  `ActivationStrip`/`DarkFixtureStrip`/`HueScopeStrip`, still exported from
+  there, just not rendered by that module's own default export in the
+  normal path) into a small "⚠ N" popover.
+- **Settings gained two direct-control cards** (`spectra/web/src/settings/
+  {RoomCard,ScenesDropsCard}.tsx`), a stated exception to "talk to Sonic,
+  no forms" (his own decision): Room (brightness, the drift gradient —
+  `components/DriftGradientPanel.tsx`, the old `DriftGradientBar.tsx`'s
+  panel content with the `TopBarGroupButton` wrapper stripped off since
+  it's inline on its own page now — and the Favourites picker) and
+  "Scenes & drops" (every tuning field moved out of the Scenes popover).
+  Both own their own draft/commit cycle against `RoomControlState`,
+  independent of RoomControlsBar's.
+- **Light Show's bar slot** (`LightShowStrip.tsx`) shows current→next with
+  trigger icons and a live countdown (10s lead-in fill), computed by the
+  pure `showNowNext()` in `lightshow/showSummary.ts` from `useShowArms`/
+  `useSequenceRunStatus` (both in `timeline/queries.ts`, cross-imported —
+  an established pattern, see `DebugPage.tsx`/`ReviewPage.tsx`) folded
+  together with push hooks `useLightShowBriefPush`/
+  `useLightShowSequencePush` (queries.ts) onto the websocket's existing
+  `light_show`/`light_show_sequence` broadcasts. Deep links
+  (`/show?tab=sequence&sub=run` / `/show?tab=run`) are read once on mount
+  by `LightShowPage.tsx` — a plain `?tab=` deep link in, never written
+  back on a later tab click.
+- **Home** (`spectra/web/src/home/HomePage.tsx`) is the real page built by
+  the parallel `ui-build-home` task (editable timeline, tuned audio shape,
+  quick-run cards — see "THE SONG-LAYOUT PLAN" above's own HOME bullet),
+  landed together with this one. `/` routes to it; `/scenes` still reaches
+  ScenesPage directly.
+- **Shared components, reusable outside this area**: `IconToggle.tsx` (a
+  30px icon toggle, purple-tinted when on — used on Test Bed's waveform-
+  lane visibility toggle, `testbed/TestbedPage.tsx`, AND on Home's own
+  timeline filter toggles, `home/HomeTimeline.tsx`) and `InfoTip.tsx` (a
+  rich hover/long-press tooltip carrying a short description plus a
+  `HelpLink`, replacing a bare "?" circle where one control deserves its
+  own explanation — used on the Light Show bar slot). Neither is wired
+  into every page; a future pass choosing to do that inherits these.
+- **Icons**: `dash`/`cube`/`gauge`/`chevronDown`/`plug`/`info`/`wave`/
+  `wait` added to `iconRegistry.ts` for this build — see that file before
+  adding a near-duplicate.
+- **Tests**: `scripts/check_nav_menu.mjs` (the menu: every route
+  reachable, keyboard open/close, the unsaved guard still intercepts a
+  dropdown item), `scripts/check_light_show_now_next.mjs`
+  (`showNowNext()`'s four rules), `scripts/check_onebar_fixed_widths.mjs`
+  (reads tokens.css itself — no browser — for the fixed-width/tabular-nums
+  rules that make the bar's no-jump property structural), and
+  `scripts/check_onebar_layout.py` (a REAL headless Chromium over raw CDP,
+  the only honest way to prove no horizontal overflow — jsdom has no
+  layout engine; connects to a PAGE target's own `webSocketDebuggerUrl`
+  from `/json/list`, never the browser-level `/json/version` one, which
+  404s `Page.navigate`/`Runtime.evaluate` with "wasn't found" on current
+  Chrome — found live while building this). Read-only against a live
+  instance (`SPECTRA_LIVE_URL`, default `http://127.0.0.1:8010/spectra/`);
+  skips cleanly when no Chromium/live app is reachable. **Teardown is by
+  the exact Popen pid/pgid only, never `pkill -f`** — a loose pattern can
+  match an unrelated real process on a shared host (see the `pkill -f`
+  memory entries); this script's own `start_new_session=True` +
+  `os.killpg` is the pattern to copy for any future browser-automation
+  check script here.
 
 ## Maintaining this file
 

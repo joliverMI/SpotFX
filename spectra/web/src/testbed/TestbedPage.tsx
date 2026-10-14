@@ -10,6 +10,7 @@
  * PromotionReviewDialog's own explicit confirm step (see that component
  * and spectra/services/testbed_promote.py). */
 import { useEffect, useMemo, useRef, useState } from 'react';
+import IconToggle from '../components/IconToggle';
 import { useToast } from '../components/Toast';
 import HelpLink from '../help/HelpLink';
 import {
@@ -183,6 +184,10 @@ export default function TestbedPage() {
   // default rather than carrying over a value tuned for a different beat
   // length.
   const [toleranceTouched, setToleranceTouched] = useState(false);
+  // A display filter only — never sent anywhere; IconToggle.tsx's first
+  // adoption site (UI declutter plan idea 6, "one icon-toggle component
+  // everywhere").
+  const [showWaveform, setShowWaveform] = useState(true);
   const lastUriRef = useRef<string | null>(null);
   // Set once the three knobs above have been synced from the live room
   // default — a ONE-TIME sync, not a standing subscription: re-syncing on
@@ -566,10 +571,17 @@ export default function TestbedPage() {
             </div>
             <div style={{ fontSize: 12, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
               Lanes <HelpLink topic="testbed-lanes-and-tolerance" title="Lanes, tinting, and the tolerance slider" />
+              <IconToggle
+                on={showWaveform}
+                onChange={setShowWaveform}
+                icon="wave"
+                title={showWaveform ? 'Hide the waveform lane' : 'Show the waveform lane'}
+                size={24}
+              />
             </div>
             <TestbedLaneBar
               durationMs={durationMs}
-              waveform={waveform}
+              waveform={showWaveform ? waveform : undefined}
               referenceMarks={activeReferenceMarks}
               scoredMarks={scoredMarks}
               referenceLabel={REFERENCE_LABEL[reference]}

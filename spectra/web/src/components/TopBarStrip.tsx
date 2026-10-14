@@ -20,19 +20,22 @@
  * that mechanism breaks. */
 import DevicePreviewStrip from './DevicePreviewStrip';
 import ModeChip from './ModeChip';
-import IntensityMarkControl from './IntensityMarkControl';
-import LiveEnergyReadout from './LiveEnergyReadout';
+import EnergyBar from './EnergyBar';
 import LightShowStrip from './LightShowStrip';
+import WarningChip from './WarningChip';
 
 export default function TopBarStrip() {
   return (
     <div className="top-bar-strip">
-      {/* House lighting's mode — FIRST, the resting state every page sits on. */}
+      {/* House lighting's mode — FIRST, the resting state every page sits on.
+        * Visual position within the merged one-bar row is driven by CSS
+        * `order` (tokens.css's `.one-bar .mode-chip` etc.), not DOM order —
+        * see App.tsx's own comment on the `display: contents` merge. */}
       <ModeChip />
-      <LiveEnergyReadout />
-      <IntensityMarkControl />
+      <EnergyBar />
       <LightShowStrip />
       <DevicePreviewStrip />
+      <WarningChip />
     </div>
   );
 }

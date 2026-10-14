@@ -65,6 +65,33 @@ export const HELP_SECTIONS: HelpSection[] = [
     ],
   },
   {
+    id: 'navigating-spectra',
+    title: 'Navigating SPECTRA — the grouped menu and Home',
+    keywords: 'menu navigation nav bar groups dropdown artifacts engine home landing page declutter',
+    intro:
+      'The 2026-10-14 layout declutter: 17 flat links became four groups — Home · Artifacts ▾ · Engine ▾ · Settings — and a one-page-per-"?" convention replaces the many small circled "?" icons that used to sit next to individual controls.',
+    entries: [
+      {
+        id: 'nav-menu',
+        title: 'The grouped top menu',
+        keywords: 'home artifacts engine settings dropdown keyboard touch tap hold group',
+        body: [
+          'Home · Artifacts ▾ (Scenes, Colours, Devices, Rooms, Room FX, Light Show) · Engine ▾ (Debug, Status, Timing, Review, Feedback, AV Sync, House, Test Bed, Timeline) · Settings.',
+          'Tap a group to open its dropdown; tap an item to go there (closes the menu); tap outside, tap the group again, or press Escape to close. With a mouse, pointing at the other group while one is open switches straight to it. Keyboard: ↑/↓ moves between items, Enter/Space opens a group or follows an item, Escape returns focus to the group button.',
+          'The group containing the page you\'re on is highlighted; inside an open dropdown, the current page has its own accent bar. Feedback lives under Engine, next to Review (it reads feedback sessions).',
+        ],
+      },
+      {
+        id: 'home-page',
+        title: 'Home — the landing page',
+        keywords: 'home landing page timeline quick sequences quick actions audio shape stub',
+        body: [
+          'Home ("/") is the landing page now, in place of Scenes. The full page — an editable song timeline, a draggable window into the tuned audio shape, and side-by-side Quick sequences / Quick actions cards — is a separate, in-progress build; until it lands this page is a short placeholder with links to Scenes and Light Show.',
+        ],
+      },
+    ],
+  },
+  {
     id: 'scenes-page',
     title: 'Scenes page & editor tabs',
     keywords: 'editor tabs scene list search save',

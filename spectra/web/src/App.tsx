@@ -1,18 +1,17 @@
 import { useEffect } from 'react';
-import { Link, Route, Routes, useLocation } from 'react-router-dom';
+import { Route, Routes, useLocation } from 'react-router-dom';
+import NavBar from './nav/NavBar';
 import RoomControlsBar from './components/RoomControlsBar';
 import RoomOwnershipBar from './components/RoomOwnershipBar';
 import TestingBar from './components/TestingBar';
 import TopBarStrip from './components/TopBarStrip';
 import { ToastProvider } from './components/Toast';
-import { confirmLeave } from './lib/unsavedGuard';
 import ColorSetsPage from './colorsets/ColorSetsPage';
 import DevicesPage from './devices/DevicesPage';
 import LiveView from './live/LiveView';
 import FeedbackPage from './feedback/FeedbackPage';
 import HelpPage from './help/HelpPage';
-import HelpLink from './help/HelpLink';
-import { topicForPath } from './help/routeTopics';
+import HomePage from './home/HomePage';
 import ReviewPage from './review/ReviewPage';
 import ScenesPage from './scenes/ScenesPage';
 import TestbedPage from './testbed/TestbedPage';
@@ -26,7 +25,6 @@ import RoomEffectsPage from './roomeffects/RoomEffectsPage';
 import DebugPage from './debug/DebugPage';
 import LightShowPage from './lightshow/LightShowPage';
 import HousePage from './house/HousePage';
-import HomePage from './home/HomePage';
 import SongStrip from './components/SongStrip';
 import KioskPage from './kiosk/KioskPage';
 import { isKioskRequested } from './kiosk/kioskConfig';
@@ -63,44 +61,6 @@ function usePageTitle() {
       : PAGE_TITLES.find(([prefix]) => pathname.startsWith(prefix))?.[1] ?? 'Home';
     document.title = `SPECTRA — ${title}`;
   }, [pathname]);
-}
-
-function NavBar() {
-  const { pathname } = useLocation();
-  const cls = (match: (p: string) => boolean) => (match(pathname) ? 'active' : '');
-  const helpTopic = topicForPath(pathname);
-  return (
-    // Capture-phase so the unsaved-changes guard runs before any Link handler.
-    <nav onClickCapture={(e) => {
-      const a = (e.target as HTMLElement).closest('a');
-      if (a && new URL(a.href).pathname !== window.location.pathname && !confirmLeave()) {
-        e.preventDefault();
-        e.stopPropagation();
-      }
-    }}>
-      <span className="logo">◆ SPECTRA</span>
-      {/* "/" is Home now (song-layout-plan §13 decision 10) — Scenes no
-        * longer claims the bare root route. */}
-      <Link to="/" className={cls((p) => p === '/')}>Home</Link>
-      <Link to="/scenes" className={cls((p) => p.startsWith('/scenes'))}>Scenes</Link>
-      <Link to="/colorsets" className={cls((p) => p.startsWith('/colorsets'))}>Colours</Link>
-      <Link to="/timeline" className={cls((p) => p === '/timeline')}>Timeline</Link>
-      <Link to="/feedback" className={cls((p) => p === '/feedback')}>Feedback</Link>
-      <Link to="/review" className={cls((p) => p === '/review')}>Review</Link>
-      <Link to="/testbed" className={cls((p) => p === '/testbed')}>Test Bed</Link>
-      <Link to="/timing" className={cls((p) => p === '/timing')}>Timing</Link>
-      <Link to="/avsync" className={cls((p) => p === '/avsync')}>AV Sync</Link>
-      <Link to="/house" className={cls((p) => p === '/house')}>House</Link>
-      <Link to="/show" className={cls((p) => p === '/show')}>Light Show</Link>
-      <Link to="/rooms" className={cls((p) => p === '/rooms')}>Rooms</Link>
-      <Link to="/room-effects" className={cls((p) => p === '/room-effects')}>Room FX</Link>
-      <Link to="/devices" className={cls((p) => p === '/devices')}>Devices</Link>
-      <Link to="/debug" className={cls((p) => p === '/debug')}>Debug</Link>
-      <Link to="/settings" className={cls((p) => p === '/settings')}>Settings</Link>
-      <Link to="/status" className={cls((p) => p === '/status')}>Status</Link>
-      <HelpLink topic={helpTopic ?? undefined} title="Help for this page" />
-    </nav>
-  );
 }
 
 export default function App() {
@@ -141,8 +101,16 @@ export default function App() {
         * use; see TestingBar.tsx for why "unknown" still shows. */}
       <TestingBar />
       <NavBar />
-      <RoomControlsBar />
-      <TopBarStrip />
+      {/* ONE BAR (UI declutter plan §3): RoomControlsBar and TopBarStrip
+        * each still own their own state/logic, but `display: contents` on
+        * both of their root divs (tokens.css) lets their children act as
+        * direct flex items of `.one-bar` — one visual row, explicit
+        * `order` per occupant (tokens.css) rather than a DOM rewrite of
+        * either component. */}
+      <div className="one-bar">
+        <RoomControlsBar />
+        <TopBarStrip />
+      </div>
       <RoomOwnershipBar />
       {!hideSongStrip && <SongStrip />}
       <main className={pathname === '/' ? 'home-route' : undefined}>

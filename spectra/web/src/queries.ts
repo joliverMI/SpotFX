@@ -854,6 +854,32 @@ export function useAmbientStatusPush() {
   }), [qc]);
 }
 
+/** The Light Show bar slot's own live feed (LightShowStrip.tsx) — folds
+ * the server's `{"type": "light_show", ...brief}` push (spectra/services/
+ * show_arms.py, spectra/api/light_show.py) into `useEngineStatus()`'s own
+ * `light_show` key, and `{"type": "light_show_sequence", "run": ...}`
+ * into `useSequenceRunStatus()`'s cache entry (timeline/queries.ts) — the
+ * same "one cache entry, pushed OR polled" shape `useAmbientStatusPush`
+ * above already established. Mount once, high in the tree. */
+export function useLightShowBriefPush() {
+  const qc = useQueryClient();
+  useEffect(() => onSpectraMessage((msg) => {
+    if (msg.type !== 'light_show') return;
+    const { type: _type, ...brief } = msg as Record<string, unknown>;
+    qc.setQueryData(['spectra-engine-status'], (prev: unknown) => (
+      prev ? { ...(prev as Record<string, unknown>), light_show: brief } : prev));
+  }), [qc]);
+}
+export function useLightShowSequencePush() {
+  const qc = useQueryClient();
+  useEffect(() => onSpectraMessage((msg) => {
+    if (msg.type !== 'light_show_sequence') return;
+    const run = (msg as { run: unknown }).run;
+    qc.setQueryData(['light-show-sequence-run'], (prev: unknown) => (
+      prev ? { ...(prev as Record<string, unknown>), run } : prev));
+  }), [qc]);
+}
+
 /* ── status ── */
 
 export interface AppStatus {

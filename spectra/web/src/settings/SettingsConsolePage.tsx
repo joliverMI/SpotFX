@@ -27,6 +27,8 @@ import {
   useTranscribeSettingsAudio, useUndoLastSetting,
 } from '../queries';
 import type { SettingsChatMessage, SettingValue } from '../types';
+import RoomCard from './RoomCard';
+import ScenesDropsCard from './ScenesDropsCard';
 
 function formatValue(spec: SettingValue): string {
   const { value, kind, unit } = spec;
@@ -217,6 +219,14 @@ export default function SettingsConsolePage() {
           </button>
         </div>
       </div>
+
+      {/* Two direct-control cards (UI declutter plan §3/§9, decided yes) —
+        * a stated exception to "talk to Sonic, no forms" above: these are
+        * controls that already lived in the top bar as direct UI, just
+        * relocated here, never a new kind of control invented for this
+        * page. */}
+      <RoomCard />
+      <ScenesDropsCard />
 
       <div className="card">
         <div className="card-title">
