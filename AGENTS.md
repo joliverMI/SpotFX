@@ -11767,12 +11767,12 @@ menu, the one consolidated bar, Settings cards) built in the parallel
   Assistant dashboard-tab iframe for a wall-mounted Raspberry Pi 7in
   touchscreen (800x480, plain http, touch-only — River's 2026-10-14
   measurement). `App.tsx` checks `kioskConfig.isKioskRequested(search)`
-  BEFORE every other route, rendering `KioskPage` (no menu, today's
-  existing `RoomControlsBar`/`TopBarStrip` — swap for the parallel
-  ui-build-bar task's consolidated bar once it lands — plus `HomePage`
-  with its audio shape dropped). `kioskConfig.ts` is the ONE place the
-  800x480/56px-HA-header/424px-usable sizing lives, so a later real
-  measurement is a one-line change. `spectra/config.py::
+  BEFORE every other route, rendering `KioskPage` (no menu,
+  `RoomControlsBar`/`TopBarStrip` wrapped in `.one-bar` — see "THE ONE BAR
+  IS TWO-TIER" below for why 800px lands on that band's deliberate two
+  rows — plus `HomePage` with its audio shape dropped). `kioskConfig.ts`
+  is the ONE place the 800x480/56px-HA-header/424px-usable sizing lives,
+  so a later real measurement is a one-line change. `spectra/config.py::
   kiosk_frame_ancestors()` (env override `SPECTRA_KIOSK_FRAME_ANCESTORS`)
   + `spectra/app.py`'s unconditional middleware set a
   `Content-Security-Policy: frame-ancestors` header on every response —
@@ -11930,7 +11930,16 @@ timeline, the global read-only song timeline, `show_clock_ms` and
   timeline filter toggles, `home/HomeTimeline.tsx`) and `InfoTip.tsx` (a
   rich hover/long-press tooltip carrying a short description plus a
   `HelpLink`, replacing a bare "?" circle where one control deserves its
-  own explanation — used on the Light Show bar slot). Neither is wired
+  own explanation — used on the Light Show bar slot). **Since 2026-10-14
+  (idea 5, "one help '?' per page") it also replaces the four
+  always-visible bar circles** (`ModeChip`/`LiveEnergyReadout`/
+  `IntensityMarkControl`/`DevicePreviewStrip`) **and each card's own
+  always-visible header circle on the Scenes page** (`ScenesPage`/
+  `EngineStatusStrip`/`SequencerStatusStrip`/`SummaryTab`'s "Scenes" /
+  "Engine" / "Sequencer" / "Summary" titles) — a state-conditional
+  `HelpLink` elsewhere on the same card (e.g. `EngineStatusStrip`'s
+  "dark — recording" badge) is untouched, since it isn't one of the
+  always-visible circles this pass targeted. Neither component is wired
   into every page; a future pass choosing to do that inherits these.
 - **Icons**: `dash`/`cube`/`gauge`/`chevronDown`/`plug`/`info`/`wave`/
   `wait` added to `iconRegistry.ts` for this build — see that file before
