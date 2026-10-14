@@ -79,7 +79,9 @@ may hard-cut into this one ON the drop, with this scene's own drop firing
 on the mark and adopting the outgoing pieces — or cut out of it the same
 way. Nothing in this scene's data opts in or out; `spectra/services/
 drop_switch.py` (and the drop-detection skill) is where the rule lives,
-including the hand-off table row for this effect (INTO STAR since 2026-10-14 and OUT OF STAR since 2026-10-13: both run a transition program on the mark).
+including the hand-off table row for this effect (INTO STAR since
+2026-10-14 and OUT OF STAR since 2026-10-13: both run a transition
+program on the mark).
 
 ## Its lull, drop and transitions out (the star plan, 2026-10-13)
 
