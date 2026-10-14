@@ -190,6 +190,14 @@ const dropdown = () => container.querySelector('div[style*="z-index: 60"]');
 const options = () => [...(dropdown()?.children ?? [])].map((d) => d.textContent);
 const click = async (el) => step(() => el.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true })));
 
+// The Light Show page now lands on the Sequence tab's Run view by default
+// (2026-10-13: "make the sequence running page the default for the
+// lightshow tab") — this script is about the Build view's own "+ Add a
+// step" dialog, so switch there first.
+const buildTab = [...container.querySelectorAll('.light-show-mode-select button')]
+  .find((b) => b.textContent.trim() === 'Build');
+await click(buildTab);
+
 console.log('ONE — a set with nine steps already renders "+ Add a step…" as a plain button');
 ok(steps().length === 9, 'all nine steps render');
 const addBtn = [...container.querySelectorAll('.light-show-add button')]

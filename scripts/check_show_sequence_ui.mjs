@@ -8,6 +8,11 @@
 //
 //   ONE   — the pure helpers (reorder, the pointer drag's landing index,
 //           done/current/upcoming, the clock).
+//   ONE-B — Run is the sub-view it lands on with no click (2026-10-13:
+//           "make the sequence running page the default for the lightshow
+//           tab"), and its Quick start row of recently started sequences
+//           — name, "last ran …", one tap posts sequence-run/start, and a
+//           sequence the loaded list no longer knows about is left out.
 //   TWO   — Build: items render, a Set item's four arming icons (the
 //           chosen one lit), + Wait, a song-list Wait's search over the
 //           songs SPECTRA knows, adding/removing songs, a POINTER drag
@@ -79,6 +84,14 @@ const RUN = {
   log: [{ at_ms: 1, what: 'started', index: 0, item: 'Quiet Hues — next High Trigger', detail: 'by button' }],
 };
 let runStatus = { run: null, refusal: null, playing_uri: null };
+// "seq-1" is Friday, a real sequence the loaded `sequences` list knows about;
+// "seq-ghost" stands in for a sequence that has since been deleted — the
+// server already leaves such a row out, but the view double-checks against
+// what it has loaded too, so this proves that defensive filter fires.
+const RECENT = { recent: [
+  { sequence_id: 'seq-1', name: 'Friday', last_started_ms: Date.now() - 3600 * 1000 },
+  { sequence_id: 'seq-ghost', name: 'Deleted one', last_started_ms: Date.now() - 2 * 3600 * 1000 },
+] };
 const SONGS = [
   { uri: 'spotify:track:apagon', title: 'El Apagón', artist: 'Bad Bunny' },
   { uri: 'spotify:track:dopa', title: 'Dopamine', artist: 'Purple Disco Machine' },
@@ -93,6 +106,7 @@ const fakeFetch = async (url, init = {}) => {
   requests.push({ method, path, full, body });
   let answer = {};
   if (method === 'GET' && path === '/spectra/api/light-show/sequences') answer = { sequences: [SEQ] };
+  else if (method === 'GET' && path === '/spectra/api/light-show/sequences/recent') answer = RECENT;
   else if (method === 'GET' && path === '/spectra/api/light-show/sequence-run') answer = runStatus;
   else if (method === 'GET' && path === '/spectra/api/light-show/songs') {
     const q = decodeURIComponent((full.split('q=')[1] || '').split('&')[0]).toLowerCase();
@@ -167,9 +181,24 @@ const setInput = async (el, value) => step(() => {
 }, 300);
 const button = (text, root = container) => qa('button', root).find((b) => b.textContent.trim().startsWith(text));
 
-console.log('TWO — Build: items, the four arming icons, Waits, the song search, duplicate');
+console.log('ONE-B — Run is the default landing sub-view, with a Quick start row');
 const tabs = qa('.show-seq-sub button[role=tab]');
 ok(tabs.map((t) => t.textContent.trim()).join('|').startsWith('Build|Run'), 'Build and Run sub-tabs');
+ok(tabs[1].getAttribute('aria-selected') === 'true' && tabs[0].getAttribute('aria-selected') === 'false',
+  'Run is selected on mount, with no click');
+ok(Boolean(q('.show-seq-recent')), 'the Quick start card is shown');
+const recentBtns = qa('.show-seq-recent-btn');
+ok(recentBtns.length === 1, `only the sequence still in the loaded list is offered (${recentBtns.length})`);
+ok(recentBtns[0].textContent.includes('Friday') && recentBtns[0].textContent.includes('last ran')
+  && recentBtns[0].textContent.includes('ago'), `shows the name and when it last ran (${recentBtns[0].textContent})`);
+requests.length = 0;
+await click(recentBtns[0]);
+const qstart = requests.find((r) => r.method === 'POST' && r.path === '/spectra/api/light-show/sequence-run/start');
+ok(Boolean(qstart) && qstart.body.sequence_id === 'seq-1' && qstart.body.replace === false,
+  'one tap posts sequence-run/start for that sequence, nothing already running');
+
+console.log('TWO — Build: items, the four arming icons, Waits, the song search, duplicate');
+await click(tabs[0]);
 ok(qa('li.show-seq-item').length === 3, `the sequence's three items render (${qa('li.show-seq-item').length})`);
 ok(qa('li.show-seq-item .light-show-step-summary').length === 3, 'items start collapsed, each with a one-line summary');
 await click(button('Expand all'));

@@ -184,6 +184,12 @@ const { container, mount, step, unmount } = require(outFile);
 await mount();
 
 const click = async (el) => step(() => el.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true })));
+// The Light Show page now lands on the Sequence tab's Run view by default
+// (2026-10-13: "make the sequence running page the default for the
+// lightshow tab") — this script is about the Build view's own Duplicate
+// button, so switch there first.
+await click([...container.querySelectorAll('.light-show-mode-select button')]
+  .find((b) => b.textContent.trim() === 'Build'));
 const setButtons = () => [...container.querySelectorAll('.light-show-sets li button')];
 const selectSet = async (name) => {
   const btn = setButtons().find((b) => b.textContent.includes(name));

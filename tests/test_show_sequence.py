@@ -586,6 +586,82 @@ def test_every_step_is_in_the_show_log(world, monkeypatch):
             "sequence_finished"} <= set(keys)
 
 
+# ── recent_runs (the Run view's quick-start row) ────────────────────────────
+
+def test_recent_runs_are_newest_first_deduped_and_hide_deleted(world):
+    a = seq("Evening", S(world, "A"))
+    b = seq("Late", S(world, "B"))
+
+    async def go():
+        show_sequence.start(a.id)
+        await settle()
+        show_sequence.start(b.id)
+        await settle()
+        # Evening again, later — its only entry in the quick-start row is
+        # this newest one, not its first start.
+        show_sequence.start(a.id)
+        await settle()
+    run_async(go)
+
+    rows = show_sequence.recent_runs()
+    assert [r["sequence_id"] for r in rows] == [a.id, b.id]
+    assert rows[0]["name"] == "Evening"
+    assert isinstance(rows[0]["last_started_ms"], int) and rows[0]["last_started_ms"] > 0
+    assert rows[0]["last_started_ms"] >= rows[1]["last_started_ms"]
+
+    # a sequence since deleted is read back as gone, from the LIVE store —
+    # never a name cached at start time.
+    assert show_store.delete_sequence(b.id)
+    rows2 = show_sequence.recent_runs()
+    assert [r["sequence_id"] for r in rows2] == [a.id]
+
+
+def test_recent_runs_renamed_sequence_shows_its_current_name(world):
+    a = seq("Draft name", S(world, "A"))
+
+    async def go():
+        show_sequence.start(a.id)
+        await settle()
+    run_async(go)
+
+    a.name = "Final name"
+    show_store.put_sequence(a)
+    rows = show_sequence.recent_runs()
+    assert rows[0]["name"] == "Final name"
+
+
+def test_recent_runs_limit_is_clamped_both_ways(world):
+    seqs = [seq(n, S(world, "A")) for n in ("One", "Two", "Three")]
+
+    async def go():
+        for s in seqs:
+            show_sequence.start(s.id)
+            await settle()
+    run_async(go)
+
+    assert len(show_sequence.recent_runs(limit=1)) == 1
+    assert len(show_sequence.recent_runs(limit=0)) == 1       # clamped up to 1
+    assert len(show_sequence.recent_runs(limit=1000)) == len(seqs)  # clamped down to the cap
+    assert len(show_sequence.recent_runs()) == len(seqs)      # default limit covers all three
+
+
+def test_recent_runs_skips_an_entry_with_no_sequence_id(world):
+    """An entry logged before `sequence_id` was stamped onto it (an older
+    build) is skipped, never crashes and never guesses by name."""
+    from spectra.services import fire_history
+    fire_history.record_fire("show", "sequence_started",
+                             {"sequence": "Old build", "run": "run-stale"})
+    a = seq("Current", S(world, "A"))
+
+    async def go():
+        show_sequence.start(a.id)
+        await settle()
+    run_async(go)
+
+    rows = show_sequence.recent_runs()
+    assert [r["name"] for r in rows] == ["Current"]
+
+
 # ── the wire ───────────────────────────────────────────────────────────────
 
 def test_routes_round_trip(world, tmp_path, monkeypatch):
@@ -623,6 +699,9 @@ def test_routes_round_trip(world, tmp_path, monkeypatch):
     st = client.post("/api/light-show/sequence-run/start", json={"sequence_id": sid}).json()
     assert st["run"]["state"] == "running"
     assert st["run"]["waiting_for"] == "armed for the next High Trigger"
+    recent = client.get("/api/light-show/sequences/recent").json()["recent"]
+    assert recent and recent[0]["sequence_id"] == sid and recent[0]["name"] == "Party"
+    assert client.get("/api/light-show/sequences/recent", params={"limit": 1}).json()["recent"] == recent[:1]
     assert client.post("/api/light-show/sequence-run/start",
                        json={"sequence_id": dup["id"]}).status_code == 409
     assert client.delete(f"/api/light-show/sequences/{sid}").status_code == 409

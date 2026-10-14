@@ -67,6 +67,8 @@ stated in the log, the honest bound.
 
 Every step is in the show log (`fire_history`, bucket "show", kinds
 `sequence_*`) and in the run's own `log` (the Run view's history).
+`recent_runs()` reads that same show log back out for the Run view's
+own quick-start row — the most recently STARTED sequences, newest first.
 """
 from __future__ import annotations
 
@@ -94,6 +96,8 @@ playing as it becomes current (he likely lined that song up)."""
 LOG_KEPT = 60
 MAX_WAIT_SECONDS = 6 * 3600
 MAX_WAIT_COUNT = 500
+RECENT_RUNS_DEFAULT_LIMIT = 6
+RECENT_RUNS_MAX_LIMIT = 20
 TRIGGER_WORDS = {"scene_change": ("scene change", "scene changes"),
                  "high": ("High Trigger", "High Triggers"),
                  "low": ("Low Trigger", "Low Triggers")}
@@ -473,7 +477,10 @@ def start(seq_id_or_name: str, *, replace: bool = False, source: str = "button")
                     items=[it.model_copy(deep=True) for it in seq.items],
                     loop=seq.loop, last_uri=_playing_uri())
     show_store.state().sequence_run = r
-    _log(r, "started", f"by {source}")
+    # sequence_id rides on the durable show-log entry too (not just this
+    # run's own in-memory `r`) — it is what recent_runs() below keys on to
+    # tell one sequence's start from another's, immune to a later rename.
+    _log(r, "started", f"by {source}", sequence_id=r.sequence_id)
     _enter(r)
     _save()
     return r
@@ -738,6 +745,44 @@ def status() -> dict:
     from spectra.services import show_output
     return {"run": run_view(run()), "refusal": show_output.refusal(),
             "playing_uri": _playing_uri()}
+
+
+def recent_runs(limit: int = RECENT_RUNS_DEFAULT_LIMIT) -> list[dict]:
+    """The sequences started most recently, newest first — the Run
+    sub-view's quick-start row (the Admiral, 2026-10-13: "add quick start
+    buttons for recently used sequences"). Derived entirely from the
+    durable show log's own "sequence_started" entries (fire_history.
+    load_show_log) — never a second history of its own, so there is
+    nothing new to keep in sync with a restart; the log already survives
+    one.
+
+    Deduplicated by sequence_id (a sequence started twice counts once, at
+    its newest start) and resolved against the CURRENT store
+    (show_store.get_sequence) rather than the name recorded at start
+    time, so a renamed sequence shows its current name and a DELETED one
+    is silently skipped — never a guess by name, which could land on the
+    wrong sequence after a rename. An entry from before `sequence_id` was
+    stamped onto this log (an older build) has none and is skipped too."""
+    from spectra.services import fire_history
+    limit = max(1, min(int(limit), RECENT_RUNS_MAX_LIMIT))
+    out: list[dict] = []
+    seen: set[str] = set()
+    for entry in reversed(fire_history.load_show_log()):
+        if entry.get("bucket") != "show" or entry.get("key") != "sequence_started":
+            continue
+        detail = entry.get("detail") or {}
+        seq_id = detail.get("sequence_id")
+        if not seq_id or seq_id in seen:
+            continue
+        seen.add(seq_id)
+        s = show_store.get_sequence(seq_id)
+        if s is None:
+            continue
+        out.append({"sequence_id": seq_id, "name": s.name,
+                    "last_started_ms": entry.get("wall_ms")})
+        if len(out) >= limit:
+            break
+    return out
 
 
 def reset() -> None:

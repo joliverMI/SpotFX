@@ -223,6 +223,12 @@ const setButtons = () => qa('.light-show-sets li button');
 const steps = () => qa('li.light-show-step');
 const settle = (ms = 30) => step(() => {}, ms);
 
+// The Light Show page now lands on the Sequence tab's Run view by default
+// (2026-10-13: "make the sequence running page the default for the
+// lightshow tab") — this script is about the Build view's own Set
+// editor, so switch there first.
+await click([...qa('.light-show-mode-select button')].find((b) => b.textContent.trim() === 'Build'));
+
 ok(steps().length === 2, `the first set (Defaults) shows its two steps (${steps().length})`);
 ok(steps().every((li) => !q('.light-show-params', li)) && qa('.light-show-step-summary').length === 2,
   'steps start COLLAPSED, each with its one-line summary');

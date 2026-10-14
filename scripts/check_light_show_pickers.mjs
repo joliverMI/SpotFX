@@ -196,6 +196,15 @@ const build = await esbuild.build({
 ok(build.errors.length === 0, 'LightShowPage.tsx + its real children bundle cleanly');
 const { container, mount, step, unmount } = require(outFile);
 await mount();
+// The Light Show page now lands on the Sequence tab's Run view by default
+// (2026-10-13: "make the sequence running page the default for the
+// lightshow tab") — this script is about the Build view's own step
+// pickers, so switch there first.
+{
+  const buildTab = [...container.querySelectorAll('.light-show-mode-select button')]
+    .find((b) => b.textContent.trim() === 'Build');
+  await step(() => buildTab.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true })));
+}
 // Steps are collapsed by default (the legacy editor's card shape) — open
 // them all, the same "Expand all" he would press.
 {

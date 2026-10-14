@@ -12,9 +12,13 @@
  *           dragging each item's own ⠿ handle (`SortableList.tsx`,
  *           `@dnd-kit` — a finger works as well as a mouse, and so does
  *           the keyboard).
- *   Run   — start one, then the current item highlighted with what it is
- *           waiting for, what is done and what is next, and the human
- *           override: Pause / Resume, Stop, Previous, Next, Fire now.
+ *   Run   — the DEFAULT sub-view (the Admiral, 2026-10-13: "make the
+ *           sequence running page the default for the lightshow tab"):
+ *           a Quick start row of his most recently STARTED sequences
+ *           (`GET /light-show/sequences/recent`, one tap to run), then
+ *           pick-and-start, then the current item highlighted with what
+ *           it is waiting for, what is done and what is next, and the
+ *           human override: Pause / Resume, Stop, Previous, Next, Fire now.
  *
  * What a run DOES is the server's business (spectra/services/
  * show_sequence.py); this view only shows `GET /light-show/sequence-run`,
@@ -35,7 +39,8 @@ import { cloneFresh, duplicateAt, insertAt, itemSummary, plainItem, writeClip } 
 import useShowClip from './useShowClip';
 import SortableList from './SortableList';
 import type {
-  ArmTrigger, SequenceItem, SequenceStatus, SequenceWait, ShowSequence, ShowSet, SongRef, WaitKind,
+  ArmTrigger, RecentSequenceRun, SequenceItem, SequenceStatus, SequenceWait, ShowSequence, ShowSet,
+  SongRef, WaitKind,
 } from './types';
 
 type Toast = (msg: string, kind?: 'success' | 'error') => void;
@@ -48,14 +53,18 @@ export default function SequenceView({ sets, toast, onOpenSet }: {
   onOpenSet?: (id: string) => void;
 }) {
   const isPhone = useIsPhone();
-  const [sub, setSub] = useState<'build' | 'run'>(() => (window.matchMedia('(max-width: 720px)').matches ? 'run' : 'build'));
+  // Run is the default on every screen size — it's the page sequences are
+  // actually RUN from, and now the Light Show tab's own default landing
+  // view (LightShowPage.tsx). Build is still one tap away.
+  const [sub, setSub] = useState<'build' | 'run'>('run');
   const [sequences, setSequences] = useState<ShowSequence[]>([]);
   const [status, setStatus] = useState<SequenceStatus | null>(null);
 
   const reload = useCallback(async () => {
     const r = await apiGet<{ sequences: ShowSequence[] }>('/light-show/sequences');
-    setSequences(r.sequences);
-    return r.sequences;
+    const list = r.sequences ?? [];
+    setSequences(list);
+    return list;
   }, []);
   const reloadStatus = useCallback(
     () => void apiGet<SequenceStatus>('/light-show/sequence-run').then(setStatus).catch(() => undefined), []);
@@ -533,8 +542,13 @@ function SequenceRunView({ sequences, status, reloadStatus, toast }: {
 }) {
   const [pick, setPick] = useState('');
   const [busy, setBusy] = useState(false);
+  const [recent, setRecent] = useState<RecentSequenceRun[] | null>(null);
   const run = status?.run ?? null;
   const active = Boolean(run?.active);
+
+  const reloadRecent = useCallback(() => void apiGet<{ recent: RecentSequenceRun[] }>('/light-show/sequences/recent')
+    .then((r) => setRecent(r.recent)).catch(() => undefined), []);
+  useEffect(() => { reloadRecent(); }, [reloadRecent]);
 
   const call = async (path: string, body?: unknown) => {
     setBusy(true);
@@ -545,6 +559,7 @@ function SequenceRunView({ sequences, status, reloadStatus, toast }: {
     } finally {
       setBusy(false);
       reloadStatus();
+      reloadRecent();
     }
   };
 
@@ -553,8 +568,30 @@ function SequenceRunView({ sequences, status, reloadStatus, toast }: {
     void call('start', { sequence_id: id, replace: active });
   };
 
+  // a deleted sequence is already left out server-side (show_sequence.
+  // recent_runs reads it back from the live store); this is a cheap
+  // second check against whatever this view already has loaded, in case
+  // the two ever disagree for a moment.
+  const recentKnown = (recent ?? []).filter((r) => sequences.some((s) => s.id === r.sequence_id));
+
   return (
     <div className="light-show-run-view show-seq-run">
+      {recentKnown.length > 0 && (
+        <div className="card show-seq-recent">
+          <strong>Quick start</strong> <HelpLink topic="show-sequence-run" />
+          <div className="show-seq-recent-row">
+            {recentKnown.map((r) => (
+              <button key={r.sequence_id} type="button" className="big show-seq-recent-btn"
+                disabled={busy} onClick={() => start(r.sequence_id)}
+                title={`Start "${r.name}" now`}>
+                <span className="show-seq-recent-name">{r.name}</span>
+                <span className="muted show-seq-recent-ago">last ran {fmtAgo(r.last_started_ms)}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="card show-seq-start">
         <strong>Start a sequence</strong>
         <div className="show-seq-start-row">
@@ -628,4 +665,14 @@ function SequenceRunView({ sequences, status, reloadStatus, toast }: {
 
 function stateWord(s: string): string {
   return ({ running: 'Running', paused: 'Paused', finished: 'Finished', stopped: 'Stopped' } as Record<string, string>)[s] ?? s;
+}
+
+/** "last ran …" for the quick-start row — day-aware, since a sequence he
+ * rarely uses can sit unstarted for a while. */
+function fmtAgo(ms: number): string {
+  const s = Math.max(0, (Date.now() - ms) / 1000);
+  if (s < 60) return `${Math.round(s)}s ago`;
+  if (s < 3600) return `${Math.round(s / 60)}m ago`;
+  if (s < 86400) return `${Math.round(s / 3600)}h ago`;
+  return `${Math.round(s / 86400)}d ago`;
 }

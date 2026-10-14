@@ -2927,7 +2927,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         keywords: 'run view build view mode tap phone big buttons disarm all end show holding',
         body: [
           'Build and Run are two tap-mode tabs at the top of the Light Show page. Build is the editor above. Run is sized for a phone in the room: each set\'s row has four icon buttons — ⚡ Fire now, 🐇 Arm for the next scene change, ▲ Arm for the next High Trigger, ▼ Arm for the next Low Trigger — one tap runs the action, no menu — then the same Armed board (with the same countdowns), the same Holding list, and big Disarm all / End show buttons. Whichever of the three arm icons is currently armed for that set lights up solid, live off the same Armed status everything else here reads — arming or disarming from Sonic or the Build view updates it too, with no tap needed here.',
-          'Run never edits a set — it only runs what the Build view already saved. On a phone it opens on Run by default; either tab is always a tap away on any screen size.',
+          'Run never edits a set — it only runs what the Build view already saved. Either tab is always a tap away on any screen size. The Light Show page itself opens on the Sequence tab\'s own Run view by default (see "Sequences"), not here — this Build/Run pair is for running individual sets once you\'ve switched to the Build tab.',
         ],
       },
       {
@@ -2935,7 +2935,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         title: 'Sequences: a show built in advance',
         keywords: 'sequence show sequence order pre-armed sets build run duplicate loop playlist',
         body: [
-          'A Sequence is an ordered list of your sets, each pre-armed one of the same four ways as the Run view\'s icons — ⚡ instant, 🐇 next scene change, ▲ next High Trigger, ▼ next Low Trigger — plus Waits. The Sequence tab has its own Build and Run views.',
+          'A Sequence is an ordered list of your sets, each pre-armed one of the same four ways as the Run view\'s icons — ⚡ instant, 🐇 next scene change, ▲ next High Trigger, ▼ next Low Trigger — plus Waits. The Sequence tab has its own Build and Run views; opening the Light Show page lands here, on Run, by default.',
           'It runs strictly in order and never skips ahead: only the current item is listening. The next item is armed only once the current one has run (its set fired, or its Wait was satisfied), so a trigger that would suit a later item is ignored until that item\'s turn. One trigger moves the sequence one step: a High that ends a Wait does not also fire the set after it.',
           'An armed item is an ordinary arm on the Armed board, labelled with its set. Disarming it there pauses the sequence (it says why). A sequence\'s arm never expires on its own, and it never replaces — or is replaced by — an arm you made by hand.',
           'Build: + New, rename in the name box, ⧉ Duplicate (an independent copy named "<name> copy", placed right after it), Delete. Add items with + Set (pick the set from the searchable list, then tap an arming icon) and + Wait. Reorder by dragging the ⠿ handle (mouse or finger) or with ↑/↓. Loop starts again from the top after the last item (it needs at least one item that waits for something). Edits made while a sequence runs apply the next time it starts — a running sequence keeps the version it started with.',
@@ -2954,9 +2954,9 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         id: 'show-sequence-run',
         title: 'Running a sequence',
-        keywords: 'run sequence start pause resume stop next previous fire now waiting for restart',
+        keywords: 'run sequence start pause resume stop next previous fire now waiting for restart quick start recent',
         body: [
-          'Run: pick a sequence and tap Start. One sequence runs at a time — starting another asks before stopping the running one. The current item is highlighted with exactly what it is waiting for ("armed for the next High Trigger", "waiting for 2 more scene changes", "waiting for one of: …"); done items are ticked and the rest are listed in order.',
+          'Quick start: a row of your most recently started sequences, newest first, each showing its name and when it last ran — one tap starts it (asking first if another sequence is already running, same as Start below). It only appears once you have started something; a sequence you deleted drops off it. Run: pick a sequence and tap Start. One sequence runs at a time — starting another asks before stopping the running one. The current item is highlighted with exactly what it is waiting for ("armed for the next High Trigger", "waiting for 2 more scene changes", "waiting for one of: …"); done items are ticked and the rest are listed in order.',
           'Pause disarms the current item and stops a timed Wait\'s clock; nothing is counted while paused, and Resume picks up where it was. Next skips the current item without running it. Previous steps back one item and re-arms it — nothing it already did is undone, and an instant item does not fire by itself after a step back. Fire now runs the current set at once (whatever its arming) and moves on; on a Wait it ends the Wait. Stop ends the run (it does not undo anything — that is End show).',
           'If SPECTRA restarts, a running sequence resumes at its current item: a timed Wait keeps its deadline, counts are kept and the item is re-armed. If the room is released the sequence pauses and says so. Every step is in History and the show log. Sonic can list your sequences and start, pause, resume, stop, step and fire them by name.',
         ],
