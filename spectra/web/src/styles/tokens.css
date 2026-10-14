@@ -275,6 +275,18 @@ button.danger:hover { border-color: var(--danger); color: var(--danger); }
 .one-bar > .room-controls-bar, .one-bar > .top-bar-strip {
   display: contents;
 }
+/* `.top-bar-strip`'s own `flex-wrap: wrap` (TopBarStrip.tsx's own
+ * comment) used to be what dropped `.device-preview-expanded-row` onto
+ * its own full-width line below every other top-bar occupant — but that
+ * div is `display: contents` here (the rule immediately above), so its
+ * wrap no longer applies to anything: wrapping is now decided solely by
+ * `.one-bar`'s own `flex-wrap`. Scoping the override to `:has()` (rather
+ * than making `.one-bar` wrap unconditionally) keeps every OTHER
+ * occupant's "fits on one line at 1024/1180/1440" guarantee intact —
+ * nothing here wraps unless the expanded stage is actually mounted. */
+.one-bar:has(.device-preview-expanded-row) {
+  flex-wrap: wrap;
+}
 /* Tablet squeeze (plan §12's own named risk: "names get ~110-140px slots
  * at 1024"): tighten the row's own spacing and the Light Show slot's label
  * so a real long scene/colour-set name (his live room measured "House
@@ -291,16 +303,22 @@ button.danger:hover { border-color: var(--danger); color: var(--danger); }
 /* The explicit left-to-right sequence (see the `.one-bar` comment above).
  * Ties (both Scenes and Colour are `.scenes-group-btn`) resolve by DOM
  * source order, which already has Scenes before Colour — no extra class
- * needed to tell them apart. */
+ * needed to tell them apart. `.device-preview-expanded-row` is ordered
+ * AFTER the warning chip and the release button (not tied with its own
+ * collapsed swatches at order 8) on purpose: flex wrapping never backfills
+ * an earlier line, so if the expanded row wrapped ahead of them, THEY
+ * would wrap again behind it onto a third line instead of staying on the
+ * bar's first row the way every other icon does. */
 .one-bar .mode-chip { order: 1; }
 .one-bar .mode-group-btn { order: 2; }
 .one-bar .ambient-group-btn { order: 3; }
 .one-bar .scenes-group-btn { order: 4; }
 .one-bar .energy-mark-group { order: 6; }
 .one-bar .light-show-strip { order: 7; }
-.one-bar .device-preview-strip, .one-bar .device-preview-expanded-row { order: 8; }
+.one-bar .device-preview-strip { order: 8; }
 .one-bar .warning-chip { order: 9; }
 .one-bar .release-hold-wrap { order: 10; }
+.one-bar .device-preview-expanded-row { order: 11; }
 .room-control {
   display: flex;
   align-items: center;

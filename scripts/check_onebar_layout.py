@@ -20,14 +20,29 @@ What it measures, at each width:
   - every one of the nine occupants (house / mode / hue hold / scenes /
     colour / energy+mark / light show / preview / release) is actually
     ON SCREEN (not clipped off the right edge) — `getBoundingClientRect()
-    .right <= window.innerWidth + 1` for each.
+    .right <= window.innerWidth + 1` for each;
+  - the NO-JUMP claim, behaviourally: it mutates the live DOM (client-side
+    only — `el.textContent = ...` in the page, no fetch/POST of any kind)
+    to give the Scenes/Colour buttons' own value an artificially long
+    string, re-measures a later sibling's left edge, and asserts it did
+    not move — then restores the original text. This is the actual
+    "nothing jumps when text changes" proof; check_onebar_fixed_widths.mjs
+    only reads the CSS source for the declarations that are SUPPOSED to
+    make this true, which can't catch a conflicting rule elsewhere or a
+    declaration that's become dead code (exactly what happened to
+    `.top-bar-strip`'s own `flex-wrap: wrap` once it went `display:
+    contents` under `.one-bar` — see the expand check below);
+  - the device-preview "Expand" feature, when a favourite device exists:
+    clicking the swatches drops `.device-preview-expanded-row` onto its
+    own line BELOW every other occupant (never squeezed onto the same
+    line, which is what overflowed the bar before the `.one-bar:has(...)`
+    fix in tokens.css), with no resulting horizontal overflow either.
 
 This proves "fits on one line, nothing jumps/overflows" against whatever
 names/state his live room happens to have right now — it does not (and,
-read-only, cannot) inject a synthetic short/long name pair; that half of
-"nothing jumps" is proven structurally instead by check_onebar_fixed_
-widths.mjs, which reads the CSS source itself for the fixed-width rule
-that makes content length irrelevant to layout.
+read-only, cannot) inject a synthetic short/long name into the SERVER's
+own data; the text-length mutation above is a pure client-side DOM edit
+used only to drive the measurement, never persisted or sent anywhere.
 
 Run: .venv/bin/python scripts/check_onebar_layout.py
 """
@@ -250,6 +265,130 @@ async def main() -> int:
                         f"at {width}px: {occ['sel']} stays within the viewport "
                         f"(right={occ['right']:.0f})",
                     )
+
+                # NO-JUMP, measured — not read off the CSS source. Mutate the
+                # Scenes/Colour value text in the live DOM (purely client-side;
+                # nothing is sent anywhere) and check that a later sibling
+                # (`.energy-mark-group`, order 6, right after the Scenes/Colour
+                # buttons at order 4) doesn't move.
+                r = await cdp_call(ws, nid(), "Runtime.evaluate", {
+                    "expression": """
+                        JSON.stringify((() => {
+                          const valueEls = [...document.querySelectorAll(
+                            '.scenes-group-btn .top-bar-group-btn-value')];
+                          const anchor = document.querySelector('.energy-mark-group');
+                          if (!valueEls.length || !anchor) return { skipped: true };
+                          const before = anchor.getBoundingClientRect().left;
+                          const originals = valueEls.map((el) => el.textContent);
+                          valueEls.forEach((el) => {
+                            el.textContent = 'A Really Extremely Long Scene Or Colour Set Name';
+                          });
+                          void document.body.offsetHeight;  // force reflow
+                          const after = anchor.getBoundingClientRect().left;
+                          valueEls.forEach((el, i) => { el.textContent = originals[i]; });
+                          void document.body.offsetHeight;  // restore before anything else reads it
+                          return { skipped: false, before, after };
+                        })())
+                    """,
+                    "returnByValue": True,
+                })
+                value = r.get("result", {}).get("result", {}).get("value")
+                jump_data = json.loads(value) if value else {"skipped": True}
+                if jump_data.get("skipped"):
+                    print(f"  (at {width}px: no Scenes/Colour button or anchor present — "
+                          "skipping the no-jump measurement)")
+                else:
+                    ok(
+                        abs(jump_data["after"] - jump_data["before"]) <= 1,
+                        f"at {width}px: lengthening the Scenes/Colour value text doesn't move "
+                        f".energy-mark-group (before={jump_data['before']:.0f}, "
+                        f"after={jump_data['after']:.0f})",
+                    )
+
+                # EXPAND, measured — the device-preview "Expand" feature must
+                # drop its stage onto its own line below every other icon,
+                # never squeezed onto the same line (the regression this
+                # fixes: `.one-bar:has(.device-preview-expanded-row)` in
+                # tokens.css). Only exercised when a favourite device exists
+                # (the swatches button only renders then).
+                r = await cdp_call(ws, nid(), "Runtime.evaluate", {
+                    "expression": """
+                        JSON.stringify((() => {
+                          const btn = document.querySelector('.device-preview-chips');
+                          if (!btn) return { present: false };
+                          btn.click();
+                          return { present: true };
+                        })())
+                    """,
+                    "returnByValue": True,
+                })
+                clicked = json.loads(r.get("result", {}).get("result", {}).get("value") or "{}")
+                if not clicked.get("present"):
+                    print(f"  (at {width}px: no favourite device-preview swatches — "
+                          "skipping the expand measurement)")
+                else:
+                    expand_deadline = time.monotonic() + 5
+                    expand_data = None
+                    while time.monotonic() < expand_deadline:
+                        r = await cdp_call(ws, nid(), "Runtime.evaluate", {
+                            "expression": """
+                                JSON.stringify((() => {
+                                  const row = document.querySelector('.device-preview-expanded-row');
+                                  if (!row) return { present: false };
+                                  const rowRect = row.getBoundingClientRect();
+                                  const others = [...document.querySelectorAll(
+                                    '.mode-chip, .scenes-group-btn, .energy-mark-group, '
+                                    + '.light-show-strip, .device-preview-strip, .warning-chip, '
+                                    + '.release-hold-wrap'
+                                  )].map((e) => e.getBoundingClientRect().bottom);
+                                  return {
+                                    present: true,
+                                    rowTop: rowRect.top,
+                                    rowRight: rowRect.right,
+                                    maxOtherBottom: others.length ? Math.max(...others) : 0,
+                                    scrollWidth: document.documentElement.scrollWidth,
+                                    clientWidth: document.documentElement.clientWidth,
+                                  };
+                                })())
+                            """,
+                            "returnByValue": True,
+                        })
+                        expand_value = r.get("result", {}).get("result", {}).get("value")
+                        expand_data = json.loads(expand_value) if expand_value else {"present": False}
+                        if expand_data.get("present"):
+                            break
+                        await asyncio.sleep(0.2)
+                    ok(
+                        bool(expand_data and expand_data.get("present")),
+                        f"at {width}px: expanding the device preview mounts "
+                        ".device-preview-expanded-row",
+                    )
+                    if expand_data and expand_data.get("present"):
+                        ok(
+                            expand_data["rowTop"] >= expand_data["maxOtherBottom"] - 1,
+                            f"at {width}px: the expanded stage lands below every other icon "
+                            f"(rowTop={expand_data['rowTop']:.0f}, "
+                            f"maxOtherBottom={expand_data['maxOtherBottom']:.0f})",
+                        )
+                        ok(
+                            expand_data["rowRight"] <= width + 1,
+                            f"at {width}px: the expanded stage's own right edge "
+                            f"({expand_data['rowRight']:.0f}) stays within the viewport",
+                        )
+                        ok(
+                            expand_data["scrollWidth"] <= expand_data["clientWidth"] + 1,
+                            f"at {width}px: expanding causes no page-level horizontal scroll "
+                            f"(scrollWidth {expand_data['scrollWidth']} <= "
+                            f"clientWidth {expand_data['clientWidth']})",
+                        )
+                    # Collapse again so the next width starts from the same
+                    # (collapsed) state — this headless profile is thrown
+                    # away afterward either way, but keep each width's
+                    # measurement independent of the previous one.
+                    await cdp_call(ws, nid(), "Runtime.evaluate", {
+                        "expression": "document.querySelector('.device-preview-chips')?.click();",
+                    })
+                    await asyncio.sleep(0.2)
     finally:
         # Exact-pid/pgid teardown only — never a pattern-based kill on a
         # shared host (AGENTS.md's own "pkill -f hits live spectra.service"

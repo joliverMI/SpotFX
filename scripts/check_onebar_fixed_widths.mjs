@@ -1,16 +1,19 @@
-// Executable spec: the no-jumping fix (UI declutter plan §6) — Scenes and
-// Colour used to size between 64-126px depending on the current scene/
-// colour-set NAME (`min-width: 64px` on `.top-bar-group-btn` racing
-// `.top-bar-group-btn-value`'s own `max-width: 100px`), moving the control
-// after them by up to 61px over 90s of ordinary playing (the plan's own
-// measurement). A browser is the only honest way to prove PIXELS don't
-// move when text does (jsdom has no layout engine — see
-// check_onebar_layout.py's own docstring) — this script instead proves the
-// STRUCTURAL property that makes pixel-stability possible regardless of
-// content: a fixed `width` (never only `min-width`) with no conflicting
-// `max-width` race, by reading tokens.css itself rather than rendering
-// anything. check_onebar_layout.py is the live-browser half (no overflow
-// at three real widths, against his live room's actual current names).
+// CHEAP SMOKE TEST ONLY — not the primary proof. This reads tokens.css as
+// text and regex-matches a few declarations; a source match can be dead
+// code (exactly what happened to `.top-bar-strip`'s own `flex-wrap: wrap`
+// once that div went `display: contents` under `.one-bar`) or overridden
+// by a higher-specificity rule elsewhere, so a green run here proves
+// intent, never behaviour. The ACTUAL "pixels don't move when text does"
+// proof is the live-browser measurement in check_onebar_layout.py (it
+// mutates the Scenes/Colour value text in a real rendered page and
+// measures a sibling's position before/after) — read that one first.
+//
+// Historical context this still documents: the no-jumping fix (UI
+// declutter plan §6) — Scenes and Colour used to size between 64-126px
+// depending on the current scene/colour-set NAME (`min-width: 64px` on
+// `.top-bar-group-btn` racing `.top-bar-group-btn-value`'s own
+// `max-width: 100px`), moving the control after them by up to 61px over
+// 90s of ordinary playing (the plan's own measurement).
 //
 // Three rules, each a plain regex read of the real stylesheet:
 //   1. `.scenes-group-btn` (the class BOTH Scenes and Colour share) has an
