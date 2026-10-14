@@ -2252,3 +2252,57 @@ button.linklike { background: none; border: none; padding: 0 4px; color: var(--a
   .song-strip-track { grid-row: 2; grid-column: 1; height: 20px; }
   .song-strip-next { grid-row: 2; grid-column: 2; }
 }
+
+/* ── song-layout-plan: Home page (/) ──────────────────────────────────── */
+.home-page { display: flex; flex-direction: column; gap: 16px; }
+.home-timeline { display: flex; flex-direction: column; gap: 8px; }
+.home-timeline-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.home-timeline-eq { color: var(--accent, #7c5cff); }
+.home-timeline-song { display: flex; flex-direction: column; min-width: 0; margin-right: auto; }
+.home-timeline-toggles { display: flex; gap: 6px; }
+.home-timeline-follow, .home-timeline-fullsong {
+  width: 30px; height: 30px; border-radius: 6px; border: 1px solid var(--border);
+  background: var(--surface2); color: var(--text-muted); cursor: pointer;
+}
+.home-timeline-follow.on { color: #fff; background: var(--accent, #7c5cff); border-color: var(--accent, #7c5cff); }
+.home-timeline-strip { position: relative; height: 39px; background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; touch-action: none; }
+.home-timeline-window {
+  position: absolute; top: 0; bottom: 0; background: rgba(255,255,255,0.1);
+  border: 1px solid rgba(255,255,255,0.3); cursor: grab; z-index: 2;
+}
+.home-timeline-window-edge { position: absolute; top: 0; bottom: 0; width: 8px; cursor: ew-resize; }
+.home-timeline-window-edge.left { left: -4px; }
+.home-timeline-window-edge.right { right: -4px; }
+.home-timeline-next { font-size: 0.85em; color: var(--text-muted); }
+.home-timeline-shape { position: relative; height: 160px; min-height: 100px; resize: vertical; overflow: hidden; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); }
+.home-timeline-shape-canvas { width: 100%; height: 100%; display: block; }
+.home-timeline-shape-playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: #fff; box-shadow: 0 0 4px rgba(255,255,255,0.7); }
+
+.icon-toggle {
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 6px; border: 1px solid var(--border); background: var(--surface2);
+  color: var(--text-muted); cursor: pointer;
+}
+.icon-toggle.on { color: #fff; background: var(--accent, #7c5cff); border-color: var(--accent, #7c5cff); }
+
+.home-quick-runs { display: grid; grid-template-columns: repeat(2, minmax(0, 560px)); gap: 16px; }
+@media (max-width: 700px) { .home-quick-runs { grid-template-columns: minmax(0, 1fr); } }
+.home-quick-card { display: flex; flex-direction: column; gap: 8px; }
+.home-quick-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.home-quick-run-btn {
+  width: 100%; display: flex; align-items: center; gap: 10px; padding: 8px 10px;
+  border-radius: 6px; border: 1px solid var(--border); background: var(--surface2); cursor: pointer; text-align: left;
+}
+.home-quick-run-name { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.home-quick-run-sub { margin-left: auto; font-size: 0.85em; white-space: nowrap; }
+.home-quick-action-row { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border-radius: 6px; background: var(--surface2); border: 1px solid var(--border); }
+.home-quick-action-icons { display: flex; gap: 6px; align-items: center; margin-left: auto; }
+.home-quick-icon-btn { width: 30px; height: 30px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); cursor: pointer; color: var(--text-muted); }
+.home-quick-icon-btn.armed { color: #fff; background: var(--accent, #7c5cff); border-color: var(--accent, #7c5cff); }
+.home-quick-armed-tag { display: flex; align-items: center; gap: 8px; font-size: 0.85em; color: var(--text-muted); }
+.home-quick-toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.85); color: #fff; padding: 6px 14px; border-radius: 6px; z-index: 50; }
+
+@media (min-width: 1200px) {
+  .home-page { max-width: none; }
+  .home-timeline { max-width: none; }
+}
