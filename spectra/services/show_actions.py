@@ -96,9 +96,7 @@ class Param:
     ha_scene | overrides.
 
     `step` is the number input's own increment — None lets the Build view
-    fall back to its existing default (0.05 below max<=1, else 1); the HA
-    volume actions set it to 4 to match River's input_number.snap_volume
-    (snaps to multiples of 4)."""
+    fall back to its existing default (0.05 below max<=1, else 1)."""
     name: str
     type: str
     label: str = ""
@@ -699,21 +697,24 @@ register(ActionKind(
 #
 # PAYLOAD SHAPES ARE RIVER'S OWN (from firstmate's inbox, 2026-10-11):
 # script.music_volume_set takes `volume` (0-100 — HA clamps
-# input_number.snap_volume to that range, and the entity steps in
-# multiples of 4, hence the Build view's own step=4); script.
-# music_volume_step takes `delta` (a signed number of those same points,
-# e.g. +8/-8 — 8 is River's own suggested default step size). An HA token
-# cannot be scoped to individual scripts, so these actions stay INERT
+# input_number.snap_volume to that range). The entity's own step of 4
+# only shapes HA's dashboard slider and is not enforced on a write (its
+# history already holds non-multiples of 4); script.music_volume_step
+# takes `delta` (a signed number of those same points, e.g. +8/-8 — 8 is
+# River's own suggested default step size). An HA token cannot be scoped
+# to individual scripts, so these actions stay INERT
 # (ha_client.configured() == False, every call reports "not configured")
 # until the Admiral decides to provision SPECTRA_HA_TOKEN — no change
 # needed here when he does; the client already treats an absent token as
 # "send it anyway, let HA's own 401 be the visible signal".
 #
-# EASED (the Admiral, 2026-10-11): both volume steps carry `ease_s`
-# (default 1 s, 0 = jump) and walk snap_volume there from SPECTRA's side —
-# spectra/services/ha_volume_ease.py is the binding statement (why not a
-# ramping HA script, one ramp at a time, last step wins, a relative step
-# carries the stopped ramp's remainder, restart leaves a real level).
+# EASED (the Admiral, 2026-10-11, widened 2026-10-13): both volume steps
+# carry `ease_s` (default 1 s, 0 = jump) and walk snap_volume there from
+# SPECTRA's side, writing every whole percent (never quantised to the
+# entity's own step) at up to ~5 writes/s — spectra/services/
+# ha_volume_ease.py is the binding statement (why not a ramping HA
+# script, one ramp at a time, last step wins, a relative step carries the
+# stopped ramp's remainder, restart leaves a real level).
 
 def _split_entity(entity: str) -> tuple[str, str]:
     entity = (entity or "").strip()
@@ -810,18 +811,18 @@ def _ease_param() -> Param:
     return Param("ease_s", "number", "Ease", default=ha_volume_ease.DEFAULT_EASE_S,
                  min=0, max=ha_volume_ease.MAX_EASE_S, step=0.1, unit="s",
                  help="How long the volume takes to get there, in seconds "
-                      "(0 = jump at once). SPECTRA walks snap_volume in its "
-                      "own steps of 4, at most ten writes a second; a newer "
-                      "volume step stops this one where it is and takes "
-                      "over.")
+                      "(0 = jump at once). SPECTRA walks snap_volume one "
+                      "whole percent at a time, at most five writes a "
+                      "second (a longer span coarsens evenly instead of "
+                      "writing faster); a newer volume step stops this "
+                      "one where it is and takes over.")
 
 
 register(ActionKind(
     name="ha_volume_absolute", label="HA volume (absolute)", group="ha",
     params=[Param("volume", "number", "Volume", required=True, default=52,
-                  min=0, max=100, step=4, unit="",
-                  help="Target snap_volume, 0-100 — the entity steps in "
-                       "multiples of 4. Calls Home Assistant's "
+                  min=0, max=100, step=1, unit="",
+                  help="Target snap_volume, 0-100. Calls Home Assistant's "
                        "script.music_volume_set."),
             _ease_param()],
     help="Set the snap_volume in Home Assistant to an exact level, eased "
@@ -834,7 +835,7 @@ register(ActionKind(
 register(ActionKind(
     name="ha_volume_relative", label="HA volume (relative step)", group="ha",
     params=[Param("delta", "number", "Step", required=True, default=8,
-                  min=-100, max=100, step=4,
+                  min=-100, max=100, step=1,
                   help="Signed step, e.g. +8 or -8. Calls the entity set "
                        "in the room's ha_volume_relative_entity setting "
                        "(default script.music_volume_step)."),

@@ -675,9 +675,10 @@ async def end_show() -> dict:
 @mcp.tool()
 async def set_ha_volume_absolute(volume: float,
                                  ease_s: Optional[float] = None) -> dict:
-    """Set Home Assistant's snap_volume to an exact level (0-100, steps
-    of 4), as an ad-hoc Light Show step. Calls script.music_volume_set.
-    ease_s: seconds the change takes (default 1.0, 0 = jump at once)."""
+    """Set Home Assistant's snap_volume to an exact level (0-100, any
+    whole number), as an ad-hoc Light Show step. Calls
+    script.music_volume_set. ease_s: seconds the change takes (default
+    1.0, 0 = jump at once)."""
     return await _call("set_ha_volume_absolute", volume=volume, ease_s=ease_s)
 
 

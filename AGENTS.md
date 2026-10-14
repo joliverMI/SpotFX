@@ -4635,12 +4635,13 @@ lights, so they still fire from a released or dark room — AND they never
 consult `house.py`: a resting house mode must never block or defer an HA
 action, his own explicit ruling, 2026-10-11, held by a test that actively
 simulates a resting house mode and fires anyway):
-`ha_volume_absolute` (`script.music_volume_set`, field `volume` 0-100,
-step 4 — River's `input_number.snap_volume` snaps to multiples of 4),
-`ha_volume_relative` (the entity named in the new
-`RoomControlState.ha_volume_relative_entity` setting, default
-`script.music_volume_step`, field `delta`, signed, default step 8 — split
-into `domain.service` on its first "."), `ha_activate_scene` (`scene.
+`ha_volume_absolute` (`script.music_volume_set`, field `volume` 0-100 —
+River's `input_number.snap_volume` has its own step of 4, but that only
+shapes HA's dashboard slider, never enforced on a write), `ha_volume_relative`
+(the entity named in the new `RoomControlState.ha_volume_relative_entity`
+setting, default `script.music_volume_step`, field `delta`, signed,
+default step 8 — split into `domain.service` on its first "."),
+`ha_activate_scene` (`scene.
 turn_on` with `entity_id` — **GENERIC, no allow-list**: his own
 correction the same day, "I want to be able to customize the scene in HA
 and trigger it as part of the light show" — ANY `scene.*` entity, typed
@@ -4648,14 +4649,21 @@ by its full id or picked from `ha_client.list_scenes()`'s live
 `GET /api/states` fetch, `GET /api/light-show/ha-scenes` the route that
 serves it; `scene.music_mode` is only the step's own suggested default,
 never a stored list). **Both volume steps EASE** (`ease_s`, default 1 s, 0 = the old single
-call; the Admiral, 2026-10-11) — SPECTRA walks snap_volume in steps of 4
-(max 10 writes/s), not a ramping HA script: River's `music_volume_set` is
-`mode: single` and would drop a newer call mid-ramp.
+call; the Admiral, 2026-10-11, widened 2026-10-13 after he asked how
+smooth the ramp was and whether it could be smoother) — SPECTRA writes
+snap_volume ONE WHOLE PERCENT at a time (never a fraction, never
+quantised to the entity's own step of 4 — that step is cosmetic, HA's own
+history already holds non-multiples of 4), at up to ~5 writes/s (River's
+own ceiling — each write fans out to 5 Snapcast clients), coarsening to
+bigger whole-number steps rather than writing faster when a span needs
+more. Not a ramping HA script: neither HA script has a transition of its
+own (River confirmed, 2026-10-13 — Snapcast sets volume instantly), and
+`music_volume_set` is `mode: single` and would drop a newer call mid-ramp.
 `spectra/services/ha_volume_ease.py` is the binding statement: one ramp
 at a time, a newer volume step stops it between writes and wins, a
 relative step carries the stopped ramp's unfinished part (two quick +8s
 = +16), the first write is inline (the step's outcome), and a restart
-mid-ramp leaves a real level between start and target. Spec:
+mid-ramp leaves a real whole-percent level between start and target. Spec:
 `tests/test_ha_volume_ease.py`. Sonic reach:
 `show_console._op_set_ha_volume_absolute`/`_op_set_ha_volume_relative`/
 `_op_activate_ha_scene` (ad-hoc one-step fires through `show_actions.

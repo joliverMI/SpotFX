@@ -822,7 +822,7 @@ OPERATIONS: dict[str, SonicOperation] = {
         name="set_ha_volume_absolute", domain="show", kind="write",
         summary="Set Home Assistant's snap_volume to an exact level, "
                 "eased over ease_s seconds, as an ad-hoc Light Show step.",
-        instructions="volume 0-100 (the entity steps in multiples of 4). "
+        instructions="volume 0-100 (any whole number). "
                     "Calls Home Assistant's script.music_volume_set. "
                     "Reports 'Home Assistant is not configured' if "
                     "SPECTRA_HA_URL is unset on this host — nothing was "

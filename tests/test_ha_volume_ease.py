@@ -18,48 +18,72 @@ E = ha_volume_ease
 
 
 # ── the plan (pure) ─────────────────────────────────────────────────────────
+#
+# These run against the real, unpatched MIN_WRITE_INTERVAL_S (0.2 s, ~5
+# writes/s) — pure arithmetic, nothing async, so there's no need to speed
+# it up the way the stateful fake-HA tests below do.
 
-def test_absolute_plan_walks_in_fours_and_lands_exactly():
-    plan = E.plan_absolute(12, 52, 1.0)
+def test_absolute_plan_writes_every_whole_percent_and_lands_exactly():
+    """Firstmate's own acceptance case: 12 -> 20 over 15 s is 8 writes,
+    ~1.9 s apart — one per whole-percent change, never a fraction."""
+    plan = E.plan_absolute(12, 20, 15.0)
     values = [v for _, v in plan]
-    assert values == [16, 20, 24, 28, 32, 36, 40, 44, 48, 52]
+    assert values == [13, 14, 15, 16, 17, 18, 19, 20]
+    assert all(float(v).is_integer() for v in values)
     times = [t for t, _ in plan]
     assert times[0] == 0
-    assert times == sorted(times) and times[-1] < 1.0
+    assert times == sorted(times)
+    gaps = [b - a for a, b in zip(times, times[1:])]
+    assert all(1.8 <= g <= 2.0 for g in gaps), gaps
+
+
+def test_absolute_plan_never_writes_faster_than_five_a_second():
+    plan = E.plan_absolute(0, 100, 1.0)
+    assert len(plan) == 5, "100 whole-percent levels over 1 s must take bigger steps, not write faster"
+    values = [v for _, v in plan]
+    assert values[-1] == 100
+    assert all(float(v).is_integer() for v in values)
+    assert values == sorted(values)
+    times = [t for t, _ in plan]
     assert all(b - a >= E.MIN_WRITE_INTERVAL_S - 1e-9 for a, b in zip(times, times[1:]))
 
 
-def test_absolute_plan_never_writes_faster_than_ten_a_second():
-    plan = E.plan_absolute(0, 100, 1.0)
-    assert len(plan) == 10, "25 levels over 1 s must take bigger steps, not write faster"
-    values = [v for _, v in plan]
-    assert values[-1] == 100
-    assert all(v % 4 == 0 for v in values)
-    assert values == sorted(values)
-
-
-def test_absolute_plan_from_an_off_grid_level_still_lands_on_target():
-    values = [v for _, v in E.plan_absolute(13, 50, 1.0)]
+def test_absolute_plan_from_a_fractional_level_still_lands_on_target():
+    values = [v for _, v in E.plan_absolute(13.4, 50, 1.0)]
     assert values[-1] == 50
-    assert all(v % 4 == 0 for v in values[:-1])
+    assert all(float(v).is_integer() for v in values)
     assert all(13 <= v <= 50 for v in values)
 
 
-@pytest.mark.parametrize("start,target,ease", [(52, 52, 1.0), (48, 52, 1.0), (12, 52, 0.0)])
-def test_absolute_plan_is_one_write_when_there_is_nothing_to_ease(start, target, ease):
+@pytest.mark.parametrize("start,target,ease", [(52, 52, 1.0), (51.5, 52, 1.0), (12, 52, 0.0)])
+def test_absolute_plan_is_one_write_when_there_is_less_than_a_whole_percent_to_ease(start, target, ease):
     assert E.plan_absolute(start, target, ease) == [(0.0, target)]
 
 
 def test_absolute_plan_downwards():
     values = [v for _, v in E.plan_absolute(52, 12, 1.0)]
-    assert values == [48, 44, 40, 36, 32, 28, 24, 20, 16, 12]
+    assert values[-1] == 12
+    assert all(float(v).is_integer() for v in values)
+    assert values == sorted(values, reverse=True)
 
 
-def test_relative_plan_splits_into_fours_summing_exactly():
-    assert E.plan_relative(8, 1.0) == [(0.0, 4), (0.5, 4)]
+def test_relative_plan_splits_into_whole_percents_summing_exactly():
+    plan = E.plan_relative(4, 1.0)
+    incs = [i for _, i in plan]
+    assert len(plan) == 4, "a 1 s ease of +4 is 4 whole-percent writes"
+    assert incs == [1, 1, 1, 1]
     incs = [i for _, i in E.plan_relative(-10, 1.0)]
     assert sum(incs) == -10
+    assert all(float(i).is_integer() for i in incs)
     assert E.plan_relative(8, 0.0) == [(0.0, 8)]
+
+
+def test_a_large_jump_over_a_short_ease_respects_the_five_a_second_cap():
+    plan = E.plan_absolute(0, 100, 0.5)
+    assert len(plan) <= 3, "0.5 s at 5 writes/s allows at most 2-3 writes"
+    times = [t for t, _ in plan]
+    assert all(b - a >= E.MIN_WRITE_INTERVAL_S - 1e-9 for a, b in zip(times, times[1:]))
+    assert plan[-1][1] == 100
 
 
 # ── a stateful fake Home Assistant ──────────────────────────────────────────
@@ -120,10 +144,14 @@ def test_absolute_eases_from_the_read_level_to_the_target(ha):
         await E.wait_idle()
     _run(go())
     values = [d["volume"] for _, _, d in ha.calls]
-    assert values == [16, 20, 24, 28, 32, 36, 40, 44, 48, 52]
+    # A 40-point span at the (fast, test-only) 0.01 s write interval needs
+    # 40 whole-percent writes, which is more than 0.2 s at 5/s allows, so
+    # it coarsens evenly to 20 writes of 2 each rather than writing faster.
+    assert values == [14, 16, 18, 20, 22, 24, 26, 28, 30, 32,
+                      34, 36, 38, 40, 42, 44, 46, 48, 50, 52]
     assert ha.volume == 52
     span = ha.calls[-1][0] - ha.calls[0][0]
-    assert 0.15 <= span < 0.4, f"ten writes spread over ~0.18 s, got {span:.3f}"
+    assert 0.15 <= span < 0.4, f"twenty writes spread over ~0.19 s, got {span:.3f}"
     assert E.status()["last"]["state"] == "done"
     assert E.status()["in_flight"] is None
 
@@ -164,7 +192,7 @@ def test_a_newer_absolute_step_stops_the_ramp_and_wins(ha):
     ha.volume = 0
 
     async def go():
-        await E.set_absolute(100, 0.5)          # 10 writes, 50 ms apart
+        await E.set_absolute(100, 0.5)          # 50 writes, 10 ms apart
         await asyncio.sleep(0.12)
         r = await E.set_absolute(20, 0)
         assert r.ha.ok
@@ -261,14 +289,14 @@ def test_a_failed_first_write_fails_the_step_and_starts_no_ramp(ha):
 
 def test_restart_mid_ramp_leaves_a_real_level_between_start_and_target(ha):
     """The process going away mid-ramp is the loop ending with the ramp in
-    flight: whatever was written last is a multiple of 4 between where the
+    flight: whatever was written last is a whole percent between where the
     ramp started and where it was going, and the next process's step
     works with nothing left over."""
     async def interrupted():
         await E.set_absolute(52, 0.5)
         await asyncio.sleep(0.12)                 # the "restart"
     _run(interrupted())
-    assert 12 < ha.volume < 52 and ha.volume % 4 == 0
+    assert 12 < ha.volume < 52 and float(ha.volume).is_integer()
     E.reset()                                     # a fresh process remembers nothing
     r = _run(E.set_absolute(40, 0))
     assert r.ha.ok and ha.volume == 40
@@ -282,6 +310,23 @@ def test_a_step_on_a_new_loop_drops_a_ramp_left_by_a_dead_one(ha):
     # No reset this time: the stale slot must be dropped, not awaited.
     r = _run(E.set_absolute(8, 0))
     assert r.ha.ok and ha.volume == 8
+
+
+def test_stop_cancels_mid_ramp_and_writes_nothing_more(ha):
+    ha.volume = 0
+
+    async def go():
+        await E.set_absolute(100, 0.5)
+        await asyncio.sleep(0.12)
+        await E.stop()
+        before = len(ha.calls)
+        await asyncio.sleep(0.6)                  # past the ramp's own end
+        return before
+    before = _run(go())
+    assert len(ha.calls) == before, "nothing fires after stop() cancels the ramp"
+    assert 0 < ha.volume < 100, "the level stops wherever the cancelled ramp left it"
+    assert E.status()["in_flight"] is None
+    assert E.status()["last"]["state"] == "replaced"
 
 
 # ── the Light Show and Sonic surfaces ──────────────────────────────────────
@@ -302,7 +347,9 @@ def test_a_light_show_step_eases_and_reports_it(room, ha):
     step = run["steps"][0]
     assert step["status"] == "applied"
     assert "easing 12 → 52 over 0.2 s" in step["detail"]
-    assert step["ease"]["writes"] == 10
+    # 40 whole-percent levels over 0.2 s, at the (fast, test-only) 0.01 s
+    # write interval: coarsened evenly to 20 writes, never faster.
+    assert step["ease"]["writes"] == 20
 
 
 def test_sonic_passes_ease_through(room, ha):

@@ -13,8 +13,7 @@ export interface ShowParam {
   min: number | null;
   max: number | null;
   /** The number input's own increment — null falls back to the Build
-   * view's existing default. (HA volume actions set this to 4, to match
-   * Home Assistant's input_number.snap_volume.) */
+   * view's existing default. */
   step?: number | null;
   unit: string;
   help: string;

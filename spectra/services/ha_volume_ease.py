@@ -3,15 +3,18 @@ actions (`show_actions.py`'s "ha" group) walk `input_number.snap_volume`
 to where it should be over a chosen time instead of jumping (the Admiral,
 2026-10-11: "add setting to ease the volume over time. default is
 1 second. figure out if the easing is best handled by home assistant or
-spectra").
+spectra"; followed up 2026-10-13 — "how smoothed is the volume increase
+... what would it take to smooth it further", answered "see if 3 is
+available, then 2, then do 1 if neither of those is reasonable", where
+3 = a native HA fade, 2 = fine-grained writes, 1 = lower HA's own step).
 
 WHY SPECTRA AND NOT A RAMPING HA SCRIPT — measured, not argued (read-only,
 2026-10-11, River's own script mirror `Homelab/HA_Packages/scripts/
 music_volume.yaml` plus a GET of the live entities):
-  * Both scripts are ONE `input_number.set_value` with no delay, and the
-    entity steps in 4s over 0-100 — at most 25 distinct levels, so a 1 s
-    ease is ~10 writes, which a 2.4 ms (p50, 30 samples) REST call carries
-    easily from here.
+  * Neither script has a transition — `media_player.volume_set`/
+    `input_number.set_value` both move Snapcast's own integer percent
+    instantly, so OPTION 3 (a native fade) IS NOT AVAILABLE (River's
+    own answer, 2026-10-13); nothing in this module waits on that again.
   * `script.music_volume_set` is `mode: single`: a ramping version of it
     would DROP a newer call that lands mid-ramp ("already running") — the
     exact opposite of last-writer-wins — and the relative script is a
@@ -24,6 +27,16 @@ music_volume.yaml` plus a GET of the live entities):
     mid-ramp — is cheap to give up: the ramp only ever writes real levels
     between where it started and where it was going, so a restart leaves
     the volume at one of them (stated below), never somewhere odd.
+
+OPTION 2 (FINE-GRAINED WRITES) IS WHAT RUNS — confirmed available with no
+HA change (River, 2026-10-13): the step of 4 on `input_number.snap_volume`
+only shapes the DASHBOARD SLIDER; Home Assistant does not enforce it on a
+write — the entity's own history already holds non-multiples of 4 (9, 10,
+14, 18, 23, ...). SPECTRA writes a WHOLE PERCENT at a time (never a
+fraction — fractional values are pointless on an integer volume), landing
+exactly on the target, rather than quantising to the entity's step
+attribute the way this module originally did. OPTION 1 (lowering HA's own
+step to 1) is therefore moot and was never applied.
 
 ONE RAMP AT A TIME. Both scripts move the same entity, so there is one
 slot. A new volume step — eased or instant, absolute or relative, from a
@@ -46,11 +59,14 @@ held back for the length of an ease. A later write that fails ends the
 ramp loudly: an ERROR log line, a show-log entry (`show/ha_volume_ease`)
 and `status()["last"]`, which rides on the Light Show's own status.
 
-RATE: never more than one write per `MIN_WRITE_INTERVAL_S` (0.1 s) — each
-change to snap_volume fans out to five Snapcast clients through HA's own
-`Snap Volume Control` automation (`mode: restart`). A long range over a
-short ease takes bigger steps (still multiples of 4) rather than writing
-faster. HA's REST API has no rate limiter of its own to respect.
+RATE: never more than one write per `MIN_WRITE_INTERVAL_S` (0.2 s, ~5 a
+second) — River's own ceiling (2026-10-13): each change to snap_volume
+fans out to five Snapcast clients, and the automation driving it is
+`mode: restart`, so a burst only drops the intermediate points rather than
+queuing or erroring. A span needing more whole-percent writes than the
+ease span allows at that rate takes bigger (still whole-number) steps
+instead of writing faster — never the reverse. HA's REST API has no rate
+limiter of its own to respect.
 
 RESTART MID-RAMP: nothing is persisted. The task dies with the process and
 the volume stays at the last level written — a real snap_volume level
@@ -75,14 +91,12 @@ logger = logging.getLogger(__name__)
 SNAP_VOLUME_ENTITY = "input_number.snap_volume"
 ABSOLUTE_DOMAIN = "script"
 ABSOLUTE_SERVICE = "music_volume_set"
-#: snap_volume's own step — every intermediate level is a multiple of it.
-QUANTUM = 4.0
 VOLUME_MIN = 0.0
 VOLUME_MAX = 100.0
 DEFAULT_EASE_S = 1.0
 MAX_EASE_S = 60.0
-#: Never more than ten writes a second (see RATE above).
-MIN_WRITE_INTERVAL_S = 0.1
+#: Never more than five writes a second (see RATE above).
+MIN_WRITE_INTERVAL_S = 0.2
 #: How long a new step waits for the stopped ramp's in-flight request to
 #: finish before cancelling it outright — a healthy HA answers in ~2 ms.
 STOP_WAIT_S = 0.5
@@ -139,27 +153,33 @@ def _lock() -> asyncio.Lock:
 # ── the plan (pure) ─────────────────────────────────────────────────────────
 
 def _writes_for(span: float, ease_s: float) -> int:
-    if ease_s <= 0 or abs(span) <= QUANTUM:
+    """How many writes a span of this many whole percent needs over
+    `ease_s`, capped at `MIN_WRITE_INTERVAL_S` apart — never more writes
+    than the ease span can hold at that rate, coarsening evenly (bigger
+    steps, not faster ones) when the span needs more than that."""
+    if ease_s <= 0 or abs(span) < 1:
         return 1
-    by_level = math.ceil(abs(span) / QUANTUM)
+    by_level = math.ceil(abs(span))
     by_rate = max(1, int(ease_s / MIN_WRITE_INTERVAL_S + 1e-9))
     return max(1, min(by_level, by_rate))
 
 
-def _snap(x: float) -> float:
-    return round(x / QUANTUM) * QUANTUM
+def _whole(x: float) -> float:
+    """Snap to the nearest whole percent — snap_volume is an integer, and
+    a fractional write is pointless on it."""
+    return round(x)
 
 
 def plan_absolute(start: float, target: float, ease_s: float) -> list[tuple[float, float]]:
-    """(seconds after the step, level to write) — evenly held levels, every
-    intermediate one a multiple of 4, the last exactly `target`, the first
-    at 0. A level equal to the one before it is not written again."""
+    """(seconds after the step, level to write) — evenly held WHOLE-PERCENT
+    levels, the last exactly `target`, the first at 0. A level equal to
+    the one before it is not written again."""
     n = _writes_for(target - start, ease_s)
     out: list[tuple[float, float]] = []
     prev = start
     for k in range(1, n + 1):
         v = target if k == n else min(VOLUME_MAX, max(VOLUME_MIN,
-                                                      _snap(start + (target - start) * k / n)))
+                                                      _whole(start + (target - start) * k / n)))
         if k < n and v == prev:
             continue
         out.append((ease_s * (k - 1) / n, v))
@@ -168,13 +188,13 @@ def plan_absolute(start: float, target: float, ease_s: float) -> list[tuple[floa
 
 
 def plan_relative(delta: float, ease_s: float) -> list[tuple[float, float]]:
-    """(seconds after the step, increment to send) — increments in
-    multiples of 4 summing exactly to `delta`, the first at 0."""
+    """(seconds after the step, increment to send) — WHOLE-PERCENT
+    increments summing exactly to `delta`, the first at 0."""
     n = _writes_for(delta, ease_s)
     out: list[tuple[float, float]] = []
     prev = 0.0
     for k in range(1, n + 1):
-        cum = delta if k == n else _snap(delta * k / n)
+        cum = delta if k == n else _whole(delta * k / n)
         inc = cum - prev
         if k < n and inc == 0:
             continue
