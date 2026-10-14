@@ -50,6 +50,14 @@ Melt's one touch: its clock step is multiplied by `self._sp_activity`
 untouched at 1). STAR, House Star and House Fish run Melt on the strips —
 the house scenes never see a phase while a house mode rests.
 
+**On the strip Star reads (`radial-dummy`), Melt skips its LULL** while a
+Radial is drawing from it (2026-10-14, his "the strip used by the radial
+effect shouldn't do the lull"): the layer tells it "none" for the lull and
+only eases what the charge left back to neutral — no fade, no lull
+activity — so Star's own lull owns the crystal's dark. Charge and drop are
+unchanged. strip_phase's THE STRIP STAR READS; `tests/
+test_star_strip_lull.py`.
+
 ## Sonic reach
 
 The layer's tunables (Charge colour fill/brightness/activity, Lull

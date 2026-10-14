@@ -11,7 +11,7 @@ it reaches his room (the PRODUCTION ResponseEngine on the FacadeExecutor):
   2. LULL B: the bands fall in as pieces and the panel is BLACK ON the dark
      point — with the strip's own fade switched off, so it is Star's doing
      (and with it on, the room's real shape);
-  3. "implode" stays selectable and is today's lull (no pieces);
+  3. "implode" stays selectable (no pieces), dark on the dark point;
   4. DROP D3: the swallowed pieces are thrown back out, the bands wear a
      colour gain, and no cell is whiter than the set's own colour at its
      hue; the switches withhold it (and a quiet watchdog release never
@@ -126,7 +126,7 @@ def test_implode_mode_is_todays_lull_with_no_pieces(tmp_path):
                              radial_cfg={"lull_mode": "implode"}, until_s=2.0))
     assert all(r["falling"] == 0 and r["held"] == 0 for r in series)
     assert star._bands is None
-    # today's implode never goes dark on its own before the breath
+    # still lit before the dark point (2.5 s; Star darkens it there itself)
     assert series[-1]["lit"] > 0
 
 
@@ -228,19 +228,24 @@ def test_a_charge_straight_into_a_drop_is_the_plain_bloom():
 # ── 5. the breath-hold ─────────────────────────────────────────────────────
 
 def test_the_breath_hold_is_black_in_implode_mode(tmp_path):
+    # Since 2026-10-14 the strip Star reads skips its lull, so Star darkens
+    # the implode itself ON the dark point; the breath-hold sits inside that
+    # dark (strip_phase's THE STRIP STAR READS; tests/test_star_strip_lull.py)
     async def body():
         async with star_room(str(tmp_path), layer=False,
                              radial={"lull_mode": "implode"}) as room:
             room.step(room.secs(1.0))
             rec = await room.phase("lull", gap_ms=GAP_MS, intensity=0.7)
             assert rec["phase"]["lull_breath_s"] == pytest.approx(0.4)
-            at = room.star._config
-            room.step(room.secs(4.0))
+            room.step(room.secs(1.0))
             before = lit_cells(room.matrix())
+            room.step(room.secs(3.0))
+            dark = lit_cells(room.matrix())
             room.step(room.secs(0.75))        # inside the breath (4.6..5.0 s)
-            return before, lit_cells(room.matrix()), at
-    before, during, _cfg = run(body())
+            return before, dark, lit_cells(room.matrix())
+    before, dark, during = run(body())
     assert before > 0
+    assert dark == 0
     assert during == 0
 
 

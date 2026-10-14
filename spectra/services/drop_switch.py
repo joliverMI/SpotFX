@@ -93,9 +93,9 @@ DETERMINISTIC, so the room, the Timeline and Sonic agree about one decision.
 THE HAND-OFF TABLE (`HANDOFF`). Every ordered pair of drop-switch effects
 has one, because every member's _adopt_handoff takes any predecessor's
 snapshot (report E6): "choreographed" where the incoming effect stages the
-arrival (radial's standalone bloom out of the particles — INTO Star;
-since the star plan, 2026-10-13, every pair OUT of Star is a program
-below instead of a particle effect erupting from its imploded point),
+arrival (radial's standalone bloom out of the particles — INTO Star — is
+retired too: since the star plan, 2026-10-13, every pair OUT of Star, and
+since 2026-10-14 every particle pair INTO Star, is a program below),
 "program" where a THEMATIC
 TRANSITION PROGRAM is registered for the pair (fx/effects/transition_
 program.py — phase 3's INFALL into the Black Hole and the Black Hole's
@@ -247,6 +247,11 @@ def _handoff_table() -> dict[tuple[str, str], str]:
                 # OUT OF STAR (the star plan, 2026-10-13): the bands release
                 # as pieces and the pair's program carries them across on
                 # the mark (transition_program.STAR_OUT)
+                table[(out, inc)] = HANDOFF_PROGRAM
+            elif inc == "radial" and transition_program.program_name(
+                    out, inc) is not None:
+                # INTO STAR (2026-10-14): the pieces land on Star's bands as
+                # it grows out of the core (transition_program.STAR_IN)
                 table[(out, inc)] = HANDOFF_PROGRAM
             elif inc == "radial" and out in particles:
                 # radial gathers the particles and blooms out of the centre
@@ -491,6 +496,18 @@ _PROGRAM_WORDS = {
     transition_program.UNRAVEL:
         "the chains unravel into the incoming form",
 }
+# INTO STAR the same releases land on Star's bands as it grows out of the
+# core (transition_cloud.RingFormer)
+_STAR_IN_WORDS = {
+    transition_program.FOUNTAIN:
+        "the Black Hole sprays and its sparks land on the star's rings",
+    transition_program.SHOAL_BREAK:
+        "the fish shatter and their dots land on the star's rings",
+    transition_program.UNRAVEL:
+        "the chains unravel onto the star's rings",
+    transition_program.WIND:
+        "the orbits wind in onto the star's rings",
+}
 
 
 def _sentence_yes(showing: Optional[Showing], target: SceneInfo,
@@ -516,7 +533,9 @@ def _sentence_yes(showing: Optional[Showing], target: SceneInfo,
         name = transition_program.program_name(
             showing.scene.effect if showing is not None else None,
             target.effect)
-        meld = _PROGRAM_WORDS.get(name or "")
+        words = (_STAR_IN_WORDS if target.effect == "radial"
+                 else _PROGRAM_WORDS)
+        meld = words.get(name or "")
     meld = f" — {meld}" if meld else ""
     return (f"{frm} → {target.name}, {_MOMENT_WORDS[moment]}{hand}: "
             f"{why}{early_why}{meld}.")

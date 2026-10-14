@@ -106,9 +106,16 @@ statement; the plan is `/home/javi/fleet-spotfx/data/star-plan/report.md`.
 Five things not visible cold:
 
 - **Star draws nothing of its own** — its colours are the `radial-dummy`
-  strip's (Melt on STAR), so the strip's own charge/lull/drop (gain, fade,
-  drop shockwave) still rides into the crystal through the mapping (his
-  answer to the plan's Q5: keep it). The set's colours are cached once a
+  strip's (Melt on STAR), so the strip's own CHARGE and DROP (gain, fill,
+  drop shockwave) still ride into the crystal through the mapping — but
+  NOT its lull (2026-10-14, his Q5 changed: "The strip used by the radial
+  effect shouldn't do the lull, let the crystal mapping handle the lull").
+  Star stamps its source strip every frame (`strip_phase.
+  mark_radial_source`, cleared in `deactivate`); the strip phase layer
+  skips a lull that starts while it is stamped (strip_phase's THE STRIP
+  STAR READS): no fade, no lull content, only an ease back from the
+  charge. So Star takes the panel dark ON the dark point BY ITSELF in both
+  modes — "bands" by its cut, "implode" by `_implode_fade`. The set's colours are cached once a
   frame off the strip effect's gradient (`_refresh_palette`), which is what
   `get_gradient_color_vectorized1d` and `_set_colours` read — a piece
   always wears the SET colour nearest its cell, composed brighter-wins
@@ -143,16 +150,53 @@ unchanged. ~`bands_pieces` lit cells, brightness-weighted, each with its
 set colour (`rgb`) and `v = omega x r` from the live rotation rate
 (`_track_rotation`). A dark star offers no pieces, so no program. Registry:
 `transition_program.STAR_OUT`; the two new flights (UNWIND, CLUSTER) are in
-`transition_cloud.py`. Into Star is not registered yet (his "still need
-work") — the next task.
+`transition_cloud.py`.
+
+## Into Star: the RingFormer grow-in (2026-10-14, "Do rec on transitions")
+
+`transition_cloud.py`'s "INTO STAR" section is the binding statement;
+`transition_program.STAR_IN` the registry (Fountain, Shoal Break, Spark
+Rings, Flame Lick, Unravel, WIND). Four things not visible cold:
+
+- **FORM is Star's, chosen by the incoming effect** (`CloudProgram.
+  _make_former` -> `RingFormer` whenever the incoming effect has
+  `_program_bands`), from `STAR_FORM_AT` (0.35) of the program on every
+  pair. Star supplies the geometry: `_program_bands` (the strip's bright
+  peaks, read once at FORM — the strip is mid-crossfade before that),
+  `_program_polar` / `_piece_xy` (screen <-> Star's ROTATING frame),
+  `_program_band_u` (twist-aware), and `_last_u` (this frame's shaped
+  radius field, stored by `draw()`).
+- **The front is paced by CELLS, not radius**: Star's cells crowd into a
+  narrow band of shaped radius, so a front at a steady radial speed lit the
+  whole middle in ~0.1 s (measured); the RingFormer passes an even share of
+  the cells (their rank in the u field sorted at FORM) each frame. Its
+  length is Star's own `ring_reveal_front_s` (0.65 s, registered, Sonic
+  `set_scene_entry_param`, help `star-into-transitions`).
+- **The old crossfade choreography is retired for program pairs**:
+  `_adopt_handoff` stands down while `_transition_program` is set, and the
+  particle side's gather only ever ran on a crossfade sibling, which a
+  program switch never makes. A plain crossfade (programs off, a house
+  glide) still blooms as before.
+- **WIND integrates turn_about's law in exact polar terms**: turn_about
+  re-reads each piece's radial speed off its last chord, which adds an
+  outward drift (rho om^2 dt / 2 a frame) that outruns an inward push.
+  UNWIND (approved, outward) is left exactly as shipped.
+
+**Measuring a reveal on this rig**: Melt BREATHES (Star's lit cells swing
+~850-2200 over a few seconds on its own) and the rig turns Star (~18/cell a
+frame of change by itself) — measure the star's own LAYER (Star's picture x
+the program's gain, `former._gain`) against the raw picture of the same
+frame, never absolute lit counts across time
+(`tests/test_star_into_programs.py`).
 
 ## Sonic reach
 
 No direct param edit (same rule as every effect skill here) — except the
 per-entry VALUES Sonic reaches through `set_scene_entry_param`: every
 registered param, including `lull_mode`, `lull_core_u`, `lull_piece_tau`,
-`drop_snap_gain`, `drop_snap_decay_s`, `shape_morph_s` (help topics
-`star-lull-drop`, `star-shape-morph`). The three out-of-Star transition
+`drop_snap_gain`, `drop_snap_decay_s`, `shape_morph_s`,
+`ring_reveal_front_s` (help topics `star-lull-drop`, `star-shape-morph`,
+`star-into-transitions`). The three out-of-Star transition
 knobs are ROOM settings (`transition_bands_pieces`, `_bands_hold_ms`,
 `transition_unwind`), reached by `set_setting`. `spin`/
 `base_rotation` both have registry `help_topic: radial-base-rotation`
@@ -166,7 +210,11 @@ Sonic write access.
 (a real Melt strip under a real Radial — Star renders black without it),
 `tests/test_star_phases.py` (lull B black on the dark point, D3 no-white,
 the switches, the morph), `tests/test_star_programs.py` (every program out
-of Star on the real `set_effect(program=)` hook), `scripts/
+of Star on the real `set_effect(program=)` hook),
+`tests/test_star_into_programs.py` (every row INTO Star: no pop-in,
+staggered landings, WIND),
+`tests/test_star_strip_lull.py` (the strip Star reads skips its lull,
+keeps charge/drop; other strips unchanged), `scripts/
 check_star_phases.py` (the same rig, printed: lull B's lit/falling/kept
 cells every 0.1 s, D3's lit/white cells after the drop, and every program
 out of Star's largest frame-to-frame change and white-cell count). The warp background fix is proven in

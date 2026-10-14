@@ -33,7 +33,13 @@ BREAK / SHOALING (Fish <-> Orbits / Squiggles) and UNRAVEL (Squiggles <->
 Orbits / Fish); the star plan (2026-10-13) adds every pair OUT OF STAR —
 Star's bands release as pieces and ride INFALL / FOUNTAIN / IGNITION /
 UNRAVEL unchanged, or the two new flights UNWIND (-> Orbits) and CLUSTER
-(-> Fish) — all in the one registry below:
+(-> Fish); and, 2026-10-14 (the Admiral: "Do rec on transitions"), every
+pair INTO STAR — each partner's own release (Fountain, Shoal Break, the
+sparks' flight, Flame Lick, Unravel, and WIND, UNWIND with time inverted)
+with Star's own FORM, the RingFormer: the pieces glide onto Star's bands
+while a soft front grows the star out of the core (transition_cloud.py's
+"INTO STAR" section is the binding statement) — all in the one registry
+below:
 
   INFALL    particles -> Black Hole (orbits / fish / squiggles -> blackhole
             — fireworks LENS in instead, below; his "I like this upgrade
@@ -111,6 +117,9 @@ UNRAVEL = "unravel"
 # the star plan (2026-10-13; out of Star — fx/effects/transition_cloud.py)
 UNWIND = "unwind"
 CLUSTER = "cluster"
+# into Star (2026-10-14; transition_cloud.py's "INTO STAR")
+WIND = "wind"
+SPARK_RINGS = "spark_rings"
 
 # Infall feeds the Black Hole from every particle effect but Fireworks,
 # whose sparks LENS in instead (phase 4); the Black Hole erupts into every
@@ -136,6 +145,24 @@ STAR_OUT = {
     "orbits": UNWIND,
     "fish": CLUSTER,
 }
+# INTO STAR (2026-10-14, the Admiral: "Do rec on transitions" — the plan's
+# revised recommendation, data/star-plan/report.md revision 2): every
+# partner releases its pieces its own way and Star's RingFormer FORMs them
+# (transition_cloud.RingFormer): they land on the bands while the star grows
+# out of the core — never a frame where the star pops in.
+STAR_IN = {
+    "blackhole": FOUNTAIN,
+    "fish": SHOAL_BREAK,
+    "fireworks": SPARK_RINGS,
+    "sauron": FLAME_LICK,
+    "eye": FLAME_LICK,
+    "squiggles": UNRAVEL,
+    "orbits": WIND,
+}
+# Into Star, FORM (the pieces gliding onto the bands, the star growing out
+# of the core) begins at this fraction of the program on every pair — and
+# the Black Hole's fountain sprays there too.
+STAR_FORM_AT = 0.35
 
 
 def _registry() -> dict[tuple[str, str], str]:
@@ -158,6 +185,8 @@ def _registry() -> dict[tuple[str, str], str]:
     table[("orbits", "squiggles")] = UNRAVEL
     for dst, name in STAR_OUT.items():
         table[(STAR, dst)] = name
+    for src, name in STAR_IN.items():
+        table[(src, STAR)] = name
     return table
 
 
@@ -288,6 +317,10 @@ _FIXED_ANCHORS = {
     # out of Star the bands come apart ON the mark (the Shoal Break's rule)
     UNWIND: 0.0,
     CLUSTER: 0.0,
+    # into Star: the orbit blobs come apart into arcs ON the mark (UNWIND's
+    # mirror); the sparks' payoff is the star starting to grow (FORM)
+    WIND: 0.0,
+    SPARK_RINGS: STAR_FORM_AT,
 }
 
 
@@ -304,6 +337,9 @@ def anchor_frac(name: Optional[str], settings: ProgramSettings,
         return 1.0 - settings.infall_form_s() / settings.duration_s
     if name == UNRAVEL:
         return THREAD_ANCHOR if in_type == "squiggles" else 0.0
+    if name == FOUNTAIN and in_type == STAR:
+        # into Star the fountain sprays where FORM begins
+        return STAR_FORM_AT
     return _FIXED_ANCHORS.get(name, 0.5)
 
 
@@ -339,7 +375,11 @@ def stages(out_type: Optional[str], in_type: Optional[str],
     cls = program_class(program_name(out_type, in_type))
     if cls is None:
         return []
-    out = [dict(s) for s in cls.stage_fracs(settings, out_type, in_type)
+    fracs = cls.stage_fracs
+    if in_type == STAR and hasattr(cls, "star_in_stage_fracs"):
+        # into Star every pair shares Star's own FORM (the RingFormer)
+        fracs = cls.star_in_stage_fracs
+    out = [dict(s) for s in fracs(settings, out_type, in_type)
            if s["to"] - s["from"] > 1e-6]
     if out and not any(s.get("anchor") for s in out):
         # on the mark the stage before the payoff has no length: the

@@ -1010,7 +1010,7 @@ Black Hole), FLAME LICK / IGNITION (Sauron or Eye <-> those five), SHOAL
 BREAK / SHOALING (Fish <-> Orbits / Squiggles), UNRAVEL (Squiggles <->
 Orbits / Fish) — runs a program with its own clock (room
 `transition_program_ms`, 1.4 s) instead of the virtual's stored 0.5 s
-crossfade. Six things:
+crossfade. Eight things:
 
 - **THE REQUEST IS EXPLICIT, end to end.** `scene_compiler.fire_scene` asks
   (`transition_program_for`, against the conductor's current effect types)
@@ -1052,9 +1052,19 @@ crossfade. Six things:
   through `Radial2d._program_snapshot` (a program asks it before
   `_handoff_snapshot`, which stays empty so crossfade adoptions are
   unchanged) into `transition_program.STAR_OUT` (INFALL / FOUNTAIN /
-  IGNITION / UNRAVEL reused, UNWIND / CLUSTER new). Into Star is not
-  registered yet. Star's own lull B / drop D3 / shape morph: the
-  radial-effect skill.
+  IGNITION / UNRAVEL reused, UNWIND / CLUSTER new). Star's own lull B /
+  drop D3 / shape morph: the radial-effect skill.
+- **INTO STAR (2026-10-14, "Do rec on transitions")**: `transition_program.
+  STAR_IN` — every partner's own release (FOUNTAIN / SHOAL BREAK / SPARK
+  RINGS / FLAME LICK / UNRAVEL, and WIND = UNWIND with time inverted) with
+  Star's FORM, `transition_cloud.RingFormer`: from `STAR_FORM_AT` the pieces
+  glide onto Star's bands (staggered, velocity-continuous) while a front
+  PACED BY STAR'S CELLS (a steady radial speed lit the crowded middle in
+  one go) grows the star from the core; the last frame is the plain star.
+  A new former keyed on an incoming effect goes in `CloudProgram.
+  _make_former` (and FOUNTAIN's override). Measure a reveal against the
+  same frame's raw picture — Melt breathes. Proof: `tests/
+  test_star_into_programs.py`.
 
 ## THE KNOWN AUDIO BUFFER — SPECTRA MIRRORS River's number, never shortens it
 
@@ -9594,7 +9604,7 @@ strip-phase-plan/report.md`, revision 3). The Admiral: brighter and busier
 on a charge, relax to black in a lull, a big explosion on the drop — and,
 binding, "i don't want to raise the white in the charge, or on the drop".
 The module docstring is the binding statement (the curves, THE ORDER of the
-output stage, HOW AN EFFECT JOINS). Six things:
+output stage, HOW AN EFFECT JOINS). Eight things:
 
 - **ONE LAYER, ONE LINE TO JOIN**: put `StripPhase` first in a 1-D effect's
   bases and add it to `fx.device_model.STRIP_PHASE_EFFECTS` (unioned into
@@ -9672,6 +9682,13 @@ output stage, HOW AN EFFECT JOINS). Six things:
 - **HELD BACK UNDER A HOUSE MODE** (his call 4):
   `scene_response.HOUSE_HELD_PHASE_EFFECTS` = one-colour ∪ strip members,
   read by `_drive_phase` and `rearm_phase`.
+- **THE STRIP STAR READS SKIPS ITS LULL** (2026-10-14, his Q5: "The strip
+  used by the radial effect shouldn't do the lull"): Radial stamps its
+  source strip every frame (`strip_phase.mark_radial_source`); a lull edge
+  on a stamped strip tells the effect "none" and only eases the charge back
+  (`_sp_skip`), the key tracked apart in `_sp_seen` so it never re-edges.
+  Charge and drop unchanged; Star darkens its own lull. Proof:
+  `tests/test_star_strip_lull.py`.
 Proofs: `tests/test_strip_phase.py` (harness `tests/strip_phase_harness.py`:
 the real pipeline + production ResponseEngine/FacadeExecutor, fake clock
 behind `time.time_ns` too, since Melt reads it), `scripts/

@@ -92,8 +92,17 @@ ever lets a phase through) gets it with no migration; set `lull_mode` to
 "implode" on the Matrix entry to put the old lull back. The scene's own
 `drop_shock_enabled` switch withholds the snap-back (plain bloom). Every
 scene change OUT of STAR into Black Hole / Fireworks / Sauron / Eye /
-Squiggles / Orbits / Fish now runs a transition program (approved); into
-STAR is still the old bloom — the next task (with a better charge).
+Squiggles / Orbits / Fish now runs a transition program (approved).
+
+2026-10-14 (his "Do rec on transitions", and Q5 changed): every scene
+change INTO STAR from those seven runs a program too — the partner's own
+release, then the pieces glide onto STAR's rings while the star grows out
+of its core (`ring_reveal_front_s` on the Matrix entry, 0.65 s, Sonic-
+reachable; help `star-into-transitions`). And STAR's strip (`radial-dummy`,
+Melt) no longer does its own LULL while STAR reads it — STAR's own lull
+takes the crystal dark on the dark point by itself; the strip's charge and
+drop still ride in. No scene data changed for either. A better STAR charge
+is still pending his word.
 
 ## Sonic reach
 

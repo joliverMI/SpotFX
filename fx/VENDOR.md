@@ -2390,3 +2390,28 @@ against that commit.
     pipeline: a real Melt strip under a real Radial,
     `tests/star_harness.py`), `scripts/check_star_phases.py` (the same rig,
     printed). Unverified against his live room.
+80. `effects/radial.py` (`_program_bands`, `_program_theta`,
+    `_program_polar`, `_program_band_u`, `_last_u`/`_last_angle` stored by
+    `draw()`, `_implode_fade`, `_adopt_handoff` standing down while a
+    program owns the arrival, `strip_phase.mark_radial_source` in `draw()`
+    and `unmark_radial_source` in `deactivate()`; schema:
+    `ring_reveal_front_s`) + `effects/transition_program.py` (`STAR_IN`,
+    `STAR_FORM_AT`, `WIND`/`SPARK_RINGS`, FOUNTAIN's anchor into Star,
+    `stages()` asking a class's `star_in_stage_fracs`) +
+    `effects/transition_cloud.py` (`RingFormer`, `SparkRingsProgram`,
+    `WindProgram`, `_Former.colour`, `CloudProgram.star_in_stage_fracs`,
+    FOUNTAIN's post-spray flight) + `effects/strip_phase.py` (THE STRIP STAR
+    READS: `mark_radial_source`/`unmark_radial_source`/`serving_radial`,
+    `_sp_seen`/`_sp_skip`): INTO STAR (the Admiral, 2026-10-14: "Do rec on
+    transitions"; "The strip used by the radial effect shouldn't do the
+    lull, let the crystal mapping handle the lull, but the charge and drop
+    should still happen"). Every particle effect into Star runs a program
+    whose FORM is the RingFormer: the pieces glide onto Star's bands while
+    a cell-paced front grows the star from the core, the last frame the
+    plain star. A strip a Radial is reading skips its lull (no fade, no
+    lull content, an ease back from the charge) and Star darkens its own
+    lull on the dark point in both modes. A strip no Radial reads, and
+    every switch with no program, are byte-identical to before. Evidence:
+    `tests/test_star_into_programs.py`, `tests/test_star_strip_lull.py`
+    (real pipeline, `tests/star_harness.py`). Unverified against his live
+    room.

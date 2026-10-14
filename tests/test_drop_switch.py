@@ -94,9 +94,10 @@ def test_repeating_the_previous_drop_switches_ON_the_drop_as_a_cut():
     assert p.switch and p.moment == ds.MOMENT_DROP
     assert p.stale_by == (ds.STALE_PREVIOUS_DROP,)
     assert (p.from_scene_name, p.to_scene_name) == ("Orbits V2", "STAR")
-    assert p.handoff == ds.HANDOFF_CHOREOGRAPHED      # orbits -> radial bloom
+    assert p.handoff == ds.HANDOFF_PROGRAM      # orbits -> Star: WIND
     assert p.cut_ms() == 16_000
     assert "hard cut on the drop" in p.sentence
+    assert "wind in onto the star's rings" in p.sentence
 
 
 def test_a_scene_installed_BY_the_previous_drop_is_fresh_for_the_next():
@@ -196,8 +197,8 @@ def test_every_drop_ready_pair_has_a_handoff_and_the_fireworks_melds():
         assert ds.handoff_kind(outside, "radial") is None
     for inc in ("blackhole", "orbits", "fish", "squiggles"):
         assert ds.handoff_kind("radial", inc) == ds.HANDOFF_PROGRAM
-        # INTO Star is still the choreographed bloom (his "still need work")
-        assert ds.handoff_kind(inc, "radial") == ds.HANDOFF_CHOREOGRAPHED
+        # INTO Star is a program too since 2026-10-14 (the RingFormer)
+        assert ds.handoff_kind(inc, "radial") == ds.HANDOFF_PROGRAM
     assert ds.handoff_kind("squiggles", "blackhole") == ds.HANDOFF_PROGRAM
 
 
