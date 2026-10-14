@@ -12,6 +12,7 @@ import { FLARE_MARKER_COLOR, SCENE_MARKER_COLOR, songPositionMarkers } from '../
 import { LIGHT_SHOW_COLOR, lightShowCueMarkers, sceneChangeArms } from './lightShowMarkers';
 import AnalysedEventsStrip from './components/AnalysedEventsStrip';
 import { usePlayhead } from './hooks/usePlayhead';
+import { getShowClockMs } from '../lib/showClock';
 import { useFollowWindow } from './hooks/useFollowWindow';
 import { drawnPlayheadMs } from './hooks/followWindow';
 import TimelineCanvas from './canvas/TimelineCanvas';
@@ -49,6 +50,20 @@ const ALL_MARKS: Record<MarkType, boolean> = {
 
 export default function BuilderPage() {
   const { getNowMs, coarseMs } = usePlayhead();
+  // ONE CLOCK (song-layout-plan, data/ui-layout-plan/report.md §4.1/§7):
+  // the SPECTRA trigger strip, the drop-sequence strip's "played" fill and
+  // the Timeline bar all draw the SAME show clock the trigger engine
+  // fires against — not the raw spot-effects `state` progress usePlayhead
+  // otherwise interpolates. Deliberately NOT applied to the audio-shape
+  // canvas's own getCanvasNowMs/getPlayheadMs below: that playhead is
+  // drawn in the SAME shifted frame (audio_latency_ms + the stored shape
+  // offset) its own follow-window anchors on (hooks/followWindow.ts) —
+  // composing the show clock (which already carries the LIVE shape
+  // offset) with that legacy shift would double-apply it. Falls back to
+  // the raw interpolation while the show clock hasn't anchored yet.
+  const getStripNowMs = useCallback(() => getShowClockMs() ?? getNowMs(),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []);
   const track = useBuilderStore((s) => s.track);
   const manualUri = useBuilderStore((s) => s.manualUri);
   const liveMode = useBuilderStore((s) => s.liveMode);
@@ -391,7 +406,7 @@ export default function BuilderPage() {
           triggers={workingTriggers}
           events={data.events}
           getWin={followWin.getWin}
-          getNowMs={getNowMs}
+          getNowMs={getStripNowMs}
           follow={followWin.follow}
           onManualWin={(w) => { followWin.setFollow(false); followWin.setManualWin(w); }}
           onAdjustFollow={(edge, deltaMs) => {
@@ -422,7 +437,7 @@ export default function BuilderPage() {
         uri={uri}
         durationMs={durationMs}
         getWin={followWin.getWin}
-        getNowMs={getNowMs}
+        getNowMs={getStripNowMs}
         below={uri ? (
           <>
             {showAnalysedEvents && (
@@ -457,7 +472,7 @@ export default function BuilderPage() {
               capturedFromMs={dropCapturedFrom}
               selectedKey={dropSel}
               getWin={followWin.getWin}
-              getNowMs={getNowMs}
+              getNowMs={getStripNowMs}
               onPick={(key) => { dropUi.select(key); jumpToDrop(key); }}
             />
             </div>
@@ -523,7 +538,7 @@ export default function BuilderPage() {
               disabled={!profile}
               title="Add a trigger at the current playhead"
               onClick={() => {
-                const now = getNowMs() ?? 0;
+                const now = getStripNowMs() ?? 0;
                 useBuilderStore.getState().setEditingTrigger(`new:${Math.round(now / 20) * 20}`);
               }}
             >
