@@ -11790,6 +11790,52 @@ menu, the one consolidated bar, Settings cards) built in the parallel
   toggles (Analysed events / Drop sequences / Light Show) call it that
   way too.
 
+**HOME'S AUDIO SHAPE NOW DRAWS FROM THE SAME rAF LOOP AS ITS PLAYHEAD, AND
+CARRIES SCENE/FLARE/DROP/LIGHT-SHOW MARKERS (2026-10-14, the Admiral: "the
+audio shape isn't as responsive and it should also show scenes, flares,
+drops, and light show triggers").** `HomeTimeline.tsx`'s own module
+docstring has the measured before/after. The root cause, found by reading
+`useFollowWindow()`: it returns a FRESH object literal every render (only
+its `getWin` property is a stable `useCallback`), so the shape canvas's
+trace+resize effect — keyed on `[shape, offsetMs, win]` — reran on every
+unrelated parent re-render (the 3s engine-status poll) AND on every single
+pointermove of a window drag, each time doing a full `canvas.width = …`
+resize. **Measured with a real headless-Chromium harness
+(`scripts/check_home_timeline_fps.py` + `spectra/web/harness/
+hometimeline.{html,tsx}`, the `check_song_strip_fps.py` technique): before,
+a synthetic drag cost 180 backing-buffer resizes over 180 pointermoves (one
+per move, unconditionally); after, zero — the trace, its own marker
+overlay, the window-overlay rect and both playheads all moved into ONE rAF
+loop reading the window/shape/events through refs, exactly matching
+SongStrip.tsx's "no React render per frame" rule and TimelineCanvas.tsx's
+own "resize only when the measured size actually changed" guard.** The
+strip's marker-SVG rebuild had the identical shape (rebuilding on every
+`win.*` dep even though a marker's x never depends on the window) and is
+now gated on `[shown, durationMs]` only. The Timeline (Builder) page's own
+audio-shape canvas needed none of this — it already runs through the
+shared, rAF-driven `TimelineCanvas.tsx` (`BUILDER_LAYERS`, which already
+draws `analysedEvents`/`lightShowMarkers`/`dropSeqBody`) — so this build is
+Home-only. The new marker overlay on Home's shape canvas is
+`songStrip.ts`'s `drawShapeMarkers()` — the same `KIND_COLOR`/
+`markerSizePx`/`markerOpacity` the SVG strip already draws with, just
+canvas primitives instead of DOM nodes — proven pure in
+`scripts/check_song_strip.mjs` §FIVE and behaviourally (real component,
+real jsdom) in `scripts/check_home_timeline_responsiveness.mjs`.
+**`components/songStrip.ts` and `components/SongStrip.tsx` differ only by
+the case of their first letter, on purpose (songStrip.ts's own docstring),
+and esbuild's bundler gets confused by that pair the moment `songStrip` is
+reached as a TRANSITIVE, extension-less import from a third file (as
+`HomeTimeline.tsx` does) rather than given directly as an entry point: it
+case-insensitively matches the request against `SongStrip.tsx`, warns
+about the mismatch, then tries to literally read the (wrong-case,
+nonexistent) path anyway and fails.** `check_song_strip.mjs` never hit this
+because it bundles `songStrip.ts` AS the entry point; any future script
+that bundles a file importing `songStrip` transitively needs the same
+one-`onResolve` esbuild-plugin workaround `check_home_timeline_responsiveness.mjs`
+uses (resolve `/components\/songStrip$/` straight to the absolute `.ts`
+path) — this is a test-tool-only quirk, not a reason to rename either
+production file.
+
 ## THE GROUPED MENU, ONE BAR, AND HOME — UI declutter plan (2026-10-14)
 
 The Admiral's layout declutter plan (`data/ui-layout-plan/` in

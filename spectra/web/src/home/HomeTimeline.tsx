@@ -18,12 +18,34 @@
  * audio_latency_ms-involving math (BuilderPage.tsx, commit note on that
  * page) — deliberately: Home's shape is a glance-and-navigate view, not
  * an editing surface, so it does not need that capture-alignment term at
- * all, only the shape offset that puts it on the right axis. */
+ * all, only the shape offset that puts it on the right axis.
+ *
+ * RESPONSIVENESS (the Admiral, 2026-10-14: "the audio shape isn't as
+ * responsive"). Measured before the fix: the shape canvas's trace+resize
+ * used to live in a React `useEffect` keyed on `[shape, offsetMs, win]` —
+ * and `useFollowWindow`'s returned object is a FRESH literal every render
+ * (only its `getWin` property is stable), so that effect reran on every
+ * parent re-render (the 3s engine-status poll this page's data flows
+ * through) AND on every single pointermove of a window drag (each move
+ * calls a `useFollowWindow` state setter), each time doing a full
+ * `canvas.width = …` resize (a forced clear/realloc) plus a full trace
+ * redraw — never rAF-paced, so a drag's redraw landed whenever React next
+ * flushed rather than once per frame. The strip's own marker-SVG rebuild
+ * had the same shape: its deps included every `win.*` field even though a
+ * marker's x position never depends on the window, so dragging rebuilt
+ * dozens of SVG nodes on every move for no visual reason. Both are now
+ * decoupled: markers (SVG + the shape canvas's own overlay, below) rebuild
+ * ONLY on `[shown, durationMs]`; the window-overlay rect, both playheads,
+ * the time readout, AND the shape canvas (trace + its own marker overlay)
+ * all move into the ONE rAF loop below, reading the window/shape/events
+ * via refs — matching SongStrip.tsx's "no React render per frame" rule,
+ * and the shared TimelineCanvas.tsx's own DPR-aware "resize only when the
+ * measured size actually changed" guard. */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import HelpLink from '../help/HelpLink';
 import IconToggle from '../components/IconToggle';
 import {
-  eventLabel, fmtCountdown, fmtMMSS, KIND_COLOR,
+  drawShapeMarkers, eventLabel, fmtCountdown, fmtMMSS, KIND_COLOR,
   markerOpacity, markerSizePx, pickNext, xFraction,
   type UpcomingEvent,
 } from '../components/songStrip';
@@ -65,6 +87,17 @@ export default function HomeTimeline({
 
   const getNowForWin = useMemo(() => () => getShowClockMs(), []);
   const win = useFollowWindow({ getNowMs: getNowForWin, durationMs: Math.max(1, durationMs), keyPrefix: 'home' });
+  // useFollowWindow returns a fresh object every render — only its own
+  // `getWin` property is a stable (useCallback-memoized) function. Reading
+  // it through a ref, rather than listing `win` in an effect's deps, is
+  // what lets the rAF loop below never re-run on an unrelated re-render
+  // (see the module docstring's RESPONSIVENESS note).
+  const winRef = useRef(win);
+  winRef.current = win;
+  const shapeRef = useRef(shape);
+  shapeRef.current = shape;
+  const offsetMsRef = useRef(offsetMs);
+  offsetMsRef.current = offsetMs;
 
   const stripRef = useRef<HTMLDivElement>(null);
   const markersGroupRef = useRef<SVGGElement>(null);
@@ -75,92 +108,104 @@ export default function HomeTimeline({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const canvasPlayheadRef = useRef<HTMLDivElement>(null);
 
-  // Window overlay + markers: redraw whenever the window moves/zooms or
-  // the shown events change (cheap — a few dozen DOM nodes).
+  // Strip markers: rebuild ONLY when WHAT is drawn changes (the shown
+  // events, or the song's own duration) — never on a window move/zoom,
+  // since a marker's x position (xFraction against the full song) never
+  // depends on the window at all. The window-overlay rect IS window-
+  // dependent and moves into the rAF loop below instead, where it's
+  // updated every frame rather than on a 500ms timer.
   useEffect(() => {
-    const draw = () => {
-      const w = win.getWin();
+    const svg = markersGroupRef.current;
+    if (!svg) return;
+    while (svg.lastChild) svg.removeChild(svg.lastChild);
+    const ns = 'http://www.w3.org/2000/svg';
+    for (const e of shown) {
+      const frac = xFraction(e.ms, durationMs);
+      const color = KIND_COLOR[e.kind];
+      if (e.kind === 'scene') {
+        const r = markerSizePx('scene', e.rank, e.rank_of);
+        const rect = document.createElementNS(ns, 'rect');
+        rect.setAttribute('x', `${frac * 100}%`); rect.setAttribute('y', '15');
+        rect.setAttribute('width', `${r * 2}`); rect.setAttribute('height', `${r * 2}`);
+        rect.setAttribute('fill', color); rect.setAttribute('opacity', String(markerOpacity(e.rank, e.rank_of)));
+        svg.appendChild(rect);
+      } else if (e.kind === 'flare') {
+        const r = markerSizePx('flare', e.rank, e.rank_of);
+        const circ = document.createElementNS(ns, 'circle');
+        circ.setAttribute('cx', `${frac * 100}%`); circ.setAttribute('cy', '19'); circ.setAttribute('r', `${r}`);
+        circ.setAttribute('fill', color); circ.setAttribute('opacity', String(markerOpacity(e.rank, e.rank_of)));
+        svg.appendChild(circ);
+      } else if (isDrop(e.kind)) {
+        const bar = document.createElementNS(ns, 'rect');
+        bar.setAttribute('x', `${frac * 100}%`); bar.setAttribute('y', '29');
+        bar.setAttribute('width', e.kind === 'drop' ? '4' : '10'); bar.setAttribute('height', '6');
+        bar.setAttribute('rx', '2'); bar.setAttribute('fill', color);
+        svg.appendChild(bar);
+      } else {
+        const flag = document.createElementNS(ns, 'line');
+        flag.setAttribute('x1', `${frac * 100}%`); flag.setAttribute('x2', `${frac * 100}%`);
+        flag.setAttribute('y1', '0'); flag.setAttribute('y2', '8');
+        flag.setAttribute('stroke', color); flag.setAttribute('stroke-width', '2');
+        svg.appendChild(flag);
+      }
+    }
+  }, [shown, durationMs]);
+
+  // THE ONE rAF LOOP — the window-overlay rect, both playheads, the time
+  // readout, AND the audio-shape canvas (trace + its own marker overlay).
+  // No React state anywhere in here: the window/shape/offset/events are
+  // all read through refs, so a window drag, a seek, a track change or
+  // the 3s engine-status poll are picked up on the very next animation
+  // frame rather than waiting on — or forcing — a React re-render.
+  useEffect(() => {
+    let raf = 0;
+    let canvasW = -1, canvasH = -1; // last sized dims — resize only on real change
+    const tick = () => {
+      const w = winRef.current.getWin();
       const span = Math.max(1, w.endMs - w.startMs);
+
       if (windowOverlayRef.current) {
         windowOverlayRef.current.style.left = `${(w.startMs / Math.max(1, durationMs)) * 100}%`;
         windowOverlayRef.current.style.width = `${(span / Math.max(1, durationMs)) * 100}%`;
       }
-      const svg = markersGroupRef.current;
-      if (svg) {
-        while (svg.lastChild) svg.removeChild(svg.lastChild);
-        const ns = 'http://www.w3.org/2000/svg';
-        for (const e of shown) {
-          const frac = xFraction(e.ms, durationMs);
-          const color = KIND_COLOR[e.kind];
-          if (e.kind === 'scene') {
-            const r = markerSizePx('scene', e.rank, e.rank_of);
-            const rect = document.createElementNS(ns, 'rect');
-            rect.setAttribute('x', `${frac * 100}%`); rect.setAttribute('y', '15');
-            rect.setAttribute('width', `${r * 2}`); rect.setAttribute('height', `${r * 2}`);
-            rect.setAttribute('fill', color); rect.setAttribute('opacity', String(markerOpacity(e.rank, e.rank_of)));
-            svg.appendChild(rect);
-          } else if (e.kind === 'flare') {
-            const r = markerSizePx('flare', e.rank, e.rank_of);
-            const circ = document.createElementNS(ns, 'circle');
-            circ.setAttribute('cx', `${frac * 100}%`); circ.setAttribute('cy', '19'); circ.setAttribute('r', `${r}`);
-            circ.setAttribute('fill', color); circ.setAttribute('opacity', String(markerOpacity(e.rank, e.rank_of)));
-            svg.appendChild(circ);
-          } else if (isDrop(e.kind)) {
-            const bar = document.createElementNS(ns, 'rect');
-            bar.setAttribute('x', `${frac * 100}%`); bar.setAttribute('y', '29');
-            bar.setAttribute('width', e.kind === 'drop' ? '4' : '10'); bar.setAttribute('height', '6');
-            bar.setAttribute('rx', '2'); bar.setAttribute('fill', color);
-            svg.appendChild(bar);
-          } else {
-            const flag = document.createElementNS(ns, 'line');
-            flag.setAttribute('x1', `${frac * 100}%`); flag.setAttribute('x2', `${frac * 100}%`);
-            flag.setAttribute('y1', '0'); flag.setAttribute('y2', '8');
-            flag.setAttribute('stroke', color); flag.setAttribute('stroke-width', '2');
-            svg.appendChild(flag);
+
+      const canvas = canvasRef.current;
+      if (canvas) {
+        const dpr = window.devicePixelRatio || 1;
+        const cw = canvas.clientWidth, ch = canvas.clientHeight;
+        const wantW = Math.round(cw * dpr), wantH = Math.round(ch * dpr);
+        if (wantW !== canvasW || wantH !== canvasH) {
+          canvas.width = wantW; canvas.height = wantH;
+          canvasW = wantW; canvasH = wantH;
+        }
+        const ctx = canvas.getContext('2d');
+        if (ctx && cw > 0 && ch > 0) {
+          ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+          ctx.clearRect(0, 0, cw, ch);
+          const shape = shapeRef.current;
+          const offMs = offsetMsRef.current;
+          const xAt = (songMs: number) => ((songMs - w.startMs) / span) * cw;
+          if (shape) {
+            const drawTrace = (vals: number[], color: string) => {
+              ctx.beginPath();
+              let started = false;
+              for (let i = 0; i < vals.length; i += 1) {
+                const songMs = shape.timestamps_ms[i] + offMs;
+                if (songMs < w.startMs - 2000 || songMs > w.endMs + 2000) continue;
+                const x = xAt(songMs);
+                const y = ch - Math.min(1, vals[i]) * ch;
+                if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
+              }
+              ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.stroke();
+            };
+            drawTrace(shape.rms_total, 'rgba(255,255,255,0.55)');
+            drawTrace(shape.rms_low, '#fbbf24');
+            drawTrace(shape.rms_high, '#a3e635');
           }
+          drawShapeMarkers(ctx, shownRef.current, xAt, cw);
         }
       }
-    };
-    draw();
-    const id = setInterval(draw, 500); // follow mode's window creeps even with no pointer input
-    return () => clearInterval(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shown, durationMs, win.follow, win.manualWin, win.windowS, win.futureS]);
 
-  // The audio shape trace, redrawn when the window or the data changes.
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas || !shape) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    const w = canvas.clientWidth, h = canvas.clientHeight;
-    canvas.width = w * devicePixelRatio; canvas.height = h * devicePixelRatio;
-    ctx.scale(devicePixelRatio, devicePixelRatio);
-    ctx.clearRect(0, 0, w, h);
-    const win2 = win.getWin();
-    const span = Math.max(1, win2.endMs - win2.startMs);
-    const xAt = (songMs: number) => ((songMs - win2.startMs) / span) * w;
-    const draw = (vals: number[], color: string) => {
-      ctx.beginPath();
-      let started = false;
-      for (let i = 0; i < vals.length; i += 1) {
-        const songMs = shape.timestamps_ms[i] + offsetMs;
-        if (songMs < win2.startMs - 2000 || songMs > win2.endMs + 2000) continue;
-        const x = xAt(songMs);
-        const y = h - Math.min(1, vals[i]) * h;
-        if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
-      }
-      ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.stroke();
-    };
-    draw(shape.rms_total, 'rgba(255,255,255,0.55)');
-    draw(shape.rms_low, '#fbbf24');
-    draw(shape.rms_high, '#a3e635');
-  }, [shape, offsetMs, win]);
-
-  // The ONE rAF loop — both playheads + the time readout.
-  useEffect(() => {
-    let raf = 0;
-    const tick = () => {
       const now = getShowClockMs();
       const pos = getPositionMs();
       if (playheadRef.current && now != null) {
@@ -168,8 +213,6 @@ export default function HomeTimeline({
         playheadRef.current.setAttribute('x2', `${xFraction(now, durationMs) * 100}%`);
       }
       if (canvasPlayheadRef.current && now != null) {
-        const w = win.getWin();
-        const span = Math.max(1, w.endMs - w.startMs);
         const frac = Math.min(1, Math.max(0, (now - w.startMs) / span));
         canvasPlayheadRef.current.style.left = `${frac * 100}%`;
         canvasPlayheadRef.current.style.display = now >= w.startMs && now <= w.endMs ? 'block' : 'none';
@@ -189,7 +232,7 @@ export default function HomeTimeline({
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [durationMs, win]);
+  }, [durationMs]);
 
   // Window drag — TimelineBar's own dragEdge shape (BuilderPage.tsx's
   // onAdjustFollow convention): in follow mode, an edge drag resizes the
