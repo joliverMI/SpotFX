@@ -1234,8 +1234,15 @@ export interface EngineStatus {
     ws_url: string;
     last_message_age_s: number | null;
     track: {
-      uri: string | null; title: string | null;
+      uri: string | null; title: string | null; artist: string | null;
+      duration_ms: number | null;
       is_playing: boolean | null; position_ms: number | null;
+      /** THE ONE SHOW CLOCK (song-layout-plan §4.1/§7) — the exact
+       * moment the trigger poll fires against. null with no track /
+       * bridge down, same as position_ms. Prefer lib/showClock.ts's
+       * getShowClockMs() for anything drawing a live playhead: it
+       * interpolates between this poll's reads and the 1 Hz WS push. */
+      show_clock_ms: number | null;
     } | null;
     deferral: string | null;
     intensity: number | null;
