@@ -151,7 +151,15 @@ per-bar rainbow drift, the flash/flip flares (the Light Show's flares
 on/off is their switch) and the charge/lull/drop choreography. FLOOR and
 CEILING clamp the final eye-scale level (the same scale as rest/depth),
 before the output guard; the guard only slows rises, so a floor is
-re-asserted after it. Where two cross, the ceiling wins.
+re-asserted after it. Where two cross, the ceiling wins. THE LULL'S DARK
+BEATS THE FLOOR (2026-10-13, the Admiral: "make it so that the pulse effect
+goes dark at the end of the lull before the drop like it used to"): in a
+lull the floor is scaled by the lull's own darkness (`_floor_gain`: its
+fade, a flare's punch, the breath-hold), so it fades out with the lull,
+is 0 from the dark point to the drop, comes back with a punch, and eases
+back with the light when a lull ends without a drop. Before this a floor
+held his Singles at its level right through the dark — a floor of 0.3 is
+a glow, never black.
 
 THE OUTPUT GUARD backs the budget up on the light actually delivered: the
 rises really sent in the last second may not pass `max_flash_rate` either
@@ -521,6 +529,7 @@ class PulseAudioEffect(AudioReactiveEffect, GradientEffect):
         self._energy_live = float(cfg.get("energy", 0.5))
         self._burst = 0.0
         self._blend_from = None
+        self._blend_floor_from = 1.0
         self._blend_t = 0.0
         self._rest = 0.0
         self._lull_from = 0.0
@@ -563,6 +572,7 @@ class PulseAudioEffect(AudioReactiveEffect, GradientEffect):
         cfg[lull_dark.PUNCH_KEY] = 0
         # diagnostics (read by tests and the check script)
         self.level = 0.0
+        self.floor_gain = 1.0   # how much of a Light Show floor applies
         self.white = 0.0
         self.hue_offset = 0.0
         self.shown_colour = np.zeros(3)
@@ -841,6 +851,8 @@ class PulseAudioEffect(AudioReactiveEffect, GradientEffect):
         floor = rest
         keep = 1.0
         ph = self._phase
+        if ph == "lull":
+            fade, pp, breath = self._lull_keeps()
         if ph == "charge":
             prog = self._progress()
             rest = _lerp(floor, self._config["charge_top"], _smooth(prog))
@@ -855,12 +867,9 @@ class PulseAudioEffect(AudioReactiveEffect, GradientEffect):
             # Pulse is pitch black for exactly as long as the crystal is.
             # LULL_LEGACY_DARK_AT (the end of the ramp) when SpotFX did not
             # say.
-            keep = 1.0 - _smooth(lull_dark.lull_timing(
-                self._config, self._progress(), self._phase_t,
-                LULL_LEGACY_DARK_AT).approach)
+            keep = fade
             level = (self._lull_from + self._pulse(env, depth)) * keep
             rest = self._lull_from * keep
-            pp = self._punch_level
             if pp > 0.0:
                 # A FLARE IN THE LULL'S DARK PUNCHES THROUGH (strip phase
                 # plan phase 5, the strip layer's own shape): the light is
@@ -875,7 +884,6 @@ class PulseAudioEffect(AudioReactiveEffect, GradientEffect):
             # Admiral: "I do want it on pulse effect"): the short true black
             # right before the drop wins over everything in the lull — the
             # lull's own glow, a flare's punch and its flash alike.
-            breath = phase_grammar.breath_gain(self._config, self._phase_t)
             if breath < 1.0:
                 level *= breath
                 rest *= breath
@@ -895,6 +903,33 @@ class PulseAudioEffect(AudioReactiveEffect, GradientEffect):
             level += fl * keep
         return min(1.0, max(0.0, level)), rest
 
+    def _lull_keeps(self):
+        """The lull's three darkness terms this frame: its own fade (1 at
+        the lull's start, 0 from its DARK POINT — fx/effects/lull_dark.py,
+        LULL_LEGACY_DARK_AT when SpotFX did not say), a flare's punch
+        (0..1) and the breath-hold before the drop (1, or down to 0)."""
+        fade = 1.0 - _smooth(lull_dark.lull_timing(
+            self._config, self._progress(), self._phase_t,
+            LULL_LEGACY_DARK_AT).approach)
+        breath = phase_grammar.breath_gain(self._config, self._phase_t)
+        return fade, self._punch_level, breath
+
+    def _floor_gain(self):
+        """How much of the Light Show's brightness FLOOR applies this frame
+        (module docstring, THE LULL'S DARK BEATS THE FLOOR): 1 outside a
+        lull; in a lull the lull's own darkness — the brighter of its fade
+        and a flare's punch, times the breath-hold — so the floor goes dark
+        exactly when and where the lull does. Eases back over the exit
+        blend when a lull ends without a drop."""
+        gain = 1.0
+        if self._phase == "lull":
+            fade, pp, breath = self._lull_keeps()
+            gain = max(fade, pp) * breath
+        if self._blend_from is not None:
+            s = _smooth(self._blend_t / EXIT_BLEND_S)
+            gain = _lerp(self._blend_floor_from, gain, s)
+        return min(1.0, max(0.0, gain))
+
     # ── phases ───────────────────────────────────────────────────────────
 
     def _self_reset_phase(self):
@@ -906,6 +941,7 @@ class PulseAudioEffect(AudioReactiveEffect, GradientEffect):
 
     def _leave_phase_without_drop(self):
         self._blend_from = self.level
+        self._blend_floor_from = self.floor_gain
         self._blend_t = 0.0
 
     def _enter_phase(self, phase):
@@ -1115,16 +1151,22 @@ class PulseAudioEffect(AudioReactiveEffect, GradientEffect):
             colour = rotate_hue(colour, offset)
         g = self._config["gamma"]
         mod = self._mod
+        floor = 0.0
         if mod is not None:
             # THE LIGHT SHOW's brightness floor and ceiling (eye scale):
-            # the ceiling wins if two holds cross.
-            level = min(max(level, mod.floor), mod.ceiling)
+            # the ceiling wins if two holds cross. A lull's dark beats the
+            # floor (_floor_gain, module docstring).
+            self.floor_gain = self._floor_gain()
+            floor = mod.floor * self.floor_gain
+            level = min(max(level, floor), mod.ceiling)
+        else:
+            self.floor_gain = 1.0
         lin = self._guard_output(level ** g)
         if lin < level ** g:
             level = lin ** (1.0 / g)
-        if mod is not None and level < min(mod.floor, mod.ceiling):
+        if mod is not None and level < min(floor, mod.ceiling):
             # the guard only ever slows a rise; a floor still holds
-            level = min(mod.floor, mod.ceiling)
+            level = min(floor, mod.ceiling)
             lin = level ** g
             self._lin_prev = lin
         self.level = level

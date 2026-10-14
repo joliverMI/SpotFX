@@ -1994,9 +1994,13 @@ against that commit.
     the per-device output layer (preview / capture / night run). Evidence:
     `tests/test_pulse_modulation.py` (idle and identity bit-identical on
     the real class; reactivity linear on hits and hit-steps, flares/drop
-    untouched; floor/ceiling through hits, a flash, a drop and a lull),
+    untouched; floor/ceiling through hits, a flash and a drop),
     `tests/test_show_flares_off.py::test_pulse_actions_reach_the_rendering_
     effect` (through the real Light Show action on the headless pipeline).
+    2026-10-13: in a LULL the floor is scaled by the lull's own darkness
+    (`_floor_gain`: fade, punch, breath-hold) so the lull still lands black
+    before its drop (the Admiral: "goes dark at the end of the lull before
+    the drop like it used to"); `tests/test_pulse_lull_dark_floor.py`.
 67. `effects/sauron.py` (NEW, SpotFX-authored) + one-word additions to
     `effects/radial.py` (the `_adopt_handoff` src gate), `effects/
     dancer.py` (the reveal hold's src tuple) and `effects/fish.py`

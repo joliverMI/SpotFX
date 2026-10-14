@@ -72,8 +72,8 @@ Plan: `/home/javi/fleet-spotfx/data/single-led-power-plan/report.md`.
   `lull_breath_s` (the room's `lull_breath_hold_s`, 0.4 s, inside the lull's
   dark hold), and `_compose`'s lull branch multiplies level, rest and the
   flash's keep by `phase_grammar.breath_gain` AFTER the punch — so a punch
-  or a flash in the last 0.4 s before the drop is black too. The Light
-  Show's brightness floor still wins (an explicit hold).
+  or a flash in the last 0.4 s before the drop is black too — and so is a
+  Light Show brightness floor (below).
 - **The flash flare only fires on HIGH ENERGY** (2026-10-12, "The flash
   flare on pulse should only happen on high energy, .8 or higher"):
   `scene_response._pulse_flash` writes nothing unless the top bar's Energy
@@ -166,7 +166,23 @@ rainbow walk's hit STEP — and nothing else, by the Admiral's choice
 (option A): rest level, slow drift, flash/flip flares and charge/lull/drop
 are untouched. Floor/ceiling clamp the final eye-scale level before the
 output guard, and the floor is re-asserted after it (the guard only slows
-rises); crossed, the ceiling wins. Holds on DIFFERENT targets stack
+rises); crossed, the ceiling wins. **A LULL'S DARK BEATS THE FLOOR**
+(2026-10-13, the Admiral: "make it so that the pulse effect goes dark at
+the end of the lull before the drop like it used to. it's not doing that
+anymore"): in a lull the floor is multiplied by `_floor_gain()` — the
+brighter of the lull's fade and a flare's punch, times the breath-hold
+(`_lull_keeps()` is the one reading of those three, shared with
+`_compose`) — so it fades out with the lull, is 0 from the dark point to
+the drop, returns with a punch, and eases back over the exit blend when a
+lull ends without a drop. THE DIAGNOSIS, so it is not re-run: none of the
+breath-hold / punch / drop-offset changes broke the lull (identical before
+them); his Light Show held "Singles" floor 0.3 and "everything" floor 0.1
+until released, and the floor (then documented as holding "through
+lulls") kept the Hue bulbs at a glow (18/255 at 0.3). Before reasoning
+about a "Pulse won't go dark" report, read the Light Show's held
+`pulse_mods` (`storage/spectra/light_show_state.json`, engine status
+`light_show.pulse_mods`). Proof: `tests/test_pulse_lull_dark_floor.py`
+(the real phase arms, his lull lengths, a red control). Holds on DIFFERENT targets stack
 (reactivities multiply, highest floor / lowest ceiling) in
 `spectra/services/show_mods.py`; re-firing the same action on the exact
 same target RESTARTS the matching hold instead of stacking a duplicate
