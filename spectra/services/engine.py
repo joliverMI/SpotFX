@@ -59,6 +59,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Callable, Optional
 
 from fx import light_ownership
@@ -593,6 +594,37 @@ def show_clock_shift_ms() -> int:
     return _last_show_clock_shift_ms
 
 
+def current_show_clock_ms() -> Optional[int]:
+    """THE ONE SHOW CLOCK, read fresh (never cached) for a status surface or
+    a WS push — the exact number the trigger poll fires against right now
+    (song-layout-plan, data/ui-layout-plan/report.md §4.1/§7). Calls the
+    SAME two functions `_run_trigger_engine` ticks with
+    (`av_sync_lead.show_clock_ms`, `known_buffer.compensation_ms`), so this
+    is a second READER of the one application point, never a second
+    computation of it — `_run_trigger_engine` still owns the only call that
+    feeds `trigger_engine.tick()`. None with no track / bridge down, exactly
+    like `bridge.effective_position_ms()`; never invented from a lead."""
+    effective = bridge.effective_position_ms()
+    if effective is None:
+        return None
+    return av_sync_lead.show_clock_ms(
+        effective, av_sync_lead.current_lead_ms(), known_buffer.compensation_ms())
+
+
+def _bridge_status_with_clock() -> dict:
+    """bridge.status(), with `show_clock_ms` folded into its `track` block
+    (song-layout-plan §7) — the one surface GET /api/engine/status's own
+    bridge key already carries, now also the show's own clock, not just
+    the raw/effective positions. bridge.py stays one-directional/pure (it
+    knows nothing of av_sync_lead/known_buffer); this is the one place
+    that composes them onto its read."""
+    body = bridge.status()
+    track = body.get("track")
+    if track is not None:
+        track["show_clock_ms"] = current_show_clock_ms()
+    return body
+
+
 async def _run_trigger_engine() -> None:
     """The trigger clock — SPECTRA's own poll of the bridge's streamed
     track position (bridge already interpolates between broadcasts;
@@ -637,6 +669,40 @@ async def _run_trigger_engine() -> None:
         except Exception:
             logger.exception("trigger engine: tick failed")
         await asyncio.sleep(TICK_S)
+
+
+CLOCK_PUSH_S = 1.0
+
+
+async def run_clock_push_supervised() -> None:
+    """THE ONE CLOCK's push (song-layout-plan §4.1/§7): once a second,
+    broadcast `{"type": "clock", show_clock_ms, position_ms, is_playing,
+    server_ms}` on the SPECTRA websocket, so every browser lane (the
+    global song timeline, Home, the Timeline page's own strips) can anchor
+    on the identical number the trigger poll fires against — the
+    `useAmbientStatusPush` push-plus-poll-backstop shape, applied to the
+    show clock instead of ambient phase. `GET /api/engine/status`'s own
+    `bridge.track.show_clock_ms` (above) is the backstop a client falls
+    back to before its first push lands or after a dropped connection.
+    `position_ms` and `is_playing` ride along so a client can tell "no
+    track" from "the clock paused" without a second poll. A missing track
+    (no song, bridge down) still pushes — `show_clock_ms`/`position_ms`
+    both None, `is_playing` False — so a client's clock honestly goes
+    unknown rather than freezing on its last good value."""
+    while True:
+        try:
+            effective = bridge.effective_position_ms()
+            show = current_show_clock_ms()
+            await ws_manager.broadcast({
+                "type": "clock",
+                "show_clock_ms": show,
+                "position_ms": effective,
+                "is_playing": bool(bridge.is_playing()),
+                "server_ms": int(time.time() * 1000),
+            })
+        except Exception:
+            logger.exception("clock push: failed")
+        await asyncio.sleep(CLOCK_PUSH_S)
 
 
 def on_scene_fired(scene: SceneV2, writes: list[dict],
@@ -755,7 +821,7 @@ def status() -> dict:
         "conductor": conductor.status(),
         "responses": {"recent_surges": list(responses.surges)[-10:],
                       "recent_kind_batches": list(responses.kind_batch_log)[-10:]},
-        "bridge": bridge.status(),
+        "bridge": _bridge_status_with_clock(),
         # THE KNOWN AUDIO BUFFER (spectra/services/known_buffer.py), beside
         # `bridge` because it is the same question one layer out: bridge
         # says where the SONG is, this says how far the SOUND is running

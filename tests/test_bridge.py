@@ -101,3 +101,36 @@ def test_device_name_empty_string_reads_as_none():
         "track": {"spotify_uri": "spotify:track:x", "is_playing": True, "progress_ms": 0},
     }))
     assert bridge.device_name() is None
+
+
+# ── artist / duration_ms (song-layout-plan §7: already on SpotFX's own
+#    broadcast, just never parsed here before the song timeline needed
+#    them for its "2:07 / 3:09" readout) ─────────────────────────────────
+
+def test_artist_and_duration_are_none_with_no_track():
+    bridge = SpotEffectsBridge()
+    assert bridge.track_artist() is None
+    assert bridge.track_duration_ms() is None
+
+
+def test_artist_and_duration_reflect_the_broadcast_track():
+    bridge = SpotEffectsBridge()
+    _run(bridge.handle_message({
+        "type": "state", "paused": False,
+        "track": {"spotify_uri": "spotify:track:x", "is_playing": True,
+                 "progress_ms": 0, "artist": "Bad Bunny", "duration_ms": 189258},
+    }))
+    assert bridge.track_artist() == "Bad Bunny"
+    assert bridge.track_duration_ms() == 189258
+
+
+def test_status_track_block_carries_artist_and_duration():
+    bridge = SpotEffectsBridge()
+    _run(bridge.handle_message({
+        "type": "state", "paused": False,
+        "track": {"spotify_uri": "spotify:track:x", "is_playing": True,
+                 "progress_ms": 0, "artist": "Bad Bunny", "duration_ms": 189258},
+    }))
+    body = bridge.status()
+    assert body["track"]["artist"] == "Bad Bunny"
+    assert body["track"]["duration_ms"] == 189258

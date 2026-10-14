@@ -32,6 +32,7 @@ from fastapi.staticfiles import StaticFiles
 
 from spectra import config
 from spectra.api import analysed_plan as analysed_plan_api
+from spectra.api import upcoming as upcoming_api
 from spectra.api import drop_sequences as drop_sequences_api
 from spectra.api import calibrations as calibrations_api
 from spectra.api import capture_queue as capture_queue_api
@@ -99,6 +100,7 @@ def create_app() -> FastAPI:
     app.include_router(triggers.router)
     app.include_router(fire_history.router)
     app.include_router(analysed_plan_api.router)
+    app.include_router(upcoming_api.router)
     app.include_router(drop_sequences_api.router)
     app.include_router(feedback.router)
     app.include_router(show_review.router)
@@ -330,13 +332,22 @@ async def _standalone_lifespan(app):
     from spectra.services import house_fixtures
     house_fixtures_task = asyncio.create_task(
         house_fixtures.run_supervised(), name="spectra-house-fixtures")
+    # THE ONE SHOW CLOCK's 1 Hz push (song-layout-plan, data/ui-layout-plan/
+    # report.md §4.1): every browser lane anchors on the identical
+    # `show_clock_ms` the trigger poll fires against, pushed on the
+    # SPECTRA websocket, with `GET /api/engine/status`'s own
+    # `bridge.track.show_clock_ms` as the poll backstop. Display only —
+    # feeds nothing back into the fire path.
+    clock_push_task = asyncio.create_task(
+        engine.run_clock_push_supervised(), name="spectra-clock-push")
     logger.info("SPECTRA started — own process, pid %d", os.getpid())
     yield
     all_tasks = (watchdog_task, reconciler_task, ambient_verify_task,
                 flare_preview_sweep_task, param_watchdog_task,
                 activation_recheck_task, dark_fixture_task,
                 known_buffer_poll_task, known_buffer_sse_task,
-                light_show_task, house_task, house_fixtures_task)
+                light_show_task, house_task, house_fixtures_task,
+                clock_push_task)
     for task in all_tasks:
         task.cancel()
     for task in all_tasks:
