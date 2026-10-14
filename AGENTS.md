@@ -11867,16 +11867,33 @@ timeline, the global read-only song timeline, `show_clock_ms` and
 - **Tests**: `scripts/check_nav_menu.mjs` (the menu: every route
   reachable, keyboard open/close, the unsaved guard still intercepts a
   dropdown item), `scripts/check_light_show_now_next.mjs`
-  (`showNowNext()`'s four rules), `scripts/check_onebar_fixed_widths.mjs`
-  (reads tokens.css itself — no browser — for the fixed-width/tabular-nums
-  rules that make the bar's no-jump property structural), and
-  `scripts/check_onebar_layout.py` (a REAL headless Chromium over raw CDP,
-  the only honest way to prove no horizontal overflow — jsdom has no
-  layout engine; connects to a PAGE target's own `webSocketDebuggerUrl`
-  from `/json/list`, never the browser-level `/json/version` one, which
-  404s `Page.navigate`/`Runtime.evaluate` with "wasn't found" on current
-  Chrome — found live while building this). Read-only against a live
-  instance (`SPECTRA_LIVE_URL`, default `http://127.0.0.1:8010/spectra/`);
+  (`showNowNext()`'s four rules), `scripts/check_favorites_picker_cancel.mjs`
+  (FavoritesPicker.tsx's Cancel button, real-behaviourally: toggling a
+  checkbox then cancelling reverts it rather than being a no-op — a real
+  regression once the picker moved from a popover, where Cancel's old
+  `onClose` unmount discarded the draft as a side effect, to a permanently-
+  mounted inline control on Settings → "Room", where `onClose` is a no-op
+  and nothing else discarded it), `scripts/check_onebar_fixed_widths.mjs`
+  (a CHEAP SMOKE TEST ONLY — reads tokens.css itself for the fixed-width/
+  tabular-nums declarations that are SUPPOSED to make the bar's no-jump
+  property structural, which can't catch a conflicting rule elsewhere or a
+  declaration gone dead — e.g. `.top-bar-strip`'s own `flex-wrap: wrap`
+  once that div went `display: contents` under `.one-bar`), and
+  `scripts/check_onebar_layout.py` (the actual proof, a REAL headless
+  Chromium over raw CDP — the only honest way to prove no horizontal
+  overflow; jsdom has no layout engine; connects to a PAGE target's own
+  `webSocketDebuggerUrl` from `/json/list`, never the browser-level
+  `/json/version` one, which 404s `Page.navigate`/`Runtime.evaluate` with
+  "wasn't found" on current Chrome — found live while building this).
+  That script also measures the no-jump claim BEHAVIOURALLY (mutates the
+  Scenes/Colour value text client-side, re-measures a later sibling,
+  restores the text) and the device-preview "Expand" feature (clicking the
+  swatches must drop `.device-preview-expanded-row` onto its own line
+  below every other occupant — `.one-bar:has(.device-preview-expanded-row)`
+  in tokens.css, with `.device-preview-expanded-row`'s own CSS `order`
+  moved past the warning chip and Release so it can never wrap ahead of
+  them onto a second line and push them to a third). Read-only against a
+  live instance (`SPECTRA_LIVE_URL`, default `http://127.0.0.1:8010/spectra/`);
   skips cleanly when no Chromium/live app is reachable. **Teardown is by
   the exact Popen pid/pgid only, never `pkill -f`** — a loose pattern can
   match an unrelated real process on a shared host (see the `pkill -f`

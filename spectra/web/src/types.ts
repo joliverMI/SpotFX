@@ -596,7 +596,7 @@ export interface RoomControlState {
   /** The two-dimensional drift gradient (spectra/models/gradient2d.py,
    * spectra/services/drift_conductor.py "gradient drift") — null (default)
    * means off, the wheel-based colour journey drives the room's colour
-   * exactly as before this feature. See DriftGradientBar.tsx. */
+   * exactly as before this feature. See DriftGradientPanel.tsx. */
   active_gradient_id: string | null;
   gradient_x_period_s: number;
   gradient_y_slew_s: number;

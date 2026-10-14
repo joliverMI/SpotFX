@@ -9,7 +9,7 @@
  * recent picks — this card is everything else.
  *
  * Owns its own draft/commit cycle against `RoomControlState`, same shape
- * as DriftGradientBar.tsx's — a separate page, so it cannot share
+ * as DriftGradientPanel.tsx's — a separate page, so it cannot share
  * RoomControlsBar's local closure, and doesn't need to: every field here
  * already commits on blur/change exactly as it did in the popover. */
 import { useEffect, useState } from 'react';
