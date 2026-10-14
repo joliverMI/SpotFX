@@ -160,6 +160,8 @@ check(set(sc.SETTINGS_REGISTRY) == {
     "drop_shock_enabled", "drop_shock_min_energy",
     # 2026-10-12, the Pulse flash flare's energy floor:
     "pulse_flash_min_energy",
+    # 2026-10-12, the room's drop timing offset (PR #414):
+    "drop_timing_offset_ms",
 }, "registry is the deliberate allowlist (eight room keys + the four "
    "analysed-transition knobs + the five 2026-10-06 widening keys + "
    "drop_floor + lull_dark_max_s + lull_breath_hold_s + the four "
@@ -243,7 +245,9 @@ check(set(scc.SCENE_SETTINGS_REGISTRY) == {
     "choreography_enabled", "choreography_transition_ms", "choreography_anchor_frac",
     "color_journey_pace_factor", "accept_all_sets",
     "drop_shock_enabled",
-}, "scene settings registry is the deliberate seven-key scalar allowlist "
+    # 2026-10-12, the scene's own drop timing offset (PR #415)
+    "drop_timing_offset_ms",
+}, "scene settings registry is the deliberate eight-key scalar allowlist "
    "(phase_blend_charge_ramp_ms/lull_ramp_ms retired 2026-08-20 — the "
    "charge/lull ramp is a computed dynamic stretch now, not a knob)")
 check(scc._model_field_bounds(_SceneV2, "entry_ramp_ms") ==
