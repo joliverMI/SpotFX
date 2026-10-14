@@ -115,3 +115,78 @@ export function xFraction(ms: number, durationMs: number): number {
   if (durationMs <= 0) return 0;
   return Math.min(1, Math.max(0, ms / durationMs));
 }
+
+/** Canvas-draw the SAME markers the SVG strip above draws — same shapes,
+ * same colours (KIND_COLOR), same rank-driven size/opacity (markerSizePx/
+ * markerOpacity) — so the zoomed audio-shape canvas and the full-song
+ * strip never disagree about what a scene/flare/drop/light-show marker
+ * looks like. `xAt` maps a song-ms timestamp to an absolute canvas-pixel
+ * x (the caller's own window mapping); only events whose `xAt` lands
+ * inside [0, w] are drawn.
+ *
+ * `kind: "high"/"low"` ARE the Light Show's own High/Low Trigger cues —
+ * not a separate concept this module invents. `spectra/api/upcoming.py`'s
+ * own docstring says so verbatim ("The Light Show's High/Low cues
+ * (show_cues) — independent of whether analysed events apply, same as the
+ * Timeline's own markers"), and its handler appends them with
+ * `source: "show_cue"` straight from `plan["show_cues"]`
+ * (`spectra/services/show_cues.py`) — the exact store
+ * `canvas/lightShowLayer.ts`'s own flag markers on the Timeline page's
+ * audio-shape canvas already draw from. So a flag here IS a Light Show
+ * trigger marker, drawn the same way SongStrip.tsx's own flag branch
+ * draws it, gated by the SAME `isLightShow` toggle HomeTimeline.tsx's
+ * filter already uses — no new marker kind, no new data source.
+ *
+ * The kind check is deliberately EXPLICIT (`'high' || 'low'`), not a
+ * catch-all `else` — a catch-all would also match `kind: "colour"`
+ * (an authored select_color_set trigger, reachable through
+ * `/api/upcoming`'s "his own triggers fire instead" branch) and draw it
+ * as a Light Show flag, which it is not. SongStrip.tsx's own flag branch
+ * already checks explicitly for this reason; `colour` is deliberately
+ * left undrawn here too, matching that established, shipped behaviour,
+ * rather than inventing a new shape for it.
+ *
+ * Pure aside from the passed-in ctx, so
+ * scripts/check_home_timeline_light_show_markers.mjs and
+ * scripts/check_song_strip.mjs can drive it with a recording fake
+ * context — no real <canvas>. */
+export function drawShapeMarkers(
+  ctx: CanvasRenderingContext2D,
+  events: UpcomingEvent[],
+  xAt: (ms: number) => number,
+  w: number,
+): void {
+  for (const e of events) {
+    const x = xAt(e.ms);
+    if (x < -10 || x > w + 10) continue;
+    const color = KIND_COLOR[e.kind];
+    if (e.kind === 'scene') {
+      const r = markerSizePx('scene', e.rank, e.rank_of);
+      ctx.globalAlpha = markerOpacity(e.rank, e.rank_of);
+      ctx.fillStyle = color;
+      ctx.fillRect(x - r, 2, r * 2, r * 2);
+    } else if (e.kind === 'flare') {
+      const r = markerSizePx('flare', e.rank, e.rank_of);
+      ctx.globalAlpha = markerOpacity(e.rank, e.rank_of);
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(x, 12, r, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (e.kind === 'charge' || e.kind === 'lull' || e.kind === 'drop') {
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = color;
+      const bw = e.kind === 'drop' ? 4 : 10;
+      ctx.fillRect(x - bw / 2, 13, bw, 6);
+    } else if (e.kind === 'high' || e.kind === 'low') {
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, 8);
+      ctx.stroke();
+    }
+    // 'colour' deliberately drawn as nothing — see the docstring above.
+  }
+  ctx.globalAlpha = 1;
+}
