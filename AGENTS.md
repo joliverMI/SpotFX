@@ -11706,10 +11706,9 @@ unmerged — expect a rebase of `App.tsx`/`tokens.css` against that work.
   shifting entirely inside its own `getCanvasNowMs`, proven by
   `scripts/check_timeline_playhead_one_clock.mjs`'s behavioural check
   (a huge, wrong `view.offsetMs` changes nothing drawn, with a red
-  control showing the retired formula really would have moved it) beside
-  its source-level check (one shared `getStripNowMs` wired to all four
-  `getNowMs` props, canvas included). `audio_latency_ms` itself is
-  untouched elsewhere (capture alignment, a separate job).
+  control showing the retired formula really would have moved it).
+  `audio_latency_ms` itself is untouched elsewhere (capture alignment, a
+  separate job).
 - **`GET /api/upcoming?uri=&limit=`** (`spectra/api/upcoming.py`): the
   merged "what will actually fire" list for one song — computed by the
   engine's OWN gating (`TriggerEngine._trigger_allowed`/

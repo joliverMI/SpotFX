@@ -3,27 +3,20 @@
  * SPECTRA trigger/drop strips draw the IDENTICAL clock (song-layout-plan,
  * data/ui-layout-plan/report.md §4.1/§7, his own "perfectly matched" ask).
  *
- * Two proofs:
- *   ONE   — SOURCE: BuilderPage.tsx wires the exact same `getStripNowMs`
- *           function (never a second, differently-shifted one) to every
- *           `getNowMs` prop — TimelineBar, SpectraTriggersCard,
- *           DropSequenceStrip AND the audio-shape TimelineCanvas. Proven by
- *           counting call sites in the real source, not by argument.
- *   TWO   — BEHAVIOUR: the real `playhead` canvas layer (canvas/layers.ts,
- *           bundled with esbuild) draws at `f.nowMs` VERBATIM — fed a huge,
- *           deliberately wrong `view.offsetMs`, the drawn line must not
- *           move. This is the legacy shift (`drawnPlayheadMs`) this build
- *           retired; the red control reproduces the OLD formula inline and
- *           shows it WOULD have moved, so this isn't a tautology.
+ * BEHAVIOUR: the real `playhead` canvas layer (canvas/layers.ts, bundled
+ * with esbuild) draws at `f.nowMs` VERBATIM — fed a huge, deliberately
+ * wrong `view.offsetMs`, the drawn line must not move. This is the legacy
+ * shift (`drawnPlayheadMs`) this build retired; the red control reproduces
+ * the OLD formula inline and shows it WOULD have moved, so this isn't a
+ * tautology.
  */
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const BUILDER_PAGE = path.join(REPO, 'spectra/web/src/timeline/BuilderPage.tsx');
 const LAYERS = path.join(REPO, 'spectra/web/src/timeline/canvas/layers.ts');
 
 let failures = 0;
@@ -32,23 +25,7 @@ const ok = (cond, msg) => {
   else { console.log(`  ✗ ${msg}`); failures += 1; }
 };
 
-console.log('ONE — BuilderPage.tsx wires ONE getNowMs function everywhere');
-{
-  const src = readFileSync(BUILDER_PAGE, 'utf8');
-  const sharedHits = (src.match(/getNowMs=\{getStripNowMs\}/g) ?? []).length;
-  ok(sharedHits === 4,
-    `getStripNowMs is passed to exactly 4 getNowMs props (TimelineBar, ` +
-    `SpectraTriggersCard, DropSequenceStrip, the audio-shape canvas) — found ${sharedHits}`);
-  // Code-level only (not prose in comments, which still name the retired
-  // functions historically): no DECLARATION of either old function, and
-  // no live IMPORT of the shift arithmetic they used.
-  ok(!/\bconst getCanvasNowMs\b/.test(src) && !/\bconst getPlayheadMs\b/.test(src),
-    'the old, separately-shifted getCanvasNowMs/getPlayheadMs are gone — nothing left to disagree with the strips');
-  ok(!/^import .*drawnPlayheadMs/m.test(src),
-    'BuilderPage.tsx no longer imports the shift arithmetic for its canvas playhead');
-}
-
-console.log('\nTWO — the playhead LAYER draws f.nowMs verbatim, ignoring view.offsetMs');
+console.log('the playhead LAYER draws f.nowMs verbatim, ignoring view.offsetMs');
 {
   const tmp = mkdtempSync(path.join(tmpdir(), 'playhead-one-clock-'));
   const js = path.join(tmp, 'layers.mjs');

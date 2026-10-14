@@ -17,6 +17,7 @@ import {
 } from './songStrip';
 import { useEngineStatus, useUpcoming } from '../queries';
 import { getPositionMs, getShowClockMs } from '../lib/showClock';
+import HelpLink from '../help/HelpLink';
 
 const TRACK_H = 39;
 
@@ -145,7 +146,10 @@ export default function SongStrip() {
   return (
     <div className="song-strip" role="img" aria-label={`${track.title ?? 'Unknown song'} — ${track.artist ?? ''}`}>
       <div className="song-strip-song" title={track.title ?? ''}>
-        <span className="song-strip-song-title">{track.title || 'No song'}</span>
+        <div className="song-strip-title-row">
+          <span className="song-strip-song-title">{track.title || 'No song'}</span>
+          <HelpLink topic="song-timeline" title="About this strip" />
+        </div>
         <span className="song-strip-song-artist">{track.artist || ''}</span>
       </div>
       <div className="song-strip-track" style={{ height: TRACK_H }}>

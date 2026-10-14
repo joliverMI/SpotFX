@@ -78,7 +78,10 @@ def upcoming_for_song(uri: str, limit: int = 20) -> dict:
         for t in stored:
             if not t.enabled or not TriggerEngine._trigger_allowed(t, mode):
                 continue
-            kind = _ACTION_KIND.get(t.action.kind, "flare")
+            if t.action.kind == "fire_response":
+                kind = t.action.event_class
+            else:
+                kind = _ACTION_KIND.get(t.action.kind, "flare")
             events.append({
                 "ms": t.timestamp_ms + t.trigger_offset_ms, "kind": kind,
                 "rank": None, "rank_of": None, "source": "authored",
@@ -89,11 +92,14 @@ def upcoming_for_song(uri: str, limit: int = 20) -> dict:
     for num, s in enumerate(ordered, start=1):
         if not s.get("fires"):
             continue
-        if s.get("charge_ms") is not None and not s.get("charge_off"):
+        stood_down = s.get("stood_down") or {}
+        if (s.get("charge_ms") is not None and not s.get("charge_off")
+                and "charge" not in stood_down):
             events.append({"ms": s["charge_ms"], "kind": "charge",
                            "rank": None, "rank_of": None,
                            "source": "drop_sequence", "num": num})
-        if s.get("lull_ms") is not None and not s.get("lull_off"):
+        if (s.get("lull_ms") is not None and not s.get("lull_off")
+                and "lull" not in stood_down):
             events.append({"ms": s["lull_ms"], "kind": "lull",
                            "rank": None, "rank_of": None,
                            "source": "drop_sequence", "num": num})
