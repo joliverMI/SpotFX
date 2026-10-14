@@ -56,10 +56,11 @@ export default function BuilderPage() {
   // never a per-lane approximation. Falls back to the raw interpolation
   // while the show clock hasn't anchored yet. This ALSO retires the
   // audio-shape canvas's old audio_latency_ms-subtract +
-  // shape-offset-add playhead math (below, getCanvasNowMs/getPlayheadMs)
-  // — that shift existed only to match the raw progress clock the strips
-  // used to draw; now that every lane shares one clock there is nothing
-  // left to reconcile. The canvas's own RMS/trigger DATA was already
+  // shape-offset-add playhead math (formerly getCanvasNowMs/getPlayheadMs
+  // in this file, now removed) — that shift existed only to match the
+  // raw progress clock the strips used to draw; now that every lane
+  // shares one clock there is nothing left to reconcile. The canvas's
+  // own RMS/trigger DATA was already
   // drawn in raw, unshifted song time (debug/plannedEvents.ts's own
   // docstring), so the playhead was actually MISALIGNED against its own
   // canvas before this — not just against the strips.

@@ -495,6 +495,7 @@ def kiosk_frame_ancestors() -> list[str]:
         return ["http://homeassistant.local:8123", "http://192.168.40.16:8123"]
     return [o for o in raw.replace(",", " ").split() if o]
 
+
 # Read-only spot-effects storage (S2 formalizes this as the bridge).
 COLOR_SETS_FILE = REPO_ROOT / "storage" / "color_sets.json"
 PROFILES_DIR = REPO_ROOT / "storage" / "profiles"

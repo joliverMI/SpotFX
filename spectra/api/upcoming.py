@@ -35,6 +35,8 @@ trigger's own offset) — the caller places it against the show clock
 """
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, Query
 
 from spectra.api.analysed_plan import _plan_with_cues
@@ -123,5 +125,4 @@ def upcoming_for_song(uri: str, limit: int = 20) -> dict:
 @router.get("/upcoming")
 async def get_upcoming(uri: str = Query(..., min_length=1),
                        limit: int = Query(default=20, ge=1, le=200)):
-    import asyncio
     return await asyncio.to_thread(upcoming_for_song, uri, limit)
