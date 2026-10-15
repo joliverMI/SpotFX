@@ -1,10 +1,7 @@
 import { useEffect } from 'react';
 import { Route, Routes, useLocation } from 'react-router-dom';
-import NavBar from './nav/NavBar';
-import RoomControlsBar from './components/RoomControlsBar';
 import RoomOwnershipBar from './components/RoomOwnershipBar';
 import TestingBar from './components/TestingBar';
-import TopBarStrip from './components/TopBarStrip';
 import { ToastProvider } from './components/Toast';
 import ColorSetsPage from './colorsets/ColorSetsPage';
 import DevicesPage from './devices/DevicesPage';
@@ -25,7 +22,7 @@ import RoomEffectsPage from './roomeffects/RoomEffectsPage';
 import DebugPage from './debug/DebugPage';
 import LightShowPage from './lightshow/LightShowPage';
 import HousePage from './house/HousePage';
-import SongStrip from './components/SongStrip';
+import AppChrome from './components/AppChrome';
 import KioskPage from './kiosk/KioskPage';
 import { isKioskRequested } from './kiosk/kioskConfig';
 import { useShowClockSeed } from './queries';
@@ -100,19 +97,11 @@ export default function App() {
         * confirmed "not testing", so it costs no vertical space in normal
         * use; see TestingBar.tsx for why "unknown" still shows. */}
       <TestingBar />
-      <NavBar />
-      {/* ONE BAR (UI declutter plan §3): RoomControlsBar and TopBarStrip
-        * each still own their own state/logic, but `display: contents` on
-        * both of their root divs (tokens.css) lets their children act as
-        * direct flex items of `.one-bar` — one visual row, explicit
-        * `order` per occupant (tokens.css) rather than a DOM rewrite of
-        * either component. */}
-      <div className="one-bar">
-        <RoomControlsBar />
-        <TopBarStrip />
-      </div>
+      {/* MENU, TIMELINE, BAR — the approved mockups' own order, and the
+        * ONE composition the design-fidelity gate renders too (see
+        * components/AppChrome.tsx on why it is shared, not duplicated). */}
+      <AppChrome showSongStrip={!hideSongStrip} />
       <RoomOwnershipBar />
-      {!hideSongStrip && <SongStrip />}
       <main className={pathname === '/' ? 'home-route' : undefined}>
         <Routes>
           <Route path="/" element={<HomePage />} />

@@ -29,8 +29,7 @@
  * Colour, row 2 is Energy+Mark/Light Show/preview/⚠/Release — see
  * tokens.css's own `.one-bar::before` rule for the mechanism. */
 import { useEffect, useRef } from 'react';
-import RoomControlsBar from '../components/RoomControlsBar';
-import TopBarStrip from '../components/TopBarStrip';
+import AppChrome from '../components/AppChrome';
 import HomePage from '../home/HomePage';
 import { applyKioskSizeVars, KIOSK_SHOW_AUDIO_SHAPE } from './kioskConfig';
 
@@ -41,10 +40,13 @@ export default function KioskPage() {
   }, []);
   return (
     <div ref={ref} className="kiosk-page">
-      <div className="one-bar">
-        <RoomControlsBar />
-        <TopBarStrip />
-      </div>
+      {/* The same bar the app's own chrome builds (components/
+        * AppChrome.tsx) — the kiosk used to assemble its own copy, which
+        * is how it kept the OLD two-strip layout for a while after the
+        * rest of the app moved on. No menu here (Home Assistant provides
+        * the navigation) and no song timeline: Home's own editable copy
+        * is directly below. */}
+      <AppChrome showSongStrip={false} showNav={false} />
       <main className="kiosk-main">
         <HomePage showAudioShape={KIOSK_SHOW_AUDIO_SHAPE} />
       </main>

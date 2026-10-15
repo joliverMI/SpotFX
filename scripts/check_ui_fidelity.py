@@ -559,6 +559,15 @@ async def run(app_url: str, artifact_url: str) -> int:
                   const r = tip.getBoundingClientRect();
                   return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
                 })(),
+                // MENU, THEN TIMELINE, THEN BAR — the approved mockups'
+                // own order (`nav() + timelineRow() + bar()`). The live
+                // app had the bar SECOND and the strip third, and this
+                // gate did not see it because the harness hand-rolled the
+                // mockup's order instead of rendering the app's own
+                // chrome; both now render components/AppChrome.tsx.
+                chromeOrder: ['nav', '.song-strip', '.one-bar']
+                  .map((sel) => { const el = document.querySelector(sel);
+                    return el ? Math.round(el.getBoundingClientRect().top) : null; }),
                 nextCountText: (document.querySelector('.song-strip-next-count') || {}).textContent,
                 timeText: (document.querySelector('.song-strip-time') || {}).textContent,
                 scrollW: document.documentElement.scrollWidth,
@@ -682,6 +691,11 @@ async def run(app_url: str, artifact_url: str) -> int:
             })()''')
             ok(tip is not None and "Up next: CYBERTRUCK" in tip,
                f"hovering the song block names what is UP NEXT (approved idea 7 — got {tip!r})")
+
+            order = m["chromeOrder"]
+            ok(all(t is not None for t in order) and order[0] < order[1] < order[2],
+               "the chrome runs MENU → TIMELINE → BAR, the mockups' own order "
+               f"(measured tops: {order})")
 
             ok(re.match(r"^\d+\.\ds$|^\d+:\d\d$", (m["nextCountText"] or "").strip()),
                "with a song, the next-event box counts down in the mockup's own format "

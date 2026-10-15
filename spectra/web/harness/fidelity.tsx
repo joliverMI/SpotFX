@@ -23,10 +23,7 @@ import '../src/styles/tokens.css';
 import { createRoot } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
-import NavBar from '../src/nav/NavBar';
-import SongStrip from '../src/components/SongStrip';
-import RoomControlsBar from '../src/components/RoomControlsBar';
-import TopBarStrip from '../src/components/TopBarStrip';
+import AppChrome from '../src/components/AppChrome';
 import HomePage from '../src/home/HomePage';
 import SettingsConsolePage from '../src/settings/SettingsConsolePage';
 import KioskPage from '../src/kiosk/KioskPage';
@@ -324,14 +321,15 @@ class FakeSocket {
 }
 (window as unknown as { WebSocket: unknown }).WebSocket = FakeSocket;
 
+/** THE REAL CHROME, not a copy of it — `components/AppChrome.tsx` is the
+ * one composition App.tsx renders too, so this gate measures the order
+ * and the markup the app actually has (that is exactly what drifted: the
+ * app rendered the bar BEFORE the strip while this harness drew the
+ * mockup's own menu/timeline/bar order, and the pair images looked fine
+ * because the harness was right and the app was not). */
 const Chrome = () => (
   <>
-    <NavBar />
-    <SongStrip />
-    <div className="one-bar">
-      <RoomControlsBar />
-      <TopBarStrip />
-    </div>
+    <AppChrome />
     {VIEW === 'home' && (
       <main className="home-route"><HomePage /></main>
     )}
