@@ -9773,7 +9773,9 @@ including how an effect opts in. Four things:
   are registered per member (`phase_grammar.registry_params()` is the one
   shape) — schema keys may not contain "colour" (`fx/utils.py` refuses it).
   Proof: `scripts/check_drop_shockwave.py`, `tests/test_phase_grammar.py`;
-  help `drop-shockwave`, `drop-breath-hold`.
+  help `drop-shockwave`; the breath-hold's own help folded into
+  `lull-dark-cap`'s topic 2026-10-15 when Settings grouped the two
+  fields under one link (Scenes & drops' "Lull" row).
 - **THREE SWITCHES DECIDE WHETHER A DROP PAINTS IT** (2026-10-12, the
   Admiral): `RoomControlState.drop_shock_enabled` (room, default on), the
   showing scene's `SceneV2.drop_shock_enabled` (default on; the Fish scene
@@ -11721,10 +11723,14 @@ menu, the one consolidated bar, Settings cards) built in the parallel
   `TriggerEngine.tick()` — the "prove from the show side" standard.
 - **THE GLOBAL SONG TIMELINE** (`spectra/web/src/components/SongStrip.tsx`
   + the pure helpers in `songStrip.ts`, spec'd by
-  `scripts/check_song_strip.mjs`): a 39px read-only strip mounted in
-  `App.tsx` on every route except Home (`/`) and `/timeline` (both carry
-  their own editable copy) and the `/live` pop-out. Markers reuse
-  `debug/plannedEvents.ts`'s own rank-tier sizing/opacity rules and
+  `scripts/check_song_strip.mjs`): a 39px strip mounted by
+  `AppChrome.tsx` on every route except `/timeline` (its own full
+  editing toolset) and the `/live` pop-out — INCLUDING Home since
+  2026-10-15, where it also hosts the draggable window Home's audio
+  shape follows (read-only everywhere else); see "THE DESIGN-FIDELITY
+  GATE"'s later entries for the current mount/edit split, superseding
+  the per-route "editable copy" design in the HOME bullet below.
+  Markers reuse `debug/plannedEvents.ts`'s own rank-tier sizing/opacity rules and
   `timeline/dropSequences.ts`'s `PHASE_COLOR` — one definition of
   "strong", shared with the Timeline/debug canvases. The playhead and the
   fixed-96px next-event countdown move in ONE rAF loop that writes
@@ -11743,19 +11749,24 @@ menu, the one consolidated bar, Settings cards) built in the parallel
   React-managed sibling `<line>` is the playhead — clearing the wrong
   node here throws on reconciliation, don't merge the two).
 - **HOME (`/`)** is now the landing page (`home/HomePage.tsx`,
-  `home/HomeTimeline.tsx`, `home/HomeQuickRuns.tsx`): an editable copy of
-  the timeline (icon toggles for analysed events/drop sequences/Light
-  Show, a draggable/zoomable window via the EXISTING
-  `timeline/hooks/useFollowWindow`, TimelineBar's own `dragEdge` shape
-  re-implemented here since `TimelineBar` itself is bound to the legacy
-  `MusicTrigger`/`EventOption` editor model) plus a tuned audio-shape
-  trace sharing the strip's one playhead, and two capped-width
-  (`minmax(0, 560px)`) Quick sequences / Quick actions cards. The audio
-  shape's own samples are WAV-time; each is shifted by the song's stored
-  `timestamp_offset_ms` to land on the SAME song-time axis the strip's
-  markers use — deliberately a NARROWER reconciliation than the Timeline
-  page's own `audio_latency_ms`-involving math (Home's shape is a
-  glance-and-navigate view, not an editing surface). `HomeQuickRuns.tsx`
+  `home/HomeTimeline.tsx`, `home/HomeQuickRuns.tsx`). Its own timeline
+  card — icon toggles for analysed events/drop sequences/Light Show, a
+  draggable/zoomable window via `timeline/hooks/useFollowWindow`,
+  TimelineBar's own `dragEdge` shape re-implemented here since
+  `TimelineBar` itself is bound to the legacy `MusicTrigger`/
+  `EventOption` editor model, undo/redo — was RETIRED 2026-10-15: the
+  window now lives on the chrome's one global strip (shared state in
+  `components/songTimelineView.tsx`), and the filter toggles/undo-redo/
+  Follow controls moved onto Home's own thin control row beneath the
+  shape (see "THE DESIGN-FIDELITY GATE"'s later entries for the full
+  current split). Home's card today is that tuned audio-shape trace,
+  aligned under the strip's track, plus the control row and two
+  capped-width (`minmax(0, 560px)`) Quick sequences / Quick actions
+  cards. The audio shape's own samples are WAV-time; each is shifted by
+  the song's stored `timestamp_offset_ms` to land on the SAME song-time
+  axis the strip's markers use — deliberately a NARROWER reconciliation
+  than the Timeline page's own `audio_latency_ms`-involving math (Home's
+  shape is a glance-and-navigate view, not an editing surface). `HomeQuickRuns.tsx`
   is deliberately self-contained rather than literally extracting
   `QuickStartCard`/`SetRunRows` out of `lightshow/SequenceView.tsx`/
   `RunView.tsx` — a real follow-up, not done here, to let the Light

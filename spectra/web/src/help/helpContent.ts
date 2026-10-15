@@ -843,7 +843,7 @@ export const HELP_SECTIONS: HelpSection[] = [
           'The track itself is an inset panel: a faint terrain of the song\'s own section energies behind the markers, the played part tinted purple, a gold CHARGE bar running into a sky-blue LULL bar and a numbered pink DROP pill along the bottom, and the Light Show\'s High/Low Triggers as flags from the top edge. A pulsing ring marks whatever fires next; markers that have passed fade.',
           'Hover (or long-press) the song at the left for what is UP NEXT after this track; tapping it opens Home.',
           'Every marker on it obeys Home\'s own three filter toggles (they are this row\'s filters, set from there) — turn drop sequences off on Home and the row stops drawing them too. They always come back on after a reload.',
-          'Every playhead in the app — this strip, Home\'s own copy, and (where it reuses the same clock) the Timeline page\'s strips — reads the ONE SHOW CLOCK: the exact moment the trigger engine fires against, not raw Spotify playback position. Before this, different pages could each read a different "now" for the same song.',
+          'Every playhead in the app — this row, Home\'s own audio shape, and (where it reuses the same clock) the Timeline page\'s strips — reads the ONE SHOW CLOCK: the exact moment the trigger engine fires against, not raw Spotify playback position. Before this, different pages could each read a different "now" for the same song.',
         ],
       },
     ],
@@ -1018,13 +1018,14 @@ export const HELP_SECTIONS: HelpSection[] = [
       },
       {
         id: 'lull-dark-cap',
-        title: 'Lull darkness (max) — how long a lull stays dark',
-        keywords: 'lull dark darkness black pitch black max maximum cap 3 seconds half way halfway event horizon black hole squiggles pulse star radial bands fall core singles crt switch off expand fade drop long lull sonic',
+        title: 'Lull darkness (max) and the breath-hold before a drop',
+        keywords: 'lull dark darkness black pitch black max maximum cap 3 seconds half way halfway event horizon black hole squiggles pulse star radial bands fall core singles crt switch off expand fade drop long lull sonic breath hold breath-hold true black pause before drop silence 0.4 seconds orbits sauron eye fish',
         body: [
           'Some lull effects go fully dark before the drop: Black Hole\'s event horizon swells until it fills the panel, Squiggles\' chains thin out one by one until none are left, Pulse (on the Singles) fades to pitch black, and STAR\'s bands fall into the core piece by piece (see "STAR / Radial — the lull (bands fall in) and the drop (bands snap back)"). A lull holds that darkness for HALF its length, but never longer than "Lull darkness (max)" — a setting in Settings → "Scenes & drops", 3 seconds by default. Sonic can read and change it too ("make the lull darkness 5 seconds").',
           'So at the default, a 20-second lull is 17 seconds of build-up and 3 seconds of dark, and a 4-second lull is still 2 seconds and 2 seconds — the cap only changes lulls longer than twice itself. All of them go black at the same moment, so they are dark for the same last stretch.',
           'While a lull is still building up, Black Hole keeps forming blobs, Squiggles keeps a few chains crossing as it thins, and STAR keeps shedding bands; once the lull is dark, nothing new appears — unless a flare punches through (see "A flare in the dark lights the room").',
           '0 means the lull only goes dark on its drop. A change takes effect on the very next lull — nothing needs re-planning. The strip effects, which take charge, lull and drop from the shared strip layer (Melt, Power and the Black Hole, Orbits and Fireworks strips — see "Strip effects on charge, lull and drop"), reach their dark point at this same moment too — the Fireworks strip keeps its two rockets as faint embers through it. Other lull effects (Eye, Fish) are not covered by this setting yet.',
+          'Right before a drop lands, the lights go to TRUE BLACK for a moment, so the drop is born out of darkness — the "breath-hold". The same Settings card\'s "Breath-hold before drop" sets how long, 0.4 seconds by default; 0 turns it off. Sonic can read and change it too ("make the breath-hold half a second"). It applies to the crystal\'s Black Hole, Sauron and Eye, to STAR, and to the Pulse singles (a flare\'s punch or flash is held dark for it too). Orbits never goes fully dark: its lull\'s one blob stays, dimmed, through the breath. The Fish never takes it at all — its searching fish swims straight on to the drop. Fireworks keeps its own drop. On the strips there is no breath-hold; the Orbits strip keeps one dim blob through its lull\'s dark and the Fireworks strip a faint ember. It is always inside the lull\'s own darkness rule above — never longer than half the lull, and never longer than "Lull darkness (max)" — so on Black Hole and STAR, whose lulls are already dark by then, nothing changes. The breath only happens when the drop\'s moment is known (the lull has a drop of its own after it); if the drop never arrives, the lull\'s picture comes back half a second later rather than staying black. A change takes effect on the very next lull.',
         ],
       },
       {
@@ -1054,16 +1055,6 @@ export const HELP_SECTIONS: HelpSection[] = [
           'This covers the strips (Melt, Power and the Black Hole, Orbits and Fireworks strips), the crystal\'s Black Hole and Squiggles, and the Pulse singles, so one flare in a dark room lights them together. On the Black Hole the event horizon that had swallowed the panel pulls back for the flare and a ring of blobs falls in, then the horizon swallows the panel again; on Squiggles a few fresh chains cross the dark and leave with the flare; on the Pulse singles the light comes back to its ordinary level (its hits and any Pulse flash with it) and fades out again.',
           'A light only punches when the flare actually reached it: a flare kind that writes nothing to that light (a Big Fish, a Sauron surge, a Pulse flash on the strips) leaves it dark. A light with flares switched off by the Light Show, and anything held by a house mode, never punches. Analysed flares are still kept out of a protected drop sequence\'s lull, so the planner never crowds your builds.',
           'The punch rises in a twenty-fifth of a second, holds for at least half a second (longer if the flare itself holds longer), then releases over 0.8 seconds. Each scene\'s light has its own settings on the Initial Set — "Flare punch" (0 = the dark wins, as before), "Flare punch hold" and "Flare punch release" — and Sonic can change them ("let the dark win over flares on Black Hole V2\'s crystal").',
-        ],
-      },
-      {
-        id: 'drop-breath-hold',
-        title: 'Breath-hold before the drop',
-        keywords: 'breath hold breath-hold black true black pause before drop silence dark 0.4 seconds lull shockwave black hole orbits sauron eye fish star radial sonic',
-        body: [
-          'Right before a drop lands, the lights go to TRUE BLACK for a moment, so the drop is born out of darkness. "Breath-hold before drop" in Settings → "Scenes & drops" sets how long, 0.4 seconds by default; 0 turns it off. Sonic can read and change it too ("make the breath-hold half a second").',
-          'It applies to the crystal\'s Black Hole, Sauron and Eye, to STAR, and to the Pulse singles (a flare\'s punch or flash is held dark for it too). Orbits never goes fully dark: its lull\'s one blob stays, dimmed, through the breath. The Fish never takes it at all — its searching fish swims straight on to the drop. Fireworks keeps its own drop. On the strips there is no breath-hold; the Orbits strip keeps one dim blob through its lull\'s dark and the Fireworks strip a faint ember. It is always inside the lull\'s own darkness rule — never longer than half the lull, and never longer than "Lull darkness (max)" — so on Black Hole and STAR, whose lulls are already dark by then, nothing changes.',
-          'The breath only happens when the drop\'s moment is known (the lull has a drop of its own after it). If the drop never arrives, the lull\'s picture comes back half a second later rather than staying black. A change takes effect on the very next lull.',
         ],
       },
       {
