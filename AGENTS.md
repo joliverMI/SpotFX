@@ -9773,7 +9773,9 @@ including how an effect opts in. Four things:
   are registered per member (`phase_grammar.registry_params()` is the one
   shape) — schema keys may not contain "colour" (`fx/utils.py` refuses it).
   Proof: `scripts/check_drop_shockwave.py`, `tests/test_phase_grammar.py`;
-  help `drop-shockwave`, `drop-breath-hold`.
+  help `drop-shockwave`; the breath-hold's own help folded into
+  `lull-dark-cap`'s topic 2026-10-15 when Settings grouped the two
+  fields under one link (Scenes & drops' "Lull" row).
 - **THREE SWITCHES DECIDE WHETHER A DROP PAINTS IT** (2026-10-12, the
   Admiral): `RoomControlState.drop_shock_enabled` (room, default on), the
   showing scene's `SceneV2.drop_shock_enabled` (default on; the Fish scene
@@ -11721,10 +11723,14 @@ menu, the one consolidated bar, Settings cards) built in the parallel
   `TriggerEngine.tick()` — the "prove from the show side" standard.
 - **THE GLOBAL SONG TIMELINE** (`spectra/web/src/components/SongStrip.tsx`
   + the pure helpers in `songStrip.ts`, spec'd by
-  `scripts/check_song_strip.mjs`): a 39px read-only strip mounted in
-  `App.tsx` on every route except Home (`/`) and `/timeline` (both carry
-  their own editable copy) and the `/live` pop-out. Markers reuse
-  `debug/plannedEvents.ts`'s own rank-tier sizing/opacity rules and
+  `scripts/check_song_strip.mjs`): a 39px strip mounted by
+  `AppChrome.tsx` on every route except `/timeline` (its own full
+  editing toolset) and the `/live` pop-out — INCLUDING Home since
+  2026-10-15, where it also hosts the draggable window Home's audio
+  shape follows (read-only everywhere else); see "THE DESIGN-FIDELITY
+  GATE"'s later entries for the current mount/edit split, superseding
+  the per-route "editable copy" design in the HOME bullet below.
+  Markers reuse `debug/plannedEvents.ts`'s own rank-tier sizing/opacity rules and
   `timeline/dropSequences.ts`'s `PHASE_COLOR` — one definition of
   "strong", shared with the Timeline/debug canvases. The playhead and the
   fixed-96px next-event countdown move in ONE rAF loop that writes
@@ -11743,19 +11749,24 @@ menu, the one consolidated bar, Settings cards) built in the parallel
   React-managed sibling `<line>` is the playhead — clearing the wrong
   node here throws on reconciliation, don't merge the two).
 - **HOME (`/`)** is now the landing page (`home/HomePage.tsx`,
-  `home/HomeTimeline.tsx`, `home/HomeQuickRuns.tsx`): an editable copy of
-  the timeline (icon toggles for analysed events/drop sequences/Light
-  Show, a draggable/zoomable window via the EXISTING
-  `timeline/hooks/useFollowWindow`, TimelineBar's own `dragEdge` shape
-  re-implemented here since `TimelineBar` itself is bound to the legacy
-  `MusicTrigger`/`EventOption` editor model) plus a tuned audio-shape
-  trace sharing the strip's one playhead, and two capped-width
-  (`minmax(0, 560px)`) Quick sequences / Quick actions cards. The audio
-  shape's own samples are WAV-time; each is shifted by the song's stored
-  `timestamp_offset_ms` to land on the SAME song-time axis the strip's
-  markers use — deliberately a NARROWER reconciliation than the Timeline
-  page's own `audio_latency_ms`-involving math (Home's shape is a
-  glance-and-navigate view, not an editing surface). `HomeQuickRuns.tsx`
+  `home/HomeTimeline.tsx`, `home/HomeQuickRuns.tsx`). Its own timeline
+  card — icon toggles for analysed events/drop sequences/Light Show, a
+  draggable/zoomable window via `timeline/hooks/useFollowWindow`,
+  TimelineBar's own `dragEdge` shape re-implemented here since
+  `TimelineBar` itself is bound to the legacy `MusicTrigger`/
+  `EventOption` editor model, undo/redo — was RETIRED 2026-10-15: the
+  window now lives on the chrome's one global strip (shared state in
+  `components/songTimelineView.tsx`), and the filter toggles/undo-redo/
+  Follow controls moved onto Home's own thin control row beneath the
+  shape (see "THE DESIGN-FIDELITY GATE"'s later entries for the full
+  current split). Home's card today is that tuned audio-shape trace,
+  aligned under the strip's track, plus the control row and two
+  capped-width (`minmax(0, 560px)`) Quick sequences / Quick actions
+  cards. The audio shape's own samples are WAV-time; each is shifted by
+  the song's stored `timestamp_offset_ms` to land on the SAME song-time
+  axis the strip's markers use — deliberately a NARROWER reconciliation
+  than the Timeline page's own `audio_latency_ms`-involving math (Home's
+  shape is a glance-and-navigate view, not an editing surface). `HomeQuickRuns.tsx`
   is deliberately self-contained rather than literally extracting
   `QuickStartCard`/`SetRunRows` out of `lightshow/SequenceView.tsx`/
   `RunView.tsx` — a real follow-up, not done here, to let the Light
@@ -12084,28 +12095,62 @@ them PASSED on the build he called much worse. Four things now hold:
   RENDERED glyph box of every small icon button, because every
   attribute-level check reads correct while this is broken.
 
-**THE CHROME IS ONE COMPOSITION, `components/AppChrome.tsx`** — MENU,
-then TIMELINE, then BAR, the mockups' own order. App.tsx, the kiosk and
-the fidelity harness all render it (`showSongStrip`/`showNav` are the two
-places that genuinely differ). It exists because the ORDER drifted and
-the gate could not see it: App.tsx rendered the bar second and the strip
-third while the harness drew the mockup's order, so the pair images
-looked right because the HARNESS was right. A harness that models the
-app rather than rendering it proves nothing about the app — the gate now
-asserts nav < strip < bar from the measured tops.
+**THE CHROME IS ONE COMPOSITION, `components/AppChrome.tsx`** — and
+since 2026-10-15 the order is MENU, then BAR, then TIMELINE, a
+DELIBERATE DEPARTURE from the mockups' `nav() + timelineRow() + bar()`
+on the Admiral's own later word ("move the timeline below the toolbar
+(with all the buttons and things like scene, colour, mark, etc)"); the
+gate's chrome-order assertion encodes the APP's order and says so, so a
+pair image showing the row in a different place from the mockup is the
+ask, not a regression. App.tsx, the kiosk and the fidelity harness all
+render it, and it now takes the PAGE BODY AS CHILDREN so the shared
+song-timeline view state has exactly one mount point
+(`components/songTimelineView.tsx` — the one window, the one marker
+filter set, the one view history). It exists because the ORDER drifted
+and the gate could not see it: App.tsx rendered the bar second and the
+strip third while the harness drew the mockup's order, so the pair
+images looked right because the HARNESS was right. A harness that models
+the app rather than rendering it proves nothing about the app.
 
-**AND THE STRIP IS NOT ON EVERY PAGE — `showsSongStrip(pathname)`, in
-that same module, is the one rule**: Home and `/timeline` draw their OWN
-editable timeline card (§13 decision 5), so the GLOBAL strip is theirs
-to omit, not to stack a second copy under. Home's own card holds the
-mockup's flat 230px audio shape with NO beat-strip lanes under it
-(`HomeTimeline.tsx` passes `beatStrips: false`, which `canvas/frame.ts`'s
-`stripCountFor` answers with zero before it looks at anything else, and
-`rails: null`); growing the canvas per lane is the Timeline page's own
-behaviour and belongs there. The gate asserts both — no `.song-strip` on
-either route, and Home's canvas within a few px of the height MEASURED
-off the mockup — because both read as ordinary-looking pages until a
-pair image is put beside the artifact.
+**THE TIMELINE IS ONE ROW ON EVERY ROUTE BUT `/timeline`, AND HOME EDITS
+IT RATHER THAN DRAWING A SECOND ONE (2026-10-15).** `showsSongStrip`
+(same module) is still the one rule, but Home is no longer excluded — his
+report was that the row JUMPED from the chrome down the page there,
+because Home carried its own copy. `SongStrip` now also hosts the
+draggable WINDOW, shown only while something is listening to it
+(`useSongTimelineShape`, Home's audio shape today — which is why the
+kiosk, where the shape is dropped for space, offers no drag that would
+move nothing). Home's card is the shape plus one control row: the three
+marker filters sit immediately LEFT of the intensity bolt (his own
+placement) and undo/redo + Follow/Full-song moved there with them.
+**The shape is ALIGNED to the track by a MEASURED CORRECTION**
+(`HomeTimeline.tsx::alignCorrection` — it reads where the canvas is
+against where the track is and nudges by the difference, re-run from a
+ResizeObserver): an absolute `track.left - parent.left` was tried first
+and measured 18px out at every width, because every bit of box model
+between the two is in that gap. The card still holds the mockup's flat
+230px canvas with NO beat-strip lanes (`beatStrips: false`, which
+`canvas/frame.ts`'s `stripCountFor` answers with zero before it looks at
+anything else, and `rails: null`). **The intensity layer's `'section'`
+mode draws per-section BLOCKS** from the same `sections[].energy_rms` the
+row's terrain uses, and Home passes `librosaOffsetMs: 0` — the raw
+convention this file already records as the right one — so the blocks,
+the section lanes and the row's terrain are all on one axis.
+
+**THE PREVIEW-HIDDEN CLASS OF BUG: A WRAP IS NOT A RELEASE.**
+`.one-bar` is `height: 48px` + `overflow-x: auto`, and
+`:has(.device-preview-expanded-row)` wrapped for the expanded stage
+without releasing either — so a correctly laid out 1408x445 stage sat
+inside a 47px scroll container and `elementFromPoint` over its middle
+returned the page below it (the Admiral: "when I expand the preview, it
+is completely hidden"). It worked at 1024/800 only because the
+deliberate-two-row band already sets `height: auto` there, which is why
+the report was a desktop one. **Anything that makes a fixed-height
+overflow container wrap must release the height AND the overflow in the
+same rule**, and `overflow-x: auto` silently makes `overflow-y` a clip
+too. `.song-strip` also dropped to `z-index: 2` when it moved below the
+bar — a row that follows the bar in the DOM would otherwise paint over
+every popover the bar drops downward.
 
 **ONE HELP "?" PER PAGE IS STRUCTURAL NOW** (idea 5): `InfoTip.tsx`
 renders NO trigger of its own — callers WRAP their control in it, and
@@ -12114,7 +12159,47 @@ the `HelpLink`, so no topic is orphaned — AGENTS.md's own orphan rule).
 The one visible circle in the chrome is the menu row's own page "?".
 A Settings card's field rows carry their help the same way. The gate
 counts `.info-tip-btn` (must be 0) and `.help-link` inside the bar, the
-strip, Home's card head and a Settings row (0) versus the nav (exactly 1).
+strip and a Settings row (0) versus the nav (exactly 1). Home's own card
+HEAD is gone with the 2026-10-15 move, so there is no third surface to
+scope; its CONTROL ROW is deliberately not scoped in its place — that
+row has always been allowed its own InfoTips.
+
+**HIS SIX FIDELITY ANSWERS, 2026-10-15 ("all recs")** — every one of
+them is asserted in `scripts/check_ui_fidelity.py`, so the reasoning
+lives here and the measurement lives there:
+
+- **Q1 — the next-event box is in the BAR at 521-1100px**, sharing row 2
+  with the Light Show slot, which now GROWS to fill that row.
+  `components/SongNextBox.tsx` is the one component and
+  `useNextBoxInBar()` the one predicate both hosts ask, so it is never
+  drawn twice or nowhere; it owns its own rAF loop precisely so moving
+  between hosts hands over no state. **The phone tier (<=520px) is
+  excluded and it was measured**: adding a 92px occupant to a row the
+  phone already wraps by content pushed the bar to THREE rows, and the
+  phone's timeline row has its own next-box column anyway. Making row 2
+  fill also fixed his separate "Nothing a…" truncation at the 800 kiosk
+  — same cause, one change.
+- **Q2 — nothing playing shows the LAST song, dimmed.**
+  `songTimelineView`'s `track`/`showingLast` remember it IN MEMORY ONLY
+  (a remembered song is a courtesy for the minutes after the music
+  stops, not a durable claim; persisting it would open a cold load on a
+  song from days ago dressed as "last played"). Both the row and Home's
+  shape read that ONE resolved track, so they can never show different
+  songs. The bare "Nothing playing" card is now reachable only in a
+  session where nothing has played at all.
+- **Q3 — the house button is the mockup's purple-lit/grey-off**, with the
+  ♪ badge carrying the music state rather than a third colour. The fourth
+  state his three words do not cover (a mode SET but not applied) stays
+  the plain unlit button: not purple, because it is not driving, and not
+  the off grey, because it is not off.
+- **Q4 — "Scenes & drops" opens as three grouped rows** (transition
+  low/high, lull darkness/breath-hold, drop timing/shockwave) with
+  everything else behind a "More" expander that is `hidden`, not
+  unmounted, so a field's draft and focus survive a collapse. No setting
+  was removed or changed.
+- **Q5/Q6 — the kiosk keeps the shape hidden; the terrain and up-next
+  stay.** Both were already true and are now asserted rather than
+  assumed.
 
 **THE TRACK IS PAINTED ONCE, BY ONE FUNCTION, IN 1:1 PIXEL SPACE.**
 `spectra/web/src/components/trackPainter.ts` draws the inset panel, the

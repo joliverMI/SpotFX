@@ -104,6 +104,14 @@ elProto.releasePointerCapture = function () {};
 elProto.getBoundingClientRect = function () {
   return { left: 0, top: 0, right: 1000, bottom: 160, width: 1000, height: 160, x: 0, y: 0, toJSON() {} };
 };
+// The TRACK is an <svg>, i.e. an SVGElement, not an HTMLElement — jsdom's
+// Element.getBoundingClientRect returns all zeros, which the painter reads
+// as a 1px-wide track and the strip's rAF loop reads as "not laid out yet"
+// (so the window overlay stays hidden and a drag proves nothing). Give it
+// the track's own real shape: 1000 x 39.
+dom.window.SVGElement.prototype.getBoundingClientRect = function () {
+  return { left: 0, top: 0, right: 1000, bottom: 39, width: 1000, height: 39, x: 0, y: 0, toJSON() {} };
+};
 
 // Fake <canvas> 2D context (jsdom has none) — a recorder, matching the pure
 // drawShapeMarkers check's own fake ctx shape, plus the methods the trace
@@ -154,9 +162,29 @@ const SHAPE_DATA = {
   rms_high: Array.from({ length: N }, () => 0.1),
   avg_rms_1s: null,
 };
+const EVENTS_WIRE = [
+  { ms: 20000, kind: 'scene', rank: 1, rank_of: 3, source: 'planned' },
+  { ms: 55000, kind: 'flare', rank: null, rank_of: null, source: 'analysed' },
+  { ms: 90000, kind: 'charge', rank: null, rank_of: null, source: 'drop_sequence', num: 1 },
+  { ms: 100000, kind: 'drop', rank: null, rank_of: null, source: 'drop_sequence', num: 1 },
+  { ms: 15000, kind: 'high', rank: null, rank_of: null, source: 'show_cue' },
+];
+const DURATION_MS = 200000;
+const TRACK = {
+  uri: 'spotify:track:perf', title: 'Octavian', artist: 'Someone',
+  duration_ms: DURATION_MS, is_playing: true, position_ms: 40000,
+  show_clock_ms: 40000,
+};
+const STATUS = { dark: false, bridge: { connected: true, track: TRACK, next_track: null, intensity: 0.5 } };
+const UPCOMING = { uri: TRACK.uri, effective_mode: 'analysed', has_authored: false, events: EVENTS_WIRE };
+
 const fakeFetch = async (url) => {
   const u = String(url);
   const json = (body) => new NodeResponse(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  if (u.includes('/api/engine/status')) return json(STATUS);
+  if (u.includes('/api/upcoming')) return json(UPCOMING);
+  if (u.includes('/audio-shape/librosa')) return json({ sections: [], beats: [], onsets: [] });
+  if (u.includes('/drop-sequences')) return json({ uri: TRACK.uri, status: 'not_detected', sequences: [], authored: [] });
   if (u.includes('/audio-shape/meta')) return json(SHAPE_META);
   if (u.includes('/audio-shape/data')) return json(SHAPE_DATA);
   throw new Error(`unexpected fetch ${u}`);
@@ -171,6 +199,8 @@ import { createRoot } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import HomeTimeline from ${JSON.stringify(join(webDir, 'src/home/HomeTimeline.tsx'))};
+import SongStrip from ${JSON.stringify(join(webDir, 'src/components/SongStrip.tsx'))};
+import { SongTimelineViewProvider } from ${JSON.stringify(join(webDir, 'src/components/songTimelineView.tsx'))};
 
 const EVENTS = [
   { ms: 20000, kind: 'scene', rank: 1, rank_of: 3, source: 'planned' },
@@ -190,12 +220,28 @@ export async function mount() {
   await act(async () => {
     root.render(React.createElement(QueryClientProvider, { client: qc },
       React.createElement(MemoryRouter, null,
-        React.createElement(HomeTimeline, {
-          uri: 'spotify:track:perf', title: 'Octavian', artist: 'Someone',
-          durationMs: 200000, events: EVENTS, showAudioShape: true,
-        }))));
+        // THE REAL COMPOSITION since the 2026-10-15 move: the global
+        // strip (which now owns the markers AND the draggable window)
+        // and Home's shape, both under the shared view state AppChrome
+        // provides. Mounting HomeTimeline alone would prove nothing
+        // about either half of the thing under test any more.
+        React.createElement(SongTimelineViewProvider, null,
+          React.createElement(SongStrip, null),
+          React.createElement(HomeTimeline, {
+            uri: 'spotify:track:perf', showAudioShape: true,
+          })))));
   });
-  for (let i = 0; i < 40 && !container.querySelector('.home-timeline-shape-canvas'); i++) {
+  for (let i = 0; i < 40 && !container.querySelector('.home-timeline-shape canvas'); i++) {
+    await act(async () => { await new Promise((r) => setTimeout(r, 5)); });
+  }
+  // AND WAIT FOR THE STRIP'S OWN DATA. Since the 2026-10-15 move the
+  // strip fetches /api/upcoming itself rather than being handed events
+  // as a prop, so its markers appear one async hop after the canvas does
+  // — a test that captured a marker node before that hop landed saw it
+  // "recreated" by the arriving data, not by anything it was testing.
+  const flareDrawn = () => [...container.querySelectorAll('.song-strip-svg g > *')]
+    .some((n) => n.getAttribute('fill') === '#a3e635');
+  for (let i = 0; i < 80 && !flareDrawn(); i++) {
     await act(async () => { await new Promise((r) => setTimeout(r, 5)); });
   }
   return container;
@@ -276,7 +322,7 @@ console.log('ONE — a window drag never rebuilds the strip\'s marker SVG nodes'
   ok(!!markersGroup && markersGroup.children.length > 0, 'the strip drew its upcoming-event markers');
   const firstMarker = markersGroup.children[0];
 
-  const overlay = container.querySelector('.home-timeline-window');
+  const overlay = container.querySelector('.song-strip-window');
   const before = overlay.style.left;
 
   // Drag the window's centre several times — exactly what used to rebuild

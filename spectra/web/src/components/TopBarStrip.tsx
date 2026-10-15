@@ -24,9 +24,29 @@ import DevicePreviewStrip from './DevicePreviewStrip';
 import ModeChip from './ModeChip';
 import EnergyBar from './EnergyBar';
 import LightShowStrip from './LightShowStrip';
+import SongNextBox, { useNextBoxInBar } from './SongNextBox';
 import WarningChip from './WarningChip';
+import { useUpcoming } from '../queries';
+import { kindShown, useSongTimelineView } from './songTimelineView';
 
 export default function TopBarStrip() {
+  // THE NEXT-EVENT BOX JOINS ROW 2 AT <=1100px (his Q1 answer,
+  // 2026-10-15): the timeline row's own 96px box squeezed the track
+  // beside it at the 1024 tablet and the 800 wall kiosk, and the bar's
+  // second row had width going spare. `useNextBoxInBar` is the one
+  // predicate this and SongStrip both ask, so it is never in both places
+  // and never in neither.
+  const nextInBar = useNextBoxInBar();
+  // THE SAME RESOLVED TRACK the global row reads (songTimelineView.tsx):
+  // live, or the last one seen this session (his Q2 answer). Reading the
+  // raw live bridge track here would make the box's two hosts disagree
+  // the instant music stops — the row keeps counting down the last
+  // song's own events while this copy would fall back to its idle state.
+  const { track, filters } = useSongTimelineView();
+  const uri = track?.uri ?? null;
+  const { data: upcoming } = useUpcoming(nextInBar ? uri : null);
+  const barEvents = (upcoming?.events ?? []).filter((e) => kindShown(e.kind, filters));
+
   return (
     <div className="top-bar-strip">
       {/* House lighting's mode — FIRST, the resting state every page sits on.
@@ -35,6 +55,10 @@ export default function TopBarStrip() {
         * see App.tsx's own comment on the `display: contents` merge. */}
       <ModeChip />
       <EnergyBar />
+      {nextInBar && (
+        <SongNextBox events={barEvents}
+          durationMs={track?.duration_ms ?? 0} host="bar" />
+      )}
       <LightShowStrip />
       {/* The mockup's fourth thin divider (`.sp .sepv`) — see tokens.css's
         * own `.one-bar-sep-*` block for why each one is named for the

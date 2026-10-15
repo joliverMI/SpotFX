@@ -107,7 +107,7 @@ on the crystal or the strips" / "orbits should keep at least one dim blob"):
 `BREATH_FLOOR = BREATH_FLOOR_DIM` (0.25) makes the base render dim the frame
 to that share instead, so the lull's one blob stays, dim, through the
 breath (`phase_grammar.breath_gain(..., floor=)`). Do not set it back to 0.
-Help topics `drop-shockwave`, `drop-breath-hold`; proof
+Help topics `drop-shockwave`, `lull-dark-cap` (the breath-hold is folded into it); proof
 `scripts/check_drop_shockwave.py` (`breath_ok`) / `tests/test_phase_grammar.py`.
 
 WHETHER A DROP PAINTS IT AT ALL (2026-10-12, his "toggled per scene, as

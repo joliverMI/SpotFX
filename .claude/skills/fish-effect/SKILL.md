@@ -453,7 +453,7 @@ breath keys (`fx.device_model.BREATH_HOLD_EFFECTS` leaves the Fish out), so
 the lull's searcher swims straight through to the drop — no short black
 before it. The schema still carries the two keys (a told one is a no-op).
 The Fish scene's strip (`fireworks1d`) keeps its own 12% ember and is
-unchanged. Help topics `drop-shockwave`, `drop-breath-hold`; proof
+unchanged. Help topics `drop-shockwave`, `lull-dark-cap` (the breath-hold is folded into it); proof
 `scripts/check_drop_shockwave.py` (`breath_ok`) / `tests/test_phase_grammar.py`.
 
 WHETHER A DROP PAINTS IT AT ALL (2026-10-12, his "toggled per scene, as

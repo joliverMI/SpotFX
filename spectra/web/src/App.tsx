@@ -86,9 +86,11 @@ export default function App() {
       </ToastProvider>
     );
   }
-  // THE GLOBAL SONG TIMELINE (song-layout-plan §4) sits on every page
-  // except Home and Timeline, which carry their own editable copy (§13
-  // decision 5) — and not on the Live pop-out, handled above. The rule
+  // THE GLOBAL SONG TIMELINE (song-layout-plan §4) sits BELOW THE BAR on
+  // every page except Timeline, which carries its own full editing
+  // toolset — and not on the Live pop-out, handled above. Home shows this
+  // same row and edits it through the chrome's own shared view state (the
+  // Admiral, 2026-10-15); it no longer draws a second copy. The rule
   // itself lives in AppChrome.tsx so the harness that renders this same
   // chrome uses it too, rather than its own idea of where the strip goes.
   return (
@@ -98,10 +100,13 @@ export default function App() {
         * confirmed "not testing", so it costs no vertical space in normal
         * use; see TestingBar.tsx for why "unknown" still shows. */}
       <TestingBar />
-      {/* MENU, TIMELINE, BAR — the approved mockups' own order, and the
-        * ONE composition the design-fidelity gate renders too (see
-        * components/AppChrome.tsx on why it is shared, not duplicated). */}
-      <AppChrome showSongStrip={showsSongStrip(pathname)} />
+      {/* MENU, BAR, TIMELINE — his own 2026-10-15 order (a deliberate
+        * departure from the mockups' nav/timeline/bar), and the ONE
+        * composition the design-fidelity gate renders too. The page body
+        * is AppChrome's CHILDREN so the shared song-timeline view state
+        * covers both the timeline row and the page driving it — see
+        * components/AppChrome.tsx on why it is shared, not duplicated. */}
+      <AppChrome showSongStrip={showsSongStrip(pathname)}>
       <RoomOwnershipBar />
       <main className={pathname === '/' ? 'home-route' : undefined}>
         <Routes>
@@ -126,6 +131,7 @@ export default function App() {
           <Route path="/help" element={<HelpPage />} />
         </Routes>
       </main>
+      </AppChrome>
     </ToastProvider>
   );
 }

@@ -1,51 +1,51 @@
-/** Home's EDITABLE copy of the global song timeline (song-layout-plan,
- * data/ui-layout-plan/report.md §5): icon toggles for which marker kinds
- * draw, a draggable/zoomable WINDOW (reusing timeline/hooks/useFollowWindow
- * — the SAME follow/manual-window mechanics the Timeline page's own
- * TimelineBar uses, via its own pointer handlers here since TimelineBar
- * itself is bound to the legacy MusicTrigger/EventOption editor model),
- * and the tuned audio shape below it sharing the identical window and
- * playhead.
+/** HOME'S AUDIO SHAPE — the tuned canvas, ALIGNED under the global song
+ * timeline, with the one thin control row beneath it.
+ *
+ * WHAT CHANGED, AND WHY (the Admiral, 2026-10-15, verbatim: "the home
+ * page moves the timeline from the top bar down to right above the audio
+ * graph. Here's what I would prefer: move the timeline below the toolbar
+ * ... Then, on the home page, just make sure the audio shape graph is
+ * aligned with the timeline"). This card used to draw its OWN copy of the
+ * song timeline — a head with the title/artist/clock and its own strip —
+ * which is exactly the row that jumped down the page on Home. Both are
+ * GONE: the chrome's single `components/SongStrip` row is the timeline on
+ * every route now, it carries the draggable window while this shape is
+ * mounted, and this card is the shape plus its controls.
  *
  * THE SHAPE IS THE TIMELINE PAGE'S OWN RENDERER (design-fidelity pass,
- * 2026-10-14 — audit H5, the glaring Home gap). It used to be a bespoke
- * 160px box drawing three thin unfilled lines with no axis, no beat
- * ticks and no control row; the approved mockup copies the Timeline
- * page's tuned canvas, so this card now mounts the REAL
- * `TimelineCanvas` + `BUILDER_LAYERS` (filled RMS terrain, time axis,
- * beat strips, analysed/drop/Light-Show markers, the one playhead) with
- * the mockup's own single thin row of controls beneath it. Read-only:
- * `triggers`/`events` are empty and no editing pointer is wired, so
- * nothing here can author anything — the Timeline page stays the editor.
+ * 2026-10-14 — audit H5): the REAL `TimelineCanvas` + `BUILDER_LAYERS`
+ * (filled RMS terrain, time axis, beat strips, analysed/drop/Light-Show
+ * markers, the one playhead). Read-only: `triggers`/`events` are empty
+ * and no editing pointer is wired, so nothing here can author anything —
+ * the Timeline page stays the editor.
  *
- * THE STRIP IS THE SHARED PAINTER (audit H3): `components/trackPainter.ts`
- * draws it, the same function the global read-only strip uses, so the
- * two can never drift apart again — plus this one's own window overlay
- * with bright edge handles.
+ * ALIGNMENT IS MEASURED, NOT GUESSED (`alignToTrack` below). The timeline
+ * row lives in the chrome, outside `<main>`, with its own song block and
+ * next-event box either side of the track; this card lives inside
+ * `<main>` with the page's own padding. So the shape's left/right are
+ * written imperatively from the track's own measured box every time
+ * either one resizes — never a hand-copied padding sum, which would be
+ * wrong at the first breakpoint that moves the song block's width (the
+ * row has three of them).
  *
  * ONE SONG-TIME AXIS: markers draw against raw song time (the convention
- * songPositionMarkers already uses, per debug/plannedEvents.ts), and the
- * canvas's own `view.offsetMs` shifts the WAV-time shape onto it — the
- * same field BuilderPage passes. Both playheads read the ONE show clock
- * (lib/showClock.ts).
+ * `songPositionMarkers` already uses, per debug/plannedEvents.ts), the
+ * canvas's own `view.offsetMs` shifts the WAV-time shape onto it, and
+ * `librosaOffsetMs` is deliberately ZERO here — see the `view` memo.
+ * Both playheads read the ONE show clock (lib/showClock.ts).
  *
  * RESPONSIVENESS (the Admiral, 2026-10-14: "the audio shape isn't as
  * responsive"). `TimelineCanvas` is itself rAF-driven and DPR-aware with
  * its own "resize only when the measured size actually changed" guard, so
- * pointing the shape at it keeps PR 424's measured fix by construction
- * rather than by this file's own hand-rolled loop. The STRIP's markers
- * still rebuild only when WHAT is drawn changes (never on a window move,
- * since a marker's x never depends on the window), and its playhead /
- * window overlay / time readout still move in one rAF loop reading refs —
- * no React render per frame. */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+ * pointing the shape at it keeps PR 424's measured fix by construction.
+ * The alignment writer is a ResizeObserver, not a render, and skips a
+ * write that would not move anything — so it costs nothing per frame
+ * either. */
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Icon from '../components/Icon';
 import IconToggle from '../components/IconToggle';
 import InfoTip from '../components/InfoTip';
-import {
-  fmtMMSS, TRACK_HEIGHT, trackX, type UpcomingEvent,
-} from '../components/songStrip';
-import { paintTrack, type MarkNode } from '../components/trackPainter';
+import { useSongTimelineShape, useSongTimelineView } from '../components/songTimelineView';
 import TimelineCanvas from '../timeline/canvas/TimelineCanvas';
 import { BUILDER_LAYERS } from '../timeline/canvas/layers';
 import { computeAverages, computeMfccDistances } from '../timeline/canvas/data';
@@ -57,35 +57,60 @@ import {
   useAnalysedPlan, useAudioShapeData, useAudioShapeMeta, useDropSequences,
   useLibrosa, useShowArms,
 } from '../timeline/queries';
-import { useFollowWindow } from '../timeline/hooks/useFollowWindow';
-import { getPositionMs, getShowClockMs } from '../lib/showClock';
+import { getShowClockMs } from '../lib/showClock';
 import { AnalysedGlyph, DropSeqGlyph, LightShowGlyph } from './markerGlyphs';
-
-type KindFilter = { analysed: boolean; drop: boolean; lightShow: boolean };
-const isAnalysed = (k: UpcomingEvent['kind']) => k === 'scene' || k === 'flare' || k === 'colour';
-const isDrop = (k: UpcomingEvent['kind']) => k === 'charge' || k === 'lull' || k === 'drop';
-const isLightShow = (k: UpcomingEvent['kind']) => k === 'high' || k === 'low';
 
 /** THE MOCKUP'S OWN CANVAS HEIGHT, flat (`.sp .canvasbox canvas {
  * height: 230px }`) — the whole canvas, not a waveform area the lanes
  * then grow past. Home draws no per-beat score strips and no drop-
  * sequence snap rails (see `beatStrips: false` and the `rails: null`
  * below), so nothing is reserved under the waveform and this IS the
- * rendered height. The first build passed 230 as the waveform area on
- * top of five empty 21px lanes and a 36px rail band, which made Home's
- * shape ~370px — half as tall again as the drawing. */
+ * rendered height. */
 const CANVAS_H = 230;
 
+/** THE ALIGNMENT RULE, pure so the check can drive it with no DOM.
+ *
+ * IT IS A CORRECTION, NOT AN ABSOLUTE POSITION, and that is the whole
+ * point: it reads where the canvas CURRENTLY is against where the track
+ * is, and nudges the aligned block's own margin/width by exactly that
+ * difference. The first version computed an absolute `track.left -
+ * parent.left`, which is wrong by every bit of box model between the
+ * two — the card's own padding and border, the shape frame's border —
+ * and measured 18 px out at every width. A correction is immune to all
+ * of it by construction, and self-heals if any of it ever changes.
+ *
+ * The margin/width relationship is 1:1, so one pass converges; `moved`
+ * says whether a write is even needed, which is what keeps this from
+ * re-triggering its own ResizeObserver forever. */
+export const ALIGN_EPSILON_PX = 0.5;
+
+export function alignCorrection(
+  track: { left: number; width: number },
+  canvas: { left: number; width: number },
+  current: { marginLeft: number; width: number },
+): { marginLeft: number; width: number; moved: boolean } {
+  const dLeft = track.left - canvas.left;
+  const dWidth = track.width - canvas.width;
+  return {
+    marginLeft: current.marginLeft + dLeft,
+    width: current.width + dWidth,
+    moved: Math.abs(dLeft) > ALIGN_EPSILON_PX || Math.abs(dWidth) > ALIGN_EPSILON_PX,
+  };
+}
+
 export default function HomeTimeline({
-  uri, title, artist, durationMs, events, showAudioShape = true,
+  uri, showAudioShape = true, dimmed = false,
 }: {
   uri: string | null;
-  title: string;
-  artist: string;
-  durationMs: number;
-  events: UpcomingEvent[];
+  /** Nothing is playing and this is the LAST song's shape (his Q2
+   * answer) — drawn dimmed, with the row above it carrying the "last
+   * played" cue. Still fully interactive: the window, the filters and
+   * the lanes all work on a remembered song. */
+  dimmed?: boolean;
   /** The kiosk view's own small-screen rule (kiosk/kioskConfig.ts): drop
-   * the audio shape rather than squeeze it illegible. */
+   * the audio shape rather than squeeze it illegible. With it off this
+   * card renders nothing at all, and the timeline row above stays
+   * read-only (nothing is listening to its window). */
   showAudioShape?: boolean;
 }) {
   const { data: meta } = useAudioShapeMeta(showAudioShape ? uri : null);
@@ -95,10 +120,15 @@ export default function HomeTimeline({
   const { data: showArms } = useShowArms(!!uri);
   const { data: dropResp } = useDropSequences(uri);
   const offsetMs = Number(meta?.timestamp_offset_ms ?? 0);
-  const sections = librosa?.sections ?? null;
 
-  const [filters, setFilters] = useState<KindFilter>({ analysed: true, drop: true, lightShow: true });
-  const toggle = (k: keyof KindFilter) => setFilters((f) => ({ ...f, [k]: !f[k] }));
+  // THE SHARED VIEW STATE the chrome's timeline row owns (the window, the
+  // marker filters, the view history) — this card's control row is where
+  // he sets it, and registering as its listener is what turns the row's
+  // own window overlay on.
+  const { win, filters, toggleFilter, pushHistory, undo, redo, canUndo, canRedo } =
+    useSongTimelineView();
+  useSongTimelineShape(showAudioShape);
+
   // The mockup's own thin control row under the shape: which bands draw,
   // the marks, and the librosa lanes — real filters, wired straight into
   // the canvas's own ViewState (the same fields BuilderPage sets).
@@ -106,120 +136,7 @@ export default function HomeTimeline({
   const [lanes, setLanes] = useState({ sections: true, beats: true, more: false });
   const [intensityBg, setIntensityBg] = useState(false);
 
-  const shown = useMemo(() => events.filter((e) => (
-    (filters.analysed && isAnalysed(e.kind))
-    || (filters.drop && isDrop(e.kind))
-    || (filters.lightShow && isLightShow(e.kind))
-  )), [events, filters]);
-
-  const getNowForWin = useMemo(() => () => getShowClockMs(), []);
-  const win = useFollowWindow({ getNowMs: getNowForWin, durationMs: Math.max(1, durationMs), keyPrefix: 'home' });
-  // useFollowWindow returns a fresh object every render — only its own
-  // `getWin` property is a stable (useCallback-memoized) function. Reading
-  // it through a ref, rather than listing `win` in an effect's deps, is
-  // what lets the rAF loop below never re-run on an unrelated re-render.
-  const winRef = useRef(win);
-  winRef.current = win;
-
-  // UNDO/REDO OVER THE WINDOW (audit H2 — the mockup draws both buttons
-  // beside Follow / Full song). They step this card's own view history:
-  // each committed window change (a drag ending, Follow, Full song) pushes
-  // the previous window, so the pair has real agency rather than being a
-  // control that implies an edit Home cannot make (this app's own
-  // "a box he cannot untick still implies agency" rule — see the
-  // charge/lull Override Blend entry in AGENTS.md).
-  const [past, setPast] = useState<{ startMs: number; endMs: number; follow: boolean }[]>([]);
-  const [future, setFuture] = useState<{ startMs: number; endMs: number; follow: boolean }[]>([]);
-  const snapshot = useCallback(() => {
-    const w = winRef.current.getWin();
-    return { startMs: w.startMs, endMs: w.endMs, follow: winRef.current.follow };
-  }, []);
-  const pushHistory = useCallback(() => {
-    setPast((p) => [...p.slice(-19), snapshot()]);
-    setFuture([]);
-  }, [snapshot]);
-  const restore = (s: { startMs: number; endMs: number; follow: boolean }) => {
-    if (s.follow) win.setFollowSnapped(true);
-    else { win.setFollow(false); win.setManualWin({ startMs: s.startMs, endMs: s.endMs }); }
-  };
-  const undo = () => {
-    if (past.length === 0) return;
-    const now = snapshot();
-    const prev = past[past.length - 1];
-    setPast((p) => p.slice(0, -1));
-    setFuture((f) => [now, ...f].slice(0, 20));
-    restore(prev);
-  };
-  const redo = () => {
-    if (future.length === 0) return;
-    const now = snapshot();
-    const nxt = future[0];
-    setFuture((f) => f.slice(1));
-    setPast((p) => [...p.slice(-19), now]);
-    restore(nxt);
-  };
-
-  const stripRef = useRef<HTMLDivElement>(null);
-  const svgRef = useRef<SVGSVGElement>(null);
-  const markersGroupRef = useRef<SVGGElement>(null);
-  const markNodesRef = useRef<MarkNode[]>([]);
-  const windowOverlayRef = useRef<HTMLDivElement>(null);
-  const playheadRef = useRef<SVGGElement>(null);
-  const timeRef = useRef<HTMLSpanElement>(null);
-
-  // The strip's own body: the SHARED painter, so Home and the global
-  // strip draw one picture. Rebuilt only when WHAT is drawn changes, and
-  // on resize (the painter rewrites the viewBox from the measured box).
-  useEffect(() => {
-    const svg = svgRef.current;
-    const group = markersGroupRef.current;
-    if (!svg || !group) return undefined;
-    const build = () => {
-      markNodesRef.current = paintTrack(svg, group, { events: shown, durationMs, sections });
-    };
-    build();
-    const observer = new ResizeObserver(build);
-    observer.observe(svg);
-    return () => observer.disconnect();
-  }, [shown, durationMs, sections]);
-
-  // THE STRIP's own rAF loop — the window-overlay rect, its playhead, the
-  // time readout and the passed-marker fade. The SHAPE has its own
-  // rAF loop inside TimelineCanvas, so nothing here draws it.
-  useEffect(() => {
-    let raf = 0;
-    const tick = () => {
-      const w = winRef.current.getWin();
-      const span = Math.max(1, w.endMs - w.startMs);
-      if (windowOverlayRef.current) {
-        windowOverlayRef.current.style.left = `${(w.startMs / Math.max(1, durationMs)) * 100}%`;
-        windowOverlayRef.current.style.width = `${(span / Math.max(1, durationMs)) * 100}%`;
-      }
-      const now = getShowClockMs();
-      const pos = getPositionMs();
-      const svgW = svgRef.current?.getBoundingClientRect().width ?? 0;
-      if (playheadRef.current && now != null && durationMs > 0 && svgW > 0) {
-        playheadRef.current.setAttribute('transform', `translate(${trackX(now, durationMs, svgW).toFixed(2)},0)`);
-        playheadRef.current.setAttribute('opacity', '1');
-      } else {
-        playheadRef.current?.setAttribute('opacity', '0');
-      }
-      if (timeRef.current) {
-        timeRef.current.textContent = pos != null && durationMs > 0
-          ? `${fmtMMSS(pos)} / ${fmtMMSS(durationMs)}` : '—:— / —:—';
-      }
-      if (now != null) {
-        for (const m of markNodesRef.current) {
-          m.node.classList.toggle('song-strip-mk-past', m.ms < now - 50);
-        }
-      }
-      raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [durationMs]);
-
-  // ── the shape: the Timeline page's own canvas, read-only ───────────────
+  // ── the shape ──────────────────────────────────────────────────────────
   const averages = useMemo(() => (shape ? computeAverages(shape, 4000) : null), [shape]);
   const mfccDistances = useMemo(() => computeMfccDistances(librosa ?? null), [librosa]);
   const maxRms = useMemo(() => (shape ? Math.max(...shape.rms_total, 1e-9) : null), [shape]);
@@ -253,12 +170,29 @@ export default function HomeTimeline({
     scales: { total: 1, bass: 1, mid: 1, high: 1 },
     scaleOverall: 1,
     offsetMs,
-    librosaOffsetMs: Number((librosa as { librosa_offset_ms?: number } | undefined)?.librosa_offset_ms ?? 0),
+    // ZERO, DELIBERATELY — the raw convention. `librosa_offset_ms` is
+    // recorded in AGENTS.md as unreliable (nonzero on ~74% of his
+    // analyses, with outliers into the tens of thousands of seconds, and
+    // a per-song best-fit shift matched the stored number in 0 of 126
+    // files), and the rule there is to read section/beat times RAW for
+    // anything that has to line up with playback position. Reading them
+    // raw here is also what makes this canvas internally consistent — the
+    // section lanes, the beat ticks and the per-section intensity blocks
+    // all on one axis — AND consistent with the timeline row's own energy
+    // terrain above it, which is the agreement his "the intensity graph
+    // should be by section, like the top bar timeline" asks for. The
+    // Timeline page keeps its own convention (it is the editor and has
+    // its own offset controls); this is Home's.
+    librosaOffsetMs: 0,
     triggerOffsetMs: 0,
     maxRms,
-    intensityMode: intensityBg ? 'total' : 'off',
+    // BY SECTION, not the continuous RMS curve (his own 2026-10-15 ask):
+    // one level per librosa section, drawn as blocks from the SAME
+    // `sections[].energy_rms` the timeline row's terrain is built from
+    // (components/songStrip.ts::terrainPath).
+    intensityMode: intensityBg ? 'section' : 'off',
     advanced: false,
-  }), [bands, lanes, intensityBg, offsetMs, librosa, maxRms]);
+  }), [bands, lanes, intensityBg, offsetMs, maxRms]);
 
   const data: LayerDataBag = useMemo(() => ({
     shape: shape ?? null,
@@ -290,161 +224,134 @@ export default function HomeTimeline({
   }), [shape, averages, meta, librosa, mfccDistances, analysedMarkers, dropSeqs,
        dropResp, lightShowCues]);
 
-  // Flat: nothing is reserved under the waveform (see the data bag above),
-  // so this is the canvas's whole rendered height.
-  const canvasHeight = CANVAS_H;
+  // ── ALIGNED WITH THE TIMELINE TRACK ────────────────────────────────────
+  const alignedRef = useRef<HTMLDivElement>(null);
+  const canvasBoxRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!showAudioShape) return undefined;
+    const apply = () => {
+      const aligned = alignedRef.current;
+      const canvasBox = canvasBoxRef.current;
+      const track = document.querySelector('.song-strip-track');
+      if (!aligned || !canvasBox || !track) return;
+      const tr = track.getBoundingClientRect();
+      const cr = canvasBox.getBoundingClientRect();
+      const ar = aligned.getBoundingClientRect();
+      // Neither side laid out yet (a hidden or zero-width track, a shape
+      // the canvas has not sized) must ever be taken as a target.
+      if (tr.width <= 1 || cr.width <= 1 || ar.width <= 1) return;
+      const next = alignCorrection(
+        { left: tr.left, width: tr.width },
+        { left: cr.left, width: cr.width },
+        {
+          marginLeft: parseFloat(aligned.style.marginLeft) || 0,
+          width: ar.width,
+        },
+      );
+      if (!next.moved) return;
+      aligned.style.marginLeft = `${next.marginLeft.toFixed(2)}px`;
+      aligned.style.width = `${next.width.toFixed(2)}px`;
+    };
+    apply();
+    const observer = new ResizeObserver(apply);
+    const track = document.querySelector('.song-strip-track');
+    if (track) observer.observe(track);
+    if (alignedRef.current?.parentElement) observer.observe(alignedRef.current.parentElement);
+    window.addEventListener('resize', apply);
+    return () => { observer.disconnect(); window.removeEventListener('resize', apply); };
+  }, [showAudioShape]);
 
-  // Window drag — TimelineBar's own dragEdge shape (BuilderPage.tsx's
-  // onAdjustFollow convention): in follow mode, an edge drag resizes the
-  // look-ahead/window size; a center drag always detaches into a manual
-  // pan (the plan's own "dragging leaves Follow" rule).
-  const dragWin = (edge: 'start' | 'end' | 'center') => (ev: React.PointerEvent) => {
-    ev.preventDefault(); ev.stopPropagation();
-    const strip = stripRef.current;
-    if (!strip) return;
-    pushHistory();
-    (ev.target as HTMLElement).setPointerCapture(ev.pointerId);
-    let lastX = ev.clientX;
-    const move = (e: PointerEvent) => {
-      const rect = strip.getBoundingClientRect();
-      const deltaMs = ((e.clientX - lastX) / Math.max(1, rect.width)) * Math.max(1, durationMs);
-      lastX = e.clientX;
-      if (win.follow && edge !== 'center') {
-        if (edge === 'end') win.setFutureS((s) => Math.max(0, s + deltaMs / 1000));
-        else win.setWindowS((s) => Math.max(2, s - deltaMs / 1000));
-        return;
-      }
-      const w = win.getWin();
-      if (edge === 'center') win.setManualWin({ startMs: w.startMs + deltaMs, endMs: w.endMs + deltaMs });
-      else if (edge === 'start') win.setManualWin({ startMs: Math.min(w.startMs + deltaMs, w.endMs - 1000), endMs: w.endMs });
-      else win.setManualWin({ startMs: w.startMs, endMs: Math.max(w.endMs + deltaMs, w.startMs + 1000) });
-      if (edge === 'center' && win.follow) win.setFollow(false);
-    };
-    const up = (e: PointerEvent) => {
-      (ev.target as HTMLElement).releasePointerCapture(e.pointerId);
-      window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', up);
-    };
-    window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', up);
-  };
+  if (!showAudioShape) return null;
 
   return (
-    <div className="home-timeline card">
-      <div className="home-timeline-head">
-        {/* The mockup's own head: equaliser, title and artist INLINE, then
-          * the marker toggles, undo/redo, Follow / Full song, and a bold
-          * tabular progress (audit H2 — the live build had a "♪" text
-          * glyph, title/artist stacked, and no undo/redo). */}
-        <span className="song-strip-eq home-timeline-eq" aria-hidden><i /><i /><i /></span>
-        <b className="home-timeline-title">{title || 'No song'}</b>
-        <span className="home-timeline-artist">{artist}</span>
-        <div className="home-timeline-tools">
-          <IconToggle glyph={AnalysedGlyph} on={filters.analysed} onChange={() => toggle('analysed')}
-            title="Analysed events (scene changes and flares)" />
-          <IconToggle glyph={DropSeqGlyph} on={filters.drop} onChange={() => toggle('drop')}
-            title="Drop sequences" />
-          <IconToggle glyph={LightShowGlyph} on={filters.lightShow} onChange={() => toggle('lightShow')}
-            title="Light Show High / Low triggers" />
-          <span className="home-timeline-vsep" aria-hidden />
-          <button type="button" className="home-timeline-tool" onClick={undo} disabled={past.length === 0}
-            title="Undo the last view change" aria-label="Undo the last view change">
-            <Icon name="undo" size={15} />
-          </button>
-          <button type="button" className="home-timeline-tool" onClick={redo} disabled={future.length === 0}
-            title="Redo the view change" aria-label="Redo the view change">
-            <Icon name="redo" size={15} />
-          </button>
-          <span className="home-timeline-vsep" aria-hidden />
-          <button type="button" className={`home-timeline-tool${win.follow ? ' home-timeline-tool-on' : ''}`}
-            title="Follow the playhead" aria-label="Follow the playhead"
-            onClick={() => { pushHistory(); win.setFollowSnapped(!win.follow); }}>
-            <Icon name="follow" size={15} />
-          </button>
-          <button type="button" className="home-timeline-tool" title="Whole song" aria-label="Whole song"
-            onClick={() => { pushHistory(); win.fullSong(); }}>
-            <Icon name="full" size={15} />
-          </button>
-          {/* The page's own help lives on the clock's hover description —
-            * no visible circle here either (idea 5's "one help '?' per
-            * page", which is the menu's own). */}
-          <InfoTip topic="home-page"
-            text="The whole song with everything that will fire, and the tuned audio shape below it. Drag the window on the strip to zoom; ◎ follows the playhead, ↔ shows the whole song.">
-            <span ref={timeRef} className="home-timeline-clock tabular-nums">—:— / —:—</span>
-          </InfoTip>
+    <div className={`home-timeline card${dimmed ? ' home-timeline-dimmed' : ''}`}>
+      {/* ONE element carries the measured alignment, so the shape and its
+        * control row move together and there is one geometry writer. */}
+      <div ref={alignedRef} className="home-timeline-aligned">
+        <div ref={canvasBoxRef} className="home-timeline-shape">
+          <TimelineCanvas
+            layers={BUILDER_LAYERS}
+            data={data}
+            view={view}
+            getWin={win.getWin}
+            getNowMs={getShowClockMs}
+            height={CANVAS_H}
+          />
+        </div>
+        {/* ONE THIN ROW of controls, the mockup's own (audit H5). */}
+        <div className="home-timeline-controls">
+          <div className="home-timeline-controls-group">
+            <IconToggle label="T" size={28} on={bands.total} title="Total RMS"
+              onChange={() => setBands((b) => ({ ...b, total: !b.total }))} />
+            <IconToggle label="B" size={28} on={bands.bass} title="Bass RMS"
+              onChange={() => setBands((b) => ({ ...b, bass: !b.bass }))} />
+            <IconToggle label="M" size={28} on={bands.mid} title="Mid RMS"
+              onChange={() => setBands((b) => ({ ...b, mid: !b.mid }))} />
+            <IconToggle label="H" size={28} on={bands.high} title="High RMS"
+              onChange={() => setBands((b) => ({ ...b, high: !b.high }))} />
+            <span className="home-timeline-vsep" aria-hidden />
+            <IconToggle label="Marks" size={28} on={bands.marks} title="The song's own marks"
+              onChange={() => setBands((b) => ({ ...b, marks: !b.marks }))} />
+            <span className="home-timeline-vsep" aria-hidden />
+            <IconToggle label="sections" size={28} on={lanes.sections} title="Librosa section boundaries"
+              onChange={() => setLanes((l) => ({ ...l, sections: !l.sections }))} />
+            <IconToggle label="beats" size={28} on={lanes.beats} title="Librosa beat strips"
+              onChange={() => setLanes((l) => ({ ...l, beats: !l.beats }))} />
+            <IconToggle icon="more" size={28} on={lanes.more}
+              title="More lanes: onsets, harmonic, bass, snare, mfcc"
+              onChange={() => setLanes((l) => ({ ...l, more: !l.more }))} />
+          </div>
+          <div className="home-timeline-controls-group">
+            {/* THE MARKER FILTERS, IMMEDIATELY LEFT OF THE INTENSITY BOLT
+              * (his own 2026-10-15 placement). Same component, same look
+              * as the ones that used to sit in this card's retired head —
+              * and they govern BOTH this shape and the timeline row above
+              * it, since both read the one shared filter set. */}
+            <IconToggle glyph={AnalysedGlyph} size={28} on={filters.analysed}
+              onChange={() => toggleFilter('analysed')}
+              title="Analysed events (scene changes and flares)" />
+            <IconToggle glyph={DropSeqGlyph} size={28} on={filters.drop}
+              onChange={() => toggleFilter('drop')} title="Drop sequences" />
+            <IconToggle glyph={LightShowGlyph} size={28} on={filters.lightShow}
+              onChange={() => toggleFilter('lightShow')}
+              title="Light Show High / Low triggers" />
+            <IconToggle icon="bolt" size={28} on={intensityBg}
+              title="Shade the background by the song's own section energy"
+              onChange={() => setIntensityBg((v) => !v)} />
+            <span className="home-timeline-vsep" aria-hidden />
+            {/* THE VIEW CONTROLS for the window drawn on the timeline row
+              * above (audit H2 kept them beside Follow / Full song; they
+              * live here now, with the shape they actually govern). */}
+            <button type="button" className="home-timeline-tool" onClick={undo} disabled={!canUndo}
+              title="Undo the last view change" aria-label="Undo the last view change">
+              <Icon name="undo" size={15} />
+            </button>
+            <button type="button" className="home-timeline-tool" onClick={redo} disabled={!canRedo}
+              title="Redo the view change" aria-label="Redo the view change">
+              <Icon name="redo" size={15} />
+            </button>
+            <button type="button" className={`home-timeline-tool${win.follow ? ' home-timeline-tool-on' : ''}`}
+              title="Follow the playhead" aria-label="Follow the playhead"
+              onClick={() => { pushHistory(); win.setFollowSnapped(!win.follow); }}>
+              <Icon name="follow" size={15} />
+            </button>
+            <button type="button" className="home-timeline-tool" title="Whole song" aria-label="Whole song"
+              onClick={() => { pushHistory(); win.fullSong(); }}>
+              <Icon name="full" size={15} />
+            </button>
+            <InfoTip topic="builder-analysed-events"
+              text="Cyan squares are scene changes and lime dots analysed flares, sized and shaded by rank. Gold is a charge, sky a lull, pink a drop. White and indigo flags are the Light Show's High and Low Triggers. Drag the window on the timeline above to choose what this shows.">
+              <span className="home-timeline-tool home-timeline-tool-wide">
+                <Icon name="info" size={14} /> Legend
+              </span>
+            </InfoTip>
+            <a className="home-timeline-tool home-timeline-tool-wide" href="/spectra/timeline"
+              title="Open the Timeline page to edit this song">
+              <Icon name="timeline" size={14} /> Timeline
+            </a>
+          </div>
         </div>
       </div>
-
-      <div ref={stripRef} className="home-timeline-strip">
-        <svg ref={svgRef} className="song-strip-svg" preserveAspectRatio="none"
-            viewBox={`0 0 100 ${TRACK_HEIGHT}`} role="img"
-            aria-label={`${title || 'No song'}: whole song with planned events`}>
-          <g ref={markersGroupRef} />
-          <g ref={playheadRef} opacity="0">
-            <line x1="0" x2="0" y1="0" y2={TRACK_HEIGHT} className="song-strip-playhead" />
-            <path d="M-4 0 L4 0 L0 5Z" fill="#fff" />
-          </g>
-        </svg>
-        <div ref={windowOverlayRef} className="home-timeline-window" onPointerDown={dragWin('center')}>
-          <div className="home-timeline-window-edge left" onPointerDown={dragWin('start')} />
-          <div className="home-timeline-window-edge right" onPointerDown={dragWin('end')} />
-        </div>
-      </div>
-
-      {showAudioShape && (
-        <>
-          <div className="home-timeline-shape">
-            <TimelineCanvas
-              layers={BUILDER_LAYERS}
-              data={data}
-              view={view}
-              getWin={win.getWin}
-              getNowMs={getShowClockMs}
-              height={canvasHeight}
-            />
-          </div>
-          {/* ONE THIN ROW of controls, the mockup's own (audit H5 — the
-            * live build had none at all). */}
-          <div className="home-timeline-controls">
-            <div className="home-timeline-controls-group">
-              <IconToggle label="T" size={28} on={bands.total} title="Total RMS"
-                onChange={() => setBands((b) => ({ ...b, total: !b.total }))} />
-              <IconToggle label="B" size={28} on={bands.bass} title="Bass RMS"
-                onChange={() => setBands((b) => ({ ...b, bass: !b.bass }))} />
-              <IconToggle label="M" size={28} on={bands.mid} title="Mid RMS"
-                onChange={() => setBands((b) => ({ ...b, mid: !b.mid }))} />
-              <IconToggle label="H" size={28} on={bands.high} title="High RMS"
-                onChange={() => setBands((b) => ({ ...b, high: !b.high }))} />
-              <span className="home-timeline-vsep" aria-hidden />
-              <IconToggle label="Marks" size={28} on={bands.marks} title="The song's own marks"
-                onChange={() => setBands((b) => ({ ...b, marks: !b.marks }))} />
-              <span className="home-timeline-vsep" aria-hidden />
-              <IconToggle label="sections" size={28} on={lanes.sections} title="Librosa section boundaries"
-                onChange={() => setLanes((l) => ({ ...l, sections: !l.sections }))} />
-              <IconToggle label="beats" size={28} on={lanes.beats} title="Librosa beat strips"
-                onChange={() => setLanes((l) => ({ ...l, beats: !l.beats }))} />
-              <IconToggle icon="more" size={28} on={lanes.more}
-                title="More lanes: onsets, harmonic, bass, snare, mfcc"
-                onChange={() => setLanes((l) => ({ ...l, more: !l.more }))} />
-            </div>
-            <div className="home-timeline-controls-group">
-              <IconToggle icon="bolt" size={28} on={intensityBg}
-                title="Shade the background by the song's own intensity"
-                onChange={() => setIntensityBg((v) => !v)} />
-              <InfoTip topic="builder-analysed-events"
-                text="Cyan squares are scene changes and lime dots analysed flares, sized and shaded by rank. Gold is a charge, sky a lull, pink a drop. White and indigo flags are the Light Show's High and Low Triggers.">
-                <span className="home-timeline-tool home-timeline-tool-wide">
-                  <Icon name="info" size={14} /> Legend
-                </span>
-              </InfoTip>
-              <a className="home-timeline-tool home-timeline-tool-wide" href="/spectra/timeline"
-                title="Open the Timeline page to edit this song">
-                <Icon name="timeline" size={14} /> Timeline
-              </a>
-            </div>
-          </div>
-        </>
-      )}
     </div>
   );
 }

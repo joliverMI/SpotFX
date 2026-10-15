@@ -336,9 +336,28 @@ button.danger:hover { border-color: var(--danger); color: var(--danger); }
  * `.one-bar`'s own `flex-wrap`. Scoping the override to `:has()` (rather
  * than making `.one-bar` wrap unconditionally) keeps every OTHER
  * occupant's "fits on one line at 1024/1180/1440" guarantee intact —
- * nothing here wraps unless the expanded stage is actually mounted. */
+ * nothing here wraps unless the expanded stage is actually mounted.
+ *
+ * `height` AND `overflow` MUST BE RELEASED WITH THE WRAP (the Admiral,
+ * 2026-10-15: "when I expand the preview, it is completely hidden").
+ * MEASURED against the live app at 1440 before the fix: the expanded row
+ * laid out correctly at y=87, 1408x445 — inside a bar whose own
+ * `clientHeight` was still 47 and whose `overflow-x: auto` makes
+ * `overflow-y` compute to `auto` too, i.e. a 48px scroll container that
+ * clipped its entire second row. `document.elementFromPoint` over the
+ * row's own middle returned the PAGE BELOW IT, which is his word
+ * "completely hidden", exactly. It worked at 1024 and on the 800 kiosk
+ * only because the deliberate-two-row band below already sets
+ * `height: auto` there — which is why the report was a desktop one.
+ *
+ * `overflow: visible` is safe precisely BECAUSE this rule also wraps: the
+ * horizontal scroll exists for the one-line band, where occupants cannot
+ * wrap; once they can, there is nothing left to scroll sideways. */
 .one-bar:has(.device-preview-expanded-row) {
   flex-wrap: wrap;
+  height: auto;
+  overflow-x: visible;
+  overflow-y: visible;
 }
 /* Tablet squeeze (plan §12's own named risk: "names get ~110-140px slots
  * at 1024"): tighten the row's own spacing and the Light Show slot's label
@@ -396,6 +415,10 @@ button.danger:hover { border-color: var(--danger); color: var(--danger); }
 .one-bar .one-bar-sep-before-energy { order: 55; }
 .one-bar .energy-mark-group { order: 60; }
 .one-bar .one-bar-sep-before-show { order: 65; }
+/* The next-event box, when the bar is its host (<=1100px, his Q1 answer
+ * — components/SongNextBox.tsx). It is NOT mounted at all above that
+ * width, so this order is simply unused there. */
+.one-bar .song-strip-next-in-bar { order: 67; }
 .one-bar .light-show-strip { order: 70; }
 .one-bar .one-bar-sep-before-preview { order: 75; }
 .one-bar .device-preview-strip { order: 80; }
@@ -467,6 +490,22 @@ button.danger:hover { border-color: var(--danger); color: var(--danger); }
   /* Row 2 fills its own width, so the mockup's push-to-the-right spacer
      has nothing to push against and would just blank the middle. */
   .one-bar .one-bar-spacer { display: none; }
+  /* The 1180 tier's own 72px cap on the Light Show act name was there to
+   * keep a ONE-LINE row from scrolling sideways. Row 2 has its own whole
+   * width here, so the cap would now throw away the room the fill just
+   * bought — the slot's own `text-overflow: ellipsis` still protects a
+   * genuinely long name. */
+  .one-bar .light-show-act-name { max-width: none; }
+  /* ROW 2 FILLS THE ROW — "no left-aligned hole" (his Q1 answer,
+   * 2026-10-15). The Light Show slot is `flex: 0 1 200px` by default, so
+   * with ~800px of row to itself it sat at 200px and left the rest
+   * empty — AND truncated its own idle text to "Nothing a..." at the
+   * 800px kiosk, which he reported separately. Letting it take the slack
+   * fixes both at once: the hole closes and the text has room. The
+   * next-event box (hosted here at these widths) keeps its own fixed
+   * width so its countdown never reflows. */
+  .one-bar .light-show-strip { flex: 1 1 200px; }
+  .one-bar .song-strip-next-in-bar { flex: 0 0 auto; }
 }
 /* Between the two: 1180 still fits one line, but only with the swatch
  * count capped (measured: 2 fits, every favourite shown does not). */
@@ -2470,20 +2509,37 @@ button.linklike { background: none; border: none; padding: 0 4px; color: var(--a
  * `.sp .ib` size: 36 wide, 34 tall, in a 48px bar (audit B1 — the live
  * build was 34x30 plus a separate ⓘ circle beside it, 56px in all).
  *
- * THE STATE COLOURS ARE UNCHANGED, deliberately: whether this button
- * should use the mockup's purple-lit/grey-off or the live green-on/
- * purple-music/amber-idle mapping is a design-choice question with the
- * Admiral (Q3, held on task ui-fidelity-fix). They are isolated to the
- * four rules below so the answer is a small change. */
+ * THE STATE COLOURS ARE THE MOCKUP'S (his Q3 answer, 2026-10-15: "house
+ * button per the mockup: purple lit when a mode drives the room, grey
+ * when house lighting is off, small music badge while music has the
+ * room, hold ring outside"), replacing the live build's own
+ * green-on/purple-music/amber-idle mapping:
+ *
+ *   on     a mode is resting on the room  -> PURPLE LIT
+ *   music  a mode owns the room, the show has it right now -> PURPLE LIT
+ *          plus the ♪ badge (his words put the music state in the BADGE,
+ *          not in a third colour — the mode still drives the room, which
+ *          is what the lit state says)
+ *   off    house lighting switched off, or no mode set -> GREY, dimmed
+ *   idle   a mode IS set but nothing is applied (SPECTRA does not hold
+ *          the room, or a standby) -> the plain unlit button. Not purple
+ *          (it is not driving) and not the off grey (it is not off) —
+ *          his three named states do not cover this fourth one, and
+ *          collapsing it into either would make the button claim
+ *          something untrue. The words stay in the tooltip/aria-label. */
 .mode-chip a {
   display: inline-flex; align-items: center; justify-content: center;
   width: 36px; height: 34px; border-radius: var(--radius);
   border: 1px solid var(--border); background: var(--surface); text-decoration: none;
+  color: var(--text-muted);
 }
-.mode-chip-on a { color: var(--ok); border-color: var(--ok); }
-.mode-chip-music a { color: var(--accent2); border-color: var(--accent2); }
-.mode-chip-idle a { color: var(--warning); border-color: var(--warning); }
-.mode-chip-off a { color: var(--text-muted); opacity: 0.7; }
+.mode-chip-on a, .mode-chip-music a {
+  color: var(--accent2);
+  border-color: var(--accent);
+  background: rgba(168, 85, 247, 0.18);
+}
+.mode-chip-idle a { color: var(--text); border-color: var(--border); }
+.mode-chip-off a { color: var(--text-muted); opacity: 0.6; }
 /* `touch-action: none`, same reasoning as .release-hold-btn above (found
  * 2026-10-09): `manipulation` let the browser cancel the hold on ordinary
  * finger drift via a native `pointercancel`. */
@@ -2915,8 +2971,16 @@ button.linklike { background: none; border: none; padding: 0 4px; color: var(--a
   background: linear-gradient(180deg, var(--surface), var(--bg));
   border-bottom: 1px solid var(--border);
   position: relative;
-  z-index: 4;
+  /* BELOW `.one-bar` (z-index 3) — the timeline row now FOLLOWS the bar in
+   * the DOM (the Admiral's 2026-10-15 order), so without this it would
+   * paint over everything the bar drops downward: a Scene/Colour/Mode
+   * popover panel, and the expanded device-preview stage. It was 4 while
+   * it sat ABOVE the bar, where nothing of the bar's reached up into it. */
+  z-index: 2;
 }
+/* WITH THE BOX IN THE BAR (<=1100px) the row drops that column outright
+ * rather than leaving a 96px gap where it used to be. */
+.song-strip-no-next { grid-template-columns: 220px minmax(0, 1fr) 100px; }
 .song-strip-song-tip { min-width: 0; }
 /* THE SONG BLOCK TAPS THROUGH TO HOME (audit T2) and carries the
  * mockup's own three-bar equaliser instead of an ⓘ circle. */
@@ -2953,6 +3017,32 @@ button.linklike { background: none; border: none; padding: 0 4px; color: var(--a
 }
 .song-strip-track { position: relative; min-width: 0; }
 .song-strip-svg { width: 100%; height: 100%; display: block; overflow: visible; }
+/* THE DRAGGABLE WINDOW (Home only — the row is read-only everywhere
+ * else; SongStrip.tsx's rAF loop hides it when nothing is listening).
+ * Moved here verbatim from Home's own retired copy of the strip, bright
+ * edge handles included (design-fidelity audit H3 — it was a flat grey
+ * block). `touch-action: none` is load-bearing on every one of these:
+ * a stationary finger's own drift otherwise reads as a page pan and the
+ * browser takes the gesture (see tokens.css's `.long-press-target`
+ * block and AGENTS.md's own hold-to-act entry for the same lesson). */
+.song-strip-window {
+  position: absolute; top: 0; bottom: 0;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1.5px solid rgba(255, 255, 255, 0.55);
+  border-radius: 5px;
+  cursor: grab; z-index: 2;
+  touch-action: none;
+}
+.song-strip-window-edge {
+  position: absolute; top: 9px;
+  width: 7px; height: 21px;
+  border-radius: 2px;
+  background: var(--text);
+  cursor: ew-resize;
+  touch-action: none;
+}
+.song-strip-window-edge.left { left: -3.5px; }
+.song-strip-window-edge.right { right: -3.5px; }
 .song-strip-playhead { stroke: #fff; stroke-width: 2; filter: drop-shadow(0 0 3px rgba(255,255,255,0.75)); }
 .song-strip-drop-num { font-size: 9px; font-weight: 800; font-family: inherit; }
 /* A passed marker fades; the one that just fired flashes once — approved
@@ -3028,6 +3118,22 @@ button.linklike { background: none; border: none; padding: 0 4px; color: var(--a
   100% { box-shadow: 0 0 0 0 transparent; }
 }
 /* Bold current time, muted total (audit T5). */
+/* THE BAR'S OWN COPY of the next-event box (his Q1 answer) — the same
+ * glyph/countdown/fill, sized and bordered like its bar neighbours
+ * (`.light-show-slot`'s own 34px) rather than the timeline row's 39px
+ * track-height box. One component, two hosts: components/SongNextBox.tsx. */
+.song-strip-next-in-bar {
+  height: 34px;
+  /* The SAME 96px the row's own copy is sized for — that width is what
+   * makes "99.9s", the widest string the countdown can ever hold, fit
+   * with no reflow (songStrip.ts::countdownParts' own boundary rule).
+   * A narrower bar copy would clip exactly the moment it matters. */
+  width: 96px;
+  flex: none;
+  color: var(--text);
+  text-decoration: none;
+}
+.song-strip-next-in-bar:hover { text-decoration: none; }
 .song-strip-time {
   font-size: 13px;
   color: var(--text-muted);
@@ -3043,9 +3149,11 @@ button.linklike { background: none; border: none; padding: 0 4px; color: var(--a
 
 @media (max-width: 1180px) {
   .song-strip { grid-template-columns: 176px minmax(0, 1fr) 96px 88px; gap: 12px; }
+  .song-strip-no-next { grid-template-columns: 176px minmax(0, 1fr) 88px; }
 }
 @media (max-width: 900px) {
   .song-strip { grid-template-columns: 128px minmax(0, 1fr) 92px 72px; gap: 10px; padding: 0 10px; }
+  .song-strip-no-next { grid-template-columns: 128px minmax(0, 1fr) 72px; }
   .song-strip-song-artist { display: none; }
   .song-strip-time { font-size: 11.5px; }
 }
@@ -3059,6 +3167,8 @@ button.linklike { background: none; border: none; padding: 0 4px; color: var(--a
   }
   .song-strip-song-tip { grid-row: 1; grid-column: 1; }
   .song-strip-time { grid-row: 1; grid-column: 2; }
+  /* The phone tier keeps its OWN next-event box (the box moves to the
+     bar only in the 521-1100 band — components/SongNextBox.tsx). */
   .song-strip-track { grid-row: 2; grid-column: 1; }
   .song-strip-next { grid-row: 2; grid-column: 2; grid-template-columns: 16px minmax(0, 1fr); padding: 0 6px; gap: 5px; }
   .song-strip-next-count { font-size: 14px; }
@@ -3068,13 +3178,33 @@ button.linklike { background: none; border: none; padding: 0 4px; color: var(--a
  * Every measurement is the approved mockup's own `homePage()` block
  * (design-fidelity pass, 2026-10-14; audit H2-H7). */
 .home-page { display: flex; flex-direction: column; gap: 16px; }
+/* NOTHING PLAYING: the LAST song, DIMMED (the Admiral's Q2 answer,
+ * 2026-10-15 — "show the LAST song's timeline + audio shape dimmed ...
+ * never a bare 'Nothing playing' card"). Opacity only: every control
+ * still works on a remembered song, and the row above carries the words
+ * ("last played"), so the dimming is the at-a-glance cue rather than the
+ * whole statement. */
+.home-timeline-dimmed { opacity: 0.62; }
+.song-strip-last .song-strip-track,
+.song-strip-last .song-strip-next,
+.song-strip-last .song-strip-time { opacity: 0.62; }
+.song-strip-last .song-strip-song-artist {
+  color: var(--accent2);
+  font-style: italic;
+  opacity: 0.95;
+}
 .home-timeline { display: flex; flex-direction: column; gap: 8px; }
-/* Title and artist INLINE with the equaliser, tools pushed right. */
-.home-timeline-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-width: 0; }
-.home-timeline-eq i { background: var(--accent); }
-.home-timeline-title { font-size: 15px; white-space: nowrap; }
-.home-timeline-artist { color: var(--text-muted); font-size: 13px; white-space: nowrap; }
-.home-timeline-tools { display: flex; align-items: center; gap: 6px; margin-left: auto; flex-wrap: wrap; }
+/* THE ALIGNED BLOCK (the Admiral, 2026-10-15: "just make sure the audio
+ * shape graph is aligned with the timeline"). Its left margin and width
+ * are written imperatively from the timeline track's own MEASURED box
+ * (home/HomeTimeline.tsx::alignOffsets) — never a hand-copied padding
+ * sum, which would be wrong at the first breakpoint that moves the song
+ * block's width, and the row has three of them. `min-width: 0` so an
+ * alignment wider than the card can never force the page sideways. */
+.home-timeline-aligned {
+  display: flex; flex-direction: column; gap: 8px;
+  min-width: 0; max-width: 100%;
+}
 .home-timeline-vsep { width: 1px; height: 20px; background: var(--border); margin: 0 4px; flex: none; }
 /* The mockup's own `.tgl`: a 30x28 square, purple-tinted when on. The
  * three view buttons (undo/redo/Follow/Full song) share it so the row
@@ -3093,27 +3223,6 @@ button.linklike { background: none; border: none; padding: 0 4px; color: var(--a
 .home-timeline-tool-on { background: rgba(168, 85, 247, 0.22); border-color: var(--accent); color: var(--text); }
 .home-timeline-tool-wide { width: auto; gap: 5px; padding: 0 8px; font-size: 11.5px; font-weight: 600; text-decoration: none; }
 .home-timeline-tool-wide:hover { text-decoration: none; }
-.home-timeline-clock { font-size: 13px; color: var(--text-muted); margin-left: 6px; }
-.home-timeline-strip { position: relative; height: 39px; touch-action: none; }
-.home-timeline-strip .song-strip-svg { position: absolute; left: 0; top: 0; width: 100%; height: 100%; }
-/* The window overlay's own BRIGHT EDGE HANDLES (audit H3 — it was a flat
- * grey block). */
-.home-timeline-window {
-  position: absolute; top: 0; bottom: 0;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1.5px solid rgba(255, 255, 255, 0.55);
-  border-radius: 5px;
-  cursor: grab; z-index: 2;
-}
-.home-timeline-window-edge {
-  position: absolute; top: 9px;
-  width: 5px; height: 21px;
-  border-radius: 2px;
-  background: var(--text);
-  cursor: ew-resize;
-}
-.home-timeline-window-edge.left { left: -2.5px; }
-.home-timeline-window-edge.right { right: -2.5px; }
 /* THE SHAPE IS THE TIMELINE PAGE'S OWN CANVAS (audit H5) — it sizes
  * itself (TimelineCanvas is DPR-aware and rAF-driven), so this box only
  * frames it. */
@@ -3266,6 +3375,48 @@ button.linklike { background: none; border: none; padding: 0 4px; color: var(--a
  * unit` grid with bounded 90-110px inputs, instead of a number field
  * stretched across the whole card. Isolated to this one block so the
  * answer to Q4 stays a small change. */
+/* THE GROUPED ROWS (his Q4 answer, 2026-10-15): `label | cell | cell`,
+ * each cell its own `name + input + unit`, so the three pairs he reaches
+ * for read as three lines rather than six of the ~35 flat rows below
+ * them. The "More" button is an ordinary disclosure — the grid it opens
+ * is `hidden` rather than unmounted, so a field's own draft state and
+ * focus survive a collapse. */
+.settings-group-rows { display: flex; flex-direction: column; gap: 2px; }
+.settings-group-row {
+  display: grid;
+  grid-template-columns: minmax(0, 120px) minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  padding: 7px 0;
+  border-bottom: 1px solid rgba(55, 37, 82, 0.6);
+}
+.settings-group-row-label { font-weight: 700; font-size: 12.5px; }
+.settings-group-cell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 84px auto;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+.settings-group-cell input { width: 100%; min-width: 0; }
+.settings-more-toggle {
+  align-self: flex-start;
+  margin: 8px 0 2px;
+  padding: 4px 10px;
+  font-size: 11.5px;
+  font-weight: 600;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.settings-more-toggle:hover { color: var(--text); border-color: var(--accent); }
+@media (max-width: 720px) {
+  .settings-group-row { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+}
 .settings-drops-card .top-bar-group-field {
   display: grid;
   grid-template-columns: minmax(0, 230px) minmax(0, 1fr) 72px;

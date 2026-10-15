@@ -329,11 +329,15 @@ class FakeSocket {
 (window as unknown as { WebSocket: unknown }).WebSocket = FakeSocket;
 
 /** THE REAL CHROME, not a copy of it — `components/AppChrome.tsx` is the
- * one composition App.tsx renders too, so this gate measures the order
- * and the markup the app actually has (that is exactly what drifted: the
- * app rendered the bar BEFORE the strip while this harness drew the
- * mockup's own menu/timeline/bar order, and the pair images looked fine
- * because the harness was right and the app was not). */
+ * one composition App.tsx and the kiosk render too, so this gate measures
+ * the order and the markup the app actually has (that is exactly what
+ * drifted: the app rendered the bar BEFORE the strip while this harness
+ * drew the mockup's own menu/timeline/bar order, and the pair images
+ * looked fine because the harness was right and the app was not). The
+ * page body is its CHILDREN, which is also what puts the shared
+ * song-timeline view state over both the timeline row and Home's shape
+ * — rendering them as siblings here would give the harness a Home that
+ * cannot drive the row, i.e. the same class of drift again. */
 /** The route each view stands for — what the real app's own rule is
  * asked about below. */
 const PATHNAME = VIEW === 'home' ? '/'
@@ -342,15 +346,14 @@ const PATHNAME = VIEW === 'home' ? '/'
   : '/scenes';
 
 const Chrome = () => (
-  <>
-    <AppChrome showSongStrip={showsSongStrip(PATHNAME)} />
+  <AppChrome showSongStrip={showsSongStrip(PATHNAME)}>
     {VIEW === 'home' && (
       <main className="home-route"><HomePage /></main>
     )}
     {VIEW === 'settings' && (
       <main><SettingsConsolePage /></main>
     )}
-  </>
+  </AppChrome>
 );
 
 createRoot(document.getElementById('root')!).render(

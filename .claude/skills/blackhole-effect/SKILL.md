@@ -180,7 +180,7 @@ effect `drop_intensity`, which scales the debris count and the front's life.
 The lull arm also tells it the BREATH-HOLD (`lull_breath_at_s`,
 `lull_breath_s`, from the room's `lull_breath_hold_s`, 0.4 s default, always
 inside the lull's dark rule): the base render takes the frame to true black
-for that window. Help topics `drop-shockwave`, `drop-breath-hold`; proof
+for that window. Help topics `drop-shockwave`, `lull-dark-cap` (the breath-hold is folded into it); proof
 `scripts/check_drop_shockwave.py` / `tests/test_phase_grammar.py`.
 
 WHETHER A DROP PAINTS IT AT ALL (2026-10-12, his "toggled per scene, as
