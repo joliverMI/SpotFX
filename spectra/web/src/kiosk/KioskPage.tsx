@@ -2,8 +2,9 @@
  * report.md's kiosk section: Spectra hosted inside a Home Assistant
  * dashboard tab. No Spectra menu (HA already provides navigation, and no
  * menu means no way to wander off into a setup page from the wall) —
- * just the one bar and Home (timeline, audio shape, quick runs), sized
- * for the wall kiosk and its touch-only input.
+ * just the one bar, the global song timeline under it, and Home (quick
+ * runs; the audio shape is dropped at this size), sized for the wall
+ * kiosk and its touch-only input.
  *
  * Sizing is River's 2026-10-14 reply (kiosk/kioskConfig.ts is the one
  * place to change it when a real measurement differs): a Raspberry Pi
@@ -40,16 +41,23 @@ export default function KioskPage() {
   }, []);
   return (
     <div ref={ref} className="kiosk-page">
-      {/* The same bar the app's own chrome builds (components/
-        * AppChrome.tsx) — the kiosk used to assemble its own copy, which
-        * is how it kept the OLD two-strip layout for a while after the
-        * rest of the app moved on. No menu here (Home Assistant provides
-        * the navigation) and no song timeline: Home's own editable copy
-        * is directly below. */}
-      <AppChrome showSongStrip={false} showNav={false} />
-      <main className="kiosk-main">
-        <HomePage showAudioShape={KIOSK_SHOW_AUDIO_SHAPE} />
-      </main>
+      {/* The same chrome the app's own builds (components/AppChrome.tsx)
+        * — the kiosk used to assemble its own copy, which is how it kept
+        * the OLD two-strip layout for a while after the rest of the app
+        * moved on. No menu here (Home Assistant provides the
+        * navigation), but the song timeline IS drawn, below the bar: it
+        * is the one global row on every route now (the Admiral,
+        * 2026-10-15), and Home no longer carries a copy of it.
+        *
+        * The audio shape is still dropped at this size, so nothing here
+        * listens to the timeline's window — which is exactly why its
+        * drag overlay stays off (components/songTimelineView.tsx's own
+        * "only editable while something is listening" rule). */}
+      <AppChrome showNav={false}>
+        <main className="kiosk-main">
+          <HomePage showAudioShape={KIOSK_SHOW_AUDIO_SHAPE} />
+        </main>
+      </AppChrome>
     </div>
   );
 }

@@ -79,6 +79,7 @@ export const intensityBackground: CanvasLayer = {
   z: 0,
   visible: (f) => f.view.intensityMode !== 'off',
   draw(f) {
+    const { ctx } = f;
     const mode = f.view.intensityMode;
     if (mode === 'total' || mode === 'bass') {
       const shape = f.data.shape;
@@ -93,17 +94,49 @@ export const intensityBackground: CanvasLayer = {
       drawCurve(f, idx.map((i) => ({ x: dataX(f, ts[i]), y: y(series[i] ?? 0) })));
       return;
     }
+    // BY SECTION, AS BLOCKS (the Admiral, 2026-10-15: "the intensity
+    // graph should be by section, like the top bar timeline"). One filled
+    // block per librosa section at that section's own `energy_rms` — the
+    // SAME measured quantity the song timeline's energy terrain is built
+    // from (components/songStrip.ts::terrainPath), so the two surfaces
+    // read as one picture. It was a single stroked step-polyline before,
+    // which read as a continuous curve with corners rather than a level
+    // per section; each block now carries its own top edge and a faint
+    // boundary tick, so where one section ends and the next begins is
+    // legible at a glance.
     if (mode === 'section') {
       const secs = f.data.librosa?.sections;
       if (!secs?.length) return;
       const off = f.view.librosaOffsetMs;
-      const y = (v: number) => f.mainH - v * f.mainH * 0.9; // energy_rms is 0-1
-      const pts: { x: number; y: number }[] = [];
+      const y = (v: number) => f.mainH - Math.max(0, Math.min(1, v)) * f.mainH * 0.9;
+      ctx.save();
       for (const sec of secs) {
-        pts.push({ x: f.timeToX(sec.start_ms + off), y: y(sec.energy_rms) });
-        pts.push({ x: f.timeToX(sec.end_ms + off), y: y(sec.energy_rms) });
+        const x0 = f.timeToX(sec.start_ms + off);
+        const x1 = f.timeToX(Math.max(sec.end_ms, sec.start_ms) + off);
+        if (x1 < 0 || x0 > f.w) continue;
+        const top = y(sec.energy_rms);
+        const left = Math.max(-1, x0);
+        const width = Math.min(f.w + 1, x1) - left;
+        if (width <= 0) continue;
+        ctx.fillStyle = 'rgba(168,85,247,0.13)';
+        ctx.fillRect(left, top, width, f.mainH - top);
+        ctx.strokeStyle = 'rgba(168,85,247,0.55)';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(left, top);
+        ctx.lineTo(left + width, top);
+        ctx.stroke();
+        // The step between this block and its neighbour.
+        if (x0 >= 0 && x0 <= f.w) {
+          ctx.strokeStyle = 'rgba(168,85,247,0.3)';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(x0, top);
+          ctx.lineTo(x0, f.mainH);
+          ctx.stroke();
+        }
       }
-      drawCurve(f, pts);
+      ctx.restore();
       return;
     }
     // triggers: polyline through the intensity circles (0-1 → circle Y space)

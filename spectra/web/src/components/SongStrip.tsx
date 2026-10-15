@@ -1,7 +1,16 @@
 /** THE GLOBAL SONG TIMELINE (song-layout-plan, data/ui-layout-plan/
- * report.md §4): a 39 px track in a 53 px row between the menu and the
- * top bar, on every page except Home (its own editable copy) and the
- * Timeline page (its own full toolset) — §13 decision 5.
+ * report.md §4): a 39 px track in a 53 px row, BELOW THE ONE BAR (the
+ * Admiral, 2026-10-15 — see components/AppChrome.tsx), on every page
+ * except the Timeline page, which carries its own full toolset.
+ *
+ * IT IS THE ONLY COPY NOW, AND HOME EDITS IT. Home used to draw a second,
+ * editable timeline directly above its audio shape, so the row jumped
+ * from the chrome down the page whenever he opened Home (his own report).
+ * This row is now the one he sees everywhere; while Home's audio shape is
+ * mounted it also carries a draggable WINDOW overlay that sets what that
+ * shape shows. The window, the marker filters and the view history all
+ * live in components/songTimelineView.tsx — the shared state AppChrome
+ * provides — so neither element owns the other.
  *
  * IT NEVER UNMOUNTS (design-fidelity pass, 2026-10-14 — audit T1/P2/N2,
  * the single biggest reason the live app did not look like the approved
@@ -28,17 +37,18 @@
  * — never a React render per frame (report §4.2). Both read the ONE show
  * clock (lib/showClock.ts) — the exact moment the trigger poll fires
  * against, not raw Spotify progress. */
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import {
   countdownParts, eventLabel, FINAL_STRETCH_MS, fmtMMSS, kindGlyphSvg, MARKER_CY,
-  NEXT_EVENT_BOX_WIDTH, PLAYED_TINT, pickNext, ringCy, TRACK_HEIGHT, trackX,
+  NEXT_EVENT_BOX_WIDTH, PLAYED_TINT, pickNext, ringCy, TRACK_HEIGHT, TRACK_PAD, trackX,
 } from './songStrip';
 import { paintTrack, type MarkNode } from './trackPainter';
 import { useEngineStatus, useUpcoming } from '../queries';
 import { useLibrosa } from '../timeline/queries';
 import { getPositionMs, getShowClockMs } from '../lib/showClock';
 import InfoTip from './InfoTip';
+import { kindShown, useSongTimelineView } from './songTimelineView';
 
 export default function SongStrip() {
   const { data: status } = useEngineStatus();
@@ -50,9 +60,21 @@ export default function SongStrip() {
   // song already looked at costs nothing here; `retry: false` means a song
   // with no analysis simply draws no terrain.
   const { data: librosa } = useLibrosa(uri);
-  const events = upcoming?.events ?? [];
+  // THE SHARED VIEW STATE: which marker kinds draw (set from Home's own
+  // control row), and — while Home's shape is listening — the draggable
+  // window this row then owns.
+  const { filters, editable, win, pushHistory } = useSongTimelineView();
+  const allEvents = upcoming?.events;
+  const events = useMemo(
+    () => (allEvents ?? []).filter((e) => kindShown(e.kind, filters)),
+    [allEvents, filters]);
   const durationMs = track?.duration_ms ?? 0;
   const sections = librosa?.sections ?? null;
+  // Read through a ref so the rAF loop below never re-runs when an
+  // unrelated render hands `useFollowWindow` a fresh object identity
+  // (only its own `getWin` is memoized — that module's own contract).
+  const winRef = useRef(win);
+  winRef.current = win;
 
   const trackRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -73,6 +95,7 @@ export default function SongStrip() {
    * marker (`.song-strip-mk-past`) and flash the one that just fired
    * (audit T6: the mockup flashes the MARKER, not only the box). */
   const markNodesRef = useRef<MarkNode[]>([]);
+  const windowOverlayRef = useRef<HTMLDivElement>(null);
 
   // Rebuild the drawn body when WHAT is drawn changes (song, plan,
   // sections) — the per-frame loop below only ever moves the playhead /
@@ -119,6 +142,25 @@ export default function SongStrip() {
 
       if (timeRef.current) {
         timeRef.current.textContent = pos != null && durationMs > 0 ? fmtMMSS(pos) : '—:—';
+      }
+
+      // THE WINDOW OVERLAY (Home only — `editable`). Positioned with the
+      // track's OWN `trackX` mapping, in px, not a raw percentage of the
+      // row: the markers are drawn inside the panel's TRACK_PAD inset, so
+      // a percentage overlay sat up to a pad's width off the markers it
+      // is meant to bracket. Moved here, in the one rAF loop, rather than
+      // in React — a drag must never cost a render per pointermove.
+      if (windowOverlayRef.current) {
+        if (!editable || durationMs <= 0 || svgW <= 0) {
+          windowOverlayRef.current.style.display = 'none';
+        } else {
+          const w = winRef.current.getWin();
+          const left = atX(w.startMs);
+          const right = atX(w.endMs);
+          windowOverlayRef.current.style.display = 'block';
+          windowOverlayRef.current.style.left = `${left.toFixed(2)}px`;
+          windowOverlayRef.current.style.width = `${Math.max(2, right - left).toFixed(2)}px`;
+        }
       }
 
       const next = now != null ? pickNext(events, now) : null;
@@ -182,7 +224,56 @@ export default function SongStrip() {
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [events, durationMs]);
+  }, [events, durationMs, editable]);
+
+  /** THE WINDOW DRAG — TimelineBar's own `dragEdge` shape (BuilderPage's
+   * `onAdjustFollow` convention), moved here from Home's retired copy of
+   * the strip: in follow mode an EDGE drag resizes the look-behind /
+   * look-ahead, and a CENTRE drag always detaches into a manual pan (the
+   * plan's own "dragging leaves Follow" rule). One history step per
+   * committed drag, pushed on pointerdown. */
+  const dragWin = (edge: 'start' | 'end' | 'center') => (ev: React.PointerEvent) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    const svg = svgRef.current;
+    if (!svg || durationMs <= 0) return;
+    pushHistory();
+    const target = ev.target as HTMLElement;
+    target.setPointerCapture(ev.pointerId);
+    let lastX = ev.clientX;
+    const move = (e: PointerEvent) => {
+      // The drag's own px→ms scale is the TRACK's, inset included, so a
+      // pointer moving over a marker moves the window to that marker.
+      const rect = svg.getBoundingClientRect();
+      const span = Math.max(1, rect.width - 2 * TRACK_PAD);
+      const deltaMs = ((e.clientX - lastX) / span) * Math.max(1, durationMs);
+      lastX = e.clientX;
+      if (win.follow && edge !== 'center') {
+        if (edge === 'end') win.setFutureS((sec) => Math.max(0, sec + deltaMs / 1000));
+        else win.setWindowS((sec) => Math.max(2, sec - deltaMs / 1000));
+        return;
+      }
+      const w = win.getWin();
+      if (edge === 'center') win.setManualWin({ startMs: w.startMs + deltaMs, endMs: w.endMs + deltaMs });
+      else if (edge === 'start') {
+        win.setManualWin({ startMs: Math.min(w.startMs + deltaMs, w.endMs - 1000), endMs: w.endMs });
+      } else {
+        win.setManualWin({ startMs: w.startMs, endMs: Math.max(w.endMs + deltaMs, w.startMs + 1000) });
+      }
+      if (edge === 'center' && win.follow) win.setFollow(false);
+    };
+    const up = (e: PointerEvent) => {
+      try { target.releasePointerCapture(e.pointerId); } catch { /* already gone */ }
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', up);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    // A gesture the browser takes over fires this instead of pointerup —
+    // without it a drag could stick with no pointerup to clear it.
+    window.addEventListener('pointercancel', up);
+  };
 
   const playing = Boolean(track?.is_playing);
   const title = track?.title ?? null;
@@ -234,6 +325,16 @@ export default function SongStrip() {
             <path d="M-4 0 L4 0 L0 5Z" fill="#fff" />
           </g>
         </svg>
+        {/* ALWAYS MOUNTED, hidden by the rAF loop when nothing is
+          * listening to the window — a conditionally-mounted overlay
+          * would make `editable` flipping a React render in the middle of
+          * a drag, and this element has a pointer capture on it. */}
+        <div ref={windowOverlayRef} className="song-strip-window"
+            style={{ display: 'none' }} onPointerDown={dragWin('center')}
+            title="Drag to choose what the audio shape below shows">
+          <div className="song-strip-window-edge left" onPointerDown={dragWin('start')} />
+          <div className="song-strip-window-edge right" onPointerDown={dragWin('end')} />
+        </div>
       </div>
 
       <div ref={nextBoxRef} className="song-strip-next" style={{ width: NEXT_EVENT_BOX_WIDTH }}>

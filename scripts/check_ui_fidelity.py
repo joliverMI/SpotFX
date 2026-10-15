@@ -553,9 +553,15 @@ async def run(app_url: str, artifact_url: str) -> int:
                            transform: getComputedStyle(g).transform };
                 })(),
                 infoCircles: document.querySelectorAll('.info-tip-btn').length,
+                // Home's own card HEAD is gone with the 2026-10-15 move
+                // (it carried the title/artist/clock of a timeline Home
+                // no longer draws), so there is no third surface left to
+                // scope here. Its control row is NOT added in its place:
+                // that row has always been allowed its own InfoTips (the
+                // Legend and the analysed-events description), which is
+                // what idea 5 asks for rather than forbids.
                 helpInChrome: document.querySelectorAll(
-                  '.one-bar .help-link, .song-strip .help-link, '
-                  + '.home-timeline-head .help-link').length,
+                  '.one-bar .help-link, .song-strip .help-link').length,
                 helpInNav: document.querySelectorAll('nav .help-link').length,
                 helpInSettingsRows: document.querySelectorAll('.settings-row .help-link').length,
                 // THE RENDERED size of every small icon button's glyph —
@@ -579,13 +585,23 @@ async def run(app_url: str, artifact_url: str) -> int:
                   const r = tip.getBoundingClientRect();
                   return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
                 })(),
-                // MENU, THEN TIMELINE, THEN BAR — the approved mockups'
-                // own order (`nav() + timelineRow() + bar()`). The live
-                // app had the bar SECOND and the strip third, and this
-                // gate did not see it because the harness hand-rolled the
-                // mockup's order instead of rendering the app's own
-                // chrome; both now render components/AppChrome.tsx.
-                chromeOrder: ['nav', '.song-strip', '.one-bar']
+                // MENU, THEN BAR, THEN TIMELINE — HIS OWN ORDER, and a
+                // DELIBERATE DEPARTURE from the approved mockups, which
+                // draw `nav() + timelineRow() + bar()`. The Admiral,
+                // 2026-10-15, verbatim: "move the timeline below the
+                // toolbar (with all the buttons and things like scene,
+                // colour, mark, etc)". His later word on his own design
+                // outranks the artifact, so this assertion encodes the
+                // APP's order; the pair images below therefore show the
+                // timeline row in a different place from the mockup's,
+                // and that difference IS the ask, not a regression.
+                //
+                // What this still guards is the thing that actually
+                // drifted once: the app and this gate rendering two
+                // different compositions. Both render
+                // components/AppChrome.tsx, so the order can only move in
+                // one place.
+                chromeOrder: ['nav', '.one-bar', '.song-strip']
                   .map((sel) => { const el = document.querySelector(sel);
                     return el ? Math.round(el.getBoundingClientRect().top) : null; }),
                 nextCountText: (document.querySelector('.song-strip-next-count') || {}).textContent,
@@ -707,7 +723,7 @@ async def run(app_url: str, artifact_url: str) -> int:
 
             order = m["chromeOrder"]
             ok(all(t is not None for t in order) and order[0] < order[1] < order[2],
-               "the chrome runs MENU → TIMELINE → BAR, the mockups' own order "
+               "the chrome runs MENU → BAR → TIMELINE, his own 2026-10-15 order "
                f"(measured tops: {order})")
 
             ok(re.match(r"^\d+\.\ds$|^\d+:\d\d$", (m["nextCountText"] or "").strip()),
@@ -719,7 +735,7 @@ async def run(app_url: str, artifact_url: str) -> int:
                f"no horizontal page scroll at 1440 ({m['scrollW']} <= {m['clientW']})")
 
             # ── 4c. Home's own page ────────────────────────────────────
-            print("\nFOUR-C — Home: its own timeline card, and no global strip")
+            print("\nFOUR-C — Home: the ONE global timeline, and the shape aligned under it")
             await cdp(ws, nid, "Emulation.setDeviceMetricsOverride", {
                 "width": 1440, "height": 1100, "deviceScaleFactor": 1, "mobile": False})
             if not await goto(ws, nid, f"{app_url}?view=home",
@@ -733,14 +749,44 @@ async def run(app_url: str, artifact_url: str) -> int:
                   const tops = row ? [...row.children]
                     .map((c) => Math.round(c.getBoundingClientRect().top)) : [];
                   const play = document.querySelector('.home-quick-play');
+                  const strip = document.querySelector('.song-strip');
+                  const bar = document.querySelector('.one-bar');
+                  const ctrlToggles = [...document.querySelectorAll(
+                    '.home-timeline-controls .icon-toggle')];
                   return JSON.stringify({
-                    globalStrip: !!document.querySelector('.song-strip'),
+                    globalStrip: !!strip,
+                    ownStrip: !!document.querySelector('.home-timeline-strip'),
+                    ownHead: !!document.querySelector('.home-timeline-head'),
                     ownCard: !!document.querySelector('.home-timeline'),
+                    stripBelowBar: strip && bar
+                      ? Math.round(strip.getBoundingClientRect().top)
+                        > Math.round(bar.getBoundingClientRect().top)
+                      : null,
+                    windowOverlay: (() => {
+                      const w = document.querySelector('.song-strip-window');
+                      if (!w) return null;
+                      const r = w.getBoundingClientRect();
+                      return { shown: getComputedStyle(w).display !== 'none',
+                               w: Math.round(r.width), h: Math.round(r.height),
+                               edges: w.querySelectorAll('.song-strip-window-edge').length };
+                    })(),
                     canvasH: canvas ? Math.round(canvas.getBoundingClientRect().height) : null,
-                    toolGlyphs: document.querySelectorAll('.home-timeline-tools .icon-toggle svg').length,
+                    toolGlyphs: ctrlToggles.filter((t) => t.querySelector('svg')).length,
                     tools: document.querySelectorAll('.home-timeline-tool').length,
                     controlsRow: !!document.querySelector('.home-timeline-controls'),
                     nextLine: !!document.querySelector('.home-timeline-next'),
+                    // THE FILTERS SIT IMMEDIATELY LEFT OF THE INTENSITY
+                    // BOLT (his own 2026-10-15 placement) — read as the
+                    // control row's own order, with the bolt found by its
+                    // title rather than its position.
+                    filterOrder: (() => {
+                      const boltIdx = ctrlToggles.findIndex(
+                        (t) => (t.getAttribute('title') || '').includes('section energy'));
+                      if (boltIdx < 0) return null;
+                      const three = ctrlToggles.slice(Math.max(0, boltIdx - 3), boltIdx)
+                        .map((t) => (t.getAttribute('title') || '').slice(0, 24));
+                      return { boltIdx, three };
+                    })(),
                     playW: play ? Math.round(play.getBoundingClientRect().width) : null,
                     actionRowH: row ? Math.round(row.getBoundingClientRect().height) : null,
                     actionRowOneLine: tops.length > 0
@@ -749,9 +795,24 @@ async def run(app_url: str, artifact_url: str) -> int:
                       return el ? getComputedStyle(el).fontVariantNumeric : null; })(),
                   });
                 })()'''))
-                ok(not h["globalStrip"] and h["ownCard"],
-                   "Home draws its OWN timeline card and NO global strip (§13 decision 5 — "
-                   f"global strip present: {h['globalStrip']})")
+                ok(h["globalStrip"] and not h["ownStrip"] and not h["ownHead"] and h["ownCard"],
+                   "Home shows the ONE GLOBAL timeline and draws no second copy of its own "
+                   "(the Admiral, 2026-10-15 — measured global strip: "
+                   f"{h['globalStrip']}, own strip: {h['ownStrip']}, own head: {h['ownHead']})")
+                ok(h["stripBelowBar"],
+                   "and that row sits BELOW the bar on Home too, the same place as every "
+                   f"other route (measured below: {h['stripBelowBar']})")
+                ok(h["windowOverlay"] and h["windowOverlay"]["shown"]
+                   and h["windowOverlay"]["w"] > 4 and h["windowOverlay"]["edges"] == 2,
+                   "the row carries its draggable window with two edge handles while Home's "
+                   f"shape is listening to it (measured {h['windowOverlay']})")
+                ok(h["filterOrder"] is not None
+                   and len(h["filterOrder"]["three"]) == 3
+                   and any("Analysed" in t for t in h["filterOrder"]["three"])
+                   and any("Drop" in t for t in h["filterOrder"]["three"])
+                   and any("Light Show" in t for t in h["filterOrder"]["three"]),
+                   "the three marker filters sit immediately LEFT of the intensity bolt in "
+                   f"the control row (his own placement — measured {h['filterOrder']})")
                 if not isinstance(mock_shape_h, int) or mock_shape_h <= 0:
                     notes.append("Home's shape height: no mockup height to compare against")
                 else:
@@ -762,10 +823,13 @@ async def run(app_url: str, artifact_url: str) -> int:
                 ok(h["toolGlyphs"] >= 3,
                    f"Home's marker toggles draw real marker glyphs (audit H2 — {h['toolGlyphs']})")
                 ok(h["tools"] >= 4,
-                   f"Home's head carries undo/redo beside Follow/Full song (audit H2 — {h['tools']})")
+                   "Home's control row carries undo/redo beside Follow/Full song (audit H2, "
+                   f"moved there with the filters in the 2026-10-15 pass — {h['tools']})")
                 ok(h["controlsRow"], "Home has the mockup's one thin control row under the shape (audit H5)")
                 if h["clockFvn"] is None:
-                    notes.append("Home's clock readout: not rendered in this harness run, nothing to measure")
+                    notes.append("Home's own clock readout is retired with its card head — "
+                                 "the one global timeline row carries the progress now, and "
+                                 "its tabular digits are asserted in ONE above")
                 else:
                     ok("tabular-nums" in h["clockFvn"],
                        f"Home's own clock readout uses tabular digits too (got {h['clockFvn']!r})")
@@ -774,6 +838,67 @@ async def run(app_url: str, artifact_url: str) -> int:
                 ok(h["actionRowOneLine"] and (h["actionRowH"] or 99) <= 48,
                    f"an action set is ONE line (audit H7/K3 — height {h['actionRowH']}, "
                    f"one line: {h['actionRowOneLine']})")
+
+            # ── 4c-2. THE SHAPE IS ALIGNED WITH THE TRACK, every width ──
+            print("\nFOUR-C2 — Home's shape plot lines up with the timeline track")
+            align_probe = """(() => {
+              const track = document.querySelector('.song-strip-track');
+              const canvas = document.querySelector('.home-timeline-shape canvas');
+              if (!track || !canvas) return JSON.stringify({ missing: true });
+              const t = track.getBoundingClientRect();
+              const c = canvas.getBoundingClientRect();
+              return JSON.stringify({
+                missing: false,
+                left: +(c.left - t.left).toFixed(2),
+                right: +(c.right - t.right).toFixed(2),
+                trackW: Math.round(t.width), canvasW: Math.round(c.width),
+                scrollW: document.documentElement.scrollWidth,
+                clientW: document.documentElement.clientWidth,
+              });
+            })()"""
+            # HIS OWN ASK, made measurable (firstmate's spec): the shape's
+            # plot and the timeline track must start and end on the same
+            # pixel column, so the window he drags on the row brackets
+            # exactly what the shape below draws. 1px of tolerance for
+            # sub-pixel layout rounding — the pre-fix gap was the page's
+            # own padding plus the row's song block, i.e. hundreds.
+            for width, label in ((1440, "desktop"), (1180, "tablet"), (1024, "tablet")):
+                await cdp(ws, nid, "Emulation.setDeviceMetricsOverride", {
+                    "width": width, "height": 1100, "deviceScaleFactor": 1, "mobile": False})
+                if not await goto(ws, nid, f"{app_url}?view=home",
+                                  "!!document.querySelector('.home-timeline-shape canvas')"):
+                    notes.append(f"Home never rendered at {width} — alignment not measured")
+                    continue
+                await asyncio.sleep(1.2)
+                a = json.loads(await evaluate(ws, nid, align_probe))
+                if a["missing"]:
+                    notes.append(f"no track/canvas pair at {width} — alignment not measured")
+                    continue
+                ok(abs(a["left"]) <= 1 and abs(a["right"]) <= 1,
+                   f"{width}px ({label}): the shape's plot starts and ends on the track's own "
+                   f"columns (left {a['left']:+}px, right {a['right']:+}px, "
+                   f"track {a['trackW']}px vs canvas {a['canvasW']}px)")
+                ok(a["scrollW"] <= a["clientW"],
+                   f"{width}px: aligning the shape introduced no horizontal page scroll "
+                   f"({a['scrollW']} <= {a['clientW']})")
+
+            # The kiosk drops the audio shape by design (his Q5 answer), so
+            # there is no plot there to align — asserted as that, rather
+            # than skipped silently.
+            await cdp(ws, nid, "Emulation.setDeviceMetricsOverride", {
+                "width": 800, "height": 424, "deviceScaleFactor": 1, "mobile": False})
+            if await goto(ws, nid, f"{app_url}?kiosk=1", "!!document.querySelector('.kiosk-page')"):
+                await asyncio.sleep(0.8)
+                kshape = json.loads(await evaluate(ws, nid, """(() => {
+                  const c = document.querySelector('.home-timeline-shape canvas');
+                  const vis = c ? c.getBoundingClientRect().height > 0
+                    && getComputedStyle(c.closest('.home-timeline-shape')).display !== 'none' : false;
+                  return JSON.stringify({ shapeVisible: vis,
+                    strip: !!document.querySelector('.song-strip') });
+                })()"""))
+                ok(kshape["strip"] and not kshape["shapeVisible"],
+                   "the 800px kiosk draws the timeline row and keeps the audio shape HIDDEN "
+                   f"(his Q5 answer — measured {kshape})")
 
             print("\nFOUR-D — and no global strip on the Timeline page either")
             if not await goto(ws, nid, f"{app_url}?view=timeline", "!!document.querySelector('.one-bar')"):
@@ -866,6 +991,110 @@ async def run(app_url: str, artifact_url: str) -> int:
                    f"{width}px is {expected} row(s) ({band} — measured {got['rows']})")
                 ok(got["scrollW"] <= got["clientW"],
                    f"{width}px has no horizontal page scroll ({got['scrollW']} <= {got['clientW']})")
+
+            # ── 5b. THE EXPANDED DEVICE PREVIEW IS VISIBLE ─────────────
+            print("\nFIVE-B — expanding the device preview actually shows it")
+            # THE DEFECT (the Admiral, 2026-10-15: "when I expand the
+            # preview, it is completely hidden"). MEASURED against the
+            # live app at 1440 before the fix: the expanded stage laid out
+            # correctly at 1408x445 inside a `.one-bar` whose own
+            # clientHeight was still 47 and whose `overflow-x: auto` makes
+            # overflow-y compute to `auto` too — a 48px scroll container
+            # that clipped its whole second row, with
+            # `elementFromPoint` over the stage's middle returning the
+            # PAGE BELOW IT. It worked at 1024/800 only because the
+            # deliberate-two-row band already sets `height: auto` there,
+            # which is why his report was a desktop one.
+            #
+            # So this measures the three things that were each separately
+            # false: a non-zero box, ON SCREEN (inside the viewport), and
+            # NOT COVERED (the topmost element at its own midpoint is
+            # itself or a descendant).
+            preview_probe = """(() => {
+              const row = document.querySelector('.device-preview-expanded-row');
+              if (!row) return JSON.stringify({ present: false });
+              const bar = document.querySelector('.one-bar');
+              const r = row.getBoundingClientRect();
+              const mx = Math.round(r.left + r.width / 2);
+              const my = Math.round(r.top + Math.min(r.height / 2, 20));
+              const top = document.elementFromPoint(mx, my);
+              return JSON.stringify({
+                present: true,
+                w: Math.round(r.width), h: Math.round(r.height),
+                // How much of it the viewport actually shows. The stage
+                // is aspect-ratio sized and can be TALLER than the
+                // viewport, which is fine and scrolls — what must never
+                // be true again is that none of it shows at all.
+                visibleH: Math.round(Math.max(0,
+                  Math.min(r.bottom, innerHeight) - Math.max(r.top, 0))),
+                topOnScreen: r.top >= 0 && r.top < innerHeight,
+                covered: top && !row.contains(top) && top !== row
+                  ? (top.className || top.tagName) : null,
+                // THE DEFECT ITSELF: the bar is a scroll container
+                // (`overflow-x: auto`), so with its height still pinned
+                // at 48px its own content overflowed it and the whole
+                // second row was clipped. Equal heights = nothing of the
+                // bar's content is hidden inside it.
+                barClipped: bar ? bar.scrollHeight > bar.clientHeight + 1 : null,
+                barH: bar ? Math.round(bar.getBoundingClientRect().height) : null,
+                scrollW: document.documentElement.scrollWidth,
+                clientW: document.documentElement.clientWidth,
+              });
+            })()"""
+            for view, label in (("view=home", "Home"), ("view=bar", "an ordinary page")):
+                for width in (1440, 1024):
+                    await cdp(ws, nid, "Emulation.setDeviceMetricsOverride", {
+                        "width": width, "height": 900, "deviceScaleFactor": 1, "mobile": False})
+                    if not await goto(ws, nid, f"{app_url}?{view}",
+                                      "!!document.querySelector('.device-preview-chips')"):
+                        notes.append(f"preview swatches never rendered on {label} at {width}")
+                        continue
+                    await asyncio.sleep(0.6)
+                    # EXPANDED IS STICKY (DevicePreviewStrip persists it),
+                    # so a bare click can just as easily COLLAPSE what the
+                    # previous iteration left open — which is exactly what
+                    # made the 1024 rows read as "never mounted". Click
+                    # until it is actually open.
+                    for _ in range(3):
+                        if await evaluate(ws, nid,
+                                          "!!document.querySelector('.device-preview-expanded-row')"):
+                            break
+                        await evaluate(ws, nid,
+                                       "(() => { document.querySelector('.device-preview-chips')"
+                                       ".click(); return 1; })()")
+                        await asyncio.sleep(1.0)
+                    await asyncio.sleep(0.4)
+                    pv = json.loads(await evaluate(ws, nid, preview_probe))
+                    if not pv["present"]:
+                        notes.append(f"the expanded stage never mounted on {label} at {width} "
+                                     "(no favourites in this harness run?)")
+                        continue
+                    ok(pv["w"] > 100 and pv["h"] > 40,
+                       f"{label} at {width}: the expanded preview has a real box "
+                       f"({pv['w']}x{pv['h']})")
+                    ok(pv["topOnScreen"] and pv["visibleH"] > 40,
+                       f"{label} at {width}: and it is ON SCREEN, not clipped out of the bar "
+                       f"({pv['visibleH']}px of it visible, top on screen: {pv['topOnScreen']})")
+                    ok(not pv["barClipped"],
+                       f"{label} at {width}: the bar GREW to hold it instead of clipping it "
+                       f"inside its own 48px scroll box (bar {pv['barH']}px, clipped: "
+                       f"{pv['barClipped']})")
+                    ok(pv["covered"] is None,
+                       f"{label} at {width}: and nothing is drawn over it "
+                       f"(topmost element at its own midpoint: {pv['covered']!r})")
+                    ok(pv["scrollW"] <= pv["clientW"],
+                       f"{label} at {width}: expanding it causes no horizontal page scroll")
+
+            # COLLAPSE IT AGAIN — `expanded` is sticky (localStorage), so
+            # leaving it open leaks a ~1000px bar into every measurement
+            # after this one (it pushed the kiosk's own quick-run cards to
+            # y=915, off the wall panel, and read as a kiosk defect).
+            await evaluate(ws, nid, '''(() => {
+              const b = document.querySelector('.device-preview-chips-open');
+              if (b) b.click();
+              return 1;
+            })()''')
+            await asyncio.sleep(0.6)
 
             await cdp(ws, nid, "Emulation.setDeviceMetricsOverride", {
                 "width": 800, "height": 424, "deviceScaleFactor": 1, "mobile": False})
