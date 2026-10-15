@@ -360,14 +360,32 @@ button.danger:hover { border-color: var(--danger); color: var(--danger); }
   overflow-y: visible;
 }
 /* Tablet squeeze (plan §12's own named risk: "names get ~110-140px slots
- * at 1024"): tighten the row's own spacing and the Light Show slot's label
- * so a real long scene/colour-set name (his live room measured "House
- * Fish" / "Calm - Green") still fits with no internal bar scroll at
- * 1024px — found by the real-browser no-overflow proof
- * (check_onebar_layout.py), not eyeballed. */
+ * at 1024"): tighten the row's own spacing so a real long scene/colour-set
+ * name (his live room measured "House Fish" / "Calm - Green") still fits
+ * with no internal bar scroll at 1024px — found by the real-browser
+ * no-overflow proof (check_onebar_layout.py), not eyeballed.
+ *
+ * `.light-show-act-name` used to carry its OWN fixed `max-width: 72px`
+ * here — a deploy-time fix (spotfx-deploy-427) found it clipped "Nothing
+ * armed" to "Nothing a…" at every width in this band that the 521-1100px
+ * two-row override below did NOT reach: 1101-1180 (one line, 262px slot,
+ * ~217px of genuinely free text column — the cap was throwing room away
+ * that was never contended) and the phone tier (max-width: 520px, where
+ * the cap clipped the SAME way the override below used to describe for
+ * the two-row band). The cap is gone, not widened: `.light-show-act-name`
+ * is an ordinary `display: block` child of the already fixed-width grid
+ * cell (`.light-show-slot`'s `minmax(0, 1fr)` track, sized off the slot's
+ * own `flex-basis` — never off this text), so it already fills exactly
+ * the slot's own available width and only ellipsises when that width is
+ * genuinely too small — the same way `.light-show-act-when` right below
+ * it always has, with no cap of its own. Removing a text element's own
+ * max-width can never widen the SLOT (no-jump survives): the slot's box
+ * is sized by `.light-show-strip`'s flex-basis, and `.light-show-act-name`
+ * contributes 0 to that sizing either way (its `overflow: hidden` makes
+ * its min-content contribution to every ancestor exactly 0 — removing a
+ * cap that was never load-bearing for ancestor sizing). */
 @media (max-width: 1180px) {
   .one-bar { gap: 6px; }
-  .light-show-act-name { max-width: 72px; }
 }
 /* PHONE: A DELIBERATE TWO ROWS, the mockup's own `@container sp
  * (max-width: 520px)` rule (audit M6 — the live bar wrapped to THREE,
@@ -490,12 +508,6 @@ button.danger:hover { border-color: var(--danger); color: var(--danger); }
   /* Row 2 fills its own width, so the mockup's push-to-the-right spacer
      has nothing to push against and would just blank the middle. */
   .one-bar .one-bar-spacer { display: none; }
-  /* The 1180 tier's own 72px cap on the Light Show act name was there to
-   * keep a ONE-LINE row from scrolling sideways. Row 2 has its own whole
-   * width here, so the cap would now throw away the room the fill just
-   * bought — the slot's own `text-overflow: ellipsis` still protects a
-   * genuinely long name. */
-  .one-bar .light-show-act-name { max-width: none; }
   /* ROW 2 FILLS THE ROW — "no left-aligned hole" (his Q1 answer,
    * 2026-10-15). The Light Show slot is `flex: 0 1 200px` by default, so
    * with ~800px of row to itself it sat at 200px and left the rest
@@ -1099,6 +1111,12 @@ button.danger:hover { border-color: var(--danger); color: var(--danger); }
 }
 .light-show-act-near .light-show-act-when { color: var(--accent2); }
 .light-show-chev { display: flex; color: var(--text-muted); }
+/* The idle "when" line's phone-only short variant (LightShowStrip.tsx's
+ * own docstring has the measurement) — the FULL string is the default
+ * everywhere, the SHORT one takes over only inside the phone tier below,
+ * where a genuine width shortage (not a removable cap) leaves no room
+ * for "tap to run an action". */
+.light-show-act-when-short { display: none; }
 @media (max-width: 1180px) { .light-show-strip { flex-basis: 262px; } }
 @media (max-width: 900px) {
   .light-show-strip { flex-basis: 200px; }
@@ -1109,6 +1127,8 @@ button.danger:hover { border-color: var(--danger); color: var(--danger); }
   .light-show-strip { flex: 1 1 0; min-width: 0; }
   .light-show-slot { grid-template-columns: 18px minmax(0, 1fr); }
   .light-show-chev, .light-show-act-nxt { display: none; }
+  .light-show-act-when-full { display: none; }
+  .light-show-act-when-short { display: inline; }
 }
 
 /* THE MOCKUP'S OWN BORDERED SWATCH GROUP (`.sp .pv`, audit B8): one 34px

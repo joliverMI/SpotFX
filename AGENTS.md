@@ -12216,6 +12216,43 @@ from these two. An SVG geometry attribute takes no `calc()`, which is
 the other reason: the mockup's pill-offset-by-half-its-width and
 triangular flag heads cannot be expressed in percent at all.
 
+**THE LIGHT SHOW SLOT'S OWN "Nothing a…" CLIP SURVIVED PR 427 IN TWO
+GAPS — a text element's own fixed `max-width` and the band that happens
+to lift it are two different things, and a band that doesn't cover the
+whole cap is a clip waiting to be found at the next width over
+(spotfx-deploy-427).** `.light-show-act-name` carried a hand-set
+`max-width: 72px` for EVERY width <=1180px, and the ONE override that
+lifted it (`.one-bar .light-show-act-name { max-width: none; }`) was
+scoped to the 521-1100px two-row band only — leaving the cap live, and
+the idle "Nothing armed" clipped to "Nothing a…", in 1101-1180px (one
+line, where the slot's own 262px flex-basis already had ~217px of
+genuinely free text column — the cap was throwing away room nothing
+else was contending for) and the phone tier (<=520px). **Fixed by
+deleting the cap, not widening the band**: `.light-show-act-name` is a
+plain `display: block` child of the slot's own fixed-width grid cell, so
+it already fills exactly the slot's available width and ellipsises only
+when that's genuinely too small — the same way `.light-show-act-when`
+beside it always has, with no cap of its own; its `overflow: hidden`
+makes its min-content contribution to every ancestor exactly 0, so
+deleting a text element's own cap can never widen the SLOT (the no-jump
+property survives — slot width is set by `.light-show-strip`'s
+flex-basis, never by this text). **The phone tier still had a GENUINE
+width shortage, not a removable cap**: the "when" line's own box there
+measured ~101px against the ~122px "tap to run an action" needs, so
+`LightShowStrip.tsx`'s idle branch now renders two sibling spans
+(`.light-show-act-when-full`/`-short`, "tap to run" the short one),
+toggled by the slot's own existing `max-width: 520px` rule in
+`tokens.css` — never a JS width check. Both check scripts gained the
+matching assertion (`check_ui_fidelity.py`'s harness-driven FIVE-A,
+`check_onebar_layout.py`'s live-only addition) at exactly 1180/1101/390 —
+the two gaps plus the phone tier. **The general lesson, since this is
+the SECOND time a width-scoped override on this exact element has left a
+gap (the 1180/521-1100 split was itself the first)**: before adding an
+override that "lifts a cap for band X", check whether the cap's own
+unconditional media query covers any width OUTSIDE band X too — a cap
+and its lifting override must share the same boundary, or state exactly
+why they don't.
+
 ## Maintaining this file
 
 Keep this file for knowledge useful to almost every future agent session in this project.

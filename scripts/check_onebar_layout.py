@@ -491,6 +491,63 @@ async def main() -> int:
                     })
                     await asyncio.sleep(0.2)
 
+            # THE LIGHT SHOW SLOT'S OWN TEXT, AT THE WIDTHS THAT CLIPPED IT
+            # (spotfx-deploy-427): `.light-show-act-name` carried a fixed
+            # `max-width: 72px` for every width <=1180px, and the override
+            # lifting it covered only the 521-1100px two-row band — leaving
+            # it clipped to "Nothing a…" in the two gaps either side:
+            # 1101-1180px (one line) and the phone tier (<=520px, measured
+            # here at 390). This is a GENERIC clip check (scrollWidth <=
+            # clientWidth on both the name and its 'when' line) against
+            # whatever the slot happens to be showing live — idle or an
+            # armed action — because the cap was unconditional on the
+            # element, not on its content; a dedicated idle-state proof
+            # (forcing "Nothing armed" specifically) lives in
+            # check_ui_fidelity.py's own mocked harness, which can set
+            # that state deterministically where this read-only, live-only
+            # script cannot.
+            for width in (1180, 1101, 390):
+                await cdp_call(ws, nid(), "Emulation.setDeviceMetricsOverride", {
+                    "width": width, "height": HEIGHT, "deviceScaleFactor": 1, "mobile": False,
+                })
+                await asyncio.sleep(0.3)
+                r = await cdp_call(ws, nid(), "Runtime.evaluate", {
+                    "expression": """
+                        JSON.stringify((() => {
+                          const n = document.querySelector('.light-show-act-name');
+                          const w = document.querySelector('.light-show-act-when');
+                          const clip = (e) => (e ? e.scrollWidth > e.clientWidth + 1 : null);
+                          return {
+                            nameText: n ? n.textContent : null, nameClipped: clip(n),
+                            whenText: w ? w.textContent : null, whenClipped: clip(w),
+                            scrollWidth: document.documentElement.scrollWidth,
+                            clientWidth: document.documentElement.clientWidth,
+                          };
+                        })())
+                    """,
+                    "returnByValue": True,
+                })
+                value = r.get("result", {}).get("result", {}).get("value")
+                lsdata = json.loads(value) if value else {}
+                if lsdata.get("nameText") is None:
+                    print(f"  (at {width}px: the Light Show slot's name never rendered — skipping)")
+                    continue
+                ok(
+                    lsdata["nameClipped"] is False,
+                    f"at {width}px: the Light Show slot's name is not truncated "
+                    f"(got {lsdata['nameText']!r})",
+                )
+                ok(
+                    lsdata["whenClipped"] is False,
+                    f"at {width}px: nor its 'when' line (got {lsdata['whenText']!r})",
+                )
+                ok(
+                    lsdata["scrollWidth"] <= lsdata["clientWidth"] + 1,
+                    f"at {width}px: no page-level horizontal scroll from the Light Show "
+                    f"text (scrollWidth {lsdata['scrollWidth']} <= clientWidth "
+                    f"{lsdata['clientWidth']})",
+                )
+
             # THE KIOSK VIEW (spotfx-deploy-423 finding B) — same app, a
             # separate route (`?kiosk=1`) with no menu and its own
             # 800x424 usable size. `KioskPage.tsx` now wraps the two bar

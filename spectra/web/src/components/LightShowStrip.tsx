@@ -18,6 +18,20 @@
  * (`.sp .show`/`.sp .act`) with the holds count as a badge on the
  * sparkle, not as 0.85em inline text behind a "◈" glyph.
  *
+ * THE IDLE "WHEN" LINE HAS A SHORTER PHONE VARIANT, the name does not
+ * (spotfx-deploy-427's own live measurement). "Nothing armed" fills the
+ * slot's own fixed-width text column fine at every width once
+ * `.light-show-act-name`'s one-time fixed cap was removed (tokens.css) —
+ * but "tap to run an action" genuinely does not fit the phone tier's own
+ * narrower column (measured ~101px available there, ~122px needed), a
+ * real width shortage rather than an artificial cap, so it is the ONE
+ * piece of idle text this slot shortens rather than lets ellipsise:
+ * `.light-show-act-when-full`/`-short` are two sibling spans, toggled by
+ * `tokens.css`'s own `max-width: 520px` rule (the slot's existing phone
+ * tier) — never a JS width check, so this costs nothing at any other
+ * width and both strings always sit in `textContent` for anything that
+ * reads the slot's words rather than its pixels.
+ *
  * Reads three already-existing sources, no new server work: `useEngineStatus`
  * (the `light_show` brief, already on the wire — spectra/services/engine.py's
  * `_light_show_brief()` — plus `bridge.track` for the live countdown clock),
@@ -114,7 +128,10 @@ export default function LightShowStrip() {
           <span className="light-show-act light-show-act-cur light-show-act-wide">
             <span className="light-show-act-text">
               <span className="light-show-act-name light-show-act-name-idle">Nothing armed</span>
-              <span className="light-show-act-when">tap to run an action</span>
+              <span className="light-show-act-when">
+                <span className="light-show-act-when-full">tap to run an action</span>
+                <span className="light-show-act-when-short">tap to run</span>
+              </span>
             </span>
           </span>
         ) : (
