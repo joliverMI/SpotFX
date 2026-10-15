@@ -1214,6 +1214,48 @@ async def run(app_url: str, artifact_url: str) -> int:
                        f"(his separate kiosk report 'Nothing a…' — got "
                        f"{row2['showName']['text']!r})")
 
+            # ── 5a. THE IDLE LIGHT SHOW TEXT, AT EVERY WIDTH THAT CLIPPED ──
+            print("\nFIVE-A — the idle 'Nothing armed' text, at the two gaps the "
+                  "521-1100px band never reached")
+            # spotfx-deploy-427's own live finding: the Light Show slot's
+            # idle name carried a fixed `max-width: 72px` for every width
+            # <=1180px (tokens.css), and the override that lifted it only
+            # covered the 521-1100px two-row band — leaving it clipped to
+            # "Nothing a…" in the two gaps either side: 1101-1180px (one
+            # line, measured here as 1101 AND 1180, since the cap and its
+            # override used different boundaries) and the phone tier
+            # (<=520px, measured at 390). The loop above runs at 1024
+            # (inside the already-fixed band) with the ARMED harness state,
+            # so it never actually exercised the idle text these widths
+            # clipped — this is that measurement, directly.
+            for width in (1180, 1101, 390):
+                await cdp(ws, nid, "Emulation.setDeviceMetricsOverride", {
+                    "width": width, "height": 500, "deviceScaleFactor": 1, "mobile": False})
+                if not await goto(ws, nid, f"{app_url}?view=bar&nothing=1",
+                                  "!!document.querySelector('.light-show-act-name')"):
+                    notes.append(f"the idle Light Show slot never rendered at {width}")
+                    continue
+                await asyncio.sleep(0.5)
+                idle_w = json.loads(await evaluate(ws, nid, """(() => {
+                  const n = document.querySelector('.light-show-act-name');
+                  const w = document.querySelector('.light-show-act-when');
+                  const clip = (e) => (e ? e.scrollWidth > e.clientWidth + 1 : null);
+                  return JSON.stringify({
+                    name: n ? n.textContent : null, nameClipped: clip(n),
+                    when: w ? w.textContent : null, whenClipped: clip(w),
+                    scrollW: document.documentElement.scrollWidth,
+                    clientW: document.documentElement.clientWidth,
+                  });
+                })()"""))
+                ok(idle_w["nameClipped"] is False,
+                   f"{width}px: the idle Light Show name is not truncated "
+                   f"(his own 'Nothing a…' report — got {idle_w['name']!r})")
+                ok(idle_w["whenClipped"] is False,
+                   f"{width}px: nor its 'tap to run…' line (got {idle_w['when']!r})")
+                ok(idle_w["scrollW"] <= idle_w["clientW"],
+                   f"{width}px: the idle Light Show text introduces no horizontal "
+                   f"page scroll ({idle_w['scrollW']} <= {idle_w['clientW']})")
+
             # ── 5b. THE EXPANDED DEVICE PREVIEW IS VISIBLE ─────────────
             print("\nFIVE-B — expanding the device preview actually shows it")
             # THE DEFECT (the Admiral, 2026-10-15: "when I expand the
