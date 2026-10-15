@@ -12104,6 +12104,16 @@ them PASSED on the build he called much worse. Four things now hold:
   RENDERED glyph box of every small icon button, because every
   attribute-level check reads correct while this is broken.
 
+**THE CHROME IS ONE COMPOSITION, `components/AppChrome.tsx`** — MENU,
+then TIMELINE, then BAR, the mockups' own order. App.tsx, the kiosk and
+the fidelity harness all render it (`showSongStrip`/`showNav` are the two
+places that genuinely differ). It exists because the ORDER drifted and
+the gate could not see it: App.tsx rendered the bar second and the strip
+third while the harness drew the mockup's order, so the pair images
+looked right because the HARNESS was right. A harness that models the
+app rather than rendering it proves nothing about the app — the gate now
+asserts nav < strip < bar from the measured tops.
+
 **ONE HELP "?" PER PAGE IS STRUCTURAL NOW** (idea 5): `InfoTip.tsx`
 renders NO trigger of its own — callers WRAP their control in it, and
 hovering/long-pressing that control opens the panel (which still carries
