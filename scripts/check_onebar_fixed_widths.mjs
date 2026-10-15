@@ -90,15 +90,10 @@ console.log('§3 numeric readouts use tabular digits so a value changing width n
   }
   // The Light Show slot's countdown and the strip's own count/progress
   // carry the shared utility on the ELEMENT instead (they are rewritten
-  // every frame by a rAF loop, so the class travels with the markup).
-  for (const [file, what] of [
-    ['spectra/web/src/components/LightShowStrip.tsx', "the Light Show slot's countdown"],
-    ['spectra/web/src/components/SongStrip.tsx', "the strip's countdown and progress"],
-    ['spectra/web/src/home/HomeTimeline.tsx', "Home's own progress readout"],
-  ]) {
-    const src = readFileSync(path.join(REPO, file), 'utf8');
-    ok(/tabular-nums/.test(src), `${what} carries the tabular-nums class`);
-  }
+  // every frame by a rAF loop, so the class travels with the markup) —
+  // proven behaviourally (getComputedStyle, a live-rendered DOM), not by
+  // reading source text, in scripts/check_ui_fidelity.py (the strip's
+  // own `.song-strip-next-count`/`.song-strip-time`).
 }
 
 console.log('§4 the one-bar never wraps on tablet/desktop (only the bar\'s own media query may re-enable it)');

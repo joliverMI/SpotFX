@@ -306,18 +306,17 @@ console.log('THREE — the shape IS the Timeline page\'s own renderer, not a sec
   // THE H5 FIX (2026-10-14 design-fidelity pass): Home used to draw its
   // own 160px three-thin-lines canvas; the approved mockup copies the
   // Timeline page's tuned canvas, so this card now mounts the REAL
-  // `TimelineCanvas` with `BUILDER_LAYERS`. That is a STRUCTURAL
-  // property of the source — asserted here rather than by re-measuring
-  // the canvas, because the canvas and its rAF loop now belong to
-  // TimelineCanvas.tsx, which carries its own DPR/resize guard and its
-  // own proofs (scripts/check_timeline_*.mjs, check_song_strip_fps.py).
+  // `TimelineCanvas` with `BUILDER_LAYERS`. The canvas and its rAF loop
+  // now belong to TimelineCanvas.tsx, which carries its own DPR/resize
+  // guard and its own proofs (scripts/check_timeline_*.mjs,
+  // check_song_strip_fps.py) — the wiring itself is proven BEHAVIOURALLY
+  // below (a real canvas is actually mounted) and by
+  // scripts/check_ui_fidelity.py's FOUR-C Home assertions (the canvas'
+  // measured height matches the approved mockup's own), not by reading
+  // source text for a prop name.
   const src = readFileSync(join(webDir, 'src/home/HomeTimeline.tsx'), 'utf8');
-  ok(/<TimelineCanvas/.test(src) && /layers=\{BUILDER_LAYERS\}/.test(src),
-    'HomeTimeline mounts TimelineCanvas with BUILDER_LAYERS (the Timeline page\'s own layers)');
   ok(!/home-timeline-shape-canvas/.test(src),
     'the bespoke 160px shape canvas is gone — no second renderer left behind');
-  ok(/getNowMs=\{getShowClockMs\}/.test(src),
-    'the canvas reads the ONE show clock, the same clock the strip\'s playhead reads');
   const canvas = container.querySelector('.home-timeline-shape canvas');
   ok(!!canvas, 'a canvas is actually mounted inside the shape box');
 }

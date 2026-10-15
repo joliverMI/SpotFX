@@ -1443,6 +1443,10 @@ nav .help-link { margin-left: auto; width: 22px; height: 22px; font-size: 12px; 
 }
 .info-tip-panel p { margin: 0; }
 
+/* EngineStatusStrip.tsx's bridge badge — pushed to the end of the
+ * strip's flex row, same as before it was wrapped in InfoTip. */
+.engine-status-bridge { margin-left: auto; }
+
 /* IconToggle.tsx — ONE 30px icon-toggle component (plan idea 6),
  * purple-tinted when on, used everywhere a boolean display filter is
  * toggled (Timeline/Home/Test Bed). */

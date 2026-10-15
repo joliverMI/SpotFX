@@ -42,6 +42,7 @@ export default function LiveEnergyReadout({ onOpenMark }: { onOpenMark?: () => v
       text="The same number the engine's own automatic decisions read — raw section energy at the current playback position, 0.00 quietest to 1.00 loudest this song. Below desktop width, tapping it opens this song's intensity Mark."
     >
       <button type="button" className="energy-readout" title={title}
+        data-mark-opener
         onClick={onOpenMark} aria-label={`Live section energy${intensity != null ? ` ${intensity.toFixed(2)}` : ' unavailable'}`}>
         <Icon name="bolt" size={14} className="energy-readout-bolt" />
         <span className="energy-meter">

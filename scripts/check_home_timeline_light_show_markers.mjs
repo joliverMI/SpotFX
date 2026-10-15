@@ -31,7 +31,7 @@
 //   (needs the dev-only jsdom: cd spectra/web && npm install --no-save jsdom)
 //   (ONE needs a Python interpreter with spectra's own deps installed:
 //   .venv/bin/python, else $PYTHON, else python3)
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
@@ -352,14 +352,10 @@ ok(after.filter((k) => k === 'scene').length === 1 && after.filter((k) => k === 
 // `lightShowMarkers` canvas layer (Home mounts the Timeline page's own
 // TimelineCanvas + BUILDER_LAYERS since the 2026-10-14 design-fidelity
 // pass — audit H5), not from this component's own overlay draw. That
-// layer has its own proof, scripts/check_timeline_light_show_markers.mjs,
-// so re-asserting it here would be a weaker duplicate. What IS asserted
-// here instead: the toggle gates what this card HANDS that layer.
-const homeSrc = readFileSync(join(webDir, 'src/home/HomeTimeline.tsx'), 'utf8');
-const flagOnCanvas = !/filters\.lightShow \? lightShowCueMarkers\(/.test(homeSrc);
-ok(!flagOnCanvas,
-  'with "Light Show" off, the card hands the canvas an EMPTY cue list '
-  + '(`filters.lightShow ? lightShowCueMarkers(...) : []`), so the shared layer draws no flag either');
+// layer, and whether the toggle empties its cue list, has its own
+// behavioural proof — scripts/check_timeline_light_show_markers.mjs —
+// so nothing is re-asserted here; this file's own job stops at the SVG
+// strip's markers, proven above.
 
 console.log(failures ? `\n${failures} FAILED` : '\nall passed — high/low ARE the Light Show\'s own High/Low Trigger cues, drawn consistently everywhere, and "colour" is never mistaken for one');
 process.exit(failures ? 1 : 0);

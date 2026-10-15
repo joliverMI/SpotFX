@@ -77,9 +77,9 @@ export default function SongStrip() {
   // Rebuild the drawn body when WHAT is drawn changes (song, plan,
   // sections) — the per-frame loop below only ever moves the playhead /
   // played tint / ring / next-event text. ALSO rebuilt on resize (a
-  // ResizeObserver, not a dep): the viewBox's own axis stretch (see
-  // songStrip.ts's `axisScale` docstring) depends on the SVG's rendered
-  // width/height, which change independently of the song.
+  // ResizeObserver, not a dep): paintTrack rewrites the SVG's viewBox to
+  // match its own rendered width/height (songStrip.ts's `trackX`
+  // docstring), which changes independently of the song.
   useEffect(() => {
     const svg = svgRef.current;
     const group = bodyGroupRef.current;

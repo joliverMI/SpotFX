@@ -77,6 +77,7 @@ export default function IntensityMarkControl({
       const t = e.target as Node;
       if (wrapRef.current?.contains(t)) return;
       if ((t as HTMLElement).closest?.('.intensity-mark-panel')) return;
+      if ((t as HTMLElement).closest?.('[data-mark-opener]')) return;
       onOpenChange(false);
     };
     document.addEventListener('mousedown', onDown);
