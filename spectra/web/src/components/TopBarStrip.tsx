@@ -26,7 +26,7 @@ import EnergyBar from './EnergyBar';
 import LightShowStrip from './LightShowStrip';
 import SongNextBox, { useNextBoxInBar } from './SongNextBox';
 import WarningChip from './WarningChip';
-import { useEngineStatus, useUpcoming } from '../queries';
+import { useUpcoming } from '../queries';
 import { kindShown, useSongTimelineView } from './songTimelineView';
 
 export default function TopBarStrip() {
@@ -37,10 +37,14 @@ export default function TopBarStrip() {
   // predicate this and SongStrip both ask, so it is never in both places
   // and never in neither.
   const nextInBar = useNextBoxInBar();
-  const { data: status } = useEngineStatus();
-  const uri = status?.bridge.track?.uri ?? null;
+  // THE SAME RESOLVED TRACK the global row reads (songTimelineView.tsx):
+  // live, or the last one seen this session (his Q2 answer). Reading the
+  // raw live bridge track here would make the box's two hosts disagree
+  // the instant music stops — the row keeps counting down the last
+  // song's own events while this copy would fall back to its idle state.
+  const { track, filters } = useSongTimelineView();
+  const uri = track?.uri ?? null;
   const { data: upcoming } = useUpcoming(nextInBar ? uri : null);
-  const { filters } = useSongTimelineView();
   const barEvents = (upcoming?.events ?? []).filter((e) => kindShown(e.kind, filters));
 
   return (
@@ -53,7 +57,7 @@ export default function TopBarStrip() {
       <EnergyBar />
       {nextInBar && (
         <SongNextBox events={barEvents}
-          durationMs={status?.bridge.track?.duration_ms ?? 0} host="bar" />
+          durationMs={track?.duration_ms ?? 0} host="bar" />
       )}
       <LightShowStrip />
       {/* The mockup's fourth thin divider (`.sp .sepv`) — see tokens.css's
